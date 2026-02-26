@@ -372,6 +372,7 @@ export default class MCPReporter implements Reporter {
       if (r.expectations.snapshot) expectationBreakdown.snapshot++;
       if (r.expectations.judge) expectationBreakdown.judge++;
       if (r.expectations.error) expectationBreakdown.error++;
+      if (r.expectations.size) expectationBreakdown.size++;
       if (r.expectations.toolsTriggered) expectationBreakdown.toolsTriggered++;
       if (r.expectations.toolCallCount) expectationBreakdown.toolCallCount++;
     }
