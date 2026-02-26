@@ -233,8 +233,13 @@ The HTTP transport:
 
 - Establishes HTTP connection on first use
 - Maintains SSE stream for server events
-- Automatically reconnects on connection loss
 - Closes connection when tests complete
+
+> **Note:** Automatic reconnection is not currently implemented. If the remote
+> server drops the connection mid-test-suite, subsequent tests will fail with
+> connection errors. For production use against unreliable servers, implement
+> reconnect logic at the Playwright `globalSetup` level or use Playwright's
+> retry mechanism.
 
 ## Multiple Transports
 
