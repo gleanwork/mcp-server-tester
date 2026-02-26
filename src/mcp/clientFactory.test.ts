@@ -125,6 +125,35 @@ describe('clientFactory', () => {
           args: [],
         });
       });
+
+      it('passes connectTimeoutMs as timeout to client.connect for stdio', async () => {
+        const config = {
+          transport: 'stdio' as const,
+          command: 'node',
+          connectTimeoutMs: 5000,
+        };
+
+        await createMCPClientForConfig(config);
+
+        expect(mocks.mockConnect).toHaveBeenCalledWith(
+          expect.anything(),
+          { timeout: 5000 }
+        );
+      });
+
+      it('omits connect timeout options when connectTimeoutMs is not set', async () => {
+        const config = {
+          transport: 'stdio' as const,
+          command: 'node',
+        };
+
+        await createMCPClientForConfig(config);
+
+        expect(mocks.mockConnect).toHaveBeenCalledWith(
+          expect.anything(),
+          undefined
+        );
+      });
     });
 
     describe('http transport', () => {
