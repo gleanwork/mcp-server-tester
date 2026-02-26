@@ -150,6 +150,21 @@ export async function createMCPClientForConfig(
  */
 export async function closeMCPClient(client: Client): Promise<void> {
   try {
+    // Best-effort cancellation of in-flight requests before closing.
+    // The server may use this to clean up any pending work.
+    await Promise.race([
+      client.notification({
+        method: 'notifications/cancelled',
+        params: {},
+      }),
+      new Promise<void>((_, reject) =>
+        setTimeout(() => reject(new Error('timeout')), 500)
+      ),
+    ]);
+  } catch {
+    // Ignore — transport may already be closing or server may be unresponsive
+  }
+  try {
     await client.close();
   } catch (error) {
     console.error('[MCP] Error closing client:', error);
