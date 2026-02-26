@@ -14,6 +14,9 @@
  *
  * # Enable only OAuth logs
  * DEBUG=mcp-server-tester:oauth npm test
+ *
+ * # Enable HTTP-level trace logging (URL, headers, transport selection)
+ * DEBUG=mcp-server-tester:http npx playwright test
  * ```
  */
 
@@ -35,3 +38,16 @@ export const debugOAuth = createDebug(`${NAMESPACE}:oauth`);
  * Debug logger for eval operations
  */
 export const debugEval = createDebug(`${NAMESPACE}:eval`);
+
+/**
+ * Debug logger for HTTP-level trace logging.
+ *
+ * Enable with:
+ * ```bash
+ * DEBUG=mcp-server-tester:http npx playwright test
+ * ```
+ *
+ * Logs: server URL, transport type selected (Streamable HTTP vs SSE),
+ * outgoing request header names, and connection outcomes.
+ */
+export const debugHttp = createDebug(`${NAMESPACE}:http`);

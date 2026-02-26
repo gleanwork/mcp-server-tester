@@ -9,7 +9,7 @@ import {
   isStdioConfig,
   isHttpConfig,
 } from '../config/mcpConfig.js';
-import { debugClient } from '../debug.js';
+import { debugClient, debugHttp } from '../debug.js';
 
 /**
  * Options for creating an MCP client
@@ -118,19 +118,32 @@ export async function createMCPClientForConfig(
       hasAuthProvider: !!options?.authProvider,
     });
 
+    debugHttp('Connecting to %s', validatedConfig.serverUrl);
+    if (Object.keys(headers).length > 0) {
+      debugHttp('Request header names: %O', Object.keys(headers));
+    }
+
     // Try Streamable HTTP first (MCP spec 2025-03-26), fall back to SSE (2024-11-05)
     try {
+      debugHttp('Attempting transport: streamableHttp');
       const streamableTransport = new StreamableHTTPClientTransport(url, {
         requestInit,
         authProvider: options?.authProvider,
       });
       await client.connect(streamableTransport);
       debugClient('Connected via Streamable HTTP');
-    } catch {
+      debugHttp('Connection established via streamableHttp');
+    } catch (err) {
+      debugHttp(
+        'streamableHttp failed (%s), falling back to SSE',
+        (err as Error).message
+      );
       debugClient('Streamable HTTP failed, falling back to SSE transport');
+      debugHttp('Attempting transport: sse');
       const sseTransport = new SSEClientTransport(url, { requestInit });
       await client.connect(sseTransport);
       debugClient('Connected via SSE');
+      debugHttp('Connection established via sse');
     }
   }
 
