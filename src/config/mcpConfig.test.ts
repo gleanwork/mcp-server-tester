@@ -31,7 +31,7 @@ describe('MCPConfig', () => {
         const result = validateMCPConfig(config);
 
         expect(result.transport).toBe('stdio');
-        expect(result.command).toBe('npx');
+        expect(isStdioConfig(result) && result.command).toBe('npx');
       });
 
       it('should validate stdio config with capabilities', () => {

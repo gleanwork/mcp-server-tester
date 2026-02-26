@@ -78,40 +78,34 @@ export interface MCPHostCapabilities {
 }
 
 /**
- * Configuration for MCP client connection
- *
- * Supports both stdio (local) and HTTP (remote) transports
+ * Configuration for MCP client connection via stdio transport (local process)
  */
-export interface MCPConfig {
+export interface StdioMCPConfig {
   /**
-   * Transport type
+   * Transport type discriminant
    */
-  transport: 'http' | 'stdio';
+  transport: 'stdio';
 
   /**
-   * Server URL (required when transport === 'http')
+   * Command to execute (required for stdio transport)
    */
-  serverUrl?: string;
+  command: string;
 
   /**
-   * HTTP headers (optional for http transport, e.g., Authorization)
-   */
-  headers?: Record<string, string>;
-
-  /**
-   * Command to execute (required when transport === 'stdio')
-   */
-  command?: string;
-
-  /**
-   * Command arguments (optional for stdio)
+   * Command arguments
    */
   args?: Array<string>;
 
   /**
-   * Working directory for the command (optional for stdio)
+   * Working directory for the command
    */
   cwd?: string;
+
+  /**
+   * Suppress stderr output from the server process.
+   * When true, server stderr is ignored instead of inherited.
+   */
+  quiet?: boolean;
 
   /**
    * Host capabilities to register with the server
@@ -127,18 +121,57 @@ export interface MCPConfig {
    * Request timeout in milliseconds
    */
   requestTimeoutMs?: number;
+}
 
+/**
+ * Configuration for MCP client connection via HTTP transport (remote server)
+ */
+export interface HttpMCPConfig {
   /**
-   * Suppress stderr output from the server process (stdio only)
-   * When true, server stderr is ignored instead of inherited
+   * Transport type discriminant
    */
-  quiet?: boolean;
+  transport: 'http';
 
   /**
-   * Authentication configuration (optional for http transport)
+   * Server URL (required for http transport)
+   */
+  serverUrl: string;
+
+  /**
+   * HTTP headers (e.g., Authorization)
+   */
+  headers?: Record<string, string>;
+
+  /**
+   * Authentication configuration
    */
   auth?: MCPAuthConfig;
+
+  /**
+   * Host capabilities to register with the server
+   */
+  capabilities?: MCPHostCapabilities;
+
+  /**
+   * Connection timeout in milliseconds
+   */
+  connectTimeoutMs?: number;
+
+  /**
+   * Request timeout in milliseconds
+   */
+  requestTimeoutMs?: number;
 }
+
+/**
+ * Configuration for MCP client connection.
+ *
+ * This is a discriminated union — narrow with `isStdioConfig()` or `isHttpConfig()`
+ * before accessing transport-specific fields.
+ *
+ * Supports both stdio (local) and HTTP (remote) transports.
+ */
+export type MCPConfig = StdioMCPConfig | HttpMCPConfig;
 
 /**
  * Zod schema for MCPHostCapabilities
@@ -227,17 +260,13 @@ export function validateMCPConfig(config: unknown): MCPConfig {
 /**
  * Type guard to check if a config is for stdio transport
  */
-export function isStdioConfig(
-  config: MCPConfig
-): config is MCPConfig & { transport: 'stdio'; command: string } {
-  return config.transport === 'stdio' && typeof config.command === 'string';
+export function isStdioConfig(config: MCPConfig): config is StdioMCPConfig {
+  return config.transport === 'stdio';
 }
 
 /**
  * Type guard to check if a config is for HTTP transport
  */
-export function isHttpConfig(
-  config: MCPConfig
-): config is MCPConfig & { transport: 'http'; serverUrl: string } {
-  return config.transport === 'http' && typeof config.serverUrl === 'string';
+export function isHttpConfig(config: MCPConfig): config is HttpMCPConfig {
+  return config.transport === 'http';
 }

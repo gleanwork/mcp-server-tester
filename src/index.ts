@@ -9,6 +9,8 @@
 // Config
 export type {
   MCPConfig,
+  StdioMCPConfig,
+  HttpMCPConfig,
   MCPHostCapabilities,
   MCPAuthConfig,
   MCPOAuthConfig,

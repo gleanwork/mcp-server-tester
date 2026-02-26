@@ -97,16 +97,19 @@ export const test = base.extend<MCPFixtures>({
     // Track resolved auth type
     let resolvedAuthType: AuthType = 'none';
 
+    // Narrow to HTTP config once for all auth-related logic (auth is HTTP-only)
+    const httpConfig = isHttpConfig(mcpConfig) ? mcpConfig : null;
+
     // Create auth provider if OAuth authStatePath is configured
     let authProvider: OAuthClientProvider | undefined;
-    if (mcpConfig.auth?.oauth?.authStatePath) {
+    if (httpConfig?.auth?.oauth?.authStatePath) {
       authProvider = new PlaywrightOAuthClientProvider({
-        storagePath: mcpConfig.auth.oauth.authStatePath,
+        storagePath: httpConfig.auth.oauth.authStatePath,
         redirectUri:
-          mcpConfig.auth.oauth.redirectUri ??
+          httpConfig.auth.oauth.redirectUri ??
           'http://localhost:3000/oauth/callback',
-        clientId: mcpConfig.auth.oauth.clientId,
-        clientSecret: mcpConfig.auth.oauth.clientSecret,
+        clientId: httpConfig.auth.oauth.clientId,
+        clientSecret: httpConfig.auth.oauth.clientSecret,
       });
       resolvedAuthType = 'oauth';
     }
@@ -115,19 +118,19 @@ export const test = base.extend<MCPFixtures>({
     let effectiveConfig = mcpConfig;
 
     // Check for explicit static API token
-    if (mcpConfig.auth?.accessToken) {
+    if (httpConfig?.auth?.accessToken) {
       resolvedAuthType = 'api-token';
     }
 
     // If HTTP transport with no explicit auth, try to use CLI-stored tokens
     // This enables the simple flow: `mcp-server-tester login <url>` then run tests
     if (
-      isHttpConfig(mcpConfig) &&
-      !mcpConfig.auth?.accessToken &&
-      !mcpConfig.auth?.oauth?.authStatePath
+      httpConfig &&
+      !httpConfig.auth?.accessToken &&
+      !httpConfig.auth?.oauth?.authStatePath
     ) {
       const cliClient = new CLIOAuthClient({
-        mcpServerUrl: mcpConfig.serverUrl,
+        mcpServerUrl: httpConfig.serverUrl,
       });
 
       // Try to get a valid token (will refresh if expired)
@@ -136,9 +139,9 @@ export const test = base.extend<MCPFixtures>({
       if (tokenResult) {
         // Use the CLI token as static auth
         effectiveConfig = {
-          ...mcpConfig,
+          ...httpConfig,
           auth: {
-            ...mcpConfig.auth,
+            ...httpConfig.auth,
             accessToken: tokenResult.accessToken,
           },
         };
