@@ -195,6 +195,59 @@ describe('validateJudge', () => {
       expect(result.pass).toBe(true);
       expect(result.message).toContain('0.70');
     });
+
+    it('includes scores and scoreStdDev in details when reps > 1', async () => {
+      const mockJudge = makeMockJudge([
+        { score: 0.6, pass: false },
+        { score: 0.8, pass: true },
+      ]);
+      mockCreateJudge.mockReturnValue(mockJudge);
+
+      const result = await validateJudge('response', {
+        rubric: { text: 'Is it good?' },
+        reps: 2,
+      });
+
+      expect(result.details).toBeDefined();
+      expect(result.details!.scores).toEqual([0.6, 0.8]);
+      expect(typeof result.details!.scoreStdDev).toBe('number');
+      expect(result.details!.highVariance).toBe(false); // stddev ≈ 0.1
+    });
+
+    it('flags highVariance when stddev > 0.2', async () => {
+      // Scores: 0.1 and 0.9 → mean = 0.5, stdDev = 0.4
+      const mockJudge = makeMockJudge([
+        { score: 0.1, pass: false },
+        { score: 0.9, pass: true },
+      ]);
+      mockCreateJudge.mockReturnValue(mockJudge);
+
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+      const result = await validateJudge('response', {
+        rubric: { text: 'Is it good?' },
+        reps: 2,
+      });
+
+      expect(result.details!.highVariance).toBe(true);
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('high variance')
+      );
+
+      consoleSpy.mockRestore();
+    });
+
+    it('does not include details for single rep', async () => {
+      const mockJudge = makeMockJudge([{ score: 0.8, pass: true }]);
+      mockCreateJudge.mockReturnValue(mockJudge);
+
+      const result = await validateJudge('response', {
+        rubric: { text: 'Is it good?' },
+        reps: 1,
+      });
+
+      expect(result.details).toBeUndefined();
+    });
   });
 
   describe('error handling', () => {

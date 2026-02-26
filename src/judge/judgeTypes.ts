@@ -121,6 +121,25 @@ export interface JudgeResult {
    * Whether the candidate exceeded maxToolOutputSize
    */
   exceedsMaxToolOutputSize?: boolean;
+
+  /**
+   * Standard deviation of individual rep scores.
+   * Only populated when the judge was run with reps > 1.
+   */
+  scoreStdDev?: number;
+
+  /**
+   * True when the standard deviation across reps exceeds 0.2, indicating
+   * that the rubric may be ambiguous or the judge is non-deterministic.
+   * Only populated when the judge was run with reps > 1.
+   */
+  highVariance?: boolean;
+
+  /**
+   * Individual scores from each judge rep.
+   * Only populated when the judge was run with reps > 1.
+   */
+  scores?: number[];
 }
 
 export type { BuiltInRubric, RubricSpec } from './rubrics.js';

@@ -66,6 +66,17 @@ export interface JudgeValidatorConfig {
  * );
  * ```
  */
+/**
+ * Computes population standard deviation of an array of scores.
+ * Returns 0 when there are fewer than 2 values.
+ */
+function computeStdDev(scores: number[], mean: number): number {
+  if (scores.length <= 1) return 0;
+  const variance =
+    scores.reduce((sum, s) => sum + (s - mean) ** 2, 0) / scores.length;
+  return Math.sqrt(variance);
+}
+
 export async function validateJudge(
   response: unknown,
   config: JudgeValidatorConfig
@@ -126,11 +137,35 @@ export async function validateJudge(
         ? ` (mean of ${reps} reps: [${scores.map((s) => s.toFixed(2)).join(', ')}])`
         : '';
 
+    let stdDev: number | undefined;
+    let highVariance: boolean | undefined;
+
+    if (reps > 1) {
+      stdDev = computeStdDev(scores, meanScore);
+      highVariance = stdDev > 0.2;
+
+      if (highVariance) {
+        console.warn(
+          `[mcp-server-tester] Judge scores have high variance ` +
+            `(stdDev=${stdDev.toFixed(2)}, scores=[${scores.map((s) => s.toFixed(2)).join(', ')}]). ` +
+            `The rubric may be ambiguous.`
+        );
+      }
+    }
+
     return {
       pass: passed,
       message: passed
         ? `Judge passed with score ${meanScore.toFixed(2)}${repNote}`
         : `Judge failed with score ${meanScore.toFixed(2)} (threshold: ${threshold})${repNote}. ${lastReasoning ?? ''}`,
+      details:
+        reps > 1
+          ? {
+              scores,
+              scoreStdDev: stdDev,
+              highVariance,
+            }
+          : undefined,
     };
   } catch (err) {
     return {
