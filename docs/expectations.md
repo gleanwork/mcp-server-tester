@@ -472,10 +472,38 @@ test('search relevance', async ({ mcp }) => {
 - `rubric` - Evaluation criteria for the LLM judge
 - `threshold` - Minimum score (0-1) to pass the evaluation (default: `1.0`)
 
+### Built-in Rubrics and Scoring Scale
+
+All built-in rubrics use a **5-point scale**: `0.0` / `0.25` / `0.5` / `0.75` / `1.0`. Each level has a concrete description to guide the judge model toward consistent scores.
+
+| Score | Meaning |
+|-------|---------|
+| `1.0` | Fully meets the criterion with no deficiencies |
+| `0.75` | Mostly meets the criterion with one minor issue |
+| `0.5` | Partially meets the criterion — notable gaps present |
+| `0.25` | Minimally meets the criterion — substantial deficiencies |
+| `0.0` | Does not meet the criterion |
+
+Available built-in rubrics: `correctness`, `completeness`, `groundedness`, `instruction-following`, `conciseness`.
+
+Use a built-in rubric by name in your eval case:
+
+```json
+{
+  "passesJudge": {
+    "rubric": "correctness",
+    "threshold": 0.75
+  }
+}
+```
+
+For custom criteria, provide `{ "text": "..." }` with explicit score-level descriptions to get comparable consistency.
+
 ### Best Practices
 
 - Use low temperature (0.0) for consistency
-- Write clear, specific rubrics
+- Prefer built-in rubrics when they fit — they have calibrated 5-point descriptions
+- When writing custom rubrics, include score-level descriptions (e.g., "Score 0.75 for...")
 - Test rubrics with known good/bad examples
 - Set appropriate passing thresholds based on your quality standards
 - Consider cost implications (LLM API calls per evaluation)
