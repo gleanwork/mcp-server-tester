@@ -520,7 +520,9 @@ export class CLIOAuthClient {
         resource: protectedResource.resource,
       });
 
-      debug('Authorization URL: %s', authUrl.toString());
+      // Log only non-sensitive parts of the authorization URL.
+      // Do NOT log: state, code_challenge, code_challenge_method (security-sensitive).
+      debug('Authorization URL (base): %s', `${authUrl.origin}${authUrl.pathname}`);
       debug('Authorization URL params:');
       debug('  - client_id: %s', authUrl.searchParams.get('client_id'));
       debug('  - redirect_uri: %s', authUrl.searchParams.get('redirect_uri'));
