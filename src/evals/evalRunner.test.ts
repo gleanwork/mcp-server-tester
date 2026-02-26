@@ -1225,3 +1225,115 @@ describe('evals guide iteration count guardrail warnings', () => {
     consoleSpy.mockRestore();
   });
 });
+
+describe('dataset-level tool precision/recall/F1 aggregation', () => {
+  function createDataset(cases: EvalCase[]): EvalDataset {
+    return { name: 'test-dataset', cases };
+  }
+
+  function createSimulationMCP(
+    toolCalls: Array<{ name: string; arguments: Record<string, unknown> }>
+  ): MCPFixtureApi {
+    const mcp = createMockMCP();
+    vi.mocked(mcp.callTool).mockResolvedValue({
+      success: true,
+      toolCalls,
+      response: 'Done',
+    } as unknown as Awaited<ReturnType<typeof mcp.callTool>>);
+    return mcp;
+  }
+
+  it('computes datasetToolPrecision and datasetToolRecall when cases have toolsTriggered', async () => {
+    // Case 1: calls exactly [search], expects [search] required → precision=1, recall=1
+    // Case 2: calls [search, extra], exclusive=true, expects [search] required → recall=1, precision=0.5
+    const mcp1 = createSimulationMCP([{ name: 'search', arguments: {} }]);
+    const mcp2 = createSimulationMCP([
+      { name: 'search', arguments: {} },
+      { name: 'extra', arguments: {} },
+    ]);
+
+    // Use separate runs so we can control the mock per case
+    const case1 = createEvalCase({
+      id: 'case-1',
+      expect: {
+        toolsTriggered: {
+          calls: [{ name: 'search', required: true }],
+          exclusive: true,
+        },
+      },
+    });
+    const case2 = createEvalCase({
+      id: 'case-2',
+      expect: {
+        toolsTriggered: {
+          calls: [{ name: 'search', required: true }],
+          exclusive: true,
+        },
+      },
+    });
+
+    const result1 = await runEvalDataset(
+      { dataset: createDataset([case1]) },
+      createContext(mcp1)
+    );
+    const result2 = await runEvalDataset(
+      { dataset: createDataset([case2]) },
+      createContext(mcp2)
+    );
+
+    // Case 1: all expected, exclusive — precision 1.0, recall 1.0
+    expect(result1.datasetToolPrecision).toBeCloseTo(1.0);
+    expect(result1.datasetToolRecall).toBeCloseTo(1.0);
+    expect(result1.datasetToolF1).toBeCloseTo(1.0);
+
+    // Case 2: extra tool called (exclusive), recall=1 but precision=0.5
+    expect(result2.datasetToolPrecision).toBeCloseTo(0.5);
+    expect(result2.datasetToolRecall).toBeCloseTo(1.0);
+    // F1 = 2 * 0.5 * 1.0 / (0.5 + 1.0) = 1.0 / 1.5 ≈ 0.667
+    expect(result2.datasetToolF1).toBeCloseTo(0.667, 2);
+  });
+
+  it('does not set dataset tool metrics when no cases have toolsTriggered', async () => {
+    const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
+    const dataset = createDataset([
+      createEvalCase({ id: 'case-1', expect: { containsText: 'hello' } }),
+    ]);
+
+    const result = await runEvalDataset({ dataset }, createContext(mcp));
+
+    expect(result.datasetToolPrecision).toBeUndefined();
+    expect(result.datasetToolRecall).toBeUndefined();
+    expect(result.datasetToolF1).toBeUndefined();
+  });
+
+  it('averages precision/recall across multiple cases with toolsTriggered', async () => {
+    // Both cases call only the expected tool (recall=1, precision=1)
+    const mcp = createSimulationMCP([{ name: 'search', arguments: {} }]);
+    const dataset = createDataset([
+      createEvalCase({
+        id: 'case-1',
+        expect: {
+          toolsTriggered: {
+            calls: [{ name: 'search', required: true }],
+            exclusive: true,
+          },
+        },
+      }),
+      createEvalCase({
+        id: 'case-2',
+        expect: {
+          toolsTriggered: {
+            calls: [{ name: 'search', required: true }],
+            exclusive: true,
+          },
+        },
+      }),
+    ]);
+
+    const result = await runEvalDataset({ dataset }, createContext(mcp));
+
+    expect(result.datasetToolPrecision).toBeCloseTo(1.0);
+    expect(result.datasetToolRecall).toBeCloseTo(1.0);
+    expect(result.datasetToolF1).toBeCloseTo(1.0);
+  });
+});

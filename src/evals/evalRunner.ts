@@ -94,6 +94,26 @@ export interface EvalRunnerResult {
    * Only present when `baselineResultsFrom` was provided.
    */
   improvements?: number;
+
+  /**
+   * Average tool precision across all llm_host cases that have a
+   * `toolsTriggered` expectation (precision = fraction of called tools
+   * that were expected). Only present when at least one such case ran.
+   */
+  datasetToolPrecision?: number;
+
+  /**
+   * Average tool recall across all llm_host cases that have a
+   * `toolsTriggered` expectation (recall = fraction of required tools
+   * that were actually called). Only present when at least one such case ran.
+   */
+  datasetToolRecall?: number;
+
+  /**
+   * Harmonic mean of `datasetToolPrecision` and `datasetToolRecall`.
+   * Only present when at least one case contributes precision/recall data.
+   */
+  datasetToolF1?: number;
 }
 
 /**
@@ -813,6 +833,25 @@ export async function runEvalDataset(
           `${err instanceof Error ? err.message : String(err)}`
       );
     }
+  }
+
+  // Aggregate tool precision/recall/F1 across cases that have those metrics
+  const llmHostCases = caseResults.filter(
+    (r) => r.toolPrecision !== undefined || r.toolRecall !== undefined
+  );
+  if (llmHostCases.length > 0) {
+    const avgPrec =
+      llmHostCases.reduce((s, r) => s + (r.toolPrecision ?? 0), 0) /
+      llmHostCases.length;
+    const avgRecall =
+      llmHostCases.reduce((s, r) => s + (r.toolRecall ?? 0), 0) /
+      llmHostCases.length;
+    result.datasetToolPrecision = avgPrec;
+    result.datasetToolRecall = avgRecall;
+    result.datasetToolF1 =
+      avgPrec + avgRecall > 0
+        ? (2 * avgPrec * avgRecall) / (avgPrec + avgRecall)
+        : 0;
   }
 
   // Save results to file if requested
