@@ -4,7 +4,7 @@ import {
   createMCPFixture,
   closeMCPClient,
   runConformanceChecks,
-  extractTextFromResponse,
+  extractText,
   type MCPConfig,
   type MCPFixtureApi,
   // Extended expect with MCP tool matchers
@@ -51,7 +51,7 @@ test.describe('Basic MCP Server Tests', () => {
 
     expect(result.isError).not.toBe(true);
 
-    const text = extractTextFromResponse(result);
+    const text = extractText(result);
     expect(text).toBe('Hello, MCP!');
   });
 

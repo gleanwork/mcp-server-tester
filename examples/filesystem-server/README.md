@@ -56,7 +56,7 @@ test('reads a file', async ({ mcp }) => {
 
   expect(result.isError).not.toBe(true);
 
-  const text = extractTextFromResponse(result);
+  const text = extractText(result);
   expect(text).toBe('Hello World');
 });
 ```

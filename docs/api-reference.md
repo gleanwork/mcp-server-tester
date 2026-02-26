@@ -499,7 +499,7 @@ test('call count', async ({ mcp }) => {
 
 ## Text Utilities
 
-### `extractTextFromResponse(response)`
+### `extractText(response)`
 
 Extract text content from various MCP response formats.
 
@@ -511,7 +511,7 @@ Extract text content from various MCP response formats.
 
 ```typescript
 const result = await mcp.callTool('get_info', {});
-const text = extractTextFromResponse(result);
+const text = extractText(result);
 ```
 
 ### `normalizeWhitespace(text)`

@@ -51,7 +51,7 @@ test('reads a file', async ({ mcp }) => {
   const result = await mcp.callTool('read_file', { path: 'readme.txt' });
 
   expect(result.isError).not.toBe(true);
-  expect(extractTextFromResponse(result)).toBe('Hello World');
+  expect(extractText(result)).toBe('Hello World');
 });
 ```
 

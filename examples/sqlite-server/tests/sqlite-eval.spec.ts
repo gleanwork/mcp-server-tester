@@ -10,7 +10,7 @@ import {
   loadEvalDataset,
   runEvalDataset,
   runConformanceChecks,
-  extractTextFromResponse,
+  extractText,
 } from '@gleanwork/mcp-server-tester';
 import {
   QueryResultSchema,
@@ -422,7 +422,7 @@ test.describe('Advanced Testing Features', () => {
     expect(response.isError).not.toBe(true);
 
     // Use utility to extract text from MCP response
-    const text = extractTextFromResponse(response);
+    const text = extractText(response);
 
     // Verify tables are listed
     expect(text).toContain('users');

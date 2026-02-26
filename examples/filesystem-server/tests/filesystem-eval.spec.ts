@@ -19,7 +19,7 @@ import {
   type EvalCase,
   runConformanceChecks,
   simulateLLMHost,
-  extractTextFromResponse,
+  extractText,
   normalizeWhitespace,
   // Extended expect with MCP tool matchers
   expect,
@@ -129,7 +129,7 @@ test.describe('Direct API Tests', () => {
 
     expect(result.isError).not.toBe(true);
 
-    const text = extractTextFromResponse(result);
+    const text = extractText(result);
     expect(text).toBe('Hello World');
   });
 
@@ -138,7 +138,7 @@ test.describe('Direct API Tests', () => {
 
     expect(result.isError).not.toBe(true);
 
-    const text = extractTextFromResponse(result);
+    const text = extractText(result);
     expect(text).toContain('guide.md');
     expect(text).toContain('api.md');
   });
@@ -155,7 +155,7 @@ test.describe('Direct API Tests', () => {
 
     expect(result.isError).not.toBe(true);
 
-    const text = extractTextFromResponse(result);
+    const text = extractText(result);
     const config = JSON.parse(text);
 
     const validated = ConfigFileSchema.parse(config);
@@ -355,7 +355,7 @@ test.describe('Text Utilities', () => {
 
     expect(result.isError).not.toBe(true);
 
-    const text = extractTextFromResponse(result);
+    const text = extractText(result);
     expect(text).toBe('Hello World');
   });
 
@@ -364,7 +364,7 @@ test.describe('Text Utilities', () => {
 
     expect(result.isError).not.toBe(true);
 
-    const text = extractTextFromResponse(result);
+    const text = extractText(result);
     const normalized = normalizeWhitespace(text);
 
     expect(normalized).toContain('# User Guide');
@@ -432,7 +432,7 @@ test.describe('Matcher-Based Tests (NEW)', () => {
 
     expect(result).not.toBeToolError();
     // Parse the JSON content and validate against schema
-    const text = extractTextFromResponse(result);
+    const text = extractText(result);
     const config = JSON.parse(text);
     expect(config).toMatchToolSchema(ConfigFileSchema);
   });
