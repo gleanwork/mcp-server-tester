@@ -220,13 +220,29 @@ describe('extractText', () => {
       expect(extractText(result)).toBe('Hello from tool');
     });
 
-    it('should recognize CallToolResult by isError property', () => {
+    it('should recognize CallToolResult by content array', () => {
       const result = {
         isError: false,
         content: [{ type: 'text', text: 'Success' }],
       };
 
       expect(extractText(result)).toBe('Success');
+    });
+
+    it('rejects objects with isError but no content array', () => {
+      // Objects with only isError and no content should NOT be treated as CallToolResult
+      // They fall through to generic object handling, not CallToolResult normalization
+      const errorOnly = { isError: true };
+      const errorFalseOnly = { isError: false };
+      const withContent = { content: [], isError: true };
+      const contentOnly = { content: [] };
+
+      // isError alone: falls to generic object, returns JSON stringification
+      expect(extractText(errorOnly)).toBe('{"isError":true}');
+      expect(extractText(errorFalseOnly)).toBe('{"isError":false}');
+      // content array present: correctly identified as CallToolResult
+      expect(extractText(withContent)).toBe('');
+      expect(extractText(contentOnly)).toBe('');
     });
   });
 

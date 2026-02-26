@@ -231,8 +231,8 @@ function isCallToolResult(value: unknown): value is CallToolResult {
     return false;
   }
   const v = value as Record<string, unknown>;
-  // CallToolResult has content array (required) or isError
-  return Array.isArray(v.content) || typeof v.isError === 'boolean';
+  // Per MCP spec, content is required in CallToolResult — isError alone is insufficient
+  return Array.isArray(v.content);
 }
 
 /**
