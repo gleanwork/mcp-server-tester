@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   type MCPConfig,
   validateMCPConfig,
@@ -111,6 +111,60 @@ describe('MCPConfig', () => {
         };
 
         expect(() => validateMCPConfig(config)).toThrow(ZodError);
+      });
+
+      it('warns when http:// is used for a non-localhost serverUrl', () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        validateMCPConfig({
+          transport: 'http',
+          serverUrl: 'http://remote.example.com/mcp',
+        });
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining('http://')
+        );
+        warnSpy.mockRestore();
+      });
+
+      it('does not warn when http:// is used for localhost', () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        validateMCPConfig({
+          transport: 'http',
+          serverUrl: 'http://localhost:3000/mcp',
+        });
+        expect(warnSpy).not.toHaveBeenCalled();
+        warnSpy.mockRestore();
+      });
+
+      it('does not warn when http:// is used for 127.0.0.1', () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        validateMCPConfig({
+          transport: 'http',
+          serverUrl: 'http://127.0.0.1:8080/mcp',
+        });
+        expect(warnSpy).not.toHaveBeenCalled();
+        warnSpy.mockRestore();
+      });
+
+      it('does not warn when https:// is used for a remote server', () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        validateMCPConfig({
+          transport: 'http',
+          serverUrl: 'https://remote.example.com/mcp',
+        });
+        expect(warnSpy).not.toHaveBeenCalled();
+        warnSpy.mockRestore();
+      });
+
+      it('warning message includes the non-localhost hostname', () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        validateMCPConfig({
+          transport: 'http',
+          serverUrl: 'http://my-server.internal/mcp',
+        });
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining('my-server.internal')
+        );
+        warnSpy.mockRestore();
       });
     });
 
