@@ -14,8 +14,8 @@ Thank you for your interest in contributing! This project is experimental and co
 
 ### Prerequisites
 
-- Node.js 18 or higher
-- npm or yarn
+- Node.js 22 or higher (required for the `import ... with { type: 'json' }` import assertions syntax used in this project; Node 18/20 do not support it)
+- pnpm (this project uses pnpm as its package manager)
 
 ### Setup
 
@@ -27,11 +27,11 @@ Thank you for your interest in contributing! This project is experimental and co
    ```
 3. Install dependencies:
    ```bash
-   npm install
+   pnpm install
    ```
 4. Build the project:
    ```bash
-   npm run build
+   pnpm run build
    ```
 
 ## Development Workflow
@@ -40,14 +40,14 @@ Thank you for your interest in contributing! This project is experimental and co
 
 ```bash
 # Unit tests (Vitest)
-npm test
-npm run test:watch
+pnpm test
+pnpm run test:watch
 
 # Integration tests (Playwright)
-npm run test:playwright
+pnpm run test:playwright
 
 # All tests
-npm test && npm run test:playwright
+pnpm test && pnpm run test:playwright
 ```
 
 ### Code Quality
@@ -55,11 +55,11 @@ npm test && npm run test:playwright
 Before submitting a PR, ensure:
 
 ```bash
-npm run typecheck  # TypeScript validation
-npm run lint       # ESLint checks
-npm run format     # Prettier formatting
-npm test          # All tests pass
-npm run build     # Build succeeds
+pnpm run typecheck  # TypeScript validation
+pnpm run lint       # ESLint checks
+pnpm run format     # Prettier formatting
+pnpm test          # All tests pass
+pnpm run build     # Build succeeds
 ```
 
 ### Making Changes
