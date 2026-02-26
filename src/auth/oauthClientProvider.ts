@@ -169,6 +169,9 @@ export class PlaywrightOAuthClientProvider implements OAuthClientProvider {
 
   /**
    * Stores new OAuth tokens for the current session
+   *
+   * The code verifier is cleared after a successful token exchange — it is
+   * single-use per PKCE spec and must not persist beyond the exchange.
    */
   async saveTokens(tokens: OAuthTokens): Promise<void> {
     const state = (await this.loadState()) ?? this.createEmptyState();
@@ -180,6 +183,8 @@ export class PlaywrightOAuthClientProvider implements OAuthClientProvider {
         ? Date.now() + tokens.expires_in * 1000
         : undefined,
     };
+    // Clear codeVerifier after successful token exchange — it's single-use per PKCE spec
+    delete state.codeVerifier;
     await this.saveState(state);
   }
 

@@ -144,6 +144,8 @@ export async function performOAuthSetup(
     });
 
     // 6. Save auth state to disk
+    // codeVerifier is intentionally excluded: it is single-use per PKCE spec
+    // and must not be persisted after a successful token exchange.
     const state: StoredOAuthState = {
       tokens: {
         accessToken: tokens.access_token,
@@ -159,7 +161,6 @@ export async function performOAuthSetup(
             clientSecret: config.clientSecret,
           }
         : undefined,
-      codeVerifier,
       savedAt: Date.now(),
     };
 
