@@ -30,6 +30,15 @@ export interface CreateMCPClientOptions {
    * This takes precedence over static token auth in config.auth.accessToken.
    */
   authProvider?: OAuthClientProvider;
+
+  /**
+   * Sampling handler callback for LLM sampling requests from the server.
+   *
+   * When provided, the client will advertise sampling capability to the server.
+   * When absent, sampling is removed from declared capabilities so the client
+   * does not falsely advertise support it cannot fulfill.
+   */
+  samplingHandler?: unknown;
 }
 
 /**
@@ -77,7 +86,14 @@ export async function createMCPClientForConfig(
       version: options?.clientInfo?.version ?? '0.1.0',
     },
     {
-      capabilities: validatedConfig.capabilities ?? {},
+      capabilities: {
+        ...(validatedConfig.capabilities ?? {}),
+        // Only advertise sampling if a handler has been registered;
+        // declaring sampling capability without a handler violates the MCP spec
+        sampling: options?.samplingHandler
+          ? (validatedConfig.capabilities?.sampling ?? {})
+          : undefined,
+      },
     }
   );
 
