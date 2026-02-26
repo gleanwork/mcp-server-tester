@@ -506,6 +506,39 @@ async function runSingleIteration(
 }
 
 /**
+ * Returns true when the error message appears to be caused by network or
+ * infrastructure issues (connection resets, timeouts, rate limits, etc.)
+ * rather than an assertion or logic failure.
+ *
+ * Accepts either an Error object or a plain string error message so it can
+ * classify both thrown errors and errors surfaced via result.error.
+ */
+function isInfrastructureError(err: unknown): boolean {
+  let name: string | undefined;
+  let msg: string;
+
+  if (err instanceof Error) {
+    name = err.name;
+    msg = err.message.toLowerCase();
+  } else if (typeof err === 'string') {
+    msg = err.toLowerCase();
+  } else {
+    return false;
+  }
+
+  return (
+    name === 'AbortError' ||
+    msg.includes('econnreset') ||
+    msg.includes('etimedout') ||
+    msg.includes('econnrefused') ||
+    msg.includes('rate limit') ||
+    msg.includes('429') ||
+    msg.includes('503') ||
+    msg.includes('network')
+  );
+}
+
+/**
  * Runs a single eval case and returns the result.
  * When `evalCase.iterations > 1`, runs the case N times and returns accuracy.
  *
@@ -541,25 +574,60 @@ export async function runEvalCase(
   let lastResult: EvalCaseResult | null = null;
 
   for (let i = 0; i < iterations; i++) {
-    const result = await runSingleIteration(evalCase, context, options);
-    lastResult = result;
-    iterationResults.push({
-      pass: result.pass,
-      durationMs: result.durationMs,
-      error: result.error,
-    });
+    try {
+      const result = await runSingleIteration(evalCase, context, options);
+      lastResult = result;
+      // Check whether the tool call itself failed due to infrastructure (the
+      // error is surfaced as result.error since executeToolCall swallows throws)
+      const infraError = result.error != null && isInfrastructureError(result.error);
+      iterationResults.push({
+        pass: result.pass,
+        durationMs: result.durationMs,
+        error: result.error,
+        isInfrastructureError: infraError,
+      });
+    } catch (err) {
+      // runSingleIteration should not throw, but guard defensively
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      iterationResults.push({
+        pass: false,
+        durationMs: 0,
+        error: errorMessage,
+        isInfrastructureError: isInfrastructureError(err),
+      });
+    }
   }
 
-  const passCount = iterationResults.filter((r) => r.pass).length;
-  const accuracy = passCount / iterations;
+  const infraErrors = iterationResults.filter((r) => r.isInfrastructureError);
+  const assertionResults = iterationResults.filter(
+    (r) => !r.isInfrastructureError
+  );
+  const passCount = assertionResults.filter((r) => r.pass).length;
+  const effectiveIterations = assertionResults.length || iterations;
+  const accuracy = passCount / effectiveIterations;
   const threshold = evalCase.accuracyThreshold ?? 1.0;
 
+  // Fall back to a synthetic result if all iterations threw infrastructure errors
+  const baseResult: EvalCaseResult = lastResult ?? {
+    id: evalCase.id,
+    datasetName: options.datasetName ?? 'single-case',
+    toolName: evalCase.toolName ?? evalCase.scenario ?? 'unknown',
+    source: 'eval',
+    pass: false,
+    error: iterationResults[0]?.error,
+    expectations: {},
+    authType: context.mcp.authType,
+    project: context.mcp.project,
+    durationMs: 0,
+    tags: evalCase.tags,
+  };
+
   return {
-    // Spread the last iteration for response/expectations context
-    ...lastResult!,
+    ...baseResult,
     pass: accuracy >= threshold,
     accuracy,
     iterationResults,
+    infrastructureErrorCount: infraErrors.length,
     durationMs: iterationResults.reduce((sum, r) => sum + r.durationMs, 0),
   };
 }

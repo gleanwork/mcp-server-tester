@@ -416,6 +416,40 @@ describe('multi-iteration cases', () => {
     expect(result.accuracy).toBeUndefined();
     expect(result.iterationResults).toBeUndefined();
   });
+
+  it('excludes infrastructure errors from accuracy computation', async () => {
+    let callCount = 0;
+    const mcp = createMockMCP();
+    // First call throws ECONNRESET (infrastructure error), second passes
+    vi.mocked(mcp.callTool).mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        const err = new Error('ECONNRESET: connection reset by peer');
+        throw err;
+      }
+      return {
+        content: [{ type: 'text', text: 'hello' }],
+        isError: false,
+      };
+    });
+
+    const evalCase = createEvalCase({
+      iterations: 2,
+      accuracyThreshold: 1.0,
+      expect: { containsText: 'hello' },
+    });
+
+    const result = await runEvalCase(evalCase, createContext(mcp));
+
+    // The infrastructure error is excluded from the denominator
+    // Only 1 assertion result (the second iteration), and it passes → accuracy = 1.0
+    expect(result.infrastructureErrorCount).toBe(1);
+    expect(result.accuracy).toBe(1.0);
+    expect(result.pass).toBe(true);
+    expect(result.iterationResults).toHaveLength(2);
+    expect(result.iterationResults?.[0]?.isInfrastructureError).toBe(true);
+    expect(result.iterationResults?.[1]?.isInfrastructureError).toBe(false);
+  });
 });
 
 describe('judgeReps behavior in eval runner', () => {

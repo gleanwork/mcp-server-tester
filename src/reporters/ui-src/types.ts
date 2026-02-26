@@ -100,7 +100,11 @@ export interface EvalCaseResult {
     pass: boolean;
     durationMs: number;
     error?: string;
+    /** When true, this iteration failed due to network/infrastructure issues rather than an assertion failure */
+    isInfrastructureError?: boolean;
   }>;
+  /** Number of iterations that failed due to infrastructure errors (network, rate limits, etc.) */
+  infrastructureErrorCount?: number;
   /**
    * Tags from the source eval case, for filtering and slicing reports.
    */

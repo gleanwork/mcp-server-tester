@@ -120,6 +120,8 @@ export interface IterationResult {
   durationMs: number;
   /** Error message if the iteration failed with an exception */
   error?: string;
+  /** When true, this iteration failed due to network/infrastructure issues rather than an assertion failure */
+  isInfrastructureError?: boolean;
 }
 
 /**
@@ -217,6 +219,12 @@ export interface EvalCaseResult {
    * Only present when a baseline was provided to runEvalDataset.
    */
   baselinePass?: boolean;
+
+  /**
+   * Number of iterations that failed due to infrastructure errors (network, rate limits, etc.)
+   * Only present when the case was run with `iterations > 1`.
+   */
+  infrastructureErrorCount?: number;
 }
 
 /**
