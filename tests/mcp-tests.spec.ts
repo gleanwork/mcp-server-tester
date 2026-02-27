@@ -74,7 +74,9 @@ test.describe('MCP Server Tests', () => {
     expect(result.passed).toBeGreaterThanOrEqual(4);
   });
 
-  test('echo tool returns expected text (toContainToolText)', async ({ mcp }) => {
+  test('echo tool returns expected text (toContainToolText)', async ({
+    mcp,
+  }) => {
     const result = await mcp.callTool('echo', { message: 'Hello World' });
     expect(result).toContainToolText('Echo: Hello World');
   });
