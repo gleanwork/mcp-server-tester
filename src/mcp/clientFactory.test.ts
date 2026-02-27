@@ -135,10 +135,9 @@ describe('clientFactory', () => {
 
         await createMCPClientForConfig(config);
 
-        expect(mocks.mockConnect).toHaveBeenCalledWith(
-          expect.anything(),
-          { timeout: 5000 }
-        );
+        expect(mocks.mockConnect).toHaveBeenCalledWith(expect.anything(), {
+          timeout: 5000,
+        });
       });
 
       it('omits connect timeout options when connectTimeoutMs is not set', async () => {
