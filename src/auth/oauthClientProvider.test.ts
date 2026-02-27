@@ -48,7 +48,7 @@ describe('PlaywrightOAuthClientProvider', () => {
       // The written state must NOT contain codeVerifier
       expect(mocks.writeFile).toHaveBeenCalledOnce();
       const writtenContent = JSON.parse(
-        mocks.writeFile.mock.calls[0][1] as string
+        mocks.writeFile.mock.calls[0]![1] as string
       ) as Record<string, unknown>;
       expect(writtenContent).not.toHaveProperty('codeVerifier');
       expect(writtenContent).toHaveProperty('tokens');
