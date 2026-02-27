@@ -579,7 +579,8 @@ export async function runEvalCase(
       lastResult = result;
       // Check whether the tool call itself failed due to infrastructure (the
       // error is surfaced as result.error since executeToolCall swallows throws)
-      const infraError = result.error != null && isInfrastructureError(result.error);
+      const infraError =
+        result.error != null && isInfrastructureError(result.error);
       iterationResults.push({
         pass: result.pass,
         durationMs: result.durationMs,
