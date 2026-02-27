@@ -28,6 +28,7 @@ vi.mock('@modelcontextprotocol/sdk/client/sse.js', () => ({
 }));
 
 import { createMCPClientForConfig, closeMCPClient } from './clientFactory.js';
+import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 
 describe('clientFactory', () => {
   beforeEach(() => {
@@ -172,6 +173,21 @@ describe('clientFactory', () => {
         expect(mocks.MockStreamableHTTPClientTransport).toHaveBeenCalled();
         expect(mocks.MockSSEClientTransport).toHaveBeenCalled();
         expect(mocks.mockConnect).toHaveBeenCalledTimes(2);
+      });
+
+      it('passes authProvider to SSE transport fallback', async () => {
+        mocks.MockStreamableHTTPClientTransport.mockImplementationOnce(() => {
+          throw new Error('Not supported');
+        });
+        const mockAuthProvider = {} as OAuthClientProvider;
+        await createMCPClientForConfig(
+          { transport: 'http', serverUrl: 'https://example.com/mcp' },
+          { authProvider: mockAuthProvider }
+        );
+        expect(mocks.MockSSEClientTransport).toHaveBeenCalledWith(
+          expect.any(URL),
+          expect.objectContaining({ authProvider: mockAuthProvider })
+        );
       });
 
       it('does not fall back to SSE when StreamableHTTP succeeds', async () => {

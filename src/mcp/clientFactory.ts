@@ -149,7 +149,10 @@ export async function createMCPClientForConfig(
       );
       debugClient('Streamable HTTP failed, falling back to SSE transport');
       debugHttp('Attempting transport: sse');
-      const sseTransport = new SSEClientTransport(url, { requestInit });
+      const sseTransport = new SSEClientTransport(url, {
+        requestInit,
+        authProvider: options?.authProvider,
+      });
       const connectOptions =
         validatedConfig.connectTimeoutMs !== undefined
           ? { timeout: validatedConfig.connectTimeoutMs }
