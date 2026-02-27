@@ -280,12 +280,12 @@ export class PlaywrightOAuthClientProvider implements OAuthClientProvider {
 
     // Ensure directory exists
     const dir = path.dirname(this.config.storagePath);
-    await fs.mkdir(dir, { recursive: true });
+    await fs.mkdir(dir, { recursive: true, mode: 0o700 });
 
     await fs.writeFile(
       this.config.storagePath,
       JSON.stringify(state, null, 2),
-      'utf-8'
+      { encoding: 'utf-8', mode: 0o600 }
     );
   }
 
@@ -381,7 +381,10 @@ export async function saveOAuthState(
 
   // Ensure directory exists
   const dir = path.dirname(storagePath);
-  await fs.mkdir(dir, { recursive: true });
+  await fs.mkdir(dir, { recursive: true, mode: 0o700 });
 
-  await fs.writeFile(storagePath, JSON.stringify(state, null, 2), 'utf-8');
+  await fs.writeFile(storagePath, JSON.stringify(state, null, 2), {
+    encoding: 'utf-8',
+    mode: 0o600,
+  });
 }
