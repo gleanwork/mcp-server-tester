@@ -222,7 +222,9 @@ describe('validateJudge', () => {
       ]);
       mockCreateJudge.mockReturnValue(mockJudge);
 
-      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const consoleSpy = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
 
       const result = await validateJudge('response', {
         rubric: { text: 'Is it good?' },
