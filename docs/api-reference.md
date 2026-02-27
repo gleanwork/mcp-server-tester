@@ -139,74 +139,6 @@ Check if a token will expire within the buffer time.
 
 **Returns:** `boolean`
 
-### OAuth Flow Functions
-
-```typescript
-import {
-  discoverAuthServer,
-  generatePKCE,
-  generateState,
-  buildAuthorizationUrl,
-  validateCallback,
-  exchangeCodeForTokens,
-  refreshAccessToken,
-  loadOAuthState,
-  saveOAuthState,
-} from '@gleanwork/mcp-server-tester';
-```
-
-#### `discoverAuthServer(issuerUrl)`
-
-Discover OAuth authorization server metadata.
-
-**Parameters:**
-
-- `issuerUrl: string` - Authorization server URL
-
-**Returns:** `Promise<AuthServerMetadata>`
-
-#### `generatePKCE()`
-
-Generate PKCE code verifier and challenge pair.
-
-**Returns:** `Promise<{ codeVerifier: string; codeChallenge: string }>`
-
-#### `generateState()`
-
-Generate random state parameter for CSRF protection.
-
-**Returns:** `string`
-
-#### `buildAuthorizationUrl(config)`
-
-Build OAuth authorization URL for browser redirect.
-
-**Parameters:**
-
-- `config: AuthorizationUrlConfig`
-
-**Returns:** `URL`
-
-#### `exchangeCodeForTokens(config)`
-
-Exchange authorization code for tokens.
-
-**Parameters:**
-
-- `config: TokenExchangeConfig`
-
-**Returns:** `Promise<TokenResult>`
-
-#### `refreshAccessToken(config)`
-
-Refresh an access token using a refresh token.
-
-**Parameters:**
-
-- `config: TokenRefreshConfig`
-
-**Returns:** `Promise<TokenResult>`
-
 ### OAuth Client Provider
 
 ```typescript
@@ -499,7 +431,7 @@ test('call count', async ({ mcp }) => {
 
 ## Text Utilities
 
-### `extractTextFromResponse(response)`
+### `extractText(response)`
 
 Extract text content from various MCP response formats.
 
@@ -511,7 +443,7 @@ Extract text content from various MCP response formats.
 
 ```typescript
 const result = await mcp.callTool('get_info', {});
-const text = extractTextFromResponse(result);
+const text = extractText(result);
 ```
 
 ### `normalizeWhitespace(text)`
@@ -529,82 +461,43 @@ const normalized = normalizeWhitespace('  hello\n\n  world  ');
 // Returns: "hello world"
 ```
 
-### `findMissingSubstrings(text, substrings, caseSensitive?)`
-
-Check which expected substrings are missing from text.
-
-**Parameters:**
-
-- `text: string` - Text to search
-- `substrings: string[]` - Expected substrings
-- `caseSensitive?: boolean` - Case-sensitive search (default: `true`)
-
-**Returns:** `string[]` - Missing substrings
-
-```typescript
-const missing = findMissingSubstrings(
-  'Hello world',
-  ['Hello', 'World', 'foo'],
-  false
-);
-// Returns: ['foo']
-```
-
-### `findFailedPatterns(text, patterns)`
-
-Check which regex patterns failed to match.
-
-**Parameters:**
-
-- `text: string` - Text to test
-- `patterns: string[]` - Regex patterns
-
-**Returns:** `string[]` - Failed patterns
-
-```typescript
-const failed = findFailedPatterns('Temperature: 20°C', [
-  'Temperature: \\d+°C',
-  'Humidity: \\d+%',
-]);
-// Returns: ['Humidity: \\d+%']
-```
 
 ## Judge Functions
 
-### `createLLMJudgeClient(config)`
+### `createJudge(config?)`
 
-Create an LLM judge client for semantic evaluation.
+Create an LLM judge for semantic evaluation of tool responses.
 
 **Parameters:**
 
-- `config: object`
-  - `provider: 'openai' | 'anthropic' | 'custom-http'` - LLM provider
-  - `model: string` - Model name
-  - `temperature: number` - Temperature (0.0-1.0)
-  - For `custom-http`: additional HTTP config
+- `config?: JudgeConfig` (all fields optional)
+  - `provider?: 'claude' | 'anthropic' | 'openai' | 'google'` - LLM provider (default: `'claude'`)
+  - `model?: string` - Model name (default: `'claude-sonnet-4-20250514'`)
+  - `temperature?: number` - Temperature 0–1 (default: `0.0`)
+  - `maxTokens?: number` - Maximum tokens for response (default: `1000`)
+  - `maxBudgetUsd?: number` - Maximum budget in USD (default: `0.10`)
+  - `maxToolOutputSize?: number` - Fail if response exceeds this byte count
 
-**Returns:** `LLMJudgeClient`
+**Returns:** `Judge`
 
-**OpenAI:**
+**Default (Claude):**
 
 ```typescript
-const judgeClient = createLLMJudgeClient({
+import { createJudge } from '@gleanwork/mcp-server-tester';
+
+const judge = createJudge();
+// Requires: ANTHROPIC_API_KEY environment variable
+```
+
+**With configuration:**
+
+```typescript
+const judge = createJudge({
   provider: 'openai',
-  model: 'gpt-4',
+  model: 'gpt-4o',
   temperature: 0.0,
 });
 // Requires: OPENAI_API_KEY environment variable
-```
-
-**Anthropic:**
-
-```typescript
-const judgeClient = createLLMJudgeClient({
-  provider: 'anthropic',
-  model: 'claude-3-opus-20240229',
-  temperature: 0.0,
-});
-// Requires: ANTHROPIC_API_KEY environment variable
 ```
 
 ### LLM Host Diagnostic Utilities
