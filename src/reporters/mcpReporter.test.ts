@@ -168,7 +168,10 @@ describe('MCPReporter.buildRunData()', () => {
 
     it('counts textContains expectation', () => {
       setResults(reporter, [
-        makeResult({ pass: true, expectations: { textContains: { pass: true } } }),
+        makeResult({
+          pass: true,
+          expectations: { textContains: { pass: true } },
+        }),
       ]);
 
       const data = callBuildRunData(reporter, 100);
@@ -230,7 +233,10 @@ describe('MCPReporter.buildRunData()', () => {
 
     it('counts toolsTriggered expectation', () => {
       setResults(reporter, [
-        makeResult({ pass: true, expectations: { toolsTriggered: { pass: true } } }),
+        makeResult({
+          pass: true,
+          expectations: { toolsTriggered: { pass: true } },
+        }),
       ]);
 
       const data = callBuildRunData(reporter, 100);
@@ -240,7 +246,10 @@ describe('MCPReporter.buildRunData()', () => {
 
     it('counts toolCallCount expectation', () => {
       setResults(reporter, [
-        makeResult({ pass: true, expectations: { toolCallCount: { pass: true } } }),
+        makeResult({
+          pass: true,
+          expectations: { toolCallCount: { pass: true } },
+        }),
       ]);
 
       const data = callBuildRunData(reporter, 100);
@@ -270,9 +279,18 @@ describe('MCPReporter.buildRunData()', () => {
 
     it('aggregates expectation counts across multiple results', () => {
       setResults(reporter, [
-        makeResult({ pass: true, expectations: { textContains: { pass: true } } }),
-        makeResult({ pass: true, expectations: { textContains: { pass: true } } }),
-        makeResult({ pass: false, expectations: { textContains: { pass: false } } }),
+        makeResult({
+          pass: true,
+          expectations: { textContains: { pass: true } },
+        }),
+        makeResult({
+          pass: true,
+          expectations: { textContains: { pass: true } },
+        }),
+        makeResult({
+          pass: false,
+          expectations: { textContains: { pass: false } },
+        }),
         makeResult({ pass: true, expectations: { judge: { pass: true } } }),
       ]);
 
@@ -283,9 +301,7 @@ describe('MCPReporter.buildRunData()', () => {
     });
 
     it('initializes all expectation counters to 0 when no expectations are set', () => {
-      setResults(reporter, [
-        makeResult({ pass: true, expectations: {} }),
-      ]);
+      setResults(reporter, [makeResult({ pass: true, expectations: {} })]);
 
       const data = callBuildRunData(reporter, 100);
 
