@@ -29,10 +29,13 @@ async function getMockCreate() {
   return (openai as any).__mockCreate as ReturnType<typeof vi.fn>;
 }
 
-function makeCompletionResponse(content: string, options: {
-  promptTokens?: number;
-  completionTokens?: number;
-} = {}) {
+function makeCompletionResponse(
+  content: string,
+  options: {
+    promptTokens?: number;
+    completionTokens?: number;
+  } = {}
+) {
   return {
     choices: [
       {
@@ -72,7 +75,9 @@ describe('openaiJudge', () => {
     it('throws when custom apiKeyEnvVar is not set', () => {
       delete process.env.MY_OPENAI_KEY;
 
-      expect(() => createOpenAIJudge({ apiKeyEnvVar: 'MY_OPENAI_KEY' })).toThrow(
+      expect(() =>
+        createOpenAIJudge({ apiKeyEnvVar: 'MY_OPENAI_KEY' })
+      ).toThrow(
         'OpenAI judge requires an API key. Set the MY_OPENAI_KEY environment variable.'
       );
     });
@@ -123,7 +128,10 @@ describe('openaiJudge', () => {
       const mockCreate = await getMockCreate();
       mockCreate.mockResolvedValue(
         makeCompletionResponse(
-          JSON.stringify({ score: 0.8, reasoning: 'Good score but no pass field' })
+          JSON.stringify({
+            score: 0.8,
+            reasoning: 'Good score but no pass field',
+          })
         )
       );
 
@@ -158,9 +166,9 @@ describe('openaiJudge', () => {
 
       const judge = createOpenAIJudge({});
 
-      await expect(
-        judge.evaluate('candidate', null, 'rubric')
-      ).rejects.toThrow('OpenAI API rate limit exceeded');
+      await expect(judge.evaluate('candidate', null, 'rubric')).rejects.toThrow(
+        'OpenAI API rate limit exceeded'
+      );
     });
 
     it('strips markdown code blocks from response before parsing', async () => {

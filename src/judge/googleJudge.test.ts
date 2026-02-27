@@ -15,10 +15,13 @@ vi.mock('@google/generative-ai', () => ({
 
 import { createGoogleJudge } from './googleJudge.js';
 
-function makeGenerateResponse(text: string, options: {
-  promptTokens?: number;
-  candidatesTokens?: number;
-} = {}) {
+function makeGenerateResponse(
+  text: string,
+  options: {
+    promptTokens?: number;
+    candidatesTokens?: number;
+  } = {}
+) {
   return {
     response: {
       text: () => text,
@@ -37,7 +40,9 @@ describe('googleJudge', () => {
     vi.clearAllMocks();
     process.env = { ...originalEnv, GOOGLE_API_KEY: 'test-google-key' };
     // Reset the mock implementation after clearAllMocks
-    mockGetGenerativeModel.mockReturnValue({ generateContent: mockGenerateContent });
+    mockGetGenerativeModel.mockReturnValue({
+      generateContent: mockGenerateContent,
+    });
     MockGoogleGenerativeAI.mockImplementation(() => ({
       getGenerativeModel: mockGetGenerativeModel,
     }));
@@ -59,7 +64,9 @@ describe('googleJudge', () => {
     it('throws when custom apiKeyEnvVar is not set', () => {
       delete process.env.MY_GOOGLE_KEY;
 
-      expect(() => createGoogleJudge({ apiKeyEnvVar: 'MY_GOOGLE_KEY' })).toThrow(
+      expect(() =>
+        createGoogleJudge({ apiKeyEnvVar: 'MY_GOOGLE_KEY' })
+      ).toThrow(
         'Google judge requires an API key. Set the MY_GOOGLE_KEY environment variable.'
       );
     });
@@ -107,7 +114,10 @@ describe('googleJudge', () => {
       // When pass field is missing, googleJudge defaults to false
       mockGenerateContent.mockResolvedValue(
         makeGenerateResponse(
-          JSON.stringify({ score: 0.85, reasoning: 'Good score but no pass field' })
+          JSON.stringify({
+            score: 0.85,
+            reasoning: 'Good score but no pass field',
+          })
         )
       );
 
@@ -134,13 +144,15 @@ describe('googleJudge', () => {
     });
 
     it('propagates API errors (does not swallow them)', async () => {
-      mockGenerateContent.mockRejectedValue(new Error('Google API quota exceeded'));
+      mockGenerateContent.mockRejectedValue(
+        new Error('Google API quota exceeded')
+      );
 
       const judge = createGoogleJudge({});
 
-      await expect(
-        judge.evaluate('candidate', null, 'rubric')
-      ).rejects.toThrow('Google API quota exceeded');
+      await expect(judge.evaluate('candidate', null, 'rubric')).rejects.toThrow(
+        'Google API quota exceeded'
+      );
     });
 
     it('strips markdown code blocks from response before parsing', async () => {
