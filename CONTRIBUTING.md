@@ -2,6 +2,11 @@
 
 Thank you for your interest in contributing! This project is experimental and community input is essential to its evolution. We welcome all types of contributions.
 
+## Architecture
+
+Before contributing, read [docs/architecture.md](./docs/architecture.md) to understand the
+module structure and design decisions.
+
 ## Ways to Contribute
 
 - 🐛 **Report bugs** - Found an issue? Let us know!

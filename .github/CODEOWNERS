@@ -1,0 +1,7 @@
+# All changes require review from a project maintainer.
+* @gleanwork/mcp-server-tester-maintainers
+
+# Critical security and eval subsystems require additional maintainer sign-off.
+src/auth/   @gleanwork/mcp-server-tester-maintainers
+src/evals/  @gleanwork/mcp-server-tester-maintainers
+src/judge/  @gleanwork/mcp-server-tester-maintainers
