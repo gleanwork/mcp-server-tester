@@ -26,7 +26,7 @@ async function getMockCreate() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const openai = await import('openai' as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
-  return (openai as any).__mockCreate as ReturnType<typeof vi.fn>;
+  return (openai as any).__mockCreate;
 }
 
 function makeCompletionResponse(
