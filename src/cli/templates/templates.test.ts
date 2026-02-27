@@ -31,7 +31,9 @@ describe('CLI template generators', () => {
         });
 
         // Should reference the mcp-server-tester reporter
-        expect(config).toContain('@gleanwork/mcp-server-tester/reporters/mcpReporter');
+        expect(config).toContain(
+          '@gleanwork/mcp-server-tester/reporters/mcpReporter'
+        );
       });
 
       it('does not include serverUrl for stdio transport', () => {
@@ -66,7 +68,9 @@ describe('CLI template generators', () => {
         // Should export a default config
         expect(config).toContain('export default defineConfig');
         // Should import defineConfig from @playwright/test
-        expect(config).toContain("import { defineConfig } from '@playwright/test'");
+        expect(config).toContain(
+          "import { defineConfig } from '@playwright/test'"
+        );
       });
     });
 
@@ -89,7 +93,9 @@ describe('CLI template generators', () => {
           serverUrl: 'http://localhost:8080/mcp',
         });
 
-        expect(config).toContain('@gleanwork/mcp-server-tester/reporters/mcpReporter');
+        expect(config).toContain(
+          '@gleanwork/mcp-server-tester/reporters/mcpReporter'
+        );
       });
 
       it('does not include command for http transport', () => {
@@ -181,7 +187,7 @@ describe('CLI template generators', () => {
       });
 
       // The generated test should use the matcher API, not extractText helper
-      expect(testFile).not.toContain("import { extractText }");
+      expect(testFile).not.toContain('import { extractText }');
     });
 
     it('works for both stdio and http transport modes', () => {
@@ -206,7 +212,9 @@ describe('CLI template generators', () => {
       const pkg = getPackageJsonTemplate('my-tests');
       const parsed = JSON.parse(pkg);
 
-      expect(parsed.dependencies).toHaveProperty('@gleanwork/mcp-server-tester');
+      expect(parsed.dependencies).toHaveProperty(
+        '@gleanwork/mcp-server-tester'
+      );
     });
 
     it('includes @playwright/test as a dependency', () => {
