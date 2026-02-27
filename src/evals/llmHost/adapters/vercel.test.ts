@@ -139,7 +139,10 @@ describe('createVercelOrchestrator', () => {
       ]);
 
       const orchestrator = createVercelOrchestrator();
-      await orchestrator.simulate(mcp, 'Search for docs', { provider: 'openai', model: 'gpt-4o' });
+      await orchestrator.simulate(mcp, 'Search for docs', {
+        provider: 'openai',
+        model: 'gpt-4o',
+      });
 
       // jsonSchemaMock should have been called with the tool's input schema
       expect(jsonSchemaMock).toHaveBeenCalledWith(
@@ -164,7 +167,10 @@ describe('createVercelOrchestrator', () => {
       ]);
 
       const orchestrator = createVercelOrchestrator();
-      await orchestrator.simulate(mcp, 'List all items', { provider: 'openai', model: 'gpt-4o' });
+      await orchestrator.simulate(mcp, 'List all items', {
+        provider: 'openai',
+        model: 'gpt-4o',
+      });
 
       expect(jsonSchemaMock).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -193,7 +199,10 @@ describe('createVercelOrchestrator', () => {
       ]);
 
       const orchestrator = createVercelOrchestrator();
-      await orchestrator.simulate(mcp, 'Run batch search', { provider: 'openai', model: 'gpt-4o' });
+      await orchestrator.simulate(mcp, 'Run batch search', {
+        provider: 'openai',
+        model: 'gpt-4o',
+      });
 
       expect(jsonSchemaMock).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -224,7 +233,10 @@ describe('createVercelOrchestrator', () => {
       ]);
 
       const orchestrator = createVercelOrchestrator();
-      await orchestrator.simulate(mcp, 'Get status', { provider: 'openai', model: 'gpt-4o' });
+      await orchestrator.simulate(mcp, 'Get status', {
+        provider: 'openai',
+        model: 'gpt-4o',
+      });
 
       expect(jsonSchemaMock).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -251,7 +263,10 @@ describe('createVercelOrchestrator', () => {
       ]);
 
       const orchestrator = createVercelOrchestrator();
-      await orchestrator.simulate(mcp, 'scenario', { provider: 'openai', model: 'gpt-4o' });
+      await orchestrator.simulate(mcp, 'scenario', {
+        provider: 'openai',
+        model: 'gpt-4o',
+      });
 
       // The adapter always adds type:'object' — Anthropic requires it
       expect(jsonSchemaMock).toHaveBeenCalledWith(
@@ -264,17 +279,27 @@ describe('createVercelOrchestrator', () => {
         {
           name: 'search',
           description: 'Search docs',
-          inputSchema: { type: 'object', properties: { query: { type: 'string' } } },
+          inputSchema: {
+            type: 'object',
+            properties: { query: { type: 'string' } },
+          },
         },
         {
           name: 'get_document',
           description: 'Get a document by ID',
-          inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+          inputSchema: {
+            type: 'object',
+            properties: { id: { type: 'string' } },
+            required: ['id'],
+          },
         },
       ]);
 
       const orchestrator = createVercelOrchestrator();
-      await orchestrator.simulate(mcp, 'scenario', { provider: 'openai', model: 'gpt-4o' });
+      await orchestrator.simulate(mcp, 'scenario', {
+        provider: 'openai',
+        model: 'gpt-4o',
+      });
 
       // jsonSchema should have been called once per tool
       expect(jsonSchemaMock).toHaveBeenCalledTimes(2);
@@ -290,7 +315,10 @@ describe('createVercelOrchestrator', () => {
       ]);
 
       const orchestrator = createVercelOrchestrator();
-      await orchestrator.simulate(mcp, 'scenario', { provider: 'openai', model: 'gpt-4o' });
+      await orchestrator.simulate(mcp, 'scenario', {
+        provider: 'openai',
+        model: 'gpt-4o',
+      });
 
       const { generateText } = await import('ai');
       const callArg = vi.mocked(generateText).mock.calls[0]?.[0] as {
@@ -303,7 +331,9 @@ describe('createVercelOrchestrator', () => {
   describe('error classification', () => {
     it('classifies authentication errors with a helpful hint', async () => {
       const { generateText } = await import('ai');
-      vi.mocked(generateText).mockRejectedValueOnce(new Error('401 Unauthorized: Invalid API key'));
+      vi.mocked(generateText).mockRejectedValueOnce(
+        new Error('401 Unauthorized: Invalid API key')
+      );
 
       const orchestrator = createVercelOrchestrator();
       const result = await orchestrator.simulate(createMockMCP(), 'scenario', {
@@ -317,7 +347,9 @@ describe('createVercelOrchestrator', () => {
 
     it('classifies rate limit errors with a helpful hint', async () => {
       const { generateText } = await import('ai');
-      vi.mocked(generateText).mockRejectedValueOnce(new Error('429 Too Many Requests'));
+      vi.mocked(generateText).mockRejectedValueOnce(
+        new Error('429 Too Many Requests')
+      );
 
       const orchestrator = createVercelOrchestrator();
       const result = await orchestrator.simulate(createMockMCP(), 'scenario', {
@@ -331,7 +363,9 @@ describe('createVercelOrchestrator', () => {
 
     it('classifies 404 model not found errors', async () => {
       const { generateText } = await import('ai');
-      vi.mocked(generateText).mockRejectedValueOnce(new Error('404 Not Found: model not found'));
+      vi.mocked(generateText).mockRejectedValueOnce(
+        new Error('404 Not Found: model not found')
+      );
 
       const orchestrator = createVercelOrchestrator();
       const result = await orchestrator.simulate(createMockMCP(), 'scenario', {
