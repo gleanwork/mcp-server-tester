@@ -74,9 +74,21 @@ test.describe('MCP Server Tests', () => {
     expect(result.passed).toBeGreaterThanOrEqual(4);
   });
 
-  test('should handle tool call errors gracefully', async ({ mcp }) => {
+  test('echo tool returns expected text (toContainToolText)', async ({ mcp }) => {
+    const result = await mcp.callTool('echo', { message: 'Hello World' });
+    expect(result).toContainToolText('Echo: Hello World');
+  });
+
+  test('get_weather tool returns city name and conditions (toContainToolText)', async ({
+    mcp,
+  }) => {
+    const result = await mcp.callTool('get_weather', { city: 'London' });
+    expect(result).toContainToolText('London');
+    expect(result).toContainToolText('Sunny');
+  });
+
+  test('nonexistent tool returns an error (toBeToolError)', async ({ mcp }) => {
     const result = await mcp.callTool('nonexistent_tool', {});
-    // MCP SDK returns isError: true instead of throwing
-    expect(result.isError).toBe(true);
+    expect(result).toBeToolError();
   });
 });
