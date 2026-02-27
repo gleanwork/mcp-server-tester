@@ -11,6 +11,7 @@ import {
 } from '../config/mcpConfig.js';
 import { debugClient, debugHttp } from '../debug.js';
 import { ProxyAgent } from 'undici';
+import packageJson from '../../package.json' with { type: 'json' };
 
 /**
  * Options for creating an MCP client
@@ -75,7 +76,7 @@ export async function createMCPClientForConfig(
   const client = new Client(
     {
       name: options?.clientInfo?.name ?? '@gleanwork/mcp-server-tester',
-      version: options?.clientInfo?.version ?? '0.1.0',
+      version: options?.clientInfo?.version ?? packageJson.version,
     },
     {
       capabilities: validatedConfig.capabilities ?? {},

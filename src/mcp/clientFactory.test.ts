@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import packageJson from '../../package.json' with { type: 'json' };
 
 // Use vi.hoisted to define mocks that can be used in vi.mock factories
 const mocks = vi.hoisted(() => ({
@@ -66,7 +67,7 @@ describe('clientFactory', () => {
         expect(mocks.MockClient).toHaveBeenCalledWith(
           {
             name: '@gleanwork/mcp-server-tester',
-            version: '0.1.0',
+            version: packageJson.version,
           },
           {
             capabilities: {},
@@ -255,7 +256,7 @@ describe('clientFactory', () => {
         expect(mocks.MockClient).toHaveBeenCalledWith(
           {
             name: '@gleanwork/mcp-server-tester',
-            version: '0.1.0',
+            version: packageJson.version,
           },
           expect.anything()
         );
@@ -300,7 +301,7 @@ describe('clientFactory', () => {
         expect(mocks.MockClient).toHaveBeenCalledWith(
           {
             name: 'my-custom-client',
-            version: '0.1.0',
+            version: packageJson.version,
           },
           expect.anything()
         );

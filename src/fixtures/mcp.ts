@@ -14,6 +14,7 @@ import {
 import { PlaywrightOAuthClientProvider } from '../auth/oauthClientProvider.js';
 import { CLIOAuthClient } from '../auth/cli.js';
 import { isHttpConfig, type MCPConfig } from '../config/mcpConfig.js';
+import packageJson from '../../package.json' with { type: 'json' };
 
 /**
  * Internal fixture state for passing auth type between fixtures
@@ -157,7 +158,7 @@ export const test = base.extend<MCPFixtures>({
     const client = await createMCPClientForConfig(effectiveConfig, {
       clientInfo: {
         name: '@gleanwork/mcp-server-tester',
-        version: '0.1.0',
+        version: packageJson.version,
       },
       authProvider,
     });
