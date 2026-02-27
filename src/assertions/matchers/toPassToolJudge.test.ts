@@ -11,7 +11,9 @@ import { createJudge } from '../../judge/judgeClient.js';
 
 const RUBRIC: RubricSpec = { text: 'Is the response accurate and complete?' };
 
-function makeMockJudge(results: Array<{ pass: boolean; score: number; reasoning?: string }>) {
+function makeMockJudge(
+  results: Array<{ pass: boolean; score: number; reasoning?: string }>
+) {
   let callCount = 0;
   return {
     evaluate: vi.fn().mockImplementation(async () => {
@@ -29,7 +31,9 @@ describe('toPassToolJudge', () => {
 
   describe('basic pass/fail', () => {
     it('passes when judge score meets the threshold', async () => {
-      const mockJudge = makeMockJudge([{ pass: true, score: 0.9, reasoning: 'Well answered' }]);
+      const mockJudge = makeMockJudge([
+        { pass: true, score: 0.9, reasoning: 'Well answered' },
+      ]);
       vi.mocked(createJudge).mockReturnValue(mockJudge);
 
       const context = { isNot: false };
@@ -44,7 +48,9 @@ describe('toPassToolJudge', () => {
     });
 
     it('fails when judge score is below threshold', async () => {
-      const mockJudge = makeMockJudge([{ pass: false, score: 0.4, reasoning: 'Missing key details' }]);
+      const mockJudge = makeMockJudge([
+        { pass: false, score: 0.4, reasoning: 'Missing key details' },
+      ]);
       vi.mocked(createJudge).mockReturnValue(mockJudge);
 
       const context = { isNot: false };
@@ -60,7 +66,9 @@ describe('toPassToolJudge', () => {
 
     it('uses default passing threshold of 0.7 when not specified', async () => {
       // Score of 0.65 should fail the default threshold of 0.7
-      const mockJudge = makeMockJudge([{ pass: false, score: 0.65, reasoning: 'Close but not enough' }]);
+      const mockJudge = makeMockJudge([
+        { pass: false, score: 0.65, reasoning: 'Close but not enough' },
+      ]);
       vi.mocked(createJudge).mockReturnValue(mockJudge);
 
       const context = { isNot: false };
@@ -75,16 +83,15 @@ describe('toPassToolJudge', () => {
     });
 
     it('passes at exactly the threshold score', async () => {
-      const mockJudge = makeMockJudge([{ pass: true, score: 0.7, reasoning: 'Just enough' }]);
+      const mockJudge = makeMockJudge([
+        { pass: true, score: 0.7, reasoning: 'Just enough' },
+      ]);
       vi.mocked(createJudge).mockReturnValue(mockJudge);
 
       const context = { isNot: false };
-      const result = await toPassToolJudge.call(
-        context,
-        'response',
-        RUBRIC,
-        { passingThreshold: 0.7 }
-      );
+      const result = await toPassToolJudge.call(context, 'response', RUBRIC, {
+        passingThreshold: 0.7,
+      });
 
       expect(result.pass).toBe(true);
     });
@@ -94,7 +101,8 @@ describe('toPassToolJudge', () => {
     it('averages scores across multiple reps when reps > 1', async () => {
       // Three reps: scores 0.8, 0.8, 0.8 => mean = 0.8 => passes at threshold 0.7
       const mockJudge = {
-        evaluate: vi.fn()
+        evaluate: vi
+          .fn()
           .mockResolvedValueOnce({ pass: true, score: 0.8, reasoning: 'Good' })
           .mockResolvedValueOnce({ pass: true, score: 0.8, reasoning: 'Good' })
           .mockResolvedValueOnce({ pass: true, score: 0.8, reasoning: 'Good' }),
@@ -102,12 +110,10 @@ describe('toPassToolJudge', () => {
       vi.mocked(createJudge).mockReturnValue(mockJudge);
 
       const context = { isNot: false };
-      const result = await toPassToolJudge.call(
-        context,
-        'response',
-        RUBRIC,
-        { reps: 3, passingThreshold: 0.7 }
-      );
+      const result = await toPassToolJudge.call(context, 'response', RUBRIC, {
+        reps: 3,
+        passingThreshold: 0.7,
+      });
 
       expect(mockJudge.evaluate).toHaveBeenCalledTimes(3);
       expect(result.pass).toBe(true);
@@ -116,19 +122,22 @@ describe('toPassToolJudge', () => {
     it('fails when averaged score across reps is below threshold', async () => {
       // Two reps: scores 0.5, 0.6 => mean = 0.55 => fails at threshold 0.7
       const mockJudge = {
-        evaluate: vi.fn()
+        evaluate: vi
+          .fn()
           .mockResolvedValueOnce({ pass: false, score: 0.5, reasoning: 'Poor' })
-          .mockResolvedValueOnce({ pass: false, score: 0.6, reasoning: 'Below par' }),
+          .mockResolvedValueOnce({
+            pass: false,
+            score: 0.6,
+            reasoning: 'Below par',
+          }),
       };
       vi.mocked(createJudge).mockReturnValue(mockJudge);
 
       const context = { isNot: false };
-      const result = await toPassToolJudge.call(
-        context,
-        'response',
-        RUBRIC,
-        { reps: 2, passingThreshold: 0.7 }
-      );
+      const result = await toPassToolJudge.call(context, 'response', RUBRIC, {
+        reps: 2,
+        passingThreshold: 0.7,
+      });
 
       expect(mockJudge.evaluate).toHaveBeenCalledTimes(2);
       expect(result.pass).toBe(false);
@@ -136,19 +145,26 @@ describe('toPassToolJudge', () => {
 
     it('includes rep count and individual scores in failure message when reps > 1', async () => {
       const mockJudge = {
-        evaluate: vi.fn()
-          .mockResolvedValueOnce({ pass: false, score: 0.3, reasoning: 'Low quality' })
-          .mockResolvedValueOnce({ pass: false, score: 0.4, reasoning: 'Insufficient' }),
+        evaluate: vi
+          .fn()
+          .mockResolvedValueOnce({
+            pass: false,
+            score: 0.3,
+            reasoning: 'Low quality',
+          })
+          .mockResolvedValueOnce({
+            pass: false,
+            score: 0.4,
+            reasoning: 'Insufficient',
+          }),
       };
       vi.mocked(createJudge).mockReturnValue(mockJudge);
 
       const context = { isNot: false };
-      const result = await toPassToolJudge.call(
-        context,
-        'response',
-        RUBRIC,
-        { reps: 2, passingThreshold: 0.7 }
-      );
+      const result = await toPassToolJudge.call(context, 'response', RUBRIC, {
+        reps: 2,
+        passingThreshold: 0.7,
+      });
 
       const msg = result.message();
       expect(msg).toContain('0.30');
@@ -158,20 +174,20 @@ describe('toPassToolJudge', () => {
 
   describe('failure message', () => {
     it('includes judge reasoning in the failure message', async () => {
-      const mockJudge = makeMockJudge([{
-        pass: false,
-        score: 0.3,
-        reasoning: 'The response completely missed the point about data accuracy',
-      }]);
+      const mockJudge = makeMockJudge([
+        {
+          pass: false,
+          score: 0.3,
+          reasoning:
+            'The response completely missed the point about data accuracy',
+        },
+      ]);
       vi.mocked(createJudge).mockReturnValue(mockJudge);
 
       const context = { isNot: false };
-      const result = await toPassToolJudge.call(
-        context,
-        'response',
-        RUBRIC,
-        { passingThreshold: 0.7 }
-      );
+      const result = await toPassToolJudge.call(context, 'response', RUBRIC, {
+        passingThreshold: 0.7,
+      });
 
       expect(result.pass).toBe(false);
       const msg = result.message();
@@ -179,16 +195,15 @@ describe('toPassToolJudge', () => {
     });
 
     it('includes score and threshold in the failure message', async () => {
-      const mockJudge = makeMockJudge([{ pass: false, score: 0.5, reasoning: 'Partial' }]);
+      const mockJudge = makeMockJudge([
+        { pass: false, score: 0.5, reasoning: 'Partial' },
+      ]);
       vi.mocked(createJudge).mockReturnValue(mockJudge);
 
       const context = { isNot: false };
-      const result = await toPassToolJudge.call(
-        context,
-        'response',
-        RUBRIC,
-        { passingThreshold: 0.8 }
-      );
+      const result = await toPassToolJudge.call(context, 'response', RUBRIC, {
+        passingThreshold: 0.8,
+      });
 
       const msg = result.message();
       expect(msg).toContain('0.50');
@@ -198,34 +213,32 @@ describe('toPassToolJudge', () => {
 
   describe('isNot (negation)', () => {
     it('inverts pass when used with .not and judge fails', async () => {
-      const mockJudge = makeMockJudge([{ pass: false, score: 0.2, reasoning: 'Bad' }]);
+      const mockJudge = makeMockJudge([
+        { pass: false, score: 0.2, reasoning: 'Bad' },
+      ]);
       vi.mocked(createJudge).mockReturnValue(mockJudge);
 
       // When isNot=true and judge actually fails, we invert: validateJudge returns pass=false
       // toPassToolJudge with isNot returns pass = !validation.pass = true
       const context = { isNot: true };
-      const result = await toPassToolJudge.call(
-        context,
-        'response',
-        RUBRIC,
-        { passingThreshold: 0.7 }
-      );
+      const result = await toPassToolJudge.call(context, 'response', RUBRIC, {
+        passingThreshold: 0.7,
+      });
 
       expect(result.pass).toBe(true);
     });
 
     it('inverts pass when used with .not and judge passes', async () => {
-      const mockJudge = makeMockJudge([{ pass: true, score: 0.9, reasoning: 'Great' }]);
+      const mockJudge = makeMockJudge([
+        { pass: true, score: 0.9, reasoning: 'Great' },
+      ]);
       vi.mocked(createJudge).mockReturnValue(mockJudge);
 
       // isNot=true and judge passes => validation.pass=true => toPassToolJudge returns pass=false
       const context = { isNot: true };
-      const result = await toPassToolJudge.call(
-        context,
-        'response',
-        RUBRIC,
-        { passingThreshold: 0.7 }
-      );
+      const result = await toPassToolJudge.call(context, 'response', RUBRIC, {
+        passingThreshold: 0.7,
+      });
 
       expect(result.pass).toBe(false);
     });
@@ -276,32 +289,34 @@ describe('toPassToolJudge', () => {
   describe('malformed judge response', () => {
     it('handles judge returning undefined score by treating it as 0 or using pass field', async () => {
       // Judge returns pass: false with no score — validateJudge uses pass ? 1.0 : 0.0
-      const mockJudge = makeMockJudge([{ pass: false, score: undefined as unknown as number, reasoning: 'No score' }]);
+      const mockJudge = makeMockJudge([
+        {
+          pass: false,
+          score: undefined as unknown as number,
+          reasoning: 'No score',
+        },
+      ]);
       vi.mocked(createJudge).mockReturnValue(mockJudge);
 
       const context = { isNot: false };
-      const result = await toPassToolJudge.call(
-        context,
-        'response',
-        RUBRIC,
-        { passingThreshold: 0.7 }
-      );
+      const result = await toPassToolJudge.call(context, 'response', RUBRIC, {
+        passingThreshold: 0.7,
+      });
 
       // pass: false with no score => score defaults to 0.0, which is < 0.7
       expect(result.pass).toBe(false);
     });
 
     it('handles judge returning undefined reasoning gracefully', async () => {
-      const mockJudge = makeMockJudge([{ pass: false, score: 0.3, reasoning: undefined }]);
+      const mockJudge = makeMockJudge([
+        { pass: false, score: 0.3, reasoning: undefined },
+      ]);
       vi.mocked(createJudge).mockReturnValue(mockJudge);
 
       const context = { isNot: false };
-      const result = await toPassToolJudge.call(
-        context,
-        'response',
-        RUBRIC,
-        { passingThreshold: 0.7 }
-      );
+      const result = await toPassToolJudge.call(context, 'response', RUBRIC, {
+        passingThreshold: 0.7,
+      });
 
       // Should not throw even with missing reasoning
       expect(result.pass).toBe(false);
@@ -329,16 +344,15 @@ describe('toPassToolJudge', () => {
 
   describe('provider and model forwarding', () => {
     it('forwards provider option to createJudge', async () => {
-      const mockJudge = makeMockJudge([{ pass: true, score: 0.9, reasoning: 'OK' }]);
+      const mockJudge = makeMockJudge([
+        { pass: true, score: 0.9, reasoning: 'OK' },
+      ]);
       vi.mocked(createJudge).mockReturnValue(mockJudge);
 
       const context = { isNot: false };
-      await toPassToolJudge.call(
-        context,
-        'response',
-        RUBRIC,
-        { provider: 'openai' }
-      );
+      await toPassToolJudge.call(context, 'response', RUBRIC, {
+        provider: 'openai',
+      });
 
       expect(createJudge).toHaveBeenCalledWith(
         expect.objectContaining({ provider: 'openai' })
@@ -346,16 +360,15 @@ describe('toPassToolJudge', () => {
     });
 
     it('forwards model option to createJudge', async () => {
-      const mockJudge = makeMockJudge([{ pass: true, score: 0.9, reasoning: 'OK' }]);
+      const mockJudge = makeMockJudge([
+        { pass: true, score: 0.9, reasoning: 'OK' },
+      ]);
       vi.mocked(createJudge).mockReturnValue(mockJudge);
 
       const context = { isNot: false };
-      await toPassToolJudge.call(
-        context,
-        'response',
-        RUBRIC,
-        { model: 'gpt-4o' }
-      );
+      await toPassToolJudge.call(context, 'response', RUBRIC, {
+        model: 'gpt-4o',
+      });
 
       expect(createJudge).toHaveBeenCalledWith(
         expect.objectContaining({ model: 'gpt-4o' })
@@ -363,7 +376,9 @@ describe('toPassToolJudge', () => {
     });
 
     it('accepts built-in rubric names', async () => {
-      const mockJudge = makeMockJudge([{ pass: true, score: 0.9, reasoning: 'Correct' }]);
+      const mockJudge = makeMockJudge([
+        { pass: true, score: 0.9, reasoning: 'Correct' },
+      ]);
       vi.mocked(createJudge).mockReturnValue(mockJudge);
 
       const context = { isNot: false };
@@ -379,7 +394,9 @@ describe('toPassToolJudge', () => {
     });
 
     it('accepts custom rubric objects', async () => {
-      const mockJudge = makeMockJudge([{ pass: true, score: 0.85, reasoning: 'Custom rubric passed' }]);
+      const mockJudge = makeMockJudge([
+        { pass: true, score: 0.85, reasoning: 'Custom rubric passed' },
+      ]);
       vi.mocked(createJudge).mockReturnValue(mockJudge);
 
       const context = { isNot: false };
