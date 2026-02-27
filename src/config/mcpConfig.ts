@@ -181,6 +181,12 @@ export interface HttpMCPConfig {
      */
     password?: string;
   };
+
+  /**
+   * Number of retry attempts for transient connection failures and 429 rate limit responses.
+   * Uses exponential backoff with Retry-After header awareness. Defaults to 0 (no retries).
+   */
+  retryAttempts?: number;
 }
 
 /**
@@ -289,6 +295,7 @@ const HttpConfigSchema = z.object({
       password: z.string().optional(),
     })
     .optional(),
+  retryAttempts: z.number().int().min(0).optional(),
 });
 
 /**
