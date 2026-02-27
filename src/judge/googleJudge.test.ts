@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock the Google AI SDK before importing the judge (Vitest hoists vi.mock)
 const mockGenerateContent = vi.fn();

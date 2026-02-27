@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock the OpenAI module before importing the judge (Vitest hoists vi.mock)
 vi.mock('openai', () => {
