@@ -171,11 +171,16 @@ Create a dataset file manually (e.g., `data/evals.json`):
       "id": "london-weather",
       "toolName": "get_weather",
       "args": { "city": "London" },
-      "expectedSchemaName": "weather-response"
+      "expect": {
+        "schema": "weather-response",
+        "containsText": ["London", "temperature"]
+      }
     }
   ]
 }
 ```
+
+Expectations are declared per-case in the `expect` block. The `schema` field names a Zod schema registered when loading the dataset. See the [Expectations Guide](./expectations.md) for all available fields.
 
 ## Running Evals
 
@@ -183,14 +188,10 @@ Use the `runEvalDataset` function in your tests:
 
 ```typescript
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
-import {
-  loadEvalDataset,
-  runEvalDataset,
-  createSchemaExpectation,
-} from '@gleanwork/mcp-server-tester';
+import { loadEvalDataset, runEvalDataset } from '@gleanwork/mcp-server-tester';
 import { z } from 'zod';
 
-test('run weather evals', async ({ mcp }) => {
+test('run weather evals', async ({ mcp }, testInfo) => {
   const WeatherSchema = z.object({
     city: z.string(),
     temperature: z.number(),
@@ -201,15 +202,7 @@ test('run weather evals', async ({ mcp }) => {
     schemas: { 'weather-response': WeatherSchema },
   });
 
-  const result = await runEvalDataset(
-    {
-      dataset,
-      expectations: {
-        schema: createSchemaExpectation(dataset),
-      },
-    },
-    { mcp }
-  );
+  const result = await runEvalDataset({ dataset }, { mcp, testInfo });
 
   expect(result.passed).toBe(result.total);
 });
