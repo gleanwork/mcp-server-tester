@@ -161,6 +161,26 @@ export interface HttpMCPConfig {
    * Request timeout in milliseconds
    */
   requestTimeoutMs?: number;
+
+  /**
+   * HTTP proxy configuration. Falls back to HTTPS_PROXY/HTTP_PROXY environment variables.
+   */
+  proxy?: {
+    /**
+     * Proxy URL (e.g., http://proxy.example.com:8080)
+     */
+    url: string;
+
+    /**
+     * Proxy username for authentication
+     */
+    username?: string;
+
+    /**
+     * Proxy password for authentication
+     */
+    password?: string;
+  };
 }
 
 /**
@@ -262,6 +282,13 @@ const HttpConfigSchema = z.object({
   connectTimeoutMs: z.number().positive().optional(),
   requestTimeoutMs: z.number().positive().optional(),
   auth: MCPAuthConfigSchema.optional(),
+  proxy: z
+    .object({
+      url: z.string().url('proxy.url must be a valid URL'),
+      username: z.string().optional(),
+      password: z.string().optional(),
+    })
+    .optional(),
 });
 
 /**

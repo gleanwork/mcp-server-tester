@@ -10,6 +10,7 @@ import {
   isHttpConfig,
 } from '../config/mcpConfig.js';
 import { debugClient, debugHttp } from '../debug.js';
+import { ProxyAgent } from 'undici';
 
 /**
  * Options for creating an MCP client
@@ -113,8 +114,23 @@ export async function createMCPClientForConfig(
     }
 
     const url = new URL(validatedConfig.serverUrl);
-    const requestInit =
+    let requestInit: RequestInit | undefined =
       Object.keys(headers).length > 0 ? { headers } : undefined;
+
+    // Apply proxy if configured or available from environment
+    const proxyUrl =
+      validatedConfig.proxy?.url ??
+      process.env['HTTPS_PROXY'] ??
+      process.env['HTTP_PROXY'];
+
+    if (proxyUrl) {
+      const proxyAgent = new ProxyAgent(proxyUrl);
+      debugClient('Using proxy: %s', proxyUrl);
+      requestInit = {
+        ...requestInit,
+        dispatcher: proxyAgent,
+      } as unknown as RequestInit;
+    }
 
     debugClient('Connecting via HTTP: %O', {
       serverUrl: validatedConfig.serverUrl,
