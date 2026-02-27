@@ -46,15 +46,20 @@ describe('resolveRubric', () => {
 describe('5-point scale rubrics', () => {
   const ALL_FIVE_SCORES = ['1.0', '0.75', '0.5', '0.25', '0.0'];
 
-  it.each(['correctness', 'completeness', 'groundedness', 'instruction-following', 'conciseness'] as const)(
-    '"%s" rubric mentions all 5 score levels',
-    (rubricName) => {
-      const text = BUILT_IN_RUBRICS[rubricName];
-      for (const score of ALL_FIVE_SCORES) {
-        expect(text, `${rubricName} should mention score ${score}`).toContain(score);
-      }
-    },
-  );
+  it.each([
+    'correctness',
+    'completeness',
+    'groundedness',
+    'instruction-following',
+    'conciseness',
+  ] as const)('"%s" rubric mentions all 5 score levels', (rubricName) => {
+    const text = BUILT_IN_RUBRICS[rubricName];
+    for (const score of ALL_FIVE_SCORES) {
+      expect(text, `${rubricName} should mention score ${score}`).toContain(
+        score
+      );
+    }
+  });
 
   it('all built-in rubrics mention Score 0.75 (5-point scale)', () => {
     for (const [name, text] of Object.entries(BUILT_IN_RUBRICS)) {
