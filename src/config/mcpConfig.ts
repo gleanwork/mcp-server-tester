@@ -196,7 +196,9 @@ const StdioConfigSchema = z.object({
  * Returns true if the hostname refers to the loopback interface
  */
 function isLocalhost(hostname: string): boolean {
-  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+  return (
+    hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1'
+  );
 }
 
 /**
@@ -207,23 +209,21 @@ const HttpConfigSchema = z.object({
   serverUrl: z
     .string()
     .url('serverUrl must be a valid URL')
-    .refine(
-      (url) => {
-        let parsed: URL;
-        try {
-          parsed = new URL(url);
-        } catch {
-          return true;
-        }
-        if (parsed.protocol === 'http:' && !isLocalhost(parsed.hostname)) {
-          console.warn(
-            `[mcp-server-tester] serverUrl uses http:// for non-localhost address "${parsed.hostname}". ` +
-              `This transmits tokens unencrypted. Use https:// for remote servers.`
-          );
-        }
+    .refine((url) => {
+      let parsed: URL;
+      try {
+        parsed = new URL(url);
+      } catch {
         return true;
       }
-    ),
+      if (parsed.protocol === 'http:' && !isLocalhost(parsed.hostname)) {
+        console.warn(
+          `[mcp-server-tester] serverUrl uses http:// for non-localhost address "${parsed.hostname}". ` +
+            `This transmits tokens unencrypted. Use https:// for remote servers.`
+        );
+      }
+      return true;
+    }),
   headers: z.record(z.string()).optional(),
   capabilities: MCPHostCapabilitiesSchema.optional(),
   connectTimeoutMs: z.number().positive().optional(),
