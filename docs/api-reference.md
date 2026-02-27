@@ -461,7 +461,6 @@ const normalized = normalizeWhitespace('  hello\n\n  world  ');
 // Returns: "hello world"
 ```
 
-
 ## Judge Functions
 
 ### `createJudge(config?)`
