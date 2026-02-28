@@ -110,8 +110,8 @@ describe('googleJudge', () => {
       expect(result.reasoning).toBe('Too vague');
     });
 
-    it('derives pass from pass field when present, defaults to false when missing', async () => {
-      // When pass field is missing, googleJudge defaults to false
+    it('throws when response is missing required pass field', async () => {
+      // When pass field is missing, schema validation rejects it
       mockGenerateContent.mockResolvedValue(
         makeGenerateResponse(
           JSON.stringify({
@@ -122,25 +122,22 @@ describe('googleJudge', () => {
       );
 
       const judge = createGoogleJudge({});
-      const result = await judge.evaluate('candidate', null, 'rubric');
 
-      // pass = typeof parsed.pass === 'boolean' ? parsed.pass : false
-      expect(result.pass).toBe(false);
-      expect(result.score).toBe(0.85);
+      await expect(judge.evaluate('candidate', null, 'rubric')).rejects.toThrow(
+        'Judge returned invalid response'
+      );
     });
 
-    it('handles invalid JSON response gracefully without throwing', async () => {
+    it('throws on invalid JSON response', async () => {
       mockGenerateContent.mockResolvedValue(
         makeGenerateResponse('This is not valid JSON at all')
       );
 
       const judge = createGoogleJudge({});
-      // googleJudge catches JSON.parse errors and stores in reasoning
-      const result = await judge.evaluate('candidate', null, 'rubric');
 
-      expect(result.pass).toBe(false);
-      expect(result.score).toBe(0);
-      expect(result.reasoning).toContain('Failed to parse judge response');
+      await expect(judge.evaluate('candidate', null, 'rubric')).rejects.toThrow(
+        'Failed to parse judge response as JSON'
+      );
     });
 
     it('propagates API errors (does not swallow them)', async () => {

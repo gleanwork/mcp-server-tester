@@ -1,3 +1,20 @@
+import { z } from 'zod';
+
+/**
+ * Zod schema for validating judge LLM responses.
+ * Ensures the response has the required structure before it is used.
+ */
+export const JudgeResponseSchema = z.object({
+  pass: z.boolean(),
+  score: z.number().min(0).max(1),
+  reasoning: z.string(),
+});
+
+/**
+ * The validated shape returned by a judge LLM.
+ */
+export type JudgeResponse = z.infer<typeof JudgeResponseSchema>;
+
 /**
  * Usage metrics from Claude Agent SDK response
  */

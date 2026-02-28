@@ -5,6 +5,7 @@ import type {
   JudgeResult,
   UsageMetrics,
 } from './judgeTypes.js';
+import { JudgeResponseSchema } from './judgeTypes.js';
 
 /**
  * Creates a Claude Agent SDK-based LLM judge client
@@ -126,7 +127,7 @@ export function createClaudeAgentJudge(config: JudgeConfig): Judge {
         };
 
         return {
-          pass: parsed.pass ?? false,
+          pass: parsed.pass,
           score: parsed.score,
           reasoning: parsed.reasoning,
           usage,
@@ -197,12 +198,13 @@ function buildJudgePrompt(
 }
 
 /**
- * Parses the JSON response from the judge, handling markdown code blocks
+ * Parses and validates the JSON response from the judge, handling markdown code blocks.
+ * Throws a descriptive error if the response cannot be parsed or fails schema validation.
  */
 function parseJudgeResponse(text: string): {
-  pass?: boolean;
-  score?: number;
-  reasoning?: string;
+  pass: boolean;
+  score: number;
+  reasoning: string;
 } {
   let jsonText = text.trim();
 
@@ -218,23 +220,25 @@ function parseJudgeResponse(text: string): {
   }
   jsonText = jsonText.trim();
 
+  let parsed: unknown;
   try {
-    return JSON.parse(jsonText) as {
-      pass?: boolean;
-      score?: number;
-      reasoning?: string;
-    };
+    parsed = JSON.parse(jsonText);
   } catch {
     // If JSON parsing fails, try to extract from the text
     // Sometimes the model adds extra text before/after JSON
     const jsonMatch = jsonText.match(/\{[\s\S]*"pass"[\s\S]*\}/);
     if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]) as {
-        pass?: boolean;
-        score?: number;
-        reasoning?: string;
-      };
+      parsed = JSON.parse(jsonMatch[0]);
+    } else {
+      throw new Error(`Failed to parse judge response as JSON: ${text}`);
     }
-    throw new Error(`Failed to parse judge response as JSON: ${text}`);
   }
+
+  const result = JudgeResponseSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new Error(
+      `Judge returned invalid response. Expected {pass, score, reasoning} but got: ${jsonText.slice(0, 500)}\nValidation errors: ${JSON.stringify(result.error.issues)}`
+    );
+  }
+  return result.data;
 }

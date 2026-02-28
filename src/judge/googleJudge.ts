@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any */
 import type { Judge, JudgeConfig, JudgeResult } from './judgeTypes.js';
+import { JudgeResponseSchema } from './judgeTypes.js';
 
 /**
  * Creates a Google Gemini-backed LLM judge.
@@ -70,20 +71,20 @@ export function createGoogleJudge(config: JudgeConfig = {}): Judge {
         .replace(/```\n?/g, '')
         .trim();
 
-      let pass = false;
-      let score = 0;
-      let reasoning = '';
-
+      let parsedRaw: unknown;
       try {
-        const parsed = JSON.parse(cleaned) as Record<string, unknown>;
-        pass = typeof parsed.pass === 'boolean' ? parsed.pass : false;
-        score =
-          typeof parsed.score === 'number' ? parsed.score : pass ? 1.0 : 0.0;
-        reasoning =
-          typeof parsed.reasoning === 'string' ? parsed.reasoning : '';
+        parsedRaw = JSON.parse(cleaned);
       } catch {
-        reasoning = `Failed to parse judge response: ${text}`;
+        throw new Error(`Failed to parse judge response as JSON: ${text}`);
       }
+
+      const validation = JudgeResponseSchema.safeParse(parsedRaw);
+      if (!validation.success) {
+        throw new Error(
+          `Judge returned invalid response. Expected {pass, score, reasoning} but got: ${cleaned.slice(0, 500)}\nValidation errors: ${JSON.stringify(validation.error.issues)}`
+        );
+      }
+      const { pass, score, reasoning } = validation.data;
 
       return {
         pass,

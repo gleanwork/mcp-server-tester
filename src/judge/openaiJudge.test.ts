@@ -123,8 +123,8 @@ describe('openaiJudge', () => {
       expect(result.reasoning).toBe('Insufficient');
     });
 
-    it('derives pass from score when pass field is missing', async () => {
-      // When pass field is missing in JSON, it defaults to false regardless of score
+    it('throws when response is missing required pass field', async () => {
+      // When pass field is missing in JSON, schema validation rejects it
       const mockCreate = await getMockCreate();
       mockCreate.mockResolvedValue(
         makeCompletionResponse(
@@ -136,28 +136,23 @@ describe('openaiJudge', () => {
       );
 
       const judge = createOpenAIJudge({});
-      const result = await judge.evaluate('candidate', null, 'rubric');
 
-      // openaiJudge uses: pass = typeof parsed.pass === 'boolean' ? parsed.pass : false
-      // So when pass is missing, it defaults to false, and score stays 0.8
-      expect(result.score).toBe(0.8);
-      // pass defaults to false when the field is absent
-      expect(result.pass).toBe(false);
+      await expect(judge.evaluate('candidate', null, 'rubric')).rejects.toThrow(
+        'Judge returned invalid response'
+      );
     });
 
-    it('handles invalid JSON response gracefully without throwing', async () => {
+    it('throws on invalid JSON response', async () => {
       const mockCreate = await getMockCreate();
       mockCreate.mockResolvedValue(
         makeCompletionResponse('This is not JSON at all')
       );
 
       const judge = createOpenAIJudge({});
-      // openaiJudge's parseJudgeResponse returns {pass:false, score:0} on parse error
-      const result = await judge.evaluate('candidate', null, 'rubric');
 
-      expect(result.pass).toBe(false);
-      expect(result.score).toBe(0);
-      expect(result.reasoning).toContain('Failed to parse judge response');
+      await expect(judge.evaluate('candidate', null, 'rubric')).rejects.toThrow(
+        'Failed to parse judge response as JSON'
+      );
     });
 
     it('propagates API errors (does not swallow them)', async () => {
@@ -236,7 +231,7 @@ describe('openaiJudge', () => {
       );
     });
 
-    it('handles null response content gracefully', async () => {
+    it('throws on null response content', async () => {
       const mockCreate = await getMockCreate();
       mockCreate.mockResolvedValue({
         choices: [{ message: { content: null } }],
@@ -244,10 +239,11 @@ describe('openaiJudge', () => {
       });
 
       const judge = createOpenAIJudge({});
-      const result = await judge.evaluate('candidate', null, 'rubric');
 
-      // Empty string is passed to parseJudgeResponse, which fails to parse -> returns defaults
-      expect(result.pass).toBe(false);
+      // Empty string is passed to parseJudgeResponse, which fails to parse JSON -> throws
+      await expect(judge.evaluate('candidate', null, 'rubric')).rejects.toThrow(
+        'Failed to parse judge response as JSON'
+      );
     });
   });
 });

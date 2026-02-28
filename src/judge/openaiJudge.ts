@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any */
 import type { Judge, JudgeConfig, JudgeResult } from './judgeTypes.js';
+import { JudgeResponseSchema } from './judgeTypes.js';
 
 /**
  * Creates an OpenAI-backed LLM judge.
@@ -108,19 +109,19 @@ function parseJudgeResponse(text: string): {
     .replace(/```json\n?/g, '')
     .replace(/```\n?/g, '')
     .trim();
+
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(cleaned) as Record<string, unknown>;
-    const pass = typeof parsed.pass === 'boolean' ? parsed.pass : false;
-    const score =
-      typeof parsed.score === 'number' ? parsed.score : pass ? 1.0 : 0.0;
-    const reasoning =
-      typeof parsed.reasoning === 'string' ? parsed.reasoning : '';
-    return { pass, score, reasoning };
+    parsed = JSON.parse(cleaned);
   } catch {
-    return {
-      pass: false,
-      score: 0,
-      reasoning: `Failed to parse judge response: ${text}`,
-    };
+    throw new Error(`Failed to parse judge response as JSON: ${text}`);
   }
+
+  const result = JudgeResponseSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new Error(
+      `Judge returned invalid response. Expected {pass, score, reasoning} but got: ${cleaned.slice(0, 500)}\nValidation errors: ${JSON.stringify(result.error.issues)}`
+    );
+  }
+  return result.data;
 }

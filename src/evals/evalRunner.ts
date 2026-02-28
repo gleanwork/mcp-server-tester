@@ -25,6 +25,7 @@ import {
   validateJudge,
 } from '../assertions/validators/index.js';
 import { execFileNoThrow } from '../utils/execFileNoThrow.js';
+import { debugEval } from '../debug.js';
 import packageJson from '../../package.json' with { type: 'json' };
 
 /**
@@ -778,6 +779,25 @@ export async function runEvalDataset(
     filterTags && filterTags.length > 0
       ? dataset.cases.filter((c) => c.tags?.some((t) => filterTags.includes(t)))
       : dataset.cases;
+
+  // Preflight cost warning: estimate the number of LLM judge API calls this run will make
+  const estimatedJudgeCalls = casesToRun.reduce((sum, c) => {
+    const effectiveIterations =
+      c.mode === 'llm_host'
+        ? (c.iterations ?? defaultLlmIterations ?? 1)
+        : (c.iterations ?? 1);
+    const judgeReps =
+      c.expect?.passesJudge != null
+        ? (c.expect.passesJudge.reps ?? c.judgeReps ?? defaultJudgeReps ?? 1)
+        : 0;
+    return sum + effectiveIterations * judgeReps;
+  }, 0);
+
+  if (estimatedJudgeCalls > 50) {
+    debugEval(
+      `Warning: This run will make approximately ${estimatedJudgeCalls} LLM judge API calls. This may incur significant costs.`
+    );
+  }
 
   // Build task factories for all cases
   const tasks = casesToRun.map((evalCase) => async () => {

@@ -424,17 +424,15 @@ describe('claudeAgentJudge', () => {
       ).rejects.toThrow('Failed to parse judge response as JSON');
     });
 
-    it('handles response with score but no pass field', async () => {
-      // JSON parses successfully but has no "pass" key — defaults to false via ?? false
+    it('throws when response is missing required pass field', async () => {
+      // JSON parses successfully but has no "pass" key — schema validation rejects it
       mockQueryResponse('{"score":0.6,"reasoning":"partial credit"}');
 
       const judge = createClaudeAgentJudge({});
-      const result = await judge.evaluate('candidate', 'reference', 'rubric');
 
-      // pass defaults to false when absent
-      expect(result.pass).toBe(false);
-      expect(result.score).toBe(0.6);
-      expect(result.reasoning).toBe('partial credit');
+      await expect(
+        judge.evaluate('candidate', 'reference', 'rubric')
+      ).rejects.toThrow('Judge returned invalid response');
     });
   });
 
