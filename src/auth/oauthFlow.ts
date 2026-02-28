@@ -5,7 +5,10 @@
  */
 
 import * as oauth from 'oauth4webapi';
+import createDebug from 'debug';
 import type { TokenResult } from './types.js';
+
+const debug = createDebug('mcp-server-tester:oauth-flow');
 
 /**
  * Discovered OAuth authorization server metadata
@@ -424,6 +427,26 @@ export async function performClientCredentialsFlow(
     client,
     response
   );
+
+  const requestedScopes = new Set(
+    config.scopes && config.scopes.length > 0 ? config.scopes : []
+  );
+  const grantedScopes = new Set(
+    (result.scope ?? '').split(' ').filter(Boolean)
+  );
+  const missingScopes = [...requestedScopes].filter(
+    (s) => !grantedScopes.has(s)
+  );
+  if (
+    missingScopes.length > 0 &&
+    requestedScopes.size > 0 &&
+    grantedScopes.size > 0
+  ) {
+    debug(
+      '[oauth] Warning: Token server granted fewer scopes than requested. Missing: %s',
+      missingScopes.join(', ')
+    );
+  }
 
   return {
     accessToken: result.access_token,

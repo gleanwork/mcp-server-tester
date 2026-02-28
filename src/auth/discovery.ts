@@ -9,6 +9,45 @@ import * as oauth from 'oauth4webapi';
 import type { AuthServerMetadata } from './oauthFlow.js';
 
 /**
+ * Returns true if the hostname refers to the loopback interface
+ */
+function isLocalhostUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const h = parsed.hostname;
+    return h === 'localhost' || h === '127.0.0.1' || h === '::1';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Validates that critical OAuth endpoints returned by discovery use HTTPS.
+ * Localhost URLs are exempt to support local development and testing.
+ *
+ * @throws Error if any endpoint uses a non-HTTPS, non-localhost scheme
+ */
+function validateAuthServerEndpoints(authServer: {
+  authorization_endpoint?: string;
+  token_endpoint?: string;
+  issuer?: string;
+}): void {
+  const endpoints = [
+    { name: 'authorization_endpoint', url: authServer.authorization_endpoint },
+    { name: 'token_endpoint', url: authServer.token_endpoint },
+  ];
+
+  for (const { name, url } of endpoints) {
+    if (url && !url.startsWith('https://') && !isLocalhostUrl(url)) {
+      throw new Error(
+        `OAuth discovery returned an insecure ${name}: "${url}". ` +
+          `Only HTTPS endpoints are permitted for OAuth flows to prevent token interception.`
+      );
+    }
+  }
+}
+
+/**
  * MCP Protocol version header value
  */
 export const MCP_PROTOCOL_VERSION = '2025-06-18';
@@ -196,6 +235,8 @@ export async function discoverAuthorizationServer(
   });
 
   const metadata = await oauth.processDiscoveryResponse(issuer, response);
+
+  validateAuthServerEndpoints(metadata);
 
   return {
     server: metadata,
