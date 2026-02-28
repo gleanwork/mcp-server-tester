@@ -62,14 +62,34 @@ export interface PatternValidatorOptions {
 }
 
 /**
+ * Built-in snapshot sanitizer names for use with toMatchToolSnapshot.
+ * Pass these values in the sanitizers array to replace non-deterministic
+ * values with stable placeholders before snapshot comparison.
+ *
+ * @example
+ * expect(result).toMatchToolSnapshot('my-snapshot', [
+ *   SnapshotSanitizers.UUID,
+ *   SnapshotSanitizers.ISO_DATE,
+ * ]);
+ */
+export const SnapshotSanitizers = {
+  /** Replaces Unix timestamps (seconds and milliseconds) with a stable placeholder */
+  TIMESTAMP: 'timestamp' as const,
+  /** Replaces UUID v1-v5 strings with a stable placeholder */
+  UUID: 'uuid' as const,
+  /** Replaces ISO 8601 date/datetime strings with a stable placeholder */
+  ISO_DATE: 'iso-date' as const,
+  /** Replaces MongoDB ObjectId strings with a stable placeholder */
+  OBJECT_ID: 'objectId' as const,
+  /** Replaces JWT tokens with a stable placeholder */
+  JWT: 'jwt' as const,
+} as const;
+
+/**
  * Built-in sanitizer names for common variable patterns
  */
 export type BuiltInSanitizer =
-  | 'timestamp' // Unix timestamps (milliseconds and seconds)
-  | 'uuid' // UUIDs v1-v5
-  | 'iso-date' // ISO 8601 date strings
-  | 'objectId' // MongoDB ObjectIds
-  | 'jwt'; // JWT tokens
+  (typeof SnapshotSanitizers)[keyof typeof SnapshotSanitizers];
 
 /**
  * Custom regex-based sanitizer

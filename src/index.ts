@@ -107,6 +107,7 @@ export {
   normalizeWhitespace,
 } from './assertions/validators/index.js';
 
+export { SnapshotSanitizers } from './assertions/validators/types.js';
 export type {
   ValidationResult,
   TextValidatorOptions,
