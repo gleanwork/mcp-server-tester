@@ -40,7 +40,7 @@ export interface MCPEvalReporterConfig {
 
   /**
    * Auto-open report in browser after test run
-   * @default true (disabled in CI)
+   * @default false
    */
   autoOpen?: boolean;
 

@@ -23,7 +23,7 @@ import type { MCPConformanceCheck } from '../spec/conformanceChecks.js';
 /**
  * Custom Playwright reporter for MCP eval results
  *
- * Generates HTML reports with historical tracking and auto-opens in browser
+ * Generates HTML reports with historical tracking
  *
  * @example
  * ```typescript
@@ -32,7 +32,6 @@ import type { MCPConformanceCheck } from '../spec/conformanceChecks.js';
  *   reporter: [
  *     ['@gleanwork/mcp-server-tester/reporters/mcpReporter', {
  *       outputDir: '.mcp-test-results',
- *       autoOpen: true,
  *       historyLimit: 10
  *     }]
  *   ]
@@ -49,7 +48,7 @@ export default class MCPReporter implements Reporter {
   constructor(options: MCPEvalReporterConfig = {}) {
     this.config = {
       outputDir: options.outputDir ?? '.mcp-test-results',
-      autoOpen: options.autoOpen ?? true,
+      autoOpen: options.autoOpen ?? false,
       historyLimit: options.historyLimit ?? 10,
       quiet: options.quiet ?? false,
       includeAutoTracking: options.includeAutoTracking ?? true,

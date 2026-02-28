@@ -53,7 +53,6 @@ export default defineConfig({
     ['html'],
     ['@gleanwork/mcp-server-tester/reporters/mcpReporter', {
       outputDir: '.mcp-test-results',
-      autoOpen: true,
       historyLimit: 10
     }]
   ],
