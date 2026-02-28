@@ -107,7 +107,10 @@ export interface LLMHostSimulationResult {
   /** Error message if simulation failed */
   error?: string;
 
-  /** Full conversation history (for debugging) */
+  /** The scenario prompt that was given to the LLM */
+  scenario?: string;
+
+  /** The conversation turns for attribution analysis */
   conversationHistory?: Array<{
     role: 'user' | 'assistant' | 'tool';
     content: string;

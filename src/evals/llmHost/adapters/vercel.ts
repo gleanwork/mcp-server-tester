@@ -280,6 +280,7 @@ export function createVercelOrchestrator(): LLMHostSimulator {
           success: true,
           toolCalls: allToolCalls,
           response: result.text as string,
+          scenario,
           llmDurationMs,
           mcpDurationMs,
           conversationHistory,
