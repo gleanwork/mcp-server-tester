@@ -102,6 +102,12 @@ async function retryWithBackoff<T>(
 }
 
 /**
+ * Tracks undici agents that need to be closed when their associated client is closed.
+ * Keyed by Client instance identity.
+ */
+const agentRegistry = new WeakMap<object, UndiciAgent | ProxyAgent>();
+
+/**
  * Options for creating an MCP client
  */
 export interface CreateMCPClientOptions {
@@ -278,6 +284,7 @@ export async function createMCPClientForConfig(
             rejectUnauthorized: tlsCfg.rejectUnauthorized ?? true,
           },
         });
+        agentRegistry.set(client, dispatcher);
         requestInit = {
           ...requestInit,
           dispatcher,
@@ -293,6 +300,15 @@ export async function createMCPClientForConfig(
         throw new Error(
           `Failed to load TLS ${fileType} from ${filePath}: ${error instanceof Error ? error.message : String(error)}`
         );
+      }
+    } else if (proxyUrl) {
+      // Track ProxyAgent for cleanup (already created above in the proxy branch)
+      // Re-extract if already set via requestInit
+      const existingDispatcher = (
+        requestInit as unknown as { dispatcher?: ProxyAgent }
+      )?.dispatcher;
+      if (existingDispatcher) {
+        agentRegistry.set(client, existingDispatcher);
       }
     }
 
@@ -367,5 +383,19 @@ export async function closeMCPClient(client: Client): Promise<void> {
   } catch (error) {
     console.error('[MCP] Error closing client:', error);
     throw error;
+  } finally {
+    // Close any pooled undici agent associated with this client
+    const agent = agentRegistry.get(client);
+    if (agent) {
+      agentRegistry.delete(client);
+      try {
+        await agent.close();
+      } catch (agentError) {
+        debugClient(
+          'Error closing undici agent: %s',
+          (agentError as Error).message
+        );
+      }
+    }
   }
 }

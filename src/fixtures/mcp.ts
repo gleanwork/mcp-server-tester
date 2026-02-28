@@ -179,9 +179,11 @@ export const test = base.extend<MCPFixtures>({
    * Automatically tracks all MCP operations for the reporter
    */
   mcp: async ({ mcpClient, _mcpFixtureState }, use, testInfo) => {
+    const useConfig = testInfo.project.use as { mcpConfig?: MCPConfig };
     const api = createMCPFixture(mcpClient, testInfo, {
       authType: _mcpFixtureState.resolvedAuthType,
       project: testInfo.project.name,
+      callTimeoutMs: useConfig.mcpConfig?.callTimeoutMs,
     });
     await use(api);
   },

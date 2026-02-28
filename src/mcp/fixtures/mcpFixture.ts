@@ -10,6 +10,27 @@ import type { AuthType } from '../../types/index.js';
 // Re-export AuthType for backwards compatibility
 export type { AuthType } from '../../types/index.js';
 
+const DEFAULT_CALL_TIMEOUT_MS = 30_000;
+
+function withCallTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  opName: string
+): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () =>
+          reject(
+            new Error(`MCP operation "${opName}" timed out after ${ms}ms`)
+          ),
+        ms
+      )
+    ),
+  ]);
+}
+
 // Dynamic import of test for conditional step tracking
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let testStep:
@@ -45,6 +66,11 @@ export interface MCPFixtureOptions {
    * Used for filtering and grouping in the reporter
    */
   project?: string;
+
+  /**
+   * Timeout in milliseconds for MCP tool/list operations. Default: 30000
+   */
+  callTimeoutMs?: number;
 }
 
 /**
@@ -143,6 +169,7 @@ export function createMCPFixture(
 ): MCPFixtureApi {
   const authType = options?.authType ?? 'none';
   const project = options?.project;
+  const callTimeout = options?.callTimeoutMs ?? DEFAULT_CALL_TIMEOUT_MS;
   // If no testInfo, return basic API without tracking
   if (!testInfo) {
     return {
@@ -151,7 +178,11 @@ export function createMCPFixture(
       project,
 
       async listTools(): Promise<Array<Tool>> {
-        const result = (await client.listTools()) as ListToolsResult;
+        const result = await withCallTimeout(
+          client.listTools() as Promise<ListToolsResult>,
+          callTimeout,
+          'listTools'
+        );
         return result.tools;
       },
 
@@ -159,10 +190,14 @@ export function createMCPFixture(
         name: string,
         args: TArgs
       ): Promise<CallToolResult> {
-        const result = (await client.callTool({
-          name,
-          arguments: args,
-        })) as CallToolResult;
+        const result = await withCallTimeout(
+          client.callTool({
+            name,
+            arguments: args,
+          }) as Promise<CallToolResult>,
+          callTimeout,
+          `callTool("${name}")`
+        );
         return result;
       },
 
@@ -187,7 +222,11 @@ export function createMCPFixture(
 
     async listTools(): Promise<Array<Tool>> {
       const execute = async () => {
-        const result = (await client.listTools()) as ListToolsResult;
+        const result = await withCallTimeout(
+          client.listTools() as Promise<ListToolsResult>,
+          callTimeout,
+          'listTools'
+        );
         const tools = result.tools;
 
         // Auto-attach for reporter
@@ -222,10 +261,14 @@ export function createMCPFixture(
     ): Promise<CallToolResult> {
       const execute = async () => {
         const startTime = Date.now();
-        const result = (await client.callTool({
-          name,
-          arguments: args,
-        })) as CallToolResult;
+        const result = await withCallTimeout(
+          client.callTool({
+            name,
+            arguments: args,
+          }) as Promise<CallToolResult>,
+          callTimeout,
+          `callTool("${name}")`
+        );
         const durationMs = Date.now() - startTime;
 
         // Auto-attach for reporter

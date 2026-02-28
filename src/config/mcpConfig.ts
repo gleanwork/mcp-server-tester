@@ -152,6 +152,11 @@ export interface StdioMCPConfig {
    * Request timeout in milliseconds
    */
   requestTimeoutMs?: number;
+
+  /**
+   * Timeout in milliseconds for MCP tool/list operations. Default: 30000
+   */
+  callTimeoutMs?: number;
 }
 
 /**
@@ -192,6 +197,11 @@ export interface HttpMCPConfig {
    * Request timeout in milliseconds
    */
   requestTimeoutMs?: number;
+
+  /**
+   * Timeout in milliseconds for MCP tool/list operations. Default: 30000
+   */
+  callTimeoutMs?: number;
 
   /**
    * HTTP proxy configuration. Falls back to HTTPS_PROXY/HTTP_PROXY environment variables.
@@ -317,6 +327,7 @@ const StdioConfigSchema = z.object({
   capabilities: MCPHostCapabilitiesSchema.optional(),
   connectTimeoutMs: z.number().positive().optional(),
   requestTimeoutMs: z.number().positive().optional(),
+  callTimeoutMs: z.number().positive().optional(),
   quiet: z.boolean().optional(),
 });
 
@@ -356,6 +367,7 @@ const HttpConfigSchema = z.object({
   capabilities: MCPHostCapabilitiesSchema.optional(),
   connectTimeoutMs: z.number().positive().optional(),
   requestTimeoutMs: z.number().positive().optional(),
+  callTimeoutMs: z.number().positive().optional(),
   auth: MCPAuthConfigSchema.optional(),
   proxy: z
     .object({
