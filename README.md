@@ -4,162 +4,50 @@
 [![npm version](https://img.shields.io/npm/v/@gleanwork/mcp-server-tester)](https://www.npmjs.com/package/@gleanwork/mcp-server-tester)
 [![CI](https://github.com/gleanwork/mcp-server-tester/actions/workflows/ci.yml/badge.svg)](https://github.com/gleanwork/mcp-server-tester/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js Version](https://img.shields.io/node/v/@gleanwork/mcp-server-tester)](https://nodejs.org)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
 
-> Playwright-based testing framework for MCP servers
+A testing and evaluation framework for [Model Context Protocol (MCP)](https://modelcontextprotocol.io) servers. Write deterministic Playwright tests against your MCP tools, or run data-driven eval datasets — including LLM-based evaluation of tool discoverability.
 
-`@gleanwork/mcp-server-tester` is a comprehensive testing and evaluation framework for [Model Context Protocol (MCP)](https://modelcontextprotocol.io) servers. It provides first-class Playwright fixtures, data-driven eval datasets, and optional LLM-as-a-judge scoring.
+## Playwright Tests
 
-## What's Included
-
-This framework provides **two complementary approaches** for testing MCP servers:
-
-### 1. **Automated Testing** (Playwright Tests)
-
-Write deterministic, automated tests using standard Playwright patterns with MCP-specific fixtures. Perfect for:
-
-- Direct tool calls with expected outputs
-- Protocol conformance validation
-- Integration testing with your MCP server
-- CI/CD pipelines
+The `mcp` Playwright fixture connects to your MCP server (stdio or HTTP) and exposes a high-level API for calling tools and asserting responses. Custom matchers keep assertions readable.
 
 ```typescript
-test('read a file', async ({ mcp }) => {
-  const result = await mcp.callTool('read_file', { path: '/tmp/test.txt' });
-  expect(result.content).toContain('Hello');
-});
-```
-
-### 2. **Evaluation Datasets** (Evals) ⚠️ Experimental
-
-Run deeper, more subjective analysis using dataset-driven evaluations. Includes:
-
-- Schema validation (deterministic)
-- Text and regex pattern matching (deterministic)
-- LLM-as-a-judge scoring (non-deterministic)
-
-**Note:** Evals, particularly those using LLM-as-a-judge, are highly experimental due to their non-deterministic nature. Results may vary between runs, and prompts may need tuning for your specific use case.
-
-```typescript
-const result = await runEvalDataset({ dataset, expectations }, { mcp });
-expect(result.passed).toBe(result.total);
-```
-
-## Features
-
-- 🎭 **Playwright Integration** - Use MCP servers in Playwright tests with idiomatic fixtures
-- 📊 **Matrix Evals** - Run dataset-driven evaluations across multiple transports
-- 📸 **Snapshot Testing** - Capture and compare deterministic responses with optional sanitizers for variable data
-- 🤖 **LLM-as-a-Judge** - Optional semantic evaluation using Anthropic Claude
-- 🔌 **Multiple Transports** - Support for both stdio (local) and HTTP (remote) connections
-- ✅ **Protocol Conformance** - Built-in checks for MCP spec compliance
-- 🤖 **LLM Host Simulation** — Test tool discovery with real LLMs ([docs](docs/llm-host.md))
-
-> **Warning:** LLM host mode (`mode: "llm_host"`) makes real LLM API calls on every iteration and incurs API costs. Use direct mode for regression tests and reserve LLM host mode for validating tool descriptions. See [LLM Host Guide](docs/llm-host.md) for details.
-
-## Two Ways to Test
-
-Understanding the difference between the two testing modes will help you choose the right approach:
-
-| Mode         | How it works                                                                                                           | When to use                                         |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| **Direct**   | You call a tool with specific arguments and assert the output. Deterministic and fast. Run once in CI.                 | Regression tests, schema checks, content validation |
-| **LLM host** | A real LLM receives your tool list and a natural language prompt, then decides which tools to call. Non-deterministic. | Validating tool descriptions and discoverability    |
-
-Direct mode is the default for most tests. LLM host mode (`mode: "llm_host"` in eval datasets) is specifically for checking that your tool names, descriptions, and input schemas are clear enough that a real LLM will use them correctly. Because LLM calls are non-deterministic, run LLM host cases 10+ times and measure the accuracy (pass rate) rather than expecting 100% pass on a single run.
-
-> **Cost note:** LLM host mode makes real API calls to the configured provider on every iteration. See the [LLM Host Guide](docs/llm-host.md) for cost management guidance.
-
-## Installation
-
-```bash
-npm install --save-dev @gleanwork/mcp-server-tester @playwright/test zod
-```
-
-**Note:** The Anthropic SDK is optional and only needed if you plan to use LLM-as-a-judge semantic evaluation:
-
-```bash
-npm install --save-dev @anthropic-ai/sdk
-```
-
-## Quick Start
-
-### Initialize with CLI
-
-The fastest way to get started:
-
-```bash
-npx mcp-server-tester init
-
-# Follow the interactive prompts to create:
-# - playwright.config.ts (configured for your MCP server)
-# - tests/mcp.spec.ts (example tests)
-# - data/example-dataset.json (sample eval dataset)
-# - package.json (with all dependencies)
-```
-
-See the [CLI Guide](./docs/cli.md) for all options.
-
-### Example: Testing in Action
-
-Here's what a complete test suite looks like (following the **layered testing pattern**):
-
-```typescript
-// tests/mcp.spec.ts
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
-import { loadEvalDataset, runEvalDataset } from '@gleanwork/mcp-server-tester';
-import { z } from 'zod';
 
-// Layer 1: MCP Protocol Conformance
-test.describe('MCP Protocol Conformance', () => {
-  test('should return valid server info', async ({ mcp }) => {
-    const info = mcp.getServerInfo();
-    expect(info).toBeTruthy();
-    expect(info?.name).toBeTruthy();
-    expect(info?.version).toBeTruthy();
-  });
-
-  test('should list available tools', async ({ mcp }) => {
-    const tools = await mcp.listTools();
-    expect(Array.isArray(tools)).toBe(true);
-    expect(tools.length).toBeGreaterThan(0);
-  });
-
-  test('should handle invalid tool gracefully', async ({ mcp }) => {
-    const result = await mcp.callTool('nonexistent_tool', {});
-    expect(result.isError).toBe(true);
-  });
+test('read_file returns file contents', async ({ mcp }) => {
+  const result = await mcp.callTool('read_file', { path: '/tmp/test.txt' });
+  expect(result).toContainToolText('Hello, world');
+  expect(result).not.toBeToolError();
 });
 
-// Layer 2: Direct Tool Testing
-test.describe('File Operations', () => {
-  test('should read a file', async ({ mcp }) => {
-    const result = await mcp.callTool('read_file', {
-      path: '/tmp/test.txt',
-    });
-    expect(result.content).toContain('Hello');
-  });
-});
-
-// Layer 3: Eval Datasets
-test('file operations eval', async ({ mcp }, testInfo) => {
-  const FileContentSchema = z.object({
-    content: z.string(),
-  });
-
-  const dataset = await loadEvalDataset('./data/evals.json', {
-    schemas: { 'file-content': FileContentSchema },
-  });
-
-  const result = await runEvalDataset({ dataset }, { mcp, testInfo });
-
-  expect(result.passed).toBe(result.total);
+test('server exposes required tools', async ({ mcp }) => {
+  const tools = await mcp.listTools();
+  expect(tools.map((t) => t.name)).toContain('read_file');
 });
 ```
+
+Playwright tests are fast, deterministic, and designed for CI. Use them for regression testing, schema validation, and protocol conformance. The framework includes built-in conformance checks for the MCP spec.
+
+Available matchers:
+
+| Matcher | Description |
+|---------|-------------|
+| `toContainToolText` | Response contains expected substrings |
+| `toMatchToolSchema` | Response validates against a Zod schema |
+| `toMatchToolPattern` | Response matches a regex pattern |
+| `toMatchToolSnapshot` | Response matches a saved baseline |
+| `toBeToolError` | Response is (or is not) an error |
+| `toHaveToolResponseSize` | Response size is within bounds |
+| `toSatisfyToolPredicate` | Response satisfies a custom function |
+| `toHaveToolCalls` | LLM called the expected tools |
+| `toHaveToolCallCount` | LLM made N tool calls |
+| `toPassToolJudge` | LLM evaluates response quality against a rubric |
+
+## Eval Datasets
+
+Eval datasets let you define test cases as JSON files and run them with `runEvalDataset()`. Each case specifies a tool call and one or more assertions.
 
 ```json
-// data/evals.json
 {
   "name": "file-ops",
   "cases": [
@@ -168,7 +56,8 @@ test('file operations eval', async ({ mcp }, testInfo) => {
       "toolName": "read_file",
       "args": { "path": "/tmp/config.json" },
       "expect": {
-        "schema": "file-content"
+        "schema": "file-content",
+        "containsText": ["version", "name"]
       }
     },
     {
@@ -176,7 +65,7 @@ test('file operations eval', async ({ mcp }, testInfo) => {
       "toolName": "read_file",
       "args": { "path": "/tmp/README.md" },
       "expect": {
-        "containsText": ["# Welcome", "## Installation"]
+        "snapshot": "readme-snapshot"
       }
     }
   ]
@@ -184,19 +73,90 @@ test('file operations eval', async ({ mcp }, testInfo) => {
 ```
 
 ```typescript
-// playwright.config.ts
+import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
+import { loadEvalDataset, runEvalDataset } from '@gleanwork/mcp-server-tester';
+import { z } from 'zod';
+
+test('file operations eval', async ({ mcp }, testInfo) => {
+  const dataset = await loadEvalDataset('./data/evals.json', {
+    schemas: { 'file-content': z.object({ content: z.string() }) },
+  });
+  const result = await runEvalDataset({ dataset }, { mcp, testInfo });
+  expect(result.passed).toBe(result.total);
+});
+```
+
+Supported assertion types:
+
+| Type | Description |
+|------|-------------|
+| `containsText` | Response includes expected substrings |
+| `schema` | Response validates against a Zod schema |
+| `regex` | Response matches a pattern |
+| `snapshot` | Response matches a saved baseline |
+| `judge` | LLM evaluates response quality against a rubric |
+| `toolsTriggered` | LLM called the expected tools (LLM host mode) |
+
+### LLM host mode
+
+In LLM host mode, a real LLM receives your server's tool list and a natural language prompt, then decides which tools to call. This tests whether your tool names, descriptions, and input schemas are clear enough for autonomous use — a different question from whether the tools return correct output.
+
+```json
+{
+  "id": "find-config",
+  "mode": "llm_host",
+  "scenario": "Find the application config file and return its contents",
+  "llmHostConfig": { "provider": "anthropic", "model": "claude-opus-4-20250514" },
+  "expect": {
+    "toolsTriggered": {
+      "calls": [{ "name": "read_file", "required": true }]
+    }
+  }
+}
+```
+
+LLM host mode makes real API calls and produces non-deterministic results. Use `iterations` to run a case multiple times and measure pass rate rather than expecting 100% on a single run. See the [LLM Host Guide](docs/llm-host.md) for configuration and cost management.
+
+## Installation
+
+Requires Node.js 22+.
+
+```bash
+npm install --save-dev @gleanwork/mcp-server-tester @playwright/test zod
+```
+
+The Anthropic SDK is only needed for LLM-as-judge assertions or LLM host mode with the Anthropic provider:
+
+```bash
+npm install --save-dev @anthropic-ai/sdk
+```
+
+## Quick Start
+
+```bash
+npx mcp-server-tester init
+```
+
+The CLI wizard creates a `playwright.config.ts`, example tests, and a sample eval dataset configured for your server. See the [CLI Guide](./docs/cli.md) for all options.
+
+## Configuration
+
+Point the framework at your MCP server in `playwright.config.ts`:
+
+```typescript
 import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests',
+  reporter: [['list'], ['@gleanwork/mcp-server-tester/reporters/mcpReporter']],
   projects: [
     {
-      name: 'mcp-local',
+      name: 'my-server',
       use: {
         mcpConfig: {
           transport: 'stdio',
           command: 'node',
-          args: ['path/to/your/server.js'],
+          args: ['server.js'],
         },
       },
     },
@@ -204,247 +164,38 @@ export default defineConfig({
 });
 ```
 
+For HTTP servers, set `transport: 'http'` and `serverUrl`. For servers that require OAuth, see the [Transports Guide](./docs/transports.md) and [CLI Guide](./docs/cli.md) for authentication setup, including CI/CD token management.
+
 ## Documentation
 
-- **[Quick Start Guide](./docs/quickstart.md)** - Detailed setup and configuration
-- **[Expectations](./docs/expectations.md)** - All validation types (exact, schema, regex, text contains, snapshot, LLM judge)
-- **[API Reference](./docs/api-reference.md)** - Complete API documentation
-- **[CLI Commands](./docs/cli.md)** - `init`, `generate`, `login`, and `token` command details
-- **[UI Reporter](./docs/ui-reporter.md)** - Interactive web UI for test results
-- **[Transports](./docs/transports.md)** - Stdio vs HTTP configuration
-- **[Development](./docs/development.md)** - Contributing and building
-- [LLM Host Simulation Guide](docs/llm-host.md)
+- [Quick Start](./docs/quickstart.md) — detailed setup and configuration
+- [Expectations](./docs/expectations.md) — all assertion types including snapshot sanitizers
+- [LLM Host Simulation](docs/llm-host.md) — tool discoverability testing
+- [API Reference](./docs/api-reference.md)
+- [Transports](./docs/transports.md) — stdio and HTTP configuration, OAuth
+- [CLI Commands](./docs/cli.md) — init, generate, login, token
+- [UI Reporter](./docs/ui-reporter.md) — interactive web UI for test results
+- [Development](./docs/development.md) — contributing and building
 
 ## Examples
 
 The `examples/` directory contains complete working examples:
 
-**Real MCP Server Tests:**
-
-- [`filesystem-server/`](./examples/filesystem-server) - Test suite for Anthropic's Filesystem MCP server
-  - Demonstrates `fixturify-project` for isolated test fixtures
-  - Zod schema validation for JSON files
-  - 5 Playwright tests, 11 eval dataset cases
-
-- [`sqlite-server/`](./examples/sqlite-server) - Test suite for SQLite MCP server
-  - Demonstrates `better-sqlite3` for database testing
-  - Custom expectations for record count validation
-  - 11 Playwright tests, 14 eval dataset cases
-
-**Basic Patterns:**
-
-- [`basic-playwright-usage/`](./examples/basic-playwright-usage) - Simple Playwright test patterns
-
-Each example includes complete test suites, eval datasets, and npm scripts. See [`examples/README.md`](./examples/README.md) for detailed documentation.
-
-## Key Concepts
-
-### Fixtures
-
-Access MCP servers in tests via Playwright fixtures:
-
-- `mcpClient: Client` - Raw MCP SDK client
-- `mcp: MCPFixtureApi` - High-level test API with helper methods
-
-### Expectations
-
-Validate tool responses with multiple expectation types:
-
-- **Exact Match** - Structured JSON equality
-- **Schema** - Zod validation
-- **Text Contains** - Substring matching (great for markdown)
-- **Regex** - Pattern matching
-- **LLM Judge** - Semantic evaluation
-
-See [Expectations Guide](./docs/expectations.md) for details.
-
-### Transports
-
-Connect to MCP servers via:
-
-- **stdio** - Local server processes
-- **HTTP** - Remote servers
-
-See [Transports Guide](./docs/transports.md) for configuration.
-
-### Snapshot Testing
-
-Snapshot testing captures tool responses and compares them against stored baselines. This works best for **deterministic responses** like help text, configuration, or schema discovery.
-
-> **Note:** For responses with timestamps, IDs, or live data, use [sanitizers](./docs/expectations.md#snapshot-sanitizers) to normalize variable content, or consider schema validation instead.
-
-```bash
-# Generate dataset with snapshot expectations
-npx mcp-server-tester generate --snapshot -o data/evals.json
-
-# First run captures snapshots
-npx playwright test
-
-# Update snapshots when server behavior changes
-npx playwright test --update-snapshots
-```
-
-For responses with variable data, use sanitizers:
-
-```json
-{
-  "id": "get-user",
-  "toolName": "get_user",
-  "args": { "id": "123" },
-  "expect": {
-    "snapshot": "user-profile",
-    "snapshotSanitizers": ["uuid", "iso-date", { "remove": ["lastLoginAt"] }]
-  }
-}
-```
-
-See the [Expectations Guide](./docs/expectations.md#snapshot-testing) for when to use snapshots vs other validation methods.
-
-## CLI OAuth Authentication
-
-For MCP servers that require OAuth authentication, the framework provides a CLI-based OAuth flow:
-
-### Interactive Login
-
-```bash
-# Authenticate with an MCP server (opens browser)
-npx mcp-server-tester login https://api.example.com/mcp
-
-# Force re-authentication
-npx mcp-server-tester login https://api.example.com/mcp --force
-```
-
-### Token Storage
-
-Tokens are cached locally and automatically refreshed when expired.
-
-**Storage locations:**
-
-- **Linux**: `$XDG_STATE_HOME/mcp-tests/<server-key>/` or `~/.local/state/mcp-tests/<server-key>/`
-- **macOS**: `~/.local/state/mcp-tests/<server-key>/`
-- **Windows**: `%LOCALAPPDATA%\mcp-tests\<server-key>\`
-
-**Security:**
-
-- Directory permissions: `0700` (owner only)
-- File permissions: `0600` (owner read/write only)
-- Files stored: `tokens.json`, `client.json`, `server.json`
-
-Use `--state-dir` to override the storage location.
-
-### Programmatic Usage
-
-```typescript
-import { CLIOAuthClient } from '@gleanwork/mcp-server-tester';
-
-const client = new CLIOAuthClient({
-  mcpServerUrl: 'https://api.example.com/mcp',
-});
-
-// Get a valid access token (cached, refreshed, or new)
-const result = await client.getAccessToken();
-console.log(`Token: ${result.accessToken}`);
-```
-
-### CI/CD Usage (GitHub Actions)
-
-For automated testing in CI, tokens can be provided via environment variables:
-
-```yaml
-# .github/workflows/mcp-tests.yml
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    env:
-      MCP_ACCESS_TOKEN: ${{ secrets.MCP_ACCESS_TOKEN }}
-      MCP_REFRESH_TOKEN: ${{ secrets.MCP_REFRESH_TOKEN }}
-    steps:
-      - uses: actions/checkout@v4
-      - run: npm ci
-      - run: npm run test:playwright
-```
-
-**To set up GitHub Actions secrets:**
-
-1. Authenticate locally: `npx mcp-server-tester login <server-url>`
-2. Export tokens for GitHub: `npx mcp-server-tester token <server-url> --format gh`
-3. Run the output `gh secret set` commands (requires [GitHub CLI](https://cli.github.com/))
-
-The `token` command supports multiple formats:
-
-- `env` (default) - Shell-compatible `KEY=value` pairs
-- `json` - JSON object for scripting
-- `gh` - Ready-to-paste GitHub CLI commands
-
-See the [CLI Guide](./docs/cli.md#token---export-tokens-for-cicd) for details.
-
-Alternatively, inject tokens programmatically in your test setup:
-
-```typescript
-import { injectTokens } from '@gleanwork/mcp-server-tester';
-
-// In globalSetup.ts
-await injectTokens('https://api.example.com/mcp', {
-  accessToken: process.env.MCP_ACCESS_TOKEN!,
-  tokenType: 'Bearer',
-});
-```
-
-## UI Reporter
-
-Interactive web UI for visualizing test results:
-
-![MCP Test Reporter UI](./ui.png)
-
-Add to your `playwright.config.ts`:
-
-```typescript
-export default defineConfig({
-  reporter: [['list'], ['@gleanwork/mcp-server-tester/reporters/mcpReporter']],
-});
-```
-
-See [UI Reporter Guide](./docs/ui-reporter.md) for features and usage.
-
-## Support
-
-- **Documentation**: See [`docs/`](./docs) directory
-- **Examples**: See [`examples/`](./examples) directory
-- **Issues**: [GitHub Issues](https://github.com/gleanwork/mcp-server-tester/issues)
-
-## Upgrading
-
-### v0.12.x from v0.11.x
-
-No breaking changes.
-
-### v0.11.x from v0.10.x
-
-The assertion API changed significantly. See the [v0.11 Migration Guide](docs/migration-0.11.md).
+- [filesystem-server/](./examples/filesystem-server) — Test suite for Anthropic's Filesystem MCP server: 5 Playwright tests, 11 eval dataset cases, Zod schema validation.
+- [sqlite-server/](./examples/sqlite-server) — Test suite for a SQLite MCP server: 11 Playwright tests, 14 eval dataset cases.
+- [basic-playwright-usage/](./examples/basic-playwright-usage) — Minimal Playwright patterns.
 
 ## Known Limitations
 
-The following MCP protocol features are not currently covered by this framework. These are deliberate scope decisions, not bugs:
+These MCP protocol features are not currently supported. These are deliberate scope decisions, not bugs:
 
-- **MCP resources** (`listResources`, `readResource`) — no fixture support or eval cases
-- **MCP prompts** (`listPrompts`, `getPrompt`) — no fixture support or eval cases
-- **Server-to-client notifications** — the test client does not expose a notification listener API
-- **Streaming tool responses** — `callTool` waits for the complete response; incremental streaming is not observable
+- MCP resources (`listResources`, `readResource`)
+- MCP prompts (`listPrompts`, `getPrompt`)
+- Server-to-client notifications
+- Streaming tool responses (`callTool` waits for the complete response)
 
-If any of these gaps affect your use case, please open an issue.
+If any of these affect your use case, please open an issue.
 
 ## License
 
 MIT
-
-## Contributing
-
-Contributions welcome! See [Development Guide](./docs/development.md) for setup instructions.
-
-## Credits
-
-Built with:
-
-- [@modelcontextprotocol/sdk](https://github.com/modelcontextprotocol/typescript-sdk)
-- [@playwright/test](https://playwright.dev)
-- [Zod](https://zod.dev)
