@@ -17,18 +17,19 @@ function withCallTimeout<T>(
   ms: number,
   opName: string
 ): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   return Promise.race([
     promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(
         () =>
           reject(
             new Error(`MCP operation "${opName}" timed out after ${ms}ms`)
           ),
         ms
-      )
-    ),
-  ]);
+      );
+    }),
+  ]).finally(() => clearTimeout(timer));
 }
 
 // Dynamic import of test for conditional step tracking
