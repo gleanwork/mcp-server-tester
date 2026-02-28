@@ -35,6 +35,12 @@ export interface ServerComparisonResult {
   ties: number;
   /** Cases where both failed */
   bothFail: number;
+  /** Raw count of cases where both servers failed (same as bothFail) */
+  bothFailCount: number;
+  /** Cases with a decisive outcome (aWins + bWins + ties, excludes BOTH_FAIL) */
+  decidedCases: number;
+  /** Fraction of total cases where both servers failed (bothFail / total) */
+  failureAlignment: number;
   /** A win rate (aWins / decidedCases, excludes BOTH_FAIL) */
   aWinRate: number;
   /** B win rate (bWins / decidedCases, excludes BOTH_FAIL) */
@@ -145,6 +151,9 @@ export async function runServerComparison(
     bWins,
     ties,
     bothFail,
+    bothFailCount: bothFail,
+    decidedCases,
+    failureAlignment: total > 0 ? bothFail / total : 0,
     aWinRate: decidedCases > 0 ? aWins / decidedCases : 0,
     bWinRate: decidedCases > 0 ? bWins / decidedCases : 0,
     tieRate: decidedCases > 0 ? ties / decidedCases : 0,
