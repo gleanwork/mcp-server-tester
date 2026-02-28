@@ -655,8 +655,10 @@ export async function runEvalCase(
     (r) => !r.isInfrastructureError
   );
   const passCount = assertionResults.filter((r) => r.pass).length;
-  const effectiveIterations = assertionResults.length || iterations;
-  const accuracy = passCount / effectiveIterations;
+  const assertionPassRate =
+    assertionResults.length > 0 ? passCount / assertionResults.length : 0;
+  const infrastructureErrorRate = infraErrors.length / iterations;
+  const accuracy = assertionPassRate; // backward compat
   const threshold = evalCase.accuracyThreshold ?? 1.0;
 
   // Fall back to a synthetic result if all iterations threw infrastructure errors
@@ -677,6 +679,8 @@ export async function runEvalCase(
   return {
     ...baseResult,
     pass: accuracy >= threshold,
+    assertionPassRate,
+    infrastructureErrorRate,
     accuracy,
     iterationResults,
     infrastructureErrorCount: infraErrors.length,

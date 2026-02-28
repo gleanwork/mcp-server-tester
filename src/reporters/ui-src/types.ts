@@ -95,6 +95,14 @@ export interface EvalCaseResult {
   project?: string;
   durationMs: number;
   // Multi-iteration accuracy fields
+  /**
+   * Assertion pass rate (0–1): passes divided by non-infrastructure iterations.
+   * Infrastructure errors are excluded from the denominator.
+   */
+  assertionPassRate?: number;
+  /** Infrastructure error rate (0–1): infra errors divided by total iterations. */
+  infrastructureErrorRate?: number;
+  /** Alias for assertionPassRate. Kept for backward compatibility. */
   accuracy?: number;
   iterationResults?: Array<{
     pass: boolean;

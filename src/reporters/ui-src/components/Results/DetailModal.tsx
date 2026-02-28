@@ -73,6 +73,8 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
   const hasAssertions = Object.keys(result.expectations ?? {}).length > 0;
   const hasIterations =
     result.iterationResults && result.iterationResults.length > 0;
+  const displayRate = result.assertionPassRate ?? result.accuracy;
+  const infraErrorRate = result.infrastructureErrorRate;
 
   return (
     <>
@@ -102,22 +104,44 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
               >
                 {result.pass ? '✓ Pass' : '✗ Fail'}
               </span>
-              {/* Accuracy badge — only for multi-iteration cases */}
-              {result.accuracy !== undefined && (
+              {/* Assertion pass rate badge — only for multi-iteration cases */}
+              {displayRate !== undefined && (
                 <span
                   className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-semibold shrink-0 ${
-                    result.accuracy >= 0.8
+                    displayRate >= 0.8
                       ? 'bg-green-500/20 text-green-700 dark:text-green-400'
-                      : result.accuracy >= 0.5
+                      : displayRate >= 0.5
                         ? 'bg-amber-500/20 text-amber-700 dark:text-amber-400'
                         : 'bg-red-500/20 text-red-700 dark:text-red-400'
                   }`}
                 >
-                  {(result.accuracy * 100).toFixed(0)}% accuracy
+                  {(displayRate * 100).toFixed(0)}% pass rate
                   {hasIterations && (
                     <span className="text-xs opacity-70">
                       ({result.iterationResults!.filter((r) => r.pass).length}/
-                      {result.iterationResults!.length})
+                      {
+                        result.iterationResults!.filter(
+                          (r) => !r.isInfrastructureError
+                        ).length
+                      }
+                      )
+                    </span>
+                  )}
+                </span>
+              )}
+              {/* Infrastructure error rate badge — only when non-zero */}
+              {infraErrorRate !== undefined && infraErrorRate > 0 && (
+                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-semibold shrink-0 bg-orange-500/20 text-orange-700 dark:text-orange-400">
+                  {(infraErrorRate * 100).toFixed(0)}% infra errors
+                  {hasIterations && (
+                    <span className="text-xs opacity-70">
+                      (
+                      {
+                        result.iterationResults!.filter(
+                          (r) => r.isInfrastructureError
+                        ).length
+                      }
+                      /{result.iterationResults!.length})
                     </span>
                   )}
                 </span>
@@ -251,9 +275,14 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                 title="Iterations"
                 defaultOpen={true}
                 badge={
-                  result.accuracy !== undefined ? (
+                  displayRate !== undefined ? (
                     <span className="text-xs text-muted-foreground ml-auto">
-                      accuracy: {(result.accuracy * 100).toFixed(0)}%
+                      pass rate: {(displayRate * 100).toFixed(0)}%
+                      {infraErrorRate !== undefined && infraErrorRate > 0 && (
+                        <span className="ml-2 text-orange-600 dark:text-orange-400">
+                          ({(infraErrorRate * 100).toFixed(0)}% infra errors)
+                        </span>
+                      )}
                     </span>
                   ) : undefined
                 }

@@ -200,8 +200,24 @@ export interface EvalCaseResult {
   durationMs: number;
 
   /**
-   * Accuracy score (0–1) across all iterations.
+   * Assertion pass rate (0–1): passes divided by non-infrastructure iterations.
    * Only present when the case was run with `iterations > 1`.
+   *
+   * Infrastructure errors (network timeouts, rate limits, etc.) are excluded from
+   * the denominator so that environment reliability does not inflate this metric.
+   */
+  assertionPassRate?: number;
+
+  /**
+   * Infrastructure error rate (0–1): infra errors divided by total iterations.
+   * Only present when the case was run with `iterations > 1`.
+   */
+  infrastructureErrorRate?: number;
+
+  /**
+   * Accuracy score (0–1) across all iterations.
+   * Alias for `assertionPassRate`. Only present when the case was run with `iterations > 1`.
+   * @deprecated Use `assertionPassRate` for clarity; this field is kept for backward compatibility.
    */
   accuracy?: number;
 
