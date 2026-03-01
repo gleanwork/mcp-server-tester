@@ -176,10 +176,7 @@ authType?: 'oauth' | 'api-token' | 'none';  // Don't do this!
 
 ### UI Type Synchronization
 
-The UI types in `src/reporters/ui-src/types.ts` must manually stay in sync with backend types. When updating backend types, also update:
-
-1. `src/types/reporter.ts` (canonical backend)
-2. `src/reporters/ui-src/types.ts` (UI copy)
+`src/reporters/ui-src/types.ts` re-exports all types directly from the canonical backend sources (`src/types/index.ts` and `src/types/reporter.ts`). No manual sync is required — update `src/types/reporter.ts` and the UI automatically picks up the changes.
 
 ## Code Style
 
