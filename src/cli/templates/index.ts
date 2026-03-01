@@ -1,6 +1,7 @@
 /**
  * Template generators for project scaffolding
  */
+import packageJson from '../../../package.json' with { type: 'json' };
 
 interface ProjectAnswers {
   projectName: string;
@@ -197,7 +198,7 @@ export function getPackageJsonTemplate(projectName: string): string {
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
     "@playwright/test": "^1.49.0",
-    "@gleanwork/mcp-server-tester": "^0.9.0",
+    "@gleanwork/mcp-server-tester": "^${packageJson.version}",
     "zod": "^3.24.1"
   },
   "devDependencies": {

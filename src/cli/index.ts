@@ -7,13 +7,14 @@ import { init } from './commands/init/index.js';
 import { generate } from './commands/generate/index.js';
 import { login } from './commands/login/index.js';
 import { token } from './commands/token/index.js';
+import packageJson from '../../package.json' with { type: 'json' };
 
 const program = new Command();
 
 program
   .name('mcp-server-tester')
   .description('CLI tools for MCP server evaluation and testing')
-  .version('0.1.0');
+  .version(packageJson.version);
 
 // Init command
 program
