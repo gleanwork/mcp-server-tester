@@ -265,7 +265,17 @@ export async function createMCPClientForConfig(
 
     if (proxyUrl) {
       const proxyAgent = new ProxyAgent(proxyUrl);
-      debugClient('Using proxy: %s', proxyUrl);
+      try {
+        const sanitized = new URL(proxyUrl);
+        debugClient(
+          'Using proxy: %s://%s:%s',
+          sanitized.protocol.slice(0, -1),
+          sanitized.hostname,
+          sanitized.port
+        );
+      } catch {
+        debugClient('Using proxy (unparseable URL)');
+      }
       requestInit = {
         ...requestInit,
         dispatcher: proxyAgent,

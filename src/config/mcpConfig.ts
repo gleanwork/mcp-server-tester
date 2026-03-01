@@ -208,19 +208,10 @@ export interface HttpMCPConfig {
    */
   proxy?: {
     /**
-     * Proxy URL (e.g., http://proxy.example.com:8080)
+     * Proxy URL. Credentials can be embedded directly if required:
+     * `http://user:pass@proxy.example.com:8080`
      */
     url: string;
-
-    /**
-     * Proxy username for authentication
-     */
-    username?: string;
-
-    /**
-     * Proxy password for authentication
-     */
-    password?: string;
   };
 
   /**
@@ -372,8 +363,6 @@ const HttpConfigSchema = z.object({
   proxy: z
     .object({
       url: z.string().url('proxy.url must be a valid URL'),
-      username: z.string().optional(),
-      password: z.string().optional(),
     })
     .optional(),
   retryAttempts: z.number().int().min(0).optional(),
