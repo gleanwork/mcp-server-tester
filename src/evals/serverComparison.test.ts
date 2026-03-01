@@ -28,6 +28,7 @@ function createMockMCP(callToolResponse?: {
 function createContext(mcp?: MCPFixtureApi): EvalContext {
   return {
     mcp: mcp ?? createMockMCP(),
+    testInfo: { attach: vi.fn().mockResolvedValue(undefined) } as unknown as EvalContext['testInfo'],
   };
 }
 

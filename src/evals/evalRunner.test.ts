@@ -31,6 +31,9 @@ function createMockMCP(callToolResponse?: {
 function createContext(mcp?: MCPFixtureApi): EvalContext {
   return {
     mcp: mcp ?? createMockMCP(),
+    // Stub testInfo so runEvalDataset skips the "no reporter" warning without
+    // requiring a real Playwright test context.
+    testInfo: { attach: vi.fn().mockResolvedValue(undefined) } as unknown as EvalContext['testInfo'],
   };
 }
 
