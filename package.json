@@ -71,7 +71,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.1.69",
+    "@anthropic-ai/claude-agent-sdk": "0.1.69",
     "@inkjs/ui": "^2.0.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "commander": "^14.0.2",
@@ -112,8 +112,15 @@
     "vitest": "^2.1.8"
   },
   "peerDependencies": {
-    "@ai-sdk/anthropic": "^3.0.0",
-    "@ai-sdk/openai": "^3.0.0",
+    "@ai-sdk/anthropic": "^3.0.46",
+    "@ai-sdk/azure": "^3.0.0",
+    "@ai-sdk/deepseek": "^2.0.0",
+    "@ai-sdk/google": "^3.0.0",
+    "@ai-sdk/google-vertex": "^4.0.0",
+    "@ai-sdk/mistral": "^3.0.0",
+    "@ai-sdk/openai": "^3.0.31",
+    "@ai-sdk/xai": "^3.0.0",
+    "@openrouter/ai-sdk-provider": "^2.0.0",
     "@playwright/test": "^1.40.0",
     "ai": "^6.0.0"
   },
@@ -124,7 +131,28 @@
     "@ai-sdk/anthropic": {
       "optional": true
     },
+    "@ai-sdk/azure": {
+      "optional": true
+    },
+    "@ai-sdk/deepseek": {
+      "optional": true
+    },
+    "@ai-sdk/google": {
+      "optional": true
+    },
+    "@ai-sdk/google-vertex": {
+      "optional": true
+    },
+    "@ai-sdk/mistral": {
+      "optional": true
+    },
     "@ai-sdk/openai": {
+      "optional": true
+    },
+    "@ai-sdk/xai": {
+      "optional": true
+    },
+    "@openrouter/ai-sdk-provider": {
       "optional": true
     }
   },
@@ -152,8 +180,14 @@
   },
   "optionalDependencies": {
     "@ai-sdk/anthropic": "^3.0.46",
-    "@ai-sdk/google-vertex": "^4.0.63",
+    "@ai-sdk/azure": "^3.0.0",
+    "@ai-sdk/deepseek": "^2.0.0",
+    "@ai-sdk/google": "^3.0.0",
+    "@ai-sdk/google-vertex": "^4.0.68",
+    "@ai-sdk/mistral": "^3.0.0",
     "@ai-sdk/openai": "^3.0.31",
+    "@ai-sdk/xai": "^3.0.0",
+    "@openrouter/ai-sdk-provider": "^2.0.0",
     "ai": "^6.0.97"
   }
 }
