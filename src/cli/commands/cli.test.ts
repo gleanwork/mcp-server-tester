@@ -14,19 +14,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { StoredTokens } from '../../auth/types.js';
 import { generateServerKey } from '../../auth/storage.js';
 
-// ---------------------------------------------------------------------------
-// Bintastic setup
-// ---------------------------------------------------------------------------
-
 const { setupProject, teardownProject, runBin } = createBintastic({
   binPath: fileURLToPath(
     new URL('../../../dist/cli/index.js', import.meta.url)
   ),
 });
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Write a stored token file for the given server URL into the project's
@@ -48,10 +40,6 @@ async function writeTokens(
   });
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 describe('mcp-server-tester CLI', () => {
   let project: BintasticProject;
 
@@ -62,10 +50,6 @@ describe('mcp-server-tester CLI', () => {
   afterEach(() => {
     teardownProject();
   });
-
-  // -------------------------------------------------------------------------
-  // Help and version
-  // -------------------------------------------------------------------------
 
   describe('--help / --version', () => {
     it('shows top-level help', async () => {
@@ -119,10 +103,6 @@ describe('mcp-server-tester CLI', () => {
       expect(result.stdout).toContain('--format');
     });
   });
-
-  // -------------------------------------------------------------------------
-  // token command
-  // -------------------------------------------------------------------------
 
   describe('token command', () => {
     const serverUrl = 'https://api.example.com/mcp';
