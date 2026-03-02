@@ -822,15 +822,17 @@ export async function runEvalDataset(
         ? { ...evalCase, iterations: defaultLlmIterations }
         : evalCase;
 
-    // Warn when an llm_host case runs fewer than the guide-recommended iterations.
-    // The evals guide recommends >= 10 iterations for statistical reliability.
+    // Warn when an llm_host case opts into multi-iteration accuracy measurement
+    // but uses fewer iterations than the guide-recommended minimum.
+    // Single-iteration llm_host runs (the default) are a valid smoke-test pattern
+    // and are not warned about — the warning is scoped to cases that have
+    // explicitly chosen a multi-iteration count that is too small to be reliable.
     if (evalCase.mode === 'llm_host') {
       const effectiveIterations = withIterations.iterations ?? 1;
-      if (effectiveIterations < 10) {
+      if (effectiveIterations > 1 && effectiveIterations < 10) {
         console.warn(
-          `[mcp-server-tester] Eval case "${evalCase.id}" uses llm_host mode with only ` +
-            `${effectiveIterations} iteration(s). The evals guide recommends >= 10 iterations. ` +
-            `See docs/evals-guide.md for guidance on statistical reliability.`
+          `[mcp-server-tester] Eval case "${evalCase.id}": running ${effectiveIterations} iterations in llm_host mode ` +
+            `may not be statistically reliable. Consider using 10+ iterations for accuracy measurements you can trust.`
         );
       }
     }
@@ -896,6 +898,20 @@ export async function runEvalDataset(
       const baselinePassRate =
         baseline.total > 0 ? baseline.passed / baseline.total : 0;
       const baselineMap = buildBaselinePassMap(baseline);
+
+      const currentCaseIds = result.caseResults.map((cr) => cr.id);
+      const unmatchedCount = currentCaseIds.filter(
+        (id) => !baselineMap.has(id)
+      ).length;
+      const unmatchedRatio =
+        currentCaseIds.length > 0 ? unmatchedCount / currentCaseIds.length : 0;
+      if (unmatchedRatio > 0.2) {
+        console.warn(
+          `[mcp-server-tester] Baseline comparison: ${unmatchedCount} of ${currentCaseIds.length} cases ` +
+            `(${Math.round(unmatchedRatio * 100)}%) have no baseline entry. ` +
+            `This may indicate the dataset structure has changed. Results for unmatched cases cannot be compared.`
+        );
+      }
 
       for (const cr of result.caseResults) {
         const baselinePass = baselineMap.get(cr.id);

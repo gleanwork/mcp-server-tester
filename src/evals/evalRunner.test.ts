@@ -1113,6 +1113,78 @@ describe('saveResultsTo and baselineResultsFrom', () => {
 
     consoleSpy.mockRestore();
   });
+
+  it('warns when more than 20% of current cases have no baseline entry', async () => {
+    const consoleSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
+
+    // Save a baseline with only one case
+    const baselinePath = join(tmpDir, 'sparse-baseline.json');
+    const baselineDataset = createDataset([
+      createEvalCase({ id: 'case-1', expect: { containsText: 'hello' } }),
+    ]);
+    await runEvalDataset(
+      { dataset: baselineDataset, saveResultsTo: baselinePath },
+      createContext(mcp)
+    );
+
+    // Run with a dataset that has 5 cases, only 1 of which matches the baseline
+    const currentDataset = createDataset([
+      createEvalCase({ id: 'case-1', expect: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-2', expect: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-3', expect: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-4', expect: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-5', expect: { containsText: 'hello' } }),
+    ]);
+    await runEvalDataset(
+      { dataset: currentDataset, baselineResultsFrom: baselinePath },
+      createContext(mcp)
+    );
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining('have no baseline entry')
+    );
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining('4 of 5 cases')
+    );
+
+    consoleSpy.mockRestore();
+  });
+
+  it('does not warn when 20% or fewer current cases have no baseline entry', async () => {
+    const consoleSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
+
+    // Save a baseline with 5 cases
+    const baselinePath = join(tmpDir, 'full-baseline.json');
+    const baselineDataset = createDataset([
+      createEvalCase({ id: 'case-1', expect: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-2', expect: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-3', expect: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-4', expect: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-5', expect: { containsText: 'hello' } }),
+    ]);
+    await runEvalDataset(
+      { dataset: baselineDataset, saveResultsTo: baselinePath },
+      createContext(mcp)
+    );
+
+    // Run with the same 5 cases — 0% unmatched, no warning
+    await runEvalDataset(
+      { dataset: baselineDataset, baselineResultsFrom: baselinePath },
+      createContext(mcp)
+    );
+
+    expect(consoleSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('have no baseline entry')
+    );
+
+    consoleSpy.mockRestore();
+  });
 });
 
 describe('evals guide iteration count guardrail warnings', () => {
@@ -1138,10 +1210,10 @@ describe('evals guide iteration count guardrail warnings', () => {
     await runEvalDataset({ dataset }, createContext());
 
     expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining('3 iteration(s)')
+      expect.stringContaining('running 3 iterations in llm_host mode')
     );
     expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining('evals guide recommends >= 10')
+      expect.stringContaining('Consider using 10+ iterations')
     );
     expect(consoleSpy).toHaveBeenCalledWith(
       expect.stringContaining('low-iter-case')
@@ -1150,7 +1222,7 @@ describe('evals guide iteration count guardrail warnings', () => {
     consoleSpy.mockRestore();
   });
 
-  it('warns when an llm_host case defaults to 1 iteration (no explicit iterations)', async () => {
+  it('does not warn when an llm_host case uses a single iteration (default smoke-test pattern)', async () => {
     const consoleSpy = vi
       .spyOn(console, 'warn')
       .mockImplementation(() => undefined);
@@ -1166,8 +1238,8 @@ describe('evals guide iteration count guardrail warnings', () => {
 
     await runEvalDataset({ dataset }, createContext());
 
-    expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining('1 iteration(s)')
+    expect(consoleSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('may not be statistically reliable')
     );
 
     consoleSpy.mockRestore();
@@ -1191,7 +1263,7 @@ describe('evals guide iteration count guardrail warnings', () => {
     await runEvalDataset({ dataset }, createContext());
 
     expect(consoleSpy).not.toHaveBeenCalledWith(
-      expect.stringContaining('evals guide recommends')
+      expect.stringContaining('may not be statistically reliable')
     );
 
     consoleSpy.mockRestore();
@@ -1215,7 +1287,7 @@ describe('evals guide iteration count guardrail warnings', () => {
     await runEvalDataset({ dataset }, createContext(mcp));
 
     expect(consoleSpy).not.toHaveBeenCalledWith(
-      expect.stringContaining('evals guide recommends')
+      expect.stringContaining('may not be statistically reliable')
     );
 
     consoleSpy.mockRestore();
@@ -1242,7 +1314,7 @@ describe('evals guide iteration count guardrail warnings', () => {
     );
 
     expect(consoleSpy).not.toHaveBeenCalledWith(
-      expect.stringContaining('evals guide recommends')
+      expect.stringContaining('may not be statistically reliable')
     );
 
     consoleSpy.mockRestore();
