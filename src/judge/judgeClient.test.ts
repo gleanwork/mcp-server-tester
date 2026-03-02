@@ -3,10 +3,6 @@ import { createJudge } from './judgeClient.js';
 import type { ProviderKind } from './judgeTypes.js';
 
 describe('createJudge provider routing', () => {
-  it('creates a judge without error for provider "claude"', () => {
-    expect(() => createJudge({ provider: 'claude' })).not.toThrow();
-  });
-
   it('creates a judge without error for provider "anthropic"', () => {
     expect(() => createJudge({ provider: 'anthropic' })).not.toThrow();
   });

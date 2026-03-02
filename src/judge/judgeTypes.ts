@@ -56,7 +56,7 @@ export interface UsageMetrics {
 }
 
 /** Valid LLM judge provider kinds. */
-export type ProviderKind = 'claude' | 'anthropic' | 'openai' | 'google';
+export type ProviderKind = 'anthropic' | 'openai' | 'google';
 
 /**
  * Configuration for an LLM judge
@@ -64,7 +64,7 @@ export type ProviderKind = 'claude' | 'anthropic' | 'openai' | 'google';
 export interface JudgeConfig {
   /**
    * LLM provider to use
-   * @default 'claude'
+   * @default 'anthropic'
    */
   provider?: ProviderKind;
 

@@ -36,12 +36,10 @@ import { createGoogleJudge } from './googleJudge.js';
  * console.log('Tokens:', result.usage?.inputTokens, result.usage?.outputTokens);
  */
 export function createJudge(config: JudgeConfig = {}): Judge {
-  const provider: ProviderKind = config.provider ?? 'claude';
+  const provider: ProviderKind = config.provider ?? 'anthropic';
 
   switch (provider) {
-    case 'claude':
     case 'anthropic':
-      // Both 'claude' and 'anthropic' use Claude Agent SDK
       return createClaudeAgentJudge(config);
 
     case 'openai':
