@@ -19,8 +19,16 @@ module structure and design decisions.
 
 ### Prerequisites
 
-- Node.js 22 or higher (required for the `import ... with { type: 'json' }` import assertions syntax used in this project; Node 18/20 do not support it)
-- pnpm (this project uses pnpm as its package manager)
+- **mise** — manages the Node.js version automatically. Install once:
+
+  ```bash
+  curl https://mise.run | sh
+  ```
+
+  Then `mise install` in the repo root picks up `mise.toml` and activates Node 22.
+  If you prefer to manage Node manually, ensure you have **Node.js 22+**.
+
+- **npm** — used for all package operations (comes with Node).
 
 ### Setup
 
@@ -30,13 +38,17 @@ module structure and design decisions.
    git clone https://github.com/YOUR_USERNAME/mcp-server-tester.git
    cd mcp-server-tester
    ```
-3. Install dependencies:
+3. Install the toolchain (if using mise):
    ```bash
-   pnpm install
+   mise install
    ```
-4. Build the project:
+4. Install dependencies:
    ```bash
-   pnpm run build
+   npm install
+   ```
+5. Build the project:
+   ```bash
+   npm run build
    ```
 
 ## Development Workflow
@@ -45,14 +57,11 @@ module structure and design decisions.
 
 ```bash
 # Unit tests (Vitest)
-pnpm test
-pnpm run test:watch
+npm test
+npm run test:watch
 
 # Integration tests (Playwright)
-pnpm run test:playwright
-
-# All tests
-pnpm test && pnpm run test:playwright
+npm run test:playwright
 ```
 
 ### Code Quality
@@ -60,11 +69,11 @@ pnpm test && pnpm run test:playwright
 Before submitting a PR, ensure:
 
 ```bash
-pnpm run typecheck  # TypeScript validation
-pnpm run lint       # ESLint checks
-pnpm run format     # Prettier formatting
-pnpm test          # All tests pass
-pnpm run build     # Build succeeds
+npm run typecheck   # TypeScript validation
+npm run lint        # ESLint checks
+npm run format      # Prettier formatting
+npm test            # All tests pass
+npm run build       # Build succeeds
 ```
 
 ### Making Changes
