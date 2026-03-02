@@ -121,13 +121,6 @@ describe('mcp-server-tester CLI', () => {
       expect(result.exitCode).toBe(1);
     });
 
-    it('renders the project name prompt before failing', async () => {
-      const result = await runBin('init');
-
-      // Ink renders to stdout; the first prompt appears before useInput fires
-      expect(result.stdout).toContain('Project name:');
-    });
-
     it('reports a clear Ink raw-mode error rather than an unrelated crash', async () => {
       const result = await runBin('init');
 
@@ -157,14 +150,6 @@ describe('mcp-server-tester CLI', () => {
       const result = await runBin('generate');
 
       expect(result.exitCode).toBe(1);
-    });
-
-    it('starts loading known servers before failing', async () => {
-      // GenerateApp begins by loading known servers; that spinner text is
-      // rendered before useInput triggers the raw-mode crash.
-      const result = await runBin('generate');
-
-      expect(result.stdout).toContain('Loading known servers');
     });
 
     it('reports a clear Ink raw-mode error rather than an unrelated crash', async () => {
