@@ -194,8 +194,8 @@ export interface EvalExpectBlock {
     threshold?: number;
     /** Number of judge evaluations for this assertion. Overrides EvalCase.judgeReps. */
     reps?: number;
-    /** Judge provider. @default 'claude' */
-    provider?: 'claude' | 'anthropic' | 'openai' | 'google';
+    /** Judge provider. @default 'anthropic' */
+    provider?: 'anthropic' | 'openai' | 'google';
     /** Model override (e.g., 'claude-opus-4-20250514') */
     model?: string;
     /** Environment variable name for API key */
@@ -296,7 +296,6 @@ const LLMHostConfigSchema = z.object({
     'azure',
     'google',
     'mistral',
-    'ollama',
     'deepseek',
     'openrouter',
     'xai',
@@ -352,7 +351,7 @@ const EvalExpectBlockSchema = z.object({
       reference: z.unknown().optional(),
       threshold: z.number().min(0).max(1).optional(),
       reps: z.number().int().min(1).optional(),
-      provider: z.enum(['claude', 'anthropic', 'openai', 'google']).optional(),
+      provider: z.enum(['anthropic', 'openai', 'google']).optional(),
       model: z.string().optional(),
       apiKeyEnvVar: z.string().optional(),
       maxTokens: z.number().int().positive().optional(),

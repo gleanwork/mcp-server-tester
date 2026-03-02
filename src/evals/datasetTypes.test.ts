@@ -366,7 +366,6 @@ describe('datasetTypes', () => {
         'google',
         'mistral',
         'azure',
-        'ollama',
         'deepseek',
         'openrouter',
         'xai',

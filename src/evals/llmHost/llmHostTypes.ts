@@ -18,7 +18,6 @@ import type { MCPFixtureApi } from '../../mcp/fixtures/mcpFixture.js';
  *   google      → npm install ai @ai-sdk/google
  *   azure       → npm install ai @ai-sdk/azure
  *   mistral     → npm install ai @ai-sdk/mistral
- *   ollama      → npm install ai @ai-sdk/ollama  (local, no API key)
  *   deepseek    → npm install ai @ai-sdk/deepseek
  *   openrouter  → npm install ai @openrouter/ai-sdk-provider
  *   xai         → npm install ai @ai-sdk/xai
@@ -29,7 +28,6 @@ export type LLMProvider =
   | 'azure'
   | 'google'
   | 'mistral'
-  | 'ollama'
   | 'deepseek'
   | 'openrouter'
   | 'xai'

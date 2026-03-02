@@ -31,7 +31,6 @@ For most regression testing, use direct mode (`callTool`). Reserve LLM host simu
 | `google` | `GOOGLE_GENERATIVE_AI_API_KEY` | `npm install ai @ai-sdk/google` |
 | `mistral` | `MISTRAL_API_KEY` | `npm install ai @ai-sdk/mistral` |
 | `azure` | `AZURE_API_KEY` | `npm install ai @ai-sdk/azure` |
-| `ollama` | _(local, no key)_ | `npm install ai @ai-sdk/ollama` |
 | `deepseek` | `DEEPSEEK_API_KEY` | `npm install ai @ai-sdk/deepseek` |
 | `openrouter` | `OPENROUTER_API_KEY` | `npm install ai @openrouter/ai-sdk-provider` |
 | `xai` | `XAI_API_KEY` | `npm install ai @ai-sdk/xai` |
@@ -130,7 +129,6 @@ interface LLMHostConfig {
     | 'google'
     | 'mistral'
     | 'azure'
-    | 'ollama'
     | 'deepseek'
     | 'openrouter'
     | 'xai';

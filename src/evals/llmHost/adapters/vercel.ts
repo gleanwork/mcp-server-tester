@@ -134,11 +134,6 @@ async function loadModel(provider: LLMProvider, model: string): Promise<any> {
       const { azure } = await import('@ai-sdk/azure');
       return (azure as any)(model);
     }
-    case 'ollama': {
-      // @ts-ignore - optional: npm install @ai-sdk/ollama
-      const { ollama } = await import('@ai-sdk/ollama');
-      return (ollama as any)(model);
-    }
     case 'deepseek': {
       // @ts-ignore - optional: npm install @ai-sdk/deepseek
       const { deepseek } = await import('@ai-sdk/deepseek');

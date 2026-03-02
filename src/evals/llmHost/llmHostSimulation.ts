@@ -1,7 +1,7 @@
 /**
  * LLM Host Simulation - Main entry point
  *
- * All providers (openai, anthropic, google, azure, mistral, ollama, deepseek,
+ * All providers (openai, anthropic, google, azure, mistral, deepseek,
  * openrouter, xai) run through the Vercel AI SDK orchestrator, which uses
  * generateText + stopWhen for a uniform multi-turn tool-calling loop with
  * built-in latency decomposition.
@@ -12,7 +12,6 @@
  *   google      → npm install ai @ai-sdk/google
  *   azure       → npm install ai @ai-sdk/azure
  *   mistral     → npm install ai @ai-sdk/mistral
- *   ollama      → npm install ai @ai-sdk/ollama  (local, no API key)
  *   deepseek    → npm install ai @ai-sdk/deepseek
  *   openrouter  → npm install ai @openrouter/ai-sdk-provider
  *   xai         → npm install ai @ai-sdk/xai
@@ -37,7 +36,6 @@ const allProviders: LLMProvider[] = [
   'azure',
   'google',
   'mistral',
-  'ollama',
   'deepseek',
   'openrouter',
   'xai',
@@ -113,7 +111,6 @@ export function getMissingDependencyMessage(provider: LLMProvider): string {
     google: 'npm install ai @ai-sdk/google',
     azure: 'npm install ai @ai-sdk/azure',
     mistral: 'npm install ai @ai-sdk/mistral',
-    ollama: 'npm install ai @ai-sdk/ollama',
     deepseek: 'npm install ai @ai-sdk/deepseek',
     openrouter: 'npm install ai @openrouter/ai-sdk-provider',
     xai: 'npm install ai @ai-sdk/xai',
