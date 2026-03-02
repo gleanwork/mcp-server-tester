@@ -104,11 +104,12 @@ export function validateToolCalls(
   const recall =
     requiredCalls.length > 0 ? calledRequiredCount / requiredCalls.length : 1.0;
 
-  // Compute precision: fraction of actual calls that were expected
-  // Only applies when exclusive=true; otherwise precision is 1.0
+  // Compute precision: fraction of actual calls that were expected.
+  // Always computed so the metric reflects actual tool call efficiency.
+  // Whether unexpected calls cause a FAILURE is controlled separately by exclusive=true (lines below).
   const allowedNames = new Set(expectation.calls.map((c) => c.name));
   const precision =
-    actual.length > 0 && expectation.exclusive === true
+    actual.length > 0
       ? actual.filter((c) => allowedNames.has(c.name)).length / actual.length
       : 1.0;
 

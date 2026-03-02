@@ -130,12 +130,15 @@ describe('validateToolCalls precision and recall metrics', () => {
     expect(result.metrics?.recall).toBe(1.0);
   });
 
-  it('precision is 1.0 when exclusive is false (default)', () => {
+  it('precision reflects actual tool call efficiency even when exclusive is false (default)', () => {
     const result = validateToolCalls(makeResult(['search', 'unexpected']), {
       calls: [{ name: 'search', required: true }],
       exclusive: false,
     });
-    expect(result.metrics?.precision).toBe(1.0);
+    // 1 of 2 actual calls matched an expected call → precision = 0.5
+    // The case still passes (exclusive=false means no failure on unexpected calls)
+    expect(result.pass).toBe(true);
+    expect(result.metrics?.precision).toBe(0.5);
   });
 
   it('precision is 0.5 when exclusive is true and half of calls were unexpected', () => {
