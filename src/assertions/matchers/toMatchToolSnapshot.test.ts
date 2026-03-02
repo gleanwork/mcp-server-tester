@@ -174,7 +174,7 @@ describe('applySanitizers', () => {
       name: 'Carol',
     };
     // Start with a JSON string containing a JWT, then strip the token field
-    let input = JSON.stringify(obj, null, 2);
+    const input = JSON.stringify(obj, null, 2);
 
     // First sanitizer: replace JWTs in the raw text
     // Second sanitizer: remove the token field entirely
