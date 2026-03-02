@@ -233,6 +233,12 @@ const UserSchema = z.object({
 
 Captures and compares tool responses against stored snapshots using Playwright's built-in snapshot functionality. Best for deterministic responses where you want to detect any changes.
 
+> **Requires Playwright test context.** `toMatchToolSnapshot()` calls Playwright's native
+> snapshot infrastructure internally and only works inside a Playwright test function.
+> If you call it outside a test or in a programmatic validator, you will get a cryptic
+> context error. To use sanitizer logic outside tests, import `applySanitizers` directly
+> from the matchers module.
+
 > **Important:** Snapshot testing works best with deterministic, stable responses. For responses containing timestamps, IDs, or live data, use [sanitizers](#snapshot-sanitizers) or consider [Schema Validation](#schema-validation) instead.
 
 ### When to Use Snapshots

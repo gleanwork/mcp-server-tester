@@ -304,18 +304,18 @@ export function ResultsTable({ results, onSelectResult }: ResultsTableProps) {
                             </span>
 
                             {/* Accuracy badge — only for multi-iteration cases */}
-                            {result.accuracy !== undefined && (
+                            {result.assertionPassRate !== undefined && (
                               <span
                                 className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold shrink-0 ${
-                                  result.accuracy >= 0.8
+                                  result.assertionPassRate >= 0.8
                                     ? 'bg-green-500/15 text-green-700 dark:text-green-400'
-                                    : result.accuracy >= 0.5
+                                    : result.assertionPassRate >= 0.5
                                       ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
                                       : 'bg-red-500/15 text-red-700 dark:text-red-400'
                                 }`}
                                 title={`${result.iterationResults?.filter((r) => r.pass).length ?? '?'}/${result.iterationResults?.length ?? '?'} iterations passed`}
                               >
-                                {(result.accuracy * 100).toFixed(0)}%
+                                {(result.assertionPassRate * 100).toFixed(0)}%
                                 <span className="opacity-60 font-normal">
                                   {result.iterationResults
                                     ? ` ${result.iterationResults.filter((r) => r.pass).length}/${result.iterationResults.length}`

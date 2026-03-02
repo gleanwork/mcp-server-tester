@@ -215,13 +215,6 @@ export interface EvalCaseResult {
   infrastructureErrorRate?: number;
 
   /**
-   * Accuracy score (0–1) across all iterations.
-   * Alias for `assertionPassRate`. Only present when the case was run with `iterations > 1`.
-   * @deprecated Use `assertionPassRate` for clarity; this field is kept for backward compatibility.
-   */
-  accuracy?: number;
-
-  /**
    * Per-iteration pass/fail breakdown.
    * Only present when the case was run with `iterations > 1`.
    */

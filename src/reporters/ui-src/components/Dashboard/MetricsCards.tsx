@@ -20,11 +20,15 @@ function computeMetrics(results: EvalCaseResult[]): MetricsSummary {
   const failed = results.filter((r) => !r.pass).length;
   const total = results.length;
 
-  const multiIterResults = results.filter((r) => r.accuracy !== undefined);
+  const multiIterResults = results.filter(
+    (r) => r.assertionPassRate !== undefined
+  );
   const avgAccuracy =
     multiIterResults.length > 0
-      ? multiIterResults.reduce((sum, r) => sum + (r.accuracy ?? 0), 0) /
-        multiIterResults.length
+      ? multiIterResults.reduce(
+          (sum, r) => sum + (r.assertionPassRate ?? 0),
+          0
+        ) / multiIterResults.length
       : undefined;
 
   const totalIterations = results.reduce(

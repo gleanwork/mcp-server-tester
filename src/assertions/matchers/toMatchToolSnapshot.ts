@@ -162,6 +162,14 @@ function removeFields(obj: unknown, paths: string[]): void {
 /**
  * Creates the toMatchToolSnapshot matcher function
  *
+ * @remarks
+ * **Requires Playwright test context.** This matcher calls `expect(content).toMatchSnapshot()`
+ * internally, which only works inside a Playwright test (i.e., when `testInfo` is available).
+ * Calling it outside a Playwright test will throw a cryptic context error.
+ *
+ * To test sanitizer logic without a Playwright context, use the exported `applySanitizers`
+ * function directly.
+ *
  * Note: This is an async matcher that uses Playwright's snapshot testing.
  */
 export async function toMatchToolSnapshot(

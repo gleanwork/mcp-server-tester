@@ -77,7 +77,7 @@ export interface EvalCase {
 
   /**
    * Number of times to run this case and compute an accuracy score.
-   * When > 1, `EvalCaseResult.accuracy` is populated and `pass` is determined
+   * When > 1, `EvalCaseResult.assertionPassRate` is populated and `pass` is determined
    * by `accuracyThreshold` rather than a single run.
    * @default 1
    */

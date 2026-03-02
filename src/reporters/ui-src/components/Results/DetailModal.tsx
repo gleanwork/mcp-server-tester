@@ -73,7 +73,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
   const hasAssertions = Object.keys(result.expectations ?? {}).length > 0;
   const hasIterations =
     result.iterationResults && result.iterationResults.length > 0;
-  const displayRate = result.assertionPassRate ?? result.accuracy;
+  const displayRate = result.assertionPassRate;
   const infraErrorRate = result.infrastructureErrorRate;
 
   return (

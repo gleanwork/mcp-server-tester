@@ -395,8 +395,8 @@ describe('multi-iteration cases', () => {
 
     const result = await runEvalCase(evalCase, createContext(mcp));
 
-    expect(result.accuracy).toBeDefined();
-    expect(result.accuracy).toBe(0.5); // 2 of 4 pass
+    expect(result.assertionPassRate).toBeDefined();
+    expect(result.assertionPassRate).toBe(0.5); // 2 of 4 pass
     expect(result.pass).toBe(true); // 0.5 >= 0.5 threshold
     expect(result.iterationResults).toHaveLength(4);
     expect(result.iterationResults?.filter((r) => r.pass)).toHaveLength(2);
@@ -411,14 +411,14 @@ describe('multi-iteration cases', () => {
     });
 
     const result = await runEvalCase(evalCase, createContext(mcp));
-    expect(result.accuracy).toBe(0);
+    expect(result.assertionPassRate).toBe(0);
     expect(result.pass).toBe(false);
   });
 
-  it('should not set accuracy for single-iteration cases', async () => {
+  it('should not set assertionPassRate for single-iteration cases', async () => {
     const evalCase = createEvalCase();
     const result = await runEvalCase(evalCase, createContext());
-    expect(result.accuracy).toBeUndefined();
+    expect(result.assertionPassRate).toBeUndefined();
     expect(result.iterationResults).toBeUndefined();
   });
 
@@ -447,9 +447,9 @@ describe('multi-iteration cases', () => {
     const result = await runEvalCase(evalCase, createContext(mcp));
 
     // The infrastructure error is excluded from the denominator
-    // Only 1 assertion result (the second iteration), and it passes → accuracy = 1.0
+    // Only 1 assertion result (the second iteration), and it passes → assertionPassRate = 1.0
     expect(result.infrastructureErrorCount).toBe(1);
-    expect(result.accuracy).toBe(1.0);
+    expect(result.assertionPassRate).toBe(1.0);
     expect(result.pass).toBe(true);
     expect(result.iterationResults).toHaveLength(2);
     expect(result.iterationResults?.[0]?.isInfrastructureError).toBe(true);
@@ -645,7 +645,7 @@ describe('runEvalDataset defaultLlmIterations', () => {
 
     // Direct mode case should NOT have iterationResults (only ran once)
     expect(result.caseResults[0]!.iterationResults).toBeUndefined();
-    expect(result.caseResults[0]!.accuracy).toBeUndefined();
+    expect(result.caseResults[0]!.assertionPassRate).toBeUndefined();
     expect(result.passed).toBe(1);
   });
 

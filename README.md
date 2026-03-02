@@ -30,18 +30,19 @@ Playwright tests are fast, deterministic, and designed for CI. Use them for regr
 
 Available matchers:
 
-| Matcher                  | Description                                     |
-| ------------------------ | ----------------------------------------------- |
-| `toContainToolText`      | Response contains expected substrings           |
-| `toMatchToolSchema`      | Response validates against a Zod schema         |
-| `toMatchToolPattern`     | Response matches a regex pattern                |
-| `toMatchToolSnapshot`    | Response matches a saved baseline               |
-| `toBeToolError`          | Response is (or is not) an error                |
-| `toHaveToolResponseSize` | Response size is within bounds                  |
-| `toSatisfyToolPredicate` | Response satisfies a custom function            |
-| `toHaveToolCalls`        | LLM called the expected tools                   |
-| `toHaveToolCallCount`    | LLM made N tool calls                           |
-| `toPassToolJudge`        | LLM evaluates response quality against a rubric |
+| Matcher                  | Description                                          |
+| ------------------------ | ---------------------------------------------------- |
+| `toMatchToolResponse`    | Response exactly matches expected value (deep equal) |
+| `toContainToolText`      | Response contains expected substrings                |
+| `toMatchToolSchema`      | Response validates against a Zod schema              |
+| `toMatchToolPattern`     | Response matches a regex pattern                     |
+| `toMatchToolSnapshot`    | Response matches a saved baseline                    |
+| `toBeToolError`          | Response is (or is not) an error                     |
+| `toHaveToolResponseSize` | Response size is within bounds                       |
+| `toSatisfyToolPredicate` | Response satisfies a custom function                 |
+| `toHaveToolCalls`        | LLM called the expected tools                        |
+| `toHaveToolCallCount`    | LLM made N tool calls                                |
+| `toPassToolJudge`        | LLM evaluates response quality against a rubric      |
 
 ## Eval Datasets
 
