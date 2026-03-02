@@ -10,6 +10,8 @@ The framework supports multiple types of expectations to validate MCP tool respo
 - [Schema Validation](#schema-validation)
 - [Snapshot Testing](#snapshot-testing)
 - [LLM-as-a-Judge](#llm-as-a-judge)
+- [Response Size](#response-size)
+- [Custom Predicate](#custom-predicate)
 - [Combining Multiple Expectations](#combining-multiple-expectations)
 - [Examples](#examples)
 
@@ -507,6 +509,108 @@ For custom criteria, provide `{ "text": "..." }` with explicit score-level descr
 - Test rubrics with known good/bad examples
 - Set appropriate passing thresholds based on your quality standards
 - Consider cost implications (LLM API calls per evaluation)
+
+## Response Size
+
+Validates that the response text falls within expected byte bounds. Use this when you need to catch responses that are suspiciously short (missing data) or unexpectedly large (truncation risk, runaway output).
+
+Size is measured in UTF-8 bytes of the extracted text content across all content items in the MCP `CallToolResult`.
+
+### Inline Test Usage
+
+```typescript
+import { expect } from '@gleanwork/mcp-server-tester';
+
+test('response is within expected size', async ({ mcp }) => {
+  const result = await mcp.callTool('search_docs', { query: 'authentication' });
+
+  // Ensure we have a non-trivial response but not an enormous dump
+  expect(result).toHaveToolResponseSize({ minBytes: 100, maxBytes: 50_000 });
+});
+
+test('brief summary stays compact', async ({ mcp }) => {
+  const result = await mcp.callTool('summarize', { text: 'Short article.' });
+  expect(result).toHaveToolResponseSize({ maxBytes: 2_000 });
+});
+```
+
+### Options
+
+| Option     | Type     | Description                           |
+| ---------- | -------- | ------------------------------------- |
+| `minBytes` | `number` | Minimum allowed response size (bytes) |
+| `maxBytes` | `number` | Maximum allowed response size (bytes) |
+
+At least one of `minBytes` or `maxBytes` must be provided. Both can be combined to assert a range.
+
+### Best Practices
+
+- Use `minBytes` to catch tools that silently return empty or near-empty responses
+- Use `maxBytes` to detect runaway responses or streaming failures that dump excessive data
+- Size is UTF-8 bytes of text content; binary or non-text content items do not contribute to the count
+- Combine with `toContainToolText` or `toMatchToolSchema` — size bounds alone do not verify correctness
+
+## Custom Predicate
+
+Validates that a response satisfies an arbitrary predicate function. Use this as an escape hatch when none of the built-in matchers fit your validation logic.
+
+The predicate receives the raw MCP `CallToolResult` object as the first argument and the extracted text content as the second argument. Return a boolean for simple pass/fail, or return an object with `pass` and `message` fields for a custom error message. Async predicates are also supported.
+
+### Inline Test Usage
+
+```typescript
+import { expect } from '@gleanwork/mcp-server-tester';
+
+test('response contains at least three results', async ({ mcp }) => {
+  const result = await mcp.callTool('search_docs', { query: 'setup' });
+
+  expect(result).toSatisfyToolPredicate((response, text) => {
+    const matches = text.match(/^##\s/gm);
+    return {
+      pass: matches !== null && matches.length >= 3,
+      message: `Expected at least 3 result sections, found ${matches?.length ?? 0}`,
+    };
+  }, 'minimum result count');
+});
+
+test('JSON content is parseable', async ({ mcp }) => {
+  const result = await mcp.callTool('get_config', {});
+
+  expect(result).toSatisfyToolPredicate((response, text) => {
+    try {
+      JSON.parse(text);
+      return true;
+    } catch {
+      return { pass: false, message: 'Response text is not valid JSON' };
+    }
+  });
+});
+
+test('async external validation', async ({ mcp }) => {
+  const result = await mcp.callTool('generate_token', {});
+
+  await expect(result).toSatisfyToolPredicate(async (response, text) => {
+    const valid = await myTokenValidationService.verify(text.trim());
+    return { pass: valid, message: 'Token failed external validation' };
+  });
+});
+```
+
+### Options
+
+| Parameter     | Type     | Required | Description                                                                            |
+| ------------- | -------- | -------- | -------------------------------------------------------------------------------------- |
+| `predicate`   | function | Yes      | Receives `(response: unknown, text: string)` — return `boolean` or `{ pass, message }` |
+| `description` | string   | No       | Label used in failure messages (default: `"custom predicate"`)                         |
+
+The predicate may be synchronous or `async`. Errors thrown inside the predicate are caught and reported as failures.
+
+### Best Practices
+
+- Provide a `description` argument — it appears in Playwright's failure output and makes failures readable
+- Return `{ pass, message }` instead of a bare boolean when the failure reason is not obvious
+- Prefer a built-in matcher when one fits — predicates are harder to read at a glance
+- The `response` argument is the raw `CallToolResult`; use `text` (second argument) for extracted string content
 
 ## Combining Multiple Expectations
 
