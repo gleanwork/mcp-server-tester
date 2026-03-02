@@ -250,6 +250,24 @@ export interface EvalCaseResult {
    * Only present when the case was run with `iterations > 1`.
    */
   infrastructureErrorCount?: number;
+
+  /**
+   * Ordered trace of tool calls made by the LLM in llm_host mode.
+   * Only populated when the eval case uses toolsTriggered expectations.
+   */
+  llmHostTrace?: {
+    /** The ordered sequence of tool calls made by the LLM */
+    calls: Array<{
+      name: string;
+      arguments: Record<string, unknown>;
+      /** 'expected' = was in the expected set, 'unexpected' = was not expected */
+      status: 'expected' | 'unexpected';
+    }>;
+    /** Tools that were required but never called */
+    missed: Array<{
+      name: string;
+    }>;
+  };
 }
 
 /**

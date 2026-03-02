@@ -3,6 +3,7 @@ import type { EvalDataset, EvalCase, EvalExpectBlock } from './datasetTypes.js';
 import type { TestInfo, Expect } from '@playwright/test';
 import type { ZodType } from 'zod';
 import { simulateLLMHost } from './llmHost/llmHostSimulation.js';
+import type { LLMHostSimulationResult } from './llmHost/llmHostTypes.js';
 import type {
   EvalCaseResult,
   IterationResult,
@@ -503,6 +504,18 @@ async function runExpectBlockValidations(
   return { expectations: results, toolPrecision, toolRecall };
 }
 
+function isLLMHostSimulationResult(
+  value: unknown
+): value is LLMHostSimulationResult {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'success' in value &&
+    'toolCalls' in value &&
+    Array.isArray((value as LLMHostSimulationResult).toolCalls)
+  );
+}
+
 /**
  * Runs a single iteration of an eval case (the atomic unit of work).
  * Extracted from runEvalCase to support multi-iteration accuracy loops.
@@ -522,6 +535,8 @@ async function runSingleIteration(
   let toolPrecision: number | undefined;
   let toolRecall: number | undefined;
 
+  let llmHostTrace: EvalCaseResult['llmHostTrace'];
+
   if (!error && evalCase.expect) {
     const {
       expectations,
@@ -536,6 +551,33 @@ async function runSingleIteration(
     expectationResults = expectations;
     toolPrecision = tp;
     toolRecall = tr;
+
+    // Build llmHostTrace when toolsTriggered expectation is present
+    if (
+      evalCase.expect.toolsTriggered !== undefined &&
+      isLLMHostSimulationResult(response)
+    ) {
+      const expectedNames = new Set(
+        evalCase.expect.toolsTriggered.calls.map((c) => c.name)
+      );
+      const requiredNames = new Set(
+        evalCase.expect.toolsTriggered.calls
+          .filter((c) => c.required !== false)
+          .map((c) => c.name)
+      );
+      const calledNames = new Set(response.toolCalls.map((c) => c.name));
+
+      llmHostTrace = {
+        calls: response.toolCalls.map((call) => ({
+          name: call.name,
+          arguments: call.arguments,
+          status: expectedNames.has(call.name) ? 'expected' : 'unexpected',
+        })),
+        missed: Array.from(requiredNames)
+          .filter((name) => !calledNames.has(name))
+          .map((name) => ({ name })),
+      };
+    }
   }
 
   // Build result - use test context for authType and project (Playwright is source of truth)
@@ -554,6 +596,7 @@ async function runSingleIteration(
     tags: evalCase.tags,
     toolPrecision,
     toolRecall,
+    llmHostTrace,
   };
 }
 

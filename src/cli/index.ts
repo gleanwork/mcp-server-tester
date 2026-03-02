@@ -7,6 +7,7 @@ import { init } from './commands/init/index.js';
 import { generate } from './commands/generate/index.js';
 import { login } from './commands/login/index.js';
 import { token } from './commands/token/index.js';
+import { open } from './commands/open/index.js';
 import packageJson from '../../package.json' with { type: 'json' };
 
 const program = new Command();
@@ -59,5 +60,12 @@ program
   )
   .option('--state-dir <dir>', 'Custom directory for token storage')
   .action(token);
+
+// Open command
+program
+  .command('open')
+  .description('Open the MCP eval reporter UI in your browser')
+  .option('-d, --dir <directory>', 'Report output directory', '.mcp-test-results')
+  .action(open);
 
 program.parse();

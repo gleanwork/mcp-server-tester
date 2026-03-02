@@ -104,6 +104,17 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
               >
                 {result.pass ? '✓ Pass' : '✗ Fail'}
               </span>
+              {/* Baseline comparison note */}
+              {result.baselinePass === true && !result.pass && (
+                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-semibold shrink-0 bg-red-500/20 text-red-700 dark:text-red-400">
+                  ▼ Regressed since baseline
+                </span>
+              )}
+              {result.baselinePass === false && result.pass && (
+                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-semibold shrink-0 bg-green-500/20 text-green-700 dark:text-green-400">
+                  ▲ Fixed since baseline
+                </span>
+              )}
               {/* Assertion pass rate badge — only for multi-iteration cases */}
               {displayRate !== undefined && (
                 <span
@@ -205,6 +216,16 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
               <span className="px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
                 {result.durationMs.toFixed(0)}ms
               </span>
+              {result.toolPrecision !== undefined && (
+                <span className="px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                  Precision: {(result.toolPrecision * 100).toFixed(0)}%
+                </span>
+              )}
+              {result.toolRecall !== undefined && (
+                <span className="px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                  Recall: {(result.toolRecall * 100).toFixed(0)}%
+                </span>
+              )}
             </div>
 
             {/* Error — always show first if present */}
@@ -268,6 +289,63 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                 </div>
               </CollapsibleSection>
             )}
+
+            {/* Tool Calls — for llm_host eval cases with tool call expectations */}
+            {result.source === 'eval' &&
+              result.toolPrecision !== undefined && (
+                <CollapsibleSection title="Tool Calls" defaultOpen={true}>
+                  {result.llmHostTrace ? (
+                    <div className="space-y-1">
+                      {result.llmHostTrace.calls.map((call, i) => (
+                        <div
+                          key={i}
+                          className={`flex items-start gap-2 text-xs p-2 rounded ${
+                            call.status === 'expected'
+                              ? 'bg-green-50 dark:bg-green-950'
+                              : 'bg-red-50 dark:bg-red-950'
+                          }`}
+                        >
+                          <span
+                            className={
+                              call.status === 'expected'
+                                ? 'text-green-600'
+                                : 'text-red-600'
+                            }
+                          >
+                            {call.status === 'expected' ? '✓' : '✗'}
+                          </span>
+                          <span className="font-mono font-medium">
+                            {call.name}
+                          </span>
+                          <span className="text-muted-foreground truncate">
+                            {JSON.stringify(call.arguments).substring(0, 80)}
+                          </span>
+                        </div>
+                      ))}
+                      {result.llmHostTrace.missed.map((missed, i) => (
+                        <div
+                          key={`missed-${i}`}
+                          className="flex items-center gap-2 text-xs p-2 rounded bg-yellow-50 dark:bg-yellow-950"
+                        >
+                          <span className="text-yellow-600">○</span>
+                          <span className="font-mono font-medium text-muted-foreground line-through">
+                            {missed.name}
+                          </span>
+                          <span className="text-muted-foreground">
+                            not called
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Precision: {(result.toolPrecision * 100).toFixed(0)}% ·
+                      Recall:{' '}
+                      {((result.toolRecall ?? 0) * 100).toFixed(0)}%
+                    </p>
+                  )}
+                </CollapsibleSection>
+              )}
 
             {/* Iterations breakdown — for multi-iteration cases */}
             {hasIterations && (
