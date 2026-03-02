@@ -133,6 +133,12 @@ export interface StdioMCPConfig {
   cwd?: string;
 
   /**
+   * Environment variables to pass to the subprocess.
+   * Merged with the current process environment.
+   */
+  env?: Record<string, string>;
+
+  /**
    * Suppress stderr output from the server process.
    * When true, server stderr is ignored instead of inherited.
    */
@@ -315,6 +321,7 @@ const StdioConfigSchema = z.object({
   command: z.string().min(1, 'command is required for stdio transport'),
   args: z.array(z.string()).optional(),
   cwd: z.string().optional(),
+  env: z.record(z.string(), z.string()).optional(),
   capabilities: MCPHostCapabilitiesSchema.optional(),
   connectTimeoutMs: z.number().positive().optional(),
   requestTimeoutMs: z.number().positive().optional(),

@@ -134,7 +134,7 @@ export interface CreateMCPClientOptions {
    * When absent, sampling is removed from declared capabilities so the client
    * does not falsely advertise support it cannot fulfill.
    */
-  samplingHandler?: unknown;
+  samplingHandler?: (...args: unknown[]) => unknown;
 }
 
 /**
@@ -201,6 +201,13 @@ export async function createMCPClientForConfig(
       ...(validatedConfig.cwd && { cwd: validatedConfig.cwd }),
       // Suppress server stderr when quiet mode is enabled
       ...(validatedConfig.quiet && { stderr: 'ignore' as const }),
+      ...(validatedConfig.env && {
+        env: Object.fromEntries(
+          Object.entries({ ...process.env, ...validatedConfig.env }).filter(
+            (entry): entry is [string, string] => entry[1] !== undefined
+          )
+        ),
+      }),
     });
 
     debugClient('Connecting via stdio: %O', {
@@ -391,7 +398,7 @@ export async function closeMCPClient(client: Client): Promise<void> {
   try {
     await client.close();
   } catch (error) {
-    console.error('[MCP] Error closing client:', error);
+    debugClient('Error closing client: %s', error instanceof Error ? error.message : String(error));
     throw error;
   } finally {
     // Close any pooled undici agent associated with this client
