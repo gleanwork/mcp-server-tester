@@ -104,6 +104,94 @@ describe('mcp-server-tester CLI', () => {
     });
   });
 
+  /**
+   * The init and generate commands are interactive Ink/React UIs that call
+   * useInput(), which requires raw mode on stdin. In the non-TTY environment
+   * that bintastic (execaNode) provides, raw mode is unavailable, so both
+   * commands exit with code 1 and print "Raw mode is not supported" to stderr.
+   *
+   * These tests document the commands' actual non-TTY behaviour so that a
+   * regression (e.g. a silent crash or a wrong exit code) is caught. They
+   * also verify which initial UI text is rendered before the crash occurs.
+   */
+  describe('init command', () => {
+    it('exits with a non-zero code in non-TTY mode (raw mode unavailable)', async () => {
+      const result = await runBin('init');
+
+      expect(result.exitCode).toBe(1);
+    });
+
+    it('renders the project name prompt before failing', async () => {
+      const result = await runBin('init');
+
+      // Ink renders to stdout; the first prompt appears before useInput fires
+      expect(result.stdout).toContain('Project name:');
+    });
+
+    it('reports a clear Ink raw-mode error rather than an unrelated crash', async () => {
+      const result = await runBin('init');
+
+      expect(result.stderr).toContain('Raw mode is not supported');
+    });
+
+    it('exits with a non-zero code when --name is supplied in non-TTY mode', async () => {
+      // Even with --name supplied the app still crashes because useInput is
+      // unconditional inside InitApp.
+      const result = await runBin('init', '--name', 'my-project');
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('Raw mode is not supported');
+    });
+
+    it('exits with a non-zero code when --dir is supplied in non-TTY mode', async () => {
+      // --dir only controls where files land; it does not bypass the TTY check.
+      const result = await runBin('init', '--dir', project.baseDir);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('Raw mode is not supported');
+    });
+  });
+
+  describe('generate command', () => {
+    it('exits with a non-zero code in non-TTY mode (raw mode unavailable)', async () => {
+      const result = await runBin('generate');
+
+      expect(result.exitCode).toBe(1);
+    });
+
+    it('starts loading known servers before failing', async () => {
+      // GenerateApp begins by loading known servers; that spinner text is
+      // rendered before useInput triggers the raw-mode crash.
+      const result = await runBin('generate');
+
+      expect(result.stdout).toContain('Loading known servers');
+    });
+
+    it('reports a clear Ink raw-mode error rather than an unrelated crash', async () => {
+      const result = await runBin('generate');
+
+      expect(result.stderr).toContain('Raw mode is not supported');
+    });
+
+    it('exits with a non-zero code when --config points to a nonexistent file', async () => {
+      // With --config, GenerateApp skips server selection and goes straight to
+      // 'connecting'; useInput still fires before the async load completes,
+      // so the process still crashes the same way.
+      const result = await runBin('generate', '--config', 'nonexistent.json');
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('Raw mode is not supported');
+    });
+
+    it('does not produce an unhandled-rejection stack trace without --config', async () => {
+      // The crash must come from the known Ink raw-mode error, not from an
+      // unexpected code path. Guard against a different class of failure.
+      const result = await runBin('generate');
+
+      expect(result.stderr).not.toContain('UnhandledPromiseRejection');
+    });
+  });
+
   describe('token command', () => {
     const serverUrl = 'https://api.example.com/mcp';
 
