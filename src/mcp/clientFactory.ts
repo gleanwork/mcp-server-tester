@@ -398,7 +398,10 @@ export async function closeMCPClient(client: Client): Promise<void> {
   try {
     await client.close();
   } catch (error) {
-    debugClient('Error closing client: %s', error instanceof Error ? error.message : String(error));
+    debugClient(
+      'Error closing client: %s',
+      error instanceof Error ? error.message : String(error)
+    );
     throw error;
   } finally {
     // Close any pooled undici agent associated with this client
