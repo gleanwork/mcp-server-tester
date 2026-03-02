@@ -174,7 +174,7 @@ export default defineConfig({
       name: 'my-server',
       use: {
         mcpConfig: {
-          type: 'stdio',
+          transport: 'stdio',
           command: 'node',
           args: ['./server.js'],
           env: {

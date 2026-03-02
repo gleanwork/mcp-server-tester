@@ -50,7 +50,7 @@ Common issues and how to fix them.
 
    ```typescript
    mcpConfig: {
-     type: 'http',
+     transport: 'http',
      serverUrl: 'http://localhost:3000/mcp',
      retryAttempts: 3,
    }
@@ -78,7 +78,7 @@ Common issues and how to fix them.
 
    ```typescript
    mcpConfig: {
-     type: 'http',
+     transport: 'http',
      serverUrl: 'https://your-server/mcp',
      retryAttempts: 3,
    }
@@ -88,7 +88,7 @@ Common issues and how to fix them.
 
    ```typescript
    mcpConfig: {
-     type: 'http',
+     transport: 'http',
      serverUrl: 'https://your-server/mcp',
      callTimeoutMs: 30_000,
    }
