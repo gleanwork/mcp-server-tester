@@ -7,18 +7,15 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import {
-  BUILT_IN_PATTERNS,
-  applySanitizers,
-} from './toMatchToolSnapshot.js';
+import { BUILT_IN_PATTERNS, applySanitizers } from './toMatchToolSnapshot.js';
 
 describe('BUILT_IN_PATTERNS', () => {
   describe('timestamp', () => {
     it('replaces 10-digit Unix timestamps with [TIMESTAMP]', () => {
       const { pattern, replacement } = BUILT_IN_PATTERNS['timestamp']!;
-      expect('created at 1700000000 seconds'.replace(pattern, replacement)).toBe(
-        'created at [TIMESTAMP] seconds'
-      );
+      expect(
+        'created at 1700000000 seconds'.replace(pattern, replacement)
+      ).toBe('created at [TIMESTAMP] seconds');
     });
 
     it('replaces 13-digit millisecond timestamps with [TIMESTAMP]', () => {
@@ -33,9 +30,7 @@ describe('BUILT_IN_PATTERNS', () => {
     it('replaces a v4 UUID with [UUID]', () => {
       const { pattern, replacement } = BUILT_IN_PATTERNS['uuid']!;
       const input = 'id: 550e8400-e29b-41d4-a716-446655440000 done';
-      expect(input.replace(pattern, replacement)).toBe(
-        'id: [UUID] done'
-      );
+      expect(input.replace(pattern, replacement)).toBe('id: [UUID] done');
     });
 
     it('replaces multiple UUIDs in a single string', () => {
@@ -91,8 +86,7 @@ describe('applySanitizers', () => {
   });
 
   it('applies multiple built-in sanitizers in sequence', () => {
-    const input =
-      'id: 550e8400-e29b-41d4-a716-446655440000 ts: 1700000000 end';
+    const input = 'id: 550e8400-e29b-41d4-a716-446655440000 ts: 1700000000 end';
     const result = applySanitizers(input, ['uuid', 'timestamp']);
     expect(result).toBe('id: [UUID] ts: [TIMESTAMP] end');
   });
@@ -100,8 +94,12 @@ describe('applySanitizers', () => {
   it('silently skips an unknown built-in sanitizer name', () => {
     const input = 'hello world';
     // No error thrown, string unchanged
-    expect(() => applySanitizers(input, ['not-a-real-sanitizer' as 'timestamp'])).not.toThrow();
-    expect(applySanitizers(input, ['not-a-real-sanitizer' as 'timestamp'])).toBe(input);
+    expect(() =>
+      applySanitizers(input, ['not-a-real-sanitizer' as 'timestamp'])
+    ).not.toThrow();
+    expect(
+      applySanitizers(input, ['not-a-real-sanitizer' as 'timestamp'])
+    ).toBe(input);
   });
 
   it('applies a custom regex sanitizer with a string pattern', () => {
@@ -171,16 +169,16 @@ describe('applySanitizers', () => {
   });
 
   it('applies multiple sanitizers in order (regex then field removal)', () => {
-    const obj = { token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0In0.abc123', name: 'Carol' };
+    const obj = {
+      token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0In0.abc123',
+      name: 'Carol',
+    };
     // Start with a JSON string containing a JWT, then strip the token field
     let input = JSON.stringify(obj, null, 2);
 
     // First sanitizer: replace JWTs in the raw text
     // Second sanitizer: remove the token field entirely
-    const result = applySanitizers(input, [
-      'jwt',
-      { remove: ['token'] },
-    ]);
+    const result = applySanitizers(input, ['jwt', { remove: ['token'] }]);
 
     const parsed = JSON.parse(result) as Record<string, unknown>;
     expect(parsed).not.toHaveProperty('token');
