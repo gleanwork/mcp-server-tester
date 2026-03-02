@@ -215,7 +215,7 @@ Use conventional commits: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore
 
 Supported `LLMProvider` values for `llmHostConfig.provider` (defined in `src/evals/llmHost/llmHostTypes.ts`):
 
-`'openai' | 'anthropic' | 'azure' | 'google' | 'mistral' | 'ollama' | 'deepseek' | 'openrouter' | 'xai'`
+`'openai' | 'anthropic' | 'azure' | 'google' | 'mistral' | 'deepseek' | 'openrouter' | 'xai' | 'vertex-anthropic'`
 
 To add a new provider:
 
