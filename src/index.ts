@@ -143,6 +143,12 @@ export type {
 export { createMCPFixture } from './mcp/fixtures/mcpFixture.js';
 export { test, expect } from './fixtures/mcp.js';
 
+// Auth fixtures — re-exported from main path for convenience.
+// The auth `test` is aliased to avoid a name collision with the MCP `test` above.
+// Use `mcpAuthTest` when you need to extend auth fixtures (e.g., base.extend<MCPAuthFixtures>).
+export type { MCPAuthFixtures } from './fixtures/mcpAuth.js';
+export { test as mcpAuthTest } from './fixtures/mcpAuth.js';
+
 // Canonical Types (single source of truth)
 export type {
   ResultSource,
