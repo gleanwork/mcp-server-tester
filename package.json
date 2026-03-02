@@ -65,7 +65,7 @@
     "prepublishOnly": "npm run build",
     "preview-reporter": "tsx scripts/preview-reporter.ts",
     "test": "vitest run",
-    "test:all": "pnpm build && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test",
+    "test:all": "npm run build && npm run format:check && npm run lint && npm run typecheck && npm test",
     "test:playwright": "playwright test",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"

@@ -155,7 +155,7 @@ The framework is built to help users write Playwright tests for MCP servers. Usi
 
 ### Why Vitest for unit tests?
 
-Playwright's test runner is process-heavy and starts real browser workers. Unit tests for pure logic (validators, config parsing, OAuth utilities) don't need that overhead. Vitest's ESM-native, watch-friendly runner is a better fit, and it supports the same `expect` assertions. The two test runners co-exist: `pnpm test` runs Vitest, `pnpm run test:playwright` runs Playwright.
+Playwright's test runner is process-heavy and starts real browser workers. Unit tests for pure logic (validators, config parsing, OAuth utilities) don't need that overhead. Vitest's ESM-native, watch-friendly runner is a better fit, and it supports the same `expect` assertions. The two test runners co-exist: `npm test` runs Vitest, `npm run test:playwright` runs Playwright.
 
 ### Why two modes (direct vs. llm_host)?
 
