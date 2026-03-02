@@ -90,10 +90,18 @@ function applySanitizers(
 
     // Handle regex sanitizers
     if (isRegexSanitizer(sanitizer)) {
-      const pattern =
-        sanitizer.pattern instanceof RegExp
-          ? sanitizer.pattern
-          : new RegExp(sanitizer.pattern, 'g');
+      let pattern: RegExp;
+      if (sanitizer.pattern instanceof RegExp) {
+        pattern = sanitizer.pattern;
+      } else {
+        try {
+          pattern = new RegExp(sanitizer.pattern, 'g');
+        } catch {
+          throw new Error(
+            `toMatchToolSnapshot: invalid regex pattern "${sanitizer.pattern}" in sanitizer`
+          );
+        }
+      }
       const replacement = sanitizer.replacement ?? '[SANITIZED]';
       result = result.replace(pattern, replacement);
       continue;

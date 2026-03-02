@@ -53,6 +53,9 @@ function partialMatch(
         v as Record<string, unknown>
       );
     }
+    // Key order in nested objects is handled by recursion — this branch only
+    // reaches leaf primitives (strings, numbers, booleans, null) and arrays,
+    // where JSON.stringify comparison is correct.
     return JSON.stringify(actualVal) === JSON.stringify(v);
   });
 }

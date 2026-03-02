@@ -59,6 +59,16 @@ describe('validateToolCalls', () => {
     expect(v.pass).toBe(false);
   });
 
+  it('argument matching is not sensitive to key declaration order', () => {
+    // actual call has keys in { a, b } order; expected spec declares them as { b, a }
+    // partialMatch recurses into nested objects so key order never reaches JSON.stringify
+    const result = makeResult([{ name: 'search', arguments: { a: 1, b: 2 } }]);
+    const v = validateToolCalls(result, {
+      calls: [{ name: 'search', arguments: { b: 2, a: 1 } }],
+    });
+    expect(v.pass).toBe(true);
+  });
+
   it('enforces strict order when order is strict', () => {
     const result = makeResult([{ name: 'search' }, { name: 'fetch' }]);
     const v = validateToolCalls(result, {

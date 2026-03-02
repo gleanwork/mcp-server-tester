@@ -185,14 +185,12 @@ describe('applySanitizers', () => {
     expect(parsed.name).toBe('Carol');
   });
 
-  it('does not crash on an invalid regex string (documents current behavior)', () => {
-    // The implementation wraps the string pattern with `new RegExp(pattern, 'g')`.
-    // An invalid regex string will throw a SyntaxError at construction time,
-    // which is NOT currently caught by applySanitizers.
-    // This test documents the existing gap: callers must supply valid patterns.
+  it('throws a descriptive error for an invalid regex string', () => {
+    // The implementation wraps new RegExp() in a try/catch and re-throws
+    // with a clear message so callers know which pattern caused the problem.
     expect(() =>
       applySanitizers('some input', [{ pattern: '[invalid regex' }])
-    ).toThrow(SyntaxError);
+    ).toThrow(/invalid regex pattern/);
   });
 
   it('returns the string unchanged when the sanitizers array is empty', () => {
