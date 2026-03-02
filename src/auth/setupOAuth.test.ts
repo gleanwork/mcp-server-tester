@@ -9,9 +9,9 @@ const mocks = vi.hoisted(() => {
     fill: vi.fn().mockResolvedValue(undefined),
     click: vi.fn().mockResolvedValue(undefined),
     waitForURL: vi.fn().mockResolvedValue(undefined),
-    url: vi.fn().mockReturnValue(
-      'http://localhost:3000/oauth/callback?code=testcode'
-    ),
+    url: vi
+      .fn()
+      .mockReturnValue('http://localhost:3000/oauth/callback?code=testcode'),
   };
 
   const context = {
@@ -65,7 +65,9 @@ import {
 } from './setupOAuth.js';
 import type { OAuthSetupConfig } from './types.js';
 
-function makeConfig(overrides: Partial<OAuthSetupConfig> = {}): OAuthSetupConfig {
+function makeConfig(
+  overrides: Partial<OAuthSetupConfig> = {}
+): OAuthSetupConfig {
   return {
     authServerUrl: 'https://auth.example.com',
     scopes: ['mcp:read', 'mcp:write'],
@@ -117,7 +119,9 @@ describe('setupOAuth', () => {
     mocks.chromiumLaunch.mockResolvedValue(mocks.browser);
     mocks.discoverAuthorizationServerMetadata.mockResolvedValue(mockMetadata);
     mocks.startAuthorization.mockResolvedValue({
-      authorizationUrl: new URL('https://auth.example.com/authorize?client_id=test'),
+      authorizationUrl: new URL(
+        'https://auth.example.com/authorize?client_id=test'
+      ),
       codeVerifier: 'test-code-verifier',
     });
     mocks.exchangeAuthorization.mockResolvedValue(mockTokens);
@@ -173,9 +177,7 @@ describe('setupOAuth', () => {
     });
 
     it('throws "No authorization code" when callback URL has no ?code param', async () => {
-      mocks.page.url.mockReturnValue(
-        'http://localhost:3000/oauth/callback'
-      );
+      mocks.page.url.mockReturnValue('http://localhost:3000/oauth/callback');
 
       await expect(performOAuthSetup(makeConfig())).rejects.toThrow(
         'No authorization code in callback URL'
@@ -284,9 +286,7 @@ describe('setupOAuth', () => {
       expect(state.tokens.expiresAt).toBeGreaterThanOrEqual(
         before + 3600 * 1000
       );
-      expect(state.tokens.expiresAt).toBeLessThanOrEqual(
-        after + 3600 * 1000
-      );
+      expect(state.tokens.expiresAt).toBeLessThanOrEqual(after + 3600 * 1000);
     });
 
     it('sets expiresAt to undefined when token response has no expires_in', async () => {
@@ -313,7 +313,9 @@ describe('setupOAuth', () => {
         savedAt: Date.now(),
       });
 
-      const result = await hasValidOAuthState('playwright/.auth/oauth-state.json');
+      const result = await hasValidOAuthState(
+        'playwright/.auth/oauth-state.json'
+      );
 
       expect(result).toBe(true);
     });
@@ -323,7 +325,9 @@ describe('setupOAuth', () => {
       error.code = 'ENOENT';
       mocks.loadOAuthState.mockRejectedValue(error);
 
-      const result = await hasValidOAuthState('playwright/.auth/oauth-state.json');
+      const result = await hasValidOAuthState(
+        'playwright/.auth/oauth-state.json'
+      );
 
       expect(result).toBe(false);
     });
@@ -337,7 +341,9 @@ describe('setupOAuth', () => {
         savedAt: Date.now(),
       });
 
-      const result = await hasValidOAuthState('playwright/.auth/oauth-state.json');
+      const result = await hasValidOAuthState(
+        'playwright/.auth/oauth-state.json'
+      );
 
       expect(result).toBe(false);
     });
@@ -347,7 +353,9 @@ describe('setupOAuth', () => {
         savedAt: Date.now(),
       });
 
-      const result = await hasValidOAuthState('playwright/.auth/oauth-state.json');
+      const result = await hasValidOAuthState(
+        'playwright/.auth/oauth-state.json'
+      );
 
       expect(result).toBe(false);
     });
@@ -362,7 +370,9 @@ describe('setupOAuth', () => {
         savedAt: Date.now(),
       });
 
-      const result = await hasValidOAuthState('playwright/.auth/oauth-state.json');
+      const result = await hasValidOAuthState(
+        'playwright/.auth/oauth-state.json'
+      );
 
       expect(result).toBe(false);
     });
@@ -377,7 +387,9 @@ describe('setupOAuth', () => {
         savedAt: Date.now(),
       });
 
-      const result = await hasValidOAuthState('playwright/.auth/oauth-state.json');
+      const result = await hasValidOAuthState(
+        'playwright/.auth/oauth-state.json'
+      );
 
       expect(result).toBe(false);
     });
@@ -391,7 +403,9 @@ describe('setupOAuth', () => {
         savedAt: Date.now(),
       });
 
-      const result = await hasValidOAuthState('playwright/.auth/oauth-state.json');
+      const result = await hasValidOAuthState(
+        'playwright/.auth/oauth-state.json'
+      );
 
       expect(result).toBe(true);
     });
@@ -422,7 +436,9 @@ describe('setupOAuth', () => {
         savedAt: Date.now(),
       });
 
-      const result = await hasValidOAuthState('playwright/.auth/oauth-state.json');
+      const result = await hasValidOAuthState(
+        'playwright/.auth/oauth-state.json'
+      );
 
       expect(result).toBe(false);
     });
@@ -430,7 +446,9 @@ describe('setupOAuth', () => {
     it('returns false when state is null (loadOAuthState returns null)', async () => {
       mocks.loadOAuthState.mockResolvedValue(null);
 
-      const result = await hasValidOAuthState('playwright/.auth/oauth-state.json');
+      const result = await hasValidOAuthState(
+        'playwright/.auth/oauth-state.json'
+      );
 
       expect(result).toBe(false);
     });
@@ -438,7 +456,9 @@ describe('setupOAuth', () => {
     it('returns false when any unexpected error is thrown', async () => {
       mocks.loadOAuthState.mockRejectedValue(new Error('Unexpected I/O error'));
 
-      const result = await hasValidOAuthState('playwright/.auth/oauth-state.json');
+      const result = await hasValidOAuthState(
+        'playwright/.auth/oauth-state.json'
+      );
 
       expect(result).toBe(false);
     });
