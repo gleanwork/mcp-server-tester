@@ -706,6 +706,24 @@ describe('runEvalDataset concurrency', () => {
     const result = await runEvalDataset({ dataset }, createContext());
     expect(result.total).toBe(2);
   });
+
+  it('runs all cases without skipping indices when concurrency > 1', async () => {
+    // Regression test for runWithConcurrency: verifies that the `index++`
+    // read-modify-write assigns a unique slot to every task and no results are
+    // dropped or overwritten when multiple workers interleave at await points.
+    const dataset = createDataset(
+      Array.from({ length: 20 }, (_, i) => createEvalCase({ id: `case-${i}` }))
+    );
+
+    const result = await runEvalDataset(
+      { dataset, concurrency: 8 },
+      createContext()
+    );
+
+    // All 20 cases must be present — none skipped or overwritten
+    expect(result.caseResults).toHaveLength(20);
+    expect(result.total).toBe(20);
+  });
 });
 
 describe('runEvalDataset', () => {

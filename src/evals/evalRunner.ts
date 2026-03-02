@@ -568,10 +568,12 @@ async function runSingleIteration(
 function isInfrastructureError(err: unknown): boolean {
   let name: string | undefined;
   let msg: string;
+  let code: string = '';
 
   if (err instanceof Error) {
     name = err.name;
     msg = err.message.toLowerCase();
+    code = ((err as NodeJS.ErrnoException).code ?? '').toLowerCase();
   } else if (typeof err === 'string') {
     msg = err.toLowerCase();
   } else {
@@ -586,7 +588,10 @@ function isInfrastructureError(err: unknown): boolean {
     msg.includes('rate limit') ||
     msg.includes('429') ||
     msg.includes('503') ||
-    msg.includes('network')
+    msg.includes('network') ||
+    code.includes('econnreset') ||
+    code.includes('etimedout') ||
+    code.includes('econnrefused')
   );
 }
 
@@ -702,6 +707,9 @@ async function runWithConcurrency<T>(
   let index = 0;
 
   async function worker() {
+    // `index++` is safe here: JavaScript's event loop is single-threaded, so the
+    // read-modify-write of `index` completes atomically before any `await` yields
+    // to another worker. Each worker captures a unique `i` before awaiting the task.
     while (index < tasks.length) {
       const i = index++;
       results[i] = await tasks[i]!();
