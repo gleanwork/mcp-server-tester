@@ -223,8 +223,12 @@ export async function createMCPClientForConfig(
         : undefined
     );
   } else if (isHttpConfig(validatedConfig)) {
-    // Build headers, including static token auth if configured and no authProvider
-    const headers: Record<string, string> = { ...validatedConfig.headers };
+    // Build headers, including static token auth if configured and no authProvider.
+    // User-provided headers take precedence over defaults (spread order).
+    const headers: Record<string, string> = {
+      'User-Agent': `@gleanwork/mcp-server-tester/${packageJson.version}`,
+      ...validatedConfig.headers,
+    };
 
     // If using client credentials grant, fetch a token first
     if (validatedConfig.auth?.clientCredentials && !options?.authProvider) {

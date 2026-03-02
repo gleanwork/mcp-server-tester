@@ -215,7 +215,13 @@ describe('clientFactory', () => {
         expect(mocks.MockClient).toHaveBeenCalled();
         expect(mocks.MockStreamableHTTPClientTransport).toHaveBeenCalledWith(
           new URL('http://localhost:3000/mcp'),
-          { requestInit: undefined }
+          {
+            requestInit: {
+              headers: {
+                'User-Agent': `@gleanwork/mcp-server-tester/${packageJson.version}`,
+              },
+            },
+          }
         );
         expect(mocks.mockConnect).toHaveBeenCalled();
       });
@@ -237,6 +243,7 @@ describe('clientFactory', () => {
           {
             requestInit: {
               headers: {
+                'User-Agent': `@gleanwork/mcp-server-tester/${packageJson.version}`,
                 Authorization: 'Bearer token123',
                 'X-Custom-Header': 'value',
               },
