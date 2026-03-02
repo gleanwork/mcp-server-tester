@@ -722,6 +722,26 @@ loginSelectors: {
 }
 ```
 
+## Extending OAuth Test Fixtures
+
+When you need to add custom test fixtures on top of the auth-aware `mcpAuthTest`, import it from the top-level package and extend it:
+
+```typescript
+import { mcpAuthTest as base } from '@gleanwork/mcp-server-tester';
+
+export const test = base.extend<{ myFixture: MyType }>({
+  myFixture: async ({ mcp }, use) => {
+    // mcp is already auth-configured
+    await use(createMyFixture(mcp));
+  },
+});
+```
+
+**When to use `mcpAuthTest` vs `test`:**
+
+- Use the regular `test` (imported from `@gleanwork/mcp-server-tester`) when your server uses static token auth, no auth, or client credentials — these are configured directly in `playwright.config.ts` via the `mcpConfig.auth` field.
+- Use `mcpAuthTest` when your server uses interactive OAuth (browser-based) and you need the full OAuth fixture context — it is pre-configured to load the stored OAuth state from your `authStatePath`.
+
 ## Next Steps
 
 - See [Transport Configuration](./transports.md) for server connection options
