@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef } from 'react';
+import { X } from 'lucide-react';
 import type { EvalCaseResult } from '../../types';
+import { CollapsibleSection } from '../CollapsibleSection';
 
 /**
  * Strips ANSI escape codes from a string.
@@ -17,55 +19,64 @@ function formatResponsePreview(response: unknown): string {
   return JSON.stringify(response, null, 2);
 }
 
-interface CollapsibleSectionProps {
-  title: string;
-  defaultOpen?: boolean;
-  children: React.ReactNode;
-  badge?: React.ReactNode;
-}
-
-function CollapsibleSection({
-  title,
-  defaultOpen = true,
-  children,
-  badge,
-}: CollapsibleSectionProps) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 w-full text-left mb-2 group"
-      >
-        <svg
-          className={`h-3 w-3 text-muted-foreground transition-transform ${open ? 'rotate-90' : ''}`}
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2.5}
-            d="M9 5l7 7-7 7"
-          />
-        </svg>
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground group-hover:text-foreground transition-colors">
-          {title}
-        </h3>
-        {badge}
-      </button>
-      {open && children}
-    </div>
-  );
-}
-
 interface DetailModalProps {
   result: EvalCaseResult | null;
   onClose: () => void;
 }
 
 export function DetailModal({ result, onClose }: DetailModalProps) {
+  const modalRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<Element | null>(null);
+
+  useEffect(() => {
+    if (!result) return;
+
+    previousFocusRef.current = document.activeElement;
+    modalRef.current?.focus();
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        onClose();
+        return;
+      }
+
+      if (event.key === 'Tab') {
+        const modal = modalRef.current;
+        if (!modal) return;
+
+        const focusable = modal.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        );
+        const focusableArray = Array.from(focusable);
+        if (focusableArray.length === 0) return;
+
+        const first = focusableArray[0];
+        const last = focusableArray[focusableArray.length - 1];
+
+        if (event.shiftKey) {
+          if (document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        }
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      const prev = previousFocusRef.current;
+      if (prev instanceof HTMLElement) {
+        prev.focus();
+      }
+    };
+  }, [result, onClose]);
+
   if (!result) return null;
 
   const responseText = formatResponsePreview(result.response);
@@ -73,6 +84,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
   const hasAssertions = Object.keys(result.expectations ?? {}).length > 0;
   const hasIterations =
     result.iterationResults && result.iterationResults.length > 0;
+  const iterations = result.iterationResults!;
   const displayRate = result.assertionPassRate;
   const infraErrorRate = result.infrastructureErrorRate;
 
@@ -87,13 +99,23 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
       {/* Modal */}
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div
-          className="bg-card rounded-lg border shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+          ref={modalRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="detail-modal-title"
+          tabIndex={-1}
+          className="bg-card rounded-lg border shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col outline-none"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
           <div className="flex items-center justify-between p-6 border-b bg-muted/50">
             <div className="flex items-center gap-3 flex-wrap min-w-0">
-              <h2 className="text-xl font-semibold truncate">{result.id}</h2>
+              <h2
+                id="detail-modal-title"
+                className="text-xl font-semibold truncate"
+              >
+                {result.id}
+              </h2>
               {/* Pass/fail */}
               <span
                 className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-semibold shrink-0 ${
@@ -129,12 +151,8 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                   {(displayRate * 100).toFixed(0)}% pass rate
                   {hasIterations && (
                     <span className="text-xs opacity-70">
-                      ({result.iterationResults!.filter((r) => r.pass).length}/
-                      {
-                        result.iterationResults!.filter(
-                          (r) => !r.isInfrastructureError
-                        ).length
-                      }
+                      ({iterations.filter((r) => r.pass).length}/
+                      {iterations.filter((r) => !r.isInfrastructureError).length}
                       )
                     </span>
                   )}
@@ -147,12 +165,8 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                   {hasIterations && (
                     <span className="text-xs opacity-70">
                       (
-                      {
-                        result.iterationResults!.filter(
-                          (r) => r.isInfrastructureError
-                        ).length
-                      }
-                      /{result.iterationResults!.length})
+                      {iterations.filter((r) => r.isInfrastructureError).length}
+                      /{iterations.length})
                     </span>
                   )}
                 </span>
@@ -160,21 +174,10 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
             </div>
             <button
               onClick={onClose}
+              aria-label="Close"
               className="p-2 rounded-md hover:bg-accent transition-colors shrink-0"
             >
-              <svg
-                className="h-5 w-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
+              <X aria-hidden="true" className="w-4 h-4" />
             </button>
           </div>
 
@@ -339,7 +342,10 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                 ) : (
                   <p className="text-xs text-muted-foreground">
                     Precision: {(result.toolPrecision * 100).toFixed(0)}% ·
-                    Recall: {((result.toolRecall ?? 0) * 100).toFixed(0)}%
+                    Recall:{' '}
+                    {result.toolRecall !== undefined
+                      ? `${(result.toolRecall * 100).toFixed(0)}%`
+                      : 'N/A'}
                   </p>
                 )}
               </CollapsibleSection>
@@ -378,7 +384,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                       </tr>
                     </thead>
                     <tbody>
-                      {result.iterationResults!.map((iter, i) => (
+                      {iterations.map((iter, i) => (
                         <tr
                           key={i}
                           className="border-b border-border/50 last:border-0"
@@ -412,23 +418,34 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
             )}
 
             {/* Response — collapsible, collapsed by default when large */}
-            <CollapsibleSection
-              title="Raw Response"
-              defaultOpen={!isLargeResponse}
-              badge={
-                isLargeResponse ? (
-                  <span className="text-xs text-muted-foreground ml-2">
-                    {(responseText.length / 1024).toFixed(1)}KB
-                  </span>
-                ) : undefined
-              }
-            >
-              <div className="max-h-64 overflow-y-auto rounded-md bg-muted">
-                <pre className="p-4 text-xs font-mono overflow-x-auto">
-                  {responseText}
-                </pre>
-              </div>
-            </CollapsibleSection>
+            {result.response === null ? (
+              <CollapsibleSection
+                title="Raw Response"
+                defaultOpen={!isLargeResponse}
+              >
+                <p className="text-xs text-muted-foreground p-4">
+                  No response — tool call failed
+                </p>
+              </CollapsibleSection>
+            ) : (
+              <CollapsibleSection
+                title="Raw Response"
+                defaultOpen={!isLargeResponse}
+                badge={
+                  isLargeResponse ? (
+                    <span className="text-xs text-muted-foreground ml-2">
+                      {(responseText.length / 1024).toFixed(1)}KB
+                    </span>
+                  ) : undefined
+                }
+              >
+                <div className="max-h-64 overflow-y-auto rounded-md bg-muted">
+                  <pre className="p-4 text-xs font-mono overflow-x-auto">
+                    {responseText}
+                  </pre>
+                </div>
+              </CollapsibleSection>
+            )}
           </div>
         </div>
       </div>
