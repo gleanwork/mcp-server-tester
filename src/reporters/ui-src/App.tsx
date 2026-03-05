@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { createRoot } from 'react-dom/client';
 import type { MCPEvalData, EvalCaseResult } from './types';
 import { Layout } from './components/Layout';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import {
   MetricsCards,
   SourceBreakdown,
@@ -37,6 +38,9 @@ function App() {
           snapshot: 0,
           judge: 0,
           error: 0,
+          size: 0,
+          toolsTriggered: 0,
+          toolCallCount: 0,
         },
       },
       results: [],
@@ -97,10 +101,14 @@ function App() {
       >
         {/* Tab navigation — underline style, familiar from VS Code / Chrome DevTools */}
         <div className="border-b border-border px-6">
-          <nav className="-mb-px flex gap-1">
+          <nav role="tablist" aria-label="Report sections" className="-mb-px flex gap-1">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
+                role="tab"
+                id={`tab-${tab.id}`}
+                aria-selected={activeTab === tab.id}
+                aria-controls={`${tab.id}-panel`}
                 onClick={() => setActiveTab(tab.id)}
                 className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
                   activeTab === tab.id
@@ -126,108 +134,139 @@ function App() {
         </div>
 
         <div className="max-w-[1600px] mx-auto p-6 h-full flex flex-col gap-6">
-          {/* ── OVERVIEW TAB ─────────────────────────────── */}
           {activeTab === 'overview' && (
-            <>
-              {/* Combined top-line metrics */}
-              <MetricsCards results={data.runData.results} mode="overview" />
+            <div
+              role="tabpanel"
+              id="overview-panel"
+              aria-labelledby="tab-overview"
+              tabIndex={0}
+              className="contents"
+            >
+              <ErrorBoundary label="Overview tab">
+                <>
+                  {/* Combined top-line metrics */}
+                  <MetricsCards results={data.runData.results} mode="overview" />
 
-              {/* Historical trend — the most important overview signal */}
-              <TrendChart historical={data.historical} />
+                  {/* Historical trend — the most important overview signal */}
+                  <TrendChart historical={data.historical} />
 
-              {/* Side-by-side source breakdown */}
-              <SourceBreakdown results={data.runData.results} />
-            </>
+                  {/* Side-by-side source breakdown */}
+                  <SourceBreakdown results={data.runData.results} />
+                </>
+              </ErrorBoundary>
+            </div>
           )}
 
-          {/* ── EVALS TAB ────────────────────────────────── */}
           {activeTab === 'evals' && (
-            <>
-              {/* Eval-specific metrics: accuracy, tool discovery, regressions */}
-              <MetricsCards results={evalResults} mode="eval" />
+            <div
+              role="tabpanel"
+              id="evals-panel"
+              aria-labelledby="tab-evals"
+              tabIndex={0}
+              className="contents"
+            >
+              <ErrorBoundary label="Evals tab">
+                <>
+                  {/* Eval-specific metrics: accuracy, tool discovery, regressions */}
+                  <MetricsCards results={evalResults} mode="eval" />
 
-              {/* Diagnostic panels with shared toggle above */}
-              <div className="space-y-2">
-                <button
-                  onClick={() => setEvalDetailsExpanded((v) => !v)}
-                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  {evalDetailsExpanded ? (
-                    <ChevronDown className="w-3.5 h-3.5" />
-                  ) : (
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  )}
-                  {evalDetailsExpanded ? 'Hide details' : 'Show details'}
-                </button>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-                  <FailureBreakdown
-                    results={evalResults}
-                    isExpanded={evalDetailsExpanded}
-                  />
-                  <ByToolTable
-                    results={evalResults}
-                    isExpanded={evalDetailsExpanded}
-                  />
-                </div>
-              </div>
+                  {/* Diagnostic panels with shared toggle above */}
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => setEvalDetailsExpanded((v) => !v)}
+                      aria-expanded={evalDetailsExpanded}
+                      aria-controls="eval-details-grid"
+                      className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      {evalDetailsExpanded ? (
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      ) : (
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      )}
+                      {evalDetailsExpanded ? 'Hide details' : 'Show details'}
+                    </button>
+                    <div id="eval-details-grid" className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                      <FailureBreakdown
+                        results={evalResults}
+                        isExpanded={evalDetailsExpanded}
+                      />
+                      <ByToolTable
+                        results={evalResults}
+                        isExpanded={evalDetailsExpanded}
+                      />
+                    </div>
+                  </div>
 
-              {/* Eval results table */}
-              <div className="rounded-lg border bg-card shadow-sm overflow-hidden flex-1 min-h-0">
-                <ResultsTable
-                  results={evalResults}
-                  onSelectResult={setSelectedResult}
-                  defaultSource="eval"
-                />
-              </div>
-            </>
+                  {/* Eval results table */}
+                  <div className="rounded-lg border bg-card shadow-sm overflow-hidden flex-1 min-h-0">
+                    <ResultsTable
+                      results={evalResults}
+                      onSelectResult={setSelectedResult}
+                      defaultSource="eval"
+                    />
+                  </div>
+                </>
+              </ErrorBoundary>
+            </div>
           )}
 
-          {/* ── TESTS TAB ────────────────────────────────── */}
           {activeTab === 'tests' && (
-            <>
-              {/* Test suite pass/fail summary */}
-              <MetricsCards results={testResults} mode="test" />
+            <div
+              role="tabpanel"
+              id="tests-panel"
+              aria-labelledby="tab-tests"
+              tabIndex={0}
+              className="contents"
+            >
+              <ErrorBoundary label="Tests tab">
+                <>
+                  {/* Test suite pass/fail summary */}
+                  <MetricsCards results={testResults} mode="test" />
 
-              {/* Conformance + server capabilities with shared toggle above */}
-              {(hasConformanceChecks || hasServerCapabilities) && (
-                <div className="space-y-2">
-                  <button
-                    onClick={() => setTestDetailsExpanded((v) => !v)}
-                    className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    {testDetailsExpanded ? (
-                      <ChevronDown className="w-3.5 h-3.5" />
-                    ) : (
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    )}
-                    {testDetailsExpanded ? 'Hide details' : 'Show details'}
-                  </button>
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-                    {hasConformanceChecks && (
-                      <ConformancePanel
-                        conformanceChecks={data.runData.conformanceChecks!}
-                        isExpanded={testDetailsExpanded}
-                      />
-                    )}
-                    {hasServerCapabilities && (
-                      <ServerCapabilities
-                        serverCapabilities={data.runData.serverCapabilities!}
-                        isExpanded={testDetailsExpanded}
-                      />
-                    )}
+                  {/* Conformance + server capabilities with shared toggle above */}
+                  {(hasConformanceChecks || hasServerCapabilities) && (
+                    <div className="space-y-2">
+                      <button
+                        onClick={() => setTestDetailsExpanded((v) => !v)}
+                        aria-expanded={testDetailsExpanded}
+                        aria-controls="test-details-grid"
+                        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        {testDetailsExpanded ? (
+                          <ChevronDown className="w-3.5 h-3.5" />
+                        ) : (
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        )}
+                        {testDetailsExpanded ? 'Hide details' : 'Show details'}
+                      </button>
+                      <div id="test-details-grid" className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                        {hasConformanceChecks && (
+                          <ConformancePanel
+                            conformanceChecks={data.runData.conformanceChecks!}
+                            isExpanded={testDetailsExpanded}
+                          />
+                        )}
+                        {hasServerCapabilities && (
+                          <ServerCapabilities
+                            serverCapabilities={data.runData.serverCapabilities!}
+                            isExpanded={testDetailsExpanded}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Test results table */}
+                  <div className="rounded-lg border bg-card shadow-sm overflow-hidden flex-1 min-h-0">
+                    <ResultsTable
+                      results={testResults}
+                      onSelectResult={setSelectedResult}
+                      defaultSource="test"
+                    />
                   </div>
-                </div>
-              )}
-
-              {/* Test results table */}
-              <div className="rounded-lg border bg-card shadow-sm overflow-hidden flex-1 min-h-0">
-                <ResultsTable
-                  results={testResults}
-                  onSelectResult={setSelectedResult}
-                  defaultSource="test"
-                />
-              </div>
-            </>
+                </>
+              </ErrorBoundary>
+            </div>
           )}
         </div>
       </Layout>
