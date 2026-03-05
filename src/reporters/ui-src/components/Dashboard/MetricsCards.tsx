@@ -286,7 +286,9 @@ function SourceBreakdownCard({
               <span className="text-xs text-muted-foreground uppercase">
                 Avg Accuracy
               </span>
-              <span className={`font-bold ${rateColorClass(metrics.avgAccuracy)}`}>
+              <span
+                className={`font-bold ${rateColorClass(metrics.avgAccuracy)}`}
+              >
                 {(metrics.avgAccuracy * 100).toFixed(1)}%
               </span>
             </div>
