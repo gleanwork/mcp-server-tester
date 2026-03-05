@@ -98,7 +98,6 @@ const mockData: MCPEvalData = {
         pass: true,
         baselinePass: false,
         assertionPassRate: 0.8,
-        accuracy: 0.8,
         infrastructureErrorRate: 0,
         iterationResults: [
           { pass: true, durationMs: 289 },
@@ -128,7 +127,6 @@ const mockData: MCPEvalData = {
         source: 'eval',
         pass: true,
         assertionPassRate: 1.0,
-        accuracy: 1.0,
         infrastructureErrorRate: 0.2,
         infrastructureErrorCount: 1,
         iterationResults: [
@@ -299,7 +297,6 @@ const mockData: MCPEvalData = {
         toolPrecision: 1.0,
         toolRecall: 1.0,
         assertionPassRate: 0.9,
-        accuracy: 0.9,
         infrastructureErrorRate: 0,
         iterationResults: [
           { pass: true, durationMs: 1100 },

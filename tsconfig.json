@@ -28,6 +28,6 @@
 
     "types": ["node", "@playwright/test", "vitest/globals"]
   },
-  "include": ["src/**/*", "tests/**/*"],
+  "include": ["src/**/*", "tests/**/*", "scripts/**/*"],
   "exclude": ["node_modules", "dist", "build", "src/reporters/ui-src"]
 }
