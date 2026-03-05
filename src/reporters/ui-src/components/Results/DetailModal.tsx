@@ -45,7 +45,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
         if (!modal) return;
 
         const focusable = modal.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
         );
         const focusableArray = Array.from(focusable);
         if (focusableArray.length === 0) return;
@@ -152,7 +152,10 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                   {hasIterations && (
                     <span className="text-xs opacity-70">
                       ({iterations.filter((r) => r.pass).length}/
-                      {iterations.filter((r) => !r.isInfrastructureError).length}
+                      {
+                        iterations.filter((r) => !r.isInfrastructureError)
+                          .length
+                      }
                       )
                     </span>
                   )}
