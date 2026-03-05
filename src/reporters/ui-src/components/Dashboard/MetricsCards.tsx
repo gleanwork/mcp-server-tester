@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { BarChart3, FlaskConical } from 'lucide-react';
 import type { EvalCaseResult } from '../../types';
+import { rateColorClass } from '../../utils';
 
 interface MetricsCardsProps {
   results: EvalCaseResult[];
@@ -95,12 +96,7 @@ export function MetricsCards({
   );
   const showEvalCards = mode === 'eval';
 
-  const passRateColor =
-    overall.passRate >= 0.8
-      ? 'text-green-600 dark:text-green-400'
-      : overall.passRate >= 0.6
-        ? 'text-amber-600 dark:text-amber-400'
-        : 'text-red-600 dark:text-red-400';
+  const passRateColor = rateColorClass(overall.passRate);
 
   return (
     <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border bg-card px-4 py-3 shadow-sm">
@@ -139,13 +135,7 @@ export function MetricsCards({
           <Divider />
           <div className="flex items-baseline gap-1.5 text-sm">
             <span
-              className={`font-semibold tabular-nums ${
-                overall.avgAccuracy >= 0.8
-                  ? 'text-green-600 dark:text-green-400'
-                  : overall.avgAccuracy >= 0.6
-                    ? 'text-amber-600 dark:text-amber-400'
-                    : 'text-red-600 dark:text-red-400'
-              }`}
+              className={`font-semibold tabular-nums ${rateColorClass(overall.avgAccuracy)}`}
             >
               {(overall.avgAccuracy * 100).toFixed(1)}%
             </span>
@@ -162,13 +152,7 @@ export function MetricsCards({
           <Divider />
           <div className="flex items-baseline gap-1.5 text-sm">
             <span
-              className={`font-semibold tabular-nums ${
-                toolDiscovery.meanRecall >= 0.8
-                  ? 'text-green-600 dark:text-green-400'
-                  : toolDiscovery.meanRecall >= 0.6
-                    ? 'text-amber-600 dark:text-amber-400'
-                    : 'text-red-600 dark:text-red-400'
-              }`}
+              className={`font-semibold tabular-nums ${rateColorClass(toolDiscovery.meanRecall)}`}
             >
               {(toolDiscovery.meanRecall * 100).toFixed(0)}%
             </span>
@@ -293,13 +277,7 @@ function SourceBreakdownCard({
             <span className="text-xs text-muted-foreground uppercase">
               Pass Rate
             </span>
-            <span
-              className={`font-bold ${
-                metrics.passRate >= 0.8
-                  ? 'text-green-600 dark:text-green-400'
-                  : 'text-red-600 dark:text-red-400'
-              }`}
-            >
+            <span className={`font-bold ${rateColorClass(metrics.passRate)}`}>
               {(metrics.passRate * 100).toFixed(1)}%
             </span>
           </div>
@@ -308,15 +286,7 @@ function SourceBreakdownCard({
               <span className="text-xs text-muted-foreground uppercase">
                 Avg Accuracy
               </span>
-              <span
-                className={`font-bold ${
-                  metrics.avgAccuracy >= 0.8
-                    ? 'text-green-600 dark:text-green-400'
-                    : metrics.avgAccuracy >= 0.6
-                      ? 'text-amber-600 dark:text-amber-400'
-                      : 'text-red-600 dark:text-red-400'
-                }`}
-              >
+              <span className={`font-bold ${rateColorClass(metrics.avgAccuracy)}`}>
                 {(metrics.avgAccuracy * 100).toFixed(1)}%
               </span>
             </div>

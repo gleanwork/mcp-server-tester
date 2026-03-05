@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { BarChart3 } from 'lucide-react';
 import type { EvalCaseResult } from '../../types';
+import { rateColorClass, formatMs } from '../../utils';
 
 interface ToolStats {
   toolName: string;
@@ -62,17 +63,6 @@ function computeByTool(results: EvalCaseResult[]): ToolStats[] {
   }
 
   return stats.sort((a, b) => a.passRate - b.passRate);
-}
-
-function passRateColor(rate: number): string {
-  if (rate >= 0.8) return 'text-green-600 dark:text-green-400';
-  if (rate < 0.6) return 'text-red-600 dark:text-red-400';
-  return 'text-amber-600 dark:text-amber-400';
-}
-
-function formatMs(ms: number): string {
-  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${Math.round(ms)}ms`;
 }
 
 function formatRatio(value: number | null): string {
@@ -153,7 +143,7 @@ export function ByToolTable({
                     {stat.cases}
                   </td>
                   <td
-                    className={`px-4 py-3 text-right font-semibold ${passRateColor(stat.passRate)}`}
+                    className={`px-4 py-3 text-right font-semibold ${rateColorClass(stat.passRate)}`}
                   >
                     {(stat.passRate * 100).toFixed(1)}%
                   </td>
