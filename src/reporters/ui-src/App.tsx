@@ -101,7 +101,11 @@ function App() {
       >
         {/* Tab navigation — underline style, familiar from VS Code / Chrome DevTools */}
         <div className="border-b border-border px-6">
-          <nav role="tablist" aria-label="Report sections" className="-mb-px flex gap-1">
+          <nav
+            role="tablist"
+            aria-label="Report sections"
+            className="-mb-px flex gap-1"
+          >
             {tabs.map((tab) => (
               <button
                 key={tab.id}
@@ -145,7 +149,10 @@ function App() {
               <ErrorBoundary label="Overview tab">
                 <>
                   {/* Combined top-line metrics */}
-                  <MetricsCards results={data.runData.results} mode="overview" />
+                  <MetricsCards
+                    results={data.runData.results}
+                    mode="overview"
+                  />
 
                   {/* Historical trend — the most important overview signal */}
                   <TrendChart historical={data.historical} />
@@ -185,7 +192,10 @@ function App() {
                       )}
                       {evalDetailsExpanded ? 'Hide details' : 'Show details'}
                     </button>
-                    <div id="eval-details-grid" className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                    <div
+                      id="eval-details-grid"
+                      className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start"
+                    >
                       <FailureBreakdown
                         results={evalResults}
                         isExpanded={evalDetailsExpanded}
@@ -239,7 +249,10 @@ function App() {
                         )}
                         {testDetailsExpanded ? 'Hide details' : 'Show details'}
                       </button>
-                      <div id="test-details-grid" className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                      <div
+                        id="test-details-grid"
+                        className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start"
+                      >
                         {hasConformanceChecks && (
                           <ConformancePanel
                             conformanceChecks={data.runData.conformanceChecks!}
@@ -248,7 +261,9 @@ function App() {
                         )}
                         {hasServerCapabilities && (
                           <ServerCapabilities
-                            serverCapabilities={data.runData.serverCapabilities!}
+                            serverCapabilities={
+                              data.runData.serverCapabilities!
+                            }
                             isExpanded={testDetailsExpanded}
                           />
                         )}
