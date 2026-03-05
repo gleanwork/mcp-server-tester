@@ -62,7 +62,9 @@ function CustomTooltip({ active, payload, label }: CustomTooltipPayload) {
   return (
     <div className="rounded-lg border bg-card p-3 shadow-sm text-sm">
       <p className="font-medium text-foreground mb-1">{label}</p>
-      <p className="text-green-600 dark:text-green-400">Pass Rate: {data.value}%</p>
+      <p className="text-green-600 dark:text-green-400">
+        Pass Rate: {data.value}%
+      </p>
       <p className="text-muted-foreground">
         {data.passed} / {data.total} passed
       </p>
@@ -84,7 +86,7 @@ export function TrendChart({ historical }: TrendChartProps) {
         passed: h.passed,
         total: h.total,
       })),
-    [historical],
+    [historical]
   );
 
   if (chartData.length < 2) {
@@ -97,7 +99,11 @@ export function TrendChart({ historical }: TrendChartProps) {
       : 'No historical data';
 
   return (
-    <div className="rounded-lg border bg-card p-4 shadow-sm" role="img" aria-label={trendSummary}>
+    <div
+      className="rounded-lg border bg-card p-4 shadow-sm"
+      role="img"
+      aria-label={trendSummary}
+    >
       <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
         Pass Rate Trend
       </span>
