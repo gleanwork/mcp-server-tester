@@ -86,7 +86,11 @@ export function TrendChart({ historical }: TrendChartProps) {
             data={chartData}
             margin={{ top: 4, right: 16, left: 0, bottom: 0 }}
           >
-            <CartesianGrid strokeDasharray="3 3" stroke="currentColor" strokeOpacity={0.1} />
+            <CartesianGrid
+              strokeDasharray="3 3"
+              stroke="currentColor"
+              strokeOpacity={0.1}
+            />
             <XAxis
               dataKey="date"
               tick={{ fontSize: 12 }}

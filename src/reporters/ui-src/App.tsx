@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { createRoot } from 'react-dom/client';
 import type { MCPEvalData, EvalCaseResult } from './types';
 import { Layout } from './components/Layout';
@@ -6,13 +7,17 @@ import {
   MetricsCards,
   SourceBreakdown,
 } from './components/Dashboard/MetricsCards';
+import { ByToolTable } from './components/Dashboard/ByToolTable';
+import { FailureBreakdown } from './components/Dashboard/FailureBreakdown';
+import { TrendChart } from './components/Dashboard/TrendChart';
 import { ResultsTable } from './components/Results/ResultsTable';
 import { DetailModal } from './components/Results/DetailModal';
 import { ConformancePanel } from './components/Conformance/ConformancePanel';
 import { ServerCapabilities } from './components/ServerInfo/ServerCapabilities';
 
+type Tab = 'overview' | 'evals' | 'tests';
+
 function App() {
-  const [serverInfoExpanded, setServerInfoExpanded] = useState(false);
   const data: MCPEvalData = window.MCP_EVAL_DATA || {
     runData: {
       timestamp: new Date().toISOString(),
@@ -39,15 +44,49 @@ function App() {
     historical: [],
   };
 
+  const evalResults = useMemo(
+    () => data.runData.results.filter((r) => r.source === 'eval'),
+    [data.runData.results]
+  );
+
+  const testResults = useMemo(
+    () => data.runData.results.filter((r) => r.source === 'test'),
+    [data.runData.results]
+  );
+
+  // Default to Tests if present (simpler → complex), then Evals, then Overview
+  const defaultTab: Tab =
+    testResults.length > 0
+      ? 'tests'
+      : evalResults.length > 0
+        ? 'evals'
+        : 'overview';
+
+  const [activeTab, setActiveTab] = useState<Tab>(defaultTab);
   const [selectedResult, setSelectedResult] = useState<EvalCaseResult | null>(
     null
   );
+  // Shared expand/collapse state for each tab's detail panels
+  const [evalDetailsExpanded, setEvalDetailsExpanded] = useState(true);
+  const [testDetailsExpanded, setTestDetailsExpanded] = useState(false);
 
+  const hasEvals = evalResults.length > 0;
+  const hasTests = testResults.length > 0;
   const hasConformanceChecks =
     data.runData.conformanceChecks && data.runData.conformanceChecks.length > 0;
   const hasServerCapabilities =
     data.runData.serverCapabilities &&
     data.runData.serverCapabilities.length > 0;
+
+  const tabs: { id: Tab; label: string; count?: number }[] = [
+    { id: 'overview', label: 'Overview' },
+    ...(hasTests
+      ? [{ id: 'tests' as Tab, label: 'Tests', count: testResults.length }]
+      : []),
+    ...(hasEvals
+      ? [{ id: 'evals' as Tab, label: 'Evals', count: evalResults.length }]
+      : []),
+  ];
 
   return (
     <>
@@ -56,44 +95,143 @@ function App() {
         platform={data.runData.environment.platform}
         durationMs={data.runData.durationMs}
       >
-        <div className="max-w-[1600px] mx-auto p-6 h-full flex flex-col gap-6">
-          {/* Overall Summary */}
-          <MetricsCards results={data.runData.results} />
+        {/* Tab navigation — underline style, familiar from VS Code / Chrome DevTools */}
+        <div className="border-b border-border px-6">
+          <nav className="-mb-px flex gap-1">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === tab.id
+                    ? 'border-primary text-foreground'
+                    : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'
+                }`}
+              >
+                {tab.label}
+                {tab.count !== undefined && (
+                  <span
+                    className={`inline-flex items-center justify-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                      activeTab === tab.id
+                        ? 'bg-primary/10 text-primary'
+                        : 'bg-muted text-muted-foreground'
+                    }`}
+                  >
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            ))}
+          </nav>
+        </div>
 
-          {/* Conformance Checks and Server Capabilities */}
-          {(hasConformanceChecks || hasServerCapabilities) && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-              {hasConformanceChecks && (
-                <ConformancePanel
-                  conformanceChecks={data.runData.conformanceChecks!}
-                  isExpanded={serverInfoExpanded}
-                  onToggle={() => setServerInfoExpanded(!serverInfoExpanded)}
-                />
-              )}
-              {hasServerCapabilities && (
-                <ServerCapabilities
-                  serverCapabilities={data.runData.serverCapabilities!}
-                  isExpanded={serverInfoExpanded}
-                  onToggle={() => setServerInfoExpanded(!serverInfoExpanded)}
-                />
-              )}
-            </div>
+        <div className="max-w-[1600px] mx-auto p-6 h-full flex flex-col gap-6">
+          {/* ── OVERVIEW TAB ─────────────────────────────── */}
+          {activeTab === 'overview' && (
+            <>
+              {/* Combined top-line metrics */}
+              <MetricsCards results={data.runData.results} mode="overview" />
+
+              {/* Historical trend — the most important overview signal */}
+              <TrendChart historical={data.historical} />
+
+              {/* Side-by-side source breakdown */}
+              <SourceBreakdown results={data.runData.results} />
+            </>
           )}
 
-          {/* Breakdown by Source */}
-          <SourceBreakdown results={data.runData.results} />
+          {/* ── EVALS TAB ────────────────────────────────── */}
+          {activeTab === 'evals' && (
+            <>
+              {/* Eval-specific metrics: accuracy, tool discovery, regressions */}
+              <MetricsCards results={evalResults} mode="eval" />
 
-          {/* Results Table */}
-          <div className="rounded-lg border bg-card shadow-sm overflow-hidden flex-1 min-h-0">
-            <ResultsTable
-              results={data.runData.results}
-              onSelectResult={setSelectedResult}
-            />
-          </div>
+              {/* Diagnostic panels with shared toggle above */}
+              <div className="space-y-2">
+                <button
+                  onClick={() => setEvalDetailsExpanded((v) => !v)}
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  {evalDetailsExpanded ? (
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  ) : (
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  )}
+                  {evalDetailsExpanded ? 'Hide details' : 'Show details'}
+                </button>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                  <FailureBreakdown
+                    results={evalResults}
+                    isExpanded={evalDetailsExpanded}
+                  />
+                  <ByToolTable
+                    results={evalResults}
+                    isExpanded={evalDetailsExpanded}
+                  />
+                </div>
+              </div>
+
+              {/* Eval results table */}
+              <div className="rounded-lg border bg-card shadow-sm overflow-hidden flex-1 min-h-0">
+                <ResultsTable
+                  results={evalResults}
+                  onSelectResult={setSelectedResult}
+                  defaultSource="eval"
+                />
+              </div>
+            </>
+          )}
+
+          {/* ── TESTS TAB ────────────────────────────────── */}
+          {activeTab === 'tests' && (
+            <>
+              {/* Test suite pass/fail summary */}
+              <MetricsCards results={testResults} mode="test" />
+
+              {/* Conformance + server capabilities with shared toggle above */}
+              {(hasConformanceChecks || hasServerCapabilities) && (
+                <div className="space-y-2">
+                  <button
+                    onClick={() => setTestDetailsExpanded((v) => !v)}
+                    className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {testDetailsExpanded ? (
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    ) : (
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    )}
+                    {testDetailsExpanded ? 'Hide details' : 'Show details'}
+                  </button>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                    {hasConformanceChecks && (
+                      <ConformancePanel
+                        conformanceChecks={data.runData.conformanceChecks!}
+                        isExpanded={testDetailsExpanded}
+                      />
+                    )}
+                    {hasServerCapabilities && (
+                      <ServerCapabilities
+                        serverCapabilities={data.runData.serverCapabilities!}
+                        isExpanded={testDetailsExpanded}
+                      />
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Test results table */}
+              <div className="rounded-lg border bg-card shadow-sm overflow-hidden flex-1 min-h-0">
+                <ResultsTable
+                  results={testResults}
+                  onSelectResult={setSelectedResult}
+                  defaultSource="test"
+                />
+              </div>
+            </>
+          )}
         </div>
       </Layout>
 
-      {/* Detail Modal */}
       <DetailModal
         result={selectedResult}
         onClose={() => setSelectedResult(null)}
@@ -102,7 +240,6 @@ function App() {
   );
 }
 
-// Initialize React app
 const root = document.getElementById('root');
 if (root) {
   createRoot(root).render(<App />);

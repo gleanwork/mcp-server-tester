@@ -1,11 +1,10 @@
 import React, { useMemo } from 'react';
-import { Wrench, ChevronDown, ChevronRight } from 'lucide-react';
+import { Wrench } from 'lucide-react';
 import type { MCPServerCapabilitiesData } from '../../types';
 
 interface ServerCapabilitiesProps {
   serverCapabilities: MCPServerCapabilitiesData[];
   isExpanded: boolean;
-  onToggle: () => void;
 }
 
 interface ToolInfo {
@@ -16,21 +15,16 @@ interface ToolInfo {
 export function ServerCapabilities({
   serverCapabilities,
   isExpanded,
-  onToggle,
 }: ServerCapabilitiesProps) {
-  // Deduplicate tools across all capability reports
   const uniqueTools = useMemo(() => {
     const toolMap = new Map<string, ToolInfo>();
-
     for (const cap of serverCapabilities) {
       for (const tool of cap.tools) {
-        // Keep the first description we find for each tool
         if (!toolMap.has(tool.name)) {
           toolMap.set(tool.name, tool);
         }
       }
     }
-
     return Array.from(toolMap.values()).sort((a, b) =>
       a.name.localeCompare(b.name)
     );
@@ -42,18 +36,9 @@ export function ServerCapabilities({
 
   return (
     <div className="rounded-lg border bg-card shadow-sm overflow-hidden">
-      {/* Header - Clickable */}
-      <button
-        onClick={onToggle}
-        className="w-full px-4 py-3 border-b bg-blue-500/10 border-blue-500/20 hover:bg-blue-500/15 transition-colors"
-      >
+      <div className="px-4 py-3 border-b bg-blue-500/10 border-blue-500/20">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            {isExpanded ? (
-              <ChevronDown className="w-4 h-4 text-muted-foreground" />
-            ) : (
-              <ChevronRight className="w-4 h-4 text-muted-foreground" />
-            )}
             <Wrench className="w-5 h-5 text-blue-600 dark:text-blue-400" />
             <h3 className="font-semibold">Server Capabilities</h3>
           </div>
@@ -61,9 +46,8 @@ export function ServerCapabilities({
             {uniqueTools.length} tools available
           </span>
         </div>
-      </button>
+      </div>
 
-      {/* Tools List - Collapsible with fixed height */}
       {isExpanded && (
         <div className="divide-y divide-border max-h-72 overflow-y-auto">
           {uniqueTools.map((tool) => (

@@ -4,6 +4,8 @@ import type { EvalCaseResult } from '../../types';
 
 interface MetricsCardsProps {
   results: EvalCaseResult[];
+  /** Controls which supplemental cards appear. 'overview' = totals only; 'eval' = accuracy + tool + regressions; 'test' = totals only */
+  mode?: 'overview' | 'eval' | 'test';
 }
 
 interface MetricsSummary {
@@ -67,7 +69,9 @@ function computeToolDiscovery(
   return { meanRecall, count: withRecall.length };
 }
 
-function computeRegressions(results: EvalCaseResult[]): RegressionMetrics | null {
+function computeRegressions(
+  results: EvalCaseResult[]
+): RegressionMetrics | null {
   const withBaseline = results.filter((r) => r.baselinePass !== undefined);
   if (withBaseline.length === 0) return null;
   const regressions = withBaseline.filter(
@@ -79,118 +83,130 @@ function computeRegressions(results: EvalCaseResult[]): RegressionMetrics | null
   return { regressions, fixes };
 }
 
-export function MetricsCards({ results }: MetricsCardsProps) {
+export function MetricsCards({
+  results,
+  mode = 'overview',
+}: MetricsCardsProps) {
   const overall = useMemo(() => computeMetrics(results), [results]);
   const toolDiscovery = useMemo(() => computeToolDiscovery(results), [results]);
-  const regressionMetrics = useMemo(() => computeRegressions(results), [results]);
-  const showAccuracy = overall.avgAccuracy !== undefined;
-
-  const extraCards =
-    (showAccuracy ? 1 : 0) +
-    (toolDiscovery !== null ? 1 : 0) +
-    (regressionMetrics !== null ? 1 : 0);
-  const totalCols = 4 + extraCards;
-
-  return (
-    <div
-      className={`grid grid-cols-2 gap-4 lg:grid-cols-${totalCols}`}
-    >
-      <MetricCard
-        title="Pass Rate"
-        value={`${(overall.passRate * 100).toFixed(1)}%`}
-        variant={overall.passRate >= 0.8 ? 'success' : 'error'}
-      />
-      {showAccuracy && (
-        <MetricCard
-          title="Avg LLM Accuracy"
-          value={`${(overall.avgAccuracy! * 100).toFixed(1)}%`}
-          subtitle={`${overall.totalIterations} iterations`}
-          variant={
-            overall.avgAccuracy! >= 0.8
-              ? 'success'
-              : overall.avgAccuracy! >= 0.6
-                ? 'warning'
-                : 'error'
-          }
-        />
-      )}
-      {toolDiscovery !== null && (
-        <MetricCard
-          title="Tool Discovery Rate"
-          value={`${(toolDiscovery.meanRecall * 100).toFixed(1)}%`}
-          subtitle="avg recall across llm_host cases"
-          variant={
-            toolDiscovery.meanRecall >= 0.8
-              ? 'success'
-              : toolDiscovery.meanRecall >= 0.6
-                ? 'warning'
-                : 'error'
-          }
-        />
-      )}
-      {regressionMetrics !== null && (
-        <RegressionCard metrics={regressionMetrics} />
-      )}
-      <MetricCard
-        title="Total Cases"
-        value={overall.total.toString()}
-        subtitle={
-          overall.totalIterations && overall.totalIterations > overall.total
-            ? `${overall.totalIterations} runs`
-            : undefined
-        }
-        variant="neutral"
-      />
-      <MetricCard
-        title="Passed"
-        value={overall.passed.toString()}
-        variant="success"
-      />
-      <MetricCard
-        title="Failed"
-        value={overall.failed.toString()}
-        variant={overall.failed === 0 ? 'neutral' : 'error'}
-      />
-    </div>
+  const regressionMetrics = useMemo(
+    () => computeRegressions(results),
+    [results]
   );
-}
+  const showEvalCards = mode === 'eval';
 
-interface RegressionCardProps {
-  metrics: RegressionMetrics;
-}
-
-function RegressionCard({ metrics }: RegressionCardProps) {
-  const hasRegressions = metrics.regressions > 0;
+  const passRateColor =
+    overall.passRate >= 0.8
+      ? 'text-green-600 dark:text-green-400'
+      : overall.passRate >= 0.6
+        ? 'text-amber-600 dark:text-amber-400'
+        : 'text-red-600 dark:text-red-400';
 
   return (
-    <div className="rounded-lg border bg-card p-6 shadow-sm hover:shadow-md transition-shadow">
-      <div className="flex flex-col">
-        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          Regressions / Fixed
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border bg-card px-4 py-3 shadow-sm">
+      {/* Pass rate — always prominent */}
+      <div className="flex items-baseline gap-1.5">
+        <span className={`text-xl font-bold tabular-nums ${passRateColor}`}>
+          {(overall.passRate * 100).toFixed(1)}%
         </span>
-        <div className="mt-2 flex flex-col gap-1">
-          <span
-            className={`text-sm font-semibold ${
-              hasRegressions
-                ? 'text-red-600 dark:text-red-400'
-                : 'text-muted-foreground'
-            }`}
-          >
-            ▼ {metrics.regressions} regression{metrics.regressions !== 1 ? 's' : ''}
-          </span>
-          <span
-            className={`text-sm font-semibold ${
-              metrics.fixes > 0
-                ? 'text-green-600 dark:text-green-400'
-                : 'text-muted-foreground'
-            }`}
-          >
-            ▲ {metrics.fixes} fixed
-          </span>
-        </div>
+        <span className="text-xs text-muted-foreground">pass rate</span>
       </div>
+
+      <Divider />
+
+      {/* Passed / Failed counts */}
+      <div className="flex items-center gap-3 text-sm">
+        <span>
+          <span className="font-semibold text-green-600 dark:text-green-400">
+            {overall.passed}
+          </span>
+          <span className="text-muted-foreground"> passed</span>
+        </span>
+        <span>
+          <span
+            className={`font-semibold ${overall.failed > 0 ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}
+          >
+            {overall.failed}
+          </span>
+          <span className="text-muted-foreground"> failed</span>
+        </span>
+        <span className="text-muted-foreground">{overall.total} total</span>
+      </div>
+
+      {/* Eval-specific stats */}
+      {showEvalCards && overall.avgAccuracy !== undefined && (
+        <>
+          <Divider />
+          <div className="flex items-baseline gap-1.5 text-sm">
+            <span
+              className={`font-semibold tabular-nums ${
+                overall.avgAccuracy >= 0.8
+                  ? 'text-green-600 dark:text-green-400'
+                  : overall.avgAccuracy >= 0.6
+                    ? 'text-amber-600 dark:text-amber-400'
+                    : 'text-red-600 dark:text-red-400'
+              }`}
+            >
+              {(overall.avgAccuracy * 100).toFixed(1)}%
+            </span>
+            <span className="text-muted-foreground">avg accuracy</span>
+            <span className="text-xs text-muted-foreground">
+              ({overall.totalIterations} iterations)
+            </span>
+          </div>
+        </>
+      )}
+
+      {showEvalCards && toolDiscovery !== null && (
+        <>
+          <Divider />
+          <div className="flex items-baseline gap-1.5 text-sm">
+            <span
+              className={`font-semibold tabular-nums ${
+                toolDiscovery.meanRecall >= 0.8
+                  ? 'text-green-600 dark:text-green-400'
+                  : toolDiscovery.meanRecall >= 0.6
+                    ? 'text-amber-600 dark:text-amber-400'
+                    : 'text-red-600 dark:text-red-400'
+              }`}
+            >
+              {(toolDiscovery.meanRecall * 100).toFixed(0)}%
+            </span>
+            <span className="text-muted-foreground">tool discovery</span>
+          </div>
+        </>
+      )}
+
+      {showEvalCards && regressionMetrics !== null && (
+        <>
+          <Divider />
+          <div className="flex items-center gap-2 text-sm">
+            {regressionMetrics.regressions > 0 && (
+              <span className="font-semibold text-red-600 dark:text-red-400">
+                ▼ {regressionMetrics.regressions} regression
+                {regressionMetrics.regressions !== 1 ? 's' : ''}
+              </span>
+            )}
+            {regressionMetrics.fixes > 0 && (
+              <span className="font-semibold text-green-600 dark:text-green-400">
+                ▲ {regressionMetrics.fixes} fixed
+              </span>
+            )}
+            {regressionMetrics.regressions === 0 &&
+              regressionMetrics.fixes === 0 && (
+                <span className="text-muted-foreground">
+                  no changes vs baseline
+                </span>
+              )}
+          </div>
+        </>
+      )}
     </div>
   );
+}
+
+function Divider() {
+  return <div className="h-4 w-px shrink-0 bg-border" />;
 }
 
 interface SourceBreakdownProps {
@@ -229,38 +245,6 @@ export function SourceBreakdown({ results }: SourceBreakdownProps) {
           accentColor="blue"
         />
       )}
-    </div>
-  );
-}
-
-interface MetricCardProps {
-  title: string;
-  value: string;
-  subtitle?: string;
-  variant: 'success' | 'error' | 'neutral' | 'warning';
-}
-
-function MetricCard({ title, value, subtitle, variant }: MetricCardProps) {
-  const colors = {
-    success: 'text-green-600 dark:text-green-400',
-    error: 'text-red-600 dark:text-red-400',
-    neutral: 'text-foreground',
-    warning: 'text-amber-600 dark:text-amber-400',
-  };
-
-  return (
-    <div className="rounded-lg border bg-card p-6 shadow-sm hover:shadow-md transition-shadow">
-      <div className="flex flex-col">
-        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          {title}
-        </span>
-        <span className={`mt-2 text-3xl font-bold ${colors[variant]}`}>
-          {value}
-        </span>
-        {subtitle && (
-          <span className="mt-1 text-xs text-muted-foreground">{subtitle}</span>
-        )}
-      </div>
     </div>
   );
 }

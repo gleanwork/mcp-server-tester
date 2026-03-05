@@ -21,10 +21,8 @@ export function Layout({
       <div className="flex h-16 items-center justify-between border-b bg-card">
         <div className="max-w-[1600px] mx-auto w-full px-6 flex items-center justify-between">
           <div className="flex items-center gap-1.5">
-            <div className="relative top-[5px]">
-              <Logo size={40} className="text-primary" />
-            </div>
-            <h1 className="text-xl font-bold">MCP Test Reporter</h1>
+            <Logo size={24} className="text-foreground" />
+            <h1 className="text-xl font-bold">MCP Server Tester</h1>
           </div>
           <div className="flex items-center gap-6">
             <div className="flex flex-col text-right">

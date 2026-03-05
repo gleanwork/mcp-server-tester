@@ -11,6 +11,8 @@ import type { EvalCaseResult } from '../../types';
 interface ResultsTableProps {
   results: EvalCaseResult[];
   onSelectResult?: (result: EvalCaseResult) => void;
+  /** Pre-select source filter tab when embedded in a parent tab */
+  defaultSource?: 'eval' | 'test';
 }
 
 interface ResultGroup {
@@ -20,10 +22,15 @@ interface ResultGroup {
   failed: number;
 }
 
-export function ResultsTable({ results, onSelectResult }: ResultsTableProps) {
+export function ResultsTable({
+  results,
+  onSelectResult,
+  defaultSource,
+}: ResultsTableProps) {
   const [filter, setFilter] = useState<'all' | 'pass' | 'fail'>('all');
+  // When embedded inside a source-specific parent tab, hide the source filter entirely
   const [sourceFilter, setSourceFilter] = useState<'all' | 'eval' | 'test'>(
-    'all'
+    defaultSource ?? 'all'
   );
   const [projectFilter, setProjectFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -150,50 +157,52 @@ export function ResultsTable({ results, onSelectResult }: ResultsTableProps) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Tabs */}
-      <div className="flex border-b bg-card">
-        <button
-          onClick={() => setSourceFilter('all')}
-          className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
-            sourceFilter === 'all'
-              ? 'border-primary text-primary'
-              : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted'
-          }`}
-        >
-          All Results
-          <span className="text-xs bg-muted px-2 py-0.5 rounded-full">
-            {results.length}
-          </span>
-        </button>
-        <button
-          onClick={() => setSourceFilter('eval')}
-          className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
-            sourceFilter === 'eval'
-              ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-              : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted'
-          }`}
-        >
-          <BarChart3 size={16} />
-          Eval Datasets
-          <span className="text-xs bg-muted px-2 py-0.5 rounded-full">
-            {evalCount}
-          </span>
-        </button>
-        <button
-          onClick={() => setSourceFilter('test')}
-          className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
-            sourceFilter === 'test'
-              ? 'border-purple-500 text-purple-600 dark:text-purple-400'
-              : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted'
-          }`}
-        >
-          <FlaskConical size={16} />
-          Test Suites
-          <span className="text-xs bg-muted px-2 py-0.5 rounded-full">
-            {testCount}
-          </span>
-        </button>
-      </div>
+      {/* Source filter tabs — hidden when parent tab already filters by source */}
+      {!defaultSource && (
+        <div className="flex border-b bg-card">
+          <button
+            onClick={() => setSourceFilter('all')}
+            className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
+              sourceFilter === 'all'
+                ? 'border-primary text-primary'
+                : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted'
+            }`}
+          >
+            All Results
+            <span className="text-xs bg-muted px-2 py-0.5 rounded-full">
+              {results.length}
+            </span>
+          </button>
+          <button
+            onClick={() => setSourceFilter('eval')}
+            className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
+              sourceFilter === 'eval'
+                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted'
+            }`}
+          >
+            <BarChart3 size={16} />
+            Eval Datasets
+            <span className="text-xs bg-muted px-2 py-0.5 rounded-full">
+              {evalCount}
+            </span>
+          </button>
+          <button
+            onClick={() => setSourceFilter('test')}
+            className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
+              sourceFilter === 'test'
+                ? 'border-purple-500 text-purple-600 dark:text-purple-400'
+                : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted'
+            }`}
+          >
+            <FlaskConical size={16} />
+            Test Suites
+            <span className="text-xs bg-muted px-2 py-0.5 rounded-full">
+              {testCount}
+            </span>
+          </button>
+        </div>
+      )}
 
       {/* Tag filter — only shown when any result has tags */}
       {allTags.length > 0 && (
@@ -351,11 +360,9 @@ export function ResultsTable({ results, onSelectResult }: ResultsTableProps) {
 
                         // Regression delta badge logic
                         const showRegressed =
-                          result.baselinePass === true &&
-                          result.pass === false;
+                          result.baselinePass === true && result.pass === false;
                         const showFixed =
-                          result.baselinePass === false &&
-                          result.pass === true;
+                          result.baselinePass === false && result.pass === true;
 
                         // Sparkline: cap at 10 dots
                         const iterDots = result.iterationResults ?? [];

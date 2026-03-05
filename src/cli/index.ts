@@ -65,7 +65,11 @@ program
 program
   .command('open')
   .description('Open the MCP eval reporter UI in your browser')
-  .option('-d, --dir <directory>', 'Report output directory', '.mcp-test-results')
+  .option(
+    '-d, --dir <directory>',
+    'Report output directory',
+    '.mcp-test-results'
+  )
   .action(open);
 
 program.parse();

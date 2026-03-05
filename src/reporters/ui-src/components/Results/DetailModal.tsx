@@ -291,61 +291,59 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
             )}
 
             {/* Tool Calls — for llm_host eval cases with tool call expectations */}
-            {result.source === 'eval' &&
-              result.toolPrecision !== undefined && (
-                <CollapsibleSection title="Tool Calls" defaultOpen={true}>
-                  {result.llmHostTrace ? (
-                    <div className="space-y-1">
-                      {result.llmHostTrace.calls.map((call, i) => (
-                        <div
-                          key={i}
-                          className={`flex items-start gap-2 text-xs p-2 rounded ${
+            {result.source === 'eval' && result.toolPrecision !== undefined && (
+              <CollapsibleSection title="Tool Calls" defaultOpen={true}>
+                {result.llmHostTrace ? (
+                  <div className="space-y-1">
+                    {result.llmHostTrace.calls.map((call, i) => (
+                      <div
+                        key={i}
+                        className={`flex items-start gap-2 text-xs p-2 rounded ${
+                          call.status === 'expected'
+                            ? 'bg-green-50 dark:bg-green-950'
+                            : 'bg-red-50 dark:bg-red-950'
+                        }`}
+                      >
+                        <span
+                          className={
                             call.status === 'expected'
-                              ? 'bg-green-50 dark:bg-green-950'
-                              : 'bg-red-50 dark:bg-red-950'
-                          }`}
+                              ? 'text-green-600'
+                              : 'text-red-600'
+                          }
                         >
-                          <span
-                            className={
-                              call.status === 'expected'
-                                ? 'text-green-600'
-                                : 'text-red-600'
-                            }
-                          >
-                            {call.status === 'expected' ? '✓' : '✗'}
-                          </span>
-                          <span className="font-mono font-medium">
-                            {call.name}
-                          </span>
-                          <span className="text-muted-foreground truncate">
-                            {JSON.stringify(call.arguments).substring(0, 80)}
-                          </span>
-                        </div>
-                      ))}
-                      {result.llmHostTrace.missed.map((missed, i) => (
-                        <div
-                          key={`missed-${i}`}
-                          className="flex items-center gap-2 text-xs p-2 rounded bg-yellow-50 dark:bg-yellow-950"
-                        >
-                          <span className="text-yellow-600">○</span>
-                          <span className="font-mono font-medium text-muted-foreground line-through">
-                            {missed.name}
-                          </span>
-                          <span className="text-muted-foreground">
-                            not called
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">
-                      Precision: {(result.toolPrecision * 100).toFixed(0)}% ·
-                      Recall:{' '}
-                      {((result.toolRecall ?? 0) * 100).toFixed(0)}%
-                    </p>
-                  )}
-                </CollapsibleSection>
-              )}
+                          {call.status === 'expected' ? '✓' : '✗'}
+                        </span>
+                        <span className="font-mono font-medium">
+                          {call.name}
+                        </span>
+                        <span className="text-muted-foreground truncate">
+                          {JSON.stringify(call.arguments).substring(0, 80)}
+                        </span>
+                      </div>
+                    ))}
+                    {result.llmHostTrace.missed.map((missed, i) => (
+                      <div
+                        key={`missed-${i}`}
+                        className="flex items-center gap-2 text-xs p-2 rounded bg-yellow-50 dark:bg-yellow-950"
+                      >
+                        <span className="text-yellow-600">○</span>
+                        <span className="font-mono font-medium text-muted-foreground line-through">
+                          {missed.name}
+                        </span>
+                        <span className="text-muted-foreground">
+                          not called
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Precision: {(result.toolPrecision * 100).toFixed(0)}% ·
+                    Recall: {((result.toolRecall ?? 0) * 100).toFixed(0)}%
+                  </p>
+                )}
+              </CollapsibleSection>
+            )}
 
             {/* Iterations breakdown — for multi-iteration cases */}
             {hasIterations && (
