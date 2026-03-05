@@ -21,6 +21,7 @@ export function Logo({
       className={className}
       fill="none"
       style={{ overflow: 'visible' }}
+      aria-hidden="true"
     >
       <path
         d="M25 97.8528L92.8823 29.9706C102.255 20.598 117.451 20.598 126.823 29.9706V29.9706C136.196 39.3431 136.196 54.5391 126.823 63.9117L75.5581 115.177"
