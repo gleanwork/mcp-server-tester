@@ -32,7 +32,11 @@ interface ResultRowProps {
   showProjectBadge: boolean;
 }
 
-function ResultRow({ result, onSelectResult, showProjectBadge }: ResultRowProps) {
+function ResultRow({
+  result,
+  onSelectResult,
+  showProjectBadge,
+}: ResultRowProps) {
   const source = result.source || 'eval';
   const isEval = source === 'eval';
 
@@ -127,9 +131,7 @@ function ResultRow({ result, onSelectResult, showProjectBadge }: ResultRowProps)
               {iter.isInfrastructureError ? '○' : '●'}
             </span>
           ))}
-          {hasMore && (
-            <span className="text-muted-foreground text-xs">+</span>
-          )}
+          {hasMore && <span className="text-muted-foreground text-xs">+</span>}
         </span>
       )}
 
@@ -281,7 +283,15 @@ export function ResultsTable({
     }
 
     return filtered;
-  }, [results, filter, sourceFilter, projectFilter, searchQuery, selectedTags, searchIndex]);
+  }, [
+    results,
+    filter,
+    sourceFilter,
+    projectFilter,
+    searchQuery,
+    selectedTags,
+    searchIndex,
+  ]);
 
   const groupedResults = useMemo(() => {
     const groups = new Map<string, EvalCaseResult[]>();
