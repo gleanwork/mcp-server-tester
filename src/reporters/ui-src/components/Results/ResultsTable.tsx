@@ -22,13 +22,175 @@ interface ResultGroup {
   failed: number;
 }
 
+function formatMs(ms: number): string {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms.toFixed(0)}ms`;
+}
+
+interface ResultRowProps {
+  result: EvalCaseResult;
+  onSelectResult?: (result: EvalCaseResult) => void;
+  showProjectBadge: boolean;
+}
+
+function ResultRow({ result, onSelectResult, showProjectBadge }: ResultRowProps) {
+  const source = result.source || 'eval';
+  const isEval = source === 'eval';
+
+  const showRegressed = result.baselinePass === true && result.pass === false;
+  const showFixed = result.baselinePass === false && result.pass === true;
+
+  const iterDots = result.iterationResults ?? [];
+  const cappedDots = iterDots.slice(0, 10);
+  const hasMore = iterDots.length > 10;
+
+  const ariaLabel = `${result.toolName ? result.toolName + ': ' : ''}${result.id}, ${result.pass ? 'passed' : 'failed'}`;
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key === 'Enter') {
+      onSelectResult?.(result);
+    } else if (event.key === ' ') {
+      event.preventDefault();
+      onSelectResult?.(result);
+    }
+  }
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      aria-label={ariaLabel}
+      onClick={() => onSelectResult?.(result)}
+      onKeyDown={handleKeyDown}
+      className={`flex items-center gap-4 px-4 py-3 border-b cursor-pointer hover:bg-accent/50 transition-colors ${
+        isEval
+          ? 'border-l-4 border-l-blue-500/30 bg-blue-500/5'
+          : 'border-l-4 border-l-purple-500/30 bg-purple-500/5'
+      }`}
+    >
+      <span
+        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold shrink-0 ${
+          result.pass
+            ? 'bg-green-500/20 text-green-700 dark:text-green-400'
+            : 'bg-red-500/20 text-red-700 dark:text-red-400'
+        }`}
+      >
+        {result.pass ? '✓ Pass' : '✗ Fail'}
+      </span>
+
+      {showRegressed && (
+        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold shrink-0 bg-red-500/15 text-red-700 dark:text-red-400">
+          ▼ regressed
+        </span>
+      )}
+      {showFixed && (
+        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold shrink-0 bg-green-500/15 text-green-700 dark:text-green-400">
+          ▲ fixed
+        </span>
+      )}
+
+      {result.assertionPassRate !== undefined && (
+        <span
+          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold shrink-0 ${
+            result.assertionPassRate >= 0.8
+              ? 'bg-green-500/15 text-green-700 dark:text-green-400'
+              : result.assertionPassRate >= 0.5
+                ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                : 'bg-red-500/15 text-red-700 dark:text-red-400'
+          }`}
+          title={`${result.iterationResults?.filter((r) => r.pass).length ?? '?'}/${result.iterationResults?.length ?? '?'} iterations passed`}
+        >
+          {(result.assertionPassRate * 100).toFixed(0)}%
+          <span className="opacity-60 font-normal">
+            {result.iterationResults
+              ? ` ${result.iterationResults.filter((r) => r.pass).length}/${result.iterationResults.length}`
+              : ''}
+          </span>
+        </span>
+      )}
+
+      {iterDots.length > 0 && (
+        <span
+          className="inline-flex items-center gap-0.5 shrink-0 font-mono text-sm"
+          title={`${iterDots.length} iterations`}
+        >
+          {cappedDots.map((iter, i) => (
+            <span
+              key={i}
+              className={
+                iter.isInfrastructureError
+                  ? 'text-gray-400'
+                  : iter.pass
+                    ? 'text-green-500'
+                    : 'text-red-500'
+              }
+            >
+              {iter.isInfrastructureError ? '○' : '●'}
+            </span>
+          ))}
+          {hasMore && (
+            <span className="text-muted-foreground text-xs">+</span>
+          )}
+        </span>
+      )}
+
+      {result.toolPrecision !== undefined && (
+        <span
+          className="inline-flex items-center px-2 py-0.5 rounded text-xs shrink-0 bg-muted text-muted-foreground"
+          title="Tool precision: fraction of tool calls that were expected"
+        >
+          P: {(result.toolPrecision * 100).toFixed(0)}%
+        </span>
+      )}
+      {result.toolRecall !== undefined && (
+        <span
+          className="inline-flex items-center px-2 py-0.5 rounded text-xs shrink-0 bg-muted text-muted-foreground"
+          title="Tool recall: fraction of required tools that were called"
+        >
+          R: {(result.toolRecall * 100).toFixed(0)}%
+        </span>
+      )}
+
+      <span className="shrink-0">
+        {isEval ? (
+          <BarChart3
+            size={16}
+            className="text-blue-600 dark:text-blue-400"
+            title="Eval Dataset"
+          />
+        ) : (
+          <FlaskConical
+            size={16}
+            className="text-purple-600 dark:text-purple-400"
+            title="Test Suite"
+          />
+        )}
+      </span>
+
+      <span className="flex-1 text-sm font-medium truncate">{result.id}</span>
+
+      <code className="text-xs bg-muted px-2 py-1 rounded shrink-0">
+        {result.toolName}
+      </code>
+
+      {showProjectBadge && result.project && (
+        <span className="px-2 py-0.5 text-xs rounded shrink-0 bg-slate-500/20 text-slate-700 dark:text-slate-400">
+          {result.project}
+        </span>
+      )}
+
+      <span className="text-xs text-muted-foreground shrink-0 w-16 text-right">
+        {formatMs(result.durationMs)}
+      </span>
+    </div>
+  );
+}
+
 export function ResultsTable({
   results,
   onSelectResult,
   defaultSource,
 }: ResultsTableProps) {
   const [filter, setFilter] = useState<'all' | 'pass' | 'fail'>('all');
-  // When embedded inside a source-specific parent tab, hide the source filter entirely
   const [sourceFilter, setSourceFilter] = useState<'all' | 'eval' | 'test'>(
     defaultSource ?? 'all'
   );
@@ -39,7 +201,6 @@ export function ResultsTable({
   );
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
 
-  // Get unique projects from results
   const uniqueProjects = useMemo(() => {
     const projects = new Set<string>();
     for (const r of results) {
@@ -50,7 +211,6 @@ export function ResultsTable({
     return Array.from(projects).sort();
   }, [results]);
 
-  // Collect all unique tags across results
   const allTags = useMemo(() => {
     const tags = new Set<string>();
     for (const r of results) {
@@ -60,6 +220,24 @@ export function ResultsTable({
     }
     return Array.from(tags).sort();
   }, [results]);
+
+  const evalCount = useMemo(
+    () => results.filter((r) => r.source === 'eval').length,
+    [results]
+  );
+
+  const testCount = useMemo(
+    () => results.filter((r) => r.source === 'test').length,
+    [results]
+  );
+
+  const searchIndex = useMemo(
+    () =>
+      results.map((r) =>
+        (r.response != null ? JSON.stringify(r.response) : '').toLowerCase()
+      ),
+    [results]
+  );
 
   const filteredResults = useMemo(() => {
     let filtered = [...results];
@@ -79,12 +257,13 @@ export function ResultsTable({
     }
 
     if (searchQuery) {
-      const query = searchQuery.toLowerCase();
+      const lowerQuery = searchQuery.toLowerCase();
       filtered = filtered.filter((r) => {
+        const index = results.indexOf(r);
         return (
-          r.id.toLowerCase().includes(query) ||
-          r.datasetName.toLowerCase().includes(query) ||
-          JSON.stringify(r.response).toLowerCase().includes(query)
+          r.id.toLowerCase().includes(lowerQuery) ||
+          r.datasetName.toLowerCase().includes(lowerQuery) ||
+          searchIndex[index].includes(lowerQuery)
         );
       });
     }
@@ -102,7 +281,7 @@ export function ResultsTable({
     }
 
     return filtered;
-  }, [results, filter, sourceFilter, projectFilter, searchQuery, selectedTags]);
+  }, [results, filter, sourceFilter, projectFilter, searchQuery, selectedTags, searchIndex]);
 
   const groupedResults = useMemo(() => {
     const groups = new Map<string, EvalCaseResult[]>();
@@ -152,15 +331,14 @@ export function ResultsTable({
     });
   };
 
-  const evalCount = results.filter((r) => r.source === 'eval').length;
-  const testCount = results.filter((r) => r.source === 'test').length;
-
   return (
     <div className="flex flex-col h-full">
-      {/* Source filter tabs — hidden when parent tab already filters by source */}
       {!defaultSource && (
-        <div className="flex border-b bg-card">
+        <div role="tablist" className="flex border-b bg-card">
           <button
+            role="tab"
+            aria-selected={sourceFilter === 'all'}
+            aria-controls="results-list"
             onClick={() => setSourceFilter('all')}
             className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
               sourceFilter === 'all'
@@ -174,6 +352,9 @@ export function ResultsTable({
             </span>
           </button>
           <button
+            role="tab"
+            aria-selected={sourceFilter === 'eval'}
+            aria-controls="results-list"
             onClick={() => setSourceFilter('eval')}
             className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
               sourceFilter === 'eval'
@@ -188,6 +369,9 @@ export function ResultsTable({
             </span>
           </button>
           <button
+            role="tab"
+            aria-selected={sourceFilter === 'test'}
+            aria-controls="results-list"
             onClick={() => setSourceFilter('test')}
             className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
               sourceFilter === 'test'
@@ -204,7 +388,6 @@ export function ResultsTable({
         </div>
       )}
 
-      {/* Tag filter — only shown when any result has tags */}
       {allTags.length > 0 && (
         <div className="flex flex-wrap gap-2 items-center px-4 py-2 bg-card border-b">
           <span className="text-xs text-muted-foreground shrink-0">Tags:</span>
@@ -213,6 +396,7 @@ export function ResultsTable({
             return (
               <button
                 key={tag}
+                aria-pressed={isSelected}
                 onClick={() => toggleTag(tag)}
                 className={`px-2.5 py-0.5 text-xs rounded-full border transition-colors ${
                   isSelected
@@ -235,20 +419,20 @@ export function ResultsTable({
         </div>
       )}
 
-      {/* Controls */}
       <div className="flex flex-wrap gap-4 items-center p-4 bg-card border-b">
         <input
           type="text"
+          aria-label="Search results"
           placeholder="Search by case ID or response content..."
           className="flex-1 min-w-[250px] px-3 py-2 text-sm rounded-md border bg-background focus:outline-none focus:ring-2 focus:ring-ring"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
         />
-        {/* Project Filter - only show if multiple projects */}
         {uniqueProjects.length > 1 && (
           <div className="flex items-center gap-2">
             <Folder size={16} className="text-muted-foreground" />
             <select
+              aria-label="Filter by project"
               value={projectFilter}
               onChange={(e) => setProjectFilter(e.target.value)}
               className="px-3 py-2 text-sm rounded-md border bg-background focus:outline-none focus:ring-2 focus:ring-ring"
@@ -264,6 +448,7 @@ export function ResultsTable({
         )}
         <div className="flex gap-2">
           <button
+            aria-pressed={filter === 'all'}
             onClick={() => setFilter('all')}
             className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
               filter === 'all'
@@ -274,6 +459,7 @@ export function ResultsTable({
             All
           </button>
           <button
+            aria-pressed={filter === 'pass'}
             onClick={() => setFilter('pass')}
             className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
               filter === 'pass'
@@ -284,6 +470,7 @@ export function ResultsTable({
             Passed
           </button>
           <button
+            aria-pressed={filter === 'fail'}
             onClick={() => setFilter('fail')}
             className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
               filter === 'fail'
@@ -296,8 +483,7 @@ export function ResultsTable({
         </div>
       </div>
 
-      {/* Grouped Results */}
-      <div className="flex-1 overflow-y-auto scrollbar-thin">
+      <div id="results-list" className="flex-1 overflow-y-auto scrollbar-thin">
         {groupedResults.length === 0 ? (
           <div className="flex items-center justify-center h-full text-muted-foreground">
             No results found
@@ -310,7 +496,6 @@ export function ResultsTable({
 
               return (
                 <div key={group.name}>
-                  {/* Group Header */}
                   <button
                     onClick={() => toggleGroup(group.name)}
                     className="w-full flex items-center justify-between px-4 py-3 bg-muted/50 hover:bg-muted transition-colors"
@@ -351,165 +536,16 @@ export function ResultsTable({
                     </div>
                   </button>
 
-                  {/* Group Results */}
                   {!isCollapsed && (
                     <div>
-                      {group.results.map((result) => {
-                        const source = result.source || 'eval';
-                        const isEval = source === 'eval';
-
-                        // Regression delta badge logic
-                        const showRegressed =
-                          result.baselinePass === true && result.pass === false;
-                        const showFixed =
-                          result.baselinePass === false && result.pass === true;
-
-                        // Sparkline: cap at 10 dots
-                        const iterDots = result.iterationResults ?? [];
-                        const cappedDots = iterDots.slice(0, 10);
-                        const hasMore = iterDots.length > 10;
-
-                        return (
-                          <div
-                            key={result.id}
-                            onClick={() => onSelectResult?.(result)}
-                            className={`flex items-center gap-4 px-4 py-3 border-b cursor-pointer hover:bg-accent/50 transition-colors ${
-                              isEval
-                                ? 'border-l-4 border-l-blue-500/30 bg-blue-500/5'
-                                : 'border-l-4 border-l-purple-500/30 bg-purple-500/5'
-                            }`}
-                          >
-                            {/* Status */}
-                            <span
-                              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold shrink-0 ${
-                                result.pass
-                                  ? 'bg-green-500/20 text-green-700 dark:text-green-400'
-                                  : 'bg-red-500/20 text-red-700 dark:text-red-400'
-                              }`}
-                            >
-                              {result.pass ? '✓ Pass' : '✗ Fail'}
-                            </span>
-
-                            {/* Regression delta badge */}
-                            {showRegressed && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold shrink-0 bg-red-500/15 text-red-700 dark:text-red-400">
-                                ▼ regressed
-                              </span>
-                            )}
-                            {showFixed && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold shrink-0 bg-green-500/15 text-green-700 dark:text-green-400">
-                                ▲ fixed
-                              </span>
-                            )}
-
-                            {/* Accuracy badge — only for multi-iteration cases */}
-                            {result.assertionPassRate !== undefined && (
-                              <span
-                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold shrink-0 ${
-                                  result.assertionPassRate >= 0.8
-                                    ? 'bg-green-500/15 text-green-700 dark:text-green-400'
-                                    : result.assertionPassRate >= 0.5
-                                      ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
-                                      : 'bg-red-500/15 text-red-700 dark:text-red-400'
-                                }`}
-                                title={`${result.iterationResults?.filter((r) => r.pass).length ?? '?'}/${result.iterationResults?.length ?? '?'} iterations passed`}
-                              >
-                                {(result.assertionPassRate * 100).toFixed(0)}%
-                                <span className="opacity-60 font-normal">
-                                  {result.iterationResults
-                                    ? ` ${result.iterationResults.filter((r) => r.pass).length}/${result.iterationResults.length}`
-                                    : ''}
-                                </span>
-                              </span>
-                            )}
-
-                            {/* Iteration sparkline — only for multi-iteration cases */}
-                            {iterDots.length > 0 && (
-                              <span
-                                className="inline-flex items-center gap-0.5 shrink-0 font-mono text-sm"
-                                title={`${iterDots.length} iterations`}
-                              >
-                                {cappedDots.map((iter, i) => (
-                                  <span
-                                    key={i}
-                                    className={
-                                      iter.isInfrastructureError
-                                        ? 'text-gray-400'
-                                        : iter.pass
-                                          ? 'text-green-500'
-                                          : 'text-red-500'
-                                    }
-                                  >
-                                    {iter.isInfrastructureError ? '○' : '●'}
-                                  </span>
-                                ))}
-                                {hasMore && (
-                                  <span className="text-muted-foreground text-xs">
-                                    +
-                                  </span>
-                                )}
-                              </span>
-                            )}
-
-                            {/* Tool precision / recall badges */}
-                            {result.toolPrecision !== undefined && (
-                              <span
-                                className="inline-flex items-center px-2 py-0.5 rounded text-xs shrink-0 bg-muted text-muted-foreground"
-                                title="Tool precision: fraction of tool calls that were expected"
-                              >
-                                P: {(result.toolPrecision * 100).toFixed(0)}%
-                              </span>
-                            )}
-                            {result.toolRecall !== undefined && (
-                              <span
-                                className="inline-flex items-center px-2 py-0.5 rounded text-xs shrink-0 bg-muted text-muted-foreground"
-                                title="Tool recall: fraction of required tools that were called"
-                              >
-                                R: {(result.toolRecall * 100).toFixed(0)}%
-                              </span>
-                            )}
-
-                            {/* Type Icon */}
-                            <span className="shrink-0">
-                              {isEval ? (
-                                <BarChart3
-                                  size={16}
-                                  className="text-blue-600 dark:text-blue-400"
-                                  title="Eval Dataset"
-                                />
-                              ) : (
-                                <FlaskConical
-                                  size={16}
-                                  className="text-purple-600 dark:text-purple-400"
-                                  title="Test Suite"
-                                />
-                              )}
-                            </span>
-
-                            {/* Case ID */}
-                            <span className="flex-1 text-sm font-medium truncate">
-                              {result.id}
-                            </span>
-
-                            {/* Tool Name */}
-                            <code className="text-xs bg-muted px-2 py-1 rounded shrink-0">
-                              {result.toolName}
-                            </code>
-
-                            {/* Project Badge - only show if multiple projects */}
-                            {uniqueProjects.length > 1 && result.project && (
-                              <span className="px-2 py-0.5 text-xs rounded shrink-0 bg-slate-500/20 text-slate-700 dark:text-slate-400">
-                                {result.project}
-                              </span>
-                            )}
-
-                            {/* Duration */}
-                            <span className="text-xs text-muted-foreground shrink-0 w-16 text-right">
-                              {result.durationMs.toFixed(0)}ms
-                            </span>
-                          </div>
-                        );
-                      })}
+                      {group.results.map((result) => (
+                        <ResultRow
+                          key={result.id}
+                          result={result}
+                          onSelectResult={onSelectResult}
+                          showProjectBadge={uniqueProjects.length > 1}
+                        />
+                      ))}
                     </div>
                   )}
                 </div>
