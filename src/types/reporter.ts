@@ -228,7 +228,7 @@ export interface EvalCaseResult {
   /**
    * Precision of tool calls made (0–1).
    * 1.0 means every tool called was expected; <1.0 means unexpected tools were called.
-   * Only populated when exclusive: true in toolsTriggered and the expectation was evaluated.
+   * Populated whenever a `toolsTriggered` expectation is evaluated.
    */
   toolPrecision?: number;
 
