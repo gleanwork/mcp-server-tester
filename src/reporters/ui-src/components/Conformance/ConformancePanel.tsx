@@ -23,9 +23,21 @@ export function ConformancePanel({
     }))
   );
 
-  const uniqueChecks = Array.from(
-    new Map(allChecks.map((c) => [c.name, c])).values()
-  );
+  // Group checks by name and aggregate: PASS only if all occurrences pass
+  const checksByName = new Map<string, (typeof allChecks)[number][]>();
+  for (const check of allChecks) {
+    const existing = checksByName.get(check.name) ?? [];
+    existing.push(check);
+    checksByName.set(check.name, existing);
+  }
+  const uniqueChecks = [...checksByName.values()].map((group) => {
+    const allPass = group.every((c) => c.pass);
+    // Prefer the failing entry's message for context when any failed
+    const representative = allPass
+      ? group[0]
+      : (group.find((c) => !c.pass) ?? group[0]);
+    return { ...representative, pass: allPass };
+  });
 
   const allPassed = uniqueChecks.every((check) => check.pass);
   const passedCount = uniqueChecks.filter((check) => check.pass).length;
