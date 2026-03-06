@@ -89,7 +89,7 @@ Test how MCP servers are **really used** - an LLM discovers tools and decides ho
 ```typescript
 test('LLM discovers and lists directory contents', async ({ mcp }) => {
   // Simulate real MCP usage: natural language → LLM → tool calls
-  const result = await simulateLLMHost(
+  const result = await simulateMCPHost(
     mcp,
     'What files are in the docs directory?',
     { provider: 'anthropic', model: 'claude-sonnet-4-20250514', temperature: 0 }

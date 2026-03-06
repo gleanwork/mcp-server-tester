@@ -33,7 +33,7 @@ The dataset-driven evaluation engine. Key files:
 - `datasetLoader.ts` — reads and validates JSON datasets from disk.
 - `evalRunner.ts` — `runEvalDataset()` iterates cases, calls the MCP server (or the LLM host simulator), validates results against each case's expectation block, and returns `EvalRunnerResult`. Supports multi-iteration accuracy tracking and configurable concurrency.
 - `baseline.ts` — saves and loads pass/fail baselines for tracking regressions across runs.
-- `llmHost/` — LLM host simulation (see data flow below).
+- `mcpHost/` — LLM host simulation (see data flow below).
 
 ### `src/judge/`
 
@@ -98,18 +98,18 @@ EvalRunnerResult (.passed, .failed, .caseResults, .durationMs)
 HTML report (ui-dist/)
 ```
 
-### LLM Host Eval Case (mode: "llm_host")
+### LLM Host Eval Case (mode: "mcp_host")
 
 ```
-EvalCase { mode: "llm_host", scenario, llmHostConfig, expect.toolsTriggered }
-   ↓  evalRunner.ts: detects llm_host mode
-   ↓  llmHost/llmHostSimulation.ts: simulateLLMHost()
-   ↓  llmHost/adapters/vercel.ts: createVercelOrchestrator()
+EvalCase { mode: "mcp_host", scenario, mcpHostConfig, expect.toolsTriggered }
+   ↓  evalRunner.ts: detects mcp_host mode
+   ↓  mcpHost/mcpHostSimulation.ts: simulateMCPHost()
+   ↓  mcpHost/adapters/vercel.ts: createVercelOrchestrator()
       - Lists MCP tools via mcp.listTools()
       - Sends tools + scenario prompt to the configured LLM provider (via Vercel AI SDK)
       - LLM generates text and calls tools autonomously (multi-turn, up to maxSteps)
       - Each tool call is forwarded to the MCP server via mcp.callTool()
-LLMHostSimulationResult (.toolCallsMade[], .success, .finalText)
+MCPHostSimulationResult (.toolCallsMade[], .success, .finalText)
    ↓  validators/: validateToolCalls(), validateToolCallCount()
 ValidationResult
    ↓  evalRunner.ts: rolled into EvalCaseResult (with optional accuracy over N iterations)
@@ -157,7 +157,7 @@ The framework is built to help users write Playwright tests for MCP servers. Usi
 
 Playwright's test runner is process-heavy and starts real browser workers. Unit tests for pure logic (validators, config parsing, OAuth utilities) don't need that overhead. Vitest's ESM-native, watch-friendly runner is a better fit, and it supports the same `expect` assertions. The two test runners co-exist: `npm test` runs Vitest, `npm run test:playwright` runs Playwright.
 
-### Why two modes (direct vs. llm_host)?
+### Why two modes (direct vs. mcp_host)?
 
 Direct mode tests are deterministic: you specify exact inputs and assert exact outputs. They are fast, cheap, and suitable for CI regression gates. LLM host mode tests are non-deterministic: they validate whether a real LLM can discover and invoke the right tools given only natural language and the tool's description. The two modes answer different questions — direct mode validates correctness, LLM host mode validates discoverability — and they need to be run and interpreted differently (direct: once per CI run; LLM host: N iterations, measure accuracy).
 

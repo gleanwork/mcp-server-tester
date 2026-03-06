@@ -1,7 +1,7 @@
 /**
- * Types and interfaces for LLM host simulation mode
+ * Types and interfaces for MCP host simulation mode
  *
- * This module provides types for testing MCP servers through LLM hosts,
+ * This module provides types for testing MCP servers through MCP hosts,
  * validating tool descriptions, parameter clarity, and discoverability.
  */
 
@@ -41,9 +41,9 @@ export type LLMProvider =
   | 'vertex-anthropic';
 
 /**
- * Configuration for LLM host simulation
+ * Configuration for MCP host simulation
  */
-export interface LLMHostConfig {
+export interface MCPHostConfig {
   /**
    * LLM provider to use
    */
@@ -90,9 +90,9 @@ export interface LLMToolCall {
 }
 
 /**
- * Result from an LLM host simulation
+ * Result from an MCP host simulation
  */
-export interface LLMHostSimulationResult {
+export interface MCPHostSimulationResult {
   /** Whether the simulation succeeded */
   success: boolean;
 
@@ -128,24 +128,24 @@ export interface LLMHostSimulationResult {
 }
 
 /**
- * Interface for LLM host simulators.
+ * Interface for MCP host simulators.
  *
  * The only built-in implementation is the Vercel AI SDK orchestrator
- * (src/evals/llmHost/adapters/vercel.ts). Custom implementations can be
+ * (src/evals/mcpHost/adapters/vercel.ts). Custom implementations can be
  * created for specialised testing needs.
  */
-export interface LLMHostSimulator {
+export interface MCPHostSimulator {
   /**
-   * Simulates an LLM host interacting with an MCP server
+   * Simulates an MCP host interacting with an MCP server
    *
    * @param mcp - MCP fixture API
    * @param scenario - Natural language prompt describing what the LLM should do
-   * @param config - LLM host configuration
+   * @param config - MCP host configuration
    * @returns Simulation result with tool calls and response
    */
   simulate(
     mcp: MCPFixtureApi,
     scenario: string,
-    config: LLMHostConfig
-  ): Promise<LLMHostSimulationResult>;
+    config: MCPHostConfig
+  ): Promise<MCPHostSimulationResult>;
 }

@@ -341,13 +341,13 @@ describe('runEvalCase', () => {
     });
   });
 
-  describe('llm_host mode', () => {
+  describe('mcp_host mode', () => {
     it('should fail when scenario is missing', async () => {
       const context = createContext();
       const evalCase = createEvalCase({
-        mode: 'llm_host',
+        mode: 'mcp_host',
         scenario: undefined,
-        llmHostConfig: { provider: 'openai', model: 'gpt-4' },
+        mcpHostConfig: { provider: 'openai', model: 'gpt-4' },
       });
 
       const result = await runEvalCase(evalCase, context);
@@ -356,18 +356,18 @@ describe('runEvalCase', () => {
       expect(result.error).toContain('scenario is required');
     });
 
-    it('should fail when llmHostConfig is missing', async () => {
+    it('should fail when mcpHostConfig is missing', async () => {
       const context = createContext();
       const evalCase = createEvalCase({
-        mode: 'llm_host',
+        mode: 'mcp_host',
         scenario: 'test scenario',
-        llmHostConfig: undefined,
+        mcpHostConfig: undefined,
       });
 
       const result = await runEvalCase(evalCase, context);
 
       expect(result.pass).toBe(false);
-      expect(result.error).toContain('llmHostConfig is required');
+      expect(result.error).toContain('mcpHostConfig is required');
     });
   });
 });
@@ -519,7 +519,7 @@ describe('defaultJudgeReps', () => {
 
 describe('toolsTriggered and toolCallCount expectations in eval runner', () => {
   it('populates toolsTriggered expectation result when simulation result contains expected tool', async () => {
-    // callTool returns an object that itself has the LLMHostSimulationResult shape.
+    // callTool returns an object that itself has the MCPHostSimulationResult shape.
     // After the fix, response = full callTool return value, so isSimulationResult
     // checks the top-level object directly.
     const mcp = createMockMCP();
@@ -575,7 +575,7 @@ describe('toolsTriggered and toolCallCount expectations in eval runner', () => {
 
     const result = await runEvalCase(evalCase, createContext(mcp));
     expect(result.expectations.toolsTriggered?.pass).toBe(false);
-    expect(result.expectations.toolsTriggered?.details).toContain('llm_host');
+    expect(result.expectations.toolsTriggered?.details).toContain('mcp_host');
   });
 
   it('validates toolCallCount correctly from simulation result', async () => {
@@ -603,28 +603,28 @@ describe('runEvalDataset defaultLlmIterations', () => {
     return { name: 'test-dataset', cases };
   }
 
-  it('applies defaultLlmIterations to llm_host cases without explicit iterations', async () => {
+  it('applies defaultLlmIterations to mcp_host cases without explicit iterations', async () => {
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'ok' }] });
     const dataset = createDataset([
       createEvalCase({
         id: 'llm-case',
-        mode: 'llm_host',
+        mode: 'mcp_host',
         scenario: 'test scenario',
-        llmHostConfig: { provider: 'anthropic' },
+        mcpHostConfig: { provider: 'anthropic' },
         // no iterations field — should use defaultLlmIterations
       }),
     ]);
 
-    // We can't actually run llm_host mode in unit tests, so spy on the
+    // We can't actually run mcp_host mode in unit tests, so spy on the
     // executeToolCall path to verify the effective case has iterations set.
     // Instead we test via the result: if defaultLlmIterations=2 is applied,
-    // the case would run twice, but since llm_host fails without a real LLM
+    // the case would run twice, but since mcp_host fails without a real LLM
     // we just check the option is read without error and the case runs.
     const result = await runEvalDataset(
       { dataset, defaultLlmIterations: 1 },
       createContext(mcp)
     );
-    // llm_host without scenario/llmHostConfig fields fails gracefully
+    // mcp_host without scenario/mcpHostConfig fields fails gracefully
     expect(result.total).toBe(1);
   });
 
@@ -1192,7 +1192,7 @@ describe('evals guide iteration count guardrail warnings', () => {
     return { name: 'test-dataset', cases };
   }
 
-  it('warns when an llm_host case has fewer than 10 iterations (explicit)', async () => {
+  it('warns when a mcp_host case has fewer than 10 iterations (explicit)', async () => {
     const consoleSpy = vi
       .spyOn(console, 'warn')
       .mockImplementation(() => undefined);
@@ -1200,9 +1200,9 @@ describe('evals guide iteration count guardrail warnings', () => {
     const dataset = createDataset([
       createEvalCase({
         id: 'low-iter-case',
-        mode: 'llm_host',
+        mode: 'mcp_host',
         scenario: 'find something',
-        llmHostConfig: { provider: 'openai' },
+        mcpHostConfig: { provider: 'openai' },
         iterations: 3,
       }),
     ]);
@@ -1210,7 +1210,7 @@ describe('evals guide iteration count guardrail warnings', () => {
     await runEvalDataset({ dataset }, createContext());
 
     expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining('running 3 iterations in llm_host mode')
+      expect.stringContaining('running 3 iterations in mcp_host mode')
     );
     expect(consoleSpy).toHaveBeenCalledWith(
       expect.stringContaining('Consider using 10+ iterations')
@@ -1222,7 +1222,7 @@ describe('evals guide iteration count guardrail warnings', () => {
     consoleSpy.mockRestore();
   });
 
-  it('does not warn when an llm_host case uses a single iteration (default smoke-test pattern)', async () => {
+  it('does not warn when a mcp_host case uses a single iteration (default smoke-test pattern)', async () => {
     const consoleSpy = vi
       .spyOn(console, 'warn')
       .mockImplementation(() => undefined);
@@ -1230,9 +1230,9 @@ describe('evals guide iteration count guardrail warnings', () => {
     const dataset = createDataset([
       createEvalCase({
         id: 'default-iter-case',
-        mode: 'llm_host',
+        mode: 'mcp_host',
         scenario: 'find something',
-        llmHostConfig: { provider: 'openai' },
+        mcpHostConfig: { provider: 'openai' },
       }),
     ]);
 
@@ -1245,7 +1245,7 @@ describe('evals guide iteration count guardrail warnings', () => {
     consoleSpy.mockRestore();
   });
 
-  it('does not warn when an llm_host case has 10 or more iterations', async () => {
+  it('does not warn when a mcp_host case has 10 or more iterations', async () => {
     const consoleSpy = vi
       .spyOn(console, 'warn')
       .mockImplementation(() => undefined);
@@ -1253,9 +1253,9 @@ describe('evals guide iteration count guardrail warnings', () => {
     const dataset = createDataset([
       createEvalCase({
         id: 'sufficient-iter-case',
-        mode: 'llm_host',
+        mode: 'mcp_host',
         scenario: 'find something',
-        llmHostConfig: { provider: 'openai' },
+        mcpHostConfig: { provider: 'openai' },
         iterations: 10,
       }),
     ]);
@@ -1301,9 +1301,9 @@ describe('evals guide iteration count guardrail warnings', () => {
     const dataset = createDataset([
       createEvalCase({
         id: 'default-raised-case',
-        mode: 'llm_host',
+        mode: 'mcp_host',
         scenario: 'find something',
-        llmHostConfig: { provider: 'openai' },
+        mcpHostConfig: { provider: 'openai' },
         // No explicit iterations — defaultLlmIterations will apply
       }),
     ]);
@@ -1453,25 +1453,25 @@ describe('experiment metadata in EvalRunnerResult', () => {
     ).toBe(true);
   });
 
-  it('includes llmHostModel in metadata when provided', async () => {
+  it('includes mcpHostModel in metadata when provided', async () => {
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const dataset = createDataset([createEvalCase({ id: 'case-1' })]);
 
     const result = await runEvalDataset(
-      { dataset, llmHostModel: 'claude-opus-4-20250514' },
+      { dataset, mcpHostModel: 'claude-opus-4-20250514' },
       createContext(mcp)
     );
 
-    expect(result.metadata!.llmHostModel).toBe('claude-opus-4-20250514');
+    expect(result.metadata!.mcpHostModel).toBe('claude-opus-4-20250514');
   });
 
-  it('omits llmHostModel and judgeModel from metadata when not provided', async () => {
+  it('omits mcpHostModel and judgeModel from metadata when not provided', async () => {
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const dataset = createDataset([createEvalCase({ id: 'case-1' })]);
 
     const result = await runEvalDataset({ dataset }, createContext(mcp));
 
-    expect(result.metadata!.llmHostModel).toBeUndefined();
+    expect(result.metadata!.mcpHostModel).toBeUndefined();
     expect(result.metadata!.judgeModel).toBeUndefined();
   });
 });

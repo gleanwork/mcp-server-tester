@@ -9,12 +9,12 @@
  * Additional providers require their respective @ai-sdk/* packages.
  */
 import type {
-  LLMHostConfig,
-  LLMHostSimulationResult,
-  LLMHostSimulator,
+  MCPHostConfig,
+  MCPHostSimulationResult,
+  MCPHostSimulator,
   LLMProvider,
   LLMToolCall,
-} from '../llmHostTypes.js';
+} from '../mcpHostTypes.js';
 import type { MCPFixtureApi } from '../../../mcp/fixtures/mcpFixture.js';
 import { extractText } from '../../../mcp/response.js';
 
@@ -22,7 +22,7 @@ import { extractText } from '../../../mcp/response.js';
  * Classifies a raw error from the Vercel AI SDK agentic loop and returns a
  * human-readable message with an actionable hint.
  *
- * The message is always prefixed with "LLM host simulation failed: " so that
+ * The message is always prefixed with "MCP host simulation failed: " so that
  * callers see a consistent error surface regardless of which failure path was
  * hit.
  */
@@ -35,8 +35,8 @@ function enrichErrorMessage(err: unknown, provider: string): string {
     raw.includes('ERR_MODULE_NOT_FOUND')
   ) {
     return (
-      `LLM host simulation failed: required package not installed.\n` +
-      `Hint: run \`getMissingDependencyMessage('${provider}')\` or check docs/llm-host.md for install instructions.`
+      `MCP host simulation failed: required package not installed.\n` +
+      `Hint: run \`getMissingDependencyMessage('${provider}')\` or check docs/mcp-host.md for install instructions.`
     );
   }
 
@@ -48,7 +48,7 @@ function enrichErrorMessage(err: unknown, provider: string): string {
     raw.includes('api_key')
   ) {
     return (
-      `LLM host simulation failed: authentication error.\n` +
+      `MCP host simulation failed: authentication error.\n` +
       `Hint: check your API key environment variable (e.g. ANTHROPIC_API_KEY, GOOGLE_APPLICATION_CREDENTIALS).`
     );
   }
@@ -61,7 +61,7 @@ function enrichErrorMessage(err: unknown, provider: string): string {
       raw.toLowerCase().includes('not found'))
   ) {
     return (
-      `LLM host simulation failed: model not found.\n` +
+      `MCP host simulation failed: model not found.\n` +
       `Hint: check the model name format for your provider. For vertex-anthropic use 'claude-3-5-haiku@20241022' (with @).`
     );
   }
@@ -73,7 +73,7 @@ function enrichErrorMessage(err: unknown, provider: string): string {
     raw.includes('ECONNREFUSED')
   ) {
     return (
-      `LLM host simulation failed: network error.\n` +
+      `MCP host simulation failed: network error.\n` +
       `Hint: check network connectivity and whether the provider's API endpoint is reachable from this machine.`
     );
   }
@@ -85,13 +85,13 @@ function enrichErrorMessage(err: unknown, provider: string): string {
     raw.includes('Too Many Requests')
   ) {
     return (
-      `LLM host simulation failed: rate limited.\n` +
+      `MCP host simulation failed: rate limited.\n` +
       `Hint: reduce concurrency, add delays between iterations, or upgrade your API plan.`
     );
   }
 
   // Default: preserve original message with a consistent prefix
-  return `LLM host simulation failed: ${raw}`;
+  return `MCP host simulation failed: ${raw}`;
 }
 
 // Dynamic import helper bypasses TypeScript module resolution for optional peer deps.
@@ -172,18 +172,18 @@ function defaultModel(provider: LLMProvider): string {
 }
 
 /**
- * Creates a Vercel AI SDK-based LLM host simulator.
+ * Creates a Vercel AI SDK-based MCP host simulator.
  *
  * Uses generateText with stopWhen (ai v6) to handle multi-turn tool calling.
  * Produces llmDurationMs and mcpDurationMs for latency decomposition.
  */
-export function createVercelOrchestrator(): LLMHostSimulator {
+export function createVercelOrchestrator(): MCPHostSimulator {
   return {
     async simulate(
       mcp: MCPFixtureApi,
       scenario: string,
-      config: LLMHostConfig
-    ): Promise<LLMHostSimulationResult> {
+      config: MCPHostConfig
+    ): Promise<MCPHostSimulationResult> {
       try {
         const { generateText, stepCountIs } = await import('ai');
         // jsonSchema from @ai-sdk/provider-utils creates a proper Schema object

@@ -74,9 +74,9 @@ A real LLM receives your tools and a natural language scenario, then decides whi
 ```json
 {
   "id": "llm-triggers-search",
-  "mode": "llm_host",
+  "mode": "mcp_host",
   "scenario": "Find recent internal documents about the Glean MCP server",
-  "llmHostConfig": {
+  "mcpHostConfig": {
     "provider": "vertex-anthropic",
     "model": "claude-3-5-haiku@20241022"
   },
@@ -350,7 +350,7 @@ projects: [
         serverUrl: '...',
         // After adding a Glean skill to the LLM host config
       },
-      llmHostConfig: {
+      mcpHostConfig: {
         systemPromptAdditions: [
           'You have access to Glean enterprise search. Use the search tool to find internal documents, and employee_search to find people.',
         ],
@@ -391,19 +391,19 @@ Run both and compare accuracy per tool. The reporter groups results by project, 
       "id": "unique-case-id",
       "description": "Human-readable description",
 
-      "mode": "direct", // or "llm_host"
+      "mode": "direct", // or "mcp_host"
       "toolName": "search", // required for direct mode
       "args": { "query": "hello" }, // required for direct mode
 
-      // For llm_host mode instead:
+      // For mcp_host mode instead:
       "scenario": "Find recent documents about X",
-      "llmHostConfig": {
+      "mcpHostConfig": {
         "provider": "vertex-anthropic", // or "openai", "anthropic", etc.
         "model": "claude-3-5-haiku@20241022",
         "maxToolCalls": 5
       },
 
-      // Multi-iteration (mainly for llm_host):
+      // Multi-iteration (mainly for mcp_host):
       "iterations": 10, // or use defaultLlmIterations in the runner
       "accuracyThreshold": 0.8, // fraction that must pass (0–1)
 
@@ -441,7 +441,7 @@ test('my evals', async ({ mcp }, testInfo) => {
     {
       dataset,
 
-      // Apply 10 iterations to all llm_host cases
+      // Apply 10 iterations to all mcp_host cases
       // that don't specify iterations explicitly
       defaultLlmIterations: 10,
 

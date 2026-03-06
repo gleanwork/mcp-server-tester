@@ -345,7 +345,7 @@ describe('MCPReporter.buildRunData()', () => {
     });
   });
 
-  describe('sourceCounts (direct vs llm_host)', () => {
+  describe('sourceCounts (direct vs mcp_host)', () => {
     it('includes all results regardless of source type', () => {
       setResults(reporter, [
         makeResult({ pass: true, source: 'eval' }),

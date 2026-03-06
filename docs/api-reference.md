@@ -403,9 +403,9 @@ test('custom predicate', async ({ mcp }) => {
 });
 ```
 
-### `toHaveToolCalls(expectation)` (llm_host mode only)
+### `toHaveToolCalls(expectation)` (mcp_host mode only)
 
-Assert that the LLM made specific tool calls when given a natural language prompt. Only meaningful in `llm_host` mode.
+Assert that the LLM made specific tool calls when given a natural language prompt. Only meaningful in `mcp_host` mode.
 
 ```typescript
 test('tool discovery', async ({ mcp }) => {
@@ -418,9 +418,9 @@ test('tool discovery', async ({ mcp }) => {
 });
 ```
 
-### `toHaveToolCallCount(options)` (llm_host mode only)
+### `toHaveToolCallCount(options)` (mcp_host mode only)
 
-Assert that the LLM made a specific number of tool calls. Only meaningful in `llm_host` mode.
+Assert that the LLM made a specific number of tool calls. Only meaningful in `mcp_host` mode.
 
 ```typescript
 test('call count', async ({ mcp }) => {
@@ -505,7 +505,7 @@ The following utilities are available for checking whether optional LLM provider
 
 #### `isProviderAvailable(provider)`
 
-Check whether the npm package required for a given `llm_host` provider is installed in the current environment.
+Check whether the npm package required for a given `mcp_host` provider is installed in the current environment.
 
 ```typescript
 import { isProviderAvailable } from '@gleanwork/mcp-server-tester';
@@ -526,7 +526,7 @@ const message = getMissingDependencyMessage('openai');
 // e.g. "Provider 'openai' requires the 'openai' package. Run: npm install openai"
 ```
 
-See [LLM Host Guide](./llm-host.md) for full details on configuring `llm_host` mode.
+See [LLM Host Guide](./mcp-host.md) for full details on configuring `mcp_host` mode.
 
 ## Conformance Functions
 
@@ -597,7 +597,7 @@ interface EvalExpectBlock {
     minBytes?: number;
   };
   toolsTriggered?: {
-    // Tool call assertion (llm_host mode)
+    // Tool call assertion (mcp_host mode)
     calls: Array<{
       name: string;
       arguments?: Record<string, unknown>;
@@ -607,7 +607,7 @@ interface EvalExpectBlock {
     exclusive?: boolean;
   };
   toolCallCount?: {
-    // Tool call count (llm_host mode)
+    // Tool call count (mcp_host mode)
     min?: number;
     max?: number;
     exact?: number;

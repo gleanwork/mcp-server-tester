@@ -121,7 +121,7 @@ In shared or multi-user environments, consider storing tokens in a secrets manag
 
 ## "Unsupported Vercel AI SDK provider" error
 
-**Symptom:** Running an eval in `llm_host` mode fails with an error such as `Unsupported provider: google` or `Cannot find module '@ai-sdk/google'`.
+**Symptom:** Running an eval in `mcp_host` mode fails with an error such as `Unsupported provider: google` or `Cannot find module '@ai-sdk/google'`.
 
 **Cause:** LLM host providers are optional peer dependencies. The package declares them in `optionalDependencies`, but npm does not guarantee they are installed in all environments. The specific Vercel AI SDK adapter for the provider you selected is missing.
 
@@ -138,4 +138,4 @@ In shared or multi-user environments, consider storing tokens in a secrets manag
 | `openrouter` | `npm install ai @openrouter/ai-sdk-provider` |
 | `xai`        | `npm install ai @ai-sdk/xai`                 |
 
-See [docs/llm-host.md](./llm-host.md) for the full provider table and required environment variables.
+See [docs/mcp-host.md](./mcp-host.md) for the full provider table and required environment variables.

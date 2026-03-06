@@ -39,7 +39,7 @@
       "type": "object",
       "required": ["id"],
       "additionalProperties": false,
-      "description": "A single eval test case. Use 'direct' mode to call a tool explicitly; use 'llm_host' mode to drive tool selection via natural language.",
+      "description": "A single eval test case. Use 'direct' mode to call a tool explicitly; use 'mcp_host' mode to drive tool selection via natural language.",
       "properties": {
         "id": {
           "type": "string",
@@ -52,30 +52,30 @@
         },
         "mode": {
           "type": "string",
-          "enum": ["direct", "llm_host"],
+          "enum": ["direct", "mcp_host"],
           "default": "direct",
-          "description": "Evaluation mode. 'direct': explicit MCP tool call with toolName + args. 'llm_host': LLM-driven tool selection from a natural language scenario."
+          "description": "Evaluation mode. 'direct': explicit MCP tool call with toolName + args. 'mcp_host': LLM-driven tool selection from a natural language scenario."
         },
         "toolName": {
           "type": "string",
           "minLength": 1,
-          "description": "Name of the MCP tool to invoke. Required in 'direct' mode; optional in 'llm_host' mode."
+          "description": "Name of the MCP tool to invoke. Required in 'direct' mode; optional in 'mcp_host' mode."
         },
         "args": {
           "type": "object",
-          "description": "Arguments to pass to the tool. Required in 'direct' mode; optional in 'llm_host' mode.",
+          "description": "Arguments to pass to the tool. Required in 'direct' mode; optional in 'mcp_host' mode.",
           "additionalProperties": true
         },
         "scenario": {
           "type": "string",
-          "description": "Natural language prompt that the LLM host will act on. Required in 'llm_host' mode.",
+          "description": "Natural language prompt that the LLM host will act on. Required in 'mcp_host' mode.",
           "examples": [
             "Find recent docs about the Glean MCP server",
             "Who leads the developer platform team?"
           ]
         },
-        "llmHostConfig": {
-          "$ref": "#/definitions/LLMHostConfig"
+        "mcpHostConfig": {
+          "$ref": "#/definitions/MCPHostConfig"
         },
         "iterations": {
           "type": "integer",
@@ -100,11 +100,11 @@
         }
       }
     },
-    "LLMHostConfig": {
+    "MCPHostConfig": {
       "type": "object",
       "required": ["provider"],
       "additionalProperties": false,
-      "description": "Configuration for the LLM host used in 'llm_host' mode. All providers run through the Vercel AI SDK.",
+      "description": "Configuration for the LLM host used in 'mcp_host' mode. All providers run through the Vercel AI SDK.",
       "properties": {
         "provider": {
           "type": "string",
@@ -334,7 +334,7 @@
       "type": "object",
       "required": ["calls"],
       "additionalProperties": false,
-      "description": "Asserts which tools the LLM called during an 'llm_host' simulation. Only meaningful in llm_host mode. Corresponds to toHaveToolCalls().",
+      "description": "Asserts which tools the LLM called during an 'mcp_host' simulation. Only meaningful in mcp_host mode. Corresponds to toHaveToolCalls().",
       "properties": {
         "calls": {
           "type": "array",
@@ -388,7 +388,7 @@
     "ToolCallCount": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Asserts the total number of tool calls made during an 'llm_host' simulation. Only meaningful in llm_host mode. Corresponds to toHaveToolCallCount().",
+      "description": "Asserts the total number of tool calls made during an 'mcp_host' simulation. Only meaningful in mcp_host mode. Corresponds to toHaveToolCallCount().",
       "properties": {
         "min": {
           "type": "integer",

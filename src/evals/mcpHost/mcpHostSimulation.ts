@@ -1,5 +1,5 @@
 /**
- * LLM Host Simulation - Main entry point
+ * MCP Host Simulation - Main entry point
  *
  * All providers (openai, anthropic, google, azure, mistral, deepseek,
  * openrouter, xai) run through the Vercel AI SDK orchestrator, which uses
@@ -19,16 +19,16 @@
 
 import type { MCPFixtureApi } from '../../mcp/fixtures/mcpFixture.js';
 import type {
-  LLMHostConfig,
-  LLMHostSimulationResult,
-  LLMHostSimulator,
+  MCPHostConfig,
+  MCPHostSimulationResult,
+  MCPHostSimulator,
   LLMProvider,
-} from './llmHostTypes.js';
+} from './mcpHostTypes.js';
 import { createVercelOrchestrator } from './adapters/vercel.js';
 
 // Single orchestrator instance shared across all providers.
 // Each provider is dynamically imported inside the orchestrator on first use.
-const vercelOrchestrator: LLMHostSimulator = createVercelOrchestrator();
+const vercelOrchestrator: MCPHostSimulator = createVercelOrchestrator();
 
 const allProviders: LLMProvider[] = [
   'openai',
@@ -42,12 +42,12 @@ const allProviders: LLMProvider[] = [
   'vertex-anthropic',
 ];
 
-const simulatorRegistry = new Map<LLMProvider, LLMHostSimulator>(
+const simulatorRegistry = new Map<LLMProvider, MCPHostSimulator>(
   allProviders.map((p) => [p, vercelOrchestrator])
 );
 
 /**
- * Simulates an LLM host interacting with an MCP server.
+ * Simulates an MCP host interacting with an MCP server.
  *
  * The LLM chooses which tools to call based solely on their descriptions and
  * schemas, testing discoverability and parameter clarity at the level a real
@@ -59,12 +59,12 @@ const simulatorRegistry = new Map<LLMProvider, LLMHostSimulator>(
  *
  * @param mcp - MCP fixture API
  * @param scenario - Natural language prompt describing what the LLM should do
- * @param config - LLM host configuration (provider, model, temperature, etc.)
+ * @param config - MCP host configuration (provider, model, temperature, etc.)
  * @returns Simulation result with tool calls, final response, and latency data
  *
  * @example
  * ```typescript
- * const result = await simulateLLMHost(mcp,
+ * const result = await simulateMCPHost(mcp,
  *   "Find recent documents about MCP testing frameworks",
  *   { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' }
  * );
@@ -73,11 +73,11 @@ const simulatorRegistry = new Map<LLMProvider, LLMHostSimulator>(
  * expect(result.toolCalls.map(c => c.name)).toContain('search');
  * ```
  */
-export async function simulateLLMHost(
+export async function simulateMCPHost(
   mcp: MCPFixtureApi,
   scenario: string,
-  config: LLMHostConfig
-): Promise<LLMHostSimulationResult> {
+  config: MCPHostConfig
+): Promise<MCPHostSimulationResult> {
   const simulator = simulatorRegistry.get(config.provider);
   if (!simulator) {
     throw new Error(
@@ -115,7 +115,7 @@ export function getMissingDependencyMessage(provider: LLMProvider): string {
     openrouter: 'npm install ai @openrouter/ai-sdk-provider',
     xai: 'npm install ai @ai-sdk/xai',
     'vertex-anthropic':
-      'npm install ai @ai-sdk/google-vertex (requires Application Default Credentials — see docs/llm-host.md)',
+      'npm install ai @ai-sdk/google-vertex (requires Application Default Credentials — see docs/mcp-host.md)',
   };
 
   const pkg = packageMap[provider];

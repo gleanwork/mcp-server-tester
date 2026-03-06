@@ -150,9 +150,9 @@ Natural language scenarios where the LLM chooses which tool and constructs the q
 ```json
 {
   "id": "llm-count-users",
-  "mode": "llm_host",
+  "mode": "mcp_host",
   "scenario": "How many users are in the database?",
-  "llmHostConfig": {
+  "mcpHostConfig": {
     "provider": "anthropic",
     "model": "claude-sonnet-4-20250514"
   },

@@ -1,6 +1,6 @@
 # Migration: LLM Host Unified to Vercel AI SDK
 
-**Applies to:** Any code that uses `simulateLLMHost()`, imports from the old adapter layer, or extends the LLM host simulation with custom adapters.
+**Applies to:** Any code that uses `simulateMCPHost()`, imports from the old adapter layer, or extends the LLM host simulation with custom adapters.
 
 ---
 
@@ -28,12 +28,12 @@ These files no longer exist. Any imports from them will fail at build time:
 
 | Deleted file                               | Replacement                                               |
 | ------------------------------------------ | --------------------------------------------------------- |
-| `src/evals/llmHost/adapter.ts`             | No replacement — adapter layer removed                    |
-| `src/evals/llmHost/orchestrator.ts`        | Replaced by `adapters/vercel.ts` (via Vercel AI SDK)      |
-| `src/evals/llmHost/retry.ts`               | No replacement — retry handled by Vercel AI SDK internals |
-| `src/evals/llmHost/adapters/openai.ts`     | Replaced by Vercel `@ai-sdk/openai`                       |
-| `src/evals/llmHost/adapters/anthropic.ts`  | Replaced by Vercel `@ai-sdk/anthropic`                    |
-| `src/evals/llmHost/toolCallExpectation.ts` | Replaced by `expect.toolsTriggered` in eval datasets      |
+| `src/evals/mcpHost/adapter.ts`             | No replacement — adapter layer removed                    |
+| `src/evals/mcpHost/orchestrator.ts`        | Replaced by `adapters/vercel.ts` (via Vercel AI SDK)      |
+| `src/evals/mcpHost/retry.ts`               | No replacement — retry handled by Vercel AI SDK internals |
+| `src/evals/mcpHost/adapters/openai.ts`     | Replaced by Vercel `@ai-sdk/openai`                       |
+| `src/evals/mcpHost/adapters/anthropic.ts`  | Replaced by Vercel `@ai-sdk/anthropic`                    |
+| `src/evals/mcpHost/toolCallExpectation.ts` | Replaced by `expect.toolsTriggered` in eval datasets      |
 
 ---
 
@@ -68,16 +68,16 @@ The stable public API remains:
 ```typescript
 // These still work — no change needed
 import {
-  simulateLLMHost,
+  simulateMCPHost,
   isProviderAvailable,
   getMissingDependencyMessage,
 } from '@gleanwork/mcp-server-tester';
 
 import type {
   LLMProvider,
-  LLMHostConfig,
-  LLMHostSimulationResult,
-  LLMHostSimulator,
+  MCPHostConfig,
+  MCPHostSimulationResult,
+  MCPHostSimulator,
   LLMToolCall,
 } from '@gleanwork/mcp-server-tester';
 ```
@@ -115,9 +115,9 @@ The eval dataset JSON format is **unchanged**. Existing datasets continue to wor
 ```json
 {
   "id": "search-trigger",
-  "mode": "llm_host",
+  "mode": "mcp_host",
   "scenario": "Find recent docs about planning",
-  "llmHostConfig": {
+  "mcpHostConfig": {
     "provider": "anthropic",
     "model": "claude-3-5-sonnet-20241022"
   }
@@ -163,19 +163,19 @@ const myAdapter: LLMAdapter = {
 registerAdapter('my-provider', () => myAdapter);
 ```
 
-**After** — implement `LLMHostSimulator` directly. The interface is simpler because the multi-turn loop is no longer your responsibility:
+**After** — implement `MCPHostSimulator` directly. The interface is simpler because the multi-turn loop is no longer your responsibility:
 
 ```typescript
-import type { LLMHostSimulator, LLMHostSimulationResult } from '@gleanwork/mcp-server-tester';
+import type { MCPHostSimulator, MCPHostSimulationResult } from '@gleanwork/mcp-server-tester';
 
-const mySimulator: LLMHostSimulator = {
-  async simulate(mcp, scenario, config): Promise<LLMHostSimulationResult> {
+const mySimulator: MCPHostSimulator = {
+  async simulate(mcp, scenario, config): Promise<MCPHostSimulationResult> {
     // Your implementation here.
     // You are responsible for:
     //   1. Calling your LLM with the scenario and available tools
     //   2. Executing tool calls via mcp.callTool()
     //   3. Continuing until the LLM produces a final response
-    //   4. Returning the result in LLMHostSimulationResult shape
+    //   4. Returning the result in MCPHostSimulationResult shape
     return {
       success: true,
       toolCalls: [...],
@@ -188,14 +188,14 @@ const mySimulator: LLMHostSimulator = {
 const result = await mySimulator.simulate(mcp, scenario, config);
 ```
 
-If you need to make `simulateLLMHost()` dispatch to your custom simulator, you can wrap it:
+If you need to make `simulateMCPHost()` dispatch to your custom simulator, you can wrap it:
 
 ```typescript
-async function mySimulateLLMHost(mcp, scenario, config) {
+async function mySimulateMCPHost(mcp, scenario, config) {
   if (config.provider === 'my-provider') {
     return mySimulator.simulate(mcp, scenario, config);
   }
-  return simulateLLMHost(mcp, scenario, config); // default path
+  return simulateMCPHost(mcp, scenario, config); // default path
 }
 ```
 
@@ -210,9 +210,9 @@ The old `toolCallExpectation.ts` module validated tool calls via `evalCase.metad
 ```json
 {
   "id": "search-test",
-  "mode": "llm_host",
+  "mode": "mcp_host",
   "scenario": "Find recent documents",
-  "llmHostConfig": { "provider": "anthropic" },
+  "mcpHostConfig": { "provider": "anthropic" },
   "metadata": {
     "expectedToolCalls": [{ "name": "search", "required": true }]
   }
@@ -224,9 +224,9 @@ The old `toolCallExpectation.ts` module validated tool calls via `evalCase.metad
 ```json
 {
   "id": "search-test",
-  "mode": "llm_host",
+  "mode": "mcp_host",
   "scenario": "Find recent documents",
-  "llmHostConfig": { "provider": "anthropic" },
+  "mcpHostConfig": { "provider": "anthropic" },
   "expect": {
     "toolsTriggered": {
       "calls": [{ "name": "search", "required": true }],
@@ -236,7 +236,7 @@ The old `toolCallExpectation.ts` module validated tool calls via `evalCase.metad
 }
 ```
 
-The `expect.toolsTriggered` approach also supports `order: "strict"`, `exclusive: true`, and partial argument matching. See [docs/llm-host.md](../llm-host.md) for full details.
+The `expect.toolsTriggered` approach also supports `order: "strict"`, `exclusive: true`, and partial argument matching. See [docs/mcp-host.md](../mcp-host.md) for full details.
 
 ---
 
@@ -250,6 +250,6 @@ If you are an AI agent updating a codebase that depends on `@gleanwork/mcp-serve
 
 3. **Convert metadata.expectedToolCalls** — search for `expectedToolCalls` in eval dataset JSON files and convert to `expect.toolsTriggered` blocks as shown above.
 
-4. **Custom adapters** — if `LLMAdapter` was implemented, rewrite as `LLMHostSimulator` (simpler interface, no conversation loop management).
+4. **Custom adapters** — if `LLMAdapter` was implemented, rewrite as `MCPHostSimulator` (simpler interface, no conversation loop management).
 
 5. **Verify** — run `npm run typecheck` and `npm test` to confirm the migration is complete.

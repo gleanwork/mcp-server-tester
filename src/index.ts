@@ -202,19 +202,19 @@ export type {
 } from './evals/serverComparison.js';
 export { runServerComparison } from './evals/serverComparison.js';
 
-// LLM Host Simulation
+// MCP Host Simulation
 export type {
   LLMProvider,
-  LLMHostConfig,
+  MCPHostConfig,
   LLMToolCall,
-  LLMHostSimulationResult,
-  LLMHostSimulator,
-} from './evals/llmHost/index.js';
+  MCPHostSimulationResult,
+  MCPHostSimulator,
+} from './evals/mcpHost/index.js';
 export {
-  simulateLLMHost,
+  simulateMCPHost,
   isProviderAvailable,
   getMissingDependencyMessage,
-} from './evals/llmHost/index.js';
+} from './evals/mcpHost/index.js';
 
 // Judge
 export type {

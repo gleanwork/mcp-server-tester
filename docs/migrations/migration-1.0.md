@@ -67,7 +67,7 @@ grep -r "provider: 'claude'" src/ tests/
 
 ## LLM host: `'ollama'` provider removed
 
-**Affects:** Eval datasets and code that set `llmHostConfig.provider: 'ollama'`
+**Affects:** Eval datasets and code that set `mcpHostConfig.provider: 'ollama'`
 
 The `'ollama'` value was listed in the `LLMProvider` union and accepted by the schema, but the underlying `@ai-sdk/ollama` package does not exist on npm — using it always resulted in a runtime error. The entry has been removed to avoid the misleading impression that it works.
 
@@ -75,18 +75,18 @@ The `'ollama'` value was listed in the `LLMProvider` union and accepted by the s
 
 **Option 1 — Switch to a supported provider.** If you were using Ollama as a local proxy for another model, configure one of the directly-supported providers instead (`'openai'`, `'anthropic'`, `'google'`, etc.).
 
-**Option 2 — Use the community `ollama-ai-provider` package with a custom simulator.** The `ollama-ai-provider` package on npm provides a Vercel AI SDK-compatible adapter. Implement `LLMHostSimulator` and call it directly:
+**Option 2 — Use the community `ollama-ai-provider` package with a custom simulator.** The `ollama-ai-provider` package on npm provides a Vercel AI SDK-compatible adapter. Implement `MCPHostSimulator` and call it directly:
 
 ```typescript
 import { createOllama } from 'ollama-ai-provider';
 import { generateText } from 'ai';
 import type {
-  LLMHostSimulator,
-  LLMHostSimulationResult,
+  MCPHostSimulator,
+  MCPHostSimulationResult,
 } from '@gleanwork/mcp-server-tester';
 
-const ollamaSimulator: LLMHostSimulator = {
-  async simulate(mcp, scenario, config): Promise<LLMHostSimulationResult> {
+const ollamaSimulator: MCPHostSimulator = {
+  async simulate(mcp, scenario, config): Promise<MCPHostSimulationResult> {
     const ollama = createOllama({ baseURL: 'http://localhost:11434/api' });
     const tools = await mcp.listTools();
 
@@ -106,7 +106,7 @@ const ollamaSimulator: LLMHostSimulator = {
 };
 ```
 
-See [docs/llm-host.md](../llm-host.md) for the `LLMHostSimulator` interface details.
+See [docs/mcp-host.md](../mcp-host.md) for the `MCPHostSimulator` interface details.
 
 ---
 

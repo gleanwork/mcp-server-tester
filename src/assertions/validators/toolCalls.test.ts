@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { validateToolCalls, validateToolCallCount } from './toolCalls.js';
-import type { LLMHostSimulationResult } from '../../evals/llmHost/llmHostTypes.js';
+import type { MCPHostSimulationResult } from '../../evals/mcpHost/mcpHostTypes.js';
 
 function makeResult(
   toolCalls: Array<{ name: string; arguments?: Record<string, unknown> }>
-): LLMHostSimulationResult {
+): MCPHostSimulationResult {
   return {
     success: true,
     toolCalls: toolCalls.map((c) => ({ ...c, arguments: c.arguments ?? {} })),
@@ -97,12 +97,12 @@ describe('validateToolCalls', () => {
     expect(v.message).toContain('unexpected');
   });
 
-  it('returns error when response is not an LLMHostSimulationResult', () => {
+  it('returns error when response is not an MCPHostSimulationResult', () => {
     const v = validateToolCalls('not a simulation result', {
       calls: [{ name: 'search' }],
     });
     expect(v.pass).toBe(false);
-    expect(v.message).toContain('llm_host');
+    expect(v.message).toContain('mcp_host');
   });
 });
 
@@ -204,9 +204,9 @@ describe('validateToolCallCount', () => {
     expect(validateToolCallCount(result, { max: 2 }).pass).toBe(false);
   });
 
-  it('returns error when response is not an LLMHostSimulationResult', () => {
+  it('returns error when response is not an MCPHostSimulationResult', () => {
     const v = validateToolCallCount('not a simulation result', { exact: 1 });
     expect(v.pass).toBe(false);
-    expect(v.message).toContain('llm_host');
+    expect(v.message).toContain('mcp_host');
   });
 });

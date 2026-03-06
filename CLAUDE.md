@@ -81,8 +81,8 @@ if (!result.pass) console.log(result.message);
 | `toPassToolJudge(rubric, options?)`      | Response passes LLM-as-judge evaluation       |
 | `toHaveToolResponseSize(options)`        | Response size is within bounds                |
 | `toSatisfyToolPredicate(fn, desc?)`      | Response satisfies custom predicate           |
-| `toHaveToolCalls(expectation)`           | LLM called the expected tools (llm_host mode) |
-| `toHaveToolCallCount(options)`           | LLM made N tool calls (llm_host mode)         |
+| `toHaveToolCalls(expectation)`           | LLM called the expected tools (mcp_host mode) |
+| `toHaveToolCallCount(options)`           | LLM made N tool calls (mcp_host mode)         |
 
 ### Playwright Fixtures (`src/fixtures/mcp.ts`)
 
@@ -109,9 +109,9 @@ Eval cases can be run multiple times to compute accuracy (win rate):
 ```json
 {
   "id": "search-trigger",
-  "mode": "llm_host",
+  "mode": "mcp_host",
   "scenario": "Find recent docs about planning",
-  "llmHostConfig": { "provider": "anthropic" },
+  "mcpHostConfig": { "provider": "anthropic" },
   "iterations": 5,
   "accuracyThreshold": 0.8,
   "expect": {
@@ -133,7 +133,7 @@ Run multiple eval cases in parallel:
 await runEvalDataset({ dataset, concurrency: 4 }, { mcp, testInfo });
 ```
 
-### Tool Call Assertions (llm_host mode only)
+### Tool Call Assertions (mcp_host mode only)
 
 ```json
 "expect": {
@@ -211,18 +211,18 @@ Use conventional commits: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore
 2. Implement `Judge` interface in `src/judge/myProviderJudge.ts`
 3. Add to switch in `src/judge/judgeClient.ts`
 
-### New LLM Host Provider (llm_host mode)
+### New LLM Host Provider (mcp_host mode)
 
-Supported `LLMProvider` values for `llmHostConfig.provider` (defined in `src/evals/llmHost/llmHostTypes.ts`):
+Supported `LLMProvider` values for `mcpHostConfig.provider` (defined in `src/evals/mcpHost/mcpHostTypes.ts`):
 
 `'openai' | 'anthropic' | 'azure' | 'google' | 'mistral' | 'deepseek' | 'openrouter' | 'xai' | 'vertex-anthropic'`
 
 To add a new provider:
 
-1. Add to `LLMProvider` union in `src/evals/llmHost/llmHostTypes.ts`
-2. Add to the `provider` enum in `LLMHostConfigSchema` in `src/evals/datasetTypes.ts`
-3. Create an adapter in `src/evals/llmHost/adapters/`
-4. Register in `src/evals/llmHost/adapter.ts`
+1. Add to `LLMProvider` union in `src/evals/mcpHost/mcpHostTypes.ts`
+2. Add to the `provider` enum in `MCPHostConfigSchema` in `src/evals/datasetTypes.ts`
+3. Create an adapter in `src/evals/mcpHost/adapters/`
+4. Register in `src/evals/mcpHost/adapter.ts`
 
 ### New Transport Type
 

@@ -12,7 +12,7 @@ This directory contains a [JSON Schema (draft-07)](https://json-schema.org/draft
 
 When you point your editor at this schema, you get:
 
-- **Autocomplete** for all field names (`mode`, `llmHostConfig.provider`, `expect.toolsTriggered`, etc.)
+- **Autocomplete** for all field names (`mode`, `mcpHostConfig.provider`, `expect.toolsTriggered`, etc.)
 - **Inline documentation** from field descriptions displayed on hover
 - **Validation errors** for incorrect types, missing required fields, and invalid enum values (e.g. an unknown LLM provider)
 
@@ -74,11 +74,11 @@ EvalDataset (root)
     └── EvalCase
         ├── id                 (string, required)
         ├── description        (string)
-        ├── mode               ("direct" | "llm_host", default "direct")
+        ├── mode               ("direct" | "mcp_host", default "direct")
         ├── toolName           (string)  — required for direct mode
         ├── args               (object)  — required for direct mode
-        ├── scenario           (string)  — required for llm_host mode
-        ├── llmHostConfig      (LLMHostConfig)
+        ├── scenario           (string)  — required for mcp_host mode
+        ├── mcpHostConfig      (MCPHostConfig)
         │   ├── provider       (enum of 10 providers, required)
         │   ├── model          (string)
         │   ├── apiKeyEnvVar   (string)
@@ -111,14 +111,14 @@ EvalDataset (root)
             ├── responseSize
             │   ├── maxBytes       (integer)
             │   └── minBytes       (integer)
-            ├── toolsTriggered     — llm_host only
+            ├── toolsTriggered     — mcp_host only
             │   ├── calls[]
             │   │   ├── name       (string, required)
             │   │   ├── arguments  (object, partial match)
             │   │   └── required   (boolean, default true)
             │   ├── order          ("strict" | "any", default "any")
             │   └── exclusive      (boolean, default false)
-            └── toolCallCount      — llm_host only
+            └── toolCallCount      — mcp_host only
                 ├── min            (integer)
                 ├── max            (integer)
                 └── exact          (integer)
@@ -126,7 +126,7 @@ EvalDataset (root)
 
 ## Supported LLM providers
 
-The `llmHostConfig.provider` field accepts any of these values:
+The `mcpHostConfig.provider` field accepts any of these values:
 
 | Value              | Notes                                                                                                                                                 |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -146,7 +146,7 @@ The `llmHostConfig.provider` field accepts any of these values:
 The schema is hand-maintained alongside the TypeScript types in:
 
 - `src/evals/datasetTypes.ts` — Zod schemas and TypeScript interfaces
-- `src/evals/llmHost/llmHostTypes.ts` — `LLMProvider` union and `LLMHostConfig`
+- `src/evals/mcpHost/mcpHostTypes.ts` — `LLMProvider` union and `MCPHostConfig`
 - `src/assertions/validators/types.ts` — `SnapshotSanitizer` types
 
 If you add a new provider, a new expectation field, or change an existing type, update `schema/eval-dataset.schema.json` to match.

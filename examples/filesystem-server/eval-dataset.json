@@ -69,11 +69,11 @@
     {
       "id": "should discover docs directory",
       "description": "LLM discovers and lists files in docs directory",
-      "mode": "llm_host",
+      "mode": "mcp_host",
       "toolName": "placeholder",
       "args": {},
       "scenario": "What files are in the docs directory?",
-      "llmHostConfig": {
+      "mcpHostConfig": {
         "provider": "anthropic",
         "model": "claude-sonnet-4-20250514",
         "temperature": 0.0,
@@ -97,11 +97,11 @@
     {
       "id": "should extract version from config using Anthropic",
       "description": "LLM (Anthropic) reads config and extracts version",
-      "mode": "llm_host",
+      "mode": "mcp_host",
       "toolName": "placeholder",
       "args": {},
       "scenario": "Read the config.json file and tell me what version it is.",
-      "llmHostConfig": {
+      "mcpHostConfig": {
         "provider": "anthropic",
         "model": "claude-sonnet-4-20250514",
         "temperature": 0.0,
@@ -125,11 +125,11 @@
     {
       "id": "should find all markdown files",
       "description": "LLM finds all markdown files",
-      "mode": "llm_host",
+      "mode": "mcp_host",
       "toolName": "placeholder",
       "args": {},
       "scenario": "Find all markdown files in this project.",
-      "llmHostConfig": {
+      "mcpHostConfig": {
         "provider": "anthropic",
         "model": "claude-sonnet-4-20250514",
         "temperature": 0.0
@@ -152,11 +152,11 @@
     {
       "id": "should analyze CSV data and count users",
       "description": "LLM reads CSV and provides analysis",
-      "mode": "llm_host",
+      "mode": "mcp_host",
       "toolName": "placeholder",
       "args": {},
       "scenario": "How many users are listed in the data/users.csv file?",
-      "llmHostConfig": {
+      "mcpHostConfig": {
         "provider": "anthropic",
         "model": "claude-sonnet-4-20250514",
         "temperature": 0.0
@@ -179,11 +179,11 @@
     {
       "id": "should list all project files",
       "description": "LLM provides complete file listing",
-      "mode": "llm_host",
+      "mode": "mcp_host",
       "toolName": "placeholder",
       "args": {},
       "scenario": "Show me all files and directories in this project.",
-      "llmHostConfig": {
+      "mcpHostConfig": {
         "provider": "anthropic",
         "model": "claude-sonnet-4-20250514",
         "temperature": 0.0

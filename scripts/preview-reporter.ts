@@ -320,7 +320,7 @@ const mockData: MCPEvalData = {
           },
           toolCallCount: { pass: true, details: 'Called 1 tool (expected 1)' },
         },
-        llmHostTrace: {
+        mcpHostTrace: {
           calls: [
             {
               name: 'search',
@@ -358,7 +358,7 @@ const mockData: MCPEvalData = {
             details: 'Required tool create_document was not called',
           },
         },
-        llmHostTrace: {
+        mcpHostTrace: {
           calls: [
             {
               name: 'search',
@@ -392,7 +392,7 @@ const mockData: MCPEvalData = {
         expectations: {
           toolsTriggered: { pass: true, details: 'search was called' },
         },
-        llmHostTrace: {
+        mcpHostTrace: {
           calls: [
             {
               name: 'search',
@@ -438,7 +438,7 @@ const mockData: MCPEvalData = {
             details: 'search was called as expected',
           },
         },
-        llmHostTrace: {
+        mcpHostTrace: {
           calls: [
             {
               name: 'search',
@@ -629,7 +629,7 @@ async function main() {
   console.log(
     `   Tools: search, create_document, update_document, get_server_info`
   );
-  console.log(`   llm_host cases: 4 (with precision/recall/trace)`);
+  console.log(`   mcp_host cases: 4 (with precision/recall/trace)`);
   console.log(`   Multi-iteration: 2 cases`);
   console.log(`   Historical runs: ${mockData.historical.length}`);
 

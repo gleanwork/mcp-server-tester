@@ -15,10 +15,10 @@ vi.mock('./adapters/vercel.js', () => ({
 }));
 
 import {
-  simulateLLMHost,
+  simulateMCPHost,
   isProviderAvailable,
   getMissingDependencyMessage,
-} from './llmHostSimulation.js';
+} from './mcpHostSimulation.js';
 
 function createMockMCP(): MCPFixtureApi {
   return {
@@ -33,10 +33,10 @@ function createMockMCP(): MCPFixtureApi {
   };
 }
 
-describe('simulateLLMHost', () => {
+describe('simulateMCPHost', () => {
   it('routes all providers through the Vercel orchestrator', async () => {
     const mcp = createMockMCP();
-    const result = await simulateLLMHost(mcp, 'Find recent docs', {
+    const result = await simulateMCPHost(mcp, 'Find recent docs', {
       provider: 'anthropic',
       model: 'claude-3-5-sonnet-20241022',
     });
@@ -48,7 +48,7 @@ describe('simulateLLMHost', () => {
 
   it('works for openai provider', async () => {
     const mcp = createMockMCP();
-    const result = await simulateLLMHost(mcp, 'scenario', {
+    const result = await simulateMCPHost(mcp, 'scenario', {
       provider: 'openai',
       model: 'gpt-4o',
     });
@@ -57,7 +57,7 @@ describe('simulateLLMHost', () => {
 
   it('works for google provider', async () => {
     const mcp = createMockMCP();
-    const result = await simulateLLMHost(mcp, 'scenario', {
+    const result = await simulateMCPHost(mcp, 'scenario', {
       provider: 'google',
     });
     expect(result.success).toBe(true);
@@ -66,7 +66,7 @@ describe('simulateLLMHost', () => {
   it('throws for unsupported provider', async () => {
     const mcp = createMockMCP();
     await expect(
-      simulateLLMHost(mcp, 'scenario', {
+      simulateMCPHost(mcp, 'scenario', {
         // @ts-expect-error - testing invalid provider
         provider: 'unknown-provider',
       })

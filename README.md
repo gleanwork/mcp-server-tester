@@ -105,9 +105,9 @@ In LLM host mode, a real LLM receives your server's tool list and a natural lang
 ```json
 {
   "id": "find-config",
-  "mode": "llm_host",
+  "mode": "mcp_host",
   "scenario": "Find the application config file and return its contents",
-  "llmHostConfig": {
+  "mcpHostConfig": {
     "provider": "anthropic",
     "model": "claude-opus-4-20250514"
   },

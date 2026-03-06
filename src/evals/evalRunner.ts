@@ -2,8 +2,8 @@ import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import type { EvalDataset, EvalCase, EvalExpectBlock } from './datasetTypes.js';
 import type { TestInfo, Expect } from '@playwright/test';
 import type { ZodType } from 'zod';
-import { simulateLLMHost } from './llmHost/llmHostSimulation.js';
-import type { LLMHostSimulationResult } from './llmHost/llmHostTypes.js';
+import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
+import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
 import type {
   EvalCaseResult,
   IterationResult,
@@ -108,14 +108,14 @@ export interface EvalRunnerResult {
   improvements?: number;
 
   /**
-   * Average tool precision across all llm_host cases that have a
+   * Average tool precision across all mcp_host cases that have a
    * `toolsTriggered` expectation (precision = fraction of called tools
    * that were expected). Only present when at least one such case ran.
    */
   datasetToolPrecision?: number;
 
   /**
-   * Average tool recall across all llm_host cases that have a
+   * Average tool recall across all mcp_host cases that have a
    * `toolsTriggered` expectation (recall = fraction of required tools
    * that were actually called). Only present when at least one such case ran.
    */
@@ -178,7 +178,7 @@ export interface EvalRunnerOptions {
   concurrency?: number;
 
   /**
-   * Default iteration count for `llm_host` mode cases that do not specify
+   * Default iteration count for `mcp_host` mode cases that do not specify
    * `iterations` explicitly. Has no effect on `direct` mode cases (which are
    * deterministic and always default to 1 iteration).
    *
@@ -189,7 +189,7 @@ export interface EvalRunnerOptions {
    *
    * @example
    * ```typescript
-   * // Run all llm_host cases 10 times each by default
+   * // Run all mcp_host cases 10 times each by default
    * await runEvalDataset({ dataset, defaultLlmIterations: 10 }, { mcp });
    * ```
    */
@@ -227,12 +227,12 @@ export interface EvalRunnerOptions {
   baselineResultsFrom?: string;
 
   /**
-   * LLM host model identifier to record in run metadata.
-   * Use this to identify which model was used when running llm_host cases.
+   * MCP host model identifier to record in run metadata.
+   * Use this to identify which model was used when running mcp_host cases.
    *
    * @example 'claude-opus-4-20250514'
    */
-  llmHostModel?: string;
+  mcpHostModel?: string;
 
   /**
    * Judge model identifier to record in run metadata.
@@ -265,28 +265,28 @@ async function executeToolCall(
   const mode = evalCase.mode || 'direct';
 
   try {
-    if (mode === 'llm_host') {
-      // LLM host simulation mode
+    if (mode === 'mcp_host') {
+      // MCP host simulation mode
       if (!evalCase.scenario) {
         throw new Error(
-          `Eval case ${evalCase.id}: scenario is required for llm_host mode`
+          `Eval case ${evalCase.id}: scenario is required for mcp_host mode`
         );
       }
 
-      if (!evalCase.llmHostConfig) {
+      if (!evalCase.mcpHostConfig) {
         throw new Error(
-          `Eval case ${evalCase.id}: llmHostConfig is required for llm_host mode`
+          `Eval case ${evalCase.id}: mcpHostConfig is required for mcp_host mode`
         );
       }
 
-      const simulationResult = await simulateLLMHost(
+      const simulationResult = await simulateMCPHost(
         mcp,
         evalCase.scenario,
-        evalCase.llmHostConfig
+        evalCase.mcpHostConfig
       );
 
       if (!simulationResult.success) {
-        throw new Error(simulationResult.error || 'LLM host simulation failed');
+        throw new Error(simulationResult.error || 'MCP host simulation failed');
       }
 
       return { response: simulationResult };
@@ -307,7 +307,7 @@ async function executeToolCall(
       return { response: result };
     }
   } catch (err) {
-    // Note: errors originating from llm_host simulation are already enriched
+    // Note: errors originating from mcp_host simulation are already enriched
     // with actionable context by enrichErrorMessage() in the vercel adapter.
     // Pass the message through unchanged so that hint text reaches the caller.
     return {
@@ -504,15 +504,15 @@ async function runExpectBlockValidations(
   return { expectations: results, toolPrecision, toolRecall };
 }
 
-function isLLMHostSimulationResult(
+function isMCPHostSimulationResult(
   value: unknown
-): value is LLMHostSimulationResult {
+): value is MCPHostSimulationResult {
   return (
     typeof value === 'object' &&
     value !== null &&
     'success' in value &&
     'toolCalls' in value &&
-    Array.isArray((value as LLMHostSimulationResult).toolCalls)
+    Array.isArray((value as MCPHostSimulationResult).toolCalls)
   );
 }
 
@@ -535,7 +535,7 @@ async function runSingleIteration(
   let toolPrecision: number | undefined;
   let toolRecall: number | undefined;
 
-  let llmHostTrace: EvalCaseResult['llmHostTrace'];
+  let mcpHostTrace: EvalCaseResult['mcpHostTrace'];
 
   if (!error && evalCase.expect) {
     const {
@@ -552,10 +552,10 @@ async function runSingleIteration(
     toolPrecision = tp;
     toolRecall = tr;
 
-    // Build llmHostTrace when toolsTriggered expectation is present
+    // Build mcpHostTrace when toolsTriggered expectation is present
     if (
       evalCase.expect.toolsTriggered !== undefined &&
-      isLLMHostSimulationResult(response)
+      isMCPHostSimulationResult(response)
     ) {
       const expectedNames = new Set(
         evalCase.expect.toolsTriggered.calls.map((c) => c.name)
@@ -567,7 +567,7 @@ async function runSingleIteration(
       );
       const calledNames = new Set(response.toolCalls.map((c) => c.name));
 
-      llmHostTrace = {
+      mcpHostTrace = {
         calls: response.toolCalls.map((call) => ({
           name: call.name,
           arguments: call.arguments,
@@ -596,7 +596,7 @@ async function runSingleIteration(
     tags: evalCase.tags,
     toolPrecision,
     toolRecall,
-    llmHostTrace,
+    mcpHostTrace,
   };
 }
 
@@ -815,7 +815,7 @@ export async function runEvalDataset(
     filterTags,
     saveResultsTo,
     baselineResultsFrom,
-    llmHostModel,
+    mcpHostModel,
     judgeModel,
   } = options;
 
@@ -836,7 +836,7 @@ export async function runEvalDataset(
   // Preflight cost warning: estimate the number of LLM judge API calls this run will make
   const estimatedJudgeCalls = casesToRun.reduce((sum, c) => {
     const effectiveIterations =
-      c.mode === 'llm_host'
+      c.mode === 'mcp_host'
         ? (c.iterations ?? defaultLlmIterations ?? 1)
         : (c.iterations ?? 1);
     const judgeReps =
@@ -854,25 +854,25 @@ export async function runEvalDataset(
 
   // Build task factories for all cases
   const tasks = casesToRun.map((evalCase) => async () => {
-    // Apply defaultLlmIterations to llm_host cases that don't specify iterations.
+    // Apply defaultLlmIterations to mcp_host cases that don't specify iterations.
     // Direct mode cases are deterministic — they always stay at 1 iteration.
     const withIterations =
-      evalCase.mode === 'llm_host' &&
+      evalCase.mode === 'mcp_host' &&
       evalCase.iterations === undefined &&
       defaultLlmIterations !== undefined
         ? { ...evalCase, iterations: defaultLlmIterations }
         : evalCase;
 
-    // Warn when an llm_host case opts into multi-iteration accuracy measurement
+    // Warn when a mcp_host case opts into multi-iteration accuracy measurement
     // but uses fewer iterations than the guide-recommended minimum.
-    // Single-iteration llm_host runs (the default) are a valid smoke-test pattern
+    // Single-iteration mcp_host runs (the default) are a valid smoke-test pattern
     // and are not warned about — the warning is scoped to cases that have
     // explicitly chosen a multi-iteration count that is too small to be reliable.
-    if (evalCase.mode === 'llm_host') {
+    if (evalCase.mode === 'mcp_host') {
       const effectiveIterations = withIterations.iterations ?? 1;
       if (effectiveIterations > 1 && effectiveIterations < 10) {
         console.warn(
-          `[mcp-server-tester] Eval case "${evalCase.id}": running ${effectiveIterations} iterations in llm_host mode ` +
+          `[mcp-server-tester] Eval case "${evalCase.id}": running ${effectiveIterations} iterations in mcp_host mode ` +
             `may not be statistically reliable. Consider using 10+ iterations for accuracy measurements you can trust.`
         );
       }
@@ -919,7 +919,7 @@ export async function runEvalDataset(
     gitHash,
     timestamp: new Date().toISOString(),
     packageVersion: packageJson.version,
-    ...(llmHostModel !== undefined && { llmHostModel }),
+    ...(mcpHostModel !== undefined && { mcpHostModel }),
     ...(judgeModel !== undefined && { judgeModel }),
   };
 
@@ -978,16 +978,16 @@ export async function runEvalDataset(
   }
 
   // Aggregate tool precision/recall/F1 across cases that have those metrics
-  const llmHostCases = caseResults.filter(
+  const mcpHostCases = caseResults.filter(
     (r) => r.toolPrecision !== undefined || r.toolRecall !== undefined
   );
-  if (llmHostCases.length > 0) {
+  if (mcpHostCases.length > 0) {
     const avgPrec =
-      llmHostCases.reduce((s, r) => s + (r.toolPrecision ?? 0), 0) /
-      llmHostCases.length;
+      mcpHostCases.reduce((s, r) => s + (r.toolPrecision ?? 0), 0) /
+      mcpHostCases.length;
     const avgRecall =
-      llmHostCases.reduce((s, r) => s + (r.toolRecall ?? 0), 0) /
-      llmHostCases.length;
+      mcpHostCases.reduce((s, r) => s + (r.toolRecall ?? 0), 0) /
+      mcpHostCases.length;
     result.datasetToolPrecision = avgPrec;
     result.datasetToolRecall = avgRecall;
     result.datasetToolF1 =

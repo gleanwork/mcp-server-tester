@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { LLMHostConfig } from './llmHost/llmHostTypes.js';
+import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
 import type { SnapshotSanitizer } from '../assertions/validators/types.js';
 import type { BuiltInRubric } from '../judge/judgeTypes.js';
 
@@ -16,13 +16,13 @@ export type {
 /**
  * Evaluation mode
  */
-export type EvalMode = 'direct' | 'llm_host';
+export type EvalMode = 'direct' | 'mcp_host';
 
 /**
  * A single eval test case
  *
  * For 'direct' mode: toolName and args are required
- * For 'llm_host' mode: scenario and llmHostConfig are required
+ * For 'mcp_host' mode: scenario and mcpHostConfig are required
  */
 export interface EvalCase {
   /**
@@ -38,40 +38,40 @@ export interface EvalCase {
   /**
    * Evaluation mode
    * - 'direct': Direct API calls to MCP tools (default)
-   * - 'llm_host': LLM-driven tool selection via natural language
+   * - 'mcp_host': LLM-driven tool selection via natural language
    *
    * @default 'direct'
    */
   mode?: EvalMode;
 
   /**
-   * Name of the MCP tool to call (required for 'direct' mode, optional for 'llm_host' mode)
+   * Name of the MCP tool to call (required for 'direct' mode, optional for 'mcp_host' mode)
    */
   toolName?: string;
 
   /**
-   * Arguments to pass to the tool (required for 'direct' mode, optional for 'llm_host' mode)
+   * Arguments to pass to the tool (required for 'direct' mode, optional for 'mcp_host' mode)
    */
   args?: Record<string, unknown>;
 
   /**
-   * Natural language scenario for LLM to execute (optional, required for 'llm_host' mode)
+   * Natural language scenario for LLM to execute (optional, required for 'mcp_host' mode)
    *
    * @example "Get the weather for London and tell me if I need an umbrella"
    */
   scenario?: string;
 
   /**
-   * LLM host configuration (optional for 'llm_host' mode)
+   * MCP host configuration (optional for 'mcp_host' mode)
    *
    * If not specified, uses default configuration from test environment
    */
-  llmHostConfig?: LLMHostConfig;
+  mcpHostConfig?: MCPHostConfig;
 
   /**
    * Additional metadata for this test case
    *
-   * For 'llm_host' mode, can include 'expectedToolCalls' for validation
+   * For 'mcp_host' mode, can include 'expectedToolCalls' for validation
    */
   metadata?: Record<string, unknown>;
 
@@ -221,8 +221,8 @@ export interface EvalExpectBlock {
   };
 
   /**
-   * Asserts which tools the LLM called during an llm_host simulation.
-   * Only meaningful for llm_host mode — direct mode has no tool call trace.
+   * Asserts which tools the LLM called during a mcp_host simulation.
+   * Only meaningful for mcp_host mode — direct mode has no tool call trace.
    */
   toolsTriggered?: {
     /** Expected tool calls */
@@ -244,7 +244,7 @@ export interface EvalExpectBlock {
   };
 
   /**
-   * Asserts the number of tool calls made during an llm_host simulation.
+   * Asserts the number of tool calls made during a mcp_host simulation.
    */
   toolCallCount?: {
     /** Minimum number of tool calls */
@@ -287,9 +287,9 @@ export interface EvalDataset {
 }
 
 /**
- * Zod schema for LLMHostConfig (simplified for serialization)
+ * Zod schema for MCPHostConfig (simplified for serialization)
  */
-const LLMHostConfigSchema = z.object({
+const MCPHostConfigSchema = z.object({
   provider: z.enum([
     'openai',
     'anthropic',
@@ -391,16 +391,16 @@ const EvalExpectBlockSchema = z.object({
 /**
  * Zod schema for EvalCase
  *
- * toolName and args are optional for llm_host mode (which uses scenario instead)
+ * toolName and args are optional for mcp_host mode (which uses scenario instead)
  */
 export const EvalCaseSchema = z.object({
   id: z.string().min(1, 'id must not be empty'),
   description: z.string().optional(),
-  mode: z.enum(['direct', 'llm_host']).optional(),
+  mode: z.enum(['direct', 'mcp_host']).optional(),
   toolName: z.string().min(1, 'toolName must not be empty').optional(),
   args: z.record(z.unknown()).optional(),
   scenario: z.string().optional(),
-  llmHostConfig: LLMHostConfigSchema.optional(),
+  mcpHostConfig: MCPHostConfigSchema.optional(),
   metadata: z.record(z.unknown()).optional(),
   iterations: z.number().int().min(1).optional(),
   accuracyThreshold: z.number().min(0).max(1).optional(),

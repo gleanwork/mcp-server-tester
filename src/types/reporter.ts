@@ -24,8 +24,8 @@ export interface EvalRunMetadata {
   timestamp: string;
   /** Package version from package.json */
   packageVersion: string;
-  /** LLM host model identifier (if llm_host mode) */
-  llmHostModel?: string;
+  /** MCP host model identifier (if mcp_host mode) */
+  mcpHostModel?: string;
   /** Judge model identifier (if judge was used) */
   judgeModel?: string;
 }
@@ -252,10 +252,10 @@ export interface EvalCaseResult {
   infrastructureErrorCount?: number;
 
   /**
-   * Ordered trace of tool calls made by the LLM in llm_host mode.
+   * Ordered trace of tool calls made by the LLM in mcp_host mode.
    * Only populated when the eval case uses toolsTriggered expectations.
    */
-  llmHostTrace?: {
+  mcpHostTrace?: {
     /** The ordered sequence of tool calls made by the LLM */
     calls: Array<{
       name: string;

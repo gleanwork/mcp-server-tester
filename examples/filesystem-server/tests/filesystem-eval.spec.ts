@@ -18,7 +18,7 @@ import {
   runEvalCase,
   type EvalCase,
   runConformanceChecks,
-  simulateLLMHost,
+  simulateMCPHost,
   extractText,
   normalizeWhitespace,
   // Extended expect with MCP tool matchers
@@ -263,7 +263,7 @@ test.describe('LLM Host Simulation (E2E)', () => {
       return;
     }
 
-    const result = await simulateLLMHost(
+    const result = await simulateMCPHost(
       mcp,
       'What files are in the docs directory?',
       {
@@ -291,7 +291,7 @@ test.describe('LLM Host Simulation (E2E)', () => {
       return;
     }
 
-    const result = await simulateLLMHost(
+    const result = await simulateMCPHost(
       mcp,
       'Read the config.json file and tell me the version number.',
       {
@@ -308,10 +308,10 @@ test.describe('LLM Host Simulation (E2E)', () => {
 });
 
 test.describe('Eval: LLM Host Mode', () => {
-  const llmCases = evalDataset.cases.filter((c) => c.mode === 'llm_host');
+  const llmCases = evalDataset.cases.filter((c) => c.mode === 'mcp_host');
 
   for (const evalCase of llmCases) {
-    const provider = evalCase.llmHostConfig?.provider || 'unknown';
+    const provider = evalCase.mcpHostConfig?.provider || 'unknown';
 
     test(evalCase.id, async ({ mcp }, testInfo) => {
       if (!hasApiKey(provider)) {

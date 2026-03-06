@@ -1,17 +1,17 @@
-# LLM Host Simulation
+# MCP Host Simulation
 
-LLM host simulation tests your MCP server through a real LLM (OpenAI, Anthropic, etc.), exactly as a user would interact with Claude Desktop or ChatGPT. The LLM decides which tools to call based only on their descriptions and schemas — making this the highest-fidelity test of tool discoverability, parameter clarity, and description quality.
+MCP host simulation tests your MCP server through a real LLM (OpenAI, Anthropic, etc.), exactly as a user would interact with Claude Desktop or ChatGPT. The LLM decides which tools to call based only on their descriptions and schemas — making this the highest-fidelity test of tool discoverability, parameter clarity, and description quality.
 
 ## When to Use
 
-Use LLM host simulation when you need to verify:
+Use MCP host simulation when you need to verify:
 
 - **Tool discoverability**: Does the LLM know which tool to call for a given task?
 - **Parameter clarity**: Does the LLM fill in parameters correctly without hints?
 - **Description quality**: Does the tool description accurately represent what the tool does?
 - **End-to-end behavior**: Does the full chain of LLM → tools → response work?
 
-For most regression testing, use direct mode (`callTool`). Reserve LLM host simulation for:
+For most regression testing, use direct mode (`callTool`). Reserve MCP host simulation for:
 
 - New tool description development and tuning
 - Evaluating tool calling accuracy across scenarios
@@ -48,7 +48,7 @@ test('LLM triggers the right tool', async ({ mcp }, testInfo) => {
 });
 ```
 
-**Eval dataset with LLM host simulation:**
+**Eval dataset with MCP host simulation:**
 
 ```json
 {
@@ -56,9 +56,9 @@ test('LLM triggers the right tool', async ({ mcp }, testInfo) => {
   "cases": [
     {
       "id": "search-trigger",
-      "mode": "llm_host",
+      "mode": "mcp_host",
       "scenario": "Find recent documents about quarterly planning",
-      "llmHostConfig": {
+      "mcpHostConfig": {
         "provider": "anthropic",
         "model": "claude-3-5-sonnet-20241022"
       },
@@ -79,9 +79,9 @@ LLM responses are non-deterministic. Run each case multiple times and measure ac
 ```json
 {
   "id": "search-accuracy",
-  "mode": "llm_host",
+  "mode": "mcp_host",
   "scenario": "Find documents about MCP testing",
-  "llmHostConfig": { "provider": "anthropic" },
+  "mcpHostConfig": { "provider": "anthropic" },
   "iterations": 5,
   "accuracyThreshold": 0.8,
   "expect": {
@@ -119,10 +119,10 @@ The case passes if `search` was triggered in at least 4 of 5 runs (80% accuracy)
 "toolCallCount": { "min": 1, "max": 3 }
 ```
 
-## LLMHostConfig Options
+## MCPHostConfig Options
 
 ```typescript
-interface LLMHostConfig {
+interface MCPHostConfig {
   provider:
     | 'openai'
     | 'anthropic'
@@ -140,12 +140,12 @@ interface LLMHostConfig {
 }
 ```
 
-## LLMHostSimulationResult
+## MCPHostSimulationResult
 
-The response for an `llm_host` case is an `LLMHostSimulationResult`:
+The response for a `mcp_host` case is an `MCPHostSimulationResult`:
 
 ```typescript
-interface LLMHostSimulationResult {
+interface MCPHostSimulationResult {
   success: boolean;
   toolCalls: Array<{ name: string; arguments: Record<string, unknown> }>;
   response?: string; // Final LLM response text
@@ -164,7 +164,7 @@ LLM host simulation calls a real LLM API. Approximate costs:
 - OpenAI GPT-4o: ~$0.005–0.02 per test
 - Ollama (local): Free
 
-**Recommendation:** Use `mode: "direct"` for regression testing. Use `mode: "llm_host"` selectively for tool description quality validation.
+**Recommendation:** Use `mode: "direct"` for regression testing. Use `mode: "mcp_host"` selectively for tool description quality validation.
 
 ## A/B Testing Tool Descriptions
 

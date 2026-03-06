@@ -62,10 +62,10 @@ describe('datasetTypes', () => {
       expect(() => validateEvalCase(evalCase)).toThrow(ZodError);
     });
 
-    it('should accept eval case without toolName (for llm_host mode)', () => {
+    it('should accept eval case without toolName (for mcp_host mode)', () => {
       const evalCase = {
         id: 'test-1',
-        mode: 'llm_host' as const,
+        mode: 'mcp_host' as const,
         scenario: 'Get the weather for London',
       };
 
@@ -82,10 +82,10 @@ describe('datasetTypes', () => {
       expect(() => validateEvalCase(evalCase)).toThrow(ZodError);
     });
 
-    it('should accept eval case without args (for llm_host mode)', () => {
+    it('should accept eval case without args (for mcp_host mode)', () => {
       const evalCase = {
         id: 'test-1',
-        mode: 'llm_host' as const,
+        mode: 'mcp_host' as const,
         scenario: 'Get the weather for London',
       };
 
@@ -293,9 +293,9 @@ describe('datasetTypes', () => {
         cases: [
           {
             id: 'tool-trigger-test',
-            mode: 'llm_host',
+            mode: 'mcp_host',
             scenario: 'Search for documents',
-            llmHostConfig: { provider: 'openai' },
+            mcpHostConfig: { provider: 'openai' },
             expect: {
               toolsTriggered: {
                 calls: [{ name: 'search', required: true }],
@@ -359,7 +359,7 @@ describe('datasetTypes', () => {
   });
 
   describe('LLMProvider expansion', () => {
-    it('should accept new provider values in llmHostConfig', () => {
+    it('should accept new provider values in mcpHostConfig', () => {
       const providers = [
         'openai',
         'anthropic',
@@ -377,9 +377,9 @@ describe('datasetTypes', () => {
             cases: [
               {
                 id: 'c',
-                mode: 'llm_host',
+                mode: 'mcp_host',
                 scenario: 's',
-                llmHostConfig: { provider },
+                mcpHostConfig: { provider },
               },
             ],
           })
