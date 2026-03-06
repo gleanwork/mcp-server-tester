@@ -79,17 +79,12 @@ export function ByToolTable({
 }) {
   const toolStats = useMemo(() => computeByTool(results), [results]);
 
-  const distinctTools = useMemo(
-    () => new Set(results.map((r) => r.toolName)).size,
-    [results]
-  );
-
   // Always use a neutral blue — the panel is a data view, not a status indicator.
   // Individual rows already color-code pass rates; the header doesn't need to warn.
   const headerColor = 'bg-blue-500/10 border-blue-500/20 hover:bg-blue-500/15';
   const badgeColor = 'text-blue-600 dark:text-blue-400';
 
-  if (distinctTools < 2) return null;
+  if (toolStats.length === 0) return null;
 
   return (
     <div className="rounded-lg border bg-card shadow-sm overflow-hidden">
