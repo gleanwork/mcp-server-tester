@@ -343,6 +343,16 @@ export function ResultsTable({
 
   return (
     <div className="flex flex-col h-full">
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {filteredResults.length === 1
+          ? '1 result'
+          : `${filteredResults.length} results`}
+      </div>
       {!defaultSource && (
         <div role="tablist" className="flex border-b bg-card">
           <button
