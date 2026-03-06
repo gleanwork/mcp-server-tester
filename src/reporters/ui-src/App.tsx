@@ -98,6 +98,7 @@ function App() {
         timestamp={data.runData.timestamp}
         platform={data.runData.environment.platform}
         durationMs={data.runData.durationMs}
+        ci={data.runData.environment.ci}
       >
         {/* Tab navigation — underline style, familiar from VS Code / Chrome DevTools */}
         <div className="border-b border-border px-6">
