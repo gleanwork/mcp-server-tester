@@ -37,8 +37,7 @@ function ResultRow({
   onSelectResult,
   showProjectBadge,
 }: ResultRowProps) {
-  const source = result.source || 'eval';
-  const isEval = source === 'eval';
+  const isEval = result.source === 'eval';
 
   const showRegressed = result.baselinePass === true && result.pass === false;
   const showFixed = result.baselinePass === false && result.pass === true;
