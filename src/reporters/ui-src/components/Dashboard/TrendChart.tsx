@@ -77,6 +77,10 @@ interface TrendChartProps {
 }
 
 export function TrendChart({ historical }: TrendChartProps) {
+  const prefersReducedMotion =
+    typeof window !== 'undefined' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
   const chartData = useMemo(
     () =>
       historical.map((h) => ({
@@ -143,6 +147,7 @@ export function TrendChart({ historical }: TrendChartProps) {
               strokeWidth={2}
               dot={LINE_DOT_STYLE}
               activeDot={LINE_ACTIVE_DOT_STYLE}
+              isAnimationActive={!prefersReducedMotion}
             />
           </LineChart>
         </ResponsiveContainer>
