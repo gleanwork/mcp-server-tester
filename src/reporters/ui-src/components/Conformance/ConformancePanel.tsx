@@ -90,11 +90,9 @@ export function ConformancePanel({
                   >
                     {check.name}
                   </code>
-                  {check.message && (
-                    <p className="text-sm text-muted-foreground mt-1">
-                      {check.message}
-                    </p>
-                  )}
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {check.message}
+                  </p>
                 </div>
               </div>
             </div>
