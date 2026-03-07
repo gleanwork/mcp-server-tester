@@ -471,7 +471,7 @@ jobs:
 
 Instead of environment variables, you can inject tokens in your test setup:
 
-```typescript
+```typescript snippet=snippets/auth-inject-tokens.ts
 // globalSetup.ts
 import { injectTokens } from '@gleanwork/mcp-server-tester';
 
@@ -487,7 +487,7 @@ export default async function globalSetup() {
 
 You can also use the OAuth client directly in code:
 
-```typescript
+```typescript snippet=snippets/auth-cli-oauth-client.ts
 import { CLIOAuthClient } from '@gleanwork/mcp-server-tester';
 
 const client = new CLIOAuthClient({
@@ -497,7 +497,7 @@ const client = new CLIOAuthClient({
 // Get a valid access token (cached, refreshed, or new)
 const result = await client.getAccessToken();
 console.log(`Token: ${result.accessToken}`);
-console.log(`Expires: ${new Date(result.expiresAt).toLocaleString()}`);
+console.log(`Expires: ${new Date(result.expiresAt!).toLocaleString()}`);
 ```
 
 ### Troubleshooting

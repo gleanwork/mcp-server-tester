@@ -29,7 +29,7 @@ The stdio transport starts a local MCP server as a child process and communicate
 
 ### Basic Configuration
 
-```typescript
+```typescript snippet=snippets/transport-stdio-config.ts
 // playwright.config.ts
 import { defineConfig } from '@playwright/test';
 
@@ -148,7 +148,7 @@ The HTTP transport connects to a remote MCP server via HTTP and Server-Sent Even
 
 ### Basic Configuration
 
-```typescript
+```typescript snippet=snippets/transport-http-config.ts
 // playwright.config.ts
 import { defineConfig } from '@playwright/test';
 
@@ -245,7 +245,7 @@ The HTTP transport:
 
 Test against multiple server configurations using Playwright projects:
 
-```typescript
+```typescript snippet=snippets/transport-multi-config.ts
 import { defineConfig } from '@playwright/test';
 
 export default defineConfig({

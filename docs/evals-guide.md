@@ -459,6 +459,270 @@ test('my evals', async ({ mcp }, testInfo) => {
 
 ---
 
+## Baseline Regression Detection
+
+Running an eval once tells you whether your server is passing today. Running it across code changes tells you whether it is still passing. Baseline regression detection automates that comparison: save the results of a known-good run, then compare future runs against it to surface regressions immediately.
+
+### How it works
+
+`runEvalDataset` accepts two options for this workflow:
+
+- `saveResultsTo` — after the run completes, write the full result to a JSON file at the given path. Parent directories are created automatically.
+- `baselineResultsFrom` — before the run, load the JSON file at the given path and compare each case result against it by case ID.
+
+When `baselineResultsFrom` is set, the returned `EvalRunnerResult` gains three additional fields:
+
+| Field           | Type     | Meaning                                                                                    |
+| --------------- | -------- | ------------------------------------------------------------------------------------------ |
+| `regressions`   | `number` | Cases that passed in the baseline but failed now                                           |
+| `improvements`  | `number` | Cases that failed in the baseline but pass now                                             |
+| `deltaPassRate` | `number` | Current pass rate minus baseline pass rate (positive = improvement, negative = regression) |
+
+Each `EvalCaseResult` in `caseResults` also gains a `baselinePass?: boolean` field, so you can see the per-case baseline status in the reporter or inspect it programmatically.
+
+If more than 20% of current case IDs have no matching baseline entry, the runner emits a warning. This usually means the dataset structure changed and the baseline needs to be regenerated.
+
+### The `saveBaseline` and `loadBaseline` functions
+
+These are the low-level functions underlying the `saveResultsTo` / `baselineResultsFrom` options. Export them when you need to manage baselines programmatically — for example, in a CI script that only promotes the baseline after a full suite passes.
+
+```typescript
+import { saveBaseline, loadBaseline } from '@gleanwork/mcp-server-tester';
+
+// Write a result to disk.
+await saveBaseline(result, '.mcp-test-results/baseline.json');
+
+// Read it back.
+const saved = await loadBaseline('.mcp-test-results/baseline.json');
+console.log(`Baseline: ${saved.passed}/${saved.total} passing`);
+```
+
+`saveBaseline` serializes the entire `EvalRunnerResult` as JSON. `loadBaseline` reads and deserializes it. Both accept any file path; `saveBaseline` creates intermediate directories.
+
+### Practical workflow
+
+**Step 1: Capture the baseline on your main branch.**
+
+Run your eval suite after a known-good state and write the results to a file. Commit that file (or store it in CI artifacts) so future runs can reference it.
+
+```typescript
+const result = await runEvalDataset(
+  {
+    dataset,
+    saveResultsTo: '.mcp-test-results/baseline.json',
+  },
+  { mcp, testInfo }
+);
+```
+
+**Step 2: Re-run after changes and compare.**
+
+On the next run — after modifying tool implementations, descriptions, or server logic — load the baseline and check for regressions:
+
+```typescript
+const result = await runEvalDataset(
+  {
+    dataset,
+    baselineResultsFrom: '.mcp-test-results/baseline.json',
+  },
+  { mcp, testInfo }
+);
+
+// Fail the test if any previously passing case now fails.
+expect(result.regressions).toBe(0);
+```
+
+**Step 3: Refresh the baseline when you intentionally change behavior.**
+
+After a deliberate improvement that changes pass/fail outcomes, run with `saveResultsTo` again to update the file. Treat this the same way you would treat a snapshot update — review the diff, confirm it reflects intended changes, and commit.
+
+The combination of `saveResultsTo` and `baselineResultsFrom` can be used in the same run to simultaneously update the baseline and compare against the previous one. Pass both options if you want a rolling comparison.
+
+### Full example
+
+<!-- snippet=snippets/baseline-comparison.ts -->
+
+```typescript
+import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
+import {
+  loadEvalDataset,
+  runEvalDataset,
+  saveBaseline,
+  loadBaseline,
+} from '@gleanwork/mcp-server-tester';
+
+// Capture a baseline after a known-good run.
+// Run this once on your main branch before making changes.
+test('capture baseline', async ({ mcp }, testInfo) => {
+  const dataset = await loadEvalDataset('./data/evals.json');
+
+  const result = await runEvalDataset(
+    {
+      dataset,
+      saveResultsTo: '.mcp-test-results/baseline.json',
+    },
+    { mcp, testInfo }
+  );
+
+  expect(result.passed).toBe(result.total);
+});
+
+// Re-run after code or description changes and compare against the baseline.
+test('detect regressions', async ({ mcp }, testInfo) => {
+  const dataset = await loadEvalDataset('./data/evals.json');
+
+  const result = await runEvalDataset(
+    {
+      dataset,
+      baselineResultsFrom: '.mcp-test-results/baseline.json',
+    },
+    { mcp, testInfo }
+  );
+
+  // Fail the test if any previously passing case now fails.
+  expect(result.regressions).toBe(0);
+
+  // Log a summary of the comparison.
+  if (result.deltaPassRate !== undefined) {
+    const delta = (result.deltaPassRate * 100).toFixed(1);
+    const sign = result.deltaPassRate >= 0 ? '+' : '';
+    console.log(`Pass rate delta vs baseline: ${sign}${delta}%`);
+    console.log(`Regressions: ${result.regressions ?? 0}`);
+    console.log(`Improvements: ${result.improvements ?? 0}`);
+  }
+});
+
+// Use saveBaseline and loadBaseline directly for custom scripting.
+test('manual baseline management', async ({ mcp }, testInfo) => {
+  const dataset = await loadEvalDataset('./data/evals.json');
+  const result = await runEvalDataset({ dataset }, { mcp, testInfo });
+
+  // Write the result as the new baseline.
+  await saveBaseline(result, '.mcp-test-results/baseline.json');
+
+  // Load it back and inspect it.
+  const saved = await loadBaseline('.mcp-test-results/baseline.json');
+  console.log(`Baseline has ${saved.total} cases, ${saved.passed} passing`);
+});
+```
+
+---
+
+## Server Comparison (A/B Testing)
+
+`runServerComparison` runs the same eval dataset against two MCP server configurations in parallel and returns a detailed per-case breakdown of which server won, lost, or tied on each case. Use it when you want to compare two versions of a server, two different tool description sets, or any other pair of configurations.
+
+### How it works
+
+`runServerComparison` takes the same options as `runEvalDataset` (minus the baseline-specific fields) and two `EvalContext` objects — one for each server. It runs both servers concurrently with identical cases, then compares results case by case.
+
+For each case, the outcome is one of:
+
+| Outcome     | Meaning                          |
+| ----------- | -------------------------------- |
+| `A_WINS`    | Server A passed, server B failed |
+| `B_WINS`    | Server B passed, server A failed |
+| `TIE`       | Both passed                      |
+| `BOTH_FAIL` | Both failed                      |
+
+The aggregate `ServerComparisonResult` contains:
+
+| Field              | Type                     | Meaning                                                    |
+| ------------------ | ------------------------ | ---------------------------------------------------------- |
+| `aWins`            | `number`                 | Cases where server A passed and B failed                   |
+| `bWins`            | `number`                 | Cases where server B passed and A failed                   |
+| `ties`             | `number`                 | Cases where both passed                                    |
+| `bothFail`         | `number`                 | Cases where both failed                                    |
+| `decidedCases`     | `number`                 | `aWins + bWins + ties` (excludes `BOTH_FAIL`)              |
+| `aWinRate`         | `number`                 | `aWins / decidedCases`                                     |
+| `bWinRate`         | `number`                 | `bWins / decidedCases`                                     |
+| `tieRate`          | `number`                 | `ties / decidedCases`                                      |
+| `failureAlignment` | `number`                 | `bothFail / total` — fraction of cases both servers failed |
+| `cases`            | `CaseComparisonResult[]` | Per-case outcomes with full result objects                 |
+
+Win rates exclude `BOTH_FAIL` cases from the denominator. A high `failureAlignment` indicates that the failing cases are a dataset quality problem, not a difference between servers.
+
+### When to use it
+
+- **Comparing server versions before and after a refactor.** Run your eval suite with the old server as A and the new server as B. Cases where B wins are improvements; cases where A wins are regressions.
+- **A/B testing tool descriptions.** Point A at a server running with your current descriptions and B at a variant. Win rates quantify which description set performs better on real scenarios.
+- **Validating that a new transport or auth layer is equivalent.** Connect A via HTTP and B via stdio (or A with token auth and B with OAuth). A perfect result is all ties.
+
+### Configuration
+
+`runServerComparison` accepts `ServerComparisonOptions`, which is `EvalRunnerOptions` without `saveResultsTo` or `baselineResultsFrom` (baseline fields do not apply to comparisons). All other options — `concurrency`, `defaultLlmIterations`, `filterTags`, etc. — are shared between both server runs.
+
+To construct the second context, create a client with `createMCPClientForConfig` and wrap it with `createMCPFixture`:
+
+```typescript
+const clientB = await createMCPClientForConfig({
+  transport: 'stdio',
+  command: 'node',
+  args: ['server-v2.js'],
+});
+const mcpB = createMCPFixture(clientB);
+```
+
+Remember to close the second client in a `finally` block.
+
+### Full example
+
+<!-- snippet=snippets/server-comparison.ts -->
+
+```typescript
+import { test } from '@gleanwork/mcp-server-tester/fixtures/mcp';
+import {
+  loadEvalDataset,
+  runServerComparison,
+  createMCPClientForConfig,
+  createMCPFixture,
+  closeMCPClient,
+} from '@gleanwork/mcp-server-tester';
+
+test('compare two server versions', async ({ mcp: mcpA }, testInfo) => {
+  const dataset = await loadEvalDataset('./data/evals.json');
+
+  // Build a second MCP context for server B.
+  const clientB = await createMCPClientForConfig({
+    transport: 'stdio',
+    command: 'node',
+    args: ['server-v2.js'],
+  });
+  const mcpB = createMCPFixture(clientB);
+
+  try {
+    const comparison = await runServerComparison(
+      { dataset },
+      { mcp: mcpA, testInfo },
+      { mcp: mcpB }
+    );
+
+    console.log(`Total cases compared: ${comparison.total}`);
+    console.log(
+      `Server A win rate: ${(comparison.aWinRate * 100).toFixed(1)}%`
+    );
+    console.log(
+      `Server B win rate: ${(comparison.bWinRate * 100).toFixed(1)}%`
+    );
+    console.log(`Tie rate: ${(comparison.tieRate * 100).toFixed(1)}%`);
+    console.log(
+      `Both failed: ${comparison.bothFail} cases (${(comparison.failureAlignment * 100).toFixed(1)}% failure alignment)`
+    );
+
+    // Inspect decisive per-case outcomes.
+    for (const c of comparison.cases) {
+      if (c.outcome !== 'TIE' && c.outcome !== 'BOTH_FAIL') {
+        console.log(`  ${c.id}: ${c.outcome}`);
+      }
+    }
+  } finally {
+    await closeMCPClient(clientB);
+  }
+});
+```
+
+---
+
 ## Where to Go From Here
 
 1. **Start with direct mode** — Build smoke tests for every tool before adding LLM host cases. You need to know the tools work before testing whether they're discoverable.
