@@ -8,30 +8,6 @@
 
 
 
-## v1.0.0 (2026-03-08)
-
-#### :boom: Breaking Change
-* [#123](https://github.com/gleanwork/mcp-server-tester/pull/123) refactor!: rename `llm_host` eval mode to `mcp_host` — update all dataset JSON files from `"mode": "llm_host"` to `"mode": "mcp_host"` ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
-
-#### :rocket: Enhancement
-* [#128](https://github.com/gleanwork/mcp-server-tester/pull/128) docs: document `clientCredentials` OAuth grant, baseline regression detection, and `runServerComparison` A/B testing ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
-* [#126](https://github.com/gleanwork/mcp-server-tester/pull/126) docs: fix stale content, add markdown-code for snippet sync ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
-* [#124](https://github.com/gleanwork/mcp-server-tester/pull/124) feat(reporter-ui): show CI badge in report header for CI-generated reports ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
-* [#125](https://github.com/gleanwork/mcp-server-tester/pull/125) feat(reporter-ui): respect prefers-reduced-motion OS preference ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
-* [#110](https://github.com/gleanwork/mcp-server-tester/pull/110) feat(reporter-ui): tabbed layout separating Tests and Evals views ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
-
-#### :bug: Bug Fix
-* [#122](https://github.com/gleanwork/mcp-server-tester/pull/122) fix(reporter-ui): aggregate conformance checks across projects conservatively ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
-* [#121](https://github.com/gleanwork/mcp-server-tester/pull/121) fix(reporter-ui): show performance table for single-tool MCP servers ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
-
-#### :memo: Documentation
-* See the [v0.12.0 to v1.0.0 Migration Guide](docs/migrations/migration-1.0.md) for breaking change details.
-
-#### Committers: 1
-* Steve Calvert ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
-
----
-
 ## v1.0.0-beta.3 (2026-03-02)
 
 #### :rocket: Enhancement
