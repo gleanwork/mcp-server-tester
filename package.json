@@ -62,7 +62,7 @@
     "format:check": "prettier --check \"**/*.{ts,tsx,json,md}\"",
     "lint": "eslint . --ext .ts,.tsx",
     "lint:fix": "eslint . --ext .ts,.tsx --fix",
-    "prepublishOnly": "npm run build",
+    "prepublishOnly": "npm run test:all",
     "docs:check": "markdown-code check",
     "docs:sync": "markdown-code sync",
     "preview-reporter": "tsx scripts/preview-reporter.ts",

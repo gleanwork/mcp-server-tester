@@ -14,6 +14,8 @@ const oauthMocks = vi.hoisted(() => ({
   processAuthorizationCodeResponse: vi.fn(),
   refreshTokenGrantRequest: vi.fn(),
   processRefreshTokenResponse: vi.fn(),
+  clientCredentialsGrantRequest: vi.fn(),
+  processClientCredentialsResponse: vi.fn(),
   ClientSecretBasic: vi.fn().mockReturnValue('client-secret-auth'),
   None: vi.fn().mockReturnValue('none-auth'),
 }));
@@ -29,6 +31,8 @@ vi.mock('oauth4webapi', () => ({
   processAuthorizationCodeResponse: oauthMocks.processAuthorizationCodeResponse,
   refreshTokenGrantRequest: oauthMocks.refreshTokenGrantRequest,
   processRefreshTokenResponse: oauthMocks.processRefreshTokenResponse,
+  clientCredentialsGrantRequest: oauthMocks.clientCredentialsGrantRequest,
+  processClientCredentialsResponse: oauthMocks.processClientCredentialsResponse,
   ClientSecretBasic: oauthMocks.ClientSecretBasic,
   None: oauthMocks.None,
 }));
@@ -40,6 +44,9 @@ import {
   buildAuthorizationUrl,
   validateCallback,
   exchangeCodeForTokens,
+  discoverAuthServer,
+  refreshAccessToken,
+  performClientCredentialsFlow,
 } from './oauthFlow.js';
 import type { AuthServerMetadata } from './oauthFlow.js';
 
@@ -300,6 +307,228 @@ describe('oauthFlow', () => {
         expect.anything(),
         expect.anything(),
         expect.anything()
+      );
+    });
+  });
+
+  describe('discoverAuthServer', () => {
+    const mockServerMetadata = {
+      issuer: 'https://auth.example.com',
+      authorization_endpoint: 'https://auth.example.com/authorize',
+      token_endpoint: 'https://auth.example.com/token',
+    };
+
+    beforeEach(() => {
+      oauthMocks.discoveryRequest.mockResolvedValue(new Response());
+      oauthMocks.processDiscoveryResponse.mockResolvedValue(mockServerMetadata);
+    });
+
+    it('returns AuthServerMetadata with server and issuer', async () => {
+      const result = await discoverAuthServer('https://auth.example.com');
+
+      expect(result.issuer).toBe('https://auth.example.com');
+      expect(result.server).toEqual(mockServerMetadata);
+    });
+
+    it('calls discoveryRequest with the issuer URL', async () => {
+      await discoverAuthServer('https://auth.example.com');
+
+      expect(oauthMocks.discoveryRequest).toHaveBeenCalledWith(
+        new URL('https://auth.example.com'),
+        { algorithm: 'oauth2' }
+      );
+    });
+
+    it('passes the discoveryRequest response to processDiscoveryResponse', async () => {
+      const mockResponse = new Response();
+      oauthMocks.discoveryRequest.mockResolvedValue(mockResponse);
+
+      await discoverAuthServer('https://auth.example.com');
+
+      expect(oauthMocks.processDiscoveryResponse).toHaveBeenCalledWith(
+        new URL('https://auth.example.com'),
+        mockResponse
+      );
+    });
+  });
+
+  describe('refreshAccessToken', () => {
+    const baseRefreshConfig = {
+      clientId: 'test-client-id',
+      clientSecret: 'test-client-secret',
+      refreshToken: 'test-refresh-token',
+      authServer: mockAuthServer(),
+    };
+
+    const mockTokenResponse = {
+      access_token: 'new-access-token',
+      token_type: 'Bearer',
+      expires_in: 3600,
+      refresh_token: 'new-refresh-token',
+      scope: 'read write',
+    };
+
+    beforeEach(() => {
+      oauthMocks.refreshTokenGrantRequest.mockResolvedValue(
+        new Response(JSON.stringify(mockTokenResponse), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      );
+      oauthMocks.processRefreshTokenResponse.mockResolvedValue(
+        mockTokenResponse
+      );
+    });
+
+    it('returns a new TokenResult on successful refresh', async () => {
+      const result = await refreshAccessToken(baseRefreshConfig);
+
+      expect(result.accessToken).toBe('new-access-token');
+      expect(result.tokenType).toBe('Bearer');
+      expect(result.expiresIn).toBe(3600);
+      expect(result.refreshToken).toBe('new-refresh-token');
+      expect(result.scope).toBe('read write');
+    });
+
+    it('uses ClientSecretBasic when clientSecret is provided', async () => {
+      await refreshAccessToken(baseRefreshConfig);
+
+      expect(oauthMocks.ClientSecretBasic).toHaveBeenCalledWith(
+        'test-client-secret'
+      );
+      expect(oauthMocks.refreshTokenGrantRequest).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        'client-secret-auth',
+        'test-refresh-token'
+      );
+    });
+
+    it('uses None auth when clientSecret is not provided', async () => {
+      const { clientSecret: _, ...configWithoutSecret } = baseRefreshConfig;
+      await refreshAccessToken(configWithoutSecret);
+
+      expect(oauthMocks.None).toHaveBeenCalled();
+    });
+
+    it('throws with JSON error body on non-OK response', async () => {
+      oauthMocks.refreshTokenGrantRequest.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: 'invalid_grant',
+            error_description: 'Token expired',
+          }),
+          { status: 400, headers: { 'content-type': 'application/json' } }
+        )
+      );
+
+      await expect(refreshAccessToken(baseRefreshConfig)).rejects.toThrow(
+        'Token refresh failed: invalid_grant - Token expired'
+      );
+    });
+
+    it('throws with text body on non-OK non-JSON response', async () => {
+      oauthMocks.refreshTokenGrantRequest.mockResolvedValue(
+        new Response('Bad request', {
+          status: 400,
+          headers: { 'content-type': 'text/plain' },
+        })
+      );
+
+      await expect(refreshAccessToken(baseRefreshConfig)).rejects.toThrow(
+        'Token refresh failed: 400 - Bad request'
+      );
+    });
+
+    it('throws status message when body is unparseable', async () => {
+      oauthMocks.refreshTokenGrantRequest.mockResolvedValue(
+        new Response('', { status: 500, statusText: 'Internal Server Error' })
+      );
+
+      await expect(refreshAccessToken(baseRefreshConfig)).rejects.toThrow(
+        'Token refresh failed: 500 Internal Server Error'
+      );
+    });
+  });
+
+  describe('performClientCredentialsFlow', () => {
+    const baseClientCredentialsConfig = {
+      clientId: 'service-client-id',
+      clientSecret: 'service-client-secret',
+      tokenEndpoint: 'https://auth.example.com/token',
+    };
+
+    const mockTokenResponse = {
+      access_token: 'service-access-token',
+      token_type: 'Bearer',
+      expires_in: 3600,
+      scope: 'api:read api:write',
+    };
+
+    beforeEach(() => {
+      oauthMocks.clientCredentialsGrantRequest.mockResolvedValue(
+        new Response()
+      );
+      oauthMocks.processClientCredentialsResponse.mockResolvedValue(
+        mockTokenResponse
+      );
+    });
+
+    it('returns a TokenResult on success', async () => {
+      const result = await performClientCredentialsFlow(
+        baseClientCredentialsConfig
+      );
+
+      expect(result.accessToken).toBe('service-access-token');
+      expect(result.tokenType).toBe('Bearer');
+      expect(result.expiresIn).toBe(3600);
+      expect(result.scope).toBe('api:read api:write');
+    });
+
+    it('constructs authServer issuer from tokenEndpoint origin', async () => {
+      await performClientCredentialsFlow(baseClientCredentialsConfig);
+
+      expect(oauthMocks.clientCredentialsGrantRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          issuer: 'https://auth.example.com',
+          token_endpoint: 'https://auth.example.com/token',
+        }),
+        expect.anything(),
+        expect.anything(),
+        expect.anything()
+      );
+    });
+
+    it('uses ClientSecretBasic auth', async () => {
+      await performClientCredentialsFlow(baseClientCredentialsConfig);
+
+      expect(oauthMocks.ClientSecretBasic).toHaveBeenCalledWith(
+        'service-client-secret'
+      );
+    });
+
+    it('passes scopes as space-separated scope parameter', async () => {
+      await performClientCredentialsFlow({
+        ...baseClientCredentialsConfig,
+        scopes: ['api:read', 'api:write'],
+      });
+
+      expect(oauthMocks.clientCredentialsGrantRequest).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        { scope: 'api:read api:write' }
+      );
+    });
+
+    it('passes empty parameters when no scopes provided', async () => {
+      await performClientCredentialsFlow(baseClientCredentialsConfig);
+
+      expect(oauthMocks.clientCredentialsGrantRequest).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        {}
       );
     });
   });

@@ -1,14 +1,49 @@
-# Migration Guide: v0.11.x to v1.0.0
+# Migration Guide: v0.12.0 to v1.0.0
 
 This guide covers the breaking changes introduced in v1.0.0. Most users will only be affected by one or two of these items. Read through the list and apply only the sections relevant to your setup.
 
 ## Table of Contents
 
+- [Eval mode renamed (`llm_host` → `mcp_host`)](#eval-mode-renamed)
 - [Judge provider alias removed (`'claude'` → `'anthropic'`)](#judge-provider-alias-removed)
 - [LLM host: `'ollama'` provider removed](#llm-host-ollama-provider-removed)
 - [Assertion accuracy metric renamed (`accuracy` → `assertionPassRate`)](#assertion-accuracy-metric-renamed)
 - [Import path improvements (non-breaking)](#import-path-improvements-non-breaking)
 - [`env` field added to `StdioMCPConfig` (non-breaking)](#env-field-added-to-stdiomcpconfig-non-breaking)
+
+---
+
+## Eval mode renamed
+
+**Affects:** Eval dataset JSON files that use `"mode": "llm_host"`.
+
+The eval mode value `"llm_host"` was renamed to `"mcp_host"` to accurately reflect that this mode tests MCP tool calling behaviour, not the LLM itself.
+
+### Before (v0.12.0)
+
+```json
+{
+  "id": "search-trigger",
+  "mode": "llm_host",
+  "scenario": "Find recent documents about onboarding"
+}
+```
+
+### After (v1.0.0)
+
+```json
+{
+  "id": "search-trigger",
+  "mode": "mcp_host",
+  "scenario": "Find recent documents about onboarding"
+}
+```
+
+To find all occurrences in your dataset files:
+
+```bash
+grep -r '"mode": "llm_host"' data/
+```
 
 ---
 
@@ -114,7 +149,7 @@ See [docs/mcp-host.md](../mcp-host.md) for the `MCPHostSimulator` interface deta
 
 **Affects:** Code that reads `EvalCaseResult.accuracy` programmatically.
 
-The `accuracy` field on `EvalCaseResult` has been renamed to `assertionPassRate` to better reflect what it measures (the fraction of assertion checks that passed within a multi-iteration run). The old name still exists as a deprecated alias and will be removed in v2.0.
+The `accuracy` field on `EvalCaseResult` has been renamed to `assertionPassRate` to better reflect what it measures (the fraction of assertion checks that passed within a multi-iteration run). The old name was **removed outright** — there is no deprecated alias.
 
 ### Before (v0.11.x)
 
@@ -136,7 +171,7 @@ for (const caseResult of result.caseResults) {
 }
 ```
 
-The `accuracy` field still returns the same value for now — update at your convenience, but do not rely on it beyond v1.x.
+Update all references to use `assertionPassRate`. TypeScript will surface these as compile errors.
 
 ---
 
