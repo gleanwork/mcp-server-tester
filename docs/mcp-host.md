@@ -35,7 +35,7 @@ All providers use the Vercel AI SDK. Install `ai` plus the provider-specific pac
 
 ## Basic Usage
 
-```typescript
+```typescript snippet=snippets/mcp-host-basic-test.ts
 import { test } from '@gleanwork/mcp-server-tester/fixtures/mcp';
 import { runEvalDataset, loadEvalDataset } from '@gleanwork/mcp-server-tester';
 
@@ -48,7 +48,7 @@ test('LLM triggers the right tool', async ({ mcp }, testInfo) => {
 
 **Eval dataset with MCP host simulation:**
 
-```json
+```json snippet=snippets/mcp-host-tools-triggered.json
 {
   "name": "tool-discovery-evals",
   "cases": [
@@ -74,7 +74,7 @@ test('LLM triggers the right tool', async ({ mcp }, testInfo) => {
 
 LLM responses are non-deterministic. Run each case multiple times and measure accuracy:
 
-```json
+```json snippet=snippets/mcp-host-iterations.json
 {
   "id": "search-accuracy",
   "mode": "mcp_host",

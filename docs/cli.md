@@ -63,7 +63,7 @@ my-mcp-tests/
 
 **playwright.config.ts:**
 
-```typescript
+```typescript snippet=snippets/cli-generated-playwright-config.ts
 import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
@@ -85,7 +85,7 @@ export default defineConfig({
 
 **tests/mcp.spec.ts:**
 
-```typescript
+```typescript snippet=snippets/cli-generated-test.ts
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
 
 test('lists tools', async ({ mcp }) => {
@@ -96,7 +96,7 @@ test('lists tools', async ({ mcp }) => {
 
 **data/example-dataset.json:**
 
-```json
+```json snippet=snippets/cli-generated-dataset.json
 {
   "name": "example-evals",
   "cases": [

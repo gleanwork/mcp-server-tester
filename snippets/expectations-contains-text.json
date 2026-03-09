@@ -1,0 +1,13 @@
+{
+  "id": "markdown-response",
+  "toolName": "get_city_info",
+  "args": { "city": "London" },
+  "expect": {
+    "containsText": [
+      "## City Information",
+      "**City:** London",
+      "### Features",
+      "- Public Transportation"
+    ]
+  }
+}

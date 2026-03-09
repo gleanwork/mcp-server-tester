@@ -53,7 +53,7 @@ Validates that response text contains expected substrings. Ideal for markdown or
 
 Use the `expect.containsText` field in the eval dataset JSON:
 
-```json
+```json snippet=snippets/expectations-contains-text.json
 {
   "id": "markdown-response",
   "toolName": "get_city_info",
@@ -99,7 +99,7 @@ Validates that response text matches regex patterns. Powerful for format validat
 
 Use the `expect.matchesPattern` field in the eval dataset JSON:
 
-```json
+```json snippet=snippets/expectations-regex-patterns.json
 {
   "id": "weather-format",
   "toolName": "get_weather",
@@ -167,8 +167,8 @@ const result = await runEvalDataset({ dataset }, { mcp, testInfo });
 
 ### Inline Test Usage
 
-```typescript
-import { expect } from '@gleanwork/mcp-server-tester';
+```typescript snippet=snippets/expectations-schema-validation.ts
+import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
 import { z } from 'zod';
 
 const UserSchema = z.object({ id: z.string(), name: z.string() });
@@ -390,7 +390,7 @@ Semantic evaluation using LLMs (OpenAI or Anthropic). Best for subjective criter
 
 Use the `expect.passesJudge` field in the eval dataset JSON. Supply a `judge` to `runEvalDataset`:
 
-```json
+```json snippet=snippets/expectations-passes-judge.json
 {
   "id": "search-test",
   "toolName": "search_docs",
@@ -553,8 +553,8 @@ The predicate receives the raw MCP `CallToolResult` object as the first argument
 
 ### Inline Test Usage
 
-```typescript
-import { expect } from '@gleanwork/mcp-server-tester';
+```typescript snippet=snippets/expectations-custom-predicate.ts
+import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
 
 test('response contains at least three results', async ({ mcp }) => {
   const result = await mcp.callTool('search_docs', { query: 'setup' });
@@ -567,6 +567,10 @@ test('response contains at least three results', async ({ mcp }) => {
     };
   }, 'minimum result count');
 });
+```
+
+```typescript snippet=snippets/expectations-json-predicate.ts
+import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
 
 test('JSON content is parseable', async ({ mcp }) => {
   const result = await mcp.callTool('get_config', {});
@@ -580,6 +584,10 @@ test('JSON content is parseable', async ({ mcp }) => {
     }
   });
 });
+```
+
+```typescript
+import { expect } from '@gleanwork/mcp-server-tester';
 
 test('async external validation', async ({ mcp }) => {
   const result = await mcp.callTool('generate_token', {});
@@ -625,7 +633,7 @@ Each eval case uses whichever `expect` fields are defined:
 
 You can combine multiple expectations for a single test case:
 
-```json
+```json snippet=snippets/expectations-combined.json
 {
   "id": "comprehensive-test",
   "toolName": "get_city_info",

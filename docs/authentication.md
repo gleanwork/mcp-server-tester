@@ -35,7 +35,7 @@ The simplest authentication method - pass a pre-acquired token directly.
 
 ### Basic Configuration
 
-```typescript
+```typescript snippet=snippets/auth-static-token-config.ts
 // playwright.config.ts
 import { defineConfig } from '@playwright/test';
 
@@ -75,7 +75,7 @@ mcpConfig: {
 
 The library provides utilities for working with tokens:
 
-```typescript
+```typescript snippet=snippets/auth-bearer-header.ts
 import {
   createTokenAuthHeaders,
   validateAccessToken,
@@ -313,7 +313,7 @@ Create a global setup file to perform the OAuth flow before tests run.
 
 ### Basic Setup
 
-```typescript
+```typescript snippet=snippets/auth-global-setup.ts
 // global-setup.ts
 import { chromium } from '@playwright/test';
 import {
@@ -717,11 +717,42 @@ DEBUG=mcp-server-tester:client npm test
 
 **Okta:**
 
-```typescript
-loginSelectors: {
-  usernameInput: '#okta-signin-username',
-  passwordInput: '#okta-signin-password',
-  submitButton: '#okta-signin-submit',
+```typescript snippet=snippets/auth-idp-selector.ts
+import type { OAuthSetupConfig } from '@gleanwork/mcp-server-tester';
+
+type LoginSelectors = OAuthSetupConfig['loginSelectors'];
+
+const idpSelectors: Record<string, LoginSelectors> = {
+  okta: {
+    usernameInput: '#okta-signin-username',
+    passwordInput: '#okta-signin-password',
+    submitButton: '#okta-signin-submit',
+  },
+  auth0: {
+    usernameInput: 'input[name="email"]',
+    passwordInput: 'input[name="password"]',
+    submitButton: 'button[type="submit"]',
+  },
+  azureAd: {
+    usernameInput: 'input[name="loginfmt"]',
+    passwordInput: 'input[name="passwd"]',
+    submitButton: 'input[type="submit"]',
+  },
+  google: {
+    usernameInput: 'input[type="email"]',
+    passwordInput: 'input[type="password"]',
+    submitButton: '#passwordNext',
+  },
+};
+
+export function getIdpSelectors(provider: string): LoginSelectors {
+  const selectors = idpSelectors[provider];
+  if (!selectors) {
+    throw new Error(
+      `Unknown IdP provider: ${provider}. Known providers: ${Object.keys(idpSelectors).join(', ')}`
+    );
+  }
+  return selectors;
 }
 ```
 

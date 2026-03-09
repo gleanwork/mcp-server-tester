@@ -1,0 +1,13 @@
+{
+  "id": "weather-format",
+  "toolName": "get_weather",
+  "args": { "city": "London" },
+  "expect": {
+    "matchesPattern": [
+      "^## Weather",
+      "Temperature: \\d+°[CF]",
+      "Conditions?: (Sunny|Cloudy|Rainy|Snowy)",
+      "\\d{4}-\\d{2}-\\d{2}"
+    ]
+  }
+}

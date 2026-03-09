@@ -183,7 +183,7 @@ Expectations are declared per-case in the `expect` block. The `schema` field nam
 
 Use the `runEvalDataset` function in your tests:
 
-```typescript
+```typescript snippet=snippets/quickstart-eval-runner.ts
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
 import { loadEvalDataset, runEvalDataset } from '@gleanwork/mcp-server-tester';
 import { z } from 'zod';

@@ -1,0 +1,14 @@
+{
+  "id": "comprehensive-test",
+  "toolName": "get_city_info",
+  "args": { "city": "London" },
+  "expect": {
+    "schema": "city-info",
+    "containsText": ["London", "Population"],
+    "matchesPattern": ["^## City Information", "Population: [\\d.]+M"],
+    "passesJudge": {
+      "rubric": "correctness",
+      "threshold": 0.7
+    }
+  }
+}

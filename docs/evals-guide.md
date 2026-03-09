@@ -71,21 +71,26 @@ You call a tool yourself with explicit arguments. The result is checked against 
 
 A real LLM receives your tools and a natural language scenario, then decides which tools to call. You assert that it made the right choices.
 
-```json
+```json snippet=snippets/evals-tools-triggered.json
 {
-  "id": "llm-triggers-search",
-  "mode": "mcp_host",
-  "scenario": "Find recent internal documents about the Glean MCP server",
-  "mcpHostConfig": {
-    "provider": "vertex-anthropic",
-    "model": "claude-3-5-haiku@20241022"
-  },
-  "accuracyThreshold": 0.8,
-  "expect": {
-    "toolsTriggered": {
-      "calls": [{ "name": "search", "required": true }]
+  "name": "llm-host-evals",
+  "cases": [
+    {
+      "id": "llm-triggers-search",
+      "mode": "mcp_host",
+      "scenario": "Find recent internal documents about the Glean MCP server",
+      "mcpHostConfig": {
+        "provider": "vertex-anthropic",
+        "model": "claude-3-5-haiku@20241022"
+      },
+      "accuracyThreshold": 0.8,
+      "expect": {
+        "toolsTriggered": {
+          "calls": [{ "name": "search", "required": true }]
+        }
+      }
     }
-  }
+  ]
 }
 ```
 
@@ -249,14 +254,29 @@ Useful for detecting runaway tool use (the LLM calling tools in a loop) or for c
 
 Did an LLM evaluator (judge) say the response was good? This is for quality, not just correctness.
 
-```json
+```json snippet=snippets/evals-passes-judge.json
 {
-  "passesJudge": {
-    "rubric": {
-      "text": "The response should cite specific documents, not generic advice"
-    },
-    "threshold": 0.7
-  }
+  "name": "judge-evals",
+  "cases": [
+    {
+      "id": "search-quality-check",
+      "mode": "mcp_host",
+      "scenario": "Find recent internal documents about the Q4 planning process",
+      "mcpHostConfig": {
+        "provider": "vertex-anthropic",
+        "model": "claude-3-5-haiku@20241022"
+      },
+      "accuracyThreshold": 0.7,
+      "expect": {
+        "passesJudge": {
+          "rubric": {
+            "text": "The response should cite specific documents, not generic advice"
+          },
+          "threshold": 0.7
+        }
+      }
+    }
+  ]
 }
 ```
 
@@ -268,18 +288,31 @@ This is the most expensive assertion (requires a second LLM call) and the most p
 
 Assertions compose. A case passes only if _all_ assertions pass. This lets you be precise about what "correct behavior" means:
 
-```json
+```json snippet=snippets/evals-combined-assertions.json
 {
-  "expect": {
-    "toolsTriggered": {
-      "calls": [{ "name": "search", "required": true }]
-    },
-    "toolCallCount": { "min": 1, "max": 5 },
-    "passesJudge": {
-      "rubric": "completeness",
-      "threshold": 0.7
+  "name": "combined-assertion-evals",
+  "cases": [
+    {
+      "id": "search-combined",
+      "mode": "mcp_host",
+      "scenario": "Find recent internal documents about the Q4 planning process",
+      "mcpHostConfig": {
+        "provider": "vertex-anthropic",
+        "model": "claude-3-5-haiku@20241022"
+      },
+      "accuracyThreshold": 0.7,
+      "expect": {
+        "toolsTriggered": {
+          "calls": [{ "name": "search", "required": true }]
+        },
+        "toolCallCount": { "min": 1, "max": 5 },
+        "passesJudge": {
+          "rubric": "completeness",
+          "threshold": 0.7
+        }
+      }
     }
-  }
+  ]
 }
 ```
 
@@ -431,8 +464,9 @@ Run both and compare accuracy per tool. The reporter groups results by project, 
 
 ## Quick Reference: Running Evals
 
-```typescript
-import { runEvalDataset, loadEvalDataset } from '@gleanwork/mcp-server-tester';
+```typescript snippet=snippets/evals-runner-reference.ts
+import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
+import { loadEvalDataset, runEvalDataset } from '@gleanwork/mcp-server-tester';
 
 test('my evals', async ({ mcp }, testInfo) => {
   const dataset = await loadEvalDataset('./data/my-evals.json');

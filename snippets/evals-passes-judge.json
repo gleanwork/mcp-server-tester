@@ -1,0 +1,23 @@
+{
+  "name": "judge-evals",
+  "cases": [
+    {
+      "id": "search-quality-check",
+      "mode": "mcp_host",
+      "scenario": "Find recent internal documents about the Q4 planning process",
+      "mcpHostConfig": {
+        "provider": "vertex-anthropic",
+        "model": "claude-3-5-haiku@20241022"
+      },
+      "accuracyThreshold": 0.7,
+      "expect": {
+        "passesJudge": {
+          "rubric": {
+            "text": "The response should cite specific documents, not generic advice"
+          },
+          "threshold": 0.7
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "name": "example-evals",
+  "cases": [
+    {
+      "id": "example-1",
+      "toolName": "example_tool",
+      "args": { "input": "test" }
+    }
+  ]
+}
