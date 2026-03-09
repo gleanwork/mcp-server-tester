@@ -196,10 +196,10 @@ export function getPackageJsonTemplate(projectName: string): string {
     "evals"
   ],
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.4",
+    "@modelcontextprotocol/sdk": "^1.27.0",
     "@playwright/test": "^1.49.0",
     "@gleanwork/mcp-server-tester": "^${packageJson.version}",
-    "zod": "^3.24.1"
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "typescript": "^5.7.2"
