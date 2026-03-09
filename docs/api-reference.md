@@ -615,13 +615,33 @@ interface EvalExpectBlock {
 
 ```typescript
 interface EvalCase {
-  id: string;
-  toolName: string;
-  args: Record<string, unknown>;
+  // Required
+  id: string;               // Unique identifier
+
+  // Mode selection
+  mode?: 'direct' | 'mcp_host'; // Default: 'direct'
+
+  // direct mode — tool name and args required
+  toolName?: string;
+  args?: Record<string, unknown>;
+
+  // mcp_host mode — scenario required; LLM decides which tool to call
+  scenario?: string;
+  mcpHostConfig?: MCPHostConfig;
+
+  // Shared optional fields
+  description?: string;
   expect?: EvalExpectBlock;
-  iterations?: number; // Run N times for accuracy scoring (default: 1)
-  accuracyThreshold?: number; // Min fraction to pass (0-1, default: 1.0)
-  judgeConfigId?: string;
+  metadata?: Record<string, unknown>;
+  tags?: string[];          // For filtering/slicing results
+
+  // Multi-iteration accuracy
+  iterations?: number;          // Run N times (default: 1)
+  accuracyThreshold?: number;   // Min pass rate 0–1 (default: 1.0)
+
+  // LLM judge options
+  judgeReps?: number;           // Judge invocations per assertion (default: 1)
+  canonicalAnswer?: string;     // Golden answer passed to judge as reference
 }
 ```
 
@@ -630,8 +650,10 @@ interface EvalCase {
 ```typescript
 interface EvalDataset {
   name: string;
+  description?: string;
   cases: EvalCase[];
-  schemas?: Record<string, ZodSchema>;
+  metadata?: Record<string, unknown>;
+  schemas?: Record<string, ZodSchema>; // Zod schemas for toMatchToolSchema assertions
 }
 ```
 
