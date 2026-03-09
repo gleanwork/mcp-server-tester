@@ -465,13 +465,13 @@ Run both and compare accuracy per tool. The reporter groups results by project, 
 ## Quick Reference: Running Evals
 
 ```typescript snippet=snippets/evals-runner-reference.ts
-import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
+import { test } from '@gleanwork/mcp-server-tester/fixtures/mcp';
 import { loadEvalDataset, runEvalDataset } from '@gleanwork/mcp-server-tester';
 
 test('my evals', async ({ mcp }, testInfo) => {
   const dataset = await loadEvalDataset('./data/my-evals.json');
 
-  const result = await runEvalDataset(
+  const _result = await runEvalDataset(
     {
       dataset,
 

@@ -83,13 +83,14 @@ import {
   isTokenExpiringSoon,
 } from '@gleanwork/mcp-server-tester';
 
-// Create auth headers
-const headers = createTokenAuthHeaders(process.env.MCP_ACCESS_TOKEN);
-// => { Authorization: 'Bearer eyJ...' }
+const token = process.env.MCP_ACCESS_TOKEN;
+const expiresAt = Number(process.env.MCP_TOKEN_EXPIRES_AT);
 
-// Validate token is present
-validateAccessToken(process.env.MCP_ACCESS_TOKEN);
-// Throws if token is missing or empty
+// Create auth headers — { Authorization: 'Bearer eyJ...' }
+const _headers = createTokenAuthHeaders(token);
+
+// Validate token is present (throws if missing or empty)
+validateAccessToken(token);
 
 // Check JWT expiration (best-effort)
 if (isTokenExpired(token)) {
@@ -315,7 +316,6 @@ Create a global setup file to perform the OAuth flow before tests run.
 
 ```typescript snippet=snippets/auth-global-setup.ts
 // global-setup.ts
-import { chromium } from '@playwright/test';
 import {
   performOAuthSetupIfNeeded,
   type OAuthSetupConfig,

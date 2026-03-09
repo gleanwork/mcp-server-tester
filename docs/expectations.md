@@ -559,7 +559,7 @@ import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
 test('response contains at least three results', async ({ mcp }) => {
   const result = await mcp.callTool('search_docs', { query: 'setup' });
 
-  expect(result).toSatisfyToolPredicate((response, text) => {
+  await expect(result).toSatisfyToolPredicate((response, text) => {
     const matches = text.match(/^##\s/gm);
     return {
       pass: matches !== null && matches.length >= 3,
@@ -575,7 +575,7 @@ import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
 test('JSON content is parseable', async ({ mcp }) => {
   const result = await mcp.callTool('get_config', {});
 
-  expect(result).toSatisfyToolPredicate((response, text) => {
+  await expect(result).toSatisfyToolPredicate((response, text) => {
     try {
       JSON.parse(text);
       return true;
