@@ -616,7 +616,7 @@ interface EvalExpectBlock {
 ```typescript
 interface EvalCase {
   // Required
-  id: string;               // Unique identifier
+  id: string; // Unique identifier
 
   // Mode selection
   mode?: 'direct' | 'mcp_host'; // Default: 'direct'
@@ -633,15 +633,15 @@ interface EvalCase {
   description?: string;
   expect?: EvalExpectBlock;
   metadata?: Record<string, unknown>;
-  tags?: string[];          // For filtering/slicing results
+  tags?: string[]; // For filtering/slicing results
 
   // Multi-iteration accuracy
-  iterations?: number;          // Run N times (default: 1)
-  accuracyThreshold?: number;   // Min pass rate 0–1 (default: 1.0)
+  iterations?: number; // Run N times (default: 1)
+  accuracyThreshold?: number; // Min pass rate 0–1 (default: 1.0)
 
   // LLM judge options
-  judgeReps?: number;           // Judge invocations per assertion (default: 1)
-  canonicalAnswer?: string;     // Golden answer passed to judge as reference
+  judgeReps?: number; // Judge invocations per assertion (default: 1)
+  canonicalAnswer?: string; // Golden answer passed to judge as reference
 }
 ```
 
