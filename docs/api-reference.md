@@ -240,12 +240,76 @@ console.log(`Passed: ${result.passed}/${result.total}`);
 
 **Result Structure:**
 
-```typescript
-interface EvalRunnerResult {
+```typescript snippet=src/evals/evalRunner.ts#L65-L134
+export interface EvalRunnerResult {
+  /**
+   * Total number of cases
+   */
   total: number;
+
+  /**
+   * Number of passing cases
+   */
   passed: number;
+
+  /**
+   * Number of failing cases
+   */
   failed: number;
+
+  /**
+   * Individual case results
+   */
   caseResults: Array<EvalCaseResult>;
+
+  /**
+   * Overall execution time in milliseconds
+   */
+  durationMs: number;
+
+  /**
+   * Difference between current pass rate and baseline pass rate.
+   * Positive = improvement, negative = regression.
+   * Only present when `baselineResultsFrom` was provided.
+   */
+  deltaPassRate?: number;
+
+  /**
+   * Number of cases that regressed: passed in baseline, failed now.
+   * Only present when `baselineResultsFrom` was provided.
+   */
+  regressions?: number;
+
+  /**
+   * Number of cases that improved: failed in baseline, passed now.
+   * Only present when `baselineResultsFrom` was provided.
+   */
+  improvements?: number;
+
+  /**
+   * Average tool precision across all mcp_host cases that have a
+   * `toolsTriggered` expectation (precision = fraction of called tools
+   * that were expected). Only present when at least one such case ran.
+   */
+  datasetToolPrecision?: number;
+
+  /**
+   * Average tool recall across all mcp_host cases that have a
+   * `toolsTriggered` expectation (recall = fraction of required tools
+   * that were actually called). Only present when at least one such case ran.
+   */
+  datasetToolRecall?: number;
+
+  /**
+   * Harmonic mean of `datasetToolPrecision` and `datasetToolRecall`.
+   * Only present when at least one case contributes precision/recall data.
+   */
+  datasetToolF1?: number;
+
+  /**
+   * Experiment tracking metadata captured at run time.
+   */
+  metadata?: EvalRunMetadata;
 }
 ```
 
@@ -613,35 +677,119 @@ interface EvalExpectBlock {
 
 ### `EvalCase`
 
-```typescript
-interface EvalCase {
-  // Required
-  id: string; // Unique identifier
+```typescript snippet=src/evals/datasetTypes.ts#L27-L139
+export interface EvalCase {
+  /**
+   * Unique identifier for this test case
+   */
+  id: string;
 
-  // Mode selection
-  mode?: 'direct' | 'mcp_host'; // Default: 'direct'
+  /**
+   * Human-readable description of what this test case validates
+   */
+  description?: string;
 
-  // direct mode — tool name and args required
+  /**
+   * Evaluation mode
+   * - 'direct': Direct API calls to MCP tools (default)
+   * - 'mcp_host': LLM-driven tool selection via natural language
+   *
+   * @default 'direct'
+   */
+  mode?: EvalMode;
+
+  /**
+   * Name of the MCP tool to call (required for 'direct' mode, optional for 'mcp_host' mode)
+   */
   toolName?: string;
+
+  /**
+   * Arguments to pass to the tool (required for 'direct' mode, optional for 'mcp_host' mode)
+   */
   args?: Record<string, unknown>;
 
-  // mcp_host mode — scenario required; LLM decides which tool to call
+  /**
+   * Natural language scenario for LLM to execute (optional, required for 'mcp_host' mode)
+   *
+   * @example "Get the weather for London and tell me if I need an umbrella"
+   */
   scenario?: string;
+
+  /**
+   * MCP host configuration (optional for 'mcp_host' mode)
+   *
+   * If not specified, uses default configuration from test environment
+   */
   mcpHostConfig?: MCPHostConfig;
 
-  // Shared optional fields
-  description?: string;
-  expect?: EvalExpectBlock;
+  /**
+   * Additional metadata for this test case
+   *
+   * For 'mcp_host' mode, can include 'expectedToolCalls' for validation
+   */
   metadata?: Record<string, unknown>;
-  tags?: string[]; // For filtering/slicing results
 
-  // Multi-iteration accuracy
-  iterations?: number; // Run N times (default: 1)
-  accuracyThreshold?: number; // Min pass rate 0–1 (default: 1.0)
+  /**
+   * Number of times to run this case and compute an assertion pass rate.
+   * When > 1, `EvalCaseResult.assertionPassRate` is populated and `pass` is determined
+   * by `accuracyThreshold` rather than a single run.
+   * @default 1
+   */
+  iterations?: number;
 
-  // LLM judge options
-  judgeReps?: number; // Judge invocations per assertion (default: 1)
-  canonicalAnswer?: string; // Golden answer passed to judge as reference
+  /**
+   * Minimum accuracy (0–1) required to pass when `iterations > 1`.
+   * @default 1.0 (all iterations must pass)
+   */
+  accuracyThreshold?: number;
+
+  /**
+   * Number of times to invoke the LLM judge per `passesJudge` assertion.
+   * Scores are averaged; the mean must meet the threshold to pass.
+   * Reduces judge variance caused by non-determinism.
+   * Per-assertion `passesJudge.reps` overrides this value.
+   * @default 1
+   */
+  judgeReps?: number;
+
+  /**
+   * Golden/expected answer for this case.
+   * When set, automatically passed as `reference` to the LLM judge
+   * (unless passesJudge.reference is explicitly provided).
+   * Mirrors EvalV2's `canonical_answer` field.
+   */
+  canonicalAnswer?: string;
+
+  /**
+   * Arbitrary string labels for this case.
+   * Use for filtering eval runs with `EvalRunnerOptions.filterTags`
+   * and for slicing results by category.
+   *
+   * @example ['tool-finding', 'multi-hop', 'search']
+   */
+  tags?: string[];
+
+  /**
+   * Expectations to validate against the tool response
+   *
+   * Multiple expectations can be combined and will all be validated.
+   *
+   * @example
+   * ```json
+   * {
+   *   "id": "weather-london",
+   *   "toolName": "get_weather",
+   *   "args": { "city": "London" },
+   *   "expect": {
+   *     "containsText": ["temperature", "conditions"],
+   *     "schema": "WeatherResponse",
+   *     "responseSize": { "maxBytes": 10000 },
+   *     "isError": false
+   *   }
+   * }
+   * ```
+   */
+  expect?: EvalExpectBlock;
 }
 ```
 
