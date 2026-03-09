@@ -584,7 +584,8 @@ async function runSingleIteration(
   return {
     id: evalCase.id,
     datasetName: options.datasetName ?? 'single-case',
-    toolName: evalCase.toolName ?? evalCase.scenario ?? 'unknown',
+    toolName:
+      evalCase.toolName ?? (evalCase.scenario != null ? 'mcp_host' : 'unknown'),
     source: 'eval',
     pass: didCasePass(error, expectationResults),
     response,
@@ -713,7 +714,8 @@ export async function runEvalCase(
   const baseResult: EvalCaseResult = lastResult ?? {
     id: evalCase.id,
     datasetName: options.datasetName ?? 'single-case',
-    toolName: evalCase.toolName ?? evalCase.scenario ?? 'unknown',
+    toolName:
+      evalCase.toolName ?? (evalCase.scenario != null ? 'mcp_host' : 'unknown'),
     source: 'eval',
     pass: false,
     error: iterationResults[0]?.error,

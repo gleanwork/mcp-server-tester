@@ -149,17 +149,11 @@ function App() {
             >
               <ErrorBoundary label="Overview tab">
                 <>
-                  {/* Combined top-line metrics */}
-                  <MetricsCards
-                    results={data.runData.results}
-                    mode="overview"
-                  />
+                  {/* Tests and Evals side by side — separate figures, not a misleading combined total */}
+                  <SourceBreakdown results={data.runData.results} />
 
                   {/* Historical trend — the most important overview signal */}
                   <TrendChart historical={data.historical} />
-
-                  {/* Side-by-side source breakdown */}
-                  <SourceBreakdown results={data.runData.results} />
                 </>
               </ErrorBoundary>
             </div>

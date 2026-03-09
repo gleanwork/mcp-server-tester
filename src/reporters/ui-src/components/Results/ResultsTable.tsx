@@ -169,9 +169,15 @@ function ResultRow({
 
       <span className="flex-1 text-sm font-medium truncate">{result.id}</span>
 
-      <code className="text-xs bg-muted px-2 py-1 rounded shrink-0">
-        {result.toolName}
-      </code>
+      {result.toolName && result.toolName !== 'mcp_host' ? (
+        <code className="text-xs bg-muted px-2 py-1 rounded shrink-0">
+          {result.toolName}
+        </code>
+      ) : result.toolName === 'mcp_host' ? (
+        <span className="text-xs text-muted-foreground shrink-0 italic">
+          mcp_host
+        </span>
+      ) : null}
 
       {showProjectBadge && result.project && (
         <span className="px-2 py-0.5 text-xs rounded shrink-0 bg-slate-500/20 text-slate-700 dark:text-slate-400">
@@ -501,6 +507,23 @@ export function ResultsTable({
           </button>
         </div>
       </div>
+
+      {filteredResults.some(
+        (r) => r.iterationResults && r.iterationResults.length > 0
+      ) && (
+        <div className="flex items-center gap-3 px-4 py-1.5 bg-muted/30 border-b text-xs text-muted-foreground">
+          <span>Iterations:</span>
+          <span className="flex items-center gap-1">
+            <span className="text-green-500">●</span> pass
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="text-red-500">●</span> fail
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="text-gray-400">○</span> infra error
+          </span>
+        </div>
+      )}
 
       <div id="results-list" className="flex-1 overflow-y-auto scrollbar-thin">
         {groupedResults.length === 0 ? (

@@ -110,57 +110,7 @@ export function MetricsCards({
 
       <Divider />
 
-      {/* Passed / Failed counts */}
-      <div className="flex items-center gap-3 text-sm">
-        <span>
-          <span className="font-semibold text-green-600 dark:text-green-400">
-            {overall.passed}
-          </span>
-          <span className="text-muted-foreground"> passed</span>
-        </span>
-        <span>
-          <span
-            className={`font-semibold ${overall.failed > 0 ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}
-          >
-            {overall.failed}
-          </span>
-          <span className="text-muted-foreground"> failed</span>
-        </span>
-        <span className="text-muted-foreground">{overall.total} total</span>
-      </div>
-
-      {/* Eval-specific stats */}
-      {showEvalCards && overall.avgAccuracy !== undefined && (
-        <>
-          <Divider />
-          <div className="flex items-baseline gap-1.5 text-sm">
-            <span
-              className={`font-semibold tabular-nums ${rateColorClass(overall.avgAccuracy)}`}
-            >
-              {(overall.avgAccuracy * 100).toFixed(1)}%
-            </span>
-            <span className="text-muted-foreground">avg accuracy</span>
-            <span className="text-xs text-muted-foreground">
-              ({overall.totalIterations} iterations)
-            </span>
-          </div>
-        </>
-      )}
-
-      {showEvalCards && toolDiscovery !== null && (
-        <>
-          <Divider />
-          <div className="flex items-baseline gap-1.5 text-sm">
-            <span
-              className={`font-semibold tabular-nums ${rateColorClass(toolDiscovery.meanRecall)}`}
-            >
-              {(toolDiscovery.meanRecall * 100).toFixed(0)}%
-            </span>
-            <span className="text-muted-foreground">tool discovery</span>
-          </div>
-        </>
-      )}
-
+      {/* Regressions first — most actionable signal when present */}
       {showEvalCards && regressionMetrics !== null && (
         <>
           <Divider />
@@ -182,6 +132,49 @@ export function MetricsCards({
                   no changes vs baseline
                 </span>
               )}
+          </div>
+        </>
+      )}
+
+      <Divider />
+
+      {/* Compact pass count — X/Y passed */}
+      <div className="flex items-center gap-1 text-sm">
+        <span className="font-semibold text-green-600 dark:text-green-400">
+          {overall.passed}
+        </span>
+        <span className="text-muted-foreground">/</span>
+        <span className="text-muted-foreground">{overall.total} passed</span>
+      </div>
+
+      {/* Eval-specific stats */}
+      {showEvalCards && overall.avgAccuracy !== undefined && (
+        <>
+          <Divider />
+          <div className="flex items-baseline gap-1.5 text-sm">
+            <span
+              className={`font-semibold tabular-nums ${rateColorClass(overall.avgAccuracy)}`}
+            >
+              {(overall.avgAccuracy * 100).toFixed(1)}%
+            </span>
+            <span className="text-muted-foreground">avg pass rate</span>
+            <span className="text-xs text-muted-foreground">
+              ({overall.totalIterations} iterations)
+            </span>
+          </div>
+        </>
+      )}
+
+      {showEvalCards && toolDiscovery !== null && (
+        <>
+          <Divider />
+          <div className="flex items-baseline gap-1.5 text-sm">
+            <span
+              className={`font-semibold tabular-nums ${rateColorClass(toolDiscovery.meanRecall)}`}
+            >
+              {(toolDiscovery.meanRecall * 100).toFixed(0)}%
+            </span>
+            <span className="text-muted-foreground">tool discovery</span>
           </div>
         </>
       )}
@@ -284,7 +277,7 @@ function SourceBreakdownCard({
           {metrics.avgAccuracy !== undefined && (
             <div className="flex flex-col items-center">
               <span className="text-xs text-muted-foreground uppercase">
-                Avg Accuracy
+                Avg Pass Rate
               </span>
               <span
                 className={`font-bold ${rateColorClass(metrics.avgAccuracy)}`}

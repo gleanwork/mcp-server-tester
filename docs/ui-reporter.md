@@ -1,22 +1,6 @@
 # UI Reporter Guide
 
-`@gleanwork/mcp-server-tester` includes a custom Playwright reporter with an interactive web UI for visualizing test results.
-
-![MCP Server Tester — Tests tab](img/ui-tests.png)
-
-![MCP Server Tester — Evals tab](img/ui-evals.png)
-
-## Features
-
-- **Tabbed layout** — separate tabs for Overview, Tests, and Evals so each result type is easy to navigate
-- **Pass rate trend** — historical chart showing pass rate over time across runs
-- **Performance by tool** — per-tool pass rate, precision, and recall for eval runs
-- **MCP conformance checks** — protocol compliance validation with per-check details
-- **Server capabilities** — view available tools and their descriptions
-- **Detailed inspection** — click any result to see full tool call details, responses, and validation results
-- **Tag filtering** — filter eval results by tag across multiple scenarios
-- **Multi-project support** — filter results by Playwright project when running multiple configurations
-- **Dark mode** — automatic theme detection with manual toggle
+`@gleanwork/mcp-server-tester` includes a custom Playwright reporter with an interactive web UI for visualizing test results. It is organized into three tabs — Overview, Tests, and Evals — so that deterministic tests and probabilistic eval results are never mixed together.
 
 ## Configuration
 
@@ -34,8 +18,6 @@ export default defineConfig({
 });
 ```
 
-You can use both reporters together - `list` for terminal output and `mcpEvalReporter` for the web UI.
-
 ## Usage
 
 The reporter automatically generates an HTML report after each test run:
@@ -47,114 +29,106 @@ npm test
 # Opens automatically in your default browser
 ```
 
-### Running Tests
+To open a previous report:
 
 ```bash
-# Run tests and generate report
-npm test
-
-# Run tests without opening browser
-PLAYWRIGHT_SKIP_BROWSER_OPEN=1 npm test
-
-# Run in UI mode (Playwright's built-in UI)
-npx playwright test --ui
+npx mcp-server-tester open
 ```
 
-## UI Components
+---
 
-### Metrics Cards
+## Overview Tab
 
-High-level summary at the top of the page:
+![MCP Server Tester — Overview tab](img/ux-overview.png)
 
-- **Pass Rate** - Percentage of passed tests (green if ≥80%, red otherwise)
-- **Total Tests** - Total number of test cases executed
-- **Passed** - Number of successful tests
-- **Failed** - Number of failed tests
+The Overview tab shows **Test Suites** and **Eval Datasets** side by side with their own separate pass rates. These are fundamentally different kinds of results — a test is binary (pass or fail), an eval has an assertion pass rate across iterations — so they are never collapsed into a single combined number.
 
-### Source Breakdown
+Below the cards, the **Pass Rate Trend** chart shows historical pass rates across runs. This is the main signal for answering "are we getting better over time?"
 
-Below the metrics cards, two cards show breakdowns by source:
+---
 
-- **Test Suites** - Pass rate, total, passed, and failed for Playwright tests
-- **Eval Datasets** - Pass rate, total, passed, and failed for dataset-driven evals
+## Tests Tab
+
+![MCP Server Tester — Tests tab](img/ux-tests.png)
+
+The Tests tab shows Playwright test suite results — deterministic, binary pass/fail tests that call MCP tools directly and assert on the output.
+
+### What's shown
+
+- **Pass rate and count** — `100.0% pass rate | 2/2 passed`
+- **MCP Conformance Checks** — expandable panel showing protocol compliance (server info present, capabilities valid, list tools succeeds, required tools present). Collapsed by default.
+- **Server Capabilities** — expandable panel listing all tools the server exposes with their descriptions
+- **Results table** — grouped by test file, each row shows case ID, tool name, and duration
 
 ### MCP Conformance Checks
 
-A collapsible panel showing MCP protocol compliance:
+Conformance checks validate that your MCP server implements the protocol correctly:
 
-- **Header** - Shows server name/version and pass count (e.g., "6/6 passed")
-- **Check List** - Expands to show individual conformance checks with pass/fail status
-- Checks include: `server_info_present`, `capabilities_valid`, `list_tools_succeeds`, `required_tools_present`, etc.
+- `server_info_present` — server returns name and version
+- `capabilities_valid` — capability declaration is well-formed
+- `list_tools_succeeds` — `tools/list` returns without error
+- `required_tools_present` — any tools declared in `requiredTools` are available
 
-### Server Capabilities
+---
 
-A collapsible panel showing available MCP tools:
+## Evals Tab
 
-- **Header** - Shows total tool count (e.g., "9 tools available")
-- **Tool List** - Expands to show each tool name with its description
-- Tools are deduplicated across multiple test runs
+![MCP Server Tester — Evals tab](img/ux-evals.png)
 
-### Tabs
+The Evals tab shows data-driven eval dataset results, including multi-iteration accuracy and LLM host mode tool discovery metrics.
 
-The reporter uses three primary tabs:
+### Metrics bar
 
-- **Overview** — aggregate metrics across all result types, pass rate trend chart, and per-source breakdowns (Test Suites and Eval Datasets)
-- **Tests** — Playwright test suite results with conformance checks and server capabilities
-- **Evals** — eval dataset results with failure breakdown, performance-by-tool table, and tag filter
+From left to right, in order of urgency:
 
-### Results Table
+- **Pass rate** — fraction of cases that passed their accuracy threshold
+- **Regressions / fixed** — cases that changed vs the baseline run (only shown when a baseline is provided)
+- **X/Y passed** — compact pass count
+- **Avg pass rate** — mean assertion pass rate across multi-iteration cases
+- **Tool discovery** — mean recall across `mcp_host` cases with `toolsTriggered` expectations
 
-Grouped results organized by dataset/test file:
+### Iteration dots and CI
 
-- **Group Headers** - Collapsible sections showing dataset name and pass count
-- **Result Rows** - Individual test cases with:
-  - **Status** - Pass/Fail badge
-  - **Type Icon** - BarChart3 for evals, FlaskConical for tests
-  - **Case ID** - Test case identifier
-  - **Tool Name** - The MCP tool being tested
-  - **Project Badge** - Shown when multiple projects exist
-  - **Duration** - Execution time in milliseconds
+For multi-iteration cases, each row shows:
 
-Features:
+- A pass rate badge: `80% 4/5`
+- Iteration dots showing per-run results
 
-- **Search** - Filter by case ID or response content
-- **Project Filter** - Filter by Playwright project (when multiple exist)
-- **Pass/Fail Filter** - Show All, Passed only, or Failed only
-- **Collapsible Groups** - Click group headers to expand/collapse
-- **Click to Expand** - Click any row to see full details in modal
+The dot legend below the filter bar explains the symbols:
 
-### Detail Modal
+| Symbol    | Meaning                                        |
+| --------- | ---------------------------------------------- |
+| ● (green) | Iteration passed                               |
+| ● (red)   | Iteration failed                               |
+| ○ (grey)  | Infrastructure error (excluded from pass rate) |
 
-Click any result row to see:
+Infrastructure errors (network timeouts, rate limits) are excluded from the assertion pass rate denominator so environment reliability doesn't inflate your accuracy numbers.
 
-1. **Status and Metadata**
-   - Pass/Fail status badge
-   - Source badge (Eval Dataset or Test Suite)
-   - Auth type badge (OAuth, API Token, or No Auth)
-   - Project badge (when applicable)
+### Detail panel
 
-2. **Error Details** (if failed)
-   - Error message with full stack trace
+Click **Show details** to expand:
 
-3. **Response Preview**
-   - Full tool response as formatted JSON
-   - Scrollable for large responses
+- **Why Cases Fail** — breakdown of which expectation types are causing failures (`textContains`, `schema`, `judge`, etc.)
+- **Performance by Tool** — per-tool pass rate, average duration, recall, and precision
 
-4. **Expectation Results**
-   - Each expectation type (exact, schema, textContains, regex, snapshot, judge)
-   - Pass/fail status with visual indicators
-   - Detailed failure messages
+### Tag filtering
 
-5. **Performance**
-   - Execution duration in milliseconds
+Tag buttons above the search bar let you filter to specific subsets. Tags come from the `tags` field on your eval cases.
 
-### Theme Toggle
+---
 
-Switch between light and dark modes:
+## Detail Modal
 
-- Click the theme toggle button in the top-right
-- Preference saved to localStorage
-- Automatic detection of system preference on first load
+Click any result row to open the detail modal:
+
+1. **Status and metadata** — Pass/Fail badge, source (Eval Dataset or Test Suite), auth type, project
+2. **Pass rate and CI** (multi-iteration only) — assertion pass rate with 95% confidence interval. Hover for: _"the true pass rate is likely between X% and Y%. Run more iterations to narrow this range."_
+3. **Error details** — error message and stack trace (failed cases only)
+4. **Response preview** — full tool response, scrollable
+5. **Expectation results** — each expectation type with pass/fail and failure message
+6. **Duration** — total execution time
+
+---
 
 ## Results Organization
 
@@ -168,126 +142,18 @@ Results are saved to `.mcp-test-results/`:
 │   ├── app.js                # UI JavaScript
 │   └── styles.css            # UI styles
 └── run-2025-01-24T12-00-00/  # Timestamped runs
-    ├── index.html
-    ├── data.js
-    ├── app.js
-    └── styles.css
+    └── ...
 ```
 
-### Timestamped Runs
+Each run creates a timestamped directory. `latest/` is a symlink to the newest run — useful for CI artifacts and bookmarking.
 
-Each test run creates a new directory with an ISO timestamp:
-
-- Format: `run-YYYY-MM-DDTHH-mm-ss`
-- Preserves historical results
-- Useful for comparing runs over time
-
-### Latest Symlink
-
-The `latest/` directory is a symlink to the most recent run:
-
-- Always points to the newest results
-- Easy to bookmark
-- Consistent URL for CI/CD
-
-### Git Integration
-
-Add to your `.gitignore`:
+Add to `.gitignore`:
 
 ```gitignore
-# MCP test results
 .mcp-test-results/
 ```
 
-This prevents committing generated reports while keeping them available locally.
-
-## Interpreting Results
-
-### Pass/Fail Indicators
-
-- **Green badge** - Test passed all expectations
-- **Red badge** - Test failed one or more expectations
-- **Expectation count** - Shows `X/Y` where X is passed and Y is total
-
-### Expectation Details
-
-Each expectation type shows specific information:
-
-**Exact Match:**
-
-```
-✓ Exact match
-  Expected: { "result": 5 }
-  Actual: { "result": 5 }
-```
-
-**Schema Validation:**
-
-```
-✗ Schema validation failed
-  Error: Expected number, received string at path "temperature"
-```
-
-**Text Contains:**
-
-```
-✓ Text contains
-  All 3 substrings found
-```
-
-**Regex:**
-
-```
-✗ Regex pattern failed
-  Failed patterns:
-    - "Temperature: \d+°C"
-  Reason: Pattern not found in response
-```
-
-**LLM Judge:**
-
-```
-✓ LLM judge passed
-  Score: 0.85 (threshold: 0.7)
-  Rubric: Evaluate search relevance
-```
-
-## Customization
-
-### Changing Output Directory
-
-Modify the reporter configuration:
-
-```typescript
-export default defineConfig({
-  reporter: [
-    ['list'],
-    [
-      '@gleanwork/mcp-server-tester/reporters/mcpReporter',
-      { outputDir: 'custom-results' },
-    ],
-  ],
-});
-```
-
-### Disabling Auto-Open
-
-Set environment variable:
-
-```bash
-PLAYWRIGHT_SKIP_BROWSER_OPEN=1 npm test
-```
-
-Or in your test script:
-
-```json
-{
-  "scripts": {
-    "test": "PLAYWRIGHT_SKIP_BROWSER_OPEN=1 playwright test",
-    "test:open": "playwright test"
-  }
-}
-```
+---
 
 ## CI/CD Integration
 
@@ -305,7 +171,6 @@ jobs:
       - run: npm ci
       - run: npm test
 
-      # Upload results as artifact
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -314,68 +179,47 @@ jobs:
           retention-days: 30
 ```
 
-### Viewing CI Results
+Download the artifact and open `index.html` to view results.
 
-1. Download the artifact from GitHub Actions
-2. Extract the files
-3. Open `index.html` in a browser
+---
 
-### Hosting Results
+## Configuration Options
 
-You can host results as static files:
-
-```bash
-# Copy latest results to web server
-cp -r .mcp-test-results/latest/* /var/www/mcp-results/
-
-# Or use GitHub Pages
-gh-pages -d .mcp-test-results/latest
+```typescript
+[
+  '@gleanwork/mcp-server-tester/reporters/mcpReporter',
+  {
+    outputDir: '.mcp-test-results', // Where to save reports (default)
+    autoOpen: false, // Open browser after run (default: true)
+    historyLimit: 10, // Historical runs to keep (default: 10)
+    quiet: false, // Suppress console output (default: false)
+    includeAutoTracking: true, // Include MCP fixture calls without explicit evals (default: true)
+  },
+];
 ```
+
+---
 
 ## Troubleshooting
 
-### Report Not Generated
+### Report not generated
 
-**Issue:** No report appears after test run
+- Verify the reporter is in `playwright.config.ts`
+- Check for write permission errors in `.mcp-test-results/`
+- Ensure tests actually ran
 
-**Solutions:**
+### Browser doesn't open
 
-- Verify reporter is in `playwright.config.ts`
-- Check for syntax errors in config
-- Ensure tests actually ran (check terminal output)
-- Look for write permission errors
+Set `PLAYWRIGHT_SKIP_BROWSER_OPEN=1` to suppress auto-open, or open manually:
 
-### Browser Doesn't Open
+```bash
+npx mcp-server-tester open
+```
 
-**Issue:** Report generated but browser doesn't open
+### Missing data
 
-**Solutions:**
-
-- Check `PLAYWRIGHT_SKIP_BROWSER_OPEN` env var
-- Try opening manually: `open .mcp-test-results/latest/index.html`
-- Verify browser is installed
-
-### Missing Data
-
-**Issue:** Report shows but some data is missing
-
-**Solutions:**
-
-- Check console for JavaScript errors (F12 → Console)
-- Verify `data.js` was generated correctly
-- Look for tool call failures in test output
-- Ensure expectations are configured properly
-
-### Styling Issues
-
-**Issue:** UI looks broken or unstyled
-
-**Solutions:**
-
-- Verify `styles.css` and `app.js` exist
-- Check browser console for loading errors
-- Try hard refresh (Cmd+Shift+R or Ctrl+Shift+R)
-- Clear browser cache
+- Check browser console (F12) for JavaScript errors
+- Verify `data.js` was generated alongside `index.html`
 
 ## Next Steps
 
