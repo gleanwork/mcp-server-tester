@@ -36,7 +36,7 @@ All providers use the Vercel AI SDK. Install `ai` plus the provider-specific pac
 ## Basic Usage
 
 ```typescript snippet=snippets/mcp-host-basic-test.ts
-import { test } from '@gleanwork/mcp-server-tester/fixtures/mcp';
+import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
 import { runEvalDataset, loadEvalDataset } from '@gleanwork/mcp-server-tester';
 
 test('LLM triggers the right tool', async ({ mcp }, testInfo) => {
