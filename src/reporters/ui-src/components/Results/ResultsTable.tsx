@@ -100,9 +100,18 @@ function ResultRow({
                 ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
                 : 'bg-red-500/15 text-red-700 dark:text-red-400'
           }`}
-          title={`${result.iterationResults?.filter((r) => r.pass).length ?? '?'}/${result.iterationResults?.length ?? '?'} iterations passed`}
+          title={
+            result.assertionPassRateCI
+              ? `${result.iterationResults?.filter((r) => r.pass).length ?? '?'}/${result.iterationResults?.length ?? '?'} iterations passed — 95% CI [${(result.assertionPassRateCI.lower * 100).toFixed(0)}%, ${(result.assertionPassRateCI.upper * 100).toFixed(0)}%]`
+              : `${result.iterationResults?.filter((r) => r.pass).length ?? '?'}/${result.iterationResults?.length ?? '?'} iterations passed`
+          }
         >
           {(result.assertionPassRate * 100).toFixed(0)}%
+          {result.assertionPassRateCI && (
+            <span className="opacity-60 font-normal">
+              {` ±${Math.round(((result.assertionPassRateCI.upper - result.assertionPassRateCI.lower) / 2) * 100)}%`}
+            </span>
+          )}
           <span className="opacity-60 font-normal">
             {result.iterationResults
               ? ` ${result.iterationResults.filter((r) => r.pass).length}/${result.iterationResults.length}`

@@ -728,10 +728,35 @@ export async function runEvalCase(
     ...baseResult,
     pass: assertionPassRate >= threshold,
     assertionPassRate,
+    assertionPassRateCI: wilsonCI(passCount, assertionResults.length),
     infrastructureErrorRate,
     iterationResults,
     infrastructureErrorCount: infraErrors.length,
     durationMs: iterationResults.reduce((sum, r) => sum + r.durationMs, 0),
+  };
+}
+
+/**
+ * Computes a 95% Wilson score confidence interval for a proportion.
+ *
+ * Preferred over naive ±√(p(1-p)/n) because it stays within [0,1] at
+ * extreme pass rates and has better coverage at small sample sizes.
+ *
+ * Returns undefined when n < 2 (not enough data for a meaningful interval).
+ */
+function wilsonCI(
+  k: number,
+  n: number
+): { lower: number; upper: number } | undefined {
+  if (n < 2) return undefined;
+  const z = 1.96; // 95% confidence
+  const z2 = z * z;
+  const ñ = n + z2;
+  const p̃ = (k + z2 / 2) / ñ;
+  const margin = z * Math.sqrt((p̃ * (1 - p̃)) / ñ);
+  return {
+    lower: Math.max(0, p̃ - margin),
+    upper: Math.min(1, p̃ + margin),
   };
 }
 

@@ -400,6 +400,12 @@ describe('multi-iteration cases', () => {
     expect(result.pass).toBe(true); // 0.5 >= 0.5 threshold
     expect(result.iterationResults).toHaveLength(4);
     expect(result.iterationResults?.filter((r) => r.pass)).toHaveLength(2);
+    // Wilson CI: 2/4 passes should produce a wide interval within [0,1]
+    expect(result.assertionPassRateCI).toBeDefined();
+    expect(result.assertionPassRateCI!.lower).toBeGreaterThanOrEqual(0);
+    expect(result.assertionPassRateCI!.upper).toBeLessThanOrEqual(1);
+    expect(result.assertionPassRateCI!.lower).toBeLessThan(0.5);
+    expect(result.assertionPassRateCI!.upper).toBeGreaterThan(0.5);
   });
 
   it('should fail when accuracy is below threshold', async () => {
@@ -419,6 +425,7 @@ describe('multi-iteration cases', () => {
     const evalCase = createEvalCase();
     const result = await runEvalCase(evalCase, createContext());
     expect(result.assertionPassRate).toBeUndefined();
+    expect(result.assertionPassRateCI).toBeUndefined();
     expect(result.iterationResults).toBeUndefined();
   });
 

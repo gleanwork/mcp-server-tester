@@ -209,6 +209,23 @@ export interface EvalCaseResult {
   assertionPassRate?: number;
 
   /**
+   * 95% Wilson score confidence interval for `assertionPassRate`.
+   * Only present when the case was run with `iterations > 1`.
+   *
+   * Interpet as: the true pass rate is likely between `lower` and `upper`.
+   * Wider intervals mean fewer iterations were run; run more iterations to narrow them.
+   *
+   * @example { lower: 0.35, upper: 0.93 } // 7/10 passes → 70% ± wide CI
+   * @example { lower: 0.57, upper: 0.80 } // 35/50 passes → 70% ± narrow CI
+   */
+  assertionPassRateCI?: {
+    /** Lower bound of the 95% confidence interval (0–1) */
+    lower: number;
+    /** Upper bound of the 95% confidence interval (0–1) */
+    upper: number;
+  };
+
+  /**
    * Infrastructure error rate (0–1): infra errors divided by total iterations.
    * Only present when the case was run with `iterations > 1`.
    */

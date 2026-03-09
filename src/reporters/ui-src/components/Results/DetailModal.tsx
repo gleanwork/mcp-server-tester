@@ -147,8 +147,18 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                         ? 'bg-amber-500/20 text-amber-700 dark:text-amber-400'
                         : 'bg-red-500/20 text-red-700 dark:text-red-400'
                   }`}
+                  title={
+                    result.assertionPassRateCI
+                      ? `95% confidence interval: the true pass rate is likely between ${(result.assertionPassRateCI.lower * 100).toFixed(0)}% and ${(result.assertionPassRateCI.upper * 100).toFixed(0)}%. Run more iterations to narrow this range.`
+                      : undefined
+                  }
                 >
                   {(displayRate * 100).toFixed(0)}% pass rate
+                  {result.assertionPassRateCI && (
+                    <span className="text-xs opacity-70 font-normal">
+                      {` ±${Math.round(((result.assertionPassRateCI.upper - result.assertionPassRateCI.lower) / 2) * 100)}%`}
+                    </span>
+                  )}
                   {hasIterations && (
                     <span className="text-xs opacity-70">
                       ({iterations.filter((r) => r.pass).length}/
