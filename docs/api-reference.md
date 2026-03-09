@@ -29,12 +29,49 @@ test('use raw client', async ({ mcpClient }) => {
 
 High-level test API with helper methods.
 
-```typescript
-interface MCPFixtureApi {
+```typescript snippet=src/mcp/fixtures/mcpFixture.ts#L82-L124
+export interface MCPFixtureApi {
+  /**
+   * The underlying MCP client (for advanced usage)
+   */
   client: Client;
+
+  /**
+   * Authentication type used for this test session
+   */
+  authType: AuthType;
+
+  /**
+   * Playwright project name for this test session
+   */
+  project?: string;
+
+  /**
+   * Lists all available tools from the MCP server
+   *
+   * @returns Array of tool definitions
+   */
   listTools(): Promise<Array<Tool>>;
-  callTool<TArgs>(name: string, args: TArgs): Promise<CallToolResult>;
-  getServerInfo(): { name?: string; version?: string } | null;
+
+  /**
+   * Calls a tool on the MCP server
+   *
+   * @param name - Tool name
+   * @param args - Tool arguments
+   * @returns Tool call result
+   */
+  callTool<TArgs extends Record<string, unknown> = Record<string, unknown>>(
+    name: string,
+    args: TArgs
+  ): Promise<CallToolResult>;
+
+  /**
+   * Gets information about the connected server
+   */
+  getServerInfo(): {
+    name?: string;
+    version?: string;
+  } | null;
 }
 ```
 
@@ -565,47 +602,116 @@ interface ConformanceResult {
 
 ### `EvalExpectBlock`
 
-```typescript
-interface EvalExpectBlock {
-  response?: unknown; // Exact response match
-  schema?: string; // Schema name to validate against
-  containsText?: string | string[]; // Text substrings that must be present
-  matchesPattern?: string | string[]; // Regex patterns that must match
-  snapshot?: string; // Snapshot name for comparison
-  snapshotSanitizers?: SnapshotSanitizer[]; // Sanitizers for snapshot
-  isError?: boolean | string | string[]; // Error expectation
+```typescript snippet=src/evals/datasetTypes.ts#L146-L257
+export interface EvalExpectBlock {
+  /**
+   * Exact response match (toMatchToolResponse)
+   */
+  response?: unknown;
+
+  /**
+   * Name of schema to validate against (toMatchToolSchema)
+   */
+  schema?: string;
+
+  /**
+   * Text substring(s) that must be present (toContainToolText)
+   */
+  containsText?: string | string[];
+
+  /**
+   * Regex pattern(s) that must match (toMatchToolPattern)
+   */
+  matchesPattern?: string | string[];
+
+  /**
+   * Snapshot name for comparison (toMatchToolSnapshot)
+   */
+  snapshot?: string;
+
+  /**
+   * Snapshot sanitizers to apply
+   */
+  snapshotSanitizers?: SnapshotSanitizer[];
+
+  /**
+   * Error expectation (toBeToolError)
+   * - true: expects any error
+   * - false: expects no error
+   * - string: expects error containing this message
+   */
+  isError?: boolean | string | string[];
+
+  /**
+   * LLM-as-judge evaluation (toPassToolJudge)
+   */
   passesJudge?: {
-    // LLM-as-judge evaluation
-    rubric:
-      | 'correctness'
-      | 'completeness'
-      | 'groundedness'
-      | 'instruction-following'
-      | 'conciseness'
-      | { text: string };
+    /** Built-in rubric name or custom rubric object */
+    rubric: BuiltInRubric | { text: string };
+    /** Reference response to compare against */
     reference?: unknown;
+    /** Score threshold for passing (0-1, default: 0.7) */
     threshold?: number;
-    configId?: string;
+    /** Number of judge evaluations for this assertion. Overrides EvalCase.judgeReps. */
+    reps?: number;
+    /** Judge provider. @default 'anthropic' */
+    provider?: 'anthropic' | 'openai' | 'google';
+    /** Model override (e.g., 'claude-opus-4-20250514') */
+    model?: string;
+    /** Environment variable name for API key */
+    apiKeyEnvVar?: string;
+    /** Max tokens for judge response */
+    maxTokens?: number;
+    /** Temperature for judge LLM (0–1) */
+    temperature?: number;
+    /** Max budget in USD per evaluation */
+    maxBudgetUsd?: number;
+    /** Fail if response exceeds this size in bytes before judging */
+    maxToolOutputSize?: number;
   };
+
+  /**
+   * Response size validation (toHaveToolResponseSize)
+   */
   responseSize?: {
-    // Size validation
+    /** Maximum allowed size in bytes */
     maxBytes?: number;
+    /** Minimum required size in bytes */
     minBytes?: number;
   };
+
+  /**
+   * Asserts which tools the LLM called during a mcp_host simulation.
+   * Only meaningful for mcp_host mode — direct mode has no tool call trace.
+   */
   toolsTriggered?: {
-    // Tool call assertion (mcp_host mode)
+    /** Expected tool calls */
     calls: Array<{
+      /** Tool name */
       name: string;
+      /** Expected arguments (partial match — extra keys are allowed) */
       arguments?: Record<string, unknown>;
+      /** Whether this call MUST have been made (default: true) */
       required?: boolean;
     }>;
+    /**
+     * 'strict': calls must appear in the exact order listed
+     * 'any': calls can appear in any order (default)
+     */
     order?: 'strict' | 'any';
+    /** If true, no tool calls outside the `calls` list are allowed */
     exclusive?: boolean;
   };
+
+  /**
+   * Asserts the number of tool calls made during a mcp_host simulation.
+   */
   toolCallCount?: {
-    // Tool call count (mcp_host mode)
+    /** Minimum number of tool calls */
     min?: number;
+    /** Maximum number of tool calls */
     max?: number;
+    /** Exact number of tool calls */
     exact?: number;
   };
 }
