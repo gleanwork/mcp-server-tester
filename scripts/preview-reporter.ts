@@ -98,6 +98,7 @@ const mockData: MCPEvalData = {
         pass: true,
         baselinePass: false,
         assertionPassRate: 0.8,
+        assertionPassRateCI: { lower: 0.37, upper: 0.97 },
         infrastructureErrorRate: 0,
         iterationResults: [
           { pass: true, durationMs: 289 },
@@ -127,6 +128,7 @@ const mockData: MCPEvalData = {
         source: 'eval',
         pass: true,
         assertionPassRate: 1.0,
+        assertionPassRateCI: { lower: 0.54, upper: 1.0 },
         infrastructureErrorRate: 0.2,
         infrastructureErrorCount: 1,
         iterationResults: [
