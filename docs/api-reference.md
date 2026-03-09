@@ -677,7 +677,7 @@ interface EvalExpectBlock {
 
 ### `EvalCase`
 
-```typescript snippet=src/evals/datasetTypes.ts#L27-L139
+````typescript snippet=src/evals/datasetTypes.ts#L27-L139
 export interface EvalCase {
   /**
    * Unique identifier for this test case
@@ -791,7 +791,7 @@ export interface EvalCase {
    */
   expect?: EvalExpectBlock;
 }
-```
+````
 
 ### `EvalDataset`
 
