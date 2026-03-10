@@ -644,6 +644,12 @@ function isInfrastructureError(err: unknown): boolean {
     msg.includes('429') ||
     msg.includes('503') ||
     msg.includes('network') ||
+    // Prompt/context overflow — LLM couldn't run, not a tool discoverability failure
+    msg.includes('prompt is too long') ||
+    msg.includes('context length exceeded') ||
+    msg.includes('maximum context length') ||
+    msg.includes('context_length_exceeded') ||
+    msg.includes('tokens > ') ||
     code.includes('econnreset') ||
     code.includes('etimedout') ||
     code.includes('econnrefused')
@@ -698,6 +704,7 @@ export async function runEvalCase(
         durationMs: result.durationMs,
         error: result.error,
         isInfrastructureError: infraError,
+        mcpHostTrace: result.mcpHostTrace,
       });
     } catch (err) {
       // runSingleIteration should not throw, but guard defensively

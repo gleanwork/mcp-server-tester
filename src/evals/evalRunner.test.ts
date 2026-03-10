@@ -462,6 +462,32 @@ describe('multi-iteration cases', () => {
     expect(result.iterationResults?.[0]?.isInfrastructureError).toBe(true);
     expect(result.iterationResults?.[1]?.isInfrastructureError).toBe(false);
   });
+
+  it('classifies prompt-too-long errors as infrastructure errors', async () => {
+    let callCount = 0;
+    const mcp = createMockMCP();
+    vi.mocked(mcp.callTool).mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        throw new Error('prompt is too long: 200795 tokens > 200000 maximum');
+      }
+      return { content: [{ type: 'text', text: 'hello' }], isError: false };
+    });
+
+    const evalCase = createEvalCase({
+      iterations: 2,
+      accuracyThreshold: 1.0,
+      expect: { containsText: 'hello' },
+    });
+
+    const result = await runEvalCase(evalCase, createContext(mcp));
+
+    expect(result.iterationResults?.[0]?.isInfrastructureError).toBe(true);
+    expect(result.iterationResults?.[1]?.isInfrastructureError).toBe(false);
+    // Excluded from denominator: 1 assertion result, 1 pass
+    expect(result.assertionPassRate).toBe(1.0);
+    expect(result.infrastructureErrorCount).toBe(1);
+  });
 });
 
 describe('judgeReps behavior in eval runner', () => {

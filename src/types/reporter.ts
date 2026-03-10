@@ -138,6 +138,19 @@ export interface IterationResult {
   error?: string;
   /** When true, this iteration failed due to network/infrastructure issues rather than an assertion failure */
   isInfrastructureError?: boolean;
+  /**
+   * Ordered trace of tool calls made by the LLM during this iteration (mcp_host mode only).
+   * Captures what was actually called so you can distinguish "LLM didn't call the tool"
+   * from "LLM called the wrong tool" from "tool was called but assertion failed".
+   */
+  mcpHostTrace?: {
+    calls: Array<{
+      name: string;
+      arguments: Record<string, unknown>;
+      status: 'expected' | 'unexpected';
+    }>;
+    missed: Array<{ name: string }>;
+  };
 }
 
 /**
