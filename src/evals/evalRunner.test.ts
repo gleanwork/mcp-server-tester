@@ -1013,6 +1013,44 @@ describe('saveResultsTo and baselineResultsFrom', () => {
     expect(saved.passed).toBe(1);
   });
 
+  it('omits response by default when saving baseline', async () => {
+    const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
+    const dataset = createDataset([
+      createEvalCase({ id: 'case-1', expect: { containsText: 'hello' } }),
+    ]);
+    const filePath = join(tmpDir, 'baseline-no-response.json');
+
+    await runEvalDataset(
+      { dataset, saveResultsTo: filePath },
+      createContext(mcp)
+    );
+
+    const raw = await readFile(filePath, 'utf8');
+    const saved = JSON.parse(raw) as {
+      caseResults: Array<{ response?: unknown }>;
+    };
+    expect(saved.caseResults[0]).not.toHaveProperty('response');
+  });
+
+  it('preserves response when omitResponsesFromBaseline is false', async () => {
+    const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
+    const dataset = createDataset([
+      createEvalCase({ id: 'case-1', expect: { containsText: 'hello' } }),
+    ]);
+    const filePath = join(tmpDir, 'baseline-with-response.json');
+
+    await runEvalDataset(
+      { dataset, saveResultsTo: filePath, omitResponsesFromBaseline: false },
+      createContext(mcp)
+    );
+
+    const raw = await readFile(filePath, 'utf8');
+    const saved = JSON.parse(raw) as {
+      caseResults: Array<{ response?: unknown }>;
+    };
+    expect(saved.caseResults[0]).toHaveProperty('response');
+  });
+
   it('computes deltaPassRate when baselineResultsFrom is set', async () => {
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const dataset = createDataset([

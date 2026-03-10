@@ -3,17 +3,46 @@ import { dirname } from 'path';
 import type { EvalRunnerResult } from './evalRunner.js';
 
 /**
+ * Options for saveBaseline
+ */
+export interface SaveBaselineOptions {
+  /**
+   * When true (default), strips the `response` field from each case result
+   * before saving. Keeps baseline files small and git-friendly — the baseline
+   * is a pass/fail record and the full response is not needed for comparison.
+   *
+   * Set to false to preserve the complete response in the saved file.
+   *
+   * @default true
+   */
+  omitResponses?: boolean;
+}
+
+/**
  * Saves eval results to a JSON file for use as a baseline in future runs.
  *
  * @param result - The eval run result to save
  * @param filePath - Path to write the JSON file (parent dirs created automatically)
+ * @param options - Save options
  */
 export async function saveBaseline(
   result: EvalRunnerResult,
-  filePath: string
+  filePath: string,
+  options: SaveBaselineOptions = {}
 ): Promise<void> {
+  const { omitResponses = true } = options;
+
+  const toSave = omitResponses
+    ? {
+        ...result,
+        caseResults: result.caseResults.map(
+          ({ response: _response, ...rest }) => rest
+        ),
+      }
+    : result;
+
   await mkdir(dirname(filePath), { recursive: true });
-  await writeFile(filePath, JSON.stringify(result, null, 2), 'utf8');
+  await writeFile(filePath, JSON.stringify(toSave, null, 2), 'utf8');
 }
 
 /**

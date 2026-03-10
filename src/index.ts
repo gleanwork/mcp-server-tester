@@ -191,7 +191,11 @@ export type {
 export { runEvalDataset, runEvalCase } from './evals/evalRunner.js';
 
 // Baseline eval comparison
-export { saveBaseline, loadBaseline } from './evals/baseline.js';
+export {
+  saveBaseline,
+  loadBaseline,
+  type SaveBaselineOptions,
+} from './evals/baseline.js';
 
 // Multi-server A/B comparison
 export type {

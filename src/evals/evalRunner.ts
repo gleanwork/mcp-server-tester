@@ -220,6 +220,17 @@ export interface EvalRunnerOptions {
   saveResultsTo?: string;
 
   /**
+   * When true (default), strips the `response` field from each case result
+   * before saving the baseline file. Keeps baseline files small and git-friendly —
+   * the full tool response is not needed for pass/fail regression detection.
+   *
+   * Set to false to preserve complete responses in the saved file.
+   *
+   * @default true
+   */
+  omitResponsesFromBaseline?: boolean;
+
+  /**
    * If set, loads this file as the baseline and computes delta metrics vs the current run.
    * Populates `EvalRunnerResult.deltaPassRate`, `.regressions`, `.improvements`,
    * and tags each `EvalCaseResult.baselinePass`.
@@ -841,6 +852,7 @@ export async function runEvalDataset(
     onCaseComplete,
     filterTags,
     saveResultsTo,
+    omitResponsesFromBaseline = true,
     baselineResultsFrom,
     mcpHostModel,
     judgeModel,
@@ -1025,7 +1037,9 @@ export async function runEvalDataset(
 
   // Save results to file if requested
   if (saveResultsTo) {
-    await saveBaseline(result, saveResultsTo);
+    await saveBaseline(result, saveResultsTo, {
+      omitResponses: omitResponsesFromBaseline,
+    });
   }
 
   // Attach results for MCP reporter if testInfo is provided
