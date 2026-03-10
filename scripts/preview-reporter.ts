@@ -301,11 +301,76 @@ const mockData: MCPEvalData = {
         assertionPassRate: 0.9,
         infrastructureErrorRate: 0,
         iterationResults: [
-          { pass: true, durationMs: 1100 },
-          { pass: true, durationMs: 1250 },
-          { pass: false, durationMs: 980 },
-          { pass: true, durationMs: 1150 },
-          { pass: true, durationMs: 1200 },
+          {
+            pass: true,
+            durationMs: 1100,
+            mcpHostTrace: {
+              calls: [
+                {
+                  name: 'search',
+                  arguments: { query: 'quarterly report' },
+                  status: 'expected' as const,
+                },
+              ],
+              missed: [],
+            },
+          },
+          {
+            pass: true,
+            durationMs: 1250,
+            mcpHostTrace: {
+              calls: [
+                {
+                  name: 'search',
+                  arguments: { query: 'Q4 report summary' },
+                  status: 'expected' as const,
+                },
+              ],
+              missed: [],
+            },
+          },
+          {
+            pass: false,
+            durationMs: 980,
+            mcpHostTrace: {
+              calls: [
+                {
+                  name: 'chat',
+                  arguments: { message: 'quarterly report' },
+                  status: 'unexpected' as const,
+                },
+              ],
+              missed: [{ name: 'search' }],
+            },
+          },
+          {
+            pass: true,
+            durationMs: 1150,
+            mcpHostTrace: {
+              calls: [
+                {
+                  name: 'search',
+                  arguments: { query: 'quarterly results' },
+                  status: 'expected' as const,
+                },
+              ],
+              missed: [],
+            },
+          },
+          {
+            pass: true,
+            durationMs: 1200,
+            mcpHostTrace: {
+              calls: [
+                {
+                  name: 'search',
+                  arguments: { query: 'Q4 financial report' },
+                  status: 'expected' as const,
+                },
+              ],
+              missed: [],
+            },
+          },
         ],
         response: {
           content: [

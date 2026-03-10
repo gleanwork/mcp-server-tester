@@ -393,6 +393,11 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                         <th className="text-left py-2 pr-4 font-medium">
                           Duration
                         </th>
+                        {iterations.some((r) => r.mcpHostTrace) && (
+                          <th className="text-left py-2 pr-4 font-medium">
+                            Tools called
+                          </th>
+                        )}
                         <th className="text-left py-2 font-medium">Error</th>
                       </tr>
                     </thead>
@@ -408,17 +413,67 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                           <td className="py-2 pr-4">
                             <span
                               className={`font-semibold ${
-                                iter.pass
-                                  ? 'text-green-600 dark:text-green-400'
-                                  : 'text-red-600 dark:text-red-400'
+                                iter.isInfrastructureError
+                                  ? 'text-orange-600 dark:text-orange-400'
+                                  : iter.pass
+                                    ? 'text-green-600 dark:text-green-400'
+                                    : 'text-red-600 dark:text-red-400'
                               }`}
                             >
-                              {iter.pass ? '✓ pass' : '✗ fail'}
+                              {iter.isInfrastructureError
+                                ? '⚠ infra'
+                                : iter.pass
+                                  ? '✓ pass'
+                                  : '✗ fail'}
                             </span>
                           </td>
                           <td className="py-2 pr-4 text-muted-foreground">
                             {iter.durationMs.toFixed(0)}ms
                           </td>
+                          {iterations.some((r) => r.mcpHostTrace) && (
+                            <td className="py-2 pr-4">
+                              {iter.mcpHostTrace ? (
+                                <span className="flex flex-wrap gap-1 items-center">
+                                  {iter.mcpHostTrace.calls.map((c, j) => (
+                                    <code
+                                      key={j}
+                                      className={`text-xs px-1.5 py-0.5 rounded ${
+                                        c.status === 'expected'
+                                          ? 'bg-green-500/15 text-green-700 dark:text-green-400'
+                                          : 'bg-red-500/15 text-red-700 dark:text-red-400'
+                                      }`}
+                                      title={
+                                        c.status === 'unexpected'
+                                          ? 'Unexpected tool call'
+                                          : 'Expected tool call'
+                                      }
+                                    >
+                                      {c.name}
+                                    </code>
+                                  ))}
+                                  {iter.mcpHostTrace.missed.map((m, j) => (
+                                    <code
+                                      key={`missed-${j}`}
+                                      className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground line-through"
+                                      title="Required tool was never called"
+                                    >
+                                      {m.name}
+                                    </code>
+                                  ))}
+                                  {iter.mcpHostTrace.calls.length === 0 &&
+                                    iter.mcpHostTrace.missed.length === 0 && (
+                                      <span className="text-xs text-muted-foreground">
+                                        no tools called
+                                      </span>
+                                    )}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">
+                                  —
+                                </span>
+                              )}
+                            </td>
+                          )}
                           <td className="py-2 text-xs text-muted-foreground font-mono">
                             {iter.error ? stripAnsiCodes(iter.error) : '—'}
                           </td>
