@@ -17,6 +17,7 @@ export type {
   MCPConformanceCheck,
   MCPConformanceResultData,
   MCPServerCapabilitiesData,
+  EvalCaseRequest,
   EvalCaseResult,
   MCPEvalRunData,
   MCPEvalHistoricalSummary,

@@ -154,6 +154,28 @@ export interface IterationResult {
 }
 
 /**
+ * Request data captured from the eval case input.
+ * Preserves what was sent so results are self-contained for debugging.
+ */
+export interface EvalCaseRequest {
+  /** Human-readable description of the case */
+  description?: string;
+
+  // Direct mode fields
+  /** Tool arguments (direct mode) */
+  args?: Record<string, unknown>;
+
+  // mcp_host mode fields
+  /** Natural language scenario sent to the LLM (mcp_host mode) */
+  scenario?: string;
+  /** LLM provider/model configuration (mcp_host mode) */
+  mcpHostConfig?: {
+    provider: string;
+    model?: string;
+  };
+}
+
+/**
  * Result of a single eval case
  */
 export interface EvalCaseResult {
@@ -181,6 +203,12 @@ export interface EvalCaseResult {
    * Overall pass/fail status
    */
   pass: boolean;
+
+  /**
+   * Request data from the eval case input (tool args, scenario, LLM config).
+   * Populated so results are self-contained for debugging without the original dataset.
+   */
+  request?: EvalCaseRequest;
 
   /**
    * Tool response

@@ -244,6 +244,54 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
               )}
             </div>
 
+            {/* Request — show what was sent */}
+            {result.request &&
+              (result.request.args ||
+                result.request.scenario ||
+                result.request.description) && (
+                <CollapsibleSection title="Request" defaultOpen={true}>
+                  <div className="space-y-3">
+                    {result.request.description && (
+                      <p className="text-sm text-muted-foreground">
+                        {result.request.description}
+                      </p>
+                    )}
+                    {result.request.scenario && (
+                      <div>
+                        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+                          Scenario
+                        </h4>
+                        <p className="text-sm bg-muted p-3 rounded-md">
+                          {result.request.scenario}
+                        </p>
+                      </div>
+                    )}
+                    {result.request.mcpHostConfig && (
+                      <div className="flex gap-2">
+                        <span className="px-2 py-1 rounded text-xs font-medium bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">
+                          {result.request.mcpHostConfig.provider}
+                        </span>
+                        {result.request.mcpHostConfig.model && (
+                          <span className="px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                            {result.request.mcpHostConfig.model}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {result.request.args && (
+                      <div>
+                        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+                          Arguments
+                        </h4>
+                        <pre className="text-xs font-mono bg-muted p-3 rounded-md overflow-x-auto">
+                          {JSON.stringify(result.request.args, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                </CollapsibleSection>
+              )}
+
             {/* Error — always show first if present */}
             {result.error && (
               <div>
@@ -309,9 +357,9 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
             {/* Tool Calls — for llm_host eval cases with tool call expectations */}
             {result.source === 'eval' && result.toolPrecision !== undefined && (
               <CollapsibleSection title="Tool Calls" defaultOpen={true}>
-                {result.llmHostTrace ? (
+                {result.mcpHostTrace ? (
                   <div className="space-y-1">
-                    {result.llmHostTrace.calls.map((call, i) => (
+                    {result.mcpHostTrace.calls.map((call, i) => (
                       <div
                         key={i}
                         className={`flex items-start gap-2 text-xs p-2 rounded ${
@@ -337,7 +385,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                         </span>
                       </div>
                     ))}
-                    {result.llmHostTrace.missed.map((missed, i) => (
+                    {result.mcpHostTrace.missed.map((missed, i) => (
                       <div
                         key={`missed-${i}`}
                         className="flex items-center gap-2 text-xs p-2 rounded bg-yellow-50 dark:bg-yellow-950"

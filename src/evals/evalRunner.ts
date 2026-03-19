@@ -6,6 +6,7 @@ import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
 import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
 import type {
   EvalCaseResult,
+  EvalCaseRequest,
   IterationResult,
   EvalRunMetadata,
 } from '../types/reporter.js';
@@ -54,6 +55,7 @@ export interface EvalContext {
 export type { EvalExpectationResult } from '../types/index.js';
 
 export type {
+  EvalCaseRequest,
   EvalCaseResult,
   IterationResult,
   EvalRunMetadata,
@@ -515,6 +517,30 @@ async function runExpectBlockValidations(
   return { expectations: results, toolPrecision, toolRecall };
 }
 
+/**
+ * Builds the request metadata from an eval case for inclusion in results.
+ */
+function buildRequest(evalCase: EvalCase): EvalCaseRequest {
+  const request: EvalCaseRequest = {};
+  if (evalCase.description) request.description = evalCase.description;
+
+  if (evalCase.mode === 'mcp_host') {
+    if (evalCase.scenario) request.scenario = evalCase.scenario;
+    if (evalCase.mcpHostConfig) {
+      request.mcpHostConfig = {
+        provider: evalCase.mcpHostConfig.provider,
+        ...(evalCase.mcpHostConfig.model !== undefined && {
+          model: evalCase.mcpHostConfig.model,
+        }),
+      };
+    }
+  } else {
+    if (evalCase.args) request.args = evalCase.args;
+  }
+
+  return request;
+}
+
 function isMCPHostSimulationResult(
   value: unknown
 ): value is MCPHostSimulationResult {
@@ -599,6 +625,7 @@ async function runSingleIteration(
       evalCase.scenario != null ? 'mcp_host' : (evalCase.toolName ?? 'unknown'),
     source: 'eval',
     pass: didCasePass(error, expectationResults),
+    request: buildRequest(evalCase),
     response,
     error,
     expectations: expectationResults,
