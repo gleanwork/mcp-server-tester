@@ -36,12 +36,34 @@ function isSimulationResult(value: unknown): value is MCPHostSimulationResult {
   );
 }
 
+/**
+ * Checks whether a value is a `{ $pattern: "regex" }` matcher object.
+ */
+function isPatternMatcher(
+  v: unknown
+): v is { $pattern: string; $flags?: string } {
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    '$pattern' in v &&
+    typeof (v as Record<string, unknown>)['$pattern'] === 'string'
+  );
+}
+
 function partialMatch(
   actual: Record<string, unknown>,
   expected: Record<string, unknown>
 ): boolean {
   return Object.entries(expected).every(([k, v]) => {
     const actualVal = actual[k];
+
+    // { $pattern: "regex", $flags?: "i" } — match actual string against regex
+    if (isPatternMatcher(v)) {
+      if (typeof actualVal !== 'string') return false;
+      const re = new RegExp(v.$pattern, v.$flags);
+      return re.test(actualVal);
+    }
+
     if (
       typeof v === 'object' &&
       v !== null &&

@@ -59,6 +59,62 @@ describe('validateToolCalls', () => {
     expect(v.pass).toBe(false);
   });
 
+  it('matches argument value with $pattern regex', () => {
+    const result = makeResult([
+      { name: 'search', arguments: { query: 'onboarding guide for new engineers' } },
+    ]);
+    const v = validateToolCalls(result, {
+      calls: [{ name: 'search', arguments: { query: { $pattern: 'onboarding.*engineer' } } }],
+    });
+    expect(v.pass).toBe(true);
+  });
+
+  it('fails when $pattern regex does not match', () => {
+    const result = makeResult([
+      { name: 'search', arguments: { query: 'weather forecast' } },
+    ]);
+    const v = validateToolCalls(result, {
+      calls: [{ name: 'search', arguments: { query: { $pattern: 'onboarding.*' } } }],
+    });
+    expect(v.pass).toBe(false);
+  });
+
+  it('supports $flags for case-insensitive regex matching', () => {
+    const result = makeResult([
+      { name: 'search', arguments: { query: 'Onboarding Guide' } },
+    ]);
+    const v = validateToolCalls(result, {
+      calls: [{ name: 'search', arguments: { query: { $pattern: 'onboarding', $flags: 'i' } } }],
+    });
+    expect(v.pass).toBe(true);
+  });
+
+  it('$pattern fails when actual value is not a string', () => {
+    const result = makeResult([
+      { name: 'search', arguments: { limit: 10 } },
+    ]);
+    const v = validateToolCalls(result, {
+      calls: [{ name: 'search', arguments: { limit: { $pattern: '10' } } }],
+    });
+    expect(v.pass).toBe(false);
+  });
+
+  it('mixes exact and $pattern argument matching', () => {
+    const result = makeResult([
+      { name: 'search', arguments: { query: 'onboarding docs', limit: 10 } },
+    ]);
+    const v = validateToolCalls(result, {
+      calls: [{
+        name: 'search',
+        arguments: {
+          query: { $pattern: 'onboarding' },
+          limit: 10,
+        },
+      }],
+    });
+    expect(v.pass).toBe(true);
+  });
+
   it('argument matching is not sensitive to key declaration order', () => {
     // actual call has keys in { a, b } order; expected spec declares them as { b, a }
     // partialMatch recurses into nested objects so key order never reaches JSON.stringify
