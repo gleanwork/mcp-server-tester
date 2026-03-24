@@ -16,6 +16,7 @@ function stripAnsiCodes(text: string): string {
 }
 
 function formatResponsePreview(response: unknown): string {
+  if (response === undefined) return 'undefined';
   return JSON.stringify(response, null, 2);
 }
 
@@ -534,7 +535,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
             )}
 
             {/* Response — collapsible, collapsed by default when large */}
-            {result.response === null ? (
+            {result.response == null ? (
               <CollapsibleSection
                 title="Raw Response"
                 defaultOpen={!isLargeResponse}
