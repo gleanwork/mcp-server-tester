@@ -278,6 +278,8 @@ console.log(`Passed: ${result.passed}/${result.total}`);
 **Result Structure:**
 
 ```typescript snippet=src/evals/evalRunner.ts#L65-L134
+ * Overall result of running an eval dataset
+ */
 export interface EvalRunnerResult {
   /**
    * Total number of cases
@@ -346,8 +348,6 @@ export interface EvalRunnerResult {
   /**
    * Experiment tracking metadata captured at run time.
    */
-  metadata?: EvalRunMetadata;
-}
 ```
 
 ## Playwright Matchers
