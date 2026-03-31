@@ -710,8 +710,15 @@ export interface EvalExpectBlock {
    * LLM-as-judge evaluation (toPassToolJudge)
    */
   passesJudge?: {
-    /** Built-in rubric name or custom rubric object */
-    rubric: BuiltInRubric | { text: string };
+    /**
+     * Name of a registered custom judge executor.
+     * When set, the named judge handles the entire evaluation pipeline
+     * and its `pass` result is authoritative (threshold, reps, and other
+     * LLM config fields are ignored).
+     */
+    judge?: string;
+    /** Built-in rubric name or custom rubric object. Required when no `judge` is specified. */
+    rubric?: BuiltInRubric | { text: string };
     /** Reference response to compare against */
     reference?: unknown;
     /** Score threshold for passing (0-1, default: 0.7) */
@@ -772,13 +779,6 @@ export interface EvalExpectBlock {
    */
   toolCallCount?: {
     /** Minimum number of tool calls */
-    min?: number;
-    /** Maximum number of tool calls */
-    max?: number;
-    /** Exact number of tool calls */
-    exact?: number;
-  };
-}
 ```
 
 ### `EvalCase`
