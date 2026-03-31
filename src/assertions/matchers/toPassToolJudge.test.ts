@@ -461,9 +461,7 @@ describe('toPassToolJudge', () => {
     });
 
     it('passes reference through to the executor', async () => {
-      const executor = vi
-        .fn()
-        .mockResolvedValue({ score: 1.0 });
+      const executor = vi.fn().mockResolvedValue({ score: 1.0 });
       vi.mocked(getRegisteredJudge).mockReturnValue(executor);
 
       const context = { isNot: false };
@@ -476,9 +474,7 @@ describe('toPassToolJudge', () => {
     });
 
     it('respects passingThreshold with named judge', async () => {
-      const executor = vi
-        .fn()
-        .mockResolvedValue({ score: 0.6 });
+      const executor = vi.fn().mockResolvedValue({ score: 0.6 });
       vi.mocked(getRegisteredJudge).mockReturnValue(executor);
 
       const context = { isNot: false };
@@ -498,9 +494,7 @@ describe('toPassToolJudge', () => {
     });
 
     it('still works with rubric + judge in options (judge takes precedence)', async () => {
-      const executor = vi
-        .fn()
-        .mockResolvedValue({ score: 0.9 });
+      const executor = vi.fn().mockResolvedValue({ score: 0.9 });
       vi.mocked(getRegisteredJudge).mockReturnValue(executor);
 
       const context = { isNot: false };

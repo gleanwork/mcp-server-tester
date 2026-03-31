@@ -134,7 +134,8 @@ export async function validateJudge(
   if (rubric === undefined) {
     return {
       pass: false,
-      message: 'Judge evaluation failed: either "judge" or "rubric" must be provided',
+      message:
+        'Judge evaluation failed: either "judge" or "rubric" must be provided',
     };
   }
 

@@ -304,9 +304,7 @@ describe('validateJudge', () => {
     });
 
     it('passes reference to the executor', async () => {
-      const executor = vi
-        .fn()
-        .mockResolvedValue({ score: 1.0 });
+      const executor = vi.fn().mockResolvedValue({ score: 1.0 });
       mockGetRegisteredJudge.mockReturnValue(executor);
 
       await validateJudge('candidate', {
@@ -349,9 +347,7 @@ describe('validateJudge', () => {
     });
 
     it('same judge reusable with different thresholds', async () => {
-      const executor = vi
-        .fn()
-        .mockResolvedValue({ score: 0.75 });
+      const executor = vi.fn().mockResolvedValue({ score: 0.75 });
       mockGetRegisteredJudge.mockReturnValue(executor);
 
       const strict = await validateJudge('response', {
@@ -368,9 +364,7 @@ describe('validateJudge', () => {
     });
 
     it('does not call createJudge when named judge is used', async () => {
-      const executor = vi
-        .fn()
-        .mockResolvedValue({ score: 1.0 });
+      const executor = vi.fn().mockResolvedValue({ score: 1.0 });
       mockGetRegisteredJudge.mockReturnValue(executor);
 
       await validateJudge('response', { judge: 'custom' });
@@ -390,9 +384,7 @@ describe('validateJudge', () => {
     });
 
     it('handles async executor rejection', async () => {
-      const executor = vi
-        .fn()
-        .mockRejectedValue(new Error('LLM API timeout'));
+      const executor = vi.fn().mockRejectedValue(new Error('LLM API timeout'));
       mockGetRegisteredJudge.mockReturnValue(executor);
 
       const result = await validateJudge('response', { judge: 'flaky' });

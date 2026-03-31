@@ -112,9 +112,10 @@ export function registerJudge(
 export function getRegisteredJudge(name: string): CustomJudgeExecutor {
   const executor = registry.get(name);
   if (!executor) {
-    const available = registry.size > 0
-      ? ` Available judges: ${[...registry.keys()].join(', ')}`
-      : ' No judges are registered.';
+    const available =
+      registry.size > 0
+        ? ` Available judges: ${[...registry.keys()].join(', ')}`
+        : ' No judges are registered.';
     throw new Error(
       `Judge "${name}" is not registered.${available} ` +
         `Register it with registerJudge() before tests run.`

@@ -238,7 +238,10 @@ export {
 } from './judge/judgeTypes.js';
 
 // Custom Judge Registry
-export type { CustomJudgeExecutor, CustomJudgeResult } from './judge/judgeRegistry.js';
+export type {
+  CustomJudgeExecutor,
+  CustomJudgeResult,
+} from './judge/judgeRegistry.js';
 export {
   registerJudge,
   getRegisteredJudge,
