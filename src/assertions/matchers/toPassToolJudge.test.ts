@@ -2,12 +2,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { toPassToolJudge } from './toPassToolJudge.js';
 import type { RubricSpec } from '../../judge/rubrics.js';
 
-// Mock the judge client so no real LLM calls are made
+// Mock the judge client and registry so no real LLM calls are made
 vi.mock('../../judge/judgeClient.js', () => ({
   createJudge: vi.fn(),
 }));
+vi.mock('../../judge/judgeRegistry.js', () => ({
+  getRegisteredJudge: vi.fn(),
+}));
 
 import { createJudge } from '../../judge/judgeClient.js';
+import { getRegisteredJudge } from '../../judge/judgeRegistry.js';
 
 const RUBRIC: RubricSpec = { text: 'Is the response accurate and complete?' };
 
@@ -408,6 +412,108 @@ describe('toPassToolJudge', () => {
       );
 
       expect(result.pass).toBe(true);
+    });
+  });
+
+  describe('named custom judge (options-only signature)', () => {
+    it('passes when called with { judge } options only (no rubric)', async () => {
+      const executor = vi
+        .fn()
+        .mockResolvedValue({ score: 0.95, reasoning: 'Great' });
+      vi.mocked(getRegisteredJudge).mockReturnValue(executor);
+
+      const context = { isNot: false };
+      const result = await toPassToolJudge.call(context, 'response', {
+        judge: 'my-judge',
+      });
+
+      expect(result.pass).toBe(true);
+      expect(getRegisteredJudge).toHaveBeenCalledWith('my-judge');
+      expect(createJudge).not.toHaveBeenCalled();
+    });
+
+    it('fails when custom judge score is below threshold', async () => {
+      const executor = vi
+        .fn()
+        .mockResolvedValue({ score: 0.2, reasoning: 'Bad' });
+      vi.mocked(getRegisteredJudge).mockReturnValue(executor);
+
+      const context = { isNot: false };
+      const result = await toPassToolJudge.call(context, 'response', {
+        judge: 'strict',
+      });
+
+      expect(result.pass).toBe(false);
+    });
+
+    it('supports .not with named judge', async () => {
+      const executor = vi
+        .fn()
+        .mockResolvedValue({ score: 0.1, reasoning: 'Nope' });
+      vi.mocked(getRegisteredJudge).mockReturnValue(executor);
+
+      const context = { isNot: true };
+      const result = await toPassToolJudge.call(context, 'response', {
+        judge: 'strict',
+      });
+
+      expect(result.pass).toBe(true);
+    });
+
+    it('passes reference through to the executor', async () => {
+      const executor = vi
+        .fn()
+        .mockResolvedValue({ score: 1.0 });
+      vi.mocked(getRegisteredJudge).mockReturnValue(executor);
+
+      const context = { isNot: false };
+      await toPassToolJudge.call(context, 'candidate', {
+        judge: 'ref-judge',
+        reference: 'expected answer',
+      });
+
+      expect(executor).toHaveBeenCalledWith('candidate', 'expected answer');
+    });
+
+    it('respects passingThreshold with named judge', async () => {
+      const executor = vi
+        .fn()
+        .mockResolvedValue({ score: 0.6 });
+      vi.mocked(getRegisteredJudge).mockReturnValue(executor);
+
+      const context = { isNot: false };
+
+      // Fails at default threshold (0.7)
+      const strict = await toPassToolJudge.call(context, 'response', {
+        judge: 'my-judge',
+      });
+      expect(strict.pass).toBe(false);
+
+      // Passes at lower threshold
+      const lenient = await toPassToolJudge.call(context, 'response', {
+        judge: 'my-judge',
+        passingThreshold: 0.5,
+      });
+      expect(lenient.pass).toBe(true);
+    });
+
+    it('still works with rubric + judge in options (judge takes precedence)', async () => {
+      const executor = vi
+        .fn()
+        .mockResolvedValue({ score: 0.9 });
+      vi.mocked(getRegisteredJudge).mockReturnValue(executor);
+
+      const context = { isNot: false };
+      const result = await toPassToolJudge.call(
+        context,
+        'response',
+        'correctness',
+        { judge: 'my-judge' }
+      );
+
+      expect(result.pass).toBe(true);
+      expect(getRegisteredJudge).toHaveBeenCalledWith('my-judge');
+      expect(createJudge).not.toHaveBeenCalled();
     });
   });
 });

@@ -33,6 +33,12 @@ export interface JudgeMatcherOptions {
   provider?: ProviderKind;
   /** Override the judge model */
   model?: string;
+  /**
+   * Name of a registered custom judge executor.
+   * When set, the named judge handles the entire evaluation pipeline
+   * and its `pass` result is authoritative.
+   */
+  judge?: string;
 }
 
 /**
@@ -141,24 +147,30 @@ declare global {
       toBeToolError(expected?: boolean | string | string[]): R;
 
       /**
-       * Validates that a response passes LLM-as-judge evaluation
+       * Validates that a response passes LLM-as-judge evaluation.
        *
-       * @param rubric - Evaluation rubric/criteria
-       * @param options - Judge options
+       * Two call signatures:
+       * - With rubric: `toPassToolJudge(rubric, options?)` — built-in LLM judge
+       * - With named judge: `toPassToolJudge({ judge: 'name' })` — custom judge executor
        *
        * @example
        * ```typescript
+       * // Built-in LLM judge with rubric
        * expect(result).toPassToolJudge('Response should be helpful and accurate');
-       * expect(result).toPassToolJudge('Response should match reference', {
+       * expect(result).toPassToolJudge('correctness', {
        *   reference: expectedOutput,
        *   passingThreshold: 0.8,
        * });
+       *
+       * // Named custom judge (registered via registerJudge)
+       * expect(result).toPassToolJudge({ judge: 'glean-completeness' });
        * ```
        */
       toPassToolJudge(
         rubric: RubricSpec,
         options?: JudgeMatcherOptions
       ): Promise<R>;
+      toPassToolJudge(options: JudgeMatcherOptions): Promise<R>;
 
       /**
        * Validates that a response meets size constraints

@@ -9,13 +9,17 @@ import type { ProviderKind } from '../../judge/judgeTypes.js';
 import type { RubricSpec } from '../../judge/rubrics.js';
 import { createJudge } from '../../judge/judgeClient.js';
 import { resolveRubric } from '../../judge/rubrics.js';
+import { getRegisteredJudge } from '../../judge/judgeRegistry.js';
 
 /**
  * Configuration for the judge validator
  */
 export interface JudgeValidatorConfig {
-  /** The evaluation rubric: a built-in name or custom { text: string } */
-  rubric: RubricSpec;
+  /**
+   * The evaluation rubric: a built-in name or custom { text: string }.
+   * Required when no named `judge` is specified.
+   */
+  rubric?: RubricSpec;
   /** Optional reference response to compare against */
   reference?: unknown;
   /** Minimum score required to pass (0-1, default: 0.7) */
@@ -36,6 +40,13 @@ export interface JudgeValidatorConfig {
   maxBudgetUsd?: number;
   /** Fail if response exceeds this size in bytes before judging */
   maxToolOutputSize?: number;
+  /**
+   * Name of a registered custom judge executor.
+   * When set, the named judge handles the entire evaluation pipeline
+   * and returns a normalized score. The `threshold` determines pass/fail.
+   * Register judges with `registerJudge()` before tests run.
+   */
+  judge?: string;
 }
 
 /**
@@ -82,6 +93,7 @@ export async function validateJudge(
   config: JudgeValidatorConfig
 ): Promise<ValidationResult> {
   const {
+    judge: judgeName,
     rubric,
     reference,
     threshold = 0.7,
@@ -94,6 +106,37 @@ export async function validateJudge(
     maxBudgetUsd,
     maxToolOutputSize,
   } = config;
+
+  // Named custom judge — executor returns a score, threshold determines pass/fail
+  if (judgeName !== undefined) {
+    try {
+      const executor = getRegisteredJudge(judgeName);
+      const judgeResult = await executor(response, reference ?? undefined);
+
+      const score = judgeResult.score;
+      const passed = score >= threshold;
+
+      return {
+        pass: passed,
+        message: passed
+          ? `Custom judge "${judgeName}" passed with score ${score.toFixed(2)}`
+          : `Custom judge "${judgeName}" failed with score ${score.toFixed(2)} (threshold: ${threshold}). ${judgeResult.reasoning ?? ''}`,
+      };
+    } catch (err) {
+      return {
+        pass: false,
+        message: `Custom judge "${judgeName}" error: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
+  // Built-in LLM judge — requires rubric
+  if (rubric === undefined) {
+    return {
+      pass: false,
+      message: 'Judge evaluation failed: either "judge" or "rubric" must be provided',
+    };
+  }
 
   const resolvedRubric = resolveRubric(rubric);
 

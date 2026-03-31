@@ -237,6 +237,14 @@ export {
   isBuiltInRubric,
 } from './judge/judgeTypes.js';
 
+// Custom Judge Registry
+export type { CustomJudgeExecutor, CustomJudgeResult } from './judge/judgeRegistry.js';
+export {
+  registerJudge,
+  getRegisteredJudge,
+  clearJudgeRegistry,
+} from './judge/judgeRegistry.js';
+
 // Conformance
 export type {
   MCPConformanceOptions,
