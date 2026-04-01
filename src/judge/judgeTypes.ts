@@ -56,7 +56,12 @@ export interface UsageMetrics {
 }
 
 /** Valid LLM judge provider kinds. */
-export type ProviderKind = 'anthropic' | 'openai' | 'google';
+export type ProviderKind =
+  | 'anthropic'
+  | 'vertex-anthropic'
+  | 'anthropic-agent-sdk'
+  | 'openai'
+  | 'google';
 
 /**
  * Configuration for an LLM judge

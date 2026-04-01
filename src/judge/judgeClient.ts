@@ -1,4 +1,5 @@
 import type { Judge, JudgeConfig, ProviderKind } from './judgeTypes.js';
+import { createAnthropicJudge } from './anthropicJudge.js';
 import { createClaudeAgentJudge } from './claudeAgentJudge.js';
 import { createOpenAIJudge } from './openaiJudge.js';
 import { createGoogleJudge } from './googleJudge.js';
@@ -40,6 +41,12 @@ export function createJudge(config: JudgeConfig = {}): Judge {
 
   switch (provider) {
     case 'anthropic':
+      return createAnthropicJudge(config, false);
+
+    case 'vertex-anthropic':
+      return createAnthropicJudge(config, true);
+
+    case 'anthropic-agent-sdk':
       return createClaudeAgentJudge(config);
 
     case 'openai':
