@@ -3,37 +3,35 @@ import type { Judge, JudgeConfig, JudgeResult } from './judgeTypes.js';
 import { JudgeResponseSchema } from './judgeTypes.js';
 
 /**
- * Creates an Anthropic-backed LLM judge using the Anthropic SDK directly.
- * Requires the `@anthropic-ai/sdk` package and an Anthropic API key.
+ * Creates an Anthropic-backed LLM judge that routes through Google Vertex AI.
+ * Requires the `@anthropic-ai/vertex-sdk` package and Application Default Credentials.
+ * Set GOOGLE_VERTEX_PROJECT and GOOGLE_VERTEX_LOCATION env vars.
  */
-export function createAnthropicJudge(config: JudgeConfig = {}): Judge {
-  const apiKeyEnvVar = config.apiKeyEnvVar ?? 'ANTHROPIC_API_KEY';
-  const apiKey = process.env[apiKeyEnvVar];
-  if (!apiKey) {
-    throw new Error(
-      `Anthropic judge requires an API key. Set the ${apiKeyEnvVar} environment variable.`
-    );
-  }
-
+export function createVertexAnthropicJudge(config: JudgeConfig = {}): Judge {
   const model = config.model ?? 'claude-sonnet-4-20250514';
   const maxTokens = config.maxTokens ?? 1000;
   const temperature = config.temperature ?? 0.0;
 
   return {
     async evaluate(candidate, reference, rubric): Promise<JudgeResult> {
-      let anthropicModule: any;
+      let vertexModule: any;
       try {
-        // @ts-expect-error - optional: npm install @anthropic-ai/sdk
-        anthropicModule = await import('@anthropic-ai/sdk');
+        // @ts-expect-error - optional: npm install @anthropic-ai/vertex-sdk
+        vertexModule = await import('@anthropic-ai/vertex-sdk');
       } catch (err) {
         throw new Error(
-          'Anthropic judge requires the `@anthropic-ai/sdk` package. ' +
-            'Install it with: npm install @anthropic-ai/sdk\n' +
+          'Vertex Anthropic judge requires the `@anthropic-ai/vertex-sdk` package. ' +
+            'Install it with: npm install @anthropic-ai/vertex-sdk\n' +
             `Original error: ${err instanceof Error ? err.message : String(err)}`
         );
       }
 
-      const client = new anthropicModule.default({ apiKey });
+      const client = new vertexModule.AnthropicVertex({
+        projectId:
+          process.env.GOOGLE_VERTEX_PROJECT ?? process.env.CLOUD_ML_PROJECT_ID,
+        region: process.env.GOOGLE_VERTEX_LOCATION ?? 'us-east5',
+      });
+
       const prompt = buildJudgePrompt(candidate, reference, rubric);
 
       const startTime = Date.now();
