@@ -188,9 +188,9 @@ export interface EvalExpectBlock {
   passesJudge?: {
     /**
      * Name of a registered custom judge executor.
-     * When set, the named judge handles the entire evaluation pipeline
-     * and its `pass` result is authoritative (threshold, reps, and other
-     * LLM config fields are ignored).
+     * When set, the named judge handles evaluation and returns a normalized score.
+     * The `threshold` determines pass/fail. `reps` and LLM config fields
+     * (provider, model, etc.) are ignored.
      */
     judge?: string;
     /** Built-in rubric name or custom rubric object. Required when no `judge` is specified. */
