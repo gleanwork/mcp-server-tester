@@ -52,6 +52,26 @@ export interface EvalExpectationResult {
    * Optional details about the result
    */
   details?: string;
+
+  /**
+   * Judge score (0-1). Populated for passesJudge expectations.
+   */
+  score?: number;
+
+  /**
+   * Judge reasoning. Populated for passesJudge expectations.
+   */
+  reasoning?: string;
+
+  /**
+   * Judge provider used. Populated for passesJudge expectations.
+   */
+  judgeProvider?: string;
+
+  /**
+   * Judge model used. Populated for passesJudge expectations.
+   */
+  judgeModel?: string;
 }
 
 /**

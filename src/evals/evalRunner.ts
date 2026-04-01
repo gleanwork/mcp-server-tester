@@ -479,6 +479,10 @@ async function runExpectBlockValidations(
     results.judge = {
       pass: validation.pass,
       details: validation.message,
+      score: validation.details?.score as number | undefined,
+      reasoning: validation.details?.reasoning as string | undefined,
+      judgeProvider: validation.details?.judgeProvider as string | undefined,
+      judgeModel: validation.details?.judgeModel as string | undefined,
     };
   }
 

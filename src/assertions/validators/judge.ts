@@ -158,14 +158,17 @@ export async function validateJudge(
       message: passed
         ? `Judge passed with score ${meanScore.toFixed(2)}${repNote}`
         : `Judge failed with score ${meanScore.toFixed(2)} (threshold: ${threshold})${repNote}. ${lastReasoning ?? ''}`,
-      details:
-        reps > 1
-          ? {
-              scores,
-              scoreStdDev: stdDev,
-              highVariance,
-            }
-          : undefined,
+      details: {
+        score: meanScore,
+        reasoning: lastReasoning,
+        judgeProvider: provider ?? 'anthropic',
+        judgeModel: model,
+        ...(reps > 1 && {
+          scores,
+          scoreStdDev: stdDev,
+          highVariance,
+        }),
+      },
     };
   } catch (err) {
     return {

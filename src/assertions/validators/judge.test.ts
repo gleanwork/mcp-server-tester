@@ -239,8 +239,10 @@ describe('validateJudge', () => {
       consoleSpy.mockRestore();
     });
 
-    it('does not include details for single rep', async () => {
-      const mockJudge = makeMockJudge([{ score: 0.8, pass: true }]);
+    it('includes judge metadata but not rep-specific fields for single rep', async () => {
+      const mockJudge = makeMockJudge([
+        { score: 0.8, pass: true, reasoning: 'Looks good' },
+      ]);
       mockCreateJudge.mockReturnValue(mockJudge);
 
       const result = await validateJudge('response', {
@@ -248,7 +250,13 @@ describe('validateJudge', () => {
         reps: 1,
       });
 
-      expect(result.details).toBeUndefined();
+      expect(result.details).toBeDefined();
+      expect(result.details?.score).toBe(0.8);
+      expect(result.details?.reasoning).toBe('Looks good');
+      expect(result.details?.judgeProvider).toBe('anthropic');
+      // No rep-specific fields for single rep
+      expect(result.details?.scores).toBeUndefined();
+      expect(result.details?.scoreStdDev).toBeUndefined();
     });
   });
 
