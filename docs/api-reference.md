@@ -666,7 +666,7 @@ interface ConformanceResult {
 
 ### `EvalExpectBlock`
 
-```typescript snippet=src/evals/datasetTypes.ts#L146-L264
+```typescript snippet=src/evals/datasetTypes.ts#L146-L269
 export interface EvalExpectBlock {
   /**
    * Exact response match (toMatchToolResponse)
@@ -726,7 +726,12 @@ export interface EvalExpectBlock {
     /** Number of judge evaluations for this assertion. Overrides EvalCase.judgeReps. */
     reps?: number;
     /** Judge provider. @default 'anthropic' */
-    provider?: 'anthropic' | 'openai' | 'google';
+    provider?:
+      | 'anthropic'
+      | 'vertex-anthropic'
+      | 'anthropic-agent-sdk'
+      | 'openai'
+      | 'google';
     /** Model override (e.g., 'claude-opus-4-20250514') */
     model?: string;
     /** Environment variable name for API key */
