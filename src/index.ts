@@ -208,6 +208,9 @@ export { runServerComparison } from './evals/serverComparison.js';
 
 // MCP Host Simulation
 export type {
+  HostType,
+  CLIOutputFormat,
+  CLIConfig,
   LLMProvider,
   MCPHostConfig,
   LLMToolCall,

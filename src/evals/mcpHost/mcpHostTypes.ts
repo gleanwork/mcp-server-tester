@@ -8,10 +8,20 @@
 import type { MCPFixtureApi } from '../../mcp/fixtures/mcpFixture.js';
 
 /**
- * LLM provider for host simulation.
+ * Host type for MCP host simulation.
  *
- * All providers run through the Vercel AI SDK (`ai` package).
- * Each provider requires its corresponding @ai-sdk/* package:
+ * - 'sdk': Programmatic via Vercel AI SDK (default). The framework's MCP connection is reused.
+ * - 'cli': CLI-based hosts (e.g., Claude Code, Codex). Spawns a process with its own MCP connection.
+ * - 'browser': Web-based hosts (e.g., claude.ai). Uses Playwright/CDP. (Not yet implemented.)
+ * - 'desktop': Desktop app hosts (e.g., Claude Desktop). Uses computer use. (Not yet implemented.)
+ */
+export type HostType = 'sdk' | 'cli' | 'browser' | 'desktop';
+
+/**
+ * LLM provider for SDK-based host simulation.
+ *
+ * Each provider runs through the Vercel AI SDK (`ai` package)
+ * and requires its corresponding @ai-sdk/* package:
  *
  *   openai      → npm install ai @ai-sdk/openai
  *   anthropic   → npm install ai @ai-sdk/anthropic
@@ -41,11 +51,84 @@ export type LLMProvider =
   | 'vertex-anthropic';
 
 /**
+ * Output format for CLI host processes.
+ *
+ * - 'stream-json': NDJSON (one JSON object per line). Used by Claude Code (`--output-format stream-json`).
+ * - 'json': Single JSON object on stdout.
+ */
+export type CLIOutputFormat = 'stream-json' | 'json';
+
+/**
+ * Configuration for a CLI host process.
+ *
+ * The process is spawned directly (no shell) with `command` and `args`.
+ * Use `{{scenario}}` in any args entry as a placeholder for the natural
+ * language prompt — the framework replaces it before spawning.
+ *
+ * Because args are passed directly to the process (not through a shell),
+ * special characters in the scenario (quotes, newlines, `$`, etc.) are
+ * handled safely without escaping.
+ *
+ * @example Claude Code
+ * ```json
+ * {
+ *   "command": "claude",
+ *   "args": ["-p", "{{scenario}}", "--output-format", "stream-json",
+ *            "--verbose", "--mcp-config", "{...}"]
+ * }
+ * ```
+ *
+ * @example Custom CLI
+ * ```json
+ * {
+ *   "command": "my-agent",
+ *   "args": ["--prompt", "{{scenario}}", "--config", "./mcp.json"],
+ *   "outputFormat": "json"
+ * }
+ * ```
+ */
+export interface CLIConfig {
+  /**
+   * CLI binary to invoke.
+   */
+  command: string;
+
+  /**
+   * Arguments to pass. Use `{{scenario}}` as a placeholder for the prompt.
+   */
+  args: string[];
+
+  /**
+   * How to parse stdout.
+   * @default 'stream-json'
+   */
+  outputFormat?: CLIOutputFormat;
+
+  /**
+   * Timeout in milliseconds.
+   * @default 120000 (2 minutes)
+   */
+  timeout?: number;
+}
+
+/**
  * Configuration for MCP host simulation
  */
 export interface MCPHostConfig {
   /**
-   * LLM provider to use
+   * Host type for the simulation.
+   *
+   * - 'sdk': Programmatic via Vercel AI SDK (default). The framework's MCP connection is reused.
+   * - 'cli': CLI-based hosts (e.g., Claude Code, Codex). Spawns a process with its own MCP connection.
+   * - 'browser': Web-based hosts (not yet implemented).
+   * - 'desktop': Desktop app hosts (not yet implemented).
+   *
+   * @default 'sdk'
+   */
+  hostType?: HostType;
+
+  /**
+   * LLM provider to use (required for 'sdk' host type)
    */
   provider: LLMProvider;
 
@@ -75,6 +158,11 @@ export interface MCPHostConfig {
    * @default 10
    */
   maxToolCalls?: number;
+
+  /**
+   * CLI host configuration (required for 'cli' host type).
+   */
+  cli?: CLIConfig;
 }
 
 /**

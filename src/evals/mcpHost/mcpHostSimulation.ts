@@ -25,6 +25,7 @@ import type {
   LLMProvider,
 } from './mcpHostTypes.js';
 import { createVercelOrchestrator } from './adapters/vercel.js';
+import { runCLIHost } from './adapters/cli/index.js';
 
 // Single orchestrator instance shared across all providers.
 // Each provider is dynamically imported inside the orchestrator on first use.
@@ -53,10 +54,6 @@ const simulatorRegistry = new Map<LLMProvider, MCPHostSimulator>(
  * schemas, testing discoverability and parameter clarity at the level a real
  * user (via Claude Desktop, ChatGPT, etc.) would experience.
  *
- * All providers run through the Vercel AI SDK's generateText with maxSteps,
- * which handles multi-turn tool calling natively and provides per-step latency
- * decomposition (llmDurationMs vs. mcpDurationMs).
- *
  * @param mcp - MCP fixture API
  * @param scenario - Natural language prompt describing what the LLM should do
  * @param config - MCP host configuration (provider, model, temperature, etc.)
@@ -64,13 +61,24 @@ const simulatorRegistry = new Map<LLMProvider, MCPHostSimulator>(
  *
  * @example
  * ```typescript
+ * // SDK host (default) — uses the framework's existing MCP connection
  * const result = await simulateMCPHost(mcp,
  *   "Find recent documents about MCP testing frameworks",
  *   { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' }
  * );
  *
- * expect(result.success).toBe(true);
- * expect(result.toolCalls.map(c => c.name)).toContain('search');
+ * // CLI host — spawns a CLI process with its own MCP connection
+ * const result = await simulateMCPHost(mcp,
+ *   "Find recent documents about MCP testing frameworks",
+ *   {
+ *     hostType: 'cli',
+ *     provider: 'anthropic',
+ *     cli: {
+ *       command: 'claude',
+ *       args: ['-p', '{{scenario}}', '--output-format', 'stream-json', '--verbose'],
+ *     },
+ *   }
+ * );
  * ```
  */
 export async function simulateMCPHost(
@@ -78,6 +86,26 @@ export async function simulateMCPHost(
   scenario: string,
   config: MCPHostConfig
 ): Promise<MCPHostSimulationResult> {
+  const hostType = config.hostType ?? 'sdk';
+
+  if (hostType === 'cli') {
+    if (!config.cli) {
+      throw new Error(
+        `mcpHostConfig.cli is required when hostType is 'cli'. ` +
+          `Provide { command } with a shell command containing {{scenario}}.`
+      );
+    }
+    return runCLIHost(config.cli, scenario);
+  }
+
+  if (hostType === 'browser' || hostType === 'desktop') {
+    throw new Error(
+      `Host type '${hostType}' is not yet implemented. ` +
+        `Supported host types: 'sdk', 'cli'.`
+    );
+  }
+
+  // Default: SDK host via Vercel AI SDK
   const simulator = simulatorRegistry.get(config.provider);
   if (!simulator) {
     throw new Error(

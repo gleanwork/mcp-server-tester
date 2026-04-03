@@ -302,6 +302,7 @@ export interface EvalDataset {
  * Zod schema for MCPHostConfig (simplified for serialization)
  */
 const MCPHostConfigSchema = z.object({
+  hostType: z.enum(['sdk', 'cli', 'browser', 'desktop']).optional(),
   provider: z.enum([
     'openai',
     'anthropic',
@@ -318,6 +319,14 @@ const MCPHostConfigSchema = z.object({
   maxTokens: z.number().optional(),
   temperature: z.number().optional(),
   maxToolCalls: z.number().optional(),
+  cli: z
+    .object({
+      command: z.string(),
+      args: z.array(z.string()),
+      outputFormat: z.enum(['stream-json', 'json']).optional(),
+      timeout: z.number().optional(),
+    })
+    .optional(),
 });
 
 /**
