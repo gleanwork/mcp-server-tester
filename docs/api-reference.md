@@ -277,7 +277,8 @@ console.log(`Passed: ${result.passed}/${result.total}`);
 
 **Result Structure:**
 
-```typescript snippet=src/evals/evalRunner.ts#L65-L134
+```typescript snippet=src/evals/evalRunner.ts#L65-L137
+/**
  * Overall result of running an eval dataset
  */
 export interface EvalRunnerResult {
@@ -348,6 +349,8 @@ export interface EvalRunnerResult {
   /**
    * Experiment tracking metadata captured at run time.
    */
+  metadata?: EvalRunMetadata;
+}
 ```
 
 ## Playwright Matchers
@@ -666,7 +669,7 @@ interface ConformanceResult {
 
 ### `EvalExpectBlock`
 
-```typescript snippet=src/evals/datasetTypes.ts#L146-L269
+```typescript snippet=src/evals/datasetTypes.ts#L144-L272
 export interface EvalExpectBlock {
   /**
    * Exact response match (toMatchToolResponse)
@@ -708,43 +711,11 @@ export interface EvalExpectBlock {
 
   /**
    * LLM-as-judge evaluation (toPassToolJudge)
+   *
+   * Accepts a single judge config or an array for multi-judge evaluation.
+   * When an array is provided, all judges must pass (AND semantics).
    */
-  passesJudge?: {
-    /**
-     * Name of a registered custom judge executor.
-     * When set, the named judge handles evaluation and returns a normalized score.
-     * The `threshold` determines pass/fail. `reps` and LLM config fields
-     * (provider, model, etc.) are ignored.
-     */
-    judge?: string;
-    /** Built-in rubric name or custom rubric object. Required when no `judge` is specified. */
-    rubric?: BuiltInRubric | { text: string };
-    /** Reference response to compare against */
-    reference?: unknown;
-    /** Score threshold for passing (0-1, default: 0.7) */
-    threshold?: number;
-    /** Number of judge evaluations for this assertion. Overrides EvalCase.judgeReps. */
-    reps?: number;
-    /** Judge provider. @default 'anthropic' */
-    provider?:
-      | 'anthropic'
-      | 'vertex-anthropic'
-      | 'anthropic-agent-sdk'
-      | 'openai'
-      | 'google';
-    /** Model override (e.g., 'claude-opus-4-20250514') */
-    model?: string;
-    /** Environment variable name for API key */
-    apiKeyEnvVar?: string;
-    /** Max tokens for judge response */
-    maxTokens?: number;
-    /** Temperature for judge LLM (0–1) */
-    temperature?: number;
-    /** Max budget in USD per evaluation */
-    maxBudgetUsd?: number;
-    /** Fail if response exceeds this size in bytes before judging */
-    maxToolOutputSize?: number;
-  };
+  passesJudge?: JudgeExpectConfig | JudgeExpectConfig[];
 
   /**
    * Response size validation (toHaveToolResponseSize)
