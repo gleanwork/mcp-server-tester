@@ -171,6 +171,9 @@ declare global {
         options?: JudgeMatcherOptions
       ): Promise<R>;
       toPassToolJudge(options: JudgeMatcherOptions): Promise<R>;
+      toPassToolJudge(
+        judges: Array<JudgeMatcherOptions & { rubric?: RubricSpec }>
+      ): Promise<R>;
 
       /**
        * Validates that a response meets size constraints

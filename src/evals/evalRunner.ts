@@ -4,6 +4,7 @@ import type { TestInfo, Expect } from '@playwright/test';
 import type { ZodType } from 'zod';
 import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
 import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
+import type { EvalExpectationResult } from '../types/index.js';
 import type {
   EvalCaseResult,
   EvalCaseRequest,
@@ -464,26 +465,57 @@ async function runExpectBlockValidations(
     };
   }
 
-  // passesJudge (toPassToolJudge)
+  // passesJudge (toPassToolJudge) — single or multi-judge
   if (expectBlock.passesJudge !== undefined) {
-    const effectiveReps = expectBlock.passesJudge.reps ?? config.judgeReps ?? 1;
-    const effectiveReference =
-      expectBlock.passesJudge.reference !== undefined
-        ? expectBlock.passesJudge.reference
-        : config.canonicalAnswer;
-    const validation = await validateJudge(response, {
-      ...expectBlock.passesJudge,
-      reference: effectiveReference,
-      reps: effectiveReps,
-    });
-    results.judge = {
-      pass: validation.pass,
-      details: validation.message,
-      score: validation.details?.score as number | undefined,
-      reasoning: validation.details?.reasoning as string | undefined,
-      judgeProvider: validation.details?.judgeProvider as string | undefined,
-      judgeModel: validation.details?.judgeModel as string | undefined,
-    };
+    const judgeConfigs = Array.isArray(expectBlock.passesJudge)
+      ? expectBlock.passesJudge
+      : [expectBlock.passesJudge];
+
+    const judgeResultEntries: EvalExpectationResult[] = [];
+
+    for (const judgeConfig of judgeConfigs) {
+      const effectiveReps = judgeConfig.reps ?? config.judgeReps ?? 1;
+      const effectiveReference =
+        judgeConfig.reference !== undefined
+          ? judgeConfig.reference
+          : config.canonicalAnswer;
+      const validation = await validateJudge(response, {
+        ...judgeConfig,
+        reference: effectiveReference,
+        reps: effectiveReps,
+      });
+
+      const judgeName =
+        judgeConfig.judge ??
+        (typeof judgeConfig.rubric === 'string'
+          ? judgeConfig.rubric
+          : undefined);
+
+      judgeResultEntries.push({
+        pass: validation.pass,
+        details: validation.message,
+        score: validation.details?.score as number | undefined,
+        reasoning: validation.details?.reasoning as string | undefined,
+        judgeName,
+        judgeProvider: validation.details?.judgeProvider as string | undefined,
+        judgeModel: validation.details?.judgeModel as string | undefined,
+      });
+    }
+
+    if (judgeResultEntries.length === 1) {
+      // Single judge — flat result, same as before
+      results.judge = judgeResultEntries[0]!;
+    } else {
+      // Multi-judge — aggregate with AND semantics
+      const allPassed = judgeResultEntries.every((r) => r.pass);
+      const passCount = judgeResultEntries.filter((r) => r.pass).length;
+
+      results.judge = {
+        pass: allPassed,
+        details: `${passCount}/${judgeResultEntries.length} judges passed`,
+        judgeResults: judgeResultEntries,
+      };
+    }
   }
 
   // snapshot (toMatchToolSnapshot) - requires Playwright expect with custom matcher
@@ -916,11 +948,15 @@ export async function runEvalDataset(
       c.mode === 'mcp_host'
         ? (c.iterations ?? defaultLlmIterations ?? 1)
         : (c.iterations ?? 1);
-    const judgeReps =
-      c.expect?.passesJudge != null
-        ? (c.expect.passesJudge.reps ?? c.judgeReps ?? defaultJudgeReps ?? 1)
-        : 0;
-    return sum + effectiveIterations * judgeReps;
+    if (c.expect?.passesJudge == null) return sum;
+    const judges = Array.isArray(c.expect.passesJudge)
+      ? c.expect.passesJudge
+      : [c.expect.passesJudge];
+    const totalReps = judges.reduce(
+      (r, j) => r + (j.reps ?? c.judgeReps ?? defaultJudgeReps ?? 1),
+      0
+    );
+    return sum + effectiveIterations * totalReps;
   }, 0);
 
   if (estimatedJudgeCalls > 50) {

@@ -64,6 +64,12 @@ export interface EvalExpectationResult {
   reasoning?: string;
 
   /**
+   * Judge name — rubric name (e.g. 'correctness') or custom judge name.
+   * Populated for passesJudge expectations.
+   */
+  judgeName?: string;
+
+  /**
    * Judge provider used. Populated for passesJudge expectations.
    */
   judgeProvider?: string;
@@ -72,6 +78,13 @@ export interface EvalExpectationResult {
    * Judge model used. Populated for passesJudge expectations.
    */
   judgeModel?: string;
+
+  /**
+   * Per-judge breakdown when multiple judges are used.
+   * Each entry contains the individual judge's result.
+   * Only populated when passesJudge is an array with 2+ entries.
+   */
+  judgeResults?: EvalExpectationResult[];
 }
 
 /**

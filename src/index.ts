@@ -162,6 +162,7 @@ export type {
   EvalCase,
   EvalDataset,
   EvalExpectBlock,
+  JudgeExpectConfig,
   SerializedEvalDataset,
   EvalMode,
 } from './evals/datasetTypes.js';

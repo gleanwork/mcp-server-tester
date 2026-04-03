@@ -286,6 +286,60 @@ describe('datasetTypes', () => {
     });
   });
 
+  describe('multi-judge passesJudge', () => {
+    it('accepts an array of judge configs', () => {
+      const result = EvalCaseSchema.safeParse({
+        id: 'test',
+        expect: {
+          passesJudge: [
+            { rubric: 'correctness', threshold: 0.8 },
+            { rubric: 'completeness', threshold: 0.7 },
+          ],
+        },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts mixed rubric and custom judge in array', () => {
+      const result = EvalCaseSchema.safeParse({
+        id: 'test',
+        expect: {
+          passesJudge: [
+            { rubric: 'correctness' },
+            { judge: 'domain-relevance', threshold: 0.9 },
+          ],
+        },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects empty array', () => {
+      const result = EvalCaseSchema.safeParse({
+        id: 'test',
+        expect: { passesJudge: [] },
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects array entry missing both judge and rubric', () => {
+      const result = EvalCaseSchema.safeParse({
+        id: 'test',
+        expect: {
+          passesJudge: [{ threshold: 0.8 }],
+        },
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it('still accepts single object form (backwards compat)', () => {
+      const result = EvalCaseSchema.safeParse({
+        id: 'test',
+        expect: { passesJudge: { rubric: 'correctness' } },
+      });
+      expect(result.success).toBe(true);
+    });
+  });
+
   describe('toolsTriggered and toolCallCount', () => {
     it('should preserve toolsTriggered in expect block after validation', () => {
       const raw = {

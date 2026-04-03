@@ -1504,6 +1504,143 @@ describe('dataset-level tool precision/recall/F1 aggregation', () => {
   });
 });
 
+describe('multi-judge passesJudge', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it('aggregates multiple judges with AND semantics (all pass)', async () => {
+    // Mock validateJudge to return passing results
+    const { runEvalCase: runEvalCaseMocked } = await import('./evalRunner.js');
+    const judgeModule = await import('../assertions/validators/judge.js');
+    vi.spyOn(judgeModule, 'validateJudge').mockResolvedValue({
+      pass: true,
+      message: 'Judge passed with score 0.90',
+      details: {
+        score: 0.9,
+        reasoning: 'Good',
+        judgeProvider: 'anthropic',
+        judgeModel: 'claude-sonnet',
+      },
+    });
+
+    const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
+    const evalCase = createEvalCase({
+      expect: {
+        passesJudge: [
+          { rubric: 'correctness', threshold: 0.7 },
+          { rubric: 'completeness', threshold: 0.7 },
+        ],
+      },
+    });
+
+    const result = await runEvalCaseMocked(evalCase, createContext(mcp));
+
+    expect(result.expectations.judge).toBeDefined();
+    expect(result.expectations.judge!.pass).toBe(true);
+    expect(result.expectations.judge!.judgeResults).toHaveLength(2);
+    expect(result.expectations.judge!.details).toContain('2/2');
+
+    vi.restoreAllMocks();
+  });
+
+  it('fails when any judge in array fails', async () => {
+    const { runEvalCase: runEvalCaseMocked } = await import('./evalRunner.js');
+    const judgeModule = await import('../assertions/validators/judge.js');
+    let callCount = 0;
+    vi.spyOn(judgeModule, 'validateJudge').mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          pass: true,
+          message: 'Judge passed with score 0.90',
+          details: {
+            score: 0.9,
+            reasoning: 'Good',
+            judgeProvider: 'anthropic',
+          },
+        };
+      }
+      return {
+        pass: false,
+        message: 'Judge failed with score 0.50',
+        details: { score: 0.5, reasoning: 'Bad', judgeProvider: 'openai' },
+      };
+    });
+
+    const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
+    const evalCase = createEvalCase({
+      expect: {
+        passesJudge: [
+          { rubric: 'correctness', threshold: 0.7 },
+          { judge: 'custom-judge', threshold: 0.7 },
+        ],
+      },
+    });
+
+    const result = await runEvalCaseMocked(evalCase, createContext(mcp));
+
+    expect(result.expectations.judge!.pass).toBe(false);
+    expect(result.expectations.judge!.judgeResults).toHaveLength(2);
+    expect(result.expectations.judge!.judgeResults![0]!.pass).toBe(true);
+    expect(result.expectations.judge!.judgeResults![1]!.pass).toBe(false);
+    expect(result.expectations.judge!.details).toContain('1/2');
+    expect(result.pass).toBe(false);
+
+    vi.restoreAllMocks();
+  });
+
+  it('single judge object produces flat result (no judgeResults)', async () => {
+    const { runEvalCase: runEvalCaseMocked } = await import('./evalRunner.js');
+    const judgeModule = await import('../assertions/validators/judge.js');
+    vi.spyOn(judgeModule, 'validateJudge').mockResolvedValue({
+      pass: true,
+      message: 'Judge passed with score 0.85',
+      details: { score: 0.85, reasoning: 'Fine', judgeProvider: 'anthropic' },
+    });
+
+    const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
+    const evalCase = createEvalCase({
+      expect: {
+        passesJudge: { rubric: 'correctness' },
+      },
+    });
+
+    const result = await runEvalCaseMocked(evalCase, createContext(mcp));
+
+    expect(result.expectations.judge!.pass).toBe(true);
+    expect(result.expectations.judge!.judgeResults).toBeUndefined();
+    expect(result.expectations.judge!.score).toBe(0.85);
+
+    vi.restoreAllMocks();
+  });
+
+  it('populates judgeName from rubric name and custom judge name', async () => {
+    const { runEvalCase: runEvalCaseMocked } = await import('./evalRunner.js');
+    const judgeModule = await import('../assertions/validators/judge.js');
+    vi.spyOn(judgeModule, 'validateJudge').mockResolvedValue({
+      pass: true,
+      message: 'Passed',
+      details: { score: 0.9, judgeProvider: 'anthropic' },
+    });
+
+    const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
+    const evalCase = createEvalCase({
+      expect: {
+        passesJudge: [{ rubric: 'correctness' }, { judge: 'domain-relevance' }],
+      },
+    });
+
+    const result = await runEvalCaseMocked(evalCase, createContext(mcp));
+
+    const judgeResults = result.expectations.judge!.judgeResults!;
+    expect(judgeResults[0]!.judgeName).toBe('correctness');
+    expect(judgeResults[1]!.judgeName).toBe('domain-relevance');
+
+    vi.restoreAllMocks();
+  });
+});
+
 describe('experiment metadata in EvalRunnerResult', () => {
   function createDataset(cases: EvalCase[]): EvalDataset {
     return { name: 'metadata-test', cases };
