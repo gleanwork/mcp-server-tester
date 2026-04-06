@@ -66,7 +66,7 @@ import {
 import type { OAuthSetupConfig } from './types.js';
 
 function makeConfig(
-  overrides: Partial<OAuthSetupConfig> = {}
+  overrides: Record<string, unknown> = {}
 ): OAuthSetupConfig {
   return {
     authServerUrl: 'https://auth.example.com',
@@ -82,7 +82,7 @@ function makeConfig(
     },
     outputPath: 'playwright/.auth/oauth-state.json',
     ...overrides,
-  };
+  } as OAuthSetupConfig;
 }
 
 const mockMetadata = {
@@ -461,6 +461,100 @@ describe('setupOAuth', () => {
       );
 
       expect(result).toBe(false);
+    });
+  });
+
+  describe('customLoginFlow', () => {
+    it('invokes customLoginFlow callback instead of completeLoginForm', async () => {
+      const customFlow = vi.fn().mockResolvedValue(undefined);
+
+      await performOAuthSetup({
+        authServerUrl: 'https://auth.example.com',
+        scopes: ['mcp:read'],
+        outputPath: 'playwright/.auth/oauth-state.json',
+        customLoginFlow: customFlow,
+      });
+
+      expect(customFlow).toHaveBeenCalledOnce();
+      expect(customFlow).toHaveBeenCalledWith(mocks.page);
+
+      // Standard form interactions should NOT have been called
+      expect(mocks.page.fill).not.toHaveBeenCalled();
+      expect(mocks.page.waitForSelector).not.toHaveBeenCalled();
+    });
+
+    it('still completes full OAuth flow (PKCE, token exchange, save)', async () => {
+      const customFlow = vi.fn().mockResolvedValue(undefined);
+
+      await performOAuthSetup({
+        authServerUrl: 'https://auth.example.com',
+        scopes: ['mcp:read'],
+        outputPath: 'playwright/.auth/oauth-state.json',
+        customLoginFlow: customFlow,
+      });
+
+      expect(mocks.discoverAuthorizationServerMetadata).toHaveBeenCalledOnce();
+      expect(mocks.startAuthorization).toHaveBeenCalledOnce();
+      expect(mocks.exchangeAuthorization).toHaveBeenCalledOnce();
+      expect(mocks.saveOAuthState).toHaveBeenCalledOnce();
+    });
+
+    it('navigates to authorization URL before calling customLoginFlow', async () => {
+      const callOrder: string[] = [];
+      mocks.page.goto.mockImplementation(async () => {
+        callOrder.push('goto');
+      });
+      const customFlow = vi.fn().mockImplementation(async () => {
+        callOrder.push('customLoginFlow');
+      });
+
+      await performOAuthSetup({
+        authServerUrl: 'https://auth.example.com',
+        scopes: ['mcp:read'],
+        outputPath: 'playwright/.auth/oauth-state.json',
+        customLoginFlow: customFlow,
+      });
+
+      expect(callOrder).toEqual(['goto', 'customLoginFlow']);
+    });
+
+    it('closes browser even when customLoginFlow throws', async () => {
+      const customFlow = vi
+        .fn()
+        .mockRejectedValue(new Error('MFA timeout'));
+
+      await expect(
+        performOAuthSetup({
+          authServerUrl: 'https://auth.example.com',
+          scopes: ['mcp:read'],
+          outputPath: 'playwright/.auth/oauth-state.json',
+          customLoginFlow: customFlow,
+        })
+      ).rejects.toThrow('MFA timeout');
+
+      expect(mocks.browser.close).toHaveBeenCalledOnce();
+    });
+
+    it('passes optional config fields through when using customLoginFlow', async () => {
+      const customFlow = vi.fn().mockResolvedValue(undefined);
+
+      await performOAuthSetup({
+        authServerUrl: 'https://auth.example.com',
+        scopes: ['mcp:read'],
+        outputPath: 'playwright/.auth/oauth-state.json',
+        customLoginFlow: customFlow,
+        clientId: 'my-client',
+        redirectUri: 'https://myapp.com/callback',
+        resource: 'https://api.example.com/mcp',
+      });
+
+      expect(mocks.startAuthorization).toHaveBeenCalledWith(
+        'https://auth.example.com',
+        expect.objectContaining({
+          redirectUrl: 'https://myapp.com/callback',
+          resource: new URL('https://api.example.com/mcp'),
+        })
+      );
     });
   });
 

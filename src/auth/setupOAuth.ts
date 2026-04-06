@@ -11,7 +11,11 @@ import {
   startAuthorization,
   exchangeAuthorization,
 } from '@modelcontextprotocol/sdk/client/auth.js';
-import type { OAuthSetupConfig, StoredOAuthState } from './types.js';
+import type {
+  OAuthSetupConfig,
+  OAuthLoginSelectors,
+  StoredOAuthState,
+} from './types.js';
 import { saveOAuthState } from './oauthClientProvider.js';
 import { debugOAuth } from '../debug.js';
 
@@ -107,8 +111,12 @@ export async function performOAuthSetup(
     // Navigate to authorization URL
     await page.goto(authorizationUrl.toString());
 
-    // Complete login form
-    await completeLoginForm(page, config);
+    // Complete login — custom flow or standard form
+    if ('customLoginFlow' in config && config.customLoginFlow) {
+      await config.customLoginFlow(page);
+    } else {
+      await completeLoginForm(page, config);
+    }
 
     // Wait for redirect with authorization code
     await page.waitForURL(
@@ -177,7 +185,10 @@ export async function performOAuthSetup(
  */
 async function completeLoginForm(
   page: Page,
-  config: OAuthSetupConfig
+  config: {
+    loginSelectors: OAuthLoginSelectors;
+    credentials: { username: string; password: string };
+  }
 ): Promise<void> {
   const { loginSelectors, credentials } = config;
 

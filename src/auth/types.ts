@@ -89,82 +89,92 @@ export interface StoredOAuthState {
 }
 
 /**
- * Configuration for OAuth setup flow
+ * Login form selectors for standard OAuth login automation
  */
-export interface OAuthSetupConfig {
-  /**
-   * OAuth authorization server metadata URL
-   */
+export interface OAuthLoginSelectors {
+  /** Selector for username/email input field */
+  usernameInput: string;
+  /** Selector for password input field */
+  passwordInput: string;
+  /** Selector for login submit button */
+  submitButton: string;
+  /** Selector for consent/authorize button (optional) */
+  consentButton?: string;
+}
+
+/**
+ * Base configuration shared by all OAuth setup strategies
+ */
+interface OAuthSetupBaseConfig {
+  /** OAuth authorization server metadata URL */
   authServerUrl: string;
-
-  /**
-   * Scopes to request
-   */
+  /** Scopes to request */
   scopes: Array<string>;
-
-  /**
-   * Resource indicator (RFC 8707)
-   */
-  resource?: string;
-
-  /**
-   * Login form selectors for automation
-   */
-  loginSelectors: {
-    /**
-     * Selector for username/email input field
-     */
-    usernameInput: string;
-
-    /**
-     * Selector for password input field
-     */
-    passwordInput: string;
-
-    /**
-     * Selector for login submit button
-     */
-    submitButton: string;
-
-    /**
-     * Selector for consent/authorize button (optional)
-     */
-    consentButton?: string;
-  };
-
-  /**
-   * Test user credentials
-   */
-  credentials: {
-    username: string;
-    password: string;
-  };
-
-  /**
-   * Path to save OAuth state file
-   */
+  /** Path to save OAuth state file */
   outputPath: string;
-
-  /**
-   * Pre-registered client ID (optional, uses DCR if not provided)
-   */
+  /** Pre-registered client ID (optional, uses DCR if not provided) */
   clientId?: string;
-
-  /**
-   * Pre-registered client secret (optional)
-   */
+  /** Pre-registered client secret (optional) */
   clientSecret?: string;
-
-  /**
-   * Redirect URI for OAuth callback
-   */
+  /** Redirect URI for OAuth callback */
   redirectUri?: string;
-
-  /**
-   * Timeout for login flow in milliseconds (default: 30000)
-   */
+  /** Resource indicator (RFC 8707) */
+  resource?: string;
+  /** Timeout for login flow in milliseconds (default: 30000) */
   timeoutMs?: number;
 }
+
+/**
+ * Standard login strategy: automates a form with username, password, and submit button.
+ * Use when the IdP presents all login fields on a single page.
+ */
+interface StandardLoginConfig {
+  /** Login form selectors for Playwright automation */
+  loginSelectors: OAuthLoginSelectors;
+  /** Test user credentials */
+  credentials: { username: string; password: string };
+  customLoginFlow?: never;
+}
+
+/**
+ * Custom login strategy: full control over the browser-based login flow.
+ * Use for multi-step logins, MFA, custom consent screens, or any flow
+ * that doesn't fit the standard username/password/submit pattern.
+ *
+ * The callback receives a Playwright Page already navigated to the OAuth
+ * authorization URL. Complete the login so the IdP redirects to the
+ * callback URL — `performOAuthSetup` handles PKCE, token exchange,
+ * and state persistence automatically.
+ */
+interface CustomLoginConfig {
+  /**
+   * Custom Playwright automation for the IdP login flow.
+   *
+   * @param page - Playwright Page already navigated to the OAuth authorization URL
+   *
+   * @example
+   * ```typescript
+   * customLoginFlow: async (page) => {
+   *   await page.fill('#username', process.env.TEST_USER!);
+   *   await page.click('#continue');
+   *   await page.fill('#password', process.env.TEST_PASS!);
+   *   await page.click('#submit');
+   * }
+   * ```
+   */
+  customLoginFlow: (page: import('@playwright/test').Page) => Promise<void>;
+  loginSelectors?: never;
+  credentials?: never;
+}
+
+/**
+ * Configuration for OAuth setup flow.
+ *
+ * Provide either `loginSelectors` + `credentials` for standard form-based login,
+ * or `customLoginFlow` for full control over the browser automation.
+ */
+export type OAuthSetupConfig = OAuthSetupBaseConfig &
+  (StandardLoginConfig | CustomLoginConfig);
 
 /**
  * Result of token exchange or refresh
