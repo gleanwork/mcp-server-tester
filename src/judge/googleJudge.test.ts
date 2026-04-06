@@ -5,9 +5,9 @@ const mockGenerateContent = vi.fn();
 const mockGetGenerativeModel = vi.fn().mockReturnValue({
   generateContent: mockGenerateContent,
 });
-const MockGoogleGenerativeAI = vi.fn().mockImplementation(() => ({
-  getGenerativeModel: mockGetGenerativeModel,
-}));
+const MockGoogleGenerativeAI = vi.fn().mockImplementation(function () {
+  return { getGenerativeModel: mockGetGenerativeModel };
+});
 
 vi.mock('@google/generative-ai', () => ({
   GoogleGenerativeAI: MockGoogleGenerativeAI,
@@ -43,9 +43,9 @@ describe('googleJudge', () => {
     mockGetGenerativeModel.mockReturnValue({
       generateContent: mockGenerateContent,
     });
-    MockGoogleGenerativeAI.mockImplementation(() => ({
-      getGenerativeModel: mockGetGenerativeModel,
-    }));
+    MockGoogleGenerativeAI.mockImplementation(function () {
+      return { getGenerativeModel: mockGetGenerativeModel };
+    });
   });
 
   afterEach(() => {

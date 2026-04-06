@@ -3,13 +3,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // Mock the OpenAI module before importing the judge (Vitest hoists vi.mock)
 vi.mock('openai', () => {
   const mockCreate = vi.fn();
-  const MockOpenAI = vi.fn().mockImplementation(() => ({
-    chat: {
-      completions: {
-        create: mockCreate,
+  const MockOpenAI = vi.fn().mockImplementation(function () {
+    return {
+      chat: {
+        completions: {
+          create: mockCreate,
+        },
       },
-    },
-  }));
+    };
+  });
   // Attach the mockCreate so tests can configure it
   (MockOpenAI as unknown as Record<string, unknown>)._mockCreate = mockCreate;
 

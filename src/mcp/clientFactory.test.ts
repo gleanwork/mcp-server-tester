@@ -42,11 +42,13 @@ describe('clientFactory', () => {
       name: 'test-server',
       version: '1.0.0',
     });
-    mocks.MockClient.mockImplementation(() => ({
-      connect: mocks.mockConnect,
-      close: mocks.mockClose,
-      getServerVersion: mocks.mockGetServerVersion,
-    }));
+    mocks.MockClient.mockImplementation(function () {
+      return {
+        connect: mocks.mockConnect,
+        close: mocks.mockClose,
+        getServerVersion: mocks.mockGetServerVersion,
+      };
+    });
   });
 
   afterEach(() => {
