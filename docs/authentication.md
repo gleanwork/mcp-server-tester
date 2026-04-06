@@ -370,9 +370,7 @@ The callback receives a Playwright `Page` already navigated to the OAuth authori
 
 ```typescript snippet=snippets/auth-playwright-oauth-provider.ts
 // global-setup.ts
-import {
-  performOAuthSetup,
-} from '@gleanwork/mcp-server-tester';
+import { performOAuthSetup } from '@gleanwork/mcp-server-tester';
 
 export default async function globalSetup() {
   await performOAuthSetup({

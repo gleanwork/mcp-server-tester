@@ -1,7 +1,5 @@
 // global-setup.ts
-import {
-  performOAuthSetup,
-} from '@gleanwork/mcp-server-tester';
+import { performOAuthSetup } from '@gleanwork/mcp-server-tester';
 
 export default async function globalSetup() {
   await performOAuthSetup({

@@ -65,9 +65,7 @@ import {
 } from './setupOAuth.js';
 import type { OAuthSetupConfig } from './types.js';
 
-function makeConfig(
-  overrides: Record<string, unknown> = {}
-): OAuthSetupConfig {
+function makeConfig(overrides: Record<string, unknown> = {}): OAuthSetupConfig {
   return {
     authServerUrl: 'https://auth.example.com',
     scopes: ['mcp:read', 'mcp:write'],
@@ -519,9 +517,7 @@ describe('setupOAuth', () => {
     });
 
     it('closes browser even when customLoginFlow throws', async () => {
-      const customFlow = vi
-        .fn()
-        .mockRejectedValue(new Error('MFA timeout'));
+      const customFlow = vi.fn().mockRejectedValue(new Error('MFA timeout'));
 
       await expect(
         performOAuthSetup({

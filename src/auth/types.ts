@@ -2,6 +2,8 @@
  * Auth types for MCP OAuth integration
  */
 
+import type { Page } from '@playwright/test';
+
 /**
  * Stored OAuth tokens
  */
@@ -162,7 +164,7 @@ interface CustomLoginConfig {
    * }
    * ```
    */
-  customLoginFlow: (page: import('@playwright/test').Page) => Promise<void>;
+  customLoginFlow: (page: Page) => Promise<void>;
   loginSelectors?: never;
   credentials?: never;
 }
