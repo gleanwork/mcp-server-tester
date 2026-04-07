@@ -669,7 +669,7 @@ interface ConformanceResult {
 
 ### `EvalExpectBlock`
 
-```typescript snippet=src/evals/datasetTypes.ts#L144-L272
+```typescript snippet=src/evals/datasetTypes.ts#L186-L277
 export interface EvalExpectBlock {
   /**
    * Exact response match (toMatchToolResponse)
