@@ -12,7 +12,7 @@ const MAX_BUFFER = 10 * 1024 * 1024; // 10MB
 /**
  * Returns a parser function for the given output format.
  */
-function getParser(
+export function getParser(
   format: CLIConfig['outputFormat']
 ): (stdout: string) => MCPHostSimulationResult {
   switch (format ?? 'stream-json') {
@@ -30,7 +30,7 @@ function getParser(
 /**
  * Interpolates `{{scenario}}` in each arg string.
  */
-function interpolateArgs(args: string[], scenario: string): string[] {
+export function interpolateArgs(args: string[], scenario: string): string[] {
   return args.map((arg) => arg.replace(/\{\{scenario\}\}/g, scenario));
 }
 
@@ -103,7 +103,7 @@ export async function runCLIHost(
   return result;
 }
 
-function validateSimulationResult(result: unknown): string | null {
+export function validateSimulationResult(result: unknown): string | null {
   if (result === null || typeof result !== 'object') {
     return `Expected object, got ${typeof result}`;
   }

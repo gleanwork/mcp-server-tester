@@ -191,6 +191,10 @@ export function createVercelOrchestrator(): MCPHostSimulator {
         // Do NOT use jsonSchema from 'ai' — in v6 it produces the wrong shape.
         const { jsonSchema } = await import('@ai-sdk/provider-utils');
 
+        if (!config.provider) {
+          throw new Error('provider is required for SDK host type');
+        }
+
         const modelId = config.model ?? defaultModel(config.provider);
         const model = await loadModel(config.provider, modelId);
 
@@ -266,7 +270,7 @@ export function createVercelOrchestrator(): MCPHostSimulator {
         return {
           success: false,
           toolCalls: [],
-          error: enrichErrorMessage(err, config.provider),
+          error: enrichErrorMessage(err, config.provider ?? 'unknown'),
         };
       }
     },

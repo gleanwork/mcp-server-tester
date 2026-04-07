@@ -170,7 +170,7 @@ export interface EvalCaseRequest {
   scenario?: string;
   /** LLM provider/model configuration (mcp_host mode) */
   mcpHostConfig?: {
-    provider: string;
+    provider?: string;
     model?: string;
   };
 }

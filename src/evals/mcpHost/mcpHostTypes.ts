@@ -128,9 +128,9 @@ export interface MCPHostConfig {
   hostType?: HostType;
 
   /**
-   * LLM provider to use (required for 'sdk' host type)
+   * LLM provider (required for 'sdk' host type, ignored for 'cli')
    */
-  provider: LLMProvider;
+  provider?: LLMProvider;
 
   /**
    * Environment variable name containing the API key

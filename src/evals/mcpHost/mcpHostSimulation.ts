@@ -54,7 +54,7 @@ const simulatorRegistry = new Map<LLMProvider, MCPHostSimulator>(
  * schemas, testing discoverability and parameter clarity at the level a real
  * user (via Claude Desktop, ChatGPT, etc.) would experience.
  *
- * @param mcp - MCP fixture API
+ * @param mcp - MCP fixture API (used by SDK hosts; ignored by CLI/browser hosts which establish their own connections)
  * @param scenario - Natural language prompt describing what the LLM should do
  * @param config - MCP host configuration (provider, model, temperature, etc.)
  * @returns Simulation result with tool calls, final response, and latency data
@@ -106,6 +106,13 @@ export async function simulateMCPHost(
   }
 
   // Default: SDK host via Vercel AI SDK
+  if (!config.provider) {
+    throw new Error(
+      `mcpHostConfig.provider is required for 'sdk' host type. ` +
+        `Supported: ${allProviders.join(', ')}`
+    );
+  }
+
   const simulator = simulatorRegistry.get(config.provider);
   if (!simulator) {
     throw new Error(

@@ -303,17 +303,19 @@ export interface EvalDataset {
  */
 const MCPHostConfigSchema = z.object({
   hostType: z.enum(['sdk', 'cli', 'browser', 'desktop']).optional(),
-  provider: z.enum([
-    'openai',
-    'anthropic',
-    'azure',
-    'google',
-    'mistral',
-    'deepseek',
-    'openrouter',
-    'xai',
-    'vertex-anthropic',
-  ]),
+  provider: z
+    .enum([
+      'openai',
+      'anthropic',
+      'azure',
+      'google',
+      'mistral',
+      'deepseek',
+      'openrouter',
+      'xai',
+      'vertex-anthropic',
+    ])
+    .optional(),
   apiKeyEnvVar: z.string().optional(),
   model: z.string().optional(),
   maxTokens: z.number().optional(),

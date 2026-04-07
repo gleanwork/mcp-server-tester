@@ -72,6 +72,13 @@ describe('simulateMCPHost', () => {
       })
     ).rejects.toThrow('Unsupported provider');
   });
+
+  it('throws when provider is missing for sdk host type', async () => {
+    const mcp = createMockMCP();
+    await expect(simulateMCPHost(mcp, 'scenario', {})).rejects.toThrow(
+      'mcpHostConfig.provider is required'
+    );
+  });
 });
 
 describe('isProviderAvailable', () => {
