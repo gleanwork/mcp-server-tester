@@ -471,36 +471,38 @@ async function runExpectBlockValidations(
       ? expectBlock.passesJudge
       : [expectBlock.passesJudge];
 
-    const judgeResultEntries: EvalExpectationResult[] = [];
+    const judgeResultEntries = await Promise.all(
+      judgeConfigs.map(async (judgeConfig) => {
+        const effectiveReps = judgeConfig.reps ?? config.judgeReps ?? 1;
+        const effectiveReference =
+          judgeConfig.reference !== undefined
+            ? judgeConfig.reference
+            : config.canonicalAnswer;
+        const validation = await validateJudge(response, {
+          ...judgeConfig,
+          reference: effectiveReference,
+          reps: effectiveReps,
+        });
 
-    for (const judgeConfig of judgeConfigs) {
-      const effectiveReps = judgeConfig.reps ?? config.judgeReps ?? 1;
-      const effectiveReference =
-        judgeConfig.reference !== undefined
-          ? judgeConfig.reference
-          : config.canonicalAnswer;
-      const validation = await validateJudge(response, {
-        ...judgeConfig,
-        reference: effectiveReference,
-        reps: effectiveReps,
-      });
+        const judgeName =
+          judgeConfig.judge ??
+          (typeof judgeConfig.rubric === 'string'
+            ? judgeConfig.rubric
+            : undefined);
 
-      const judgeName =
-        judgeConfig.judge ??
-        (typeof judgeConfig.rubric === 'string'
-          ? judgeConfig.rubric
-          : undefined);
-
-      judgeResultEntries.push({
-        pass: validation.pass,
-        details: validation.message,
-        score: validation.details?.score as number | undefined,
-        reasoning: validation.details?.reasoning as string | undefined,
-        judgeName,
-        judgeProvider: validation.details?.judgeProvider as string | undefined,
-        judgeModel: validation.details?.judgeModel as string | undefined,
-      });
-    }
+        return {
+          pass: validation.pass,
+          details: validation.message,
+          score: validation.details?.score as number | undefined,
+          reasoning: validation.details?.reasoning as string | undefined,
+          judgeName,
+          judgeProvider: validation.details?.judgeProvider as
+            | string
+            | undefined,
+          judgeModel: validation.details?.judgeModel as string | undefined,
+        } satisfies EvalExpectationResult;
+      })
+    );
 
     if (judgeResultEntries.length === 1) {
       // Single judge — flat result, same as before

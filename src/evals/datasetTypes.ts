@@ -158,7 +158,12 @@ export interface JudgeExpectConfig {
   /** Number of judge evaluations for this assertion. Overrides EvalCase.judgeReps. */
   reps?: number;
   /** Judge provider. @default 'anthropic' */
-  provider?: 'anthropic' | 'vertex-anthropic' | 'anthropic-agent-sdk' | 'openai' | 'google';
+  provider?:
+    | 'anthropic'
+    | 'vertex-anthropic'
+    | 'anthropic-agent-sdk'
+    | 'openai'
+    | 'google';
   /** Model override (e.g., 'claude-opus-4-20250514') */
   model?: string;
   /** Environment variable name for API key */
@@ -361,7 +366,15 @@ const JudgeExpectConfigSchema = z
     reference: z.unknown().optional(),
     threshold: z.number().min(0).max(1).optional(),
     reps: z.number().int().min(1).optional(),
-    provider: z.enum(['anthropic', 'vertex-anthropic', 'anthropic-agent-sdk', 'openai', 'google']).optional(),
+    provider: z
+      .enum([
+        'anthropic',
+        'vertex-anthropic',
+        'anthropic-agent-sdk',
+        'openai',
+        'google',
+      ])
+      .optional(),
     model: z.string().optional(),
     apiKeyEnvVar: z.string().optional(),
     maxTokens: z.number().int().positive().optional(),

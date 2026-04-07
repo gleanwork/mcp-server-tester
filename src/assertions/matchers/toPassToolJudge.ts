@@ -67,12 +67,12 @@ export async function toPassToolJudge(
 ): Promise<{ pass: boolean; message: () => string }> {
   // Multi-judge: array of judge configs
   if (Array.isArray(rubricOrOptions)) {
-    const results: Array<{ pass: boolean; message: string }> = [];
-    for (const judgeConfig of rubricOrOptions) {
-      const { rubric: r, ...opts } = judgeConfig;
-      const result = await runSingleJudge(received, r, opts);
-      results.push(result);
-    }
+    const results = await Promise.all(
+      rubricOrOptions.map(async (judgeConfig) => {
+        const { rubric: r, ...opts } = judgeConfig;
+        return runSingleJudge(received, r, opts);
+      })
+    );
 
     const allPassed = results.every((r) => r.pass);
     const passCount = results.filter((r) => r.pass).length;
