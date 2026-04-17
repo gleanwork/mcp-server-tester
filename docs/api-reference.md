@@ -353,6 +353,46 @@ export interface EvalRunnerResult {
 }
 ```
 
+### `runEvalCase(evalCase, context, options?)`
+
+Run a single eval case. Useful when you want fine-grained control over individual cases outside of a dataset, or when building custom eval orchestration.
+
+**Parameters:**
+
+- `evalCase: EvalCase` - The eval case to run
+- `context: EvalContext`
+  - `mcp: MCPFixtureApi` - MCP fixture API
+  - `testInfo?: TestInfo` - Playwright test info (for reporter integration)
+  - `expect?: Expect` - Playwright expect (for snapshot support)
+- `options?: EvalCaseOptions`
+  - `datasetName?: string` - Dataset name for the result (default: `'single-case'`)
+  - `schemas?: Record<string, ZodType>` - Schema registry for named schema validation
+
+**Returns:** `Promise<EvalCaseResult>`
+
+```typescript
+import { runEvalCase } from '@gleanwork/mcp-server-tester';
+
+test('single eval case', async ({ mcp }, testInfo) => {
+  const result = await runEvalCase(
+    {
+      id: 'search-check',
+      mode: 'direct',
+      toolName: 'search',
+      args: { query: 'planning' },
+      expect: { textContains: ['result'] },
+    },
+    { mcp, testInfo }
+  );
+
+  expect(result.pass).toBe(true);
+});
+```
+
+When `evalCase.iterations > 1`, the case is run multiple times and `result.assertionPassRate` is populated with the fraction of passing iterations.
+
+---
+
 ## Playwright Matchers
 
 Custom Playwright matchers for writing inline assertions against MCP tool responses. Import `expect` from the package or its fixtures:
