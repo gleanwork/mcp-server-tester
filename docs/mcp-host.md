@@ -166,7 +166,7 @@ LLM host simulation calls a real LLM API. Approximate costs:
 
 ## A/B Testing Tool Descriptions
 
-Run two Playwright projects with different `systemPromptAdditions` to compare tool description variants:
+Run two Playwright projects with different MCP server configurations to compare tool description variants:
 
 ```typescript
 // playwright.config.ts
@@ -185,7 +185,7 @@ projects: [
       mcpConfig: {
         /* ... */
       },
-      // If your fixture supports systemPromptAdditions, add them here
+      mcpHostConfig: { provider: 'anthropic' },
     },
   },
 ];

@@ -384,9 +384,7 @@ projects: [
         // After adding a Glean skill to the LLM host config
       },
       mcpHostConfig: {
-        systemPromptAdditions: [
-          'You have access to Glean enterprise search. Use the search tool to find internal documents, and employee_search to find people.',
-        ],
+        provider: 'anthropic',
       },
     },
   },
