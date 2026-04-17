@@ -701,7 +701,7 @@ function isInfrastructureError(err: unknown): boolean {
   }
 
   return (
-    name === 'AbortError' ||
+    name?.toLowerCase() === 'aborterror' ||
     msg.includes('econnreset') ||
     msg.includes('etimedout') ||
     msg.includes('econnrefused') ||
