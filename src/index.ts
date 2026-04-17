@@ -47,6 +47,7 @@ export {
 } from './auth/setupOAuth.js';
 export {
   performClientCredentialsFlow,
+  refreshAccessToken,
   type ClientCredentialsConfig,
 } from './auth/oauthFlow.js';
 
