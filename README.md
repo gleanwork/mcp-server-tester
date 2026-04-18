@@ -126,7 +126,7 @@ LLM host mode makes real API calls and produces non-deterministic results. Use `
 Requires Node.js 22+.
 
 ```bash
-npm install --save-dev @gleanwork/mcp-server-tester @playwright/test zod
+npm install --save-dev @gleanwork/mcp-server-tester @playwright/test
 ```
 
 The Anthropic SDK is only needed for LLM-as-judge assertions or LLM host mode with the Anthropic provider:
