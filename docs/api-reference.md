@@ -7,6 +7,7 @@ Complete API documentation for `@gleanwork/mcp-server-tester`.
 - [Fixtures](#fixtures)
 - [Authentication](#authentication)
 - [Eval Functions](#eval-functions)
+- [Programmatic Validators](#programmatic-validators)
 - [Playwright Matchers](#playwright-matchers)
 - [Text Utilities](#text-utilities)
 - [Judge Functions](#judge-functions)
@@ -112,6 +113,48 @@ Get server information (name, version).
 ```typescript
 const info = mcp.getServerInfo();
 console.log(info?.name, info?.version);
+```
+
+### `createMCPFixture(client, testInfo?, options?)`
+
+Creates an `MCPFixtureApi` wrapper around a raw MCP `Client`. Use this when you need manual fixture setup — for example in custom fixture hierarchies, non-Playwright test runners (Vitest, Jest), or when composing with other lifecycle logic.
+
+For the standard Playwright use case, prefer importing `test` and `mcp` from `@gleanwork/mcp-server-tester/fixtures/mcp`, which wires this up automatically.
+
+**Parameters:**
+
+- `client: Client` — MCP client created via `createMCPClientForConfig()`
+- `testInfo?: TestInfo` — Optional Playwright `TestInfo`. When provided, operations are wrapped in `test.step()` and attachments are created for the MCP reporter
+- `options?: MCPFixtureOptions` — Optional configuration
+
+**`MCPFixtureOptions`:**
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `authType` | `'oauth' \| 'api-token' \| 'none'` | `'none'` | Authentication type for this session |
+| `project` | `string` | — | Playwright project name (for filtering/grouping in the reporter) |
+| `callTimeoutMs` | `number` | `30000` | Timeout in milliseconds for MCP operations |
+
+**Returns:** `MCPFixtureApi`
+
+```typescript
+import { createMCPFixture, createMCPClientForConfig, closeMCPClient } from '@gleanwork/mcp-server-tester';
+import { test as base } from '@playwright/test';
+import type { MCPFixtureApi } from '@gleanwork/mcp-server-tester';
+
+const test = base.extend<{ mcp: MCPFixtureApi }>({
+  mcp: async ({}, use, testInfo) => {
+    const client = await createMCPClientForConfig(config);
+    const api = createMCPFixture(client, testInfo, { authType: 'api-token' });
+    await use(api);
+    await closeMCPClient(client);
+  },
+});
+
+// Non-Playwright usage (no reporter attachments)
+const client = await createMCPClientForConfig(config);
+const api = createMCPFixture(client);
+const tools = await api.listTools();
 ```
 
 ## Authentication
@@ -392,6 +435,177 @@ test('single eval case', async ({ mcp }, testInfo) => {
 When `evalCase.iterations > 1`, the case is run multiple times and `result.assertionPassRate` is populated with the fraction of passing iterations.
 
 ---
+
+## Programmatic Validators
+
+Pure validation functions that power both Playwright matchers and the eval runner. Each returns a `ValidationResult` with `pass`, `message`, and optional `details`. Use these when you need validation logic outside of Playwright's `expect()` — for example in Vitest/Jest tests, eval datasets, or custom pipelines.
+
+```typescript
+import { validateText, validateSchema } from '@gleanwork/mcp-server-tester';
+
+interface ValidationResult {
+  pass: boolean;
+  message: string;
+  details?: Record<string, unknown>;
+  metrics?: { precision?: number; recall?: number };
+}
+```
+
+### `validateText(response, expected, options?)`
+
+Checks that the response contains all expected text substrings.
+
+**Parameters:**
+
+- `response: unknown` — The response to validate
+- `expected: string | string[]` — Substring(s) to find
+- `options?: TextValidatorOptions` — `{ caseSensitive?: boolean }` (default: `true`)
+
+```typescript
+const result = validateText(response, ['temperature', 'conditions']);
+const result2 = validateText(response, 'hello', { caseSensitive: false });
+```
+
+### `validatePattern(response, patterns, options?)`
+
+Checks that the response matches all expected regex patterns.
+
+**Parameters:**
+
+- `response: unknown` — The response to validate
+- `patterns: string | RegExp | (string | RegExp)[]` — Pattern(s) to match
+- `options?: PatternValidatorOptions` — `{ caseSensitive?: boolean }` (default: `true`)
+
+```typescript
+const result = validatePattern(response, /temperature: \d+/);
+const result2 = validatePattern(response, ['\\d+ degrees', /humidity: \d+%/]);
+```
+
+### `validateError(response, expected?)`
+
+Checks that the response is (or is not) an error, optionally with a specific message.
+
+**Parameters:**
+
+- `response: unknown` — The response to validate
+- `expected?: boolean | string | string[]` — `true` = expect any error, `false` = expect no error, `string` = expect error containing text (default: `true`)
+
+```typescript
+const result = validateError(response, true);        // any error
+const result2 = validateError(response, false);       // no error
+const result3 = validateError(response, 'not found'); // error with message
+```
+
+### `validateSize(response, options)`
+
+Checks that the response size in bytes is within bounds.
+
+**Parameters:**
+
+- `response: unknown` — The response to validate
+- `options: SizeValidatorOptions` — `{ minBytes?: number; maxBytes?: number }` (at least one required)
+
+```typescript
+const result = validateSize(response, { maxBytes: 10_000 });
+const result2 = validateSize(response, { minBytes: 100, maxBytes: 50_000 });
+```
+
+### `validateSchema(response, schema, options?)`
+
+Validates the response against a Zod schema. Automatically parses JSON text responses.
+
+**Parameters:**
+
+- `response: unknown` — The response to validate
+- `schema: ZodType` — Zod schema to validate against
+- `options?: SchemaValidatorOptions` — `{ strict?: boolean }` (default: `false`)
+
+```typescript
+import { z } from 'zod';
+
+const WeatherSchema = z.object({
+  temperature: z.number(),
+  conditions: z.string(),
+});
+
+const result = validateSchema(response, WeatherSchema);
+```
+
+### `validateResponse(actual, expected)`
+
+Deep equality comparison using JSON serialization.
+
+**Parameters:**
+
+- `actual: unknown` — The actual response
+- `expected: unknown` — The expected response
+
+```typescript
+const result = validateResponse(response, { status: 'ok', count: 42 });
+```
+
+### `validateToolCalls(response, expectation)`
+
+Validates tool calls from an MCP host simulation result. Only applicable to `mcp_host` mode.
+
+**Parameters:**
+
+- `response: unknown` — Must be an `MCPHostSimulationResult`
+- `expectation: ToolCallExpectation` — Expected tool call specification
+
+```typescript
+import type { ToolCallExpectation } from '@gleanwork/mcp-server-tester';
+
+const expectation: ToolCallExpectation = {
+  calls: [{ name: 'search', required: true }],
+  order: 'any',
+  exclusive: false,
+};
+
+const result = validateToolCalls(simulationResult, expectation);
+// result.metrics contains { precision, recall }
+```
+
+### `validateToolCallCount(response, options)`
+
+Validates the number of tool calls from an MCP host simulation result. Only applicable to `mcp_host` mode.
+
+**Parameters:**
+
+- `response: unknown` — Must be an `MCPHostSimulationResult`
+- `options: ToolCallCountOptions` — `{ min?: number; max?: number; exact?: number }`
+
+```typescript
+const result = validateToolCallCount(simulationResult, { min: 1, max: 3 });
+```
+
+### `validateJudge(response, config)` (async)
+
+Evaluates a response using an LLM-as-a-judge. Returns a `Promise<ValidationResult>`.
+
+**Parameters:**
+
+- `response: unknown` — The response to evaluate
+- `config: JudgeValidatorConfig` — Judge configuration
+
+**`JudgeValidatorConfig`:**
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `rubric` | `RubricSpec` | — | Evaluation rubric (required unless `judge` is set) |
+| `judge` | `string` | — | Name of a registered custom judge |
+| `reference` | `unknown` | — | Reference response to compare against |
+| `threshold` | `number` | `0.7` | Minimum score to pass (0–1) |
+| `reps` | `number` | `1` | Number of evaluations to run (scores averaged) |
+| `provider` | `ProviderKind` | `'claude'` | Judge LLM provider |
+| `model` | `string` | — | Model override |
+
+```typescript
+const result = await validateJudge(response, {
+  rubric: 'Does the response accurately describe the weather?',
+  threshold: 0.8,
+});
+```
 
 ## Playwright Matchers
 
