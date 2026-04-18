@@ -178,6 +178,8 @@ export default defineConfig({
 }
 ```
 
+> **Security note:** When `serverUrl` uses `http://` with a non-localhost address, the framework emits a console warning: tokens and credentials are transmitted unencrypted over plain HTTP. Always use `https://` for remote servers. The warning is suppressed for `localhost` / `127.0.0.1` since local development traffic stays on the machine.
+
 ### Examples
 
 **Local HTTP Server:**
