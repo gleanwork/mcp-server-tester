@@ -70,4 +70,3 @@ Once you understand the basics, check out:
 
 - **[filesystem-server](../filesystem-server/)** - Comprehensive example with eval datasets
 - **[sqlite-server](../sqlite-server/)** - Database testing with custom fixtures
-- **[glean-server](../glean-server/)** - HTTP transport and production server testing

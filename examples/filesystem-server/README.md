@@ -158,4 +158,3 @@ ANTHROPIC_API_KEY=your-key npm test
 
 - **[basic-playwright-usage](../basic-playwright-usage/)** - Minimal starter example
 - **[sqlite-server](../sqlite-server/)** - Database testing example
-- **[glean-server](../glean-server/)** - HTTP transport example

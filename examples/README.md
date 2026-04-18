@@ -24,7 +24,6 @@ Complete working examples demonstrating how to use `@gleanwork/mcp-server-tester
 | [basic-playwright-usage](./basic-playwright-usage/) | Minimal starter (~60 lines)           | ⭐         |
 | [filesystem-server](./filesystem-server/)           | **Canonical example** - all patterns  | ⭐⭐⭐     |
 | [sqlite-server](./sqlite-server/)                   | Database testing with custom fixtures | ⭐⭐       |
-| [glean-server](./glean-server/)                     | Production HTTP server testing        | ⭐⭐       |
 
 ## Quick Start
 
