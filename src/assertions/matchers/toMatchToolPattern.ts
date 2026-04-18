@@ -18,6 +18,8 @@ export function toMatchToolPattern(
 ) {
   const result = validatePattern(received, patterns, options);
 
+  const preview = result.details?.textPreview as string | undefined;
+
   return {
     pass: result.pass,
     message: () => {
@@ -25,6 +27,9 @@ export function toMatchToolPattern(
         return result.pass
           ? 'Expected response NOT to match pattern(s), but it did'
           : result.message;
+      }
+      if (!result.pass && preview) {
+        return `${result.message}\n\nActual response (truncated):\n${preview}`;
       }
       return result.message;
     },

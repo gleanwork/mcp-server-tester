@@ -19,6 +19,8 @@ export function toMatchToolSchema(
 ) {
   const result = validateSchema(received, schema, options);
 
+  const preview = result.details?.textPreview as string | undefined;
+
   return {
     pass: result.pass,
     message: () => {
@@ -26,6 +28,9 @@ export function toMatchToolSchema(
         return result.pass
           ? 'Expected response NOT to match schema, but it did'
           : result.message;
+      }
+      if (!result.pass && preview) {
+        return `${result.message}\n\nActual response (truncated):\n${preview}`;
       }
       return result.message;
     },

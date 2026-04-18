@@ -6,7 +6,7 @@
 
 import type { ZodType, ZodError } from 'zod';
 import type { ValidationResult, SchemaValidatorOptions } from './types.js';
-import { extractText } from './utils.js';
+import { extractText, stringifyResponse } from './utils.js';
 
 /**
  * Validates that a response matches a Zod schema
@@ -61,11 +61,13 @@ export function validateSchema(
     const zodError = error as ZodError;
     const issues = formatZodIssues(zodError);
 
+    const text = stringifyResponse(response);
     return {
       pass: false,
       message: `Response does not match schema: ${issues}`,
       details: {
         issues: zodError.issues,
+        textPreview: truncateForDisplay(text),
       },
     };
   }
@@ -159,4 +161,11 @@ function formatZodIssues(error: ZodError): string {
   });
 
   return issues.join('; ');
+}
+
+function truncateForDisplay(str: string, maxLength = 200): string {
+  if (str.length <= maxLength) {
+    return str;
+  }
+  return str.slice(0, maxLength) + '... (truncated)';
 }

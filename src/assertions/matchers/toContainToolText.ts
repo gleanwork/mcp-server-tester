@@ -18,6 +18,8 @@ export function toContainToolText(
 ) {
   const result = validateText(received, expected, options);
 
+  const preview = result.details?.textPreview as string | undefined;
+
   return {
     pass: result.pass,
     message: () => {
@@ -28,6 +30,9 @@ export function toContainToolText(
         return result.pass
           ? `Expected response NOT to contain ${expectedStr}, but it did`
           : result.message;
+      }
+      if (!result.pass && preview) {
+        return `${result.message}\n\nActual response (truncated):\n${preview}`;
       }
       return result.message;
     },
