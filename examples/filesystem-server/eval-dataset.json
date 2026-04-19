@@ -80,18 +80,10 @@
         "maxTokens": 1000
       },
       "expect": {
-        "containsText": ["guide.md", "api.md"]
-      },
-      "metadata": {
-        "expectedToolCalls": [
-          {
-            "name": "list_directory",
-            "arguments": {
-              "path": "docs"
-            },
-            "required": true
-          }
-        ]
+        "containsText": ["guide.md", "api.md"],
+        "toolsTriggered": {
+          "calls": [{ "name": "list_directory", "required": true }]
+        }
       }
     },
     {
@@ -108,18 +100,10 @@
         "maxTokens": 1000
       },
       "expect": {
-        "containsText": "1.0.0"
-      },
-      "metadata": {
-        "expectedToolCalls": [
-          {
-            "name": "read_file",
-            "arguments": {
-              "path": "config.json"
-            },
-            "required": true
-          }
-        ]
+        "containsText": "1.0.0",
+        "toolsTriggered": {
+          "calls": [{ "name": "read_file", "required": true }]
+        }
       }
     },
     {
@@ -135,18 +119,10 @@
         "temperature": 0.0
       },
       "expect": {
-        "containsText": [".md"]
-      },
-      "metadata": {
-        "expectedToolCalls": [
-          {
-            "name": "search_files",
-            "arguments": {
-              "pattern": "**/*.md"
-            },
-            "required": true
-          }
-        ]
+        "containsText": [".md"],
+        "toolsTriggered": {
+          "calls": [{ "name": "search_files", "required": true }]
+        }
       }
     },
     {
@@ -162,18 +138,10 @@
         "temperature": 0.0
       },
       "expect": {
-        "containsText": ["2", "Alice", "Bob"]
-      },
-      "metadata": {
-        "expectedToolCalls": [
-          {
-            "name": "read_file",
-            "arguments": {
-              "path": "data/users.csv"
-            },
-            "required": true
-          }
-        ]
+        "containsText": ["2", "Alice", "Bob"],
+        "toolsTriggered": {
+          "calls": [{ "name": "read_file", "required": true }]
+        }
       }
     },
     {
@@ -188,13 +156,10 @@
         "model": "claude-sonnet-4-20250514",
         "temperature": 0.0
       },
-      "metadata": {
-        "expectedToolCalls": [
-          {
-            "name": "list_directory",
-            "required": true
-          }
-        ]
+      "expect": {
+        "toolsTriggered": {
+          "calls": [{ "name": "list_directory", "required": true }]
+        }
       }
     },
     {

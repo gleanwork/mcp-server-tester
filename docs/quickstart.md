@@ -57,7 +57,7 @@ If you prefer to set up your project manually:
 ### 1. Install Dependencies
 
 ```bash
-npm install --save-dev @gleanwork/mcp-server-tester @playwright/test @modelcontextprotocol/sdk zod
+npm install --save-dev @gleanwork/mcp-server-tester @playwright/test
 ```
 
 ### 2. Configure Playwright

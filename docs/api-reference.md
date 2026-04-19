@@ -303,21 +303,14 @@ Run an eval dataset. Expectations are defined per-case in the dataset's `expect`
 - `options: object`
   - `dataset: EvalDataset` - Dataset to run
   - `concurrency?: number` - Max parallel cases (default: 1 = sequential)
-  - `judgeClient?: LLMJudgeClient` - Optional LLM judge client
 - `context: object`
   - `mcp: MCPFixtureApi` - MCP fixture API
-  - `testInfo: TestInfo` - Playwright test info (required for snapshot support)
+  - `testInfo?: TestInfo` - Playwright test info (required for snapshot support)
 
 **Returns:** `Promise<EvalRunnerResult>`
 
 ```typescript
-const result = await runEvalDataset(
-  {
-    dataset,
-    judgeClient,
-  },
-  { mcp, testInfo }
-);
+const result = await runEvalDataset({ dataset }, { mcp, testInfo });
 
 console.log(`Passed: ${result.passed}/${result.total}`);
 ```
@@ -594,15 +587,15 @@ Evaluates a response using an LLM-as-a-judge. Returns a `Promise<ValidationResul
 
 **`JudgeValidatorConfig`:**
 
-| Field       | Type           | Default    | Description                                        |
-| ----------- | -------------- | ---------- | -------------------------------------------------- |
-| `rubric`    | `RubricSpec`   | —          | Evaluation rubric (required unless `judge` is set) |
-| `judge`     | `string`       | —          | Name of a registered custom judge                  |
-| `reference` | `unknown`      | —          | Reference response to compare against              |
-| `threshold` | `number`       | `0.7`      | Minimum score to pass (0–1)                        |
-| `reps`      | `number`       | `1`        | Number of evaluations to run (scores averaged)     |
-| `provider`  | `ProviderKind` | `'claude'` | Judge LLM provider                                 |
-| `model`     | `string`       | —          | Model override                                     |
+| Field       | Type           | Default       | Description                                        |
+| ----------- | -------------- | ------------- | -------------------------------------------------- |
+| `rubric`    | `RubricSpec`   | —             | Evaluation rubric (required unless `judge` is set) |
+| `judge`     | `string`       | —             | Name of a registered custom judge                  |
+| `reference` | `unknown`      | —             | Reference response to compare against              |
+| `threshold` | `number`       | `0.7`         | Minimum score to pass (0–1)                        |
+| `reps`      | `number`       | `1`           | Number of evaluations to run (scores averaged)     |
+| `provider`  | `ProviderKind` | `'anthropic'` | Judge LLM provider                                 |
+| `model`     | `string`       | —             | Model override                                     |
 
 ```typescript
 const result = await validateJudge(response, {
@@ -1150,16 +1143,6 @@ interface EvalDataset {
   metadata?: Record<string, unknown>;
   schemas?: Record<string, ZodSchema>; // Zod schemas for toMatchToolSchema assertions
 }
-```
-
-### `EvalExpectation`
-
-```typescript
-type EvalExpectation = (
-  context: { mcp: MCPFixtureApi },
-  evalCase: EvalCase,
-  response: CallToolResult
-) => Promise<{ pass: boolean; details: string }>;
 ```
 
 ## Next Steps

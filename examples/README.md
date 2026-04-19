@@ -65,9 +65,10 @@ test('validates config', async ({ mcp }) => {
       id: 'config-check',
       toolName: 'read_file',
       args: { path: 'config.json' },
-      expectedTextContains: ['version', '1.0.0'],
+      expect: {
+        containsText: ['version', '1.0.0'],
+      },
     },
-    { textContains: createTextContainsExpectation() },
     { mcp }
   );
 
@@ -82,10 +83,7 @@ Load test cases from JSON files for maintainability:
 ```typescript
 const dataset = await loadEvalDataset('./eval-dataset.json');
 
-const result = await runEvalDataset(
-  { dataset, expectations: { textContains: createTextContainsExpectation() } },
-  { mcp, testInfo, expect }
-);
+const result = await runEvalDataset({ dataset }, { mcp, testInfo, expect });
 
 expect(result.passed).toBe(result.total);
 ```
@@ -110,15 +108,15 @@ test('LLM discovers directory contents', async ({ mcp }) => {
 
 ## Example Comparison
 
-| Feature             | basic | filesystem | sqlite | glean |
-| ------------------- | ----- | ---------- | ------ | ----- |
-| Transport           | stdio | stdio      | stdio  | HTTP  |
-| Direct API Tests    | ✓     | ✓          | ✓      | ✓     |
-| Inline Eval Cases   | ✗     | ✓          | ✗      | ✗     |
-| JSON Eval Datasets  | ✗     | ✓          | ✓      | ✓     |
-| LLM Host Simulation | ✗     | ✓          | ✗      | ✗     |
-| LLM Host from JSON  | ✗     | ✓          | ✓      | ✓     |
-| MCP Reporter        | ✗     | ✓          | ✗      | ✓     |
+| Feature             | basic | filesystem | sqlite |
+| ------------------- | ----- | ---------- | ------ |
+| Transport           | stdio | stdio      | stdio  |
+| Direct API Tests    | ✓     | ✓          | ✓      |
+| Inline Eval Cases   | ✗     | ✓          | ✗      |
+| JSON Eval Datasets  | ✗     | ✓          | ✓      |
+| LLM Host Simulation | ✗     | ✓          | ✗      |
+| LLM Host from JSON  | ✗     | ✓          | ✓      |
+| MCP Reporter        | ✗     | ✓          | ✗      |
 
 ## Running LLM Tests
 
