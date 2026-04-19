@@ -129,16 +129,20 @@ For the standard Playwright use case, prefer importing `test` and `mcp` from `@g
 
 **`MCPFixtureOptions`:**
 
-| Field | Type | Default | Description |
-| --- | --- | --- | --- |
-| `authType` | `'oauth' \| 'api-token' \| 'none'` | `'none'` | Authentication type for this session |
-| `project` | `string` | — | Playwright project name (for filtering/grouping in the reporter) |
-| `callTimeoutMs` | `number` | `30000` | Timeout in milliseconds for MCP operations |
+| Field           | Type                               | Default  | Description                                                      |
+| --------------- | ---------------------------------- | -------- | ---------------------------------------------------------------- |
+| `authType`      | `'oauth' \| 'api-token' \| 'none'` | `'none'` | Authentication type for this session                             |
+| `project`       | `string`                           | —        | Playwright project name (for filtering/grouping in the reporter) |
+| `callTimeoutMs` | `number`                           | `30000`  | Timeout in milliseconds for MCP operations                       |
 
 **Returns:** `MCPFixtureApi`
 
 ```typescript
-import { createMCPFixture, createMCPClientForConfig, closeMCPClient } from '@gleanwork/mcp-server-tester';
+import {
+  createMCPFixture,
+  createMCPClientForConfig,
+  closeMCPClient,
+} from '@gleanwork/mcp-server-tester';
 import { test as base } from '@playwright/test';
 import type { MCPFixtureApi } from '@gleanwork/mcp-server-tester';
 
@@ -491,8 +495,8 @@ Checks that the response is (or is not) an error, optionally with a specific mes
 - `expected?: boolean | string | string[]` — `true` = expect any error, `false` = expect no error, `string` = expect error containing text (default: `true`)
 
 ```typescript
-const result = validateError(response, true);        // any error
-const result2 = validateError(response, false);       // no error
+const result = validateError(response, true); // any error
+const result2 = validateError(response, false); // no error
 const result3 = validateError(response, 'not found'); // error with message
 ```
 
@@ -590,15 +594,15 @@ Evaluates a response using an LLM-as-a-judge. Returns a `Promise<ValidationResul
 
 **`JudgeValidatorConfig`:**
 
-| Field | Type | Default | Description |
-| --- | --- | --- | --- |
-| `rubric` | `RubricSpec` | — | Evaluation rubric (required unless `judge` is set) |
-| `judge` | `string` | — | Name of a registered custom judge |
-| `reference` | `unknown` | — | Reference response to compare against |
-| `threshold` | `number` | `0.7` | Minimum score to pass (0–1) |
-| `reps` | `number` | `1` | Number of evaluations to run (scores averaged) |
-| `provider` | `ProviderKind` | `'claude'` | Judge LLM provider |
-| `model` | `string` | — | Model override |
+| Field       | Type           | Default    | Description                                        |
+| ----------- | -------------- | ---------- | -------------------------------------------------- |
+| `rubric`    | `RubricSpec`   | —          | Evaluation rubric (required unless `judge` is set) |
+| `judge`     | `string`       | —          | Name of a registered custom judge                  |
+| `reference` | `unknown`      | —          | Reference response to compare against              |
+| `threshold` | `number`       | `0.7`      | Minimum score to pass (0–1)                        |
+| `reps`      | `number`       | `1`        | Number of evaluations to run (scores averaged)     |
+| `provider`  | `ProviderKind` | `'claude'` | Judge LLM provider                                 |
+| `model`     | `string`       | —          | Model override                                     |
 
 ```typescript
 const result = await validateJudge(response, {
