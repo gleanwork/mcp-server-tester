@@ -322,7 +322,10 @@ Run an eval dataset. Expectations are defined per-case in the dataset's `expect`
 **Returns:** `Promise<EvalRunnerResult>`
 
 ```typescript
-const result = await runEvalDataset({ dataset }, { mcp, testInfo });
+const result = await runEvalDataset(
+  { dataset }, // options — what to run and how
+  { mcp, testInfo } // context — Playwright fixtures from your test
+);
 
 console.log(`Passed: ${result.passed}/${result.total}`);
 ```
