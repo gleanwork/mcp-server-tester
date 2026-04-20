@@ -300,24 +300,29 @@ Run an eval dataset. Expectations are defined per-case in the dataset's `expect`
 
 **Parameters:**
 
-- `options: object`
+- `options: EvalRunnerOptions`
   - `dataset: EvalDataset` - Dataset to run
-  - `concurrency?: number` - Max parallel cases (default: 1 = sequential)
-  - `judgeClient?: LLMJudgeClient` - Optional LLM judge client
-- `context: object`
+  - `schemas?: Record<string, ZodType>` - Schema registry for `expect.schema` validation by name
+  - `stopOnFailure?: boolean` - Stop on first failure (default: `false`)
+  - `onCaseComplete?: (result: EvalCaseResult) => void` - Callback after each case completes
+  - `concurrency?: number` - Max parallel cases (default: `1` = sequential)
+  - `defaultLlmIterations?: number` - Default iteration count for `mcp_host` cases (default: `1`)
+  - `defaultJudgeReps?: number` - Default judge evaluation count per case (default: `1`)
+  - `filterTags?: string[]` - Only run cases whose `tags` contain at least one match
+  - `saveResultsTo?: string` - Save run results to file for baseline comparison
+  - `omitResponsesFromBaseline?: boolean` - Strip responses from saved baseline (default: `true`)
+  - `baselineResultsFrom?: string` - Load baseline file for regression detection
+  - `mcpHostModel?: string` - Model identifier recorded in run metadata
+  - `judgeModel?: string` - Judge model identifier recorded in run metadata
+- `context: EvalContext`
   - `mcp: MCPFixtureApi` - MCP fixture API
-  - `testInfo: TestInfo` - Playwright test info (required for snapshot support)
+  - `testInfo?: TestInfo` - Playwright test info (required for snapshot support)
+  - `expect?: ExpectType` - Playwright expect function (required for snapshot support)
 
 **Returns:** `Promise<EvalRunnerResult>`
 
 ```typescript
-const result = await runEvalDataset(
-  {
-    dataset,
-    judgeClient,
-  },
-  { mcp, testInfo }
-);
+const result = await runEvalDataset({ dataset }, { mcp, testInfo });
 
 console.log(`Passed: ${result.passed}/${result.total}`);
 ```
@@ -899,7 +904,7 @@ Run MCP protocol conformance checks.
   - `requiredTools?: string[]` - Tools that must be present
   - `validateSchemas?: boolean` - Validate tool input schemas (default: `false`)
 
-**Returns:** `Promise<ConformanceResult>`
+**Returns:** `Promise<MCPConformanceResult>`
 
 ```typescript
 const result = await runConformanceChecks(mcp, {
@@ -913,7 +918,7 @@ expect(result.pass).toBe(true);
 **Result Structure:**
 
 ```typescript
-interface ConformanceResult {
+interface MCPConformanceResult {
   pass: boolean;
   checks: Array<{
     name: string;

@@ -57,6 +57,8 @@ export function createJudge(config: JudgeConfig = {}): Judge {
       return createGoogleJudge(config);
 
     default:
-      throw new Error(`Unsupported LLM provider: ${String(provider)}`);
+      throw new Error(
+        `Unsupported LLM provider: ${String(provider)}. Valid providers: 'anthropic', 'vertex-anthropic', 'anthropic-agent-sdk', 'openai', 'google'`
+      );
   }
 }

@@ -615,6 +615,19 @@ The predicate may be synchronous or `async`. Errors thrown inside the predicate 
 - Prefer a built-in matcher when one fits — predicates are harder to read at a glance
 - The `response` argument is the raw `CallToolResult`; use `text` (second argument) for extracted string content
 
+## Matcher Naming Convention
+
+The custom Playwright matchers follow standard Playwright/Jest prefix conventions. All matchers include `Tool` in the name to distinguish them from built-in matchers.
+
+| Prefix       | Meaning                  | Matchers                                                                                |
+| ------------ | ------------------------ | --------------------------------------------------------------------------------------- |
+| `toMatch*`   | Structural/content match | `toMatchToolResponse`, `toMatchToolSchema`, `toMatchToolPattern`, `toMatchToolSnapshot` |
+| `toContain*` | Substring presence       | `toContainToolText`                                                                     |
+| `toBe*`      | Identity/boolean check   | `toBeToolError`                                                                         |
+| `toHave*`    | Property/count assertion | `toHaveToolResponseSize`, `toHaveToolCalls`, `toHaveToolCallCount`                      |
+| `toPass*`    | External evaluation      | `toPassToolJudge`                                                                       |
+| `toSatisfy*` | Custom predicate         | `toSatisfyToolPredicate`                                                                |
+
 ## Combining Multiple Expectations
 
 A single eval case can declare multiple expectation types at once. The runner evaluates each defined field independently and reports results per expectation:

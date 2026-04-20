@@ -29,6 +29,7 @@ describe('validateToolCalls', () => {
     });
     expect(v.pass).toBe(false);
     expect(v.message).toContain('search');
+    expect(v.details).toEqual({ actual: ['other'], expected: 'search' });
   });
 
   it('passes optional tool even when missing', () => {
@@ -147,6 +148,10 @@ describe('validateToolCalls', () => {
       order: 'strict',
     });
     expect(v.pass).toBe(false);
+    expect(v.details).toEqual({
+      actual: ['search', 'fetch'],
+      expected: 'search',
+    });
   });
 
   it('passes strict order when sequence matches', () => {
@@ -166,6 +171,10 @@ describe('validateToolCalls', () => {
     });
     expect(v.pass).toBe(false);
     expect(v.message).toContain('unexpected');
+    expect(v.details).toEqual({
+      actual: ['search', 'unexpected'],
+      unexpected: ['unexpected'],
+    });
   });
 
   it('returns error when response is not an MCPHostSimulationResult', () => {
@@ -258,6 +267,7 @@ describe('validateToolCallCount', () => {
     const v = validateToolCallCount(result, { exact: 2 });
     expect(v.pass).toBe(false);
     expect(v.message).toContain('1');
+    expect(v.details).toEqual({ actual: 1, expected: 2 });
   });
 
   it('passes min/max range', () => {
@@ -267,12 +277,16 @@ describe('validateToolCallCount', () => {
 
   it('fails when below min', () => {
     const result = makeResult([]);
-    expect(validateToolCallCount(result, { min: 1 }).pass).toBe(false);
+    const v = validateToolCallCount(result, { min: 1 });
+    expect(v.pass).toBe(false);
+    expect(v.details).toEqual({ actual: 0, min: 1 });
   });
 
   it('fails when above max', () => {
     const result = makeResult([{ name: 'a' }, { name: 'b' }, { name: 'c' }]);
-    expect(validateToolCallCount(result, { max: 2 }).pass).toBe(false);
+    const v = validateToolCallCount(result, { max: 2 });
+    expect(v.pass).toBe(false);
+    expect(v.details).toEqual({ actual: 3, max: 2 });
   });
 
   it('returns error when response is not an MCPHostSimulationResult', () => {

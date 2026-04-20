@@ -97,7 +97,7 @@ export type ExpectationResultMap = Partial<
 /**
  * Breakdown of expectation types used in a run
  */
-export type ExpectationBreakdown = Record<ExpectationType, number>;
+export type ExpectationBreakdown = Partial<Record<ExpectationType, number>>;
 
 // Reporter types are exported from ./reporter.js
 // Import them from there to avoid circular dependencies:

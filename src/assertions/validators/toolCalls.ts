@@ -152,6 +152,10 @@ export function validateToolCalls(
           return {
             pass: false,
             message: `Expected tool '${expected.name}' to be called in sequence (starting from position ${searchFrom}), but it was not found`,
+            details: {
+              actual: actual.map((c) => c.name),
+              expected: expected.name,
+            },
             metrics,
           };
         }
@@ -172,6 +176,10 @@ export function validateToolCalls(
         return {
           pass: false,
           message: `Expected tool '${expected.name}'${argsNote} to be called, but it was not`,
+          details: {
+            actual: actual.map((c) => c.name),
+            expected: expected.name,
+          },
           metrics,
         };
       }
@@ -185,6 +193,10 @@ export function validateToolCalls(
       return {
         pass: false,
         message: `Unexpected tool calls: ${names}. Only ${[...allowedNames].map((n) => `'${n}'`).join(', ')} are allowed`,
+        details: {
+          actual: actual.map((c) => c.name),
+          unexpected: unexpected.map((c) => c.name),
+        },
         metrics,
       };
     }
@@ -218,6 +230,7 @@ export function validateToolCallCount(
     return {
       pass: false,
       message: `Expected exactly ${exact} tool call(s), but got ${count}`,
+      details: { actual: count, expected: exact },
     };
   }
 
@@ -225,6 +238,7 @@ export function validateToolCallCount(
     return {
       pass: false,
       message: `Expected at least ${min} tool call(s), but got ${count}`,
+      details: { actual: count, min },
     };
   }
 
@@ -232,6 +246,7 @@ export function validateToolCallCount(
     return {
       pass: false,
       message: `Expected at most ${max} tool call(s), but got ${count}`,
+      details: { actual: count, max },
     };
   }
 

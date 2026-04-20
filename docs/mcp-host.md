@@ -121,23 +121,39 @@ The case passes if `search` was triggered in at least 4 of 5 runs (80% accuracy)
 
 ```typescript
 interface MCPHostConfig {
-  provider:
-    | 'openai'
-    | 'anthropic'
-    | 'google'
-    | 'vertex-anthropic'
-    | 'mistral'
-    | 'azure'
-    | 'deepseek'
-    | 'openrouter'
-    | 'xai';
+  hostType?: 'sdk' | 'cli' | 'browser' | 'desktop'; // Host type (default: 'sdk')
+  provider?: LLMProvider; // Required for 'sdk', ignored for 'cli'
   model?: string; // Model name (provider-specific default if omitted)
   maxToolCalls?: number; // Max tool call steps (default: 10)
   temperature?: number; // LLM temperature (default: 0)
   maxTokens?: number; // Max response tokens
   apiKeyEnvVar?: string; // Override default env var name
+  cli?: CLIConfig; // Required for 'cli' host type
+}
+
+type LLMProvider =
+  | 'openai'
+  | 'anthropic'
+  | 'google'
+  | 'vertex-anthropic'
+  | 'mistral'
+  | 'azure'
+  | 'deepseek'
+  | 'openrouter'
+  | 'xai';
+
+interface CLIConfig {
+  command: string; // CLI command (e.g., 'claude', 'codex')
+  args: string[]; // Arguments — use '{{scenario}}' as prompt placeholder
+  outputFormat?: 'text' | 'json' | 'stream-json'; // How to parse stdout (default: 'stream-json')
+  timeout?: number; // Command timeout in ms (default: 120000)
 }
 ```
+
+**Host types:**
+
+- **`sdk`** (default) — Programmatic via Vercel AI SDK. Reuses the framework's MCP connection. Requires `provider`.
+- **`cli`** — CLI-based hosts (e.g., Claude Code, Codex). Spawns a process with its own MCP connection. Requires `cli`.
 
 ## MCPHostSimulationResult
 
