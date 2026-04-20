@@ -192,12 +192,12 @@ npx skills add -g gleanwork/mcp-server-tester
 
 This installs skills globally so they're available across all your projects. Four skills are included:
 
-| Skill | Description |
-| ----- | ----------- |
-| `mcp-tester-guide` | Framework reference — matchers, config, auth, anti-patterns |
-| `write-mcp-test` | Generate direct-mode Playwright tests |
-| `write-mcp-eval` | Generate data-driven eval datasets |
-| `write-mcp-host-eval` | Generate LLM host simulation evals |
+| Skill                 | Description                                                 |
+| --------------------- | ----------------------------------------------------------- |
+| `mcp-tester-guide`    | Framework reference — matchers, config, auth, anti-patterns |
+| `write-mcp-test`      | Generate direct-mode Playwright tests                       |
+| `write-mcp-eval`      | Generate data-driven eval datasets                          |
+| `write-mcp-host-eval` | Generate LLM host simulation evals                          |
 
 Compatible with Claude Code, Cursor, Windsurf, Copilot, and [40+ other AI agents](https://github.com/nicepkg/nice-skills).
 
