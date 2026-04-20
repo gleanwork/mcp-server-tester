@@ -182,6 +182,25 @@ For HTTP servers, set `transport: 'http'` and `serverUrl`. For servers that requ
 - [Development](./docs/development.md) — contributing and building
 - [Migration Guide (v0.12 → v1.0)](./docs/migrations/migration-1.0.md) — upgrading from pre-1.0 releases
 
+## AI Skills
+
+Install AI skills to help your coding assistant generate tests, eval datasets, and MCP host evals:
+
+```bash
+npx skills add -g gleanwork/mcp-server-tester
+```
+
+This installs skills globally so they're available across all your projects. Four skills are included:
+
+| Skill | Description |
+| ----- | ----------- |
+| `mcp-tester-guide` | Framework reference — matchers, config, auth, anti-patterns |
+| `write-mcp-test` | Generate direct-mode Playwright tests |
+| `write-mcp-eval` | Generate data-driven eval datasets |
+| `write-mcp-host-eval` | Generate LLM host simulation evals |
+
+Compatible with Claude Code, Cursor, Windsurf, Copilot, and [40+ other AI agents](https://github.com/nicepkg/nice-skills).
+
 ## Examples
 
 The `examples/` directory contains complete working examples:

@@ -148,6 +148,71 @@ await runEvalDataset({ dataset, concurrency: 4 }, { mcp, testInfo });
 
 Validators: `validateToolCalls(response, expectation)`, `validateToolCallCount(response, options)`
 
+### Testing Modes
+
+The framework supports two evaluation modes:
+
+- **Direct mode** (`mode: 'direct'`, default): Call a specific tool with known arguments and assert on the response. Fast, deterministic, free. Use for regression testing.
+- **mcp_host mode** (`mode: 'mcp_host'`): An LLM receives a natural language `scenario` and discovers which tools to call. Non-deterministic, costs money, measures tool description quality. Use selectively for tool discoverability validation.
+
+Direct mode uses `toolName` + `args`. mcp_host mode uses `scenario` + `mcpHostConfig`. Tool call assertions (`toolsTriggered`, `toolCallCount`) only work in mcp_host mode.
+
+### Snapshot Testing
+
+`toMatchToolSnapshot(name, sanitizers?)` compares tool responses against saved baselines. Requires Playwright `testInfo` (destructure from second arg: `async ({ mcp }, testInfo)`).
+
+Built-in sanitizers: `'uuid'`, `'iso-date'`, `'timestamp'`, `'jwt'`, `'objectId'`
+
+Custom sanitizers:
+
+- Field removal: `{ remove: ['createdAt', 'requestId'] }`
+- Regex replacement: `{ pattern: /token_[a-z0-9]+/, replacement: '[TOKEN]' }`
+
+Update snapshots: `npx playwright test --update-snapshots`
+
+### MCP Host Simulation
+
+`simulateMCPHost()` orchestrates LLM + MCP tool calls via the Vercel AI SDK. The LLM receives all available tools and a scenario prompt, then decides which tools to call.
+
+Two host types:
+
+- **`sdk`** (default): Programmatic via Vercel AI SDK. Reuses the test's MCP connection. Requires `provider`.
+- **`cli`**: CLI-based hosts (e.g., Claude Code). Spawns a process with its own MCP connection. Requires `cli` config with `command`, `args` (use `{{scenario}}` placeholder), and `outputFormat`.
+
+Provider packages are dynamically imported — install `ai` + `@ai-sdk/<provider>` (e.g., `npm install ai @ai-sdk/anthropic`).
+
+Multi-iteration: set `iterations` and `accuracyThreshold` on an eval case. The runner executes N times, computes `assertionPassRate` (0–1), and passes if rate >= threshold.
+
+### Fixture Composition
+
+- **Standard**: `import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp'` — provides `mcp: MCPFixtureApi` and `mcpClient: Client`
+- **Manual**: `createMCPFixture(client, testInfo?, options?)` — for custom fixture hierarchies or non-Playwright usage
+- **Auth**: `import { test } from '@gleanwork/mcp-server-tester/fixtures/mcpAuth'` — adds OAuth/token auth setup
+- Always call `closeMCPClient(client)` in teardown when using manual fixtures
+
+### Conformance Checking
+
+`runConformanceChecks(mcp)` validates MCP protocol compliance (tool listing, error handling, spec adherence). Returns `MCPConformanceResult[]` with pass/fail per check. Attach results to the reporter via `testInfo` for inclusion in the HTML report.
+
+### Judge / Rubrics
+
+`toPassToolJudge(rubric, options?)` sends the tool response to an LLM for quality evaluation. Requires `await`.
+
+Built-in rubrics: `'correctness'`, `'completeness'`, `'groundedness'`, `'instruction-following'`, `'conciseness'`
+
+Custom rubrics: pass a string prompt or `{ text: '...' }` object. Use `judgeReps` (case-level) or `reps` (assertion-level) for variance reduction — scores are averaged across repetitions.
+
+`registerJudge(name, executor)` registers a custom judge for use with `{ judge: 'name' }` in `toPassToolJudge` or `passesJudge` eval expectations.
+
+### Debugging
+
+- `DEBUG=mcp-server-tester:*` enables verbose logging for transport, auth, and eval runner internals
+- Common pitfalls:
+  - Missing `testInfo` for snapshot matchers (destructure from second test arg)
+  - Wrong import path — use `@gleanwork/mcp-server-tester/fixtures/mcp` for tests, not the root path
+  - Provider package not installed for mcp_host mode (`npm install ai @ai-sdk/<provider>`)
+  - Missing `await` on async matchers (`toPassToolJudge`, `toMatchToolSnapshot`, `toSatisfyToolPredicate`)
+
 ## Type Architecture
 
 ### Single Source of Truth
