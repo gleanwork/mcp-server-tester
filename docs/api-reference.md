@@ -599,15 +599,15 @@ Evaluates a response using an LLM-as-a-judge. Returns a `Promise<ValidationResul
 
 **`JudgeValidatorConfig`:**
 
-| Field       | Type           | Default    | Description                                        |
-| ----------- | -------------- | ---------- | -------------------------------------------------- |
-| `rubric`    | `RubricSpec`   | —          | Evaluation rubric (required unless `judge` is set) |
-| `judge`     | `string`       | —          | Name of a registered custom judge                  |
-| `reference` | `unknown`      | —          | Reference response to compare against              |
-| `threshold` | `number`       | `0.7`      | Minimum score to pass (0–1)                        |
-| `reps`      | `number`       | `1`        | Number of evaluations to run (scores averaged)     |
-| `provider`  | `ProviderKind` | `'claude'` | Judge LLM provider                                 |
-| `model`     | `string`       | —          | Model override                                     |
+| Field       | Type           | Default       | Description                                        |
+| ----------- | -------------- | ------------- | -------------------------------------------------- |
+| `rubric`    | `RubricSpec`   | —             | Evaluation rubric (required unless `judge` is set) |
+| `judge`     | `string`       | —             | Name of a registered custom judge                  |
+| `reference` | `unknown`      | —             | Reference response to compare against              |
+| `threshold` | `number`       | `0.7`         | Minimum score to pass (0–1)                        |
+| `reps`      | `number`       | `1`           | Number of evaluations to run (scores averaged)     |
+| `provider`  | `ProviderKind` | `'anthropic'` | Judge LLM provider                                 |
+| `model`     | `string`       | —             | Model override                                     |
 
 ```typescript
 const result = await validateJudge(response, {
@@ -1155,16 +1155,6 @@ interface EvalDataset {
   metadata?: Record<string, unknown>;
   schemas?: Record<string, ZodSchema>; // Zod schemas for toMatchToolSchema assertions
 }
-```
-
-### `EvalExpectation`
-
-```typescript
-type EvalExpectation = (
-  context: { mcp: MCPFixtureApi },
-  evalCase: EvalCase,
-  response: CallToolResult
-) => Promise<{ pass: boolean; details: string }>;
 ```
 
 ## Next Steps

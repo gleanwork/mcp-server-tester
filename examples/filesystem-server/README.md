@@ -72,9 +72,10 @@ test('validates config with inline case', async ({ mcp }) => {
       id: 'inline-config-check',
       toolName: 'read_file',
       args: { path: 'config.json' },
-      expectedTextContains: ['version', '1.0.0'],
+      expect: {
+        containsText: ['version', '1.0.0'],
+      },
     },
-    { textContains: createTextContainsExpectation() },
     { mcp }
   );
 
@@ -117,17 +118,17 @@ Define test cases in JSON for maintainability:
   "mode": "direct",
   "toolName": "read_file",
   "args": { "path": "readme.txt" },
-  "expectedTextContains": "Hello World"
+  "expect": {
+    "containsText": "Hello World",
+    "isError": false
+  }
 }
 ```
 
 ```typescript
 const dataset = await loadEvalDataset('./eval-dataset.json');
 
-const result = await runEvalDataset(
-  { dataset, expectations: { textContains: createTextContainsExpectation() } },
-  { mcp, testInfo, expect }
-);
+const result = await runEvalDataset({ dataset }, { mcp, testInfo, expect });
 
 expect(result.passed).toBe(result.total);
 ```

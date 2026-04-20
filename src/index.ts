@@ -183,9 +183,11 @@ export {
 
 // Eval Runner
 export type {
+  EvalCaseRequest,
   EvalContext,
   EvalExpectationResult,
   EvalCaseResult,
+  EvalRunMetadata,
   IterationResult,
   EvalRunnerResult,
   EvalRunnerOptions,

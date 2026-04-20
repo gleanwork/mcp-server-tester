@@ -14,7 +14,7 @@ This example demonstrates testing the [SQLite MCP Server](https://github.com/joh
 
 ## Prerequisites
 
-- Node.js 18+
+- Node.js 22+
 - npm or pnpm
 
 ## Installation
@@ -139,7 +139,9 @@ Direct SQL queries to specific tools:
   "args": {
     "sql": "SELECT * FROM users"
   },
-  "expectedSchemaName": "queryResult"
+  "expect": {
+    "schema": "queryResult"
+  }
 }
 ```
 
@@ -156,13 +158,10 @@ Natural language scenarios where the LLM chooses which tool and constructs the q
     "provider": "anthropic",
     "model": "claude-sonnet-4-20250514"
   },
-  "metadata": {
-    "expectedToolCalls": [
-      {
-        "name": "query",
-        "required": true
-      }
-    ]
+  "expect": {
+    "toolsTriggered": {
+      "calls": [{ "name": "query", "required": true }]
+    }
   }
 }
 ```
