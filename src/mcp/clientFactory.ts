@@ -409,7 +409,9 @@ export async function closeMCPClient(client: Client): Promise<void> {
       } catch (sessionError) {
         debugClient(
           'Error terminating session: %s',
-          sessionError instanceof Error ? sessionError.message : String(sessionError)
+          sessionError instanceof Error
+            ? sessionError.message
+            : String(sessionError)
         );
       }
     }
