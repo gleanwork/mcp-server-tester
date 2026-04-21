@@ -400,6 +400,20 @@ export async function closeMCPClient(client: Client): Promise<void> {
   // outstanding request IDs as a public API, so we close directly and let the
   // transport teardown signal disconnection to the server.
   try {
+    // Terminate the MCP session before closing so stateful servers can clean up.
+    // TODO: Remove once MCP moves to stateless protocol (see roadmap: https://blog.modelcontextprotocol.io/posts/2026-mcp-roadmap/)
+    const transport = client.transport;
+    if (transport instanceof StreamableHTTPClientTransport) {
+      try {
+        await transport.terminateSession();
+      } catch (sessionError) {
+        debugClient(
+          'Error terminating session: %s',
+          sessionError instanceof Error ? sessionError.message : String(sessionError)
+        );
+      }
+    }
+
     await client.close();
   } catch (error) {
     debugClient(
