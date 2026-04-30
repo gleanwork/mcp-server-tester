@@ -12,8 +12,8 @@ import type {
   ExpectationType,
   EvalExpectationResult,
   ExpectationBreakdown,
+  UsageMetrics,
 } from './index.js';
-import type { UsageMetrics } from '../judge/judgeTypes.js';
 
 /**
  * Experiment tracking metadata for an eval run

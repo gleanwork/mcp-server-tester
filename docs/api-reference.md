@@ -332,7 +332,7 @@ console.log(`Passed: ${result.passed}/${result.total}`);
 
 **Result Structure:**
 
-```typescript snippet=src/evals/evalRunner.ts#L65-L137
+```typescript snippet=src/evals/evalRunner.ts#L66-L143
 /**
  * Overall result of running an eval dataset
  */
@@ -405,6 +405,11 @@ export interface EvalRunnerResult {
    * Experiment tracking metadata captured at run time.
    */
   metadata?: EvalRunMetadata;
+
+  /**
+   * Aggregate token usage from all mcp_host LLM simulations across all cases.
+   */
+  totalHostUsage?: UsageMetrics;
 }
 ```
 

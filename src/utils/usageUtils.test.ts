@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { sumUsage } from './usageUtils.js';
-import type { UsageMetrics } from '../judge/judgeTypes.js';
+import type { UsageMetrics } from '../types/index.js';
 
 describe('sumUsage', () => {
   const base: UsageMetrics = {

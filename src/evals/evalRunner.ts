@@ -4,8 +4,7 @@ import type { TestInfo, Expect } from '@playwright/test';
 import type { ZodType } from 'zod';
 import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
 import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
-import type { EvalExpectationResult } from '../types/index.js';
-import type { UsageMetrics } from '../judge/judgeTypes.js';
+import type { EvalExpectationResult, UsageMetrics } from '../types/index.js';
 import type {
   EvalCaseResult,
   EvalCaseRequest,

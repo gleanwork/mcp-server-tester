@@ -19,8 +19,8 @@ import type {
   EvalCaseResult,
   MCPConformanceCheck,
 } from '../types/reporter.js';
+import type { UsageMetrics } from '../types/index.js';
 import { sumUsage } from '../utils/usageUtils.js';
-import type { UsageMetrics } from '../judge/judgeTypes.js';
 
 /**
  * Custom Playwright reporter for MCP eval results

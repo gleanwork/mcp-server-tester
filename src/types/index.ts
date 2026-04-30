@@ -99,6 +99,10 @@ export type ExpectationResultMap = Partial<
  */
 export type ExpectationBreakdown = Partial<Record<ExpectationType, number>>;
 
+// Usage metrics re-exported from judge module for centralised access.
+// Prefer importing UsageMetrics from this module rather than judge/judgeTypes.
+export type { UsageMetrics } from '../judge/judgeTypes.js';
+
 // Reporter types are exported from ./reporter.js
 // Import them from there to avoid circular dependencies:
 //   import type { EvalCaseResult } from '../types/reporter.js';

@@ -1,4 +1,4 @@
-import type { UsageMetrics } from '../judge/judgeTypes.js';
+import type { UsageMetrics } from '../types/index.js';
 
 function optionalSum(a?: number, b?: number): number | undefined {
   if (a === undefined && b === undefined) return undefined;

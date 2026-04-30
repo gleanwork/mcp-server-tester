@@ -15,7 +15,7 @@ import type {
   LLMProvider,
   LLMToolCall,
 } from '../mcpHostTypes.js';
-import type { UsageMetrics } from '../../../judge/judgeTypes.js';
+import type { UsageMetrics } from '../../../types/index.js';
 import type { MCPFixtureApi } from '../../../mcp/fixtures/mcpFixture.js';
 import { extractText } from '../../../mcp/response.js';
 

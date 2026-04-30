@@ -6,7 +6,7 @@
  */
 
 import type { MCPFixtureApi } from '../../mcp/fixtures/mcpFixture.js';
-import type { UsageMetrics } from '../../judge/judgeTypes.js';
+import type { UsageMetrics } from '../../types/index.js';
 
 /**
  * Host type for MCP host simulation.
