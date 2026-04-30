@@ -13,6 +13,7 @@ import type {
   EvalExpectationResult,
   ExpectationBreakdown,
 } from './index.js';
+import type { UsageMetrics } from '../judge/judgeTypes.js';
 
 /**
  * Experiment tracking metadata for an eval run
@@ -151,6 +152,8 @@ export interface IterationResult {
     }>;
     missed: Array<{ name: string }>;
   };
+  /** Token usage from mcp_host LLM simulation in this iteration */
+  hostUsage?: UsageMetrics;
 }
 
 /**
@@ -326,6 +329,12 @@ export interface EvalCaseResult {
       name: string;
     }>;
   };
+
+  /**
+   * Aggregate token usage from mcp_host LLM simulation for this case.
+   * Summed across all iterations. Only populated for mcp_host mode cases.
+   */
+  hostUsage?: UsageMetrics;
 }
 
 /**
@@ -384,6 +393,11 @@ export interface MCPEvalRunData {
      * Expectation type breakdown
      */
     expectationBreakdown: ExpectationBreakdown;
+
+    /**
+     * Aggregate token usage from all mcp_host LLM simulations in this run.
+     */
+    totalHostUsage?: UsageMetrics;
   };
 
   /**

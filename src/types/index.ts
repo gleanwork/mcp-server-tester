@@ -7,6 +7,7 @@
  * @packageDocumentation
  */
 
+
 /**
  * Authentication type for MCP connections
  *

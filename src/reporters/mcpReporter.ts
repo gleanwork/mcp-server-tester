@@ -19,6 +19,8 @@ import type {
   EvalCaseResult,
   MCPConformanceCheck,
 } from '../types/reporter.js';
+import { sumUsage } from '../utils/usageUtils.js';
+import type { UsageMetrics } from '../judge/judgeTypes.js';
 
 /**
  * Custom Playwright reporter for MCP eval results
@@ -378,6 +380,11 @@ export default class MCPReporter implements Reporter {
 
     const failed = total - passed;
 
+    const totalHostUsage = this.allResults.reduce(
+      (acc, r) => sumUsage(acc, r.hostUsage),
+      undefined as UsageMetrics | undefined
+    );
+
     return {
       timestamp: new Date().toISOString(),
       durationMs,
@@ -393,6 +400,7 @@ export default class MCPReporter implements Reporter {
         passRate: passed / total,
         datasetBreakdown,
         expectationBreakdown,
+        totalHostUsage,
       },
       results: this.allResults,
       conformanceChecks:

@@ -110,6 +110,38 @@ describe('createVercelOrchestrator', () => {
     expect(result.mcpDurationMs).toBeGreaterThanOrEqual(0);
   });
 
+  it('should capture token usage from SDK response', async () => {
+    const orchestrator = createVercelOrchestrator();
+    const result = await orchestrator.simulate(
+      createMockMCP(),
+      'What is the weather?',
+      { provider: 'openai', model: 'gpt-4o' }
+    );
+
+    expect(result.usage).toBeDefined();
+    expect(result.usage!.inputTokens).toBe(100);
+    expect(result.usage!.outputTokens).toBe(50);
+    expect(result.usage!.totalCostUsd).toBe(0);
+    expect(result.usage!.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('should omit usage when SDK does not return it', async () => {
+    const { generateText } = await import('ai');
+    vi.mocked(generateText).mockResolvedValueOnce({
+      text: 'Answer',
+      steps: [],
+    } as never);
+
+    const orchestrator = createVercelOrchestrator();
+    const result = await orchestrator.simulate(createMockMCP(), 'scenario', {
+      provider: 'openai',
+      model: 'gpt-4o',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.usage).toBeUndefined();
+  });
+
   it('should return success:false on error', async () => {
     const { generateText } = await import('ai');
     vi.mocked(generateText).mockRejectedValueOnce(new Error('API error'));

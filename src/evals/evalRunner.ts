@@ -5,6 +5,7 @@ import type { ZodType } from 'zod';
 import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
 import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
 import type { EvalExpectationResult } from '../types/index.js';
+import type { UsageMetrics } from '../judge/judgeTypes.js';
 import type {
   EvalCaseResult,
   EvalCaseRequest,
@@ -29,6 +30,7 @@ import {
 } from '../assertions/validators/index.js';
 import { execFileNoThrow } from '../utils/execFileNoThrow.js';
 import { debugEval } from '../debug.js';
+import { sumUsage } from '../utils/usageUtils.js';
 import packageJson from '../../package.json' with { type: 'json' };
 
 /**
@@ -134,6 +136,11 @@ export interface EvalRunnerResult {
    * Experiment tracking metadata captured at run time.
    */
   metadata?: EvalRunMetadata;
+
+  /**
+   * Aggregate token usage from all mcp_host LLM simulations across all cases.
+   */
+  totalHostUsage?: UsageMetrics;
 }
 
 /**
@@ -655,6 +662,12 @@ async function runSingleIteration(
     }
   }
 
+  // Extract host usage from simulation result
+  const hostUsage =
+    isMCPHostSimulationResult(response) && response.usage
+      ? response.usage
+      : undefined;
+
   // Build result - use test context for authType and project (Playwright is source of truth)
   return {
     id: evalCase.id,
@@ -674,6 +687,7 @@ async function runSingleIteration(
     toolPrecision,
     toolRecall,
     mcpHostTrace,
+    hostUsage,
   };
 }
 
@@ -770,6 +784,7 @@ export async function runEvalCase(
         error: result.error,
         isInfrastructureError: infraError,
         mcpHostTrace: result.mcpHostTrace,
+        hostUsage: result.hostUsage,
       });
     } catch (err) {
       // runSingleIteration should not throw, but guard defensively
@@ -809,6 +824,11 @@ export async function runEvalCase(
     tags: evalCase.tags,
   };
 
+  const totalHostUsage = iterationResults.reduce(
+    (acc, r) => sumUsage(acc, r.hostUsage),
+    undefined as UsageMetrics | undefined
+  );
+
   return {
     ...baseResult,
     pass: assertionPassRate >= threshold,
@@ -818,6 +838,7 @@ export async function runEvalCase(
     iterationResults,
     infrastructureErrorCount: infraErrors.length,
     durationMs: iterationResults.reduce((sum, r) => sum + r.durationMs, 0),
+    hostUsage: totalHostUsage,
   };
 }
 
@@ -1038,6 +1059,11 @@ export async function runEvalDataset(
     ...(judgeModel !== undefined && { judgeModel }),
   };
 
+  const runHostUsage = caseResults.reduce(
+    (acc, r) => sumUsage(acc, r.hostUsage),
+    undefined as UsageMetrics | undefined
+  );
+
   const result: EvalRunnerResult = {
     total,
     passed,
@@ -1045,6 +1071,7 @@ export async function runEvalDataset(
     caseResults,
     durationMs: Date.now() - startTime,
     metadata,
+    totalHostUsage: runHostUsage,
   };
 
   // Load baseline and compute delta if requested

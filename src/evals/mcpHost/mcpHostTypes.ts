@@ -6,6 +6,7 @@
  */
 
 import type { MCPFixtureApi } from '../../mcp/fixtures/mcpFixture.js';
+import type { UsageMetrics } from '../../judge/judgeTypes.js';
 
 /**
  * Host type for MCP host simulation.
@@ -213,6 +214,12 @@ export interface MCPHostSimulationResult {
    * (excludes LLM response time)
    */
   mcpDurationMs?: number;
+
+  /**
+   * Token usage from the LLM during simulation.
+   * Populated by SDK-based hosts from the AI SDK response.
+   */
+  usage?: UsageMetrics;
 }
 
 /**

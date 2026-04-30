@@ -401,4 +401,5 @@ describe('validateJudge', () => {
       expect(result.message).toContain('LLM API timeout');
     });
   });
+
 });

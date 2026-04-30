@@ -15,6 +15,7 @@ import type {
   LLMProvider,
   LLMToolCall,
 } from '../mcpHostTypes.js';
+import type { UsageMetrics } from '../../../judge/judgeTypes.js';
 import type { MCPFixtureApi } from '../../../mcp/fixtures/mcpFixture.js';
 import { extractText } from '../../../mcp/response.js';
 
@@ -247,6 +248,15 @@ export function createVercelOrchestrator(): MCPHostSimulator {
         const totalDurationMs = Date.now() - llmStart;
         const llmDurationMs = totalDurationMs - mcpDurationMs;
 
+        const hostUsage: UsageMetrics | undefined = result.usage
+          ? {
+              inputTokens: (result.usage.promptTokens as number) ?? 0,
+              outputTokens: (result.usage.completionTokens as number) ?? 0,
+              totalCostUsd: 0,
+              durationMs: llmDurationMs,
+            }
+          : undefined;
+
         const conversationHistory = (result.steps ?? []).map((step: any) => ({
           role: (step.toolCalls?.length > 0 ? 'tool' : 'assistant') as
             | 'tool'
@@ -265,6 +275,7 @@ export function createVercelOrchestrator(): MCPHostSimulator {
           llmDurationMs,
           mcpDurationMs,
           conversationHistory,
+          usage: hostUsage,
         };
       } catch (err) {
         return {
