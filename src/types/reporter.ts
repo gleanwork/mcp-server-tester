@@ -15,6 +15,17 @@ import type {
   UsageMetrics,
 } from './index.js';
 import type { EvalResultStoreLike } from '../evals/resultStore.js';
+import type {
+  ExternalHostCorrelationConfig,
+  ExternalHostMetadata,
+  HostDriverId,
+} from '../evals/externalHost/types.js';
+
+export interface SerializedExternalHostCapabilityBinding {
+  uses: string;
+  provides?: string[];
+  with?: Record<string, unknown>;
+}
 
 /**
  * Configuration options for MCP Eval Reporter
@@ -218,6 +229,8 @@ export interface IterationResult {
   };
   /** Token usage from mcp_host LLM simulation in this iteration */
   hostUsage?: UsageMetrics;
+  /** External host metadata for this iteration */
+  externalHost?: ExternalHostMetadata;
 }
 
 /**
@@ -225,10 +238,28 @@ export interface IterationResult {
  * Preserves what was sent so results are self-contained for debugging.
  */
 export interface EvalCaseRequest {
+  /** Eval execution mode */
+  mode?: string;
+
   /** Human-readable description of the case */
   description?: string;
   /** Runtime tool override variant identifier, when one was used */
   toolOverrideVariantId?: string;
+
+  /** Number of iterations configured for this case */
+  iterations?: number;
+
+  /** Accuracy threshold configured for this case */
+  accuracyThreshold?: number;
+
+  /** Judge repetitions configured for this case */
+  judgeReps?: number;
+
+  /** Tags from the source eval case */
+  tags?: string[];
+
+  /** Configured expectation block, sanitized for reporter output */
+  expect?: Record<string, unknown>;
 
   // Direct mode fields
   /** Tool arguments (direct mode) */
@@ -241,6 +272,19 @@ export interface EvalCaseRequest {
   mcpHostConfig?: {
     provider?: string;
     model?: string;
+  };
+  /** External host configuration summary (external_host mode) */
+  externalHost?: {
+    driver: HostDriverId | string;
+    driverSlug?: string;
+    name?: string;
+    hostType?: string;
+    variant?: string;
+    timeoutMs?: number;
+    usesBuiltInDefaults?: boolean;
+    correlation?: ExternalHostCorrelationConfig;
+    options?: Record<string, unknown>;
+    capabilities?: Record<string, SerializedExternalHostCapabilityBinding[]>;
   };
 }
 
@@ -401,6 +445,12 @@ export interface EvalCaseResult {
    * Summed across all iterations. Only populated for mcp_host mode cases.
    */
   hostUsage?: UsageMetrics;
+
+  /**
+   * External host trace and evidence metadata.
+   * Populated for external_host mode cases.
+   */
+  externalHost?: ExternalHostMetadata;
 }
 
 /**

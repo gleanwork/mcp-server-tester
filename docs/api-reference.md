@@ -1159,7 +1159,12 @@ interface MCPConformanceResult {
 
 ### `EvalExpectBlock`
 
-```typescript snippet=src/evals/datasetTypes.ts#L186-L277
+```typescript snippet=src/evals/datasetTypes.ts#L190-L288
+/**
+ * Unified expectation block for eval cases
+ *
+ * Mirrors the Playwright matcher API for consistency.
+ */
 export interface EvalExpectBlock {
   /**
    * Exact response match (toMatchToolResponse)
@@ -1218,8 +1223,9 @@ export interface EvalExpectBlock {
   };
 
   /**
-   * Asserts which tools the LLM called during a mcp_host simulation.
-   * Only meaningful for mcp_host mode — direct mode has no tool call trace.
+   * Asserts which tools the LLM called during a host simulation.
+   * Only meaningful for mcp_host or external_host runs with high-confidence
+   * structured tool evidence — direct mode has no tool call trace.
    */
   toolsTriggered?: {
     /** Expected tool calls */
@@ -1241,7 +1247,8 @@ export interface EvalExpectBlock {
   };
 
   /**
-   * Asserts the number of tool calls made during a mcp_host simulation.
+   * Asserts the number of tool calls made during a host simulation.
+   * External-host runs require high-confidence structured tool evidence.
    */
   toolCallCount?: {
     /** Minimum number of tool calls */
@@ -1256,7 +1263,14 @@ export interface EvalExpectBlock {
 
 ### `EvalCase`
 
-````typescript snippet=src/evals/datasetTypes.ts#L27-L139
+````typescript snippet=src/evals/datasetTypes.ts#L23-L148
+/**
+ * A single eval test case
+ *
+ * For 'direct' mode: toolName and args are required
+ * For 'mcp_host' mode: scenario and mcpHostConfig are required
+ * For 'external_host' mode: scenario and externalHost are required
+ */
 export interface EvalCase {
   /**
    * Unique identifier for this test case
@@ -1271,7 +1285,8 @@ export interface EvalCase {
   /**
    * Evaluation mode
    * - 'direct': Direct API calls to MCP tools (default)
-   * - 'mcp_host': LLM-driven tool selection via natural language
+   * - 'mcp_host': SDK/CLI host simulation via natural language
+   * - 'external_host': Real external MCP host driven by configured capabilities
    *
    * @default 'direct'
    */
@@ -1288,7 +1303,7 @@ export interface EvalCase {
   args?: Record<string, unknown>;
 
   /**
-   * Natural language scenario for LLM to execute (optional, required for 'mcp_host' mode)
+   * Natural language scenario for LLM to execute (required for 'mcp_host' and 'external_host' modes)
    *
    * @example "Get the weather for London and tell me if I need an umbrella"
    */
@@ -1300,6 +1315,11 @@ export interface EvalCase {
    * If not specified, uses default configuration from test environment
    */
   mcpHostConfig?: MCPHostConfig;
+
+  /**
+   * External host configuration (required for 'external_host' mode)
+   */
+  externalHost?: ExternalHostConfig;
 
   /**
    * Additional metadata for this test case
@@ -1371,18 +1391,6 @@ export interface EvalCase {
   expect?: EvalExpectBlock;
 }
 ````
-
-### `EvalDataset`
-
-```typescript
-interface EvalDataset {
-  name: string;
-  description?: string;
-  cases: EvalCase[];
-  metadata?: Record<string, unknown>;
-  schemas?: Record<string, ZodSchema>; // Zod schemas for toMatchToolSchema assertions
-}
-```
 
 ## Next Steps
 

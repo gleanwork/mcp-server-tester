@@ -662,7 +662,9 @@ describe('toolsTriggered and toolCallCount expectations in eval runner', () => {
 
     const result = await runEvalCase(evalCase, createContext(mcp));
     expect(result.expectations.toolsTriggered?.pass).toBe(false);
-    expect(result.expectations.toolsTriggered?.details).toContain('mcp_host');
+    expect(result.expectations.toolsTriggered?.details).toContain(
+      'host simulation response'
+    );
   });
 
   it('validates toolCallCount correctly from simulation result', async () => {

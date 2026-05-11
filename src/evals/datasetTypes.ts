@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
+import type { ExternalHostConfig } from './externalHost/types.js';
+import { ExternalHostConfigSchema } from './externalHost/schema.js';
 import type { SnapshotSanitizer } from '../assertions/validators/types.js';
 import type { BuiltInRubric } from '../judge/judgeTypes.js';
 
@@ -16,13 +18,14 @@ export type {
 /**
  * Evaluation mode
  */
-export type EvalMode = 'direct' | 'mcp_host';
+export type EvalMode = 'direct' | 'mcp_host' | 'external_host';
 
 /**
  * A single eval test case
  *
  * For 'direct' mode: toolName and args are required
  * For 'mcp_host' mode: scenario and mcpHostConfig are required
+ * For 'external_host' mode: scenario and externalHost are required
  */
 export interface EvalCase {
   /**
@@ -38,7 +41,8 @@ export interface EvalCase {
   /**
    * Evaluation mode
    * - 'direct': Direct API calls to MCP tools (default)
-   * - 'mcp_host': LLM-driven tool selection via natural language
+   * - 'mcp_host': SDK/CLI host simulation via natural language
+   * - 'external_host': Real external MCP host driven by configured capabilities
    *
    * @default 'direct'
    */
@@ -55,7 +59,7 @@ export interface EvalCase {
   args?: Record<string, unknown>;
 
   /**
-   * Natural language scenario for LLM to execute (optional, required for 'mcp_host' mode)
+   * Natural language scenario for LLM to execute (required for 'mcp_host' and 'external_host' modes)
    *
    * @example "Get the weather for London and tell me if I need an umbrella"
    */
@@ -67,6 +71,11 @@ export interface EvalCase {
    * If not specified, uses default configuration from test environment
    */
   mcpHostConfig?: MCPHostConfig;
+
+  /**
+   * External host configuration (required for 'external_host' mode)
+   */
+  externalHost?: ExternalHostConfig;
 
   /**
    * Additional metadata for this test case
@@ -241,8 +250,9 @@ export interface EvalExpectBlock {
   };
 
   /**
-   * Asserts which tools the LLM called during a mcp_host simulation.
-   * Only meaningful for mcp_host mode — direct mode has no tool call trace.
+   * Asserts which tools the LLM called during a host simulation.
+   * Only meaningful for mcp_host or external_host runs with high-confidence
+   * structured tool evidence — direct mode has no tool call trace.
    */
   toolsTriggered?: {
     /** Expected tool calls */
@@ -264,7 +274,8 @@ export interface EvalExpectBlock {
   };
 
   /**
-   * Asserts the number of tool calls made during a mcp_host simulation.
+   * Asserts the number of tool calls made during a host simulation.
+   * External-host runs require high-confidence structured tool evidence.
    */
   toolCallCount?: {
     /** Minimum number of tool calls */
@@ -447,11 +458,12 @@ const EvalExpectBlockSchema = z.object({
 export const EvalCaseSchema = z.object({
   id: z.string().min(1, 'id must not be empty'),
   description: z.string().optional(),
-  mode: z.enum(['direct', 'mcp_host']).optional(),
+  mode: z.enum(['direct', 'mcp_host', 'external_host']).optional(),
   toolName: z.string().min(1, 'toolName must not be empty').optional(),
   args: z.record(z.string(), z.unknown()).optional(),
   scenario: z.string().optional(),
   mcpHostConfig: MCPHostConfigSchema.optional(),
+  externalHost: ExternalHostConfigSchema.optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
   iterations: z.number().int().min(1).optional(),
   accuracyThreshold: z.number().min(0).max(1).optional(),

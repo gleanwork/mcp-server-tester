@@ -183,6 +183,18 @@ describe('validateText', () => {
       const result = validateText(response, 'result');
       expect(result.pass).toBe(true);
     });
+
+    it('should prefer host simulation final response over metadata JSON', () => {
+      const response = {
+        response: 'final answer text',
+        externalHost: {
+          traceLimitations: ['metadata-only text'],
+        },
+      };
+
+      expect(validateText(response, 'final answer').pass).toBe(true);
+      expect(validateText(response, 'metadata-only').pass).toBe(false);
+    });
   });
 });
 
