@@ -162,6 +162,76 @@ describe('parseStreamJson', () => {
     expect(result.response).toBeUndefined();
   });
 
+  it('extracts usage metrics from result event', () => {
+    const stdout = [
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          content: [{ type: 'text', text: 'Hello' }],
+        },
+      }),
+      JSON.stringify({
+        type: 'result',
+        result: 'Hello',
+        usage: {
+          input_tokens: 150,
+          output_tokens: 42,
+          cache_read_input_tokens: 100,
+          cache_creation_input_tokens: 50,
+        },
+        total_cost_usd: 0.0035,
+        duration_ms: 2500,
+        duration_api_ms: 1800,
+      }),
+    ].join('\n');
+
+    const result = parseStreamJson(stdout);
+    expect(result.success).toBe(true);
+    expect(result.usage).toEqual({
+      inputTokens: 150,
+      outputTokens: 42,
+      totalCostUsd: 0.0035,
+      durationMs: 2500,
+      durationApiMs: 1800,
+      cacheReadInputTokens: 100,
+      cacheCreationInputTokens: 50,
+    });
+  });
+
+  it('extracts usage metrics from error result event', () => {
+    const stdout = JSON.stringify({
+      type: 'result',
+      is_error: true,
+      result: 'Something went wrong',
+      usage: { input_tokens: 50, output_tokens: 0 },
+      total_cost_usd: 0.001,
+      duration_ms: 500,
+    });
+
+    const result = parseStreamJson(stdout);
+    expect(result.success).toBe(false);
+    expect(result.usage).toEqual({
+      inputTokens: 50,
+      outputTokens: 0,
+      totalCostUsd: 0.001,
+      durationMs: 500,
+      durationApiMs: undefined,
+      cacheReadInputTokens: undefined,
+      cacheCreationInputTokens: undefined,
+    });
+  });
+
+  it('returns undefined usage when result event has no usage field', () => {
+    const stdout = JSON.stringify({
+      type: 'result',
+      result: 'No usage info',
+    });
+
+    const result = parseStreamJson(stdout);
+    expect(result.success).toBe(true);
+    expect(result.usage).toBeUndefined();
+  });
+
   it('collects tool_result blocks into conversationHistory', () => {
     const stdout = JSON.stringify({
       type: 'user',

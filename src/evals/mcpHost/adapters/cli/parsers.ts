@@ -2,12 +2,14 @@ import type {
   MCPHostSimulationResult,
   LLMToolCall,
 } from '../../mcpHostTypes.js';
+import type { UsageMetrics } from '../../../../types/index.js';
 
 /** Parses NDJSON (stream-json) output from CLI hosts. */
 export function parseStreamJson(stdout: string): MCPHostSimulationResult {
   const lines = stdout.split('\n').filter((line) => line.trim().length > 0);
   const toolCalls: LLMToolCall[] = [];
   const textParts: string[] = [];
+  let usage: UsageMetrics | undefined;
   const conversationHistory: Array<{
     role: 'user' | 'assistant' | 'tool';
     content: string;
@@ -52,9 +54,21 @@ export function parseStreamJson(stdout: string): MCPHostSimulationResult {
       }
     }
 
-    if (event.type === 'result' && typeof event.result === 'string') {
-      if (textParts.length === 0) {
+    if (event.type === 'result') {
+      if (typeof event.result === 'string' && textParts.length === 0) {
         textParts.push(event.result);
+      }
+
+      if (event.usage) {
+        usage = {
+          inputTokens: event.usage.input_tokens ?? 0,
+          outputTokens: event.usage.output_tokens ?? 0,
+          totalCostUsd: event.total_cost_usd ?? 0,
+          durationMs: event.duration_ms ?? 0,
+          durationApiMs: event.duration_api_ms,
+          cacheReadInputTokens: event.usage.cache_read_input_tokens,
+          cacheCreationInputTokens: event.usage.cache_creation_input_tokens,
+        };
       }
     }
 
@@ -66,6 +80,7 @@ export function parseStreamJson(stdout: string): MCPHostSimulationResult {
           typeof event.result === 'string'
             ? event.result
             : 'CLI host reported an error',
+        usage,
       };
     }
   }
@@ -82,6 +97,7 @@ export function parseStreamJson(stdout: string): MCPHostSimulationResult {
     response: response || undefined,
     conversationHistory:
       conversationHistory.length > 0 ? conversationHistory : undefined,
+    usage,
   };
 }
 
@@ -130,6 +146,15 @@ interface StreamJsonEvent {
   message?: { role?: string; content?: ContentBlock[] };
   result?: string;
   is_error?: boolean;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
+  };
+  total_cost_usd?: number;
+  duration_ms?: number;
+  duration_api_ms?: number;
 }
 
 function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
