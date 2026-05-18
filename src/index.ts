@@ -191,6 +191,8 @@ export type {
   IterationResult,
   EvalRunnerResult,
   EvalRunnerOptions,
+  ToolMetadataOverride,
+  ToolOverrideVariant,
 } from './evals/evalRunner.js';
 export { runEvalDataset, runEvalCase } from './evals/evalRunner.js';
 

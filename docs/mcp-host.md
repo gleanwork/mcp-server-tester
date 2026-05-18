@@ -180,9 +180,57 @@ LLM host simulation calls a real LLM API. Approximate costs:
 
 **Recommendation:** Use `mode: "direct"` for regression testing. Use `mode: "mcp_host"` selectively for tool description quality validation.
 
-## A/B Testing Tool Descriptions
+## Runtime Tool Override Experiments
 
-Run two Playwright projects with different MCP server configurations to compare tool description variants:
+Use `toolOverrides` to compare tool metadata variants without changing your eval dataset or MCP server source. The dataset remains the behavioral contract; the override is runtime-only data passed to `runEvalDataset`.
+
+```typescript
+const variant = {
+  id: 'search-description-v2',
+  description: 'Clarify that search is for internal docs and policies.',
+  tools: {
+    search: {
+      description:
+        'Search internal company documents, policies, wiki pages, and announcements. Use this when the user asks to find company information by topic.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'Natural language document or policy query.',
+          },
+        },
+        required: ['query'],
+      },
+    },
+  },
+};
+
+const baseline = await runEvalDataset(
+  { dataset, defaultLlmIterations: 10 },
+  { mcp, testInfo }
+);
+
+const candidate = await runEvalDataset(
+  {
+    dataset,
+    defaultLlmIterations: 10,
+    toolOverrides: variant,
+  },
+  { mcp, testInfo }
+);
+
+const passRateDelta =
+  candidate.passed / candidate.total - baseline.passed / baseline.total;
+const toolF1Delta =
+  (candidate.datasetToolF1 ?? 0) - (baseline.datasetToolF1 ?? 0);
+```
+
+`toolOverrides.tools` is keyed by canonical MCP tool name. v1 supports `description` and `inputSchema` replacements only; tool renames, mocked responses, and dataset rewriting are intentionally out of scope.
+
+## Project-Based A/B Testing
+
+Run two Playwright projects with different MCP server configurations when the variant is not limited to runtime metadata. This is useful for comparing different server builds, tool behavior, auth scopes, response shapes, transports, or any change that should be exercised through a real MCP server process.
 
 ```typescript
 // playwright.config.ts
@@ -191,20 +239,23 @@ projects: [
     name: 'baseline',
     use: {
       mcpConfig: {
-        /* ... */
+        transport: 'stdio',
+        command: 'node',
+        args: ['./dist/server-v1.js'],
       },
     },
   },
   {
-    name: 'with-skill',
+    name: 'server-v2',
     use: {
       mcpConfig: {
-        /* ... */
+        transport: 'stdio',
+        command: 'node',
+        args: ['./dist/server-v2.js'],
       },
-      mcpHostConfig: { provider: 'anthropic' },
     },
   },
 ];
 ```
 
-The MCP reporter groups results by project, letting you compare pass rates side-by-side.
+The MCP reporter groups results by project, letting you compare pass rates side-by-side. Prefer `toolOverrides` for description and input schema experiments; use project-based A/B testing when the real server surface or implementation changes.

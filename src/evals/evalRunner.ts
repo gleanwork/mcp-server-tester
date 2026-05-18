@@ -1,6 +1,7 @@
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import type { EvalDataset, EvalCase, EvalExpectBlock } from './datasetTypes.js';
 import type { TestInfo, Expect } from '@playwright/test';
+import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { ZodType } from 'zod';
 import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
 import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
@@ -62,6 +63,45 @@ export type {
   IterationResult,
   EvalRunMetadata,
 } from '../types/reporter.js';
+
+/**
+ * Metadata overrides for a single existing MCP tool.
+ */
+export interface ToolMetadataOverride {
+  /**
+   * Replacement tool description shown to MCP hosts.
+   */
+  description?: string;
+
+  /**
+   * Replacement input schema shown to MCP hosts.
+   */
+  inputSchema?: Record<string, unknown>;
+}
+
+/**
+ * Runtime metadata variant for experimenting with MCP tool discoverability.
+ *
+ * Tool keys are canonical MCP server tool names. Overrides affect only the
+ * metadata returned from listTools(); callTool() still forwards canonical tool
+ * names and arguments to the original MCP server.
+ */
+export interface ToolOverrideVariant {
+  /**
+   * Stable identifier for this runtime variant.
+   */
+  id: string;
+
+  /**
+   * Optional human-readable explanation of what this variant is testing.
+   */
+  description?: string;
+
+  /**
+   * Per-tool metadata overrides keyed by canonical tool name.
+   */
+  tools: Record<string, ToolMetadataOverride>;
+}
 
 /**
  * Overall result of running an eval dataset
@@ -247,6 +287,15 @@ export interface EvalRunnerOptions {
   baselineResultsFrom?: string;
 
   /**
+   * Runtime MCP tool metadata overrides used for variant experiments.
+   *
+   * Overrides are applied to the tool list shown to MCP hosts without changing
+   * the eval dataset or mutating the underlying MCP server. Tool keys must be
+   * canonical tool names exposed by the server.
+   */
+  toolOverrides?: ToolOverrideVariant;
+
+  /**
    * MCP host model identifier to record in run metadata.
    * Use this to identify which model was used when running mcp_host cases.
    *
@@ -276,6 +325,59 @@ export interface EvalCaseOptions {
    * Schema registry for schema validation by name
    */
   schemas?: Record<string, ZodType>;
+
+  /**
+   * Runtime tool override variant id for reporter/debug metadata.
+   */
+  toolOverrideVariantId?: string;
+}
+
+function createToolOverrideMCP(
+  mcp: MCPFixtureApi,
+  variant: ToolOverrideVariant
+): MCPFixtureApi {
+  return {
+    ...mcp,
+
+    async listTools(): Promise<Array<Tool>> {
+      const tools = await mcp.listTools();
+      const knownToolNames = new Set(tools.map((tool) => tool.name));
+      const unknownToolNames = Object.keys(variant.tools).filter(
+        (name) => !knownToolNames.has(name)
+      );
+
+      if (unknownToolNames.length > 0) {
+        throw new Error(
+          `[mcp-server-tester] toolOverrides variant "${variant.id}" references unknown tool(s): ` +
+            unknownToolNames.join(', ')
+        );
+      }
+
+      return tools.map((tool) => {
+        const override = variant.tools[tool.name];
+        if (!override) {
+          return tool;
+        }
+
+        return {
+          ...tool,
+          ...(override.description !== undefined && {
+            description: override.description,
+          }),
+          ...(override.inputSchema !== undefined && {
+            inputSchema: override.inputSchema as Tool['inputSchema'],
+          }),
+        };
+      });
+    },
+
+    async callTool<TArgs extends Record<string, unknown>>(
+      name: string,
+      args: TArgs
+    ) {
+      return mcp.callTool(name, args);
+    },
+  };
 }
 
 async function executeToolCall(
@@ -564,9 +666,15 @@ async function runExpectBlockValidations(
 /**
  * Builds the request metadata from an eval case for inclusion in results.
  */
-function buildRequest(evalCase: EvalCase): EvalCaseRequest {
+function buildRequest(
+  evalCase: EvalCase,
+  toolOverrideVariantId?: string
+): EvalCaseRequest {
   const request: EvalCaseRequest = {};
   if (evalCase.description) request.description = evalCase.description;
+  if (toolOverrideVariantId !== undefined) {
+    request.toolOverrideVariantId = toolOverrideVariantId;
+  }
 
   if (evalCase.mode === 'mcp_host') {
     if (evalCase.scenario) request.scenario = evalCase.scenario;
@@ -675,7 +783,7 @@ async function runSingleIteration(
       evalCase.scenario != null ? 'mcp_host' : (evalCase.toolName ?? 'unknown'),
     source: 'eval',
     pass: didCasePass(error, expectationResults),
-    request: buildRequest(evalCase),
+    request: buildRequest(evalCase, options.toolOverrideVariantId),
     response,
     error,
     expectations: expectationResults,
@@ -821,6 +929,7 @@ export async function runEvalCase(
     project: context.mcp.project,
     durationMs: 0,
     tags: evalCase.tags,
+    request: buildRequest(evalCase, options.toolOverrideVariantId),
   };
 
   const totalHostUsage = iterationResults.reduce(
@@ -946,11 +1055,15 @@ export async function runEvalDataset(
     saveResultsTo,
     omitResponsesFromBaseline = true,
     baselineResultsFrom,
+    toolOverrides,
     mcpHostModel,
     judgeModel,
   } = options;
 
   const startTime = Date.now();
+  const effectiveContext: EvalContext = toolOverrides
+    ? { ...context, mcp: createToolOverrideMCP(context.mcp, toolOverrides) }
+    : context;
 
   // Merge schemas from dataset and options
   const allSchemas = {
@@ -1019,9 +1132,10 @@ export async function runEvalDataset(
         ? { ...withIterations, judgeReps: defaultJudgeReps }
         : withIterations;
 
-    const result = await runEvalCase(effectiveCase, context, {
+    const result = await runEvalCase(effectiveCase, effectiveContext, {
       datasetName: dataset.name,
       schemas: allSchemas,
+      toolOverrideVariantId: toolOverrides?.id,
     });
 
     if (onCaseComplete) {
@@ -1054,6 +1168,9 @@ export async function runEvalDataset(
     gitHash,
     timestamp: new Date().toISOString(),
     packageVersion: packageJson.version,
+    ...(toolOverrides !== undefined && {
+      toolOverrideVariantId: toolOverrides.id,
+    }),
     ...(mcpHostModel !== undefined && { mcpHostModel }),
     ...(judgeModel !== undefined && { judgeModel }),
   };

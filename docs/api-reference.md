@@ -312,6 +312,7 @@ Run an eval dataset. Expectations are defined per-case in the dataset's `expect`
   - `saveResultsTo?: string` - Save run results to file for baseline comparison
   - `omitResponsesFromBaseline?: boolean` - Strip responses from saved baseline (default: `true`)
   - `baselineResultsFrom?: string` - Load baseline file for regression detection
+  - `toolOverrides?: ToolOverrideVariant` - Runtime tool metadata overrides for variant experiments
   - `mcpHostModel?: string` - Model identifier recorded in run metadata
   - `judgeModel?: string` - Judge model identifier recorded in run metadata
 - `context: EvalContext`
@@ -330,9 +331,63 @@ const result = await runEvalDataset(
 console.log(`Passed: ${result.passed}/${result.total}`);
 ```
 
+Runtime tool overrides let you test alternate tool descriptions or input schemas without editing the eval dataset or MCP server source. Tool names are canonical server tool names; v1 does not support renames.
+
+```typescript
+const variant = {
+  id: 'search-description-v2',
+  tools: {
+    search: {
+      description:
+        'Search internal company documents, policies, wiki pages, and announcements.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'Natural language document or policy query.',
+          },
+        },
+        required: ['query'],
+      },
+    },
+  },
+};
+
+const baseline = await runEvalDataset(
+  { dataset, defaultLlmIterations: 10 },
+  { mcp, testInfo }
+);
+
+const candidate = await runEvalDataset(
+  {
+    dataset,
+    defaultLlmIterations: 10,
+    toolOverrides: variant,
+  },
+  { mcp, testInfo }
+);
+
+console.log(candidate.metadata?.toolOverrideVariantId);
+```
+
+```typescript
+interface ToolOverrideVariant {
+  id: string;
+  description?: string;
+  tools: Record<
+    string,
+    {
+      description?: string;
+      inputSchema?: Record<string, unknown>;
+    }
+  >;
+}
+```
+
 **Result Structure:**
 
-```typescript snippet=src/evals/evalRunner.ts#L66-L143
+```typescript snippet=src/evals/evalRunner.ts#L106-L184
 /**
  * Overall result of running an eval dataset
  */

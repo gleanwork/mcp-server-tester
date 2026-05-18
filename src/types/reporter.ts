@@ -25,6 +25,8 @@ export interface EvalRunMetadata {
   timestamp: string;
   /** Package version from package.json */
   packageVersion: string;
+  /** Runtime tool override variant identifier, when one was used */
+  toolOverrideVariantId?: string;
   /** MCP host model identifier (if mcp_host mode) */
   mcpHostModel?: string;
   /** Judge model identifier (if judge was used) */
@@ -163,6 +165,8 @@ export interface IterationResult {
 export interface EvalCaseRequest {
   /** Human-readable description of the case */
   description?: string;
+  /** Runtime tool override variant identifier, when one was used */
+  toolOverrideVariantId?: string;
 
   // Direct mode fields
   /** Tool arguments (direct mode) */

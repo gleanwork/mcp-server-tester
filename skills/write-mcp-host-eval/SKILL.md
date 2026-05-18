@@ -300,9 +300,47 @@ test('tool discovery evals', async ({ mcp }, testInfo) => {
 1. **Options object** — `{ dataset, concurrency?, ... }` — what to run and how
 2. **Context object** — `{ mcp, testInfo }` — Playwright fixtures from your test
 
-## Step 6 — A/B Testing Tool Descriptions
+## Step 6 — Runtime Tool Override Experiments
 
-Compare tool description variants by running two Playwright projects with different MCP server configs:
+When comparing tool description or input schema variants, do not mutate the eval dataset. Keep the dataset as the behavioral contract and pass variant data dynamically through `runEvalDataset({ toolOverrides })`.
+
+```typescript
+const baseline = await runEvalDataset(
+  { dataset, defaultLlmIterations: 10 },
+  { mcp, testInfo }
+);
+
+const variant = {
+  id: 'search-description-v2',
+  description: 'Clarify that search is for internal docs and policies.',
+  tools: {
+    search: {
+      description:
+        'Search internal company documents, policies, wiki pages, and announcements. Use this when the user asks to find company information by topic.',
+    },
+  },
+};
+
+const candidate = await runEvalDataset(
+  {
+    dataset,
+    defaultLlmIterations: 10,
+    toolOverrides: variant,
+  },
+  { mcp, testInfo }
+);
+```
+
+For agent-driven remediation loops:
+
+- Generate variants as runtime data, not eval dataset edits.
+- Compare baseline and candidate results in userland.
+- Report improved cases, regressed cases, pass-rate delta, and tool F1 delta.
+- Emit a structured override proposal. Do not edit MCP server source unless the user explicitly asks for source remediation.
+
+## Step 7 — Project-Based A/B Testing
+
+Use project-based A/B testing when the variant is not limited to runtime tool metadata. This is the right path for changed tool behavior, changed auth/config/transport, different server builds, changed response shapes, or any experiment that needs to run against a real MCP server variant.
 
 ```typescript
 // playwright.config.ts
@@ -319,7 +357,7 @@ export default defineConfig({
       },
     },
     {
-      name: 'improved-descriptions',
+      name: 'server-v2',
       use: {
         mcpConfig: {
           transport: 'stdio',
@@ -332,7 +370,12 @@ export default defineConfig({
 });
 ```
 
-The MCP reporter groups results by project, letting you compare pass rates side-by-side.
+The MCP reporter groups results by project, letting users compare pass rates side-by-side.
+
+Choose the comparison mode deliberately:
+
+- Use `toolOverrides` for descriptions and input schemas only.
+- Use project-based A/B testing for real server, config, behavior, or response changes.
 
 ## Complete Example
 
