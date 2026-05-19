@@ -305,6 +305,8 @@ test('tool discovery evals', async ({ mcp }, testInfo) => {
 When comparing tool description or input schema variants, do not mutate the eval dataset. Keep the dataset as the behavioral contract and pass variant data dynamically through `runEvalDataset({ toolOverrides })`.
 
 ```typescript
+import { compareEvalRuns } from '@gleanwork/mcp-server-tester';
+
 const baseline = await runEvalDataset(
   { dataset, defaultLlmIterations: 10 },
   { mcp, testInfo }
@@ -329,13 +331,22 @@ const candidate = await runEvalDataset(
   },
   { mcp, testInfo }
 );
+
+const comparison = compareEvalRuns({
+  baseline,
+  candidate,
+  labels: {
+    baseline: 'baseline',
+    candidate: variant.id,
+  },
+});
 ```
 
 For agent-driven remediation loops:
 
 - Generate variants as runtime data, not eval dataset edits.
-- Compare baseline and candidate results in userland.
-- Report improved cases, regressed cases, pass-rate delta, and tool F1 delta.
+- Compare baseline and candidate results with `compareEvalRuns`.
+- Report pass-rate delta, tool precision/recall/F1 deltas, improved cases, regressed cases, and unchanged failures.
 - Emit a structured override proposal. Do not edit MCP server source unless the user explicitly asks for source remediation.
 
 ## Step 7 — Project-Based A/B Testing

@@ -212,6 +212,16 @@ export type {
 } from './evals/serverComparison.js';
 export { runServerComparison } from './evals/serverComparison.js';
 
+// Completed eval run comparison
+export type {
+  CompareEvalRunsOptions,
+  EvalCaseComparison,
+  EvalCaseComparisonOutcome,
+  EvalRunComparisonLabels,
+  EvalRunComparisonResult,
+} from './evals/evalRunComparison.js';
+export { compareEvalRuns } from './evals/evalRunComparison.js';
+
 // MCP Host Simulation
 export type {
   HostType,

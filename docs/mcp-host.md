@@ -185,6 +185,8 @@ LLM host simulation calls a real LLM API. Approximate costs:
 Use `toolOverrides` to compare tool metadata variants without changing your eval dataset or MCP server source. The dataset remains the behavioral contract; the override is runtime-only data passed to `runEvalDataset`.
 
 ```typescript
+import { compareEvalRuns } from '@gleanwork/mcp-server-tester';
+
 const variant = {
   id: 'search-description-v2',
   description: 'Clarify that search is for internal docs and policies.',
@@ -220,10 +222,18 @@ const candidate = await runEvalDataset(
   { mcp, testInfo }
 );
 
-const passRateDelta =
-  candidate.passed / candidate.total - baseline.passed / baseline.total;
-const toolF1Delta =
-  (candidate.datasetToolF1 ?? 0) - (baseline.datasetToolF1 ?? 0);
+const comparison = compareEvalRuns({
+  baseline,
+  candidate,
+  labels: {
+    baseline: 'baseline',
+    candidate: variant.id,
+  },
+});
+
+console.log(`Pass-rate delta: ${comparison.deltaPassRate}`);
+console.log(`Tool F1 delta: ${comparison.deltaToolF1 ?? 'n/a'}`);
+console.log(`Improved cases: ${comparison.improvedCases.length}`);
 ```
 
 `toolOverrides.tools` is keyed by canonical MCP tool name. v1 supports `description` and `inputSchema` replacements only; tool renames, mocked responses, and dataset rewriting are intentionally out of scope.

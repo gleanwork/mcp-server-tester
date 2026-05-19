@@ -371,6 +371,25 @@ const candidate = await runEvalDataset(
 console.log(candidate.metadata?.toolOverrideVariantId);
 ```
 
+Use `compareEvalRuns()` to summarize the completed baseline and candidate runs:
+
+```typescript
+import { compareEvalRuns } from '@gleanwork/mcp-server-tester';
+
+const comparison = compareEvalRuns({
+  baseline,
+  candidate,
+  labels: {
+    baseline: 'baseline',
+    candidate: variant.id,
+  },
+});
+
+console.log(`Pass-rate delta: ${comparison.deltaPassRate}`);
+console.log(`Improved cases: ${comparison.improvedCases.length}`);
+console.log(`Regressed cases: ${comparison.regressedCases.length}`);
+```
+
 ```typescript
 interface ToolOverrideVariant {
   id: string;
@@ -384,6 +403,35 @@ interface ToolOverrideVariant {
   >;
 }
 ```
+
+### `compareEvalRuns(options)`
+
+Compare two completed eval runs. This is a pure utility: it does not run evals, read or write baselines, call LLMs, or mutate datasets.
+
+**Parameters:**
+
+- `options: CompareEvalRunsOptions`
+  - `baseline: EvalRunnerResult` - Baseline run result
+  - `candidate: EvalRunnerResult` - Candidate run result
+  - `labels?: { baseline?: string; candidate?: string }` - Optional display labels
+
+**Returns:** `EvalRunComparisonResult`
+
+```typescript
+const comparison = compareEvalRuns({
+  baseline,
+  candidate,
+});
+```
+
+The result includes pass-rate deltas, optional tool precision/recall/F1 deltas, and case buckets:
+
+- `improvedCases` - failed in baseline, passed in candidate
+- `regressedCases` - passed in baseline, failed in candidate
+- `unchangedPasses` - passed in both runs
+- `unchangedFailures` - failed in both runs
+- `missingFromBaseline` - case exists only in candidate
+- `missingFromCandidate` - case exists only in baseline
 
 **Result Structure:**
 
