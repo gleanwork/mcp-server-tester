@@ -3,7 +3,7 @@ import { defineConfig } from 'tsup';
 export default defineConfig([
   // Library build
   {
-    entry: ['src/index.ts'],
+    entry: ['src/index.ts', 'src/types/index.ts'],
     format: ['esm', 'cjs'],
     dts: true,
     splitting: false,

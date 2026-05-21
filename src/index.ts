@@ -6,8 +6,9 @@
  * @packageDocumentation
  */
 
-// Config
+// Types
 export type {
+  // Config
   MCPConfig,
   StdioMCPConfig,
   HttpMCPConfig,
@@ -15,7 +16,119 @@ export type {
   MCPAuthConfig,
   MCPOAuthConfig,
   MCPClientCredentialsConfig,
-} from './config/mcpConfig.js';
+
+  // Auth
+  StoredTokens,
+  StoredClientInfo,
+  StoredOAuthState,
+  OAuthSetupConfig,
+  TokenResult,
+  PlaywrightOAuthClientProviderConfig,
+  ClientCredentialsConfig,
+  ProtectedResourceMetadata,
+  ProtectedResourceDiscoveryResult,
+  StoredServerMetadata,
+  CLIOAuthClientConfig,
+  CLIOAuthResult,
+
+  // MCP
+  CreateMCPClientOptions,
+  ContentBlock,
+  NormalizedToolResponse,
+  MCPFixtureApi,
+  MCPFixtureOptions,
+  MCPAuthFixtures,
+
+  // Assertions
+  ValidationResult,
+  TextValidatorOptions,
+  SizeValidatorOptions,
+  SchemaValidatorOptions,
+  PatternValidatorOptions,
+  SnapshotSanitizer,
+  BuiltInSanitizer,
+  RegexSanitizer,
+  FieldRemovalSanitizer,
+  SchemaRegistry,
+  ToolCallExpectation,
+  ToolCallCountOptions,
+  JudgeValidatorConfig,
+  JudgeMatcherOptions,
+  ToolPredicate,
+  PredicateResult,
+
+  // Core
+  AuthType,
+  ResultSource,
+  ExpectationType,
+  EvalExpectationResult,
+  ExpectationBreakdown,
+  ExpectationResultMap,
+
+  // Evals
+  EvalCase,
+  EvalDataset,
+  EvalExpectBlock,
+  JudgeExpectConfig,
+  SerializedEvalDataset,
+  EvalMode,
+  LoadDatasetOptions,
+  EvalCaseRequest,
+  EvalContext,
+  EvalCaseResult,
+  EvalRunMetadata,
+  IterationResult,
+  EvalRunnerResult,
+  EvalRunnerOptions,
+  ToolMetadataOverride,
+  ToolOverrideVariant,
+  SaveBaselineOptions,
+  ComparisonOutcome,
+  CaseComparisonResult,
+  ServerComparisonResult,
+  ServerComparisonOptions,
+  CompareEvalRunsOptions,
+  EvalCaseComparison,
+  EvalCaseComparisonOutcome,
+  EvalRunComparisonLabels,
+  EvalRunComparisonResult,
+  HostType,
+  CLIOutputFormat,
+  CLIConfig,
+  LLMProvider,
+  MCPHostConfig,
+  LLMToolCall,
+  MCPHostSimulationResult,
+  MCPHostSimulator,
+
+  // Judge
+  JudgeConfig,
+  Judge,
+  JudgeResult,
+  UsageMetrics,
+  ProviderKind,
+  BuiltInRubric,
+  RubricSpec,
+  CustomJudgeExecutor,
+  CustomJudgeResult,
+
+  // Conformance
+  MCPConformanceOptions,
+  MCPConformanceResult,
+  MCPConformanceCheck,
+  MCPConformanceRaw,
+
+  // Reporter
+  MCPEvalReporterConfig,
+  MCPEvalRunData,
+  MCPEvalHistoricalSummary,
+  MCPConformanceResultData,
+  MCPServerCapabilitiesData,
+  MCPEvalData,
+} from './types/index.js';
+export { SnapshotSanitizers } from './types/index.js';
+
+// Config
 export {
   MCPConfigSchema,
   validateMCPConfig,
@@ -24,17 +137,7 @@ export {
 } from './config/mcpConfig.js';
 
 // Auth
-export type {
-  StoredTokens,
-  StoredClientInfo,
-  StoredOAuthState,
-  OAuthSetupConfig,
-  TokenResult,
-} from './auth/types.js';
-export {
-  PlaywrightOAuthClientProvider,
-  type PlaywrightOAuthClientProviderConfig,
-} from './auth/oauthClientProvider.js';
+export { PlaywrightOAuthClientProvider } from './auth/oauthClientProvider.js';
 export {
   createTokenAuthHeaders,
   validateAccessToken,
@@ -48,7 +151,6 @@ export {
 export {
   performClientCredentialsFlow,
   refreshAccessToken,
-  type ClientCredentialsConfig,
 } from './auth/oauthFlow.js';
 
 // Discovery (RFC 9728)
@@ -57,8 +159,6 @@ export {
   discoverAuthorizationServer,
   DiscoveryError,
   MCP_PROTOCOL_VERSION,
-  type ProtectedResourceMetadata,
-  type ProtectedResourceDiscoveryResult,
 } from './auth/discovery.js';
 
 // Token Storage
@@ -68,25 +168,18 @@ export {
   injectTokens,
   loadTokensFromEnv,
   ENV_VAR_NAMES,
-  type StoredServerMetadata,
 } from './auth/storage.js';
 
 // CLI OAuth
-export {
-  CLIOAuthClient,
-  type CLIOAuthClientConfig,
-  type CLIOAuthResult,
-} from './auth/cli.js';
+export { CLIOAuthClient } from './auth/cli.js';
 
 // MCP Client
 export {
   createMCPClientForConfig,
   closeMCPClient,
-  type CreateMCPClientOptions,
 } from './mcp/clientFactory.js';
 
 // Response Normalization
-export type { ContentBlock, NormalizedToolResponse } from './mcp/response.js';
 export { normalizeToolResponse, extractText } from './mcp/response.js';
 
 // Assertions - Matchers (primary API)
@@ -108,65 +201,16 @@ export {
   normalizeWhitespace,
 } from './assertions/validators/index.js';
 
-export { SnapshotSanitizers } from './assertions/validators/types.js';
-export type {
-  ValidationResult,
-  TextValidatorOptions,
-  SizeValidatorOptions,
-  SchemaValidatorOptions,
-  PatternValidatorOptions,
-  SnapshotSanitizer,
-  BuiltInSanitizer,
-  RegexSanitizer,
-  FieldRemovalSanitizer,
-  SchemaRegistry,
-} from './assertions/validators/types.js';
-
-export type {
-  ToolCallExpectation,
-  ToolCallCountOptions,
-} from './assertions/validators/toolCalls.js';
-
-export type { JudgeValidatorConfig } from './assertions/validators/judge.js';
-
-export type {
-  JudgeMatcherOptions,
-  ToolPredicate,
-  PredicateResult,
-} from './assertions/matchers/types.js';
-
 // Fixtures
-export type {
-  MCPFixtureApi,
-  MCPFixtureOptions,
-  AuthType,
-} from './mcp/fixtures/mcpFixture.js';
 export { createMCPFixture } from './mcp/fixtures/mcpFixture.js';
 export { test, expect } from './fixtures/mcp.js';
 
 // Auth fixtures — re-exported from main path for convenience.
 // The auth `test` is aliased to avoid a name collision with the MCP `test` above.
 // Use `mcpAuthTest` when you need to extend auth fixtures (e.g., base.extend<MCPAuthFixtures>).
-export type { MCPAuthFixtures } from './fixtures/mcpAuth.js';
 export { test as mcpAuthTest } from './fixtures/mcpAuth.js';
 
-// Canonical Types (single source of truth)
-export type {
-  ResultSource,
-  ExpectationType,
-  ExpectationBreakdown,
-  ExpectationResultMap,
-} from './types/index.js';
-
 // Eval Dataset
-export type {
-  EvalCase,
-  EvalDataset,
-  EvalExpectBlock,
-  JudgeExpectConfig,
-  SerializedEvalDataset,
-  EvalMode,
-} from './evals/datasetTypes.js';
 export {
   EvalCaseSchema,
   EvalDatasetSchema,
@@ -175,64 +219,24 @@ export {
 } from './evals/datasetTypes.js';
 
 // Eval Loader
-export type { LoadDatasetOptions } from './evals/datasetLoader.js';
 export {
   loadEvalDataset,
   loadEvalDatasetFromObject,
 } from './evals/datasetLoader.js';
 
 // Eval Runner
-export type {
-  EvalCaseRequest,
-  EvalContext,
-  EvalExpectationResult,
-  EvalCaseResult,
-  EvalRunMetadata,
-  IterationResult,
-  EvalRunnerResult,
-  EvalRunnerOptions,
-  ToolMetadataOverride,
-  ToolOverrideVariant,
-} from './evals/evalRunner.js';
 export { runEvalDataset, runEvalCase } from './evals/evalRunner.js';
 
 // Baseline eval comparison
-export {
-  saveBaseline,
-  loadBaseline,
-  type SaveBaselineOptions,
-} from './evals/baseline.js';
+export { saveBaseline, loadBaseline } from './evals/baseline.js';
 
 // Multi-server A/B comparison
-export type {
-  ComparisonOutcome,
-  CaseComparisonResult,
-  ServerComparisonResult,
-  ServerComparisonOptions,
-} from './evals/serverComparison.js';
 export { runServerComparison } from './evals/serverComparison.js';
 
 // Completed eval run comparison
-export type {
-  CompareEvalRunsOptions,
-  EvalCaseComparison,
-  EvalCaseComparisonOutcome,
-  EvalRunComparisonLabels,
-  EvalRunComparisonResult,
-} from './evals/evalRunComparison.js';
 export { compareEvalRuns } from './evals/evalRunComparison.js';
 
 // MCP Host Simulation
-export type {
-  HostType,
-  CLIOutputFormat,
-  CLIConfig,
-  LLMProvider,
-  MCPHostConfig,
-  LLMToolCall,
-  MCPHostSimulationResult,
-  MCPHostSimulator,
-} from './evals/mcpHost/index.js';
 export {
   simulateMCPHost,
   isProviderAvailable,
@@ -240,15 +244,6 @@ export {
 } from './evals/mcpHost/index.js';
 
 // Judge
-export type {
-  JudgeConfig,
-  Judge,
-  JudgeResult,
-  UsageMetrics,
-  ProviderKind,
-  BuiltInRubric,
-  RubricSpec,
-} from './judge/judgeTypes.js';
 export { createJudge } from './judge/judgeClient.js';
 export {
   BUILT_IN_RUBRICS,
@@ -257,10 +252,6 @@ export {
 } from './judge/judgeTypes.js';
 
 // Custom Judge Registry
-export type {
-  CustomJudgeExecutor,
-  CustomJudgeResult,
-} from './judge/judgeRegistry.js';
 export {
   registerJudge,
   getRegisteredJudge,
@@ -268,23 +259,4 @@ export {
 } from './judge/judgeRegistry.js';
 
 // Conformance
-export type {
-  MCPConformanceOptions,
-  MCPConformanceResult,
-  MCPConformanceCheck,
-  MCPConformanceRaw,
-} from './spec/conformanceChecks.js';
 export { runConformanceChecks } from './spec/conformanceChecks.js';
-
-// Reporter types — primarily used by the mcpReporter plugin.
-// These types are available for custom reporter implementations or
-// when consuming reporter output programmatically.
-// Import the reporter itself from '@gleanwork/mcp-server-tester/reporters/mcpReporter'
-export type {
-  MCPEvalReporterConfig,
-  MCPEvalRunData,
-  MCPEvalHistoricalSummary,
-  MCPConformanceResultData,
-  MCPServerCapabilitiesData,
-  MCPEvalData,
-} from './reporters/types.js';

@@ -99,12 +99,121 @@ export type ExpectationResultMap = Partial<
  */
 export type ExpectationBreakdown = Partial<Record<ExpectationType, number>>;
 
-// Usage metrics re-exported from judge module for centralised access.
-// Prefer importing UsageMetrics from this module rather than judge/judgeTypes.
-export type { UsageMetrics } from '../judge/judgeTypes.js';
+export {
+  SnapshotSanitizers,
+  type BuiltInSanitizer,
+  type FieldRemovalSanitizer,
+  type JudgeMatcherOptions,
+  type JudgeValidatorConfig,
+  type PatternValidatorOptions,
+  type PredicateResult,
+  type RegexSanitizer,
+  type SchemaRegistry,
+  type SchemaValidatorOptions,
+  type SizeValidatorOptions,
+  type SnapshotSanitizer,
+  type TextValidatorOptions,
+  type ToolCallCountOptions,
+  type ToolCallExpectation,
+  type ToolPredicate,
+  type ValidationResult,
+} from './assertions.js';
 
-// Reporter types are exported from ./reporter.js
-// Import them from there to avoid circular dependencies:
-//   import type { EvalCaseResult } from '../types/reporter.js';
-//
-// Or import everything via the package's main index.ts
+export type {
+  MCPConfig,
+  StdioMCPConfig,
+  HttpMCPConfig,
+  MCPHostCapabilities,
+  MCPAuthConfig,
+  MCPOAuthConfig,
+  MCPClientCredentialsConfig,
+} from './config.js';
+
+export type {
+  StoredTokens,
+  StoredClientInfo,
+  StoredOAuthState,
+  OAuthSetupConfig,
+  TokenResult,
+  PlaywrightOAuthClientProviderConfig,
+  ClientCredentialsConfig,
+  ProtectedResourceMetadata,
+  ProtectedResourceDiscoveryResult,
+  StoredServerMetadata,
+  CLIOAuthClientConfig,
+  CLIOAuthResult,
+} from './auth.js';
+
+export type {
+  CreateMCPClientOptions,
+  ContentBlock,
+  NormalizedToolResponse,
+  MCPFixtureApi,
+  MCPFixtureOptions,
+  MCPAuthFixtures,
+} from './mcp.js';
+
+export type {
+  EvalCase,
+  EvalDataset,
+  EvalExpectBlock,
+  JudgeExpectConfig,
+  SerializedEvalDataset,
+  EvalMode,
+  LoadDatasetOptions,
+  EvalContext,
+  EvalRunnerResult,
+  EvalRunnerOptions,
+  ToolMetadataOverride,
+  ToolOverrideVariant,
+  SaveBaselineOptions,
+  ComparisonOutcome,
+  CaseComparisonResult,
+  ServerComparisonResult,
+  ServerComparisonOptions,
+  CompareEvalRunsOptions,
+  EvalCaseComparison,
+  EvalCaseComparisonOutcome,
+  EvalRunComparisonLabels,
+  EvalRunComparisonResult,
+  HostType,
+  CLIOutputFormat,
+  CLIConfig,
+  LLMProvider,
+  MCPHostConfig,
+  LLMToolCall,
+  MCPHostSimulationResult,
+  MCPHostSimulator,
+} from './evals.js';
+
+export type {
+  JudgeConfig,
+  Judge,
+  JudgeResult,
+  UsageMetrics,
+  ProviderKind,
+  BuiltInRubric,
+  RubricSpec,
+  CustomJudgeExecutor,
+  CustomJudgeResult,
+} from './judge.js';
+
+export type {
+  MCPConformanceOptions,
+  MCPConformanceResult,
+  MCPConformanceCheck,
+  MCPConformanceRaw,
+} from './conformance.js';
+
+export type {
+  MCPEvalReporterConfig,
+  EvalCaseRequest,
+  EvalCaseResult,
+  EvalRunMetadata,
+  IterationResult,
+  MCPEvalRunData,
+  MCPEvalHistoricalSummary,
+  MCPConformanceResultData,
+  MCPServerCapabilitiesData,
+  MCPEvalData,
+} from './reporter.js';
