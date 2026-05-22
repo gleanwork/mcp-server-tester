@@ -109,6 +109,7 @@
     "lucide-react": "^0.460.0",
     "markdown-code": "^0.6.1",
     "memfs": "^4.51.1",
+    "nock": "^14.0.10",
     "postcss": "^8.4.49",
     "prettier": "^3.4.2",
     "react-dom": "^18.3.1",
@@ -188,6 +189,7 @@
     }
   },
   "optionalDependencies": {
+    "@google-cloud/storage": "^7.17.1",
     "@ai-sdk/anthropic": "^3.0.46",
     "@ai-sdk/azure": "^3.0.0",
     "@ai-sdk/deepseek": "^2.0.0",

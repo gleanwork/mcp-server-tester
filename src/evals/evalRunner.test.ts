@@ -1,11 +1,24 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { z } from 'zod';
-import { runEvalCase, runEvalDataset, type EvalContext } from './evalRunner.js';
+import {
+  runEvalCase,
+  runEvalDataset,
+  type EvalContext,
+  type EvalRunnerResult,
+} from './evalRunner.js';
 import type { EvalCase, EvalDataset } from './datasetTypes.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import { mkdtemp, rm, readFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import {
+  createStoredEvalArtifact,
+  type EvalResultStore,
+  type ListStoredArtifactsOptions,
+  type StoredArtifactKind,
+  type StoredArtifactSummary,
+  type StoredEvalArtifact,
+} from './resultStore.js';
 
 function createMockMCP(callToolResponse?: {
   content?: unknown;
@@ -46,6 +59,47 @@ function createEvalCase(overrides: Partial<EvalCase> = {}): EvalCase {
     args: { input: 'test' },
     ...overrides,
   };
+}
+
+class MemoryEvalResultStore implements EvalResultStore {
+  artifacts = new Map<string, StoredEvalArtifact<unknown>>();
+  latest = new Map<StoredArtifactKind, StoredEvalArtifact<unknown>>();
+
+  async saveArtifact<T>(artifact: StoredEvalArtifact<T>): Promise<void> {
+    this.artifacts.set(`${artifact.kind}:${artifact.id}`, artifact);
+    this.latest.set(artifact.kind, artifact);
+  }
+
+  async loadArtifact<T>(
+    kind: StoredArtifactKind,
+    id: string
+  ): Promise<StoredEvalArtifact<T>> {
+    const artifact = this.artifacts.get(`${kind}:${id}`);
+    if (!artifact) throw new Error(`Missing artifact ${kind}:${id}`);
+    return artifact as StoredEvalArtifact<T>;
+  }
+
+  async loadLatestArtifact<T>(
+    kind: StoredArtifactKind
+  ): Promise<StoredEvalArtifact<T> | null> {
+    return (this.latest.get(kind) as StoredEvalArtifact<T> | undefined) ?? null;
+  }
+
+  async listArtifacts(
+    kind: StoredArtifactKind,
+    options: ListStoredArtifactsOptions = {}
+  ): Promise<StoredArtifactSummary[]> {
+    return [...this.artifacts.values()]
+      .filter((a) => a.kind === kind)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, options.limit)
+      .map((a) => ({
+        kind: a.kind,
+        id: a.id,
+        createdAt: a.createdAt,
+        metadata: a.metadata,
+      }));
+  }
 }
 
 describe('runEvalCase', () => {
@@ -1075,6 +1129,102 @@ describe('saveResultsTo and baselineResultsFrom', () => {
       caseResults: Array<{ response?: unknown }>;
     };
     expect(saved.caseResults[0]).toHaveProperty('response');
+  });
+
+  it('saves results to an external store and omits responses by default', async () => {
+    const store = new MemoryEvalResultStore();
+    const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
+    const dataset = createDataset([
+      createEvalCase({ id: 'case-1', expect: { containsText: 'hello' } }),
+    ]);
+
+    await runEvalDataset(
+      {
+        dataset,
+        resultStore: store,
+        saveResultsTo: { store: true, ref: { id: 'stored-run' } },
+      },
+      createContext(mcp)
+    );
+
+    const artifact = await store.loadArtifact<EvalRunnerResult>(
+      'eval-runner-result',
+      'stored-run'
+    );
+    expect(artifact.metadata.datasetName).toBe('baseline-test-dataset');
+    expect(artifact.data.caseResults[0]).not.toHaveProperty('response');
+  });
+
+  it('preserves responses in external store when redaction is disabled', async () => {
+    const store = new MemoryEvalResultStore();
+    const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
+    const dataset = createDataset([
+      createEvalCase({ id: 'case-1', expect: { containsText: 'hello' } }),
+    ]);
+
+    await runEvalDataset(
+      {
+        dataset,
+        resultStore: store,
+        saveResultsTo: { store: true, ref: { id: 'stored-run' } },
+        redactStoredResponses: false,
+        omitResponsesFromBaseline: false,
+      },
+      createContext(mcp)
+    );
+
+    const artifact = await store.loadArtifact<EvalRunnerResult>(
+      'eval-runner-result',
+      'stored-run'
+    );
+    expect(artifact.data.caseResults[0]).toHaveProperty('response');
+  });
+
+  it('loads latest external baseline and computes regressions', async () => {
+    const store = new MemoryEvalResultStore();
+    const dataset = createDataset([
+      createEvalCase({ id: 'case-1', expect: { containsText: 'hello' } }),
+    ]);
+    await store.saveArtifact(
+      createStoredEvalArtifact({
+        kind: 'eval-runner-result',
+        id: 'baseline',
+        data: {
+          total: 1,
+          passed: 1,
+          failed: 0,
+          durationMs: 10,
+          caseResults: [
+            {
+              id: 'case-1',
+              pass: true,
+              datasetName: dataset.name,
+              toolName: 'test-tool',
+              source: 'eval',
+              expectations: {},
+              durationMs: 1,
+            },
+          ],
+        },
+      })
+    );
+
+    const failingMcp = createMockMCP({
+      content: [{ type: 'text', text: 'world' }],
+    });
+    const result = await runEvalDataset(
+      {
+        dataset,
+        resultStore: store,
+        baselineResultsFrom: { store: true, ref: 'latest' },
+      },
+      createContext(failingMcp)
+    );
+
+    expect(result.regressions).toBe(1);
+    expect(result.improvements).toBe(0);
+    expect(result.deltaPassRate).toBeLessThan(0);
+    expect(result.caseResults[0]!.baselinePass).toBe(true);
   });
 
   it('computes deltaPassRate when baselineResultsFrom is set', async () => {

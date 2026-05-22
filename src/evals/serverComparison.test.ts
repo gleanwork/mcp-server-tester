@@ -1,8 +1,12 @@
-import { describe, it, expect, vi } from 'vitest';
+import { mkdtemp, rm } from 'fs/promises';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { runServerComparison } from './serverComparison.js';
 import type { EvalDataset } from './datasetTypes.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import type { EvalContext } from './evalRunner.js';
+import { FileEvalResultStore } from './resultStore.js';
 
 function createMockMCP(callToolResponse?: {
   content?: unknown;
@@ -46,6 +50,16 @@ const dataset: EvalDataset = {
 };
 
 describe('runServerComparison', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'mcp-server-comparison-'));
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
   it('returns correct dataset name and totals when both servers are identical', async () => {
     // Both mocks return the same successful response — all cases should TIE
     const mockA = createMockMCP({ content: [{ type: 'text', text: 'ok' }] });
@@ -64,6 +78,30 @@ describe('runServerComparison', () => {
     expect(result.aWins).toBe(0);
     expect(result.bWins).toBe(0);
     expect(result.bothFail).toBe(0);
+  });
+
+  it('persists comparison output when comparisonStore is configured', async () => {
+    const store = new FileEvalResultStore({ provider: 'file', dir: tmpDir });
+    const mockA = createMockMCP({ content: [{ type: 'text', text: 'ok' }] });
+    const mockB = createMockMCP({ content: [{ type: 'text', text: 'ok' }] });
+
+    await runServerComparison(
+      {
+        dataset,
+        comparisonStore: store,
+        comparisonId: 'sxs-1',
+        comparisonMetadata: { labels: { serverA: 'a', serverB: 'b' } },
+      },
+      createContext(mockA),
+      createContext(mockB)
+    );
+
+    const artifact = await store.loadArtifact<
+      Awaited<ReturnType<typeof runServerComparison>>
+    >('server-comparison', 'sxs-1');
+    expect(artifact.metadata.datasetName).toBe('comparison-test');
+    expect(artifact.metadata.labels).toEqual({ serverA: 'a', serverB: 'b' });
+    expect(artifact.data.total).toBe(4);
   });
 
   it('returns A_WINS when server A passes a case that server B fails', async () => {

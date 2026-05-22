@@ -5,6 +5,13 @@ import type {
   EvalRunnerResult,
 } from './evalRunner.js';
 import type { EvalCaseResult } from '../types/reporter.js';
+import {
+  createStoredEvalArtifact,
+  resolveEvalResultStore,
+  type EvalResultStoreLike,
+  type StoredEvalArtifact,
+  type StoredEvalArtifactMetadata,
+} from './resultStore.js';
 
 /** Outcome of comparing two servers on a single eval case. */
 export type ComparisonOutcome = 'A_WINS' | 'B_WINS' | 'TIE' | 'BOTH_FAIL';
@@ -62,7 +69,12 @@ export interface ServerComparisonResult {
 export type ServerComparisonOptions = Omit<
   EvalRunnerOptions,
   'saveResultsTo' | 'baselineResultsFrom'
->;
+> & {
+  comparisonStore?: EvalResultStoreLike;
+  comparisonId?: string;
+  comparisonMetadata?: StoredEvalArtifactMetadata;
+  redactStoredResponses?: boolean;
+};
 
 /**
  * Runs the same eval dataset against two MCP servers in parallel and
@@ -142,7 +154,7 @@ export async function runServerComparison(
   const total = cases.length;
   const decidedCases = aWins + bWins + ties; // BOTH_FAIL excluded from win rate denominator
 
-  return {
+  const comparison: ServerComparisonResult = {
     dataset: options.dataset.name,
     total,
     aWins,
@@ -159,4 +171,56 @@ export async function runServerComparison(
     serverBResult: resultB,
     durationMs: Date.now() - startTime,
   };
+
+  if (options.comparisonStore) {
+    await saveServerComparison({
+      store: options.comparisonStore,
+      comparison,
+      id: options.comparisonId,
+      metadata: {
+        datasetName: options.dataset.name,
+        ...(options.comparisonMetadata ?? {}),
+      },
+      redactStoredResponses: options.redactStoredResponses,
+    });
+  }
+
+  return comparison;
+}
+
+export interface SaveServerComparisonOptions {
+  store: EvalResultStoreLike;
+  comparison: ServerComparisonResult;
+  id?: string;
+  metadata?: StoredEvalArtifactMetadata;
+  redactStoredResponses?: boolean;
+}
+
+export async function saveServerComparison(
+  options: SaveServerComparisonOptions
+): Promise<StoredEvalArtifact<ServerComparisonResult>> {
+  const store = resolveEvalResultStore(options.store);
+  const data = options.redactStoredResponses
+    ? redactResponses(options.comparison)
+    : options.comparison;
+  const artifact = createStoredEvalArtifact({
+    kind: 'server-comparison',
+    id: options.id,
+    data,
+    metadata: {
+      datasetName: options.comparison.dataset,
+      ...(options.metadata ?? {}),
+    },
+  });
+
+  await store.saveArtifact(artifact);
+  return artifact;
+}
+
+function redactResponses<T>(value: T): T {
+  return JSON.parse(
+    JSON.stringify(value, (key, currentValue: unknown) =>
+      key === 'response' ? undefined : currentValue
+    )
+  ) as T;
 }

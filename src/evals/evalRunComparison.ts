@@ -1,5 +1,12 @@
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { EvalRunnerResult } from './evalRunner.js';
+import {
+  createStoredEvalArtifact,
+  resolveEvalResultStore,
+  type EvalResultStoreLike,
+  type StoredEvalArtifact,
+  type StoredEvalArtifactMetadata,
+} from './resultStore.js';
 
 /** Labels used when presenting an eval run comparison. */
 export interface EvalRunComparisonLabels {
@@ -84,6 +91,16 @@ export interface EvalRunComparisonResult {
   missingFromBaseline: EvalCaseComparison[];
   /** Cases present only in baseline */
   missingFromCandidate: EvalCaseComparison[];
+}
+
+export type StoredEvalRunRef = 'latest' | { id: string };
+
+export interface SaveEvalRunComparisonOptions {
+  store: EvalResultStoreLike;
+  comparison: EvalRunComparisonResult;
+  id?: string;
+  metadata?: StoredEvalArtifactMetadata;
+  redactStoredResponses?: boolean;
 }
 
 /**
@@ -173,6 +190,50 @@ export function compareEvalRuns(
   };
 }
 
+export async function loadStoredEvalRunnerResult(
+  storeLike: EvalResultStoreLike,
+  ref: StoredEvalRunRef
+): Promise<EvalRunnerResult> {
+  const store = resolveEvalResultStore(storeLike);
+  const artifact =
+    ref === 'latest'
+      ? await store.loadLatestArtifact<EvalRunnerResult>('eval-runner-result')
+      : await store.loadArtifact<EvalRunnerResult>(
+          'eval-runner-result',
+          ref.id
+        );
+
+  if (!artifact) {
+    throw new Error('No latest eval run artifact found');
+  }
+
+  return artifact.data;
+}
+
+export async function saveEvalRunComparison(
+  options: SaveEvalRunComparisonOptions
+): Promise<StoredEvalArtifact<EvalRunComparisonResult>> {
+  const store = resolveEvalResultStore(options.store);
+  const data = options.redactStoredResponses
+    ? redactResponses(options.comparison)
+    : options.comparison;
+  const artifact = createStoredEvalArtifact({
+    kind: 'eval-run-comparison',
+    id: options.id,
+    data,
+    metadata: {
+      labels: {
+        baseline: options.comparison.baselineLabel,
+        candidate: options.comparison.candidateLabel,
+      },
+      ...(options.metadata ?? {}),
+    },
+  });
+
+  await store.saveArtifact(artifact);
+  return artifact;
+}
+
 function compareCaseOutcome(
   baselinePass: boolean,
   candidatePass: boolean
@@ -202,4 +263,12 @@ function metricDelta(
     result[`delta${name}`] = candidateValue - baselineValue;
   }
   return result;
+}
+
+function redactResponses<T>(value: T): T {
+  return JSON.parse(
+    JSON.stringify(value, (key, currentValue: unknown) =>
+      key === 'response' ? undefined : currentValue
+    )
+  ) as T;
 }

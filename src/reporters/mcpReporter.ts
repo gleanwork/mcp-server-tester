@@ -21,6 +21,21 @@ import type {
 } from '../types/reporter.js';
 import type { UsageMetrics } from '../types/index.js';
 import { sumUsage } from '../utils/usageUtils.js';
+import {
+  createStoredEvalArtifact,
+  resolveEvalResultStore,
+} from '../evals/resultStore.js';
+
+type ResolvedReporterConfig = Required<
+  Omit<
+    MCPEvalReporterConfig,
+    'resultStore' | 'runId' | 'runMetadata' | 'redactStoredResponses'
+  >
+> &
+  Pick<
+    MCPEvalReporterConfig,
+    'resultStore' | 'runId' | 'runMetadata' | 'redactStoredResponses'
+  >;
 
 /**
  * Custom Playwright reporter for MCP eval results
@@ -41,7 +56,7 @@ import { sumUsage } from '../utils/usageUtils.js';
  * ```
  */
 export default class MCPReporter implements Reporter {
-  private config: Required<MCPEvalReporterConfig>;
+  private config: ResolvedReporterConfig;
   private startTime: number = 0;
   private allResults: Array<EvalCaseResult> = [];
   private conformanceChecks: Array<MCPConformanceResultData> = [];
@@ -54,6 +69,10 @@ export default class MCPReporter implements Reporter {
       historyLimit: options.historyLimit ?? 10,
       quiet: options.quiet ?? false,
       includeAutoTracking: options.includeAutoTracking ?? true,
+      resultStore: options.resultStore,
+      runId: options.runId,
+      runMetadata: options.runMetadata,
+      redactStoredResponses: options.redactStoredResponses,
     };
   }
 
@@ -299,6 +318,10 @@ export default class MCPReporter implements Reporter {
     // Clean up old runs
     await this.cleanupOldRuns();
 
+    // Save current run to external storage, if configured. This is additive:
+    // local report generation should still work if remote storage is down.
+    await this.saveRunDataToStore(runData);
+
     // Generate report using copy + inject pattern
     const reportDir = join(this.config.outputDir, 'latest');
     await this.generateReport(runData, historical, reportDir);
@@ -413,6 +436,11 @@ export default class MCPReporter implements Reporter {
   }
 
   private async loadHistoricalData(): Promise<Array<MCPEvalHistoricalSummary>> {
+    const storeHistorical = await this.loadHistoricalDataFromStore();
+    if (storeHistorical) {
+      return storeHistorical;
+    }
+
     try {
       const files = await readdir(this.config.outputDir);
       const runFiles = files
@@ -456,6 +484,62 @@ export default class MCPReporter implements Reporter {
     await writeFile(filepath, JSON.stringify(runData, null, 2), 'utf-8');
   }
 
+  private async saveRunDataToStore(runData: MCPEvalRunData): Promise<void> {
+    if (!this.config.resultStore) {
+      return;
+    }
+
+    try {
+      const store = resolveEvalResultStore(this.config.resultStore);
+      await store.saveArtifact(
+        createStoredEvalArtifact({
+          kind: 'reporter-run',
+          id: this.config.runId,
+          data: this.config.redactStoredResponses
+            ? redactResponses(runData)
+            : runData,
+          metadata: {
+            ...(this.config.runMetadata ?? {}),
+          },
+        })
+      );
+    } catch (error) {
+      this.logError(
+        '[MCP Reporter] Failed to save run to result store:',
+        error
+      );
+    }
+  }
+
+  private async loadHistoricalDataFromStore(): Promise<Array<MCPEvalHistoricalSummary> | null> {
+    if (!this.config.resultStore) {
+      return null;
+    }
+
+    try {
+      const store = resolveEvalResultStore(this.config.resultStore);
+      const summaries = await store.listArtifacts('reporter-run', {
+        limit: this.config.historyLimit - 1,
+      });
+
+      const historical: Array<MCPEvalHistoricalSummary> = [];
+      for (const summary of summaries.reverse()) {
+        const artifact = await store.loadArtifact<MCPEvalRunData>(
+          'reporter-run',
+          summary.id
+        );
+        historical.push(toHistoricalSummary(artifact.data));
+      }
+      return historical;
+    } catch (error) {
+      this.logError(
+        '[MCP Reporter] Failed to load history from result store:',
+        error
+      );
+      return null;
+    }
+  }
+
   private async cleanupOldRuns(): Promise<void> {
     try {
       const files = await readdir(this.config.outputDir);
@@ -488,4 +572,25 @@ export default class MCPReporter implements Reporter {
       this.log(`[MCP Reporter] Open manually: file://${resolve(reportPath)}`);
     }
   }
+}
+
+function toHistoricalSummary(
+  runData: MCPEvalRunData
+): MCPEvalHistoricalSummary {
+  return {
+    timestamp: runData.timestamp,
+    total: runData.metrics.total,
+    passed: runData.metrics.passed,
+    failed: runData.metrics.failed,
+    passRate: runData.metrics.passRate,
+    durationMs: runData.durationMs,
+  };
+}
+
+function redactResponses<T>(value: T): T {
+  return JSON.parse(
+    JSON.stringify(value, (key, currentValue: unknown) =>
+      key === 'response' ? undefined : currentValue
+    )
+  ) as T;
 }

@@ -570,6 +570,207 @@ After a deliberate improvement that changes pass/fail outcomes, run with `saveRe
 
 The combination of `saveResultsTo` and `baselineResultsFrom` can be used in the same run to simultaneously update the baseline and compare against the previous one. Pass both options if you want a rolling comparison.
 
+## External Result Storage
+
+Eval results can be stored outside the local workspace so CI runs, local runs, and
+AI analysis tools can share the same run history. The first built-in cloud store is
+GCS. Local file paths continue to work unchanged.
+
+### Authentication
+
+GCS storage uses Application Default Credentials. Do not put credential JSON in
+Playwright config.
+
+For local development, create a service-account key with read/write access to the
+bucket prefix and load it with `.env`:
+
+```bash
+GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/service-account.json
+```
+
+For CI, store the service-account JSON as a secret, write it to a temporary file,
+and set `GOOGLE_APPLICATION_CREDENTIALS` for the test step.
+
+### Reporter History
+
+Configure the MCP reporter with a GCS result store to keep dashboard history across
+machines and CI jobs:
+
+```typescript snippet=snippets/result-store-reporter-config.ts
+import { defineConfig } from '@playwright/test';
+
+export default defineConfig({
+  reporter: [
+    ['list'],
+    [
+      '@gleanwork/mcp-server-tester/reporters/mcpReporter',
+      {
+        outputDir: '.mcp-test-results',
+        resultStore: {
+          provider: 'gcs',
+          bucket: 'my-mcp-eval-results',
+          prefix: 'my-server/main',
+        },
+        runMetadata: {
+          branch: process.env.GITHUB_REF_NAME ?? 'local',
+          trigger: process.env.GITHUB_EVENT_NAME ?? 'manual',
+        },
+      },
+    ],
+  ],
+});
+```
+
+The reporter still writes `.mcp-test-results/latest/` locally. The
+`mcp-server-tester open` command opens local reports only in v1.
+
+### Stored Baselines
+
+Use a stored `latest` baseline when you want CI to compare against the most recently
+promoted known-good run:
+
+```typescript snippet=snippets/result-store-baseline.ts
+import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
+import { loadEvalDataset, runEvalDataset } from '@gleanwork/mcp-server-tester';
+
+const resultStore = {
+  provider: 'gcs' as const,
+  bucket: 'my-mcp-eval-results',
+  prefix: 'my-server/baselines',
+};
+
+test('save latest baseline', async ({ mcp }, testInfo) => {
+  const dataset = await loadEvalDataset('./data/evals.json');
+
+  const result = await runEvalDataset(
+    {
+      dataset,
+      resultStore,
+      saveResultsTo: { store: true, ref: 'latest' },
+    },
+    { mcp, testInfo }
+  );
+
+  expect(result.failed).toBe(0);
+});
+
+test('compare against latest baseline', async ({ mcp }, testInfo) => {
+  const dataset = await loadEvalDataset('./data/evals.json');
+
+  const result = await runEvalDataset(
+    {
+      dataset,
+      resultStore,
+      baselineResultsFrom: { store: true, ref: 'latest' },
+    },
+    { mcp, testInfo }
+  );
+
+  expect(result.regressions ?? 0).toBe(0);
+});
+```
+
+When `saveResultsTo` targets the store, baseline saves still omit responses by
+default. Set `omitResponsesFromBaseline: false` when the stored baseline should
+include full responses.
+
+### Stored Variant Comparisons
+
+Stored eval runs can be loaded back into `compareEvalRuns()`. This is useful for
+tool override experiments where one run captures the current tool metadata and
+another captures a proposed variant.
+
+```typescript snippet=snippets/result-store-compare-runs.ts
+import {
+  compareEvalRuns,
+  createEvalResultStore,
+  loadStoredEvalRunnerResult,
+  saveEvalRunComparison,
+} from '@gleanwork/mcp-server-tester';
+
+const store = createEvalResultStore({
+  provider: 'gcs',
+  bucket: 'my-mcp-eval-results',
+  prefix: 'my-server/variants',
+});
+
+const baseline = await loadStoredEvalRunnerResult(store, { id: 'baseline' });
+const candidate = await loadStoredEvalRunnerResult(store, { id: 'candidate' });
+
+const comparison = compareEvalRuns({
+  baseline,
+  candidate,
+  labels: {
+    baseline: 'current',
+    candidate: candidate.metadata?.toolOverrideVariantId ?? 'candidate',
+  },
+});
+
+await saveEvalRunComparison({
+  store,
+  comparison,
+  id: 'candidate-vs-current',
+});
+```
+
+### Stored Server Comparisons
+
+`runServerComparison()` can persist side-by-side results directly:
+
+```typescript snippet=snippets/result-store-server-comparison.ts
+import { test } from '@gleanwork/mcp-server-tester/fixtures/mcp';
+import {
+  loadEvalDataset,
+  runServerComparison,
+} from '@gleanwork/mcp-server-tester';
+
+test('compare two MCP servers and persist the result', async ({
+  mcp,
+}, testInfo) => {
+  const dataset = await loadEvalDataset('./data/evals.json');
+  const otherMcp = mcp;
+
+  await runServerComparison(
+    {
+      dataset,
+      comparisonStore: {
+        provider: 'gcs',
+        bucket: 'my-mcp-eval-results',
+        prefix: 'my-server/server-comparisons',
+      },
+      comparisonId: `server-comparison-${Date.now()}`,
+    },
+    { mcp, testInfo },
+    { mcp: otherMcp, testInfo }
+  );
+});
+```
+
+### GCS Layout
+
+Given `bucket: "my-mcp-eval-results"` and `prefix: "my-server/main"`, artifacts are
+stored as JSON:
+
+```text
+gs://my-mcp-eval-results/my-server/main/
+├── eval-runs/
+│   ├── latest.json
+│   └── <run-id>.json
+├── reporter-runs/
+│   ├── latest.json
+│   └── <run-id>.json
+└── comparisons/
+    ├── eval-runs/
+    │   ├── latest.json
+    │   └── <comparison-id>.json
+    └── servers/
+        ├── latest.json
+        └── <comparison-id>.json
+```
+
+Configure lifecycle retention on the bucket if you do not want to keep every
+historical run indefinitely.
+
 ### Full example
 
 <!-- snippet=snippets/baseline-comparison.ts -->

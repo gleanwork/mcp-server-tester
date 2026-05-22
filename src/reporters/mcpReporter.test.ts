@@ -7,7 +7,15 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import MCPReporter from './mcpReporter.js';
-import type { EvalCaseResult } from '../types/reporter.js';
+import type { EvalCaseResult, MCPEvalRunData } from '../types/reporter.js';
+import {
+  createStoredEvalArtifact,
+  type EvalResultStore,
+  type ListStoredArtifactsOptions,
+  type StoredArtifactKind,
+  type StoredArtifactSummary,
+  type StoredEvalArtifact,
+} from '../evals/resultStore.js';
 
 // Suppress file-system side effects (mkdir, writeFile, etc.) in onEnd/onBegin
 vi.mock('fs/promises', () => ({
@@ -63,6 +71,47 @@ function makeResult(
     durationMs: 100,
     ...overrides,
   };
+}
+
+class MemoryEvalResultStore implements EvalResultStore {
+  artifacts = new Map<string, StoredEvalArtifact<unknown>>();
+  latest = new Map<StoredArtifactKind, StoredEvalArtifact<unknown>>();
+
+  async saveArtifact<T>(artifact: StoredEvalArtifact<T>): Promise<void> {
+    this.artifacts.set(`${artifact.kind}:${artifact.id}`, artifact);
+    this.latest.set(artifact.kind, artifact);
+  }
+
+  async loadArtifact<T>(
+    kind: StoredArtifactKind,
+    id: string
+  ): Promise<StoredEvalArtifact<T>> {
+    const artifact = this.artifacts.get(`${kind}:${id}`);
+    if (!artifact) throw new Error(`Missing artifact ${kind}:${id}`);
+    return artifact as StoredEvalArtifact<T>;
+  }
+
+  async loadLatestArtifact<T>(
+    kind: StoredArtifactKind
+  ): Promise<StoredEvalArtifact<T> | null> {
+    return (this.latest.get(kind) as StoredEvalArtifact<T> | undefined) ?? null;
+  }
+
+  async listArtifacts(
+    kind: StoredArtifactKind,
+    options: ListStoredArtifactsOptions = {}
+  ): Promise<StoredArtifactSummary[]> {
+    return [...this.artifacts.values()]
+      .filter((a) => a.kind === kind)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, options.limit)
+      .map((a) => ({
+        kind: a.kind,
+        id: a.id,
+        createdAt: a.createdAt,
+        metadata: a.metadata,
+      }));
+  }
 }
 
 describe('MCPReporter.buildRunData()', () => {
@@ -142,6 +191,78 @@ describe('MCPReporter.buildRunData()', () => {
       expect(data.metrics.total).toBe(0);
       expect(data.metrics.passed).toBe(0);
       expect(data.metrics.failed).toBe(0);
+    });
+  });
+
+  describe('external result store', () => {
+    it('saves reporter run data to the configured store', async () => {
+      const store = new MemoryEvalResultStore();
+      reporter = makeReporter({
+        resultStore: store,
+        runId: 'reporter-run-1',
+        runMetadata: { datasetName: 'reporter-suite' },
+      });
+      setResults(reporter, [makeResult({ pass: true })]);
+
+      await reporter.onEnd({} as never);
+
+      const artifact = await store.loadArtifact<MCPEvalRunData>(
+        'reporter-run',
+        'reporter-run-1'
+      );
+      expect(artifact.metadata.datasetName).toBe('reporter-suite');
+      expect(artifact.data.metrics.passed).toBe(1);
+    });
+
+    it('loads historical summaries from the configured store', async () => {
+      const store = new MemoryEvalResultStore();
+      await store.saveArtifact(
+        createStoredEvalArtifact({
+          kind: 'reporter-run',
+          id: 'previous-run',
+          createdAt: '2026-05-22T12:00:00.000Z',
+          data: {
+            timestamp: '2026-05-22T12:00:00.000Z',
+            durationMs: 10,
+            environment: { ci: true, node: 'v22.0.0', platform: 'darwin' },
+            metrics: {
+              total: 2,
+              passed: 1,
+              failed: 1,
+              passRate: 0.5,
+              datasetBreakdown: { dataset: 2 },
+              expectationBreakdown: {
+                exact: 0,
+                schema: 0,
+                textContains: 0,
+                regex: 0,
+                snapshot: 0,
+                judge: 0,
+                error: 0,
+                size: 0,
+                toolsTriggered: 0,
+                toolCallCount: 0,
+              },
+            },
+            results: [],
+          } satisfies MCPEvalRunData,
+        })
+      );
+      reporter = makeReporter({ resultStore: store });
+
+      const historical = (await (
+        reporter as unknown as {
+          loadHistoricalData(): Promise<
+            Array<{ total: number; passRate: number }>
+          >;
+        }
+      ).loadHistoricalData()) as Array<{
+        total: number;
+        passRate: number;
+      }>;
+
+      expect(historical).toHaveLength(1);
+      expect(historical[0]).toMatchObject({ total: 2, passRate: 0.5 });
     });
   });
 

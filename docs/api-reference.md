@@ -433,9 +433,86 @@ The result includes pass-rate deltas, optional tool precision/recall/F1 deltas, 
 - `missingFromBaseline` - case exists only in candidate
 - `missingFromCandidate` - case exists only in baseline
 
+### External Result Storage
+
+External result storage persists eval runs, reporter runs, and comparison artifacts
+as JSON. GCS is the first built-in cloud provider.
+
+```typescript
+type StoredArtifactKind =
+  | 'eval-runner-result'
+  | 'reporter-run'
+  | 'eval-run-comparison'
+  | 'server-comparison';
+
+interface EvalResultStore {
+  saveArtifact<T>(artifact: StoredEvalArtifact<T>): Promise<void>;
+  loadArtifact<T>(
+    kind: StoredArtifactKind,
+    id: string
+  ): Promise<StoredEvalArtifact<T>>;
+  loadLatestArtifact<T>(
+    kind: StoredArtifactKind
+  ): Promise<StoredEvalArtifact<T> | null>;
+  listArtifacts(
+    kind: StoredArtifactKind,
+    options?: { limit?: number }
+  ): Promise<StoredArtifactSummary[]>;
+}
+```
+
+Create a store from config:
+
+```typescript
+import { createEvalResultStore } from '@gleanwork/mcp-server-tester';
+
+const store = createEvalResultStore({
+  provider: 'gcs',
+  bucket: 'my-mcp-eval-results',
+  prefix: 'my-server/main',
+});
+```
+
+`runEvalDataset()` accepts store-backed baseline references in addition to local
+file paths:
+
+```typescript
+await runEvalDataset(
+  {
+    dataset,
+    resultStore: store,
+    baselineResultsFrom: { store: true, ref: 'latest' },
+    saveResultsTo: { store: true, ref: { id: 'candidate-run' } },
+  },
+  { mcp, testInfo }
+);
+```
+
+Stored runs can be used with `compareEvalRuns()`:
+
+```typescript
+import {
+  compareEvalRuns,
+  loadStoredEvalRunnerResult,
+  saveEvalRunComparison,
+} from '@gleanwork/mcp-server-tester';
+
+const baseline = await loadStoredEvalRunnerResult(store, { id: 'baseline' });
+const candidate = await loadStoredEvalRunnerResult(store, { id: 'candidate' });
+const comparison = compareEvalRuns({ baseline, candidate });
+
+await saveEvalRunComparison({ store, comparison, id: 'candidate-comparison' });
+```
+
 **Result Structure:**
 
 ```typescript snippet=src/evals/evalRunner.ts#L106-L184
+  /**
+   * Per-tool metadata overrides keyed by canonical tool name.
+   */
+  tools: Record<string, ToolMetadataOverride>;
+}
+
 /**
  * Overall result of running an eval dataset
  */
@@ -508,12 +585,6 @@ export interface EvalRunnerResult {
    * Experiment tracking metadata captured at run time.
    */
   metadata?: EvalRunMetadata;
-
-  /**
-   * Aggregate token usage from all mcp_host LLM simulations across all cases.
-   */
-  totalHostUsage?: UsageMetrics;
-}
 ```
 
 ### `runEvalCase(evalCase, context, options?)`

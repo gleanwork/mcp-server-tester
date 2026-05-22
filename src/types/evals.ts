@@ -14,6 +14,9 @@ export type {
   EvalRunnerResult,
   EvalRunnerOptions,
   EvalCaseOptions,
+  StoredEvalResultLoadOptions,
+  StoredEvalResultRef,
+  StoredEvalResultSaveOptions,
   ToolMetadataOverride,
   ToolOverrideVariant,
 } from '../evals/evalRunner.js';
@@ -23,6 +26,7 @@ export type {
   CaseComparisonResult,
   ServerComparisonResult,
   ServerComparisonOptions,
+  SaveServerComparisonOptions,
 } from '../evals/serverComparison.js';
 
 export type {
@@ -31,6 +35,8 @@ export type {
   EvalCaseComparisonOutcome,
   EvalRunComparisonLabels,
   EvalRunComparisonResult,
+  SaveEvalRunComparisonOptions,
+  StoredEvalRunRef,
 } from '../evals/evalRunComparison.js';
 
 export type { SaveBaselineOptions } from '../evals/baseline.js';

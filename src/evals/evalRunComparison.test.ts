@@ -1,7 +1,19 @@
-import { describe, expect, it } from 'vitest';
-import { compareEvalRuns } from './evalRunComparison.js';
+import { mkdtemp, rm } from 'fs/promises';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  compareEvalRuns,
+  loadStoredEvalRunnerResult,
+  saveEvalRunComparison,
+  type EvalRunComparisonResult,
+} from './evalRunComparison.js';
 import type { EvalRunnerResult } from './evalRunner.js';
 import type { EvalCaseResult } from '../types/reporter.js';
+import {
+  FileEvalResultStore,
+  createStoredEvalArtifact,
+} from './resultStore.js';
 
 function createCase(id: string, pass: boolean): EvalCaseResult {
   return {
@@ -31,6 +43,16 @@ function createRun(
 }
 
 describe('compareEvalRuns', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'mcp-run-comparison-'));
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
   it('buckets improved, regressed, unchanged, and missing cases', () => {
     const baseline = createRun([
       createCase('improved', false),
@@ -154,5 +176,55 @@ describe('compareEvalRuns', () => {
     expect(result.baselinePassRate).toBe(0);
     expect(result.candidatePassRate).toBe(0);
     expect(result.deltaPassRate).toBe(0);
+  });
+
+  it('loads a stored eval run for comparison', async () => {
+    const store = new FileEvalResultStore({ provider: 'file', dir: tmpDir });
+    const run = createRun([createCase('a', true)], {
+      metadata: {
+        timestamp: '2026-05-22T00:00:00.000Z',
+        packageVersion: '1.0.0',
+        toolOverrideVariantId: 'variant-a',
+      },
+    });
+    await store.saveArtifact(
+      createStoredEvalArtifact({
+        kind: 'eval-runner-result',
+        id: 'run-a',
+        data: run,
+      })
+    );
+
+    const loaded = await loadStoredEvalRunnerResult(store, { id: 'run-a' });
+
+    expect(loaded.metadata?.toolOverrideVariantId).toBe('variant-a');
+    expect(
+      compareEvalRuns({ baseline: loaded, candidate: loaded }).cases
+    ).toHaveLength(1);
+  });
+
+  it('saves eval run comparison artifacts with labels metadata', async () => {
+    const store = new FileEvalResultStore({ provider: 'file', dir: tmpDir });
+    const comparison = compareEvalRuns({
+      baseline: createRun([createCase('a', false)]),
+      candidate: createRun([createCase('a', true)]),
+      labels: { baseline: 'control', candidate: 'variant' },
+    });
+
+    const artifact = await saveEvalRunComparison({
+      store,
+      comparison,
+      id: 'comparison-a',
+    });
+    const loaded = await store.loadArtifact<EvalRunComparisonResult>(
+      'eval-run-comparison',
+      'comparison-a'
+    );
+
+    expect(artifact.metadata.labels).toEqual({
+      baseline: 'control',
+      candidate: 'variant',
+    });
+    expect(loaded.data.improvedCases).toHaveLength(1);
   });
 });

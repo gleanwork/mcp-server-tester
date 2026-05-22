@@ -18,6 +18,12 @@ import {
   buildBaselinePassMap,
 } from './baseline.js';
 import {
+  createStoredEvalArtifact,
+  resolveEvalResultStore,
+  type EvalResultStoreLike,
+  type StoredEvalArtifactMetadata,
+} from './resultStore.js';
+import {
   validateResponse,
   validateSchema,
   validateText,
@@ -182,6 +188,18 @@ export interface EvalRunnerResult {
   totalHostUsage?: UsageMetrics;
 }
 
+export type StoredEvalResultRef = 'latest' | { id: string };
+
+export interface StoredEvalResultLoadOptions {
+  store: true;
+  ref: StoredEvalResultRef;
+}
+
+export interface StoredEvalResultSaveOptions {
+  store: true;
+  ref?: 'latest' | { id?: string };
+}
+
 /**
  * Options for running eval dataset
  */
@@ -266,7 +284,7 @@ export interface EvalRunnerOptions {
    *
    * @example '.mcp-test-results/baseline.json'
    */
-  saveResultsTo?: string;
+  saveResultsTo?: string | StoredEvalResultSaveOptions;
 
   /**
    * When true (default), strips the `response` field from each case result
@@ -280,11 +298,22 @@ export interface EvalRunnerOptions {
   omitResponsesFromBaseline?: boolean;
 
   /**
-   * If set, loads this file as the baseline and computes delta metrics vs the current run.
+   * When true, strips responses before storing externally. For baseline-style
+   * saves, `omitResponsesFromBaseline` remains the default behavior.
+   */
+  redactStoredResponses?: boolean;
+
+  /**
+   * Optional external result store for loading/saving eval run artifacts.
+   */
+  resultStore?: EvalResultStoreLike;
+
+  /**
+   * If set, loads this file or stored result as the baseline and computes delta metrics vs the current run.
    * Populates `EvalRunnerResult.deltaPassRate`, `.regressions`, `.improvements`,
    * and tags each `EvalCaseResult.baselinePass`.
    */
-  baselineResultsFrom?: string;
+  baselineResultsFrom?: string | StoredEvalResultLoadOptions;
 
   /**
    * Runtime MCP tool metadata overrides used for variant experiments.
@@ -1054,6 +1083,8 @@ export async function runEvalDataset(
     filterTags,
     saveResultsTo,
     omitResponsesFromBaseline = true,
+    redactStoredResponses,
+    resultStore,
     baselineResultsFrom,
     toolOverrides,
     mcpHostModel,
@@ -1193,7 +1224,10 @@ export async function runEvalDataset(
   // Load baseline and compute delta if requested
   if (baselineResultsFrom) {
     try {
-      const baseline = await loadBaseline(baselineResultsFrom);
+      const baseline =
+        typeof baselineResultsFrom === 'string'
+          ? await loadBaseline(baselineResultsFrom)
+          : await loadStoredBaseline(baselineResultsFrom, resultStore);
       const baselinePassRate =
         baseline.total > 0 ? baseline.passed / baseline.total : 0;
       const baselineMap = buildBaselinePassMap(baseline);
@@ -1229,7 +1263,7 @@ export async function runEvalDataset(
         result.total > 0 ? result.passed / result.total - baselinePassRate : 0;
     } catch (err) {
       console.warn(
-        `[mcp-server-tester] Could not load baseline from ${baselineResultsFrom}: ` +
+        `[mcp-server-tester] Could not load baseline from ${formatBaselineRef(baselineResultsFrom)}: ` +
           `${err instanceof Error ? err.message : String(err)}`
       );
     }
@@ -1256,9 +1290,29 @@ export async function runEvalDataset(
 
   // Save results to file if requested
   if (saveResultsTo) {
-    await saveBaseline(result, saveResultsTo, {
-      omitResponses: omitResponsesFromBaseline,
-    });
+    if (typeof saveResultsTo === 'string') {
+      await saveBaseline(result, saveResultsTo, {
+        omitResponses: omitResponsesFromBaseline,
+      });
+    } else {
+      await saveStoredEvalResult(result, saveResultsTo, {
+        resultStore,
+        omitResponses:
+          redactStoredResponses !== undefined
+            ? redactStoredResponses
+            : omitResponsesFromBaseline,
+        metadata: {
+          datasetName: dataset.name,
+          ...(toolOverrides?.id !== undefined && {
+            toolOverrideVariantId: toolOverrides.id,
+          }),
+          ...(mcpHostModel !== undefined && { mcpHostModel }),
+          ...(judgeModel !== undefined && { judgeModel }),
+          ...(gitHash !== undefined && { gitHash }),
+          packageVersion: packageJson.version,
+        },
+      });
+    }
   }
 
   // Attach results for MCP reporter if testInfo is provided
@@ -1276,4 +1330,78 @@ export async function runEvalDataset(
   }
 
   return result;
+}
+
+async function loadStoredBaseline(
+  baselineResultsFrom: StoredEvalResultLoadOptions,
+  resultStore: EvalResultStoreLike | undefined
+): Promise<EvalRunnerResult> {
+  if (!resultStore) {
+    throw new Error('resultStore is required for store-backed baselines');
+  }
+
+  const store = resolveEvalResultStore(resultStore);
+  const artifact =
+    baselineResultsFrom.ref === 'latest'
+      ? await store.loadLatestArtifact<EvalRunnerResult>('eval-runner-result')
+      : await store.loadArtifact<EvalRunnerResult>(
+          'eval-runner-result',
+          baselineResultsFrom.ref.id
+        );
+
+  if (!artifact) {
+    throw new Error('No latest eval run artifact found');
+  }
+
+  return artifact.data;
+}
+
+async function saveStoredEvalResult(
+  result: EvalRunnerResult,
+  saveResultsTo: StoredEvalResultSaveOptions,
+  options: {
+    resultStore: EvalResultStoreLike | undefined;
+    omitResponses: boolean;
+    metadata: StoredEvalArtifactMetadata;
+  }
+): Promise<void> {
+  if (!options.resultStore) {
+    throw new Error('resultStore is required for store-backed saves');
+  }
+
+  const store = resolveEvalResultStore(options.resultStore);
+  const data = options.omitResponses ? omitResponsesFromResult(result) : result;
+  const id =
+    saveResultsTo.ref && saveResultsTo.ref !== 'latest'
+      ? saveResultsTo.ref.id
+      : undefined;
+
+  await store.saveArtifact(
+    createStoredEvalArtifact({
+      kind: 'eval-runner-result',
+      id,
+      data,
+      metadata: options.metadata,
+    })
+  );
+}
+
+function omitResponsesFromResult(result: EvalRunnerResult): EvalRunnerResult {
+  return {
+    ...result,
+    caseResults: result.caseResults.map(
+      ({ response: _response, ...rest }) => rest
+    ),
+  };
+}
+
+function formatBaselineRef(
+  baselineResultsFrom: string | StoredEvalResultLoadOptions
+): string {
+  if (typeof baselineResultsFrom === 'string') {
+    return baselineResultsFrom;
+  }
+  return baselineResultsFrom.ref === 'latest'
+    ? 'resultStore latest'
+    : `resultStore ${baselineResultsFrom.ref.id}`;
 }

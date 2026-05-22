@@ -198,6 +198,43 @@ Download the artifact and open `index.html` to view results.
 ];
 ```
 
+### External History Storage
+
+The reporter can load and save historical runs through a result store. This keeps
+the trend chart useful across CI jobs and local machines while still writing the
+normal local report.
+
+```typescript snippet=snippets/result-store-reporter-config.ts
+import { defineConfig } from '@playwright/test';
+
+export default defineConfig({
+  reporter: [
+    ['list'],
+    [
+      '@gleanwork/mcp-server-tester/reporters/mcpReporter',
+      {
+        outputDir: '.mcp-test-results',
+        resultStore: {
+          provider: 'gcs',
+          bucket: 'my-mcp-eval-results',
+          prefix: 'my-server/main',
+        },
+        runMetadata: {
+          branch: process.env.GITHUB_REF_NAME ?? 'local',
+          trigger: process.env.GITHUB_EVENT_NAME ?? 'manual',
+        },
+      },
+    ],
+  ],
+});
+```
+
+GCS storage uses Application Default Credentials. Set
+`GOOGLE_APPLICATION_CREDENTIALS` locally or in CI before running Playwright.
+`mcp-server-tester open` opens the local `.mcp-test-results/latest/` report only
+in v1; externally stored JSON is intended for history, baselines, dashboards, and
+AI analysis.
+
 ---
 
 ## Troubleshooting

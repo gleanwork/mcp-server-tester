@@ -82,16 +82,22 @@ export type {
   EvalRunnerOptions,
   ToolMetadataOverride,
   ToolOverrideVariant,
+  StoredEvalResultLoadOptions,
+  StoredEvalResultRef,
+  StoredEvalResultSaveOptions,
   SaveBaselineOptions,
   ComparisonOutcome,
   CaseComparisonResult,
   ServerComparisonResult,
   ServerComparisonOptions,
+  SaveServerComparisonOptions,
   CompareEvalRunsOptions,
   EvalCaseComparison,
   EvalCaseComparisonOutcome,
   EvalRunComparisonLabels,
   EvalRunComparisonResult,
+  SaveEvalRunComparisonOptions,
+  StoredEvalRunRef,
   HostType,
   CLIOutputFormat,
   CLIConfig,
@@ -227,14 +233,44 @@ export {
 // Eval Runner
 export { runEvalDataset, runEvalCase } from './evals/evalRunner.js';
 
+export type {
+  EvalResultStore,
+  EvalResultStoreConfig,
+  EvalResultStoreLike,
+  FileEvalResultStoreConfig,
+  GCSEvalResultStoreConfig,
+  ListStoredArtifactsOptions,
+  StoredArtifactKind,
+  StoredArtifactSummary,
+  StoredEvalArtifact,
+  StoredEvalArtifactMetadata,
+} from './evals/resultStore.js';
+export {
+  FileEvalResultStore,
+  GCSEvalResultStore,
+  createDefaultArtifactId,
+  createEvalResultStore,
+  createStoredEvalArtifact,
+  defaultEnvironmentMetadata,
+  isEvalResultStore,
+  resolveEvalResultStore,
+} from './evals/resultStore.js';
+
 // Baseline eval comparison
 export { saveBaseline, loadBaseline } from './evals/baseline.js';
 
 // Multi-server A/B comparison
-export { runServerComparison } from './evals/serverComparison.js';
+export {
+  runServerComparison,
+  saveServerComparison,
+} from './evals/serverComparison.js';
 
 // Completed eval run comparison
-export { compareEvalRuns } from './evals/evalRunComparison.js';
+export {
+  compareEvalRuns,
+  loadStoredEvalRunnerResult,
+  saveEvalRunComparison,
+} from './evals/evalRunComparison.js';
 
 // MCP Host Simulation
 export {

@@ -33,6 +33,7 @@ The dataset-driven evaluation engine. Key files:
 - `datasetLoader.ts` — reads and validates JSON datasets from disk.
 - `evalRunner.ts` — `runEvalDataset()` iterates cases, calls the MCP server (or the LLM host simulator), validates results against each case's expectation block, and returns `EvalRunnerResult`. Supports multi-iteration accuracy tracking and configurable concurrency.
 - `baseline.ts` — saves and loads pass/fail baselines for tracking regressions across runs.
+- `resultStore.ts` — persists eval runs, reporter runs, and comparison artifacts to local files or GCS using a shared JSON envelope.
 - `mcpHost/` — LLM host simulation (see data flow below).
 
 ### `src/judge/`
@@ -115,6 +116,26 @@ ValidationResult
    ↓  evalRunner.ts: rolled into EvalCaseResult (with optional accuracy over N iterations)
 EvalRunnerResult
 ```
+
+### External Result Storage
+
+```
+EvalRunnerResult / MCPEvalRunData / comparison result
+   ↓  resultStore.ts: createStoredEvalArtifact()
+StoredEvalArtifact { schemaVersion, kind, id, metadata, data }
+   ↓
+FileEvalResultStore or GCSEvalResultStore
+   ↓
+eval-runs/, reporter-runs/, or comparisons/
+   ↓
+latest.json + immutable <id>.json
+```
+
+The eval runner uses stored `eval-runner-result` artifacts for baseline
+regression detection. `compareEvalRuns()` remains pure; helpers load stored runs
+and save comparison artifacts around it. The Playwright reporter stores
+`reporter-run` artifacts for cross-run trend history while continuing to generate
+local HTML reports.
 
 ### Auth Flow
 

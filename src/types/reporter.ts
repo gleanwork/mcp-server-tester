@@ -14,6 +14,7 @@ import type {
   ExpectationBreakdown,
   UsageMetrics,
 } from './index.js';
+import type { EvalResultStoreLike } from '../evals/resultStore.js';
 
 /**
  * Configuration options for MCP Eval Reporter
@@ -51,6 +52,29 @@ export interface MCPEvalReporterConfig {
    * @default true
    */
   includeAutoTracking?: boolean;
+
+  /**
+   * Optional external result store for durable reporter run history.
+   */
+  resultStore?: EvalResultStoreLike;
+
+  /**
+   * Optional run ID for externally stored reporter results.
+   * Defaults to a generated timestamp-based ID.
+   */
+  runId?: string;
+
+  /**
+   * Extra metadata to attach to externally stored reporter results.
+   */
+  runMetadata?: Record<string, unknown>;
+
+  /**
+   * When true, strips response payloads before storing reporter results externally.
+   * Local report output is unchanged.
+   * @default false
+   */
+  redactStoredResponses?: boolean;
 }
 
 /**
