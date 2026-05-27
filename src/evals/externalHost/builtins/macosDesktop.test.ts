@@ -27,7 +27,7 @@ describe('macOS desktop built-in capabilities', () => {
     ]);
   });
 
-  it('builds a submit script that focuses the composer via coordinate click then pastes and submits', () => {
+  it('builds a submit script that uses keyboard-only input (no coordinate clicks)', () => {
     const script = buildMacosDesktopSubmitScript('hello marker', {
       appName: 'Example',
       createNewConversation: false,
@@ -35,9 +35,11 @@ describe('macOS desktop built-in capabilities', () => {
     });
 
     expect(script).toContain('tell application "Example" to activate');
-    expect(script).toContain('click at {centerX as integer, composerY as integer}');
     expect(script).toContain('keystroke "v" using command down');
     expect(script).toContain('key code 36');
+    // Coordinate-based clicks were removed in favor of relying on Chromium's
+    // DOM autofocus when a new conversation opens via Cmd+N.
+    expect(script).not.toContain('click at {');
   });
 
   it('emits Cmd+N when createNewConversation is enabled', () => {

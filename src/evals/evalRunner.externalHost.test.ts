@@ -153,15 +153,11 @@ describe('runEvalCase external_host mode', () => {
             uses: 'builtin:anthropic.claude.activateCoworkSurface',
             with: { appName: 'Claude' },
           },
-          {
-            uses: 'builtin:desktop.macos.wakeAccessibility',
-            with: { appName: 'Claude' },
-          },
         ],
         input: [
           {
             uses: 'builtin:desktop.macos.accessibilitySubmit',
-            with: { appName: 'Claude', createNewConversation: false },
+            with: { appName: 'Claude', createNewConversation: true },
           },
         ],
         completion: [

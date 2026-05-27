@@ -248,23 +248,18 @@ export function buildMacosDesktopSubmitScript(
 tell application ${JSON.stringify(options.appName)} to activate
 delay ${settleDelayMs / 1000}
 tell application "System Events"
-  ${newConversation}
   tell process ${JSON.stringify(options.appName)}
     set frontmost to true
-    -- Click the lower-center of the front window where chat composers live.
-    -- This focuses the composer AND wakes the Chromium AX tree as a side
-    -- effect. Using a coordinate-based click avoids fragile recursive
-    -- searches for AXTextArea — Cowork's composer may use a different role
-    -- (AXTextField, AXTextInput) depending on Electron/Claude version.
-    set winPos to position of front window
-    set winSize to size of front window
-    set centerX to (item 1 of winPos) + (item 1 of winSize) / 2
-    set composerY to (item 2 of winPos) + (item 2 of winSize) - 90
-    click at {centerX as integer, composerY as integer}
-    delay 0.6
   end tell
+  -- Force a known-focus state by opening a new conversation. Chromium's React
+  -- app autofocuses the composer on a fresh chat view, even though
+  -- AXFocusedUIElement doesn't expose that state to AppleScript. This avoids
+  -- coordinate-based clicks that are fragile to window position, monitor
+  -- placement, or layout drift.
+  ${newConversation}
   -- Paste the prompt from clipboard. The caller has already written the
-  -- prompt to the macOS clipboard via writeMacosClipboard.
+  -- prompt to the macOS clipboard via writeMacosClipboard. The keystroke
+  -- routes to whatever has DOM focus inside the active window.
   keystroke "v" using command down
   delay 0.4
   -- Submit via Return.
