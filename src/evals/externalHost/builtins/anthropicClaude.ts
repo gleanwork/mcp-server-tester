@@ -22,6 +22,7 @@ import { driverToSlug, hostTypeFromDriver } from '../driverIdentity.js';
 import {
   readMacosAccessibilityText,
   readMacosFrontWindowContents,
+  runAppleScript,
 } from './macosDesktop.js';
 
 const DEFAULT_APP_NAME = 'Claude';
@@ -112,6 +113,11 @@ export const ANTHROPIC_CLAUDE_CAPABILITIES: ExternalHostCapabilityImplementation
       run: rejectClaudeChatSurfaceCapability,
     },
     {
+      id: 'builtin:anthropic.claude.activateCoworkSurface',
+      capabilities: ['control'],
+      run: activateCoworkSurfaceCapability,
+    },
+    {
       id: 'builtin:anthropic.claude.accessibilityTrace',
       capabilities: ['completion', 'trace', 'normalize'],
       run: captureClaudeChatAccessibilityResultCapability,
@@ -128,6 +134,53 @@ export const ANTHROPIC_CLAUDE_CAPABILITIES: ExternalHostCapabilityImplementation
       run: normalizeClaudeCoworkAgentTraceCapability,
     },
   ];
+
+/**
+ * Deterministically switches the Claude desktop app to the Cowork surface via
+ * Cmd+2 (the app's built-in shortcut for the Cowork sidebar tab). Idempotent —
+ * sending Cmd+2 while already on Cowork is a no-op. Replaces the older
+ * rejectClaudeChatSurface capability for use cases that need automatic surface
+ * activation (e.g. CI runs).
+ */
+async function activateCoworkSurfaceCapability({
+  config,
+  run,
+  binding,
+  state,
+}: ExternalHostCapabilityContext): Promise<ExternalHostRunResult | void> {
+  const appName =
+    runStringOption(config, binding, 'appName') ?? DEFAULT_APP_NAME;
+  const settleDelayMs = 700;
+  const script = `
+tell application ${JSON.stringify(appName)} to activate
+delay 0.4
+tell application "System Events"
+  tell process ${JSON.stringify(appName)}
+    set frontmost to true
+    keystroke "2" using command down
+  end tell
+end tell
+delay ${settleDelayMs / 1000}
+return "ok"
+`;
+  try {
+    await runAppleScript(script, { timeoutMs: 8_000 });
+  } catch (err) {
+    return failureResult({
+      config,
+      context: run,
+      driver: state.driver,
+      displayName: state.displayName,
+      capabilitiesUsed: state.capabilitiesUsed,
+      failureKind: 'submission_failed',
+      error: `Failed to activate Cowork surface via Cmd+2: ${formatError(err)}`,
+      artifacts: [],
+      limitations: [
+        'Cowork surface activation depends on Cmd+2 being bound to the Cowork sidebar tab in the user-installed Claude app version.',
+      ],
+    });
+  }
+}
 
 async function rejectClaudeChatSurfaceCapability({
   config,
@@ -594,6 +647,11 @@ async function detectClaudeChatSurface(
 ): Promise<string | undefined> {
   let surfaceText: string;
   try {
+    // `entire contents of front window` is a single IPC batch transfer; it can
+    // be multi-MB on a fully-loaded Electron window (handled by the maxBuffer
+    // bump in runAppleScript). The recursive AppleScript alternative does one
+    // IPC round-trip per element and hits the per-script timeout on large
+    // trees.
     surfaceText = await readMacosFrontWindowContents(appName);
   } catch (err) {
     return `could not verify active Claude surface via Accessibility: ${formatError(err)}`;

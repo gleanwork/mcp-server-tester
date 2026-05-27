@@ -45,7 +45,14 @@ const EXTERNAL_HOST_REGISTRY: Record<
     capabilities: {
       control: [
         { uses: 'builtin:platform.macos' },
-        { uses: 'builtin:anthropic.claude.coworkSurface' },
+        {
+          uses: 'builtin:anthropic.claude.activateCoworkSurface',
+          with: { appName: 'Claude' },
+        },
+        {
+          uses: 'builtin:desktop.macos.wakeAccessibility',
+          with: { appName: 'Claude' },
+        },
       ],
       input: {
         uses: 'builtin:desktop.macos.accessibilitySubmit',

@@ -36,7 +36,14 @@ describe('external host driver identity and built-in defaults', () => {
     expect(config?.capabilities).toMatchObject({
       control: [
         { uses: 'builtin:platform.macos' },
-        { uses: 'builtin:anthropic.claude.coworkSurface' },
+        {
+          uses: 'builtin:anthropic.claude.activateCoworkSurface',
+          with: { appName: 'Claude' },
+        },
+        {
+          uses: 'builtin:desktop.macos.wakeAccessibility',
+          with: { appName: 'Claude' },
+        },
       ],
       input: { uses: 'builtin:desktop.macos.accessibilitySubmit' },
       completion: {
@@ -66,7 +73,8 @@ describe('external host driver identity and built-in defaults', () => {
       loaded.loadedCapabilities.map((capability) => capability.binding.uses)
     ).toEqual([
       'builtin:platform.macos',
-      'builtin:anthropic.claude.coworkSurface',
+      'builtin:anthropic.claude.activateCoworkSurface',
+      'builtin:desktop.macos.wakeAccessibility',
       'builtin:desktop.macos.accessibilitySubmit',
       'builtin:anthropic.claude.localAgentTrace',
       'builtin:anthropic.claude.localAgentNormalize',

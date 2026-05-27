@@ -10,7 +10,8 @@ import { driverToSlug, hostTypeFromDriver } from '../driverIdentity.js';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_SETTLE_DELAY_MS = 500;
-const DEFAULT_SUBMIT_BUTTON_NAMES = ['Send', 'Submit'];
+const DEFAULT_APPLESCRIPT_TIMEOUT_MS = 30_000;
+const DEFAULT_APPLESCRIPT_MAX_BUFFER = 64 * 1024 * 1024;
 
 export const MACOS_DESKTOP_CAPABILITIES: ExternalHostCapabilityImplementation[] =
   [
@@ -24,10 +25,22 @@ export const MACOS_DESKTOP_CAPABILITIES: ExternalHostCapabilityImplementation[] 
       capabilities: ['control', 'input'],
       run: submitPromptCapability,
     },
+    {
+      id: 'builtin:desktop.macos.wakeAccessibility',
+      capabilities: ['control'],
+      run: wakeAccessibilityCapability,
+    },
   ];
 
-export async function runAppleScript(script: string): Promise<string> {
-  const result = await execFileAsync('osascript', ['-e', script]);
+export async function runAppleScript(
+  script: string,
+  options: { timeoutMs?: number; maxBuffer?: number } = {}
+): Promise<string> {
+  const result = await execFileAsync('osascript', ['-e', script], {
+    maxBuffer: options.maxBuffer ?? DEFAULT_APPLESCRIPT_MAX_BUFFER,
+    timeout: options.timeoutMs ?? DEFAULT_APPLESCRIPT_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
+  });
   return result.stdout;
 }
 
@@ -80,6 +93,63 @@ export async function readMacosFrontWindowContents(
     appName
   )} to get entire contents of front window`;
   return runAppleScript(script);
+}
+
+/**
+ * Forces a Chromium-based app (Electron) to populate its accessibility tree by
+ * activating the app and simulating a click in the lower-center of the front
+ * window — the area where chat composers typically live. Without this, the AX
+ * tree exposes only window chrome (close/minimize buttons) and downstream
+ * findTextArea/findSubmitButton calls fail with "no composer found".
+ */
+export async function wakeMacosAccessibility(
+  appName: string,
+  options: { settleDelayMs?: number } = {}
+): Promise<void> {
+  const settleDelayMs = options.settleDelayMs ?? 800;
+  const script = `
+tell application ${JSON.stringify(appName)} to activate
+delay 0.3
+tell application "System Events"
+  tell process ${JSON.stringify(appName)}
+    set frontmost to true
+    set winPos to position of front window
+    set winSize to size of front window
+    set centerX to (item 1 of winPos) + (item 1 of winSize) / 2
+    set composerY to (item 2 of winPos) + (item 2 of winSize) - 90
+    click at {centerX as integer, composerY as integer}
+  end tell
+end tell
+delay ${settleDelayMs / 1000}
+return "ok"
+`;
+  await runAppleScript(script, { timeoutMs: 10_000 });
+}
+
+async function wakeAccessibilityCapability({
+  config,
+  run,
+  binding,
+  state,
+}: ExternalHostCapabilityContext): Promise<ExternalHostRunResult | void> {
+  try {
+    const appName =
+      runStringOption(config, binding, 'appName') ?? state.displayName;
+    await wakeMacosAccessibility(appName, {
+      settleDelayMs: runNumberOption(config, binding, 'settleDelayMs'),
+    });
+  } catch (err) {
+    return desktopFailureResult({
+      config,
+      context: run,
+      state,
+      failureKind: classifyDesktopSubmissionFailure(formatError(err)),
+      error: `Failed to wake macOS accessibility tree: ${formatError(err)}`,
+      limitations: [
+        'Chromium/Electron apps require a real mouse interaction before the macOS accessibility tree is populated.',
+      ],
+    });
+  }
 }
 
 async function requireMacosCapability({
@@ -159,7 +229,7 @@ export async function submitPromptToMacosDesktopApp(
 }
 
 export function buildMacosDesktopSubmitScript(
-  prompt: string,
+  _prompt: string,
   options: {
     appName: string;
     createNewConversation: boolean;
@@ -168,16 +238,6 @@ export function buildMacosDesktopSubmitScript(
   }
 ): string {
   const settleDelayMs = options.settleDelayMs;
-  const promptLiteral = JSON.stringify(prompt);
-  const verificationNeedle = prompt.includes('[eval-run-marker:')
-    ? '[eval-run-marker:'
-    : prompt.trim().slice(0, 120);
-  const verificationNeedleLiteral = JSON.stringify(verificationNeedle);
-  const submitButtonNamesLiteral = appleScriptListLiteral(
-    options.submitButtonNames?.length
-      ? options.submitButtonNames
-      : DEFAULT_SUBMIT_BUTTON_NAMES
-  );
 
   const newConversation = options.createNewConversation
     ? `keystroke "n" using command down
@@ -185,123 +245,30 @@ export function buildMacosDesktopSubmitScript(
     : '';
 
   return `
-on findTextArea(theElement)
-  try
-    tell application "System Events" to if role of theElement is "AXTextArea" then return theElement
-  end try
-  try
-    tell application "System Events" to set uiChildren to UI elements of theElement
-    repeat with childElement in uiChildren
-      set foundElement to my findTextArea(childElement)
-      if foundElement is not equal to missing value then return foundElement
-    end repeat
-  end try
-  return missing value
-end findTextArea
-
-on normalizeText(valueToNormalize)
-  try
-    return my lowercaseText(valueToNormalize as text)
-  on error
-    return ""
-  end try
-end normalizeText
-
-on lowercaseText(inputText)
-  set upperChars to "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-  set lowerChars to "abcdefghijklmnopqrstuvwxyz"
-  set outputText to ""
-  repeat with currentChar in characters of inputText
-    set currentCharText to currentChar as text
-    set charIndex to offset of currentCharText in upperChars
-    if charIndex is greater than 0 then
-      set outputText to outputText & character charIndex of lowerChars
-    else
-      set outputText to outputText & currentCharText
-    end if
-  end repeat
-  return outputText
-end lowercaseText
-
-on elementLabel(theElement)
-  set labels to {}
-  try
-    tell application "System Events" to if name of theElement is not missing value then set end of labels to name of theElement
-  end try
-  try
-    tell application "System Events" to if description of theElement is not missing value then set end of labels to description of theElement
-  end try
-  try
-    tell application "System Events" to if value of theElement is not missing value then set end of labels to value of theElement
-  end try
-  set AppleScript's text item delimiters to " "
-  return my normalizeText(labels as text)
-end elementLabel
-
-on labelMatches(theElement, buttonNames)
-  set labelText to my elementLabel(theElement)
-  repeat with buttonName in buttonNames
-    if labelText contains my normalizeText(buttonName) then return true
-  end repeat
-  return false
-end labelMatches
-
-on findSubmitButton(theElement, buttonNames)
-  try
-    tell application "System Events" to if role of theElement is "AXButton" and my labelMatches(theElement, buttonNames) then return theElement
-  end try
-  try
-    tell application "System Events" to set uiChildren to UI elements of theElement
-    repeat with childElement in uiChildren
-      set foundElement to my findSubmitButton(childElement, buttonNames)
-      if foundElement is not equal to missing value then return foundElement
-    end repeat
-  end try
-  return missing value
-end findSubmitButton
-
 tell application ${JSON.stringify(options.appName)} to activate
 delay ${settleDelayMs / 1000}
 tell application "System Events"
   ${newConversation}
   tell process ${JSON.stringify(options.appName)}
     set frontmost to true
-    set textAreaElement to my findTextArea(front window)
-    if textAreaElement is equal to missing value then error "No composer text area found"
-    click textAreaElement
-    try
-      set focused of textAreaElement to true
-    end try
-    try
-      set value of textAreaElement to ${promptLiteral}
-    end try
+    -- Click the lower-center of the front window where chat composers live.
+    -- This focuses the composer AND wakes the Chromium AX tree as a side
+    -- effect. Using a coordinate-based click avoids fragile recursive
+    -- searches for AXTextArea — Cowork's composer may use a different role
+    -- (AXTextField, AXTextInput) depending on Electron/Claude version.
+    set winPos to position of front window
+    set winSize to size of front window
+    set centerX to (item 1 of winPos) + (item 1 of winSize) / 2
+    set composerY to (item 2 of winPos) + (item 2 of winSize) - 90
+    click at {centerX as integer, composerY as integer}
+    delay 0.6
   end tell
-  delay 0.1
-  tell process ${JSON.stringify(options.appName)}
-    set textAreaElement to my findTextArea(front window)
-    if textAreaElement is equal to missing value then error "No composer text area found before submit"
-    if value of textAreaElement does not contain ${verificationNeedleLiteral} then
-      set frontmost to true
-      click textAreaElement
-      try
-        set focused of textAreaElement to true
-      end try
-      keystroke "v" using command down
-      delay 0.5
-    end if
-    if value of textAreaElement does not contain ${verificationNeedleLiteral} then error "Composer did not receive pasted eval prompt"
-    set submitButtonElement to my findSubmitButton(front window, ${submitButtonNamesLiteral})
-    if submitButtonElement is not equal to missing value then
-      perform action "AXPress" of submitButtonElement
-    else
-      set frontmost to true
-      click textAreaElement
-      try
-        set focused of textAreaElement to true
-      end try
-      key code 36
-    end if
-  end tell
+  -- Paste the prompt from clipboard. The caller has already written the
+  -- prompt to the macOS clipboard via writeMacosClipboard.
+  keystroke "v" using command down
+  delay 0.4
+  -- Submit via Return.
+  key code 36
 end tell
 `;
 }
@@ -406,10 +373,6 @@ function stringArrayOption(
     (item): item is string => typeof item === 'string'
   );
   return strings.length > 0 ? strings : undefined;
-}
-
-function appleScriptListLiteral(values: string[]): string {
-  return `{${values.map((value) => JSON.stringify(value)).join(', ')}}`;
 }
 
 function classifyDesktopSubmissionFailure(

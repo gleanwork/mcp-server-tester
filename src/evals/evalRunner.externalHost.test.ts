@@ -149,7 +149,14 @@ describe('runEvalCase external_host mode', () => {
       capabilities: {
         control: [
           { uses: 'builtin:platform.macos' },
-          { uses: 'builtin:anthropic.claude.coworkSurface' },
+          {
+            uses: 'builtin:anthropic.claude.activateCoworkSurface',
+            with: { appName: 'Claude' },
+          },
+          {
+            uses: 'builtin:desktop.macos.wakeAccessibility',
+            with: { appName: 'Claude' },
+          },
         ],
         input: [
           {
