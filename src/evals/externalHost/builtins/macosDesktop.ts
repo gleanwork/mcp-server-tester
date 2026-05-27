@@ -247,10 +247,31 @@ export function buildMacosDesktopSubmitScript(
   return `
 tell application ${JSON.stringify(options.appName)} to activate
 delay ${settleDelayMs / 1000}
-tell application "System Events"
-  tell process ${JSON.stringify(options.appName)}
-    set frontmost to true
+
+-- Verify the app actually came to the foreground. tell-to-activate is
+-- unreliable on multi-monitor / multi-Space setups when another app
+-- (browser, terminal, etc.) holds focus-prevention precedence. Retry
+-- bringing the app forward up to ~2 seconds; fail fast with a clear
+-- error if the OS refuses, since otherwise our keystrokes route to
+-- whatever app actually has focus and the eval times out 90s later.
+set activated to false
+repeat 10 times
+  tell application "System Events" to tell process ${JSON.stringify(options.appName)}
+    if frontmost then
+      set activated to true
+      exit repeat
+    end if
+    try
+      set frontmost to true
+    end try
   end tell
+  delay 0.2
+end repeat
+if not activated then
+  error ${JSON.stringify(options.appName)} & " could not be brought to the foreground (focus is held by another app); keystrokes would route to the wrong app"
+end if
+
+tell application "System Events"
   -- Force a known-focus state by opening a new conversation. Chromium's React
   -- app autofocuses the composer on a fresh chat view, even though
   -- AXFocusedUIElement doesn't expose that state to AppleScript. This avoids
