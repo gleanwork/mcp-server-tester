@@ -193,7 +193,7 @@ export function compareEvalRuns(
 export async function loadStoredEvalRunnerResult(
   storeLike: EvalResultStoreLike,
   ref: StoredEvalRunRef
-): Promise<EvalRunnerResult> {
+): Promise<StoredEvalArtifact<EvalRunnerResult>> {
   const store = resolveEvalResultStore(storeLike);
   const artifact =
     ref === 'latest'
@@ -207,7 +207,7 @@ export async function loadStoredEvalRunnerResult(
     throw new Error('No latest eval run artifact found');
   }
 
-  return artifact.data;
+  return artifact;
 }
 
 export async function saveEvalRunComparison(

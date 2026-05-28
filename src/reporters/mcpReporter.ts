@@ -72,7 +72,14 @@ export default class MCPReporter implements Reporter {
       resultStore: options.resultStore,
       runId: options.runId,
       runMetadata: options.runMetadata,
-      redactStoredResponses: options.redactStoredResponses,
+      // Default true to match the eval-runner store path. Stored artifacts
+      // omit response bodies by default; opt in by passing
+      // `redactStoredResponses: false` if you need full responses for
+      // debugging or history comparison. Keeping this consistent across
+      // both write paths prevents users from getting a mix of
+      // redacted/non-redacted artifacts depending on which code path wrote
+      // them.
+      redactStoredResponses: options.redactStoredResponses ?? true,
     };
   }
 

@@ -180,26 +180,29 @@ describe('compareEvalRuns', () => {
 
   it('loads a stored eval run for comparison', async () => {
     const store = new FileEvalResultStore({ provider: 'file', dir: tmpDir });
-    const run = createRun([createCase('a', true)], {
-      metadata: {
-        timestamp: '2026-05-22T00:00:00.000Z',
-        packageVersion: '1.0.0',
-        toolOverrideVariantId: 'variant-a',
-      },
-    });
+    const run = createRun([createCase('a', true)]);
     await store.saveArtifact(
       createStoredEvalArtifact({
         kind: 'eval-runner-result',
         id: 'run-a',
         data: run,
+        metadata: {
+          timestamp: '2026-05-22T00:00:00.000Z',
+          packageVersion: '1.0.0',
+          toolOverrideVariantId: 'variant-a',
+        },
       })
     );
 
     const loaded = await loadStoredEvalRunnerResult(store, { id: 'run-a' });
 
-    expect(loaded.metadata?.toolOverrideVariantId).toBe('variant-a');
+    // Artifact-level metadata is the storage envelope (set via
+    // createStoredEvalArtifact's metadata option). EvalRunnerResult is the
+    // runtime data and lives under loaded.data.
+    expect(loaded.metadata.toolOverrideVariantId).toBe('variant-a');
+    expect(loaded.data.caseResults).toHaveLength(1);
     expect(
-      compareEvalRuns({ baseline: loaded, candidate: loaded }).cases
+      compareEvalRuns({ baseline: loaded.data, candidate: loaded.data }).cases
     ).toHaveLength(1);
   });
 

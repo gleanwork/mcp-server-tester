@@ -298,8 +298,18 @@ export interface EvalRunnerOptions {
   omitResponsesFromBaseline?: boolean;
 
   /**
-   * When true, strips responses before storing externally. For baseline-style
-   * saves, `omitResponsesFromBaseline` remains the default behavior.
+   * When true (default), strips response bodies from each case result before
+   * saving to an external result store. Stored artifacts only need the pass/fail
+   * shape and tool-call metadata — full response payloads are not necessary
+   * for regression detection or history comparison. Set to false when you
+   * specifically need stored artifacts to retain complete responses.
+   *
+   * Defaults to `true` to match the reporter's `redactStoredResponses` default
+   * (see `MCPReporter`). Both write paths produce the same redaction shape, so
+   * users with both configured don't end up with a mix of redacted and
+   * non-redacted artifacts depending on which code path wrote them.
+   *
+   * @default true
    */
   redactStoredResponses?: boolean;
 
@@ -1297,10 +1307,7 @@ export async function runEvalDataset(
     } else {
       await saveStoredEvalResult(result, saveResultsTo, {
         resultStore,
-        omitResponses:
-          redactStoredResponses !== undefined
-            ? redactStoredResponses
-            : omitResponsesFromBaseline,
+        omitResponses: redactStoredResponses ?? true,
         metadata: {
           datasetName: dataset.name,
           ...(toolOverrides?.id !== undefined && {

@@ -698,8 +698,8 @@ const baseline = await loadStoredEvalRunnerResult(store, { id: 'baseline' });
 const candidate = await loadStoredEvalRunnerResult(store, { id: 'candidate' });
 
 const comparison = compareEvalRuns({
-  baseline,
-  candidate,
+  baseline: baseline.data,
+  candidate: candidate.data,
   labels: {
     baseline: 'current',
     candidate: candidate.metadata?.toolOverrideVariantId ?? 'candidate',
