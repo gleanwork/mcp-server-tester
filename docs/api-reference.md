@@ -507,9 +507,6 @@ await saveEvalRunComparison({ store, comparison, id: 'candidate-comparison' });
 **Result Structure:**
 
 ```typescript snippet=src/evals/evalRunner.ts#L121-L195
-/**
- * Overall result of running an eval dataset
- */
 export interface EvalRunnerResult {
   /**
    * Total number of cases
