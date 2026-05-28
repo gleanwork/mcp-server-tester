@@ -25,11 +25,6 @@ export const MACOS_DESKTOP_CAPABILITIES: ExternalHostCapabilityImplementation[] 
       capabilities: ['control', 'input'],
       run: submitPromptCapability,
     },
-    {
-      id: 'builtin:desktop.macos.wakeAccessibility',
-      capabilities: ['control'],
-      run: wakeAccessibilityCapability,
-    },
   ];
 
 export async function runAppleScript(
@@ -93,63 +88,6 @@ export async function readMacosFrontWindowContents(
     appName
   )} to get entire contents of front window`;
   return runAppleScript(script);
-}
-
-/**
- * Forces a Chromium-based app (Electron) to populate its accessibility tree by
- * activating the app and simulating a click in the lower-center of the front
- * window — the area where chat composers typically live. Without this, the AX
- * tree exposes only window chrome (close/minimize buttons) and downstream
- * findTextArea/findSubmitButton calls fail with "no composer found".
- */
-export async function wakeMacosAccessibility(
-  appName: string,
-  options: { settleDelayMs?: number } = {}
-): Promise<void> {
-  const settleDelayMs = options.settleDelayMs ?? 800;
-  const script = `
-tell application ${JSON.stringify(appName)} to activate
-delay 0.3
-tell application "System Events"
-  tell process ${JSON.stringify(appName)}
-    set frontmost to true
-    set winPos to position of front window
-    set winSize to size of front window
-    set centerX to (item 1 of winPos) + (item 1 of winSize) / 2
-    set composerY to (item 2 of winPos) + (item 2 of winSize) - 90
-    click at {centerX as integer, composerY as integer}
-  end tell
-end tell
-delay ${settleDelayMs / 1000}
-return "ok"
-`;
-  await runAppleScript(script, { timeoutMs: 10_000 });
-}
-
-async function wakeAccessibilityCapability({
-  config,
-  run,
-  binding,
-  state,
-}: ExternalHostCapabilityContext): Promise<ExternalHostRunResult | void> {
-  try {
-    const appName =
-      runStringOption(config, binding, 'appName') ?? state.displayName;
-    await wakeMacosAccessibility(appName, {
-      settleDelayMs: runNumberOption(config, binding, 'settleDelayMs'),
-    });
-  } catch (err) {
-    return desktopFailureResult({
-      config,
-      context: run,
-      state,
-      failureKind: classifyDesktopSubmissionFailure(formatError(err)),
-      error: `Failed to wake macOS accessibility tree: ${formatError(err)}`,
-      limitations: [
-        'Chromium/Electron apps require a real mouse interaction before the macOS accessibility tree is populated.',
-      ],
-    });
-  }
 }
 
 async function requireMacosCapability({

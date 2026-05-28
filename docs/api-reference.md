@@ -506,13 +506,7 @@ await saveEvalRunComparison({ store, comparison, id: 'candidate-comparison' });
 
 **Result Structure:**
 
-```typescript snippet=src/evals/evalRunner.ts#L106-L184
-  /**
-   * Per-tool metadata overrides keyed by canonical tool name.
-   */
-  tools: Record<string, ToolMetadataOverride>;
-}
-
+```typescript snippet=src/evals/evalRunner.ts#L121-L195
 /**
  * Overall result of running an eval dataset
  */
