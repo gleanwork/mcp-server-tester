@@ -516,6 +516,51 @@ export interface EvalRunnerResult {
 }
 ```
 
+### `runVariantExperiment(options, context)`
+
+Run a tool-metadata variant experiment: establish a baseline, inject each candidate variant via `toolOverrides`, compare against the baseline, rank by a metric, guard against regressions, and emit a structured improvement proposal. This is the high-level API that wraps the manual baseline → candidate → `compareEvalRuns` loop.
+
+**Parameters:**
+
+- `options: VariantExperimentOptions`
+  - `dataset: EvalDataset` - The dataset to run (never mutated)
+  - `variants?: ToolOverrideVariant[]` - Static candidates tried in round 0
+  - `proposeVariants?: (ctx: ProposeVariantsContext) => Promise<ToolOverrideVariant[]>` - Callback returning the next candidates from prior-round evidence; return `[]` to stop
+  - `metric?: 'passRate' | 'toolF1' | 'toolPrecision' | 'toolRecall'` - Ranking metric (default `'passRate'`)
+  - `maxRounds?: number` - Round budget (default `1`)
+  - `minImprovement?: number` - Stop when a round's best gain is below this (default `0`)
+  - `allowRegressions?: boolean` - Allow winners that regress cases (default `false`)
+  - Plus `runEvalDataset` passthrough: `defaultLlmIterations`, `defaultJudgeReps`, `concurrency`, `filterTags`, `schemas`, `mcpHostModel`, `judgeModel`
+- `context: EvalContext` - `{ mcp, testInfo? }` from your test
+
+**Returns:** `VariantExperimentResult`
+
+- `baseline` - The original no-override run
+- `rounds` - Every round's candidates with per-candidate `result`, `comparison`, `metricValue`, `metricDelta`, `disqualified`
+- `winner` - Best non-disqualified candidate across all rounds
+- `proposal` - `VariantImprovementProposal` with `recommendation: 'apply' | 'reject' | 'inconclusive'`, metric values, `toolChanges`, and improved/regressed case ids
+- `reason` - Why the experiment stopped: `'no-variants' | 'no-improvement' | 'max-rounds' | 'threshold-met'`
+
+```typescript
+import { runVariantExperiment } from '@gleanwork/mcp-server-tester';
+
+const result = await runVariantExperiment(
+  {
+    dataset,
+    variants: [variant],
+    metric: 'passRate',
+    defaultLlmIterations: 10,
+  },
+  { mcp, testInfo }
+);
+
+if (result.proposal?.recommendation === 'apply') {
+  console.log(result.winner?.variant.id, result.proposal.delta);
+}
+```
+
+A candidate that regresses any case is disqualified from winning unless `allowRegressions: true`; the best attempt is still surfaced in `proposal` with `recommendation: 'reject'` so an agent can see what broke. See [MCP Host Simulation](./mcp-host.md#driving-it-from-an-agent-runvariantexperiment) for the full agent-loop example.
+
 ### `runEvalCase(evalCase, context, options?)`
 
 Run a single eval case. Useful when you want fine-grained control over individual cases outside of a dataset, or when building custom eval orchestration.

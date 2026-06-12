@@ -92,6 +92,15 @@ export type {
   EvalCaseComparisonOutcome,
   EvalRunComparisonLabels,
   EvalRunComparisonResult,
+  ExperimentMetric,
+  VariantExperimentReason,
+  VariantRecommendation,
+  VariantCandidateResult,
+  VariantExperimentRound,
+  ProposeVariantsContext,
+  VariantImprovementProposal,
+  VariantExperimentOptions,
+  VariantExperimentResult,
   HostType,
   CLIOutputFormat,
   CLIConfig,
@@ -235,6 +244,9 @@ export { runServerComparison } from './evals/serverComparison.js';
 
 // Completed eval run comparison
 export { compareEvalRuns } from './evals/evalRunComparison.js';
+
+// AI-driven variant optimization experiments
+export { runVariantExperiment } from './evals/variantExperiment.js';
 
 // MCP Host Simulation
 export {

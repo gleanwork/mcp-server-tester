@@ -238,6 +238,131 @@ console.log(`Improved cases: ${comparison.improvedCases.length}`);
 
 `toolOverrides.tools` is keyed by canonical MCP tool name. v1 supports `description` and `inputSchema` replacements only; tool renames, mocked responses, and dataset rewriting are intentionally out of scope.
 
+For a complete runnable harness — including building a structured next-variant proposal from the comparison — see [`snippets/runtime-tool-override-experiment.ts`](../snippets/runtime-tool-override-experiment.ts).
+
+### Driving it from an agent: `runVariantExperiment`
+
+The manual loop above — run baseline, inject a variant, `compareEvalRuns`, build a proposal — is the low-level path. `runVariantExperiment` wraps that whole loop into a single call so an AI or skill can optimize tool metadata autonomously:
+
+- Pass a static `variants` list for an A/B comparison, **or** a `proposeVariants` callback that returns the next candidate(s) from the previous round's evidence (`history`, `bestSoFar`).
+- Candidates are ranked by `metric` (`passRate` by default, or `toolF1` / `toolPrecision` / `toolRecall`) and always compared against the original baseline, so the resulting proposal is directly applicable.
+- A variant that regresses any case is disqualified (unless `allowRegressions: true`), so the loop never crowns a description that fixes one case while breaking another.
+- The result carries a structured `proposal` with an `apply` / `reject` / `inconclusive` recommendation, the per-tool `toolChanges`, and the improved/regressed case ids.
+
+The library owns the experiment mechanics; your `proposeVariants` callback owns the judgment of which variant to try next. `runVariantExperiment` never edits your MCP server source or dataset — it returns a proposal for you (or an agent) to act on.
+
+```typescript snippet=snippets/variant-experiment.ts
+import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
+import {
+  loadEvalDataset,
+  runVariantExperiment,
+  type ToolOverrideVariant,
+} from '@gleanwork/mcp-server-tester';
+
+// Static A/B: try a fixed set of tool-description variants and keep the winner.
+test('optimize search description (static variants)', async ({
+  mcp,
+}, testInfo) => {
+  const dataset = await loadEvalDataset('./data/host-evals.json');
+
+  const variants: ToolOverrideVariant[] = [
+    {
+      id: 'search-v2-internal-docs',
+      description: 'Clarify that search is for internal knowledge.',
+      tools: {
+        search: {
+          description:
+            'Search internal company documents, policies, wiki pages, and announcements. Use this when the user asks to find company information by topic.',
+        },
+      },
+    },
+    {
+      id: 'search-v3-with-examples',
+      description: 'Add example triggers to the search description.',
+      tools: {
+        search: {
+          description:
+            'Find internal company knowledge — docs, policies, wikis, announcements. Examples: "find the Q3 planning doc", "what is our PTO policy".',
+        },
+      },
+    },
+  ];
+
+  const result = await runVariantExperiment(
+    { dataset, variants, metric: 'passRate', defaultLlmIterations: 10 },
+    { mcp, testInfo }
+  );
+
+  if (result.proposal?.recommendation === 'apply') {
+    const pct = (result.proposal.delta * 100).toFixed(1);
+    console.log(
+      `Apply ${result.winner?.variant.id}: +${pct}% ${result.metric}`
+    );
+    console.log(
+      `Improved cases: ${result.proposal.improvedCaseIds.join(', ')}`
+    );
+  }
+
+  // The default guard never crowns a variant that regresses a case.
+  expect(result.winner?.comparison.regressedCases ?? []).toHaveLength(0);
+});
+
+// Agent loop: propose the next variant from the previous round's evidence.
+test('optimize search description (agent loop)', async ({ mcp }, testInfo) => {
+  const dataset = await loadEvalDataset('./data/host-evals.json');
+
+  const result = await runVariantExperiment(
+    {
+      dataset,
+      metric: 'passRate',
+      maxRounds: 4,
+      minImprovement: 0.05,
+      defaultLlmIterations: 10,
+      async proposeVariants({ round, history, bestSoFar }) {
+        // An agent inspects bestSoFar / history to decide the next rewrite.
+        // Stop early once the best candidate has no remaining failures.
+        const stillFailing =
+          history.at(-1)?.best?.comparison.unchangedFailures.map((c) => c.id) ??
+          [];
+        if (round > 0 && stillFailing.length === 0) {
+          return [];
+        }
+
+        return [
+          {
+            id: `search-round-${round}`,
+            description: `Round ${round} refinement of ${
+              bestSoFar?.variant.id ?? 'baseline'
+            }.`,
+            tools: {
+              search: {
+                description:
+                  'Use search ONLY to find internal company knowledge (docs, policies, wikis, announcements). Convert the request into a concise topic query.',
+              },
+            },
+          },
+        ];
+      },
+    },
+    { mcp, testInfo }
+  );
+
+  console.log(
+    `Stopped after ${result.rounds.length} round(s): ${result.reason}`
+  );
+  console.log(JSON.stringify(result.proposal, null, 2));
+});
+```
+
+| Option             | Default      | Purpose                                                                 |
+| ------------------ | ------------ | ----------------------------------------------------------------------- |
+| `variants`         | —            | Static candidates tried in round 0.                                     |
+| `proposeVariants`  | —            | Async callback returning the next candidates — the AI hook.             |
+| `metric`           | `'passRate'` | Ranking metric: `passRate` / `toolF1` / `toolPrecision` / `toolRecall`. |
+| `maxRounds`        | `1`          | Maximum optimization rounds.                                            |
+| `minImprovement`   | `0`          | Stop when a round's best gain falls below this.                         |
+| `allowRegressions` | `false`      | Allow a winner that regresses cases.                                    |
+
 ## Project-Based A/B Testing
 
 Run two Playwright projects with different MCP server configurations when the variant is not limited to runtime metadata. This is useful for comparing different server builds, tool behavior, auth scopes, response shapes, transports, or any change that should be exercised through a real MCP server process.

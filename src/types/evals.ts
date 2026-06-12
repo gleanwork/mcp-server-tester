@@ -33,6 +33,18 @@ export type {
   EvalRunComparisonResult,
 } from '../evals/evalRunComparison.js';
 
+export type {
+  ExperimentMetric,
+  VariantExperimentReason,
+  VariantRecommendation,
+  VariantCandidateResult,
+  VariantExperimentRound,
+  ProposeVariantsContext,
+  VariantImprovementProposal,
+  VariantExperimentOptions,
+  VariantExperimentResult,
+} from '../evals/variantExperiment.js';
+
 export type { SaveBaselineOptions } from '../evals/baseline.js';
 
 export type {
