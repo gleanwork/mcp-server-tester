@@ -72,7 +72,7 @@ export interface MCPEvalReporterConfig {
   /**
    * When true, strips response payloads before storing reporter results externally.
    * Local report output is unchanged.
-   * @default false
+   * @default true
    */
   redactStoredResponses?: boolean;
 }
