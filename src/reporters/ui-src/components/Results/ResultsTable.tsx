@@ -7,6 +7,7 @@ import {
   Folder,
 } from 'lucide-react';
 import type { EvalCaseResult } from '../../types';
+import { rateColorClass } from '../../utils';
 
 interface ResultsTableProps {
   results: EvalCaseResult[];
@@ -153,7 +154,7 @@ function ResultRow({
       )}
       {result.toolRecall !== undefined && (
         <span
-          className="inline-flex items-center px-2 py-0.5 rounded text-xs shrink-0 bg-muted text-muted-foreground"
+          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold shrink-0 bg-muted ${rateColorClass(result.toolRecall)}`}
           title="Tool recall: fraction of required tools that were called"
         >
           R: {(result.toolRecall * 100).toFixed(0)}%

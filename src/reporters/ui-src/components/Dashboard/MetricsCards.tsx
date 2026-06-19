@@ -51,6 +51,8 @@ function computeMetrics(results: EvalCaseResult[]): MetricsSummary {
 
 interface ToolDiscoveryMetrics {
   meanRecall: number;
+  meanPrecision: number;
+  meanF1: number;
   count: number;
 }
 
@@ -64,10 +66,17 @@ function computeToolDiscovery(
 ): ToolDiscoveryMetrics | null {
   const withRecall = results.filter((r) => r.toolRecall !== undefined);
   if (withRecall.length === 0) return null;
-  const meanRecall =
-    withRecall.reduce((sum, r) => sum + (r.toolRecall ?? 0), 0) /
-    withRecall.length;
-  return { meanRecall, count: withRecall.length };
+  const mean = (fn: (r: EvalCaseResult) => number) =>
+    withRecall.reduce((sum, r) => sum + fn(r), 0) / withRecall.length;
+  const meanRecall = mean((r) => r.toolRecall ?? 0);
+  const meanPrecision = mean((r) => r.toolPrecision ?? 0);
+  // Per-case F1 (harmonic mean of that case's precision & recall), then averaged.
+  const meanF1 = mean((r) => {
+    const p = r.toolPrecision ?? 0;
+    const rec = r.toolRecall ?? 0;
+    return p + rec > 0 ? (2 * p * rec) / (p + rec) : 0;
+  });
+  return { meanRecall, meanPrecision, meanF1, count: withRecall.length };
 }
 
 function computeRegressions(
@@ -107,6 +116,28 @@ export function MetricsCards({
         </span>
         <span className="text-xs text-muted-foreground">pass rate</span>
       </div>
+
+      {/* Tool recall — co-headline for mcp_host runs: this is what tool
+          discoverability is measured by. Precision / F1 ride alongside. */}
+      {showEvalCards && toolDiscovery !== null && (
+        <>
+          <Divider />
+          <div className="flex items-baseline gap-1.5">
+            <span
+              className={`text-xl font-bold tabular-nums ${rateColorClass(toolDiscovery.meanRecall)}`}
+            >
+              {(toolDiscovery.meanRecall * 100).toFixed(0)}%
+            </span>
+            <span className="text-xs text-muted-foreground">tool recall</span>
+          </div>
+          <div className="flex items-baseline gap-2 text-sm text-muted-foreground tabular-nums">
+            <span>
+              precision {(toolDiscovery.meanPrecision * 100).toFixed(0)}%
+            </span>
+            <span>F1 {(toolDiscovery.meanF1 * 100).toFixed(0)}%</span>
+          </div>
+        </>
+      )}
 
       <Divider />
 
@@ -161,20 +192,6 @@ export function MetricsCards({
             <span className="text-xs text-muted-foreground">
               ({overall.totalIterations} iterations)
             </span>
-          </div>
-        </>
-      )}
-
-      {showEvalCards && toolDiscovery !== null && (
-        <>
-          <Divider />
-          <div className="flex items-baseline gap-1.5 text-sm">
-            <span
-              className={`font-semibold tabular-nums ${rateColorClass(toolDiscovery.meanRecall)}`}
-            >
-              {(toolDiscovery.meanRecall * 100).toFixed(0)}%
-            </span>
-            <span className="text-muted-foreground">tool discovery</span>
           </div>
         </>
       )}
