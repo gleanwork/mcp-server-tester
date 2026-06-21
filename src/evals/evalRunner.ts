@@ -1078,6 +1078,10 @@ async function getGitHash(): Promise<string | undefined> {
   return result.status === 0 ? result.stdout.trim() : undefined;
 }
 
+// ponytail: warn once per process, not per call — the message is identical and
+// runVariantExperiment / scripted loops call this many times.
+let warnedNoTestInfo = false;
+
 export async function runEvalDataset(
   options: EvalRunnerOptions,
   context: EvalContext
@@ -1328,7 +1332,8 @@ export async function runEvalDataset(
       contentType: 'application/json',
       body: Buffer.from(JSON.stringify({ caseResults })),
     });
-  } else if (caseResults.length > 0) {
+  } else if (caseResults.length > 0 && !warnedNoTestInfo) {
+    warnedNoTestInfo = true;
     console.warn(
       '[mcp-server-tester] runEvalDataset: testInfo not provided — results will not appear in the MCP reporter.\n' +
         'To enable reporting, pass testInfo from the Playwright test function:\n' +
