@@ -406,7 +406,10 @@ describe('createVercelOrchestrator', () => {
       });
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain('model not found');
+      // Raw provider error is preserved, not collapsed to a misleading guess.
+      expect(result.error).toContain('404 Not Found: model not found');
+      // Hint points at the real causes (model id / base-URL override).
+      expect(result.error).toContain('ANTHROPIC_BASE_URL');
     });
   });
 });

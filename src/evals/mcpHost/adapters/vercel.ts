@@ -54,7 +54,9 @@ function enrichErrorMessage(err: unknown, provider: string): string {
     );
   }
 
-  // Model not found (404 or explicit "model … not found" phrasing)
+  // 404 / not-found: the SDK collapses several distinct causes here — a wrong
+  // or retired model id, or a base-URL override routing to a gateway that
+  // doesn't serve the model. Preserve the raw error instead of guessing.
   if (
     raw.includes('404') ||
     raw.includes('Not Found') ||
@@ -62,8 +64,11 @@ function enrichErrorMessage(err: unknown, provider: string): string {
       raw.toLowerCase().includes('not found'))
   ) {
     return (
-      `MCP host simulation failed: model not found.\n` +
-      `Hint: check the model name format for your provider. For vertex-anthropic use 'claude-3-5-haiku@20241022' (with @).`
+      `MCP host simulation failed: ${raw}\n` +
+      `Hint: a 404 usually means the model id is wrong or retired, or a ` +
+      `base-URL override (e.g. ANTHROPIC_BASE_URL / OPENAI_BASE_URL pointing ` +
+      `at a gateway) is routing requests somewhere that doesn't serve this ` +
+      `model. Verify the model id and that no unexpected *_BASE_URL is set.`
     );
   }
 
