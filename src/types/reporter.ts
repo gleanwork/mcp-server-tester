@@ -480,6 +480,39 @@ export interface MCPEvalRunData {
    * Server capabilities discovered via listTools (optional)
    */
   serverCapabilities?: MCPServerCapabilitiesData[];
+
+  /**
+   * Summary of a tool-metadata variant experiment (runVariantExperiment),
+   * present when the run was produced by one. The `results` above reflect the
+   * winning variant; this records how the experiment got there.
+   */
+  variantExperiment?: MCPVariantExperimentData;
+}
+
+/**
+ * Compact summary of a `runVariantExperiment` run, for the reporter UI.
+ */
+export interface MCPVariantExperimentData {
+  /** Metric optimized: passRate | toolF1 | toolPrecision | toolRecall. */
+  metric: string;
+  /** Baseline metric value (0-1), before any variant. */
+  baselineValue: number;
+  /** Best metric value achieved (the winner, or best attempt) (0-1). */
+  bestValue: number;
+  /** The best candidate from each round, in order. */
+  rounds: Array<{
+    round: number;
+    variantId: string;
+    metricValue: number;
+    metricDelta: number;
+    disqualified: boolean;
+  }>;
+  /** Winning variant id, if a non-regressing candidate beat the baseline. */
+  winnerVariantId?: string;
+  /** apply | reject | inconclusive */
+  recommendation?: string;
+  /** Why the experiment stopped. */
+  reason: string;
 }
 
 /**

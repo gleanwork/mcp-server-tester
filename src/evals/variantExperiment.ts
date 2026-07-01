@@ -8,6 +8,7 @@ import type {
 import type { EvalDataset } from './datasetTypes.js';
 import { compareEvalRuns } from './evalRunComparison.js';
 import type { EvalRunComparisonResult } from './evalRunComparison.js';
+import type { MCPVariantExperimentData } from '../types/reporter.js';
 import type { ZodType } from 'zod';
 
 /**
@@ -212,9 +213,17 @@ export async function runVariantExperiment(
   const minImprovement = options.minImprovement ?? 0;
   const allowRegressions = options.allowRegressions ?? false;
 
+  // Internal eval runs must not attach to the reporter individually, or the
+  // report would show only the baseline run. We attach the winner's results
+  // plus an experiment summary once, at the end, when testInfo is present.
+  const internalContext: EvalContext = {
+    mcp: context.mcp,
+    expect: context.expect,
+  };
+
   const baseline = await runEvalDataset(
     buildRunOptions(options, undefined),
-    context
+    internalContext
   );
 
   const baselineValue = readMetric(baseline, metric);
@@ -249,7 +258,7 @@ export async function runVariantExperiment(
     for (const variant of variants) {
       const candidate = await scoreVariant(
         options,
-        context,
+        internalContext,
         baseline,
         baselineValue,
         metric,
@@ -283,7 +292,7 @@ export async function runVariantExperiment(
     ? buildProposal(metric, baselineValue, proposalSource, winner !== undefined)
     : undefined;
 
-  return {
+  const result: VariantExperimentResult = {
     metric,
     baseline,
     rounds,
@@ -291,6 +300,53 @@ export async function runVariantExperiment(
     proposal,
     converged: true,
     reason,
+  };
+
+  if (context.testInfo) {
+    // Surface the best run's case results so the report reflects the optimized
+    // state, plus a compact summary of how the experiment got there.
+    const surfaceRun = winner?.result ?? bestAttempted?.result ?? baseline;
+    await context.testInfo.attach('mcp-test-results', {
+      contentType: 'application/json',
+      body: Buffer.from(
+        JSON.stringify({ caseResults: surfaceRun.caseResults })
+      ),
+    });
+    await context.testInfo.attach('mcp-variant-experiment', {
+      contentType: 'application/json',
+      body: Buffer.from(
+        JSON.stringify(buildExperimentData(result, baselineValue))
+      ),
+    });
+  }
+
+  return result;
+}
+
+function buildExperimentData(
+  result: VariantExperimentResult,
+  baselineValue: number
+): MCPVariantExperimentData {
+  return {
+    metric: result.metric,
+    baselineValue,
+    bestValue:
+      result.winner?.metricValue ??
+      result.proposal?.candidateValue ??
+      baselineValue,
+    rounds: result.rounds.map((round) => {
+      const best = round.best ?? round.candidates[0];
+      return {
+        round: round.round,
+        variantId: best?.variant.id ?? '(none)',
+        metricValue: best?.metricValue ?? baselineValue,
+        metricDelta: best?.metricDelta ?? 0,
+        disqualified: best?.disqualified ?? false,
+      };
+    }),
+    winnerVariantId: result.winner?.variant.id,
+    recommendation: result.proposal?.recommendation,
+    reason: result.reason,
   };
 }
 

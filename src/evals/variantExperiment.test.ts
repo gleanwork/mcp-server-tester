@@ -340,3 +340,90 @@ describe('runVariantExperiment — multi-round proposeVariants', () => {
     expect(result.reason).toBe('no-improvement');
   });
 });
+
+describe('runVariantExperiment — reporter integration', () => {
+  it('attaches winner results and an experiment summary when testInfo is present', async () => {
+    setRuns({
+      __baseline__: makeResult([
+        { id: 'c1', pass: false },
+        { id: 'c2', pass: false },
+      ]),
+      v1: makeResult([
+        { id: 'c1', pass: true },
+        { id: 'c2', pass: true },
+      ]),
+    });
+    const attach = vi.fn();
+    const ctx = { mcp: {}, testInfo: { attach } } as unknown as EvalContext;
+
+    await runVariantExperiment(
+      { dataset, variants: [variant('v1')], metric: 'passRate' },
+      ctx
+    );
+
+    const names = attach.mock.calls.map((c) => c[0] as string);
+    expect(names).toContain('mcp-test-results');
+    expect(names).toContain('mcp-variant-experiment');
+
+    const expCall = attach.mock.calls.find(
+      (c) => c[0] === 'mcp-variant-experiment'
+    );
+    const summaryBody = (expCall![1] as { body: Buffer }).body;
+    const summary = JSON.parse(summaryBody.toString()) as {
+      metric: string;
+      baselineValue: number;
+      bestValue: number;
+      winnerVariantId?: string;
+      recommendation?: string;
+      rounds: unknown[];
+    };
+    expect(summary.metric).toBe('passRate');
+    expect(summary.baselineValue).toBe(0);
+    expect(summary.bestValue).toBe(1);
+    expect(summary.winnerVariantId).toBe('v1');
+    expect(summary.recommendation).toBe('apply');
+    expect(summary.rounds).toHaveLength(1);
+
+    // The surfaced case results are the WINNER's (both passing), not baseline.
+    const resCall = attach.mock.calls.find((c) => c[0] === 'mcp-test-results');
+    const surfacedBody = (resCall![1] as { body: Buffer }).body;
+    const surfaced = JSON.parse(surfacedBody.toString()) as {
+      caseResults: Array<{ pass: boolean }>;
+    };
+    expect(surfaced.caseResults.every((r) => r.pass)).toBe(true);
+  });
+
+  it('does not attach when testInfo is absent', async () => {
+    setRuns({
+      __baseline__: makeResult([{ id: 'c1', pass: true }]),
+      v1: makeResult([{ id: 'c1', pass: true }]),
+    });
+    // context has testInfo: undefined — should complete without attaching.
+    await expect(
+      runVariantExperiment(
+        { dataset, variants: [variant('v1')], metric: 'passRate' },
+        context
+      )
+    ).resolves.toBeDefined();
+  });
+
+  it('runs internal evals without testInfo so the reporter is not spammed', async () => {
+    setRuns({
+      __baseline__: makeResult([{ id: 'c1', pass: false }]),
+      v1: makeResult([{ id: 'c1', pass: true }]),
+    });
+    const attach = vi.fn();
+    const ctx = { mcp: {}, testInfo: { attach } } as unknown as EvalContext;
+
+    await runVariantExperiment(
+      { dataset, variants: [variant('v1')], metric: 'passRate' },
+      ctx
+    );
+
+    // Every internal runEvalDataset call received a context WITHOUT testInfo.
+    for (const call of mocks.runEvalDataset.mock.calls) {
+      const passedCtx = call[1] as EvalContext;
+      expect(passedCtx.testInfo).toBeUndefined();
+    }
+  });
+});

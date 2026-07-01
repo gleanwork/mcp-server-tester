@@ -11,6 +11,7 @@ import {
 import { ByToolTable } from './components/Dashboard/ByToolTable';
 import { FailureBreakdown } from './components/Dashboard/FailureBreakdown';
 import { TrendChart } from './components/Dashboard/TrendChart';
+import { VariantExperimentCard } from './components/Dashboard/VariantExperimentCard';
 import { ResultsTable } from './components/Results/ResultsTable';
 import { DetailModal } from './components/Results/DetailModal';
 import { ConformancePanel } from './components/Conformance/ConformancePanel';
@@ -172,8 +173,15 @@ function App() {
             >
               <ErrorBoundary label="Evals tab">
                 <>
-                  {/* Eval-specific metrics: accuracy, tool discovery, regressions */}
+                  {/* Eval-specific metrics: accuracy, tool recall, regressions */}
                   <MetricsCards results={evalResults} mode="eval" />
+
+                  {/* Variant experiment summary, when this run was one */}
+                  {data.runData.variantExperiment && (
+                    <VariantExperimentCard
+                      data={data.runData.variantExperiment}
+                    />
+                  )}
 
                   {/* Diagnostic panels with shared toggle above */}
                   <div className="space-y-2">

@@ -16,6 +16,7 @@ import type {
   MCPEvalHistoricalSummary,
   MCPConformanceResultData,
   MCPServerCapabilitiesData,
+  MCPVariantExperimentData,
   EvalCaseResult,
   MCPConformanceCheck,
 } from '../types/reporter.js';
@@ -61,6 +62,7 @@ export default class MCPReporter implements Reporter {
   private allResults: Array<EvalCaseResult> = [];
   private conformanceChecks: Array<MCPConformanceResultData> = [];
   private serverCapabilities: Array<MCPServerCapabilitiesData> = [];
+  private variantExperiment: MCPVariantExperimentData | undefined;
 
   constructor(options: MCPEvalReporterConfig = {}) {
     this.config = {
@@ -150,6 +152,28 @@ export default class MCPReporter implements Reporter {
       } catch (error) {
         this.logError(
           `[MCP Reporter] Failed to parse eval results from test "${test.title}":`,
+          error
+        );
+      }
+    }
+
+    // Strategy 1b: Extract variant-experiment summary (runVariantExperiment)
+    const experimentAttachment = result.attachments.find(
+      (a) =>
+        a.name === 'mcp-variant-experiment' &&
+        a.contentType === 'application/json'
+    );
+    const experimentContent = experimentAttachment
+      ? await this.getAttachmentContent(experimentAttachment)
+      : null;
+    if (experimentContent) {
+      try {
+        this.variantExperiment = JSON.parse(
+          experimentContent
+        ) as MCPVariantExperimentData;
+      } catch (error) {
+        this.logError(
+          `[MCP Reporter] Failed to parse variant-experiment attachment for "${test.title}":`,
           error
         );
       }
@@ -439,6 +463,7 @@ export default class MCPReporter implements Reporter {
         this.serverCapabilities.length > 0
           ? this.serverCapabilities
           : undefined,
+      variantExperiment: this.variantExperiment,
     };
   }
 
