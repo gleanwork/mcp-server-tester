@@ -12,7 +12,8 @@ export function parseStreamJson(stdout: string): MCPHostSimulationResult {
   let usage: UsageMetrics | undefined;
   const conversationHistory: Array<{
     role: 'user' | 'assistant' | 'tool';
-    content: string;
+    content?: string;
+    toolCallId?: string;
   }> = [];
 
   for (const line of lines) {
@@ -49,7 +50,17 @@ export function parseStreamJson(stdout: string): MCPHostSimulationResult {
             typeof block.content === 'string'
               ? block.content
               : JSON.stringify(block.content);
-          conversationHistory.push({ role: 'tool', content });
+          const call = block.tool_use_id
+            ? toolCalls.find((tc) => tc.id === block.tool_use_id)
+            : undefined;
+          if (call) {
+            // Store the payload once on the call; the transcript just references it.
+            call.output = content;
+            conversationHistory.push({ role: 'tool', toolCallId: call.id });
+          } else {
+            // Orphan result (no matching tool_use) — keep inline so nothing is lost.
+            conversationHistory.push({ role: 'tool', content });
+          }
         }
       }
     }
