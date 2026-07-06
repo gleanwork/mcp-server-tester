@@ -237,6 +237,8 @@ export interface LLMToolCall {
   arguments: Record<string, unknown>;
   /** Optional tool call ID (for tracking) */
   id?: string;
+  /** Tool result text, when the host surfaces it (paired to this call) */
+  output?: string;
 }
 
 /**
@@ -258,10 +260,17 @@ export interface MCPHostSimulationResult {
   /** The scenario prompt that was given to the LLM */
   scenario?: string;
 
-  /** The conversation turns for attribution analysis */
+  /**
+   * The conversation turns for attribution analysis.
+   *
+   * Tool turns reference their call via `toolCallId` rather than inlining the
+   * (potentially large) result — hydrate the output from the matching
+   * `toolCalls[]` entry. `content` holds assistant/user text.
+   */
   conversationHistory?: Array<{
     role: 'user' | 'assistant' | 'tool';
-    content: string;
+    content?: string;
+    toolCallId?: string;
   }>;
 
   /**

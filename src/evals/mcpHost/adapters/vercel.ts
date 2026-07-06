@@ -222,13 +222,22 @@ export function createVercelOrchestrator(): MCPHostSimulator {
           tools[toolName] = {
             description: mcpTool.description ?? '',
             inputSchema: jsonSchema(rawSchema),
-            execute: async (args: Record<string, unknown>) => {
+            execute: async (
+              args: Record<string, unknown>,
+              opts?: { toolCallId?: string },
+            ) => {
               const mcpStart = Date.now();
               const result = await mcp.callTool(toolName, args);
               mcpDurationMs += Date.now() - mcpStart;
 
-              allToolCalls.push({ name: toolName, arguments: args });
-              return extractText(result);
+              const output = extractText(result);
+              allToolCalls.push({
+                id: opts?.toolCallId,
+                name: toolName,
+                arguments: args,
+                output,
+              });
+              return output;
             },
           };
         }
@@ -257,15 +266,22 @@ export function createVercelOrchestrator(): MCPHostSimulator {
             }
           : undefined;
 
-        const conversationHistory = (result.steps ?? []).map((step: any) => ({
-          role: (step.toolCalls?.length > 0 ? 'tool' : 'assistant') as
-            | 'tool'
-            | 'assistant',
-          content:
-            step.toolCalls?.length > 0
-              ? JSON.stringify(step.toolResults)
-              : (step.text ?? ''),
-        }));
+        const conversationHistory: Array<{
+          role: 'tool' | 'assistant';
+          content?: string;
+          toolCallId?: string;
+        }> = (result.steps ?? []).flatMap((step: any) => {
+          if (step.toolCalls?.length > 0) {
+            // Reference each call by id; the payload lives once on allToolCalls.
+            return step.toolCalls.map((tc: any) => ({
+              role: 'tool' as const,
+              toolCallId: tc.toolCallId as string | undefined,
+            }));
+          }
+          return step.text
+            ? [{ role: 'assistant' as const, content: step.text as string }]
+            : [];
+        });
 
         return {
           success: true,

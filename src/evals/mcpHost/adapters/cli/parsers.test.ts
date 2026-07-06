@@ -232,7 +232,7 @@ describe('parseStreamJson', () => {
     expect(result.usage).toBeUndefined();
   });
 
-  it('collects tool_result blocks into conversationHistory', () => {
+  it('keeps orphan tool_result inline in conversationHistory (no matching call)', () => {
     const stdout = JSON.stringify({
       type: 'user',
       message: {
@@ -246,6 +246,85 @@ describe('parseStreamJson', () => {
       role: 'tool',
       content: 'tool output here',
     });
+  });
+
+  it('stores output on the matching call and references it by id in the transcript', () => {
+    const stdout = [
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          content: [
+            {
+              type: 'tool_use',
+              name: 'search',
+              id: 'call_1',
+              input: { query: 'abcd' },
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: 'user',
+        message: {
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'call_1',
+              content: '{"abc":"xyz"}',
+            },
+          ],
+        },
+      }),
+    ].join('\n');
+
+    const result = parseStreamJson(stdout);
+    // Payload stored once, on the call.
+    expect(result.toolCalls[0]).toEqual({
+      name: 'search',
+      arguments: { query: 'abcd' },
+      id: 'call_1',
+      output: '{"abc":"xyz"}',
+    });
+    // Transcript references the call by id, without duplicating the payload.
+    expect(result.conversationHistory![0]).toEqual({
+      role: 'tool',
+      toolCallId: 'call_1',
+    });
+  });
+
+  it('serializes object tool_result content as JSON onto the call', () => {
+    const stdout = [
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          content: [{ type: 'tool_use', name: 'search', id: 'c1', input: {} }],
+        },
+      }),
+      JSON.stringify({
+        type: 'user',
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: 'c1', content: { abc: 'xyz' } },
+          ],
+        },
+      }),
+    ].join('\n');
+
+    const result = parseStreamJson(stdout);
+    expect(result.toolCalls[0]!.output).toBe('{"abc":"xyz"}');
+  });
+
+  it('leaves output undefined when tool_result has no matching tool_use_id', () => {
+    const stdout = JSON.stringify({
+      type: 'user',
+      message: {
+        content: [{ type: 'tool_result', content: 'orphan output' }],
+      },
+    });
+
+    const result = parseStreamJson(stdout);
+    expect(result.toolCalls).toHaveLength(0);
+    expect(result.conversationHistory).toHaveLength(1);
   });
 });
 
