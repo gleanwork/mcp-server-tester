@@ -229,7 +229,7 @@ export function createVercelOrchestrator(): MCPHostSimulator {
             inputSchema: jsonSchema(rawSchema),
             execute: async (
               args: Record<string, unknown>,
-              opts?: { toolCallId?: string },
+              opts?: { toolCallId?: string }
             ) => {
               const mcpStart = Date.now();
               const result = await mcp.callTool(toolName, args);
