@@ -229,7 +229,7 @@ export function createVercelOrchestrator(): MCPHostSimulator {
             inputSchema: jsonSchema(rawSchema),
             execute: async (
               args: Record<string, unknown>,
-              opts?: { toolCallId?: string },
+              opts?: { toolCallId?: string }
             ) => {
               const mcpStart = Date.now();
               const result = await mcp.callTool(toolName, args);
@@ -278,10 +278,12 @@ export function createVercelOrchestrator(): MCPHostSimulator {
         }> = (result.steps ?? []).flatMap((step: any) => {
           if (step.toolCalls?.length > 0) {
             // Reference each call by id; the payload lives once on allToolCalls.
-            return step.toolCalls.map((tc: any) => ({
-              role: 'tool' as const,
-              toolCallId: tc.toolCallId as string | undefined,
-            }));
+            return (step.toolCalls as Array<{ toolCallId?: string }>).map(
+              (tc) => ({
+                role: 'tool' as const,
+                toolCallId: tc.toolCallId,
+              })
+            );
           }
           return step.text
             ? [{ role: 'assistant' as const, content: step.text as string }]
