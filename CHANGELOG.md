@@ -12,6 +12,27 @@
 
 
 
+
+## v1.1.1 (2026-07-10)
+
+#### :rocket: Enhancement
+* [#227](https://github.com/gleanwork/mcp-server-tester/pull/227) feat: capture tool call outputs and reference them by id in transcript ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#219](https://github.com/gleanwork/mcp-server-tester/pull/219) feat(evals): surface variant-experiment results in the reporter ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#218](https://github.com/gleanwork/mcp-server-tester/pull/218) feat(reporter): promote tool recall to a headline metric ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+#### :bug: Bug Fix
+* [#226](https://github.com/gleanwork/mcp-server-tester/pull/226) fix(evals): surface the real provider error on mcp_host 404s ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#225](https://github.com/gleanwork/mcp-server-tester/pull/225) fix(evals): warn once when testInfo is missing ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#217](https://github.com/gleanwork/mcp-server-tester/pull/217) fix(reporter): align tab nav width with content ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+#### :house: Internal
+* [#228](https://github.com/gleanwork/mcp-server-tester/pull/228) fix: unblock CI on main after #227 (format:check + lint) ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+
+#### Committers: 2
+- Chenhao Yang ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+- Steve Calvert ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+
 ## v1.1.0 (2026-06-18)
 
 #### :rocket: Enhancement
