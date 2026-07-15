@@ -291,6 +291,40 @@ export {
   getMissingDependencyMessage,
 } from './evals/mcpHost/index.js';
 
+// External Host Evals (experimental)
+export type {
+  EvidenceSource,
+  ExternalHostCapabilityBinding,
+  ExternalHostCapabilityContext,
+  ExternalHostCapabilityImplementation,
+  ExternalHostCapabilitiesConfig,
+  ExternalHostConfig,
+  ExternalHostDriverReference,
+  ExternalHostFailureKind,
+  ExternalHostMetadata,
+  ExternalHostRunResult,
+  ExternalHostSession,
+  ExternalHostSimulationResult,
+  ExternalHostType,
+  HostArtifact,
+  HostCapability,
+  HostDriverConfig,
+  HostDriverId,
+  HostRunContext,
+  ObservationConfidence,
+  TraceSource,
+} from './evals/externalHost/index.js';
+export {
+  driverToSlug,
+  normalizeHostDriver,
+  parseDriverSlug,
+  getExternalHostConfigJsonSchema,
+  getExternalHostReference,
+  listExternalHostDriverReferences,
+  registerExternalHostCapability,
+  runExternalHostScenario,
+} from './evals/externalHost/index.js';
+
 // Judge
 export { createJudge } from './judge/judgeClient.js';
 export {

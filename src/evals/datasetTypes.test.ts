@@ -92,6 +92,68 @@ describe('datasetTypes', () => {
       expect(() => validateEvalCase(evalCase)).not.toThrow();
     });
 
+    it('should accept external_host eval case configuration', () => {
+      const evalCase = {
+        id: 'external-1',
+        mode: 'external_host' as const,
+        scenario: 'Reply with exactly hello',
+        externalHost: {
+          driver: {
+            provider: 'anthropic',
+            product: 'claude',
+            surface: 'cowork',
+            runtime: 'desktop-app',
+            platform: 'macos',
+          },
+          name: 'Claude Cowork Desktop',
+          timeoutMs: 120000,
+          capabilities: {
+            control: [
+              { uses: 'builtin:platform.macos' },
+              { uses: 'builtin:anthropic.claude.coworkSurface' },
+            ],
+            input: {
+              uses: 'builtin:desktop.macos.accessibilitySubmit',
+              with: { createNewConversation: false },
+            },
+            completion: {
+              uses: 'builtin:anthropic.claude.localAgentTrace',
+              provides: ['trace'],
+            },
+            normalize: {
+              uses: 'builtin:anthropic.claude.localAgentNormalize',
+            },
+          },
+          correlation: {
+            strategy: 'prompt_marker',
+            includeInPrompt: false,
+            promptTemplate: 'trace: {{marker}}',
+          },
+          options: {
+            appName: 'Claude',
+            newConversationShortcut: 'cmd+n',
+          },
+        },
+      };
+
+      const result = validateEvalCase(evalCase);
+
+      expect(result).toEqual(evalCase);
+    });
+
+    it('should reject external_host configuration without a driver', () => {
+      const evalCase = {
+        id: 'external-1',
+        mode: 'external_host' as const,
+        scenario: 'Reply with exactly hello',
+        externalHost: {
+          name: 'Claude Cowork Desktop',
+        },
+      };
+
+      expect(() => validateEvalCase(evalCase)).toThrow(ZodError);
+    });
+
     it('should accept eval case with complex args', () => {
       const evalCase = {
         id: 'test-1',

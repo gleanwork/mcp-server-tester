@@ -27,6 +27,65 @@ function formatMs(ms: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms.toFixed(0)}ms`;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function toolCallCount(result: EvalCaseResult): number {
+  const response = isRecord(result.response) ? result.response : undefined;
+  const toolCalls = response?.toolCalls;
+  return Array.isArray(toolCalls) ? toolCalls.length : 0;
+}
+
+function usageRecord(
+  result: EvalCaseResult
+): Record<string, unknown> | undefined {
+  if (result.hostUsage) {
+    return result.hostUsage as unknown as Record<string, unknown>;
+  }
+  const response = isRecord(result.response) ? result.response : undefined;
+  return isRecord(response?.usage) ? response.usage : undefined;
+}
+
+function numberField(
+  value: Record<string, unknown> | undefined,
+  key: string
+): number | undefined {
+  const nested = value?.[key];
+  return typeof nested === 'number' ? nested : undefined;
+}
+
+function formatCost(value: number): string {
+  return `$${value.toFixed(value === 0 ? 2 : 4)}`;
+}
+
+function failedExpectationTypes(result: EvalCaseResult): string[] {
+  return Object.entries(result.expectations ?? {})
+    .filter(([, expectation]) => expectation !== undefined && !expectation.pass)
+    .map(([type]) => type);
+}
+
+function failureLabel(result: EvalCaseResult): string | undefined {
+  if (result.pass) {
+    return undefined;
+  }
+
+  if (result.externalHost?.failureKind) {
+    return `host: ${result.externalHost.failureKind}`;
+  }
+
+  if (result.error) {
+    return 'execution error';
+  }
+
+  const failedAssertions = failedExpectationTypes(result);
+  if (failedAssertions.length > 0) {
+    return `assertion: ${failedAssertions.join(', ')}`;
+  }
+
+  return 'failed';
+}
+
 interface ResultRowProps {
   result: EvalCaseResult;
   onSelectResult?: (result: EvalCaseResult) => void;
@@ -46,6 +105,13 @@ function ResultRow({
   const iterDots = result.iterationResults ?? [];
   const cappedDots = iterDots.slice(0, 10);
   const hasMore = iterDots.length > 10;
+  const observedToolCallCount = toolCallCount(result);
+  const usage = usageRecord(result);
+  const inputTokens = numberField(usage, 'inputTokens') ?? 0;
+  const outputTokens = numberField(usage, 'outputTokens') ?? 0;
+  const totalTokens = inputTokens + outputTokens;
+  const totalCostUsd = numberField(usage, 'totalCostUsd');
+  const rowFailureLabel = failureLabel(result);
 
   const ariaLabel = `${result.toolName ? result.toolName + ': ' : ''}${result.id}, ${result.pass ? 'passed' : 'failed'}`;
 
@@ -89,6 +155,14 @@ function ResultRow({
       {showFixed && (
         <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold shrink-0 bg-green-500/15 text-green-700 dark:text-green-400">
           ▲ fixed
+        </span>
+      )}
+      {rowFailureLabel && (
+        <span
+          className="inline-flex items-center px-2 py-0.5 rounded text-xs shrink-0 bg-red-500/10 text-red-700 dark:text-red-400 max-w-56 truncate"
+          title={rowFailureLabel}
+        >
+          {rowFailureLabel}
         </span>
       )}
 
@@ -161,6 +235,63 @@ function ResultRow({
         </span>
       )}
 
+      {result.externalHost && (
+        <>
+          <span
+            className="inline-flex items-center px-2 py-0.5 rounded text-xs shrink-0 bg-teal-500/15 text-teal-700 dark:text-teal-300"
+            title={`External host: ${result.externalHost.driverSlug}`}
+          >
+            {result.externalHost.driver.provider}/
+            {result.externalHost.driver.product}
+          </span>
+          <span
+            className="inline-flex items-center px-2 py-0.5 rounded text-xs shrink-0 bg-cyan-500/15 text-cyan-700 dark:text-cyan-300"
+            title={result.externalHost.driverSlug}
+          >
+            {result.externalHost.driver.surface} ·{' '}
+            {result.externalHost.driver.runtime}
+            {result.externalHost.driver.platform
+              ? ` · ${result.externalHost.driver.platform}`
+              : ''}
+          </span>
+          <span
+            className={`inline-flex items-center px-2 py-0.5 rounded text-xs shrink-0 ${
+              result.externalHost.traceConfidence === 'high'
+                ? 'bg-green-500/15 text-green-700 dark:text-green-400'
+                : result.externalHost.traceConfidence === 'medium'
+                  ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                  : 'bg-gray-500/15 text-gray-700 dark:text-gray-300'
+            }`}
+            title={`Trace source: ${result.externalHost.traceSource}`}
+          >
+            {result.externalHost.traceConfidence} trace
+          </span>
+          <span
+            className="inline-flex items-center px-2 py-0.5 rounded text-xs shrink-0 bg-muted text-muted-foreground"
+            title="Observed tool calls in the normalized host trace"
+          >
+            {observedToolCallCount} tool
+            {observedToolCallCount === 1 ? '' : 's'}
+          </span>
+          {totalTokens > 0 && (
+            <span
+              className="inline-flex items-center px-2 py-0.5 rounded text-xs shrink-0 bg-muted text-muted-foreground"
+              title="Input + output tokens reported by the host trace"
+            >
+              {totalTokens.toLocaleString()} tokens
+            </span>
+          )}
+          {totalCostUsd !== undefined && (
+            <span
+              className="inline-flex items-center px-2 py-0.5 rounded text-xs shrink-0 bg-muted text-muted-foreground"
+              title="Cost reported by the host trace"
+            >
+              {formatCost(totalCostUsd)}
+            </span>
+          )}
+        </>
+      )}
+
       <span className="shrink-0">
         {isEval ? (
           <BarChart3
@@ -179,13 +310,19 @@ function ResultRow({
 
       <span className="flex-1 text-sm font-medium truncate">{result.id}</span>
 
-      {result.toolName && result.toolName !== 'mcp_host' ? (
+      {result.toolName &&
+      result.toolName !== 'mcp_host' &&
+      result.toolName !== 'external_host' ? (
         <code className="text-xs bg-muted px-2 py-1 rounded shrink-0">
           {result.toolName}
         </code>
       ) : result.toolName === 'mcp_host' ? (
         <span className="text-xs text-muted-foreground shrink-0 italic">
           mcp_host
+        </span>
+      ) : result.toolName === 'external_host' ? (
+        <span className="text-xs text-muted-foreground shrink-0 italic">
+          external_host
         </span>
       ) : null}
 

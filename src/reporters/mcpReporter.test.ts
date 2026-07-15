@@ -503,6 +503,77 @@ describe('MCPReporter.buildRunData()', () => {
     });
   });
 
+  describe('external host metadata', () => {
+    it('preserves external host trace metadata in run data', () => {
+      setResults(reporter, [
+        makeResult({
+          pass: true,
+          toolName: 'external_host',
+          externalHost: {
+            driver: {
+              provider: 'anthropic',
+              product: 'claude',
+              surface: 'cowork',
+              runtime: 'desktop-app',
+              platform: 'macos',
+            },
+            driverSlug: 'anthropic.claude.cowork.desktop-app.macos',
+            displayName: 'Claude Cowork Desktop',
+            hostName: 'Claude Cowork Desktop',
+            hostType: 'desktop',
+            capabilitiesUsed: [
+              'control',
+              'input',
+              'completion',
+              'trace',
+              'normalize',
+            ],
+            traceSource: 'host-local-transcript',
+            traceConfidence: 'high',
+            traceLimitations: ['fixture limitation'],
+            artifacts: [
+              {
+                kind: 'audit',
+                name: 'Claude audit log',
+                path: '/tmp/audit.jsonl',
+              },
+            ],
+            session: {
+              id: 'local_123',
+              runMarker: 'MCP_SERVER_TESTER_TEST',
+              requestId: 'req_123',
+            },
+            correlation: {
+              strategy: 'prompt_marker',
+              marker: 'MCP_SERVER_TESTER_TEST',
+              includedInPrompt: true,
+            },
+            evidence: {
+              finalAnswer: {
+                source: 'host-local-transcript',
+                confidence: 'high',
+              },
+              toolCalls: {
+                source: 'host-local-transcript',
+                confidence: 'high',
+              },
+            },
+          },
+        }),
+      ]);
+
+      const data = callBuildRunData(reporter, 100);
+
+      expect(data.results[0]?.externalHost).toMatchObject({
+        driverSlug: 'anthropic.claude.cowork.desktop-app.macos',
+        hostName: 'Claude Cowork Desktop',
+        traceSource: 'host-local-transcript',
+        traceConfidence: 'high',
+        session: { id: 'local_123', requestId: 'req_123' },
+      });
+    });
+  });
+
   describe('conformanceChecks and serverCapabilities', () => {
     it('returns undefined conformanceChecks when none are recorded', () => {
       setResults(reporter, [makeResult({ pass: true })]);

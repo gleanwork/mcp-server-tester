@@ -5,6 +5,18 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { ZodType } from 'zod';
 import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
 import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
+import { runExternalHostScenario } from './externalHost/runtime.js';
+import type {
+  ExternalHostCapabilitiesConfig,
+  ExternalHostCorrelationConfig,
+  ExternalHostMetadata,
+  ExternalHostSimulationResult,
+} from './externalHost/types.js';
+import {
+  driverToSlug,
+  normalizeHostDriver,
+} from './externalHost/driverIdentity.js';
+import { getRegisteredExternalHostConfig } from './externalHost/hostRegistry.js';
 import type { EvalExpectationResult, UsageMetrics } from '../types/index.js';
 import type {
   EvalCaseResult,
@@ -451,6 +463,33 @@ async function executeToolCall(
       }
 
       return { response: simulationResult };
+    } else if (mode === 'external_host') {
+      if (!evalCase.scenario) {
+        throw new Error(
+          `Eval case ${evalCase.id}: scenario is required for external_host mode`
+        );
+      }
+
+      if (!evalCase.externalHost) {
+        throw new Error(
+          `Eval case ${evalCase.id}: externalHost is required for external_host mode`
+        );
+      }
+
+      const simulationResult = await runExternalHostScenario(
+        evalCase.scenario,
+        evalCase.externalHost,
+        { caseId: evalCase.id }
+      );
+
+      if (!simulationResult.success) {
+        return {
+          response: simulationResult,
+          error: simulationResult.error || 'External host simulation failed',
+        };
+      }
+
+      return { response: simulationResult };
     } else {
       // Direct mode - call tool directly
       if (!evalCase.toolName) {
@@ -709,10 +748,25 @@ function buildRequest(
   evalCase: EvalCase,
   toolOverrideVariantId?: string
 ): EvalCaseRequest {
-  const request: EvalCaseRequest = {};
+  const request: EvalCaseRequest = {
+    mode: evalCase.mode ?? 'direct',
+  };
   if (evalCase.description) request.description = evalCase.description;
   if (toolOverrideVariantId !== undefined) {
     request.toolOverrideVariantId = toolOverrideVariantId;
+  }
+  if (evalCase.iterations !== undefined)
+    request.iterations = evalCase.iterations;
+  if (evalCase.accuracyThreshold !== undefined) {
+    request.accuracyThreshold = evalCase.accuracyThreshold;
+  }
+  if (evalCase.judgeReps !== undefined) request.judgeReps = evalCase.judgeReps;
+  if (evalCase.tags) request.tags = evalCase.tags;
+  if (evalCase.expect) {
+    request.expect = sanitizeReporterValue(evalCase.expect) as Record<
+      string,
+      unknown
+    >;
   }
 
   if (evalCase.mode === 'mcp_host') {
@@ -725,11 +779,174 @@ function buildRequest(
         }),
       };
     }
+  } else if (evalCase.mode === 'external_host') {
+    if (evalCase.scenario) request.scenario = evalCase.scenario;
+    if (evalCase.externalHost) {
+      let driverSlug: string | undefined;
+      try {
+        driverSlug = driverToSlug(
+          normalizeHostDriver(evalCase.externalHost.driver)
+        );
+      } catch {
+        driverSlug = undefined;
+      }
+      const registeredConfig = driverSlug
+        ? getRegisteredExternalHostConfig(driverSlug)
+        : undefined;
+      const effectiveOptions = mergeReporterOptions(
+        registeredConfig?.options,
+        evalCase.externalHost.options
+      );
+      const effectiveCapabilities = mergeReporterCapabilities(
+        registeredConfig?.capabilities,
+        evalCase.externalHost.capabilities
+      );
+      const effectiveCorrelation = mergeReporterCorrelation(
+        registeredConfig?.correlation,
+        evalCase.externalHost.correlation
+      );
+      request.externalHost = {
+        driver: evalCase.externalHost.driver,
+        driverSlug,
+        name: evalCase.externalHost.name ?? registeredConfig?.name,
+        hostType: evalCase.externalHost.hostType,
+        variant: evalCase.externalHost.variant,
+        timeoutMs: evalCase.externalHost.timeoutMs,
+        usesBuiltInDefaults: registeredConfig !== undefined,
+        correlation: effectiveCorrelation,
+        options: sanitizeReporterRecord(effectiveOptions),
+        capabilities: serializeExternalHostCapabilities(effectiveCapabilities),
+      };
+    }
   } else {
     if (evalCase.args) request.args = evalCase.args;
   }
 
   return request;
+}
+
+function mergeReporterOptions(
+  base: Record<string, unknown> | undefined,
+  override: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (!base) {
+    return override;
+  }
+  if (!override) {
+    return base;
+  }
+  return {
+    ...base,
+    ...override,
+  };
+}
+
+function mergeReporterCapabilities(
+  base: ExternalHostCapabilitiesConfig | undefined,
+  override: ExternalHostCapabilitiesConfig | undefined
+): ExternalHostCapabilitiesConfig | undefined {
+  if (!base) {
+    return override;
+  }
+  if (!override) {
+    return base;
+  }
+  return {
+    ...base,
+    ...override,
+  };
+}
+
+function mergeReporterCorrelation(
+  base: ExternalHostCorrelationConfig | undefined,
+  override: ExternalHostCorrelationConfig | undefined
+): ExternalHostCorrelationConfig | undefined {
+  if (!base) {
+    return override;
+  }
+  if (!override) {
+    return base;
+  }
+  return {
+    ...base,
+    ...override,
+  };
+}
+
+function serializeExternalHostCapabilities(
+  capabilities: ExternalHostCapabilitiesConfig | undefined
+): NonNullable<EvalCaseRequest['externalHost']>['capabilities'] {
+  if (!capabilities || typeof capabilities !== 'object') {
+    return undefined;
+  }
+
+  const serialized: NonNullable<
+    NonNullable<EvalCaseRequest['externalHost']>['capabilities']
+  > = {};
+
+  for (const [capability, bindingOrBindings] of Object.entries(capabilities)) {
+    const bindings = Array.isArray(bindingOrBindings)
+      ? bindingOrBindings
+      : [bindingOrBindings];
+    serialized[capability] = bindings
+      .filter((binding): binding is NonNullable<typeof binding> =>
+        Boolean(binding)
+      )
+      .map((binding) => ({
+        uses: binding.uses,
+        ...(binding.provides !== undefined && {
+          provides: [...binding.provides],
+        }),
+        ...(binding.with !== undefined && {
+          with: sanitizeReporterRecord(binding.with),
+        }),
+      }));
+  }
+
+  return serialized;
+}
+
+function sanitizeReporterRecord(
+  value: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (!value) {
+    return undefined;
+  }
+  return sanitizeReporterValue(value) as Record<string, unknown>;
+}
+
+function sanitizeReporterValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeReporterValue(item));
+  }
+
+  if (value && typeof value === 'object') {
+    const sanitized: Record<string, unknown> = {};
+    for (const [key, nestedValue] of Object.entries(
+      value as Record<string, unknown>
+    )) {
+      sanitized[key] = isSecretLikeKey(key)
+        ? '[redacted]'
+        : sanitizeReporterValue(nestedValue);
+    }
+    return sanitized;
+  }
+
+  if (typeof value === 'function') {
+    return '[function]';
+  }
+
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+
+  return value;
+}
+
+function isSecretLikeKey(key: string): boolean {
+  return /token|secret|password|credential|authorization|api[-_]?key/i.test(
+    key
+  );
 }
 
 function isMCPHostSimulationResult(
@@ -742,6 +959,12 @@ function isMCPHostSimulationResult(
     'toolCalls' in value &&
     Array.isArray((value as MCPHostSimulationResult).toolCalls)
   );
+}
+
+function isExternalHostSimulationResult(
+  value: unknown
+): value is ExternalHostSimulationResult {
+  return isMCPHostSimulationResult(value) && 'externalHost' in value;
 }
 
 /**
@@ -757,6 +980,10 @@ async function runSingleIteration(
 
   // Execute tool call
   const { response, error } = await executeToolCall(evalCase, context.mcp);
+  const externalHost =
+    isExternalHostSimulationResult(response) && response.externalHost
+      ? response.externalHost
+      : undefined;
 
   // Collect expectation results from expect block
   let expectationResults: EvalCaseResult['expectations'] = {};
@@ -780,10 +1007,24 @@ async function runSingleIteration(
     toolPrecision = tp;
     toolRecall = tr;
 
+    if (evalCase.mode === 'external_host' && externalHost) {
+      applyExternalHostEvidenceGating(
+        evalCase.expect,
+        externalHost,
+        expectationResults
+      );
+      if (expectationResults.toolsTriggered?.pass === false) {
+        toolPrecision = undefined;
+        toolRecall = undefined;
+      }
+    }
+
     // Build mcpHostTrace when toolsTriggered expectation is present
     if (
       evalCase.expect.toolsTriggered !== undefined &&
-      isMCPHostSimulationResult(response)
+      isMCPHostSimulationResult(response) &&
+      (evalCase.mode !== 'external_host' ||
+        (externalHost !== undefined && hasStructuredToolEvidence(externalHost)))
     ) {
       const expectedNames = new Set(
         evalCase.expect.toolsTriggered.calls.map((c) => c.name)
@@ -819,7 +1060,11 @@ async function runSingleIteration(
     id: evalCase.id,
     datasetName: options.datasetName ?? 'single-case',
     toolName:
-      evalCase.scenario != null ? 'mcp_host' : (evalCase.toolName ?? 'unknown'),
+      evalCase.mode === 'external_host'
+        ? 'external_host'
+        : evalCase.scenario != null
+          ? 'mcp_host'
+          : (evalCase.toolName ?? 'unknown'),
     source: 'eval',
     pass: didCasePass(error, expectationResults),
     request: buildRequest(evalCase, options.toolOverrideVariantId),
@@ -834,7 +1079,58 @@ async function runSingleIteration(
     toolRecall,
     mcpHostTrace,
     hostUsage,
+    externalHost,
   };
+}
+
+function applyExternalHostEvidenceGating(
+  expectBlock: EvalExpectBlock,
+  externalHost: ExternalHostMetadata,
+  expectationResults: EvalCaseResult['expectations']
+): void {
+  const needsToolEvidence =
+    expectBlock.toolsTriggered !== undefined ||
+    expectBlock.toolCallCount !== undefined;
+
+  if (!needsToolEvidence || hasStructuredToolEvidence(externalHost)) {
+    return;
+  }
+
+  const details = `External host trace source ${
+    externalHost.sources?.toolCalls ?? externalHost.traceSource
+  } (${externalHost.traceConfidence} confidence) cannot support tool-call assertions. Use protocol traces or host-native structured traces for toolsTriggered/toolCallCount.`;
+
+  if (expectBlock.toolsTriggered !== undefined) {
+    expectationResults.toolsTriggered = { pass: false, details };
+  }
+  if (expectBlock.toolCallCount !== undefined) {
+    expectationResults.toolCallCount = { pass: false, details };
+  }
+}
+
+function hasStructuredToolEvidence(
+  externalHost: ExternalHostMetadata
+): boolean {
+  const structuredSources = [
+    'mcp-proxy',
+    'mcp-server-logs',
+    'host-local-transcript',
+    'host-native-export',
+  ];
+  const evidence = externalHost.evidence?.toolCalls;
+
+  if (evidence) {
+    return (
+      evidence.confidence === 'high' &&
+      structuredSources.includes(evidence.source)
+    );
+  }
+
+  const source = externalHost.sources?.toolCalls ?? externalHost.traceSource;
+  return (
+    externalHost.traceConfidence === 'high' &&
+    structuredSources.includes(source)
+  );
 }
 
 /**
@@ -869,6 +1165,12 @@ function isInfrastructureError(err: unknown): boolean {
     msg.includes('429') ||
     msg.includes('503') ||
     msg.includes('network') ||
+    msg.includes('automation permission') ||
+    msg.includes('automation/accessibility') ||
+    msg.includes('no matching claude session') ||
+    msg.includes('timed out waiting for claude session') ||
+    msg.includes('failed to submit prompt to claude') ||
+    msg.includes('failed to submit prompt to desktop host') ||
     // Prompt/context overflow — LLM couldn't run, not a tool discoverability failure
     msg.includes('prompt is too long') ||
     msg.includes('context length exceeded') ||
@@ -879,6 +1181,12 @@ function isInfrastructureError(err: unknown): boolean {
     code.includes('etimedout') ||
     code.includes('econnrefused')
   );
+}
+
+function isExternalHostInfrastructureFailure(
+  externalHost: ExternalHostMetadata | undefined
+): boolean {
+  return externalHost?.failureKind !== undefined;
 }
 
 /**
@@ -923,7 +1231,8 @@ export async function runEvalCase(
       // Check whether the tool call itself failed due to infrastructure (the
       // error is surfaced as result.error since executeToolCall swallows throws)
       const infraError =
-        result.error != null && isInfrastructureError(result.error);
+        isExternalHostInfrastructureFailure(result.externalHost) ||
+        (result.error != null && isInfrastructureError(result.error));
       iterationResults.push({
         pass: result.pass,
         durationMs: result.durationMs,
@@ -931,6 +1240,7 @@ export async function runEvalCase(
         isInfrastructureError: infraError,
         mcpHostTrace: result.mcpHostTrace,
         hostUsage: result.hostUsage,
+        externalHost: result.externalHost,
       });
     } catch (err) {
       // runSingleIteration should not throw, but guard defensively
@@ -959,7 +1269,11 @@ export async function runEvalCase(
     id: evalCase.id,
     datasetName: options.datasetName ?? 'single-case',
     toolName:
-      evalCase.scenario != null ? 'mcp_host' : (evalCase.toolName ?? 'unknown'),
+      evalCase.mode === 'external_host'
+        ? 'external_host'
+        : evalCase.scenario != null
+          ? 'mcp_host'
+          : (evalCase.toolName ?? 'unknown'),
     source: 'eval',
     pass: false,
     error: iterationResults[0]?.error,
@@ -1125,7 +1439,7 @@ export async function runEvalDataset(
   // Preflight cost warning: estimate the number of LLM judge API calls this run will make
   const estimatedJudgeCalls = casesToRun.reduce((sum, c) => {
     const effectiveIterations =
-      c.mode === 'mcp_host'
+      c.mode === 'mcp_host' || c.mode === 'external_host'
         ? (c.iterations ?? defaultLlmIterations ?? 1)
         : (c.iterations ?? 1);
     if (c.expect?.passesJudge == null) return sum;
@@ -1147,10 +1461,10 @@ export async function runEvalDataset(
 
   // Build task factories for all cases
   const tasks = casesToRun.map((evalCase) => async () => {
-    // Apply defaultLlmIterations to mcp_host cases that don't specify iterations.
+    // Apply defaultLlmIterations to host-driven cases that don't specify iterations.
     // Direct mode cases are deterministic — they always stay at 1 iteration.
     const withIterations =
-      evalCase.mode === 'mcp_host' &&
+      (evalCase.mode === 'mcp_host' || evalCase.mode === 'external_host') &&
       evalCase.iterations === undefined &&
       defaultLlmIterations !== undefined
         ? { ...evalCase, iterations: defaultLlmIterations }
@@ -1161,11 +1475,11 @@ export async function runEvalDataset(
     // Single-iteration mcp_host runs (the default) are a valid smoke-test pattern
     // and are not warned about — the warning is scoped to cases that have
     // explicitly chosen a multi-iteration count that is too small to be reliable.
-    if (evalCase.mode === 'mcp_host') {
+    if (evalCase.mode === 'mcp_host' || evalCase.mode === 'external_host') {
       const effectiveIterations = withIterations.iterations ?? 1;
       if (effectiveIterations > 1 && effectiveIterations < 10) {
         console.warn(
-          `[mcp-server-tester] Eval case "${evalCase.id}": running ${effectiveIterations} iterations in mcp_host mode ` +
+          `[mcp-server-tester] Eval case "${evalCase.id}": running ${effectiveIterations} iterations in ${evalCase.mode} mode ` +
             `may not be statistically reliable. Consider using 10+ iterations for accuracy measurements you can trust.`
         );
       }

@@ -182,7 +182,7 @@ describe('validateToolCalls', () => {
       calls: [{ name: 'search' }],
     });
     expect(v.pass).toBe(false);
-    expect(v.message).toContain('mcp_host');
+    expect(v.message).toContain('host simulation response');
   });
 });
 
@@ -292,6 +292,6 @@ describe('validateToolCallCount', () => {
   it('returns error when response is not an MCPHostSimulationResult', () => {
     const v = validateToolCallCount('not a simulation result', { exact: 1 });
     expect(v.pass).toBe(false);
-    expect(v.message).toContain('mcp_host');
+    expect(v.message).toContain('host simulation response');
   });
 });

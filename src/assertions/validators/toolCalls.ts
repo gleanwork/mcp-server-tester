@@ -102,9 +102,9 @@ function findMatchingCall(
 }
 
 /**
- * Validates tool calls made during an MCP host simulation.
+ * Validates tool calls made during a host simulation.
  *
- * @param response - Must be an MCPHostSimulationResult (from mcp_host mode)
+ * @param response - Must be an MCPHostSimulationResult-compatible response
  * @param expectation - Expected tool call specification
  */
 export function validateToolCalls(
@@ -115,7 +115,7 @@ export function validateToolCalls(
     return {
       pass: false,
       message:
-        'toolsTriggered expectation requires mcp_host mode — response must be an MCPHostSimulationResult',
+        'toolsTriggered expectation requires a host simulation response with structured tool calls',
     };
   }
 
@@ -206,9 +206,9 @@ export function validateToolCalls(
 }
 
 /**
- * Validates the number of tool calls made during an MCP host simulation.
+ * Validates the number of tool calls made during a host simulation.
  *
- * @param response - Must be an MCPHostSimulationResult (from mcp_host mode)
+ * @param response - Must be an MCPHostSimulationResult-compatible response
  * @param options - Count constraints (min, max, exact)
  */
 export function validateToolCallCount(
@@ -219,7 +219,7 @@ export function validateToolCallCount(
     return {
       pass: false,
       message:
-        'toolCallCount expectation requires mcp_host mode — response must be an MCPHostSimulationResult',
+        'toolCallCount expectation requires a host simulation response with structured tool calls',
     };
   }
 

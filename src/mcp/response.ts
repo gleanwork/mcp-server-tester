@@ -190,6 +190,11 @@ export function extractText(response: unknown): string {
       return r.text;
     }
 
+    // Host simulation results expose the final answer as `response`.
+    if (typeof r.response === 'string') {
+      return r.response;
+    }
+
     // Fallback to JSON
     return JSON.stringify(r);
   }
