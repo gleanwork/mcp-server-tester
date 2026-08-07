@@ -298,6 +298,16 @@ export {
   validateManifestRegistrations,
 } from './evals/frameworkRegistries.js';
 
+// Eval dataset building and suite runner
+export { buildEvalDataset } from './evals/buildEvalDataset.js';
+export { getBuiltinHostConfig } from './evals/builtinHosts.js';
+export { runEvalSuite } from './evals/runEvalSuite.js';
+export type {
+  RunEvalSuiteOptions,
+  RunEvalSuiteResult,
+  ScioCompatibleResults,
+} from './evals/runEvalSuite.js';
+
 // Plugin loading
 export { loadPluginModule, loadPlugins } from './plugins/loadPlugins.js';
 export type {
