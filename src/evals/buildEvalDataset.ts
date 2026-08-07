@@ -244,7 +244,14 @@ export function buildEvalDataset(
   config: EvalConfig,
 ): EvalDataset {
   if (isPrebuiltDataset(raw)) {
-    return loadEvalDatasetFromObject(raw);
+    let dataset = loadEvalDatasetFromObject(raw);
+    if (config.maxCases && dataset.cases.length > config.maxCases) {
+      dataset = {
+        ...dataset,
+        cases: dataset.cases.slice(0, config.maxCases),
+      };
+    }
+    return dataset;
   }
 
   const builder = BUILDERS[mode];
