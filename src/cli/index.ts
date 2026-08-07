@@ -72,6 +72,7 @@ program
     'Plugin directories to load before the run (registers judges, auth, hosts)',
   )
   .option('--root-dir <dir>', 'Base directory for resolving relative paths', '.')
+  .option('--output-dir <dir>', 'Directory for results.json output')
   .option('--dry-run', 'Validate config and plugins without executing evals')
   .action(run);
 
