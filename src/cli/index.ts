@@ -66,17 +66,14 @@ program
 // Run command
 program
   .command('run')
-  .description('Run an evaluation from a JSON config file')
+  .description('Run an eval campaign from a JSON config file')
   .requiredOption('-c, --config <path>', 'Path to eval config JSON')
   .option(
     '--plugins <paths...>',
-    'Plugin directories to load before the run (registers judges, auth, hosts)'
+    'Plugin directories to load before the run (registers judges, auth, hosts)',
   )
-  .option(
-    '--root-dir <dir>',
-    'Base directory for resolving relative paths',
-    '.'
-  )
+  .option('--root-dir <dir>', 'Base directory for resolving relative paths', '.')
+  .option('--output-dir <dir>', 'Directory for results.json output')
   .option('--dry-run', 'Validate config and plugins without executing evals')
   .action(run);
 

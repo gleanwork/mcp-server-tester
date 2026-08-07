@@ -1,62 +1,48 @@
-import fs from 'node:fs';
 import path from 'node:path';
 import {
-  loadEvalConfig,
-  resolveEvalsetPaths,
-} from '../../../evals/evalConfigSchema.js';
-import { loadPlugins } from '../../../plugins/loadPlugins.js';
+  runEvalSuite,
+  type RunEvalSuiteOptions,
+} from '../../../evals/runEvalSuite.js';
 
 export interface RunOptions {
   config: string;
   plugins?: string[];
   rootDir?: string;
   dryRun?: boolean;
+  outputDir?: string;
 }
 
 export async function run(options: RunOptions): Promise<void> {
-  const rootDir = options.rootDir ?? process.cwd();
-  const config = loadEvalConfig(options.config, {
-    rootDir,
-    skipEvalsetValidation: options.dryRun,
-  });
-
-  const pluginPaths =
-    options.plugins ??
-    config.plugins?.map((plugin) =>
-      path.isAbsolute(plugin.dir)
-        ? plugin.dir
-        : path.resolve(rootDir, plugin.dir)
-    ) ??
-    [];
-
-  if (pluginPaths.length > 0) {
-    await loadPlugins(pluginPaths);
-  }
-
-  const evalsetPaths = resolveEvalsetPaths(config, rootDir);
-  const output = {
-    name: config.name,
-    mode: config.mode,
-    evalsetPaths,
-    pluginsLoaded: pluginPaths,
+  const suiteOptions: RunEvalSuiteOptions = {
+    configPath: options.config,
+    rootDir: options.rootDir,
+    pluginPaths: options.plugins,
+    outputDir: options.outputDir,
+    dryRun: options.dryRun,
   };
 
+  const result = await runEvalSuite(suiteOptions);
+
   if (options.dryRun) {
-    process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          name: result.config.name,
+          mode: result.config.mode,
+          outputDir: result.outputDir,
+          datasets: result.datasets.map((d) => d.path),
+        },
+        null,
+        2
+      )}\n`
+    );
     return;
   }
 
-  const resultsDir = path.join(rootDir, '.mcp-test-results', config.name);
-  fs.mkdirSync(resultsDir, { recursive: true });
-  const planPath = path.join(resultsDir, 'run-plan.json');
-  fs.writeFileSync(planPath, `${JSON.stringify(output, null, 2)}\n`);
-
-  console.log(`Eval config validated: ${config.name}`);
-  console.log(`Mode: ${config.mode}`);
-  console.log(`Evalsets: ${evalsetPaths.length}`);
-  console.log(`Plugins loaded: ${pluginPaths.length}`);
-  console.log(`Run plan written to ${planPath}`);
+  const { merged } = result;
+  console.log(`\nEval complete: ${merged.configName}`);
   console.log(
-    'Note: evaluation execution is not wired yet; this scaffold only validates and plans the run.'
+    `Results: ${merged.metrics.passed}/${merged.metrics.total} passed (${(merged.metrics.passRate * 100).toFixed(1)}%)`
   );
+  console.log(`Output: ${path.join(result.outputDir, 'results.json')}`);
 }
