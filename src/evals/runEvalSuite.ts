@@ -55,6 +55,10 @@ export interface ScioCompatibleResults {
 }
 
 function applyConfigEnv(config: EvalConfig): void {
+  // Match scio run-eval.ts — required for scio-prod in corp TLS environments.
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = '1';
+  process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS = '1';
   if (config.mcpUrl) {
     process.env.GLEAN_MCP_URL = config.mcpUrl;
   }
