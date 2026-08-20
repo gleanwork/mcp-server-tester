@@ -8,6 +8,7 @@ import { generate } from './commands/generate/index.js';
 import { login } from './commands/login/index.js';
 import { token } from './commands/token/index.js';
 import { open } from './commands/open/index.js';
+import { run } from './commands/run/index.js';
 import packageJson from '../../package.json' with { type: 'json' };
 
 const program = new Command();
@@ -60,6 +61,19 @@ program
   )
   .option('--state-dir <dir>', 'Custom directory for token storage')
   .action(token);
+
+// Run command
+program
+  .command('run')
+  .description('Run an eval campaign from a JSON config file')
+  .requiredOption('-c, --config <path>', 'Path to eval config JSON')
+  .option(
+    '--plugins <paths...>',
+    'Plugin directories to load before the run (registers judges, auth, hosts)',
+  )
+  .option('--root-dir <dir>', 'Base directory for resolving relative paths', '.')
+  .option('--dry-run', 'Validate config and plugins without executing evals')
+  .action(run);
 
 // Open command
 program

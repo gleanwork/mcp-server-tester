@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/gleanwork/mcp-server-tester/schema/eval-config.schema.json",
+  "title": "Eval Campaign Config",
+  "description": "JSON config for mcp-server-tester run campaigns. Derived from scio .github/mcp_tests/configs/weekly/*.json.",
+  "type": "object",
+  "required": ["name", "mode"],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique campaign name used for result directories and reporting."
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "tool-selection",
+        "tool-call",
+        "e2e-quality",
+        "mcp-host",
+        "sxs",
+        "direct",
+        "all"
+      ],
+      "description": "Eval campaign mode. Maps to MST runner behavior (filter tags, judges, server comparison)."
+    },
+    "evalsetFilePaths": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Paths to evalset JSON files or directories."
+    },
+    "localEvalsets": {
+      "type": "string",
+      "description": "Shorthand for a single local evalset path."
+    },
+    "model": { "type": "string" },
+    "clientHost": {
+      "type": "string",
+      "description": "MCP host simulator (e.g. claude-cli, cursor-desktop)."
+    },
+    "mcpUrl": { "type": "string", "format": "uri" },
+    "concurrency": { "type": "integer", "minimum": 1 },
+    "maxCases": { "type": "integer", "minimum": 1 },
+    "timeout": { "type": "integer", "minimum": 1 },
+    "provider": { "type": "string" },
+    "env": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "metrics": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "type": "string" },
+          {
+            "type": "object",
+            "required": ["metric"],
+            "properties": {
+              "metric": { "type": "string" },
+              "name": { "type": "string" },
+              "params": { "type": "object" }
+            }
+          }
+        ]
+      }
+    },
+    "iterations": { "type": "integer", "minimum": 0 },
+    "maxToolCalls": { "type": "integer", "minimum": 0 },
+    "judges": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Registered judge names (via --plugins) for e2e-quality mode."
+    },
+    "version": { "type": "string" },
+    "plugins": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "dir"],
+        "properties": {
+          "name": { "type": "string" },
+          "dir": { "type": "string" },
+          "mcpUrl": { "type": "string", "format": "uri" }
+        }
+      }
+    },
+    "useOAuth": { "type": "boolean" },
+    "tools": {
+      "type": "string",
+      "description": "Comma-separated tool filter."
+    },
+    "serverB": { "type": "string", "format": "uri" },
+    "serverBToken": { "type": "string" }
+  }
+}
