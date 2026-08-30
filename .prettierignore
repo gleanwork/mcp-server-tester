@@ -12,3 +12,6 @@ package-lock.json
 
 # Generated eval results
 **/.mcp-eval-results/
+
+# Draft RFCs
+docs/rfcs/
