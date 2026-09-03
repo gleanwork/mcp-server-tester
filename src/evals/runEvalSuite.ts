@@ -387,7 +387,9 @@ export async function runEvalSuite(
         serverUrl: config.serverB,
         auth: {
           accessToken:
-            config.serverBToken ??
+            (config.serverBTokenEnv
+              ? process.env[config.serverBTokenEnv]
+              : undefined) ??
             process.env.SXS_SERVER_B_TOKEN ??
             process.env.GLEAN_API_TOKEN,
         },

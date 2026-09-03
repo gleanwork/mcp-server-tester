@@ -5,6 +5,7 @@ import type {
   EvalRunnerResult,
 } from './evalRunner.js';
 import type { EvalCaseResult } from '../types/reporter.js';
+import type { EvalDataset } from './datasetTypes.js';
 import {
   createStoredEvalArtifact,
   resolveEvalResultStore,
@@ -70,6 +71,8 @@ export type ServerComparisonOptions = Omit<
   EvalRunnerOptions,
   'saveResultsTo' | 'baselineResultsFrom'
 > & {
+  /** Optional B-side case data, useful when host configs embed server URLs. */
+  datasetB?: EvalDataset;
   comparisonStore?: EvalResultStoreLike;
   comparisonId?: string;
   comparisonMetadata?: StoredEvalArtifactMetadata;
@@ -107,9 +110,13 @@ export async function runServerComparison(
   const startTime = Date.now();
 
   // Run both servers concurrently
+  const { datasetB, ...sharedOptions } = options;
   const [resultA, resultB] = await Promise.all([
-    runEvalDataset(options, contextA),
-    runEvalDataset(options, contextB),
+    runEvalDataset({ ...sharedOptions, dataset: options.dataset }, contextA),
+    runEvalDataset(
+      { ...sharedOptions, dataset: datasetB ?? options.dataset },
+      contextB
+    ),
   ]);
 
   // Index results by case ID for O(1) lookup
