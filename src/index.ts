@@ -258,6 +258,17 @@ export type {
   LoadEvalConfigOptions,
 } from './evals/evalConfigSchema.js';
 
+// Native MCP server contract (runtime safety is implemented later)
+export {
+  buildNativeMcpServers,
+  withNativeMcpServers,
+} from './evals/nativeMcpServers.js';
+export type {
+  NativeMcpServerDefinition,
+  NativeMcpSelection,
+  NativeMcpConfig,
+} from './evals/nativeMcpServers.js';
+
 // Framework contracts
 export type {
   EvaluationSuiteOptions,
