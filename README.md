@@ -209,9 +209,9 @@ The `examples/` directory contains complete working examples:
 - [sqlite-server/](./examples/sqlite-server) — Test suite for a SQLite MCP server: 11 Playwright tests, 14 eval dataset cases.
 - [basic-playwright-usage/](./examples/basic-playwright-usage) — Minimal Playwright patterns.
 
-## Campaign runner
+## Evaluation runner
 
-For projects with multiple evalsets, the campaign runner converts minimal JSON
+For projects with multiple evalsets, the evaluation runner converts minimal JSON
 (evalsets containing `expected_tool`, `tool`, or `scenario`) into tester-native
 cases and writes self-contained results:
 
@@ -228,7 +228,7 @@ npx mcp-server-tester batch \
   --parallel 4
 ```
 
-Campaign configs support `direct`, `tool-selection`, `tool-call`,
+Evaluation configs support `direct`, `tool-selection`, `tool-call`,
 `e2e-quality`, `mcp-host`, `sxs`, and `all` modes, plus local evalset paths,
 custom judge plugins, metrics, baselines, and host overrides. The public
 metric registry includes token/cost/duration, response/tool, pass/no-action,

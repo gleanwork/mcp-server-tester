@@ -45,7 +45,7 @@ async function runWithConcurrency<T>(
   return results;
 }
 
-/** Run multiple campaign configs with bounded process-level concurrency. */
+/** Run multiple evaluation configs with bounded process-level concurrency. */
 export async function runEvalBatch(
   options: RunEvalBatchOptions
 ): Promise<RunEvalBatchResult> {

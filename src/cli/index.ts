@@ -67,7 +67,7 @@ program
 // Batch command
 program
   .command('batch')
-  .description('Run multiple eval campaign configs with bounded concurrency')
+  .description('Run multiple eval evaluation configs with bounded concurrency')
   .option('--configs <paths...>', 'Config files to run')
   .option('--config-dir <dir>', 'Directory containing config JSON files')
   .option(
@@ -82,7 +82,7 @@ program
     Number,
     1
   )
-  .option('--mode <mode>', 'Override campaign mode')
+  .option('--mode <mode>', 'Override evaluation mode')
   .option('--client-host <name>', 'Override client host')
   .option('--mcp-url <url>', 'Override MCP server URL')
   .option('--tools <names>', 'Comma-separated tool filter')
@@ -163,7 +163,7 @@ program
     '.'
   )
   .option('--output-dir <dir>', 'Directory for results.json output')
-  .option('--mode <mode>', 'Override campaign mode')
+  .option('--mode <mode>', 'Override evaluation mode')
   .option('--client-host <name>', 'Override client host')
   .option('--mcp-url <url>', 'Override MCP server URL')
   .option('--server-b <url>', 'MCP server B URL for SxS mode')

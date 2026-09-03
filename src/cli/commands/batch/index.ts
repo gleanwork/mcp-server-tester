@@ -5,7 +5,7 @@ import {
   type RunEvalBatchOptions,
 } from '../../../evals/runEvalBatch.js';
 import type {
-  EvalCampaignMode,
+  EvalConfigMode,
   EvalConfig,
   MetricSpec,
 } from '../../../evals/evalConfigSchema.js';
@@ -16,7 +16,7 @@ export interface BatchOptions {
   rootDir?: string;
   outputRoot?: string;
   parallel?: number;
-  mode?: EvalCampaignMode;
+  mode?: EvalConfigMode;
   clientHost?: string;
   mcpUrl?: string;
   tools?: string;
