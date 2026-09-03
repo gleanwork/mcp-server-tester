@@ -1,10 +1,6 @@
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { EvalRunnerResult } from '../types/index.js';
-import type {
-  EvalConfig,
-  EvalConfigMode,
-  NativeMcpServerConfig,
-} from './evalConfigSchema.js';
+import type { EvalConfig, NativeMcpServerConfig } from './evalConfigSchema.js';
 import type {
   MCPHostConfig,
   MCPHostSimulationResult,
@@ -25,7 +21,7 @@ export interface EvaluationSummary {
   timestamp: string;
   durationMs: number;
   configName: string;
-  evalMode: EvalConfigMode | string;
+  evalMode: string;
   mcpUrl?: string;
   evalsetFilePaths?: string[];
   metrics: {
