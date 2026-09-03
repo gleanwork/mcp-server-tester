@@ -80,7 +80,7 @@ function makeConfig(overrides: Record<string, unknown> = {}): OAuthSetupConfig {
     },
     outputPath: 'playwright/.auth/oauth-state.json',
     ...overrides,
-  } as OAuthSetupConfig;
+  };
 }
 
 const mockMetadata = {

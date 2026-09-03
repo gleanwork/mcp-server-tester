@@ -105,7 +105,7 @@ export async function toPassToolJudge(
       rubricOrOptions !== null &&
       'text' in rubricOrOptions)
   ) {
-    rubric = rubricOrOptions as RubricSpec;
+    rubric = rubricOrOptions;
     options = maybeOptions ?? {};
   } else {
     options = rubricOrOptions;

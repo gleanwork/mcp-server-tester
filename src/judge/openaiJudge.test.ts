@@ -25,7 +25,7 @@ import { createOpenAIJudge } from './openaiJudge.js';
 
 // Retrieve the mocked create function for configuring in tests
 async function getMockCreate() {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion
   const openai = await import('openai' as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion
   return (openai as any).__mockCreate;
