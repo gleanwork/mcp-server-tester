@@ -239,29 +239,28 @@ export {
   loadEvalDatasetFromObject,
 } from './evals/datasetLoader.js';
 
-// Eval campaign config (mcp-server-tester run)
+// Evaluation config (mcp-server-tester run)
 export {
-  EvalCampaignModeSchema,
+  EvalModeSchema,
   EvalConfigSchema,
   EvalPluginRefSchema,
-  MetricSpecSchema,
   loadEvalConfig,
   loadEvalConfigFromObject,
-  resolveEvalModeConfig,
   resolveEvalsetPaths,
 } from './evals/evalConfigSchema.js';
 export type {
-  EvalCampaignMode,
+  EvalMode,
   EvalConfig,
   EvalPluginRef,
   LoadEvalConfigOptions,
-  MetricSpec,
-  ResolvedEvalModeConfig,
 } from './evals/evalConfigSchema.js';
 
 // Plugin loading
 export { loadPluginModule, loadPlugins } from './plugins/loadPlugins.js';
-export type { EvalPluginModule, LoadPluginsOptions } from './plugins/loadPlugins.js';
+export type {
+  EvalPluginModule,
+  LoadPluginsOptions,
+} from './plugins/loadPlugins.js';
 
 // Eval Runner
 export { runEvalDataset, runEvalCase } from './evals/evalRunner.js';

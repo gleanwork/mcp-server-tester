@@ -2,76 +2,29 @@ import { describe, it, expect } from 'vitest';
 import {
   EvalConfigSchema,
   loadEvalConfigFromObject,
-  resolveEvalModeConfig,
   resolveEvalsetPaths,
 } from './evalConfigSchema.js';
 
 describe('EvalConfigSchema', () => {
-  it('parses a tool-selection weekly config', () => {
+  it('parses a minimal evaluation config', () => {
     const config = EvalConfigSchema.parse({
-      name: 'weekly-tool-selection-search',
-      mode: 'tool-selection',
-      evalsetFilePaths: ['evalsets/tool-selection/search.json'],
-      model: 'claude-sonnet-4-6',
-      clientHost: 'claude-cli',
-      mcpUrl: 'https://scio-prod-be.glean.com/mcp/default/eval',
-      concurrency: 5,
-      maxCases: 50,
-      metrics: ['passed', 'cost_usd'],
+      name: 'code-search',
+      mode: 'direct',
+      evalsetFilePaths: ['evalsets/code-search.json'],
     });
 
-    expect(config.name).toBe('weekly-tool-selection-search');
-    expect(config.mode).toBe('tool-selection');
+    expect(config.name).toBe('code-search');
+    expect(config.mode).toBe('direct');
   });
 
-  it('requires serverB for sxs mode', () => {
-    const result = EvalConfigSchema.safeParse({
-      name: 'sxs-run',
-      mode: 'sxs',
-      evalsetFilePaths: ['evalsets/tool-selection/search.json'],
-    });
-
-    expect(result.success).toBe(false);
-  });
-
-  it('accepts metric objects with params', () => {
+  it('accepts plugin references', () => {
     const config = EvalConfigSchema.parse({
-      name: 'e2e',
+      name: 'with-plugin',
       mode: 'e2e-quality',
-      evalsetFilePaths: ['evalsets/e2e-quality/info-seeking.json'],
-      judges: ['glean-completeness'],
-      metrics: [
-        {
-          metric: 'judge_pass_for',
-          name: 'judge_glean_completeness_pass',
-          params: { judge: 'glean-completeness' },
-        },
-      ],
+      plugins: [{ name: 'custom-judge', dir: './plugins/custom-judge' }],
     });
 
-    expect(config.metrics?.[0]).toEqual({
-      metric: 'judge_pass_for',
-      name: 'judge_glean_completeness_pass',
-      params: { judge: 'glean-completeness' },
-    });
-  });
-});
-
-describe('resolveEvalModeConfig', () => {
-  it('maps tool-selection to mcp_host tag filter', () => {
-    expect(resolveEvalModeConfig('tool-selection')).toEqual({
-      filterTags: ['mcp_host'],
-      requiresJudges: false,
-      isServerComparison: false,
-    });
-  });
-
-  it('maps e2e-quality to e2e_quality tag filter with judges', () => {
-    expect(resolveEvalModeConfig('e2e-quality')).toEqual({
-      filterTags: ['e2e_quality'],
-      requiresJudges: true,
-      isServerComparison: false,
-    });
+    expect(config.plugins?.[0]?.name).toBe('custom-judge');
   });
 });
 
@@ -80,10 +33,10 @@ describe('resolveEvalsetPaths', () => {
     const paths = resolveEvalsetPaths(
       {
         name: 'x',
-        mode: 'tool-selection',
+        mode: 'direct',
         evalsetFilePaths: ['evalsets/search.json'],
       },
-      '/tmp/mcp_tests',
+      '/tmp/mcp_tests'
     );
 
     expect(paths).toEqual(['/tmp/mcp_tests/evalsets/search.json']);
@@ -93,10 +46,10 @@ describe('resolveEvalsetPaths', () => {
     const paths = resolveEvalsetPaths(
       {
         name: 'x',
-        mode: 'tool-selection',
+        mode: 'direct',
         localEvalsets: 'fixtures/evals/search-evals.json',
       },
-      '/tmp/mcp_tests',
+      '/tmp/mcp_tests'
     );
 
     expect(paths).toEqual(['/tmp/mcp_tests/fixtures/evals/search-evals.json']);
@@ -109,11 +62,11 @@ describe('loadEvalConfigFromObject', () => {
       loadEvalConfigFromObject(
         {
           name: 'missing',
-          mode: 'tool-selection',
+          mode: 'direct',
           evalsetFilePaths: ['does-not-exist.json'],
         },
-        { rootDir: process.cwd() },
-      ),
+        { rootDir: process.cwd() }
+      )
     ).toThrow(/Evalset path not found/);
   });
 });

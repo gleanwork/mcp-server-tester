@@ -25,7 +25,9 @@ export async function run(options: RunOptions): Promise<void> {
   const pluginPaths =
     options.plugins ??
     config.plugins?.map((plugin) =>
-      path.isAbsolute(plugin.dir) ? plugin.dir : path.resolve(rootDir, plugin.dir),
+      path.isAbsolute(plugin.dir)
+        ? plugin.dir
+        : path.resolve(rootDir, plugin.dir)
     ) ??
     [];
 
@@ -59,15 +61,17 @@ export async function run(options: RunOptions): Promise<void> {
   fs.mkdirSync(resultsDir, { recursive: true });
   fs.writeFileSync(
     path.join(resultsDir, 'run-plan.json'),
-    `${JSON.stringify(output, null, 2)}\n`,
+    `${JSON.stringify(output, null, 2)}\n`
   );
 
   console.log(`Eval config validated: ${config.name}`);
-  console.log(`Mode: ${config.mode} → filterTags=${output.filterTags.join(',') || '(none)'}`);
+  console.log(
+    `Mode: ${config.mode} → filterTags=${output.filterTags.join(',') || '(none)'}`
+  );
   console.log(`Evalsets: ${evalsetPaths.length}`);
   console.log(`Plugins loaded: ${pluginPaths.length}`);
   console.log(`Run plan written to ${path.join(resultsDir, 'run-plan.json')}`);
   console.log(
-    'Note: full campaign execution (runEvalSuite) is not wired yet — config + plugin loading only.',
+    'Note: full evaluation execution (runEvalSuite) is not wired yet — config + plugin loading only.'
   );
 }
