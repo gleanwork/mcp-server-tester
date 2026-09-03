@@ -264,7 +264,6 @@ export type {
   NativeMcpServerConfig,
   LoadEvalConfigOptions,
   ResolvedEvalModeConfig,
-  EvalNativeMcpServerDefinition,
 } from './evals/evalConfigSchema.js';
 export type {
   MetricValue,
@@ -273,16 +272,6 @@ export type {
   ResolvedMetric,
   MetricResult,
 } from './evals/metrics.js';
-
-// Native MCP server contract (runtime safety is implemented later)
-export {
-  buildNativeMcpServers,
-  withNativeMcpServers,
-} from './evals/nativeMcpServers.js';
-export type {
-  NativeMcpServerDefinition,
-  NativeMcpSelection,
-} from './evals/nativeMcpServers.js';
 
 // Framework contracts
 export type {
