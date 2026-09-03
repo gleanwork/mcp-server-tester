@@ -348,6 +348,33 @@ const MCPHostConfigSchema = z.object({
       timeout: z.number().optional(),
     })
     .optional(),
+  mcpServers: z
+    .record(z.string(), z.record(z.string(), z.unknown()))
+    .optional(),
+  browser: z
+    .object({
+      script: z.string(),
+      timeout: z.number().optional(),
+      headless: z.boolean().optional(),
+      storageState: z.string().optional(),
+      cookies: z
+        .array(
+          z.object({
+            name: z.string(),
+            value: z.string(),
+            url: z.string().optional(),
+            domain: z.string().optional(),
+            path: z.string().optional(),
+            expires: z.number().optional(),
+            httpOnly: z.boolean().optional(),
+            secure: z.boolean().optional(),
+            sameSite: z.enum(['Strict', 'Lax', 'None']).optional(),
+            partitionKey: z.string().optional(),
+          })
+        )
+        .optional(),
+    })
+    .optional(),
 });
 
 /**
