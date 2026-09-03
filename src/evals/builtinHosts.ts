@@ -153,9 +153,12 @@ function claudeCliHost(options: BuiltinHostOptions): MCPHostConfig {
     `${JSON.stringify({ mcpServers }, null, 2)}\n`
   );
 
+  const model = options.model ?? 'claude-sonnet-4-20250514';
   const baseArgs = [
     '-p',
     '{{scenario}}',
+    '--model',
+    model,
     '--output-format',
     'stream-json',
     '--verbose',
@@ -169,7 +172,8 @@ function claudeCliHost(options: BuiltinHostOptions): MCPHostConfig {
   return {
     hostType: 'cli',
     provider: provider as MCPHostConfig['provider'],
-    model: options.model ?? 'claude-sonnet-4-20250514',
+    mcpServers: mcpServers as Record<string, Record<string, unknown>>,
+    model,
     cli: {
       command: 'claude',
       args: baseArgs,
