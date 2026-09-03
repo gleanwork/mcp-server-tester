@@ -168,7 +168,7 @@ function metric(
   return { name, kind, compute, aggregate, unit };
 }
 
-/** Built-in metrics, including the metrics used by Scio's eval campaigns. */
+/** Built-in metrics, including the metrics used by Scio's evaluations. */
 export const BUILT_IN_METRICS: Record<string, MetricDefinition> = {
   passed: metric('passed', 'binary', (result) => result.pass, rateAggregation),
   response_success: metric(
