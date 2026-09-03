@@ -197,6 +197,7 @@ function buildE2eQualityDataset(
       mode: 'mcp_host',
       scenario,
       mcpHostConfig: hostConfig,
+      ...(reference !== undefined ? { canonicalAnswer: reference } : {}),
       tags: ['e2e_quality', ...tags],
       iterations: 1,
     };
@@ -217,6 +218,17 @@ function buildE2eQualityDataset(
   });
 }
 
+function inferRawMode(
+  evalset: RawEvalset
+): Exclude<EvalCampaignMode, 'all' | 'sxs'> {
+  const first = evalset.cases[0];
+  if (!first) return 'direct';
+  if (first.expected_tool !== undefined) return 'tool-selection';
+  if (first.tool !== undefined) return 'tool-call';
+  if (first.scenario !== undefined) return 'e2e-quality';
+  return 'direct';
+}
+
 const BUILDERS: Record<
   EvalConfigMode,
   | ((
@@ -232,8 +244,13 @@ const BUILDERS: Record<
   'e2e-quality': buildE2eQualityDataset,
   'mcp-host': buildToolSelectionDataset,
   direct: null,
-  sxs: null,
-  all: null,
+  // all and sxs accept a single raw evalset and infer its campaign shape. A
+  // prebuilt dataset is returned unchanged above, so mixed tagged datasets are
+  // also supported by the normal EvalDataset path.
+  sxs: (evalset, hostConfig, config) =>
+    buildEvalDataset(evalset, inferRawMode(evalset), hostConfig, config),
+  all: (evalset, hostConfig, config) =>
+    buildEvalDataset(evalset, inferRawMode(evalset), hostConfig, config),
 };
 
 export function buildEvalDataset(

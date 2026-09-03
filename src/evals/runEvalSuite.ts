@@ -14,11 +14,20 @@ import {
 } from './evalConfigSchema.js';
 import { buildEvalDataset } from './buildEvalDataset.js';
 import { getBuiltinHostConfig } from './builtinHosts.js';
+import { buildNativeMcpServers } from './nativeMcpServers.js';
 import { runEvalDataset } from './evalRunner.js';
 import type { EvalRunnerResult } from './evalRunner.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { UsageMetrics } from '../types/index.js';
+import type { EvalDataset } from './datasetTypes.js';
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
+import {
+  runServerComparison,
+  type ServerComparisonResult,
+} from './serverComparison.js';
 import { loadPlugins } from '../plugins/loadPlugins.js';
+import { computeMetrics } from './metrics.js';
 
 export interface RunEvalSuiteOptions {
   configPath: string;
@@ -27,12 +36,15 @@ export interface RunEvalSuiteOptions {
   outputDir?: string;
   mcpConfig?: MCPConfig;
   dryRun?: boolean;
+  /** Optional command-line overrides applied after loading the JSON config. */
+  configOverrides?: Partial<EvalConfig>;
 }
 
 export interface RunEvalSuiteResult {
   config: EvalConfig;
   outputDir: string;
   datasets: Array<{ path: string; name: string; result?: EvalRunnerResult }>;
+  comparison?: ServerComparisonResult[];
   merged: ScioCompatibleResults;
 }
 
@@ -51,6 +63,7 @@ export interface ScioCompatibleResults {
     datasetBreakdown: Record<string, number>;
     totalHostUsage?: Partial<UsageMetrics>;
   };
+  aggregatedMetrics?: Record<string, unknown>;
   results: EvalCaseResult[];
 }
 
@@ -61,6 +74,16 @@ function applyConfigEnv(config: EvalConfig): void {
   process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS = '1';
   if (config.mcpUrl) {
     process.env.GLEAN_MCP_URL = config.mcpUrl;
+  } else if (
+    (Array.isArray(config.nativeConnectors) &&
+      config.nativeConnectors.length > 0) ||
+    (config.nativeConnectors !== undefined &&
+      !Array.isArray(config.nativeConnectors) &&
+      Object.keys(config.nativeConnectors).length > 0)
+  ) {
+    // An explicit native-only selection must not inherit a Glean URL from the
+    // shell environment or the default production endpoint.
+    process.env.GLEAN_MCP_URL = '';
   }
   if (config.model) {
     process.env.EVAL_MODEL = config.model;
@@ -94,10 +117,7 @@ function applyConfigEnv(config: EvalConfig): void {
   }
 }
 
-function resolveMcpConfig(
-  config: EvalConfig,
-  override?: MCPConfig,
-): MCPConfig {
+function resolveMcpConfig(config: EvalConfig, override?: MCPConfig): MCPConfig {
   if (override) {
     return override;
   }
@@ -108,7 +128,7 @@ function resolveMcpConfig(
   const accessToken = process.env.GLEAN_API_TOKEN;
   if (!accessToken) {
     throw new Error(
-      'GLEAN_API_TOKEN is required to run evals against the MCP server',
+      'GLEAN_API_TOKEN is required to run evals against the MCP server'
     );
   }
   return {
@@ -137,7 +157,7 @@ async function expandEvalsetPaths(paths: string[]): Promise<string[]> {
 
 function mergeResults(
   config: EvalConfig,
-  datasetResults: Array<{ name: string; result: EvalRunnerResult }>,
+  datasetResults: Array<{ name: string; result: EvalRunnerResult }>
 ): ScioCompatibleResults {
   const allResults: EvalCaseResult[] = [];
   const datasetBreakdown: Record<string, number> = {};
@@ -175,9 +195,56 @@ function mergeResults(
   };
 }
 
+function createUnusedMcpFixture(): MCPFixtureApi {
+  const unavailable = async (): Promise<never> => {
+    throw new Error(
+      'This eval uses a CLI/browser host and has no primary MCP server'
+    );
+  };
+  return {
+    client: undefined as unknown as Client,
+    authType: 'none',
+    listTools: unavailable,
+    callTool: unavailable,
+    getServerInfo: () => null,
+  };
+}
+
+function withHostConfig(
+  dataset: EvalDataset,
+  hostConfig: ReturnType<typeof getBuiltinHostConfig>
+): EvalDataset {
+  return {
+    ...dataset,
+    cases: dataset.cases.map((evalCase) =>
+      evalCase.mode === 'mcp_host'
+        ? { ...evalCase, mcpHostConfig: hostConfig }
+        : evalCase
+    ),
+  };
+}
+
+function filterDatasetByTools(
+  dataset: EvalDataset,
+  tools: string | undefined
+): EvalDataset {
+  if (!tools?.trim()) return dataset;
+  const selected = new Set(
+    tools
+      .split(',')
+      .map((tool) => tool.trim())
+      .filter(Boolean)
+  );
+  const cases = dataset.cases.filter(
+    (evalCase) =>
+      evalCase.toolName !== undefined && selected.has(evalCase.toolName)
+  );
+  return { ...dataset, cases };
+}
+
 function sumUsage(
   a: Partial<UsageMetrics> | undefined,
-  b: Partial<UsageMetrics>,
+  b: Partial<UsageMetrics>
 ): Partial<UsageMetrics> {
   const keys = [
     'inputTokens',
@@ -199,10 +266,18 @@ function sumUsage(
 }
 
 export async function runEvalSuite(
-  options: RunEvalSuiteOptions,
+  options: RunEvalSuiteOptions
 ): Promise<RunEvalSuiteResult> {
   const rootDir = options.rootDir ?? process.cwd();
-  const config = loadEvalConfig(options.configPath, { rootDir });
+  const loadedConfig = loadEvalConfig(options.configPath, {
+    rootDir,
+    // Allow config validation without local evalset fixtures on disk.
+    skipEvalsetValidation: options.dryRun,
+  });
+  const config: EvalConfig = {
+    ...loadedConfig,
+    ...options.configOverrides,
+  };
   applyConfigEnv(config);
 
   const pluginPaths =
@@ -210,7 +285,7 @@ export async function runEvalSuite(
     config.plugins?.map((plugin) =>
       path.isAbsolute(plugin.dir)
         ? plugin.dir
-        : path.resolve(rootDir, plugin.dir),
+        : path.resolve(rootDir, plugin.dir)
     ) ??
     [];
 
@@ -219,10 +294,18 @@ export async function runEvalSuite(
   }
 
   const modeConfig = resolveEvalModeConfig(config.mode);
-  const evalsetPaths = await expandEvalsetPaths(
-    resolveEvalsetPaths(config, rootDir),
-  );
+  const resolvedEvalsetPaths = resolveEvalsetPaths(config, rootDir);
+  const evalsetPaths = options.dryRun
+    ? resolvedEvalsetPaths
+    : await expandEvalsetPaths(resolvedEvalsetPaths);
 
+  const nativeMcpServers = options.dryRun
+    ? {}
+    : await buildNativeMcpServers(
+        config.nativeServers ?? [],
+        config.nativeConnectors,
+        { preflight: true }
+      );
   const hostConfig = getBuiltinHostConfig(config.clientHost ?? 'claude-cli', {
     model: config.model,
     maxToolCalls: config.maxToolCalls,
@@ -231,11 +314,16 @@ export async function runEvalSuite(
     mcpUrl: config.mcpUrl,
     pluginDir: process.env.PLUGIN_DIR,
     pluginMcpUrl: process.env.GLEAN_PLUGIN_MCP_URL,
+    mcpServers: nativeMcpServers,
   });
 
+  const runTimestamp = new Date()
+    .toISOString()
+    .replace(/[:.]/g, '-')
+    .slice(0, 19);
   const outputDir =
     options.outputDir ??
-    path.join(rootDir, '.mcp-test-results', config.name);
+    path.join(rootDir, '.mcp-test-results', `${config.name}-${runTimestamp}`);
 
   if (options.dryRun) {
     return {
@@ -264,59 +352,156 @@ export async function runEvalSuite(
     };
   }
 
-  if (modeConfig.isServerComparison) {
-    throw new Error(
-      'sxs mode is not yet supported by runEvalSuite — use runServerComparison directly',
-    );
-  }
+  const hasNativeSelection = Array.isArray(config.nativeConnectors)
+    ? config.nativeConnectors.length > 0
+    : config.nativeConnectors !== undefined &&
+      Object.keys(config.nativeConnectors).length > 0;
+  const nativeOnly = hasNativeSelection && !config.mcpUrl;
+  const mcpConfig = nativeOnly
+    ? undefined
+    : resolveMcpConfig(config, options.mcpConfig);
+  const client = mcpConfig
+    ? await createMCPClientForConfig(mcpConfig)
+    : undefined;
+  const mcp = client
+    ? createMCPFixture(client, undefined, { authType: 'api-token' })
+    : createUnusedMcpFixture();
 
-  const mcpConfig = resolveMcpConfig(config, options.mcpConfig);
-  const client = await createMCPClientForConfig(mcpConfig);
-  const mcp = createMCPFixture(client, undefined, { authType: 'api-token' });
-
-  const datasetResults: Array<{ path: string; name: string; result: EvalRunnerResult }> =
+  const datasetResults: Array<{
+    path: string;
+    name: string;
+    result: EvalRunnerResult;
+  }> = [];
+  const comparisons: Array<{ name: string; result: ServerComparisonResult }> =
     [];
+  let clientB: Awaited<ReturnType<typeof createMCPClientForConfig>> | undefined;
+  let hostConfigB: ReturnType<typeof getBuiltinHostConfig> | undefined;
 
   try {
-    for (const evalsetPath of evalsetPaths) {
-      const raw = JSON.parse(await fs.readFile(evalsetPath, 'utf8')) as unknown;
-      const dataset = buildEvalDataset(
-        raw,
-        config.mode,
-        hostConfig,
-        config,
-      );
-      const result = await runEvalDataset(
-        {
-          dataset,
-          filterTags:
-            modeConfig.filterTags.length > 0
-              ? modeConfig.filterTags
-              : undefined,
-          concurrency: config.concurrency ?? 1,
-          defaultLlmIterations: config.iterations || undefined,
+    if (modeConfig.isServerComparison) {
+      if (!config.serverB) {
+        throw new Error('serverB is required when mode is sxs');
+      }
+      clientB = await createMCPClientForConfig({
+        transport: 'http',
+        serverUrl: config.serverB,
+        auth: {
+          accessToken:
+            config.serverBToken ??
+            process.env.SXS_SERVER_B_TOKEN ??
+            process.env.GLEAN_API_TOKEN,
         },
-        { mcp },
-      );
-      datasetResults.push({
-        path: evalsetPath,
-        name: dataset.name,
-        result,
+      });
+      hostConfigB = getBuiltinHostConfig(config.clientHost ?? 'claude-cli', {
+        model: config.model,
+        maxToolCalls: config.maxToolCalls,
+        timeout: config.timeout,
+        provider: config.provider,
+        mcpUrl: config.serverB,
+        pluginDir: process.env.PLUGIN_DIR,
+        pluginMcpUrl: process.env.GLEAN_PLUGIN_MCP_URL,
       });
     }
+
+    for (const evalsetPath of evalsetPaths) {
+      const raw = JSON.parse(await fs.readFile(evalsetPath, 'utf8')) as unknown;
+      const dataset = filterDatasetByTools(
+        buildEvalDataset(raw, config.mode, hostConfig, config),
+        config.tools
+      );
+      if (dataset.cases.length === 0) {
+        throw new Error(
+          `No eval cases remain for ${evalsetPath}${config.tools ? ` after filtering tools: ${config.tools}` : ''}`
+        );
+      }
+
+      if (clientB) {
+        const comparison = await runServerComparison(
+          {
+            dataset,
+            datasetB: hostConfigB
+              ? withHostConfig(dataset, hostConfigB)
+              : undefined,
+            filterTags:
+              modeConfig.filterTags.length > 0
+                ? modeConfig.filterTags
+                : undefined,
+            concurrency: config.concurrency ?? 1,
+            defaultLlmIterations: config.iterations || undefined,
+            mcpHostModel: config.model,
+            judgeModel: process.env.JUDGE_MODEL,
+          },
+          { mcp },
+          {
+            mcp: createMCPFixture(clientB, undefined, {
+              authType: 'api-token',
+            }),
+          }
+        );
+        comparisons.push({ name: dataset.name, result: comparison });
+        datasetResults.push({
+          path: evalsetPath,
+          name: dataset.name,
+          result: comparison.serverAResult,
+        });
+      } else {
+        const result = await runEvalDataset(
+          {
+            dataset,
+            filterTags:
+              modeConfig.filterTags.length > 0
+                ? modeConfig.filterTags
+                : undefined,
+            concurrency: config.concurrency ?? 1,
+            defaultLlmIterations: config.iterations || undefined,
+            mcpHostModel: config.model,
+            judgeModel: process.env.JUDGE_MODEL,
+          },
+          { mcp }
+        );
+        datasetResults.push({ path: evalsetPath, name: dataset.name, result });
+      }
+    }
   } finally {
-    await closeMCPClient(client);
+    if (clientB) await closeMCPClient(clientB);
+    if (client) await closeMCPClient(client);
   }
 
   const merged = mergeResults(
     config,
-    datasetResults.map(({ name, result }) => ({ name, result })),
+    datasetResults.map(({ name, result }) => ({ name, result }))
   );
+  if (comparisons.length > 0) {
+    merged.aggregatedMetrics = {
+      ...merged.metrics,
+      aWins: comparisons.reduce((sum, item) => sum + item.result.aWins, 0),
+      bWins: comparisons.reduce((sum, item) => sum + item.result.bWins, 0),
+      ties: comparisons.reduce((sum, item) => sum + item.result.ties, 0),
+      bothFail: comparisons.reduce(
+        (sum, item) => sum + item.result.bothFail,
+        0
+      ),
+    };
+  }
+
+  if (config.metrics?.length) {
+    const { perCase, aggregated } = computeMetrics(
+      config.metrics,
+      merged.results
+    );
+    for (const c of merged.results) {
+      (c as unknown as Record<string, unknown>).metrics = perCase[c.id] ?? {};
+    }
+    merged.aggregatedMetrics = {
+      ...(merged.aggregatedMetrics ?? merged.metrics),
+      ...aggregated,
+    };
+  }
 
   await fs.mkdir(outputDir, { recursive: true });
   await fs.writeFile(
     path.join(outputDir, 'results.json'),
-    `${JSON.stringify(merged, null, 2)}\n`,
+    `${JSON.stringify(merged, null, 2)}\n`
   );
 
   for (const { name, result } of datasetResults) {
@@ -336,8 +521,15 @@ export async function runEvalSuite(
           results: result.caseResults,
         },
         null,
-        2,
-      )}\n`,
+        2
+      )}\n`
+    );
+  }
+
+  for (const comparison of comparisons) {
+    await fs.writeFile(
+      path.join(outputDir, `comparison-${comparison.name}.json`),
+      `${JSON.stringify(comparison.result, null, 2)}\n`
     );
   }
 
@@ -345,6 +537,10 @@ export async function runEvalSuite(
     config,
     outputDir,
     datasets: datasetResults,
+    comparison:
+      comparisons.length > 0
+        ? comparisons.map((comparison) => comparison.result)
+        : undefined,
     merged,
   };
 }
