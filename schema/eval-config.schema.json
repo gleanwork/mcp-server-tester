@@ -1,0 +1,129 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/gleanwork/mcp-server-tester/schema/eval-config.schema.json",
+  "title": "Evaluation Config",
+  "description": "Complete JSON contract for an mcp-server-tester evaluation run.",
+  "type": "object",
+  "required": ["name", "mode"],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique evaluation name used for result directories and reporting."
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["tool-selection", "tool-call", "e2e-quality", "mcp-host", "sxs", "direct", "all"],
+      "description": "Evaluation mode."
+    },
+    "evalsetFilePaths": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Paths to evalset JSON files or directories."
+    },
+    "localEvalsets": {
+      "type": "string",
+      "description": "Shorthand for a single local evalset path."
+    },
+    "model": { "type": "string" },
+    "clientHost": {
+      "type": "string",
+      "description": "Host adapter used for model-driven evaluation."
+    },
+    "mcpUrl": { "type": "string", "format": "uri" },
+    "concurrency": { "type": "integer", "minimum": 1 },
+    "maxCases": { "type": "integer", "minimum": 1 },
+    "timeout": { "type": "integer", "minimum": 1 },
+    "provider": { "type": "string" },
+    "env": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "metrics": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "type": "string" },
+          {
+            "type": "object",
+            "required": ["metric"],
+            "properties": {
+              "metric": { "type": "string" },
+              "name": { "type": "string" },
+              "params": { "type": "object" }
+            },
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "iterations": { "type": "integer", "minimum": 0 },
+    "maxToolCalls": { "type": "integer", "minimum": 0 },
+    "judges": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "version": { "type": "string" },
+    "plugins": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "dir"],
+        "properties": {
+          "name": { "type": "string" },
+          "dir": { "type": "string" },
+          "mcpUrl": { "type": "string", "format": "uri" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "useOAuth": { "type": "boolean" },
+    "tools": {
+      "type": "string",
+      "description": "Comma-separated tool filter."
+    },
+    "serverB": {
+      "type": "string",
+      "format": "uri",
+      "description": "Second MCP endpoint for SxS evaluation."
+    },
+    "serverBTokenEnv": {
+      "type": "string",
+      "description": "Environment variable containing the SxS server token."
+    },
+    "nativeServers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "url"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "url": { "type": "string", "format": "uri" },
+          "tokenEnv": { "type": "string" },
+          "headers": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          },
+          "alwaysWriteTools": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "readOnlyTools": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "expectedMinTools": { "type": "integer", "minimum": 0 },
+          "plannedWriteKey": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "nativeConnectors": {
+      "oneOf": [
+        { "type": "array", "items": { "type": "string" } },
+        { "type": "object", "additionalProperties": { "type": "string" } }
+      ]
+    }
+  }
+}

@@ -239,6 +239,56 @@ export {
   loadEvalDatasetFromObject,
 } from './evals/datasetLoader.js';
 
+// Evaluation config (mcp-server-tester run)
+export {
+  EvalConfigModeSchema,
+  EvalConfigSchema,
+  EvalPluginRefSchema,
+  MetricSpecSchema,
+  loadEvalConfig,
+  loadEvalConfigFromObject,
+  resolveEvalsetPaths,
+} from './evals/evalConfigSchema.js';
+export type {
+  EvalConfigMode,
+  EvalConfig,
+  EvalPluginRef,
+  MetricSpec,
+  NativeMcpServerConfig,
+  LoadEvalConfigOptions,
+} from './evals/evalConfigSchema.js';
+
+// Native MCP server contract (runtime safety is implemented later)
+export {
+  buildNativeMcpServers,
+  withNativeMcpServers,
+} from './evals/nativeMcpServers.js';
+export type {
+  NativeMcpServerDefinition,
+  NativeMcpSelection,
+  NativeMcpConfig,
+} from './evals/nativeMcpServers.js';
+
+// Framework contracts
+export type {
+  EvaluationSuiteOptions,
+  EvaluationSuiteResult,
+  EvaluationSummary,
+  EvaluationBatchOptions,
+  EvaluationBatchResult,
+  EvalMetricDefinition,
+  EvalHostAdapter,
+  NativeMcpServerResolver,
+  EvalSummaryGenerator,
+} from './evals/evalFrameworkTypes.js';
+
+// Plugin loading
+export { loadPluginModule, loadPlugins } from './plugins/loadPlugins.js';
+export type {
+  EvalPluginModule,
+  LoadPluginsOptions,
+} from './plugins/loadPlugins.js';
+
 // Eval Runner
 export { runEvalDataset, runEvalCase } from './evals/evalRunner.js';
 
