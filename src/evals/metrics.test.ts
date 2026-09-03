@@ -9,6 +9,7 @@ function result(
     calls?: string[];
     usage?: EvalCaseResult['hostUsage'];
     judge?: { name: string; pass: boolean; score: number };
+    response?: EvalCaseResult['response'];
   } = {}
 ): EvalCaseResult {
   return {
@@ -17,7 +18,7 @@ function result(
     toolName: 'test',
     source: 'eval',
     pass,
-    response: {
+    response: options.response ?? {
       toolCalls: (options.calls ?? []).map((name) => ({ name })),
       response: 'one two three',
     },
@@ -86,6 +87,22 @@ describe('computeMetrics', () => {
     expect(metrics.aggregated.cost_usd_mean).toBe(0.2);
     expect(metrics.aggregated.quality_score_mean).toBe(0.9);
     expect(metrics.aggregated.judge_score).toEqual({ quality: 0.9 });
+  });
+
+  it('extracts text from direct MCP content responses', () => {
+    const metrics = computeMetrics(
+      ['response_len', 'response_words'],
+      [
+        result('direct', true, {
+          response: {
+            content: [{ type: 'text', text: 'one two three' }],
+          },
+        }),
+      ]
+    );
+
+    expect(metrics.perCase.direct!.response_len).toBe(13);
+    expect(metrics.perCase.direct!.response_words).toBe(3);
   });
 
   it('rejects unknown metric names instead of silently dropping them', () => {
