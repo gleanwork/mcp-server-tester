@@ -9,6 +9,7 @@ import { login } from './commands/login/index.js';
 import { token } from './commands/token/index.js';
 import { open } from './commands/open/index.js';
 import { run } from './commands/run/index.js';
+import { batch } from './commands/batch/index.js';
 import packageJson from '../../package.json' with { type: 'json' };
 
 const program = new Command();
@@ -78,6 +79,34 @@ program
   )
   .option('--dry-run', 'Validate config and plugins without executing evals')
   .action(run);
+
+// Batch command
+program
+  .command('batch')
+  .description('Run multiple evaluation configs')
+  .option('--configs <paths...>', 'Evaluation config files')
+  .option('--config-dir <dir>', 'Directory containing evaluation configs')
+  .option(
+    '--root-dir <dir>',
+    'Base directory for resolving relative paths',
+    '.'
+  )
+  .option('--output-root <dir>', 'Root directory for evaluation results')
+  .option(
+    '--parallel <number>',
+    'Maximum number of evaluations to run in parallel'
+  )
+  .option('--dry-run', 'Validate config paths without executing evaluations')
+  .action((options) =>
+    batch({
+      configPaths: options.configs,
+      configDir: options.configDir,
+      rootDir: options.rootDir,
+      outputRoot: options.outputRoot,
+      parallel: options.parallel ? Number(options.parallel) : undefined,
+      dryRun: options.dryRun,
+    })
+  );
 
 // Open command
 program

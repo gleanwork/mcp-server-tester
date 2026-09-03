@@ -241,19 +241,35 @@ export {
 
 // Evaluation config (mcp-server-tester run)
 export {
-  EvalModeSchema,
+  EvalConfigModeSchema,
   EvalConfigSchema,
   EvalPluginRefSchema,
+  MetricSpecSchema,
   loadEvalConfig,
   loadEvalConfigFromObject,
   resolveEvalsetPaths,
 } from './evals/evalConfigSchema.js';
 export type {
-  EvalMode,
+  EvalConfigMode,
   EvalConfig,
   EvalPluginRef,
+  MetricSpec,
+  NativeMcpServerConfig,
   LoadEvalConfigOptions,
 } from './evals/evalConfigSchema.js';
+
+// Framework contracts
+export type {
+  EvaluationSuiteOptions,
+  EvaluationSuiteResult,
+  EvaluationSummary,
+  EvaluationBatchOptions,
+  EvaluationBatchResult,
+  EvalMetricDefinition,
+  EvalHostAdapter,
+  NativeMcpServerResolver,
+  EvalSummaryGenerator,
+} from './evals/evalFrameworkTypes.js';
 
 // Plugin loading
 export { loadPluginModule, loadPlugins } from './plugins/loadPlugins.js';

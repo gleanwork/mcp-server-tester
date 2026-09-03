@@ -21,10 +21,38 @@ describe('EvalConfigSchema', () => {
     const config = EvalConfigSchema.parse({
       name: 'with-plugin',
       mode: 'e2e-quality',
+      evalsetFilePaths: ['evalsets/e2e.json'],
       plugins: [{ name: 'custom-judge', dir: './plugins/custom-judge' }],
     });
 
     expect(config.plugins?.[0]?.name).toBe('custom-judge');
+  });
+
+  it('describes SxS and native-server configuration without inline tokens', () => {
+    const config = EvalConfigSchema.parse({
+      name: 'host-integrations',
+      mode: 'sxs',
+      evalsetFilePaths: ['evalsets/search.json'],
+      serverB: 'https://server-b.example.com/mcp',
+      serverBTokenEnv: 'SERVER_B_TOKEN',
+      nativeServers: [
+        {
+          name: 'vendor',
+          url: 'https://vendor.example.com/mcp',
+          tokenEnv: 'VENDOR_TOKEN',
+        },
+      ],
+      metrics: [
+        {
+          metric: 'judge_score_for',
+          name: 'vendor_score',
+          params: { judge: 'vendor-judge' },
+        },
+      ],
+    });
+
+    expect(config.serverBTokenEnv).toBe('SERVER_B_TOKEN');
+    expect(config.nativeServers?.[0]?.tokenEnv).toBe('VENDOR_TOKEN');
   });
 });
 
