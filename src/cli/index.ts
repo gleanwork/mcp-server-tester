@@ -10,6 +10,7 @@ import { token } from './commands/token/index.js';
 import { open } from './commands/open/index.js';
 import { run } from './commands/run/index.js';
 import { batch } from './commands/batch/index.js';
+import { runDryRunProxy } from '../mcp/dryRunProxy.js';
 import packageJson from '../../package.json' with { type: 'json' };
 
 const program = new Command();
@@ -63,6 +64,90 @@ program
   .option('--state-dir <dir>', 'Custom directory for token storage')
   .action(token);
 
+// Batch command
+program
+  .command('batch')
+  .description('Run multiple eval campaign configs with bounded concurrency')
+  .option('--configs <paths...>', 'Config files to run')
+  .option('--config-dir <dir>', 'Directory containing config JSON files')
+  .option(
+    '--root-dir <dir>',
+    'Base directory for resolving relative paths',
+    '.'
+  )
+  .option('--output-root <dir>', 'Root directory for per-config results')
+  .option(
+    '--parallel <count>',
+    'Maximum configs to run concurrently',
+    Number,
+    1
+  )
+  .option('--mode <mode>', 'Override campaign mode')
+  .option('--client-host <name>', 'Override client host')
+  .option('--mcp-url <url>', 'Override MCP server URL')
+  .option('--tools <names>', 'Comma-separated tool filter')
+  .option('--max-cases <count>', 'Limit cases per evalset', Number)
+  .option('--concurrency <count>', 'Maximum concurrent cases', Number)
+  .option('--iterations <count>', 'Default LLM iterations', Number)
+  .option('--max-tool-calls <count>', 'Maximum tool calls per host run', Number)
+  .option('--judges <names...>', 'Override enabled custom judges')
+  .option('--metrics <names...>', 'Override metrics')
+  .option('--plugins <paths...>', 'Plugin directories to load before each run')
+  .action(batch);
+
+// Native-server dry-run proxy. This is normally launched by an MCP host,
+// not by a user directly.
+program
+  .command('proxy')
+  .description('Run a write-intercepting stdio proxy for a native MCP server')
+  .requiredOption('--upstream-url <url>', 'Upstream streamable HTTP MCP URL')
+  .requiredOption('--name <name>', 'Server name used in planned-write results')
+  .option(
+    '--token-env <name>',
+    'Environment variable containing the bearer token',
+    'MCP_PROXY_TOKEN'
+  )
+  .option('--header <headers...>', 'Extra upstream headers as NAME:VALUE')
+  .option(
+    '--always-write <tools...>',
+    'Tools to intercept regardless of annotations'
+  )
+  .option(
+    '--read-only <tools...>',
+    'Tools to allow when annotations are missing'
+  )
+  .option('--planned-write-key <key>', 'Envelope key for intercepted writes')
+  .action(
+    async (options: {
+      upstreamUrl: string;
+      name: string;
+      tokenEnv: string;
+      header?: string[];
+      alwaysWrite?: string[];
+      readOnly?: string[];
+      plannedWriteKey?: string;
+    }) => {
+      const headers: Record<string, string> = {};
+      for (const raw of options.header ?? []) {
+        const separator = raw.indexOf(':');
+        if (separator <= 0)
+          throw new Error(`Invalid --header ${raw}; expected NAME:VALUE`);
+        headers[raw.slice(0, separator).trim()] = raw
+          .slice(separator + 1)
+          .trim();
+      }
+      await runDryRunProxy({
+        name: options.name,
+        upstreamUrl: options.upstreamUrl,
+        token: process.env[options.tokenEnv] ?? '',
+        headers,
+        alwaysWriteTools: options.alwaysWrite,
+        readOnlyTools: options.readOnly,
+        plannedWriteKey: options.plannedWriteKey,
+      });
+    }
+  );
+
 // Run command
 program
   .command('run')
@@ -78,36 +163,20 @@ program
     '.'
   )
   .option('--output-dir <dir>', 'Directory for results.json output')
+  .option('--mode <mode>', 'Override campaign mode')
+  .option('--client-host <name>', 'Override client host')
+  .option('--mcp-url <url>', 'Override MCP server URL')
+  .option('--server-b <url>', 'MCP server B URL for SxS mode')
+  .option('--tools <names>', 'Comma-separated tool filter')
+  .option('--version <version>', 'Evalset version or source identifier')
+  .option('--max-cases <count>', 'Limit cases per evalset', Number)
+  .option('--concurrency <count>', 'Maximum concurrent cases', Number)
+  .option('--iterations <count>', 'Default LLM iterations', Number)
+  .option('--max-tool-calls <count>', 'Maximum tool calls per host run', Number)
+  .option('--judges <names...>', 'Override enabled custom judges')
+  .option('--metrics <names...>', 'Override metrics')
   .option('--dry-run', 'Validate config and plugins without executing evals')
   .action(run);
-
-// Batch command
-program
-  .command('batch')
-  .description('Run multiple evaluation configs')
-  .option('--configs <paths...>', 'Evaluation config files')
-  .option('--config-dir <dir>', 'Directory containing evaluation configs')
-  .option(
-    '--root-dir <dir>',
-    'Base directory for resolving relative paths',
-    '.'
-  )
-  .option('--output-root <dir>', 'Root directory for evaluation results')
-  .option(
-    '--parallel <number>',
-    'Maximum number of evaluations to run in parallel'
-  )
-  .option('--dry-run', 'Validate config paths without executing evaluations')
-  .action((options) =>
-    batch({
-      configPaths: options.configs,
-      configDir: options.configDir,
-      rootDir: options.rootDir,
-      outputRoot: options.outputRoot,
-      parallel: options.parallel ? Number(options.parallel) : undefined,
-      dryRun: options.dryRun,
-    })
-  );
 
 // Open command
 program
