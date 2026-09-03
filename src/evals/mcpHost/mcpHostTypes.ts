@@ -231,9 +231,6 @@ export interface MCPHostConfig {
    * Browser host configuration (required for 'browser' host type).
    */
   browser?: BrowserConfig;
-
-  /** Named MCP servers exposed to a host adapter. */
-  mcpServers?: Record<string, Record<string, unknown>>;
 }
 
 /**

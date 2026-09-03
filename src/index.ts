@@ -268,7 +268,6 @@ export {
 export type {
   NativeMcpServerDefinition,
   NativeMcpSelection,
-  NativeMcpConfig,
 } from './evals/nativeMcpServers.js';
 
 // Framework contracts
