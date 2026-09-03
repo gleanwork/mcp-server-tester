@@ -16,7 +16,8 @@ export type NativeMcpServerDefinition = NativeMcpServerConfig;
  */
 export async function buildNativeMcpServers(
   _definitions: NativeMcpServerDefinition[],
-  _selection?: NativeMcpSelection
+  _selection?: NativeMcpSelection,
+  _options?: { preflight?: boolean }
 ): Promise<Record<string, Record<string, unknown>>> {
   throw new Error(
     'Native MCP server resolution is not implemented in the scaffolding branch.'
