@@ -106,6 +106,50 @@ export interface ResolvedEvalModeConfig {
   isServerComparison: boolean;
 }
 
+const MODE_TAG_MAP: Record<EvalConfigMode, ResolvedEvalModeConfig> = {
+  'tool-selection': {
+    filterTags: ['mcp_host'],
+    requiresJudges: false,
+    isServerComparison: false,
+  },
+  'tool-call': {
+    filterTags: ['tool_call'],
+    requiresJudges: false,
+    isServerComparison: false,
+  },
+  'e2e-quality': {
+    filterTags: ['e2e_quality'],
+    requiresJudges: true,
+    isServerComparison: false,
+  },
+  'mcp-host': {
+    filterTags: ['mcp_host'],
+    requiresJudges: false,
+    isServerComparison: false,
+  },
+  sxs: {
+    filterTags: [],
+    requiresJudges: false,
+    isServerComparison: true,
+  },
+  direct: {
+    filterTags: [],
+    requiresJudges: false,
+    isServerComparison: false,
+  },
+  all: {
+    filterTags: [],
+    requiresJudges: true,
+    isServerComparison: false,
+  },
+};
+
+export function resolveEvalModeConfig(
+  mode: EvalConfigMode
+): ResolvedEvalModeConfig {
+  return MODE_TAG_MAP[mode];
+}
+
 export interface LoadEvalConfigOptions {
   /** Base directory for resolving relative evalset paths. */
   rootDir?: string;

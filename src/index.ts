@@ -247,6 +247,7 @@ export {
   MetricSpecSchema,
   loadEvalConfig,
   loadEvalConfigFromObject,
+  resolveEvalModeConfig,
   resolveEvalsetPaths,
 } from './evals/evalConfigSchema.js';
 export type {
@@ -256,6 +257,7 @@ export type {
   MetricSpec,
   NativeMcpServerConfig,
   LoadEvalConfigOptions,
+  ResolvedEvalModeConfig,
 } from './evals/evalConfigSchema.js';
 
 // Native MCP server contract (runtime safety is implemented later)
