@@ -220,7 +220,7 @@ function buildE2eQualityDataset(
 
 function inferRawMode(
   evalset: RawEvalset
-): Exclude<EvalCampaignMode, 'all' | 'sxs'> {
+): Exclude<EvalConfigMode, 'all' | 'sxs'> {
   const first = evalset.cases[0];
   if (!first) return 'direct';
   if (first.expected_tool !== undefined) return 'tool-selection';
@@ -244,7 +244,7 @@ const BUILDERS: Record<
   'e2e-quality': buildE2eQualityDataset,
   'mcp-host': buildToolSelectionDataset,
   direct: null,
-  // all and sxs accept a single raw evalset and infer its campaign shape. A
+  // all and sxs accept a single raw evalset and infer its evaluation shape. A
   // prebuilt dataset is returned unchanged above, so mixed tagged datasets are
   // also supported by the normal EvalDataset path.
   sxs: (evalset, hostConfig, config) =>
