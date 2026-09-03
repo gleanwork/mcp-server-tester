@@ -47,8 +47,17 @@ function toolCalls(caseResult: EvalCaseResult): unknown[] {
 }
 
 function responseText(caseResult: EvalCaseResult): string {
-  const response = responseObject(caseResult).response;
-  return typeof response === 'string' ? response : '';
+  const response = responseObject(caseResult);
+  if (typeof response.response === 'string') return response.response;
+  if (!Array.isArray(response.content)) return '';
+  return response.content
+    .map((item) => {
+      if (!item || typeof item !== 'object') return '';
+      const text = (item as Record<string, unknown>).text;
+      return typeof text === 'string' ? text : '';
+    })
+    .filter(Boolean)
+    .join('\n');
 }
 
 function judgeEntries(
