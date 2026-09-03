@@ -1,4 +1,4 @@
-import type { EvalCampaignMode } from './evalConfigSchema.js';
+import type { EvalConfigMode } from './evalConfigSchema.js';
 import type { EvalConfig } from './evalConfigSchema.js';
 import type { EvalDataset } from './datasetTypes.js';
 import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
@@ -44,13 +44,18 @@ function enabledJudges(config: EvalConfig): Set<string> {
     return new Set(config.judges);
   }
   const raw = process.env.EVAL_JUDGES ?? '';
-  return new Set(raw.split(',').map((j) => j.trim()).filter(Boolean));
+  return new Set(
+    raw
+      .split(',')
+      .map((j) => j.trim())
+      .filter(Boolean)
+  );
 }
 
 function buildJudges(
   scenario: string,
   reference: string | undefined,
-  judges: Set<string>,
+  judges: Set<string>
 ): Array<Record<string, unknown>> {
   const result: Array<Record<string, unknown>> = [];
   if (judges.has('glean-completeness')) {
@@ -89,15 +94,13 @@ function buildJudges(
 function buildToolSelectionDataset(
   evalset: RawEvalset,
   hostConfig: MCPHostConfig,
-  config: EvalConfig,
+  config: EvalConfig
 ): EvalDataset {
   const iterations = fixtureIterations(config);
   const cases = evalset.cases.map((case_) => {
     const expectedTool = String(case_.expected_tool);
     const scenario = String(case_.scenario);
-    const tags = Array.isArray(case_.tags)
-      ? (case_.tags as string[])
-      : [];
+    const tags = Array.isArray(case_.tags) ? (case_.tags as string[]) : [];
     return {
       id: String(case_.id),
       description:
@@ -121,21 +124,18 @@ function buildToolSelectionDataset(
 
   return loadEvalDatasetFromObject({
     name: evalset.name ?? 'tool-selection',
-    description:
-      evalset.description ?? 'Tool selection evaluation.',
+    description: evalset.description ?? 'Tool selection evaluation.',
     cases,
   });
 }
 
 function buildToolCallDataset(
   evalset: RawEvalset,
-  hostConfig: MCPHostConfig,
+  hostConfig: MCPHostConfig
 ): EvalDataset {
   const cases = evalset.cases.map((case_) => {
     const tool = String(case_.tool);
-    const tags = Array.isArray(case_.tags)
-      ? (case_.tags as string[])
-      : [];
+    const tags = Array.isArray(case_.tags) ? (case_.tags as string[]) : [];
     const fixtureCase: Record<string, unknown> = {
       id: String(case_.id),
       description:
@@ -180,16 +180,14 @@ function buildToolCallDataset(
 function buildE2eQualityDataset(
   evalset: RawEvalset,
   hostConfig: MCPHostConfig,
-  config: EvalConfig,
+  config: EvalConfig
 ): EvalDataset {
   const judges = enabledJudges(config);
   const cases = evalset.cases.map((case_) => {
     const scenario = String(case_.scenario);
     const reference =
       typeof case_.reference === 'string' ? case_.reference : undefined;
-    const tags = Array.isArray(case_.tags)
-      ? (case_.tags as string[])
-      : [];
+    const tags = Array.isArray(case_.tags) ? (case_.tags as string[]) : [];
     const fixtureCase: Record<string, unknown> = {
       id: String(case_.id),
       description:
@@ -220,16 +218,17 @@ function buildE2eQualityDataset(
 }
 
 const BUILDERS: Record<
-  EvalCampaignMode,
+  EvalConfigMode,
   | ((
       evalset: RawEvalset,
       hostConfig: MCPHostConfig,
-      config: EvalConfig,
+      config: EvalConfig
     ) => EvalDataset)
   | null
 > = {
   'tool-selection': buildToolSelectionDataset,
-  'tool-call': (evalset, hostConfig) => buildToolCallDataset(evalset, hostConfig),
+  'tool-call': (evalset, hostConfig) =>
+    buildToolCallDataset(evalset, hostConfig),
   'e2e-quality': buildE2eQualityDataset,
   'mcp-host': buildToolSelectionDataset,
   direct: null,
@@ -239,9 +238,9 @@ const BUILDERS: Record<
 
 export function buildEvalDataset(
   raw: unknown,
-  mode: EvalCampaignMode,
+  mode: EvalConfigMode,
   hostConfig: MCPHostConfig,
-  config: EvalConfig,
+  config: EvalConfig
 ): EvalDataset {
   if (isPrebuiltDataset(raw)) {
     let dataset = loadEvalDatasetFromObject(raw);
