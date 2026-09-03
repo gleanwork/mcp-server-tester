@@ -64,13 +64,18 @@ function claudeCliHost(options: BuiltinHostOptions): MCPHostConfig {
   const pluginDir = options.pluginDir ?? process.env.PLUGIN_DIR ?? '';
 
   const mcpServers: Record<string, unknown> = {
-    'glean-mcp': {
-      type: 'http',
-      url: mcpUrl,
-      headers: {
-        Authorization: `Bearer ${apiToken}`,
-      },
-    },
+    ...(mcpUrl
+      ? {
+          'glean-mcp': {
+            type: 'http',
+            url: mcpUrl,
+            headers: {
+              Authorization: `Bearer ${apiToken}`,
+            },
+          },
+        }
+      : {}),
+    ...(options.mcpServers ?? {}),
   };
 
   if (pluginDir) {
@@ -127,6 +132,7 @@ function claudeCliHost(options: BuiltinHostOptions): MCPHostConfig {
   return {
     hostType: 'cli',
     provider: provider as MCPHostConfig['provider'],
+    mcpServers: mcpServers as Record<string, Record<string, unknown>>,
     model: options.model ?? 'claude-sonnet-4-20250514',
     cli: {
       command: 'claude',

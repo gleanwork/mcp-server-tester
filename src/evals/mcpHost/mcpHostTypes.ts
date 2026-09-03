@@ -13,8 +13,8 @@ import type { UsageMetrics } from '../../types/index.js';
  *
  * - 'sdk': Programmatic via Vercel AI SDK (default). The framework's MCP connection is reused.
  * - 'cli': CLI-based hosts (e.g., Claude Code, Codex). Spawns a process with its own MCP connection.
- * - 'browser': Web-based hosts (e.g., claude.ai). Uses Playwright/CDP. (Not yet implemented.)
- * - 'desktop': Desktop app hosts (e.g., Claude Desktop). Uses computer use. (Not yet implemented.)
+ * - 'browser': Web-based hosts (e.g., claude.ai). Uses Playwright and a user script.
+ * - 'desktop': Desktop-style hosts driven through the browser adapter.
  */
 export type HostType = 'sdk' | 'cli' | 'browser' | 'desktop';
 
@@ -177,8 +177,8 @@ export interface MCPHostConfig {
    *
    * - 'sdk': Programmatic via Vercel AI SDK (default). The framework's MCP connection is reused.
    * - 'cli': CLI-based hosts (e.g., Claude Code, Codex). Spawns a process with its own MCP connection.
-   * - 'browser': Web-based hosts (not yet implemented).
-   * - 'desktop': Desktop app hosts (not yet implemented).
+   * - 'browser': Web-based hosts driven by a Playwright script.
+   * - 'desktop': Desktop-style hosts driven through the browser adapter.
    *
    * @default 'sdk'
    */
@@ -220,6 +220,12 @@ export interface MCPHostConfig {
    * CLI host configuration (required for 'cli' host type).
    */
   cli?: CLIConfig;
+
+  /**
+   * Additional MCP server entries for CLI hosts. Values follow the Claude
+   * mcpServers JSON shape and may point at safe local proxies.
+   */
+  mcpServers?: Record<string, Record<string, unknown>>;
 
   /**
    * Browser host configuration (required for 'browser' host type).
