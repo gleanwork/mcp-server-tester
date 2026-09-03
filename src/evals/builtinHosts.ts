@@ -12,6 +12,7 @@ export interface BuiltinHostOptions {
   apiToken?: string;
   pluginDir?: string;
   pluginMcpUrl?: string;
+  mcpServers?: Record<string, Record<string, unknown>>;
 }
 
 /**
@@ -20,7 +21,7 @@ export interface BuiltinHostOptions {
  */
 export function getBuiltinHostConfig(
   name: string,
-  options: BuiltinHostOptions = {},
+  options: BuiltinHostOptions = {}
 ): MCPHostConfig {
   const factory = BUILTIN_HOSTS[name];
   if (!factory) {
@@ -63,19 +64,27 @@ function claudeCliHost(options: BuiltinHostOptions): MCPHostConfig {
   const pluginDir = options.pluginDir ?? process.env.PLUGIN_DIR ?? '';
 
   const mcpServers: Record<string, unknown> = {
-    'glean-mcp': {
-      type: 'http',
-      url: mcpUrl,
-      headers: {
-        Authorization: `Bearer ${apiToken}`,
-      },
-    },
+    ...(mcpUrl
+      ? {
+          'glean-mcp': {
+            type: 'http',
+            url: mcpUrl,
+            headers: {
+              Authorization: `Bearer ${apiToken}`,
+            },
+          },
+        }
+      : {}),
+    ...(options.mcpServers ?? {}),
   };
 
   if (pluginDir) {
     const dataDir =
       process.env.PLUGIN_DATA_DIR ??
-      path.join(os.homedir(), '.claude/plugins/data/glean-vnext-glean-plugins-vnext');
+      path.join(
+        os.homedir(),
+        '.claude/plugins/data/glean-vnext-glean-plugins-vnext'
+      );
     const serverUrl =
       options.pluginMcpUrl ??
       process.env.GLEAN_PLUGIN_MCP_URL ??
@@ -83,7 +92,7 @@ function claudeCliHost(options: BuiltinHostOptions): MCPHostConfig {
     fs.mkdirSync(dataDir, { recursive: true });
     fs.writeFileSync(
       path.join(dataDir, 'mcp-server-url.json'),
-      `${JSON.stringify({ serverUrl }, null, 2)}\n`,
+      `${JSON.stringify({ serverUrl }, null, 2)}\n`
     );
     mcpServers['glean-plugin'] = {
       command: 'bash',
@@ -100,11 +109,11 @@ function claudeCliHost(options: BuiltinHostOptions): MCPHostConfig {
 
   const mcpConfigFile = path.join(
     fs.mkdtempSync(path.join(os.tmpdir(), 'mcp_config_')),
-    'mcp.json',
+    'mcp.json'
   );
   fs.writeFileSync(
     mcpConfigFile,
-    `${JSON.stringify({ mcpServers }, null, 2)}\n`,
+    `${JSON.stringify({ mcpServers }, null, 2)}\n`
   );
 
   const baseArgs = [
@@ -123,6 +132,7 @@ function claudeCliHost(options: BuiltinHostOptions): MCPHostConfig {
   return {
     hostType: 'cli',
     provider: provider as MCPHostConfig['provider'],
+    mcpServers: mcpServers as Record<string, Record<string, unknown>>,
     model: options.model ?? 'claude-sonnet-4-20250514',
     cli: {
       command: 'claude',

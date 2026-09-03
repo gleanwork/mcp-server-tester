@@ -26,6 +26,7 @@ import type {
 } from './mcpHostTypes.js';
 import { createVercelOrchestrator } from './adapters/vercel.js';
 import { runCLIHost } from './adapters/cli/index.js';
+import { runBrowserHost } from './adapters/browser/runner.js';
 
 // Single orchestrator instance shared across all providers.
 // Each provider is dynamically imported inside the orchestrator on first use.
@@ -99,10 +100,12 @@ export async function simulateMCPHost(
   }
 
   if (hostType === 'browser' || hostType === 'desktop') {
-    throw new Error(
-      `Host type '${hostType}' is not yet implemented. ` +
-        `Supported host types: 'sdk', 'cli'.`
-    );
+    if (!config.browser) {
+      throw new Error(
+        `mcpHostConfig.browser is required when hostType is '${hostType}'.`
+      );
+    }
+    return runBrowserHost(config.browser, scenario);
   }
 
   // Default: SDK host via Vercel AI SDK

@@ -193,6 +193,12 @@ export {
   createMCPClientForConfig,
   closeMCPClient,
 } from './mcp/clientFactory.js';
+export {
+  DEFAULT_PLANNED_WRITE_KEY,
+  preflightMcpServer,
+  runDryRunProxy,
+} from './mcp/dryRunProxy.js';
+export type { DryRunProxyOptions } from './mcp/dryRunProxy.js';
 
 // Response Normalization
 export { normalizeToolResponse, extractText } from './mcp/response.js';
@@ -257,21 +263,61 @@ export type {
   LoadEvalConfigOptions,
   MetricSpec,
   ResolvedEvalModeConfig,
+  EvalNativeMcpServerDefinition,
 } from './evals/evalConfigSchema.js';
+export type {
+  MetricValue,
+  MetricKind,
+  MetricDefinition,
+  ResolvedMetric,
+  MetricResult,
+} from './evals/metrics.js';
 
 // Eval dataset building and suite runner
 export { buildEvalDataset } from './evals/buildEvalDataset.js';
 export { getBuiltinHostConfig } from './evals/builtinHosts.js';
+export {
+  buildNativeMcpServers,
+  withNativeMcpServers,
+} from './evals/nativeMcpServers.js';
+export type {
+  NativeMcpServerDefinition,
+  NativeMcpSelection,
+} from './evals/nativeMcpServers.js';
+export {
+  BUILT_IN_METRICS,
+  METRIC_REGISTRY,
+  computeMetrics,
+  registerMetric,
+  resolveMetric,
+} from './evals/metrics.js';
 export { runEvalSuite } from './evals/runEvalSuite.js';
+export { runEvalBatch } from './evals/runEvalBatch.js';
+export {
+  buildEvalSummaryPrompt,
+  summarizeEvalResults,
+} from './evals/resultSummary.js';
 export type {
   RunEvalSuiteOptions,
   RunEvalSuiteResult,
   ScioCompatibleResults,
 } from './evals/runEvalSuite.js';
+export type {
+  RunEvalBatchOptions,
+  EvalBatchItem,
+  RunEvalBatchResult,
+} from './evals/runEvalBatch.js';
+export type {
+  EvalSummaryResult,
+  EvalSummaryCaller,
+} from './evals/resultSummary.js';
 
 // Plugin loading
 export { loadPluginModule, loadPlugins } from './plugins/loadPlugins.js';
-export type { EvalPluginModule, LoadPluginsOptions } from './plugins/loadPlugins.js';
+export type {
+  EvalPluginModule,
+  LoadPluginsOptions,
+} from './plugins/loadPlugins.js';
 
 // Eval Runner
 export { runEvalDataset, runEvalCase } from './evals/evalRunner.js';
@@ -319,6 +365,10 @@ export {
 export { runVariantExperiment } from './evals/variantExperiment.js';
 
 // MCP Host Simulation
+export type {
+  BrowserCookie,
+  BrowserConfig,
+} from './evals/mcpHost/mcpHostTypes.js';
 export {
   simulateMCPHost,
   isProviderAvailable,

@@ -44,13 +44,18 @@ function enabledJudges(config: EvalConfig): Set<string> {
     return new Set(config.judges);
   }
   const raw = process.env.EVAL_JUDGES ?? '';
-  return new Set(raw.split(',').map((j) => j.trim()).filter(Boolean));
+  return new Set(
+    raw
+      .split(',')
+      .map((j) => j.trim())
+      .filter(Boolean)
+  );
 }
 
 function buildJudges(
   scenario: string,
   reference: string | undefined,
-  judges: Set<string>,
+  judges: Set<string>
 ): Array<Record<string, unknown>> {
   const result: Array<Record<string, unknown>> = [];
   if (judges.has('glean-completeness')) {
@@ -89,15 +94,13 @@ function buildJudges(
 function buildToolSelectionDataset(
   evalset: RawEvalset,
   hostConfig: MCPHostConfig,
-  config: EvalConfig,
+  config: EvalConfig
 ): EvalDataset {
   const iterations = fixtureIterations(config);
   const cases = evalset.cases.map((case_) => {
     const expectedTool = String(case_.expected_tool);
     const scenario = String(case_.scenario);
-    const tags = Array.isArray(case_.tags)
-      ? (case_.tags as string[])
-      : [];
+    const tags = Array.isArray(case_.tags) ? (case_.tags as string[]) : [];
     return {
       id: String(case_.id),
       description:
@@ -121,21 +124,18 @@ function buildToolSelectionDataset(
 
   return loadEvalDatasetFromObject({
     name: evalset.name ?? 'tool-selection',
-    description:
-      evalset.description ?? 'Tool selection evaluation.',
+    description: evalset.description ?? 'Tool selection evaluation.',
     cases,
   });
 }
 
 function buildToolCallDataset(
   evalset: RawEvalset,
-  hostConfig: MCPHostConfig,
+  hostConfig: MCPHostConfig
 ): EvalDataset {
   const cases = evalset.cases.map((case_) => {
     const tool = String(case_.tool);
-    const tags = Array.isArray(case_.tags)
-      ? (case_.tags as string[])
-      : [];
+    const tags = Array.isArray(case_.tags) ? (case_.tags as string[]) : [];
     const fixtureCase: Record<string, unknown> = {
       id: String(case_.id),
       description:
@@ -180,16 +180,14 @@ function buildToolCallDataset(
 function buildE2eQualityDataset(
   evalset: RawEvalset,
   hostConfig: MCPHostConfig,
-  config: EvalConfig,
+  config: EvalConfig
 ): EvalDataset {
   const judges = enabledJudges(config);
   const cases = evalset.cases.map((case_) => {
     const scenario = String(case_.scenario);
     const reference =
       typeof case_.reference === 'string' ? case_.reference : undefined;
-    const tags = Array.isArray(case_.tags)
-      ? (case_.tags as string[])
-      : [];
+    const tags = Array.isArray(case_.tags) ? (case_.tags as string[]) : [];
     const fixtureCase: Record<string, unknown> = {
       id: String(case_.id),
       description:
@@ -199,6 +197,7 @@ function buildE2eQualityDataset(
       mode: 'mcp_host',
       scenario,
       mcpHostConfig: hostConfig,
+      ...(reference !== undefined ? { canonicalAnswer: reference } : {}),
       tags: ['e2e_quality', ...tags],
       iterations: 1,
     };
@@ -219,29 +218,46 @@ function buildE2eQualityDataset(
   });
 }
 
+function inferRawMode(
+  evalset: RawEvalset
+): Exclude<EvalCampaignMode, 'all' | 'sxs'> {
+  const first = evalset.cases[0];
+  if (!first) return 'direct';
+  if (first.expected_tool !== undefined) return 'tool-selection';
+  if (first.tool !== undefined) return 'tool-call';
+  if (first.scenario !== undefined) return 'e2e-quality';
+  return 'direct';
+}
+
 const BUILDERS: Record<
   EvalCampaignMode,
   | ((
       evalset: RawEvalset,
       hostConfig: MCPHostConfig,
-      config: EvalConfig,
+      config: EvalConfig
     ) => EvalDataset)
   | null
 > = {
   'tool-selection': buildToolSelectionDataset,
-  'tool-call': (evalset, hostConfig) => buildToolCallDataset(evalset, hostConfig),
+  'tool-call': (evalset, hostConfig) =>
+    buildToolCallDataset(evalset, hostConfig),
   'e2e-quality': buildE2eQualityDataset,
   'mcp-host': buildToolSelectionDataset,
   direct: null,
-  sxs: null,
-  all: null,
+  // all and sxs accept a single raw evalset and infer its campaign shape. A
+  // prebuilt dataset is returned unchanged above, so mixed tagged datasets are
+  // also supported by the normal EvalDataset path.
+  sxs: (evalset, hostConfig, config) =>
+    buildEvalDataset(evalset, inferRawMode(evalset), hostConfig, config),
+  all: (evalset, hostConfig, config) =>
+    buildEvalDataset(evalset, inferRawMode(evalset), hostConfig, config),
 };
 
 export function buildEvalDataset(
   raw: unknown,
   mode: EvalCampaignMode,
   hostConfig: MCPHostConfig,
-  config: EvalConfig,
+  config: EvalConfig
 ): EvalDataset {
   if (isPrebuiltDataset(raw)) {
     let dataset = loadEvalDatasetFromObject(raw);

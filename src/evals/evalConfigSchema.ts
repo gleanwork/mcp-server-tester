@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import type { NativeMcpServerDefinition } from './nativeMcpServers.js';
 
 /**
  * Scio-era eval campaign modes. These map to MST runner behavior via
@@ -35,7 +36,20 @@ export const EvalPluginRefSchema = z.object({
   mcpUrl: z.string().url().optional(),
 });
 
+const NativeMcpServerDefinitionSchema = z.object({
+  name: z.string().min(1),
+  url: z.string().url(),
+  tokenEnv: z.string().optional(),
+  token: z.string().optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+  alwaysWriteTools: z.array(z.string()).optional(),
+  readOnlyTools: z.array(z.string()).optional(),
+  expectedMinTools: z.number().int().nonnegative().optional(),
+  plannedWriteKey: z.string().optional(),
+});
+
 export type EvalPluginRef = z.infer<typeof EvalPluginRefSchema>;
+export type EvalNativeMcpServerDefinition = NativeMcpServerDefinition;
 
 /**
  * JSON config for a single eval campaign run.
@@ -67,6 +81,10 @@ export const EvalConfigSchema = z
     tools: z.string().optional(),
     serverB: z.string().url().optional(),
     serverBToken: z.string().optional(),
+    nativeServers: z.array(NativeMcpServerDefinitionSchema).optional(),
+    nativeConnectors: z
+      .union([z.array(z.string()), z.record(z.string(), z.string())])
+      .optional(),
   })
   .superRefine((config, ctx) => {
     const hasEvalsets =
@@ -138,7 +156,9 @@ const MODE_TAG_MAP: Record<EvalCampaignMode, ResolvedEvalModeConfig> = {
   },
 };
 
-export function resolveEvalModeConfig(mode: EvalCampaignMode): ResolvedEvalModeConfig {
+export function resolveEvalModeConfig(
+  mode: EvalCampaignMode
+): ResolvedEvalModeConfig {
   return MODE_TAG_MAP[mode];
 }
 
@@ -151,11 +171,11 @@ export interface LoadEvalConfigOptions {
 
 export function resolveEvalsetPaths(
   config: EvalConfig,
-  rootDir = process.cwd(),
+  rootDir = process.cwd()
 ): string[] {
   if (config.evalsetFilePaths?.length) {
     return config.evalsetFilePaths.map((p) =>
-      path.isAbsolute(p) ? p : path.resolve(rootDir, p),
+      path.isAbsolute(p) ? p : path.resolve(rootDir, p)
     );
   }
   if (config.localEvalsets) {
@@ -167,7 +187,7 @@ export function resolveEvalsetPaths(
 
 export function loadEvalConfigFromObject(
   value: unknown,
-  options: LoadEvalConfigOptions = {},
+  options: LoadEvalConfigOptions = {}
 ): EvalConfig {
   const config = EvalConfigSchema.parse(value);
   if (options.skipEvalsetValidation) {
@@ -184,7 +204,7 @@ export function loadEvalConfigFromObject(
 
 export function loadEvalConfig(
   configPath: string,
-  options: LoadEvalConfigOptions = {},
+  options: LoadEvalConfigOptions = {}
 ): EvalConfig {
   const absPath = path.isAbsolute(configPath)
     ? configPath

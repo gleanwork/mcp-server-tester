@@ -60,7 +60,7 @@ function mockAuthServer(
       authorization_endpoint: 'https://auth.example.com/authorize',
       token_endpoint: 'https://auth.example.com/token',
       ...overrides,
-    } as oauth.AuthorizationServer,
+    },
   };
 }
 

@@ -90,7 +90,7 @@ export function createClaudeAgentJudge(config: JudgeConfig): Judge {
         })) {
           // The final message will be the SDKResultMessage
           if (message.type === 'result') {
-            resultMessage = message as unknown as typeof resultMessage;
+            resultMessage = message;
           }
         }
 

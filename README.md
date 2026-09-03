@@ -209,6 +209,37 @@ The `examples/` directory contains complete working examples:
 - [sqlite-server/](./examples/sqlite-server) — Test suite for a SQLite MCP server: 11 Playwright tests, 14 eval dataset cases.
 - [basic-playwright-usage/](./examples/basic-playwright-usage) — Minimal Playwright patterns.
 
+## Campaign runner
+
+For projects with multiple evalsets, the campaign runner converts minimal JSON
+(evalsets containing `expected_tool`, `tool`, or `scenario`) into tester-native
+cases and writes self-contained results:
+
+```bash
+npx mcp-server-tester run \
+  --config configs/eval.json \
+  --root-dir . \
+  --mode tool-selection \
+  --max-cases 10 \
+  --concurrency 4
+
+npx mcp-server-tester batch \
+  --config-dir configs/weekly \
+  --parallel 4
+```
+
+Campaign configs support `direct`, `tool-selection`, `tool-call`,
+`e2e-quality`, `mcp-host`, `sxs`, and `all` modes, plus local evalset paths,
+custom judge plugins, metrics, baselines, and host overrides. The public
+metric registry includes token/cost/duration, response/tool, pass/no-action,
+and judge metrics; applications can add a metric with `registerMetric()`.
+
+Native MCP servers can be attached safely by supplying definitions with
+`buildNativeMcpServers()`. The tester validates HTTPS (or loopback HTTP),
+preflights credentials and `tools/list`, and gives CLI hosts a stdio dry-run
+proxy. Non-read-only calls are returned as planned writes and are never sent
+to the upstream server.
+
 ## Known Limitations
 
 These MCP protocol features are not currently supported. These are deliberate scope decisions, not bugs:

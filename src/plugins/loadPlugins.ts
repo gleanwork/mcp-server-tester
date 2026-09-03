@@ -45,13 +45,14 @@ function resolvePluginEntry(pluginPath: string): string {
 
 async function invokeRegisterExport(
   pluginModule: EvalPluginModule,
-  exportName: string,
+  exportName: string
 ): Promise<boolean> {
   const candidate = pluginModule[exportName];
   if (typeof candidate !== 'function') {
     return false;
   }
-  await candidate();
+  const register = candidate as () => void | Promise<void>;
+  await register();
   return true;
 }
 
@@ -64,10 +65,12 @@ async function invokeRegisterExport(
  */
 export async function loadPluginModule(
   pluginPath: string,
-  options: LoadPluginsOptions = {},
+  options: LoadPluginsOptions = {}
 ): Promise<void> {
   const entry = resolvePluginEntry(pluginPath);
-  const pluginModule = (await import(pathToFileURL(entry).href)) as EvalPluginModule;
+  const pluginModule = (await import(
+    pathToFileURL(entry).href
+  )) as EvalPluginModule;
   const exportNames = [
     ...(options.registerExportNames ?? []),
     ...DEFAULT_REGISTER_EXPORTS,
@@ -86,7 +89,7 @@ export async function loadPluginModule(
 
   throw new Error(
     `Plugin at ${entry} does not export a register function. ` +
-      `Expected one of: ${exportNames.join(', ')}, or a default function.`,
+      `Expected one of: ${exportNames.join(', ')}, or a default function.`
   );
 }
 
@@ -95,7 +98,7 @@ export async function loadPluginModule(
  */
 export async function loadPlugins(
   pluginPaths: string[],
-  options: LoadPluginsOptions = {},
+  options: LoadPluginsOptions = {}
 ): Promise<void> {
   for (const pluginPath of pluginPaths) {
     await loadPluginModule(pluginPath, options);

@@ -644,8 +644,7 @@ async function runExpectBlockValidations(
           reasoning: validation.details?.reasoning as string | undefined,
           judgeName,
           judgeProvider: validation.details?.judgeProvider as
-            | string
-            | undefined,
+            string | undefined,
           judgeModel: validation.details?.judgeModel as string | undefined,
         } satisfies EvalExpectationResult;
       })
@@ -717,6 +716,9 @@ function buildRequest(
 
   if (evalCase.mode === 'mcp_host') {
     if (evalCase.scenario) request.scenario = evalCase.scenario;
+    if (evalCase.canonicalAnswer !== undefined) {
+      request.reference = evalCase.canonicalAnswer;
+    }
     if (evalCase.mcpHostConfig) {
       request.mcpHostConfig = {
         provider: evalCase.mcpHostConfig.provider,
