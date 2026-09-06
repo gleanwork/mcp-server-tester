@@ -175,6 +175,7 @@ For HTTP servers, set `transport: 'http'` and `serverUrl`. For servers that requ
 - [Quick Start](./docs/quickstart.md) — detailed setup and configuration
 - [Expectations](./docs/expectations.md) — all assertion types including snapshot sanitizers
 - [LLM Host Simulation](docs/mcp-host.md) — tool discoverability testing
+- [External Host Evaluations](./docs/external-hosts.md) — real desktop hosts and Cowork lifecycle
 - [API Reference](./docs/api-reference.md)
 - [Transports](./docs/transports.md) — stdio and HTTP configuration, OAuth
 - [CLI Commands](./docs/cli.md) — init, generate, login, token

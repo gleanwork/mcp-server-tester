@@ -20,6 +20,9 @@ import type {
 import type { UsageMetrics } from '../../../types/index.js';
 import { driverToSlug, hostTypeFromDriver } from '../driverIdentity.js';
 import {
+  classifyMacosDesktopFailure,
+  ensureMacosDesktopAppReady,
+  readMacosAccessibilityDescriptions,
   readMacosAccessibilityText,
   readMacosFrontWindowContents,
   runAppleScript,
@@ -136,9 +139,9 @@ export const ANTHROPIC_CLAUDE_CAPABILITIES: ExternalHostCapabilityImplementation
   ];
 
 /**
- * Deterministically switches the Claude desktop app to the Cowork surface via
- * Cmd+2 (the app's built-in shortcut for the Cowork sidebar tab). Idempotent —
- * sending Cmd+2 while already on Cowork is a no-op. Replaces the older
+ * Deterministically switches the Claude desktop app to the Home/Cowork surface
+ * via Cmd+1. The current Claude UI uses Cmd+2 for Code, so the driver also waits
+ * for and verifies Cowork-specific accessibility labels before input. Replaces the older
  * rejectClaudeChatSurface capability for use cases that need automatic surface
  * activation (e.g. CI runs).
  */
@@ -151,20 +154,24 @@ async function activateCoworkSurfaceCapability({
   const appName =
     runStringOption(config, binding, 'appName') ?? DEFAULT_APP_NAME;
   const settleDelayMs = 700;
-  const script = `
-tell application ${JSON.stringify(appName)} to activate
-delay 0.4
-tell application "System Events"
-  tell process ${JSON.stringify(appName)}
-    set frontmost to true
-    keystroke "2" using command down
-  end tell
-end tell
-delay ${settleDelayMs / 1000}
-return "ok"
-`;
+  const appReadyTimeoutMs =
+    runNumberOption(config, binding, 'appReadyTimeoutMs') ?? 60_000;
+  const script = buildActivateCoworkSurfaceScript(appName, settleDelayMs);
   try {
+    await ensureMacosDesktopAppReady(appName, appReadyTimeoutMs);
+    await waitForClaudeAccessibilityText({
+      appName,
+      timeoutMs: appReadyTimeoutMs,
+      predicate: isClaudeDesktopNavigationAccessibilityText,
+      expectation: 'Home and Code navigation',
+    });
     await runAppleScript(script, { timeoutMs: 8_000 });
+    await waitForClaudeAccessibilityText({
+      appName,
+      timeoutMs: appReadyTimeoutMs,
+      predicate: isClaudeCoworkAccessibilityText,
+      expectation: 'Cowork Home composer',
+    });
   } catch (err) {
     return failureResult({
       config,
@@ -172,14 +179,77 @@ return "ok"
       driver: state.driver,
       displayName: state.displayName,
       capabilitiesUsed: state.capabilitiesUsed,
-      failureKind: 'submission_failed',
-      error: `Failed to activate Cowork surface via Cmd+2: ${formatError(err)}`,
+      failureKind: classifyMacosDesktopFailure(formatError(err)),
+      error: `Failed to activate the Cowork Home surface: ${formatError(err)}`,
       artifacts: [],
       limitations: [
-        'Cowork surface activation depends on Cmd+2 being bound to the Cowork sidebar tab in the user-installed Claude app version.',
+        'Cowork surface activation currently depends on Cmd+1 selecting Home and on the Home surface exposing Cowork accessibility labels.',
       ],
     });
   }
+}
+
+export function buildActivateCoworkSurfaceScript(
+  appName: string,
+  settleDelayMs: number
+): string {
+  return `
+tell application "System Events"
+  tell process ${JSON.stringify(appName)}
+    set frontmost to true
+    keystroke "1" using command down
+  end tell
+end tell
+delay ${settleDelayMs / 1000}
+return "ok"
+`;
+}
+
+export function isClaudeDesktopNavigationAccessibilityText(
+  text: string
+): boolean {
+  return text.includes('Home') && text.includes('Code');
+}
+
+export function isClaudeCoworkAccessibilityText(text: string): boolean {
+  return (
+    text.includes('Write your prompt to Claude') &&
+    (text.includes('Learn more about Cowork') || text.includes('Cowork'))
+  );
+}
+
+async function waitForClaudeAccessibilityText(options: {
+  appName: string;
+  timeoutMs: number;
+  predicate(text: string): boolean;
+  expectation: string;
+}): Promise<string> {
+  const deadline = Date.now() + options.timeoutMs;
+  let lastError: unknown;
+  let lastText = '';
+
+  while (Date.now() < deadline) {
+    try {
+      const text = await readMacosAccessibilityDescriptions(options.appName);
+      lastText = text;
+      if (options.predicate(text)) {
+        return text;
+      }
+    } catch (err) {
+      lastError = err;
+    }
+    await delay(POLL_INTERVAL_MS);
+  }
+
+  const errorSuffix = lastError
+    ? ` Last accessibility error: ${formatError(lastError)}`
+    : '';
+  const observedSuffix = lastText
+    ? ` Last observed accessibility text: ${lastText.replaceAll(/\s+/g, ' ').slice(0, 500)}`
+    : '';
+  throw new Error(
+    `${options.appName} did not expose ${options.expectation} within ${options.timeoutMs}ms.${errorSuffix}${observedSuffix}`
+  );
 }
 
 async function rejectClaudeChatSurfaceCapability({
@@ -417,6 +487,19 @@ function runStringOption(
   key: string
 ): string | undefined {
   return stringOption(binding.with, key) ?? configStringOption(config, key);
+}
+
+function runNumberOption(
+  config: ExternalHostConfig,
+  binding: { with?: Record<string, unknown> },
+  key: string
+): number | undefined {
+  const bindingValue = binding.with?.[key];
+  if (typeof bindingValue === 'number') {
+    return bindingValue;
+  }
+  const configValue = config.options?.[key];
+  return typeof configValue === 'number' ? configValue : undefined;
 }
 
 export function getClaudeDataDir(
@@ -750,7 +833,7 @@ export async function parseClaudeTrace(
         'Claude transcript'
       );
       transcriptEvents = parsed.events;
-      transcriptParsed = parsed.ok;
+      transcriptParsed = parsed.ok && parsed.events.length > 0;
       parseWarnings.push(...parsed.warnings);
     } catch (err) {
       parseWarnings.push(

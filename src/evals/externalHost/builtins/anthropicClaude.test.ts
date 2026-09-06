@@ -3,10 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  buildActivateCoworkSurfaceScript,
   buildClaudeTraceMetadata,
   findMatchingClaudeSessions,
   extractAccessibilityResponse,
   getClaudeDataDir,
+  isClaudeCoworkAccessibilityText,
+  isClaudeDesktopNavigationAccessibilityText,
   looksLikeClaudeChatSurface,
   parseClaudeTrace,
   snapshotClaudeSessions,
@@ -31,6 +34,27 @@ async function writeJsonl(path: string, events: unknown[]): Promise<void> {
 }
 
 describe('anthropicClaude trace parsing', () => {
+  it('activates the current Cowork Home surface and verifies its semantic controls', () => {
+    const script = buildActivateCoworkSurfaceScript('Claude', 700);
+
+    expect(script).toContain('keystroke "1" using command down');
+    expect(script).not.toContain('keystroke "2" using command down');
+    expect(
+      isClaudeDesktopNavigationAccessibilityText('Home\nCode\nQuick task')
+    ).toBe(true);
+    expect(isClaudeDesktopNavigationAccessibilityText('Loading Claude')).toBe(
+      false
+    );
+    expect(
+      isClaudeCoworkAccessibilityText(
+        'Write your prompt to Claude\nLearn more about Cowork\nManually approve'
+      )
+    ).toBe(true);
+    expect(isClaudeCoworkAccessibilityText('Code\nNew code session')).toBe(
+      false
+    );
+  });
+
   it('parses final answer, usage, tool calls, and artifacts from local Claude files', async () => {
     const root = await mkdtemp(join(tmpdir(), 'claude-trace-'));
     const sessionId = 'local_test';
@@ -213,6 +237,35 @@ describe('anthropicClaude trace parsing', () => {
     expect(trace.parseWarnings.join('\n')).toContain(
       'discarded 1 malformed JSONL line'
     );
+  });
+
+  it('does not claim tool-call evidence for an empty transcript', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'claude-empty-transcript-'));
+    const sessionId = 'local_empty_transcript';
+    const cliSessionId = 'cli_empty_transcript';
+    const sessionDir = join(root, sessionId);
+    await mkdir(sessionDir, { recursive: true });
+    const metadataPath = join(root, `${sessionId}.json`);
+    await writeFile(
+      metadataPath,
+      JSON.stringify({ sessionId, cliSessionId }),
+      'utf-8'
+    );
+    await writeJsonl(join(sessionDir, 'audit.jsonl'), [
+      { type: 'result', result: 'final answer' },
+    ]);
+    await writeFile(join(sessionDir, `${cliSessionId}.jsonl`), '', 'utf-8');
+
+    const trace = await parseClaudeTrace({
+      id: sessionId,
+      metadataPath,
+      sessionDir,
+      statMtimeMs: Date.now(),
+      metadata: { sessionId, cliSessionId },
+    });
+
+    expect(trace.isComplete).toBe(true);
+    expect(trace.transcriptParsed).toBe(false);
   });
 
   it('only marks evidence fields high confidence when the parsed trace supports them', async () => {
