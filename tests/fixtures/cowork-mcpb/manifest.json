@@ -1,0 +1,25 @@
+{
+  "manifest_version": "0.3",
+  "name": "mcp-server-tester-e2e",
+  "display_name": "MCP Server Tester E2E",
+  "version": "1.0.0",
+  "description": "A temporary deterministic MCP server for external-host end-to-end verification.",
+  "author": {
+    "name": "MCP Server Tester"
+  },
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.js"]
+    }
+  },
+  "tools": [
+    {
+      "name": "get_eval_nonce",
+      "description": "Returns the opaque nonce required by the MCP Server Tester end-to-end eval."
+    }
+  ],
+  "tools_generated": true
+}

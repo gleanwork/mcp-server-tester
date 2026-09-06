@@ -178,7 +178,63 @@ async function runLoadedExternalHost(
     data: {},
   };
 
+  let result: ExternalHostRunResult | undefined;
+  let executionError: unknown;
+  const enteredCapabilities: LoadedExternalHostCapability[] = [];
+  try {
+    result = await runExternalHostCapabilityPipeline(
+      loaded,
+      context,
+      state,
+      enteredCapabilities
+    );
+  } catch (err) {
+    executionError = err;
+  }
+
+  const cleanupErrors: unknown[] = [];
+  for (const loadedCapability of [...enteredCapabilities].reverse()) {
+    try {
+      await loadedCapability.implementation.teardown?.(
+        capabilityContext(loaded, context, state, loadedCapability)
+      );
+    } catch (err) {
+      cleanupErrors.push(err);
+    }
+  }
+
+  if (executionError !== undefined) {
+    const failure = runtimeFailure(
+      loaded,
+      context,
+      `External host capability failed: ${formatError(executionError)}`
+    );
+    return cleanupErrors.length > 0
+      ? cleanupFailure(failure, cleanupErrors)
+      : failure;
+  }
+
+  if (!result) {
+    return runtimeFailure(
+      loaded,
+      context,
+      `External host ${loaded.driverSlug} did not produce a result.`
+    );
+  }
+
+  return cleanupErrors.length > 0
+    ? cleanupFailure(result, cleanupErrors)
+    : result;
+}
+
+async function runExternalHostCapabilityPipeline(
+  loaded: LoadedExternalHostConfig,
+  context: HostRunContext,
+  state: ExternalHostRunState,
+  enteredCapabilities: LoadedExternalHostCapability[]
+): Promise<ExternalHostRunResult> {
   for (const loadedCapability of loaded.loadedCapabilities) {
+    enteredCapabilities.push(loadedCapability);
     const result = await loadedCapability.implementation.setup?.(
       capabilityContext(loaded, context, state, loadedCapability)
     );
@@ -305,6 +361,34 @@ function isExternalHostCapabilityImplementation(
   );
 }
 
+function cleanupFailure(
+  result: ExternalHostRunResult,
+  errors: unknown[]
+): ExternalHostRunResult {
+  const cleanupMessage = `External host cleanup failed: ${errors
+    .map(formatError)
+    .join('; ')}`;
+  return {
+    success: false,
+    toolCalls: result.toolCalls,
+    error: result.success
+      ? cleanupMessage
+      : `${result.error}; ${cleanupMessage}`,
+    externalHost: {
+      ...result.externalHost,
+      traceLimitations: [
+        ...(result.externalHost.traceLimitations ?? []),
+        cleanupMessage,
+      ],
+      failureKind: 'cleanup_failed',
+    },
+  };
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function runtimeFailure(
   loaded: LoadedExternalHostConfig,
   context: HostRunContext,
@@ -330,7 +414,7 @@ function runtimeFailure(
       artifacts: [],
       session: { runMarker: context.marker },
       correlation: context.correlation,
-      failureKind: 'unsupported_host',
+      failureKind: 'host_run_failed',
     },
   };
 }
