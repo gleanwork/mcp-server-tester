@@ -66,44 +66,46 @@ program
 // Run command
 program
   .command('run')
-  .description('Run an evaluation from a JSON config file')
-  .requiredOption('-c, --config <path>', 'Path to eval config JSON')
-  .option(
-    '--plugins <paths...>',
-    'Plugin directories to load before the run (registers judges, auth, hosts)'
+  .description('Run an evaluation manifest')
+  .requiredOption(
+    '-m, --manifest <path>',
+    'Path to an evaluation manifest JSON'
   )
+  .option('--plugins <paths...>', 'Plugin modules to load before the run')
+  .option('--arm <name>', 'Run one named manifest arm')
   .option(
     '--root-dir <dir>',
     'Base directory for resolving relative paths',
     '.'
   )
-  .option('--dry-run', 'Validate config and plugins without executing evals')
+  .option('--dry-run', 'Validate the manifest and plugins without executing')
   .action(run);
 
 // Batch command
 program
   .command('batch')
-  .description('Run multiple evaluation configs')
-  .option('--configs <paths...>', 'Evaluation config files')
-  .option('--config-dir <dir>', 'Directory containing evaluation configs')
+  .description('Run multiple evaluation manifests')
+  .option('--manifests <paths...>', 'Evaluation manifest files')
+  .option('--manifest-dir <dir>', 'Directory containing evaluation manifests')
+  .option('--plugins <paths...>', 'Plugin modules to load before the batch')
   .option(
     '--root-dir <dir>',
     'Base directory for resolving relative paths',
     '.'
   )
   .option('--output-root <dir>', 'Root directory for evaluation results')
-  .option(
-    '--parallel <number>',
-    'Maximum number of evaluations to run in parallel'
-  )
-  .option('--dry-run', 'Validate config paths without executing evaluations')
+  .option('--workers <number>', 'Maximum number of parallel manifest runs')
+  .option('--skip-existing', 'Skip manifests with an existing result')
+  .option('--dry-run', 'Validate manifests without executing evaluations')
   .action((options) =>
     batch({
-      configPaths: options.configs,
-      configDir: options.configDir,
+      manifests: options.manifests,
+      manifestDir: options.manifestDir,
+      plugins: options.plugins,
       rootDir: options.rootDir,
       outputRoot: options.outputRoot,
-      parallel: options.parallel ? Number(options.parallel) : undefined,
+      workers: options.workers ? Number(options.workers) : undefined,
+      skipExisting: options.skipExisting,
       dryRun: options.dryRun,
     })
   );

@@ -117,6 +117,9 @@ export interface StdioMCPConfig {
    */
   transport: 'stdio';
 
+  /** Optional label used when a manifest targets multiple servers. */
+  label?: string;
+
   /**
    * Command to execute (required for stdio transport)
    */
@@ -173,6 +176,9 @@ export interface HttpMCPConfig {
    * Transport type discriminant
    */
   transport: 'http';
+
+  /** Optional label used when a manifest targets multiple servers. */
+  label?: string;
 
   /**
    * Server URL (required for http transport)

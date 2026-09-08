@@ -239,48 +239,62 @@ export {
   loadEvalDatasetFromObject,
 } from './evals/datasetLoader.js';
 
-// Evaluation config (mcp-server-tester run)
+// Evaluation manifest and framework contracts
 export {
-  EvalConfigModeSchema,
-  EvalConfigSchema,
-  EvalPluginRefSchema,
-  MetricSpecSchema,
-  loadEvalConfig,
-  loadEvalConfigFromObject,
-  resolveEvalsetPaths,
-} from './evals/evalConfigSchema.js';
+  EvalManifestSchema,
+  loadEvalManifest,
+  loadEvalManifestFromObject,
+  resolveDatasetPaths,
+} from './evals/evalManifest.js';
 export type {
-  EvalConfigMode,
-  EvalConfig,
-  EvalPluginRef,
-  MetricSpec,
-  NativeMcpServerConfig,
-  LoadEvalConfigOptions,
-} from './evals/evalConfigSchema.js';
-
-// Native MCP server contract (runtime safety is implemented later)
-export {
-  buildNativeMcpServers,
-  withNativeMcpServers,
-} from './evals/nativeMcpServers.js';
+  DatasetConfig,
+  EvalArm,
+  EvalManifest,
+  EvalManifestInput,
+  ExtensionConfig,
+  HostConfig,
+  TaggedConfig,
+} from './evals/evalManifest.js';
 export type {
-  NativeMcpServerDefinition,
-  NativeMcpSelection,
-  NativeMcpConfig,
-} from './evals/nativeMcpServers.js';
-
-// Framework contracts
-export type {
+  DatasetSource,
+  DatasetSourceContext,
+  EvaluationArmResult,
+  EvaluationBatchOptions,
+  EvaluationBatchResult,
   EvaluationSuiteOptions,
   EvaluationSuiteResult,
   EvaluationSummary,
-  EvaluationBatchOptions,
-  EvaluationBatchResult,
-  EvalMetricDefinition,
-  EvalHostAdapter,
-  NativeMcpServerResolver,
+  HostDefinition,
+  HostRunOptions,
+  JudgeDefinition,
+  MetricDefinition,
+  MetricKind,
+  MetricValue,
+  ResultStoreDefinition,
   EvalSummaryGenerator,
 } from './evals/evalFrameworkTypes.js';
+export {
+  clearDatasetSources,
+  clearHosts,
+  clearJudges,
+  clearMetrics,
+  clearResultStores,
+  getDatasetSource,
+  getHost,
+  getJudge,
+  getMetric,
+  getResultStore,
+  listDatasetSources,
+  listHosts,
+  listJudges,
+  listMetrics,
+  listResultStores,
+  registerDatasetSource,
+  registerHost,
+  registerJudge,
+  registerMetric,
+  registerResultStore,
+} from './evals/frameworkRegistries.js';
 
 // Plugin loading
 export { loadPluginModule, loadPlugins } from './plugins/loadPlugins.js';
@@ -382,13 +396,6 @@ export {
   resolveRubric,
   isBuiltInRubric,
 } from './judge/judgeTypes.js';
-
-// Custom Judge Registry
-export {
-  registerJudge,
-  getRegisteredJudge,
-  clearJudgeRegistry,
-} from './judge/judgeRegistry.js';
 
 // Conformance
 export { runConformanceChecks } from './spec/conformanceChecks.js';

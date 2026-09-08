@@ -1,62 +1,43 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import {
-  loadEvalConfig,
-  resolveEvalsetPaths,
-} from '../../../evals/evalConfigSchema.js';
+import { loadEvalManifest } from '../../../evals/evalManifest.js';
 import { loadPlugins } from '../../../plugins/loadPlugins.js';
 
 export interface RunOptions {
-  config: string;
+  manifest: string;
   plugins?: string[];
   rootDir?: string;
   dryRun?: boolean;
+  arm?: string;
 }
 
+/**
+ * Validate and plan a manifest run.
+ *
+ * Execution is intentionally deferred to the suite-runner branch. Keeping this
+ * command functional as a validator gives plugins and editors a stable CLI
+ * contract without pretending to run evaluations.
+ */
 export async function run(options: RunOptions): Promise<void> {
-  const rootDir = options.rootDir ?? process.cwd();
-  const config = loadEvalConfig(options.config, {
-    rootDir,
-    skipEvalsetValidation: options.dryRun,
+  const manifest = loadEvalManifest(options.manifest, {
+    rootDir: options.rootDir,
+    skipDatasetValidation: Boolean(options.dryRun),
   });
+  if (options.plugins?.length) await loadPlugins(options.plugins);
 
-  const pluginPaths =
-    options.plugins ??
-    config.plugins?.map((plugin) =>
-      path.isAbsolute(plugin.dir)
-        ? plugin.dir
-        : path.resolve(rootDir, plugin.dir)
-    ) ??
-    [];
-
-  if (pluginPaths.length > 0) {
-    await loadPlugins(pluginPaths);
-  }
-
-  const evalsetPaths = resolveEvalsetPaths(config, rootDir);
-  const output = {
-    name: config.name,
-    mode: config.mode,
-    evalsetPaths,
-    pluginsLoaded: pluginPaths,
+  const plan = {
+    name: manifest.name,
+    datasets: manifest.datasets,
+    servers: manifest.servers ?? [],
+    host: manifest.host,
+    arms: manifest.arms?.map((arm) => arm.name) ?? ['default'],
+    selectedArm: options.arm,
   };
 
   if (options.dryRun) {
-    process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
     return;
   }
 
-  const resultsDir = path.join(rootDir, '.mcp-test-results', config.name);
-  fs.mkdirSync(resultsDir, { recursive: true });
-  const planPath = path.join(resultsDir, 'run-plan.json');
-  fs.writeFileSync(planPath, `${JSON.stringify(output, null, 2)}\n`);
-
-  console.log(`Eval config validated: ${config.name}`);
-  console.log(`Mode: ${config.mode}`);
-  console.log(`Evalsets: ${evalsetPaths.length}`);
-  console.log(`Plugins loaded: ${pluginPaths.length}`);
-  console.log(`Run plan written to ${planPath}`);
-  console.log(
-    'Note: evaluation execution is not wired yet; this scaffold only validates and plans the run.'
+  throw new Error(
+    'Manifest execution is not wired in the scaffolding branch; use --dry-run.'
   );
 }

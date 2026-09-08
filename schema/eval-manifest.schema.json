@@ -1,0 +1,115 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/gleanwork/mcp-server-tester/schema/eval-manifest.schema.json",
+  "title": "MCP evaluation manifest",
+  "description": "Organization-neutral evaluation manifest. Pluggable blocks resolve through the tester registries.",
+  "type": "object",
+  "required": ["name", "datasets"],
+  "additionalProperties": true,
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "datasets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          { "type": "string", "description": "Shorthand for a file dataset." },
+          {
+            "type": "object",
+            "required": ["type"],
+            "additionalProperties": true,
+            "properties": {
+              "type": { "type": "string", "minLength": 1 },
+              "path": { "type": "string" },
+              "recursive": { "type": "boolean" }
+            }
+          }
+        ]
+      }
+    },
+    "servers": {
+      "type": "array",
+      "description": "The MCP server set under test. Each entry is an MCPConfig.",
+      "items": {
+        "type": "object",
+        "required": ["transport"],
+        "additionalProperties": true,
+        "properties": {
+          "transport": { "enum": ["http", "stdio"] },
+          "label": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "host": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": true,
+      "properties": { "type": { "type": "string", "minLength": 1 } }
+    },
+    "arms": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "servers": { "$ref": "#/properties/servers" },
+          "host": { "$ref": "#/properties/host" },
+          "toolMap": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          },
+          "scenarioTemplate": { "type": "string" },
+          "metrics": {
+            "type": "array",
+            "items": { "$ref": "#/definitions/extension" }
+          },
+          "judges": {
+            "type": "array",
+            "items": { "$ref": "#/definitions/extension" }
+          }
+        }
+      }
+    },
+    "metrics": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/extension" }
+    },
+    "judges": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/extension" }
+    },
+    "results": {
+      "type": "object",
+      "required": ["store"],
+      "properties": { "store": { "$ref": "#/definitions/extension" } },
+      "additionalProperties": false
+    },
+    "plugins": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "model": { "type": "string" },
+    "provider": { "type": "string" },
+    "concurrency": { "type": "integer", "minimum": 1 },
+    "iterations": { "type": "integer", "minimum": 1 },
+    "maxCases": { "type": "integer", "minimum": 1 },
+    "timeout": { "type": "integer", "minimum": 1 },
+    "maxToolCalls": { "type": "integer", "minimum": 0 },
+    "tools": { "type": "string" }
+  },
+  "definitions": {
+    "extension": {
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": true,
+          "properties": { "type": { "type": "string", "minLength": 1 } }
+        }
+      ]
+    }
+  }
+}
