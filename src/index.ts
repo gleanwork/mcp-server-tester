@@ -312,6 +312,12 @@ export type {
   RunEvalSuiteOptions,
   RunEvalSuiteResult,
 } from './evals/runEvalSuite.js';
+export { runEvalBatch } from './evals/runEvalBatch.js';
+export type {
+  EvalBatchItem,
+  RunEvalBatchOptions,
+  RunEvalBatchResult,
+} from './evals/runEvalBatch.js';
 
 // Plugin loading
 export { loadPluginModule, loadPlugins } from './plugins/loadPlugins.js';

@@ -1,30 +1,34 @@
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
   runEvalSuite,
   type RunEvalSuiteOptions,
   type RunEvalSuiteResult,
 } from './runEvalSuite.js';
-import type { EvalConfig } from './evalConfigSchema.js';
 
 export interface RunEvalBatchOptions {
-  configPaths: string[];
+  manifestPaths: string[];
   rootDir?: string;
-  parallel?: number;
+  workers?: number;
   outputRoot?: string;
-  configOverrides?: Partial<EvalConfig>;
+  skipExisting?: boolean;
   pluginPaths?: string[];
+  dryRun?: boolean;
 }
 
 export interface EvalBatchItem {
-  configPath: string;
+  manifestPath: string;
+  outputDir?: string;
   result?: RunEvalSuiteResult;
   error?: string;
+  skipped?: boolean;
 }
 
 export interface RunEvalBatchResult {
   items: EvalBatchItem[];
   passed: number;
   failed: number;
+  skipped: number;
 }
 
 async function runWithConcurrency<T>(
@@ -45,44 +49,53 @@ async function runWithConcurrency<T>(
   return results;
 }
 
-/** Run multiple campaign configs with bounded process-level concurrency. */
+/** Run multiple manifests with bounded process-level concurrency. */
 export async function runEvalBatch(
   options: RunEvalBatchOptions
 ): Promise<RunEvalBatchResult> {
-  if (options.configPaths.length === 0) {
-    throw new Error('At least one config path is required');
+  if (options.manifestPaths.length === 0) {
+    throw new Error('At least one manifest path is required.');
   }
   const rootDir = options.rootDir ?? process.cwd();
-  const tasks = options.configPaths.map(
-    (configPath) => async (): Promise<EvalBatchItem> => {
+  const tasks = options.manifestPaths.map(
+    (manifestPath) => async (): Promise<EvalBatchItem> => {
       try {
+        const outputDir = options.outputRoot
+          ? path.join(
+              options.outputRoot,
+              path.basename(manifestPath, path.extname(manifestPath))
+            )
+          : undefined;
+        if (options.skipExisting && outputDir) {
+          try {
+            await fs.access(path.join(outputDir, 'results.json'));
+            return { manifestPath, outputDir, skipped: true };
+          } catch {
+            // No existing result; continue with the run.
+          }
+        }
         const suiteOptions: RunEvalSuiteOptions = {
-          configPath,
+          manifestPath,
           rootDir,
           pluginPaths: options.pluginPaths,
-          configOverrides: options.configOverrides,
-          ...(options.outputRoot
-            ? {
-                outputDir: path.join(
-                  options.outputRoot,
-                  path.basename(configPath, '.json')
-                ),
-              }
-            : {}),
+          outputDir,
+          dryRun: options.dryRun,
         };
-        return { configPath, result: await runEvalSuite(suiteOptions) };
+        return { manifestPath, result: await runEvalSuite(suiteOptions) };
       } catch (error) {
         return {
-          configPath,
+          manifestPath,
           error: error instanceof Error ? error.message : String(error),
         };
       }
     }
   );
-  const items = await runWithConcurrency(tasks, options.parallel ?? 1);
+  const items = await runWithConcurrency(tasks, options.workers ?? 1);
+  const skipped = items.filter((item) => item.skipped).length;
   const failed = items.filter(
     (item) =>
-      item.error !== undefined || (item.result?.merged.metrics.failed ?? 0) > 0
+      item.error !== undefined ||
+      ((item.result?.summary.metrics.failed as number | undefined) ?? 0) > 0
   ).length;
-  return { items, passed: items.length - failed, failed };
+  return { items, passed: items.length - failed - skipped, failed, skipped };
 }

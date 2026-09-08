@@ -1,5 +1,8 @@
-import { loadEvalManifest } from '../../../evals/evalManifest.js';
-import { loadPlugins } from '../../../plugins/loadPlugins.js';
+import path from 'node:path';
+import {
+  runEvalSuite,
+  type RunEvalSuiteOptions,
+} from '../../../evals/runEvalSuite.js';
 
 export interface RunOptions {
   manifest: string;
@@ -7,37 +10,44 @@ export interface RunOptions {
   rootDir?: string;
   dryRun?: boolean;
   arm?: string;
+  outputDir?: string;
 }
 
-/**
- * Validate and plan a manifest run.
- *
- * Execution is intentionally deferred to the suite-runner branch. Keeping this
- * command functional as a validator gives plugins and editors a stable CLI
- * contract without pretending to run evaluations.
- */
 export async function run(options: RunOptions): Promise<void> {
-  const manifest = loadEvalManifest(options.manifest, {
+  const suiteOptions: RunEvalSuiteOptions = {
+    manifestPath: options.manifest,
     rootDir: options.rootDir,
-    skipDatasetValidation: Boolean(options.dryRun),
-  });
-  if (options.plugins?.length) await loadPlugins(options.plugins);
-
-  const plan = {
-    name: manifest.name,
-    datasets: manifest.datasets,
-    servers: manifest.servers ?? [],
-    host: manifest.host,
-    arms: manifest.arms?.map((arm) => arm.name) ?? ['default'],
-    selectedArm: options.arm,
+    pluginPaths: options.plugins,
+    outputDir: options.outputDir,
+    dryRun: options.dryRun,
+    arm: options.arm,
   };
+  const result = await runEvalSuite(suiteOptions);
 
   if (options.dryRun) {
-    process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          name: result.manifest.name,
+          outputDir: result.outputDir,
+          datasets: result.datasets.map((item) => item.source),
+          arms: result.manifest.arms?.map((arm) => arm.name) ?? ['default'],
+        },
+        null,
+        2
+      )}\n`
+    );
     return;
   }
 
-  throw new Error(
-    'Manifest execution is not wired in the scaffolding branch; use --dry-run.'
+  const metrics = result.summary.metrics as {
+    passed?: number;
+    total?: number;
+    passRate?: number;
+  };
+  console.log(`\nEval complete: ${result.manifest.name}`);
+  console.log(
+    `Results: ${metrics.passed ?? 0}/${metrics.total ?? 0} passed (${((metrics.passRate ?? 0) * 100).toFixed(1)}%)`
   );
+  console.log(`Output: ${path.join(result.outputDir, 'results.json')}`);
 }
