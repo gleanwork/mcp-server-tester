@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { z } from 'zod';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import { getHost, registerHost } from './frameworkRegistries.js';
 import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
@@ -21,6 +22,7 @@ export interface BuiltinHostOptions {
  * Built-in client host configs. Organization-specific plugin wiring stays
  * outside the framework and is provided through generic plugin options.
  */
+const BuiltinHostSchema = z.object({}).passthrough();
 let builtinsRegistered = false;
 
 export function registerBuiltinHosts(): void {
@@ -28,6 +30,7 @@ export function registerBuiltinHosts(): void {
   for (const [name, factory] of Object.entries(BUILTIN_HOSTS)) {
     registerHost({
       name,
+      schema: BuiltinHostSchema,
       createConfig: (options) => factory(options ?? {}),
     });
   }

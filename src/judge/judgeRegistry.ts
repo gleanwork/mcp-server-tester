@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import {
   clearJudges,
   getJudge,
@@ -107,7 +108,11 @@ export function registerJudge(
     ) {
       throw error;
     }
-    registerFrameworkJudge({ name, evaluate: executor });
+    registerFrameworkJudge({
+      name,
+      schema: z.object({}).passthrough(),
+      evaluate: executor,
+    });
   }
 }
 

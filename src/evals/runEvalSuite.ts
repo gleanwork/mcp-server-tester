@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -43,6 +44,18 @@ export interface RunEvalSuiteResult {
     result?: EvalRunnerResult;
   }>;
   summary: EvaluationSummary;
+}
+
+function manifestIdentity(manifest: EvalManifest): {
+  manifestId: string;
+  contentHash: string;
+} {
+  return {
+    manifestId: manifest.name,
+    contentHash: createHash('sha256')
+      .update(JSON.stringify(manifest))
+      .digest('hex'),
+  };
 }
 
 function applyManifestEnv(manifest: EvalManifest): void {
@@ -169,6 +182,7 @@ export async function runEvalSuite(
   const outputDir =
     options.outputDir ?? path.join(rootDir, '.mcp-test-results', manifest.name);
   const arms = selectedArms(manifest, options.arm);
+  const identity = manifestIdentity(manifest);
   const datasets = manifest.datasets.flatMap((source) => {
     if (source.type !== 'file' && source.type !== 'dir') return [source];
     return [source];
@@ -180,11 +194,14 @@ export async function runEvalSuite(
       outputDir,
       datasets: datasets.map((source) => ({ source })),
       summary: {
+        schemaVersion: 1,
+        ...identity,
         timestamp: new Date().toISOString(),
         durationMs: 0,
         manifestName: manifest.name,
         arms: [],
         metrics: {},
+        armDeltas: {},
         results: [],
       },
     };
@@ -256,6 +273,8 @@ export async function runEvalSuite(
     0
   );
   const summary: EvaluationSummary = {
+    schemaVersion: 1,
+    ...identity,
     timestamp: new Date().toISOString(),
     durationMs,
     manifestName: manifest.name,
@@ -270,6 +289,7 @@ export async function runEvalSuite(
             allResults.length
           : 0,
     },
+    armDeltas: {},
     results: allResults,
   };
 
