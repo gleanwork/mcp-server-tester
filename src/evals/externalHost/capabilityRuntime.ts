@@ -265,9 +265,7 @@ function mergeCapabilities(
 
 function normalizeCapabilityBindings(
   binding:
-    | ExternalHostCapabilityBinding
-    | ExternalHostCapabilityBinding[]
-    | undefined
+    ExternalHostCapabilityBinding | ExternalHostCapabilityBinding[] | undefined
 ): ExternalHostCapabilityBinding[] {
   if (!binding) {
     return [];

@@ -32,7 +32,9 @@ describe('loadPluginModule', () => {
     `);
 
     await loadPluginModule(pluginDir);
-    const mod = await import(new URL('./index.mjs', `file://${pluginDir}/`).href);
+    const mod = await import(
+      new URL('./index.mjs', `file://${pluginDir}/`).href
+    );
     expect(mod.wasCalled()).toBe(true);
   });
 
@@ -49,6 +51,8 @@ describe('loadPluginModule', () => {
       export const noop = () => {};
     `);
 
-    await expect(loadPluginModule(pluginDir)).rejects.toThrow(/does not export a register function/);
+    await expect(loadPluginModule(pluginDir)).rejects.toThrow(
+      /does not export a register function/
+    );
   });
 });

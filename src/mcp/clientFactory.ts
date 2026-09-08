@@ -21,8 +21,7 @@ import { performClientCredentialsFlow } from '../auth/oauthFlow.js';
  */
 function getRetryAfterDelayMs(err: unknown): number | null {
   const response = (err as Record<string, unknown>)?.response as
-    | Response
-    | undefined;
+    Response | undefined;
   const retryAfter = response?.headers?.get?.('Retry-After');
   if (retryAfter) {
     const seconds = parseInt(retryAfter, 10);
@@ -36,8 +35,7 @@ function getRetryAfterDelayMs(err: unknown): number | null {
  */
 function isRateLimitError(err: unknown): boolean {
   const response = (err as Record<string, unknown>)?.response as
-    | Response
-    | undefined;
+    Response | undefined;
   return response?.status === 429;
 }
 

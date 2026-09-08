@@ -35,8 +35,8 @@ function withCallTimeout<T>(
 // Dynamic import of test for conditional step tracking
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let testStep:
-  | ((name: string, fn: () => Promise<unknown>) => Promise<unknown>)
-  | null = null;
+  ((name: string, fn: () => Promise<unknown>) => Promise<unknown>) | null =
+  null;
 
 // Try to load test.step() dynamically
 try {

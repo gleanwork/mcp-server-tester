@@ -68,8 +68,7 @@ export interface GCSEvalResultStoreConfig {
 }
 
 export type EvalResultStoreConfig =
-  | FileEvalResultStoreConfig
-  | GCSEvalResultStoreConfig;
+  FileEvalResultStoreConfig | GCSEvalResultStoreConfig;
 
 export type EvalResultStoreLike = EvalResultStore | EvalResultStoreConfig;
 

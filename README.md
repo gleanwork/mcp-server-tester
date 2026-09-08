@@ -209,36 +209,53 @@ The `examples/` directory contains complete working examples:
 - [sqlite-server/](./examples/sqlite-server) — Test suite for a SQLite MCP server: 11 Playwright tests, 14 eval dataset cases.
 - [basic-playwright-usage/](./examples/basic-playwright-usage) — Minimal Playwright patterns.
 
-## Campaign runner
+## Evaluation manifests
 
-For projects with multiple evalsets, the campaign runner converts minimal JSON
-(evalsets containing `expected_tool`, `tool`, or `scenario`) into tester-native
-cases and writes self-contained results:
+For projects with multiple datasets, use an evaluation manifest. Dataset
+paths are shorthand for tagged file sources, while hosts, metrics, judges,
+result stores, and other extensions resolve through public registries:
+
+```json
+{
+  "name": "tool-selection-search",
+  "datasets": [{ "type": "file", "path": "evalsets/search.json" }],
+  "servers": [
+    {
+      "transport": "http",
+      "serverUrl": "https://example.com/mcp",
+      "label": "prod"
+    }
+  ],
+  "host": { "type": "sdk" },
+  "metrics": ["passed"],
+  "results": { "store": { "type": "file", "directory": ".mcp-test-results" } }
+}
+```
+
+Run one manifest or a bounded batch:
 
 ```bash
 npx mcp-server-tester run \
-  --config configs/eval.json \
-  --root-dir . \
-  --mode tool-selection \
-  --max-cases 10 \
-  --concurrency 4
+  --manifest eval-manifest.json \
+  --plugins ./plugins \
+  --dry-run
 
 npx mcp-server-tester batch \
-  --config-dir configs/weekly \
-  --parallel 4
+  --manifest-dir manifests \
+  --workers 4 \
+  --skip-existing \
+  --dry-run
 ```
 
-Campaign configs support `direct`, `tool-selection`, `tool-call`,
-`e2e-quality`, `mcp-host`, `sxs`, and `all` modes, plus local evalset paths,
-custom judge plugins, metrics, baselines, and host overrides. The public
-metric registry includes token/cost/duration, response/tool, pass/no-action,
-and judge metrics; applications can add a metric with `registerMetric()`.
+Use `arms` to compare server sets or host configurations. An arm can override
+servers, host options, tool maps, scenario templates, metrics, and judges.
+The canonical execution primitives remain `EvalDataset`, `EvalCase`,
+`EvalMode`, `MCPConfig`, and `runEvalDataset`.
 
-Native MCP servers can be attached safely by supplying definitions with
-`buildNativeMcpServers()`. The tester validates HTTPS (or loopback HTTP),
-preflights credentials and `tools/list`, and gives CLI hosts a stdio dry-run
-proxy. Non-read-only calls are returned as planned writes and are never sent
-to the upstream server.
+Applications can register extensions with `registerDatasetSource`,
+`registerHost`, `registerJudge`, `registerMetric`, and `registerResultStore`.
+Secrets remain environment-variable or plugin-owned runtime inputs and do not
+belong in committed manifests.
 
 ## Known Limitations
 
