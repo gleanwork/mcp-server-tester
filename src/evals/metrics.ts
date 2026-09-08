@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { UsageMetrics } from '../types/index.js';
 import { registerMetric as registerFrameworkMetric } from './frameworkRegistries.js';
@@ -18,6 +19,7 @@ export type MetricKind = 'binary' | 'continuous' | 'categorical' | 'object';
 
 export interface MetricDefinition {
   readonly name: string;
+  readonly schema: z.ZodType;
   readonly kind: MetricKind;
   readonly unit?: string;
   compute(caseResult: EvalCaseResult): MetricValue;
@@ -173,7 +175,14 @@ function metric(
   aggregate?: MetricDefinition['aggregate'],
   unit?: string
 ): MetricDefinition {
-  return { name, kind, compute, aggregate, unit };
+  return {
+    name,
+    schema: z.object({}).passthrough(),
+    kind,
+    compute,
+    aggregate,
+    unit,
+  };
 }
 
 /** Built-in metrics, including the metrics used by Scio's evaluations. */
