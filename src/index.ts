@@ -305,7 +305,6 @@ export { runEvalSuite } from './evals/runEvalSuite.js';
 export type {
   RunEvalSuiteOptions,
   RunEvalSuiteResult,
-  ScioCompatibleResults,
 } from './evals/runEvalSuite.js';
 
 // Plugin loading

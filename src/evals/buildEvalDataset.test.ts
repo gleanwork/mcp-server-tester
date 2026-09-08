@@ -1,18 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { buildEvalDataset } from './buildEvalDataset.js';
-import type { EvalConfig } from './evalConfigSchema.js';
+import type { EvalManifest } from './evalManifest.js';
 import { getBuiltinHostConfig } from './builtinHosts.js';
 
-const baseConfig: EvalConfig = {
+const baseManifest: EvalManifest = {
   name: 'test',
-  mode: 'tool-selection',
-  evalsetFilePaths: ['x.json'],
+  datasets: [{ type: 'file', path: 'x.json' }],
 };
 
 const hostConfig = getBuiltinHostConfig('vercel-sdk');
 
 describe('buildEvalDataset', () => {
-  it('builds tool-selection dataset from raw evalset', () => {
+  it('builds a tool-selection dataset from its fixture shape', () => {
     const dataset = buildEvalDataset(
       {
         name: 'search',
@@ -24,20 +23,19 @@ describe('buildEvalDataset', () => {
           },
         ],
       },
-      'tool-selection',
       hostConfig,
-      baseConfig,
+      baseManifest
     );
 
     expect(dataset.cases).toHaveLength(1);
     expect(dataset.cases[0]?.mode).toBe('mcp_host');
     expect(dataset.cases[0]?.expect?.toolsTriggered?.calls[0]?.name).toBe(
-      'search',
+      'search'
     );
     expect(dataset.cases[0]?.tags).toContain('tool_selection');
   });
 
-  it('builds e2e-quality dataset with judges from config', () => {
+  it('builds an e2e-quality dataset with manifest judges', () => {
     const dataset = buildEvalDataset(
       {
         name: 'info-seeking',
@@ -49,13 +47,11 @@ describe('buildEvalDataset', () => {
           },
         ],
       },
-      'e2e-quality',
       hostConfig,
       {
-        ...baseConfig,
-        mode: 'e2e-quality',
-        judges: ['glean-completeness', 'glean-correctness'],
-      },
+        ...baseManifest,
+        judges: [{ type: 'glean-completeness' }, { type: 'glean-correctness' }],
+      }
     );
 
     expect(dataset.cases[0]?.tags).toContain('e2e_quality');
@@ -64,24 +60,21 @@ describe('buildEvalDataset', () => {
     expect(judges).toHaveLength(2);
   });
 
-  it('passes through prebuilt datasets unchanged', () => {
-    const prebuilt = {
-      name: 'search-evals',
-      cases: [
-        {
-          id: 'search-basic',
-          toolName: 'search',
-          args: { query: 'pto policy' },
-          expect: { isError: false },
-        },
-      ],
-    };
-
+  it('passes through canonical datasets unchanged', () => {
     const dataset = buildEvalDataset(
-      prebuilt,
-      'direct',
+      {
+        name: 'search-evals',
+        cases: [
+          {
+            id: 'search-basic',
+            toolName: 'search',
+            args: { query: 'pto policy' },
+            expect: { isError: false },
+          },
+        ],
+      },
       hostConfig,
-      { ...baseConfig, mode: 'direct' },
+      baseManifest
     );
 
     expect(dataset.cases[0]?.toolName).toBe('search');
@@ -96,9 +89,8 @@ describe('buildEvalDataset', () => {
           { id: 'b', scenario: 'two', expected_tool: 'search' },
         ],
       },
-      'tool-selection',
       hostConfig,
-      { ...baseConfig, maxCases: 1 },
+      { ...baseManifest, maxCases: 1 }
     );
 
     expect(dataset.cases).toHaveLength(1);

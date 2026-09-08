@@ -1,6 +1,5 @@
-import type { EvalConfigMode } from './evalConfigSchema.js';
-import type { EvalConfig } from './evalConfigSchema.js';
 import type { EvalDataset } from './datasetTypes.js';
+import type { EvalManifest, ExtensionConfig } from './evalManifest.js';
 import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
 import { loadEvalDatasetFromObject } from './datasetLoader.js';
 
@@ -13,17 +12,11 @@ type RawEvalset = {
 type RawEvalCase = Record<string, unknown>;
 
 function isPrebuiltDataset(data: unknown): data is EvalDataset {
-  if (!data || typeof data !== 'object' || !('cases' in data)) {
-    return false;
-  }
+  if (!data || typeof data !== 'object' || !('cases' in data)) return false;
   const cases = (data as { cases: unknown[] }).cases;
-  if (!cases?.length) {
-    return false;
-  }
+  if (!cases?.length) return false;
   const first = cases[0];
-  if (!first || typeof first !== 'object') {
-    return false;
-  }
+  if (!first || typeof first !== 'object') return false;
   return (
     'mode' in first ||
     ('expect' in first &&
@@ -31,25 +24,20 @@ function isPrebuiltDataset(data: unknown): data is EvalDataset {
   );
 }
 
-function fixtureIterations(config: EvalConfig): number {
-  if (config.iterations && config.iterations > 0) {
-    return config.iterations;
+function fixtureIterations(manifest: EvalManifest): number {
+  if (manifest.iterations && manifest.iterations > 0) {
+    return manifest.iterations;
   }
   const raw = process.env.EVAL_ITERATIONS;
   return raw ? parseInt(raw, 10) : 5;
 }
 
-function enabledJudges(config: EvalConfig): Set<string> {
-  if (config.judges?.length) {
-    return new Set(config.judges);
-  }
-  const raw = process.env.EVAL_JUDGES ?? '';
-  return new Set(
-    raw
-      .split(',')
-      .map((j) => j.trim())
-      .filter(Boolean)
-  );
+function extensionName(extension: ExtensionConfig): string {
+  return extension.name ?? extension.type;
+}
+
+function enabledJudges(manifest: EvalManifest): Set<string> {
+  return new Set((manifest.judges ?? []).map(extensionName));
 }
 
 function buildJudges(
@@ -81,11 +69,7 @@ function buildJudges(
   }
   for (const signalJudge of ['glean-rate-limit', 'glean-timeout'] as const) {
     if (judges.has(signalJudge)) {
-      result.push({
-        judge: signalJudge,
-        reference: scenario,
-        threshold: 0.5,
-      });
+      result.push({ judge: signalJudge, reference: scenario, threshold: 0.5 });
     }
   }
   return result;
@@ -94,9 +78,9 @@ function buildJudges(
 function buildToolSelectionDataset(
   evalset: RawEvalset,
   hostConfig: MCPHostConfig,
-  config: EvalConfig
+  manifest: EvalManifest
 ): EvalDataset {
-  const iterations = fixtureIterations(config);
+  const iterations = fixtureIterations(manifest);
   const cases = evalset.cases.map((case_) => {
     const expectedTool = String(case_.expected_tool);
     const scenario = String(case_.scenario);
@@ -144,29 +128,21 @@ function buildToolCallDataset(
           : `Tool call: ${tool}`,
       toolName: tool,
       tags: ['tool_call', ...tags],
-      expect:
-        case_.expect ??
-        ({
-          isError: false,
-          responseSize: { minBytes: 50 },
-        } as const),
+      expect: case_.expect ?? {
+        isError: false,
+        responseSize: { minBytes: 50 },
+      },
     };
-    if (case_.args !== undefined) {
-      fixtureCase.args = case_.args;
-    }
+    if (case_.args !== undefined) fixtureCase.args = case_.args;
     for (const key of [
       'mode',
       'scenario',
       'iterations',
       'accuracyThreshold',
     ] as const) {
-      if (case_[key] !== undefined) {
-        fixtureCase[key] = case_[key];
-      }
+      if (case_[key] !== undefined) fixtureCase[key] = case_[key];
     }
-    if (case_.mode === 'mcp_host') {
-      fixtureCase.mcpHostConfig = hostConfig;
-    }
+    if (case_.mode === 'mcp_host') fixtureCase.mcpHostConfig = hostConfig;
     return fixtureCase;
   });
 
@@ -180,9 +156,9 @@ function buildToolCallDataset(
 function buildE2eQualityDataset(
   evalset: RawEvalset,
   hostConfig: MCPHostConfig,
-  config: EvalConfig
+  manifest: EvalManifest
 ): EvalDataset {
-  const judges = enabledJudges(config);
+  const judges = enabledJudges(manifest);
   const cases = evalset.cases.map((case_) => {
     const scenario = String(case_.scenario);
     const reference =
@@ -201,9 +177,7 @@ function buildE2eQualityDataset(
       iterations: 1,
     };
     const judgeList = buildJudges(scenario, reference, judges);
-    if (judgeList.length > 0) {
-      fixtureCase.expect = { passesJudge: judgeList };
-    }
+    if (judgeList.length > 0) fixtureCase.expect = { passesJudge: judgeList };
     return fixtureCase;
   });
 
@@ -217,58 +191,51 @@ function buildE2eQualityDataset(
   });
 }
 
-const BUILDERS: Record<
-  EvalConfigMode,
-  | ((
-      evalset: RawEvalset,
-      hostConfig: MCPHostConfig,
-      config: EvalConfig
-    ) => EvalDataset)
-  | null
-> = {
-  'tool-selection': buildToolSelectionDataset,
-  'tool-call': (evalset, hostConfig) =>
-    buildToolCallDataset(evalset, hostConfig),
-  'e2e-quality': buildE2eQualityDataset,
-  'mcp-host': buildToolSelectionDataset,
-  direct: null,
-  sxs: null,
-  all: null,
-};
-
+/**
+ * Convert a tagged dataset source into the canonical EvalDataset model.
+ * Legacy fixture shapes are inferred from their fields; configuration does not
+ * need a second top-level evaluation mode.
+ */
 export function buildEvalDataset(
   raw: unknown,
-  mode: EvalConfigMode,
   hostConfig: MCPHostConfig,
-  config: EvalConfig
+  manifest: EvalManifest
 ): EvalDataset {
   if (isPrebuiltDataset(raw)) {
     let dataset = loadEvalDatasetFromObject(raw);
-    if (config.maxCases && dataset.cases.length > config.maxCases) {
+    if (manifest.maxCases && dataset.cases.length > manifest.maxCases) {
       dataset = {
         ...dataset,
-        cases: dataset.cases.slice(0, config.maxCases),
+        cases: dataset.cases.slice(0, manifest.maxCases),
       };
     }
     return dataset;
   }
 
-  const builder = BUILDERS[mode];
-  if (!builder) {
-    throw new Error(`Cannot build dataset for mode "${mode}" from raw evalset`);
+  if (
+    !raw ||
+    typeof raw !== 'object' ||
+    !Array.isArray((raw as RawEvalset).cases)
+  ) {
+    throw new Error('Dataset must contain a cases array');
   }
-
   const evalset = raw as RawEvalset;
-  if (!Array.isArray(evalset.cases)) {
-    throw new Error('Evalset must contain a cases array');
+  const firstCase = evalset.cases[0] ?? {};
+  let dataset: EvalDataset;
+  if ('expected_tool' in firstCase) {
+    dataset = buildToolSelectionDataset(evalset, hostConfig, manifest);
+  } else if ('tool' in firstCase) {
+    dataset = buildToolCallDataset(evalset, hostConfig);
+  } else if ('scenario' in firstCase) {
+    dataset = buildE2eQualityDataset(evalset, hostConfig, manifest);
+  } else {
+    throw new Error(
+      'Unable to infer dataset shape; provide canonical EvalDataset cases.'
+    );
   }
 
-  let dataset = builder(evalset, hostConfig, config);
-  if (config.maxCases && dataset.cases.length > config.maxCases) {
-    dataset = {
-      ...dataset,
-      cases: dataset.cases.slice(0, config.maxCases),
-    };
+  if (manifest.maxCases && dataset.cases.length > manifest.maxCases) {
+    dataset = { ...dataset, cases: dataset.cases.slice(0, manifest.maxCases) };
   }
   return dataset;
 }

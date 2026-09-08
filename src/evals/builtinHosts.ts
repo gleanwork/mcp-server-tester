@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type { MCPConfig } from '../config/mcpConfig.js';
 import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
 
 export interface BuiltinHostOptions {
@@ -8,7 +9,7 @@ export interface BuiltinHostOptions {
   maxToolCalls?: number;
   timeout?: number;
   provider?: string;
-  mcpUrl?: string;
+  server?: MCPConfig;
   apiToken?: string;
   pluginDir?: string;
   pluginMcpUrl?: string;
@@ -56,22 +57,48 @@ function claudeCliHost(options: BuiltinHostOptions): MCPHostConfig {
       process.env.GOOGLE_VERTEX_PROJECT ?? 'dev-sandbox-334901';
   }
 
+  const server = options.server;
   const mcpUrl =
-    options.mcpUrl ??
-    process.env.GLEAN_MCP_URL ??
-    'https://scio-prod-be.glean.com/mcp/default';
-  const apiToken = options.apiToken ?? process.env.GLEAN_API_TOKEN ?? '';
+    server?.transport === 'http'
+      ? server.serverUrl
+      : (process.env.GLEAN_MCP_URL ??
+        'https://scio-prod-be.glean.com/mcp/default');
+  const apiToken =
+    options.apiToken ??
+    (server?.transport === 'http' ? server.auth?.accessToken : undefined) ??
+    process.env.GLEAN_API_TOKEN ??
+    '';
   const pluginDir = options.pluginDir ?? process.env.PLUGIN_DIR ?? '';
 
-  const mcpServers: Record<string, unknown> = {
-    'glean-mcp': {
-      type: 'http',
-      url: mcpUrl,
-      headers: {
-        Authorization: `Bearer ${apiToken}`,
-      },
-    },
-  };
+  const mcpServers: Record<string, unknown> = server
+    ? server.transport === 'http'
+      ? {
+          [server.label ?? 'mcp-server']: {
+            type: 'http',
+            url: server.serverUrl,
+            headers: {
+              ...server.headers,
+              ...(apiToken ? { Authorization: `Bearer ${apiToken}` } : {}),
+            },
+          },
+        }
+      : {
+          [server.label ?? 'mcp-server']: {
+            command: server.command,
+            args: server.args,
+            cwd: server.cwd,
+            env: server.env,
+          },
+        }
+    : {
+        'glean-mcp': {
+          type: 'http',
+          url: mcpUrl,
+          headers: {
+            Authorization: `Bearer ${apiToken}`,
+          },
+        },
+      };
 
   if (pluginDir) {
     const dataDir =

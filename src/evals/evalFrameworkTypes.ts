@@ -1,7 +1,7 @@
 import type { ZodType } from 'zod';
 import type { EvalDataset, EvalCase } from './datasetTypes.js';
 import type { EvalCaseResult } from '../types/reporter.js';
-import type { EvalRunnerResult } from '../types/index.js';
+import type { EvalRunnerResult, UsageMetrics } from '../types/index.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import type {
   DatasetConfig,
@@ -98,7 +98,14 @@ export interface EvaluationSuiteOptions {
 export interface EvaluationArmResult {
   name: string;
   servers: MCPConfig[];
-  result?: EvalRunnerResult;
+  result?: {
+    caseResults: EvalCaseResult[];
+    total: number;
+    passed: number;
+    failed: number;
+    durationMs: number;
+    totalHostUsage?: Partial<UsageMetrics>;
+  };
   comparison?: Record<string, unknown>;
 }
 
