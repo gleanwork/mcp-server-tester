@@ -61,7 +61,6 @@ export interface MetricDefinition {
   readonly kind: MetricKind;
   readonly unit?: string;
   compute(caseResult: EvalCaseResult): MetricValue;
-  aggregate?(values: MetricValue[], metricName: string): unknown;
 }
 
 /** Public judge extension point. */

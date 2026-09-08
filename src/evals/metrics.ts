@@ -1,6 +1,14 @@
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { UsageMetrics } from '../types/index.js';
-import type { MetricSpec } from './evalConfigSchema.js';
+import { registerMetric as registerFrameworkMetric } from './frameworkRegistries.js';
+export type MetricSpec =
+  | string
+  | {
+      metric?: string;
+      type?: string;
+      name?: string;
+      params?: Record<string, unknown>;
+    };
 
 /** Values emitted by a metric for one eval case. */
 export type MetricValue =
@@ -294,9 +302,14 @@ export const METRIC_REGISTRY: Record<string, MetricDefinition> = {
   ...BUILT_IN_METRICS,
 };
 
+for (const definition of Object.values(BUILT_IN_METRICS)) {
+  registerFrameworkMetric(definition);
+}
+
 /** Register or replace a named metric for subsequent runs. */
 export function registerMetric(definition: MetricDefinition): void {
   METRIC_REGISTRY[definition.name] = definition;
+  registerFrameworkMetric(definition);
 }
 
 function slug(value: string): string {
@@ -308,8 +321,10 @@ export function resolveMetric(
   spec: MetricSpec,
   registry: Record<string, MetricDefinition> = METRIC_REGISTRY
 ): ResolvedMetric {
-  const name = typeof spec === 'string' ? spec : spec.metric;
+  const name =
+    typeof spec === 'string' ? spec : (spec.metric ?? spec.type ?? spec.name);
   const params = typeof spec === 'string' ? {} : (spec.params ?? {});
+  if (!name) throw new Error('Metric configuration requires a type or name.');
   const base = registry[name];
   if (base) {
     return {

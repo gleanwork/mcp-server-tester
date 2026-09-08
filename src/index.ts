@@ -293,10 +293,16 @@ export {
   registerDatasetSource,
   registerHost,
   registerJudge,
-  registerMetric,
   registerResultStore,
   validateManifestRegistrations,
 } from './evals/frameworkRegistries.js';
+export {
+  BUILT_IN_METRICS,
+  METRIC_REGISTRY,
+  computeMetrics,
+  registerMetric,
+  resolveMetric,
+} from './evals/metrics.js';
 
 // Eval dataset building and suite runner
 export { buildEvalDataset } from './evals/buildEvalDataset.js';
