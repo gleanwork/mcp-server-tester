@@ -121,7 +121,7 @@ export function registerJudge(
 export function getRegisteredJudge(name: string): CustomJudgeExecutor {
   try {
     const judge = getJudge(name);
-    return (candidate, reference) => judge.evaluate(candidate, reference);
+    return judge.evaluate;
   } catch (error) {
     if (error instanceof Error && !error.message.includes('Available:')) {
       throw new Error(`${error.message} No judges are registered.`);
