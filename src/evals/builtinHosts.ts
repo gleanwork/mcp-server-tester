@@ -28,7 +28,7 @@ export function registerBuiltinHosts(): void {
   for (const [name, factory] of Object.entries(BUILTIN_HOSTS)) {
     registerHost({
       name,
-      createConfig: (options) => factory((options ?? {}) as BuiltinHostOptions),
+      createConfig: (options) => factory(options ?? {}),
     });
   }
   builtinsRegistered = true;
