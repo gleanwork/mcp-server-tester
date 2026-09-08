@@ -5,7 +5,10 @@ describe('getBuiltinHostConfig', () => {
   it('passes the configured model to the Claude CLI', () => {
     const config = getBuiltinHostConfig('claude-cli', {
       model: 'claude-sonnet-4-6',
-      mcpUrl: 'https://example.com/mcp',
+      server: {
+        transport: 'http',
+        serverUrl: 'https://example.com/mcp',
+      },
     });
 
     expect(config.cli?.args).toContain('--model');
