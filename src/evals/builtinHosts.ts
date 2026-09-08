@@ -18,8 +18,8 @@ export interface BuiltinHostOptions {
 }
 
 /**
- * Built-in client host configs matching scio's python/hosts registry.
- * Glean-specific plugin wiring stays env-driven for backward compatibility.
+ * Built-in client host configs. Organization-specific plugin wiring stays
+ * outside the framework and is provided through generic plugin options.
  */
 let builtinsRegistered = false;
 
@@ -65,22 +65,23 @@ function claudeCliHost(options: BuiltinHostOptions): MCPHostConfig {
   const provider = options.provider ?? 'anthropic';
   if (provider === 'vertex') {
     process.env.CLAUDE_CODE_USE_VERTEX = '1';
-    process.env.ANTHROPIC_VERTEX_PROJECT_ID ??=
-      process.env.GOOGLE_VERTEX_PROJECT ?? 'dev-sandbox-334901';
+    if (process.env.GOOGLE_VERTEX_PROJECT) {
+      process.env.ANTHROPIC_VERTEX_PROJECT_ID ??=
+        process.env.GOOGLE_VERTEX_PROJECT;
+    }
   }
 
   const server = options.server;
-  const mcpUrl =
+  const defaultServerUrl =
     server?.transport === 'http'
       ? server.serverUrl
-      : (process.env.GLEAN_MCP_URL ??
-        'https://scio-prod-be.glean.com/mcp/default');
+      : process.env.MCP_SERVER_URL;
   const apiToken =
     options.apiToken ??
     (server?.transport === 'http' ? server.auth?.accessToken : undefined) ??
-    process.env.GLEAN_API_TOKEN ??
+    process.env.MCP_ACCESS_TOKEN ??
     '';
-  const pluginDir = options.pluginDir ?? process.env.PLUGIN_DIR ?? '';
+  const pluginDir = options.pluginDir ?? process.env.MCP_PLUGIN_DIR ?? '';
 
   const mcpServers: Record<string, unknown> = server
     ? server.transport === 'http'
@@ -102,43 +103,42 @@ function claudeCliHost(options: BuiltinHostOptions): MCPHostConfig {
             env: server.env,
           },
         }
-    : {
-        'glean-mcp': {
-          type: 'http',
-          url: mcpUrl,
-          headers: {
-            Authorization: `Bearer ${apiToken}`,
+    : defaultServerUrl
+      ? {
+          'mcp-server': {
+            type: 'http',
+            url: defaultServerUrl,
+            headers: apiToken
+              ? { Authorization: `Bearer ${apiToken}` }
+              : undefined,
           },
-        },
-      };
+        }
+      : {};
 
   if (pluginDir) {
     const dataDir =
-      process.env.PLUGIN_DATA_DIR ??
-      path.join(
-        os.homedir(),
-        '.claude/plugins/data/glean-vnext-glean-plugins-vnext'
-      );
+      process.env.MCP_PLUGIN_DATA_DIR ??
+      path.join(os.homedir(), '.mcp-server-tester', 'plugins');
     const serverUrl =
-      options.pluginMcpUrl ??
-      process.env.GLEAN_PLUGIN_MCP_URL ??
-      'https://scio-prod-be.glean.com/mcp/gateway/proxy';
+      options.pluginMcpUrl ?? process.env.MCP_PLUGIN_SERVER_URL ?? '';
     fs.mkdirSync(dataDir, { recursive: true });
     fs.writeFileSync(
       path.join(dataDir, 'mcp-server-url.json'),
       `${JSON.stringify({ serverUrl }, null, 2)}\n`
     );
-    mcpServers['glean-plugin'] = {
-      command: 'bash',
-      args: [path.join(pluginDir, 'start.sh')],
-      env: {
-        GLEAN_MCP_SERVER_URL: serverUrl,
-        ENABLE_HITL: 'false',
-        CLAUDE_PLUGIN_DATA: dataDir,
-        NODE_TLS_REJECT_UNAUTHORIZED: '0',
-      },
-      alwaysLoad: process.env.PLUGIN_ALWAYS_LOAD !== '0',
-    };
+    if (serverUrl) {
+      mcpServers['plugin'] = {
+        command: 'bash',
+        args: [path.join(pluginDir, 'start.sh')],
+        env: {
+          MCP_PLUGIN_SERVER_URL: serverUrl,
+          ENABLE_HITL: 'false',
+          CLAUDE_PLUGIN_DATA: dataDir,
+          NODE_TLS_REJECT_UNAUTHORIZED: '0',
+        },
+        alwaysLoad: process.env.MCP_PLUGIN_ALWAYS_LOAD !== '0',
+      };
+    }
   }
 
   const mcpConfigFile = path.join(
