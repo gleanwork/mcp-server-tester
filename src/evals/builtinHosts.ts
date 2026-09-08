@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { MCPConfig } from '../config/mcpConfig.js';
+import { getHost, registerHost } from './frameworkRegistries.js';
 import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
 
 export interface BuiltinHostOptions {
@@ -20,16 +21,27 @@ export interface BuiltinHostOptions {
  * Built-in client host configs matching scio's python/hosts registry.
  * Glean-specific plugin wiring stays env-driven for backward compatibility.
  */
+let builtinsRegistered = false;
+
+export function registerBuiltinHosts(): void {
+  if (builtinsRegistered) return;
+  for (const [name, factory] of Object.entries(BUILTIN_HOSTS)) {
+    registerHost({
+      name,
+      createConfig: (options) => factory((options ?? {}) as BuiltinHostOptions),
+    });
+  }
+  builtinsRegistered = true;
+}
+
 export function getBuiltinHostConfig(
   name: string,
   options: BuiltinHostOptions = {}
 ): MCPHostConfig {
-  const factory = BUILTIN_HOSTS[name];
-  if (!factory) {
-    const valid = Object.keys(BUILTIN_HOSTS).sort().join(', ');
-    throw new Error(`Unknown client host "${name}". Valid hosts: ${valid}`);
-  }
-  return factory(options);
+  registerBuiltinHosts();
+  return getHost(name).createConfig(
+    options as unknown as Record<string, unknown>
+  );
 }
 
 const BUILTIN_HOSTS: Record<

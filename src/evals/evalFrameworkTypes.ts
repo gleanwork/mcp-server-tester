@@ -3,6 +3,7 @@ import type { EvalDataset, EvalCase } from './datasetTypes.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { EvalRunnerResult, UsageMetrics } from '../types/index.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
+import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
 import type {
   DatasetConfig,
   EvalArm,
