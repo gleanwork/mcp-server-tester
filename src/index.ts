@@ -271,6 +271,7 @@ export type {
   MetricKind,
   MetricValue,
   ResultStoreDefinition,
+  RunSummary,
   EvalSummaryGenerator,
 } from './evals/evalFrameworkTypes.js';
 export {
@@ -294,6 +295,7 @@ export {
   registerJudge,
   registerMetric,
   registerResultStore,
+  validateManifestRegistrations,
 } from './evals/frameworkRegistries.js';
 
 // Plugin loading

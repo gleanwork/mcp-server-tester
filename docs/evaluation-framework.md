@@ -48,10 +48,12 @@ capabilities.
 
 ## Registries
 
-All extension points follow the same public shape:
+All extension points follow the same public shape. Each implementation owns
+its tagged-config schema; the core registry does not know organization-specific
+options:
 
 ```ts
-registerX({ name, ...implementation });
+registerX({ name, schema, ...implementation });
 getX(name);
 listXs();
 ```
@@ -71,14 +73,15 @@ are loaded with `--plugins` before manifest validation and execution.
 
 ```text
 EvalManifest
-  -> validate tagged blocks and registry names
+  -> validate tagged blocks, registry names, schemas, and server labels
   -> load plugins and built-in registrations
   -> resolve DatasetSource entries into EvalDataset values
   -> derive one or more arms from the manifest
   -> run each arm through a registered Host with its MCPConfig[] server set
   -> compute metrics and judges
   -> write per-arm results through a registered ResultStore
-  -> produce a summary with arm metadata and evidence
+  -> save a RunSummary with manifest identity, content hash, arm aggregates,
+     pairwise arm deltas, and per-case artifact pointers
 ```
 
 `EvalDataset`, `EvalCase`, `EvalMode`, `MCPConfig`, and `runEvalDataset` remain

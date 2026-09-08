@@ -1,3 +1,4 @@
+import type { ZodType } from 'zod';
 import type { EvalDataset, EvalCase } from './datasetTypes.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { EvalRunnerResult } from '../types/index.js';
@@ -9,6 +10,7 @@ import type {
   ExtensionConfig,
   HostConfig,
 } from './evalManifest.js';
+import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
 import type { EvalResultStore } from './resultStore.js';
 
 /** Context provided to a dataset source implementation. */
@@ -20,6 +22,7 @@ export interface DatasetSourceContext {
 /** Public dataset-source extension point. */
 export interface DatasetSource {
   readonly name: string;
+  readonly schema: ZodType;
   load(
     config: DatasetConfig,
     context: DatasetSourceContext
@@ -40,7 +43,9 @@ export interface HostRunOptions {
 /** Public host extension point. */
 export interface HostDefinition {
   readonly name: string;
-  run(options: HostRunOptions): Promise<EvalRunnerResult>;
+  readonly schema: ZodType;
+  createConfig(options?: Record<string, unknown>): MCPHostConfig;
+  run?(options: HostRunOptions): Promise<EvalRunnerResult>;
 }
 
 /** Values emitted by a metric for one evaluation case. */
@@ -52,6 +57,7 @@ export type MetricKind = 'binary' | 'continuous' | 'categorical' | 'object';
 /** Public metric extension point. */
 export interface MetricDefinition {
   readonly name: string;
+  readonly schema: ZodType;
   readonly kind: MetricKind;
   readonly unit?: string;
   compute(caseResult: EvalCaseResult): MetricValue;
@@ -61,10 +67,11 @@ export interface MetricDefinition {
 /** Public judge extension point. */
 export interface JudgeDefinition {
   readonly name: string;
-  evaluate(
+  readonly schema: ZodType;
+  evaluate: (
     candidate: unknown,
     reference?: unknown
-  ): Promise<{
+  ) => Promise<{
     score: number;
     reasoning?: string;
   }>;
@@ -73,6 +80,7 @@ export interface JudgeDefinition {
 /** Public result-store extension point. */
 export interface ResultStoreDefinition {
   readonly name: string;
+  readonly schema: ZodType;
   create(config: ExtensionConfig): EvalResultStore;
 }
 
@@ -95,14 +103,21 @@ export interface EvaluationArmResult {
 }
 
 /** Stable summary shape written by a completed evaluation suite. */
-export interface EvaluationSummary {
+export interface RunSummary {
+  schemaVersion: 1;
+  manifestId: string;
+  contentHash: string;
   timestamp: string;
   durationMs: number;
   manifestName: string;
   arms: EvaluationArmResult[];
   metrics: Record<string, unknown>;
+  armDeltas: Record<string, Record<string, unknown>>;
+  caseArtifactPointers?: Record<string, string[]>;
   results: EvalCaseResult[];
 }
+
+export type EvaluationSummary = RunSummary;
 
 /** Result contract for a suite implementation. */
 export interface EvaluationSuiteResult {

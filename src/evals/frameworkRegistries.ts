@@ -5,6 +5,7 @@ import type {
   MetricDefinition,
   ResultStoreDefinition,
 } from './evalFrameworkTypes.js';
+import type { EvalManifest, ExtensionConfig } from './evalManifest.js';
 
 interface NamedImplementation {
   readonly name: string;
@@ -92,3 +93,40 @@ export const getResultStore = (name: string): ResultStoreDefinition =>
 export const listResultStores = (): ResultStoreDefinition[] =>
   resultStores.list();
 export const clearResultStores = (): void => resultStores.clear();
+
+function extensionName(extension: ExtensionConfig): string {
+  return extension.name ?? extension.type;
+}
+
+function validateLabels(
+  servers: Array<{ label?: string }>,
+  context: string
+): void {
+  const labels = servers.map((server) => server.label).filter(Boolean);
+  if (labels.length !== new Set(labels).size) {
+    throw new Error(`MCP server labels must be unique within ${context}.`);
+  }
+  if (servers.length > 1 && labels.length !== servers.length) {
+    throw new Error(
+      `Every MCP server in ${context} requires a label when the set has multiple entries.`
+    );
+  }
+}
+
+/** Validate manifest references against the currently registered extensions. */
+export function validateManifestRegistrations(manifest: EvalManifest): void {
+  for (const dataset of manifest.datasets) getDatasetSource(dataset.type);
+  if (manifest.host) getHost(manifest.host.type);
+  for (const metric of manifest.metrics ?? []) getMetric(extensionName(metric));
+  for (const judge of manifest.judges ?? []) getJudge(extensionName(judge));
+  if (manifest.results?.store) {
+    getResultStore(extensionName(manifest.results.store));
+  }
+  validateLabels(manifest.servers ?? [], 'the manifest');
+  for (const arm of manifest.arms ?? []) {
+    if (arm.host) getHost(arm.host.type);
+    for (const metric of arm.metrics ?? []) getMetric(extensionName(metric));
+    for (const judge of arm.judges ?? []) getJudge(extensionName(judge));
+    validateLabels(arm.servers ?? [], `arm "${arm.name}"`);
+  }
+}
