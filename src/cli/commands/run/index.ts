@@ -44,6 +44,7 @@ export async function run(options: RunOptions): Promise<void> {
 
   const metrics = result.summary.metrics as {
     passed?: number;
+    failed?: number;
     total?: number;
     passRate?: number;
   };
@@ -52,4 +53,5 @@ export async function run(options: RunOptions): Promise<void> {
     `Results: ${metrics.passed ?? 0}/${metrics.total ?? 0} passed (${((metrics.passRate ?? 0) * 100).toFixed(1)}%)`
   );
   console.log(`Output: ${path.join(result.outputDir, 'results.json')}`);
+  if ((metrics.failed ?? 0) > 0) process.exitCode = 1;
 }
