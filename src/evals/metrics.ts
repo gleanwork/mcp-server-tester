@@ -312,7 +312,21 @@ export const METRIC_REGISTRY: Record<string, MetricDefinition> = {
 };
 
 for (const definition of Object.values(BUILT_IN_METRICS)) {
-  registerFrameworkMetric(definition);
+  try {
+    registerFrameworkMetric(definition);
+  } catch (error) {
+    // A packaged CLI and a dynamically loaded plugin can each load this
+    // module. Built-ins are identical by name in that case, so keep the
+    // process-wide registry's first definition.
+    if (
+      !(error instanceof Error) ||
+      !error.message.includes(
+        `Metric "${definition.name}" is already registered`
+      )
+    ) {
+      throw error;
+    }
+  }
 }
 
 /** Register or replace a named metric for subsequent runs. */

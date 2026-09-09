@@ -75,11 +75,24 @@ function buildJudges(
   return result;
 }
 
+function requireHostConfig(
+  hostConfig: MCPHostConfig | undefined,
+  source: string
+): MCPHostConfig {
+  if (!hostConfig) {
+    throw new Error(
+      `Dataset source "${source}" requires a resolved host configuration.`
+    );
+  }
+  return hostConfig;
+}
+
 function buildToolSelectionDataset(
   evalset: RawEvalset,
-  hostConfig: MCPHostConfig,
+  hostConfig: MCPHostConfig | undefined,
   manifest: EvalManifest
 ): EvalDataset {
+  const resolvedHostConfig = requireHostConfig(hostConfig, 'tool-selection');
   const iterations = fixtureIterations(manifest);
   const cases = evalset.cases.map((case_) => {
     const expectedTool = String(case_.expected_tool);
@@ -94,7 +107,7 @@ function buildToolSelectionDataset(
       toolName: expectedTool,
       mode: 'mcp_host' as const,
       scenario,
-      mcpHostConfig: hostConfig,
+      mcpHostConfig: resolvedHostConfig,
       tags: ['mcp_host', 'tool_selection', ...tags],
       iterations,
       accuracyThreshold: iterations === 1 ? 1.0 : 0.8,
@@ -115,8 +128,9 @@ function buildToolSelectionDataset(
 
 function buildToolCallDataset(
   evalset: RawEvalset,
-  hostConfig: MCPHostConfig
+  hostConfig: MCPHostConfig | undefined
 ): EvalDataset {
+  const resolvedHostConfig = requireHostConfig(hostConfig, 'tool-call');
   const cases = evalset.cases.map((case_) => {
     const tool = String(case_.tool);
     const tags = Array.isArray(case_.tags) ? (case_.tags as string[]) : [];
@@ -142,7 +156,8 @@ function buildToolCallDataset(
     ] as const) {
       if (case_[key] !== undefined) fixtureCase[key] = case_[key];
     }
-    if (case_.mode === 'mcp_host') fixtureCase.mcpHostConfig = hostConfig;
+    if (case_.mode === 'mcp_host')
+      fixtureCase.mcpHostConfig = resolvedHostConfig;
     return fixtureCase;
   });
 
@@ -155,9 +170,10 @@ function buildToolCallDataset(
 
 function buildE2eQualityDataset(
   evalset: RawEvalset,
-  hostConfig: MCPHostConfig,
+  hostConfig: MCPHostConfig | undefined,
   manifest: EvalManifest
 ): EvalDataset {
+  const resolvedHostConfig = requireHostConfig(hostConfig, 'e2e-quality');
   const judges = enabledJudges(manifest);
   const cases = evalset.cases.map((case_) => {
     const scenario = String(case_.scenario);
@@ -172,7 +188,7 @@ function buildE2eQualityDataset(
           : `E2E quality: ${scenario.slice(0, 80)}`,
       mode: 'mcp_host',
       scenario,
-      mcpHostConfig: hostConfig,
+      mcpHostConfig: resolvedHostConfig,
       tags: ['e2e_quality', ...tags],
       iterations: 1,
     };
@@ -198,7 +214,7 @@ function buildE2eQualityDataset(
  */
 export function buildEvalDataset(
   raw: unknown,
-  hostConfig: MCPHostConfig,
+  hostConfig: MCPHostConfig | undefined,
   manifest: EvalManifest
 ): EvalDataset {
   if (isPrebuiltDataset(raw)) {

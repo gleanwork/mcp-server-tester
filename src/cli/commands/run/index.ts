@@ -11,6 +11,7 @@ export interface RunOptions {
   dryRun?: boolean;
   arm?: string;
   outputDir?: string;
+  secretsFile?: string;
 }
 
 export async function run(options: RunOptions): Promise<void> {
@@ -19,6 +20,7 @@ export async function run(options: RunOptions): Promise<void> {
     rootDir: options.rootDir,
     pluginPaths: options.plugins,
     outputDir: options.outputDir,
+    secretsFile: options.secretsFile,
     dryRun: options.dryRun,
     arm: options.arm,
   };

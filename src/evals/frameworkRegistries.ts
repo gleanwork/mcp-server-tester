@@ -18,24 +18,48 @@ interface Registry<T extends NamedImplementation> {
   clear(): void;
 }
 
+interface RegistryState {
+  datasets: Map<string, NamedImplementation>;
+  hosts: Map<string, NamedImplementation>;
+  judges: Map<string, NamedImplementation>;
+  metrics: Map<string, NamedImplementation>;
+  resultStores: Map<string, NamedImplementation>;
+}
+
+const REGISTRY_STATE_KEY = Symbol.for(
+  'mcp-server-tester.framework-registry-state'
+);
+const globalRegistry = globalThis as unknown as Record<symbol, unknown>;
+const existingRegistryState = globalRegistry[REGISTRY_STATE_KEY] as
+  RegistryState | undefined;
+const registryState: RegistryState = existingRegistryState ?? {
+  datasets: new Map<string, NamedImplementation>(),
+  hosts: new Map<string, NamedImplementation>(),
+  judges: new Map<string, NamedImplementation>(),
+  metrics: new Map<string, NamedImplementation>(),
+  resultStores: new Map<string, NamedImplementation>(),
+};
+if (!existingRegistryState) globalRegistry[REGISTRY_STATE_KEY] = registryState;
+
 function createRegistry<T extends NamedImplementation>(
-  kind: string
+  kind: string,
+  implementations: Map<string, NamedImplementation>
 ): Registry<T> {
-  const implementations = new Map<string, T>();
+  const typedImplementations = implementations as Map<string, T>;
   return {
     register(implementation) {
-      const existing = implementations.get(implementation.name);
+      const existing = typedImplementations.get(implementation.name);
       if (existing && existing !== implementation) {
         throw new Error(
           `${kind} "${implementation.name}" is already registered.`
         );
       }
-      implementations.set(implementation.name, implementation);
+      typedImplementations.set(implementation.name, implementation);
     },
     get(name) {
-      const implementation = implementations.get(name);
+      const implementation = typedImplementations.get(name);
       if (!implementation) {
-        const available = [...implementations.keys()].sort().join(', ');
+        const available = [...typedImplementations.keys()].sort().join(', ');
         throw new Error(
           `${kind} "${name}" is not registered.${
             available ? ` Available: ${available}.` : ''
@@ -45,21 +69,30 @@ function createRegistry<T extends NamedImplementation>(
       return implementation;
     },
     list() {
-      return [...implementations.values()].sort((a, b) =>
+      return [...typedImplementations.values()].sort((a, b) =>
         a.name.localeCompare(b.name)
       );
     },
     clear() {
-      implementations.clear();
+      typedImplementations.clear();
     },
   };
 }
 
-const datasetSources = createRegistry<DatasetSource>('Dataset source');
-const hosts = createRegistry<HostDefinition>('Host');
-const judges = createRegistry<JudgeDefinition>('Judge');
-const metrics = createRegistry<MetricDefinition>('Metric');
-const resultStores = createRegistry<ResultStoreDefinition>('Result store');
+const datasetSources = createRegistry<DatasetSource>(
+  'Dataset source',
+  registryState.datasets
+);
+const hosts = createRegistry<HostDefinition>('Host', registryState.hosts);
+const judges = createRegistry<JudgeDefinition>('Judge', registryState.judges);
+const metrics = createRegistry<MetricDefinition>(
+  'Metric',
+  registryState.metrics
+);
+const resultStores = createRegistry<ResultStoreDefinition>(
+  'Result store',
+  registryState.resultStores
+);
 
 export const registerDatasetSource = (source: DatasetSource): void =>
   datasetSources.register(source);

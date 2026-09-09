@@ -17,6 +17,8 @@ import type { EvalResultStore } from './resultStore.js';
 export interface DatasetSourceContext {
   rootDir: string;
   manifest: EvalManifest;
+  /** Resolved built-in host config for legacy dataset normalization. */
+  hostConfig?: MCPHostConfig;
 }
 
 /** Public dataset-source extension point. */
@@ -89,6 +91,7 @@ export interface EvaluationSuiteOptions {
   rootDir?: string;
   pluginPaths?: string[];
   outputDir?: string;
+  secretsFile?: string;
   dryRun?: boolean;
   arm?: string;
 }
@@ -109,6 +112,13 @@ export interface EvaluationArmResult {
 }
 
 /** Stable summary shape written by a completed evaluation suite. */
+export interface RunTelemetry {
+  cases: number;
+  toolCalls: number;
+  failedCases: number;
+  totalHostUsage?: Partial<UsageMetrics>;
+}
+
 export interface RunSummary {
   schemaVersion: 1;
   manifestId: string;
@@ -118,6 +128,7 @@ export interface RunSummary {
   manifestName: string;
   arms: EvaluationArmResult[];
   metrics: Record<string, unknown>;
+  telemetry?: RunTelemetry;
   armDeltas: Record<string, Record<string, unknown>>;
   caseArtifactPointers?: Record<string, string[]>;
   results: EvalCaseResult[];

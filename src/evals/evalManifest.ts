@@ -55,6 +55,8 @@ export interface EvalManifest {
   timeout?: number;
   maxToolCalls?: number;
   tools?: string;
+  /** Require HTTP server URLs to use an explicit /eval endpoint. */
+  requireEvalEndpoint?: boolean;
   [key: string]: unknown;
 }
 
@@ -101,6 +103,7 @@ export const EvalManifestSchema = z
     timeout: z.number().int().positive().optional(),
     maxToolCalls: z.number().int().nonnegative().optional(),
     tools: z.string().optional(),
+    requireEvalEndpoint: z.boolean().optional(),
   })
   .passthrough();
 

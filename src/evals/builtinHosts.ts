@@ -67,6 +67,9 @@ function vercelSdkHost(options: BuiltinHostOptions): MCPHostConfig {
 function claudeCliHost(options: BuiltinHostOptions): MCPHostConfig {
   const provider = options.provider ?? 'anthropic';
   if (provider === 'vertex') {
+    // Claude Code prefers ANTHROPIC_API_KEY even when Vertex is selected.
+    // Remove the conflicting direct key so the explicit provider wins.
+    delete process.env.ANTHROPIC_API_KEY;
     process.env.CLAUDE_CODE_USE_VERTEX = '1';
     if (process.env.GOOGLE_VERTEX_PROJECT) {
       process.env.ANTHROPIC_VERTEX_PROJECT_ID ??=
@@ -171,7 +174,9 @@ function claudeCliHost(options: BuiltinHostOptions): MCPHostConfig {
 
   return {
     hostType: 'cli',
-    provider: provider as MCPHostConfig['provider'],
+    provider: (provider === 'vertex'
+      ? 'vertex-anthropic'
+      : provider) as MCPHostConfig['provider'],
     mcpServers: mcpServers as Record<string, Record<string, unknown>>,
     model,
     cli: {

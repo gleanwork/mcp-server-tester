@@ -7,29 +7,41 @@ import {
 } from '../mcp/clientFactory.js';
 import { createMCPFixture } from '../mcp/fixtures/mcpFixture.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
+import { isHttpConfig } from '../config/mcpConfig.js';
 import {
   loadEvalManifest,
   type DatasetConfig,
   type EvalArm,
   type EvalManifest,
+  type HostConfig,
 } from './evalManifest.js';
 import type {
   EvaluationArmResult,
   EvaluationSummary,
+  HostDefinition,
+  RunTelemetry,
 } from './evalFrameworkTypes.js';
-import { buildEvalDataset } from './buildEvalDataset.js';
-import { getBuiltinHostConfig } from './builtinHosts.js';
+import { registerBuiltinDatasetSources } from './builtinDatasetSources.js';
+import { registerBuiltinHosts } from './builtinHosts.js';
 import { runEvalDataset } from './evalRunner.js';
 import type { EvalRunnerResult } from './evalRunner.js';
+import type { EvalDataset } from './datasetTypes.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { UsageMetrics } from '../types/index.js';
 import { loadPlugins } from '../plugins/loadPlugins.js';
+import {
+  getDatasetSource,
+  getHost,
+  validateManifestRegistrations,
+} from './frameworkRegistries.js';
+import { computeMetrics, type MetricSpec } from './metrics.js';
 
 export interface RunEvalSuiteOptions {
   manifestPath: string;
   rootDir?: string;
   pluginPaths?: string[];
   outputDir?: string;
+  secretsFile?: string;
   mcpConfig?: MCPConfig;
   dryRun?: boolean;
   arm?: string;
@@ -40,10 +52,64 @@ export interface RunEvalSuiteResult {
   outputDir: string;
   datasets: Array<{
     source: DatasetConfig;
-    dataset?: ReturnType<typeof buildEvalDataset>;
+    dataset?: EvalDataset;
     result?: EvalRunnerResult;
   }>;
   summary: EvaluationSummary;
+}
+
+async function loadSecretsFile(secretsFile: string): Promise<void> {
+  const raw = await fs.readFile(secretsFile, 'utf8');
+  let entries: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('Secrets JSON must contain an object.');
+    }
+    entries = parsed as Record<string, unknown>;
+  } catch {
+    entries = {};
+    for (const rawLine of raw.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+      const equals = line.indexOf('=');
+      if (equals < 1) continue;
+      const key = line.slice(0, equals).trim();
+      const value = line
+        .slice(equals + 1)
+        .trim()
+        .replace(/^['"]|['"]$/g, '');
+      entries[key] = value;
+    }
+  }
+  for (const [key, value] of Object.entries(entries)) {
+    if (typeof value === 'string' && process.env[key] === undefined) {
+      process.env[key] = value;
+    }
+  }
+}
+
+function resolveServerSecrets(server: MCPConfig): MCPConfig {
+  if (!isHttpConfig(server) || !server.auth?.accessTokenEnv) return server;
+  const envName = server.auth.accessTokenEnv;
+  const token = process.env[envName];
+  if (!token) {
+    throw new Error(
+      `MCP access token environment variable "${envName}" is not set.`
+    );
+  }
+  const { accessTokenEnv: _accessTokenEnv, ...auth } = server.auth;
+  return { ...server, auth: { ...auth, accessToken: token } };
+}
+
+function assertEvalEndpoint(server: MCPConfig, manifest: EvalManifest): void {
+  if (!manifest.requireEvalEndpoint || !isHttpConfig(server)) return;
+  const pathname = new URL(server.serverUrl).pathname;
+  if (!/\/eval(?:\/|$)/.test(pathname)) {
+    throw new Error(
+      `Evaluation requires an /eval MCP endpoint; received "${server.serverUrl}".`
+    );
+  }
 }
 
 function manifestIdentity(manifest: EvalManifest): {
@@ -108,6 +174,28 @@ function resolveServer(
   return servers[0]!;
 }
 
+function resolveHost(
+  manifest: EvalManifest,
+  arm: EvalArm,
+  server: MCPConfig
+): {
+  definition: HostDefinition;
+  declaration: HostConfig;
+  config: ReturnType<HostDefinition['createConfig']>;
+} {
+  const declaration = arm.host ?? manifest.host ?? { type: 'claude-cli' };
+  const definition = getHost(declaration.type);
+  const config = definition.createConfig({
+    ...declaration,
+    model: manifest.model,
+    maxToolCalls: manifest.maxToolCalls,
+    timeout: manifest.timeout,
+    provider: manifest.provider,
+    server,
+  });
+  return { definition, declaration, config };
+}
+
 function sumUsage(
   a: Partial<UsageMetrics> | undefined,
   b: Partial<UsageMetrics>
@@ -129,6 +217,38 @@ function sumUsage(
     }
   }
   return result;
+}
+
+function countToolCalls(results: EvalCaseResult[]): number {
+  return results.reduce((count, result) => {
+    const response = result.response;
+    if (!response || typeof response !== 'object') return count;
+    const calls = (response as { toolCalls?: unknown }).toolCalls;
+    return count + (Array.isArray(calls) ? calls.length : 0);
+  }, 0);
+}
+
+function buildArmDeltas(
+  arms: EvaluationArmResult[]
+): Record<string, Record<string, unknown>> {
+  const baseline = arms[0]?.result;
+  if (!baseline || baseline.total === 0) return {};
+  const baselineRate = baseline.passed / baseline.total;
+  return Object.fromEntries(
+    arms.slice(1).map((arm) => {
+      const result = arm.result;
+      const passRate =
+        result && result.total > 0 ? result.passed / result.total : 0;
+      return [
+        arm.name,
+        {
+          passRate,
+          passRateDelta: passRate - baselineRate,
+          baseline: arms[0]?.name,
+        },
+      ];
+    })
+  );
 }
 
 function summarizeArm(
@@ -166,8 +286,17 @@ export async function runEvalSuite(
 ): Promise<RunEvalSuiteResult> {
   const rootDir = options.rootDir ?? process.cwd();
   const manifest = loadEvalManifest(options.manifestPath, { rootDir });
+  if (options.secretsFile) {
+    await loadSecretsFile(
+      path.isAbsolute(options.secretsFile)
+        ? options.secretsFile
+        : path.resolve(rootDir, options.secretsFile)
+    );
+  }
   applyManifestEnv(manifest);
 
+  registerBuiltinDatasetSources();
+  registerBuiltinHosts();
   const pluginPaths = options.pluginPaths ?? manifest.plugins ?? [];
   if (pluginPaths.length > 0) {
     await loadPlugins(
@@ -179,6 +308,7 @@ export async function runEvalSuite(
     );
   }
 
+  validateManifestRegistrations(manifest);
   const outputDir =
     options.outputDir ?? path.join(rootDir, '.mcp-test-results', manifest.name);
   const arms = selectedArms(manifest, options.arm);
@@ -213,65 +343,90 @@ export async function runEvalSuite(
 
   for (const arm of arms) {
     const server = resolveServer(manifest, arm, options.mcpConfig);
-    const client = await createMCPClientForConfig(server);
-    const mcp = createMCPFixture(client, undefined, { authType: 'api-token' });
-    const hostType = arm.host?.type ?? manifest.host?.type ?? 'claude-cli';
-    const hostConfig = getBuiltinHostConfig(hostType, {
-      model: manifest.model,
-      maxToolCalls: manifest.maxToolCalls,
-      timeout: manifest.timeout,
-      provider: manifest.provider,
-      server,
-    });
-    const armDatasetResults: Array<{
+    const resolvedServer = resolveServerSecrets(server);
+    assertEvalEndpoint(resolvedServer, manifest);
+    const host = resolveHost(manifest, arm, resolvedServer);
+    const sourceResults: Array<{
       name: string;
       result: EvalRunnerResult;
     }> = [];
+    const client = host.definition.run
+      ? undefined
+      : await createMCPClientForConfig(resolvedServer);
+    const mcp = client
+      ? createMCPFixture(client, undefined, { authType: 'api-token' })
+      : undefined;
 
     try {
       for (const source of datasets) {
-        if (source.type !== 'file' && source.type !== 'dir') {
-          throw new Error(
-            `Dataset source "${source.type}" is not registered in the built-in runner.`
-          );
-        }
-        const datasetPath = source.path;
-        if (typeof datasetPath !== 'string') {
-          throw new Error(`Dataset source "${source.type}" requires a path.`);
-        }
-        for (const filePath of await expandDatasetPath(
-          path.isAbsolute(datasetPath)
-            ? datasetPath
-            : path.resolve(rootDir, datasetPath)
-        )) {
-          const raw = JSON.parse(
-            await fs.readFile(filePath, 'utf8')
-          ) as unknown;
-          const dataset = buildEvalDataset(raw, hostConfig, manifest);
-          const result = await runEvalDataset(
-            {
-              dataset,
-              concurrency: manifest.concurrency ?? 1,
-              defaultLlmIterations: manifest.iterations || undefined,
-            },
-            { mcp }
-          );
-          allDatasets.push({ source, dataset, result });
-          armDatasetResults.push({ name: dataset.name, result });
+        const datasetPaths =
+          source.type === 'file' || source.type === 'dir'
+            ? await expandDatasetPath(
+                path.isAbsolute(String(source.path))
+                  ? String(source.path)
+                  : path.resolve(rootDir, String(source.path))
+              )
+            : [undefined];
+        for (const filePath of datasetPaths) {
+          const sourceConfig = filePath
+            ? { ...source, type: 'file', path: filePath }
+            : source;
+          const datasetSource = getDatasetSource(sourceConfig.type);
+          const dataset = await datasetSource.load(sourceConfig, {
+            rootDir,
+            manifest,
+            hostConfig: host.config,
+          });
+          const result = host.definition.run
+            ? await host.definition.run({
+                dataset,
+                cases: dataset.cases,
+                servers: [resolvedServer],
+                host: host.declaration,
+                manifest,
+                arm,
+              })
+            : await runEvalDataset(
+                {
+                  dataset,
+                  concurrency: manifest.concurrency ?? 1,
+                  defaultLlmIterations: manifest.iterations || undefined,
+                },
+                { mcp: mcp! }
+              );
+          allDatasets.push({ source: sourceConfig, dataset, result });
+          sourceResults.push({ name: dataset.name, result });
           allResults.push(...result.caseResults);
         }
       }
     } finally {
-      await closeMCPClient(client);
+      if (client) await closeMCPClient(client);
     }
 
-    armResults.push(summarizeArm(arm, server, armDatasetResults));
+    armResults.push(summarizeArm(arm, resolvedServer, sourceResults));
   }
 
   const durationMs = armResults.reduce(
     (sum, arm) => sum + (arm.result?.durationMs ?? 0),
     0
   );
+  const metricSpecs = [
+    ...(manifest.metrics ?? []),
+    ...arms.flatMap((arm) => arm.metrics ?? []),
+  ] as MetricSpec[];
+  const computedMetrics = metricSpecs.length
+    ? computeMetrics(metricSpecs, allResults).aggregated
+    : {};
+  let totalHostUsage: Partial<UsageMetrics> | undefined;
+  for (const arm of armResults) {
+    totalHostUsage = sumUsage(totalHostUsage, arm.result?.totalHostUsage ?? {});
+  }
+  const telemetry: RunTelemetry = {
+    cases: allResults.length,
+    toolCalls: countToolCalls(allResults),
+    failedCases: allResults.filter((result) => !result.pass).length,
+    totalHostUsage,
+  };
   const summary: EvaluationSummary = {
     schemaVersion: 1,
     ...identity,
@@ -288,8 +443,10 @@ export async function runEvalSuite(
           ? allResults.filter((result) => result.pass).length /
             allResults.length
           : 0,
+      ...computedMetrics,
     },
-    armDeltas: {},
+    telemetry,
+    armDeltas: buildArmDeltas(armResults),
     results: allResults,
   };
 

@@ -77,6 +77,9 @@ export interface MCPAuthConfig {
    */
   accessToken?: string;
 
+  /** Environment variable containing the access token; resolved at runtime. */
+  accessTokenEnv?: string;
+
   /**
    * Full OAuth configuration for browser-based authentication
    */
@@ -311,9 +314,14 @@ const MCPClientCredentialsConfigSchema = z.object({
 const MCPAuthConfigSchema = z
   .object({
     accessToken: z.string().optional(),
+    accessTokenEnv: z.string().min(1).optional(),
     oauth: MCPOAuthConfigSchema.optional(),
     clientCredentials: MCPClientCredentialsConfigSchema.optional(),
   })
+  .refine(
+    (data) => !(data.accessToken && data.accessTokenEnv),
+    'Cannot specify both accessToken and accessTokenEnv'
+  )
   .refine(
     (data) => !(data.accessToken && data.oauth),
     'Cannot specify both accessToken and oauth configuration'

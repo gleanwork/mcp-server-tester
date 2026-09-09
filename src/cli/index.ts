@@ -73,6 +73,8 @@ program
   )
   .option('--plugins <paths...>', 'Plugin modules to load before the run')
   .option('--arm <name>', 'Run one named manifest arm')
+  .option('--output-dir <dir>', 'Directory for run artifacts')
+  .option('--secrets-file <path>', 'JSON or dotenv-style runtime secrets file')
   .option(
     '--root-dir <dir>',
     'Base directory for resolving relative paths',

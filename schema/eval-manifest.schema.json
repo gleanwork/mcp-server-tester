@@ -97,7 +97,8 @@
     "maxCases": { "type": "integer", "minimum": 1 },
     "timeout": { "type": "integer", "minimum": 1 },
     "maxToolCalls": { "type": "integer", "minimum": 0 },
-    "tools": { "type": "string" }
+    "tools": { "type": "string" },
+    "requireEvalEndpoint": { "type": "boolean" }
   },
   "definitions": {
     "extension": {
