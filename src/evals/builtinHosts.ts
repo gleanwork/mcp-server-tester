@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import { getHost, registerHost } from './frameworkRegistries.js';
 import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
+import { ANTHROPIC_API_HOST } from './anthropicApiHost.js';
 
 export interface BuiltinHostOptions {
   model?: string;
@@ -34,6 +35,7 @@ export function registerBuiltinHosts(): void {
       createConfig: (options) => factory(options ?? {}),
     });
   }
+  registerHost(ANTHROPIC_API_HOST);
   builtinsRegistered = true;
 }
 
