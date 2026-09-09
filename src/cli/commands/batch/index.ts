@@ -11,6 +11,8 @@ export interface BatchOptions {
   rootDir?: string;
   outputRoot?: string;
   workers?: number;
+  secretsFile?: string;
+  resultsGcsUri?: string;
   skipExisting?: boolean;
   plugins?: string[];
   dryRun?: boolean;
@@ -33,6 +35,8 @@ export async function batch(options: BatchOptions): Promise<void> {
     rootDir: options.rootDir,
     outputRoot: options.outputRoot,
     workers: options.workers,
+    secretsFile: options.secretsFile,
+    resultsGcsUri: options.resultsGcsUri,
     skipExisting: options.skipExisting,
     pluginPaths: options.plugins,
     dryRun: options.dryRun,
