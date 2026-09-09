@@ -5,7 +5,6 @@ import {
   type RunEvalSuiteOptions,
   type RunEvalSuiteResult,
 } from './runEvalSuite.js';
-import { uploadResultsDirectory } from './uploadResults.js';
 
 export interface RunEvalBatchOptions {
   manifestPaths: string[];
@@ -14,7 +13,6 @@ export interface RunEvalBatchOptions {
   outputRoot?: string;
   skipExisting?: boolean;
   secretsFile?: string;
-  resultsGcsUri?: string;
   pluginPaths?: string[];
   dryRun?: boolean;
 }
@@ -86,9 +84,6 @@ export async function runEvalBatch(
           dryRun: options.dryRun,
         };
         const result = await runEvalSuite(suiteOptions);
-        if (options.resultsGcsUri) {
-          await uploadResultsDirectory(result.outputDir, options.resultsGcsUri);
-        }
         return { manifestPath, result };
       } catch (error) {
         return {

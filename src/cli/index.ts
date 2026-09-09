@@ -97,7 +97,6 @@ program
   )
   .option('--output-root <dir>', 'Root directory for evaluation results')
   .option('--secrets-file <path>', 'JSON or dotenv-style runtime secrets file')
-  .option('--results-gcs-uri <uri>', 'Upload each manifest output directory to a gs:// URI')
   .option('--workers <number>', 'Maximum number of parallel manifest runs')
   .option('--skip-existing', 'Skip manifests with an existing result')
   .option('--dry-run', 'Validate manifests without executing evaluations')
@@ -109,7 +108,6 @@ program
       rootDir: options.rootDir,
       outputRoot: options.outputRoot,
       secretsFile: options.secretsFile,
-      resultsGcsUri: options.resultsGcsUri,
       workers: options.workers ? Number(options.workers) : undefined,
       skipExisting: options.skipExisting,
       dryRun: options.dryRun,

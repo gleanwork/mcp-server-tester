@@ -14,6 +14,12 @@ const FileDatasetSchema = z
     recursive: z.boolean().optional(),
   })
   .passthrough();
+const GCSDatasetSchema = z
+  .object({
+    type: z.literal('gcs'),
+    uri: z.string().regex(/^gs:\/\/[^/]+\/.+/),
+  })
+  .passthrough();
 
 async function loadFileDataset(
   config: DatasetConfig,
@@ -29,6 +35,41 @@ async function loadFileDataset(
   return buildEvalDataset(raw, context.hostConfig, context.manifest);
 }
 
+interface GCSStorage {
+  bucket(name: string): {
+    file(name: string): { download(): Promise<[Buffer]> };
+  };
+}
+
+async function loadGCSDataset(
+  config: DatasetConfig,
+  context: DatasetSourceContext
+): Promise<EvalDataset> {
+  const uri = String(config.uri);
+  const match = /^gs:\/\/([^/]+)\/(.+)$/.exec(uri);
+  if (!match) throw new Error(`Invalid GCS dataset URI: ${uri}`);
+  let Storage: new () => GCSStorage;
+  try {
+    ({ Storage } = (await import('@google-cloud/storage')) as unknown as {
+      Storage: new () => GCSStorage;
+    });
+  } catch (error) {
+    throw new Error(
+      'GCS datasets require the optional `@google-cloud/storage` package. ' +
+        `Original error: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  const [buffer] = await new Storage()
+    .bucket(match[1]!)
+    .file(match[2]!)
+    .download();
+  return buildEvalDataset(
+    JSON.parse(buffer.toString('utf8')) as unknown,
+    context.hostConfig,
+    context.manifest
+  );
+}
+
 let registered = false;
 
 /** Register the provider-neutral file and directory dataset sources. */
@@ -41,5 +82,10 @@ export function registerBuiltinDatasetSources(): void {
       load: loadFileDataset,
     });
   }
+  registerDatasetSource({
+    name: 'gcs',
+    schema: GCSDatasetSchema,
+    load: loadGCSDataset,
+  });
   registered = true;
 }

@@ -32,9 +32,12 @@ import { loadPlugins } from '../plugins/loadPlugins.js';
 import {
   getDatasetSource,
   getHost,
+  getResultStore,
   validateManifestRegistrations,
 } from './frameworkRegistries.js';
 import { computeMetrics, type MetricSpec } from './metrics.js';
+import { registerBuiltinResultStores } from './builtinResultStores.js';
+import { createStoredEvalArtifact } from './resultStore.js';
 
 export interface RunEvalSuiteOptions {
   manifestPath: string;
@@ -297,6 +300,7 @@ export async function runEvalSuite(
 
   registerBuiltinDatasetSources();
   registerBuiltinHosts();
+  registerBuiltinResultStores();
   const pluginPaths = options.pluginPaths ?? manifest.plugins ?? [];
   if (pluginPaths.length > 0) {
     await loadPlugins(
@@ -455,5 +459,22 @@ export async function runEvalSuite(
     path.join(outputDir, 'results.json'),
     `${JSON.stringify(summary, null, 2)}\n`
   );
+  if (manifest.results?.store) {
+    const store = getResultStore(
+      manifest.results.store.name ?? manifest.results.store.type
+    ).create(manifest.results.store);
+    await store.saveArtifact(
+      createStoredEvalArtifact({
+        kind: 'eval-runner-result',
+        id: manifest.name,
+        data: summary,
+        metadata: {
+          datasetName: manifest.name,
+          labels: { manifestId: summary.manifestId },
+        },
+        createdAt: summary.timestamp,
+      })
+    );
+  }
   return { manifest, outputDir, datasets: allDatasets, summary };
 }
