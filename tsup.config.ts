@@ -21,6 +21,7 @@ export default defineConfig([
       '@ai-sdk/deepseek',
       '@openrouter/ai-sdk-provider',
       '@ai-sdk/xai',
+      '@google-cloud/storage',
     ],
   },
   // CLI build
@@ -35,6 +36,7 @@ export default defineConfig([
     outDir: 'dist/cli',
     tsconfig: './tsconfig.build.json',
     shims: true,
+    external: ['@google-cloud/storage'],
     banner: {
       js: '#!/usr/bin/env node',
     },
