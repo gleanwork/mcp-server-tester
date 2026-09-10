@@ -1,7 +1,7 @@
 import type { ZodType } from 'zod';
 import type { EvalDataset, EvalCase } from './datasetTypes.js';
 import type { EvalCaseResult } from '../types/reporter.js';
-import type { EvalRunnerResult } from '../types/index.js';
+import type { UsageMetrics } from '../types/index.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import type {
   DatasetConfig,
@@ -17,6 +17,8 @@ import type { EvalResultStore } from './resultStore.js';
 export interface DatasetSourceContext {
   rootDir: string;
   manifest: EvalManifest;
+  /** Resolved built-in host config for legacy dataset normalization. */
+  hostConfig?: MCPHostConfig;
 }
 
 /** Public dataset-source extension point. */
@@ -40,12 +42,49 @@ export interface HostRunOptions {
   dryRun?: boolean;
 }
 
+export interface HostRunInput {
+  scenario: string;
+  servers: MCPConfig[];
+}
+
+export interface HostRunContext {
+  manifest: EvalManifest;
+  arm?: EvalArm;
+  /** Optional compatibility settings for existing SDK/CLI case configurations. */
+  mcpHostConfig?: MCPHostConfig;
+}
+
+export type HostEvidence = 'structured' | 'observed' | 'none';
+export interface HostEvent {
+  kind: 'tool_call' | 'skill' | 'command' | 'subagent';
+  source: 'mcp' | 'host';
+  name: string;
+  server?: string;
+  arguments?: Record<string, unknown>;
+  output?: string;
+  id?: string;
+}
+
+/** One execution trace. Hosts never return evaluation verdicts. */
+export interface HostRunResult {
+  finalText: string;
+  events: HostEvent[];
+  error?: string;
+  usage?: UsageMetrics;
+}
+
 /** Public host extension point. */
 export interface HostDefinition {
   readonly name: string;
   readonly schema: ZodType;
-  createConfig(options?: Record<string, unknown>): MCPHostConfig;
-  run?(options: HostRunOptions): Promise<EvalRunnerResult>;
+  createConfig?(options?: Record<string, unknown>): MCPHostConfig;
+  /** Missing evidence declarations are treated as unverified. */
+  readonly evidence?: HostEvidence;
+  run?(
+    input: HostRunInput,
+    config: HostConfig,
+    context: HostRunContext
+  ): Promise<HostRunResult>;
 }
 
 /** Values emitted by a metric for one evaluation case. */
@@ -54,14 +93,26 @@ export type MetricValue =
 
 export type MetricKind = 'binary' | 'continuous' | 'categorical' | 'object';
 
+export interface ResolvedMetric {
+  readonly metric: MetricDefinition;
+  readonly outName: string;
+  readonly params: Record<string, unknown>;
+}
+
 /** Public metric extension point. */
 export interface MetricDefinition {
   readonly name: string;
   readonly schema: ZodType;
   readonly kind: MetricKind;
   readonly unit?: string;
-  compute(caseResult: EvalCaseResult): MetricValue;
-  aggregate?(values: MetricValue[], metricName: string): unknown;
+  compute(
+    caseResult: EvalCaseResult,
+    params?: Record<string, unknown>
+  ): MetricValue;
+  aggregate?(
+    values: MetricValue[],
+    metric: ResolvedMetric
+  ): { key: string; value: unknown } | undefined;
 }
 
 /** Public judge extension point. */
@@ -90,6 +141,7 @@ export interface EvaluationSuiteOptions {
   rootDir?: string;
   pluginPaths?: string[];
   outputDir?: string;
+  secretsFile?: string;
   dryRun?: boolean;
   arm?: string;
 }
@@ -98,11 +150,26 @@ export interface EvaluationSuiteOptions {
 export interface EvaluationArmResult {
   name: string;
   servers: MCPConfig[];
-  result?: EvalRunnerResult;
+  result?: {
+    caseResults: EvalCaseResult[];
+    total: number;
+    passed: number;
+    failed: number;
+    durationMs: number;
+    totalHostUsage?: Partial<UsageMetrics>;
+  };
+  metrics?: Record<string, unknown>;
   comparison?: Record<string, unknown>;
 }
 
 /** Stable summary shape written by a completed evaluation suite. */
+export interface RunTelemetry {
+  cases: number;
+  toolCalls: number;
+  failedCases: number;
+  totalHostUsage?: Partial<UsageMetrics>;
+}
+
 export interface RunSummary {
   schemaVersion: 1;
   manifestId: string;
@@ -112,6 +179,7 @@ export interface RunSummary {
   manifestName: string;
   arms: EvaluationArmResult[];
   metrics: Record<string, unknown>;
+  telemetry?: RunTelemetry;
   armDeltas: Record<string, Record<string, unknown>>;
   caseArtifactPointers?: Record<string, string[]>;
   results: EvalCaseResult[];

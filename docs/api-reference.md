@@ -506,7 +506,7 @@ await saveEvalRunComparison({ store, comparison, id: 'candidate-comparison' });
 
 **Result Structure:**
 
-```typescript snippet=src/evals/evalRunner.ts#L127-L195
+```typescript snippet=src/evals/evalRunner.ts#L128-L196
 export interface EvalRunnerResult {
   /**
    * Total number of cases
@@ -1150,7 +1150,7 @@ interface MCPConformanceResult {
 
 ### `EvalExpectBlock`
 
-```typescript snippet=src/evals/datasetTypes.ts#L190-L288
+```typescript snippet=src/evals/datasetTypes.ts#L193-L291
 /**
  * Unified expectation block for eval cases
  *
@@ -1254,7 +1254,7 @@ export interface EvalExpectBlock {
 
 ### `EvalCase`
 
-````typescript snippet=src/evals/datasetTypes.ts#L23-L148
+````typescript snippet=src/evals/datasetTypes.ts#L24-L151
 /**
  * A single eval test case
  *
@@ -1263,6 +1263,8 @@ export interface EvalExpectBlock {
  * For 'external_host' mode: scenario and externalHost are required
  */
 export interface EvalCase {
+  /** Optional per-case registered host override. */
+  host?: HostConfig;
   /**
    * Unique identifier for this test case
    */

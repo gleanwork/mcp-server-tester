@@ -88,6 +88,169 @@ describe('framework registries', () => {
     expect(() => validateManifestRegistrations(manifest)).not.toThrow();
   });
 
+  it('parses every extension schema and preserves defaults, transforms, and routing aliases', () => {
+    const optionsSchema = z.object({
+      count: z
+        .number()
+        .default(2)
+        .transform((value) => value * 3),
+    });
+    registerDatasetSource({
+      name: 'custom',
+      schema: optionsSchema,
+      load: async () => ({ name: 'data', cases: [] }),
+    });
+    registerHost({
+      name: 'custom',
+      schema: optionsSchema,
+      createConfig: () => ({ hostType: 'sdk' }),
+    });
+    registerJudge({
+      name: 'custom',
+      schema: optionsSchema,
+      evaluate: async () => ({ score: 1 }),
+    });
+    registerMetric({
+      name: 'custom',
+      schema: optionsSchema,
+      kind: 'binary',
+      compute: () => true,
+    });
+    registerResultStore({
+      name: 'custom',
+      schema: optionsSchema,
+      create: () => {
+        throw new Error('unused');
+      },
+    });
+    const manifest: EvalManifest = {
+      name: 'parsed',
+      datasets: [{ type: 'custom', ignored: true }],
+      host: { type: 'custom' },
+      metrics: [{ type: 'custom', name: 'alias' }],
+      judges: [{ type: 'custom' }],
+      results: { store: { type: 'custom' } },
+      arms: [
+        { name: 'inherited' },
+        {
+          name: 'override',
+          host: { type: 'custom', count: 4 },
+          metrics: [],
+          judges: [],
+        },
+      ],
+    };
+    const parsed = validateManifestRegistrations(manifest);
+    expect(parsed.datasets).toEqual([{ type: 'custom', count: 6 }]);
+    expect(parsed.host).toEqual({ type: 'custom', count: 6 });
+    expect(parsed.metrics).toEqual([
+      { type: 'custom', name: 'alias', count: 6 },
+    ]);
+    expect(parsed.judges).toEqual([{ type: 'custom', count: 6 }]);
+    expect(parsed.results?.store).toEqual({ type: 'custom', count: 6 });
+    expect(parsed.arms?.[0]?.host).toEqual(parsed.host);
+    expect(parsed.arms?.[0]?.metrics).toEqual(parsed.metrics);
+    expect(parsed.arms?.[1]?.host).toEqual({ type: 'custom', count: 12 });
+    expect(parsed.arms?.[1]?.metrics).toEqual([]);
+    expect(manifest.datasets[0]).toEqual({ type: 'custom', ignored: true });
+  });
+
+  it.each([
+    'dataset',
+    'host',
+    'metric',
+    'judge',
+    'store',
+    'armHost',
+    'armMetric',
+    'armJudge',
+  ] as const)('rejects invalid registered %s options', (kind) => {
+    registerAll();
+    const required = z.object({ required: z.number() });
+    registerDatasetSource({
+      name: 'strict',
+      schema: required,
+      load: async () => ({ name: 'data', cases: [] }),
+    });
+    registerHost({
+      name: 'strict',
+      schema: required,
+      createConfig: () => ({ hostType: 'sdk' }),
+    });
+    registerMetric({
+      name: 'strict',
+      schema: required,
+      kind: 'binary',
+      compute: () => true,
+    });
+    registerJudge({
+      name: 'strict',
+      schema: required,
+      evaluate: async () => ({ score: 1 }),
+    });
+    registerResultStore({
+      name: 'strict',
+      schema: required,
+      create: () => {
+        throw new Error('unused');
+      },
+    });
+    const config = { type: 'strict', required: 'invalid' };
+    const manifest: EvalManifest = {
+      name: 'invalid-options',
+      datasets: [{ type: 'file' }],
+    };
+    if (kind === 'dataset') manifest.datasets = [config];
+    if (kind === 'host') manifest.host = config;
+    if (kind === 'metric') manifest.metrics = [config];
+    if (kind === 'judge') manifest.judges = [config];
+    if (kind === 'store') manifest.results = { store: config };
+    if (kind === 'armHost') manifest.arms = [{ name: 'arm', host: config }];
+    if (kind === 'armMetric')
+      manifest.arms = [{ name: 'arm', metrics: [config] }];
+    if (kind === 'armJudge')
+      manifest.arms = [{ name: 'arm', judges: [config] }];
+    expect(() => validateManifestRegistrations(manifest)).toThrow(
+      /Invalid .* options "strict"/
+    );
+  });
+
+  it('validates effective top-level host options in arm overrides', () => {
+    registerAll();
+    registerHost({
+      name: 'limited',
+      schema: z.object({
+        maxToolCalls: z.number().max(2),
+        model: z.string().default('default'),
+      }),
+      createConfig: () => ({ hostType: 'sdk' }),
+    });
+    const manifest: EvalManifest = {
+      name: 'effective',
+      datasets: [{ type: 'file' }],
+      maxToolCalls: 5,
+      arms: [{ name: 'arm', host: { type: 'limited' } }],
+    };
+    expect(() => validateManifestRegistrations(manifest)).toThrow(
+      'Invalid host options "limited"'
+    );
+    const parsed = validateManifestRegistrations({
+      ...manifest,
+      maxToolCalls: 2,
+    });
+    expect(parsed.arms?.[0]?.host).toEqual({
+      type: 'limited',
+      maxToolCalls: 2,
+      model: 'default',
+    });
+    expect(
+      validateManifestRegistrations({
+        ...manifest,
+        arms: [{ name: 'arm', host: { type: 'limited', maxToolCalls: 1 } }],
+      }).arms?.[0]?.host?.maxToolCalls
+    ).toBe(1);
+  });
+
   it('rejects an unknown extension or duplicate server label', () => {
     registerAll();
     expect(() =>

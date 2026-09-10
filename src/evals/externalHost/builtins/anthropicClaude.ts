@@ -282,8 +282,7 @@ async function captureClaudeCoworkAgentTraceCapability({
       ? state.data.claudeDataDir
       : getClaudeDataDir(config, binding);
   const snapshot = state.data.claudeSessionSnapshot as
-    | ClaudeSessionSnapshot
-    | undefined;
+    ClaudeSessionSnapshot | undefined;
 
   if (!snapshot) {
     return failureResult({

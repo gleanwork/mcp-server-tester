@@ -46,6 +46,12 @@
       "additionalProperties": true,
       "properties": { "type": { "type": "string", "minLength": 1 } }
     },
+    "toolMap": {
+      "type": "object",
+      "additionalProperties": { "type": "array", "items": { "type": "string" } }
+    },
+    "toolOverrides": { "$ref": "#/definitions/toolOverrideVariant" },
+    "scenarioTemplate": { "type": "string" },
     "arms": {
       "type": "array",
       "items": {
@@ -56,10 +62,8 @@
           "name": { "type": "string", "minLength": 1 },
           "servers": { "$ref": "#/properties/servers" },
           "host": { "$ref": "#/properties/host" },
-          "toolMap": {
-            "type": "object",
-            "additionalProperties": { "type": "string" }
-          },
+          "toolMap": { "$ref": "#/properties/toolMap" },
+          "toolOverrides": { "$ref": "#/definitions/toolOverrideVariant" },
           "scenarioTemplate": { "type": "string" },
           "metrics": {
             "type": "array",
@@ -97,9 +101,30 @@
     "maxCases": { "type": "integer", "minimum": 1 },
     "timeout": { "type": "integer", "minimum": 1 },
     "maxToolCalls": { "type": "integer", "minimum": 0 },
-    "tools": { "type": "string" }
+    "tools": { "type": "string" },
+    "requireEvalEndpoint": { "type": "boolean" }
   },
   "definitions": {
+    "toolOverrideVariant": {
+      "type": "object",
+      "required": ["id", "tools"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "tools": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "description": { "type": "string" },
+              "inputSchema": { "type": "object", "additionalProperties": true }
+            }
+          }
+        }
+      }
+    },
     "extension": {
       "oneOf": [
         { "type": "string", "minLength": 1 },

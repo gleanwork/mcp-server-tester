@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TaggedConfigSchema, type HostConfig } from './evalManifest.js';
 import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
 import type { ExternalHostConfig } from './externalHost/types.js';
 import { ExternalHostConfigSchema } from './externalHost/schema.js';
@@ -18,7 +19,7 @@ export type {
 /**
  * Evaluation mode
  */
-export type EvalMode = 'direct' | 'mcp_host' | 'external_host';
+export type EvalMode = 'direct' | 'host' | 'mcp_host' | 'external_host';
 
 /**
  * A single eval test case
@@ -28,6 +29,8 @@ export type EvalMode = 'direct' | 'mcp_host' | 'external_host';
  * For 'external_host' mode: scenario and externalHost are required
  */
 export interface EvalCase {
+  /** Optional per-case registered host override. */
+  host?: HostConfig;
   /**
    * Unique identifier for this test case
    */
@@ -348,6 +351,33 @@ const MCPHostConfigSchema = z.object({
       timeout: z.number().optional(),
     })
     .optional(),
+  mcpServers: z
+    .record(z.string(), z.record(z.string(), z.unknown()))
+    .optional(),
+  browser: z
+    .object({
+      script: z.string(),
+      timeout: z.number().optional(),
+      headless: z.boolean().optional(),
+      storageState: z.string().optional(),
+      cookies: z
+        .array(
+          z.object({
+            name: z.string(),
+            value: z.string(),
+            url: z.string().optional(),
+            domain: z.string().optional(),
+            path: z.string().optional(),
+            expires: z.number().optional(),
+            httpOnly: z.boolean().optional(),
+            secure: z.boolean().optional(),
+            sameSite: z.enum(['Strict', 'Lax', 'None']).optional(),
+            partitionKey: z.string().optional(),
+          })
+        )
+        .optional(),
+    })
+    .optional(),
 });
 
 /**
@@ -411,7 +441,7 @@ const JudgeExpectConfigSchema = z
 /**
  * Zod schema for EvalExpectBlock
  */
-const EvalExpectBlockSchema = z.object({
+export const EvalExpectBlockSchema = z.object({
   response: z.unknown().optional(),
   schema: z.string().optional(),
   containsText: z.union([z.string(), z.array(z.string())]).optional(),
@@ -458,7 +488,8 @@ const EvalExpectBlockSchema = z.object({
 export const EvalCaseSchema = z.object({
   id: z.string().min(1, 'id must not be empty'),
   description: z.string().optional(),
-  mode: z.enum(['direct', 'mcp_host', 'external_host']).optional(),
+  mode: z.enum(['direct', 'host', 'mcp_host', 'external_host']).optional(),
+  host: TaggedConfigSchema.optional(),
   toolName: z.string().min(1, 'toolName must not be empty').optional(),
   args: z.record(z.string(), z.unknown()).optional(),
   scenario: z.string().optional(),

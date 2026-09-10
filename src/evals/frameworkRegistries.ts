@@ -1,11 +1,17 @@
+import type { ZodType } from 'zod';
 import type {
   DatasetSource,
+  MetricDefinition,
   HostDefinition,
   JudgeDefinition,
-  MetricDefinition,
   ResultStoreDefinition,
 } from './evalFrameworkTypes.js';
-import type { EvalManifest, ExtensionConfig } from './evalManifest.js';
+import type {
+  EvalManifest,
+  ExtensionConfig,
+  HostConfig,
+  TaggedConfig,
+} from './evalManifest.js';
 
 interface NamedImplementation {
   readonly name: string;
@@ -18,24 +24,48 @@ interface Registry<T extends NamedImplementation> {
   clear(): void;
 }
 
+interface RegistryState {
+  datasets: Map<string, NamedImplementation>;
+  hosts: Map<string, NamedImplementation>;
+  judges: Map<string, NamedImplementation>;
+  metrics: Map<string, NamedImplementation>;
+  resultStores: Map<string, NamedImplementation>;
+}
+
+const REGISTRY_STATE_KEY = Symbol.for(
+  'mcp-server-tester.framework-registry-state'
+);
+const globalRegistry = globalThis as unknown as Record<symbol, unknown>;
+const existingRegistryState = globalRegistry[REGISTRY_STATE_KEY] as
+  RegistryState | undefined;
+const registryState: RegistryState = existingRegistryState ?? {
+  datasets: new Map<string, NamedImplementation>(),
+  hosts: new Map<string, NamedImplementation>(),
+  judges: new Map<string, NamedImplementation>(),
+  metrics: new Map<string, NamedImplementation>(),
+  resultStores: new Map<string, NamedImplementation>(),
+};
+if (!existingRegistryState) globalRegistry[REGISTRY_STATE_KEY] = registryState;
+
 function createRegistry<T extends NamedImplementation>(
-  kind: string
+  kind: string,
+  implementations: Map<string, NamedImplementation>
 ): Registry<T> {
-  const implementations = new Map<string, T>();
+  const typedImplementations = implementations as Map<string, T>;
   return {
     register(implementation) {
-      const existing = implementations.get(implementation.name);
+      const existing = typedImplementations.get(implementation.name);
       if (existing && existing !== implementation) {
         throw new Error(
           `${kind} "${implementation.name}" is already registered.`
         );
       }
-      implementations.set(implementation.name, implementation);
+      typedImplementations.set(implementation.name, implementation);
     },
     get(name) {
-      const implementation = implementations.get(name);
+      const implementation = typedImplementations.get(name);
       if (!implementation) {
-        const available = [...implementations.keys()].sort().join(', ');
+        const available = [...typedImplementations.keys()].sort().join(', ');
         throw new Error(
           `${kind} "${name}" is not registered.${
             available ? ` Available: ${available}.` : ''
@@ -45,21 +75,30 @@ function createRegistry<T extends NamedImplementation>(
       return implementation;
     },
     list() {
-      return [...implementations.values()].sort((a, b) =>
+      return [...typedImplementations.values()].sort((a, b) =>
         a.name.localeCompare(b.name)
       );
     },
     clear() {
-      implementations.clear();
+      typedImplementations.clear();
     },
   };
 }
 
-const datasetSources = createRegistry<DatasetSource>('Dataset source');
-const hosts = createRegistry<HostDefinition>('Host');
-const judges = createRegistry<JudgeDefinition>('Judge');
-const metrics = createRegistry<MetricDefinition>('Metric');
-const resultStores = createRegistry<ResultStoreDefinition>('Result store');
+const datasetSources = createRegistry<DatasetSource>(
+  'Dataset source',
+  registryState.datasets
+);
+const hosts = createRegistry<HostDefinition>('Host', registryState.hosts);
+const judges = createRegistry<JudgeDefinition>('Judge', registryState.judges);
+const metrics = createRegistry<MetricDefinition>(
+  'Metric',
+  registryState.metrics
+);
+const resultStores = createRegistry<ResultStoreDefinition>(
+  'Result store',
+  registryState.resultStores
+);
 
 export const registerDatasetSource = (source: DatasetSource): void =>
   datasetSources.register(source);
@@ -94,8 +133,66 @@ export const listResultStores = (): ResultStoreDefinition[] =>
   resultStores.list();
 export const clearResultStores = (): void => resultStores.clear();
 
-function extensionName(extension: ExtensionConfig): string {
-  return extension.name ?? extension.type;
+function parseConfig<T extends TaggedConfig>(
+  config: T,
+  implementation: NamedImplementation & { schema: ZodType },
+  context: string
+): T {
+  const result = implementation.schema.safeParse(config);
+  if (!result.success) {
+    throw new Error(
+      `Invalid ${context} "${implementation.name}": ${result.error.message}`
+    );
+  }
+  if (
+    !result.data ||
+    typeof result.data !== 'object' ||
+    Array.isArray(result.data)
+  ) {
+    throw new Error(
+      `Invalid ${context} "${implementation.name}": schema must return an options object.`
+    );
+  }
+  // Keep routing metadata even when an options schema strips unknown keys.
+  // Do not merge raw options back in: that would undo stripping/transforms.
+  return {
+    ...result.data,
+    type: config.type,
+    ...(typeof config.name === 'string' ? { name: config.name } : {}),
+  } as T;
+}
+
+function parseMetrics(
+  configs: ExtensionConfig[] | undefined
+): ExtensionConfig[] | undefined {
+  return configs?.map((config) =>
+    parseConfig(config, getMetric(config.type), 'metric options')
+  );
+}
+
+function parseJudges(
+  configs: ExtensionConfig[] | undefined
+): ExtensionConfig[] | undefined {
+  return configs?.map((config) =>
+    parseConfig(config, getJudge(config.type), 'judge options')
+  );
+}
+
+export function parseHostConfig(config: HostConfig): HostConfig {
+  return parseConfig(config, getHost(config.type), 'host options');
+}
+
+function effectiveHost(
+  manifest: EvalManifest,
+  host: HostConfig | undefined
+): HostConfig | undefined {
+  if (!host) return undefined;
+  const options = { ...host };
+  for (const key of ['model', 'provider', 'maxToolCalls', 'timeout'] as const) {
+    if (options[key] === undefined && manifest[key] !== undefined)
+      options[key] = manifest[key];
+  }
+  return parseHostConfig(options);
 }
 
 function validateLabels(
@@ -113,20 +210,43 @@ function validateLabels(
   }
 }
 
-/** Validate manifest references against the currently registered extensions. */
-export function validateManifestRegistrations(manifest: EvalManifest): void {
-  for (const dataset of manifest.datasets) getDatasetSource(dataset.type);
-  if (manifest.host) getHost(manifest.host.type);
-  for (const metric of manifest.metrics ?? []) getMetric(extensionName(metric));
-  for (const judge of manifest.judges ?? []) getJudge(extensionName(judge));
-  if (manifest.results?.store) {
-    getResultStore(extensionName(manifest.results.store));
-  }
+/**
+ * Validate registered schemas and return parsed options, including effective arm
+ * inheritance. Callers must use the returned manifest to retain defaults and
+ * transforms. The input is not mutated, and each effective config is parsed once.
+ */
+export function validateManifestRegistrations(
+  manifest: EvalManifest
+): EvalManifest {
   validateLabels(manifest.servers ?? [], 'the manifest');
-  for (const arm of manifest.arms ?? []) {
-    if (arm.host) getHost(arm.host.type);
-    for (const metric of arm.metrics ?? []) getMetric(extensionName(metric));
-    for (const judge of arm.judges ?? []) getJudge(extensionName(judge));
-    validateLabels(arm.servers ?? [], `arm "${arm.name}"`);
-  }
+  const datasets = manifest.datasets.map((config) =>
+    parseConfig(config, getDatasetSource(config.type), 'dataset options')
+  );
+  const host = effectiveHost(manifest, manifest.host);
+  const metrics = parseMetrics(manifest.metrics);
+  const judges = parseJudges(manifest.judges);
+  const results = manifest.results
+    ? {
+        ...manifest.results,
+        store: parseConfig(
+          manifest.results.store,
+          getResultStore(manifest.results.store.type),
+          'result store options'
+        ),
+      }
+    : undefined;
+  const arms = manifest.arms?.map((arm) => {
+    const servers = arm.servers ?? manifest.servers;
+    validateLabels(servers ?? [], `arm "${arm.name}"`);
+    return {
+      ...arm,
+      servers,
+      host: arm.host
+        ? effectiveHost(manifest, { ...manifest.host, ...arm.host })
+        : host,
+      metrics: arm.metrics ? parseMetrics(arm.metrics) : metrics,
+      judges: arm.judges ? parseJudges(arm.judges) : judges,
+    };
+  });
+  return { ...manifest, datasets, host, metrics, judges, results, arms };
 }

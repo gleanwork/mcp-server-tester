@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import type { MCPConfig } from '../config/mcpConfig.js';
+import type { ToolOverrideVariant } from '../types/index.js';
 
 /** A tagged configuration block resolved by a public registry. */
 export interface TaggedConfig {
@@ -28,7 +29,8 @@ export interface EvalArm {
   name: string;
   servers?: MCPConfig[];
   host?: HostConfig;
-  toolMap?: Record<string, string>;
+  toolMap?: Record<string, string[]>;
+  toolOverrides?: ToolOverrideVariant;
   scenarioTemplate?: string;
   metrics?: ExtensionConfig[];
   judges?: ExtensionConfig[];
@@ -40,6 +42,9 @@ export interface EvalManifest {
   datasets: DatasetConfig[];
   servers?: MCPConfig[];
   host?: HostConfig;
+  toolMap?: Record<string, string[]>;
+  toolOverrides?: ToolOverrideVariant;
+  scenarioTemplate?: string;
   arms?: EvalArm[];
   metrics?: ExtensionConfig[];
   judges?: ExtensionConfig[];
@@ -55,10 +60,14 @@ export interface EvalManifest {
   timeout?: number;
   maxToolCalls?: number;
   tools?: string;
+  /** Require HTTP server URLs to use an explicit /eval endpoint. */
+  requireEvalEndpoint?: boolean;
   [key: string]: unknown;
 }
 
-const TaggedConfigSchema = z.object({ type: z.string().min(1) }).passthrough();
+export const TaggedConfigSchema = z
+  .object({ type: z.string().min(1) })
+  .passthrough();
 
 const DatasetConfigSchema = z.union([z.string().min(1), TaggedConfigSchema]);
 const ExtensionConfigSchema = z.union([z.string().min(1), TaggedConfigSchema]);
@@ -70,12 +79,33 @@ const ServerConfigSchema = z
   })
   .passthrough();
 
+const ToolMapSchema = z.record(z.string(), z.array(z.string()));
+
+// The runtime runner owns the canonical type; share its manifest validation
+// between defaults and arms rather than introducing a second override model.
+const ToolOverrideVariantSchema = z
+  .object({
+    id: z.string().min(1),
+    description: z.string().optional(),
+    tools: z.record(
+      z.string(),
+      z
+        .object({
+          description: z.string().optional(),
+          inputSchema: z.record(z.string(), z.unknown()).optional(),
+        })
+        .strict()
+    ),
+  })
+  .strict() satisfies z.ZodType<ToolOverrideVariant>;
+
 const EvalArmSchema = z
   .object({
     name: z.string().min(1),
     servers: z.array(ServerConfigSchema).optional(),
     host: TaggedConfigSchema.optional(),
-    toolMap: z.record(z.string(), z.string()).optional(),
+    toolMap: ToolMapSchema.optional(),
+    toolOverrides: ToolOverrideVariantSchema.optional(),
     scenarioTemplate: z.string().optional(),
     metrics: z.array(ExtensionConfigSchema).optional(),
     judges: z.array(ExtensionConfigSchema).optional(),
@@ -88,6 +118,9 @@ export const EvalManifestSchema = z
     datasets: z.array(DatasetConfigSchema).min(1),
     servers: z.array(ServerConfigSchema).optional(),
     host: TaggedConfigSchema.optional(),
+    toolMap: ToolMapSchema.optional(),
+    toolOverrides: ToolOverrideVariantSchema.optional(),
+    scenarioTemplate: z.string().optional(),
     arms: z.array(EvalArmSchema).optional(),
     metrics: z.array(ExtensionConfigSchema).optional(),
     judges: z.array(ExtensionConfigSchema).optional(),
@@ -101,6 +134,7 @@ export const EvalManifestSchema = z
     timeout: z.number().int().positive().optional(),
     maxToolCalls: z.number().int().nonnegative().optional(),
     tools: z.string().optional(),
+    requireEvalEndpoint: z.boolean().optional(),
   })
   .passthrough();
 

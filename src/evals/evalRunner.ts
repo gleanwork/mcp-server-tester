@@ -1,5 +1,6 @@
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import type { EvalDataset, EvalCase, EvalExpectBlock } from './datasetTypes.js';
+import type { EvalExecutionResult } from './hostTrace.js';
 import type { TestInfo, Expect } from '@playwright/test';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { ZodType } from 'zod';
@@ -58,7 +59,7 @@ export interface EvalContext {
   /**
    * MCP fixture API for interacting with the server
    */
-  mcp: MCPFixtureApi;
+  mcp?: MCPFixtureApi;
 
   /**
    * Optional Playwright TestInfo for reporter integration
@@ -221,6 +222,12 @@ export interface EvalRunnerOptions {
    */
   dataset: EvalDataset;
 
+  /** Canonical tool name to accepted native tool names. */
+  toolMap?: Record<string, string[]>;
+
+  /** Optional host trace producer. The runner still owns all verdicts. */
+  executeCase?: (evalCase: EvalCase) => Promise<EvalExecutionResult>;
+
   /**
    * Schema registry for schema validation by name
    *
@@ -367,6 +374,9 @@ export interface EvalRunnerOptions {
  * Options for running a single eval case
  */
 export interface EvalCaseOptions {
+  toolMap?: Record<string, string[]>;
+  /** Trace producer called once per iteration; assertions remain runner-owned. */
+  executeCase?: (evalCase: EvalCase) => Promise<EvalExecutionResult>;
   /**
    * Dataset name for the result (defaults to 'single-case')
    */
@@ -383,7 +393,7 @@ export interface EvalCaseOptions {
   toolOverrideVariantId?: string;
 }
 
-function createToolOverrideMCP(
+export function createToolOverrideMCP(
   mcp: MCPFixtureApi,
   variant: ToolOverrideVariant
 ): MCPFixtureApi {
@@ -431,14 +441,38 @@ function createToolOverrideMCP(
   };
 }
 
-async function executeToolCall(
+function mapToolNames(
+  response: unknown,
+  toolMap?: Record<string, string[]>
+): unknown {
+  if (!toolMap || !isMCPHostSimulationResult(response)) return response;
+  const aliases = new Map<string, string>();
+  for (const [canonical, names] of Object.entries(toolMap)) {
+    for (const name of names) {
+      if (aliases.has(name) && aliases.get(name) !== canonical) {
+        throw new Error(`Ambiguous tool mapping for ${name}.`);
+      }
+      aliases.set(name, canonical);
+    }
+  }
+  return {
+    ...response,
+    toolCalls: response.toolCalls.map((call) => ({
+      ...call,
+      name: aliases.get(call.name) ?? call.name,
+    })),
+  };
+}
+
+export async function executeToolCall(
   evalCase: EvalCase,
-  mcp: MCPFixtureApi
+  mcp: MCPFixtureApi | undefined
 ): Promise<{ response: unknown; error?: string }> {
   const mode = evalCase.mode || 'direct';
 
   try {
-    if (mode === 'mcp_host') {
+    if (mode === 'mcp_host' || mode === 'host') {
+      if (!mcp) throw new Error('This host requires an MCP connection.');
       // MCP host simulation mode
       if (!evalCase.scenario) {
         throw new Error(
@@ -503,6 +537,7 @@ async function executeToolCall(
         );
       }
 
+      if (!mcp) throw new Error('Direct tool calls require an MCP connection.');
       const result = await mcp.callTool(evalCase.toolName, evalCase.args);
       return { response: result };
     }
@@ -683,8 +718,7 @@ async function runExpectBlockValidations(
           reasoning: validation.details?.reasoning as string | undefined,
           judgeName,
           judgeProvider: validation.details?.judgeProvider as
-            | string
-            | undefined,
+            string | undefined,
           judgeModel: validation.details?.judgeModel as string | undefined,
         } satisfies EvalExpectationResult;
       })
@@ -769,8 +803,11 @@ function buildRequest(
     >;
   }
 
-  if (evalCase.mode === 'mcp_host') {
+  if (evalCase.mode === 'mcp_host' || evalCase.mode === 'host') {
     if (evalCase.scenario) request.scenario = evalCase.scenario;
+    if (evalCase.canonicalAnswer !== undefined) {
+      request.reference = evalCase.canonicalAnswer;
+    }
     if (evalCase.mcpHostConfig) {
       request.mcpHostConfig = {
         provider: evalCase.mcpHostConfig.provider,
@@ -978,8 +1015,26 @@ async function runSingleIteration(
 ): Promise<EvalCaseResult> {
   const startTime = Date.now();
 
-  // Execute tool call
-  const { response, error } = await executeToolCall(evalCase, context.mcp);
+  // Execute through a custom host trace producer when provided; otherwise use
+  // the canonical MCP/SDK execution path.
+  let execution: EvalExecutionResult;
+  try {
+    execution =
+      options.executeCase && evalCase.mode !== 'external_host'
+        ? await options.executeCase(evalCase)
+        : await executeToolCall(evalCase, context.mcp);
+  } catch (error) {
+    execution = {
+      response: undefined,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+  const { response, hostUsage: producedHostUsage } = execution;
+  const error =
+    execution.error ??
+    (isMCPHostSimulationResult(response) && !response.success
+      ? (response.error ?? 'Host execution failed.')
+      : undefined);
   const externalHost =
     isExternalHostSimulationResult(response) && response.externalHost
       ? response.externalHost
@@ -997,13 +1052,26 @@ async function runSingleIteration(
       expectations,
       toolPrecision: tp,
       toolRecall: tr,
-    } = await runExpectBlockValidations(evalCase.expect, response, {
-      schemas: options.schemas,
-      playwrightExpect: context.expect,
-      judgeReps: evalCase.judgeReps,
-      canonicalAnswer: evalCase.canonicalAnswer,
-    });
+    } = await runExpectBlockValidations(
+      evalCase.expect,
+      mapToolNames(response, options.toolMap),
+      {
+        schemas: options.schemas,
+        playwrightExpect: context.expect,
+        judgeReps: evalCase.judgeReps,
+        canonicalAnswer: evalCase.canonicalAnswer,
+      }
+    );
     expectationResults = expectations;
+    if (execution.evidence && execution.evidence !== 'structured') {
+      for (const key of ['toolsTriggered', 'toolCallCount'] as const) {
+        if (evalCase.expect[key] !== undefined)
+          expectationResults[key] = {
+            pass: false,
+            details: `Host evidence is ${execution.evidence}; structured tool evidence is required.`,
+          };
+      }
+    }
     toolPrecision = tp;
     toolRecall = tr;
 
@@ -1051,9 +1119,10 @@ async function runSingleIteration(
 
   // Extract host usage from simulation result
   const hostUsage =
-    isMCPHostSimulationResult(response) && response.usage
+    producedHostUsage ??
+    (isMCPHostSimulationResult(response) && response.usage
       ? response.usage
-      : undefined;
+      : undefined);
 
   // Build result - use test context for authType and project (Playwright is source of truth)
   return {
@@ -1071,8 +1140,8 @@ async function runSingleIteration(
     response,
     error,
     expectations: expectationResults,
-    authType: context.mcp.authType,
-    project: context.mcp.project,
+    authType: context.mcp?.authType,
+    project: context.mcp?.project,
     durationMs: Date.now() - startTime,
     tags: evalCase.tags,
     toolPrecision,
@@ -1278,8 +1347,8 @@ export async function runEvalCase(
     pass: false,
     error: iterationResults[0]?.error,
     expectations: {},
-    authType: context.mcp.authType,
-    project: context.mcp.project,
+    authType: context.mcp?.authType,
+    project: context.mcp?.project,
     durationMs: 0,
     tags: evalCase.tags,
     request: buildRequest(evalCase, options.toolOverrideVariantId),
@@ -1420,9 +1489,10 @@ export async function runEvalDataset(
   } = options;
 
   const startTime = Date.now();
-  const effectiveContext: EvalContext = toolOverrides
-    ? { ...context, mcp: createToolOverrideMCP(context.mcp, toolOverrides) }
-    : context;
+  const effectiveContext: EvalContext =
+    toolOverrides && context.mcp
+      ? { ...context, mcp: createToolOverrideMCP(context.mcp, toolOverrides) }
+      : context;
 
   // Merge schemas from dataset and options
   const allSchemas = {
@@ -1439,7 +1509,7 @@ export async function runEvalDataset(
   // Preflight cost warning: estimate the number of LLM judge API calls this run will make
   const estimatedJudgeCalls = casesToRun.reduce((sum, c) => {
     const effectiveIterations =
-      c.mode === 'mcp_host' || c.mode === 'external_host'
+      c.mode === 'host' || c.mode === 'mcp_host' || c.mode === 'external_host'
         ? (c.iterations ?? defaultLlmIterations ?? 1)
         : (c.iterations ?? 1);
     if (c.expect?.passesJudge == null) return sum;
@@ -1464,7 +1534,9 @@ export async function runEvalDataset(
     // Apply defaultLlmIterations to host-driven cases that don't specify iterations.
     // Direct mode cases are deterministic — they always stay at 1 iteration.
     const withIterations =
-      (evalCase.mode === 'mcp_host' || evalCase.mode === 'external_host') &&
+      (evalCase.mode === 'host' ||
+        evalCase.mode === 'mcp_host' ||
+        evalCase.mode === 'external_host') &&
       evalCase.iterations === undefined &&
       defaultLlmIterations !== undefined
         ? { ...evalCase, iterations: defaultLlmIterations }
@@ -1475,7 +1547,11 @@ export async function runEvalDataset(
     // Single-iteration mcp_host runs (the default) are a valid smoke-test pattern
     // and are not warned about — the warning is scoped to cases that have
     // explicitly chosen a multi-iteration count that is too small to be reliable.
-    if (evalCase.mode === 'mcp_host' || evalCase.mode === 'external_host') {
+    if (
+      evalCase.mode === 'host' ||
+      evalCase.mode === 'mcp_host' ||
+      evalCase.mode === 'external_host'
+    ) {
       const effectiveIterations = withIterations.iterations ?? 1;
       if (effectiveIterations > 1 && effectiveIterations < 10) {
         console.warn(
@@ -1492,6 +1568,8 @@ export async function runEvalDataset(
         : withIterations;
 
     const result = await runEvalCase(effectiveCase, effectiveContext, {
+      executeCase: options.executeCase,
+      toolMap: options.toolMap,
       datasetName: dataset.name,
       schemas: allSchemas,
       toolOverrideVariantId: toolOverrides?.id,

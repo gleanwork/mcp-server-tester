@@ -268,6 +268,8 @@ export interface EvalCaseRequest {
   // mcp_host mode fields
   /** Natural language scenario sent to the LLM (mcp_host mode) */
   scenario?: string;
+  /** Golden/reference answer associated with the case, when supplied. */
+  reference?: string;
   /** LLM provider/model configuration (mcp_host mode) */
   mcpHostConfig?: {
     provider?: string;
