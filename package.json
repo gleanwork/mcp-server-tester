@@ -97,6 +97,7 @@
   "devDependencies": {
     "@ai-sdk/provider-utils": "^4.0.15",
     "@playwright/test": "^1.49.0",
+    "playwright": "^1.57.0",
     "@release-it-plugins/lerna-changelog": "^8.0.1",
     "@types/debug": "^4.1.12",
     "@types/ndjson": "^2.0.4",
