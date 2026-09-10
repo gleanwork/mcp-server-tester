@@ -98,6 +98,7 @@
   "devDependencies": {
     "@ai-sdk/provider-utils": "^4.0.15",
     "@playwright/test": "^1.49.0",
+    "playwright": "^1.57.0",
     "@release-it-plugins/lerna-changelog": "^8.0.1",
     "@types/debug": "^4.1.12",
     "@types/ndjson": "^2.0.4",
@@ -208,8 +209,10 @@
     "ai": "^6.0.97"
   },
   "overrides": {
+    "undici": "7.24.0",
     "release-it": {
       "undici": "6.24.1"
-    }
+    },
+    "tar": "6.2.2"
   }
 }

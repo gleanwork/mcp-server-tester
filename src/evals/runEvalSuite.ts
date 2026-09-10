@@ -42,10 +42,16 @@ import { loadPlugins } from '../plugins/loadPlugins.js';
 import {
   getDatasetSource,
   getHost,
+  getResultStore,
   parseHostConfig,
   validateManifestRegistrations,
 } from './frameworkRegistries.js';
 import { computeMetrics, type MetricSpec } from './metrics.js';
+import { registerBuiltinResultStores } from './builtinResultStores.js';
+import {
+  createDefaultArtifactId,
+  createStoredEvalArtifact,
+} from './resultStore.js';
 
 export interface RunEvalSuiteOptions {
   manifestPath: string;
@@ -340,6 +346,7 @@ export async function runEvalSuite(
 
   registerBuiltinDatasetSources();
   registerBuiltinHosts();
+  registerBuiltinResultStores();
   const pluginPaths = options.pluginPaths ?? manifest.plugins ?? [];
   if (pluginPaths.length > 0) {
     await loadPlugins(
@@ -623,6 +630,45 @@ export async function runEvalSuite(
   };
 
   await fs.mkdir(outputDir, { recursive: true });
+  if (manifest.results?.store) {
+    const store = getResultStore(
+      manifest.results.store.name ?? manifest.results.store.type
+    ).create(manifest.results.store);
+    const executionId = createDefaultArtifactId(summary.timestamp);
+    const metadata = {
+      datasetName: manifest.name,
+      labels: {
+        manifestId: summary.manifestId,
+        contentHash: summary.contentHash,
+      },
+    };
+    summary.caseArtifactPointers = {};
+    for (const [index, arm] of armResults.entries()) {
+      const id = `${executionId}-arm-${index}`;
+      await store.saveArtifact(
+        createStoredEvalArtifact({
+          kind: 'eval-runner-result',
+          id,
+          data: arm.result,
+          metadata: {
+            ...metadata,
+            labels: { ...metadata.labels, arm: arm.name },
+          },
+          createdAt: summary.timestamp,
+        })
+      );
+      summary.caseArtifactPointers[arm.name] = [id];
+    }
+    await store.saveArtifact(
+      createStoredEvalArtifact({
+        kind: 'eval-run-summary',
+        id: executionId,
+        data: summary,
+        metadata,
+        createdAt: summary.timestamp,
+      })
+    );
+  }
   await fs.writeFile(
     path.join(outputDir, 'results.json'),
     `${JSON.stringify(summary, null, 2)}\n`

@@ -1,7 +1,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { loadEvalManifest } from '../../../evals/evalManifest.js';
-import { loadPlugins } from '../../../plugins/loadPlugins.js';
+import {
+  runEvalBatch,
+  type RunEvalBatchOptions,
+} from '../../../evals/runEvalBatch.js';
 
 export interface BatchOptions {
   manifests?: string[];
@@ -25,36 +27,32 @@ async function resolveManifestPaths(options: BatchOptions): Promise<string[]> {
   return names.map((name) => path.join(options.manifestDir!, name));
 }
 
-/** Validate and plan a batch. Runtime scheduling is added by the operations branch. */
 export async function batch(options: BatchOptions): Promise<void> {
-  const manifestPaths = await resolveManifestPaths(options);
-  if (options.plugins?.length) await loadPlugins(options.plugins);
-  const manifests = manifestPaths.map((manifestPath) =>
-    loadEvalManifest(manifestPath, {
-      rootDir: options.rootDir,
-      skipDatasetValidation: Boolean(options.dryRun),
-    })
-  );
-
-  if (options.dryRun) {
-    process.stdout.write(
-      `${JSON.stringify(
-        {
-          manifests: manifests.map((manifest, index) => ({
-            path: manifestPaths[index],
-            name: manifest.name,
-          })),
-          workers: options.workers,
-          skipExisting: options.skipExisting,
-        },
-        null,
-        2
-      )}\n`
-    );
-    return;
+  const batchOptions: RunEvalBatchOptions = {
+    manifestPaths: await resolveManifestPaths(options),
+    rootDir: options.rootDir,
+    outputRoot: options.outputRoot,
+    workers: options.workers,
+    skipExisting: options.skipExisting,
+    pluginPaths: options.plugins,
+    dryRun: options.dryRun,
+  };
+  const result = await runEvalBatch(batchOptions);
+  for (const item of result.items) {
+    if (item.skipped) console.log(`${item.manifestPath}: skipped`);
+    else if (item.error) console.error(`${item.manifestPath}: ${item.error}`);
+    else {
+      const metrics = item.result?.summary.metrics as {
+        passed?: number;
+        total?: number;
+      };
+      console.log(
+        `${item.manifestPath}: ${metrics.passed ?? 0}/${metrics.total ?? 0} passed`
+      );
+    }
   }
-
-  throw new Error(
-    'Manifest batch execution is not wired in the scaffolding branch; use --dry-run.'
+  console.log(
+    `\nBatch complete: ${result.passed} passed, ${result.failed} failed, ${result.skipped} skipped`
   );
+  if (result.failed > 0) process.exitCode = 1;
 }
