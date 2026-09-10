@@ -96,6 +96,7 @@ program
     '.'
   )
   .option('--output-root <dir>', 'Root directory for evaluation results')
+  .option('--secrets-file <path>', 'JSON or dotenv-style runtime secrets file')
   .option('--workers <number>', 'Maximum number of parallel manifest runs')
   .option('--skip-existing', 'Skip manifests with an existing result')
   .option('--dry-run', 'Validate manifests without executing evaluations')
@@ -106,6 +107,7 @@ program
       plugins: options.plugins,
       rootDir: options.rootDir,
       outputRoot: options.outputRoot,
+      secretsFile: options.secretsFile,
       workers: options.workers ? Number(options.workers) : undefined,
       skipExisting: options.skipExisting,
       dryRun: options.dryRun,
