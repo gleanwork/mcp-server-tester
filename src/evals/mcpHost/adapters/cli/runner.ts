@@ -53,7 +53,10 @@ export async function runCLIHost(
 
   let stdout: string;
   try {
-    const result = await spawnProcess(cliConfig.command, args, { timeout });
+    const result = await spawnProcess(cliConfig.command, args, {
+      timeout,
+      env: cliConfig.env,
+    });
     stdout = result.stdout;
   } catch (err) {
     const elapsed = Date.now() - startTime;
@@ -141,11 +144,12 @@ export function validateSimulationResult(result: unknown): string | null {
 function spawnProcess(
   command: string,
   args: string[],
-  options: { timeout: number }
+  options: { timeout: number; env?: Record<string, string | undefined> }
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
+      ...(options.env ? { env: { ...process.env, ...options.env } } : {}),
     });
 
     // Close stdin immediately so the CLI doesn't wait for input

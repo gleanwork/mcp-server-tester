@@ -89,6 +89,8 @@ export type CLIOutputFormat = 'stream-json' | 'json';
  * ```
  */
 export interface CLIConfig {
+  /** Child-process-only environment overrides. Undefined removes an inherited key. */
+  env?: Record<string, string | undefined>;
   /**
    * CLI binary to invoke.
    */
