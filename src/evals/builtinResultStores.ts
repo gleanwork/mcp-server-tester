@@ -26,10 +26,11 @@ function createFileStore(config: ExtensionConfig): EvalResultStore {
 }
 
 function createGCSStore(config: ExtensionConfig): EvalResultStore {
+  const prefix = config.prefix;
   return new GCSEvalResultStore({
     provider: 'gcs',
     bucket: String(config.bucket),
-    prefix: config.prefix === undefined ? undefined : String(config.prefix),
+    ...(typeof prefix === 'string' ? { prefix } : {}),
   });
 }
 
