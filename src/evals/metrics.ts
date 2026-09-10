@@ -67,7 +67,8 @@ function judgeEntries(
   caseResult: EvalCaseResult
 ): Array<Record<string, unknown>> {
   const judge = caseResult.expectations?.judge as
-    Record<string, unknown> | undefined;
+    | Record<string, unknown>
+    | undefined;
   if (!judge) return [];
   const nested = judge.judgeResults;
   if (Array.isArray(nested)) {
@@ -211,7 +212,8 @@ const globalMetrics = globalThis as unknown as Record<symbol, unknown>;
 /** Built-in metrics, including the metrics used by Scio's evaluations. */
 export const BUILT_IN_METRICS: Record<string, MetricDefinition> =
   (globalMetrics[BUILT_INS_KEY] as
-    Record<string, MetricDefinition> | undefined) ?? {
+    | Record<string, MetricDefinition>
+    | undefined) ?? {
     judge_pass_for: parameterizedJudgeMetric('judge_pass_for'),
     judge_score_for: parameterizedJudgeMetric('judge_score_for'),
     passed: metric(
