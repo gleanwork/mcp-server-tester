@@ -93,10 +93,12 @@ export function createGoogleJudge(config: JudgeConfig = {}): Judge {
         usage: {
           inputTokens:
             (result.response.usageMetadata?.promptTokenCount as
-              number | undefined) ?? 0,
+              | number
+              | undefined) ?? 0,
           outputTokens:
             (result.response.usageMetadata?.candidatesTokenCount as
-              number | undefined) ?? 0,
+              | number
+              | undefined) ?? 0,
           totalCostUsd: 0,
           durationMs,
         },

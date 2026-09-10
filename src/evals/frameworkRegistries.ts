@@ -37,7 +37,8 @@ const REGISTRY_STATE_KEY = Symbol.for(
 );
 const globalRegistry = globalThis as unknown as Record<symbol, unknown>;
 const existingRegistryState = globalRegistry[REGISTRY_STATE_KEY] as
-  RegistryState | undefined;
+  | RegistryState
+  | undefined;
 const registryState: RegistryState = existingRegistryState ?? {
   datasets: new Map<string, NamedImplementation>(),
   hosts: new Map<string, NamedImplementation>(),

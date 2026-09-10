@@ -121,7 +121,9 @@ export interface FieldRemovalSanitizer {
  * - A field removal sanitizer: { remove: ['field1', 'nested.field'] }
  */
 export type SnapshotSanitizer =
-  BuiltInSanitizer | RegexSanitizer | FieldRemovalSanitizer;
+  | BuiltInSanitizer
+  | RegexSanitizer
+  | FieldRemovalSanitizer;
 
 /**
  * Schema registry for named schemas in datasets

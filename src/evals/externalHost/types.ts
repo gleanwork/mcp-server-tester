@@ -7,7 +7,11 @@ import type { UsageMetrics } from '../../types/index.js';
 export type ExternalHostType = 'cli' | 'browser' | 'desktop' | 'custom';
 
 export type HostCapability =
-  'control' | 'input' | 'completion' | 'trace' | 'normalize';
+  | 'control'
+  | 'input'
+  | 'completion'
+  | 'trace'
+  | 'normalize';
 
 export type TraceSource =
   | 'mcp-proxy'
@@ -25,7 +29,9 @@ export type TraceSource =
 export type ObservationConfidence = 'high' | 'medium' | 'low' | 'unknown';
 
 export type ExternalHostCorrelationStrategy =
-  'prompt_marker' | 'host_session_metadata' | 'none';
+  | 'prompt_marker'
+  | 'host_session_metadata'
+  | 'none';
 
 export interface HostDriverId {
   provider: string;
@@ -204,7 +210,8 @@ export interface ExternalHostRunFailure {
 }
 
 export type ExternalHostRunResult =
-  ExternalHostRunSuccess | ExternalHostRunFailure;
+  | ExternalHostRunSuccess
+  | ExternalHostRunFailure;
 
 export type ExternalHostCapabilitiesConfig = Partial<
   Record<

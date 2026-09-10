@@ -21,7 +21,10 @@ import type { ZodType } from 'zod';
  *   error rather than silently ranking on nothing.
  */
 export type ExperimentMetric =
-  'passRate' | 'toolF1' | 'toolPrecision' | 'toolRecall';
+  | 'passRate'
+  | 'toolF1'
+  | 'toolPrecision'
+  | 'toolRecall';
 
 /**
  * Why a variant experiment stopped.
@@ -35,7 +38,10 @@ export type ExperimentMetric =
  *   emitted by the current delta-based logic.
  */
 export type VariantExperimentReason =
-  'threshold-met' | 'no-improvement' | 'max-rounds' | 'no-variants';
+  | 'threshold-met'
+  | 'no-improvement'
+  | 'max-rounds'
+  | 'no-variants';
 
 /** Whether a winning variant should be applied, rejected, or is inconclusive. */
 export type VariantRecommendation = 'apply' | 'reject' | 'inconclusive';

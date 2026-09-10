@@ -718,7 +718,8 @@ async function runExpectBlockValidations(
           reasoning: validation.details?.reasoning as string | undefined,
           judgeName,
           judgeProvider: validation.details?.judgeProvider as
-            string | undefined,
+            | string
+            | undefined,
           judgeModel: validation.details?.judgeModel as string | undefined,
         } satisfies EvalExpectationResult;
       })

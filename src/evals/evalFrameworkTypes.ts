@@ -89,7 +89,11 @@ export interface HostDefinition {
 
 /** Values emitted by a metric for one evaluation case. */
 export type MetricValue =
-  boolean | number | string | Record<string, number> | null;
+  | boolean
+  | number
+  | string
+  | Record<string, number>
+  | null;
 
 export type MetricKind = 'binary' | 'continuous' | 'categorical' | 'object';
 
