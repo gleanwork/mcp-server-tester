@@ -1,41 +1,22 @@
+import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { loadEvalManifest, type EvalManifest } from './evalManifest.js';
 import { registerBuiltinResultStores } from './builtinResultStores.js';
-import { getResultStore } from './frameworkRegistries.js';
+import { resolveResultStoreConfig } from './frameworkRegistries.js';
 import { manifestIdentity } from './manifestIdentity.js';
 import { loadPlugins } from '../plugins/loadPlugins.js';
-import {
-  runEvalSuite,
-  type RunEvalSuiteOptions,
-  type RunEvalSuiteResult,
-} from './runEvalSuite.js';
+import { runEvalSuite, type RunEvalSuiteOptions } from './runEvalSuite.js';
+import type {
+  EvaluationBatchItem,
+  EvaluationBatchOptions,
+  EvaluationBatchResult,
+} from './evalFrameworkTypes.js';
 
-export interface RunEvalBatchOptions {
-  manifestPaths: string[];
-  rootDir?: string;
-  workers?: number;
-  outputRoot?: string;
-  skipExisting?: boolean;
-  secretsFile?: string;
-  pluginPaths?: string[];
-  dryRun?: boolean;
-}
-
-export interface EvalBatchItem {
-  manifestPath: string;
-  outputDir?: string;
-  result?: RunEvalSuiteResult;
-  error?: string;
-  skipped?: boolean;
-}
-
-export interface RunEvalBatchResult {
-  items: EvalBatchItem[];
-  passed: number;
-  failed: number;
-  skipped: number;
-}
+export type RunEvalBatchOptions = EvaluationBatchOptions;
+export type EvalBatchItem = EvaluationBatchItem;
+export type RunEvalBatchResult = EvaluationBatchResult;
 
 async function runWithConcurrency<T>(
   tasks: Array<() => Promise<T>>,
@@ -50,7 +31,7 @@ async function runWithConcurrency<T>(
     }
   }
   await Promise.all(
-    Array.from({ length: Math.min(Math.max(limit, 1), tasks.length) }, worker)
+    Array.from({ length: Math.min(limit, tasks.length) }, worker)
   );
   return results;
 }
@@ -107,18 +88,16 @@ function isMatchingCompletedSummary(
     summary.manifestId !== identity.manifestId ||
     summary.contentHash !== identity.contentHash ||
     summary.manifestName !== manifest.name
-  ) {
+  )
     return false;
-  }
   const expectedArms = manifest.arms?.length
     ? manifest.arms.map((arm) => arm.name)
     : ['default'];
   if (
     summary.arms.length !== expectedArms.length ||
     summary.arms.some((arm, index) => arm.name !== expectedArms[index])
-  ) {
+  )
     return false;
-  }
   const results = summary.arms.flatMap((arm) => arm.result.caseResults);
   if (
     results.length !== summary.results.length ||
@@ -127,9 +106,8 @@ function isMatchingCompletedSummary(
         result.id !== summary.results[index]?.id ||
         result.pass !== summary.results[index]?.pass
     )
-  ) {
+  )
     return false;
-  }
   return [
     { ...summary.metrics, caseResults: summary.results },
     ...summary.arms.map((arm) => arm.result),
@@ -147,12 +125,11 @@ async function hasMatchingSavedResult(
   pluginPaths?: string[]
 ): Promise<boolean> {
   try {
-    // Load and validate the current manifest even when a local results.json exists.
     const manifest = loadEvalManifest(manifestPath, { rootDir });
     if (!manifest.results?.store) return false;
     registerBuiltinResultStores();
     const plugins = pluginPaths ?? manifest.plugins ?? [];
-    if (plugins.length > 0) {
+    if (plugins.length > 0)
       await loadPlugins(
         plugins.map((pluginPath) =>
           path.isAbsolute(pluginPath)
@@ -160,55 +137,90 @@ async function hasMatchingSavedResult(
             : path.resolve(rootDir, pluginPath)
         )
       );
-    }
-    const config = manifest.results.store;
-    const definition = getResultStore(config.name ?? config.type);
-    definition.schema.parse(config);
+    const { definition, config } = resolveResultStoreConfig(
+      manifest.results.store
+    );
     const store = definition.create(config);
     const identity = manifestIdentity(manifest);
-    const candidates = await store.listArtifacts('eval-run-summary');
-    for (const candidate of candidates) {
+    for (const candidate of await store.listArtifacts('eval-run-summary')) {
       if (
         candidate.metadata?.labels?.manifestId !== identity.manifestId ||
         candidate.metadata?.labels?.contentHash !== identity.contentHash
-      ) {
+      )
         continue;
-      }
       try {
-        const artifact = await store.loadArtifact<unknown>(
-          'eval-run-summary',
-          candidate.id
-        );
-        if (isMatchingCompletedSummary(artifact, candidate.id, manifest)) {
+        if (
+          isMatchingCompletedSummary(
+            await store.loadArtifact('eval-run-summary', candidate.id),
+            candidate.id,
+            manifest
+          )
+        )
           return true;
-        }
       } catch {
-        // A missing/corrupt candidate does not prevent checking older runs.
+        /* continue checking older runs */
       }
     }
   } catch {
-    // Missing manifests, unavailable stores, and corrupt indexes must never skip.
+    /* invalid or unavailable inputs must never skip */
   }
   return false;
+}
+
+function resolveManifestPaths(
+  options: RunEvalBatchOptions,
+  rootDir: string
+): Promise<string[]> {
+  if (options.manifestPaths?.length)
+    return Promise.resolve(options.manifestPaths);
+  if (!options.manifestDir)
+    return Promise.reject(
+      new Error('At least one manifest path or manifest directory is required.')
+    );
+  return fs.readdir(path.resolve(rootDir, options.manifestDir)).then((names) =>
+    names
+      .filter((name) => name.endsWith('.json'))
+      .sort()
+      .map((name) => path.resolve(rootDir, options.manifestDir!, name))
+  );
+}
+
+function outputDirectory(
+  outputRoot: string | undefined,
+  manifestPath: string,
+  rootDir: string
+): string | undefined {
+  if (!outputRoot) return undefined;
+  const absolute = path.resolve(rootDir, manifestPath);
+  const stem = path.basename(absolute, path.extname(absolute));
+  const hash = crypto
+    .createHash('sha256')
+    .update(absolute)
+    .digest('hex')
+    .slice(0, 12);
+  return path.join(outputRoot, `${stem}-${hash}`);
 }
 
 /** Run multiple manifests with bounded process-level concurrency. */
 export async function runEvalBatch(
   options: RunEvalBatchOptions
 ): Promise<RunEvalBatchResult> {
-  if (options.manifestPaths.length === 0) {
-    throw new Error('At least one manifest path is required.');
-  }
   const rootDir = options.rootDir ?? process.cwd();
-  const tasks = options.manifestPaths.map(
+  const manifestPaths = await resolveManifestPaths(options, rootDir);
+  if (
+    !Number.isFinite(options.workers ?? 1) ||
+    !Number.isInteger(options.workers ?? 1) ||
+    (options.workers ?? 1) < 1
+  )
+    throw new Error('workers must be a finite positive integer.');
+  const tasks = manifestPaths.map(
     (manifestPath) => async (): Promise<EvalBatchItem> => {
       try {
-        const outputDir = options.outputRoot
-          ? path.join(
-              options.outputRoot,
-              path.basename(manifestPath, path.extname(manifestPath))
-            )
-          : undefined;
+        const outputDir = outputDirectory(
+          options.outputRoot,
+          manifestPath,
+          rootDir
+        );
         if (
           options.skipExisting &&
           !options.dryRun &&
@@ -217,9 +229,8 @@ export async function runEvalBatch(
             rootDir,
             options.pluginPaths
           ))
-        ) {
+        )
           return { manifestPath, outputDir, skipped: true };
-        }
         const suiteOptions: RunEvalSuiteOptions = {
           manifestPath,
           rootDir,
@@ -228,8 +239,11 @@ export async function runEvalBatch(
           secretsFile: options.secretsFile,
           dryRun: options.dryRun,
         };
-        const result = await runEvalSuite(suiteOptions);
-        return { manifestPath, result };
+        return {
+          manifestPath,
+          outputDir,
+          result: await runEvalSuite(suiteOptions),
+        };
       } catch (error) {
         return {
           manifestPath,

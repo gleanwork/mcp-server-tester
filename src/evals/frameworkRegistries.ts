@@ -134,6 +134,18 @@ export const listResultStores = (): ResultStoreDefinition[] =>
   resultStores.list();
 export const clearResultStores = (): void => resultStores.clear();
 
+/** Resolve by implementation type and retain parsed defaults/transforms for consumers. */
+export function resolveResultStoreConfig(config: ExtensionConfig): {
+  definition: ResultStoreDefinition;
+  config: ExtensionConfig;
+} {
+  const definition = getResultStore(config.type);
+  return {
+    definition,
+    config: parseConfig(config, definition, 'result store options'),
+  };
+}
+
 function parseConfig<T extends TaggedConfig>(
   config: T,
   implementation: NamedImplementation & { schema: ZodType },

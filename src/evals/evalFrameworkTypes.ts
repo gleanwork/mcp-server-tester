@@ -12,6 +12,7 @@ import type {
 } from './evalManifest.js';
 import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
 import type { EvalResultStore } from './resultStore.js';
+import type { EvalRunnerResult } from './evalRunner.js';
 
 /** Context provided to a dataset source implementation. */
 export interface DatasetSourceContext {
@@ -160,14 +161,7 @@ export interface EvaluationSuiteOptions {
 export interface EvaluationArmResult {
   name: string;
   servers: MCPConfig[];
-  result?: {
-    caseResults: EvalCaseResult[];
-    total: number;
-    passed: number;
-    failed: number;
-    durationMs: number;
-    totalHostUsage?: Partial<UsageMetrics>;
-  };
+  result?: EvalRunnerResult;
   metrics?: Record<string, unknown>;
   comparison?: Record<string, unknown>;
 }
@@ -204,29 +198,39 @@ export interface EvaluationSuiteResult {
   datasets: Array<{
     source: DatasetConfig;
     dataset?: EvalDataset;
+    result?: EvalRunnerResult;
   }>;
   summary: EvaluationSummary;
 }
 
 /** Options for running multiple evaluation manifests. */
 export interface EvaluationBatchOptions {
+  /** Explicit paths take precedence over manifestDir when nonempty. */
   manifestPaths?: string[];
   manifestDir?: string;
   rootDir?: string;
   outputRoot?: string;
   workers?: number;
   skipExisting?: boolean;
+  secretsFile?: string;
+  pluginPaths?: string[];
   dryRun?: boolean;
+}
+
+export interface EvaluationBatchItem {
+  manifestPath: string;
+  outputDir?: string;
+  result?: EvaluationSuiteResult;
+  error?: string;
+  skipped?: boolean;
 }
 
 /** Result contract for a batch implementation. */
 export interface EvaluationBatchResult {
-  runs: Array<{
-    manifestPath: string;
-    outputDir?: string;
-    result?: EvaluationSuiteResult;
-    error?: string;
-  }>;
+  items: EvaluationBatchItem[];
+  passed: number;
+  failed: number;
+  skipped: number;
 }
 
 /** Public result-summary extension point. */

@@ -261,6 +261,7 @@ export type {
   DatasetSourceContext,
   EvaluationArmResult,
   EvaluationBatchOptions,
+  EvaluationBatchItem,
   EvaluationBatchResult,
   EvaluationSuiteOptions,
   EvaluationSuiteResult,
@@ -300,6 +301,7 @@ export {
   registerHost,
   registerMetric,
   registerResultStore,
+  resolveResultStoreConfig,
   validateManifestRegistrations,
 } from './evals/frameworkRegistries.js';
 // Preserve both legacy name/executor and schema-bearing object registration.

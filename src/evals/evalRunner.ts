@@ -1833,7 +1833,9 @@ async function saveStoredEvalResult(
   );
 }
 
-function omitResponsesFromResult(result: EvalRunnerResult): EvalRunnerResult {
+export function omitResponsesFromResult(
+  result: EvalRunnerResult
+): EvalRunnerResult {
   return {
     ...result,
     caseResults: result.caseResults.map(

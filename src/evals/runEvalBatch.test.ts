@@ -128,6 +128,40 @@ describe('runEvalBatch skipExisting', () => {
     });
   }
 
+  it('rejects invalid worker counts before scheduling any manifest', async () => {
+    await expect(
+      runEvalBatch({
+        manifestPaths: [manifestPath],
+        rootDir,
+        workers: Number.NaN,
+      })
+    ).rejects.toThrow(/workers must be a finite positive integer/);
+    expect(runEvalSuite).not.toHaveBeenCalled();
+  });
+
+  it('supports manifest directories and disambiguates colliding output basenames', async () => {
+    const first = path.join(rootDir, 'one', 'same.json');
+    const second = path.join(rootDir, 'two', 'same.json');
+    await fs.mkdir(path.dirname(first), { recursive: true });
+    await fs.mkdir(path.dirname(second), { recursive: true });
+    await fs.writeFile(
+      first,
+      JSON.stringify({ ...manifestInput, name: 'one' })
+    );
+    await fs.writeFile(
+      second,
+      JSON.stringify({ ...manifestInput, name: 'two' })
+    );
+    const result = await runEvalBatch({
+      manifestPaths: [first, second],
+      rootDir,
+      outputRoot,
+      workers: 2,
+    });
+    expect(result.items.map((item) => item.outputDir)).toHaveLength(2);
+    expect(new Set(result.items.map((item) => item.outputDir)).size).toBe(2);
+  });
+
   it('resumes a valid stored summary repeatedly without relying on results.json', async () => {
     await saveValidSummary();
     for (let i = 0; i < 3; i++) {
@@ -170,23 +204,18 @@ describe('runEvalBatch skipExisting', () => {
     expect(runEvalSuite).not.toHaveBeenCalled();
   });
 
-  it('uses a registered custom result store by configured name', async () => {
+  it('uses a registered custom result store by configured type', async () => {
     const create = vi.fn(() => store);
     registerResultStore({
-      name: 'batch-custom-store',
-      schema: z.object({ type: z.string(), name: z.string() }),
+      name: 'custom',
+      schema: z.object({ type: z.string() }),
       create,
     });
-    manifestInput.results = {
-      store: { type: 'custom', name: 'batch-custom-store' },
-    };
+    manifestInput.results = { store: { type: 'custom' } };
     await fs.writeFile(manifestPath, JSON.stringify(manifestInput));
     await saveValidSummary();
     expect((await run()).skipped).toBe(1);
-    expect(create).toHaveBeenCalledWith({
-      type: 'custom',
-      name: 'batch-custom-store',
-    });
+    expect(create).toHaveBeenCalledWith({ type: 'custom' });
   });
 
   it('loads manifest plugins before checking the configured result store', async () => {
