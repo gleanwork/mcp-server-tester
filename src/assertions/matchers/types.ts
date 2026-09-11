@@ -23,6 +23,8 @@ import type {
  * Options for the LLM judge matcher
  */
 export interface JudgeMatcherOptions {
+  /** Plugin options, parsed by the registered judge's schema. */
+  options?: Record<string, unknown>;
   /** Reference response to compare against */
   reference?: unknown;
   /** Score threshold for passing (default: 0.7) */
@@ -36,7 +38,7 @@ export interface JudgeMatcherOptions {
   /**
    * Name of a registered custom judge executor.
    * When set, the named judge handles the entire evaluation pipeline
-   * and its `pass` result is authoritative.
+   * and its score is compared with passingThreshold.
    */
   judge?: string;
 }

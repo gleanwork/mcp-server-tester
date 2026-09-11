@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import { z } from 'zod';
+import { MCPConfigSchema } from '../config/mcpConfig.js';
 import { describe, expect, it } from 'vitest';
 import type { ToolOverrideVariant } from '../types/index.js';
 import {
@@ -8,6 +10,96 @@ import {
 } from './evalManifest.js';
 
 describe('EvalManifestSchema', () => {
+  it('accepts partial arm host options without weakening the base host tag', () => {
+    const base = {
+      name: 'patch',
+      datasets: ['cases.json'],
+      host: { type: 'sdk', model: 'base' },
+    };
+    const manifest = loadEvalManifestFromObject(
+      { ...base, arms: [{ name: 'candidate', host: { model: 'candidate' } }] },
+      { skipDatasetValidation: true }
+    );
+    expect(manifest.arms?.[0]?.host).toEqual({ model: 'candidate' });
+    expect(() =>
+      EvalManifestSchema.parse({ ...base, host: { model: 'untagged' } })
+    ).toThrow();
+    expect(() =>
+      EvalManifestSchema.parse({
+        ...base,
+        arms: [{ name: 'invalid', host: { type: '' } }],
+      })
+    ).toThrow();
+  });
+
+  it.each([
+    { transport: 'http', serverUrl: 17 },
+    { transport: 'http' },
+    { transport: 'http', serverUrl: 'not-a-url' },
+    {
+      transport: 'http',
+      serverUrl: 'https://example.com',
+      headers: { Authorization: 17 },
+    },
+    {
+      transport: 'http',
+      serverUrl: 'https://example.com',
+      requestTimeoutMs: -1,
+    },
+    {
+      transport: 'http',
+      serverUrl: 'https://example.com',
+      tls: { rejectUnauthorized: 'false' },
+    },
+    { transport: 'http', serverUrl: 'https://example.com', retryAttempts: 0.5 },
+    {
+      transport: 'http',
+      serverUrl: 'https://example.com',
+      auth: { oauth: { serverUrl: 17 } },
+    },
+    { transport: 'stdio' },
+    { transport: 'stdio', command: 17 },
+    { transport: 'stdio', command: 'node', args: [17] },
+    { transport: 'stdio', command: 'node', env: { PORT: 17 } },
+  ])(
+    'uses canonical transport validation on defaults and arms: %j',
+    (server) => {
+      const base = { name: 'invalid', datasets: ['cases.json'] };
+      expect(() =>
+        EvalManifestSchema.parse({ ...base, servers: [server] })
+      ).toThrow();
+      expect(() =>
+        EvalManifestSchema.parse({
+          ...base,
+          arms: [{ name: 'candidate', servers: [server] }],
+        })
+      ).toThrow();
+    }
+  );
+
+  it('keeps editor transport schema synchronized with canonical MCPConfigSchema', () => {
+    const schema = JSON.parse(
+      fs.readFileSync(
+        new URL('../../schema/eval-manifest.schema.json', import.meta.url),
+        'utf8'
+      )
+    ) as {
+      definitions: { mcpConfig: unknown };
+      properties: {
+        servers: { items: unknown };
+        arms: { items: { properties: { host: { required?: string[] } } } };
+      };
+    };
+    expect(schema.definitions.mcpConfig).toEqual(
+      z.toJSONSchema(MCPConfigSchema, { target: 'draft-7', io: 'input' })
+    );
+    expect(schema.properties.servers.items).toEqual({
+      $ref: '#/definitions/mcpConfig',
+    });
+    expect(
+      schema.properties.arms.items.properties.host.required
+    ).toBeUndefined();
+  });
   const overrides: ToolOverrideVariant = {
     id: 'search-v2',
     description: 'More precise search metadata',

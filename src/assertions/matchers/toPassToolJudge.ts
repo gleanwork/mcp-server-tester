@@ -33,6 +33,7 @@ async function runSingleJudge(
     provider,
     model,
     judge,
+    options: judgeOptions,
   } = options;
 
   const validation = await validateJudge(received, {
@@ -43,6 +44,7 @@ async function runSingleJudge(
     ...(provider !== undefined && { provider }),
     ...(model !== undefined && { model }),
     ...(judge !== undefined && { judge }),
+    ...(judgeOptions !== undefined && { options: judgeOptions }),
   });
 
   return { pass: validation.pass, message: validation.message };

@@ -5,6 +5,7 @@ import type { ExternalHostConfig } from './externalHost/types.js';
 import { ExternalHostConfigSchema } from './externalHost/schema.js';
 import type { SnapshotSanitizer } from '../assertions/validators/types.js';
 import type { BuiltInRubric } from '../judge/judgeTypes.js';
+import type { HostEvent } from './evalFrameworkTypes.js';
 
 // Re-export sanitizer types from canonical source (validators/types.ts)
 // Note: For JSON datasets, the Zod schema below validates that patterns are strings.
@@ -154,6 +155,10 @@ export interface EvalCase {
  * Configuration for a single LLM-as-judge evaluation
  */
 export interface JudgeExpectConfig {
+  /** Plugin options, validated by the registered judge schema. */
+  options?: Record<string, unknown>;
+  /** Flat plugin policy fields are also accepted for manifest integration. */
+  [key: string]: unknown;
   /**
    * Name of a registered custom judge executor.
    * When set, the named judge handles evaluation and returns a normalized score.
@@ -260,8 +265,11 @@ export interface EvalExpectBlock {
   toolsTriggered?: {
     /** Expected tool calls */
     calls: Array<{
-      /** Tool name */
+      /** Tool or explicitly selected host event name. */
       name: string;
+      kind?: HostEvent['kind'];
+      source?: HostEvent['source'];
+      server?: string;
       /** Expected arguments (partial match — extra keys are allowed) */
       arguments?: Record<string, unknown>;
       /** Whether this call MUST have been made (default: true) */
@@ -400,40 +408,47 @@ const SnapshotSanitizerSchema = z.union([
 /**
  * Zod schema for a single judge configuration
  */
-const JudgeExpectConfigSchema = z
-  .object({
-    judge: z.string().min(1).optional(),
-    rubric: z
-      .union([
-        z.enum([
-          'correctness',
-          'completeness',
-          'groundedness',
-          'instruction-following',
-          'conciseness',
-        ]),
-        z.object({ text: z.string().min(1) }),
-      ])
-      .optional(),
-    reference: z.unknown().optional(),
-    threshold: z.number().min(0).max(1).optional(),
-    reps: z.number().int().min(1).optional(),
-    provider: z
-      .enum([
-        'anthropic',
-        'vertex-anthropic',
-        'anthropic-agent-sdk',
-        'openai',
-        'google',
-      ])
-      .optional(),
-    model: z.string().optional(),
-    apiKeyEnvVar: z.string().optional(),
-    maxTokens: z.number().int().positive().optional(),
-    temperature: z.number().min(0).max(1).optional(),
-    maxBudgetUsd: z.number().positive().optional(),
-    maxToolOutputSize: z.number().int().positive().optional(),
-  })
+const JudgeExpectConfigFieldsSchema = z.object({
+  judge: z.string().min(1).optional(),
+  options: z.record(z.string(), z.unknown()).optional(),
+  rubric: z
+    .union([
+      z.enum([
+        'correctness',
+        'completeness',
+        'groundedness',
+        'instruction-following',
+        'conciseness',
+      ]),
+      z.object({ text: z.string().min(1) }),
+    ])
+    .optional(),
+  reference: z.unknown().optional(),
+  threshold: z.number().min(0).max(1).optional(),
+  reps: z.number().int().min(1).optional(),
+  provider: z
+    .enum([
+      'anthropic',
+      'vertex-anthropic',
+      'anthropic-agent-sdk',
+      'openai',
+      'google',
+    ])
+    .optional(),
+  model: z.string().optional(),
+  apiKeyEnvVar: z.string().optional(),
+  maxTokens: z.number().int().positive().optional(),
+  temperature: z.number().min(0).max(1).optional(),
+  maxBudgetUsd: z.number().positive().optional(),
+  maxToolOutputSize: z.number().int().positive().optional(),
+});
+
+const JudgeExpectConfigSchema = JudgeExpectConfigFieldsSchema.passthrough()
+  .transform((config) =>
+    config.judge !== undefined
+      ? config
+      : JudgeExpectConfigFieldsSchema.parse(config)
+  )
   .refine((data) => data.judge !== undefined || data.rubric !== undefined, {
     message: 'Either "judge" or "rubric" must be provided in passesJudge',
   });
@@ -463,6 +478,11 @@ export const EvalExpectBlockSchema = z.object({
       calls: z.array(
         z.object({
           name: z.string(),
+          kind: z
+            .enum(['tool_call', 'skill', 'command', 'subagent'])
+            .optional(),
+          source: z.enum(['mcp', 'host']).optional(),
+          server: z.string().min(1).optional(),
           arguments: z.record(z.string(), z.unknown()).optional(),
           required: z.boolean().optional(),
         })

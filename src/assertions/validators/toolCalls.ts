@@ -6,13 +6,27 @@
  */
 import type { ValidationResult } from './types.js';
 import type {
-  MCPHostSimulationResult,
-  LLMToolCall,
-} from '../../evals/mcpHost/mcpHostTypes.js';
+  HostEvent,
+  HostEvidence,
+} from '../../evals/evalFrameworkTypes.js';
+
+/** Legacy simulations omit identity metadata; explicit expectations never infer it. */
+type TraceCall = Pick<HostEvent, 'name' | 'arguments'> &
+  Partial<Pick<HostEvent, 'kind' | 'source' | 'server'>>;
+
+interface TraceResponse {
+  success: unknown;
+  toolCalls: TraceCall[];
+  events?: HostEvent[];
+  evidence?: HostEvidence;
+}
 
 export interface ToolCallExpectation {
   calls: Array<{
     name: string;
+    kind?: HostEvent['kind'];
+    source?: HostEvent['source'];
+    server?: string;
     arguments?: Record<string, unknown>;
     required?: boolean;
   }>;
@@ -26,13 +40,13 @@ export interface ToolCallCountOptions {
   exact?: number;
 }
 
-function isSimulationResult(value: unknown): value is MCPHostSimulationResult {
+function isSimulationResult(value: unknown): value is TraceResponse {
   return (
     typeof value === 'object' &&
     value !== null &&
     'success' in value &&
     'toolCalls' in value &&
-    Array.isArray((value as MCPHostSimulationResult).toolCalls)
+    Array.isArray((value as TraceResponse).toolCalls)
   );
 }
 
@@ -82,14 +96,41 @@ function partialMatch(
   });
 }
 
+/** Shared identity matching for assertions and reported tool traces. */
+export function matchesIdentity(
+  call: TraceCall,
+  expected: ToolCallExpectation['calls'][number]
+): boolean {
+  return (
+    (call.name === expected.name ||
+      (call.server !== undefined &&
+        `${call.server}.${call.name}` === expected.name)) &&
+    (call.kind ?? 'tool_call') === (expected.kind ?? 'tool_call') &&
+    (expected.source === undefined || call.source === expected.source) &&
+    (expected.server === undefined || call.server === expected.server)
+  );
+}
+
+function unverifiedEvidence(
+  response: TraceResponse
+): ValidationResult | undefined {
+  if (response.evidence === undefined || response.evidence === 'structured')
+    return undefined;
+  return {
+    pass: false,
+    message: `Host evidence is ${response.evidence}; structured tool evidence is required.`,
+    details: { evidence: response.evidence },
+  };
+}
+
 function findMatchingCall(
-  actual: LLMToolCall[],
+  actual: TraceCall[],
   expected: ToolCallExpectation['calls'][number],
   startIndex = 0
 ): number {
   for (let i = startIndex; i < actual.length; i++) {
     const call = actual[i]!;
-    if (call.name !== expected.name) continue;
+    if (!matchesIdentity(call, expected)) continue;
     if (
       expected.arguments !== undefined &&
       !partialMatch(call.arguments ?? {}, expected.arguments)
@@ -119,7 +160,17 @@ export function validateToolCalls(
     };
   }
 
-  const actual = response.toolCalls;
+  const unverified = unverifiedEvidence(response);
+  if (unverified) return unverified;
+
+  // Non-tool events participate only when that kind is explicitly requested.
+  const kinds = new Set([
+    'tool_call',
+    ...expectation.calls.map((call) => call.kind ?? 'tool_call'),
+  ]);
+  const actual = (response.events ?? response.toolCalls).filter((call) =>
+    kinds.has(call.kind ?? 'tool_call')
+  );
 
   // Compute recall: fraction of required calls that were made
   const requiredCalls = expectation.calls.filter((c) => c.required !== false);
@@ -135,7 +186,9 @@ export function validateToolCalls(
   const allowedNames = new Set(expectation.calls.map((c) => c.name));
   const precision =
     actual.length > 0
-      ? actual.filter((c) => allowedNames.has(c.name)).length / actual.length
+      ? actual.filter((call) =>
+          expectation.calls.some((expected) => matchesIdentity(call, expected))
+        ).length / actual.length
       : 1.0;
 
   const metrics = { precision, recall };
@@ -187,7 +240,10 @@ export function validateToolCalls(
   }
 
   if (expectation.exclusive === true) {
-    const unexpected = actual.filter((c) => !allowedNames.has(c.name));
+    const unexpected = actual.filter(
+      (call) =>
+        !expectation.calls.some((expected) => matchesIdentity(call, expected))
+    );
     if (unexpected.length > 0) {
       const names = unexpected.map((c) => `'${c.name}'`).join(', ');
       return {
@@ -223,7 +279,12 @@ export function validateToolCallCount(
     };
   }
 
-  const count = response.toolCalls.length;
+  const unverified = unverifiedEvidence(response);
+  if (unverified) return unverified;
+
+  const count = (response.events ?? response.toolCalls).filter(
+    (call) => (call.kind ?? 'tool_call') === 'tool_call'
+  ).length;
   const { min, max, exact } = options;
 
   if (exact !== undefined && count !== exact) {

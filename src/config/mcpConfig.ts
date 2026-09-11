@@ -324,6 +324,7 @@ const MCPAuthConfigSchema = z
  */
 const StdioConfigSchema = z.object({
   transport: z.literal('stdio'),
+  label: z.string().min(1).optional(),
   command: z.string().min(1, 'command is required for stdio transport'),
   args: z.array(z.string()).optional(),
   cwd: z.string().optional(),
@@ -349,6 +350,7 @@ function isLocalhost(hostname: string): boolean {
  */
 const HttpConfigSchema = z.object({
   transport: z.literal('http'),
+  label: z.string().min(1).optional(),
   serverUrl: z
     .string()
     .url('serverUrl must be a valid URL')

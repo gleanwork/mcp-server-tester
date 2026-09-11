@@ -253,6 +253,7 @@ export type {
   EvalManifestInput,
   ExtensionConfig,
   HostConfig,
+  HostConfigPatch,
   TaggedConfig,
 } from './evals/evalManifest.js';
 export type {
@@ -297,11 +298,12 @@ export {
   listResultStores,
   registerDatasetSource,
   registerHost,
-  registerJudge,
   registerMetric,
   registerResultStore,
   validateManifestRegistrations,
 } from './evals/frameworkRegistries.js';
+// Preserve both legacy name/executor and schema-bearing object registration.
+export { registerJudge } from './judge/judgeRegistry.js';
 
 // Plugin loading
 export { loadPluginModule, loadPlugins } from './plugins/loadPlugins.js';

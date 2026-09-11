@@ -12,6 +12,118 @@ function makeResult(
 }
 
 describe('validateToolCalls', () => {
+  it.each([
+    { source: 'host' as const },
+    { server: 'other' },
+    { kind: 'skill' as const },
+  ])('matches identity, not just a same-named event: %j', (mismatch) => {
+    const event = {
+      name: 'search',
+      kind: 'tool_call' as const,
+      source: 'mcp' as const,
+      server: 'agg',
+      arguments: {},
+    };
+    const response = {
+      success: true,
+      toolCalls: [event],
+      events: [event],
+      evidence: 'structured',
+    };
+    const expectation = { calls: [{ ...event, ...mismatch }], exclusive: true };
+    const result = validateToolCalls(response, expectation);
+    expect(result.pass).toBe(false);
+    expect(result.metrics).toEqual({ precision: 0, recall: 0 });
+  });
+
+  it('matches single-server qualified and unqualified names', () => {
+    const response = {
+      success: true,
+      toolCalls: [{ name: 'search', server: 'agg' }],
+    };
+    for (const name of ['search', 'agg.search']) {
+      expect(
+        validateToolCalls(response, { calls: [{ name }], exclusive: true }).pass
+      ).toBe(true);
+    }
+  });
+
+  it('does not infer metadata for legacy tool calls', () => {
+    const response = makeResult([{ name: 'search' }]);
+    expect(
+      validateToolCalls(response, {
+        calls: [{ name: 'search', source: 'mcp' }],
+      }).pass
+    ).toBe(false);
+    expect(
+      validateToolCalls(response, {
+        calls: [{ name: 'search', server: 'agg' }],
+      }).pass
+    ).toBe(false);
+  });
+
+  it('checks explicit skill events in order without counting them as tool calls', () => {
+    const events = [
+      {
+        kind: 'skill',
+        source: 'host',
+        name: 'research',
+        arguments: { topic: 'docs' },
+      },
+      {
+        kind: 'tool_call',
+        source: 'mcp',
+        server: 'agg',
+        name: 'search',
+        arguments: {},
+      },
+    ];
+    const response = {
+      success: true,
+      events,
+      toolCalls: [events[1]],
+      evidence: 'structured',
+    };
+    expect(
+      validateToolCalls(response, {
+        calls: [
+          {
+            name: 'research',
+            kind: 'skill',
+            source: 'host',
+            arguments: { topic: 'docs' },
+          },
+          { name: 'search', source: 'mcp', server: 'agg' },
+        ],
+        order: 'strict',
+        exclusive: true,
+      })
+    ).toMatchObject({ pass: true, metrics: { precision: 1, recall: 1 } });
+    expect(
+      validateToolCalls(response, { calls: [{ name: 'research' }] }).pass
+    ).toBe(false);
+    expect(
+      validateToolCalls(response, {
+        calls: [{ name: 'search' }],
+        exclusive: true,
+      }).pass
+    ).toBe(true);
+    expect(validateToolCallCount(response, { exact: 1 }).pass).toBe(true);
+  });
+
+  it.each(['observed', 'none'])(
+    'does not emit verified metrics or pass counts for %s evidence',
+    (evidence) => {
+      const response = { ...makeResult([{ name: 'search' }]), evidence };
+      const result = validateToolCalls(response, {
+        calls: [{ name: 'search' }],
+      });
+      expect(result.pass).toBe(false);
+      expect(result.metrics).toBeUndefined();
+      expect(result.details).toEqual({ evidence });
+      expect(validateToolCallCount(response, { exact: 1 }).pass).toBe(false);
+    }
+  );
   it('passes when required tool was called', () => {
     const result = makeResult([
       { name: 'search', arguments: { query: 'hello' } },

@@ -125,7 +125,9 @@ export interface JudgeDefinition {
   readonly schema: ZodType;
   evaluate: (
     candidate: unknown,
-    reference?: unknown
+    reference?: unknown,
+    /** Options parsed by this judge's schema, including defaults/transforms. */
+    options?: Record<string, unknown>
   ) => Promise<{
     score: number;
     reasoning?: string;

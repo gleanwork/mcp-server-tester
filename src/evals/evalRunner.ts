@@ -1,6 +1,7 @@
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import type { EvalDataset, EvalCase, EvalExpectBlock } from './datasetTypes.js';
 import type { EvalExecutionResult } from './hostTrace.js';
+import type { HostEvent } from './evalFrameworkTypes.js';
 import type { TestInfo, Expect } from '@playwright/test';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { ZodType } from 'zod';
@@ -50,6 +51,7 @@ import {
 import { execFileNoThrow } from '../utils/execFileNoThrow.js';
 import { debugEval } from '../debug.js';
 import { sumUsage } from '../utils/usageUtils.js';
+import { matchesIdentity } from '../assertions/validators/toolCalls.js';
 import packageJson from '../../package.json' with { type: 'json' };
 
 /**
@@ -455,12 +457,24 @@ function mapToolNames(
       aliases.set(name, canonical);
     }
   }
+  function mapCall<
+    T extends { name: string; server?: string; kind?: HostEvent['kind'] },
+  >(call: T): T {
+    if (call.kind !== undefined && call.kind !== 'tool_call') return call;
+    const qualified = call.server ? `${call.server}.${call.name}` : call.name;
+    return {
+      ...call,
+      name: aliases.get(qualified) ?? aliases.get(call.name) ?? call.name,
+    };
+  }
+  const events =
+    'events' in response && Array.isArray(response.events)
+      ? (response.events as HostEvent[])
+      : undefined;
   return {
     ...response,
-    toolCalls: response.toolCalls.map((call) => ({
-      ...call,
-      name: aliases.get(call.name) ?? call.name,
-    })),
+    toolCalls: response.toolCalls.map(mapCall),
+    ...(events !== undefined ? { events: events.map(mapCall) } : {}),
   };
 }
 
@@ -1030,7 +1044,25 @@ async function runSingleIteration(
       error: error instanceof Error ? error.message : String(error),
     };
   }
-  const { response, hostUsage: producedHostUsage } = execution;
+  const { response: rawResponse, hostUsage: producedHostUsage } = execution;
+  const declaredEvidence =
+    execution.evidence ??
+    (isMCPHostSimulationResult(rawResponse) && 'evidence' in rawResponse
+      ? rawResponse.evidence
+      : undefined);
+  const evidence =
+    declaredEvidence === undefined
+      ? undefined
+      : declaredEvidence === 'structured'
+        ? 'structured'
+        : declaredEvidence === 'observed'
+          ? 'observed'
+          : 'none';
+  // Keep evidence consistent in assertions, metrics, reports and redacted artifacts.
+  const response =
+    evidence !== undefined && isMCPHostSimulationResult(rawResponse)
+      ? { ...rawResponse, evidence }
+      : rawResponse;
   const error =
     execution.error ??
     (isMCPHostSimulationResult(response) && !response.success
@@ -1049,32 +1081,30 @@ async function runSingleIteration(
   let mcpHostTrace: EvalCaseResult['mcpHostTrace'];
 
   if (!error && evalCase.expect) {
+    const validationResponse = mapToolNames(response, options.toolMap);
     const {
       expectations,
       toolPrecision: tp,
       toolRecall: tr,
-    } = await runExpectBlockValidations(
-      evalCase.expect,
-      mapToolNames(response, options.toolMap),
-      {
-        schemas: options.schemas,
-        playwrightExpect: context.expect,
-        judgeReps: evalCase.judgeReps,
-        canonicalAnswer: evalCase.canonicalAnswer,
-      }
-    );
+    } = await runExpectBlockValidations(evalCase.expect, validationResponse, {
+      schemas: options.schemas,
+      playwrightExpect: context.expect,
+      judgeReps: evalCase.judgeReps,
+      canonicalAnswer: evalCase.canonicalAnswer,
+    });
     expectationResults = expectations;
-    if (execution.evidence && execution.evidence !== 'structured') {
+    if (evidence && evidence !== 'structured') {
       for (const key of ['toolsTriggered', 'toolCallCount'] as const) {
         if (evalCase.expect[key] !== undefined)
           expectationResults[key] = {
             pass: false,
-            details: `Host evidence is ${execution.evidence}; structured tool evidence is required.`,
+            details: `Host evidence is ${evidence}; structured tool evidence is required.`,
           };
       }
     }
-    toolPrecision = tp;
-    toolRecall = tr;
+    const verified = evidence === undefined || evidence === 'structured';
+    toolPrecision = verified ? tp : undefined;
+    toolRecall = verified ? tr : undefined;
 
     if (evalCase.mode === 'external_host' && externalHost) {
       applyExternalHostEvidenceGating(
@@ -1091,29 +1121,39 @@ async function runSingleIteration(
     // Build mcpHostTrace when toolsTriggered expectation is present
     if (
       evalCase.expect.toolsTriggered !== undefined &&
+      (evidence === undefined || evidence === 'structured') &&
       isMCPHostSimulationResult(response) &&
+      isMCPHostSimulationResult(validationResponse) &&
       (evalCase.mode !== 'external_host' ||
         (externalHost !== undefined && hasStructuredToolEvidence(externalHost)))
     ) {
-      const expectedNames = new Set(
-        evalCase.expect.toolsTriggered.calls.map((c) => c.name)
+      const expected = evalCase.expect.toolsTriggered.calls.filter(
+        (call) => (call.kind ?? 'tool_call') === 'tool_call'
       );
-      const requiredNames = new Set(
-        evalCase.expect.toolsTriggered.calls
-          .filter((c) => c.required !== false)
-          .map((c) => c.name)
-      );
-      const calledNames = new Set(response.toolCalls.map((c) => c.name));
-
+      const canonicalCalls =
+        'events' in validationResponse &&
+        Array.isArray(validationResponse.events)
+          ? (validationResponse.events as HostEvent[]).filter(
+              (event) => event.kind === 'tool_call'
+            )
+          : validationResponse.toolCalls;
       mcpHostTrace = {
-        calls: response.toolCalls.map((call) => ({
+        calls: response.toolCalls.map((call, index) => ({
           name: call.name,
           arguments: call.arguments,
-          status: expectedNames.has(call.name) ? 'expected' : 'unexpected',
+          status: expected.some((item) =>
+            matchesIdentity(canonicalCalls[index] ?? call, item)
+          )
+            ? 'expected'
+            : 'unexpected',
         })),
-        missed: Array.from(requiredNames)
-          .filter((name) => !calledNames.has(name))
-          .map((name) => ({ name })),
+        missed: expected
+          .filter(
+            (item) =>
+              item.required !== false &&
+              !canonicalCalls.some((call) => matchesIdentity(call, item))
+          )
+          .map(({ name }) => ({ name })),
       };
     }
   }
@@ -1148,6 +1188,7 @@ async function runSingleIteration(
     toolPrecision,
     toolRecall,
     mcpHostTrace,
+    hostEvidence: evidence,
     hostUsage,
     externalHost,
   };
@@ -1309,6 +1350,7 @@ export async function runEvalCase(
         error: result.error,
         isInfrastructureError: infraError,
         mcpHostTrace: result.mcpHostTrace,
+        hostEvidence: result.hostEvidence,
         hostUsage: result.hostUsage,
         externalHost: result.externalHost,
       });

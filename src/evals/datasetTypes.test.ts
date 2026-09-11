@@ -9,6 +9,45 @@ import {
 import { ZodError } from 'zod';
 
 describe('datasetTypes', () => {
+  it('retains event identity and named judge policy in serialized expectations', () => {
+    const input = {
+      id: 'identity',
+      mode: 'host',
+      scenario: 'research',
+      expect: {
+        toolsTriggered: {
+          calls: [
+            { name: 'search', source: 'mcp', server: 'agg', kind: 'tool_call' },
+            { name: 'research', source: 'host', kind: 'skill' },
+          ],
+        },
+        passesJudge: {
+          judge: 'policy',
+          policy: 'strict',
+          options: { limit: 3 },
+        },
+      },
+    };
+    expect(validateEvalCase(input)).toEqual(input);
+  });
+
+  it.each([
+    { source: 'unknown' },
+    { kind: 'unknown' },
+    { server: 17 },
+    { server: '' },
+  ])('rejects invalid event identity %j', (identity) => {
+    expect(() =>
+      validateEvalCase({
+        id: 'invalid',
+        mode: 'host',
+        scenario: 'research',
+        expect: {
+          toolsTriggered: { calls: [{ name: 'search', ...identity }] },
+        },
+      })
+    ).toThrow(ZodError);
+  });
   describe('validateEvalCase', () => {
     it('should validate minimal eval case', () => {
       const evalCase = {

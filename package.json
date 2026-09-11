@@ -71,6 +71,7 @@
     "docs:sync": "markdown-code sync",
     "preview-reporter": "tsx scripts/preview-reporter.ts",
     "test": "vitest run",
+    "test:eval-foundation": "node scripts/test-eval-foundation.mjs",
     "test:all": "npm run build && npm run format:check && npm run lint && npm run typecheck && npm test",
     "test:external-host": "vitest run --config vitest.external-host.config.mts",
     "test:external-host:chat": "vitest run --config vitest.external-host.config.mts -t \"Claude Chat\"",

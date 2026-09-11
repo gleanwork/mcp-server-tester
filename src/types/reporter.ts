@@ -15,6 +15,7 @@ import type {
   UsageMetrics,
 } from './index.js';
 import type { EvalResultStoreLike } from '../evals/resultStore.js';
+import type { HostEvidence } from '../evals/evalFrameworkTypes.js';
 import type {
   ExternalHostCorrelationConfig,
   ExternalHostMetadata,
@@ -227,6 +228,8 @@ export interface IterationResult {
     }>;
     missed: Array<{ name: string }>;
   };
+  /** Evidence level retained even when raw responses are redacted. */
+  hostEvidence?: HostEvidence;
   /** Token usage from mcp_host LLM simulation in this iteration */
   hostUsage?: UsageMetrics;
   /** External host metadata for this iteration */
@@ -441,6 +444,9 @@ export interface EvalCaseResult {
       name: string;
     }>;
   };
+
+  /** Evidence level retained in persisted comparisons after response redaction. */
+  hostEvidence?: HostEvidence;
 
   /**
    * Aggregate token usage from mcp_host LLM simulation for this case.

@@ -30,15 +30,7 @@
     "servers": {
       "type": "array",
       "description": "The MCP server set under test. Each entry is an MCPConfig.",
-      "items": {
-        "type": "object",
-        "required": ["transport"],
-        "additionalProperties": true,
-        "properties": {
-          "transport": { "enum": ["http", "stdio"] },
-          "label": { "type": "string", "minLength": 1 }
-        }
-      }
+      "items": { "$ref": "#/definitions/mcpConfig" }
     },
     "host": {
       "type": "object",
@@ -61,7 +53,12 @@
         "properties": {
           "name": { "type": "string", "minLength": 1 },
           "servers": { "$ref": "#/properties/servers" },
-          "host": { "$ref": "#/properties/host" },
+          "host": {
+            "type": "object",
+            "description": "Partial patch to the base host. The effective host must have a type.",
+            "additionalProperties": true,
+            "properties": { "type": { "type": "string", "minLength": 1 } }
+          },
           "toolMap": { "$ref": "#/properties/toolMap" },
           "toolOverrides": { "$ref": "#/definitions/toolOverrideVariant" },
           "scenarioTemplate": { "type": "string" },
@@ -105,6 +102,128 @@
     "requireEvalEndpoint": { "type": "boolean" }
   },
   "definitions": {
+    "mcpConfig": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "transport": { "type": "string", "const": "stdio" },
+            "label": { "type": "string", "minLength": 1 },
+            "command": { "type": "string", "minLength": 1 },
+            "args": { "type": "array", "items": { "type": "string" } },
+            "cwd": { "type": "string" },
+            "env": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "type": "string" }
+            },
+            "capabilities": {
+              "type": "object",
+              "properties": {
+                "sampling": {
+                  "type": "object",
+                  "propertyNames": { "type": "string" },
+                  "additionalProperties": {}
+                },
+                "roots": {
+                  "type": "object",
+                  "properties": { "listChanged": { "type": "boolean" } },
+                  "required": ["listChanged"]
+                }
+              }
+            },
+            "connectTimeoutMs": { "type": "number", "exclusiveMinimum": 0 },
+            "requestTimeoutMs": { "type": "number", "exclusiveMinimum": 0 },
+            "callTimeoutMs": { "type": "number", "exclusiveMinimum": 0 },
+            "quiet": { "type": "boolean" }
+          },
+          "required": ["transport", "command"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "transport": { "type": "string", "const": "http" },
+            "label": { "type": "string", "minLength": 1 },
+            "serverUrl": { "type": "string", "format": "uri" },
+            "headers": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": { "type": "string" }
+            },
+            "capabilities": {
+              "type": "object",
+              "properties": {
+                "sampling": {
+                  "type": "object",
+                  "propertyNames": { "type": "string" },
+                  "additionalProperties": {}
+                },
+                "roots": {
+                  "type": "object",
+                  "properties": { "listChanged": { "type": "boolean" } },
+                  "required": ["listChanged"]
+                }
+              }
+            },
+            "connectTimeoutMs": { "type": "number", "exclusiveMinimum": 0 },
+            "requestTimeoutMs": { "type": "number", "exclusiveMinimum": 0 },
+            "callTimeoutMs": { "type": "number", "exclusiveMinimum": 0 },
+            "auth": {
+              "type": "object",
+              "properties": {
+                "accessToken": { "type": "string" },
+                "oauth": {
+                  "type": "object",
+                  "properties": {
+                    "serverUrl": { "type": "string", "format": "uri" },
+                    "scopes": {
+                      "type": "array",
+                      "items": { "type": "string" }
+                    },
+                    "resource": { "type": "string", "format": "uri" },
+                    "authStatePath": { "type": "string" },
+                    "clientId": { "type": "string" },
+                    "clientSecret": { "type": "string" },
+                    "redirectUri": { "type": "string", "format": "uri" }
+                  },
+                  "required": ["serverUrl"]
+                },
+                "clientCredentials": {
+                  "type": "object",
+                  "properties": {
+                    "clientId": { "type": "string" },
+                    "clientSecret": { "type": "string" },
+                    "tokenEndpoint": { "type": "string", "format": "uri" },
+                    "scopes": { "type": "array", "items": { "type": "string" } }
+                  }
+                }
+              }
+            },
+            "proxy": {
+              "type": "object",
+              "properties": { "url": { "type": "string", "format": "uri" } },
+              "required": ["url"]
+            },
+            "retryAttempts": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tls": {
+              "type": "object",
+              "properties": {
+                "ca": { "type": "string" },
+                "cert": { "type": "string" },
+                "key": { "type": "string" },
+                "rejectUnauthorized": { "type": "boolean" }
+              }
+            }
+          },
+          "required": ["transport", "serverUrl"]
+        }
+      ]
+    },
     "toolOverrideVariant": {
       "type": "object",
       "required": ["id", "tools"],

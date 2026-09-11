@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import type { MCPConfig } from '../config/mcpConfig.js';
+import { MCPConfigSchema, type MCPConfig } from '../config/mcpConfig.js';
 import type { ToolOverrideVariant } from '../types/index.js';
 
 /** A tagged configuration block resolved by a public registry. */
@@ -19,6 +19,9 @@ export interface DatasetConfig extends TaggedConfig {
 /** A host implementation declaration. Host-specific options are plugin-owned. */
 export type HostConfig = TaggedConfig;
 
+/** An arm may patch options while inheriting the base host's type. */
+export type HostConfigPatch = Partial<HostConfig>;
+
 /** A judge, metric, or other named extension declaration. */
 export interface ExtensionConfig extends TaggedConfig {
   name?: string;
@@ -28,7 +31,7 @@ export interface ExtensionConfig extends TaggedConfig {
 export interface EvalArm {
   name: string;
   servers?: MCPConfig[];
-  host?: HostConfig;
+  host?: HostConfigPatch;
   toolMap?: Record<string, string[]>;
   toolOverrides?: ToolOverrideVariant;
   scenarioTemplate?: string;
@@ -72,12 +75,8 @@ export const TaggedConfigSchema = z
 const DatasetConfigSchema = z.union([z.string().min(1), TaggedConfigSchema]);
 const ExtensionConfigSchema = z.union([z.string().min(1), TaggedConfigSchema]);
 
-const ServerConfigSchema = z
-  .object({
-    transport: z.enum(['http', 'stdio']),
-    label: z.string().min(1).optional(),
-  })
-  .passthrough();
+const ServerConfigSchema = MCPConfigSchema;
+const HostConfigPatchSchema = TaggedConfigSchema.partial();
 
 const ToolMapSchema = z.record(z.string(), z.array(z.string()));
 
@@ -103,7 +102,7 @@ const EvalArmSchema = z
   .object({
     name: z.string().min(1),
     servers: z.array(ServerConfigSchema).optional(),
-    host: TaggedConfigSchema.optional(),
+    host: HostConfigPatchSchema.optional(),
     toolMap: ToolMapSchema.optional(),
     toolOverrides: ToolOverrideVariantSchema.optional(),
     scenarioTemplate: z.string().optional(),

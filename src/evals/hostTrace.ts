@@ -30,6 +30,9 @@ export function hostTraceToExecution(
             event.server && servers.length > 1
               ? `${event.server}.${event.name}`
               : event.name,
+          kind: event.kind,
+          source: event.source,
+          server: event.server,
           arguments: event.arguments ?? {},
           output: event.output,
           id: event.id,
@@ -57,14 +60,22 @@ export function simulationToHostTrace(
       const server = servers.find(
         (server) => server.label && call.name.startsWith(`${server.label}.`)
       );
+      const source =
+        call.source ?? (server || servers.length === 1 ? 'mcp' : 'host');
       return {
         kind: 'tool_call',
-        source: server || servers.length === 1 ? 'mcp' : 'host',
-        name: server ? call.name.slice(server.label!.length + 1) : call.name,
-        // Preserve labels even for one server; matching may use unqualified names.
+        source,
+        name:
+          server && call.source !== 'host'
+            ? call.name.slice(server.label!.length + 1)
+            : call.name,
+        // Explicit parser provenance wins over the legacy server-count fallback.
         server:
-          server?.label ??
-          (servers.length === 1 ? servers[0]?.label : undefined),
+          source === 'host'
+            ? undefined
+            : (call.server ??
+              server?.label ??
+              (servers.length === 1 ? servers[0]?.label : undefined)),
         arguments: call.arguments,
         output: call.output,
         id: call.id,

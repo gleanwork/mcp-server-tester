@@ -234,6 +234,12 @@ export interface MCPHostConfig {
  * A tool call made by the LLM
  */
 export interface LLMToolCall {
+  /** Explicit provenance, when known (do not infer native tools as MCP). */
+  source?: 'mcp' | 'host';
+  /** MCP server label, independent of the canonical tool name. */
+  server?: string;
+  /** Original provider-encoded name, retained for diagnostics. */
+  rawName?: string;
   /** Tool name */
   name: string;
   /** Tool arguments (as provided by LLM) */

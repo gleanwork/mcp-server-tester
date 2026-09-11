@@ -499,14 +499,18 @@ import {
 
 const baseline = await loadStoredEvalRunnerResult(store, { id: 'baseline' });
 const candidate = await loadStoredEvalRunnerResult(store, { id: 'candidate' });
-const comparison = compareEvalRuns({ baseline, candidate });
+const comparison = compareEvalRuns({
+  baseline: baseline.data,
+  candidate: candidate.data,
+});
 
 await saveEvalRunComparison({ store, comparison, id: 'candidate-comparison' });
 ```
 
 **Result Structure:**
 
-```typescript snippet=src/evals/evalRunner.ts#L128-L196
+```typescript snippet=src/evals/evalRunner.ts#L129-L203
+ */
 export interface EvalRunnerResult {
   /**
    * Total number of cases
@@ -576,6 +580,11 @@ export interface EvalRunnerResult {
    * Experiment tracking metadata captured at run time.
    */
   metadata?: EvalRunMetadata;
+
+  /**
+   * Aggregate token usage from all mcp_host LLM simulations across all cases.
+   */
+  totalHostUsage?: UsageMetrics;
 ```
 
 ### `runVariantExperiment(options, context)`
@@ -1150,7 +1159,7 @@ interface MCPConformanceResult {
 
 ### `EvalExpectBlock`
 
-```typescript snippet=src/evals/datasetTypes.ts#L193-L291
+```typescript snippet=src/evals/datasetTypes.ts#L198-L299
 /**
  * Unified expectation block for eval cases
  *
@@ -1221,8 +1230,11 @@ export interface EvalExpectBlock {
   toolsTriggered?: {
     /** Expected tool calls */
     calls: Array<{
-      /** Tool name */
+      /** Tool or explicitly selected host event name. */
       name: string;
+      kind?: HostEvent['kind'];
+      source?: HostEvent['source'];
+      server?: string;
       /** Expected arguments (partial match — extra keys are allowed) */
       arguments?: Record<string, unknown>;
       /** Whether this call MUST have been made (default: true) */
@@ -1254,7 +1266,7 @@ export interface EvalExpectBlock {
 
 ### `EvalCase`
 
-````typescript snippet=src/evals/datasetTypes.ts#L24-L151
+````typescript snippet=src/evals/datasetTypes.ts#L25-L152
 /**
  * A single eval test case
  *

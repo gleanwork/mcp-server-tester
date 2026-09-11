@@ -243,7 +243,11 @@ export function validateManifestRegistrations(
       ...arm,
       servers,
       host: arm.host
-        ? effectiveHost(manifest, { ...manifest.host, ...arm.host })
+        ? effectiveHost(manifest, {
+            ...manifest.host,
+            ...arm.host,
+            type: arm.host.type ?? manifest.host?.type ?? 'claude-cli',
+          })
         : host,
       metrics: arm.metrics ? parseMetrics(arm.metrics) : metrics,
       judges: arm.judges ? parseJudges(arm.judges) : judges,

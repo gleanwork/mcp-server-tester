@@ -26,6 +26,9 @@ jobs:
 
       - run: npm run build
 
+      - name: Public evaluation foundation contracts
+        run: npm run test:eval-foundation
+
       - run: npm test
 
       - name: Install Playwright browsers
