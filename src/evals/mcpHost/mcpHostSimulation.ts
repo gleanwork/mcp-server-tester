@@ -95,7 +95,23 @@ export async function simulateMCPHost(
           `Provide { command } with a shell command containing {{scenario}}.`
       );
     }
-    return runCLIHost(config.cli, scenario);
+    if (
+      config.temperature !== undefined ||
+      config.maxTokens !== undefined ||
+      config.maxToolCalls !== undefined
+    ) {
+      throw new Error(
+        'CLI hosts do not support temperature, maxTokens or maxToolCalls.'
+      );
+    }
+    return runCLIHost(
+      {
+        ...config.cli,
+        timeout: config.timeout ?? config.cli.timeout,
+        env: { ...config.env, ...config.cli.env },
+      },
+      scenario
+    );
   }
 
   if (hostType === 'browser' || hostType === 'desktop') {

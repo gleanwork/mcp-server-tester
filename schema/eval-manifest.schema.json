@@ -173,6 +173,7 @@
               "type": "object",
               "properties": {
                 "accessToken": { "type": "string" },
+                "accessTokenEnv": { "type": "string", "minLength": 1 },
                 "oauth": {
                   "type": "object",
                   "properties": {

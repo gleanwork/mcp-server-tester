@@ -6,6 +6,11 @@ import {
   listMetrics,
   registerMetric as registerFrameworkMetric,
 } from './frameworkRegistries.js';
+/**
+ * Tagged options are passed to compute without routing keys (type/metric/name).
+ * Legacy params are flattened for compatibility; keys may not also occur at the
+ * top level, since choosing either value would silently discard configuration.
+ */
 export type MetricSpec =
   | string
   | {
@@ -13,6 +18,7 @@ export type MetricSpec =
       type?: string;
       name?: string;
       params?: Record<string, unknown>;
+      [option: string]: unknown;
     };
 
 import type {
@@ -200,9 +206,12 @@ function parameterizedJudgeMetric(
       },
       passMetric ? rateAggregation : meanAggregation
     ),
-    schema: z
-      .object({ params: z.object({ judge: z.string().min(1) }) })
-      .passthrough(),
+    schema: z.union([
+      z.object({ judge: z.string().min(1) }).passthrough(),
+      z
+        .object({ params: z.object({ judge: z.string().min(1) }) })
+        .passthrough(),
+    ]),
   };
 }
 
@@ -250,7 +259,7 @@ export const BUILT_IN_METRICS: Record<string, MetricDefinition> =
           ? usage.inputTokens +
               (usage.cacheReadInputTokens ?? 0) +
               (usage.cacheCreationInputTokens ?? 0)
-          : 0;
+          : null;
       },
       meanAggregation,
       'tokens'
@@ -409,6 +418,29 @@ function slug(value: string): string {
   return value.replace(/-/g, '_');
 }
 
+function metricOptions(spec: MetricSpec): Record<string, unknown> {
+  if (typeof spec === 'string') return {};
+  const options = Object.fromEntries(
+    Object.entries(spec).filter(
+      ([key]) => !['metric', 'type', 'name', 'params'].includes(key)
+    )
+  );
+  for (const [key, value] of Object.entries(spec.params ?? {})) {
+    if (Object.hasOwn(options, key)) {
+      throw new Error(
+        `Ambiguous metric option "${key}": specify it at the top level or in params, not both.`
+      );
+    }
+    Object.defineProperty(options, key, {
+      value,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+  }
+  return options;
+}
+
 /** Resolve one config metric, including parameterized judge metrics. */
 export function resolveMetric(
   spec: MetricSpec,
@@ -416,7 +448,7 @@ export function resolveMetric(
 ): ResolvedMetric {
   const name =
     typeof spec === 'string' ? spec : (spec.metric ?? spec.type ?? spec.name);
-  const params = typeof spec === 'string' ? {} : (spec.params ?? {});
+  const params = metricOptions(spec);
   if (!name) throw new Error('Metric configuration requires a type or name.');
   const base = registry[name];
   if (base) {

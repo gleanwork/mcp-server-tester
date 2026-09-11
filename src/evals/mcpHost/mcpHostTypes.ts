@@ -174,6 +174,10 @@ export interface BrowserConfig {
  * Configuration for MCP host simulation
  */
 export interface MCPHostConfig {
+  /** Execution-local environment overrides; never assigned to process.env. */
+  env?: Record<string, string | undefined>;
+  /** End-to-end SDK execution deadline in milliseconds. */
+  timeout?: number;
   /**
    * Host type for the simulation.
    *

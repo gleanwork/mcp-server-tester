@@ -2,13 +2,19 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
-import type { MCPConfig } from '../config/mcpConfig.js';
+import { MCPConfigSchema, type MCPConfig } from '../config/mcpConfig.js';
+import {
+  GenerationOptions,
+  ProviderSchema,
+  hostEnvironment,
+  overrideHostTools,
+  type HostEnvironment,
+} from './mcpHost/hostOptions.js';
 import {
   createMCPClientForConfig,
   closeMCPClient,
 } from '../mcp/clientFactory.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
-import { createToolOverrideMCP } from './evalRunner.js';
 import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
 import type {
   HostRunInput,
@@ -26,6 +32,10 @@ async function runBuiltinHost(
   context: HostRunContext,
   factory: (options: BuiltinHostOptions) => MCPHostConfig
 ): Promise<HostRunResult> {
+  const env = hostEnvironment(
+    input as HostRunInput & { env?: HostEnvironment },
+    context as HostRunContext & { env?: HostEnvironment }
+  );
   const options = { ...input, host, ...context };
   const case_ = {
     scenario: input.scenario,
@@ -33,8 +43,9 @@ async function runBuiltinHost(
   };
   if (!input.scenario) throw new Error('Hosts require a scenario.');
   const config = {
-    ...factory({ ...options.host, servers: options.servers }),
+    ...factory({ ...options.host, servers: options.servers, env }),
     ...case_.mcpHostConfig,
+    env,
   };
   const clients: Array<Awaited<ReturnType<typeof createMCPClientForConfig>>> =
     [];
@@ -49,6 +60,8 @@ async function runBuiltinHost(
       string,
       { client: (typeof clients)[number]; name: string }
     >();
+    const overrides =
+      options.arm?.toolOverrides ?? options.manifest.toolOverrides;
     const mcp: MCPFixtureApi = {
       get client() {
         if (!clients[0]) throw new Error('No MCP client for this host.');
@@ -66,10 +79,15 @@ async function runBuiltinHost(
                 ? `${options.servers[index]!.label}.${tool.name}`
                 : tool.name;
             routes.set(name, { client, name: tool.name });
-            tools.push({ ...tool, name });
+            tools.push({ ...tool, server: options.servers[index]!.label });
           }
         }
-        return tools;
+        return overrideHostTools(tools, overrides).map(
+          ({ server, ...tool }) => ({
+            ...tool,
+            name: clients.length > 1 ? `${server}.${tool.name}` : tool.name,
+          })
+        );
       },
       async callTool(name, args) {
         if (!routes.size) await this.listTools();
@@ -91,17 +109,11 @@ async function runBuiltinHost(
         config.cli.args[position + 1] = file;
       }
     }
-    const overrides =
-      options.arm?.toolOverrides ?? options.manifest.toolOverrides;
     if (overrides && config.hostType === 'cli')
       throw new Error(
         'CLI description overrides require a host plugin that exposes overridden tools.'
       );
-    const response = await simulateMCPHost(
-      overrides ? createToolOverrideMCP(mcp, overrides) : mcp,
-      case_.scenario,
-      config
-    );
+    const response = await simulateMCPHost(mcp, case_.scenario, config);
     return simulationToHostTrace(response, input.servers);
   } finally {
     await Promise.allSettled(clients.map(closeMCPClient));
@@ -110,6 +122,10 @@ async function runBuiltinHost(
 }
 
 export interface BuiltinHostOptions {
+  env?: HostEnvironment;
+  temperature?: number;
+  maxTokens?: number;
+  apiKeyEnvVar?: string;
   model?: string;
   maxToolCalls?: number;
   timeout?: number;
@@ -126,7 +142,31 @@ export interface BuiltinHostOptions {
  * Built-in client host configs. Organization-specific plugin wiring stays
  * outside the framework and is provided through generic plugin options.
  */
-const BuiltinHostSchema = z.object({}).passthrough();
+const SdkHostSchema = z
+  .object({
+    type: z.literal('vercel-sdk').optional(),
+    ...GenerationOptions,
+    provider: ProviderSchema.optional(),
+    apiKeyEnvVar: z.string().min(1).optional(),
+    env: z.record(z.string(), z.string().optional()).optional(),
+    server: MCPConfigSchema.optional(),
+    servers: z.array(MCPConfigSchema).optional(),
+  })
+  .strict();
+const CliHostSchema = z
+  .object({
+    type: z.literal('claude-cli').optional(),
+    model: GenerationOptions.model,
+    timeout: GenerationOptions.timeout,
+    provider: z.enum(['anthropic', 'vertex', 'vertex-anthropic']).optional(),
+    apiToken: z.string().optional(),
+    pluginDir: z.string().optional(),
+    pluginMcpUrl: z.string().optional(),
+    env: z.record(z.string(), z.string().optional()).optional(),
+    server: MCPConfigSchema.optional(),
+    servers: z.array(MCPConfigSchema).optional(),
+  })
+  .strict();
 let builtinsRegistered = false;
 
 export function registerBuiltinHosts(): void {
@@ -134,7 +174,7 @@ export function registerBuiltinHosts(): void {
   for (const [name, factory] of Object.entries(BUILTIN_HOSTS)) {
     registerHost({
       name,
-      schema: BuiltinHostSchema,
+      schema: name === 'vercel-sdk' ? SdkHostSchema : CliHostSchema,
       createConfig: (options) => factory(options ?? {}),
       evidence: 'structured',
       run: (input, config, context) =>
@@ -165,7 +205,13 @@ const BUILTIN_HOSTS: Record<
 };
 
 function vercelSdkHost(options: BuiltinHostOptions): MCPHostConfig {
+  SdkHostSchema.parse(options);
   return {
+    timeout: options.timeout,
+    temperature: options.temperature,
+    maxTokens: options.maxTokens,
+    apiKeyEnvVar: options.apiKeyEnvVar,
+    env: options.env,
     hostType: 'sdk',
     provider: (options.provider as MCPHostConfig['provider']) ?? 'anthropic',
     model: options.model ?? 'claude-sonnet-4-20250514',
@@ -174,19 +220,46 @@ function vercelSdkHost(options: BuiltinHostOptions): MCPHostConfig {
 }
 
 function claudeCliHost(options: BuiltinHostOptions): MCPHostConfig {
-  const provider = options.provider ?? 'anthropic';
+  CliHostSchema.parse(options);
+  const env = { ...process.env, ...options.env };
+  for (const server of [
+    ...(options.servers ?? []),
+    ...(options.server ? [options.server] : []),
+  ]) {
+    if (server.transport !== 'http') continue;
+    const unsupported = [
+      server.auth?.clientCredentials && 'clientCredentials',
+      server.auth?.oauth && 'oauth',
+      server.auth?.accessTokenEnv &&
+        !server.auth.accessToken &&
+        'unresolved accessTokenEnv',
+      server.tls && 'tls/mTLS',
+      server.proxy && 'proxy',
+      server.retryAttempts !== undefined && 'retryAttempts',
+      server.connectTimeoutMs !== undefined && 'connectTimeoutMs',
+      server.requestTimeoutMs !== undefined && 'requestTimeoutMs',
+      server.callTimeoutMs !== undefined && 'callTimeoutMs',
+      server.capabilities && 'capabilities',
+    ].filter(Boolean);
+    if (unsupported.length)
+      throw new Error(
+        `claude-cli cannot forward connection policy for ${server.label ?? server.serverUrl}: ${unsupported.join(', ')}. Use an SDK host or explicit proxy.`
+      );
+  }
+  const provider =
+    options.provider === 'vertex-anthropic'
+      ? 'vertex'
+      : (options.provider ?? 'anthropic');
 
   const server = options.server;
   const defaultServerUrl =
-    server?.transport === 'http'
-      ? server.serverUrl
-      : process.env.MCP_SERVER_URL;
+    server?.transport === 'http' ? server.serverUrl : env.MCP_SERVER_URL;
   const apiToken =
     options.apiToken ??
     (server?.transport === 'http' ? server.auth?.accessToken : undefined) ??
-    process.env.MCP_ACCESS_TOKEN ??
+    env.MCP_ACCESS_TOKEN ??
     '';
-  const pluginDir = options.pluginDir ?? process.env.MCP_PLUGIN_DIR ?? '';
+  const pluginDir = options.pluginDir ?? env.MCP_PLUGIN_DIR ?? '';
 
   const mcpServers: Record<string, unknown> = server
     ? server.transport === 'http'
@@ -222,10 +295,9 @@ function claudeCliHost(options: BuiltinHostOptions): MCPHostConfig {
 
   if (pluginDir) {
     const dataDir =
-      process.env.MCP_PLUGIN_DATA_DIR ??
+      env.MCP_PLUGIN_DATA_DIR ??
       path.join(os.homedir(), '.mcp-server-tester', 'plugins');
-    const serverUrl =
-      options.pluginMcpUrl ?? process.env.MCP_PLUGIN_SERVER_URL ?? '';
+    const serverUrl = options.pluginMcpUrl ?? env.MCP_PLUGIN_SERVER_URL ?? '';
     fs.mkdirSync(dataDir, { recursive: true });
     fs.writeFileSync(
       path.join(dataDir, 'mcp-server-url.json'),
@@ -240,7 +312,7 @@ function claudeCliHost(options: BuiltinHostOptions): MCPHostConfig {
           ENABLE_HITL: 'false',
           CLAUDE_PLUGIN_DATA: dataDir,
         },
-        alwaysLoad: process.env.MCP_PLUGIN_ALWAYS_LOAD !== '0',
+        alwaysLoad: env.MCP_PLUGIN_ALWAYS_LOAD !== '0',
       };
     }
   }
@@ -300,6 +372,7 @@ function claudeCliHost(options: BuiltinHostOptions): MCPHostConfig {
       outputFormat: 'stream-json',
       timeout: options.timeout ?? 180_000,
       env: {
+        ...env,
         CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
         CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1',
         ...(provider === 'vertex'
@@ -307,12 +380,10 @@ function claudeCliHost(options: BuiltinHostOptions): MCPHostConfig {
               ANTHROPIC_API_KEY: undefined,
               CLAUDE_CODE_USE_VERTEX: '1',
               ANTHROPIC_VERTEX_PROJECT_ID:
-                process.env.ANTHROPIC_VERTEX_PROJECT_ID ??
-                process.env.GOOGLE_VERTEX_PROJECT,
+                env.ANTHROPIC_VERTEX_PROJECT_ID ?? env.GOOGLE_VERTEX_PROJECT,
             }
           : { CLAUDE_CODE_USE_VERTEX: undefined }),
       },
     },
-    maxToolCalls: options.maxToolCalls ?? 5,
   };
 }

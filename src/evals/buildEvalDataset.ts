@@ -7,6 +7,7 @@ import {
 import type { EvalManifest } from './evalManifest.js';
 import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
 import { loadEvalDatasetFromObject } from './datasetLoader.js';
+import { normalizeSuiteControls } from './frameworkRegistries.js';
 
 // Source ingestion must not silently discard noncanonical fields. In particular,
 // dropping an assertion field can turn an intended failure into a passing case.
@@ -53,7 +54,23 @@ export function buildEvalDataset(
     );
   }
   const dataset = loadEvalDatasetFromObject(result.data);
-  return manifest.maxCases && dataset.cases.length > manifest.maxCases
-    ? { ...dataset, cases: dataset.cases.slice(0, manifest.maxCases) }
-    : dataset;
+  return selectEvalCases(dataset, manifest);
+}
+
+/** Apply the same tag selection and case cap to built-in and plugin datasets. */
+export function selectEvalCases(
+  dataset: EvalDataset,
+  manifest: EvalManifest
+): EvalDataset {
+  const controls = normalizeSuiteControls(manifest);
+  const tags = controls.filterTags as string[] | undefined;
+  const cases = tags?.length
+    ? dataset.cases.filter((evalCase) =>
+        evalCase.tags?.some((tag) => tags.includes(tag))
+      )
+    : dataset.cases;
+  return {
+    ...dataset,
+    cases: controls.maxCases ? cases.slice(0, controls.maxCases) : cases,
+  };
 }

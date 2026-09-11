@@ -28,6 +28,8 @@ describe('parseStreamJson', () => {
     expect(result.toolCalls).toHaveLength(1);
     expect(result.toolCalls[0]).toEqual({
       name: 'search',
+      source: 'host',
+      rawName: 'search',
       arguments: { query: 'test' },
       id: 'call_1',
     });
@@ -281,6 +283,8 @@ describe('parseStreamJson', () => {
     // Payload stored once, on the call.
     expect(result.toolCalls[0]).toEqual({
       name: 'search',
+      source: 'host',
+      rawName: 'search',
       arguments: { query: 'abcd' },
       id: 'call_1',
       output: '{"abc":"xyz"}',

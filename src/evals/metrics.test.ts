@@ -123,10 +123,111 @@ describe('computeMetrics', () => {
     expect(metrics.perCase.one!.judge_score).toEqual({ quality: 0.9 });
     expect(metrics.perCase.two!.cost_usd).toBeNull();
     expect(metrics.aggregated.passed_rate).toBe(0.5);
-    expect(metrics.aggregated.input_tokens_mean).toBe(8.5);
+    expect(metrics.perCase.two!.input_tokens).toBeNull();
+    expect(metrics.aggregated.input_tokens_mean).toBe(17);
     expect(metrics.aggregated.cost_usd_mean).toBe(0.2);
     expect(metrics.aggregated.quality_score_mean).toBe(0.9);
     expect(metrics.aggregated.judge_score).toEqual({ quality: 0.9 });
+  });
+
+  it('keeps unknown input usage null while including measured zero in the mean', () => {
+    const unknown = computeMetrics(['input_tokens'], [result('unknown', true)]);
+    expect(unknown.perCase.unknown?.input_tokens).toBeNull();
+    expect(unknown.aggregated).not.toHaveProperty('input_tokens_mean');
+    const measured = computeMetrics(
+      ['input_tokens'],
+      [
+        result('unknown', true),
+        result('zero', true, {
+          usage: {
+            inputTokens: 0,
+            outputTokens: 0,
+            totalCostUsd: 0,
+            durationMs: 0,
+          },
+        }),
+        result('known', true, {
+          usage: {
+            inputTokens: 10,
+            outputTokens: 1,
+            totalCostUsd: 0,
+            durationMs: 0,
+          },
+        }),
+      ]
+    );
+    expect(measured.perCase.zero?.input_tokens).toBe(0);
+    expect(measured.aggregated.input_tokens_mean).toBe(5);
+  });
+
+  it('passes tagged metric options through to compute without routing metadata', () => {
+    const compute = vi.fn(
+      (_row: EvalCaseResult, options?: Record<string, unknown>) =>
+        Number(options?.weight)
+    );
+    registerMetric({
+      name: 'weighted',
+      schema: z.object({ weight: z.number() }),
+      kind: 'continuous',
+      compute,
+    });
+    const metrics = computeMetrics(
+      [{ type: 'weighted', name: 'weighted_alias', weight: 7 }],
+      [result('one', true)]
+    );
+    expect(metrics.perCase.one?.weighted_alias).toBe(7);
+    expect(compute).toHaveBeenCalledWith(expect.anything(), { weight: 7 });
+  });
+
+  it('retains parsed top-level defaults and transforms without reparsing', () => {
+    registerMetric({
+      name: 'weighted-parsed',
+      schema: z.object({
+        weight: z
+          .number()
+          .default(3)
+          .transform((value) => value * 2),
+      }),
+      kind: 'continuous',
+      compute: (_row, options) => Number(options?.weight),
+    });
+    const parsed = validateManifestRegistrations({
+      name: 'metrics',
+      datasets: [],
+      metrics: [{ type: 'weighted-parsed', name: 'alias' }],
+    });
+    expect(
+      computeMetrics(parsed.metrics ?? [], [result('one', true)]).perCase.one
+        ?.alias
+    ).toBe(6);
+  });
+
+  it('flattens legacy params only when keys do not overlap top-level options', () => {
+    expect(
+      resolveMetric({ type: 'passed', params: { weight: 7 } }).params
+    ).toEqual({ weight: 7 });
+    expect(
+      resolveMetric({ type: 'passed', weight: 7, params: { offset: 2 } }).params
+    ).toEqual({ weight: 7, offset: 2 });
+    for (const weight of [7, 8]) {
+      expect(() =>
+        resolveMetric({ type: 'passed', weight: 7, params: { weight } })
+      ).toThrow('Ambiguous metric option "weight"');
+    }
+  });
+
+  it('accepts tagged top-level judge options with default output names', () => {
+    const manifest = validateManifestRegistrations({
+      name: 'metrics',
+      datasets: [],
+      metrics: [{ type: 'judge_score_for', judge: 'quality' }],
+    });
+    const metrics = computeMetrics(manifest.metrics ?? [], [
+      result('one', true, {
+        judge: { name: 'quality', pass: true, score: 0.7 },
+      }),
+    ]);
+    expect(metrics.perCase.one?.judge_quality_score).toBe(0.7);
   });
 
   it('extracts text from direct MCP content responses', () => {

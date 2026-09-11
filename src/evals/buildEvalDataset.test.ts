@@ -117,6 +117,25 @@ describe('buildEvalDataset canonical ingestion', () => {
     ).toThrow(/at least one case/);
   });
 
+  it('applies tag selection before nested run.maxCases without changing source data', () => {
+    const raw = {
+      name: 'tagged',
+      cases: [
+        { id: 'skip', toolName: 'search', tags: ['other'] },
+        { id: 'keep', toolName: 'search', tags: ['wanted'] },
+        { id: 'limit', toolName: 'search', tags: ['wanted'] },
+      ],
+    };
+    expect(
+      buildEvalDataset(raw, undefined, {
+        ...manifest,
+        filterTags: ['wanted'],
+        run: { maxCases: 1 },
+      }).cases.map((entry) => entry.id)
+    ).toEqual(['keep']);
+    expect(raw.cases).toHaveLength(3);
+  });
+
   it('truncates validated canonical datasets to maxCases', () => {
     expect(
       buildEvalDataset(

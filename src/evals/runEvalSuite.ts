@@ -26,7 +26,12 @@ import { registerBuiltinHosts } from './builtinHosts.js';
 import { runEvalDataset, executeToolCall } from './evalRunner.js';
 import { hostTraceToExecution } from './hostTrace.js';
 import type { EvalRunnerResult } from './evalRunner.js';
-import { EvalExpectBlockSchema, type EvalDataset } from './datasetTypes.js';
+import {
+  EvalExpectBlockSchema,
+  type EvalDataset,
+  type EvalCase,
+} from './datasetTypes.js';
+import { selectEvalCases } from './buildEvalDataset.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { UsageMetrics } from '../types/index.js';
 import { loadPlugins } from '../plugins/loadPlugins.js';
@@ -60,7 +65,9 @@ export interface RunEvalSuiteResult {
   summary: EvaluationSummary;
 }
 
-async function loadSecretsFile(secretsFile: string): Promise<void> {
+async function loadSecretsFile(
+  secretsFile: string
+): Promise<Record<string, string>> {
   const raw = await fs.readFile(secretsFile, 'utf8');
   let entries: Record<string, unknown>;
   try {
@@ -84,17 +91,29 @@ async function loadSecretsFile(secretsFile: string): Promise<void> {
       entries[key] = value;
     }
   }
-  for (const [key, value] of Object.entries(entries)) {
-    if (typeof value === 'string' && process.env[key] === undefined) {
-      process.env[key] = value;
-    }
-  }
+  return Object.fromEntries(
+    Object.entries(entries).filter(
+      (entry): entry is [string, string] => typeof entry[1] === 'string'
+    )
+  );
 }
 
-function resolveServerSecrets(server: MCPConfig): MCPConfig {
+function resolveServerSecrets(
+  server: MCPConfig,
+  env: Record<string, string | undefined>
+): MCPConfig {
+  if (server.transport === 'stdio')
+    return {
+      ...server,
+      env: Object.fromEntries(
+        Object.entries({ ...env, ...server.env }).filter(
+          (entry): entry is [string, string] => typeof entry[1] === 'string'
+        )
+      ),
+    };
   if (!isHttpConfig(server) || !server.auth?.accessTokenEnv) return server;
   const envName = server.auth.accessTokenEnv;
-  const token = process.env[envName];
+  const token = env[envName];
   if (!token) {
     throw new Error(
       `MCP access token environment variable "${envName}" is not set.`
@@ -114,15 +133,6 @@ function assertEvalEndpoint(server: MCPConfig, manifest: EvalManifest): void {
   }
 }
 
-async function expandDatasetPath(datasetPath: string): Promise<string[]> {
-  const stat = await fs.stat(datasetPath);
-  if (!stat.isDirectory()) return [datasetPath];
-  return (await fs.readdir(datasetPath))
-    .filter((name) => name.endsWith('.json'))
-    .sort()
-    .map((name) => path.join(datasetPath, name));
-}
-
 function selectedArms(manifest: EvalManifest, name?: string): EvalArm[] {
   const arms = manifest.arms?.length
     ? manifest.arms
@@ -138,8 +148,10 @@ function resolveHost(
   arm: EvalArm,
   servers: MCPConfig[]
 ) {
-  const declaration: HostConfig = arm.host ??
-    manifest.host ?? { type: 'claude-cli' };
+  const declaration: HostConfig = {
+    ...(arm.host ?? manifest.host ?? { type: 'claude-cli' }),
+    type: arm.host?.type ?? manifest.host?.type ?? 'claude-cli',
+  };
   const definition: HostDefinition = getHost(declaration.type);
   const config = definition.createConfig?.({
     ...declaration,
@@ -255,19 +267,60 @@ function summarizeArm(
   };
 }
 
+function configuredJudges(
+  evalCase: EvalCase,
+  judges: Array<Record<string, unknown>>,
+  rawJudges: Array<Record<string, unknown>>
+) {
+  const existing = Array.isArray(evalCase.expect?.passesJudge)
+    ? evalCase.expect.passesJudge
+    : evalCase.expect?.passesJudge
+      ? [evalCase.expect.passesJudge]
+      : [];
+  return [
+    ...existing.filter(
+      (item) => !judges.some((judge) => judge.type === item.judge)
+    ),
+    ...judges.map((judge) => {
+      const inherited = existing.find((item) => item.judge === judge.type);
+      const raw =
+        rawJudges.find(
+          (item) => item.type === judge.type && item.name === judge.name
+        ) ?? judge;
+      return {
+        ...inherited,
+        ...judge,
+        judge: judge.type,
+        options: { ...inherited?.options, ...raw },
+        reference:
+          judge.reference ?? inherited?.reference ?? evalCase.canonicalAnswer,
+      };
+    }),
+  ];
+}
+
 export async function runEvalSuite(
   options: RunEvalSuiteOptions
 ): Promise<RunEvalSuiteResult> {
   const rootDir = options.rootDir ?? process.cwd();
-  let manifest = loadEvalManifest(options.manifestPath, { rootDir });
-  const identity = manifestIdentity(manifest);
-  if (options.secretsFile) {
-    await loadSecretsFile(
-      path.isAbsolute(options.secretsFile)
-        ? options.secretsFile
-        : path.resolve(rootDir, options.secretsFile)
-    );
-  }
+  const rawManifest = loadEvalManifest(options.manifestPath, { rootDir });
+  const identity = manifestIdentity(rawManifest);
+  let manifest = rawManifest;
+  const ambientEnv = Object.fromEntries(
+    Object.entries(process.env).filter(
+      (entry): entry is [string, string] => typeof entry[1] === 'string'
+    )
+  );
+  const env = {
+    ...ambientEnv,
+    ...(options.secretsFile
+      ? await loadSecretsFile(
+          path.isAbsolute(options.secretsFile)
+            ? options.secretsFile
+            : path.resolve(rootDir, options.secretsFile)
+        )
+      : {}),
+  };
 
   registerBuiltinDatasetSources();
   registerBuiltinHosts();
@@ -313,17 +366,38 @@ export async function runEvalSuite(
   const armResults: EvaluationArmResult[] = [];
   const allDatasets: RunEvalSuiteResult['datasets'] = [];
   const allResults: EvalCaseResult[] = [];
+  const sourceArm = arms[0] ?? { name: 'default' };
+  const sourceServers = sourceArm.servers ?? manifest.servers ?? [];
+  const sourceHost = resolveHost(manifest, sourceArm, sourceServers);
+  const canonicalDatasets = await Promise.all(
+    datasets.map(async (source) => ({
+      source,
+      dataset: await getDatasetSource(source.type).load(source, {
+        rootDir,
+        manifest: {
+          ...manifest,
+          maxCases: undefined,
+          filterTags: undefined,
+          run: undefined,
+        },
+        hostConfig: sourceHost.config,
+      }),
+    }))
+  );
 
   for (const arm of arms) {
     const servers = options.mcpConfig
       ? [options.mcpConfig]
       : (arm.servers ?? manifest.servers ?? []);
-    const resolvedServers = servers.map(resolveServerSecrets);
+    const resolvedServers = servers.map((server) =>
+      resolveServerSecrets(server, env)
+    );
     resolvedServers.forEach((server) => assertEvalEndpoint(server, manifest));
     const host = resolveHost(manifest, arm, resolvedServers);
-    const effectiveManifest = {
+    const effectiveManifest: EvalManifest = {
       ...manifest,
       ...arm,
+      host: host.declaration,
       name: manifest.name,
       datasets: manifest.datasets,
     };
@@ -331,6 +405,14 @@ export async function runEvalSuite(
       name: string;
       result: EvalRunnerResult;
     }> = [];
+    const rawArm = rawManifest.arms?.find(
+      (candidate) => candidate.name === arm.name
+    ) ?? { name: arm.name };
+    const rawDeclaration: HostConfig = {
+      type: 'claude-cli',
+      ...rawManifest.host,
+      ...rawArm.host,
+    };
     const client = host.definition.run
       ? undefined
       : resolvedServers.length === 1
@@ -341,156 +423,126 @@ export async function runEvalSuite(
       : undefined;
 
     try {
-      for (const source of datasets) {
-        const datasetPaths =
-          source.type === 'file' || source.type === 'dir'
-            ? await expandDatasetPath(
-                path.isAbsolute(String(source.path))
-                  ? String(source.path)
-                  : path.resolve(rootDir, String(source.path))
-              )
-            : [undefined];
-        for (const filePath of datasetPaths) {
-          const sourceConfig = filePath
-            ? { ...source, type: 'file', path: filePath }
-            : source;
-          const datasetSource = getDatasetSource(sourceConfig.type);
-          const dataset = await datasetSource.load(sourceConfig, {
-            rootDir,
-            manifest: effectiveManifest,
-            hostConfig: host.config,
-          });
-          const template = arm.scenarioTemplate ?? manifest.scenarioTemplate;
-          const effectiveDataset: EvalDataset = {
-            ...dataset,
-            cases: dataset.cases.map((evalCase) => ({
-              ...evalCase,
-              ...(evalCase.host
-                ? {
-                    host: parseHostConfig({
-                      ...host.declaration,
-                      ...evalCase.host,
-                    }),
-                  }
-                : {}),
-              ...(effectiveManifest.judges?.length
-                ? {
-                    expect: EvalExpectBlockSchema.parse({
-                      ...evalCase.expect,
-                      passesJudge: [
-                        ...(Array.isArray(evalCase.expect?.passesJudge)
-                          ? evalCase.expect.passesJudge
-                          : evalCase.expect?.passesJudge
-                            ? [evalCase.expect.passesJudge]
-                            : []),
-                        ...(effectiveManifest.judges ?? [])
-                          .filter((judge) => {
-                            const existing = evalCase.expect?.passesJudge;
-                            return !(
-                              Array.isArray(existing)
-                                ? existing
-                                : existing
-                                  ? [existing]
-                                  : []
-                            ).some((config) => config.judge === judge.type);
-                          })
-                          .map((judge) => ({
-                            ...judge,
-                            judge: judge.type,
-                            reference:
-                              judge.reference ?? evalCase.canonicalAnswer,
-                          })),
-                      ],
-                    }),
-                  }
-                : {}),
-              ...(template && evalCase.scenario
-                ? {
-                    scenario: template.replaceAll(
-                      '{{scenario}}',
-                      evalCase.scenario
+      for (const { source, dataset } of canonicalDatasets) {
+        const executionDataset = selectEvalCases(dataset, manifest);
+        const template = arm.scenarioTemplate ?? manifest.scenarioTemplate;
+        const effectiveDataset: EvalDataset = {
+          ...executionDataset,
+          cases: executionDataset.cases.map((evalCase) => ({
+            ...evalCase,
+            ...(evalCase.host
+              ? {
+                  host: parseHostConfig({
+                    ...rawDeclaration,
+                    ...evalCase.host,
+                  }),
+                }
+              : {}),
+            ...(effectiveManifest.judges?.length
+              ? {
+                  expect: EvalExpectBlockSchema.parse({
+                    ...evalCase.expect,
+                    passesJudge: configuredJudges(
+                      evalCase,
+                      effectiveManifest.judges,
+                      (rawArm.judges ?? rawManifest.judges ?? []) as Array<
+                        Record<string, unknown>
+                      >
                     ),
-                  }
-                : {}),
-            })),
-          };
-          const runHost = host.definition.run?.bind(host.definition);
-          const result = await runEvalDataset(
-            {
-              dataset: effectiveDataset,
-              concurrency: manifest.concurrency ?? 1,
-              defaultLlmIterations: manifest.iterations,
-              toolOverrides: arm.toolOverrides ?? manifest.toolOverrides,
-              toolMap: arm.toolMap ?? manifest.toolMap,
-              ...(runHost
-                ? {
-                    executeCase: async (evalCase) => {
-                      const declaration = evalCase.host ?? host.declaration;
-                      if ((evalCase.mode ?? 'direct') === 'direct') {
-                        const selected =
-                          resolvedServers.length === 1
-                            ? resolvedServers[0]
-                            : resolvedServers.find(
-                                (server) =>
-                                  server.label &&
-                                  evalCase.toolName?.startsWith(
-                                    `${server.label}.`
-                                  )
-                              );
-                        if (!selected)
-                          throw new Error(
-                            'Direct cases require one server or a label-qualified tool name.'
-                          );
-                        const directClient =
-                          await createMCPClientForConfig(selected);
-                        try {
-                          const toolName =
-                            selected.label &&
-                            evalCase.toolName?.startsWith(`${selected.label}.`)
-                              ? evalCase.toolName.slice(
-                                  selected.label.length + 1
+                  }),
+                }
+              : {}),
+            ...(template && evalCase.scenario
+              ? {
+                  scenario: template.replaceAll(
+                    '{{scenario}}',
+                    evalCase.scenario
+                  ),
+                }
+              : {}),
+          })),
+        };
+        const sourceConfig = source;
+        const runHost = host.definition.run?.bind(host.definition);
+        const result = await runEvalDataset(
+          {
+            dataset: effectiveDataset,
+            concurrency: manifest.concurrency ?? 1,
+            defaultLlmIterations: manifest.iterations,
+            toolOverrides: arm.toolOverrides ?? manifest.toolOverrides,
+            toolMap: arm.toolMap ?? manifest.toolMap,
+            ...(runHost
+              ? {
+                  executeCase: async (evalCase) => {
+                    const declaration = evalCase.host ?? host.declaration;
+                    if ((evalCase.mode ?? 'direct') === 'direct') {
+                      const selected =
+                        resolvedServers.length === 1
+                          ? resolvedServers[0]
+                          : resolvedServers.find(
+                              (server) =>
+                                server.label &&
+                                evalCase.toolName?.startsWith(
+                                  `${server.label}.`
                                 )
-                              : evalCase.toolName;
-                          return await executeToolCall(
-                            { ...evalCase, toolName },
-                            createMCPFixture(directClient)
-                          );
-                        } finally {
-                          await closeMCPClient(directClient);
-                        }
-                      }
-                      const definition = getHost(declaration.type);
-                      if (!definition.run)
+                            );
+                      if (!selected)
                         throw new Error(
-                          `Host ${declaration.type} must expose run() for per-case dispatch.`
+                          'Direct cases require one server or a label-qualified tool name.'
                         );
-                      const trace = await definition.run(
-                        {
-                          scenario: evalCase.scenario ?? '',
-                          servers: resolvedServers,
-                        },
-                        declaration,
-                        {
-                          manifest: effectiveManifest,
-                          arm,
-                          mcpHostConfig: evalCase.mcpHostConfig,
-                        }
+                      const directClient =
+                        await createMCPClientForConfig(selected);
+                      try {
+                        const toolName =
+                          selected.label &&
+                          evalCase.toolName?.startsWith(`${selected.label}.`)
+                            ? evalCase.toolName.slice(selected.label.length + 1)
+                            : evalCase.toolName;
+                        return await executeToolCall(
+                          { ...evalCase, toolName },
+                          createMCPFixture(directClient)
+                        );
+                      } finally {
+                        await closeMCPClient(directClient);
+                      }
+                    }
+                    const definition = getHost(declaration.type);
+                    if (!definition.run)
+                      throw new Error(
+                        `Host ${declaration.type} must expose run() for per-case dispatch.`
                       );
-                      return hostTraceToExecution(
-                        trace,
-                        definition.evidence ?? 'none',
-                        resolvedServers
-                      );
-                    },
-                  }
-                : {}),
-            },
-            { mcp }
-          );
-          allDatasets.push({ source: sourceConfig, dataset, result });
-          sourceResults.push({ name: dataset.name, result });
-          allResults.push(...result.caseResults);
-        }
+                    const trace = await definition.run(
+                      {
+                        scenario: evalCase.scenario ?? '',
+                        servers: resolvedServers,
+                        env,
+                      },
+                      declaration,
+                      {
+                        manifest: effectiveManifest,
+                        arm,
+                        env,
+                        mcpHostConfig: evalCase.mcpHostConfig,
+                      }
+                    );
+                    return hostTraceToExecution(
+                      trace,
+                      definition.evidence ?? 'none',
+                      resolvedServers
+                    );
+                  },
+                }
+              : {}),
+          },
+          { mcp }
+        );
+        allDatasets.push({
+          source: sourceConfig,
+          dataset: executionDataset,
+          result,
+        });
+        sourceResults.push({ name: executionDataset.name, result });
+        allResults.push(...result.caseResults);
       }
     } finally {
       if (client) await closeMCPClient(client);

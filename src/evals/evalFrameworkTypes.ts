@@ -45,11 +45,15 @@ export interface HostRunOptions {
 export interface HostRunInput {
   scenario: string;
   servers: MCPConfig[];
+  /** Execution-local environment; never persisted. */
+  env?: Record<string, string | undefined>;
 }
 
 export interface HostRunContext {
   manifest: EvalManifest;
   arm?: EvalArm;
+  /** Runtime-only environment isolated per suite. */
+  env?: Record<string, string | undefined>;
   /** Optional compatibility settings for existing SDK/CLI case configurations. */
   mcpHostConfig?: MCPHostConfig;
 }

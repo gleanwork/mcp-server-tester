@@ -29,9 +29,12 @@ export function parseStreamJson(stdout: string): MCPHostSimulationResult {
       for (const block of event.message.content) {
         if (block.type === 'tool_use' && block.name) {
           const rawName = block.name;
-          const mcpMatch = /^mcp__[^_]+__(.+)$/.exec(rawName);
+          const mcpMatch = /^mcp__(.+?)__(.+)$/.exec(rawName);
           toolCalls.push({
-            name: mcpMatch ? mcpMatch[1]! : rawName,
+            name: mcpMatch ? mcpMatch[2]! : rawName,
+            source: mcpMatch ? 'mcp' : 'host',
+            ...(mcpMatch ? { server: mcpMatch[1] } : {}),
+            rawName,
             arguments: block.input ?? {},
             id: block.id,
           });
@@ -125,6 +128,13 @@ export function createJsonParser(paths: {
     const toolCalls: LLMToolCall[] = Array.isArray(rawToolCalls)
       ? rawToolCalls.map((tc: Record<string, unknown>) => ({
           name: typeof tc.name === 'string' ? tc.name : '',
+          ...(tc.source === 'mcp' || tc.source === 'host'
+            ? { source: tc.source }
+            : {}),
+          ...(typeof tc.server === 'string' ? { server: tc.server } : {}),
+          ...(typeof tc.rawName === 'string' ? { rawName: tc.rawName } : {}),
+          ...(typeof tc.id === 'string' ? { id: tc.id } : {}),
+          ...(typeof tc.output === 'string' ? { output: tc.output } : {}),
           arguments: (tc.arguments ?? tc.args ?? {}) as Record<string, unknown>,
         }))
       : [];

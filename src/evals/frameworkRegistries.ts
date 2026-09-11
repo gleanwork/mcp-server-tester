@@ -1,4 +1,4 @@
-import type { ZodType } from 'zod';
+import { z, type ZodType } from 'zod';
 import type {
   DatasetSource,
   MetricDefinition,
@@ -163,6 +163,47 @@ function parseConfig<T extends TaggedConfig>(
   } as T;
 }
 
+const SuiteControlsSchema = z
+  .object({
+    iterations: z.number().int().positive().optional(),
+    maxCases: z.number().int().positive().optional(),
+    concurrency: z.number().int().positive().optional(),
+    filterTags: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
+
+/** Canonical top-level controls, with explicit support for the run namespace. */
+export function normalizeSuiteControls(manifest: EvalManifest): EvalManifest {
+  if (manifest.profile !== undefined) {
+    throw new Error(
+      'Evaluation profile is not supported; use explicit host and run controls.'
+    );
+  }
+  const nested = SuiteControlsSchema.parse(manifest.run ?? {});
+  const top = SuiteControlsSchema.parse(
+    Object.fromEntries(
+      Object.keys(SuiteControlsSchema.shape).map((key) => [key, manifest[key]])
+    )
+  );
+  for (const key of Object.keys(nested) as Array<keyof typeof nested>) {
+    if (
+      top[key] !== undefined &&
+      JSON.stringify(top[key]) !== JSON.stringify(nested[key])
+    ) {
+      throw new Error(
+        `Conflicting evaluation controls: ${key} and run.${key}.`
+      );
+    }
+  }
+  return {
+    ...manifest,
+    ...nested,
+    ...Object.fromEntries(
+      Object.entries(top).filter(([, value]) => value !== undefined)
+    ),
+  };
+}
+
 function parseMetrics(
   configs: ExtensionConfig[] | undefined
 ): ExtensionConfig[] | undefined {
@@ -219,6 +260,7 @@ function validateLabels(
 export function validateManifestRegistrations(
   manifest: EvalManifest
 ): EvalManifest {
+  manifest = normalizeSuiteControls(manifest);
   validateLabels(manifest.servers ?? [], 'the manifest');
   const datasets = manifest.datasets.map((config) =>
     parseConfig(config, getDatasetSource(config.type), 'dataset options')

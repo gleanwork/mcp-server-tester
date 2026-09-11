@@ -13,7 +13,11 @@ import {
   registerJudge,
 } from './frameworkRegistries.js';
 import type { EvalCase, EvalDataset } from './datasetTypes.js';
-import type { HostRunOptions } from './evalFrameworkTypes.js';
+import type {
+  HostRunOptions,
+  HostRunInput,
+  HostRunContext,
+} from './evalFrameworkTypes.js';
 
 const dirs: string[] = [];
 let sequence = 0;
@@ -36,6 +40,11 @@ async function fixture(
   dirs.push(dir);
   const type = `review-host-${sequence++}`;
   const source = `review-source-${sequence++}`;
+  const observe =
+    vi.fn<(input: HostRunInput, context: HostRunContext) => void>();
+  const load = vi.fn(
+    async (): Promise<EvalDataset> => ({ name: 'canonical', cases })
+  );
   registerHost({
     name: type,
     schema: z
@@ -43,6 +52,7 @@ async function fixture(
       .passthrough(),
     evidence: 'structured',
     async run(input, config, context) {
+      observe(input, context);
       const result = await run({
         dataset: { name: 'canonical', cases },
         cases,
@@ -60,9 +70,7 @@ async function fixture(
   registerDatasetSource({
     name: source,
     schema: z.object({ type: z.string() }),
-    async load(): Promise<EvalDataset> {
-      return { name: 'canonical', cases };
-    },
+    load,
   });
   const manifestPath = path.join(dir, 'manifest.json');
   const manifest = {
@@ -73,7 +81,7 @@ async function fixture(
     ...extra,
   };
   await fs.writeFile(manifestPath, JSON.stringify(manifest));
-  return { dir, manifestPath, manifest, run, type };
+  return { dir, manifestPath, manifest, run, type, observe, load };
 }
 const scenario: EvalCase = {
   id: 'same',
@@ -83,6 +91,179 @@ const scenario: EvalCase = {
 };
 
 describe('suite review regressions', () => {
+  it('isolates secrets files across dry, sequential, and concurrent suites', async () => {
+    vi.stubEnv('SUITE_DUMMY_TOKEN', undefined);
+    const f = await fixture([scenario], {
+      servers: [
+        {
+          transport: 'http',
+          serverUrl: 'https://example.com/eval',
+          auth: { accessTokenEnv: 'SUITE_DUMMY_TOKEN' },
+        },
+      ],
+    });
+    const first = path.join(f.dir, 'first.env');
+    const second = path.join(f.dir, 'second.json');
+    await fs.writeFile(
+      first,
+      'SUITE_DUMMY_TOKEN=first-dummy\nSUITE_DUMMY_HOST_KEY=first-host'
+    );
+    await fs.writeFile(
+      second,
+      JSON.stringify({
+        SUITE_DUMMY_TOKEN: 'second-dummy',
+        SUITE_DUMMY_HOST_KEY: 'second-host',
+      })
+    );
+    await runEvalSuite({
+      manifestPath: f.manifestPath,
+      rootDir: f.dir,
+      secretsFile: first,
+      dryRun: true,
+    });
+    expect(process.env.SUITE_DUMMY_TOKEN).toBeUndefined();
+    await runEvalSuite({
+      manifestPath: f.manifestPath,
+      rootDir: f.dir,
+      secretsFile: first,
+    });
+    await runEvalSuite({
+      manifestPath: f.manifestPath,
+      rootDir: f.dir,
+      secretsFile: second,
+    });
+    await Promise.all([
+      runEvalSuite({
+        manifestPath: f.manifestPath,
+        rootDir: f.dir,
+        secretsFile: first,
+      }),
+      runEvalSuite({
+        manifestPath: f.manifestPath,
+        rootDir: f.dir,
+        secretsFile: second,
+      }),
+    ]);
+    expect(
+      f.observe.mock.calls.map(([input]) => input.env?.SUITE_DUMMY_TOKEN)
+    ).toEqual(['first-dummy', 'second-dummy', 'first-dummy', 'second-dummy']);
+    expect(process.env.SUITE_DUMMY_TOKEN).toBeUndefined();
+    await expect(
+      runEvalSuite({ manifestPath: f.manifestPath, rootDir: f.dir })
+    ).rejects.toThrow('SUITE_DUMMY_TOKEN');
+  });
+
+  it('loads canonical datasets once and isolates arm prompts', async () => {
+    const original = { ...scenario, args: { nested: { untouched: true } } };
+    const f = await fixture([original], {
+      arms: [
+        { name: 'a', scenarioTemplate: 'A {{scenario}}' },
+        { name: 'b', scenarioTemplate: 'B {{scenario}}' },
+      ],
+    });
+    const result = await runEvalSuite({
+      manifestPath: f.manifestPath,
+      rootDir: f.dir,
+    });
+    expect(f.load).toHaveBeenCalledTimes(1);
+    expect(f.observe.mock.calls.map(([input]) => input.scenario)).toEqual([
+      'A Find documents',
+      'B Find documents',
+    ]);
+    expect(original.scenario).toBe('Find documents');
+    expect(result.datasets[0]?.dataset).toEqual({
+      name: 'canonical',
+      cases: [original],
+    });
+  });
+
+  it('merges raw base, arm, and case host options before parsing transforms once', async () => {
+    const name = `transform-host-${sequence++}`;
+    const run = vi.fn(async () => ({ finalText: 'OK', events: [] }));
+    registerHost({
+      name,
+      schema: z.object({
+        count: z.number().transform((value) => value * 3),
+        model: z.string(),
+      }),
+      run,
+    });
+    const f = await fixture(
+      [{ ...scenario, host: { type: name, model: 'case' } }],
+      {
+        host: { type: name, count: 2, model: 'base' },
+        arms: [{ name: 'a', host: { model: 'arm' } }],
+      }
+    );
+    await runEvalSuite({ manifestPath: f.manifestPath, rootDir: f.dir });
+    expect(run).toHaveBeenCalledWith(
+      expect.anything(),
+      { type: name, count: 6, model: 'case' },
+      expect.anything()
+    );
+  });
+
+  it('applies run controls and rejects unsupported/conflicting controls', async () => {
+    const f = await fixture(
+      [
+        { ...scenario, id: 'skip', tags: ['other'] },
+        { ...scenario, id: 'selected', tags: ['wanted'] },
+        { ...scenario, id: 'capped', tags: ['wanted'] },
+      ],
+      { filterTags: ['wanted'], run: { iterations: 2, maxCases: 1 } }
+    );
+    const result = await runEvalSuite({
+      manifestPath: f.manifestPath,
+      rootDir: f.dir,
+    });
+    expect(f.run).toHaveBeenCalledTimes(2);
+    expect(result.summary.results.map((entry) => entry.id)).toEqual([
+      'selected',
+    ]);
+    for (const extra of [
+      { profile: 'ignored' },
+      { run: { profile: 'ignored' } },
+      { run: { unknown: true } },
+      { iterations: 3, run: { iterations: 2 } },
+    ]) {
+      const invalid = await fixture([scenario], extra);
+      await expect(
+        runEvalSuite({
+          manifestPath: invalid.manifestPath,
+          rootDir: invalid.dir,
+          dryRun: true,
+        })
+      ).rejects.toThrow();
+      expect(invalid.run).not.toHaveBeenCalled();
+    }
+  });
+
+  it('traverses recursive directories through the public suite source path', async () => {
+    const f = await fixture([scenario]);
+    const sourceDir = path.join(f.dir, 'datasets');
+    await fs.mkdir(path.join(sourceDir, 'nested'), { recursive: true });
+    await fs.writeFile(
+      path.join(sourceDir, 'a.json'),
+      JSON.stringify({ name: 'a', cases: [{ ...scenario, id: 'a' }] })
+    );
+    await fs.writeFile(
+      path.join(sourceDir, 'nested', 'b.json'),
+      JSON.stringify({ name: 'b', cases: [{ ...scenario, id: 'b' }] })
+    );
+    await fs.writeFile(
+      f.manifestPath,
+      JSON.stringify({
+        ...f.manifest,
+        datasets: [{ type: 'dir', path: sourceDir, recursive: true }],
+      })
+    );
+    const result = await runEvalSuite({
+      manifestPath: f.manifestPath,
+      rootDir: f.dir,
+    });
+    expect(result.summary.results.map((entry) => entry.id)).toEqual(['a', 'b']);
+  });
+
   it('does not mutate TLS or per-suite environment settings, including dry runs', async () => {
     vi.stubEnv('NODE_TLS_REJECT_UNAUTHORIZED', '1');
     vi.stubEnv('EVAL_ITERATIONS', 'untouched');
@@ -141,6 +322,21 @@ describe('suite review regressions', () => {
     expect(alternate.run).toHaveBeenCalledTimes(2);
     expect(alternate.run.mock.calls[0]?.[0].host.model).toBe('case-model');
   });
+  it('retains transformed manifest judge options through suite execution', async () => {
+    const name = `options-judge-${sequence++}`;
+    const evaluate = vi.fn(async () => ({ score: 1 }));
+    registerJudge({
+      name,
+      schema: z.object({ count: z.number().transform((value) => value * 3) }),
+      evaluate,
+    });
+    const f = await fixture([scenario], { judges: [{ type: name, count: 2 }] });
+    await runEvalSuite({ manifestPath: f.manifestPath, rootDir: f.dir });
+    expect(evaluate).toHaveBeenCalledWith(expect.anything(), undefined, {
+      count: 6,
+    });
+  });
+
   it('applies manifest judges to canonical cases and respects arm judge overrides', async () => {
     const name = `manifest-judge-${sequence++}`;
     const evaluate = vi.fn(async () => ({ score: 0 }));

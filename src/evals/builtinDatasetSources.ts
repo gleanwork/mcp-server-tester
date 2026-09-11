@@ -14,6 +14,7 @@ const FileDatasetSchema = z
     recursive: z.boolean().optional(),
   })
   .passthrough();
+
 async function loadFileDataset(
   config: DatasetConfig,
   context: DatasetSourceContext
@@ -26,21 +27,78 @@ async function loadFileDataset(
   return buildEvalDataset(raw, context.hostConfig, context.manifest);
 }
 
+async function loadDirectoryDataset(
+  config: DatasetConfig,
+  context: DatasetSourceContext
+): Promise<EvalDataset> {
+  const source = FileDatasetSchema.parse(config);
+  const directory = path.resolve(context.rootDir, source.path);
+  if (!(await fs.stat(directory)).isDirectory()) {
+    return loadFileDataset(config, context);
+  }
+
+  async function collect(dir: string): Promise<string[]> {
+    const entries = (await fs.readdir(dir, { withFileTypes: true })).sort(
+      (a, b) => a.name.localeCompare(b.name)
+    );
+    const files: string[] = [];
+    for (const entry of entries) {
+      const entryPath = path.join(dir, entry.name);
+      if (entry.isDirectory() && source.recursive) {
+        files.push(...(await collect(entryPath)));
+      } else if (entry.isFile() && entry.name.endsWith('.json')) {
+        files.push(entryPath);
+      }
+    }
+    return files;
+  }
+
+  const files = await collect(directory);
+  if (files.length === 0) {
+    throw new Error(
+      `Dataset directory contains no JSON datasets: ${directory}`
+    );
+  }
+  const datasets = await Promise.all(
+    files.map((filePath) =>
+      loadFileDataset(
+        { type: 'file', path: filePath },
+        {
+          ...context,
+          manifest: {
+            ...context.manifest,
+            maxCases: undefined,
+            filterTags: undefined,
+            run: undefined,
+          },
+        }
+      )
+    )
+  );
+  return buildEvalDataset(
+    {
+      name: path.basename(directory),
+      cases: datasets.flatMap((dataset) => dataset.cases),
+    },
+    undefined,
+    context.manifest
+  );
+}
+
 let registered = false;
 
-/**
- * Register source-only file, directory-entry, and GCS readers. Every payload is
- * validated as canonical EvalDataset JSON, regardless of its transport. The
- * suite expands directory declarations into individual JSON file entries.
- */
+/** Register source-owned canonical file and recursive directory readers. */
 export function registerBuiltinDatasetSources(): void {
   if (registered) return;
-  for (const name of ['file', 'dir'] as const) {
-    registerDatasetSource({
-      name,
-      schema: FileDatasetSchema,
-      load: loadFileDataset,
-    });
-  }
+  registerDatasetSource({
+    name: 'file',
+    schema: FileDatasetSchema,
+    load: loadFileDataset,
+  });
+  registerDatasetSource({
+    name: 'dir',
+    schema: FileDatasetSchema,
+    load: loadDirectoryDataset,
+  });
   registered = true;
 }
