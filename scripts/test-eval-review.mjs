@@ -5,6 +5,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
+import { build } from 'esbuild';
 
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'eval-review-'));
 try {
@@ -106,16 +107,34 @@ export function register() {registerMetric({name:'local-plugin-metric',schema:z.
       })),
     })
   );
+  // Keep the documented plain-Node smoke portable to Node 22 without a TS loader.
+  const legacyPlugin = path.join(dir, 'legacy-plugin.mjs');
+  await build({
+    entryPoints: ['examples/plugins/legacy-glean-datasets.ts'],
+    outfile: legacyPlugin,
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    target: 'node22',
+    plugins: [
+      {
+        name: 'built-public-api',
+        setup(builder) {
+          builder.onResolve(
+            { filter: /^@gleanwork\/mcp-server-tester$/ },
+            () => ({ path: path.resolve('dist/index.js'), external: true })
+          );
+        },
+      },
+    ],
+  });
   const legacyManifest = path.join(dir, 'legacy-manifest.json');
   await fs.writeFile(
     legacyManifest,
     JSON.stringify({
       ...manifest,
       name: 'legacy-adapter',
-      plugins: [
-        ...manifest.plugins,
-        path.resolve('examples/plugins/legacy-glean-datasets.ts'),
-      ],
+      plugins: [...manifest.plugins, legacyPlugin],
       datasets: [
         {
           type: 'glean-legacy',
@@ -140,13 +159,13 @@ export function register() {registerMetric({name:'local-plugin-metric',schema:z.
   );
   dataset.cases[0].expect.containsText = 'deliberately impossible';
   await fs.writeFile(datasetPath, JSON.stringify(dataset));
-  cli(
+  const failedRun = cli(
     ['run', '--manifest', paths[0], '--output-dir', path.join(dir, 'failure')],
     1
   );
-  const summary = JSON.parse(
-    await fs.readFile(path.join(dir, 'failure', 'results.json'), 'utf8')
-  );
+  const summaryPath = /^Output: (.+)$/m.exec(failedRun)?.[1];
+  assert.ok(summaryPath, 'CLI must print the unique execution result path');
+  const summary = JSON.parse(await fs.readFile(summaryPath, 'utf8'));
   assert.equal(summary.metrics.failed, 1);
   assert.equal(summary.metrics.passed, 4);
   assert.equal(summary.metrics['local-plugin-metric_rate'], 0.8);
