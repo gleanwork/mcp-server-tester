@@ -308,9 +308,7 @@ describe('validateJudge', () => {
       });
 
       expect(mockGetRegisteredJudge).toHaveBeenCalledWith('my-custom-judge');
-      expect(executor).toHaveBeenCalledWith('some response', undefined, {
-        judge: 'my-custom-judge',
-      });
+      expect(executor).toHaveBeenCalledWith('some response', undefined, {});
       expect(result.pass).toBe(true);
       expect(result.message).toContain('my-custom-judge');
       expect(result.message).toContain('0.95');
@@ -325,10 +323,18 @@ describe('validateJudge', () => {
         reference: 'expected answer',
       });
 
-      expect(executor).toHaveBeenCalledWith('candidate', 'expected answer', {
-        judge: 'ref-judge',
-        reference: 'expected answer',
+      expect(executor).toHaveBeenCalledWith('candidate', 'expected answer', {});
+    });
+
+    it('passes only explicit judge-owned options to strict schemas', async () => {
+      const executor = vi.fn().mockResolvedValue({ score: 1 });
+      mockGetRegisteredJudge.mockReturnValue(executor);
+      await validateJudge('candidate', {
+        judge: 'strict',
+        threshold: 0.5,
+        options: {},
       });
+      expect(executor).toHaveBeenCalledWith('candidate', undefined, {});
     });
 
     it('applies threshold to executor score', async () => {

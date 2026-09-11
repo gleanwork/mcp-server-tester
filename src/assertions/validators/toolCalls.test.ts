@@ -33,7 +33,10 @@ describe('validateToolCalls', () => {
     const expectation = { calls: [{ ...event, ...mismatch }], exclusive: true };
     const result = validateToolCalls(response, expectation);
     expect(result.pass).toBe(false);
-    expect(result.metrics).toEqual({ precision: 0, recall: 0 });
+    expect(result.metrics).toEqual({
+      precision: 'kind' in mismatch ? 1 : 0,
+      recall: 0,
+    });
   });
 
   it('matches single-server qualified and unqualified names', () => {
@@ -101,12 +104,14 @@ describe('validateToolCalls', () => {
     ).toMatchObject({ pass: true, metrics: { precision: 1, recall: 1 } });
     expect(
       validateToolCalls(response, { calls: [{ name: 'research' }] }).pass
-    ).toBe(false);
+    ).toBe(true);
     expect(
       validateToolCalls(response, {
-        calls: [{ name: 'search' }],
-        exclusive: true,
+        calls: [{ name: 'research', kind: 'tool_call' }],
       }).pass
+    ).toBe(false);
+    expect(
+      validateToolCalls(response, { calls: [{ name: 'search' }] }).pass
     ).toBe(true);
     expect(validateToolCallCount(response, { exact: 1 }).pass).toBe(true);
   });

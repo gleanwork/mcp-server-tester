@@ -105,7 +105,8 @@ export function matchesIdentity(
     (call.name === expected.name ||
       (call.server !== undefined &&
         `${call.server}.${call.name}` === expected.name)) &&
-    (call.kind ?? 'tool_call') === (expected.kind ?? 'tool_call') &&
+    (expected.kind === undefined ||
+      (call.kind ?? 'tool_call') === expected.kind) &&
     (expected.source === undefined || call.source === expected.source) &&
     (expected.server === undefined || call.server === expected.server)
   );
@@ -163,14 +164,19 @@ export function validateToolCalls(
   const unverified = unverifiedEvidence(response);
   if (unverified) return unverified;
 
-  // Non-tool events participate only when that kind is explicitly requested.
-  const kinds = new Set([
-    'tool_call',
-    ...expectation.calls.map((call) => call.kind ?? 'tool_call'),
-  ]);
-  const actual = (response.events ?? response.toolCalls).filter((call) =>
-    kinds.has(call.kind ?? 'tool_call')
+  // An omitted kind is an unrestricted selector; explicit kinds constrain matching.
+  const events = response.events ?? response.toolCalls;
+  const hasUnrestrictedKind = expectation.calls.some(
+    (call) => call.kind === undefined
   );
+  const kinds = new Set(
+    expectation.calls
+      .filter((call) => call.kind !== undefined)
+      .map((call) => call.kind)
+  );
+  const actual = hasUnrestrictedKind
+    ? events
+    : events.filter((call) => kinds.has(call.kind ?? 'tool_call'));
 
   // Compute recall: fraction of required calls that were made
   const requiredCalls = expectation.calls.filter((c) => c.required !== false);

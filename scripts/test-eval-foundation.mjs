@@ -96,8 +96,29 @@ try {
     (await validateJudge('candidate', { judge: 'foundation-legacy' })).pass,
     true
   );
+  registerJudge({
+    name: 'foundation-default-policy',
+    schema: z.object({ policy: z.string().default('allow') }).strict(),
+    evaluate: async (_candidate, _reference, options) => ({
+      score: options?.policy === 'allow' ? 1 : 0,
+    }),
+  });
+  assert.equal(
+    (await validateJudge('candidate', { judge: 'foundation-default-policy' }))
+      .pass,
+    true
+  );
+  assert.equal(
+    (
+      await validateJudge('candidate', {
+        judge: 'foundation-default-policy',
+        options: {},
+      })
+    ).pass,
+    true
+  );
   console.log(
-    'PASS: public object and legacy judge registration reach the shared validator at this layer.'
+    'PASS: public object and legacy judge registration reach the shared validator at this layer, including omitted/defaulted options.'
   );
 
   for (const [policy, passed] of [
@@ -130,6 +151,9 @@ try {
   await playwrightExpect('candidate').toPassToolJudge({
     judge: 'foundation-policy',
     options: { policy: 'allow' },
+  });
+  await playwrightExpect('candidate').toPassToolJudge({
+    judge: 'foundation-default-policy',
   });
   assert.equal(
     (

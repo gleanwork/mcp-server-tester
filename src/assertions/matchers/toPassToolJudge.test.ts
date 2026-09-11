@@ -473,11 +473,7 @@ describe('toPassToolJudge', () => {
         reference: 'expected answer',
       });
 
-      expect(executor).toHaveBeenCalledWith(
-        'candidate',
-        'expected answer',
-        expect.objectContaining({ reference: 'expected answer' })
-      );
+      expect(executor).toHaveBeenCalledWith('candidate', 'expected answer', {});
     });
 
     it('respects passingThreshold with named judge', async () => {

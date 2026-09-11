@@ -17,6 +17,21 @@ import {
 /**
  * Configuration for the judge validator
  */
+const judgeFrameworkOptionKeys = new Set([
+  'judge',
+  'rubric',
+  'reference',
+  'threshold',
+  'reps',
+  'provider',
+  'model',
+  'apiKeyEnvVar',
+  'maxTokens',
+  'temperature',
+  'maxBudgetUsd',
+  'maxToolOutputSize',
+]);
+
 export interface JudgeValidatorConfig {
   /** Plugin policy parsed by the registered judge's schema. */
   options?: Record<string, unknown>;
@@ -120,7 +135,12 @@ export async function validateJudge(
       const executor = getRegisteredJudge(judgeName);
       const options = getRegisteredJudgeOptions(
         judgeName,
-        config.options ?? config
+        config.options ??
+          Object.fromEntries(
+            Object.entries(config).filter(
+              ([key]) => !judgeFrameworkOptionKeys.has(key)
+            )
+          )
       );
       const judgeResult = await executor(
         response,
