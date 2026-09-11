@@ -15,6 +15,7 @@ import type {
 } from './mcpHost/mcpHostTypes.js';
 
 import type { HostConfig } from './evalManifest.js';
+import type { MCPConfig } from '../config/mcpConfig.js';
 import { simulationToHostTrace } from './hostTrace.js';
 
 interface ContentBlock {
@@ -50,8 +51,13 @@ async function runAnthropicApiHost(
   context: HostRunContext
 ): Promise<HostRunResult> {
   const options = { ...input, ...context, host };
-  const config = HostSchema.parse({ ...options.manifest, ...options.host });
-  const apiKey = process.env[config.apiKeyEnv];
+  const config = HostSchema.parse({
+    ...options.manifest,
+    ...options.host,
+    ...(context.mcpHostConfig ?? {}),
+  });
+  const env = { ...process.env, ...context.env, ...input.env };
+  const apiKey = env[config.apiKeyEnv];
   if (!apiKey)
     throw new Error(`Anthropic API key ${config.apiKeyEnv} is not set.`);
   const case_ = { scenario: input.scenario };
@@ -86,6 +92,14 @@ async function runAnthropicApiHost(
       { client: Client; name: string; label?: string }
     >();
     const tools: Array<Record<string, unknown>> = [];
+    const toolEntries: Array<{
+      server: MCPConfig;
+      tool: {
+        name: string;
+        description?: string;
+        inputSchema: Record<string, unknown>;
+      };
+    }> = [];
     for (const server of options.servers) {
       const client = await withinDeadline(
         createMCPClientForConfig(server).then(async (connected) => {
@@ -109,21 +123,39 @@ async function runAnthropicApiHost(
         if (routing.has(name))
           throw new Error(`Duplicate host tool name: ${name}`);
         routing.set(name, { client, name: tool.name, label: server.label });
-        const overrides =
-          options.arm?.toolOverrides ?? options.manifest.toolOverrides;
-        const override = overrides?.tools[tool.name];
-        tools.push({
-          name,
-          description: override?.description ?? tool.description,
-          input_schema: override?.inputSchema ?? tool.inputSchema,
-        });
+        toolEntries.push({ server, tool });
       }
     }
     const overrides =
       options.arm?.toolOverrides ?? options.manifest.toolOverrides;
     for (const name of Object.keys(overrides?.tools ?? {})) {
-      if (![...routing.values()].some((route) => route.name === name))
+      const matches = toolEntries.filter(
+        ({ server, tool }) =>
+          name === tool.name || name === `${server.label}.${tool.name}`
+      );
+      if (matches.length === 0)
         throw new Error(`Unknown tool override: ${name}`);
+      if (matches.length > 1)
+        throw new Error(`Ambiguous tool override: ${name}`);
+    }
+    for (const { server, tool } of toolEntries) {
+      const qualified = `${server.label}.${String(tool.name)}`;
+      const override =
+        overrides?.tools[qualified] ??
+        (toolEntries.filter(
+          ({ tool: candidate }) => candidate.name === tool.name
+        ).length === 1
+          ? overrides?.tools[String(tool.name)]
+          : undefined);
+      const name =
+        options.servers.length > 1
+          ? `${server.label}__${tool.name}`
+          : String(tool.name);
+      tools.push({
+        name,
+        description: override?.description ?? tool.description,
+        input_schema: override?.inputSchema ?? tool.inputSchema,
+      });
     }
     const messages: Message[] = [{ role: 'user', content: case_.scenario }];
     for (;;) {

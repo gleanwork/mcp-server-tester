@@ -1,15 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ANTHROPIC_API_HOST } from './anthropicApiHost.js';
 import { hostTraceToExecution } from './hostTrace.js';
-async function run(options: HostRunOptions) {
+async function run(
+  options: HostRunOptions,
+  extra: Partial<HostRunContext> = {}
+) {
   const trace = await ANTHROPIC_API_HOST.run!(
-    { scenario: options.cases[0]!.scenario!, servers: options.servers },
+    {
+      scenario: options.cases[0]!.scenario!,
+      servers: options.servers,
+      env: extra.env,
+    },
     options.host,
-    { manifest: options.manifest, arm: options.arm }
+    { manifest: options.manifest, arm: options.arm, ...extra }
   );
   return hostTraceToExecution(trace, 'structured', options.servers);
 }
-import type { HostRunOptions } from './evalFrameworkTypes.js';
+import type { HostRunOptions, HostRunContext } from './evalFrameworkTypes.js';
 import {
   createMCPClientForConfig,
   closeMCPClient,
@@ -137,6 +144,37 @@ describe('Anthropic trace execution', () => {
     expect(close).toHaveBeenCalledOnce();
     expect(vi.getTimerCount()).toBe(0);
   });
+  it('honors legacy case host settings before execution', async () => {
+    fetchMock.mockResolvedValueOnce(calls(1));
+    const input = options(10);
+    input.host.model = 'suite-model';
+    const result = await run(input, {
+      mcpHostConfig: { model: 'case-model', maxToolCalls: 0 },
+    });
+    expect(result.error).toContain('budget exhausted');
+    expect(callTool).not.toHaveBeenCalled();
+    expect(JSON.stringify(fetchMock.mock.calls[0]?.[1]?.body)).toContain(
+      'case-model'
+    );
+  });
+
+  it('applies server-qualified overrides consistently across labeled servers', async () => {
+    fetchMock.mockResolvedValueOnce(response([{ type: 'text', text: 'OK' }]));
+    const input = options();
+    input.servers = [
+      { transport: 'http', serverUrl: 'https://a.example', label: 'a' },
+      { transport: 'http', serverUrl: 'https://b.example', label: 'b' },
+    ];
+    input.manifest.toolOverrides = {
+      id: 'qualified',
+      tools: { 'a.search': { description: 'only-a' } },
+    };
+    await run(input);
+    const body = JSON.stringify(fetchMock.mock.calls[0]?.[1]?.body);
+    expect(body).toContain('only-a');
+    expect(body).toContain('b__search');
+  });
+
   it('applies description overrides and supports a no-server assistant', async () => {
     fetchMock.mockResolvedValueOnce(response([{ type: 'text', text: 'OK' }]));
     const input = options();
