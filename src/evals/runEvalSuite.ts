@@ -405,7 +405,13 @@ export async function runEvalSuite(
       resolveServerSecrets(server, env)
     );
     resolvedServers.forEach((server) => assertEvalEndpoint(server, manifest));
-    const host = resolveHost(manifest, arm, resolvedServers, env);
+    // The first arm's resolved host was already needed to load the shared
+    // datasets. Reuse it for that arm so source loading does not invoke a
+    // stateful host factory twice or create a configuration that is discarded.
+    const host =
+      arm === sourceArm
+        ? sourceHost
+        : resolveHost(manifest, arm, resolvedServers, env);
     const effectiveManifest: EvalManifest = {
       ...manifest,
       ...arm,

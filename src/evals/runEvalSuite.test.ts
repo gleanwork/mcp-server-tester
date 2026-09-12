@@ -167,6 +167,54 @@ describe('suite review regressions', () => {
     ).rejects.toThrow('SUITE_DUMMY_TOKEN');
   });
 
+  it('reuses the source host configuration for the first comparison arm', async () => {
+    const hostType = `arm-host-${sequence++}`;
+    const sourceType = `arm-source-${sequence++}`;
+    const configurations: Record<string, unknown>[] = [];
+    registerHost({
+      name: hostType,
+      schema: z.object({ type: z.string(), model: z.string() }).passthrough(),
+      createConfig(options = {}) {
+        configurations.push(options);
+        return {
+          hostType: 'sdk',
+          model: options.model as string | undefined,
+        };
+      },
+      run: async () => ({ finalText: 'OK', events: [] }),
+    });
+    registerDatasetSource({
+      name: sourceType,
+      schema: z.object({ type: z.string() }),
+      load: async () => ({
+        name: 'shared',
+        cases: [{ id: 'case', mode: 'host', scenario: 'hello' }],
+      }),
+    });
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'suite-arms-'));
+    dirs.push(dir);
+    const manifestPath = path.join(dir, 'manifest.json');
+    await fs.writeFile(
+      manifestPath,
+      JSON.stringify({
+        name: 'arm-configs',
+        datasets: [{ type: sourceType }],
+        host: { type: hostType, model: 'base' },
+        arms: [
+          { name: 'base-arm' },
+          { name: 'variant-arm', host: { type: hostType, model: 'variant' } },
+        ],
+      })
+    );
+
+    await runEvalSuite({ manifestPath, rootDir: dir });
+
+    expect(configurations.map((options) => options.model)).toEqual([
+      'base',
+      'variant',
+    ]);
+  });
+
   it.each(['manifest', 'override'] as const)(
     'resolves %s server credentials before creating the source CLI config',
     async (serverSource) => {
