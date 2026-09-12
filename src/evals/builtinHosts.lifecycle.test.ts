@@ -8,9 +8,23 @@ import { MockLanguageModelV3 } from 'ai/test';
 import { registerBuiltinHosts } from './builtinHosts.js';
 import { getHost } from './frameworkRegistries.js';
 
-// Only the model provider is fake. Hosts create and close real local MCP clients.
-const mocks = vi.hoisted(() => ({ provider: vi.fn() }));
+// The model provider is fake; the AI SDK and host cancellation path are real.
+// A barrier before simulation models setup time without HTTP under fake timers.
+const mocks = vi.hoisted(() => ({
+  provider: vi.fn(),
+  beforeSimulation: vi.fn<() => Promise<void>>(),
+}));
 vi.mock('@ai-sdk/openai', () => ({ createOpenAI: mocks.provider }));
+vi.mock(import('./mcpHost/mcpHostSimulation.js'), async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    async simulateMCPHost(...args: Parameters<typeof actual.simulateMCPHost>) {
+      await mocks.beforeSimulation();
+      return actual.simulateMCPHost(...args);
+    },
+  };
+});
 const answer = {
   content: [{ type: 'text' as const, text: 'done' }],
   finishReason: { unified: 'stop' as const, raw: 'stop' },
@@ -21,12 +35,11 @@ const answer = {
   warnings: [],
 };
 let model: MockLanguageModelV3;
-let server: http.Server;
+let server: http.Server | undefined;
 let serverUrl: string;
 let initialize: http.ServerResponse | undefined;
 let deletion: http.ServerResponse | undefined;
 let initializeId: unknown;
-let onInitialize: (() => void) | undefined;
 let holdInitialize: boolean;
 let holdDelete: boolean;
 let deleteAborted: boolean;
@@ -61,19 +74,16 @@ function run(timeout: number) {
   );
 }
 
-beforeEach(async () => {
-  registerBuiltinHosts();
-  vi.stubEnv('HTTP_PROXY', undefined);
-  vi.stubEnv('HTTPS_PROXY', undefined);
-  holdInitialize = false;
-  holdDelete = false;
-  deleteAborted = false;
-  initialize = undefined;
-  onInitialize = undefined;
-  deletion = undefined;
-  model = new MockLanguageModelV3({ doGenerate: answer });
-  mocks.provider.mockReturnValue(() => model);
-  server = http.createServer((request, response) => {
+function barrier() {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
+}
+
+async function startServer() {
+  const localServer = http.createServer((request, response) => {
     if (request.method === 'DELETE') {
       deletion = response;
       response.on('close', () => {
@@ -95,7 +105,6 @@ beforeEach(async () => {
       if (message.method === 'initialize') {
         initialize = response;
         initializeId = message.id;
-        onInitialize?.();
         if (!holdInitialize) releaseInitialize();
       } else if (message.id !== undefined) {
         response.writeHead(200, { 'Content-Type': 'application/json' }).end(
@@ -108,23 +117,45 @@ beforeEach(async () => {
       } else response.writeHead(202).end();
     });
   });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address();
+  server = localServer;
+  await new Promise<void>((resolve) =>
+    localServer.listen(0, '127.0.0.1', resolve)
+  );
+  const address = localServer.address();
   if (!address || typeof address === 'string')
     throw new Error('No test server address');
   serverUrl = `http://127.0.0.1:${address.port}/mcp`;
+}
+
+beforeEach(() => {
+  registerBuiltinHosts();
+  vi.stubEnv('HTTP_PROXY', undefined);
+  vi.stubEnv('HTTPS_PROXY', undefined);
+  holdInitialize = false;
+  holdDelete = false;
+  deleteAborted = false;
+  initialize = undefined;
+  deletion = undefined;
+  server = undefined;
+  model = new MockLanguageModelV3({ doGenerate: answer });
+  mocks.provider.mockReturnValue(() => model);
+  mocks.beforeSimulation.mockReset().mockResolvedValue(undefined);
 });
 afterEach(async () => {
   vi.useRealTimers();
   releaseInitialize();
   deletion?.end();
-  server.closeAllConnections();
-  await new Promise<void>((resolve) => server.close(() => resolve()));
+  const localServer = server;
+  if (localServer) {
+    localServer.closeAllConnections();
+    await new Promise<void>((resolve) => localServer.close(() => resolve()));
+  }
   vi.unstubAllEnvs();
 });
 
 describe('registered SDK owned lifecycle deadline', () => {
   it('bounds delayed connection setup without starting model execution', async () => {
+    await startServer();
     holdInitialize = true;
     const pending = run(50);
     await vi.waitFor(() => expect(initialize).toBeDefined());
@@ -138,47 +169,75 @@ describe('registered SDK owned lifecycle deadline', () => {
   });
 
   it('uses the remaining lifecycle budget for model execution and aborts it at the deadline', async () => {
-    holdInitialize = true;
-    const initializeStarted = new Promise<void>((resolve) => {
-      onInitialize = resolve;
+    const setupStarted = barrier();
+    const setupReleased = barrier();
+    const modelStarted = barrier();
+    const modelReleased = barrier();
+    let modelAborted = false;
+    mocks.beforeSimulation.mockImplementationOnce(async () => {
+      setupStarted.release();
+      await setupReleased.promise;
     });
-    const modelStarted = new Promise<void>((resolve) => {
-      model = new MockLanguageModelV3({
-        doGenerate: async () => {
-          resolve();
-          return new Promise(() => {});
-        },
-      });
+    model = new MockLanguageModelV3({
+      doGenerate: async ({ abortSignal }) => {
+        function onAbort() {
+          modelAborted = true;
+          modelReleased.release();
+        }
+        abortSignal?.addEventListener('abort', onAbort, { once: true });
+        modelStarted.release();
+        try {
+          await modelReleased.promise;
+          abortSignal?.throwIfAborted();
+          return answer;
+        } finally {
+          abortSignal?.removeEventListener('abort', onAbort);
+        }
+      },
     });
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     const startedAt = Date.now();
     let settled = false;
-    const pending = run(200).finally(() => {
+    // No HTTP fixture or MCP clients: only promises, imports and the real AI SDK.
+    const pending = getHost('vercel-sdk').run!(
+      { scenario: 'hello', servers: [] },
+      { type: 'vercel-sdk', provider: 'openai', timeout: 200 },
+      { manifest: { name: 'offline', datasets: [] } }
+    ).finally(() => {
       settled = true;
     });
 
-    // Wait for real HTTP/import readiness without advancing the fake clock.
-    await initializeStarted;
-    expect(model.doGenerateCalls).toHaveLength(0);
-    await vi.advanceTimersByTimeAsync(75);
-    releaseInitialize();
-    await modelStarted;
-    expect(Date.now() - startedAt).toBe(75);
-    expect(model.doGenerateCalls).toHaveLength(1);
-    const signal = model.doGenerateCalls[0]?.abortSignal;
+    try {
+      await setupStarted.promise;
+      expect(model.doGenerateCalls).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(75);
+      setupReleased.release();
+      await modelStarted.promise;
+      expect(Date.now() - startedAt).toBe(75);
+      expect(model.doGenerateCalls).toHaveLength(1);
+      const signal = model.doGenerateCalls[0]?.abortSignal;
 
-    // Setup consumed 75 ms, leaving only 125 ms for model execution.
-    await vi.advanceTimersByTimeAsync(124);
-    expect(settled).toBe(false);
-    expect(signal?.aborted).toBe(false);
-    await vi.advanceTimersByTimeAsync(1);
-    const result = await pending;
-    expect(Date.now() - startedAt).toBe(200);
-    expect(result.error).toContain('timed out');
-    expect(signal?.aborted).toBe(true);
+      // The adapter starts at t=75. Its own fresh timeout would expire at t=275,
+      // so only the propagated host signal can stop the model at t=200.
+      await vi.advanceTimersByTimeAsync(124);
+      expect(settled).toBe(false);
+      expect(signal?.aborted).toBe(false);
+      expect(modelAborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      const result = await pending;
+      expect(Date.now() - startedAt).toBe(200);
+      expect(result.error).toContain('timed out');
+      expect(signal?.aborted).toBe(true);
+      expect(modelAborted).toBe(true);
+      expect(model.doGenerateCalls).toHaveLength(1);
+    } finally {
+      setupReleased.release();
+      modelReleased.release();
+    }
   });
 
   it('bounds stalled session teardown and aborts its owned HTTP request', async () => {
+    await startServer();
     holdDelete = true;
     const pending = run(200);
     await vi.waitFor(() => expect(deletion).toBeDefined());
