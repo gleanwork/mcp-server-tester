@@ -17,6 +17,7 @@ import type {
 import type { HostConfig } from './evalManifest.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import { simulationToHostTrace } from './hostTrace.js';
+import { GenerationOptions } from './mcpHost/hostOptions.js';
 
 interface ContentBlock {
   type: string;
@@ -41,6 +42,8 @@ const HostSchema = z
     apiKeyEnv: z.string().min(1).default('ANTHROPIC_API_KEY'),
     maxToolCalls: z.number().int().nonnegative().default(20),
     timeout: z.number().int().positive().default(180_000),
+    temperature: GenerationOptions.temperature,
+    maxTokens: GenerationOptions.maxTokens,
   })
   .passthrough();
 
@@ -170,7 +173,8 @@ async function runAnthropicApiHost(
           },
           body: JSON.stringify({
             model: config.model,
-            max_tokens: 4096,
+            max_tokens: config.maxTokens ?? 4096,
+            temperature: config.temperature,
             messages,
             ...(tools.length ? { tools } : {}),
           }),

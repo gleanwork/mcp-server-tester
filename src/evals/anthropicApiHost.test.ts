@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { ANTHROPIC_API_HOST } from './anthropicApiHost.js';
 import { hostTraceToExecution } from './hostTrace.js';
+import { runEvalSuite } from './runEvalSuite.js';
 async function run(
   options: HostRunOptions,
   extra: Partial<HostRunContext> = {}
@@ -65,6 +69,12 @@ function response(content: unknown[], stop_reason = 'end_turn'): Response {
     { status: 200 }
   );
 }
+function requestBody(index = 0): Record<string, unknown> {
+  const body = fetchMock.mock.calls[index]?.[1]?.body;
+  if (typeof body !== 'string')
+    throw new Error('Expected a JSON request body.');
+  return JSON.parse(body) as Record<string, unknown>;
+}
 function calls(count: number): Response {
   return response(
     Array.from({ length: count }, (_, index) => ({
@@ -78,6 +88,7 @@ function calls(count: number): Response {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  fetchMock.mockReset();
   vi.stubEnv('ANTHROPIC_API_KEY', 'dummy-key');
   vi.stubGlobal('fetch', fetchMock);
   vi.mocked(createMCPClientForConfig).mockResolvedValue({
@@ -91,6 +102,184 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
 });
+describe.each(['tagged', 'legacy', 'manifest'] as const)(
+  'Anthropic %s generation settings',
+  (source) => {
+    async function runWithSettings(settings: {
+      temperature?: number;
+      maxTokens?: number;
+    }) {
+      const input = options();
+      input.manifest.temperature = 0.8;
+      input.manifest.maxTokens = 789;
+      if (source === 'legacy') {
+        input.host.temperature = 0.7;
+        input.host.maxTokens = 456;
+        return run(input, { mcpHostConfig: settings });
+      }
+      Object.assign(
+        source === 'manifest' ? input.manifest : input.host,
+        settings
+      );
+      return run(input);
+    }
+
+    it('forwards resolved generation options in every Anthropic request', async () => {
+      fetchMock
+        .mockResolvedValueOnce(calls(1))
+        .mockResolvedValueOnce(response([{ type: 'text', text: 'OK' }]));
+      const result = await runWithSettings({
+        temperature: 0.4,
+        maxTokens: 123,
+      });
+      expect(result.error).toBeUndefined();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      for (const index of [0, 1]) {
+        expect(requestBody(index)).toMatchObject({
+          temperature: 0.4,
+          max_tokens: 123,
+        });
+      }
+    });
+
+    it.each([
+      [0, 1],
+      [1, 8192],
+    ])(
+      'accepts temperature=%s and maxTokens=%s',
+      async (temperature, maxTokens) => {
+        fetchMock.mockResolvedValueOnce(
+          response([{ type: 'text', text: 'OK' }])
+        );
+        const result = await runWithSettings({ temperature, maxTokens });
+        expect(result.error).toBeUndefined();
+        expect(requestBody()).toMatchObject({
+          temperature,
+          max_tokens: maxTokens,
+        });
+      }
+    );
+
+    it.each([
+      ['temperature', -0.01],
+      ['temperature', 1.01],
+      ['temperature', NaN],
+      ['temperature', Infinity],
+      ['maxTokens', 0],
+      ['maxTokens', -1],
+      ['maxTokens', 1.5],
+      ['maxTokens', NaN],
+      ['maxTokens', Infinity],
+      ['maxTokens', Number.MAX_SAFE_INTEGER + 1],
+    ] as const)(
+      'rejects %s=%s before connecting or fetching',
+      async (field, value) => {
+        fetchMock.mockResolvedValueOnce(
+          response([{ type: 'text', text: 'OK' }])
+        );
+        await expect(runWithSettings({ [field]: value })).rejects.toThrow(
+          field
+        );
+        expect(createMCPClientForConfig).not.toHaveBeenCalled();
+        expect(fetchMock).not.toHaveBeenCalled();
+      }
+    );
+  }
+);
+
+describe('Anthropic generation defaults and suite precedence', () => {
+  it('keeps 4096 tokens and omits temperature when neither is specified', async () => {
+    fetchMock.mockResolvedValueOnce(response([{ type: 'text', text: 'OK' }]));
+    const result = await run(options());
+    expect(result.error).toBeUndefined();
+    expect(requestBody()).toHaveProperty('max_tokens', 4096);
+    expect(requestBody()).not.toHaveProperty('temperature');
+  });
+
+  it('forwards serialized manifest, arm, tagged case and legacy case settings', async () => {
+    const dir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'anthropic-generation-')
+    );
+    try {
+      const manifestPath = path.join(dir, 'manifest.json');
+      await fs.writeFile(
+        manifestPath,
+        JSON.stringify({
+          name: 'generation-options',
+          datasets: [{ type: 'file', path: 'cases.json' }],
+          servers: [{ transport: 'http', serverUrl: 'https://example.com' }],
+          temperature: 0.8,
+          maxTokens: 789,
+          host: { type: 'anthropic-api' },
+          arms: [
+            { name: 'inherit' },
+            { name: 'override', host: { temperature: 0.6, maxTokens: 512 } },
+          ],
+        })
+      );
+      await fs.writeFile(
+        path.join(dir, 'cases.json'),
+        JSON.stringify({
+          name: 'generation-cases',
+          cases: [
+            { id: 'inherit' },
+            {
+              id: 'tagged',
+              host: { type: 'anthropic-api', temperature: 0, maxTokens: 1 },
+            },
+            {
+              id: 'legacy',
+              mcpHostConfig: {
+                provider: 'anthropic',
+                temperature: 1,
+                maxTokens: 123,
+              },
+            },
+            {
+              id: 'mixed',
+              host: { type: 'anthropic-api', temperature: 0.9, maxTokens: 999 },
+              mcpHostConfig: { provider: 'anthropic', maxTokens: 321 },
+            },
+          ].map((case_) => ({
+            ...case_,
+            mode: 'mcp_host',
+            scenario: case_.id,
+            expect: { containsText: ['OK'] },
+          })),
+        })
+      );
+      fetchMock.mockImplementation(async () =>
+        response([{ type: 'text', text: 'OK' }])
+      );
+      const result = await runEvalSuite({ manifestPath, rootDir: dir });
+      expect(result.summary.metrics).toMatchObject({
+        total: 8,
+        passed: 8,
+        failed: 0,
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(8);
+      expect(
+        fetchMock.mock.calls.map((_, index) => {
+          const body = requestBody(index);
+          return { temperature: body.temperature, max_tokens: body.max_tokens };
+        })
+      ).toEqual([
+        { temperature: 0.8, max_tokens: 789 },
+        { temperature: 0, max_tokens: 1 },
+        { temperature: 1, max_tokens: 123 },
+        { temperature: 0.9, max_tokens: 321 },
+        { temperature: 0.6, max_tokens: 512 },
+        { temperature: 0, max_tokens: 1 },
+        { temperature: 1, max_tokens: 123 },
+        { temperature: 0.9, max_tokens: 321 },
+      ]);
+      expect(closeMCPClient).toHaveBeenCalledTimes(8);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('Anthropic trace execution', () => {
   it.each([0, 1])(
     'enforces a budget of %s before every tool call',
