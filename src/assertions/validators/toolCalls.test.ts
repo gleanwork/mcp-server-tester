@@ -13,6 +13,25 @@ function makeResult(
 
 describe('validateToolCalls', () => {
   it.each([
+    ['legacy tool', makeResult([{ name: 'search' }])],
+    [
+      'native skill',
+      {
+        success: true,
+        toolCalls: [],
+        events: [{ kind: 'skill', source: 'host', name: 'research' }],
+      },
+    ],
+  ])(
+    'rejects an unexpected %s with an empty exclusive list',
+    (_kind, response) => {
+      expect(
+        validateToolCalls(response, { calls: [], exclusive: true }).pass
+      ).toBe(false);
+    }
+  );
+
+  it.each([
     { source: 'host' as const },
     { server: 'other' },
     { kind: 'skill' as const },
@@ -33,10 +52,20 @@ describe('validateToolCalls', () => {
     const expectation = { calls: [{ ...event, ...mismatch }], exclusive: true };
     const result = validateToolCalls(response, expectation);
     expect(result.pass).toBe(false);
-    expect(result.metrics).toEqual({
-      precision: 'kind' in mismatch ? 1 : 0,
-      recall: 0,
-    });
+    expect(result.metrics).toEqual({ precision: 0, recall: 0 });
+  });
+
+  it('rejects unexpected events outside the explicitly requested kind', () => {
+    const events = [
+      { name: 'research', kind: 'skill', source: 'host' },
+      { name: 'unexpected', kind: 'tool_call', source: 'mcp' },
+    ];
+    expect(
+      validateToolCalls(
+        { success: true, events, toolCalls: [events[1]] },
+        { calls: [{ name: 'research', kind: 'skill' }], exclusive: true }
+      )
+    ).toMatchObject({ pass: false, metrics: { precision: 0.5, recall: 1 } });
   });
 
   it('matches single-server qualified and unqualified names', () => {

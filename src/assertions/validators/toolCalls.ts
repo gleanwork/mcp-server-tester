@@ -164,19 +164,9 @@ export function validateToolCalls(
   const unverified = unverifiedEvidence(response);
   if (unverified) return unverified;
 
-  // An omitted kind is an unrestricted selector; explicit kinds constrain matching.
-  const events = response.events ?? response.toolCalls;
-  const hasUnrestrictedKind = expectation.calls.some(
-    (call) => call.kind === undefined
-  );
-  const kinds = new Set(
-    expectation.calls
-      .filter((call) => call.kind !== undefined)
-      .map((call) => call.kind)
-  );
-  const actual = hasUnrestrictedKind
-    ? events
-    : events.filter((call) => kinds.has(call.kind ?? 'tool_call'));
+  // Selectors constrain matching, not the observed trace. Retain every event so
+  // exclusive expectations and precision also account for unexpected kinds.
+  const actual = response.events ?? response.toolCalls;
 
   // Compute recall: fraction of required calls that were made
   const requiredCalls = expectation.calls.filter((c) => c.required !== false);

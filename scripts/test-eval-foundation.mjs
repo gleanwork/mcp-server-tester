@@ -9,6 +9,7 @@ import {
   registerHost,
   registerDatasetSource,
   validateJudge,
+  validateToolCalls,
   validateManifestRegistrations,
   loadEvalManifestFromObject,
   loadEvalDatasetFromObject,
@@ -117,6 +118,15 @@ try {
     ).pass,
     true
   );
+  assert.equal(
+    (
+      await validateJudge('candidate', {
+        judge: 'foundation-default-policy',
+        options: undefined,
+      })
+    ).pass,
+    true
+  );
   console.log(
     'PASS: public object and legacy judge registration reach the shared validator at this layer, including omitted/defaulted options.'
   );
@@ -188,8 +198,22 @@ try {
     [{ kind: 'skill', name: 'research', source: 'host' }]
   );
   assert.equal(skill.result.passed, 1);
+  assert.equal(
+    validateToolCalls(
+      { success: true, toolCalls: [{ name: 'unexpected' }] },
+      { calls: [], exclusive: true }
+    ).pass,
+    false
+  );
+  assert.equal(
+    validateToolCalls(
+      { success: true, toolCalls: [] },
+      { calls: [], exclusive: true }
+    ).pass,
+    true
+  );
   console.log(
-    'PASS: source/server/kind selectors survive dataset loading; wrong provenance fails and skills match.'
+    'PASS: source/server/kind selectors survive dataset loading; wrong provenance fails and skills match; empty exclusive lists reject unexpected calls.'
   );
 
   for (const alias of ['agg.native_search', 'native_search']) {

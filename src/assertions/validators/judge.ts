@@ -18,6 +18,7 @@ import {
  * Configuration for the judge validator
  */
 const judgeFrameworkOptionKeys = new Set([
+  'options',
   'judge',
   'rubric',
   'reference',
