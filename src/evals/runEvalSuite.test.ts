@@ -21,6 +21,11 @@ import type {
   HostRunInput,
   HostRunContext,
 } from './evalFrameworkTypes.js';
+import { FileEvalResultStore } from './resultStore.js';
+import {
+  compareEvalRuns,
+  loadStoredEvalRunnerResult,
+} from './evalRunComparison.js';
 
 const dirs: string[] = [];
 let sequence = 0;
@@ -799,5 +804,72 @@ describe('suite review regressions', () => {
     ])
       expect(json).not.toContain(secret);
     expect(json).toContain('REVIEW_TOKEN');
+  });
+  it.each([true, false])(
+    'redacts every persisted response by default with explicit opt-out (%s)',
+    async (redact) => {
+      const f = await fixture([{ ...scenario, iterations: 2 }]);
+      f.run.mockResolvedValue({
+        response: {
+          success: true,
+          response: 'PRIVATE_RESPONSE_MARKER',
+          toolCalls: [],
+        },
+      });
+      const storeDir = path.join(f.dir, 'store');
+      await fs.writeFile(
+        f.manifestPath,
+        JSON.stringify({
+          ...f.manifest,
+          results: { store: { type: 'file', dir: storeDir } },
+          ...(redact ? {} : { redactStoredResponses: false }),
+        })
+      );
+      const result = await runEvalSuite({
+        manifestPath: f.manifestPath,
+        rootDir: f.dir,
+      });
+      const local = await fs.readFile(
+        path.join(result.outputDir, 'results.json'),
+        'utf8'
+      );
+      expect(local.includes('PRIVATE_RESPONSE_MARKER')).toBe(!redact);
+      const store = new FileEvalResultStore({
+        provider: 'file',
+        dir: storeDir,
+      });
+      for (const kind of ['eval-runner-result', 'eval-run-summary'] as const) {
+        expect(
+          JSON.stringify(await store.loadLatestArtifact(kind)).includes(
+            'PRIVATE_RESPONSE_MARKER'
+          )
+        ).toBe(!redact);
+      }
+    }
+  );
+
+  it('keeps unique per-arm canonical artifacts consumable by comparison and stores separate summaries', async () => {
+    const f = await fixture([scenario]);
+    const storeDir = path.join(f.dir, 'store');
+    await fs.writeFile(
+      f.manifestPath,
+      JSON.stringify({
+        ...f.manifest,
+        results: { store: { type: 'file', dir: storeDir } },
+      })
+    );
+    await runEvalSuite({ manifestPath: f.manifestPath, rootDir: f.dir });
+    await runEvalSuite({ manifestPath: f.manifestPath, rootDir: f.dir });
+    const store = new FileEvalResultStore({ provider: 'file', dir: storeDir });
+    const entries = await store.listArtifacts('eval-runner-result');
+    expect(entries).toHaveLength(2);
+    expect(await store.listArtifacts('eval-run-summary')).toHaveLength(2);
+    const result = await loadStoredEvalRunnerResult(store, {
+      id: entries[0]!.id,
+    });
+    expect(result.data.caseResults).toHaveLength(1);
+    expect(() =>
+      compareEvalRuns({ baseline: result.data, candidate: result.data })
+    ).not.toThrow();
   });
 });

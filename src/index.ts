@@ -261,6 +261,7 @@ export type {
   DatasetSourceContext,
   EvaluationArmResult,
   EvaluationBatchOptions,
+  EvaluationBatchItem,
   EvaluationBatchResult,
   EvaluationSuiteOptions,
   EvaluationSuiteResult,
@@ -300,6 +301,7 @@ export {
   registerHost,
   registerMetric,
   registerResultStore,
+  resolveResultStoreConfig,
   validateManifestRegistrations,
 } from './evals/frameworkRegistries.js';
 // Preserve both legacy name/executor and schema-bearing object registration.
@@ -319,6 +321,12 @@ export type {
   RunEvalSuiteOptions,
   RunEvalSuiteResult,
 } from './evals/runEvalSuite.js';
+export { runEvalBatch } from './evals/runEvalBatch.js';
+export type {
+  EvalBatchItem,
+  RunEvalBatchOptions,
+  RunEvalBatchResult,
+} from './evals/runEvalBatch.js';
 
 // Plugin loading
 export { loadPluginModule, loadPlugins } from './plugins/loadPlugins.js';

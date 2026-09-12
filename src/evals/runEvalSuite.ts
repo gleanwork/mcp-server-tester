@@ -1,4 +1,6 @@
 import { manifestIdentity } from './manifestIdentity.js';
+import { sumUsage } from '../utils/usageUtils.js';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -27,7 +29,11 @@ import {
   hostEnvironment,
   type HostEnvironment,
 } from './mcpHost/hostOptions.js';
-import { runEvalDataset, executeToolCall } from './evalRunner.js';
+import {
+  runEvalDataset,
+  executeToolCall,
+  omitResponsesFromResult,
+} from './evalRunner.js';
 import { hostTraceToExecution } from './hostTrace.js';
 import type { EvalRunnerResult } from './evalRunner.js';
 import {
@@ -42,10 +48,13 @@ import { loadPlugins } from '../plugins/loadPlugins.js';
 import {
   getDatasetSource,
   getHost,
+  getResultStore,
   parseHostConfig,
   validateManifestRegistrations,
 } from './frameworkRegistries.js';
 import { computeMetrics, type MetricSpec } from './metrics.js';
+import { registerBuiltinResultStores } from './builtinResultStores.js';
+import { createStoredEvalArtifact } from './resultStore.js';
 
 export interface RunEvalSuiteOptions {
   manifestPath: string;
@@ -56,6 +65,7 @@ export interface RunEvalSuiteOptions {
   mcpConfig?: MCPConfig;
   dryRun?: boolean;
   arm?: string;
+  redactStoredResponses?: boolean;
 }
 
 export interface RunEvalSuiteResult {
@@ -170,29 +180,6 @@ function resolveHost(
   return { definition, declaration, config };
 }
 
-function sumUsage(
-  a: Partial<UsageMetrics> | undefined,
-  b: Partial<UsageMetrics>
-): Partial<UsageMetrics> {
-  const keys = [
-    'inputTokens',
-    'outputTokens',
-    'totalCostUsd',
-    'durationMs',
-    'cacheReadInputTokens',
-    'cacheCreationInputTokens',
-  ] as const;
-  const result: Partial<UsageMetrics> = { ...(a ?? {}) };
-  for (const key of keys) {
-    const va = a?.[key];
-    const vb = b[key];
-    if (va !== undefined || vb !== undefined) {
-      result[key] = (va ?? 0) + (vb ?? 0);
-    }
-  }
-  return result;
-}
-
 function countToolCalls(results: EvalCaseResult[]): number {
   return results.reduce((count, result) => {
     const response = result.response;
@@ -252,7 +239,7 @@ function summarizeArm(
   results: Array<{ name: string; result: EvalRunnerResult }>
 ): EvaluationArmResult {
   const caseResults: EvalCaseResult[] = [];
-  let totalHostUsage: Partial<UsageMetrics> | undefined;
+  let totalHostUsage: UsageMetrics | undefined;
   for (const { result } of results) {
     caseResults.push(...result.caseResults);
     if (result.totalHostUsage) {
@@ -340,6 +327,7 @@ export async function runEvalSuite(
 
   registerBuiltinDatasetSources();
   registerBuiltinHosts();
+  registerBuiltinResultStores();
   const pluginPaths = options.pluginPaths ?? manifest.plugins ?? [];
   if (pluginPaths.length > 0) {
     await loadPlugins(
@@ -355,8 +343,11 @@ export async function runEvalSuite(
     ...manifest,
     host: manifest.host ?? { type: 'claude-cli' },
   });
-  const outputDir =
-    options.outputDir ?? path.join(rootDir, '.mcp-test-results', manifest.name);
+  const executionId = randomUUID();
+  const outputDir = path.join(
+    options.outputDir ?? path.join(rootDir, '.mcp-test-results', manifest.name),
+    executionId
+  );
   const arms = selectedArms(manifest, options.arm);
   const datasets = manifest.datasets;
 
@@ -589,9 +580,9 @@ export async function runEvalSuite(
   // Top-level metrics describe the baseline arm. Comparison-arm metrics remain
   // attached to their arm, avoiding case-id collisions across arms.
   const computedMetrics = armMetrics[0] ?? {};
-  let totalHostUsage: Partial<UsageMetrics> | undefined;
+  let totalHostUsage: UsageMetrics | undefined;
   for (const arm of armResults) {
-    totalHostUsage = sumUsage(totalHostUsage, arm.result?.totalHostUsage ?? {});
+    totalHostUsage = sumUsage(totalHostUsage, arm.result?.totalHostUsage);
   }
   const telemetry: RunTelemetry = {
     cases: allResults.length,
@@ -622,10 +613,68 @@ export async function runEvalSuite(
     results: allResults,
   };
 
+  const redactStoredResponses =
+    options.redactStoredResponses ??
+    (manifest.redactStoredResponses as boolean | undefined) ??
+    true;
+  const storedSummary = redactStoredResponses
+    ? {
+        ...summary,
+        results: summary.results.map(
+          ({ response: _response, ...result }) => result
+        ),
+        arms: summary.arms.map((arm) => ({
+          ...arm,
+          ...(arm.result
+            ? { result: omitResponsesFromResult(arm.result) }
+            : {}),
+        })),
+      }
+    : structuredClone(summary);
   await fs.mkdir(outputDir, { recursive: true });
+  if (manifest.results?.store) {
+    // Manifest validation already parsed defaults and transforms once.
+    const definition = getResultStore(manifest.results.store.type);
+    const store = definition.create(manifest.results.store);
+    const metadata = {
+      datasetName: manifest.name,
+      labels: {
+        manifestId: summary.manifestId,
+        contentHash: summary.contentHash,
+      },
+    };
+    summary.caseArtifactPointers = {};
+    for (const [index, arm] of storedSummary.arms.entries()) {
+      const id = `${executionId}-arm-${index}`;
+      await store.saveArtifact(
+        createStoredEvalArtifact({
+          kind: 'eval-runner-result',
+          id,
+          data: arm.result,
+          metadata: {
+            ...metadata,
+            labels: { ...metadata.labels, arm: arm.name },
+          },
+          createdAt: summary.timestamp,
+        })
+      );
+      summary.caseArtifactPointers[arm.name] = [id];
+    }
+    // Pointers are populated after redaction/cloning; retain them in both copies.
+    storedSummary.caseArtifactPointers = summary.caseArtifactPointers;
+    await store.saveArtifact(
+      createStoredEvalArtifact({
+        kind: 'eval-run-summary',
+        id: executionId,
+        data: storedSummary,
+        metadata,
+        createdAt: summary.timestamp,
+      })
+    );
+  }
   await fs.writeFile(
     path.join(outputDir, 'results.json'),
-    `${JSON.stringify(summary, null, 2)}\n`
+    `${JSON.stringify(storedSummary, null, 2)}\n`
   );
   return { manifest, outputDir, datasets: allDatasets, summary };
 }

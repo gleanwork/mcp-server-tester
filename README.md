@@ -209,6 +209,54 @@ The `examples/` directory contains complete working examples:
 - [sqlite-server/](./examples/sqlite-server) — Test suite for a SQLite MCP server: 11 Playwright tests, 14 eval dataset cases.
 - [basic-playwright-usage/](./examples/basic-playwright-usage) — Minimal Playwright patterns.
 
+## Evaluation manifests
+
+For projects with multiple datasets, use an evaluation manifest. Dataset
+paths are shorthand for tagged file sources, while hosts, metrics, judges,
+result stores, and other extensions resolve through public registries:
+
+```json
+{
+  "name": "tool-selection-search",
+  "datasets": [{ "type": "file", "path": "evalsets/search.json" }],
+  "servers": [
+    {
+      "transport": "http",
+      "serverUrl": "https://example.com/mcp",
+      "label": "prod"
+    }
+  ],
+  "host": { "type": "sdk" },
+  "metrics": ["passed"],
+  "results": { "store": { "type": "file", "directory": ".mcp-test-results" } }
+}
+```
+
+Run one manifest or a bounded batch:
+
+```bash
+npx mcp-server-tester run \
+  --manifest eval-manifest.json \
+  --plugins ./plugins \
+  --dry-run
+
+npx mcp-server-tester batch \
+  --manifest-dir manifests \
+  --workers 4 \
+  --skip-existing \
+  --dry-run
+```
+
+Use `arms` to compare server sets or host configurations. An arm can override
+servers, host options, tool maps, scenario templates, metrics, and judges.
+The canonical execution primitives remain `EvalDataset`, `EvalCase`,
+`EvalMode`, `MCPConfig`, and `runEvalDataset`.
+
+Applications can register extensions with `registerDatasetSource`,
+`registerHost`, `registerJudge`, `registerMetric`, and `registerResultStore`.
+Secrets remain environment-variable or plugin-owned runtime inputs and do not
+belong in committed manifests.
+
 ## Known Limitations
 
 These MCP protocol features are not currently supported. These are deliberate scope decisions, not bugs:
