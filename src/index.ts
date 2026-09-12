@@ -279,6 +279,7 @@ export type {
   MetricValue,
   ResultStoreDefinition,
   RunSummary,
+  RunTelemetry,
   EvalSummaryGenerator,
 } from './evals/evalFrameworkTypes.js';
 export {
