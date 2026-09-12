@@ -227,10 +227,12 @@ export function createVercelOrchestrator(): MCPHostSimulator {
     async simulate(
       mcp: MCPFixtureApi,
       scenario: string,
-      config: MCPHostConfig
+      config: MCPHostConfig,
+      signal?: AbortSignal
     ): Promise<MCPHostSimulationResult> {
       const controller = new AbortController();
       let timer: ReturnType<typeof setTimeout> | undefined;
+      let abortFromHost: (() => void) | undefined;
       const allToolCalls: LLMToolCall[] = [];
       let expired: Promise<never>;
       function withinDeadline<T>(promise: Promise<T>): Promise<T> {
@@ -239,7 +241,21 @@ export function createVercelOrchestrator(): MCPHostSimulator {
       try {
         SdkConfigSchema.parse(config);
         expired = new Promise<never>((_, reject) => {
-          if (config.timeout !== undefined)
+          if (signal) {
+            abortFromHost = function abortFromHost() {
+              const reason: unknown = signal.reason;
+              const error =
+                reason instanceof Error
+                  ? reason
+                  : new Error(
+                      typeof reason === 'string' ? reason : 'SDK host aborted.'
+                    );
+              controller.abort(error);
+              reject(error);
+            };
+            signal.addEventListener('abort', abortFromHost, { once: true });
+            if (signal.aborted) abortFromHost();
+          } else if (config.timeout !== undefined)
             timer = setTimeout(() => {
               const error = new Error(
                 `SDK host timed out after ${config.timeout} ms.`
@@ -394,6 +410,7 @@ export function createVercelOrchestrator(): MCPHostSimulator {
         };
       } finally {
         clearTimeout(timer);
+        if (abortFromHost) signal?.removeEventListener('abort', abortFromHost);
         controller.abort();
       }
     },

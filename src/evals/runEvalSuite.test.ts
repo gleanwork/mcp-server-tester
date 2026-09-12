@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import { runEvalSuite } from './runEvalSuite.js';
+import { getBuiltinHostConfig } from './builtinHosts.js';
 import {
   registerHost,
   registerDatasetSource,
@@ -14,6 +15,8 @@ import {
 } from './frameworkRegistries.js';
 import type { EvalCase, EvalDataset } from './datasetTypes.js';
 import type {
+  DatasetSourceContext,
+  HostDefinition,
   HostRunOptions,
   HostRunInput,
   HostRunContext,
@@ -144,14 +147,150 @@ describe('suite review regressions', () => {
         secretsFile: second,
       }),
     ]);
-    expect(
-      f.observe.mock.calls.map(([input]) => input.env?.SUITE_DUMMY_TOKEN)
-    ).toEqual(['first-dummy', 'second-dummy', 'first-dummy', 'second-dummy']);
+    const observedTokens = f.observe.mock.calls.map(
+      ([input]) => input.env?.SUITE_DUMMY_TOKEN
+    );
+    expect(observedTokens.slice(0, 2)).toEqual(['first-dummy', 'second-dummy']);
+    // Concurrent suites may finish in either order; each must keep its own token.
+    expect(observedTokens.slice(2).sort()).toEqual([
+      'first-dummy',
+      'second-dummy',
+    ]);
     expect(process.env.SUITE_DUMMY_TOKEN).toBeUndefined();
     await expect(
       runEvalSuite({ manifestPath: f.manifestPath, rootDir: f.dir })
     ).rejects.toThrow('SUITE_DUMMY_TOKEN');
   });
+
+  it.each(['manifest', 'override'] as const)(
+    'resolves %s server credentials before creating the source CLI config',
+    async (serverSource) => {
+      vi.stubEnv('SUITE_DUMMY_TOKEN', undefined);
+      vi.stubEnv('SUITE_DUMMY_HOST_KEY', undefined);
+      vi.stubEnv('MCP_PLUGIN_DIR', undefined);
+      const name = `source-cli-${sequence++}`;
+      const source = `source-cli-data-${sequence++}`;
+      const run = vi.fn<NonNullable<HostDefinition['run']>>(async () => ({
+        finalText: 'OK',
+        events: [],
+      }));
+      registerHost({
+        name,
+        schema: z.object({}),
+        createConfig(options) {
+          const { type: _type, ...hostOptions } = options ?? {};
+          return getBuiltinHostConfig('claude-cli', hostOptions);
+        },
+        run,
+      });
+      const sourceConfigs: DatasetSourceContext['hostConfig'][] = [];
+      registerDatasetSource({
+        name: source,
+        schema: z.object({}),
+        async load(_config, context) {
+          sourceConfigs.push(context.hostConfig);
+          return {
+            name: 'cli-source',
+            cases: [{ id: 'case', mode: 'host', scenario: 'Find documents' }],
+          };
+        },
+      });
+      const server = {
+        transport: 'http' as const,
+        label: 'protected',
+        serverUrl: 'https://example.com/eval',
+        auth: { accessTokenEnv: 'SUITE_DUMMY_TOKEN' },
+      };
+      const f = await fixture([], {
+        datasets: [{ type: source }],
+        host: { type: name },
+        servers: serverSource === 'manifest' ? [server] : [],
+      });
+      const secretsFile = path.join(f.dir, 'secrets.env');
+      await fs.writeFile(
+        secretsFile,
+        'SUITE_DUMMY_TOKEN=source-dummy\nSUITE_DUMMY_HOST_KEY=source-host'
+      );
+      const result = await runEvalSuite({
+        manifestPath: f.manifestPath,
+        rootDir: f.dir,
+        secretsFile,
+        ...(serverSource === 'override' ? { mcpConfig: server } : {}),
+      });
+      expect(result.summary.results[0]?.pass).toBe(true);
+      expect(sourceConfigs).toHaveLength(1);
+      expect(sourceConfigs[0]?.mcpServers?.protected).toMatchObject({
+        headers: { Authorization: 'Bearer source-dummy' },
+      });
+      expect(sourceConfigs[0]?.cli?.env?.SUITE_DUMMY_HOST_KEY).toBe(
+        'source-host'
+      );
+      expect(run.mock.calls[0]?.[0].servers[0]).toEqual({
+        ...server,
+        auth: { accessToken: 'source-dummy' },
+      });
+      expect(process.env.SUITE_DUMMY_TOKEN).toBeUndefined();
+      expect(process.env.SUITE_DUMMY_HOST_KEY).toBeUndefined();
+      const saved = await fs.readFile(
+        path.join(result.outputDir, 'results.json'),
+        'utf8'
+      );
+      expect(saved).not.toContain('source-dummy');
+      expect(saved).not.toContain('source-host');
+    }
+  );
+
+  it.each(['claude-cli', 'vercel-sdk'])(
+    'preserves declared %s environment in dataset source context',
+    async (type) => {
+      vi.stubEnv('HOST_ENV_SHARED', 'ambient');
+      vi.stubEnv('HOST_ENV_SUITE_ONLY', undefined);
+      vi.stubEnv('HOST_ENV_DECLARED_ONLY', undefined);
+      vi.stubEnv('MCP_PLUGIN_DIR', undefined);
+      const source = `host-env-source-${sequence++}`;
+      const sourceConfigs: DatasetSourceContext['hostConfig'][] = [];
+      registerDatasetSource({
+        name: source,
+        schema: z.object({}),
+        async load(_config, context) {
+          sourceConfigs.push(context.hostConfig);
+          return { name: 'host-env', cases: [] };
+        },
+      });
+      const declaredEnv = {
+        HOST_ENV_SHARED: 'declared',
+        HOST_ENV_DECLARED_ONLY: 'host-only',
+      };
+      const f = await fixture([], {
+        datasets: [{ type: source }],
+        host: { type, env: declaredEnv },
+      });
+      const secretsFile = path.join(f.dir, 'secrets.env');
+      await fs.writeFile(
+        secretsFile,
+        'HOST_ENV_SHARED=suite\nHOST_ENV_SUITE_ONLY=suite-only'
+      );
+      const result = await runEvalSuite({
+        manifestPath: f.manifestPath,
+        rootDir: f.dir,
+        secretsFile,
+      });
+      expect(sourceConfigs).toHaveLength(1);
+      const sourceConfig = sourceConfigs[0];
+      expect(sourceConfig?.cli?.env ?? sourceConfig?.env).toMatchObject({
+        HOST_ENV_SHARED: 'declared',
+        HOST_ENV_DECLARED_ONLY: 'host-only',
+        HOST_ENV_SUITE_ONLY: 'suite-only',
+      });
+      expect(result.manifest.host?.env).toEqual(declaredEnv);
+      expect(JSON.parse(await fs.readFile(f.manifestPath, 'utf8'))).toEqual(
+        f.manifest
+      );
+      expect(process.env.HOST_ENV_SHARED).toBe('ambient');
+      expect(process.env.HOST_ENV_SUITE_ONLY).toBeUndefined();
+      expect(process.env.HOST_ENV_DECLARED_ONLY).toBeUndefined();
+    }
+  );
 
   it('loads canonical datasets once and isolates arm prompts', async () => {
     const original = { ...scenario, args: { nested: { untouched: true } } };
@@ -201,6 +340,81 @@ describe('suite review regressions', () => {
       { type: name, count: 6, model: 'case' },
       expect.anything()
     );
+  });
+
+  it('retains top-level host defaults when a case patches the model', async () => {
+    const name = `defaults-host-${sequence++}`;
+    const run = vi.fn<NonNullable<HostDefinition['run']>>(async () => ({
+      finalText: 'OK',
+      events: [],
+    }));
+    registerHost({
+      name,
+      schema: z.object({
+        count: z.number().transform((value) => value * 3),
+        model: z.string().optional(),
+        provider: z.string().optional(),
+        timeout: z.number().optional(),
+        maxToolCalls: z.number().optional(),
+      }),
+      run,
+    });
+    const f = await fixture(
+      [
+        { ...scenario, id: 'baseline' },
+        { ...scenario, id: 'patched', host: { type: name, model: 'case' } },
+      ],
+      {
+        host: { type: name, count: 2 },
+        model: 'suite',
+        provider: 'openai',
+        timeout: 123,
+        maxToolCalls: 0,
+        arms: [
+          { name: 'inherited' },
+          { name: 'override', host: { timeout: 321 } },
+        ],
+      }
+    );
+    const result = await runEvalSuite({
+      manifestPath: f.manifestPath,
+      rootDir: f.dir,
+    });
+    expect(result.summary.results.every((entry) => entry.pass)).toBe(true);
+    expect(run.mock.calls.map(([, config]) => config)).toEqual([
+      {
+        type: name,
+        count: 6,
+        model: 'suite',
+        provider: 'openai',
+        timeout: 123,
+        maxToolCalls: 0,
+      },
+      {
+        type: name,
+        count: 6,
+        model: 'case',
+        provider: 'openai',
+        timeout: 123,
+        maxToolCalls: 0,
+      },
+      {
+        type: name,
+        count: 6,
+        model: 'suite',
+        provider: 'openai',
+        timeout: 321,
+        maxToolCalls: 0,
+      },
+      {
+        type: name,
+        count: 6,
+        model: 'case',
+        provider: 'openai',
+        timeout: 321,
+        maxToolCalls: 0,
+      },
+    ]);
   });
 
   it('applies run controls and rejects unsupported/conflicting controls', async () => {
@@ -322,20 +536,128 @@ describe('suite review regressions', () => {
     expect(alternate.run).toHaveBeenCalledTimes(2);
     expect(alternate.run.mock.calls[0]?.[0].host.model).toBe('case-model');
   });
-  it('retains transformed manifest judge options through suite execution', async () => {
+  it('retains manifest and arm judge settings with a stripping policy schema', async () => {
     const name = `options-judge-${sequence++}`;
-    const evaluate = vi.fn(async () => ({ score: 1 }));
+    const evaluate = vi.fn(async () => ({ score: 0.8 }));
     registerJudge({
       name,
       schema: z.object({ count: z.number().transform((value) => value * 3) }),
       evaluate,
     });
-    const f = await fixture([scenario], { judges: [{ type: name, count: 2 }] });
-    await runEvalSuite({ manifestPath: f.manifestPath, rootDir: f.dir });
-    expect(evaluate).toHaveBeenCalledWith(expect.anything(), undefined, {
-      count: 6,
+    const f = await fixture([scenario], {
+      judges: [
+        { type: name, count: 2, threshold: 0.9, reference: 'manifest-gold' },
+      ],
+      arms: [
+        { name: 'baseline' },
+        {
+          name: 'variant',
+          judges: [
+            { type: name, count: 4, threshold: 0.95, reference: 'arm-gold' },
+          ],
+        },
+      ],
+    });
+    const result = await runEvalSuite({
+      manifestPath: f.manifestPath,
+      rootDir: f.dir,
+    });
+    expect(result.summary.arms.map((arm) => arm.result?.passed)).toEqual([
+      0, 0,
+    ]);
+    expect(evaluate).toHaveBeenCalledTimes(2);
+    expect(evaluate).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      'manifest-gold',
+      {
+        count: 6,
+      }
+    );
+    expect(evaluate).toHaveBeenNthCalledWith(2, expect.anything(), 'arm-gold', {
+      count: 12,
     });
   });
+
+  it.each([
+    ['stripping', 'nested'],
+    ['stripping', 'flat'],
+    ['passthrough', 'nested'],
+    ['passthrough', 'flat'],
+  ] as const)(
+    'lets case judge settings override manifest defaults with a %s schema and %s policy',
+    async (policyMode, casePolicy) => {
+      const name = `precedence-judge-${sequence++}`;
+      const policySchema = z.object({
+        count: z.number().transform((value) => value * 3),
+        retained: z.string(),
+      });
+      const evaluate = vi.fn(async () => ({ score: 0.8 }));
+      registerJudge({
+        name,
+        schema:
+          policyMode === 'passthrough'
+            ? policySchema.passthrough()
+            : policySchema,
+        evaluate,
+      });
+      const f = await fixture(
+        [
+          {
+            ...scenario,
+            id: 'default',
+          },
+          {
+            ...scenario,
+            id: 'case',
+            canonicalAnswer: 'canonical-gold',
+            expect: {
+              passesJudge: {
+                judge: name,
+                threshold: 0.9,
+                reference: 'case-gold',
+                ...(casePolicy === 'nested'
+                  ? { options: { count: 4 } }
+                  : { count: 4 }),
+              },
+            },
+          },
+        ],
+        {
+          judges: [
+            {
+              type: name,
+              count: 2,
+              retained: 'manifest-policy',
+              threshold: 0.7,
+              reference: 'manifest-gold',
+            },
+          ],
+        }
+      );
+      const result = await runEvalSuite({
+        manifestPath: f.manifestPath,
+        rootDir: f.dir,
+      });
+      expect(result.summary.results.map((entry) => entry.pass)).toEqual([
+        true,
+        false,
+      ]);
+      expect(evaluate).toHaveBeenCalledTimes(2);
+      expect(evaluate).toHaveBeenNthCalledWith(
+        1,
+        expect.anything(),
+        'manifest-gold',
+        expect.objectContaining({ count: 6, retained: 'manifest-policy' })
+      );
+      expect(evaluate).toHaveBeenNthCalledWith(
+        2,
+        expect.anything(),
+        'case-gold',
+        expect.objectContaining({ count: 12, retained: 'manifest-policy' })
+      );
+    }
+  );
 
   it('applies manifest judges to canonical cases and respects arm judge overrides', async () => {
     const name = `manifest-judge-${sequence++}`;

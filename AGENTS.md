@@ -253,15 +253,18 @@ authType?: 'oauth' | 'api-token' | 'none';  // Don't do this!
 
 ## Pre-Push Checklist
 
-Before pushing commits or creating a PR, run all CI checks locally and fix any failures. These mirror the CI pipeline (`.github/workflows/ci.yml`) exactly:
+Before pushing commits or creating a PR, run all CI checks locally and fix any failures. These mirror the CI pipeline (`.github/workflows/ci.yml`) exactly. Build before typecheck and lint: legacy examples resolve package self-imports through `dist`.
 
 ```bash
 npm run format:check        # Prettier (run `npm run format` to auto-fix)
+npm run build               # Full build including UI reporter
 npm run typecheck           # TypeScript validation
 npm run lint                # ESLint (run `npm run lint:fix` to auto-fix)
 npm run docs:check          # Docs snippet sync
-npm run build               # Full build including UI reporter
+npm run test:eval-foundation # Public evaluation foundation contracts
 npm test                    # Unit tests (Vitest)
+npx playwright install --with-deps
+npm run test:playwright     # Integration tests (Playwright)
 ```
 
 If `format:check` or `lint` fails, run `npm run format` or `npm run lint:fix` to auto-fix, then re-check. If `docs:check` fails with "content-mismatch", update the snippet line range in the markdown file to match the current source.

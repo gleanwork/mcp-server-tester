@@ -68,6 +68,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllEnvs();
 });
 
 describe('registered SDK host through the real AI SDK', () => {
@@ -99,6 +100,11 @@ describe('registered SDK host through the real AI SDK', () => {
     expect(model.doGenerateCalls[0]?.abortSignal?.aborted).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
   });
+  it('clears the lifecycle timer after successful execution', async () => {
+    vi.useFakeTimers();
+    expect((await run({ timeout: 1000 })).finalText).toBe('done');
+    expect(vi.getTimerCount()).toBe(0);
+  });
   it('uses execution-local credentials and does not mutate process.env', async () => {
     const before = process.env.OPENAI_API_KEY;
     await run({}, [], undefined, { OPENAI_API_KEY: 'run-only' });
@@ -107,6 +113,38 @@ describe('registered SDK host through the real AI SDK', () => {
     );
     expect(process.env.OPENAI_API_KEY).toBe(before);
   });
+  it.each(['host', 'case'] as const)(
+    'uses explicit %s credentials ahead of suite environment at the SDK provider boundary',
+    async (precedence) => {
+      vi.stubEnv('OPENAI_API_KEY', 'ambient');
+      registerBuiltinHosts();
+      const input = {
+        scenario: 'hello',
+        servers: [],
+        env: { OPENAI_API_KEY: 'suite' },
+      };
+      const host = {
+        type: 'vercel-sdk',
+        provider: 'openai',
+        env: { OPENAI_API_KEY: 'host' },
+      };
+      const context = {
+        manifest: { name: 'offline', datasets: [] },
+        env: { OPENAI_API_KEY: 'context' },
+        mcpHostConfig:
+          precedence === 'case' ? { env: { OPENAI_API_KEY: 'case' } } : {},
+      };
+      const before = structuredClone({ input, host, context });
+      const result = await getHost('vercel-sdk').run!(input, host, context);
+      expect(result.error).toBeUndefined();
+      expect(result.finalText).toBe('done');
+      expect(mocks.provider).toHaveBeenCalledWith(
+        expect.objectContaining({ apiKey: precedence })
+      );
+      expect({ input, host, context }).toEqual(before);
+      expect(process.env.OPENAI_API_KEY).toBe('ambient');
+    }
+  );
   it('applies server-qualified overrides before encoding provider names', async () => {
     const servers: MCPConfig[] = ['a', 'b'].map((label) => ({
       transport: 'http',
@@ -213,6 +251,8 @@ describe('CLI connection policy preflight', () => {
     }
   );
   it('uses runtime environment for CLI provider configuration without mutation', () => {
+    vi.stubEnv('ANTHROPIC_VERTEX_PROJECT_ID', undefined);
+    vi.stubEnv('GOOGLE_VERTEX_PROJECT', 'ambient-project');
     const before = process.env.GOOGLE_VERTEX_PROJECT;
     const config = getBuiltinHostConfig('claude-cli', {
       provider: 'vertex',

@@ -23,6 +23,10 @@ import type {
 } from './evalFrameworkTypes.js';
 import { registerBuiltinDatasetSources } from './builtinDatasetSources.js';
 import { registerBuiltinHosts } from './builtinHosts.js';
+import {
+  hostEnvironment,
+  type HostEnvironment,
+} from './mcpHost/hostOptions.js';
 import { runEvalDataset, executeToolCall } from './evalRunner.js';
 import { hostTraceToExecution } from './hostTrace.js';
 import type { EvalRunnerResult } from './evalRunner.js';
@@ -146,7 +150,8 @@ function selectedArms(manifest: EvalManifest, name?: string): EvalArm[] {
 function resolveHost(
   manifest: EvalManifest,
   arm: EvalArm,
-  servers: MCPConfig[]
+  servers: MCPConfig[],
+  env: HostEnvironment
 ) {
   const declaration: HostConfig = {
     ...(arm.host ?? manifest.host ?? { type: 'claude-cli' }),
@@ -157,6 +162,10 @@ function resolveHost(
     ...declaration,
     servers,
     server: servers[0],
+    env: hostEnvironment(
+      { env: declaration.env as HostEnvironment | undefined },
+      { env }
+    ),
   });
   return { definition, declaration, config };
 }
@@ -282,18 +291,25 @@ function configuredJudges(
       (item) => !judges.some((judge) => judge.type === item.judge)
     ),
     ...judges.map((judge) => {
-      const inherited = existing.find((item) => item.judge === judge.type);
+      const caseJudge = existing.find((item) => item.judge === judge.type);
       const raw =
         rawJudges.find(
           (item) => item.type === judge.type && item.name === judge.name
         ) ?? judge;
+      const { options: caseOptions, ...caseSettings } = caseJudge ?? {};
       return {
-        ...inherited,
         ...judge,
+        ...caseSettings,
         judge: judge.type,
-        options: { ...inherited?.options, ...raw },
+        // Merge raw policy inputs so the shared evaluator transforms them once.
+        // Explicit case settings, including flat policy fields, win over defaults.
+        options: { ...raw, ...caseSettings, ...caseOptions },
         reference:
-          judge.reference ?? inherited?.reference ?? evalCase.canonicalAnswer,
+          caseJudge?.reference !== undefined
+            ? caseJudge.reference
+            : judge.reference !== undefined
+              ? judge.reference
+              : evalCase.canonicalAnswer,
       };
     }),
   ];
@@ -367,8 +383,13 @@ export async function runEvalSuite(
   const allDatasets: RunEvalSuiteResult['datasets'] = [];
   const allResults: EvalCaseResult[] = [];
   const sourceArm = arms[0] ?? { name: 'default' };
-  const sourceServers = sourceArm.servers ?? manifest.servers ?? [];
-  const sourceHost = resolveHost(manifest, sourceArm, sourceServers);
+  const sourceServers = (
+    options.mcpConfig
+      ? [options.mcpConfig]
+      : (sourceArm.servers ?? manifest.servers ?? [])
+  ).map((server) => resolveServerSecrets(server, env));
+  sourceServers.forEach((server) => assertEvalEndpoint(server, manifest));
+  const sourceHost = resolveHost(manifest, sourceArm, sourceServers, env);
   const canonicalDatasets = await Promise.all(
     datasets.map(async (source) => ({
       source,
@@ -393,7 +414,7 @@ export async function runEvalSuite(
       resolveServerSecrets(server, env)
     );
     resolvedServers.forEach((server) => assertEvalEndpoint(server, manifest));
-    const host = resolveHost(manifest, arm, resolvedServers);
+    const host = resolveHost(manifest, arm, resolvedServers, env);
     const effectiveManifest: EvalManifest = {
       ...manifest,
       ...arm,
@@ -432,10 +453,10 @@ export async function runEvalSuite(
             ...evalCase,
             ...(evalCase.host
               ? {
-                  host: parseHostConfig({
-                    ...rawDeclaration,
-                    ...evalCase.host,
-                  }),
+                  host: parseHostConfig(
+                    { ...rawDeclaration, ...evalCase.host },
+                    rawManifest
+                  ),
                 }
               : {}),
             ...(effectiveManifest.judges?.length

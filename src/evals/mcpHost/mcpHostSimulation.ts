@@ -84,7 +84,8 @@ const simulatorRegistry = new Map<LLMProvider, MCPHostSimulator>(
 export async function simulateMCPHost(
   mcp: MCPFixtureApi,
   scenario: string,
-  config: MCPHostConfig
+  config: MCPHostConfig,
+  signal?: AbortSignal
 ): Promise<MCPHostSimulationResult> {
   const hostType = config.hostType ?? 'sdk';
 
@@ -110,7 +111,8 @@ export async function simulateMCPHost(
         timeout: config.timeout ?? config.cli.timeout,
         env: { ...config.env, ...config.cli.env },
       },
-      scenario
+      scenario,
+      signal
     );
   }
 
@@ -136,7 +138,7 @@ export async function simulateMCPHost(
         `Supported: ${allProviders.join(', ')}`
     );
   }
-  return simulator.simulate(mcp, scenario, config);
+  return simulator.simulate(mcp, scenario, config, signal);
 }
 
 /**

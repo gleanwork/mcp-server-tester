@@ -215,26 +215,34 @@ function parseMetrics(
 function parseJudges(
   configs: ExtensionConfig[] | undefined
 ): ExtensionConfig[] | undefined {
-  return configs?.map((config) =>
-    parseConfig(config, getJudge(config.type), 'judge options')
-  );
+  return configs?.map((config) => {
+    const parsed = parseConfig(config, getJudge(config.type), 'judge options');
+    // These belong to the framework assertion, not the judge's policy schema.
+    // A stripping or transforming policy must not change the requested verdict.
+    for (const key of ['threshold', 'reference'] as const) {
+      if (config[key] !== undefined) parsed[key] = config[key];
+    }
+    return parsed;
+  });
 }
 
-export function parseHostConfig(config: HostConfig): HostConfig {
-  return parseConfig(config, getHost(config.type), 'host options');
+export function parseHostConfig(
+  config: HostConfig,
+  defaults?: EvalManifest
+): HostConfig {
+  const options = { ...config };
+  for (const key of ['model', 'provider', 'maxToolCalls', 'timeout'] as const) {
+    if (options[key] === undefined && defaults?.[key] !== undefined)
+      options[key] = defaults[key];
+  }
+  return parseConfig(options, getHost(config.type), 'host options');
 }
 
 function effectiveHost(
   manifest: EvalManifest,
   host: HostConfig | undefined
 ): HostConfig | undefined {
-  if (!host) return undefined;
-  const options = { ...host };
-  for (const key of ['model', 'provider', 'maxToolCalls', 'timeout'] as const) {
-    if (options[key] === undefined && manifest[key] !== undefined)
-      options[key] = manifest[key];
-  }
-  return parseHostConfig(options);
+  return host ? parseHostConfig(host, manifest) : undefined;
 }
 
 function validateLabels(

@@ -32,91 +32,178 @@ async function runBuiltinHost(
   context: HostRunContext,
   factory: (options: BuiltinHostOptions) => MCPHostConfig
 ): Promise<HostRunResult> {
-  const env = hostEnvironment(
-    input as HostRunInput & { env?: HostEnvironment },
-    context as HostRunContext & { env?: HostEnvironment }
-  );
+  const startedAt = Date.now();
+  // Runtime values are fallbacks; explicit host and legacy case values win.
+  const env: HostEnvironment = {
+    ...hostEnvironment(input, context),
+    ...(host.env as HostEnvironment | undefined),
+    ...context.mcpHostConfig?.env,
+  };
   const options = { ...input, host, ...context };
   const case_ = {
     scenario: input.scenario,
     mcpHostConfig: context.mcpHostConfig,
   };
   if (!input.scenario) throw new Error('Hosts require a scenario.');
+  // Legacy execution details (especially caller-authored CLI args) remain
+  // intact, but accepted generation settings must reach the factory first.
+  const legacyOptions = { ...case_.mcpHostConfig };
+  delete legacyOptions.hostType;
+  delete legacyOptions.cli;
+  delete legacyOptions.browser;
+  delete legacyOptions.mcpServers;
   const config = {
-    ...factory({ ...options.host, servers: options.servers, env }),
+    ...factory({
+      ...options.host,
+      ...legacyOptions,
+      servers: options.servers,
+      env,
+    }),
     ...case_.mcpHostConfig,
     env,
   };
   const clients: Array<Awaited<ReturnType<typeof createMCPClientForConfig>>> =
     [];
   let configDir: string | undefined;
-  try {
-    // CLI hosts manage their own server connections.
-    if (config.hostType !== 'cli' || !case_.scenario) {
-      for (const server of options.servers)
-        clients.push(await createMCPClientForConfig(server));
+  const controller = new AbortController();
+  const timeout =
+    config.timeout ??
+    (config.hostType === 'cli' ? config.cli?.timeout : undefined);
+  const timeoutError = new Error(
+    `${config.hostType === 'cli' ? 'CLI' : 'SDK'} host timed out after ${timeout} ms.`
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const closing = new Map<(typeof clients)[number], Promise<void>>();
+
+  function closeOwnedClient(client: (typeof clients)[number]): Promise<void> {
+    let pending = closing.get(client);
+    if (!pending) {
+      pending = closeMCPClient(client);
+      closing.set(client, pending);
+      // Cleanup can finish after the deadline, but must not reject unobserved.
+      void pending.catch(() => {});
     }
-    const routes = new Map<
-      string,
-      { client: (typeof clients)[number]; name: string }
-    >();
-    const overrides =
-      options.arm?.toolOverrides ?? options.manifest.toolOverrides;
-    const mcp: MCPFixtureApi = {
-      get client() {
-        if (!clients[0]) throw new Error('No MCP client for this host.');
-        return clients[0];
-      },
-      authType: 'none',
-      getServerInfo: () => null,
-      async listTools() {
-        const tools = [];
-        for (const [index, client] of clients.entries()) {
-          const result = await client.listTools();
-          for (const tool of result.tools) {
-            const name =
-              clients.length > 1
-                ? `${options.servers[index]!.label}.${tool.name}`
-                : tool.name;
-            routes.set(name, { client, name: tool.name });
-            tools.push({ ...tool, server: options.servers[index]!.label });
-          }
+    if (controller.signal.aborted) {
+      // Bypass a stalled session DELETE. Only this host's clients are closed;
+      // the shared graceful-close policy and caller-owned fixtures are unchanged.
+      void client.close().catch(() => {});
+    }
+    return pending;
+  }
+
+  const expired = new Promise<never>((_, reject) => {
+    if (timeout === undefined) return;
+    function expire() {
+      controller.abort(timeoutError);
+      for (const client of clients) void closeOwnedClient(client);
+      reject(timeoutError);
+    }
+    const remaining = timeout - (Date.now() - startedAt);
+    if (remaining <= 0) expire();
+    else timer = setTimeout(expire, remaining);
+  });
+
+  function checkDeadline() {
+    if (timeout !== undefined && Date.now() - startedAt >= timeout) {
+      controller.abort(timeoutError);
+    }
+    controller.signal.throwIfAborted();
+  }
+
+  async function execute(): Promise<HostRunResult> {
+    try {
+      checkDeadline();
+      // CLI hosts manage their own server connections.
+      if (config.hostType !== 'cli') {
+        for (const server of options.servers) {
+          const client = await createMCPClientForConfig(server);
+          clients.push(client);
+          // A connection that settles late is still owned and closed in finally.
+          checkDeadline();
         }
-        return overrideHostTools(tools, overrides).map(
-          ({ server, ...tool }) => ({
-            ...tool,
-            name: clients.length > 1 ? `${server}.${tool.name}` : tool.name,
-          })
-        );
-      },
-      async callTool(name, args) {
-        if (!routes.size) await this.listTools();
-        const route = routes.get(name);
-        if (!route) throw new Error(`Unknown MCP tool: ${name}`);
-        return route.client.callTool({
-          name: route.name,
-          arguments: args,
-        }) as ReturnType<MCPFixtureApi['callTool']>;
-      },
-    };
-    if (config.cli) {
-      const position = config.cli.args.indexOf('--mcp-config');
-      if (position >= 0 && config.cli.args[position + 1]?.startsWith('{')) {
-        configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp_config_'));
-        const file = path.join(configDir, 'mcp.json');
-        fs.writeFileSync(file, config.cli.args[position + 1]!, { mode: 0o600 });
-        config.cli = { ...config.cli, args: [...config.cli.args] };
-        config.cli.args[position + 1] = file;
       }
-    }
-    if (overrides && config.hostType === 'cli')
-      throw new Error(
-        'CLI description overrides require a host plugin that exposes overridden tools.'
+      const routes = new Map<
+        string,
+        { client: (typeof clients)[number]; name: string }
+      >();
+      const overrides =
+        options.arm?.toolOverrides ?? options.manifest.toolOverrides;
+      const mcp: MCPFixtureApi = {
+        get client() {
+          if (!clients[0]) throw new Error('No MCP client for this host.');
+          return clients[0];
+        },
+        authType: 'none',
+        getServerInfo: () => null,
+        async listTools() {
+          const tools = [];
+          for (const [index, client] of clients.entries()) {
+            const result = await client.listTools();
+            for (const tool of result.tools) {
+              const name =
+                clients.length > 1
+                  ? `${options.servers[index]!.label}.${tool.name}`
+                  : tool.name;
+              routes.set(name, { client, name: tool.name });
+              tools.push({ ...tool, server: options.servers[index]!.label });
+            }
+          }
+          return overrideHostTools(tools, overrides).map(
+            ({ server, ...tool }) => ({
+              ...tool,
+              name: clients.length > 1 ? `${server}.${tool.name}` : tool.name,
+            })
+          );
+        },
+        async callTool(name, args) {
+          if (!routes.size) await this.listTools();
+          const route = routes.get(name);
+          if (!route) throw new Error(`Unknown MCP tool: ${name}`);
+          return route.client.callTool({
+            name: route.name,
+            arguments: args,
+          }) as ReturnType<MCPFixtureApi['callTool']>;
+        },
+      };
+      if (config.cli) {
+        const position = config.cli.args.indexOf('--mcp-config');
+        if (position >= 0 && config.cli.args[position + 1]?.startsWith('{')) {
+          configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp_config_'));
+          const file = path.join(configDir, 'mcp.json');
+          fs.writeFileSync(file, config.cli.args[position + 1]!, {
+            mode: 0o600,
+          });
+          config.cli = { ...config.cli, args: [...config.cli.args] };
+          config.cli.args[position + 1] = file;
+        }
+      }
+      if (overrides && config.hostType === 'cli')
+        throw new Error(
+          'CLI description overrides require a host plugin that exposes overridden tools.'
+        );
+      checkDeadline();
+      const response = await simulateMCPHost(
+        mcp,
+        case_.scenario,
+        config,
+        timeout === undefined ? undefined : controller.signal
       );
-    const response = await simulateMCPHost(mcp, case_.scenario, config);
-    return simulationToHostTrace(response, input.servers);
+      return simulationToHostTrace(response, input.servers);
+    } finally {
+      await Promise.allSettled(clients.map(closeOwnedClient));
+    }
+  }
+
+  try {
+    const result = await Promise.race([execute(), expired]);
+    checkDeadline();
+    return result;
+  } catch (error) {
+    if (error === timeoutError)
+      return { finalText: '', events: [], error: timeoutError.message };
+    throw error;
   } finally {
-    await Promise.allSettled(clients.map(closeMCPClient));
+    clearTimeout(timer);
     if (configDir) fs.rmSync(configDir, { recursive: true, force: true });
   }
 }
@@ -361,6 +448,7 @@ function claudeCliHost(options: BuiltinHostOptions): MCPHostConfig {
 
   return {
     hostType: 'cli',
+    timeout: options.timeout,
     provider: (provider === 'vertex'
       ? 'vertex-anthropic'
       : provider) as MCPHostConfig['provider'],

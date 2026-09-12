@@ -176,7 +176,7 @@ export interface BrowserConfig {
 export interface MCPHostConfig {
   /** Execution-local environment overrides; never assigned to process.env. */
   env?: Record<string, string | undefined>;
-  /** End-to-end SDK execution deadline in milliseconds. */
+  /** Execution deadline in milliseconds, including registered host-owned setup and teardown. */
   timeout?: number;
   /**
    * Host type for the simulation.
@@ -326,6 +326,8 @@ export interface MCPHostSimulator {
   simulate(
     mcp: MCPFixtureApi,
     scenario: string,
-    config: MCPHostConfig
+    config: MCPHostConfig,
+    /** Optional enclosing host deadline; does not cover caller-owned fixtures. */
+    signal?: AbortSignal
   ): Promise<MCPHostSimulationResult>;
 }

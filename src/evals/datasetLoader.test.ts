@@ -23,6 +23,41 @@ describe('datasetLoader', () => {
       expect(dataset.cases[0]?.id).toBe('case-1');
     });
 
+    it('preserves a legacy host deadline through canonical dataset loading', () => {
+      const mcpHostConfig = {
+        provider: 'openai',
+        model: 'case-model',
+        timeout: 17,
+      };
+      const dataset = loadEvalDatasetFromObject({
+        name: 'host-deadline',
+        cases: [
+          { id: 'one', mode: 'mcp_host', scenario: 'hello', mcpHostConfig },
+        ],
+      });
+
+      expect(dataset.cases[0]?.mcpHostConfig).toEqual(mcpHostConfig);
+    });
+
+    it.each([0, -1, 1.5, Infinity, '17'])(
+      'rejects an invalid legacy host deadline: %s',
+      (timeout) => {
+        expect(() =>
+          loadEvalDatasetFromObject({
+            name: 'host-deadline',
+            cases: [
+              {
+                id: 'one',
+                mode: 'mcp_host',
+                scenario: 'hello',
+                mcpHostConfig: { provider: 'openai', timeout },
+              },
+            ],
+          })
+        ).toThrow();
+      }
+    );
+
     it('should attach schemas to dataset', () => {
       const data = {
         name: 'test-dataset',
