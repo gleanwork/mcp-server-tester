@@ -9,12 +9,35 @@ import type { ProviderKind } from '../../judge/judgeTypes.js';
 import type { RubricSpec } from '../../judge/rubrics.js';
 import { createJudge } from '../../judge/judgeClient.js';
 import { resolveRubric } from '../../judge/rubrics.js';
-import { getRegisteredJudge } from '../../judge/judgeRegistry.js';
+import {
+  getRegisteredJudge,
+  getRegisteredJudgeOptions,
+} from '../../judge/judgeRegistry.js';
 
 /**
  * Configuration for the judge validator
  */
+const judgeFrameworkOptionKeys = new Set([
+  'options',
+  'judge',
+  'rubric',
+  'reference',
+  'threshold',
+  'reps',
+  'provider',
+  'model',
+  'apiKeyEnvVar',
+  'maxTokens',
+  'temperature',
+  'maxBudgetUsd',
+  'maxToolOutputSize',
+]);
+
 export interface JudgeValidatorConfig {
+  /** Plugin policy parsed by the registered judge's schema. */
+  options?: Record<string, unknown>;
+  /** Also accept flat policy fields from manifest judge configurations. */
+  [key: string]: unknown;
   /**
    * The evaluation rubric: a built-in name or custom { text: string }.
    * Required when no named `judge` is specified.
@@ -111,7 +134,20 @@ export async function validateJudge(
   if (judgeName !== undefined) {
     try {
       const executor = getRegisteredJudge(judgeName);
-      const judgeResult = await executor(response, reference ?? undefined);
+      const options = getRegisteredJudgeOptions(
+        judgeName,
+        config.options ??
+          Object.fromEntries(
+            Object.entries(config).filter(
+              ([key]) => !judgeFrameworkOptionKeys.has(key)
+            )
+          )
+      );
+      const judgeResult = await executor(
+        response,
+        reference ?? undefined,
+        options
+      );
 
       const score = judgeResult.score;
       const passed = score >= threshold;
@@ -121,6 +157,7 @@ export async function validateJudge(
         message: passed
           ? `Custom judge "${judgeName}" passed with score ${score.toFixed(2)}`
           : `Custom judge "${judgeName}" failed with score ${score.toFixed(2)} (threshold: ${threshold}). ${judgeResult.reasoning ?? ''}`,
+        details: { score, reasoning: judgeResult.reasoning },
       };
     } catch (err) {
       return {

@@ -1,3 +1,11 @@
+import { z } from 'zod';
+import type { JudgeDefinition } from '../evals/evalFrameworkTypes.js';
+import {
+  clearJudges,
+  getJudge,
+  registerJudge as registerFrameworkJudge,
+} from '../evals/frameworkRegistries.js';
+
 /**
  * Custom Judge Registry
  *
@@ -49,10 +57,9 @@ export interface CustomJudgeResult {
  */
 export type CustomJudgeExecutor = (
   candidate: unknown,
-  reference?: unknown
+  reference?: unknown,
+  options?: Record<string, unknown>
 ) => Promise<CustomJudgeResult>;
-
-const registry = new Map<string, CustomJudgeExecutor>();
 
 /**
  * Registers a named custom judge executor.
@@ -85,21 +92,41 @@ const registry = new Map<string, CustomJudgeExecutor>();
  * // expect(result).toPassToolJudge({ judge: 'glean-completeness', passingThreshold: 0.5 });
  * ```
  */
+export function registerJudge(judge: JudgeDefinition): void;
 export function registerJudge(
   name: string,
   executor: CustomJudgeExecutor
+): void;
+export function registerJudge(
+  nameOrJudge: string | JudgeDefinition,
+  executor?: CustomJudgeExecutor
 ): void {
-  const existing = registry.get(name);
-  if (existing !== undefined) {
-    if (existing === executor) {
-      return; // same function re-registered (e.g., shared setup imported by multiple files)
-    }
+  if (typeof nameOrJudge !== 'string') {
+    registerFrameworkJudge(nameOrJudge);
+    return;
+  }
+  const name = nameOrJudge;
+  if (!executor) throw new Error(`Judge "${name}" requires an executor.`);
+  try {
+    const existing = getJudge(name);
+    if (existing.evaluate === executor) return;
     throw new Error(
       `Judge "${name}" is already registered with a different executor. ` +
         `Use clearJudgeRegistry() first if you need to replace it.`
     );
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      !error.message.includes(`Judge "${name}" is not registered`)
+    ) {
+      throw error;
+    }
+    registerFrameworkJudge({
+      name,
+      schema: z.object({}).passthrough(),
+      evaluate: executor,
+    });
   }
-  registry.set(name, executor);
 }
 
 /**
@@ -110,23 +137,32 @@ export function registerJudge(
  * @throws {Error} If no judge with the given name is registered
  */
 export function getRegisteredJudge(name: string): CustomJudgeExecutor {
-  const executor = registry.get(name);
-  if (!executor) {
-    const available =
-      registry.size > 0
-        ? ` Available judges: ${[...registry.keys()].join(', ')}`
-        : ' No judges are registered.';
-    throw new Error(
-      `Judge "${name}" is not registered.${available} ` +
-        `Register it with registerJudge() before tests run.`
-    );
+  try {
+    const judge = getJudge(name);
+    return judge.evaluate;
+  } catch (error) {
+    if (error instanceof Error && !error.message.includes('Available:')) {
+      throw new Error(`${error.message} No judges are registered.`);
+    }
+    throw error;
   }
-  return executor;
+}
+
+/** Validate plugin policy without merging stripped raw fields back in. */
+export function getRegisteredJudgeOptions(
+  name: string,
+  options: Record<string, unknown>
+): Record<string, unknown> {
+  const parsed: unknown = getJudge(name).schema.parse(options);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`Judge "${name}" schema must return an options object.`);
+  }
+  return parsed as Record<string, unknown>;
 }
 
 /**
  * Clears all registered judges. Intended for test teardown.
  */
 export function clearJudgeRegistry(): void {
-  registry.clear();
+  clearJudges();
 }

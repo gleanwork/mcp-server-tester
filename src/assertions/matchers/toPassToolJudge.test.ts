@@ -8,6 +8,9 @@ vi.mock('../../judge/judgeClient.js', () => ({
 }));
 vi.mock('../../judge/judgeRegistry.js', () => ({
   getRegisteredJudge: vi.fn(),
+  getRegisteredJudgeOptions: vi.fn(
+    (_name: string, options: Record<string, unknown>) => options
+  ),
 }));
 
 import { createJudge } from '../../judge/judgeClient.js';
@@ -470,7 +473,7 @@ describe('toPassToolJudge', () => {
         reference: 'expected answer',
       });
 
-      expect(executor).toHaveBeenCalledWith('candidate', 'expected answer');
+      expect(executor).toHaveBeenCalledWith('candidate', 'expected answer', {});
     });
 
     it('respects passingThreshold with named judge', async () => {

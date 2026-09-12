@@ -765,26 +765,35 @@ describe('runEvalDataset concurrency', () => {
   }
 
   it('should run cases concurrently when concurrency > 1', async () => {
-    const startTimes: number[] = [];
-    const mcp = createMockMCP();
-    vi.mocked(mcp.callTool).mockImplementation(async () => {
-      startTimes.push(Date.now());
-      await new Promise((r) => setTimeout(r, 30)); // simulate latency
-      return { content: [{ type: 'text', text: 'ok' }], isError: false };
-    });
+    vi.useFakeTimers();
+    try {
+      const startTimes: number[] = [];
+      const mcp = createMockMCP();
+      vi.mocked(mcp.callTool).mockImplementation(async () => {
+        startTimes.push(Date.now());
+        await new Promise((r) => setTimeout(r, 30)); // simulate latency
+        return { content: [{ type: 'text', text: 'ok' }], isError: false };
+      });
 
-    const dataset = createDataset([
-      createEvalCase({ id: 'c1' }),
-      createEvalCase({ id: 'c2' }),
-      createEvalCase({ id: 'c3' }),
-    ]);
+      const dataset = createDataset([
+        createEvalCase({ id: 'c1' }),
+        createEvalCase({ id: 'c2' }),
+        createEvalCase({ id: 'c3' }),
+      ]);
 
-    const start = Date.now();
-    await runEvalDataset({ dataset, concurrency: 3 }, createContext(mcp));
-    const elapsed = Date.now() - start;
+      const result = runEvalDataset(
+        { dataset, concurrency: 3 },
+        createContext(mcp)
+      );
+      await vi.runAllTimersAsync();
+      await result;
 
-    // 3 cases with 30ms each, run in parallel → should complete well under 90ms (sequential)
-    expect(elapsed).toBeLessThan(150);
+      // All three calls start at the same virtual time when concurrency is 3.
+      expect(startTimes).toHaveLength(3);
+      expect(new Set(startTimes).size).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('should default to sequential execution (concurrency: 1)', async () => {

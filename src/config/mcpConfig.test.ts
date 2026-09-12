@@ -8,6 +8,14 @@ import {
 import { ZodError } from 'zod';
 
 describe('MCPConfig', () => {
+  it.each([
+    { transport: 'http', serverUrl: 'https://example.com/mcp', label: 'agg' },
+    { transport: 'stdio', command: 'node', label: 'local' },
+  ])('retains canonical transport labels: %j', (config) => {
+    expect(validateMCPConfig(config)).toEqual(config);
+    expect(() => validateMCPConfig({ ...config, label: '' })).toThrow(ZodError);
+    expect(() => validateMCPConfig({ ...config, label: 17 })).toThrow(ZodError);
+  });
   describe('validateMCPConfig', () => {
     describe('stdio config', () => {
       it('should validate valid stdio config', () => {

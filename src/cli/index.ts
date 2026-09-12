@@ -8,6 +8,8 @@ import { generate } from './commands/generate/index.js';
 import { login } from './commands/login/index.js';
 import { token } from './commands/token/index.js';
 import { open } from './commands/open/index.js';
+import { run } from './commands/run/index.js';
+import { batch } from './commands/batch/index.js';
 import packageJson from '../../package.json' with { type: 'json' };
 
 const program = new Command();
@@ -60,6 +62,53 @@ program
   )
   .option('--state-dir <dir>', 'Custom directory for token storage')
   .action(token);
+
+// Run command
+program
+  .command('run')
+  .description('Run an evaluation manifest')
+  .requiredOption(
+    '-m, --manifest <path>',
+    'Path to an evaluation manifest JSON'
+  )
+  .option('--plugins <paths...>', 'Plugin modules to load before the run')
+  .option('--arm <name>', 'Run one named manifest arm')
+  .option(
+    '--root-dir <dir>',
+    'Base directory for resolving relative paths',
+    '.'
+  )
+  .option('--dry-run', 'Validate the manifest and plugins without executing')
+  .action(run);
+
+// Batch command
+program
+  .command('batch')
+  .description('Run multiple evaluation manifests')
+  .option('--manifests <paths...>', 'Evaluation manifest files')
+  .option('--manifest-dir <dir>', 'Directory containing evaluation manifests')
+  .option('--plugins <paths...>', 'Plugin modules to load before the batch')
+  .option(
+    '--root-dir <dir>',
+    'Base directory for resolving relative paths',
+    '.'
+  )
+  .option('--output-root <dir>', 'Root directory for evaluation results')
+  .option('--workers <number>', 'Maximum number of parallel manifest runs')
+  .option('--skip-existing', 'Skip manifests with an existing result')
+  .option('--dry-run', 'Validate manifests without executing evaluations')
+  .action((options) =>
+    batch({
+      manifests: options.manifests,
+      manifestDir: options.manifestDir,
+      plugins: options.plugins,
+      rootDir: options.rootDir,
+      outputRoot: options.outputRoot,
+      workers: options.workers ? Number(options.workers) : undefined,
+      skipExisting: options.skipExisting,
+      dryRun: options.dryRun,
+    })
+  );
 
 // Open command
 program

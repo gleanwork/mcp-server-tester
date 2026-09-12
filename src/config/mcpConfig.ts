@@ -117,6 +117,9 @@ export interface StdioMCPConfig {
    */
   transport: 'stdio';
 
+  /** Optional label used when a manifest targets multiple servers. */
+  label?: string;
+
   /**
    * Command to execute (required for stdio transport)
    */
@@ -173,6 +176,9 @@ export interface HttpMCPConfig {
    * Transport type discriminant
    */
   transport: 'http';
+
+  /** Optional label used when a manifest targets multiple servers. */
+  label?: string;
 
   /**
    * Server URL (required for http transport)
@@ -318,6 +324,7 @@ const MCPAuthConfigSchema = z
  */
 const StdioConfigSchema = z.object({
   transport: z.literal('stdio'),
+  label: z.string().min(1).optional(),
   command: z.string().min(1, 'command is required for stdio transport'),
   args: z.array(z.string()).optional(),
   cwd: z.string().optional(),
@@ -343,6 +350,7 @@ function isLocalhost(hostname: string): boolean {
  */
 const HttpConfigSchema = z.object({
   transport: z.literal('http'),
+  label: z.string().min(1).optional(),
   serverUrl: z
     .string()
     .url('serverUrl must be a valid URL')

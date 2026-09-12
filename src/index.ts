@@ -239,6 +239,79 @@ export {
   loadEvalDatasetFromObject,
 } from './evals/datasetLoader.js';
 
+// Evaluation manifest and framework contracts
+export {
+  EvalManifestSchema,
+  loadEvalManifest,
+  loadEvalManifestFromObject,
+  resolveDatasetPaths,
+} from './evals/evalManifest.js';
+export type {
+  DatasetConfig,
+  EvalArm,
+  EvalManifest,
+  EvalManifestInput,
+  ExtensionConfig,
+  HostConfig,
+  HostConfigPatch,
+  TaggedConfig,
+} from './evals/evalManifest.js';
+export type {
+  DatasetSource,
+  DatasetSourceContext,
+  EvaluationArmResult,
+  EvaluationBatchOptions,
+  EvaluationBatchResult,
+  EvaluationSuiteOptions,
+  EvaluationSuiteResult,
+  EvaluationSummary,
+  HostDefinition,
+  HostRunOptions,
+  HostRunResult,
+  HostRunInput,
+  HostRunContext as EvaluationHostRunContext,
+  HostEvent,
+  HostEvidence,
+  JudgeDefinition,
+  MetricDefinition,
+  MetricKind,
+  MetricValue,
+  ResultStoreDefinition,
+  RunSummary,
+  EvalSummaryGenerator,
+} from './evals/evalFrameworkTypes.js';
+export {
+  clearDatasetSources,
+  clearHosts,
+  clearJudges,
+  clearMetrics,
+  clearResultStores,
+  getDatasetSource,
+  getHost,
+  getJudge,
+  getMetric,
+  getResultStore,
+  listDatasetSources,
+  listHosts,
+  listJudges,
+  listMetrics,
+  listResultStores,
+  registerDatasetSource,
+  registerHost,
+  registerMetric,
+  registerResultStore,
+  validateManifestRegistrations,
+} from './evals/frameworkRegistries.js';
+// Preserve both legacy name/executor and schema-bearing object registration.
+export { registerJudge } from './judge/judgeRegistry.js';
+
+// Plugin loading
+export { loadPluginModule, loadPlugins } from './plugins/loadPlugins.js';
+export type {
+  EvalPluginModule,
+  LoadPluginsOptions,
+} from './plugins/loadPlugins.js';
+
 // Eval Runner
 export { runEvalDataset, runEvalCase } from './evals/evalRunner.js';
 
@@ -332,13 +405,6 @@ export {
   resolveRubric,
   isBuiltInRubric,
 } from './judge/judgeTypes.js';
-
-// Custom Judge Registry
-export {
-  registerJudge,
-  getRegisteredJudge,
-  clearJudgeRegistry,
-} from './judge/judgeRegistry.js';
 
 // Conformance
 export { runConformanceChecks } from './spec/conformanceChecks.js';

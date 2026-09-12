@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -403,6 +403,11 @@ describe('anthropicClaude trace parsing', () => {
       'utf-8'
     );
 
+    // Make the pre-run snapshot observably older than the new audit on filesystems
+    // where consecutive writes can share an mtime. Do not depend on wall-clock gaps.
+    const previousTime = new Date(Date.now() - 60_000);
+    await utimes(join(root, 'local_reuse.json'), previousTime, previousTime);
+    await utimes(sessionDir, previousTime, previousTime);
     const snapshot = await snapshotClaudeSessions(root);
     await writeJsonl(join(sessionDir, 'audit.jsonl'), [
       { type: 'result', result: 'reuse done' },
