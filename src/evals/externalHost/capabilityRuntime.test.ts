@@ -93,6 +93,239 @@ describe('external host capability runtime', () => {
     });
   });
 
+  it('tears down configured capabilities after a successful run', async () => {
+    const calls: string[] = [];
+
+    registerExternalHostCapability({
+      id: 'test.capability.lifecycle',
+      capabilities: ['control', 'input', 'completion', 'trace', 'normalize'],
+      async setup() {
+        calls.push('setup');
+      },
+      async run({ run, state }) {
+        calls.push('run');
+        return {
+          success: true,
+          response: 'completed',
+          toolCalls: [],
+          externalHost: {
+            driver: state.driver,
+            driverSlug: state.driverSlug,
+            displayName: state.displayName,
+            hostName: state.displayName,
+            hostType: 'custom',
+            capabilitiesUsed: state.capabilitiesUsed,
+            traceSource: 'manual-import',
+            traceConfidence: 'high',
+            artifacts: [],
+            session: { runMarker: run.marker },
+            correlation: run.correlation,
+          },
+        };
+      },
+      async teardown() {
+        calls.push('teardown');
+      },
+    });
+
+    const runner = await loadExternalHostRunner({
+      driver: TEST_DRIVER,
+      capabilities: {
+        control: {
+          uses: 'test.capability.lifecycle',
+          provides: ['input', 'completion', 'trace', 'normalize'],
+        },
+      },
+    });
+
+    const result = await runner.run({
+      runId: 'run',
+      caseId: 'case',
+      scenario: 'scenario',
+      submittedScenario: 'scenario',
+      marker: 'MCP_SERVER_TESTER_CAPABILITY',
+      correlation: TEST_CORRELATION,
+      timeoutMs: 1000,
+      startedAtMs: Date.now(),
+    });
+
+    expect(result.success).toBe(true);
+    expect(calls).toEqual(['setup', 'run', 'teardown']);
+  });
+
+  it('tears down configured capabilities after an early setup failure', async () => {
+    const calls: string[] = [];
+
+    registerExternalHostCapability({
+      id: 'test.capability.setupFailureLifecycle',
+      capabilities: ['control', 'input', 'completion', 'trace', 'normalize'],
+      async setup({ run, state }) {
+        calls.push('setup');
+        return {
+          success: false,
+          error: 'setup failed',
+          toolCalls: [],
+          externalHost: {
+            driver: state.driver,
+            driverSlug: state.driverSlug,
+            displayName: state.displayName,
+            hostName: state.displayName,
+            hostType: 'custom',
+            capabilitiesUsed: state.capabilitiesUsed,
+            traceSource: 'none',
+            traceConfidence: 'unknown',
+            artifacts: [],
+            session: { runMarker: run.marker },
+            correlation: run.correlation,
+            failureKind: 'submission_failed',
+          },
+        };
+      },
+      async teardown() {
+        calls.push('teardown');
+      },
+    });
+
+    const runner = await loadExternalHostRunner({
+      driver: TEST_DRIVER,
+      capabilities: {
+        control: {
+          uses: 'test.capability.setupFailureLifecycle',
+          provides: ['input', 'completion', 'trace', 'normalize'],
+        },
+      },
+    });
+
+    const result = await runner.run({
+      runId: 'run',
+      caseId: 'case',
+      scenario: 'scenario',
+      submittedScenario: 'scenario',
+      marker: 'MCP_SERVER_TESTER_CAPABILITY',
+      correlation: TEST_CORRELATION,
+      timeoutMs: 1000,
+      startedAtMs: Date.now(),
+    });
+
+    expect(result).toMatchObject({ success: false, error: 'setup failed' });
+    expect(calls).toEqual(['setup', 'teardown']);
+  });
+
+  it('returns structured metadata for thrown capability errors and tears down only entered capabilities', async () => {
+    const calls: string[] = [];
+
+    registerExternalHostCapability({
+      id: 'test.capability.throwingSetup',
+      capabilities: ['control'],
+      async setup() {
+        calls.push('first:setup');
+        throw new Error('setup exploded');
+      },
+      async teardown() {
+        calls.push('first:teardown');
+      },
+    });
+    registerExternalHostCapability({
+      id: 'test.capability.notEntered',
+      capabilities: ['input', 'completion', 'trace', 'normalize'],
+      async setup() {
+        calls.push('second:setup');
+      },
+      async teardown() {
+        calls.push('second:teardown');
+      },
+    });
+
+    const runner = await loadExternalHostRunner({
+      driver: TEST_DRIVER,
+      capabilities: {
+        control: { uses: 'test.capability.throwingSetup' },
+        input: {
+          uses: 'test.capability.notEntered',
+          provides: ['completion', 'trace', 'normalize'],
+        },
+      },
+    });
+
+    const result = await runner.run({
+      runId: 'run',
+      caseId: 'case',
+      scenario: 'scenario',
+      submittedScenario: 'scenario',
+      marker: 'MCP_SERVER_TESTER_CAPABILITY',
+      correlation: TEST_CORRELATION,
+      timeoutMs: 1000,
+      startedAtMs: Date.now(),
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining('setup exploded'),
+      externalHost: { failureKind: 'host_run_failed' },
+    });
+    expect(calls).toEqual(['first:setup', 'first:teardown']);
+  });
+
+  it('returns a structured cleanup failure when teardown throws', async () => {
+    registerExternalHostCapability({
+      id: 'test.capability.cleanupFailure',
+      capabilities: ['control', 'input', 'completion', 'trace', 'normalize'],
+      async run({ run, state }) {
+        return {
+          success: true,
+          response: 'completed',
+          toolCalls: [],
+          externalHost: {
+            driver: state.driver,
+            driverSlug: state.driverSlug,
+            displayName: state.displayName,
+            hostName: state.displayName,
+            hostType: 'custom',
+            capabilitiesUsed: state.capabilitiesUsed,
+            traceSource: 'manual-import',
+            traceConfidence: 'high',
+            artifacts: [],
+            session: { runMarker: run.marker },
+            correlation: run.correlation,
+          },
+        };
+      },
+      async teardown() {
+        throw new Error('cleanup exploded');
+      },
+    });
+
+    const runner = await loadExternalHostRunner({
+      driver: TEST_DRIVER,
+      capabilities: {
+        control: {
+          uses: 'test.capability.cleanupFailure',
+          provides: ['input', 'completion', 'trace', 'normalize'],
+        },
+      },
+    });
+
+    const result = await runner.run({
+      runId: 'run',
+      caseId: 'case',
+      scenario: 'scenario',
+      submittedScenario: 'scenario',
+      marker: 'MCP_SERVER_TESTER_CAPABILITY',
+      correlation: TEST_CORRELATION,
+      timeoutMs: 1000,
+      startedAtMs: Date.now(),
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining('cleanup exploded'),
+      externalHost: {
+        failureKind: 'cleanup_failed',
+        traceLimitations: [expect.stringContaining('cleanup exploded')],
+      },
+    });
+  });
+
   it('treats binding provides as additional capabilities', async () => {
     registerExternalHostCapability({
       id: 'test.capability.extraControl',

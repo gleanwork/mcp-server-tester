@@ -37,6 +37,10 @@ describe('external host driver identity and built-in defaults', () => {
       control: [
         { uses: 'builtin:platform.macos' },
         {
+          uses: 'builtin:desktop.macos.appLifecycle',
+          with: { appName: 'Claude' },
+        },
+        {
           uses: 'builtin:anthropic.claude.activateCoworkSurface',
           with: { appName: 'Claude' },
         },
@@ -69,6 +73,7 @@ describe('external host driver identity and built-in defaults', () => {
       loaded.loadedCapabilities.map((capability) => capability.binding.uses)
     ).toEqual([
       'builtin:platform.macos',
+      'builtin:desktop.macos.appLifecycle',
       'builtin:anthropic.claude.activateCoworkSurface',
       'builtin:desktop.macos.accessibilitySubmit',
       'builtin:anthropic.claude.localAgentTrace',

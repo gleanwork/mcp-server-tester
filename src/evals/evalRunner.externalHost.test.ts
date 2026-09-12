@@ -150,6 +150,10 @@ describe('runEvalCase external_host mode', () => {
         control: [
           { uses: 'builtin:platform.macos' },
           {
+            uses: 'builtin:desktop.macos.appLifecycle',
+            with: { appName: 'Claude' },
+          },
+          {
             uses: 'builtin:anthropic.claude.activateCoworkSurface',
             with: { appName: 'Claude' },
           },
@@ -157,7 +161,11 @@ describe('runEvalCase external_host mode', () => {
         input: [
           {
             uses: 'builtin:desktop.macos.accessibilitySubmit',
-            with: { appName: 'Claude', createNewConversation: true },
+            with: {
+              appName: 'Claude',
+              createNewConversation: false,
+              promptElementDescription: 'Write your prompt to Claude',
+            },
           },
         ],
         completion: [

@@ -53,6 +53,7 @@ export type ExternalHostFailureKind =
   | 'timeout'
   | 'parse_failure'
   | 'host_run_failed'
+  | 'cleanup_failed'
   | 'unsupported_host'
   | 'unknown';
 
@@ -262,6 +263,7 @@ export interface ExternalHostCapabilityImplementation {
   run?(
     context: ExternalHostCapabilityContext
   ): Promise<ExternalHostRunResult | void>;
+  teardown?(context: ExternalHostCapabilityContext): Promise<void>;
 }
 
 export interface ExternalHostRunner {
