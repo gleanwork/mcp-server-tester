@@ -48,8 +48,8 @@ import { loadPlugins } from '../plugins/loadPlugins.js';
 import {
   getDatasetSource,
   getHost,
+  getResultStore,
   parseHostConfig,
-  resolveResultStoreConfig,
   validateManifestRegistrations,
 } from './frameworkRegistries.js';
 import { computeMetrics, type MetricSpec } from './metrics.js';
@@ -633,10 +633,9 @@ export async function runEvalSuite(
     : structuredClone(summary);
   await fs.mkdir(outputDir, { recursive: true });
   if (manifest.results?.store) {
-    const { definition, config } = resolveResultStoreConfig(
-      manifest.results.store
-    );
-    const store = definition.create(config);
+    // Manifest validation already parsed defaults and transforms once.
+    const definition = getResultStore(manifest.results.store.type);
+    const store = definition.create(manifest.results.store);
     const metadata = {
       datasetName: manifest.name,
       labels: {
@@ -661,6 +660,8 @@ export async function runEvalSuite(
       );
       summary.caseArtifactPointers[arm.name] = [id];
     }
+    // Pointers are populated after redaction/cloning; retain them in both copies.
+    storedSummary.caseArtifactPointers = summary.caseArtifactPointers;
     await store.saveArtifact(
       createStoredEvalArtifact({
         kind: 'eval-run-summary',
