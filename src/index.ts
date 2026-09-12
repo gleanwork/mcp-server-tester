@@ -304,6 +304,21 @@ export {
 } from './evals/frameworkRegistries.js';
 // Preserve both legacy name/executor and schema-bearing object registration.
 export { registerJudge } from './judge/judgeRegistry.js';
+export {
+  BUILT_IN_METRICS,
+  METRIC_REGISTRY,
+  computeMetrics,
+  resolveMetric,
+} from './evals/metrics.js';
+
+// Eval dataset building and suite runner
+export { buildEvalDataset } from './evals/buildEvalDataset.js';
+export { getBuiltinHostConfig } from './evals/builtinHosts.js';
+export { runEvalSuite } from './evals/runEvalSuite.js';
+export type {
+  RunEvalSuiteOptions,
+  RunEvalSuiteResult,
+} from './evals/runEvalSuite.js';
 
 // Plugin loading
 export { loadPluginModule, loadPlugins } from './plugins/loadPlugins.js';

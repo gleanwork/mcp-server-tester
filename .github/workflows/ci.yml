@@ -18,13 +18,14 @@ jobs:
 
       - run: npm run format:check
 
+      # Legacy examples resolve package self-imports through dist.
+      - run: npm run build
+
       - run: npm run typecheck
 
       - run: npm run lint
 
       - run: npm run docs:check
-
-      - run: npm run build
 
       - name: Public evaluation foundation contracts
         run: npm run test:eval-foundation

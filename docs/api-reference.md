@@ -1159,7 +1159,7 @@ interface MCPConformanceResult {
 
 ### `EvalExpectBlock`
 
-```typescript snippet=src/evals/datasetTypes.ts#L198-L299
+```typescript snippet=src/evals/datasetTypes.ts#L199-L300
 /**
  * Unified expectation block for eval cases
  *
@@ -1266,7 +1266,7 @@ export interface EvalExpectBlock {
 
 ### `EvalCase`
 
-````typescript snippet=src/evals/datasetTypes.ts#L25-L152
+````typescript snippet=src/evals/datasetTypes.ts#L26-L153
 /**
  * A single eval test case
  *

@@ -44,7 +44,8 @@ export function interpolateArgs(args: string[], scenario: string): string[] {
  */
 export async function runCLIHost(
   cliConfig: CLIConfig,
-  scenario: string
+  scenario: string,
+  signal?: AbortSignal
 ): Promise<MCPHostSimulationResult> {
   const timeout = cliConfig.timeout ?? DEFAULT_TIMEOUT;
   const args = interpolateArgs(cliConfig.args, scenario);
@@ -53,7 +54,11 @@ export async function runCLIHost(
 
   let stdout: string;
   try {
-    const result = await spawnProcess(cliConfig.command, args, { timeout });
+    const result = await spawnProcess(cliConfig.command, args, {
+      timeout,
+      env: cliConfig.env,
+      signal,
+    });
     stdout = result.stdout;
   } catch (err) {
     const elapsed = Date.now() - startTime;
@@ -141,11 +146,17 @@ export function validateSimulationResult(result: unknown): string | null {
 function spawnProcess(
   command: string,
   args: string[],
-  options: { timeout: number }
+  options: {
+    timeout: number;
+    env?: Record<string, string | undefined>;
+    signal?: AbortSignal;
+  }
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
+    options.signal?.throwIfAborted();
     const child = spawn(command, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
+      ...(options.env ? { env: { ...process.env, ...options.env } } : {}),
     });
 
     // Close stdin immediately so the CLI doesn't wait for input
@@ -169,18 +180,40 @@ function spawnProcess(
       }
     });
 
-    const timer = setTimeout(() => {
-      child.kill('SIGTERM');
-      reject(new Error(`Process timed out after ${options.timeout}ms`));
-    }, options.timeout);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    function cleanup() {
+      clearTimeout(timer);
+      options.signal?.removeEventListener('abort', abortFromHost);
+    }
+    function abortFromHost() {
+      // The enclosing lifecycle budget is exhausted: stop only our spawned
+      // process, never a process group or an unrelated CLI instance.
+      child.kill('SIGKILL');
+      cleanup();
+      const reason: unknown = options.signal?.reason;
+      reject(
+        reason instanceof Error
+          ? reason
+          : new Error(typeof reason === 'string' ? reason : 'CLI host aborted.')
+      );
+    }
+    if (options.signal) {
+      options.signal.addEventListener('abort', abortFromHost, { once: true });
+    } else {
+      // Preserve standalone CLI timeout behavior when there is no owner signal.
+      timer = setTimeout(() => {
+        child.kill('SIGTERM');
+        reject(new Error(`Process timed out after ${options.timeout}ms`));
+      }, options.timeout);
+    }
 
     child.on('error', (err) => {
-      clearTimeout(timer);
+      cleanup();
       reject(err);
     });
 
     child.on('close', (code) => {
-      clearTimeout(timer);
+      cleanup();
       const stdout = Buffer.concat(stdoutChunks).toString('utf-8');
       const stderr = Buffer.concat(stderrChunks).toString('utf-8');
 

@@ -155,6 +155,40 @@ describe('framework registries', () => {
     expect(manifest.datasets[0]).toEqual({ type: 'custom', ignored: true });
   });
 
+  it('preserves framework judge settings when policy schemas strip unknown fields', () => {
+    registerAll();
+    registerJudge({
+      name: 'policy',
+      schema: z.object({ count: z.number().transform((value) => value * 3) }),
+      evaluate: async () => ({ score: 0.8 }),
+    });
+    const manifest: EvalManifest = {
+      name: 'judge-settings',
+      datasets: [{ type: 'file' }],
+      judges: [
+        { type: 'policy', count: 2, threshold: 0.9, reference: 'base-gold' },
+      ],
+      arms: [
+        { name: 'inherited' },
+        {
+          name: 'override',
+          judges: [
+            { type: 'policy', count: 4, threshold: 0, reference: 'arm-gold' },
+          ],
+        },
+      ],
+    };
+    const parsed = validateManifestRegistrations(manifest);
+    expect(parsed.judges).toEqual([
+      { type: 'policy', count: 6, threshold: 0.9, reference: 'base-gold' },
+    ]);
+    expect(parsed.arms?.[0]?.judges).toEqual(parsed.judges);
+    expect(parsed.arms?.[1]?.judges).toEqual([
+      { type: 'policy', count: 12, threshold: 0, reference: 'arm-gold' },
+    ]);
+    expect(manifest.judges?.[0]?.count).toBe(2);
+  });
+
   it.each([
     'dataset',
     'host',

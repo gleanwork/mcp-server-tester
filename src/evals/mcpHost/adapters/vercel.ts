@@ -18,6 +18,22 @@ import type {
 import type { UsageMetrics } from '../../../types/index.js';
 import type { MCPFixtureApi } from '../../../mcp/fixtures/mcpFixture.js';
 import { extractText } from '../../../mcp/response.js';
+import { z } from 'zod';
+import {
+  GenerationOptions,
+  ProviderSchema,
+  type HostEnvironment,
+} from '../hostOptions.js';
+
+const SdkConfigSchema = z
+  .object({
+    hostType: z.literal('sdk').optional(),
+    provider: ProviderSchema,
+    ...GenerationOptions,
+    apiKeyEnvVar: z.string().min(1).optional(),
+    env: z.record(z.string(), z.string().optional()).optional(),
+  })
+  .strict();
 
 /**
  * Classifies a raw error from the Vercel AI SDK agentic loop and returns a
@@ -102,15 +118,29 @@ function enrichErrorMessage(err: unknown, provider: string): string {
 
 // Dynamic import helper bypasses TypeScript module resolution for optional peer deps.
 // Each @ai-sdk/* package is optional — install only the providers you need.
-async function loadModel(provider: LLMProvider, model: string): Promise<any> {
+async function loadModel(
+  provider: LLMProvider,
+  model: string,
+  config: MCPHostConfig
+): Promise<any> {
+  const env: HostEnvironment = { ...process.env, ...config.env };
+  function apiKey(defaultName: string): string {
+    return env[config.apiKeyEnvVar ?? defaultName] ?? '';
+  }
   switch (provider) {
     case 'openai': {
-      const { openai } = await import('@ai-sdk/openai');
-      return openai(model);
+      const { createOpenAI } = await import('@ai-sdk/openai');
+      return createOpenAI({
+        apiKey: apiKey('OPENAI_API_KEY'),
+        baseURL: env.OPENAI_BASE_URL,
+      })(model);
     }
     case 'anthropic': {
-      const { anthropic } = await import('@ai-sdk/anthropic');
-      return anthropic(model);
+      const { createAnthropic } = await import('@ai-sdk/anthropic');
+      return createAnthropic({
+        apiKey: apiKey('ANTHROPIC_API_KEY'),
+        baseURL: env.ANTHROPIC_BASE_URL,
+      })(model);
     }
     case 'vertex-anthropic': {
       // Anthropic via Google Vertex AI — uses Application Default Credentials.
@@ -120,40 +150,49 @@ async function loadModel(provider: LLMProvider, model: string): Promise<any> {
       const { createVertexAnthropic } =
         await import('@ai-sdk/google-vertex/anthropic');
       const vertexAnthropic = createVertexAnthropic({
-        project: process.env.GOOGLE_VERTEX_PROJECT,
-        location: process.env.GOOGLE_VERTEX_LOCATION ?? 'us-east5',
+        project: env.GOOGLE_VERTEX_PROJECT,
+        location: env.GOOGLE_VERTEX_LOCATION ?? 'us-east5',
+        googleAuthOptions: env.GOOGLE_APPLICATION_CREDENTIALS
+          ? { keyFilename: env.GOOGLE_APPLICATION_CREDENTIALS }
+          : undefined,
       });
       return (vertexAnthropic as unknown as (m: string) => unknown)(model);
     }
     case 'google': {
       // @ts-ignore - optional: npm install @ai-sdk/google
-      const { google } = await import('@ai-sdk/google');
-      return (google as any)(model);
+      const { createGoogleGenerativeAI } = await import('@ai-sdk/google');
+      return createGoogleGenerativeAI({
+        apiKey: apiKey('GOOGLE_GENERATIVE_AI_API_KEY'),
+      })(model);
     }
     case 'mistral': {
       // @ts-ignore - optional: npm install @ai-sdk/mistral
-      const { mistral } = await import('@ai-sdk/mistral');
-      return (mistral as any)(model);
+      const { createMistral } = await import('@ai-sdk/mistral');
+      return createMistral({ apiKey: apiKey('MISTRAL_API_KEY') })(model);
     }
     case 'azure': {
       // @ts-ignore - optional: npm install @ai-sdk/azure
-      const { azure } = await import('@ai-sdk/azure');
-      return (azure as any)(model);
+      const { createAzure } = await import('@ai-sdk/azure');
+      return createAzure({
+        apiKey: apiKey('AZURE_API_KEY'),
+        resourceName: env.AZURE_RESOURCE_NAME,
+        baseURL: env.AZURE_BASE_URL,
+      })(model);
     }
     case 'deepseek': {
       // @ts-ignore - optional: npm install @ai-sdk/deepseek
-      const { deepseek } = await import('@ai-sdk/deepseek');
-      return (deepseek as any)(model);
+      const { createDeepSeek } = await import('@ai-sdk/deepseek');
+      return createDeepSeek({ apiKey: apiKey('DEEPSEEK_API_KEY') })(model);
     }
     case 'openrouter': {
       // @ts-ignore - optional: npm install @openrouter/ai-sdk-provider
-      const { openrouter } = await import('@openrouter/ai-sdk-provider');
-      return (openrouter as any)(model);
+      const { createOpenRouter } = await import('@openrouter/ai-sdk-provider');
+      return createOpenRouter({ apiKey: apiKey('OPENROUTER_API_KEY') })(model);
     }
     case 'xai': {
       // @ts-ignore - optional: npm install @ai-sdk/xai
-      const { xai } = await import('@ai-sdk/xai');
-      return (xai as any)(model);
+      const { createXai } = await import('@ai-sdk/xai');
+      return createXai({ apiKey: apiKey('XAI_API_KEY') })(model);
     }
     default:
       throw new Error(
@@ -188,26 +227,67 @@ export function createVercelOrchestrator(): MCPHostSimulator {
     async simulate(
       mcp: MCPFixtureApi,
       scenario: string,
-      config: MCPHostConfig
+      config: MCPHostConfig,
+      signal?: AbortSignal
     ): Promise<MCPHostSimulationResult> {
+      const controller = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let abortFromHost: (() => void) | undefined;
+      const allToolCalls: LLMToolCall[] = [];
+      let expired: Promise<never>;
+      function withinDeadline<T>(promise: Promise<T>): Promise<T> {
+        return Promise.race([promise, expired]);
+      }
       try {
-        const { generateText, stepCountIs } = await import('ai');
+        SdkConfigSchema.parse(config);
+        expired = new Promise<never>((_, reject) => {
+          if (signal) {
+            abortFromHost = function abortFromHost() {
+              const reason: unknown = signal.reason;
+              const error =
+                reason instanceof Error
+                  ? reason
+                  : new Error(
+                      typeof reason === 'string' ? reason : 'SDK host aborted.'
+                    );
+              controller.abort(error);
+              reject(error);
+            };
+            signal.addEventListener('abort', abortFromHost, { once: true });
+            if (signal.aborted) abortFromHost();
+          } else if (config.timeout !== undefined)
+            timer = setTimeout(() => {
+              const error = new Error(
+                `SDK host timed out after ${config.timeout} ms.`
+              );
+              controller.abort(error);
+              reject(error);
+            }, config.timeout);
+        });
+        const { generateText, stepCountIs } = await withinDeadline(
+          import('ai')
+        );
         // jsonSchema from @ai-sdk/provider-utils creates a proper Schema object
         // (with .jsonSchema property) that ai's prepareToolsAndToolChoice can read.
         // Do NOT use jsonSchema from 'ai' — in v6 it produces the wrong shape.
-        const { jsonSchema } = await import('@ai-sdk/provider-utils');
+        const { jsonSchema } = await withinDeadline(
+          import('@ai-sdk/provider-utils')
+        );
 
         if (!config.provider) {
           throw new Error('provider is required for SDK host type');
         }
 
         const modelId = config.model ?? defaultModel(config.provider);
-        const model = await loadModel(config.provider, modelId);
+        const model = await withinDeadline(
+          loadModel(config.provider, modelId, config)
+        );
 
         // Get available MCP tools and wrap them for Vercel AI SDK
-        const mcpTools = await mcp.listTools();
+        const mcpTools = await withinDeadline(mcp.listTools());
         let mcpDurationMs = 0;
-        const allToolCalls: LLMToolCall[] = [];
+        let attemptedToolCalls = 0;
+        let budgetError: Error | undefined;
 
         // Build tool definitions in Vercel AI SDK format.
         // Uses any because the tool() generic requires inferred parameter types
@@ -224,21 +304,34 @@ export function createVercelOrchestrator(): MCPHostSimulator {
             type: 'object',
             ...(mcpTool.inputSchema as Record<string, unknown>),
           };
-          tools[toolName] = {
+          const encodedName = toolName.replaceAll('.', '__');
+          if (tools[encodedName])
+            throw new Error(`Duplicate encoded tool name: ${encodedName}`);
+          tools[encodedName] = {
             description: mcpTool.description ?? '',
             inputSchema: jsonSchema(rawSchema),
             execute: async (
               args: Record<string, unknown>,
               opts?: { toolCallId?: string }
             ) => {
+              if (controller.signal.aborted) throw controller.signal.reason;
+              if (attemptedToolCalls >= (config.maxToolCalls ?? 10)) {
+                budgetError = new Error(
+                  `Tool call budget exhausted (${config.maxToolCalls ?? 10}).`
+                );
+                throw budgetError;
+              }
+              attemptedToolCalls++;
               const mcpStart = Date.now();
-              const result = await mcp.callTool(toolName, args);
+              const result = await withinDeadline(mcp.callTool(toolName, args));
               mcpDurationMs += Date.now() - mcpStart;
 
               const output = extractText(result);
               allToolCalls.push({
                 id: opts?.toolCallId,
                 name: toolName,
+                source: 'mcp',
+                rawName: encodedName,
                 arguments: args,
                 output,
               });
@@ -250,22 +343,27 @@ export function createVercelOrchestrator(): MCPHostSimulator {
         const maxSteps = config.maxToolCalls ?? 10;
         const llmStart = Date.now();
 
-        const result = await (generateText as any)({
-          model,
-          prompt: scenario,
-          tools,
-          stopWhen: stepCountIs(maxSteps),
-          temperature: config.temperature ?? 0,
-          maxTokens: config.maxTokens,
-        });
+        const result = await withinDeadline(
+          generateText({
+            model,
+            prompt: scenario,
+            tools,
+            stopWhen: stepCountIs(Math.max(1, maxSteps)),
+            temperature: config.temperature ?? 0,
+            maxOutputTokens: config.maxTokens,
+            abortSignal: controller.signal,
+          })
+        );
+        if (budgetError) throw budgetError;
 
         const totalDurationMs = Date.now() - llmStart;
         const llmDurationMs = totalDurationMs - mcpDurationMs;
 
-        const hostUsage: UsageMetrics | undefined = result.usage
+        const usage = result.totalUsage ?? result.usage;
+        const hostUsage: UsageMetrics | undefined = usage
           ? {
-              inputTokens: (result.usage.promptTokens as number) ?? 0,
-              outputTokens: (result.usage.completionTokens as number) ?? 0,
+              inputTokens: usage.inputTokens ?? 0,
+              outputTokens: usage.outputTokens ?? 0,
               totalCostUsd: 0,
               durationMs: llmDurationMs,
             }
@@ -275,7 +373,11 @@ export function createVercelOrchestrator(): MCPHostSimulator {
           role: 'tool' | 'assistant';
           content?: string;
           toolCallId?: string;
-        }> = (result.steps ?? []).flatMap((step: any) => {
+        }> = (result.steps ?? []).flatMap<{
+          role: 'tool' | 'assistant';
+          content?: string;
+          toolCallId?: string;
+        }>((step) => {
           if (step.toolCalls?.length > 0) {
             // Reference each call by id; the payload lives once on allToolCalls.
             return (step.toolCalls as Array<{ toolCallId?: string }>).map(
@@ -303,9 +405,13 @@ export function createVercelOrchestrator(): MCPHostSimulator {
       } catch (err) {
         return {
           success: false,
-          toolCalls: [],
+          toolCalls: allToolCalls,
           error: enrichErrorMessage(err, config.provider ?? 'unknown'),
         };
+      } finally {
+        clearTimeout(timer);
+        if (abortFromHost) signal?.removeEventListener('abort', abortFromHost);
+        controller.abort();
       }
     },
   };

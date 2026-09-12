@@ -84,7 +84,8 @@ const simulatorRegistry = new Map<LLMProvider, MCPHostSimulator>(
 export async function simulateMCPHost(
   mcp: MCPFixtureApi,
   scenario: string,
-  config: MCPHostConfig
+  config: MCPHostConfig,
+  signal?: AbortSignal
 ): Promise<MCPHostSimulationResult> {
   const hostType = config.hostType ?? 'sdk';
 
@@ -95,7 +96,24 @@ export async function simulateMCPHost(
           `Provide { command } with a shell command containing {{scenario}}.`
       );
     }
-    return runCLIHost(config.cli, scenario);
+    if (
+      config.temperature !== undefined ||
+      config.maxTokens !== undefined ||
+      config.maxToolCalls !== undefined
+    ) {
+      throw new Error(
+        'CLI hosts do not support temperature, maxTokens or maxToolCalls.'
+      );
+    }
+    return runCLIHost(
+      {
+        ...config.cli,
+        timeout: config.timeout ?? config.cli.timeout,
+        env: { ...config.env, ...config.cli.env },
+      },
+      scenario,
+      signal
+    );
   }
 
   if (hostType === 'browser' || hostType === 'desktop') {
@@ -120,7 +138,7 @@ export async function simulateMCPHost(
         `Supported: ${allProviders.join(', ')}`
     );
   }
-  return simulator.simulate(mcp, scenario, config);
+  return simulator.simulate(mcp, scenario, config, signal);
 }
 
 /**

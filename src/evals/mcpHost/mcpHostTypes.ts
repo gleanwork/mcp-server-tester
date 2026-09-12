@@ -89,6 +89,8 @@ export type CLIOutputFormat = 'stream-json' | 'json';
  * ```
  */
 export interface CLIConfig {
+  /** Child-process-only environment overrides. Undefined removes an inherited key. */
+  env?: Record<string, string | undefined>;
   /**
    * CLI binary to invoke.
    */
@@ -172,6 +174,10 @@ export interface BrowserConfig {
  * Configuration for MCP host simulation
  */
 export interface MCPHostConfig {
+  /** Execution-local environment overrides; never assigned to process.env. */
+  env?: Record<string, string | undefined>;
+  /** Execution deadline in milliseconds, including registered host-owned setup and teardown. */
+  timeout?: number;
   /**
    * Host type for the simulation.
    *
@@ -320,6 +326,8 @@ export interface MCPHostSimulator {
   simulate(
     mcp: MCPFixtureApi,
     scenario: string,
-    config: MCPHostConfig
+    config: MCPHostConfig,
+    /** Optional enclosing host deadline; does not cover caller-owned fixtures. */
+    signal?: AbortSignal
   ): Promise<MCPHostSimulationResult>;
 }

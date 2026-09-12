@@ -25,7 +25,7 @@ vi.mock('ai', () => ({
         text: '',
       },
     ],
-    usage: { promptTokens: 100, completionTokens: 50 },
+    usage: { inputTokens: 100, outputTokens: 50 },
   }),
   tool: vi.fn(
     (config: {
@@ -38,7 +38,7 @@ vi.mock('ai', () => ({
 }));
 
 vi.mock('@ai-sdk/openai', () => ({
-  openai: vi.fn(() => ({ id: 'gpt-4o' })),
+  createOpenAI: vi.fn(() => vi.fn(() => ({ id: 'gpt-4o' }))),
 }));
 
 function createMockMCP(
@@ -89,11 +89,13 @@ describe('createVercelOrchestrator', () => {
           text: '',
         },
       ],
-      usage: { promptTokens: 100, completionTokens: 50 },
+      usage: { inputTokens: 100, outputTokens: 50 },
     } as never);
 
-    const { openai } = await import('@ai-sdk/openai');
-    vi.mocked(openai).mockReturnValue({ id: 'gpt-4o' } as never);
+    const { createOpenAI } = await import('@ai-sdk/openai');
+    vi.mocked(createOpenAI).mockReturnValue(
+      vi.fn(() => ({ id: 'gpt-4o' })) as never
+    );
   });
 
   it('should return a simulation result with tool calls', async () => {
