@@ -282,6 +282,31 @@ export type {
   RunTelemetry,
   EvalSummaryGenerator,
 } from './evals/evalFrameworkTypes.js';
+export { createCoworkHost } from './evals/cowork/host.js';
+export { createCoworkNativeEvidence } from './evals/cowork/nativeEvidence.js';
+export { createCuaCoworkControl } from './evals/cowork/cuaControl.js';
+export type { CoworkTransactionalPaste } from './evals/cowork/cuaControl.js';
+export { connectCoworkCua } from './evals/cowork/cuaTransport.js';
+export type { CoworkCuaConnection } from './evals/cowork/cuaTransport.js';
+export { CoworkControlError } from './evals/cowork/workflow.js';
+export type {
+  CoworkHostOptions,
+  CoworkCheckpoint,
+  CoworkControl,
+  CoworkControlContext,
+  CoworkControlState,
+  CoworkComposer,
+  CoworkComposerVerification,
+  CoworkInputMode,
+  CoworkCuaTransport,
+  CoworkNativeEvidence,
+  CoworkEvidenceInput,
+  CoworkEvidenceDiagnostics,
+  CoworkEvidenceResult,
+  CoworkRunDiagnostics,
+} from './evals/cowork/types.js';
+export { hostTraceToExecution } from './evals/hostTrace.js';
+export type { EvalExecutionResult } from './evals/hostTrace.js';
 export {
   clearDatasetSources,
   clearHosts,

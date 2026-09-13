@@ -208,6 +208,7 @@ The `examples/` directory contains complete working examples:
 - [filesystem-server/](./examples/filesystem-server) — Test suite for Anthropic's Filesystem MCP server: 5 Playwright tests, 11 eval dataset cases, Zod schema validation.
 - [sqlite-server/](./examples/sqlite-server) — Test suite for a SQLite MCP server: 11 Playwright tests, 14 eval dataset cases.
 - [basic-playwright-usage/](./examples/basic-playwright-usage) — Minimal Playwright patterns.
+- [cowork/](./examples/cowork/) — Experimental macOS Cowork evaluation using a patched Cua runtime and a manually installed nonce fixture.
 
 ## Evaluation manifests
 

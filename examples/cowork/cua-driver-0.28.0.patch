@@ -1,0 +1,1780 @@
+diff --git a/libs/cua-driver/contract/manifest.json b/libs/cua-driver/contract/manifest.json
+index 7245868..eb2c54d 100644
+--- a/libs/cua-driver/contract/manifest.json
++++ b/libs/cua-driver/contract/manifest.json
+@@ -1672,0 +1673,6 @@
++                "url": {
++                  "type": [
++                    "string",
++                    "null"
++                  ]
++                },
+@@ -2834,0 +2841,66 @@
++    {
++      "name": "paste_text",
++      "description": "macOS only: replace the focused field in exact pid/window_id with text using foreground Cmd+A then Cmd+V, never Return. Uses the window's existing focused field; element targeting fields are not accepted. Backs up every readable pasteboard item/type/data in native memory (16 MiB total); unreadable and promised formats refuse before mutation. Waits 500 ms for paste settle, then restores if the clipboard generation is still owned. AppKit has no atomic ownership compare-and-swap or cancellable provider reads. Returns only effect and clipboard_restored; unverifiable requires independent UI confirmation. Active Cua recording refuses; recording start is excluded until the paste worker exits, including restoration after caller cancellation. This tool never records text or clipboard backup.",
++      "platforms": [
++        "macos"
++      ],
++      "capabilities": [
++        "input.text.paste_transaction",
++        "clipboard.transaction"
++      ],
++      "annotations": {
++        "read_only": false,
++        "destructive": true,
++        "idempotent": false,
++        "open_world": true
++      },
++      "schema_mode": "canonical_runtime",
++      "input_schema": {
++        "additionalProperties": false,
++        "properties": {
++          "pid": {
++            "format": "int32",
++            "type": "integer"
++          },
++          "session": {
++            "description": "For multi-call work, prefer a short public session label and repeat it on every call that accepts it.\nOmit it to use the authenticated transport's implicit lifecycle session.",
++            "type": "string"
++          },
++          "text": {
++            "description": "Exact text; no sanitization or Return keystroke is applied.",
++            "type": "string"
++          },
++          "window_id": {
++            "format": "uint32",
++            "minimum": 0,
++            "type": "integer"
++          }
++        },
++        "required": [
++          "pid",
++          "window_id",
++          "text"
++        ],
++        "type": "object"
++      },
++      "success_output_schema": {
++        "additionalProperties": true,
++        "properties": {
++          "clipboard_restored": {
++            "type": "boolean"
++          },
++          "effect": {
++            "enum": [
++              "refused",
++              "unverifiable"
++            ],
++            "type": "string"
++          }
++        },
++        "required": [
++          "effect",
++          "clipboard_restored"
++        ],
++        "type": "object"
++      }
++    },
+diff --git a/libs/cua-driver/docs/paste-text-macos.md b/libs/cua-driver/docs/paste-text-macos.md
+new file mode 100644
+index 0000000..4ce38b0
+--- /dev/null
++++ b/libs/cua-driver/docs/paste-text-macos.md
+@@ -0,0 +1,39 @@
++# macOS transactional paste (local addition)
++
++`paste_text` is registered only by the macOS backend. Windows and Linux do not implement it. The generated contract advertises `platforms: ["macos"]`.
++
++```json
++{"pid": 123, "window_id": 456, "text": "exact text"}
++```
++
++Required: positive native `pid`, nonzero `window_id`, and exact `text`. Only `session` is optional. Unknown fields, including `element_index`, `element_token`, and `snapshot_id`, refuse rather than silently changing the target. Text is not trimmed or sanitized. Text larger than 16 MiB refuses.
++
++Paste addresses the exact window's existing focused field. Establish the field's focus independently. There is no element-cache lookup, element focus operation, or mouse fallback.
++
++## Transaction
++
++1. After existing permission enforcement, atomically refuse an active registry recording and reserve recording exclusion. Acquire the existing desktop-input lane and per-PID mutation lease. Move owned admission into the blocking worker so caller cancellation cannot release desktop serialization or recording exclusion before restoration and worker exit. Serialize with this process's clipboard-rs readers/writers.
++2. Eagerly copy every original pasteboard item, type, and byte payload into independent native `NSPasteboardItem`/`NSData` objects. Nothing is serialized. Reject missing data, unsupported file promises, unrepresentable legacy boards, more than 128 items/1024 types, or a total data/type budget above 16 MiB before clearing anything. Check a two-second snapshot deadline between native calls.
++3. Install one plain-text item. Retain the exact generation returned by `clearContents`; never adopt a generation observed after a write.
++4. Use the existing SkyLight foreground-HID activation helper. Immediately before each chord, verify WindowServer ownership/front process, exact AX focused window and clipboard generation. Send only Cmd+A, wait 50 ms, then Cmd+V. Never send Return.
++5. Wait 500 ms after the paste attempt, including an actuator error. This is a settle delay, not a paste-consumed acknowledgement.
++6. Restore the original items and formats only if the owned generation is still current. RAII handles early returns and Rust unwinding. If another owner has changed the clipboard, leave it alone and report `clipboard_restored: false`. A failed restore is reported, not retried over a subsequent copy. The worker retains its transaction if its requesting future is canceled.
++
++The result text and structured content contain only:
++
++```json
++{"effect":"unverifiable","clipboard_restored":true}
++```
++
++`effect` is `refused` if no chord was attempted; otherwise it is `unverifiable`. Failure also sets the MCP envelope's `isError`. A preflight refusal reports `clipboard_restored: true` because this operation did not modify the clipboard. Authorization/transport failures retain the existing Cua error conventions.
++
++The tool uses active `desktop_input` and `clipboard` authorization, with advertised R2 risk and foreground delivery. It does not bypass OS permissions or Cua grants. Text is redacted from recording arguments, and paste does not trigger trajectory, history, or PiP capture. An active registry recording causes refusal before dispatch. Recording start (including the legacy configure path) refuses while an admitted paste is waiting or running; the same recording mutex makes the enabled check and exclusion atomic. Direct paste invocation without the runtime-owned admission refuses. The native backup has no Debug/Serialize implementation and is never returned, logged, or written to disk.
++
++## Limits and validation
++
++- AppKit provides no atomic compare-and-swap for `changeCount` plus `clearContents`. Generation checks protect observed ownership changes but cannot eliminate the interprocess check/clear race. This is **not** an absolute guarantee against a simultaneous external writer.
++- Synchronous AppKit/AX calls cannot be canceled safely mid-call. Polling, byte/count limits, and settle delays are bounded; the snapshot deadline cannot preempt a stalled native data provider. Rust RAII cannot restore after process termination or an Objective-C abort.
++- A delayed application may read the clipboard after the settle interval. The driver never claims confirmed delivery; inspect the target independently. Restoring clipboard data does not undo selection or text changes.
++- An external clipboard manager, recorder, or cloud clipboard may observe temporary content. This operation cannot control those processes.
++
++Focused tests use fake clipboard storage and fake keyboard actions only. They cover full-format restoration, empty boards, unreadable backup refusal, install/actuator/restore failures, Rust unwinding, ownership changes, byte limits, and the two-chord sequence. Separate tests cover Mac-only discovery, rejected targeting fields, authorization composition, redaction, and content-free MCP failure output. Channel-gated fake workers verify desktop and recording exclusion during action and restoration after caller cancellation. Recording tests use invalid output paths or in-memory state and do not start capture. No general-pasteboard or GUI test is required or run by this addition.
+diff --git a/libs/cua-driver/rust/crates/cua-driver-contract/src/lib.rs b/libs/cua-driver/rust/crates/cua-driver-contract/src/lib.rs
+index ef089ba..e53ab5a 100644
+--- a/libs/cua-driver/rust/crates/cua-driver-contract/src/lib.rs
++++ b/libs/cua-driver/rust/crates/cua-driver-contract/src/lib.rs
+@@ -21,0 +22,2 @@ mod outputs;
++mod paste;
++pub use paste::{PasteEffect, PasteTextInput, PasteTextOutput};
+@@ -197,0 +200 @@ pub fn manifest() -> ContractManifest {
++    tools.push(paste::contract());
+diff --git a/libs/cua-driver/rust/crates/cua-driver-contract/src/paste.rs b/libs/cua-driver/rust/crates/cua-driver-contract/src/paste.rs
+new file mode 100644
+index 0000000..a4adf81
+--- /dev/null
++++ b/libs/cua-driver/rust/crates/cua-driver-contract/src/paste.rs
+@@ -0,0 +1,101 @@
++//! macOS-only transactional text paste. No clipboard contents in the output.
++use schemars::JsonSchema;
++use serde::{Deserialize, Serialize};
++
++use crate::{Platform, SchemaMode, ToolAnnotations, ToolContract, ToolInput, ToolOutput};
++
++// Intentionally no Debug implementation: text must not enter diagnostics.
++#[derive(Clone, Serialize, Deserialize, JsonSchema)]
++#[serde(deny_unknown_fields)]
++pub struct PasteTextInput {
++    pub pid: i32,
++    pub window_id: u32,
++    /// Exact text; no sanitization or Return keystroke is applied.
++    pub text: String,
++    /// For multi-call work, prefer a short public session label and repeat it on every call that accepts it.
++    /// Omit it to use the authenticated transport's implicit lifecycle session.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    #[schemars(with = "String")]
++    pub session: Option<String>,
++}
++
++impl ToolInput for PasteTextInput {
++    const TOOL_NAME: &'static str = "paste_text";
++}
++
++#[derive(Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Debug)]
++#[serde(rename_all = "snake_case")]
++pub enum PasteEffect {
++    Refused,
++    Unverifiable,
++}
++
++#[derive(Serialize, Deserialize, JsonSchema)]
++#[serde(deny_unknown_fields)]
++pub struct PasteTextOutput {
++    pub effect: PasteEffect,
++    /// False if another clipboard owner intervened or restoration failed.
++    pub clipboard_restored: bool,
++}
++
++impl ToolOutput for PasteTextOutput {}
++
++pub(crate) fn contract() -> ToolContract {
++    ToolContract {
++        name: "paste_text".into(),
++        description: "macOS only: replace the focused field in exact pid/window_id with text using foreground Cmd+A then Cmd+V, never Return. Uses the window's existing focused field; element targeting fields are not accepted. Backs up every readable pasteboard item/type/data in native memory (16 MiB total); unreadable and promised formats refuse before mutation. Waits 500 ms for paste settle, then restores if the clipboard generation is still owned. AppKit has no atomic ownership compare-and-swap or cancellable provider reads. Returns only effect and clipboard_restored; unverifiable requires independent UI confirmation. Active Cua recording refuses; recording start is excluded until the paste worker exits, including restoration after caller cancellation. This tool never records text or clipboard backup.".into(),
++        platforms: vec![Platform::Macos],
++        aliases: vec![],
++        capabilities: vec!["input.text.paste_transaction".into(), "clipboard.transaction".into()],
++        annotations: ToolAnnotations { read_only: false, destructive: true, idempotent: false, open_world: true },
++        schema_mode: SchemaMode::CanonicalRuntime,
++        cursor_semantics: None,
++        input_schema: PasteTextInput::input_schema(),
++        success_output_schema: Some(PasteTextOutput::output_schema()),
++        output_validator: crate::validate_typed_output::<PasteTextOutput>,
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    #[test]
++    fn paste_text_rejects_removed_targeting_fields() {
++        for field in ["element_index", "element_token", "snapshot_id"] {
++            for value in [
++                serde_json::json!(0),
++                serde_json::json!("target"),
++                serde_json::Value::Null,
++            ] {
++                let mut args = serde_json::json!({"pid": 123, "window_id": 456, "text": "exact"});
++                args[field] = value;
++                assert!(
++                    serde_json::from_value::<PasteTextInput>(args).is_err(),
++                    "accepted {field}"
++                );
++            }
++            assert!(contract().input_schema["properties"].get(field).is_none());
++        }
++        assert_eq!(contract().input_schema["additionalProperties"], false);
++    }
++
++    #[test]
++    fn paste_text_contract_is_mac_only_and_exact_targeted() {
++        let tool = contract();
++        assert_eq!(tool.platforms, vec![Platform::Macos]);
++        assert!(tool.annotations.destructive && !tool.annotations.read_only);
++        let required = tool.input_schema["required"].as_array().unwrap();
++        for key in ["pid", "window_id", "text"] {
++            assert!(required.contains(&key.into()));
++        }
++        let output = serde_json::to_value(PasteTextOutput {
++            effect: PasteEffect::Unverifiable,
++            clipboard_restored: true,
++        })
++        .unwrap();
++        assert_eq!(
++            output,
++            serde_json::json!({"effect":"unverifiable", "clipboard_restored":true})
++        );
++    }
++}
+diff --git a/libs/cua-driver/rust/crates/cua-driver-contract/src/windows.rs b/libs/cua-driver/rust/crates/cua-driver-contract/src/windows.rs
+index 49dea44..7e7d41a 100644
+--- a/libs/cua-driver/rust/crates/cua-driver-contract/src/windows.rs
++++ b/libs/cua-driver/rust/crates/cua-driver-contract/src/windows.rs
+@@ -211,0 +212,4 @@ pub struct WindowElement {
++    /// Native accessibility URL, when reported by the platform. Never inferred from the label.
++    /// Absent when the platform or element does not expose a URL.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub url: Option<String>,
+@@ -381,0 +386,24 @@ mod tests {
++    #[test]
++    fn window_state_preserves_native_urls_without_inferring_missing_urls() {
++        let input = json!({
++            "pid":7,"window_id":9,
++            "elements":[
++                {"element_index":0,"role":"AXWebArea","depth":1,
++                 "label":"Unrelated page title","url":"https://example.test/a%20b?q=one#two"},
++                {"element_index":1,"role":"AXLink","depth":2,
++                 "url":"https://example.test/next"},
++                {"element_index":2,"role":"button","depth":1,
++                 "label":"https://title-is-not-a-url.test"}
++            ]
++        });
++        let output: WindowStateOutput = serde_json::from_value(input.clone()).unwrap();
++        output.validate().unwrap();
++        let serialized = serde_json::to_value(output).unwrap();
++        assert_eq!(serialized["elements"], input["elements"]);
++        assert!(serialized["elements"][2].get("url").is_none());
++        let schema = WindowStateOutput::output_schema();
++        let element = &schema["properties"]["elements"]["items"];
++        assert!(element["properties"].get("url").is_some());
++        assert!(!element["required"].as_array().unwrap().contains(&json!("url")));
++    }
++
+diff --git a/libs/cua-driver/rust/crates/cua-driver-core/src/authorization.rs b/libs/cua-driver/rust/crates/cua-driver-core/src/authorization.rs
+index 2625ee2..731a1c1 100644
+--- a/libs/cua-driver/rust/crates/cua-driver-core/src/authorization.rs
++++ b/libs/cua-driver/rust/crates/cua-driver-core/src/authorization.rs
+@@ -279,0 +280 @@ const DESKTOP_INPUT_OPERATIONS: &[&str] = &[
++    "paste_text",
+@@ -602 +603 @@ pub const ENFORCEMENT_ADAPTERS: &[EnforcementAdapterDescriptor] = &[
+-        operations: &["clipboard_read", "clipboard_write"],
++        operations: &["clipboard_read", "clipboard_write", "paste_text"],
+@@ -767 +768 @@ pub fn enforcement_adapters_for_call(
+-    if matches!(tool, "clipboard_read" | "clipboard_write") {
++    if matches!(tool, "clipboard_read" | "clipboard_write" | "paste_text") {
+@@ -907,0 +909 @@ pub fn advertised_risk_for(tool: &str) -> RiskAssessment {
++        | "paste_text"
+@@ -1029,0 +1032 @@ pub fn classify_tool_call(tool: &str, args: &Value) -> RiskAssessment {
++        | "paste_text"
+@@ -1962,0 +1966,14 @@ mod tests {
++    #[test]
++    fn paste_text_requires_clipboard_and_desktop_authorization() {
++        let args = serde_json::json!({"pid": 42, "window_id": 7, "text": "private"});
++        let adapters: Vec<_> = enforcement_adapters_for_call("paste_text", &args)
++            .iter()
++            .map(|adapter| adapter.id)
++            .collect();
++        assert!(adapters.contains(&"clipboard"));
++        assert!(adapters.contains(&"desktop_input"));
++        let risk = classify_tool_call("paste_text", &args);
++        assert_eq!(risk.class, RiskClass::R2);
++        assert_eq!(risk.enforcement, RiskEnforcement::Active);
++    }
++
+diff --git a/libs/cua-driver/rust/crates/cua-driver-core/src/mcp_result.rs b/libs/cua-driver/rust/crates/cua-driver-core/src/mcp_result.rs
+index a62d4e5..e2bc305 100644
+--- a/libs/cua-driver/rust/crates/cua-driver-core/src/mcp_result.rs
++++ b/libs/cua-driver/rust/crates/cua-driver-core/src/mcp_result.rs
+@@ -109,0 +110,6 @@ fn conforming_tool_result_inner(tool: &str, result: Value, has_schema: bool) ->
++        // Transactional paste has one content-free shape for both success and failure.
++        // It already conforms to the advertised output schema; do not add diagnostics.
++        if tool == "paste_text" && validate_success_output(tool, structured.clone()).is_ok() {
++            result.insert("structuredContent".to_owned(), structured);
++            return Value::Object(result);
++        }
+@@ -233,0 +240,11 @@ mod tests {
++    #[test]
++    fn paste_text_failure_retains_only_effect_and_restoration_metadata() {
++        let metadata = json!({"effect": "refused", "clipboard_restored": true});
++        let result = conforming_tool_result(
++            "paste_text",
++            tool_error_result(&metadata.to_string(), metadata.clone()),
++        );
++        assert_conforms("paste_text", &result);
++        assert_eq!(result["structuredContent"], metadata);
++    }
++
+diff --git a/libs/cua-driver/rust/crates/cua-driver-core/src/recording.rs b/libs/cua-driver/rust/crates/cua-driver-core/src/recording.rs
+index 6a8e72e..715cd90 100644
+--- a/libs/cua-driver/rust/crates/cua-driver-core/src/recording.rs
++++ b/libs/cua-driver/rust/crates/cua-driver-core/src/recording.rs
+@@ -231,0 +232,17 @@ pub struct RecordingSession {
++/// Blocks recording start while an admitted paste can expose temporary text.
++/// Owned by the paste worker, not the cancelable registry invocation.
++pub(crate) struct PasteRecordingExclusion {
++    recording: Arc<RecordingSession>,
++}
++
++impl Drop for PasteRecordingExclusion {
++    fn drop(&mut self) {
++        let mut inner = self
++            .recording
++            .inner
++            .lock()
++            .unwrap_or_else(|poisoned| poisoned.into_inner());
++        inner.active_pastes -= 1;
++    }
++}
++
+@@ -233,0 +251 @@ struct RecordingInner {
++    active_pastes: usize,
+@@ -298,0 +317 @@ impl RecordingSession {
++                active_pastes: 0,
+@@ -313,0 +333,13 @@ impl RecordingSession {
++    /// Test and reserve under the same mutex as `start()`. The owned guard can
++    /// cross spawn_blocking and outlive a canceled caller. Poison refuses paste.
++    pub(crate) fn try_exclude_paste(self: &Arc<Self>) -> Option<PasteRecordingExclusion> {
++        let mut inner = self.inner.lock().ok()?;
++        if inner.enabled {
++            return None;
++        }
++        inner.active_pastes += 1;
++        Some(PasteRecordingExclusion {
++            recording: self.clone(),
++        })
++    }
++
+@@ -349,0 +382,3 @@ impl RecordingSession {
++        if inner.active_pastes != 0 {
++            anyhow::bail!("cannot start recording while a paste operation is active");
++        }
+@@ -1178,0 +1214,68 @@ mod tests {
++    #[test]
++    fn paste_recording_exclusion_refuses_enabled_recording_atomically() {
++        let recording = Arc::new(RecordingSession::new());
++        let mut inner = recording.inner.lock().unwrap();
++        let (attempting_tx, attempting) = std::sync::mpsc::channel();
++        let worker_recording = recording.clone();
++        let worker = std::thread::spawn(move || {
++            attempting_tx.send(()).unwrap();
++            worker_recording.try_exclude_paste().is_none()
++        });
++        attempting
++            .recv_timeout(std::time::Duration::from_secs(5))
++            .unwrap();
++        // Simulate start's enabled write while holding its actual mutex. No
++        // video, cursor sampler, or filesystem operation runs in this test.
++        inner.enabled = true;
++        drop(inner);
++        assert!(worker.join().unwrap());
++        assert_eq!(recording.inner.lock().unwrap().active_pastes, 0);
++        recording.inner.lock().unwrap().enabled = false;
++        assert!(recording.try_exclude_paste().is_some());
++    }
++
++    #[test]
++    fn paste_recording_exclusion_blocks_start_and_configure_until_last_guard_drops() {
++        let recording = Arc::new(RecordingSession::new());
++        let first = recording.try_exclude_paste().unwrap();
++        let second = recording.try_exclude_paste().unwrap();
++        let file = tempfile::NamedTempFile::new().unwrap();
++        let invalid_output = file.path().join("recording");
++        let path = invalid_output.to_str().unwrap();
++        for guard in [first, second] {
++            assert!(recording
++                .start(path, false, None)
++                .unwrap_err()
++                .to_string()
++                .contains("paste"));
++            assert!(recording
++                .configure(true, Some(path))
++                .unwrap_err()
++                .to_string()
++                .contains("paste"));
++            recording.stop_owner(None).unwrap();
++            drop(guard);
++        }
++        assert_eq!(recording.inner.lock().unwrap().active_pastes, 0);
++        // Without exclusion start reaches filesystem validation, which fails
++        // before any recorder/cursor capture can start.
++        assert!(!recording
++            .start(path, false, None)
++            .unwrap_err()
++            .to_string()
++            .contains("paste"));
++    }
++
++    #[test]
++    fn paste_recording_exclusion_releases_after_worker_unwind() {
++        let recording = Arc::new(RecordingSession::new());
++        let worker_recording = recording.clone();
++        let worker = std::thread::spawn(move || {
++            let _guard = worker_recording.try_exclude_paste().unwrap();
++            panic!("fake paste worker failure");
++        });
++        assert!(worker.join().is_err());
++        assert_eq!(recording.inner.lock().unwrap().active_pastes, 0);
++        assert!(recording.try_exclude_paste().is_some());
++    }
++
+diff --git a/libs/cua-driver/rust/crates/cua-driver-core/src/tool.rs b/libs/cua-driver/rust/crates/cua-driver-core/src/tool.rs
+index c69c0a3..01d0b52 100644
+--- a/libs/cua-driver/rust/crates/cua-driver-core/src/tool.rs
++++ b/libs/cua-driver/rust/crates/cua-driver-core/src/tool.rs
+@@ -74,3 +74,15 @@ pub fn with_runtime_scope<T>(scope: String, action: impl FnOnce() -> T) -> T {
+-fn desktop_action_coordinator() -> &'static tokio::sync::Mutex<()> {
+-    static COORDINATOR: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+-    COORDINATOR.get_or_init(|| tokio::sync::Mutex::new(()))
++fn desktop_action_coordinator() -> &'static Arc<tokio::sync::Mutex<()>> {
++    static COORDINATOR: OnceLock<Arc<tokio::sync::Mutex<()>>> = OnceLock::new();
++    COORDINATOR.get_or_init(|| Arc::new(tokio::sync::Mutex::new(())))
++}
++
++/// Runtime-only admission for the native paste worker. Public JSON cannot
++/// construct it. Keep a clone inside spawn_blocking until restoration finishes.
++#[derive(Clone)]
++pub struct PasteAdmission {
++    _guards: Arc<PasteAdmissionGuards>,
++}
++
++struct PasteAdmissionGuards {
++    _desktop: tokio::sync::OwnedMutexGuard<()>,
++    _recording: crate::recording::PasteRecordingExclusion,
+@@ -550,0 +563,12 @@ pub trait Tool: Send + Sync {
++
++    /// Only the paste dispatch path supplies this opaque admission. Blocking
++    /// implementations must move it into their worker; other tools are unchanged.
++    async fn invoke_with_paste_admission(
++        &self,
++        _args: Value,
++        _admission: PasteAdmission,
++    ) -> ToolResult {
++        // Never fall back to a handler that cannot retain worker admission.
++        let metadata = serde_json::json!({"effect": "refused", "clipboard_restored": true});
++        ToolResult::error(metadata.to_string()).with_structured(metadata)
++    }
+@@ -1479,0 +1504,11 @@ impl ToolRegistry {
++        // Atomically refuse an active recorder and exclude recording start until
++        // the paste worker finishes, even if the registry future is canceled.
++        let paste_exclusion = if resolved_name == "paste_text" {
++            let Some(exclusion) = self.recording.try_exclude_paste() else {
++                let metadata = serde_json::json!({"effect": "refused", "clipboard_restored": true});
++                return ToolResult::error(metadata.to_string()).with_structured(metadata);
++            };
++            Some(exclusion)
++        } else {
++            None
++        };
+@@ -1489 +1524,5 @@ impl ToolRegistry {
+-            history.begin_action(resolved_name, &public_args, runtime_session.as_deref())
++            if resolved_name == "paste_text" {
++                None
++            } else {
++                history.begin_action(resolved_name, &public_args, runtime_session.as_deref())
++            }
+@@ -1497 +1536,5 @@ impl ToolRegistry {
+-                "start_recording" | "stop_recording" | "get_recording_state" | "replay_trajectory"
++                "start_recording"
++                    | "stop_recording"
++                    | "get_recording_state"
++                    | "replay_trajectory"
++                    | "paste_text"
+@@ -1500 +1543 @@ impl ToolRegistry {
+-        let _desktop_action = if requires_desktop_coordination(
++        let mut desktop_action = if requires_desktop_coordination(
+@@ -1511 +1554 @@ impl ToolRegistry {
+-            Some(match coordinator.try_lock() {
++            Some(match coordinator.clone().try_lock_owned() {
+@@ -1513 +1556 @@ impl ToolRegistry {
+-                Err(_) => coordinator.lock().await,
++                Err(_) => coordinator.clone().lock_owned().await,
+@@ -1517,0 +1561,8 @@ impl ToolRegistry {
++        let paste_admission = paste_exclusion.map(|exclusion| PasteAdmission {
++            _guards: Arc::new(PasteAdmissionGuards {
++                _desktop: desktop_action
++                    .take()
++                    .expect("paste requires desktop coordination"),
++                _recording: exclusion,
++            }),
++        });
+@@ -1530,5 +1581,11 @@ impl ToolRegistry {
+-        let mut result = crate::recording::scope_dispatch_click_capture(
+-            pending_turn.as_ref(),
+-            tool.invoke(args.clone()),
+-        )
+-        .await;
++        let mut result =
++            crate::recording::scope_dispatch_click_capture(pending_turn.as_ref(), async {
++                match paste_admission.as_ref() {
++                    Some(admission) => {
++                        tool.invoke_with_paste_admission(args.clone(), admission.clone())
++                            .await
++                    }
++                    None => tool.invoke(args.clone()).await,
++                }
++            })
++            .await;
+@@ -1580 +1637,2 @@ impl ToolRegistry {
+-        drop(_desktop_action);
++        drop(desktop_action);
++        drop(paste_admission);
+@@ -1863 +1921 @@ impl ToolRegistry {
+-        let delivery_mode = if tool_name == "bring_to_front" {
++        let delivery_mode = if matches!(tool_name, "bring_to_front" | "paste_text") {
+@@ -1964 +2022,7 @@ impl ToolRegistry {
+-        let (operation, content_kind, summary) = if tool_name == "clipboard_read" {
++        let (operation, content_kind, summary) = if tool_name == "paste_text" {
++            (
++                "transaction",
++                "all_formats_backup_text_paste",
++                "Allow Cua to temporarily replace and restore the system clipboard for text paste",
++            )
++        } else if tool_name == "clipboard_read" {
+@@ -2566,0 +2631 @@ fn is_physical_desktop_action(tool: &str) -> bool {
++            | "paste_text"
+@@ -2575,0 +2641,4 @@ fn requires_desktop_coordination(tool: &str, args: &Value, independent_lane: boo
++    // Paste always uses foreground HID; no implementation may opt it out.
++    if tool == "paste_text" {
++        return true;
++    }
+@@ -4594,0 +4664,166 @@ resources:
++    struct PasteWorkerProbe {
++        def: super::ToolDef,
++        started: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
++        restoring: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
++        finished: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
++        advance: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
++    }
++
++    #[async_trait::async_trait]
++    impl super::Tool for PasteWorkerProbe {
++        fn def(&self) -> &super::ToolDef {
++            &self.def
++        }
++
++        async fn invoke(&self, _args: serde_json::Value) -> ToolResult {
++            panic!("paste must receive runtime admission");
++        }
++
++        async fn invoke_with_paste_admission(
++            &self,
++            _args: serde_json::Value,
++            admission: super::PasteAdmission,
++        ) -> ToolResult {
++            let started = self.started.lock().unwrap().take().unwrap();
++            let restoring = self.restoring.lock().unwrap().take().unwrap();
++            let finished = self.finished.lock().unwrap().take().unwrap();
++            let advance = self.advance.lock().unwrap().take().unwrap();
++            tokio::task::spawn_blocking(move || {
++                started.send(()).unwrap();
++                advance.recv_timeout(Duration::from_secs(10)).unwrap();
++                restoring.send(()).unwrap();
++                advance.recv_timeout(Duration::from_secs(10)).unwrap();
++                drop(admission);
++                finished.send(()).unwrap();
++                ToolResult::text("fake paste completed")
++            })
++            .await
++            .unwrap()
++        }
++    }
++
++    #[tokio::test]
++    async fn paste_text_cancel_before_worker_releases_recording_exclusion() {
++        let desktop = desktop_action_coordinator().lock().await;
++        let hits = Arc::new(AtomicUsize::new(0));
++        let mut registry = super::ToolRegistry::new();
++        registry.register(Box::new(ArgumentProbe {
++            hits: hits.clone(),
++            last_args: Arc::new(Mutex::new(None)),
++            def: super::ToolDef::from_contract(
++                &cua_driver_contract::tool_contract("paste_text").unwrap(),
++            ),
++        }));
++        let file = tempfile::NamedTempFile::new().unwrap();
++        let invalid_output = file.path().join("recording");
++        let path = invalid_output.to_str().unwrap();
++        let mut caller = Box::pin(registry.invoke_with_context(
++            "paste_text",
++            serde_json::json!({"pid": 8_675_512, "window_id": 42, "text": "fake text"}),
++            unrestricted_context(),
++        ));
++        assert!(futures_util::poll!(caller.as_mut()).is_pending());
++        assert!(registry
++            .recording
++            .start(path, false, None)
++            .unwrap_err()
++            .to_string()
++            .contains("paste"));
++        drop(caller);
++        assert!(!registry
++            .recording
++            .start(path, false, None)
++            .unwrap_err()
++            .to_string()
++            .contains("paste"));
++        assert_eq!(hits.load(Ordering::SeqCst), 0);
++        drop(desktop);
++    }
++
++    #[tokio::test]
++    async fn paste_text_cancellation_retains_desktop_and_recording_until_worker_restores() {
++        let (started_tx, started) = tokio::sync::oneshot::channel();
++        let (restoring_tx, restoring) = tokio::sync::oneshot::channel();
++        let (finished_tx, finished) = tokio::sync::oneshot::channel();
++        let (advance, advance_rx) = std::sync::mpsc::channel();
++        let mut registry = super::ToolRegistry::new();
++        registry.register(Box::new(PasteWorkerProbe {
++            def: super::ToolDef::from_contract(
++                &cua_driver_contract::tool_contract("paste_text").unwrap(),
++            ),
++            started: Mutex::new(Some(started_tx)),
++            restoring: Mutex::new(Some(restoring_tx)),
++            finished: Mutex::new(Some(finished_tx)),
++            advance: Mutex::new(Some(advance_rx)),
++        }));
++        let registry = Arc::new(registry);
++        let caller_registry = registry.clone();
++        let caller = tokio::spawn(async move {
++            caller_registry
++                .invoke_with_context(
++                    "paste_text",
++                    serde_json::json!({"pid": 8_675_511, "window_id": 42, "text": "fake text"}),
++                    unrestricted_context(),
++                )
++                .await
++        });
++        tokio::time::timeout(Duration::from_secs(5), started)
++            .await
++            .unwrap()
++            .unwrap();
++        caller.abort();
++        assert!(caller.await.unwrap_err().is_cancelled());
++        let desktop_held_during_action = desktop_action_coordinator().try_lock().is_err();
++        // A file cannot contain a child directory. Even the unfixed start path
++        // fails before cursor/video capture, so this regression never uses GUI.
++        let file = tempfile::NamedTempFile::new().unwrap();
++        let invalid_output = file.path().join("recording");
++        let recording_during_action = registry
++            .recording
++            .start(invalid_output.to_str().unwrap(), false, None)
++            .unwrap_err()
++            .to_string();
++        advance.send(()).unwrap();
++        tokio::time::timeout(Duration::from_secs(5), restoring)
++            .await
++            .unwrap()
++            .unwrap();
++        let desktop_held_during_restore = desktop_action_coordinator().try_lock().is_err();
++        let recording_during_restore = registry
++            .recording
++            .start(invalid_output.to_str().unwrap(), false, None)
++            .unwrap_err()
++            .to_string();
++        advance.send(()).unwrap();
++        tokio::time::timeout(Duration::from_secs(5), finished)
++            .await
++            .unwrap()
++            .unwrap();
++        let _next_action =
++            tokio::time::timeout(Duration::from_secs(5), desktop_action_coordinator().lock())
++                .await
++                .expect("desktop released after worker completion");
++        let recording_after = registry
++            .recording
++            .start(invalid_output.to_str().unwrap(), false, None)
++            .unwrap_err()
++            .to_string();
++        assert!(
++            desktop_held_during_action,
++            "caller cancellation released desktop during action"
++        );
++        assert!(
++            desktop_held_during_restore,
++            "caller cancellation released desktop during restoration"
++        );
++        assert!(
++            recording_during_action.contains("paste"),
++            "{recording_during_action}"
++        );
++        assert!(
++            recording_during_restore.contains("paste"),
++            "{recording_during_restore}"
++        );
++        assert!(!recording_after.contains("paste"), "{recording_after}");
++    }
++
+@@ -4843 +5078 @@ fn recording_args_for(tool_name: &str, args: &Value) -> Value {
+-            "clipboard_write" => {
++            "clipboard_write" | "paste_text" => {
+@@ -4993,0 +5229,10 @@ mod capability_tests {
++    #[test]
++    fn paste_text_recording_args_are_content_free() {
++        let args = serde_json::json!({"pid": 42, "window_id": 7, "text": "secret-paste-body"});
++        assert!(!recording_args_for("paste_text", &args)
++            .to_string()
++            .contains("secret-paste-body"));
++        assert!(requires_desktop_coordination("paste_text", &args, false));
++        assert!(requires_desktop_coordination("paste_text", &args, true));
++    }
++
+diff --git a/libs/cua-driver/rust/crates/platform-macos/Cargo.toml b/libs/cua-driver/rust/crates/platform-macos/Cargo.toml
+index 5a18e6a..c3fffdc 100644
+--- a/libs/cua-driver/rust/crates/platform-macos/Cargo.toml
++++ b/libs/cua-driver/rust/crates/platform-macos/Cargo.toml
+@@ -38 +38 @@ objc2-foundation = { version = "0.2", features = [
+-    "NSArray", "NSString", "NSDictionary", "NSRunLoop",
++    "NSArray", "NSString", "NSDictionary", "NSRunLoop", "NSData", "NSEnumerator",
+@@ -45 +45 @@ objc2-app-kit = { version = "0.2", features = [
+-    "NSApplication", "NSWindow", "NSScreen", "NSColor",
++    "NSApplication", "NSWindow", "NSScreen", "NSColor", "NSPasteboard", "NSPasteboardItem",
+diff --git a/libs/cua-driver/rust/crates/platform-macos/src/ax/bindings.rs b/libs/cua-driver/rust/crates/platform-macos/src/ax/bindings.rs
+index 02ba09c..b1b6804 100644
+--- a/libs/cua-driver/rust/crates/platform-macos/src/ax/bindings.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/ax/bindings.rs
+@@ -177,0 +178,40 @@ pub unsafe fn copy_string_attr(element: AXUIElementRef, attr_name: &str) -> Opti
++/// Convert a borrowed AXURL value without taking ownership or interpreting it.
++/// AXURL is commonly a CFURL, but some providers return a CFString.
++unsafe fn coerce_url_value(value: CFTypeRef) -> Option<String> {
++    use core_foundation::url::CFURL;
++
++    if value.is_null() {
++        return None;
++    }
++    let type_id = core_foundation::base::CFGetTypeID(value);
++    let url = if type_id == CFURL::type_id() {
++        CFURL::wrap_under_get_rule(value as _)
++            .get_string()
++            .to_string()
++    } else if type_id == CFStr::type_id() {
++        CFStr::wrap_under_get_rule(value as _).to_string()
++    } else {
++        return None;
++    };
++    // Preserve the native text verbatim; only an empty value is unavailable.
++    (!url.trim().is_empty()).then_some(url)
++}
++
++/// Copy a native URL attribute. Missing, empty, and unsupported values are absent.
++/// Unlike `copy_string_attr`, this accepts CFURL as well as CFString.
++///
++/// # Safety
++///
++/// `element` must be a valid, live `AXUIElementRef` for the duration of the call.
++pub unsafe fn copy_url_attr(element: AXUIElementRef, attr_name: &str) -> Option<String> {
++    let attr = CFStr::new(attr_name);
++    let mut value: CFTypeRef = std::ptr::null();
++    let err = AXUIElementCopyAttributeValue(element, attr.as_concrete_TypeRef(), &mut value);
++    if err != kAXErrorSuccess || value.is_null() {
++        return None;
++    }
++    let result = coerce_url_value(value);
++    CFRelease(value);
++    result
++}
++
+@@ -755,0 +796,34 @@ mod tests {
++    #[test]
++    fn url_value_preserves_cfurl_and_cfstring_without_coercing_other_types() {
++        use core_foundation::url::{CFURLCreateWithString, CFURL};
++
++        let expected = "https://example.test/a%20b?q=one&lang=%E6%97%A5#two";
++        let string = CFStr::new(expected);
++        let url_ref = unsafe {
++            CFURLCreateWithString(
++                std::ptr::null(),
++                string.as_concrete_TypeRef(),
++                std::ptr::null(),
++            )
++        };
++        assert!(!url_ref.is_null());
++        let url = unsafe { CFURL::wrap_under_create_rule(url_ref) };
++        assert_eq!(
++            unsafe { coerce_url_value(url.as_CFTypeRef()) }.as_deref(),
++            Some(expected)
++        );
++        assert_eq!(
++            unsafe { coerce_url_value(string.as_CFTypeRef()) }.as_deref(),
++            Some(expected)
++        );
++        assert_eq!(unsafe { coerce_url_value(std::ptr::null()) }, None);
++        for value in [
++            CFStr::new("").as_CFType(),
++            CFStr::new("  \n").as_CFType(),
++            CFNumber::from(42).as_CFType(),
++            CFBoolean::true_value().as_CFType(),
++        ] {
++            assert_eq!(unsafe { coerce_url_value(value.as_CFTypeRef()) }, None);
++        }
++    }
++
+diff --git a/libs/cua-driver/rust/crates/platform-macos/src/ax/cache.rs b/libs/cua-driver/rust/crates/platform-macos/src/ax/cache.rs
+index 15aa754..cc109fe 100644
+--- a/libs/cua-driver/rust/crates/platform-macos/src/ax/cache.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/ax/cache.rs
+@@ -156,0 +157 @@ mod tests {
++            url: None,
+diff --git a/libs/cua-driver/rust/crates/platform-macos/src/ax/tree.rs b/libs/cua-driver/rust/crates/platform-macos/src/ax/tree.rs
+index ee1f5d3..67a40eb 100644
+--- a/libs/cua-driver/rust/crates/platform-macos/src/ax/tree.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/ax/tree.rs
+@@ -56,0 +57,3 @@ pub struct AXNode {
++    /// Native AXURL, when supplied by the app. Never inferred from other text.
++    /// Structured metadata only; does not change Markdown or addressability.
++    pub url: Option<String>,
+@@ -468,2 +471,4 @@ unsafe fn walk_element(
+-    // Structured `elements` only contains actionable nodes. Keep all new AX
+-    // round-trips behind that same gate so display-only rows pay no cost.
++    // URL metadata belongs to any returned node, not only controls or web roots.
++    let url = copy_url_attr(element, "AXURL");
++    // Structured `elements` only contains actionable nodes. Keep control-state AX
++    // round-trips behind that same gate so display-only rows pay no control-state cost.
+@@ -493,0 +499 @@ unsafe fn walk_element(
++            url,
+@@ -527,0 +534 @@ unsafe fn walk_element(
++            url,
+diff --git a/libs/cua-driver/rust/crates/platform-macos/src/browser/consent_ui.rs b/libs/cua-driver/rust/crates/platform-macos/src/browser/consent_ui.rs
+index 4d2e131..09b4a24 100644
+--- a/libs/cua-driver/rust/crates/platform-macos/src/browser/consent_ui.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/browser/consent_ui.rs
+@@ -396,0 +397 @@ mod tests {
++            url: None,
+diff --git a/libs/cua-driver/rust/crates/platform-macos/src/browser/setup_ui.rs b/libs/cua-driver/rust/crates/platform-macos/src/browser/setup_ui.rs
+index 0ba2abd..212a424 100644
+--- a/libs/cua-driver/rust/crates/platform-macos/src/browser/setup_ui.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/browser/setup_ui.rs
+@@ -1719,0 +1720 @@ mod tests {
++            url: None,
+diff --git a/libs/cua-driver/rust/crates/platform-macos/src/tools/clipboard.rs b/libs/cua-driver/rust/crates/platform-macos/src/tools/clipboard.rs
+index 1d48a87..506372d 100644
+--- a/libs/cua-driver/rust/crates/platform-macos/src/tools/clipboard.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/tools/clipboard.rs
+@@ -5,0 +6,3 @@ use cua_driver_core::clipboard::ClipboardBackend;
++// Serialize the eager transaction with all clipboard-rs readers/writers in this process.
++pub(super) static CLIPBOARD_ACCESS: Mutex<()> = Mutex::new(());
++
+@@ -41,0 +45,3 @@ impl ClipboardBackend for MacosClipboard {
++        let _access = CLIPBOARD_ACCESS
++            .lock()
++            .map_err(|_| "clipboard lock was poisoned")?;
+@@ -47,0 +54,3 @@ impl ClipboardBackend for MacosClipboard {
++        let _access = CLIPBOARD_ACCESS
++            .lock()
++            .map_err(|_| "clipboard lock was poisoned")?;
+@@ -56,0 +66,3 @@ impl ClipboardBackend for MacosClipboard {
++        let _access = CLIPBOARD_ACCESS
++            .lock()
++            .map_err(|_| "clipboard lock was poisoned")?;
+@@ -62,0 +75,3 @@ impl ClipboardBackend for MacosClipboard {
++        let _access = CLIPBOARD_ACCESS
++            .lock()
++            .map_err(|_| "clipboard lock was poisoned")?;
+@@ -67,0 +83,3 @@ impl ClipboardBackend for MacosClipboard {
++        let _access = CLIPBOARD_ACCESS
++            .lock()
++            .map_err(|_| "clipboard lock was poisoned")?;
+diff --git a/libs/cua-driver/rust/crates/platform-macos/src/tools/get_window_state.rs b/libs/cua-driver/rust/crates/platform-macos/src/tools/get_window_state.rs
+index 01e56b5..974e4bc 100644
+--- a/libs/cua-driver/rust/crates/platform-macos/src/tools/get_window_state.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/tools/get_window_state.rs
+@@ -36 +36,2 @@ fn def() -> &'static ToolDef {
+-            holds), `actions` (names of AX actions exposed by the element, \
++            holds), optional `url` (native AXURL only, never inferred from the title), \
++            `actions` (names of AX actions exposed by the element, \
+@@ -900,0 +902,3 @@ pub(crate) fn build_elements_array_with_token(
++            if let Some(url) = &node.url {
++                entry["url"] = serde_json::Value::String(url.clone());
++            }
+@@ -1141,0 +1146 @@ mod tests {
++            url: None,
+@@ -1344,0 +1350,43 @@ mod tests {
++
++    #[test]
++    fn elements_preserve_native_urls_through_the_shared_contract() {
++        use cua_driver_contract::{ToolOutput, WindowStateOutput};
++
++        let mut nodes = vec![
++            node(
++                Some(0),
++                "AXWebArea",
++                Some("Unrelated title"),
++                0,
++                None,
++                None,
++                vec![],
++            ),
++            node(Some(1), "AXLink", Some("Next"), 1, Some(0), None, vec![]),
++            node(
++                Some(2),
++                "AXWebArea",
++                Some("https://title-is-not-a-url.test"),
++                0,
++                None,
++                None,
++                vec![],
++            ),
++        ];
++        nodes[0].url = Some("https://example.test/a%20b?q=one#two".into());
++        nodes[1].url = Some("https://example.test/next".into());
++        let elements = build_elements_array_with_token(&nodes, None);
++        assert_eq!(elements[0]["url"], "https://example.test/a%20b?q=one#two");
++        assert_eq!(elements[0]["label"], "Unrelated title");
++        assert_eq!(elements[1]["url"], "https://example.test/next");
++        assert!(elements[2].get("url").is_none());
++        let output: WindowStateOutput = serde_json::from_value(json!({
++            "pid":7,"window_id":9,"elements":elements
++        }))
++        .unwrap();
++        output.validate().unwrap();
++        assert_eq!(
++            serde_json::to_value(output).unwrap()["elements"],
++            json!(elements)
++        );
++    }
+diff --git a/libs/cua-driver/rust/crates/platform-macos/src/tools/mod.rs b/libs/cua-driver/rust/crates/platform-macos/src/tools/mod.rs
+index 68287e0..371b7b0 100644
+--- a/libs/cua-driver/rust/crates/platform-macos/src/tools/mod.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/tools/mod.rs
+@@ -35,0 +36,3 @@ mod page;
++mod paste_text;
++mod paste_transaction;
++mod pasteboard_native;
+@@ -946,0 +950 @@ pub fn register_all(
++    registry.register(Box::new(paste_text::PasteTextTool));
+diff --git a/libs/cua-driver/rust/crates/platform-macos/src/tools/paste_text.rs b/libs/cua-driver/rust/crates/platform-macos/src/tools/paste_text.rs
+new file mode 100644
+index 0000000..56a290b
+--- /dev/null
++++ b/libs/cua-driver/rust/crates/platform-macos/src/tools/paste_text.rs
+@@ -0,0 +1,197 @@
++//! One foreground, exact-window, clipboard-preserving paste operation (macOS only).
++//! See docs/paste-text-macos.md for AppKit race and synchronous-call limits.
++use async_trait::async_trait;
++use cua_driver_contract::{PasteEffect, PasteTextInput, PasteTextOutput};
++use cua_driver_core::{
++    protocol::ToolResult,
++    tool::{PasteAdmission, Tool, ToolDef},
++};
++use serde_json::Value;
++use std::{sync::OnceLock, time::Duration};
++
++use super::{
++    paste_transaction::{replace_selection, PasteKeys, Transaction},
++    pasteboard_native::{NativePasteboard, MAX_BACKUP_BYTES},
++};
++
++pub struct PasteTextTool;
++
++fn outcome(started: bool, restored: bool, failed: bool) -> ToolResult {
++    let output = PasteTextOutput {
++        effect: if started {
++            PasteEffect::Unverifiable
++        } else {
++            PasteEffect::Refused
++        },
++        clipboard_restored: restored,
++    };
++    let metadata = serde_json::to_value(output).expect("paste metadata serializes");
++    let mut result = ToolResult::text(metadata.to_string()).with_structured(metadata);
++    if failed {
++        result.is_error = Some(true);
++    }
++    result
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn paste_text_schema_follows_shared_mcp_conventions() {
++        let contract = cua_driver_contract::tool_contract("paste_text").unwrap();
++        let violations = cua_driver_core::tool_schema::shared_schema_violations(
++            "paste_text",
++            &contract.input_schema,
++        );
++        assert!(violations.is_empty(), "{violations:?}");
++    }
++
++    #[tokio::test]
++    async fn paste_text_direct_invocation_refuses_without_runtime_admission() {
++        let result = PasteTextTool
++            .invoke(serde_json::json!({
++                "pid": 123, "window_id": 456, "text": "must not touch the desktop"
++            }))
++            .await;
++        assert_eq!(result.is_error, Some(true));
++        assert_eq!(
++            result.structured_content.unwrap(),
++            serde_json::json!({
++                "effect": "refused", "clipboard_restored": true
++            })
++        );
++    }
++
++    #[test]
++    fn paste_text_outcomes_are_only_effect_and_restore_metadata() {
++        for started in [false, true] {
++            for restored in [false, true] {
++                let result = outcome(started, restored, true);
++                let metadata = result.structured_content.unwrap();
++                assert_eq!(metadata.as_object().unwrap().len(), 2);
++                assert_eq!(metadata["clipboard_restored"], restored);
++                assert_eq!(
++                    metadata["effect"],
++                    if started { "unverifiable" } else { "refused" }
++                );
++                assert_eq!(result.is_error, Some(true));
++            }
++        }
++    }
++}
++
++struct NativeKeys {
++    pid: i32,
++    window_id: u32,
++}
++impl PasteKeys for NativeKeys {
++    fn verify(&self) -> Result<(), ()> {
++        if !matches!(
++            crate::windows::resolve_window_owner(self.pid, self.window_id),
++            crate::windows::WindowOwner::SamePid
++        ) || crate::input::skylight::front_process_matches(self.pid, self.window_id)
++            != Some(true)
++            || crate::ax::bindings::focused_window_id_of_pid(self.pid) != Some(self.window_id)
++        {
++            return Err(());
++        }
++        Ok(())
++    }
++    fn select_all(&mut self) -> Result<(), ()> {
++        crate::input::keyboard::press_key_global("a", &["cmd"]).map_err(|_| ())?;
++        std::thread::sleep(Duration::from_millis(50));
++        Ok(())
++    }
++    fn paste(&mut self) -> Result<(), ()> {
++        crate::input::keyboard::press_key_global("v", &["cmd"]).map_err(|_| ())
++    }
++    fn settle(&mut self) {
++        // AppKit has no reliable paste-consumed acknowledgement. This is a bounded
++        // settle, not proof of application delivery; effect remains unverifiable.
++        std::thread::sleep(Duration::from_millis(500));
++    }
++}
++
++#[async_trait]
++impl Tool for PasteTextTool {
++    fn def(&self) -> &ToolDef {
++        static DEF: OnceLock<ToolDef> = OnceLock::new();
++        DEF.get_or_init(|| {
++            ToolDef::from_contract(
++                &cua_driver_contract::tool_contract("paste_text").expect("paste contract"),
++            )
++        })
++    }
++
++    async fn invoke(&self, _args: Value) -> ToolResult {
++        // Direct invocation cannot prove desktop/recording admission. Only the
++        // authorized registry path can supply the opaque worker guard below.
++        outcome(false, true, true)
++    }
++
++    async fn invoke_with_paste_admission(
++        &self,
++        mut args: Value,
++        admission: PasteAdmission,
++    ) -> ToolResult {
++        cua_driver_core::tool_args::sanitize_reserved_args(&mut args);
++        // Do not surface serde errors: a malformed request could embed text in them.
++        let Ok(input) = serde_json::from_value::<PasteTextInput>(args) else {
++            return outcome(false, true, true);
++        };
++        if input.pid <= 0 || input.window_id == 0 || input.text.len() > MAX_BACKUP_BYTES {
++            return outcome(false, true, true);
++        }
++        let lease = super::acquire_background_mutation(input.pid).await;
++        let prior_front = crate::apps::frontmost_pid();
++        crate::focus_guard::with_focus_suppressed(
++            Some(input.pid),
++            prior_front,
++            "paste_text",
++            || async move {
++                tokio::task::spawn_blocking(move || {
++                    // Keep ownership in the worker if the requesting future is canceled.
++                    let _admission = admission;
++                    let _lease = lease;
++                    let Ok(_clipboard_lock) = super::clipboard::CLIPBOARD_ACCESS.try_lock() else {
++                        return outcome(false, true, true);
++                    };
++                    objc2::rc::autoreleasepool(|_| {
++                        if !matches!(
++                            crate::windows::resolve_window_owner(input.pid, input.window_id),
++                            crate::windows::WindowOwner::SamePid
++                        ) {
++                            return outcome(false, true, true);
++                        }
++                        let mut board = NativePasteboard::general();
++                        let Ok(mut transaction) = Transaction::begin(&mut board) else {
++                            return outcome(false, true, true);
++                        };
++                        let mut started = false;
++                        let result = transaction.install(&input.text).and_then(|()| {
++                            crate::input::skylight::with_foreground_hid_activation(
++                                input.pid,
++                                input.window_id,
++                                || {
++                                    let mut keys = NativeKeys {
++                                        pid: input.pid,
++                                        window_id: input.window_id,
++                                    };
++                                    replace_selection(&transaction, &mut keys, &mut started)
++                                        .map_err(|()| anyhow::anyhow!("paste refused"))
++                                },
++                            )
++                            .map_err(|_| ())
++                        });
++                        let restored = transaction.restore();
++                        outcome(started, restored, result.is_err() || !restored)
++                    })
++                })
++                .await
++                .unwrap_or_else(|_| outcome(true, false, true))
++            },
++        )
++        .await
++    }
++}
+diff --git a/libs/cua-driver/rust/crates/platform-macos/src/tools/paste_transaction.rs b/libs/cua-driver/rust/crates/platform-macos/src/tools/paste_transaction.rs
+new file mode 100644
+index 0000000..d30efb2
+--- /dev/null
++++ b/libs/cua-driver/rust/crates/platform-macos/src/tools/paste_transaction.rs
+@@ -0,0 +1,344 @@
++//! In-memory clipboard transaction seam. Tests use fake storage, never AppKit.
++
++pub(super) trait Pasteboard {
++    type Contents;
++    fn snapshot(&mut self) -> Result<(isize, Self::Contents), ()>;
++    fn text(&self, text: &str) -> Result<Self::Contents, ()>;
++    fn change_count(&self) -> isize;
++    fn clear(&mut self) -> isize;
++    /// Must refuse if `generation` is no longer current; must not adopt a newer generation.
++    fn write(&mut self, contents: &Self::Contents, generation: isize) -> Result<(), ()>;
++}
++
++pub(super) struct Transaction<'a, B: Pasteboard> {
++    board: &'a mut B,
++    backup: Option<B::Contents>,
++    generation: isize,
++    modified: bool,
++}
++
++impl<'a, B: Pasteboard> Transaction<'a, B> {
++    pub(super) fn begin(board: &'a mut B) -> Result<Self, ()> {
++        let (generation, backup) = board.snapshot()?;
++        Ok(Self {
++            board,
++            backup: Some(backup),
++            generation,
++            modified: false,
++        })
++    }
++
++    pub(super) fn is_current(&self) -> bool {
++        self.board.change_count() == self.generation
++    }
++
++    pub(super) fn install(&mut self, text: &str) -> Result<(), ()> {
++        let contents = self.board.text(text)?;
++        if !self.is_current() {
++            return Err(());
++        }
++        self.generation = self.board.clear();
++        self.modified = true;
++        self.board.write(&contents, self.generation)
++    }
++
++    pub(super) fn restore(&mut self) -> bool {
++        let Some(backup) = self.backup.take() else {
++            return !self.modified;
++        };
++        if !self.modified {
++            return true;
++        }
++        if !self.is_current() {
++            return false;
++        }
++        self.generation = self.board.clear();
++        let restored = self.board.write(&backup, self.generation).is_ok();
++        self.modified = !restored;
++        restored
++    }
++}
++
++impl<B: Pasteboard> Drop for Transaction<'_, B> {
++    fn drop(&mut self) {
++        self.restore();
++    }
++}
++
++pub(super) trait PasteKeys {
++    fn verify(&self) -> Result<(), ()>;
++    fn select_all(&mut self) -> Result<(), ()>;
++    fn paste(&mut self) -> Result<(), ()>;
++    fn settle(&mut self);
++}
++
++/// Only two chords exist at this seam. No free-form key or submit parameter.
++pub(super) fn replace_selection<B: Pasteboard, K: PasteKeys>(
++    transaction: &Transaction<'_, B>,
++    keys: &mut K,
++    started: &mut bool,
++) -> Result<(), ()> {
++    keys.verify()?;
++    if !transaction.is_current() {
++        return Err(());
++    }
++    *started = true;
++    keys.select_all()?;
++    keys.verify()?;
++    if !transaction.is_current() {
++        return Err(());
++    }
++    let result = keys.paste();
++    // Even a failed actuator may have queued a key-down; do not restore early.
++    keys.settle();
++    result
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[derive(Clone, PartialEq, Eq, Debug)]
++    struct Contents(Vec<Vec<(String, Vec<u8>)>>);
++
++    struct FakeBoard {
++        contents: Contents,
++        generation: isize,
++        fail_write: bool,
++        fail_snapshot: bool,
++    }
++
++    impl FakeBoard {
++        fn original() -> Self {
++            Self {
++                contents: Contents(vec![
++                    vec![
++                        ("public.rtf".into(), b"{\\rtf1 original}".to_vec()),
++                        ("vendor.custom".into(), vec![0, 255, 7]),
++                    ],
++                    vec![("public.file-url".into(), b"file:///example".to_vec())],
++                ]),
++                generation: 4,
++                fail_write: false,
++                fail_snapshot: false,
++            }
++        }
++    }
++
++    impl Pasteboard for FakeBoard {
++        type Contents = Contents;
++        fn snapshot(&mut self) -> Result<(isize, Contents), ()> {
++            if self.fail_snapshot {
++                return Err(());
++            }
++            Ok((self.generation, self.contents.clone()))
++        }
++        fn text(&self, text: &str) -> Result<Contents, ()> {
++            Ok(Contents(vec![vec![(
++                "public.utf8-plain-text".into(),
++                text.as_bytes().to_vec(),
++            )]]))
++        }
++        fn change_count(&self) -> isize {
++            self.generation
++        }
++        fn clear(&mut self) -> isize {
++            self.generation += 1;
++            self.contents.0.clear();
++            self.generation
++        }
++        fn write(&mut self, contents: &Contents, generation: isize) -> Result<(), ()> {
++            if self.fail_write {
++                self.fail_write = false;
++                return Err(());
++            }
++            if generation != self.generation {
++                return Err(());
++            }
++            self.contents = contents.clone();
++            Ok(())
++        }
++    }
++
++    #[test]
++    fn paste_transaction_unreadable_backup_refuses_before_modification() {
++        let mut board = FakeBoard::original();
++        let original = board.contents.clone();
++        board.fail_snapshot = true;
++        assert!(Transaction::begin(&mut board).is_err());
++        assert_eq!(board.contents, original);
++        assert_eq!(board.generation, 4);
++    }
++
++    #[derive(Default)]
++    struct FakeKeys {
++        calls: Vec<&'static str>,
++        fail_paste: bool,
++        wrong_target: bool,
++    }
++    impl PasteKeys for FakeKeys {
++        fn verify(&self) -> Result<(), ()> {
++            if self.wrong_target {
++                Err(())
++            } else {
++                Ok(())
++            }
++        }
++        fn select_all(&mut self) -> Result<(), ()> {
++            self.calls.push("cmd+a");
++            Ok(())
++        }
++        fn paste(&mut self) -> Result<(), ()> {
++            self.calls.push("cmd+v");
++            if self.fail_paste {
++                Err(())
++            } else {
++                Ok(())
++            }
++        }
++        fn settle(&mut self) {
++            self.calls.push("settle");
++        }
++    }
++
++    #[test]
++    fn paste_transaction_only_selects_pastes_and_settles_on_success_or_key_failure() {
++        for fail_paste in [false, true] {
++            let mut board = FakeBoard::original();
++            let original = board.contents.clone();
++            let mut keys = FakeKeys {
++                fail_paste,
++                ..Default::default()
++            };
++            let mut started = false;
++            {
++                let mut transaction = Transaction::begin(&mut board).unwrap();
++                transaction.install("temporary").unwrap();
++                assert_eq!(
++                    replace_selection(&transaction, &mut keys, &mut started).is_err(),
++                    fail_paste
++                );
++            }
++            assert!(started);
++            assert_eq!(keys.calls, ["cmd+a", "cmd+v", "settle"]);
++            assert_eq!(board.contents, original);
++        }
++    }
++
++    #[test]
++    fn paste_transaction_refuses_wrong_window_before_keys_and_restores() {
++        let mut board = FakeBoard::original();
++        let original = board.contents.clone();
++        let mut keys = FakeKeys {
++            wrong_target: true,
++            ..Default::default()
++        };
++        let mut started = false;
++        {
++            let mut transaction = Transaction::begin(&mut board).unwrap();
++            transaction.install("temporary").unwrap();
++            assert!(replace_selection(&transaction, &mut keys, &mut started).is_err());
++        }
++        assert!(!started);
++        assert!(keys.calls.is_empty());
++        assert_eq!(board.contents, original);
++    }
++
++    #[test]
++    fn paste_transaction_refuses_keys_after_clipboard_ownership_change() {
++        let mut board = FakeBoard::original();
++        let mut keys = FakeKeys::default();
++        let mut started = false;
++        let mut transaction = Transaction::begin(&mut board).unwrap();
++        transaction.install("temporary").unwrap();
++        transaction.board.generation += 1;
++        assert!(replace_selection(&transaction, &mut keys, &mut started).is_err());
++        assert!(!started);
++        assert!(keys.calls.is_empty());
++        assert!(!transaction.restore());
++    }
++
++    #[test]
++    fn paste_transaction_refuses_install_if_snapshot_ownership_changed() {
++        let mut board = FakeBoard::original();
++        let mut transaction = Transaction::begin(&mut board).unwrap();
++        transaction.board.generation += 1;
++        transaction.board.contents = Contents(vec![]);
++        assert!(transaction.install("temporary").is_err());
++        drop(transaction);
++        assert!(board.contents.0.is_empty());
++    }
++
++    #[test]
++    fn paste_transaction_reports_restore_failure_without_retrying() {
++        let mut board = FakeBoard::original();
++        let mut transaction = Transaction::begin(&mut board).unwrap();
++        transaction.install("temporary").unwrap();
++        transaction.board.fail_write = true;
++        assert!(!transaction.restore());
++        let count = transaction.board.generation;
++        drop(transaction);
++        assert_eq!(board.generation, count);
++    }
++
++    #[test]
++    fn paste_transaction_restores_empty_clipboard() {
++        let mut board = FakeBoard::original();
++        board.contents.0.clear();
++        {
++            let mut transaction = Transaction::begin(&mut board).unwrap();
++            transaction.install("temporary").unwrap();
++        }
++        assert!(board.contents.0.is_empty());
++    }
++
++    #[test]
++    fn paste_transaction_restores_after_install_failure() {
++        let mut board = FakeBoard::original();
++        let original = board.contents.clone();
++        board.fail_write = true;
++        {
++            let mut transaction = Transaction::begin(&mut board).unwrap();
++            assert!(transaction.install("temporary").is_err());
++        }
++        assert_eq!(board.contents, original);
++    }
++
++    #[test]
++    fn paste_transaction_restores_on_action_error_and_unwind() {
++        let mut board = FakeBoard::original();
++        let original = board.contents.clone();
++        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
++            let mut transaction = Transaction::begin(&mut board).unwrap();
++            transaction.install("temporary").unwrap();
++            panic!("simulated actuator failure");
++        }));
++        assert_eq!(board.contents, original);
++    }
++
++    #[test]
++    fn paste_transaction_does_not_overwrite_newer_user_clipboard() {
++        let mut board = FakeBoard::original();
++        let mut transaction = Transaction::begin(&mut board).unwrap();
++        transaction.install("temporary").unwrap();
++        transaction.board.clear();
++        transaction.board.contents = Contents(vec![vec![("user.copy".into(), vec![42])]]);
++        assert!(!transaction.restore());
++        drop(transaction);
++        assert_eq!(
++            board.contents,
++            Contents(vec![vec![("user.copy".into(), vec![42])]])
++        );
++    }
++
++    #[test]
++    fn paste_transaction_restores_all_items_formats_and_bytes_after_success() {
++        let mut board = FakeBoard::original();
++        let original = board.contents.clone();
++        let mut transaction = Transaction::begin(&mut board).unwrap();
++        transaction.install("exact\ntext").unwrap();
++        assert!(transaction.restore());
++        drop(transaction);
++        assert_eq!(board.contents, original);
++    }
++}
+diff --git a/libs/cua-driver/rust/crates/platform-macos/src/tools/pasteboard_native.rs b/libs/cua-driver/rust/crates/platform-macos/src/tools/pasteboard_native.rs
+new file mode 100644
+index 0000000..f13f62a
+--- /dev/null
++++ b/libs/cua-driver/rust/crates/platform-macos/src/tools/pasteboard_native.rs
+@@ -0,0 +1,257 @@
++//! Lossless eager AppKit backup; clipboard-rs's public API flattens item boundaries.
++//! Contents never implement Debug/Serialize and never leave this worker's memory.
++use std::time::{Duration, Instant};
++
++use objc2::{rc::Retained, runtime::ProtocolObject};
++use objc2_app_kit::{NSPasteboard, NSPasteboardItem, NSPasteboardWriting};
++use objc2_foundation::{NSArray, NSData, NSString};
++
++use super::paste_transaction::Pasteboard;
++
++pub(super) const MAX_BACKUP_BYTES: usize = 16 * 1024 * 1024;
++const MAX_ITEMS: usize = 128;
++const MAX_TYPES: usize = 1024;
++const SNAPSHOT_BUDGET: Duration = Duration::from_secs(2);
++
++pub(super) struct NativePasteboard(Retained<NSPasteboard>);
++pub(super) struct Contents(Vec<Retained<NSPasteboardItem>>);
++
++impl NativePasteboard {
++    // Created only inside the blocking operation, never by tests or tool discovery.
++    pub(super) fn general() -> Self {
++        Self(unsafe { NSPasteboard::generalPasteboard() })
++    }
++}
++
++fn account_bytes(total: usize, added: usize) -> Result<usize, ()> {
++    total
++        .checked_add(added)
++        .filter(|n| *n <= MAX_BACKUP_BYTES)
++        .ok_or(())
++}
++
++fn canonical_legacy_type(kind: &str) -> &str {
++    // AppKit exposes these legacy aliases on NSPasteboard.types even when
++    // NSPasteboardItem.types contains only the canonical UTI. Restoring the
++    // canonical item regenerates the aliases; they are not extra provider data.
++    match kind {
++        "NSStringPboardType" => "public.utf8-plain-text",
++        "Apple HTML pasteboard type" => "public.html",
++        "NeXT Rich Text Format v1.0 pasteboard type" => "public.rtf",
++        _ => kind,
++    }
++}
++
++fn supported_type(kind: &str) -> bool {
++    // File promises require the original provider's code, not just serialized data.
++    // Never invoke a file-promise receiver or materialize files during a backup.
++    !kind.to_ascii_lowercase().contains("promise")
++}
++
++impl Pasteboard for NativePasteboard {
++    type Contents = Contents;
++
++    fn snapshot(&mut self) -> Result<(isize, Contents), ()> {
++        let deadline = Instant::now() + SNAPSHOT_BUDGET;
++        let generation = self.change_count();
++        let mut backup = Vec::new();
++        let mut bytes = 0usize;
++        let mut type_count = 0usize;
++        let mut copied_types = std::collections::BTreeSet::new();
++        unsafe {
++            // nil can signal a read error. Only a successfully read empty array
++            // is an empty board; never clear an unreadable/provider-only board.
++            let items = self.0.pasteboardItems().ok_or(())?;
++            let declared = self.0.types();
++            if (items.is_empty() && declared.as_ref().is_some_and(|types| !types.is_empty()))
++                || (!items.is_empty() && declared.is_none())
++            {
++                return Err(());
++            }
++            {
++                if items.len() > MAX_ITEMS {
++                    return Err(());
++                }
++                for item in items.iter() {
++                    let copy = NSPasteboardItem::new();
++                    let types = item.types();
++                    if types.is_empty() {
++                        return Err(());
++                    }
++                    for kind in types.iter() {
++                        type_count += 1;
++                        bytes = account_bytes(bytes, kind.len())?;
++                        if type_count > MAX_TYPES
++                            || Instant::now() >= deadline
++                            || !supported_type(&kind.to_string())
++                        {
++                            return Err(());
++                        }
++                        let data = item.dataForType(&kind).ok_or(())?;
++                        bytes = account_bytes(bytes, data.len())?;
++                        if Instant::now() >= deadline {
++                            return Err(());
++                        }
++                        // Make an independent byte copy before relinquishing the original owner.
++                        if !copy.setData_forType(&NSData::with_bytes(data.bytes()), &kind) {
++                            return Err(());
++                        }
++                        copied_types.insert(kind.to_string());
++                    }
++                    backup.push(copy);
++                }
++            }
++            if let Some(declared) = declared {
++                if declared.len() > MAX_TYPES {
++                    return Err(());
++                }
++                for kind in declared.iter() {
++                    if kind.len() > MAX_BACKUP_BYTES
++                        || !copied_types.contains(canonical_legacy_type(&kind.to_string()))
++                    {
++                        return Err(());
++                    }
++                }
++            }
++        }
++        if self.change_count() != generation || Instant::now() >= deadline {
++            return Err(());
++        }
++        Ok((generation, Contents(backup)))
++    }
++
++    fn text(&self, text: &str) -> Result<Contents, ()> {
++        if text.len() > MAX_BACKUP_BYTES {
++            return Err(());
++        }
++        unsafe {
++            let item = NSPasteboardItem::new();
++            if !item.setString_forType(
++                &NSString::from_str(text),
++                &NSString::from_str("public.utf8-plain-text"),
++            ) {
++                return Err(());
++            }
++            Ok(Contents(vec![item]))
++        }
++    }
++
++    fn change_count(&self) -> isize {
++        unsafe { self.0.changeCount() }
++    }
++    fn clear(&mut self) -> isize {
++        unsafe { self.0.clearContents() }
++    }
++
++    fn write(&mut self, contents: &Contents, generation: isize) -> Result<(), ()> {
++        if self.change_count() != generation {
++            return Err(());
++        }
++        if !contents.0.is_empty() {
++            let objects: Vec<Retained<ProtocolObject<dyn NSPasteboardWriting>>> = contents
++                .0
++                .iter()
++                .map(|item| ProtocolObject::from_retained(item.clone()))
++                .collect();
++            let objects = NSArray::from_vec(objects);
++            if !unsafe { self.0.writeObjects(&objects) } {
++                return Err(());
++            }
++        }
++        // Never adopt a generation read after write: it could belong to a user copy.
++        if self.change_count() != generation {
++            return Err(());
++        }
++        Ok(())
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    #[test]
++    fn paste_transaction_named_pasteboard_preserves_html_and_custom_data() {
++        // A newly allocated NAMED pasteboard, never the user's general clipboard.
++        objc2::rc::autoreleasepool(|_| unsafe {
++            let board = NSPasteboard::pasteboardWithUniqueName();
++            board.clearContents();
++            let item = NSPasteboardItem::new();
++            for (kind, bytes) in [
++                ("public.utf8-plain-text", b"original text".as_slice()),
++                ("public.html", b"<b>original text</b>".as_slice()),
++                ("org.example.opaque", [0u8, 255, 9].as_slice()),
++            ] {
++                assert!(item.setData_forType(&NSData::with_bytes(bytes), &NSString::from_str(kind)));
++            }
++            let objects = NSArray::from_vec(vec![
++                ProtocolObject::<dyn NSPasteboardWriting>::from_retained(item),
++            ]);
++            assert!(board.writeObjects(&objects));
++            let original_generation = board.changeCount();
++            let mut original_types: Vec<_> = board
++                .types()
++                .unwrap()
++                .iter()
++                .map(|kind| kind.to_string())
++                .collect();
++            original_types.sort();
++            let mut native = NativePasteboard(board.clone());
++            let mut transaction = super::super::paste_transaction::Transaction::begin(&mut native)
++                .expect("all declared formats must be backed up");
++            transaction
++                .install("temporary text")
++                .expect("own write must retain ownership");
++            assert!(
++                transaction.restore(),
++                "all original formats must be restored"
++            );
++            drop(transaction);
++            assert!(board.changeCount() > original_generation);
++            let mut restored_types: Vec<_> = board
++                .types()
++                .unwrap()
++                .iter()
++                .map(|kind| kind.to_string())
++                .collect();
++            restored_types.sort();
++            assert_eq!(restored_types, original_types);
++            assert_eq!(
++                board
++                    .stringForType(&NSString::from_str("public.utf8-plain-text"))
++                    .unwrap()
++                    .to_string(),
++                "original text"
++            );
++            assert_eq!(
++                board
++                    .dataForType(&NSString::from_str("public.html"))
++                    .unwrap()
++                    .bytes(),
++                b"<b>original text</b>"
++            );
++            assert_eq!(
++                board
++                    .dataForType(&NSString::from_str("org.example.opaque"))
++                    .unwrap()
++                    .bytes(),
++                &[0, 255, 9]
++            );
++            board.clearContents();
++        });
++    }
++
++    #[test]
++    fn paste_transaction_backup_budget_rejects_oversize_and_overflow_without_allocating() {
++        assert_eq!(account_bytes(0, MAX_BACKUP_BYTES), Ok(MAX_BACKUP_BYTES));
++        assert!(account_bytes(MAX_BACKUP_BYTES, 1).is_err());
++        assert!(account_bytes(1, usize::MAX).is_err());
++    }
++
++    #[test]
++    fn paste_transaction_rejects_provider_promises_but_supports_opaque_formats() {
++        assert!(!supported_type("com.apple.pasteboard.promised-file-url"));
++        assert!(!supported_type("NSFilesPromisePboardType"));
++        assert!(supported_type("com.vendor.arbitrary-binary"));
++        assert!(supported_type("public.rtf"));
++    }
++}
