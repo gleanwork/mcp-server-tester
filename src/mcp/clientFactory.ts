@@ -357,7 +357,9 @@ export async function createMCPClientForConfig(
         debugHttp('Attempting transport: streamableHttp');
         const streamableTransport = new StreamableHTTPClientTransport(url, {
           requestInit,
-          authProvider: options?.authProvider,
+          ...(options?.authProvider
+            ? { authProvider: options.authProvider }
+            : {}),
         });
         await client.connect(streamableTransport, connectOptions);
         debugClient('Connected via Streamable HTTP');
@@ -371,7 +373,9 @@ export async function createMCPClientForConfig(
         debugHttp('Attempting transport: sse');
         const sseTransport = new SSEClientTransport(url, {
           requestInit,
-          authProvider: options?.authProvider,
+          ...(options?.authProvider
+            ? { authProvider: options.authProvider }
+            : {}),
         });
         await client.connect(sseTransport, connectOptions);
         debugClient('Connected via SSE');
