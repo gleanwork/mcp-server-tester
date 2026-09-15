@@ -20,6 +20,8 @@ export const CLAUDE_COWORK_DESKTOP_MACOS_DRIVER: HostDriverId = {
   platform: 'macos',
 };
 
+export const COWORK_COMPUTER_USE_DRIVER_ALIAS = 'cowork_cu';
+
 export const CLAUDE_CODE_CLI_MACOS_DRIVER: HostDriverId = {
   provider: 'anthropic',
   product: 'claude',
@@ -63,6 +65,9 @@ export function parseDriverSlug(slug: string): HostDriverId {
 
 export function normalizeHostDriver(driver: HostDriverConfig): HostDriverId {
   if (typeof driver === 'string') {
+    if (driver === COWORK_COMPUTER_USE_DRIVER_ALIAS) {
+      return CLAUDE_COWORK_DESKTOP_MACOS_DRIVER;
+    }
     return parseDriverSlug(driver);
   }
 

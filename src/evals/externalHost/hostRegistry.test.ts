@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CLAUDE_COWORK_DESKTOP_MACOS_DRIVER,
+  COWORK_COMPUTER_USE_DRIVER_ALIAS,
   driverToSlug,
   getRegisteredExternalHostConfig,
   loadExternalHostConfig,
@@ -17,10 +18,13 @@ describe('external host driver identity and built-in defaults', () => {
     expect(parseDriverSlug(slug)).toEqual(CLAUDE_COWORK_DESKTOP_MACOS_DRIVER);
   });
 
-  it('normalizes driver slug strings to structured ids', () => {
+  it('normalizes canonical and short Cowork Computer Use driver ids', () => {
     expect(
       normalizeHostDriver('anthropic.claude.cowork.desktop-app.macos')
     ).toEqual(CLAUDE_COWORK_DESKTOP_MACOS_DRIVER);
+    expect(normalizeHostDriver(COWORK_COMPUTER_USE_DRIVER_ALIAS)).toEqual(
+      CLAUDE_COWORK_DESKTOP_MACOS_DRIVER
+    );
   });
 
   it('declares Claude Cowork as capability bindings, not a concrete runner', () => {

@@ -20,6 +20,30 @@ External-host mode drives a real host application and maps its observed result b
 }
 ```
 
+For a direct command-line run, use the short `cowork_cu` driver alias:
+
+```json
+{
+  "driver": "cowork_cu",
+  "scenario": "Reply with exactly: acknowledged.",
+  "timeoutMs": 120000,
+  "options": {
+    "computerUseProvider": "anthropic-computer-use"
+  }
+}
+```
+
+Run it with:
+
+```bash
+python3 -m pip install anthropic pyautogui mss Pillow
+export ANTHROPIC_API_KEY="..."
+npm run build
+node dist/cli/index.js run --config cowork.json --output cowork-result.json
+```
+
+The command exits `0` only when every query succeeds. Use `queries` instead of `scenario` to run multiple queries sequentially.
+
 ## Lifecycle
 
 Every external-host capability can implement three hooks:

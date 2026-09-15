@@ -320,6 +320,7 @@ export type {
   TraceSource,
 } from './evals/externalHost/index.js';
 export {
+  COWORK_COMPUTER_USE_DRIVER_ALIAS,
   driverToSlug,
   normalizeHostDriver,
   parseDriverSlug,

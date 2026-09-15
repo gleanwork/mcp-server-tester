@@ -26,6 +26,7 @@ export type {
 } from './capabilityRuntime.js';
 export {
   CLAUDE_CHAT_DESKTOP_MACOS_DRIVER,
+  COWORK_COMPUTER_USE_DRIVER_ALIAS,
   CLAUDE_CODE_CLI_MACOS_DRIVER,
   CLAUDE_COWORK_DESKTOP_MACOS_DRIVER,
   driverToSlug,

@@ -8,6 +8,7 @@ import { generate } from './commands/generate/index.js';
 import { login } from './commands/login/index.js';
 import { token } from './commands/token/index.js';
 import { open } from './commands/open/index.js';
+import { runExternalHostConfigFile } from './commands/run/index.js';
 import packageJson from '../../package.json' with { type: 'json' };
 
 const program = new Command();
@@ -34,6 +35,17 @@ program
   .option('-o, --output <path>', 'Output dataset path', 'data/dataset.json')
   .option('-s, --snapshot', 'Use Playwright snapshot testing for all cases')
   .action(generate);
+
+// External host run command
+program
+  .command('run')
+  .description('Run an external-host query from a JSON config')
+  .requiredOption('-c, --config <path>', 'Path to external-host run config')
+  .option('-q, --query <query>', 'Override the config query')
+  .option('-o, --output <path>', 'Write JSON results to a file')
+  .action(async (options) => {
+    process.exitCode = await runExternalHostConfigFile(options.config, options);
+  });
 
 // Login command
 program
@@ -72,4 +84,4 @@ program
   )
   .action(open);
 
-program.parse();
+await program.parseAsync();
