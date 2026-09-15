@@ -22,6 +22,9 @@ export async function runAnthropicComputerUseSubmission(
 ): Promise<ComputerUseSubmissionResult> {
   const timeoutMs = Math.max(1, options.deadlineAt - Date.now());
   const scriptPath = DRIVER_PATH;
+  diagnostic(
+    `starting Computer Use driver (script=${scriptPath}, maxActions=${options.maxActions ?? 24}, timeoutMs=${timeoutMs})`
+  );
   let stdout = '';
   let stderr = '';
   try {
@@ -37,6 +40,9 @@ export async function runAnthropicComputerUseSubmission(
     stdout = String(result.stdout ?? '');
     stderr = String(result.stderr ?? '');
   } catch (error) {
+    const childError = error as { stdout?: string; stderr?: string };
+    stdout = String(childError.stdout ?? '');
+    stderr = String(childError.stderr ?? '');
     const details = [
       formatError(error),
       stdout ? `stdout=${stdout.slice(-1000)}` : '',
@@ -44,16 +50,31 @@ export async function runAnthropicComputerUseSubmission(
     ]
       .filter(Boolean)
       .join('; ');
+    diagnostic(`Computer Use driver failed: ${details}`);
     throw new Error(`Computer Use submission failed: ${details}`);
   }
 
+  diagnostic(
+    `Computer Use driver exited successfully (stdoutBytes=${stdout.length})`
+  );
   const record = parseLastJsonLine(stdout);
   if (record?.status !== 'submitted') {
+    const detail = JSON.stringify(record ?? stdout.slice(-1000));
+    diagnostic(`Computer Use driver stopped before submission: ${detail}`);
     throw new Error(
-      `Computer Use submission did not reach its once-only submit boundary: ${JSON.stringify(record ?? stdout.slice(-1000))}`
+      `Computer Use submission did not reach its once-only submit boundary: ${detail}`
     );
   }
+  const actionCount =
+    typeof record.action_count === 'number' ? record.action_count : 'unknown';
+  diagnostic(
+    `Computer Use submission boundary reached (actions=${actionCount})`
+  );
   return record as unknown as ComputerUseSubmissionResult;
+}
+
+function diagnostic(message: string): void {
+  process.stderr.write(`[mst:cowork-cu] ${message}\n`);
 }
 
 function parseLastJsonLine(

@@ -24,6 +24,10 @@ DEFAULT_MODEL = "claude-sonnet-4-6"
 DEFAULT_MAX_ACTIONS = 24
 
 
+def log(message: str) -> None:
+    print(f"[mst:cowork-cu] {message}", file=sys.stderr, flush=True)
+
+
 def screenshot() -> dict[str, Any]:
     import mss
     from PIL import Image
@@ -108,7 +112,9 @@ async def run(query: str, max_actions: int) -> dict[str, Any]:
 
     client = anthropic.Anthropic(api_key=api_key)
     model = os.environ.get("MST_COWORK_CUA_MODEL", DEFAULT_MODEL)
+    log(f"starting driver with model={model}, max_actions={max_actions}")
     subprocess.run(["open", "-a", "Claude"], check=False, capture_output=True)
+    log("requested Claude Desktop launch/focus")
     time.sleep(float(os.environ.get("MST_COWORK_CUA_START_DELAY", "3")))
 
     tools = [{
@@ -135,6 +141,7 @@ async def run(query: str, max_actions: int) -> dict[str, Any]:
     )
 
     for action_number in range(1, max_actions + 1):
+        log(f"requesting Computer Use plan {action_number}/{max_actions}")
         response = client.beta.messages.create(
             model=model,
             max_tokens=1024,
@@ -148,8 +155,10 @@ async def run(query: str, max_actions: int) -> dict[str, Any]:
         for block in response.content:
             if getattr(block, "type", None) != "tool_use":
                 continue
+            log(f"executing action {action_number}: {block.input.get('action', 'unknown')}")
             result, submitted = execute_action(block.input)
             if submitted:
+                log("submission boundary reached; stopping immediately")
                 return {
                     "status": "submitted",
                     "action_count": action_number,
@@ -181,6 +190,7 @@ def main() -> int:
         print(json.dumps(asyncio.run(run(args.query, args.max_actions))), flush=True)
         return 0
     except Exception as error:
+        log(f"driver failed: {error}")
         print(json.dumps({"status": "failed", "error": str(error)}), flush=True)
         return 1
 

@@ -30,12 +30,20 @@ export async function runExternalHostConfigFile(
     queries: _queries,
     ...externalHost
   } = raw;
+  process.stderr.write(
+    `[mst:run] loaded ${queries.length} quer${queries.length === 1 ? 'y' : 'ies'} from ${configPath}\n`
+  );
   const results = [];
   for (const [index, query] of queries.entries()) {
-    results.push(
-      await runExternalHostScenario(query, externalHost, {
-        caseId: `config-run-${index + 1}`,
-      })
+    process.stderr.write(
+      `[mst:run] starting query ${index + 1}/${queries.length}\n`
+    );
+    const result = await runExternalHostScenario(query, externalHost, {
+      caseId: `config-run-${index + 1}`,
+    });
+    results.push(result);
+    process.stderr.write(
+      `[mst:run] query ${index + 1}/${queries.length} ${result.success ? 'succeeded' : `failed: ${result.error ?? 'unknown error'}`}\n`
     );
   }
 
