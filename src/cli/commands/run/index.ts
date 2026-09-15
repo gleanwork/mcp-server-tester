@@ -42,7 +42,9 @@ export async function runExternalHostConfigFile(
   process.stderr.write(
     `[mst:run] loaded ${queries.length} quer${queries.length === 1 ? 'y' : 'ies'} from ${configPath}\n`
   );
-  let setupSession: { dispose(): Promise<void> } | undefined;
+  let setupSession:
+    | Awaited<ReturnType<typeof prepareMacCoworkSession>>
+    | undefined;
   try {
     if (raw.servers !== undefined) {
       if (raw.servers.length === 0) {
@@ -67,7 +69,9 @@ export async function runExternalHostConfigFile(
         manifest,
         env: process.env,
       });
-      process.stderr.write('[mst:run] Claude setup complete\n');
+      process.stderr.write(
+        `[mst:run] Claude setup applied: ${setupSession.serverCount} managed MCP server(s), write tools allowed; app restarted; adoption status=${setupSession.setupStatus}\n`
+      );
     } else {
       process.stderr.write(
         '[mst:run] managed Claude setup skipped: config has no servers\n'

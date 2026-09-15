@@ -88,7 +88,11 @@ export async function prepareMacCoworkSession(options: {
   manifest: EvalManifest;
   env: Record<string, string | undefined>;
   profileDirectory?: string;
-}): Promise<{ dispose(): Promise<void> }> {
+}): Promise<{
+  setupStatus: 'applied-not-verified';
+  serverCount: number;
+  dispose(): Promise<void>;
+}> {
   try {
     if (process.platform !== 'darwin') throw new Error(ERROR);
     // Snapshot caller input so later mutation cannot change the preflighted setup.
@@ -258,6 +262,8 @@ export async function prepareMacCoworkSession(options: {
     }
     let disposal: Promise<void> | undefined;
     return {
+      setupStatus: transaction.status,
+      serverCount: manifest.servers?.length ?? 0,
       dispose() {
         // Concurrent/repeated callers share one cleanup, including its failure.
         disposal ??= cleanup();
