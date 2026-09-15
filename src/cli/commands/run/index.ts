@@ -1,5 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { runExternalHostScenario } from '../../../evals/externalHost/runtime.js';
+import { runAnthropicCoworkBatch } from '../../../evals/externalHost/builtins/anthropicCoworkBatch.js';
 import { prepareMacCoworkSession } from '../../../evals/coworkSetup/macSession.js';
 import type { EvalManifest } from '../../../evals/evalManifest.js';
 import type { CoworkMcpServerConfig } from '../../../evals/coworkSetup/config.js';
@@ -73,19 +74,30 @@ export async function runExternalHostConfigFile(
       );
     }
 
-    const results = [];
-    for (const [index, query] of queries.entries()) {
-      process.stderr.write(
-        `[mst:run] starting query ${index + 1}/${queries.length}\n`
-      );
-      const result = await runExternalHostScenario(query, externalHost, {
-        caseId: `config-run-${index + 1}`,
-      });
-      results.push(result);
-      process.stderr.write(
-        `[mst:run] query ${index + 1}/${queries.length} ${result.success ? 'succeeded' : `failed: ${result.error ?? 'unknown error'}`}\n`
-      );
-    }
+    const computerUseProvider = externalHost.options?.computerUseProvider;
+    const results =
+      computerUseProvider === 'anthropic-computer-use'
+        ? await runAnthropicCoworkBatch(queries, externalHost)
+        : await (async () => {
+            const sequentialResults = [];
+            for (const [index, query] of queries.entries()) {
+              process.stderr.write(
+                `[mst:run] starting query ${index + 1}/${queries.length}\n`
+              );
+              const result = await runExternalHostScenario(
+                query,
+                externalHost,
+                {
+                  caseId: `config-run-${index + 1}`,
+                }
+              );
+              sequentialResults.push(result);
+              process.stderr.write(
+                `[mst:run] query ${index + 1}/${queries.length} ${result.success ? 'succeeded' : `failed: ${result.error ?? 'unknown error'}`}\n`
+              );
+            }
+            return sequentialResults;
+          })();
 
     const output = JSON.stringify(
       {

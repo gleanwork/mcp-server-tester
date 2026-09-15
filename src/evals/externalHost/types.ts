@@ -75,6 +75,21 @@ export interface HostArtifact {
   summary?: string;
 }
 
+export interface ExternalHostTelemetry {
+  resultCount?: number;
+  apiCallCount?: number;
+  models?: string[];
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
+  totalCostUsd?: number;
+  durationMs?: number;
+  durationApiMs?: number;
+  toolCallCount?: number;
+  toolErrorCount?: number;
+}
+
 export interface ExternalHostSession {
   id?: string;
   runMarker: string;
@@ -132,6 +147,7 @@ export interface ExternalHostMetadata {
     usage?: TraceSource;
     cost?: TraceSource;
   };
+  telemetry?: ExternalHostTelemetry;
   evidence?: {
     finalAnswer?: EvidenceSource;
     toolCalls?: EvidenceSource;

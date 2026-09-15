@@ -66,6 +66,21 @@ interface SnapshotEntry {
 
 export type ClaudeSessionSnapshot = Map<string, SnapshotEntry>;
 
+export interface ClaudeNativeTelemetry {
+  resultCount: number;
+  apiCallCount: number;
+  models: string[];
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
+  totalCostUsd?: number;
+  durationMs?: number;
+  durationApiMs?: number;
+  toolCallCount: number;
+  toolErrorCount: number;
+}
+
 export interface ClaudeTrace {
   candidate: SessionCandidate;
   auditPath?: string;
@@ -85,6 +100,7 @@ export interface ClaudeTrace {
   costAvailable: boolean;
   parseWarnings: string[];
   rawText: string;
+  telemetry: ClaudeNativeTelemetry;
 }
 
 interface ClaudeAuditEvent {
@@ -94,6 +110,7 @@ interface ClaudeAuditEvent {
   duration_ms?: number;
   duration_api_ms?: number;
   total_cost_usd?: number;
+  model?: string;
   requestId?: string;
   request_id?: string;
   usage?: Record<string, unknown>;
@@ -104,6 +121,7 @@ interface ClaudeAuditEvent {
       name?: string;
       input?: Record<string, unknown>;
       text?: string;
+      is_error?: boolean;
     }>;
   };
   timestamp?: string;
@@ -359,6 +377,29 @@ async function captureClaudeCoworkAgentTraceCapability({
       limitations: [`Claude data directory: ${dataDir}`],
     });
   }
+}
+
+export async function normalizeClaudeTraceForRun(options: {
+  config: ExternalHostConfig;
+  context: HostRunContext;
+  driver: HostDriverId;
+  displayName: string;
+  capabilitiesUsed: HostCapability[];
+  trace: ClaudeTrace;
+}): Promise<ExternalHostRunResult> {
+  return normalizeClaudeCoworkAgentTraceCapability({
+    config: options.config,
+    run: options.context,
+    capability: 'normalize',
+    binding: { uses: 'builtin:anthropic.claude.localAgentNormalize' },
+    state: {
+      driver: options.driver,
+      driverSlug: driverToSlug(options.driver),
+      displayName: options.displayName,
+      capabilitiesUsed: options.capabilitiesUsed,
+      data: { claudeTrace: options.trace },
+    },
+  });
 }
 
 async function normalizeClaudeCoworkAgentTraceCapability({
@@ -827,14 +868,16 @@ export async function parseClaudeTrace(
     ...auditEventsForRun,
     ...transcriptEventsForRun,
   ];
-  const resultEvent =
-    findLastResultEvent(auditEventsForRun) ??
-    findLastResultEvent(transcriptEventsForRun);
+  const resultEvents = dedupeResultEvents([
+    ...auditEventsForRun.filter((event) => event.type === 'result'),
+    ...transcriptEventsForRun.filter((event) => event.type === 'result'),
+  ]);
+  const resultEvent = resultEvents.at(-1);
   const finalAnswer =
     typeof resultEvent?.result === 'string'
       ? resultEvent.result
       : extractAssistantText(combinedEventsForRun);
-  const usage = resultEvent ? extractUsage(resultEvent) : undefined;
+  const usage = extractAggregatedUsage(resultEvents);
   const toolCalls = extractToolCalls(
     transcriptEventsForRun.length > 0
       ? transcriptEventsForRun
@@ -857,9 +900,12 @@ export async function parseClaudeTrace(
     auditParsed,
     transcriptParsed,
     usageAvailable: usage !== undefined,
-    costAvailable: typeof resultEvent?.total_cost_usd === 'number',
+    costAvailable: resultEvents.some(
+      (event) => typeof event.total_cost_usd === 'number'
+    ),
     parseWarnings,
     rawText: `${rawAudit}\n${rawTranscript}`,
+    telemetry: buildNativeTelemetry(resultEvents, toolCalls, usage),
   };
 }
 
@@ -879,7 +925,17 @@ function selectEventsForMarker(
     return metadata.initialMessage?.includes(marker) ? events : [];
   }
 
-  return events.slice(markerIndex);
+  const nextMarkerIndex = events.findIndex(
+    (event, index) =>
+      index > markerIndex &&
+      /\[eval-run-marker:MCP_SERVER_TESTER_[A-Za-z0-9_-]+\]/u.test(
+        JSON.stringify(event)
+      )
+  );
+  return events.slice(
+    markerIndex,
+    nextMarkerIndex >= 0 ? nextMarkerIndex : undefined
+  );
 }
 
 export function buildClaudeTraceMetadata(options: {
@@ -936,6 +992,7 @@ export function buildClaudeTraceMetadata(options: {
     traceConfidence,
     traceLimitations: limitations.length > 0 ? limitations : undefined,
     artifacts: options.artifacts,
+    telemetry: options.trace.telemetry,
     session: {
       id:
         options.trace.candidate.metadata.sessionId ??
@@ -1284,14 +1341,6 @@ async function parseNdjsonContent<T>(
   return { events, ok: warnings.length === 0, warnings };
 }
 
-function findLastResultEvent(
-  events: ClaudeAuditEvent[]
-): ClaudeAuditEvent | undefined {
-  return [...events]
-    .reverse()
-    .find((event) => event.type === 'result' || event.result !== undefined);
-}
-
 async function findFile(
   root: string,
   filename: string
@@ -1355,6 +1404,77 @@ function extractToolCalls(events: ClaudeAuditEvent[]): LLMToolCall[] {
   return toolCalls;
 }
 
+function dedupeResultEvents(events: ClaudeAuditEvent[]): ClaudeAuditEvent[] {
+  const byRequest = new Map<string, ClaudeAuditEvent>();
+  events.forEach((event) => {
+    const key =
+      event.requestId ??
+      event.request_id ??
+      JSON.stringify({
+        timestamp: event.timestamp,
+        result: event.result,
+        usage: event.usage,
+        cost: event.total_cost_usd,
+        duration: event.duration_ms,
+      });
+    byRequest.set(key, event);
+  });
+  return [...byRequest.values()];
+}
+
+function extractAggregatedUsage(
+  events: ClaudeAuditEvent[]
+): UsageMetrics | undefined {
+  const byRequest = new Map<string, UsageMetrics>();
+  events.forEach((event, index) => {
+    const usage = extractUsage(event);
+    if (!usage) return;
+    const requestId = event.requestId ?? event.request_id ?? `event-${index}`;
+    const previous = byRequest.get(requestId);
+    if (!previous) {
+      byRequest.set(requestId, usage);
+      return;
+    }
+    byRequest.set(requestId, {
+      inputTokens: Math.max(previous.inputTokens, usage.inputTokens),
+      outputTokens: Math.max(previous.outputTokens, usage.outputTokens),
+      totalCostUsd: Math.max(previous.totalCostUsd, usage.totalCostUsd),
+      durationMs: Math.max(previous.durationMs, usage.durationMs),
+      durationApiMs:
+        previous.durationApiMs === undefined &&
+        usage.durationApiMs === undefined
+          ? undefined
+          : Math.max(previous.durationApiMs ?? 0, usage.durationApiMs ?? 0),
+      cacheReadInputTokens: Math.max(
+        previous.cacheReadInputTokens ?? 0,
+        usage.cacheReadInputTokens ?? 0
+      ),
+      cacheCreationInputTokens: Math.max(
+        previous.cacheCreationInputTokens ?? 0,
+        usage.cacheCreationInputTokens ?? 0
+      ),
+    });
+  });
+
+  const values = [...byRequest.values()];
+  if (values.length === 0) return undefined;
+  return values.reduce((total, value) => ({
+    inputTokens: total.inputTokens + value.inputTokens,
+    outputTokens: total.outputTokens + value.outputTokens,
+    totalCostUsd: total.totalCostUsd + value.totalCostUsd,
+    durationMs: total.durationMs + value.durationMs,
+    durationApiMs:
+      total.durationApiMs === undefined && value.durationApiMs === undefined
+        ? undefined
+        : (total.durationApiMs ?? 0) + (value.durationApiMs ?? 0),
+    cacheReadInputTokens:
+      (total.cacheReadInputTokens ?? 0) + (value.cacheReadInputTokens ?? 0),
+    cacheCreationInputTokens:
+      (total.cacheCreationInputTokens ?? 0) +
+      (value.cacheCreationInputTokens ?? 0),
+  }));
+}
+
 function extractUsage(event: ClaudeAuditEvent): UsageMetrics | undefined {
   const usage = event.usage;
   const inputTokens =
@@ -1366,7 +1486,8 @@ function extractUsage(event: ClaudeAuditEvent): UsageMetrics | undefined {
     inputTokens === undefined &&
     outputTokens === undefined &&
     event.total_cost_usd === undefined &&
-    event.duration_ms === undefined
+    event.duration_ms === undefined &&
+    event.duration_api_ms === undefined
   ) {
     return undefined;
   }
@@ -1383,6 +1504,42 @@ function extractUsage(event: ClaudeAuditEvent): UsageMetrics | undefined {
     cacheCreationInputTokens:
       getNumber(usage, 'cache_creation_input_tokens') ??
       getNumber(usage, 'cacheCreationInputTokens'),
+  };
+}
+
+function buildNativeTelemetry(
+  resultEvents: ClaudeAuditEvent[],
+  toolCalls: LLMToolCall[],
+  usage: UsageMetrics | undefined
+): ClaudeNativeTelemetry {
+  const models = [
+    ...new Set(
+      resultEvents
+        .map((event) => event.model)
+        .filter((model): model is string => Boolean(model))
+    ),
+  ];
+  const toolErrorCount = resultEvents.reduce(
+    (count, event) =>
+      count +
+      (event.message?.content ?? []).filter(
+        (block) => block.type === 'tool_result' && block.is_error === true
+      ).length,
+    0
+  );
+  return {
+    resultCount: resultEvents.length,
+    apiCallCount: usage ? resultEvents.length : 0,
+    models,
+    inputTokens: usage?.inputTokens,
+    outputTokens: usage?.outputTokens,
+    cacheReadInputTokens: usage?.cacheReadInputTokens,
+    cacheCreationInputTokens: usage?.cacheCreationInputTokens,
+    totalCostUsd: usage?.totalCostUsd,
+    durationMs: usage?.durationMs,
+    durationApiMs: usage?.durationApiMs,
+    toolCallCount: toolCalls.length,
+    toolErrorCount,
   };
 }
 

@@ -42,11 +42,11 @@ npm run build
 node dist/cli/index.js run --config cowork.json --output cowork-result.json
 ```
 
-The command exits `0` only when every query succeeds. Use `queries` instead of `scenario` to run multiple queries sequentially.
+The command exits `0` only when every query succeeds. Use `queries` instead of `scenario` to run multiple queries. With `anthropic-computer-use`, MST submits all queries first, checks HITL prompts afterward, then collects native Claude telemetry for each query.
 
 To enable the PR 271 managed Claude setup, add an explicit `servers` array. MST prepares Claude once for the whole run, applies `toolPolicy: {"*":"allow"}` to every declared server, runs all queries, checks each query for a visible HITL prompt, selects the first option when present, and restores the prior Claude profile afterward. If `servers` is omitted, MST preserves the existing Claude configuration and logs that managed setup was skipped. Do not use an empty array unless you intentionally want a run with no managed MCP servers.
 
-Each query result retains the native Claude session and trace metadata. The output file also contains a top-level `telemetry` array with response, tool calls, usage, durations, session correlation, artifacts, and evidence metadata.
+Each query result retains the native Claude session and trace metadata. The output file also contains a top-level `telemetry` array with response, tool calls, native usage/cost/timing, session correlation, artifacts, and evidence metadata. Computer Use action counts are diagnostics only and are not reported as Claude telemetry.
 
 ## Lifecycle
 
