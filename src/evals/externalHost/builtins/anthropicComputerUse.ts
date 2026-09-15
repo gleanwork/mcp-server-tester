@@ -1,13 +1,31 @@
 import { execFile } from 'node:child_process';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
-const DRIVER_PATH = join(
-  process.env.MST_COWORK_DRIVER_ROOT ?? process.cwd(),
-  'scripts',
-  'cowork_computer_use.py'
-);
+function resolveDriverPath(): string {
+  const configuredRoot = process.env.MST_COWORK_DRIVER_ROOT;
+  if (configuredRoot) {
+    return join(configuredRoot, 'scripts', 'cowork_computer_use.py');
+  }
+
+  const pythonPath = process.env.MST_COWORK_PYTHON;
+  if (pythonPath) {
+    // .../mcp-server-tester/.venv/cowork-cu/bin/python -> repo root.
+    return join(
+      dirname(pythonPath),
+      '..',
+      '..',
+      '..',
+      'scripts',
+      'cowork_computer_use.py'
+    );
+  }
+
+  return join(process.cwd(), 'scripts', 'cowork_computer_use.py');
+}
+
+const DRIVER_PATH = resolveDriverPath();
 
 export interface ComputerUseSubmissionResult {
   status: 'submitted';
