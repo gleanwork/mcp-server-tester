@@ -2,7 +2,11 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join, posix, resolve } from 'node:path';
 import type { CoworkMcpServerConfig } from './config.js';
 import type { EvalManifest } from '../evalManifest.js';
-import { createCoworkMcpPlan, resolveCoworkMcpHeaders } from './config.js';
+import {
+  createCoworkMcpPlan,
+  resolveCoworkMcpHeaders,
+  toCoworkServers,
+} from './config.js';
 import { resolveCoworkSetupConfig, type CoworkSetupConfig } from './options.js';
 
 const ERROR_MESSAGE = 'Unable to prepare Cowork MCP bundle.';
@@ -21,10 +25,10 @@ function selectSetup(
       ? undefined
       : arms.find((arm) => arm.name === armName);
   if (armName !== undefined && !arm) throw new Error(ERROR_MESSAGE);
-  const servers = (arm?.servers === undefined ? manifest.servers : arm.servers) as CoworkMcpServerConfig[] | undefined;
+  const servers = arm?.servers === undefined ? manifest.servers : arm.servers;
   if (servers === undefined) throw new Error(ERROR_MESSAGE);
   return {
-    servers,
+    servers: toCoworkServers(servers),
     setup: resolveCoworkSetupConfig(manifest.coworkSetup, arm?.coworkSetup),
   };
 }

@@ -25,6 +25,7 @@ const CLEANUP_ERROR =
   'Unable to restore the Mac Cowork session safely. Recovery state retained.';
 const LEASE = '.mst-session-lock';
 const TRANSACTION = '.mst-setup-lock';
+const RECOVERY = '.mst-recovery-lock';
 
 async function exists(file: string): Promise<boolean> {
   try {
@@ -111,7 +112,11 @@ export async function prepareMacCoworkSession(options: {
       throw new Error(ERROR);
     const lease = join(profileDirectory, LEASE);
     const lock = join(profileDirectory, TRANSACTION);
-    if (await exists(lease)) throw new Error(ERROR);
+    if (
+      (await exists(lease)) ||
+      (await exists(join(profileDirectory, RECOVERY)))
+    )
+      throw new Error(ERROR);
     const stagingDirectory = join(
       await realpath(tmpdir()),
       `mst-cowork-session-${randomUUID()}`

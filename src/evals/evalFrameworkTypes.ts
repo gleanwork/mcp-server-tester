@@ -76,6 +76,16 @@ export interface HostRunResult {
   events: HostEvent[];
   error?: string;
   usage?: UsageMetrics;
+  /** Native-host measurements only; UI action counts are not usage. */
+  telemetry?: Record<string, unknown>;
+  llmDurationMs?: number;
+}
+
+export interface HostBatchRequest {
+  caseId: string;
+  iteration: number;
+  input: HostRunInput;
+  config: HostConfig;
 }
 
 /** Public host extension point. */
@@ -85,6 +95,11 @@ export interface HostDefinition {
   createConfig?(options?: Record<string, unknown>): MCPHostConfig;
   /** Missing evidence declarations are treated as unverified. */
   readonly evidence?: HostEvidence;
+  /** Ordered traces for all selected iterations. The framework owns verdicts. */
+  runBatch?(
+    requests: HostBatchRequest[],
+    context: HostRunContext
+  ): Promise<HostRunResult[]>;
   run?(
     input: HostRunInput,
     config: HostConfig,
