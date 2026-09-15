@@ -179,6 +179,7 @@ async def run(query: str, max_actions: int, mode: str) -> dict[str, Any]:
             "successful Enter/Return, stop. Do not approve permissions or change account settings."
         )
 
+    hitl_action_taken = False
     for action_number in range(1, max_actions + 1):
         log(f"requesting Computer Use plan {action_number}/{max_actions}")
         response = client.beta.messages.create(
@@ -194,7 +195,15 @@ async def run(query: str, max_actions: int, mode: str) -> dict[str, Any]:
         for block in response.content:
             if getattr(block, "type", None) != "tool_use":
                 continue
-            log(f"executing action {action_number}: {block.input.get('action', 'unknown')}")
+            action_name = block.input.get('action', 'unknown')
+            log(f"executing action {action_number}: {action_name}")
+            if mode == "hitl" and action_name not in {
+                "screenshot",
+                "wait",
+                "mouse_move",
+                "cursor_position",
+            }:
+                hitl_action_taken = True
             result, submitted = execute_action(block.input)
             if submitted and mode != "hitl":
                 log("submission boundary reached; stopping immediately")
@@ -220,6 +229,18 @@ async def run(query: str, max_actions: int, mode: str) -> dict[str, Any]:
             raise RuntimeError("Computer Use planner stopped before submitting the Cowork query")
         messages.append({"role": "user", "content": tool_results})
 
+    if mode == "hitl" and not hitl_action_taken:
+        log("no visible HITL prompt found within the bounded check")
+        return {
+            "status": "hitl_checked",
+            "action_count": max_actions,
+            "prompt_found": False,
+            "model": model,
+        }
+    if mode == "hitl":
+        raise RuntimeError(
+            f"Computer Use HITL check exceeded {max_actions} actions after attempting a visible prompt"
+        )
     raise RuntimeError(f"Computer Use submission exceeded {max_actions} actions without submitting")
 
 

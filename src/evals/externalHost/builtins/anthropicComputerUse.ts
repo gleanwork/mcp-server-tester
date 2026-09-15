@@ -60,7 +60,7 @@ async function runComputerUseDriver(
   label: string
 ): Promise<ComputerUseSubmissionResult | ComputerUseHitlResult> {
   const timeoutMs = Math.max(1, options.deadlineAt - Date.now());
-  const maxActions = options.maxActions ?? (mode === 'hitl' ? 6 : 24);
+  const maxActions = options.maxActions ?? (mode === 'hitl' ? 12 : 24);
   diagnostic(
     `starting Computer Use ${label} (script=${DRIVER_PATH}, maxActions=${maxActions}, timeoutMs=${timeoutMs})`
   );
