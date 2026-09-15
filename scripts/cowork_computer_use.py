@@ -32,7 +32,7 @@ def screenshot() -> dict[str, Any]:
     import mss
     from PIL import Image
 
-    with mss.mss() as capture:
+    with mss.MSS() as capture:
         monitor = capture.monitors[1]
         raw = capture.grab(monitor)
         image = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
@@ -40,7 +40,7 @@ def screenshot() -> dict[str, Any]:
         buffer = io.BytesIO()
         image.save(buffer, format="PNG")
         return {
-            "type": "computer_screenshot",
+            "type": "image",
             "source": {
                 "type": "base64",
                 "media_type": "image/png",
@@ -52,7 +52,7 @@ def screenshot() -> dict[str, Any]:
 def screen_point(coordinate: list[int]) -> tuple[int, int]:
     import mss
 
-    with mss.mss() as capture:
+    with mss.MSS() as capture:
         monitor = capture.monitors[1]
         return (
             int(coordinate[0] * monitor["width"] / DISPLAY_WIDTH),
@@ -165,7 +165,7 @@ async def run(query: str, max_actions: int) -> dict[str, Any]:
                     "model": model,
                     "submission_action": block.input,
                 }
-            if isinstance(result, dict) and result.get("type") == "computer_screenshot":
+            if isinstance(result, dict) and result.get("type") == "image":
                 tool_content: Any = [result]
             else:
                 tool_content = str(result)
