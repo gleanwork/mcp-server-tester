@@ -312,6 +312,17 @@ describe('persistent Cua transport (in-memory MCP, no subprocess)', () => {
     await expect(cua.close()).rejects.toMatchObject(unsafe);
   });
 
+  it('never closes a runtime with an indeterminate native mutation', async () => {
+    const sdkClose = vi.spyOn(Client.prototype, 'close');
+    callTool.mockRejectedValueOnce(new Error('PRIVATE_TRANSPORT_ERROR'));
+    const cua = await connect();
+    await expect(cua.call('bring_to_front', {}, 100)).rejects.toMatchObject(
+      unsafe
+    );
+    await expect(cua.close()).rejects.toMatchObject(unsafe);
+    expect(sdkClose).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['invalid MCP envelope', { content: 'PRIVATE_CLIPBOARD' }],
     ['missing structured acknowledgement', { content: [] }],

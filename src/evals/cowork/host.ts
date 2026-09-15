@@ -13,6 +13,11 @@ import type {
   HostRunResult,
 } from '../evalFrameworkTypes.js';
 import type { HostConfig } from '../evalManifest.js';
+import { createAutomatedApprovalDriver } from '../approvalAutomation.js';
+import {
+  createCuaCoworkApprovalAdapter,
+  createCuaCoworkAutoModeAdapter,
+} from './approval.js';
 import { createCuaCoworkControl } from './cuaControl.js';
 import {
   bounded,
@@ -43,15 +48,27 @@ export function createCoworkHost(
     dataDir,
     checkpoint,
     record,
-    createControl = createCuaCoworkControl,
     isProcessAlive = processAlive,
   } = dependencies;
   const name = dependencies.name ?? 'cowork';
+  const approval = dependencies.approval;
+  const createControl =
+    dependencies.createControl ??
+    ((context) => createCuaCoworkControl(context, { alreadyFrontmost: true }));
   if (
     !name.trim() ||
     !isAbsolute(dataDir) ||
     typeof dependencies.cua?.call !== 'function' ||
-    typeof checkpoint !== 'function'
+    typeof checkpoint !== 'function' ||
+    (dependencies.application !== undefined &&
+      (typeof dependencies.application.launch !== 'function' ||
+        typeof dependencies.application.activate !== 'function' ||
+        typeof dependencies.application.stop !== 'function')) ||
+    (approval !== undefined &&
+      (!approval.isolationKey.trim() ||
+        typeof approval.journal?.append !== 'function' ||
+        !Array.isArray(approval.servers) ||
+        approval.servers.length < 1))
   )
     throw new TypeError(
       'Cowork requires a name, persistent Cua transport, absolute dataDir, and checkpoint persistence'
@@ -71,6 +88,14 @@ export function createCoworkHost(
     }
   });
   const labels = expectedServers.map((server) => server.label);
+  if (
+    approval?.servers.some(
+      (server) => !labels.includes(server.label) || !server.displayName.trim()
+    )
+  )
+    throw new TypeError(
+      'Approval server identities must match provisioned server labels'
+    );
   if (labels.some((label) => !label) || new Set(labels).size !== labels.length)
     throw new TypeError(
       'expectedServers require unique provisioned server labels'
@@ -85,13 +110,14 @@ export function createCoworkHost(
     );
   const nativeEvidence = createCoworkNativeEvidence({
     mcpServerPrefixes: prefixes,
+    requireMcpResults: dependencies.requireMcpResults,
   });
   const evidence = dependencies.evidence ?? nativeEvidence;
   const schema = z
     .object({
       type: z.literal(name),
       timeout: z.number().int().min(1).max(600_000).default(120_000),
-      cleanupTimeoutMs: z.number().int().min(10).max(30_000).default(5000),
+      cleanupTimeoutMs: z.number().int().min(10).max(30_000).default(15_000),
       pollIntervalMs: z.number().int().min(1).max(1000).default(100),
     })
     .strict();
@@ -121,8 +147,10 @@ export function createCoworkHost(
     let launchAttempted = false;
     let safeToRelease = true;
     let submitArmed = false;
+    let ownedProcessStopped = false;
     let diagnostics: CoworkEvidenceDiagnostics | undefined;
     let submitAcknowledgementError: string | undefined;
+    let automatedApprovalCount = 0;
     try {
       options = schema.parse(config);
       scope = new CoworkOperationScope(startedAtMs + options.timeout);
@@ -162,39 +190,75 @@ export function createCoworkHost(
       const snapshot = await scope.run(() => evidence.snapshot(dataDir));
       stage = 'launch';
       launchAttempted = true;
-      await call('launch_app', { bundle_id: BUNDLE_ID }, (data) => {
-        // Capture ownership even when an error/late acknowledgement follows launch.
-        if (positiveInteger(data?.pid)) ownedPid = data.pid;
-      });
+      const acquireOwnedPid = (pid: unknown) => {
+        if (
+          !positiveInteger(pid) ||
+          (ownedPid !== undefined && ownedPid !== pid)
+        ) {
+          throw new Error('launch returned invalid or conflicting ownership');
+        }
+        ownedPid = pid;
+      };
+      if (dependencies.application) {
+        await scope.run(() =>
+          dependencies.application!.launch(acquireOwnedPid)
+        );
+      } else {
+        await call('launch_app', { bundle_id: BUNDLE_ID }, (data) => {
+          // Capture ownership even when an error/late acknowledgement follows launch.
+          acquireOwnedPid(data?.pid);
+        });
+      }
       if (!ownedPid) throw new Error('launch returned no owned PID');
+      if (dependencies.application) {
+        stage = 'activate';
+        await scope.run(() =>
+          dependencies.application!.activate(ownedPid!, 'claude://cowork/new')
+        );
+      }
       stage = 'window';
       while (windowId === undefined) {
         const data = await call('list_windows', {
           pid: ownedPid,
-          on_screen_only: true,
+          on_screen_only: false,
         });
         if (!Array.isArray(data.windows) || !data.windows.every(isRecord))
           throw new Error('unverified window catalog');
-        const candidates = data.windows.filter(
-          (w) =>
-            w.pid === ownedPid &&
-            w.is_on_screen === true &&
-            isRecord(w.bounds) &&
-            typeof w.bounds.width === 'number' &&
-            w.bounds.width > 500 &&
-            typeof w.bounds.height === 'number' &&
-            w.bounds.height > 300
+        const candidates = data.windows.filter((window) =>
+          mainWindowCandidate(window, ownedPid!)
         );
-        if (candidates.length > 1) throw new Error('ambiguous main windows');
-        if (candidates.length) {
-          if (!positiveInteger(candidates[0]!.window_id))
+        const visible = candidates.filter(
+          (window) =>
+            window.is_on_screen === true && window.on_current_space !== false
+        );
+        const eligible = visible.length > 0 ? visible : candidates;
+        if (eligible.length > 1) throw new Error('ambiguous main windows');
+        if (eligible.length) {
+          if (!positiveInteger(eligible[0]!.window_id))
             throw new Error('invalid window identity');
-          windowId = candidates[0]!.window_id;
+          windowId = eligible[0]!.window_id;
         } else
           await sleep(
             Math.min(options.pollIntervalMs, remaining(scope.deadline))
           );
       }
+      stage = 'focus';
+      await call('bring_to_front', { pid: ownedPid, window_id: windowId });
+      const visible = await call('list_windows', {
+        pid: ownedPid,
+        on_screen_only: true,
+      });
+      if (
+        !Array.isArray(visible.windows) ||
+        !visible.windows.some(
+          (window) =>
+            isRecord(window) &&
+            window.window_id === windowId &&
+            window.is_on_screen === true &&
+            mainWindowCandidate(window, ownedPid!)
+        )
+      )
+        throw new Error('owned main window did not become visible');
       stage = 'pre_submit';
       const pid = ownedPid;
       const mainWindowId = windowId;
@@ -209,6 +273,40 @@ export function createCoworkHost(
           text,
           deadline: execution.deadline,
           pollIntervalMs: options!.pollIntervalMs,
+          permissionPolicy: approval ? 'automated-hitl' : 'automatic-mode',
+          routePrepared: dependencies.application !== undefined,
+          onStage: (substage) => {
+            stage = `pre_submit_${substage}`;
+          },
+          preparePermissions: approval
+            ? async () => {
+                const adapter = approval.createModeAdapter
+                  ? approval.createModeAdapter({
+                      pid,
+                      windowId: mainWindowId,
+                      call,
+                    })
+                  : createCuaCoworkAutoModeAdapter({
+                      pid,
+                      windowId: mainWindowId,
+                      call,
+                    });
+                const driver = createAutomatedApprovalDriver({
+                  policy: approval.modePolicy,
+                  adapter,
+                  journal: approval.journal,
+                  pollIntervalMs: options!.pollIntervalMs,
+                });
+                const prepared = await driver.drive({
+                  host: name,
+                  isolationKey: approval.isolationKey,
+                  deadline: execution.deadline,
+                  targetApprovals: 1,
+                  isComplete: () => false,
+                });
+                automatedApprovalCount += prepared.approvals;
+              }
+            : undefined,
           async beforeSubmit(details) {
             remaining(execution.deadline);
             if (submitArmed)
@@ -238,16 +336,54 @@ export function createCoworkHost(
       submitAcknowledgementError = submitted.acknowledgementError;
       stage = 'evidence';
       // Reconcile uncertain acknowledgement without another submit or a new budget.
-      const collected = await execution.run(() =>
-        evidence.collect({
-          dataDir,
-          marker,
-          snapshot,
-          startedAtMs,
-          timeoutMs: remaining(execution.deadline),
-          expectedPrompt: text,
-        })
-      );
+      let evidenceSettled = false;
+      const evidenceOperation = execution
+        .run(() =>
+          evidence.collect({
+            dataDir,
+            marker,
+            snapshot,
+            startedAtMs,
+            timeoutMs: remaining(execution.deadline),
+            expectedPrompt: text,
+          })
+        )
+        .finally(() => {
+          evidenceSettled = true;
+        });
+      const approvalOperation = approval
+        ? execution.run(async () => {
+            const adapter = approval.createAdapter
+              ? approval.createAdapter({
+                  pid,
+                  windowId: mainWindowId,
+                  call,
+                })
+              : createCuaCoworkApprovalAdapter({
+                  pid,
+                  windowId: mainWindowId,
+                  call,
+                  servers: approval.servers,
+                });
+            const driver = createAutomatedApprovalDriver({
+              policy: approval.policy,
+              adapter,
+              journal: approval.journal,
+              pollIntervalMs: options!.pollIntervalMs,
+            });
+            return driver.drive({
+              host: name,
+              isolationKey: approval.isolationKey,
+              deadline: execution.deadline,
+              isComplete: () => evidenceSettled,
+            });
+          })
+        : Promise.resolve({ approvals: 0 });
+      const [collected, approvalResult] = await Promise.all([
+        evidenceOperation,
+        approvalOperation,
+      ]);
+      automatedApprovalCount += approvalResult.approvals;
       diagnostics = collected.diagnostics;
       if (
         typeof collected.trace?.finalText !== 'string' ||
@@ -294,11 +430,33 @@ export function createCoworkHost(
         );
       }
       if (ownedPid && scope) {
-        try {
-          await cleanup(ownedPid, windowId, cleanupEnd, scope);
-        } catch (error) {
+        const safeForOwnedStop = !submitArmed || diagnostics?.complete === true;
+        if (dependencies.application && safeForOwnedStop) {
+          try {
+            await bounded(
+              () => dependencies.application!.stop(ownedPid!, cleanupMs),
+              cleanupEnd
+            );
+            ownedProcessStopped = true;
+          } catch (error) {
+            safeToRelease = false;
+            result = fail(result, 'cleanup', errorMessage(error));
+          }
+        } else if (dependencies.application) {
           safeToRelease = false;
-          result = fail(result, 'cleanup', errorMessage(error));
+          result = fail(
+            result,
+            'quarantine',
+            'submitted work lacks terminal evidence; owned application retained'
+          );
+        } else {
+          try {
+            await cleanup(ownedPid, windowId, cleanupEnd, scope);
+            ownedProcessStopped = !(await isProcessAlive(ownedPid));
+          } catch (error) {
+            safeToRelease = false;
+            result = fail(result, 'cleanup', errorMessage(error));
+          }
         }
       }
       if (scope?.pendingCount) {
@@ -325,10 +483,13 @@ export function createCoworkHost(
                 marker,
                 startedAtMs,
                 stage,
+                ownedPid,
+                ownedProcessStopped,
                 submitArmed,
                 quarantined: !safeToRelease,
                 diagnostics,
                 submitAcknowledgementError,
+                automatedApprovalCount,
               }),
             Date.now() + 1000
           );
@@ -508,6 +669,21 @@ function validateOverrides(input: HostRunInput, context: HostRunContext): void {
       'mcpHostConfig overrides are unsupported by the provisioned Cowork app'
     );
 }
+function mainWindowCandidate(
+  window: Record<string, unknown>,
+  pid: number
+): boolean {
+  return (
+    window.pid === pid &&
+    window.layer === 0 &&
+    isRecord(window.bounds) &&
+    typeof window.bounds.width === 'number' &&
+    window.bounds.width > 500 &&
+    typeof window.bounds.height === 'number' &&
+    window.bounds.height > 300
+  );
+}
+
 function positiveInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value > 0;
 }

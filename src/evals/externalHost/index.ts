@@ -1,5 +1,13 @@
 export { runExternalHostScenario } from './runtime.js';
 export {
+  isolatedDesktopEnvironment,
+  prepareIsolatedDesktopProfile,
+} from './isolatedProfile.js';
+export type {
+  IsolatedDesktopProfile,
+  IsolatedDesktopProfilePaths,
+} from './isolatedProfile.js';
+export {
   REQUIRED_HOST_CAPABILITIES,
   validateHostCapabilities,
 } from './capabilities.js';

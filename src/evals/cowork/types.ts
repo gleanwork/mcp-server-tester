@@ -1,5 +1,10 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { MCPConfig } from '../../config/mcpConfig.js';
+import type {
+  ApprovalAdapter,
+  ApprovalJournal,
+  ApprovalPolicy,
+} from '../approvalAutomation.js';
 import type { HostRunResult } from '../evalFrameworkTypes.js';
 import type { ClaudeSessionSnapshot } from '../externalHost/builtins/anthropicClaude.js';
 
@@ -107,10 +112,48 @@ export interface CoworkRunDiagnostics {
   marker: string;
   startedAtMs: number;
   stage: string;
+  ownedPid?: number;
+  ownedProcessStopped: boolean;
   submitArmed: boolean;
   quarantined: boolean;
   diagnostics?: CoworkEvidenceDiagnostics;
   submitAcknowledgementError?: string;
+  automatedApprovalCount?: number;
+}
+
+export interface CoworkOwnedApplication {
+  /** Launch, attest, and report the exact process owned by this suite. */
+  launch(acquired: (pid: number) => void): Promise<void>;
+  /** Open the task route in, and activate, the exact owned process. */
+  activate(pid: number, url: string): Promise<void>;
+  /** Stop only the attested owned process within a bounded teardown budget. */
+  stop(pid: number, timeoutMs: number): Promise<void>;
+}
+
+export interface CoworkApprovalAdapterContext {
+  pid: number;
+  windowId: number;
+  call(
+    name: string,
+    args: Record<string, unknown>
+  ): Promise<Record<string, unknown>>;
+}
+
+export interface CoworkAutomatedApprovalOptions {
+  isolationKey: string;
+  /** Pre-submit permission-mode policy. */
+  modePolicy: ApprovalPolicy;
+  /** Post-submit exact action policy. */
+  policy: ApprovalPolicy;
+  journal: ApprovalJournal;
+  servers: Array<{ label: string; displayName: string }>;
+  /** Internal test seam. Production uses the pinned Cua adapter. */
+  createAdapter?(
+    context: CoworkApprovalAdapterContext
+  ): ApprovalAdapter<unknown>;
+  createModeAdapter?(
+    context: CoworkApprovalAdapterContext
+  ): ApprovalAdapter<unknown>;
 }
 
 export interface CoworkHostOptions {
@@ -122,6 +165,12 @@ export interface CoworkHostOptions {
   expectedServers: MCPConfig[];
   /** Verified native mcp__<namespace>__ prefixes mapped to expected server labels. */
   mcpServerPrefixes: Record<string, string>;
+  /** Optional isolated-profile application lifecycle adapter. */
+  application?: CoworkOwnedApplication;
+  /** Optional bounded automated-HITL capability. */
+  approval?: CoworkAutomatedApprovalOptions;
+  /** Require each native MCP call to have a complete paired native result. */
+  requireMcpResults?: boolean;
   checkpoint(this: void, receipt: CoworkCheckpoint): Promise<void>;
   /** Store privately. Do not persist raw clipboard data. */
   record?(this: void, record: CoworkRunDiagnostics): void | Promise<void>;

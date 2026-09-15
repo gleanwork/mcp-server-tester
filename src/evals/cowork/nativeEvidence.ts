@@ -2,6 +2,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { isDeepStrictEqual } from 'node:util';
+import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { HostEvent } from '../evalFrameworkTypes.js';
 import {
   parseClaudeTrace,
@@ -18,8 +19,10 @@ import { errorMessage, isRecord } from './deadline.js';
 
 export function createCoworkNativeEvidence(options: {
   mcpServerPrefixes: Record<string, string>;
+  requireMcpResults?: boolean;
 }): CoworkNativeEvidence {
   const prefixes = Object.entries(options.mcpServerPrefixes);
+  const requireMcpResults = options.requireMcpResults ?? false;
   if (
     prefixes.some(
       ([prefix, server]) =>
@@ -215,7 +218,7 @@ export function createCoworkNativeEvidence(options: {
           const event: HostEvent = {
             kind: 'tool_call',
             source: matched ? 'mcp' : 'host',
-            name: block.name,
+            name: matched ? nativeName.slice(matched[0].length) : nativeName,
             ...(matched ? { server: matched[1] } : {}),
             id: block.id,
             arguments: isRecord(block.input) ? block.input : {},
@@ -234,6 +237,12 @@ export function createCoworkNativeEvidence(options: {
         }
       }
     }
+    attachMcpResults(
+      events,
+      transcript,
+      requireMcpResults,
+      transcriptStream.canGrow
+    );
     if (!terminal && !transcriptStream.canGrow)
       return unavailable('transcript_incomplete', diagnostics);
     if (!auditTerminal && !auditStream.canGrow)
@@ -273,6 +282,81 @@ export function createCoworkNativeEvidence(options: {
       },
     };
   }
+}
+
+function attachMcpResults(
+  events: HostEvent[],
+  transcript: Record<string, unknown>[],
+  required: boolean,
+  canGrow: boolean
+): void {
+  if (!required) return;
+  const knownCalls = new Set(events.map((event) => event.id));
+  const seenCalls = new Set<string>();
+  const results = new Map<string, string>();
+  for (const record of transcript) {
+    for (const block of blocks(record)) {
+      if (block.type === 'tool_use' && typeof block.id === 'string') {
+        seenCalls.add(block.id);
+      }
+      if (block.type !== 'tool_result') continue;
+      const id = block.tool_use_id;
+      if (
+        typeof id !== 'string' ||
+        !id ||
+        !seenCalls.has(id) ||
+        !knownCalls.has(id) ||
+        results.has(id)
+      ) {
+        throw new EvidenceError('invalid_tool_result');
+      }
+      const event = events.find((candidate) => candidate.id === id)!;
+      if (event.source === 'mcp') {
+        results.set(id, JSON.stringify(normalizeMcpResult(block)));
+      }
+    }
+  }
+  for (const event of events) {
+    if (event.source !== 'mcp') continue;
+    const output = event.id ? results.get(event.id) : undefined;
+    if (output !== undefined) event.output = output;
+    else if (required)
+      throw canGrow
+        ? new PendingEvidenceError('mcp_result_missing')
+        : new EvidenceError('mcp_result_missing');
+  }
+}
+
+function normalizeMcpResult(block: Record<string, unknown>) {
+  const text = toolResultText(block.content);
+  const parsed: unknown = JSON.parse(text);
+  const complete =
+    isRecord(parsed) &&
+    ('content' in parsed ||
+      'structuredContent' in parsed ||
+      'isError' in parsed)
+      ? CallToolResultSchema.safeParse(parsed)
+      : undefined;
+  if (complete?.success) return complete.data;
+  return CallToolResultSchema.parse({
+    isError: block.is_error === true,
+    content: [{ type: 'text', text }],
+    structuredContent: parsed,
+  });
+}
+
+function toolResultText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (!Array.isArray(value)) throw new EvidenceError('invalid_tool_result');
+  const text = value.filter(isRecord).filter((item) => item.type === 'text');
+  if (
+    text.length !== value.length ||
+    text.length !== 1 ||
+    typeof text[0]!.text !== 'string'
+  ) {
+    throw new EvidenceError('invalid_tool_result');
+  }
+  return text[0]!.text;
 }
 
 class EvidenceError extends Error {}

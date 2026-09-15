@@ -133,7 +133,9 @@ export async function runCoworkExample(input: CoworkExampleConfig) {
     throw error;
   } finally {
     if (cua) {
-      const disposition = await finishRuntime(cua, quarantined);
+      const disposition = await finishRuntime(cua, {
+        retainAfterSubmit: quarantined,
+      });
       runtimeRetained = disposition.runtimeRetained;
       if (runtimeRetained) {
         retainRuntime(cua);

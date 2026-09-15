@@ -28,7 +28,7 @@ describe('Cowork native evidence (synthetic files, shared native collector)', ()
           kind: 'tool_call',
           source: 'mcp',
           server: 'fixture',
-          name: 'mcp__fixture__get_eval_nonce',
+          name: 'get_eval_nonce',
           id: 'a',
           arguments: {},
         },
@@ -46,6 +46,84 @@ describe('Cowork native evidence (synthetic files, shared native collector)', ()
       fullPromptConfirmed: true,
       duplicateCallCount: 2,
     });
+  });
+
+  it('supports Claude 2.110 cwd-root session storage', async () => {
+    const f = await nativeFixture();
+    await f.emit({ layout: 'cwd-root' });
+    const { trace, diagnostics } = await f.collect();
+    expect(trace.error).toBeUndefined();
+    expect(trace.finalText).toBe('NATIVE_NONCE');
+    expect(trace.events).toHaveLength(1);
+    expect(diagnostics).toMatchObject({
+      evidence: 'structured',
+      complete: true,
+      toolCallCount: 1,
+    });
+  });
+
+  it('pairs strict native MCP results and rejects a terminal call without one', async () => {
+    const body = { serverLabel: 'fixture', nonce: 'synthetic' };
+    const text = JSON.stringify(body);
+    const toolResult = {
+      type: 'user',
+      message: {
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'call-one',
+            content: text,
+            is_error: false,
+          },
+        ],
+      },
+    };
+    const complete = await nativeFixture({ requireMcpResults: true });
+    await complete.emit({
+      audit: [
+        prompt(complete.expectedPrompt),
+        tool('mcp__fixture__lookup_record'),
+        result(),
+      ],
+      transcript: [
+        prompt(complete.expectedPrompt),
+        tool('mcp__fixture__lookup_record'),
+        toolResult,
+        endTurn(),
+      ],
+    });
+    expect((await complete.collect()).trace.events).toEqual([
+      {
+        kind: 'tool_call',
+        source: 'mcp',
+        server: 'fixture',
+        name: 'lookup_record',
+        id: 'call-one',
+        arguments: {},
+        output: JSON.stringify({
+          content: [{ type: 'text', text }],
+          structuredContent: body,
+          isError: false,
+        }),
+      },
+    ]);
+
+    const missing = await nativeFixture({ requireMcpResults: true });
+    await missing.emit({
+      audit: [
+        prompt(missing.expectedPrompt),
+        tool('mcp__fixture__lookup_record'),
+        result(),
+      ],
+      transcript: [
+        prompt(missing.expectedPrompt),
+        tool('mcp__fixture__lookup_record'),
+        endTurn(),
+      ],
+    });
+    expect((await missing.collect()).trace.error).toContain(
+      'mcp_result_missing'
+    );
   });
 
   it.each([

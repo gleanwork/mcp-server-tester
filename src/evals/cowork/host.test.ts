@@ -73,6 +73,9 @@ async function fixture(
     noNative?: boolean;
     badNative?: boolean;
     ignoreQuit?: boolean;
+    isolatedLaunch?: boolean;
+    automatedHitl?: boolean;
+    hiddenAuxiliaryWindow?: boolean;
   } = {}
 ) {
   const root = await temporaryDirectory();
@@ -84,6 +87,7 @@ async function fixture(
   let alive = false;
   let text = options.draft;
   let sent = 0;
+  let automaticApproval = options.approval !== false;
   const cua: CoworkCuaTransport = {
     async call(name, args) {
       calls.push({ name, args });
@@ -113,11 +117,29 @@ async function fixture(
               {
                 pid: 42,
                 window_id: 7,
+                layer: 0,
                 is_on_screen: true,
+                on_current_space: true,
                 bounds: { width: 1000, height: 700 },
               },
+              ...(options.hiddenAuxiliaryWindow
+                ? [
+                    {
+                      pid: 42,
+                      window_id: 8,
+                      layer: 0,
+                      is_on_screen: false,
+                      on_current_space: null,
+                      bounds: { width: 800, height: 600 },
+                    },
+                  ]
+                : []),
             ],
           };
+          break;
+        case 'bring_to_front':
+          expect(args).toEqual({ pid: 42, window_id: 7 });
+          data = { activated: true };
           break;
         case 'press_key':
           expect(args).toMatchObject({
@@ -155,7 +177,7 @@ async function fixture(
       return {
         pageUrl: options.route ?? 'https://claude.ai/new',
         composer: { value },
-        automaticallyApprove: options.approval !== false,
+        automaticallyApprove: automaticApproval,
       };
     },
     async paste(value) {
@@ -199,6 +221,122 @@ async function fixture(
     dataDir: root,
     expectedServers: SERVERS,
     mcpServerPrefixes: { mcp__fixture__: 'fixture' },
+    approval: options.automatedHitl
+      ? {
+          isolationKey: 'test-profile',
+          modePolicy: {
+            id: 'test-auto-mode',
+            maxTotalApprovals: 1,
+            rules: [
+              {
+                id: 'current-task',
+                kind: 'host_permission_mode',
+                match: {
+                  surface: 'cowork',
+                  mode: 'automatic',
+                  scope: 'current_task',
+                },
+                maxUses: 1,
+              },
+            ],
+          },
+          policy: {
+            id: 'test-read-only-tools',
+            maxTotalApprovals: 1,
+            rules: [
+              {
+                id: 'nonce',
+                kind: 'mcp_tool_call',
+                match: {
+                  server: 'fixture',
+                  tool: 'get_eval_nonce',
+                  arguments: {},
+                },
+                maxUses: 1,
+              },
+            ],
+          },
+          servers: [{ label: 'fixture', displayName: 'Fixture' }],
+          journal: {
+            async append(receipt) {
+              calls.push({ name: `approval_${receipt.state}`, args: {} });
+            },
+          },
+          createModeAdapter() {
+            return {
+              async observe() {
+                return {
+                  id: 'mode-card',
+                  handle: 'mode-token',
+                  action: {
+                    kind: 'host_permission_mode',
+                    attributes: {
+                      surface: 'cowork',
+                      mode: 'automatic',
+                      scope: 'current_task',
+                    },
+                  },
+                };
+              },
+              async approve() {
+                calls.push({ name: 'mode_click', args: {} });
+              },
+              async verify() {
+                automaticApproval = true;
+                return 'applied' as const;
+              },
+            };
+          },
+          createAdapter() {
+            let observed = false;
+            return {
+              async observe() {
+                if (observed) return null;
+                observed = true;
+                return {
+                  id: 'approval-card',
+                  handle: 'allow-token',
+                  action: {
+                    kind: 'mcp_tool_call',
+                    attributes: {
+                      server: 'fixture',
+                      tool: 'get_eval_nonce',
+                      arguments: {},
+                    },
+                  },
+                };
+              },
+              async approve() {
+                calls.push({ name: 'approval_click', args: {} });
+              },
+              async verify() {
+                await emitSession(root, text!);
+                return 'applied' as const;
+              },
+            };
+          },
+        }
+      : undefined,
+    application: options.isolatedLaunch
+      ? {
+          async launch(acquired) {
+            calls.push({ name: 'isolated_launch', args: {} });
+            alive = true;
+            acquired(42);
+          },
+          async activate(pid, url) {
+            expect(pid).toBe(42);
+            expect(url).toBe('claude://cowork/new');
+            calls.push({ name: 'isolated_activate', args: { pid } });
+          },
+          async stop(pid, timeoutMs) {
+            expect(pid).toBe(42);
+            expect(timeoutMs).toBe(CONFIG.cleanupTimeoutMs);
+            calls.push({ name: 'isolated_stop', args: { pid } });
+            alive = false;
+          },
+        }
+      : undefined,
     isProcessAlive: (pid) => {
       expect(pid).toBe(42);
       return alive;
@@ -254,7 +392,7 @@ describe('createCoworkHost: canonical run seam', () => {
         kind: 'tool_call',
         source: 'mcp',
         server: 'fixture',
-        name: 'mcp__fixture__get_eval_nonce',
+        name: 'get_eval_nonce',
         id: 'call-one',
         arguments: {},
       },
@@ -294,6 +432,58 @@ describe('createCoworkHost: canonical run seam', () => {
     expect(result.failed).toBe(1);
     expect(result.caseResults[0]?.pass).toBe(false);
     expect(f.records[0]?.diagnostics?.complete).toBe(true);
+  });
+
+  it('selects the unique current-space main window over hidden auxiliary surfaces', async () => {
+    const f = await fixture({ hiddenAuxiliaryWindow: true });
+    expect((await run(f)).error).toBeUndefined();
+    expect(f.sent).toBe(1);
+  });
+
+  it('uses the isolated application lifecycle without borrowing Cua process ownership', async () => {
+    const f = await fixture({ isolatedLaunch: true });
+    const trace = await run(f);
+    expect(trace.error).toBeUndefined();
+    expect(f.calls.map((call) => call.name)).toContain('isolated_launch');
+    expect(f.calls.map((call) => call.name)).toContain('isolated_activate');
+    expect(f.calls.map((call) => call.name)).toContain('isolated_stop');
+    expect(f.calls.map((call) => call.name)).not.toContain('launch_app');
+    expect(f.calls.map((call) => call.name)).not.toContain('kill_app');
+    expect(f.alive).toBe(false);
+  });
+
+  it('drives bounded automated HITL while collecting native evidence', async () => {
+    const f = await fixture({
+      isolatedLaunch: true,
+      approval: false,
+      noNative: true,
+      automatedHitl: true,
+    });
+    const trace = await run(f);
+    expect(trace.error).toBeUndefined();
+    expect(f.sent).toBe(1);
+    expect(f.calls.map((call) => call.name)).toEqual(
+      expect.arrayContaining([
+        'approval_armed',
+        'mode_click',
+        'approval_click',
+        'approval_applied',
+      ])
+    );
+    expect(f.records[0]?.automatedApprovalCount).toBe(2);
+    expect(f.alive).toBe(false);
+  });
+
+  it('automatically tears down and releases a pre-submit isolated failure', async () => {
+    const f = await fixture({ isolatedLaunch: true, approval: false });
+    const trace = await run(f);
+    expect(trace.error).toContain('did not inherit Automatically approve');
+    expect(f.sent).toBe(0);
+    expect(f.calls.map((call) => call.name)).toContain('isolated_stop');
+    expect(f.records[0]?.submitArmed).toBe(false);
+    expect(f.records[0]?.ownedProcessStopped).toBe(true);
+    expect(f.records[0]?.quarantined).toBe(false);
+    expect(f.alive).toBe(false);
   });
 
   it.each([undefined, 'retained'])(
@@ -515,6 +705,7 @@ describe('Cowork quarantine across timed-out operations', () => {
                   {
                     pid: 42,
                     window_id: 7,
+                    layer: 0,
                     is_on_screen: true,
                     bounds: { width: 1000, height: 700 },
                   },

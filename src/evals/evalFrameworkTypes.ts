@@ -67,6 +67,7 @@ export interface HostEvent {
   server?: string;
   arguments?: Record<string, unknown>;
   output?: string;
+  error?: string;
   id?: string;
 }
 

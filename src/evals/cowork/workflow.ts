@@ -59,12 +59,18 @@ export async function submitCoworkPrompt(options: {
   text: string;
   deadline: number;
   pollIntervalMs: number;
+  permissionPolicy?: 'automatic-mode' | 'automated-hitl';
+  routePrepared?: boolean;
+  onStage?(this: void, stage: string): void;
+  preparePermissions?(this: void): Promise<void>;
   beforeSubmit(this: void, details: SubmissionDetails): Promise<void>;
 }): Promise<SubmissionDetails & { acknowledgementError?: string }> {
   const { control, text, deadline, pollIntervalMs, beforeSubmit } = options;
   const openDeadline = Math.min(Date.now() + 15_000, deadline);
   remaining(deadline);
-  await control.openUrl('claude://cowork/new');
+  options.onStage?.('route');
+  if (!options.routePrepared) await control.openUrl('claude://cowork/new');
+  options.onStage?.('observe');
   let draft: CoworkControlState | undefined;
   while (Date.now() < openDeadline) {
     const state = await control.observe();
@@ -77,10 +83,20 @@ export async function submitCoworkPrompt(options: {
     );
   }
   if (!draft) throw new Error('fresh task URL and composer were not verified');
-  // Observe only: never open approval menus or grant permissions.
-  if (!draft.automaticallyApprove)
+  if (options.preparePermissions && !draft.automaticallyApprove) {
+    options.onStage?.('permissions');
+    await options.preparePermissions();
+    draft = await control.observe();
+    if (!draft.composer || !isFreshTask(draft.pageUrl))
+      throw new Error('fresh task changed while preparing permissions');
+  }
+  if (
+    options.permissionPolicy !== 'automated-hitl' &&
+    !draft.automaticallyApprove
+  )
     throw new Error('fresh task did not inherit Automatically approve');
 
+  options.onStage?.('input');
   let inputMode: CoworkInputMode = 'accessibility';
   let verification: CoworkComposerVerification | null = null;
   let pasteError: string | undefined;
@@ -120,7 +136,8 @@ export async function submitCoworkPrompt(options: {
   const current = await control.observe();
   if (
     !isFreshTask(current.pageUrl) ||
-    !current.automaticallyApprove ||
+    (options.permissionPolicy !== 'automated-hitl' &&
+      !current.automaticallyApprove) ||
     !matchesComposer(current.composer?.value, text)
   ) {
     throw new Error(
@@ -128,8 +145,10 @@ export async function submitCoworkPrompt(options: {
     );
   }
   remaining(deadline);
+  options.onStage?.('checkpoint');
   await beforeSubmit({ inputMode, verification });
   remaining(deadline);
+  options.onStage?.('submit');
   let acknowledgementError: string | undefined;
   try {
     if (inputMode === 'keyboard') await control.pressReturn();

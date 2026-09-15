@@ -1,4 +1,4 @@
-# Qualified local Cua runtime
+# Local Cua runtime qualification record
 
 The experimental Cowork host needs two capabilities absent from the public Cua
 0.28.0 release:
@@ -49,9 +49,11 @@ uses standard permission mode, local MCP stdio, and explicit `mcp --direct`.
 
 ## Scope and prior validation
 
-The observations below describe an earlier local build, not a new live
-qualification of the current source. Requalify changed runtime/app pairs manually;
-the example's offline checks do not exercise the desktop or clipboard.
+The application gate accepts only Claude Desktop **2.110.0**. A live run of the
+current source with Cua **0.28.0** on macOS **26.5.1 arm64** passed all three shared
+desktop cases in attempt `cowork-shared-024`, including strict native-result and
+independent-ledger reconciliation. Requalify any changed runtime/app pair; the
+example's offline checks do not exercise the desktop or clipboard.
 
 The patch adds the optional shared URL field and macOS extraction. The paste
 operation is explicitly macOS-only. It uses existing desktop/clipboard
@@ -62,8 +64,10 @@ and recognizes AppKit's derived legacy text/HTML aliases.
 Focused Rust checks covered contracts, URL extraction, input authorization,
 restoration on failure, and clipboard ownership changes. An isolated named
 pasteboard test exercised real AppKit HTML/text/custom-format round trips without
-using the user's general clipboard. A live Claude Desktop **1.52386.3** run on
-macOS **26.5.1 arm64** passed the tester's canonical nonce evaluation.
+using the user's general clipboard. The prior live qualification used Claude
+Desktop **1.52386.3** on macOS **26.5.1 arm64** and passed the tester's canonical
+nonce evaluation. The newer three-case qualification above supersedes that
+historical result for the currently pinned build.
 
 The current patch also retains desktop and recording exclusion through native
 worker completion after cancellation. Those changes have headless regression

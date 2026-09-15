@@ -1,0 +1,24 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "../..",
+    "outDir": "../../build/cowork-shared",
+    "noEmit": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false
+  },
+  "include": [
+    "./cliShared.ts",
+    "./discoverShared.ts",
+    "./prepareShared.ts",
+    "./approvalConsentShared.ts",
+    "./runShared.ts",
+    "./setupCli.ts",
+    "./setupIsolated.ts",
+    "./sharedConfig.ts",
+    "./teardownShared.ts",
+    "./files.ts",
+    "./lifecycle.ts"
+  ]
+}

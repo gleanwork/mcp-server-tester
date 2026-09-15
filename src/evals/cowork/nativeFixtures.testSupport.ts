@@ -1,6 +1,6 @@
 import { appendFile, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { onTestFinished } from 'vitest';
 import { createCoworkNativeEvidence } from './nativeEvidence.js';
@@ -46,10 +46,14 @@ export async function emitSession(
     metadataPrompt?: string;
     audit?: NativeRecord[] | string;
     transcript?: NativeRecord[] | string | null;
+    layout?: 'legacy' | 'cwd-root';
   } = {}
 ): Promise<void> {
   const id = options.id ?? 'local_synthetic';
-  const dir = join(dataDir, id);
+  const dir =
+    options.layout === 'cwd-root'
+      ? join(dataDir, 'runtime-synthetic')
+      : join(dataDir, id);
   await mkdir(dir, { recursive: true });
   await writeFile(
     join(dataDir, `${id}.json`),
@@ -58,6 +62,7 @@ export async function emitSession(
       cliSessionId: 'cli-synthetic',
       createdAt: Date.now(),
       initialMessage: options.metadataPrompt ?? text,
+      ...(options.layout === 'cwd-root' ? { cwd: join(dir, 'workspace') } : {}),
     })
   );
   const defaults = [
@@ -68,7 +73,9 @@ export async function emitSession(
   await writeStream(join(dir, 'audit.jsonl'), options.audit ?? defaults);
   if (options.transcript !== null)
     await writeStream(
-      join(dir, 'cli-synthetic.jsonl'),
+      options.layout === 'cwd-root'
+        ? join(dir, '.claude', 'projects', 'synthetic', 'cli-synthetic.jsonl')
+        : join(dir, 'cli-synthetic.jsonl'),
       options.transcript ?? defaults
     );
 }
@@ -76,6 +83,7 @@ async function writeStream(
   path: string,
   events: NativeRecord[] | string
 ): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
   await writeFile(path, serializeStream(events));
 }
 function serializeStream(events: NativeRecord[] | string): string {
@@ -83,10 +91,13 @@ function serializeStream(events: NativeRecord[] | string): string {
     ? events
     : events.map((event) => JSON.stringify(event)).join('\n') + '\n';
 }
-export async function nativeFixture() {
+export async function nativeFixture(
+  options: { requireMcpResults?: boolean } = {}
+) {
   const dataDir = await temporaryDirectory();
   const evidence = createCoworkNativeEvidence({
     mcpServerPrefixes: { mcp__fixture__: 'fixture' },
+    requireMcpResults: options.requireMcpResults,
   });
   const snapshot = await evidence.snapshot(dataDir);
   const marker = `synthetic_${randomUUID()}`;

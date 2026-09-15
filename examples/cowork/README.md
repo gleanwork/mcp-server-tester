@@ -20,6 +20,9 @@ node build/cowork/cli.js prepare /absolute/private/parent/cowork-test-001
 
 The parent directory must exist. The setup directory must not exist. `prepare`
 creates a private directory with `fixture.mcpb`, `evaluator.json`, and `run.json`.
+The separate `npm run build:cowork-shared` maintainer command is
+**source-checkout-only**. It requires this repository's `.git`, `src/`, and `tests/`
+inputs and is not a published-package build path.
 It packages the checked-in [fixture sources](../../tests/fixtures/cowork-mcpb/)
 with macOS `/usr/bin/zip -X`, using explicit filenames in a private temporary
 directory that is removed after packaging, including on failure. Each bundle gets

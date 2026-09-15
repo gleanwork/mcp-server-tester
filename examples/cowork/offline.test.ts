@@ -265,15 +265,25 @@ void test('quarantine skips close; close refusal returns a diagnostic outcome', 
       calls++;
     },
   };
-  assert.deepEqual(await finishRuntime(cua, true), {
-    runtimeRetained: true,
-    reason: 'host-quarantined',
-  });
+  assert.deepEqual(
+    await finishRuntime(cua, {
+      retainAfterSubmit: true,
+    }),
+    {
+      runtimeRetained: true,
+      reason: 'host-quarantined',
+    }
+  );
   assert.equal(calls, 0);
-  assert.deepEqual(await finishRuntime(cua, false), {
-    runtimeRetained: false,
-    reason: 'closed',
-  });
+  assert.deepEqual(
+    await finishRuntime(cua, {
+      retainAfterSubmit: false,
+    }),
+    {
+      runtimeRetained: false,
+      reason: 'closed',
+    }
+  );
   assert.equal(calls, 1);
   const refusal = await finishRuntime(
     {
@@ -281,7 +291,9 @@ void test('quarantine skips close; close refusal returns a diagnostic outcome', 
         throw new Error('pending RPC');
       },
     },
-    false
+    {
+      retainAfterSubmit: false,
+    }
   );
   assert.deepEqual(refusal, {
     runtimeRetained: true,

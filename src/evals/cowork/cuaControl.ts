@@ -28,7 +28,10 @@ export type CoworkTransactionalPaste = (
 /** Stock Cua 0.28 needs AXURL and transactional-paste patches for this adapter. */
 export function createCuaCoworkControl(
   context: CoworkControlContext,
-  options: { pasteText?: CoworkTransactionalPaste } = {}
+  options: {
+    pasteText?: CoworkTransactionalPaste;
+    alreadyFrontmost?: boolean;
+  } = {}
 ): CoworkControl {
   const { pid, windowId } = context;
   async function command(
@@ -127,21 +130,23 @@ export function createCuaCoworkControl(
     observe: state,
     async paste(text) {
       const pasteText = options.pasteText ?? nativeTransactionalPaste;
-      const front = await command('bring_to_front', {
-        pid,
-        window_id: windowId,
-      });
-      // Exact WindowServer/AX proof is authoritative. NSWorkspace active can lag.
-      if (
-        front.activated !== true ||
-        front.pid !== pid ||
-        front.window_id !== windowId ||
-        !isRecord(front.exact_window_effect) ||
-        front.exact_window_effect.verified !== true
-      ) {
-        throw new CoworkControlError(
-          'Claude exact window did not become frontmost'
-        );
+      if (!options.alreadyFrontmost) {
+        const front = await command('bring_to_front', {
+          pid,
+          window_id: windowId,
+        });
+        // Exact WindowServer/AX proof is authoritative. NSWorkspace active can lag.
+        if (
+          front.activated !== true ||
+          front.pid !== pid ||
+          front.window_id !== windowId ||
+          !isRecord(front.exact_window_effect) ||
+          front.exact_window_effect.verified !== true
+        ) {
+          throw new CoworkControlError(
+            'Claude exact window did not become frontmost'
+          );
+        }
       }
       try {
         await pasteText({ pid, windowId, call: command, text });

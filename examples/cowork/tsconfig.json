@@ -8,5 +8,13 @@
     "declarationMap": false,
     "sourceMap": false
   },
-  "include": ["./*.ts"]
+  "include": [
+    "./cli.ts",
+    "./config.ts",
+    "./files.ts",
+    "./lifecycle.ts",
+    "./offline.test.ts",
+    "./prepare.ts",
+    "./run.ts"
+  ]
 }

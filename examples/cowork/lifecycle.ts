@@ -8,9 +8,12 @@ export interface RuntimeDisposition {
 
 export async function finishRuntime(
   cua: Pick<CoworkCuaConnection, 'close'>,
-  quarantined: boolean
+  options: {
+    retainAfterSubmit: boolean;
+  }
 ): Promise<RuntimeDisposition> {
-  if (quarantined) return { runtimeRetained: true, reason: 'host-quarantined' };
+  if (options.retainAfterSubmit)
+    return { runtimeRetained: true, reason: 'host-quarantined' };
   try {
     await cua.close();
     return { runtimeRetained: false, reason: 'closed' };
