@@ -166,7 +166,7 @@ async def run(query: str, max_actions: int) -> dict[str, Any]:
                     "submission_action": block.input,
                 }
             if isinstance(result, dict) and result.get("type") == "computer_screenshot":
-                tool_content: Any = result
+                tool_content: Any = [result]
             else:
                 tool_content = str(result)
             tool_results.append({
