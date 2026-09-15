@@ -1,3 +1,6 @@
+import { createNativeMacComputerUseProvider } from './nativeMacComputerUse.js';
+export { createNativeMacComputerUseProvider } from './nativeMacComputerUse.js';
+
 export interface MacComputerUseApp {
   getAXStateAndScreenshot(options?: {
     disableDiffing?: boolean;
@@ -141,6 +144,7 @@ export function createGlobalCuaComputerUseProvider(): MacComputerUseProvider {
 }
 
 registerMacComputerUseProvider(createGlobalCuaComputerUseProvider());
+registerMacComputerUseProvider(createNativeMacComputerUseProvider());
 
 export function validateMacComputerUseApp(
   appName: string,

@@ -46,6 +46,7 @@ export {
 export type { ExternalHostDriverReference } from './schema.js';
 export {
   createGlobalCuaComputerUseProvider,
+  createNativeMacComputerUseProvider,
   getMacComputerUseRuntime,
   listMacComputerUseProviders,
   loadMacComputerUseProvider,

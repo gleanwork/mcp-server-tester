@@ -6,7 +6,8 @@ if (process.env.MST_MAC_CUA_PLUGIN) {
   await loadMacComputerUseProvider(process.env.MST_MAC_CUA_PLUGIN);
 }
 
-const computerUseProvider = process.env.MST_MAC_CUA_PROVIDER ?? 'global-cua';
+const computerUseProvider =
+  process.env.MST_COWORK_CUA_PROVIDER ?? 'anthropic-computer-use';
 
 describe('Claude external host integrations', () => {
   it('drives Claude Chat Desktop and captures low-confidence visible response evidence', async () => {

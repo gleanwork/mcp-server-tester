@@ -58,7 +58,7 @@
   ],
   "scripts": {
     "build": "npm run build:ui && tsup && npm run build:copy-ui",
-    "build:copy-ui": "cp -r src/reporters/ui-dist dist/reporters/",
+    "build:copy-ui": "cp -r src/reporters/ui-dist dist/reporters/ && mkdir -p dist/evals/externalHost/builtins && cp src/evals/externalHost/builtins/macComputerUseBridge.swift dist/evals/externalHost/builtins/",
     "build:ui": "tsx src/reporters/build-ui.ts",
     "dev": "tsup --watch",
     "dev:ui": "tsx src/reporters/build-ui.ts --watch",

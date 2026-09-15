@@ -7,6 +7,7 @@ import type {
   ExternalHostRunResult,
 } from '../types.js';
 import { driverToSlug, hostTypeFromDriver } from '../driverIdentity.js';
+import { runAnthropicComputerUseSubmission } from './anthropicComputerUse.js';
 import { submitMacCoworkPrompt } from './macCowork.js';
 
 const execFileAsync = promisify(execFile);
@@ -428,13 +429,34 @@ async function submitPromptCapability({
     const appName =
       runStringOption(config, binding, 'appName') ?? state.displayName;
     if (isClaudeCoworkDriver(state.driver)) {
+      const computerUseProvider =
+        runStringOption(config, binding, 'computerUseProvider') ??
+        'native-macos';
+      if (computerUseProvider === 'anthropic-computer-use') {
+        const submission = await runAnthropicComputerUseSubmission(
+          run.submittedScenario,
+          { deadlineAt: run.startedAtMs + run.timeoutMs }
+        );
+        state.data.macCoworkCheckpoint = {
+          phase: 'submitted',
+          appName,
+          prompt: run.submittedScenario,
+          marker: run.marker,
+          submittedAt: new Date().toISOString(),
+          submissionMode: 'anthropic-computer-use',
+          submissionConfidence: 'high',
+          actionCount: submission.action_count,
+          model: submission.model,
+        };
+        return;
+      }
       const submission = await submitMacCoworkPrompt(run.submittedScenario, {
         appName,
         marker: run.marker,
         openFreshComposer: true,
         computerUseProvider:
           runStringOption(config, binding, 'computerUseProvider') ??
-          'global-cua',
+          'anthropic-computer-use',
         deadlineAt: run.startedAtMs + run.timeoutMs,
       });
       state.data.macCoworkCheckpoint = submission.checkpoint;
@@ -463,7 +485,7 @@ async function submitPromptCapability({
       failureKind: classifyMacosDesktopFailure(message),
       error: `Failed to submit prompt to desktop host: ${message}`,
       limitations: [
-        'The desktop host app must be installed, signed in, and allowed in macOS Automation/Accessibility settings.',
+        'The desktop host app must be installed, signed in, and allowed in macOS Accessibility and Screen Recording settings for Computer Use.',
       ],
     });
   }

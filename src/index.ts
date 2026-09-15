@@ -327,6 +327,7 @@ export {
   getExternalHostReference,
   listExternalHostDriverReferences,
   createGlobalCuaComputerUseProvider,
+  createNativeMacComputerUseProvider,
   getMacComputerUseRuntime,
   listMacComputerUseProviders,
   loadMacComputerUseProvider,

@@ -155,6 +155,9 @@ async function activateCoworkSurfaceCapability({
 }: ExternalHostCapabilityContext): Promise<ExternalHostRunResult | void> {
   const appName =
     runStringOption(config, binding, 'appName') ?? DEFAULT_APP_NAME;
+  const computerUseProvider =
+    runStringOption(config, binding, 'computerUseProvider') ?? 'native-macos';
+  if (computerUseProvider === 'anthropic-computer-use') return;
   const appReadyTimeoutMs =
     runNumberOption(config, binding, 'appReadyTimeoutMs') ?? 60_000;
   const deadlineAt = Math.min(
@@ -163,7 +166,8 @@ async function activateCoworkSurfaceCapability({
   );
   try {
     const computerUseProvider =
-      runStringOption(config, binding, 'computerUseProvider') ?? 'global-cua';
+      runStringOption(config, binding, 'computerUseProvider') ??
+      'anthropic-computer-use';
     const app =
       await getMacComputerUseRuntime(computerUseProvider).getApp(appName);
     await ensureMacComputerUseApp(app, deadlineAt);

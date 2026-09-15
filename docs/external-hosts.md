@@ -44,13 +44,13 @@ The built-in Cowork driver requires:
 
 - macOS;
 - Claude Desktop installed and signed in;
-- a registered MST Computer Use provider; the built-in `global-cua` provider requires a host that initializes `globalThis.cua.getApp("Claude")`;
+- the built-in `anthropic-computer-use` provider, or a registered MST Computer Use provider;
 - no running Claude process when a custom lifecycle capability requests a fresh environment;
 - serialized Cowork eval execution, with no manual Claude launch during a run.
 
-The driver launches Claude, resolves a registered MST Computer Use provider, observes the Accessibility tree and screenshot, selects the current **Home** Cowork surface, opens a fresh Cowork composer through `claude://cowork/new`, and verifies the composer semantically. The Mac submission path uses Computer Use `setValue` and a single semantic Send-node click, records an at-most-once submission checkpoint, retries stale UI nodes only before submission, and never resubmits after an ambiguous click. Claude's native local-agent session remains authoritative for the final response, tool calls, usage, cost, and trace telemetry.
+The driver launches Claude, resolves the configured Computer Use provider, and submits one query through a bounded screenshot/action loop. The default `anthropic-computer-use` path uses the Anthropic Computer Use API with `pyautogui` and `mss`; it stops immediately after the first Enter/Return. MST then owns native session correlation, terminal validation, response extraction, tool calls, usage, cost, and trace telemetry. The submission checkpoint is at-most-once, and no failed model action may trigger a second query submission.
 
-MST ships a `global-cua` provider that adapts a host-initialized `globalThis.cua.getApp("Claude")`. Other CUA implementations can register the same provider contract:
+MST ships an `anthropic-computer-use` submission provider for the first runnable Mac path, plus `native-macos` and `global-cua` provider adapters. Other CUA implementations can register the same provider contract:
 
 ```ts
 import { registerMacComputerUseProvider } from '@gleanwork/mcp-server-tester';
@@ -61,7 +61,21 @@ registerMacComputerUseProvider({
 });
 ```
 
-Select it in the Cowork binding with `computerUseProvider: "my-cua"`. The provider must return an app exposing `getAXStateAndScreenshot`, `click`, `setValue`, and `pressKey`; the Cowork state machine and evidence rules are provider-independent. For the integration command, load an ESM plugin without changing MST:
+Select it in the Cowork binding with `computerUseProvider: "my-cua"`. The provider must return an app exposing `getAXStateAndScreenshot`, `click`, `setValue`, and `pressKey`; the Cowork state machine and evidence rules are provider-independent.
+
+For the default screenshot/action provider, install its optional Python dependencies first:
+
+```bash
+python3 -m pip install anthropic pyautogui mss Pillow
+```
+
+Then run the integration command with an Anthropic API key:
+
+```bash
+ANTHROPIC_API_KEY=... npm run test:external-host:cowork
+```
+
+For another provider, load an ESM plugin without changing MST:
 
 ```bash
 MST_MAC_CUA_PLUGIN=/absolute/path/my-cua-plugin.mjs \
