@@ -20,9 +20,14 @@ import type {
 import type { UsageMetrics } from '../../../types/index.js';
 import { driverToSlug, hostTypeFromDriver } from '../driverIdentity.js';
 import {
+  getMacComputerUseRuntime,
+  waitForMacComputerUseText,
+} from './macComputerUse.js';
+import { ensureMacComputerUseApp } from './macCowork.js';
+import {
+  classifyMacosDesktopFailure,
   readMacosAccessibilityText,
   readMacosFrontWindowContents,
-  runAppleScript,
 } from './macosDesktop.js';
 
 const DEFAULT_APP_NAME = 'Claude';
@@ -61,6 +66,21 @@ interface SnapshotEntry {
 
 export type ClaudeSessionSnapshot = Map<string, SnapshotEntry>;
 
+export interface ClaudeNativeTelemetry {
+  resultCount: number;
+  apiCallCount: number;
+  models: string[];
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
+  totalCostUsd?: number;
+  durationMs?: number;
+  durationApiMs?: number;
+  toolCallCount: number;
+  toolErrorCount: number;
+}
+
 export interface ClaudeTrace {
   candidate: SessionCandidate;
   auditPath?: string;
@@ -80,6 +100,7 @@ export interface ClaudeTrace {
   costAvailable: boolean;
   parseWarnings: string[];
   rawText: string;
+  telemetry: ClaudeNativeTelemetry;
 }
 
 interface ClaudeAuditEvent {
@@ -89,6 +110,7 @@ interface ClaudeAuditEvent {
   duration_ms?: number;
   duration_api_ms?: number;
   total_cost_usd?: number;
+  model?: string;
   requestId?: string;
   request_id?: string;
   usage?: Record<string, unknown>;
@@ -99,6 +121,7 @@ interface ClaudeAuditEvent {
       name?: string;
       input?: Record<string, unknown>;
       text?: string;
+      is_error?: boolean;
     }>;
   };
   timestamp?: string;
@@ -136,9 +159,9 @@ export const ANTHROPIC_CLAUDE_CAPABILITIES: ExternalHostCapabilityImplementation
   ];
 
 /**
- * Deterministically switches the Claude desktop app to the Cowork surface via
- * Cmd+2 (the app's built-in shortcut for the Cowork sidebar tab). Idempotent —
- * sending Cmd+2 while already on Cowork is a no-op. Replaces the older
+ * Deterministically switches the Claude desktop app to the Home/Cowork surface
+ * via Cmd+1. The current Claude UI uses Cmd+2 for Code, so the driver also waits
+ * for and verifies Cowork-specific accessibility labels before input. Replaces the older
  * rejectClaudeChatSurface capability for use cases that need automatic surface
  * activation (e.g. CI runs).
  */
@@ -150,21 +173,34 @@ async function activateCoworkSurfaceCapability({
 }: ExternalHostCapabilityContext): Promise<ExternalHostRunResult | void> {
   const appName =
     runStringOption(config, binding, 'appName') ?? DEFAULT_APP_NAME;
-  const settleDelayMs = 700;
-  const script = `
-tell application ${JSON.stringify(appName)} to activate
-delay 0.4
-tell application "System Events"
-  tell process ${JSON.stringify(appName)}
-    set frontmost to true
-    keystroke "2" using command down
-  end tell
-end tell
-delay ${settleDelayMs / 1000}
-return "ok"
-`;
+  const computerUseProvider =
+    runStringOption(config, binding, 'computerUseProvider') ?? 'native-macos';
+  if (computerUseProvider === 'anthropic-computer-use') return;
+  const appReadyTimeoutMs =
+    runNumberOption(config, binding, 'appReadyTimeoutMs') ?? 60_000;
+  const deadlineAt = Math.min(
+    run.startedAtMs + run.timeoutMs,
+    Date.now() + appReadyTimeoutMs
+  );
   try {
-    await runAppleScript(script, { timeoutMs: 8_000 });
+    const computerUseProvider =
+      runStringOption(config, binding, 'computerUseProvider') ??
+      'anthropic-computer-use';
+    const app =
+      await getMacComputerUseRuntime(computerUseProvider).getApp(appName);
+    await ensureMacComputerUseApp(app, deadlineAt);
+    await waitForMacComputerUseText(
+      app,
+      (observation) =>
+        isClaudeDesktopNavigationAccessibilityText(observation.text),
+      { deadlineAt }
+    );
+    await app.pressKey('CMD+1');
+    await waitForMacComputerUseText(
+      app,
+      (observation) => isClaudeCoworkAccessibilityText(observation.text),
+      { deadlineAt }
+    );
   } catch (err) {
     return failureResult({
       config,
@@ -172,14 +208,27 @@ return "ok"
       driver: state.driver,
       displayName: state.displayName,
       capabilitiesUsed: state.capabilitiesUsed,
-      failureKind: 'submission_failed',
-      error: `Failed to activate Cowork surface via Cmd+2: ${formatError(err)}`,
+      failureKind: classifyMacosDesktopFailure(formatError(err)),
+      error: `Failed to activate the Cowork Home surface: ${formatError(err)}`,
       artifacts: [],
       limitations: [
-        'Cowork surface activation depends on Cmd+2 being bound to the Cowork sidebar tab in the user-installed Claude app version.',
+        'Cowork surface activation requires an initialized Computer Use runtime exposing globalThis.cua.getApp("Claude").',
       ],
     });
   }
+}
+
+export function isClaudeDesktopNavigationAccessibilityText(
+  text: string
+): boolean {
+  return text.includes('Home') && text.includes('Code');
+}
+
+export function isClaudeCoworkAccessibilityText(text: string): boolean {
+  return (
+    text.includes('Write your prompt to Claude') &&
+    (text.includes('Learn more about Cowork') || text.includes('Cowork'))
+  );
 }
 
 async function rejectClaudeChatSurfaceCapability({
@@ -250,7 +299,10 @@ async function captureClaudeChatAccessibilityResultCapability({
       driver: state.driver,
       displayName: state.displayName,
       capabilitiesUsed: state.capabilitiesUsed,
-      timeoutMs: run.timeoutMs,
+      timeoutMs: Math.max(
+        1,
+        Math.min(run.timeoutMs, run.startedAtMs + run.timeoutMs - Date.now())
+      ),
       appName: runStringOption(config, binding, 'appName'),
     });
   } catch (err) {
@@ -305,7 +357,10 @@ async function captureClaudeCoworkAgentTraceCapability({
       marker: run.marker,
       correlation: run.correlation,
       snapshot,
-      timeoutMs: run.timeoutMs,
+      timeoutMs: Math.max(
+        1,
+        Math.min(run.timeoutMs, run.startedAtMs + run.timeoutMs - Date.now())
+      ),
       startedAtMs: run.startedAtMs,
     });
   } catch (err) {
@@ -322,6 +377,29 @@ async function captureClaudeCoworkAgentTraceCapability({
       limitations: [`Claude data directory: ${dataDir}`],
     });
   }
+}
+
+export async function normalizeClaudeTraceForRun(options: {
+  config: ExternalHostConfig;
+  context: HostRunContext;
+  driver: HostDriverId;
+  displayName: string;
+  capabilitiesUsed: HostCapability[];
+  trace: ClaudeTrace;
+}): Promise<ExternalHostRunResult> {
+  return normalizeClaudeCoworkAgentTraceCapability({
+    config: options.config,
+    run: options.context,
+    capability: 'normalize',
+    binding: { uses: 'builtin:anthropic.claude.localAgentNormalize' },
+    state: {
+      driver: options.driver,
+      driverSlug: driverToSlug(options.driver),
+      displayName: options.displayName,
+      capabilitiesUsed: options.capabilitiesUsed,
+      data: { claudeTrace: options.trace },
+    },
+  });
 }
 
 async function normalizeClaudeCoworkAgentTraceCapability({
@@ -419,6 +497,19 @@ function runStringOption(
   return stringOption(binding.with, key) ?? configStringOption(config, key);
 }
 
+function runNumberOption(
+  config: ExternalHostConfig,
+  binding: { with?: Record<string, unknown> },
+  key: string
+): number | undefined {
+  const bindingValue = binding.with?.[key];
+  if (typeof bindingValue === 'number') {
+    return bindingValue;
+  }
+  const configValue = config.options?.[key];
+  return typeof configValue === 'number' ? configValue : undefined;
+}
+
 export function getClaudeDataDir(
   config: ExternalHostConfig,
   binding?: { with?: Record<string, unknown> }
@@ -433,7 +524,7 @@ export function getClaudeDataDir(
       homedir(),
       'Library',
       'Application Support',
-      'Claude',
+      'Claude-3p',
       'local-agent-mode-sessions'
     )
   );
@@ -457,6 +548,7 @@ export async function waitForClaudeTrace(options: {
   snapshot: ClaudeSessionSnapshot;
   timeoutMs: number;
   startedAtMs: number;
+  scenario?: string;
 }): Promise<ClaudeTrace> {
   const deadline = Date.now() + options.timeoutMs;
   let lastPending: ClaudeTrace | undefined;
@@ -522,6 +614,7 @@ export async function findMatchingClaudeSessions(options: {
   correlation?: HostRunContext['correlation'];
   snapshot: ClaudeSessionSnapshot;
   startedAtMs: number;
+  scenario?: string;
 }): Promise<ClaudeTrace[]> {
   const sessions = await listSessionCandidates(options.dataDir);
   const traces: ClaudeTrace[] = [];
@@ -538,18 +631,22 @@ export async function findMatchingClaudeSessions(options: {
       continue;
     }
 
-    const trace = await parseClaudeTrace(
+    let trace = await parseClaudeTrace(
       session,
       options.correlation?.includedInPrompt === false
         ? undefined
         : options.marker
     );
+    if (options.scenario && trace.rawText.includes(options.marker) === false) {
+      trace = await parseClaudeTrace(session, undefined);
+    }
     if (
       sessionMatchesCorrelation({
         session,
         trace,
         marker: options.marker,
         correlation: options.correlation,
+        scenario: options.scenario,
         isNewOrUpdated,
         isRecent,
       })
@@ -564,11 +661,14 @@ export async function findMatchingClaudeSessions(options: {
 function describeCorrelation(options: {
   marker: string;
   correlation?: HostRunContext['correlation'];
+  scenario?: string;
 }): string {
   if (options.correlation?.includedInPrompt) {
     return `marker ${options.marker}`;
   }
-  return `${options.correlation?.strategy ?? 'none'} correlation near the run start`;
+  return options.scenario
+    ? `query correlation near the run start: ${options.scenario}`
+    : `${options.correlation?.strategy ?? 'none'} correlation near the run start`;
 }
 
 async function readAccessibilityFallback(
@@ -750,7 +850,7 @@ export async function parseClaudeTrace(
         'Claude transcript'
       );
       transcriptEvents = parsed.events;
-      transcriptParsed = parsed.ok;
+      transcriptParsed = parsed.ok && parsed.events.length > 0;
       parseWarnings.push(...parsed.warnings);
     } catch (err) {
       parseWarnings.push(
@@ -777,14 +877,16 @@ export async function parseClaudeTrace(
     ...auditEventsForRun,
     ...transcriptEventsForRun,
   ];
-  const resultEvent =
-    findLastResultEvent(auditEventsForRun) ??
-    findLastResultEvent(transcriptEventsForRun);
+  const resultEvents = dedupeResultEvents([
+    ...auditEventsForRun.filter((event) => event.type === 'result'),
+    ...transcriptEventsForRun.filter((event) => event.type === 'result'),
+  ]);
+  const resultEvent = resultEvents.at(-1);
   const finalAnswer =
     typeof resultEvent?.result === 'string'
       ? resultEvent.result
       : extractAssistantText(combinedEventsForRun);
-  const usage = resultEvent ? extractUsage(resultEvent) : undefined;
+  const usage = extractAggregatedUsage(resultEvents);
   const toolCalls = extractToolCalls(
     transcriptEventsForRun.length > 0
       ? transcriptEventsForRun
@@ -807,9 +909,12 @@ export async function parseClaudeTrace(
     auditParsed,
     transcriptParsed,
     usageAvailable: usage !== undefined,
-    costAvailable: typeof resultEvent?.total_cost_usd === 'number',
+    costAvailable: resultEvents.some(
+      (event) => typeof event.total_cost_usd === 'number'
+    ),
     parseWarnings,
     rawText: `${rawAudit}\n${rawTranscript}`,
+    telemetry: buildNativeTelemetry(resultEvents, toolCalls, usage),
   };
 }
 
@@ -829,7 +934,17 @@ function selectEventsForMarker(
     return metadata.initialMessage?.includes(marker) ? events : [];
   }
 
-  return events.slice(markerIndex);
+  const nextMarkerIndex = events.findIndex(
+    (event, index) =>
+      index > markerIndex &&
+      /\[eval-run-marker:MCP_SERVER_TESTER_[A-Za-z0-9_-]+\]/u.test(
+        JSON.stringify(event)
+      )
+  );
+  return events.slice(
+    markerIndex,
+    nextMarkerIndex >= 0 ? nextMarkerIndex : undefined
+  );
 }
 
 export function buildClaudeTraceMetadata(options: {
@@ -886,6 +1001,7 @@ export function buildClaudeTraceMetadata(options: {
     traceConfidence,
     traceLimitations: limitations.length > 0 ? limitations : undefined,
     artifacts: options.artifacts,
+    telemetry: options.trace.telemetry,
     session: {
       id:
         options.trace.candidate.metadata.sessionId ??
@@ -1194,11 +1310,16 @@ function sessionMatchesCorrelation(options: {
   trace: ClaudeTrace;
   marker: string;
   correlation?: HostRunContext['correlation'];
+  scenario?: string;
   isNewOrUpdated: boolean;
   isRecent: boolean;
 }): boolean {
   if (options.correlation?.includedInPrompt !== false) {
-    return sessionMatchesMarker(options.session, options.trace, options.marker);
+    return (
+      sessionMatchesMarker(options.session, options.trace, options.marker) ||
+      (options.scenario !== undefined &&
+        options.trace.rawText.includes(options.scenario))
+    );
   }
 
   return options.isNewOrUpdated || options.isRecent;
@@ -1232,14 +1353,6 @@ async function parseNdjsonContent<T>(
       : [];
 
   return { events, ok: warnings.length === 0, warnings };
-}
-
-function findLastResultEvent(
-  events: ClaudeAuditEvent[]
-): ClaudeAuditEvent | undefined {
-  return [...events]
-    .reverse()
-    .find((event) => event.type === 'result' || event.result !== undefined);
 }
 
 async function findFile(
@@ -1305,6 +1418,77 @@ function extractToolCalls(events: ClaudeAuditEvent[]): LLMToolCall[] {
   return toolCalls;
 }
 
+function dedupeResultEvents(events: ClaudeAuditEvent[]): ClaudeAuditEvent[] {
+  const byRequest = new Map<string, ClaudeAuditEvent>();
+  events.forEach((event) => {
+    const key =
+      event.requestId ??
+      event.request_id ??
+      JSON.stringify({
+        timestamp: event.timestamp,
+        result: event.result,
+        usage: event.usage,
+        cost: event.total_cost_usd,
+        duration: event.duration_ms,
+      });
+    byRequest.set(key, event);
+  });
+  return [...byRequest.values()];
+}
+
+function extractAggregatedUsage(
+  events: ClaudeAuditEvent[]
+): UsageMetrics | undefined {
+  const byRequest = new Map<string, UsageMetrics>();
+  events.forEach((event, index) => {
+    const usage = extractUsage(event);
+    if (!usage) return;
+    const requestId = event.requestId ?? event.request_id ?? `event-${index}`;
+    const previous = byRequest.get(requestId);
+    if (!previous) {
+      byRequest.set(requestId, usage);
+      return;
+    }
+    byRequest.set(requestId, {
+      inputTokens: Math.max(previous.inputTokens, usage.inputTokens),
+      outputTokens: Math.max(previous.outputTokens, usage.outputTokens),
+      totalCostUsd: Math.max(previous.totalCostUsd, usage.totalCostUsd),
+      durationMs: Math.max(previous.durationMs, usage.durationMs),
+      durationApiMs:
+        previous.durationApiMs === undefined &&
+        usage.durationApiMs === undefined
+          ? undefined
+          : Math.max(previous.durationApiMs ?? 0, usage.durationApiMs ?? 0),
+      cacheReadInputTokens: Math.max(
+        previous.cacheReadInputTokens ?? 0,
+        usage.cacheReadInputTokens ?? 0
+      ),
+      cacheCreationInputTokens: Math.max(
+        previous.cacheCreationInputTokens ?? 0,
+        usage.cacheCreationInputTokens ?? 0
+      ),
+    });
+  });
+
+  const values = [...byRequest.values()];
+  if (values.length === 0) return undefined;
+  return values.reduce((total, value) => ({
+    inputTokens: total.inputTokens + value.inputTokens,
+    outputTokens: total.outputTokens + value.outputTokens,
+    totalCostUsd: total.totalCostUsd + value.totalCostUsd,
+    durationMs: total.durationMs + value.durationMs,
+    durationApiMs:
+      total.durationApiMs === undefined && value.durationApiMs === undefined
+        ? undefined
+        : (total.durationApiMs ?? 0) + (value.durationApiMs ?? 0),
+    cacheReadInputTokens:
+      (total.cacheReadInputTokens ?? 0) + (value.cacheReadInputTokens ?? 0),
+    cacheCreationInputTokens:
+      (total.cacheCreationInputTokens ?? 0) +
+      (value.cacheCreationInputTokens ?? 0),
+  }));
+}
+
 function extractUsage(event: ClaudeAuditEvent): UsageMetrics | undefined {
   const usage = event.usage;
   const inputTokens =
@@ -1316,7 +1500,8 @@ function extractUsage(event: ClaudeAuditEvent): UsageMetrics | undefined {
     inputTokens === undefined &&
     outputTokens === undefined &&
     event.total_cost_usd === undefined &&
-    event.duration_ms === undefined
+    event.duration_ms === undefined &&
+    event.duration_api_ms === undefined
   ) {
     return undefined;
   }
@@ -1333,6 +1518,42 @@ function extractUsage(event: ClaudeAuditEvent): UsageMetrics | undefined {
     cacheCreationInputTokens:
       getNumber(usage, 'cache_creation_input_tokens') ??
       getNumber(usage, 'cacheCreationInputTokens'),
+  };
+}
+
+function buildNativeTelemetry(
+  resultEvents: ClaudeAuditEvent[],
+  toolCalls: LLMToolCall[],
+  usage: UsageMetrics | undefined
+): ClaudeNativeTelemetry {
+  const models = [
+    ...new Set(
+      resultEvents
+        .map((event) => event.model)
+        .filter((model): model is string => Boolean(model))
+    ),
+  ];
+  const toolErrorCount = resultEvents.reduce(
+    (count, event) =>
+      count +
+      (event.message?.content ?? []).filter(
+        (block) => block.type === 'tool_result' && block.is_error === true
+      ).length,
+    0
+  );
+  return {
+    resultCount: resultEvents.length,
+    apiCallCount: usage ? resultEvents.length : 0,
+    models,
+    inputTokens: usage?.inputTokens,
+    outputTokens: usage?.outputTokens,
+    cacheReadInputTokens: usage?.cacheReadInputTokens,
+    cacheCreationInputTokens: usage?.cacheCreationInputTokens,
+    totalCostUsd: usage?.totalCostUsd,
+    durationMs: usage?.durationMs,
+    durationApiMs: usage?.durationApiMs,
+    toolCallCount: toolCalls.length,
+    toolErrorCount,
   };
 }
 

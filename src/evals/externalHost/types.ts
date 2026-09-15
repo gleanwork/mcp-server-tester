@@ -53,6 +53,7 @@ export type ExternalHostFailureKind =
   | 'timeout'
   | 'parse_failure'
   | 'host_run_failed'
+  | 'cleanup_failed'
   | 'unsupported_host'
   | 'unknown';
 
@@ -72,6 +73,21 @@ export interface HostArtifact {
   path?: string;
   contentType?: string;
   summary?: string;
+}
+
+export interface ExternalHostTelemetry {
+  resultCount?: number;
+  apiCallCount?: number;
+  models?: string[];
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
+  totalCostUsd?: number;
+  durationMs?: number;
+  durationApiMs?: number;
+  toolCallCount?: number;
+  toolErrorCount?: number;
 }
 
 export interface ExternalHostSession {
@@ -131,6 +147,7 @@ export interface ExternalHostMetadata {
     usage?: TraceSource;
     cost?: TraceSource;
   };
+  telemetry?: ExternalHostTelemetry;
   evidence?: {
     finalAnswer?: EvidenceSource;
     toolCalls?: EvidenceSource;
@@ -262,6 +279,7 @@ export interface ExternalHostCapabilityImplementation {
   run?(
     context: ExternalHostCapabilityContext
   ): Promise<ExternalHostRunResult | void>;
+  teardown?(context: ExternalHostCapabilityContext): Promise<void>;
 }
 
 export interface ExternalHostRunner {
