@@ -96,6 +96,7 @@ export async function runAnthropicCoworkBatch(
         )
       ),
       startedAtMs: run.context.startedAtMs,
+      scenario: run.context.scenario,
     });
     const result = await normalizeClaudeTraceForRun({
       config: loaded.config,

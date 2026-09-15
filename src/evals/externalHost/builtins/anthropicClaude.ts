@@ -524,7 +524,7 @@ export function getClaudeDataDir(
       homedir(),
       'Library',
       'Application Support',
-      'Claude',
+      'Claude-3p',
       'local-agent-mode-sessions'
     )
   );
@@ -548,6 +548,7 @@ export async function waitForClaudeTrace(options: {
   snapshot: ClaudeSessionSnapshot;
   timeoutMs: number;
   startedAtMs: number;
+  scenario?: string;
 }): Promise<ClaudeTrace> {
   const deadline = Date.now() + options.timeoutMs;
   let lastPending: ClaudeTrace | undefined;
@@ -613,6 +614,7 @@ export async function findMatchingClaudeSessions(options: {
   correlation?: HostRunContext['correlation'];
   snapshot: ClaudeSessionSnapshot;
   startedAtMs: number;
+  scenario?: string;
 }): Promise<ClaudeTrace[]> {
   const sessions = await listSessionCandidates(options.dataDir);
   const traces: ClaudeTrace[] = [];
@@ -629,18 +631,22 @@ export async function findMatchingClaudeSessions(options: {
       continue;
     }
 
-    const trace = await parseClaudeTrace(
+    let trace = await parseClaudeTrace(
       session,
       options.correlation?.includedInPrompt === false
         ? undefined
         : options.marker
     );
+    if (options.scenario && trace.rawText.includes(options.marker) === false) {
+      trace = await parseClaudeTrace(session, undefined);
+    }
     if (
       sessionMatchesCorrelation({
         session,
         trace,
         marker: options.marker,
         correlation: options.correlation,
+        scenario: options.scenario,
         isNewOrUpdated,
         isRecent,
       })
@@ -655,11 +661,14 @@ export async function findMatchingClaudeSessions(options: {
 function describeCorrelation(options: {
   marker: string;
   correlation?: HostRunContext['correlation'];
+  scenario?: string;
 }): string {
   if (options.correlation?.includedInPrompt) {
     return `marker ${options.marker}`;
   }
-  return `${options.correlation?.strategy ?? 'none'} correlation near the run start`;
+  return options.scenario
+    ? `query correlation near the run start: ${options.scenario}`
+    : `${options.correlation?.strategy ?? 'none'} correlation near the run start`;
 }
 
 async function readAccessibilityFallback(
@@ -1301,11 +1310,16 @@ function sessionMatchesCorrelation(options: {
   trace: ClaudeTrace;
   marker: string;
   correlation?: HostRunContext['correlation'];
+  scenario?: string;
   isNewOrUpdated: boolean;
   isRecent: boolean;
 }): boolean {
   if (options.correlation?.includedInPrompt !== false) {
-    return sessionMatchesMarker(options.session, options.trace, options.marker);
+    return (
+      sessionMatchesMarker(options.session, options.trace, options.marker) ||
+      (options.scenario !== undefined &&
+        options.trace.rawText.includes(options.scenario))
+    );
   }
 
   return options.isNewOrUpdated || options.isRecent;
