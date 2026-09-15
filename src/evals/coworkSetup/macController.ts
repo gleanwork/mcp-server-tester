@@ -74,8 +74,9 @@ async function compile(): Promise<MacCoworkController> {
           maxBuffer: 16 * 1024,
         });
         return JSON.parse(stdout) as unknown;
-      } catch {
-        throw new Error(ERROR);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code ?? 'unknown';
+        throw new Error(`${ERROR} Native ${action} failed (${code}).`);
       }
     };
     return {
@@ -84,8 +85,10 @@ async function compile(): Promise<MacCoworkController> {
           const state = StateSchema.parse(await invoke('state'));
           if (state.running !== (state.instances === 1)) throw new Error();
           return { running: state.running };
-        } catch {
-          throw new Error(ERROR);
+        } catch (error) {
+          throw new Error(
+            `${ERROR} State check failed: ${error instanceof Error ? error.message : 'unknown'}`
+          );
         }
       },
       async stop() {
@@ -103,7 +106,7 @@ async function compile(): Promise<MacCoworkController> {
         }
       },
     };
-  } catch {
+  } catch (error) {
     if (directory) {
       try {
         await rm(directory, { recursive: true, force: true });
@@ -111,7 +114,8 @@ async function compile(): Promise<MacCoworkController> {
         /* best effort */
       }
     }
-    throw new Error(ERROR);
+    const code = (error as NodeJS.ErrnoException).code ?? 'unknown';
+    throw new Error(`${ERROR} Native controller build failed (${code}).`);
   }
 }
 

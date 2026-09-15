@@ -3,13 +3,13 @@ import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
-function resolveDriverPath(): string {
-  const configuredRoot = process.env.MST_COWORK_DRIVER_ROOT;
+function resolveDriverPath(env: NodeJS.ProcessEnv): string {
+  const configuredRoot = env.MST_COWORK_DRIVER_ROOT;
   if (configuredRoot) {
     return join(configuredRoot, 'scripts', 'cowork_computer_use.py');
   }
 
-  const pythonPath = process.env.MST_COWORK_PYTHON;
+  const pythonPath = env.MST_COWORK_PYTHON;
   if (pythonPath) {
     // .../mcp-server-tester/.venv/cowork-cu/bin/python -> repo root.
     return join(
@@ -25,7 +25,11 @@ function resolveDriverPath(): string {
   return join(process.cwd(), 'scripts', 'cowork_computer_use.py');
 }
 
-const DRIVER_PATH = resolveDriverPath();
+interface ComputerUseOptions {
+  deadlineAt: number;
+  maxActions?: number;
+  env?: NodeJS.ProcessEnv;
+}
 
 export interface ComputerUseSubmissionResult {
   status: 'submitted';
@@ -42,17 +46,17 @@ export interface ComputerUseHitlResult {
 
 export async function runAnthropicComputerUseSubmission(
   query: string,
-  options: { deadlineAt: number; maxActions?: number }
+  options: ComputerUseOptions
 ): Promise<ComputerUseSubmissionResult> {
   return runComputerUseDriver(query, options, 'submit', 'submission');
 }
 
-export async function runAnthropicComputerUseHitl(options: {
-  deadlineAt: number;
-  maxActions?: number;
-}): Promise<ComputerUseHitlResult> {
+export async function runAnthropicComputerUseHitl(
+  options: ComputerUseOptions & { task?: string }
+): Promise<ComputerUseHitlResult> {
   return runComputerUseDriver(
-    'Resolve any visible HITL prompt for the submitted Cowork task.',
+    options.task ??
+      'Resolve any visible HITL prompt for the submitted Cowork task.',
     options,
     'hitl',
     'HITL check'
@@ -61,23 +65,27 @@ export async function runAnthropicComputerUseHitl(options: {
 
 function runComputerUseDriver(
   query: string,
-  options: { deadlineAt: number; maxActions?: number },
+  options: ComputerUseOptions,
   mode: 'submit',
   label: string
 ): Promise<ComputerUseSubmissionResult>;
 function runComputerUseDriver(
   query: string,
-  options: { deadlineAt: number; maxActions?: number },
+  options: ComputerUseOptions,
   mode: 'hitl',
   label: string
 ): Promise<ComputerUseHitlResult>;
 async function runComputerUseDriver(
   query: string,
-  options: { deadlineAt: number; maxActions?: number },
+  options: ComputerUseOptions,
   mode: 'submit' | 'hitl',
   label: string
 ): Promise<ComputerUseSubmissionResult | ComputerUseHitlResult> {
-  const timeoutMs = Math.max(1, options.deadlineAt - Date.now());
+  const env = { ...process.env, ...options.env };
+  const DRIVER_PATH = resolveDriverPath(env);
+  const timeoutMs = options.deadlineAt - Date.now();
+  if (timeoutMs <= 0)
+    throw new Error(`Computer Use ${label} deadline exceeded; not retrying.`);
   const maxActions = options.maxActions ?? (mode === 'hitl' ? 12 : 24);
   diagnostic(
     `starting Computer Use ${label} (script=${DRIVER_PATH}, maxActions=${maxActions}, timeoutMs=${timeoutMs})`
@@ -86,12 +94,12 @@ async function runComputerUseDriver(
   let stderr = '';
   try {
     const result = await execFileAsync(
-      process.env.MST_COWORK_PYTHON ?? 'python3',
+      env.MST_COWORK_PYTHON ?? 'python3',
       [DRIVER_PATH, query, '--max-actions', String(maxActions), '--mode', mode],
       {
         timeout: timeoutMs,
         maxBuffer: 2 * 1024 * 1024,
-        env: { ...process.env, PYTHONUNBUFFERED: '1' },
+        env: { ...env, PYTHONUNBUFFERED: '1' },
       }
     );
     stdout = String(result.stdout ?? '');
@@ -100,12 +108,20 @@ async function runComputerUseDriver(
     const childError = error as { stdout?: string; stderr?: string };
     stdout = String(childError.stdout ?? '');
     stderr = String(childError.stderr ?? '');
+    const redact = (text: string): string => {
+      for (const [key, value] of Object.entries(env)) {
+        if (value && /token|key|secret|password|authorization/i.test(key))
+          text = text.split(value).join('[REDACTED]');
+      }
+      return text;
+    };
     const details = [
       formatError(error),
       stdout ? `stdout=${stdout.slice(-1000)}` : '',
       stderr ? `stderr=${stderr.slice(-1000)}` : '',
     ]
       .filter(Boolean)
+      .map(redact)
       .join('; ');
     diagnostic(`Computer Use ${label} failed: ${details}`);
     throw new Error(`Computer Use ${label} failed: ${details}`);

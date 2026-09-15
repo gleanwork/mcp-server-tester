@@ -232,6 +232,8 @@ export interface IterationResult {
   hostEvidence?: HostEvidence;
   /** Token usage from mcp_host LLM simulation in this iteration */
   hostUsage?: UsageMetrics;
+  /** Native numeric host measurements, retained after response redaction. */
+  hostTelemetry?: Record<string, unknown>;
   /** External host metadata for this iteration */
   externalHost?: ExternalHostMetadata;
 }
@@ -453,6 +455,8 @@ export interface EvalCaseResult {
    * Summed across all iterations. Only populated for mcp_host mode cases.
    */
   hostUsage?: UsageMetrics;
+  /** Native single-iteration measurements; multi-iteration values live in iterationResults. */
+  hostTelemetry?: Record<string, unknown>;
 
   /**
    * External host trace and evidence metadata.

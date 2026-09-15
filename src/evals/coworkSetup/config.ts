@@ -1,4 +1,5 @@
 import { resolveCoworkSetupConfig, type CoworkSetupConfig } from './options.js';
+import type { MCPConfig } from '../../config/mcpConfig.js';
 
 export type CoworkMcpSettings = {
   managedMcpServers: Array<{
@@ -22,6 +23,28 @@ export interface CoworkMcpServerConfig {
 }
 
 type CoworkMcpServer = { label: string; url: string; helperName?: string };
+
+/** Adapt V2 connection declarations without silently accepting unsupported auth. */
+export function toCoworkServers(servers: MCPConfig[]): CoworkMcpServerConfig[] {
+  return servers.map((server, index) => {
+    if (
+      server.transport !== 'http' ||
+      server.auth?.oauth ||
+      server.auth?.clientCredentials
+    ) {
+      throw new Error(
+        'Cowork requires HTTP MCP servers with static or environment-backed bearer authentication.'
+      );
+    }
+    return {
+      transport: 'http',
+      label: server.label ?? `server-${index + 1}`,
+      serverUrl: server.serverUrl,
+      ...(server.headers ? { headers: server.headers } : {}),
+      ...(server.auth ? { auth: server.auth } : {}),
+    };
+  });
+}
 
 const LABEL_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 const HEADER_NAME_PATTERN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;

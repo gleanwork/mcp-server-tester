@@ -36,7 +36,7 @@ def screenshot() -> dict[str, Any]:
         monitor = capture.monitors[1]
         raw = capture.grab(monitor)
         image = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
-        image.thumbnail((DISPLAY_WIDTH, DISPLAY_HEIGHT), Image.Resampling.LANCZOS)
+        image = image.resize((DISPLAY_WIDTH, DISPLAY_HEIGHT), Image.Resampling.LANCZOS)
         buffer = io.BytesIO()
         image.save(buffer, format="PNG")
         return {
@@ -50,14 +50,31 @@ def screenshot() -> dict[str, Any]:
 
 
 def screen_point(coordinate: list[int]) -> tuple[int, int]:
-    import mss
+    import pyautogui
 
-    with mss.MSS() as capture:
-        monitor = capture.monitors[1]
-        return (
-            int(coordinate[0] * monitor["width"] / DISPLAY_WIDTH),
-            int(coordinate[1] * monitor["height"] / DISPLAY_HEIGHT),
-        )
+    width, height = pyautogui.size()  # Logical points, not Retina capture pixels.
+    return (
+        int(coordinate[0] * width / DISPLAY_WIDTH),
+        int(coordinate[1] * height / DISPLAY_HEIGHT),
+    )
+
+
+def type_query(text: str) -> None:
+    """Unicode keyboard events; line breaks must not submit the composer."""
+    import Quartz
+    import pyautogui
+
+    for line_index, line in enumerate(text.split("\n")):
+        if line_index:
+            pyautogui.hotkey("shift", "enter")
+        for start in range(0, len(line), 16):
+            chunk = line[start:start + 16]
+            units = len(chunk.encode("utf-16-le")) // 2
+            for down in (True, False):
+                event = Quartz.CGEventCreateKeyboardEvent(None, 0, down)
+                Quartz.CGEventKeyboardSetUnicodeString(event, units, chunk)
+                Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
+            time.sleep(0.01)
 
 
 def execute_action(action: dict[str, Any]) -> tuple[Any, bool]:
@@ -98,11 +115,12 @@ def execute_action(action: dict[str, Any]) -> tuple[Any, bool]:
         pyautogui.dragTo(end_x, end_y, duration=0.4, button="left")
         return "drag completed", False
     if name == "type":
-        pyautogui.write(action["text"], interval=0.002)
+        type_query(action["text"])
         return "text entered", False
     if name == "key":
         text = str(action["text"])
-        keys = [part.strip().lower() for part in text.split("+")]
+        aliases = {"return": "enter", "super": "command", "cmd": "command", "ctrl": "ctrl"}
+        keys = [aliases.get(part.strip().lower(), part.strip().lower()) for part in text.split("+")]
         if len(keys) == 1:
             pyautogui.press(keys[0])
         else:
@@ -153,7 +171,7 @@ async def run(query: str, max_actions: int, mode: str) -> dict[str, Any]:
                 "approval or choice prompt is blocking progress, choose the first visible option. "
                 "Do not submit a new query, do not change account settings, and do not approve a "
                 "prompt unless it is the visible task's first option. If no such prompt is visible, "
-                "stop without taking an action."
+                "stop without taking an action.\n\nTask to locate (do not type or submit this text):\n" + query
             ),
         }]
         system = (
@@ -175,11 +193,15 @@ async def run(query: str, max_actions: int, mode: str) -> dict[str, Any]:
         system = (
             "You are a bounded desktop submission operator. Use screenshots and Computer Use "
             "actions only. You may open/focus Claude, select Cowork, create a fresh task, "
-            "type the supplied query, and submit it once. Never submit twice. After the first "
+            "type the entire exact query in one type action, and submit it with unmodified Enter, never by clicking Send. Never submit twice. After the first "
             "successful Enter/Return, stop. Do not approve permissions or change account settings."
         )
 
+    # Ground the first action in a current screenshot, not an assumed layout.
+    messages[0]["content"] = [{"type": "text", "text": messages[0]["content"]}, screenshot()]
     hitl_action_taken = False
+    actions_executed = 0
+    typed_query = False
     for action_number in range(1, max_actions + 1):
         log(f"requesting Computer Use plan {action_number}/{max_actions}")
         response = client.beta.messages.create(
@@ -195,8 +217,23 @@ async def run(query: str, max_actions: int, mode: str) -> dict[str, Any]:
         for block in response.content:
             if getattr(block, "type", None) != "tool_use":
                 continue
+            if actions_executed >= max_actions:
+                raise RuntimeError("Computer Use action budget exhausted; no further actions executed")
+            actions_executed += 1
             action_name = block.input.get('action', 'unknown')
-            log(f"executing action {action_number}: {action_name}")
+            if mode == "hitl" and action_name not in {"screenshot", "wait", "mouse_move", "cursor_position", "left_click", "scroll"}:
+                raise RuntimeError("HITL cannot type, press keys, drag, or submit tasks")
+            if mode == "submit":
+                if action_name == "type":
+                    if typed_query or block.input.get("text") != query:
+                        raise RuntimeError("Submission requires the exact query in one type action, once")
+                    typed_query = True
+                elif action_name == "key" and any(k.strip().lower() in {"enter", "return"} for k in str(block.input.get("text", "")).split("+")):
+                    if not typed_query or str(block.input.get("text", "")).lower() not in {"enter", "return"}:
+                        raise RuntimeError("Only an unmodified Enter after typing the exact query may submit")
+                elif typed_query and action_name not in {"screenshot", "wait", "cursor_position"}:
+                    raise RuntimeError("After typing, only screenshots or the single Enter submission are allowed")
+            log(f"executing action {actions_executed}: {action_name}")
             if mode == "hitl" and action_name not in {
                 "screenshot",
                 "wait",
@@ -209,9 +246,9 @@ async def run(query: str, max_actions: int, mode: str) -> dict[str, Any]:
                 log("submission boundary reached; stopping immediately")
                 return {
                     "status": "submitted",
-                    "action_count": action_number,
+                    "action_count": actions_executed,
                     "model": model,
-                    "submission_action": block.input,
+                    "submission_action": {"action": "key", "text": "enter"},
                 }
             if isinstance(result, dict) and result.get("type") == "image":
                 tool_content: Any = [result]

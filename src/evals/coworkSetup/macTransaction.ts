@@ -17,7 +17,7 @@ import { prepareCoworkMcpBundle } from './bundle.js';
 import {
   createCoworkMcpPlan,
   resolveCoworkMcpHeaders,
-  type CoworkMcpServerConfig,
+  toCoworkServers,
 } from './config.js';
 import { resolveCoworkSetupConfig } from './options.js';
 
@@ -557,8 +557,9 @@ async function validateInstall(options: InstallOptions) {
     (options.arm !== undefined && !arm)
   )
     fail();
-  const servers = (arm?.servers ?? options.manifest.servers) as CoworkMcpServerConfig[] | undefined;
-  if (!servers) fail();
+  const declarations = arm?.servers ?? options.manifest.servers;
+  if (!declarations) fail();
+  const servers = toCoworkServers(declarations);
   const plan = createCoworkMcpPlan(
     servers,
     directory,

@@ -35,6 +35,7 @@ import {
   omitResponsesFromResult,
 } from './evalRunner.js';
 import { hostTraceToExecution } from './hostTrace.js';
+import { prepareHostBatch } from './prepareHostBatch.js';
 import type { EvalRunnerResult } from './evalRunner.js';
 import {
   EvalExpectBlockSchema,
@@ -431,11 +432,12 @@ export async function runEvalSuite(
       ...rawManifest.host,
       ...rawArm.host,
     };
-    const client = host.definition.run
-      ? undefined
-      : resolvedServers.length === 1
-        ? await createMCPClientForConfig(resolvedServers[0]!)
-        : undefined;
+    const client =
+      host.definition.run || host.definition.runBatch
+        ? undefined
+        : resolvedServers.length === 1
+          ? await createMCPClientForConfig(resolvedServers[0]!)
+          : undefined;
     const mcp = client
       ? createMCPFixture(client, undefined, { authType: 'api-token' })
       : undefined;
@@ -481,7 +483,16 @@ export async function runEvalSuite(
           })),
         };
         const sourceConfig = source;
-        const runHost = host.definition.run?.bind(host.definition);
+        const runHost =
+          typeof host.definition.run === 'function' ||
+          typeof host.definition.runBatch === 'function';
+        const batchTraces = await prepareHostBatch(
+          host.definition,
+          effectiveDataset.cases,
+          host.declaration,
+          resolvedServers,
+          { manifest: effectiveManifest, arm, env }
+        );
         const result = await runEvalDataset(
           {
             dataset: effectiveDataset,
@@ -525,6 +536,18 @@ export async function runEvalSuite(
                       }
                     }
                     const definition = getHost(declaration.type);
+                    if (batchTraces) {
+                      const trace = batchTraces.get(evalCase.id)?.shift();
+                      if (!trace)
+                        throw new Error(
+                          'Batch trace already consumed or missing; refusing to resubmit.'
+                        );
+                      return hostTraceToExecution(
+                        trace,
+                        definition.evidence ?? 'none',
+                        resolvedServers
+                      );
+                    }
                     if (!definition.run)
                       throw new Error(
                         `Host ${declaration.type} must expose run() for per-case dispatch.`

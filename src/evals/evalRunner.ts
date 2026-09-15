@@ -1190,6 +1190,7 @@ async function runSingleIteration(
     mcpHostTrace,
     hostEvidence: evidence,
     hostUsage,
+    hostTelemetry: execution.hostTelemetry,
     externalHost,
   };
 }
@@ -1352,6 +1353,7 @@ export async function runEvalCase(
         mcpHostTrace: result.mcpHostTrace,
         hostEvidence: result.hostEvidence,
         hostUsage: result.hostUsage,
+        hostTelemetry: result.hostTelemetry,
         externalHost: result.externalHost,
       });
     } catch (err) {
@@ -1412,6 +1414,7 @@ export async function runEvalCase(
     infrastructureErrorCount: infraErrors.length,
     durationMs: iterationResults.reduce((sum, r) => sum + r.durationMs, 0),
     hostUsage: totalHostUsage,
+    hostTelemetry: undefined,
   };
 }
 
