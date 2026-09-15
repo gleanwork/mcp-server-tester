@@ -16,21 +16,60 @@ export interface ComputerUseSubmissionResult {
   submission_action: Record<string, unknown>;
 }
 
+export interface ComputerUseHitlResult {
+  status: 'hitl_checked';
+  action_count: number;
+  model: string;
+}
+
 export async function runAnthropicComputerUseSubmission(
   query: string,
   options: { deadlineAt: number; maxActions?: number }
 ): Promise<ComputerUseSubmissionResult> {
+  return runComputerUseDriver(query, options, 'submit', 'submission');
+}
+
+export async function runAnthropicComputerUseHitl(options: {
+  deadlineAt: number;
+  maxActions?: number;
+}): Promise<ComputerUseHitlResult> {
+  return runComputerUseDriver(
+    'Resolve any visible HITL prompt for the submitted Cowork task.',
+    options,
+    'hitl',
+    'HITL check'
+  );
+}
+
+function runComputerUseDriver(
+  query: string,
+  options: { deadlineAt: number; maxActions?: number },
+  mode: 'submit',
+  label: string
+): Promise<ComputerUseSubmissionResult>;
+function runComputerUseDriver(
+  query: string,
+  options: { deadlineAt: number; maxActions?: number },
+  mode: 'hitl',
+  label: string
+): Promise<ComputerUseHitlResult>;
+async function runComputerUseDriver(
+  query: string,
+  options: { deadlineAt: number; maxActions?: number },
+  mode: 'submit' | 'hitl',
+  label: string
+): Promise<ComputerUseSubmissionResult | ComputerUseHitlResult> {
   const timeoutMs = Math.max(1, options.deadlineAt - Date.now());
-  const scriptPath = DRIVER_PATH;
+  const maxActions = options.maxActions ?? (mode === 'hitl' ? 6 : 24);
   diagnostic(
-    `starting Computer Use driver (script=${scriptPath}, maxActions=${options.maxActions ?? 24}, timeoutMs=${timeoutMs})`
+    `starting Computer Use ${label} (script=${DRIVER_PATH}, maxActions=${maxActions}, timeoutMs=${timeoutMs})`
   );
   let stdout = '';
   let stderr = '';
   try {
     const result = await execFileAsync(
       process.env.MST_COWORK_PYTHON ?? 'python3',
-      [scriptPath, query, '--max-actions', String(options.maxActions ?? 24)],
+      [DRIVER_PATH, query, '--max-actions', String(maxActions), '--mode', mode],
       {
         timeout: timeoutMs,
         maxBuffer: 2 * 1024 * 1024,
@@ -50,27 +89,28 @@ export async function runAnthropicComputerUseSubmission(
     ]
       .filter(Boolean)
       .join('; ');
-    diagnostic(`Computer Use driver failed: ${details}`);
-    throw new Error(`Computer Use submission failed: ${details}`);
+    diagnostic(`Computer Use ${label} failed: ${details}`);
+    throw new Error(`Computer Use ${label} failed: ${details}`);
   }
 
   diagnostic(
-    `Computer Use driver exited successfully (stdoutBytes=${stdout.length})`
+    `Computer Use ${label} exited successfully (stdoutBytes=${stdout.length})`
   );
   const record = parseLastJsonLine(stdout);
-  if (record?.status !== 'submitted') {
+  const expectedStatus = mode === 'submit' ? 'submitted' : 'hitl_checked';
+  if (record?.status !== expectedStatus) {
     const detail = JSON.stringify(record ?? stdout.slice(-1000));
-    diagnostic(`Computer Use driver stopped before submission: ${detail}`);
+    diagnostic(`Computer Use ${label} stopped unexpectedly: ${detail}`);
     throw new Error(
-      `Computer Use submission did not reach its once-only submit boundary: ${detail}`
+      `Computer Use ${label} did not reach ${expectedStatus}: ${detail}`
     );
   }
-  const actionCount =
-    typeof record.action_count === 'number' ? record.action_count : 'unknown';
   diagnostic(
-    `Computer Use submission boundary reached (actions=${actionCount})`
+    `Computer Use ${label} completed (actions=${typeof record.action_count === 'number' ? record.action_count : 'unknown'})`
   );
-  return record as unknown as ComputerUseSubmissionResult;
+  return record as unknown as
+    | ComputerUseSubmissionResult
+    | ComputerUseHitlResult;
 }
 
 function diagnostic(message: string): void {

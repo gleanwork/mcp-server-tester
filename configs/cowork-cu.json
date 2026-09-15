@@ -1,0 +1,8 @@
+{
+  "driver": "cowork_cu",
+  "scenario": "Who is my manager?",
+  "timeoutMs": 120000,
+  "options": {
+    "computerUseProvider": "anthropic-computer-use"
+  }
+}

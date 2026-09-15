@@ -100,7 +100,7 @@ def execute_action(action: dict[str, Any]) -> tuple[Any, bool]:
     raise RuntimeError(f"unsupported Computer Use action: {name}")
 
 
-async def run(query: str, max_actions: int) -> dict[str, Any]:
+async def run(query: str, max_actions: int, mode: str) -> dict[str, Any]:
     try:
         import anthropic
     except ImportError as error:
@@ -123,22 +123,39 @@ async def run(query: str, max_actions: int) -> dict[str, Any]:
         "display_width_px": DISPLAY_WIDTH,
         "display_height_px": DISPLAY_HEIGHT,
     }]
-    messages: list[dict[str, Any]] = [{
-        "role": "user",
-        "content": (
-            "Control the already installed Claude Desktop app. Open or focus Cowork, "
-            "create a fresh Cowork task, enter the exact query below, and submit it once. "
-            "After the first Enter/Return that submits the query, stop immediately and "
-            "reply with SUBMITTED. Do not wait for or read the answer.\n\n"
-            f"Exact query:\n{query}"
-        ),
-    }]
-    system = (
-        "You are a bounded desktop submission operator. Use screenshots and Computer Use "
-        "actions only. You may open/focus Claude, select Cowork, create a fresh task, "
-        "type the supplied query, and submit it once. Never submit twice. After the first "
-        "successful Enter/Return, stop. Do not approve permissions or change account settings."
-    )
+    if mode == "hitl":
+        messages: list[dict[str, Any]] = [{
+            "role": "user",
+            "content": (
+                "Inspect the currently visible Claude Desktop Cowork task. If a human-in-the-loop "
+                "approval or choice prompt is blocking progress, choose the first visible option. "
+                "Do not submit a new query, do not change account settings, and do not approve a "
+                "prompt unless it is the visible task's first option. If no such prompt is visible, "
+                "stop without taking an action."
+            ),
+        }]
+        system = (
+            "You are a bounded HITL resolver. Use screenshots and Computer Use actions only. "
+            "Choose the first visible option when a task approval/choice prompt is present. "
+            "Never submit a query or change account settings. If no HITL prompt is visible, stop."
+        )
+    else:
+        messages = [{
+            "role": "user",
+            "content": (
+                "Control the already installed Claude Desktop app. Open or focus Cowork, "
+                "create a fresh Cowork task, enter the exact query below, and submit it once. "
+                "After the first Enter/Return that submits the query, stop immediately and "
+                "reply with SUBMITTED. Do not wait for or read the answer.\n\n"
+                f"Exact query:\n{query}"
+            ),
+        }]
+        system = (
+            "You are a bounded desktop submission operator. Use screenshots and Computer Use "
+            "actions only. You may open/focus Claude, select Cowork, create a fresh task, "
+            "type the supplied query, and submit it once. Never submit twice. After the first "
+            "successful Enter/Return, stop. Do not approve permissions or change account settings."
+        )
 
     for action_number in range(1, max_actions + 1):
         log(f"requesting Computer Use plan {action_number}/{max_actions}")
@@ -157,7 +174,7 @@ async def run(query: str, max_actions: int) -> dict[str, Any]:
                 continue
             log(f"executing action {action_number}: {block.input.get('action', 'unknown')}")
             result, submitted = execute_action(block.input)
-            if submitted:
+            if submitted and mode != "hitl":
                 log("submission boundary reached; stopping immediately")
                 return {
                     "status": "submitted",
@@ -175,6 +192,9 @@ async def run(query: str, max_actions: int) -> dict[str, Any]:
                 "content": tool_content,
             })
         if not tool_results:
+            if mode == "hitl":
+                log("no HITL action was needed")
+                return {"status": "hitl_checked", "action_count": action_number, "model": model}
             raise RuntimeError("Computer Use planner stopped before submitting the Cowork query")
         messages.append({"role": "user", "content": tool_results})
 
@@ -185,9 +205,10 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("query")
     parser.add_argument("--max-actions", type=int, default=DEFAULT_MAX_ACTIONS)
+    parser.add_argument("--mode", choices=["submit", "hitl"], default="submit")
     args = parser.parse_args()
     try:
-        print(json.dumps(asyncio.run(run(args.query, args.max_actions))), flush=True)
+        print(json.dumps(asyncio.run(run(args.query, args.max_actions, args.mode))), flush=True)
         return 0
     except Exception as error:
         log(f"driver failed: {error}")

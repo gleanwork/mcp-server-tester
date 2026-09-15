@@ -1,0 +1,11 @@
+{
+  "driver": "cowork_cu",
+  "queries": [
+    "Replace this with the first Cowork task.",
+    "Replace this with the second Cowork task."
+  ],
+  "timeoutMs": 120000,
+  "options": {
+    "computerUseProvider": "anthropic-computer-use"
+  }
+}

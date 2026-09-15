@@ -7,7 +7,10 @@ import type {
   ExternalHostRunResult,
 } from '../types.js';
 import { driverToSlug, hostTypeFromDriver } from '../driverIdentity.js';
-import { runAnthropicComputerUseSubmission } from './anthropicComputerUse.js';
+import {
+  runAnthropicComputerUseHitl,
+  runAnthropicComputerUseSubmission,
+} from './anthropicComputerUse.js';
 import { submitMacCoworkPrompt } from './macCowork.js';
 
 const execFileAsync = promisify(execFile);
@@ -437,6 +440,9 @@ async function submitPromptCapability({
           run.submittedScenario,
           { deadlineAt: run.startedAtMs + run.timeoutMs }
         );
+        await runAnthropicComputerUseHitl({
+          deadlineAt: run.startedAtMs + run.timeoutMs,
+        });
         state.data.macCoworkCheckpoint = {
           phase: 'submitted',
           appName,
@@ -447,6 +453,7 @@ async function submitPromptCapability({
           submissionConfidence: 'high',
           actionCount: submission.action_count,
           model: submission.model,
+          hitlChecked: true,
         };
         return;
       }
