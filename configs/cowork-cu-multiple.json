@@ -1,9 +1,6 @@
 {
   "driver": "cowork_cu",
-  "queries": [
-    "Replace this with the first Cowork task.",
-    "Replace this with the second Cowork task."
-  ],
+  "queries": ["Who is my manager?", "What team do I work on?"],
   "timeoutMs": 120000,
   "servers": [
     {
@@ -19,6 +16,7 @@
     "approveWriteTools": true
   },
   "options": {
-    "computerUseProvider": "anthropic-computer-use"
+    "computerUseProvider": "anthropic-computer-use",
+    "computerUseMaxActions": 36
   }
 }

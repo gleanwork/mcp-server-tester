@@ -25,6 +25,10 @@ export async function runAnthropicCoworkBatch(
   const dataDir = getClaudeDataDir(loaded.config);
   const snapshot = await snapshotClaudeSessions(dataDir);
   const timeoutMs = loaded.config.timeoutMs ?? 120_000;
+  const maxActions =
+    typeof loaded.config.options?.computerUseMaxActions === 'number'
+      ? Math.max(1, Math.min(64, loaded.config.options.computerUseMaxActions))
+      : 24;
   const runs: Array<{
     context: HostRunContext;
     submittedScenario: string;
@@ -54,6 +58,7 @@ export async function runAnthropicCoworkBatch(
     };
     await runAnthropicComputerUseSubmission(context.submittedScenario, {
       deadlineAt: startedAtMs + timeoutMs,
+      maxActions,
     });
     runs.push({ context, submittedScenario: context.submittedScenario });
     process.stderr.write(
