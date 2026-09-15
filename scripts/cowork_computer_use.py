@@ -180,21 +180,31 @@ async def run(query: str, max_actions: int, mode: str) -> dict[str, Any]:
             "Never submit a query or change account settings. If no HITL prompt is visible, stop."
         )
     else:
+        tools.append({
+            "name": "fill_query",
+            "description": (
+                "Insert the original evaluation query and its correlation marker into the focused "
+                "empty Cowork task composer. First locate and focus that composer using a screenshot. "
+                "This tool takes no text: the harness supplies the exact text. It may run only once. "
+                "After it succeeds, use computer key Enter to submit, never click Send."
+            ),
+            "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+        })
         messages = [{
             "role": "user",
             "content": (
-                "Control the already installed Claude Desktop app. Open or focus Cowork, "
-                "create a fresh Cowork task, enter the exact query below, and submit it once. "
-                "After the first Enter/Return that submits the query, stop immediately and "
-                "reply with SUBMITTED. Do not wait for or read the answer.\n\n"
-                f"Exact query:\n{query}"
+                "Control Claude Desktop. Open Cowork, create a fresh task, and focus its empty "
+                "prompt composer. Call fill_query with no arguments. It inserts the original "
+                "query for you. Do not reconstruct or type the query yourself. Then press "
+                "unmodified Enter once to submit. Do not wait for or read the answer."
             ),
         }]
         system = (
             "You are a bounded desktop submission operator. Use screenshots and Computer Use "
-            "actions only. You may open/focus Claude, select Cowork, create a fresh task, "
-            "type the entire exact query in one type action, and submit it with unmodified Enter, never by clicking Send. Never submit twice. After the first "
-            "successful Enter/Return, stop. Do not approve permissions or change account settings."
+            "actions to open/focus Claude, select Cowork, create a fresh task, and focus its composer. "
+            "Use fill_query, not computer type, to insert the query. After fill_query succeeds, "
+            "submit with unmodified Enter, never by clicking Send. Never submit twice. Stop after "
+            "submission. Do not approve permissions or change account settings."
         )
 
     # Ground the first action in a current screenshot, not an assumed layout.
@@ -220,19 +230,35 @@ async def run(query: str, max_actions: int, mode: str) -> dict[str, Any]:
             if actions_executed >= max_actions:
                 raise RuntimeError("Computer Use action budget exhausted; no further actions executed")
             actions_executed += 1
-            action_name = block.input.get('action', 'unknown')
-            if mode == "hitl" and action_name not in {"screenshot", "wait", "mouse_move", "cursor_position", "left_click", "scroll"}:
+            tool_name = getattr(block, "name", "computer")
+            action = block.input
+            action_name = action.get('action', 'unknown')
+            refusal = None
+            if mode == "hitl" and (tool_name != "computer" or action_name not in {"screenshot", "wait", "mouse_move", "cursor_position", "left_click", "scroll"}):
                 raise RuntimeError("HITL cannot type, press keys, drag, or submit tasks")
             if mode == "submit":
-                if action_name == "type":
-                    if typed_query or block.input.get("text") != query:
-                        raise RuntimeError("Submission requires the exact query in one type action, once")
-                    typed_query = True
-                elif action_name == "key" and any(k.strip().lower() in {"enter", "return"} for k in str(block.input.get("text", "")).split("+")):
-                    if not typed_query or str(block.input.get("text", "")).lower() not in {"enter", "return"}:
-                        raise RuntimeError("Only an unmodified Enter after typing the exact query may submit")
+                if tool_name == "fill_query":
+                    if typed_query:
+                        refusal = "The query is already entered. Do not fill again. Use unmodified Enter to submit."
+                    elif block.input != {}:
+                        refusal = "fill_query takes no arguments; the harness owns the original text."
+                    else:
+                        action = {"action": "type", "text": query}
+                        action_name = "type"
+                elif tool_name != "computer":
+                    refusal = "Unknown tool. Use computer for navigation and fill_query for text entry."
+                elif action_name == "type":
+                    refusal = "Do not reconstruct the query. Focus the empty composer, then call fill_query with no arguments."
+                elif action_name == "key" and any(k.strip().lower() in {"enter", "return"} for k in str(action.get("text", "")).split("+")):
+                    if not typed_query or str(action.get("text", "")).lower() not in {"enter", "return"}:
+                        refusal = "Only an unmodified Enter after fill_query succeeds may submit."
                 elif typed_query and action_name not in {"screenshot", "wait", "cursor_position"}:
-                    raise RuntimeError("After typing, only screenshots or the single Enter submission are allowed")
+                    refusal = "The query is entered. Only screenshots or the single Enter submission are allowed."
+            if refusal:
+                # A rejected proposal has no desktop side effects. Let the planner correct it
+                # within the same action budget; never retry a failed physical text entry.
+                tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": refusal, "is_error": True})
+                continue
             log(f"executing action {actions_executed}: {action_name}")
             if mode == "hitl" and action_name not in {
                 "screenshot",
@@ -241,7 +267,9 @@ async def run(query: str, max_actions: int, mode: str) -> dict[str, Any]:
                 "cursor_position",
             }:
                 hitl_action_taken = True
-            result, submitted = execute_action(block.input)
+            result, submitted = execute_action(action)
+            if tool_name == "fill_query":
+                typed_query = True
             if submitted and mode != "hitl":
                 log("submission boundary reached; stopping immediately")
                 return {
