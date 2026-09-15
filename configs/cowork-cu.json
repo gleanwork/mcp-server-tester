@@ -2,6 +2,19 @@
   "driver": "cowork_cu",
   "scenario": "Who is my manager?",
   "timeoutMs": 120000,
+  "servers": [
+    {
+      "transport": "http",
+      "label": "glean-eval",
+      "serverUrl": "https://scio-prod-be.glean.com/mcp/default/eval",
+      "auth": {
+        "accessTokenEnv": "GLEAN_API_TOKEN"
+      }
+    }
+  ],
+  "coworkSetup": {
+    "approveWriteTools": true
+  },
   "options": {
     "computerUseProvider": "anthropic-computer-use"
   }
