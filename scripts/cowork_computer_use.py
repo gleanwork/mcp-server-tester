@@ -66,12 +66,31 @@ def execute_action(action: dict[str, Any]) -> tuple[Any, bool]:
     name = action.get("action")
     if name == "screenshot":
         return screenshot(), False
-    if name in {"left_click", "right_click", "middle_click", "double_click"}:
+    if name in {
+        "left_click",
+        "right_click",
+        "middle_click",
+        "double_click",
+        "triple_click",
+    }:
         x, y = screen_point(action["coordinate"])
-        button = name.split("_")[0]
-        clicks = 2 if name == "double_click" else 1
+        button = {
+            "right_click": "right",
+            "middle_click": "middle",
+        }.get(name, "left")
+        clicks = {
+            "double_click": 2,
+            "triple_click": 3,
+        }.get(name, 1)
         pyautogui.click(x, y, clicks=clicks, button=button)
         return f"{name} completed", False
+    if name == "cursor_position":
+        x, y = pyautogui.position()
+        return {"x": int(x), "y": int(y)}, False
+    if name == "mouse_move":
+        x, y = screen_point(action["coordinate"])
+        pyautogui.moveTo(x, y)
+        return "mouse_move completed", False
     if name == "left_click_drag":
         start_x, start_y = screen_point(action["start_coordinate"])
         end_x, end_y = screen_point(action["coordinate"])
@@ -97,6 +116,9 @@ def execute_action(action: dict[str, Any]) -> tuple[Any, bool]:
         pyautogui.moveTo(x, y)
         pyautogui.scroll(-amount if direction == "down" else amount)
         return "scroll completed", False
+    if name == "wait":
+        time.sleep(min(float(action.get("duration", 1)), 5.0))
+        return "wait completed", False
     raise RuntimeError(f"unsupported Computer Use action: {name}")
 
 
