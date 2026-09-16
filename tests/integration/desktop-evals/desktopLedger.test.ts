@@ -91,7 +91,28 @@ describe('independent desktop fixture ledger', () => {
             },
           })
         );
-        const entries = await fixture.readLedger();
+        const entries = await fixture.waitForLedger((ledger) => {
+          const requests = ledger.filter(
+            (entry) =>
+              entry.direction === 'request' &&
+              'method' in entry.message &&
+              entry.message.method === 'tools/call' &&
+              'id' in entry.message
+          );
+          return (
+            requests.length === results.length &&
+            requests.every((request) =>
+              ledger.some(
+                (entry) =>
+                  entry.direction === 'response' &&
+                  entry.sessionId === request.sessionId &&
+                  'id' in entry.message &&
+                  'id' in request.message &&
+                  entry.message.id === request.message.id
+              )
+            )
+          );
+        });
         const events: HostEvent[] = evalCase.expect!.toolsTriggered!.calls.map(
           (call, index) => ({
             kind: 'tool_call',
@@ -220,7 +241,14 @@ describe('independent desktop fixture ledger', () => {
         arguments: args,
       });
       events[0]!.output = JSON.stringify(toolResult);
-      const entries = await fixture.readLedger();
+      const entries = await fixture.waitForLedger((ledger) =>
+        ledger.some(
+          (entry) =>
+            entry.direction === 'response' &&
+            'result' in entry.message &&
+            entry.message.result.isError === false
+        )
+      );
       expect(() =>
         assertDesktopLedgerEvidence(fixture.oracle, evalCase, entries, events)
       ).not.toThrow();

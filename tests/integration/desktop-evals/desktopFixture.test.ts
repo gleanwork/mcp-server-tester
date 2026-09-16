@@ -107,7 +107,15 @@ describe('representative desktop MCP fixture', () => {
           reference: 'missing-release',
         })
       ).toEqual(missing);
-      const ledger = await fixture.readLedger();
+      const ledger = await fixture.waitForLedger(
+        (entries) =>
+          entries.filter(
+            (entry) =>
+              entry.direction === 'response' &&
+              'result' in entry.message &&
+              typeof entry.message.result.isError === 'boolean'
+          ).length === 4
+      );
       expect(
         ledger
           .filter(

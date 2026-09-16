@@ -490,6 +490,14 @@ export {
   runExternalHostScenario,
 } from './evals/externalHost/index.js';
 
+// Codex desktop host (pinned signed build; native SQLite evidence is fail-closed)
+export {
+  CodexFirstHostSchema,
+  createCodexDesktopHost,
+} from './evals/codex/host.js';
+export type { CodexFirstHostConfig } from './evals/codex/host.js';
+export { CODEX_DESKTOP_BUILD } from './evals/codex/version.js';
+
 // Judge
 export { createJudge } from './judge/judgeClient.js';
 export {
