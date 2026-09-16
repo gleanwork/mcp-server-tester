@@ -4,16 +4,16 @@ import type * as os from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import type { MCPConfig } from '../../config/mcpConfig.js';
+import type { MCPConfig } from '../../../../src/config/mcpConfig.js';
 import type {
   HostDefinition,
   HostRunContext,
   HostRunInput,
-} from '../evalFrameworkTypes.js';
-import { loadEvalDatasetFromObject } from '../datasetLoader.js';
-import { runEvalDataset } from '../evalRunner.js';
-import { hostTraceToExecution } from '../hostTrace.js';
-import { createCoworkHost } from './host.js';
+} from '../../../../src/evals/evalFrameworkTypes.js';
+import { loadEvalDatasetFromObject } from '../../../../src/evals/datasetLoader.js';
+import { runEvalDataset } from '../../../../src/evals/evalRunner.js';
+import { hostTraceToExecution } from '../../../../src/evals/hostTrace.js';
+import { createCoworkHost } from '../../../../src/evals/cowork/host.js';
 import {
   emitSession,
   temporaryDirectory,
@@ -24,8 +24,8 @@ import type {
   CoworkCuaTransport,
   CoworkHostOptions,
   CoworkRunDiagnostics,
-} from './types.js';
-import { CoworkControlError } from './workflow.js';
+} from '../../../../src/evals/cowork/types.js';
+import { CoworkControlError } from '../../../../src/evals/cowork/workflow.js';
 
 vi.mock('node:os', async (original) => ({
   ...(await original<typeof os>()),
@@ -661,7 +661,8 @@ describe('Cowork quarantine across timed-out operations', () => {
     // and module instance, without changing the lease captured by other tests.
     vi.stubGlobal(Symbol.for('mcp-server-tester.cowork-lease'), undefined);
     vi.resetModules();
-    const { createCoworkHost: createHost } = await import('./host.js');
+    const { createCoworkHost: createHost } =
+      await import('../../../../src/evals/cowork/host.js');
     const calls: string[] = [];
     const records: CoworkRunDiagnostics[] = [];
     let alive = false;

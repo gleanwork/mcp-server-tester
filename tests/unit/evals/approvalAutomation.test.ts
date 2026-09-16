@@ -7,7 +7,7 @@ import {
   type ApprovalObservation,
   type ApprovalPolicy,
   type ApprovalReceipt,
-} from './approvalAutomation.js';
+} from '../../../src/evals/approvalAutomation.js';
 
 const ACTION = {
   kind: 'mcp_tool_call',

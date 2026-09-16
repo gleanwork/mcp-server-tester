@@ -1,4 +1,4 @@
-# Cowork nonce example (experimental, macOS only)
+# Cowork manual harness (experimental, macOS only)
 
 This is one manual-user test of a **preinstalled, read-only MCPB tool** through
 Claude Cowork. The source path is `createCoworkHost` → `hostTraceToExecution` →
@@ -13,8 +13,7 @@ Use Node 22+ and the repository's existing dependencies. From the repository roo
 
 ```bash
 npm run build
-node node_modules/typescript/bin/tsc -p examples/cowork/tsconfig.json
-node --test build/cowork/offline.test.js
+npm run test:cowork:offline
 node build/cowork/cli.js prepare /absolute/private/parent/cowork-test-001
 ```
 
@@ -23,7 +22,7 @@ creates a private directory with `fixture.mcpb`, `evaluator.json`, and `run.json
 The separate `npm run build:cowork-shared` maintainer command is
 **source-checkout-only**. It requires this repository's `.git`, `src/`, and `tests/`
 inputs and is not a published-package build path.
-It packages the checked-in [fixture sources](../../tests/fixtures/cowork-mcpb/)
+It packages the checked-in [fixture sources](../../fixtures/cowork-mcpb/)
 with macOS `/usr/bin/zip -X`, using explicit filenames in a private temporary
 directory that is removed after packaging, including on failure. Each bundle gets
 a fresh 256-bit random nonce. The tool response is deterministic for that bundle.

@@ -10,8 +10,8 @@ import {
 import {
   createDesktopEvalFixture,
   type DesktopEvalFixture,
-} from './fixture.js';
-import { createDesktopMcpbBundles } from './mcpb.js';
+} from '../../fixtures/desktop-evals/fixture.js';
+import { createDesktopMcpbBundles } from '../../fixtures/desktop-evals/mcpb.js';
 
 const fixtures: DesktopEvalFixture[] = [];
 afterEach(async () => {

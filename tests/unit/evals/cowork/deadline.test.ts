@@ -3,8 +3,11 @@ import {
   CoworkOperationScope,
   isFatalControlError,
   requiresQuarantine,
-} from './deadline.js';
-import { CoworkControlError, isCoworkControlError } from './workflow.js';
+} from '../../../../src/evals/cowork/deadline.js';
+import {
+  CoworkControlError,
+  isCoworkControlError,
+} from '../../../../src/evals/cowork/workflow.js';
 
 afterEach(() => vi.useRealTimers());
 

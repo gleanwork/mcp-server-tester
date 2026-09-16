@@ -8,13 +8,13 @@ import {
 } from './sharedConfig.js';
 
 const USAGE = `Usage (from the repository root):
-  node build/cowork-shared/examples/cowork/cliShared.js prepare /absolute/setup-directory
-  node build/cowork-shared/examples/cowork/cliShared.js configure /absolute/setup-directory/cowork-run.json /absolute/cua-driver cowork-shared-001
-  node build/cowork-shared/examples/cowork/cliShared.js suite /absolute/setup-directory/cowork-run.json /absolute/cua-driver cowork-shared-001
-  node build/cowork-shared/examples/cowork/cliShared.js authorize /absolute/setup-directory/cowork-shared-001.json
-  node build/cowork-shared/examples/cowork/cliShared.js check /absolute/setup-directory/cowork-shared-001.json
-  node build/cowork-shared/examples/cowork/cliShared.js run /absolute/setup-directory/cowork-shared-001.json
-  node build/cowork-shared/examples/cowork/cliShared.js teardown /absolute/setup-directory/cowork-shared-001.json
+  node build/cowork-shared/tests/manual/cowork/cliShared.js prepare /absolute/setup-directory
+  node build/cowork-shared/tests/manual/cowork/cliShared.js configure /absolute/setup-directory/cowork-run.json /absolute/cua-driver cowork-shared-001
+  node build/cowork-shared/tests/manual/cowork/cliShared.js suite /absolute/setup-directory/cowork-run.json /absolute/cua-driver cowork-shared-001
+  node build/cowork-shared/tests/manual/cowork/cliShared.js authorize /absolute/setup-directory/cowork-shared-001.json
+  node build/cowork-shared/tests/manual/cowork/cliShared.js check /absolute/setup-directory/cowork-shared-001.json
+  node build/cowork-shared/tests/manual/cowork/cliShared.js run /absolute/setup-directory/cowork-shared-001.json
+  node build/cowork-shared/tests/manual/cowork/cliShared.js teardown /absolute/setup-directory/cowork-shared-001.json
 
 prepare/configure/authorize/check are offline. authorize records explicit operator consent for per-task Automatically-approve setup plus bounded Allow-once fallback for only the two records fixture tools. suite performs setup, test, and teardown. teardown recovers only failed pre-submit owned processes.`;
 

@@ -8,9 +8,9 @@ import type { HostEvent } from '../../../src/evals/evalFrameworkTypes.js';
 import {
   createDesktopEvalFixture,
   type DesktopEvalFixture,
-} from './fixture.js';
-import { createDesktopEvalDataset } from './dataset.js';
-import { assertDesktopLedgerEvidence } from './ledger.js';
+} from '../../fixtures/desktop-evals/fixture.js';
+import { createDesktopEvalDataset } from '../../fixtures/desktop-evals/dataset.js';
+import { assertDesktopLedgerEvidence } from '../../fixtures/desktop-evals/ledger.js';
 
 const fixtures: DesktopEvalFixture[] = [];
 afterEach(async () => {

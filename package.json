@@ -58,7 +58,8 @@
   ],
   "scripts": {
     "build": "npm run build:ui && tsup && npm run build:copy-ui",
-    "build:cowork-shared": "node examples/cowork/buildShared.mjs",
+    "build:cowork-shared": "node tests/manual/cowork/buildShared.mjs",
+    "test:cowork:offline": "npm run build && tsc -p tests/manual/cowork/tsconfig.json && node --test build/cowork/offline.test.js",
     "build:copy-ui": "cp -r src/reporters/ui-dist dist/reporters/",
     "build:ui": "tsx src/reporters/build-ui.ts",
     "dev": "tsup --watch",

@@ -11,9 +11,9 @@ import {
   type EvalRunnerResult,
   type HostRunResult,
 } from '@gleanwork/mcp-server-tester';
-import { DesktopLedgerEntrySchema } from '../../tests/fixtures/desktop-evals/contract.js';
-import { createDesktopEvalDataset } from '../../tests/fixtures/desktop-evals/dataset.js';
-import { assertDesktopLedgerEvidence } from '../../tests/fixtures/desktop-evals/ledger.js';
+import { DesktopLedgerEntrySchema } from '../../fixtures/desktop-evals/contract.js';
+import { createDesktopEvalDataset } from '../../fixtures/desktop-evals/dataset.js';
+import { assertDesktopLedgerEvidence } from '../../fixtures/desktop-evals/ledger.js';
 import type { SharedCoworkConfig } from './sharedConfig.js';
 import { readSharedDesktopOracle, sharedLedgerPath } from './sharedConfig.js';
 import { assertSharedCoworkDataDir } from './discoverShared.js';

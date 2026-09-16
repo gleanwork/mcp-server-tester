@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   isolatedDesktopEnvironment,
   prepareIsolatedDesktopProfile,
-} from './isolatedProfile.js';
+} from '../../../../src/evals/externalHost/isolatedProfile.js';
 
 const roots: string[] = [];
 afterEach(async () => {

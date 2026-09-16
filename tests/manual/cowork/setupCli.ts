@@ -7,10 +7,10 @@ import {
 } from './setupIsolated.js';
 
 const USAGE = `Usage:
-  npx tsx examples/cowork/setupCli.ts launch /absolute/setup/cowork-run.json
-  npx tsx examples/cowork/setupCli.ts open-records /absolute/setup/cowork-run.json
-  npx tsx examples/cowork/setupCli.ts open-decoy /absolute/setup/cowork-run.json
-  npx tsx examples/cowork/setupCli.ts stop /absolute/setup/cowork-run.json
+  npx tsx tests/manual/cowork/setupCli.ts launch /absolute/setup/cowork-run.json
+  npx tsx tests/manual/cowork/setupCli.ts open-records /absolute/setup/cowork-run.json
+  npx tsx tests/manual/cowork/setupCli.ts open-decoy /absolute/setup/cowork-run.json
+  npx tsx tests/manual/cowork/setupCli.ts stop /absolute/setup/cowork-run.json
 
 Launch uses only the dedicated profile. Authentication, MFA, installation consent,
 and tool approvals remain user-controlled.`;

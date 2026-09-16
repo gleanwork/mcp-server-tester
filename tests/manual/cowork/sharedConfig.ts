@@ -1,8 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { z } from 'zod';
-import type { DesktopEvalOracle } from '../../tests/fixtures/desktop-evals/fixture.js';
-import { DesktopRuntimeSchema } from '../../tests/fixtures/desktop-evals/contract.js';
+import type { DesktopEvalOracle } from '../../fixtures/desktop-evals/fixture.js';
+import { DesktopRuntimeSchema } from '../../fixtures/desktop-evals/contract.js';
 import { requireAbsent } from './files.js';
 
 const absolutePath = z

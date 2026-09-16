@@ -1,8 +1,8 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "rootDir": "../..",
-    "outDir": "../../build/cowork-shared",
+    "rootDir": "../../..",
+    "outDir": "../../../build/cowork-shared",
     "noEmit": false,
     "declaration": false,
     "declarationMap": false,

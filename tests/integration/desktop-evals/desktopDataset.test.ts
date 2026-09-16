@@ -12,19 +12,19 @@ import { hostTraceToExecution } from '../../../src/evals/hostTrace.js';
 import {
   createDesktopEvalFixture,
   type DesktopEvalFixture,
-} from './fixture.js';
+} from '../../fixtures/desktop-evals/fixture.js';
 import {
   createDesktopEvalDataset,
   createDesktopSmokeDataset,
-} from './dataset.js';
+} from '../../fixtures/desktop-evals/dataset.js';
 import { runEvalDataset } from '../../../src/evals/evalRunner.js';
 import {
   createMCPClientForConfig,
   closeMCPClient,
 } from '../../../src/mcp/clientFactory.js';
 import { createMCPFixture } from '../../../src/mcp/fixtures/mcpFixture.js';
-import { assertDesktopLedgerEvidence } from './ledger.js';
-import { createSyntheticDesktopHost } from './syntheticHost.js';
+import { assertDesktopLedgerEvidence } from '../../fixtures/desktop-evals/ledger.js';
+import { createSyntheticDesktopHost } from '../../fixtures/desktop-evals/syntheticHost.js';
 
 const fixtures: DesktopEvalFixture[] = [];
 afterEach(async () => {

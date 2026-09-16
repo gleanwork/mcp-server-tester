@@ -3,12 +3,12 @@ import { access, cp, mkdir, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const sourceCheckoutInputs = [
   join(root, '.git'),
   join(root, 'src'),
   join(root, 'tests', 'fixtures', 'desktop-evals'),
-  join(root, 'examples', 'cowork', 'tsconfig.shared.json'),
+  join(root, 'tests', 'manual', 'cowork', 'tsconfig.shared.json'),
 ];
 try {
   await Promise.all(sourceCheckoutInputs.map((path) => access(path)));
@@ -28,7 +28,7 @@ execFileSync(
     '--',
     'tsc',
     '-p',
-    join(root, 'examples', 'cowork', 'tsconfig.shared.json'),
+    join(root, 'tests', 'manual', 'cowork', 'tsconfig.shared.json'),
   ],
   { cwd: root, stdio: 'inherit' }
 );

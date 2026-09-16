@@ -1,6 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { describe, expect, it } from 'vitest';
-import { createCoworkNativeEvidence } from './nativeEvidence.js';
+import { createCoworkNativeEvidence } from '../../../../src/evals/cowork/nativeEvidence.js';
 import {
   emitSession,
   endTurn,
@@ -123,6 +123,42 @@ describe('Cowork native evidence (synthetic files, shared native collector)', ()
     });
     expect((await missing.collect()).trace.error).toContain(
       'mcp_result_missing'
+    );
+  });
+
+  it('preserves a valid plain-text MCP result', async () => {
+    const f = await nativeFixture({ requireMcpResults: true });
+    await f.emit({
+      audit: [
+        prompt(f.expectedPrompt),
+        tool('mcp__fixture__lookup_record'),
+        result(),
+      ],
+      transcript: [
+        prompt(f.expectedPrompt),
+        tool('mcp__fixture__lookup_record'),
+        {
+          type: 'user',
+          message: {
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'call-one',
+                content: 'plain text result',
+                is_error: false,
+              },
+            ],
+          },
+        },
+        endTurn(),
+      ],
+    });
+
+    expect((await f.collect()).trace.events[0]?.output).toBe(
+      JSON.stringify({
+        content: [{ type: 'text', text: 'plain text result' }],
+        isError: false,
+      })
     );
   });
 

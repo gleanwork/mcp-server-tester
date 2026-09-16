@@ -7,8 +7,8 @@ import {
   type CallToolResult,
 } from '@modelcontextprotocol/sdk/types.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { connectCoworkCua } from './cuaTransport.js';
-import { CoworkOperationScope } from './deadline.js';
+import { connectCoworkCua } from '../../../../src/evals/cowork/cuaTransport.js';
+import { CoworkOperationScope } from '../../../../src/evals/cowork/deadline.js';
 
 const runtime = vi.hoisted(() => ({
   transport: undefined as InMemoryTransport | undefined,

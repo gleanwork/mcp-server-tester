@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createCuaCoworkApprovalAdapter,
   createCuaCoworkAutoModeAdapter,
-} from './approval.js';
+} from '../../../../src/evals/cowork/approval.js';
 
 const PID = 42;
 const WINDOW_ID = 7;

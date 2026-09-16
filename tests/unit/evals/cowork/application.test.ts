@@ -12,7 +12,7 @@ import {
   type CoworkApplicationFacade,
   type CoworkNativeProcessOperations,
   type CoworkSpawnRequest,
-} from './application.js';
+} from '../../../../src/evals/cowork/application.js';
 
 const roots: string[] = [];
 afterEach(async () => {

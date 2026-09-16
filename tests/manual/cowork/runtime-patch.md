@@ -24,8 +24,8 @@ git clone --depth 1 --filter=blob:none --sparse \
   --branch cua-driver-rs-v0.28.0 https://github.com/trycua/cua.git cua-cowork
 cd cua-cowork
 git sparse-checkout set libs/cua-driver
-git apply --check --unidiff-zero /absolute/path/to/mcp-server-tester/examples/cowork/cua-driver-0.28.0.patch
-git apply --unidiff-zero /absolute/path/to/mcp-server-tester/examples/cowork/cua-driver-0.28.0.patch
+git apply --check --unidiff-zero /absolute/path/to/mcp-server-tester/tests/manual/cowork/cua-driver-0.28.0.patch
+git apply --unidiff-zero /absolute/path/to/mcp-server-tester/tests/manual/cowork/cua-driver-0.28.0.patch
 cd libs/cua-driver/rust
 ```
 

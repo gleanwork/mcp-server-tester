@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { onTestFinished } from 'vitest';
-import { createCoworkNativeEvidence } from './nativeEvidence.js';
-import type { CoworkEvidenceResult } from './types.js';
+import { createCoworkNativeEvidence } from '../../../../src/evals/cowork/nativeEvidence.js';
+import type { CoworkEvidenceResult } from '../../../../src/evals/cowork/types.js';
 
 export type NativeRecord = Record<string, unknown>;
 export function prompt(text: string): NativeRecord {

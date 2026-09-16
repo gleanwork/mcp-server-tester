@@ -7,7 +7,7 @@ const { nonce } = JSON.parse(
   readFileSync(new URL('./nonce.json', import.meta.url), 'utf8')
 );
 if (!/^MCP_E2E_NONCE_[a-f0-9]{64}$/.test(nonce)) {
-  throw new Error('Build a fresh fixture with examples/cowork/cli.ts prepare');
+  throw new Error('Build a fresh fixture with tests/manual/cowork/cli.ts prepare');
 }
 const input = readline.createInterface({ input: process.stdin });
 

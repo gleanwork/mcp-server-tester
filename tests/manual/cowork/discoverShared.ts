@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { prepareCoworkApplication } from '@gleanwork/mcp-server-tester';
-import { DesktopRuntimeSchema } from '../../tests/fixtures/desktop-evals/contract.js';
+import { DesktopRuntimeSchema } from '../../fixtures/desktop-evals/contract.js';
 import { writePrivateJson } from './files.js';
 import { SharedCoworkConfigSchema } from './sharedConfig.js';
 
@@ -110,10 +110,7 @@ export async function configureSharedCowork(
         await readFile(join(installed, 'server', 'index.mjs')),
         await readFile(
           fileURLToPath(
-            new URL(
-              '../../tests/fixtures/desktop-evals/server.mjs',
-              import.meta.url
-            )
+            new URL('../../fixtures/desktop-evals/server.mjs', import.meta.url)
           )
         )
       )

@@ -1,6 +1,6 @@
 import { join } from 'node:path';
-import { createDesktopEvalFixture } from '../../tests/fixtures/desktop-evals/fixture.js';
-import { createDesktopMcpbBundles } from '../../tests/fixtures/desktop-evals/mcpb.js';
+import { createDesktopEvalFixture } from '../../fixtures/desktop-evals/fixture.js';
+import { createDesktopMcpbBundles } from '../../fixtures/desktop-evals/mcpb.js';
 import { writePrivateJson } from './files.js';
 
 /** Prepare one retained private fixture shared by the CoWork and Codex runners. */

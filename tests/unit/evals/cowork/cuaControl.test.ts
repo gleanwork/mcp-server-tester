@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createCuaCoworkControl } from './cuaControl.js';
-import { CoworkControlError, submitCoworkPrompt } from './workflow.js';
-import type { CoworkControlContext } from './types.js';
+import { createCuaCoworkControl } from '../../../../src/evals/cowork/cuaControl.js';
+import {
+  CoworkControlError,
+  submitCoworkPrompt,
+} from '../../../../src/evals/cowork/workflow.js';
+import type { CoworkControlContext } from '../../../../src/evals/cowork/types.js';
 
 function fixture(
   options: {
@@ -156,7 +159,7 @@ describe('Cua adapter without GUI', () => {
         async (flags) => {
           vi.resetModules();
           const { CoworkControlError: OtherCopyError } =
-            await import('./workflow.js');
+            await import('../../../../src/evals/cowork/workflow.js');
           expect(OtherCopyError).not.toBe(CoworkControlError);
           const f = fixture({
             noPaste: source === 'native bridge',

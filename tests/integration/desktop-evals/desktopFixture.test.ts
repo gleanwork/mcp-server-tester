@@ -9,7 +9,7 @@ import { createMCPFixture } from '../../../src/mcp/fixtures/mcpFixture.js';
 import {
   createDesktopEvalFixture,
   type DesktopEvalFixture,
-} from './fixture.js';
+} from '../../fixtures/desktop-evals/fixture.js';
 
 const fixtures: DesktopEvalFixture[] = [];
 

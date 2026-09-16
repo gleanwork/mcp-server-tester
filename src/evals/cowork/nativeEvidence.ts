@@ -329,7 +329,15 @@ function attachMcpResults(
 
 function normalizeMcpResult(block: Record<string, unknown>) {
   const text = toolResultText(block.content);
-  const parsed: unknown = JSON.parse(text);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return CallToolResultSchema.parse({
+      isError: block.is_error === true,
+      content: [{ type: 'text', text }],
+    });
+  }
   const complete =
     isRecord(parsed) &&
     ('content' in parsed ||
@@ -341,7 +349,7 @@ function normalizeMcpResult(block: Record<string, unknown>) {
   return CallToolResultSchema.parse({
     isError: block.is_error === true,
     content: [{ type: 'text', text }],
-    structuredContent: parsed,
+    ...(isRecord(parsed) ? { structuredContent: parsed } : {}),
   });
 }
 

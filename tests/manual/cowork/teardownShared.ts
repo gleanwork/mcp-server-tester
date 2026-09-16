@@ -1,7 +1,7 @@
 import { access, readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { prepareCoworkApplication } from '../../src/evals/cowork/application.js';
+import { prepareCoworkApplication } from '../../../src/evals/cowork/application.js';
 import { writePrivateJson } from './files.js';
 import type { SharedCoworkConfig } from './sharedConfig.js';
 

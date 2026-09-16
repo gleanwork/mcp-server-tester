@@ -6,7 +6,7 @@ import {
   assertSharedCoworkDataDir,
   matchesExactFixtureBytes,
   matchesFixtureInstallation,
-} from './discoverShared.js';
+} from '../../../manual/cowork/discoverShared.js';
 
 const roots: string[] = [];
 afterEach(async () => {
