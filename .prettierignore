@@ -10,5 +10,7 @@ CHANGELOG.md
 # Package lock
 package-lock.json
 
-# Generated eval results
+# Generated eval results and private Cowork runtime/recovery data
 **/.mcp-eval-results/
+**/.mcp-test-results/
+**/.cowork-runtime/

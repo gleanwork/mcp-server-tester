@@ -20,6 +20,7 @@ export function hostTraceToExecution(
   return {
     response: {
       success: !trace.error,
+      ...(trace.externalHost ? { externalHost: trace.externalHost } : {}),
       response: trace.finalText,
       events: trace.events,
       evidence,

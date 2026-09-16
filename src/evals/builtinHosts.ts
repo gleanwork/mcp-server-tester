@@ -26,6 +26,7 @@ import { simulationToHostTrace } from './hostTrace.js';
 import { getHost, registerHost } from './frameworkRegistries.js';
 import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
 import { ANTHROPIC_API_HOST } from './anthropicApiHost.js';
+import { COWORK_HOST } from './coworkHost.js';
 
 async function runBuiltinHost(
   input: HostRunInput,
@@ -270,6 +271,7 @@ export function registerBuiltinHosts(): void {
     });
   }
   registerHost(ANTHROPIC_API_HOST);
+  registerHost(COWORK_HOST);
   builtinsRegistered = true;
 }
 

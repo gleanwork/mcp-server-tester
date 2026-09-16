@@ -1,0 +1,22 @@
+{
+  "name": "cowork-example",
+  "datasets": [{ "type": "file", "path": "./queries.json" }],
+  "host": {
+    "type": "cowork",
+    "driver": "anthropic.claude.cowork.desktop-app.macos"
+  },
+  "servers": [
+    {
+      "transport": "http",
+      "label": "search",
+      "serverUrl": "https://search.example.test/mcp",
+      "auth": { "accessTokenEnv": "SEARCH_MCP_TOKEN" }
+    },
+    {
+      "transport": "http",
+      "label": "calendar",
+      "serverUrl": "https://calendar.example.test/mcp",
+      "auth": { "accessTokenEnv": "CALENDAR_MCP_TOKEN" }
+    }
+  ]
+}

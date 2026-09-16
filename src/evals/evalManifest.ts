@@ -3,6 +3,10 @@ import path from 'node:path';
 import { z } from 'zod';
 import { MCPConfigSchema, type MCPConfig } from '../config/mcpConfig.js';
 import type { ToolOverrideVariant } from '../types/index.js';
+import {
+  CoworkSetupConfigSchema,
+  type CoworkSetupConfig,
+} from './coworkSetup/options.js';
 
 /** A tagged configuration block resolved by a public registry. */
 export interface TaggedConfig {
@@ -31,6 +35,7 @@ export interface ExtensionConfig extends TaggedConfig {
 export interface EvalArm {
   name: string;
   servers?: MCPConfig[];
+  coworkSetup?: CoworkSetupConfig;
   host?: HostConfigPatch;
   toolMap?: Record<string, string[]>;
   toolOverrides?: ToolOverrideVariant;
@@ -44,6 +49,8 @@ export interface EvalManifest {
   name: string;
   datasets: DatasetConfig[];
   servers?: MCPConfig[];
+  /** Native Cowork setup policy; ignored by other hosts. */
+  coworkSetup?: CoworkSetupConfig;
   host?: HostConfig;
   toolMap?: Record<string, string[]>;
   toolOverrides?: ToolOverrideVariant;
@@ -102,6 +109,7 @@ const EvalArmSchema = z
   .object({
     name: z.string().min(1),
     servers: z.array(ServerConfigSchema).optional(),
+    coworkSetup: CoworkSetupConfigSchema.optional(),
     host: HostConfigPatchSchema.optional(),
     toolMap: ToolMapSchema.optional(),
     toolOverrides: ToolOverrideVariantSchema.optional(),
@@ -116,6 +124,7 @@ export const EvalManifestSchema = z
     name: z.string().min(1),
     datasets: z.array(DatasetConfigSchema).min(1),
     servers: z.array(ServerConfigSchema).optional(),
+    coworkSetup: CoworkSetupConfigSchema.optional(),
     host: TaggedConfigSchema.optional(),
     toolMap: ToolMapSchema.optional(),
     toolOverrides: ToolOverrideVariantSchema.optional(),

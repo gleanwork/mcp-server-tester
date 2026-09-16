@@ -14,6 +14,7 @@ test-results/
 test-output.txt
 .preview-output/
 .mcp-test-results/
+.cowork-runtime/
 
 # Environment variables
 .env

@@ -267,6 +267,7 @@ export type {
   EvaluationSuiteResult,
   EvaluationSummary,
   HostDefinition,
+  PreparedHostSession,
   HostRunOptions,
   HostRunResult,
   HostRunInput,

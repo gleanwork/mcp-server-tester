@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { simulationToHostTrace } from '../../hostTrace.js';
 import {
   buildClaudeTraceMetadata,
   findMatchingClaudeSessions,
@@ -119,6 +120,8 @@ describe('anthropicClaude trace parsing', () => {
       {
         id: 'toolu_1',
         name: 'search',
+        source: 'mcp',
+        server: 'server',
         arguments: { query: 'planning' },
       },
     ]);
@@ -608,6 +611,12 @@ describe('anthropicClaude trace parsing', () => {
               name: 'mcp__my_server__search',
               input: { query: 'planning' },
             },
+            {
+              type: 'tool_use',
+              id: 'toolu_2',
+              name: 'Bash',
+              input: { command: 'echo synthetic' },
+            },
           ],
         },
       },
@@ -625,7 +634,32 @@ describe('anthropicClaude trace parsing', () => {
       },
     });
 
-    expect(trace.toolCalls[0]?.name).toBe('search');
+    expect(trace.toolCalls[0]).toMatchObject({
+      name: 'search',
+      source: 'mcp',
+      server: 'my_server',
+    });
+    expect(trace.toolCalls[1]).toMatchObject({ name: 'Bash', source: 'host' });
+    for (const labels of [['my_server'], ['my_server', 'other']]) {
+      const adapted = simulationToHostTrace(
+        { success: true, response: 'done', toolCalls: trace.toolCalls },
+        labels.map((label) => ({
+          transport: 'http',
+          label,
+          serverUrl: `https://${label.replaceAll('_', '-')}.example.test/mcp`,
+        }))
+      );
+      expect(adapted.events[0]).toMatchObject({
+        name: 'search',
+        source: 'mcp',
+        server: 'my_server',
+      });
+      expect(adapted.events[1]).toMatchObject({
+        name: 'Bash',
+        source: 'host',
+        server: undefined,
+      });
+    }
   });
 
   it('waits for a terminal result event before returning a matched trace', async () => {

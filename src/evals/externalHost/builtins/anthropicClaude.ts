@@ -1296,6 +1296,8 @@ function extractToolCalls(events: ClaudeAuditEvent[]): LLMToolCall[] {
       const mcpMatch = /^mcp__(.+)__(.+)$/.exec(block.name);
       toolCalls.push({
         name: mcpMatch ? mcpMatch[2]! : block.name,
+        source: mcpMatch ? 'mcp' : 'host',
+        ...(mcpMatch ? { server: mcpMatch[1]! } : {}),
         arguments: block.input ?? {},
         id: block.id,
       });
