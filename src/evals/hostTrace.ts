@@ -35,6 +35,7 @@ export function hostTraceToExecution(
           server: event.server,
           arguments: event.arguments ?? {},
           output: event.output,
+          error: event.error,
           id: event.id,
         })),
       usage: trace.usage,

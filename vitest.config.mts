@@ -9,6 +9,7 @@ export default defineConfig({
       'node_modules',
       'dist',
       'tests/**/*.spec.ts',
+      'tests/manual/**',
       'src/**/*.integration.test.ts',
     ],
     coverage: {

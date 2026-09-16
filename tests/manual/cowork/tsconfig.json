@@ -1,0 +1,20 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "../../../build/cowork",
+    "noEmit": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false
+  },
+  "include": [
+    "./cli.ts",
+    "./config.ts",
+    "./files.ts",
+    "./lifecycle.ts",
+    "./offline.test.ts",
+    "./prepare.ts",
+    "./run.ts"
+  ]
+}

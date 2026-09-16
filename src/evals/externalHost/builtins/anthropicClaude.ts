@@ -1,7 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { lstat, readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from 'node:path';
 import { Readable } from 'node:stream';
 import { parse as parseNdjson } from 'ndjson';
 import type { LLMToolCall } from '../../mcpHost/mcpHostTypes.js';
@@ -1094,7 +1102,12 @@ async function listSessionCandidates(
       ) as ClaudeSessionMetadata;
       const metadataStat = await stat(metadataPath);
       const id = basename(metadataPath, '.json');
-      const sessionDir = join(dirname(metadataPath), id);
+      const sessionDir = await resolveClaudeSessionDir(
+        dataDir,
+        metadataPath,
+        id,
+        metadata
+      );
       const statMtimeMs = await getSessionObservedMtime({
         sessionDir,
         cliSessionId: metadata.cliSessionId,
@@ -1113,6 +1126,46 @@ async function listSessionCandidates(
   }
 
   return candidates;
+}
+
+async function resolveClaudeSessionDir(
+  dataDir: string,
+  metadataPath: string,
+  id: string,
+  metadata: ClaudeSessionMetadata
+): Promise<string> {
+  const legacy = join(dirname(metadataPath), id);
+  if (await hasRealAuditFile(legacy)) return legacy;
+  if (typeof metadata.cwd !== 'string' || !isAbsolute(metadata.cwd))
+    return legacy;
+  const canonicalSyntax = resolve(metadata.cwd);
+  const remainder = relative(dataDir, canonicalSyntax);
+  if (
+    !remainder ||
+    remainder === '..' ||
+    remainder.startsWith(`..${sep}`) ||
+    isAbsolute(remainder)
+  )
+    return legacy;
+  const runtimeRoot = join(dataDir, remainder.split(sep)[0]!);
+  return (await hasRealAuditFile(runtimeRoot)) ? runtimeRoot : legacy;
+}
+
+async function hasRealAuditFile(sessionDir: string): Promise<boolean> {
+  try {
+    const [directory, audit] = await Promise.all([
+      lstat(sessionDir),
+      lstat(join(sessionDir, 'audit.jsonl')),
+    ]);
+    return (
+      directory.isDirectory() &&
+      !directory.isSymbolicLink() &&
+      audit.isFile() &&
+      !audit.isSymbolicLink()
+    );
+  } catch {
+    return false;
+  }
 }
 
 async function getSessionObservedMtime(options: {

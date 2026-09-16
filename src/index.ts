@@ -283,6 +283,70 @@ export type {
   EvalSummaryGenerator,
 } from './evals/evalFrameworkTypes.js';
 export {
+  ApprovalAutomationError,
+  createAutomatedApprovalDriver,
+} from './evals/approvalAutomation.js';
+export type {
+  ApprovalAction,
+  ApprovalAdapter,
+  ApprovalDriveInput,
+  ApprovalJournal,
+  ApprovalJson,
+  ApprovalObservation,
+  ApprovalPolicy,
+  ApprovalReceipt,
+  ApprovalRule,
+} from './evals/approvalAutomation.js';
+export {
+  CLAUDE_DESKTOP_BUILD,
+  CLAUDE_DESKTOP_BUNDLE_ID,
+  CLAUDE_DESKTOP_TEAM_ID,
+  createNativeCoworkApplicationFacade,
+  prepareCoworkApplication,
+} from './evals/cowork/application.js';
+export type {
+  CoworkApplication,
+  CoworkApplicationFacade,
+  CoworkApplicationMetadata,
+  CoworkApplicationOptions,
+  CoworkSpawnRequest,
+} from './evals/cowork/application.js';
+export { createCoworkHost } from './evals/cowork/host.js';
+export { createCoworkNativeEvidence } from './evals/cowork/nativeEvidence.js';
+export {
+  createCuaCoworkApprovalAdapter,
+  createCuaCoworkAutoModeAdapter,
+} from './evals/cowork/approval.js';
+export type {
+  CoworkApprovalHandle,
+  CoworkModeApprovalHandle,
+} from './evals/cowork/approval.js';
+export { createCuaCoworkControl } from './evals/cowork/cuaControl.js';
+export type { CoworkTransactionalPaste } from './evals/cowork/cuaControl.js';
+export { connectCoworkCua } from './evals/cowork/cuaTransport.js';
+export type { CoworkCuaConnection } from './evals/cowork/cuaTransport.js';
+export { CoworkControlError } from './evals/cowork/workflow.js';
+export type {
+  CoworkHostOptions,
+  CoworkAutomatedApprovalOptions,
+  CoworkApprovalAdapterContext,
+  CoworkCheckpoint,
+  CoworkControl,
+  CoworkControlContext,
+  CoworkControlState,
+  CoworkComposer,
+  CoworkComposerVerification,
+  CoworkInputMode,
+  CoworkCuaTransport,
+  CoworkNativeEvidence,
+  CoworkEvidenceInput,
+  CoworkEvidenceDiagnostics,
+  CoworkEvidenceResult,
+  CoworkRunDiagnostics,
+} from './evals/cowork/types.js';
+export { hostTraceToExecution } from './evals/hostTrace.js';
+export type { EvalExecutionResult } from './evals/hostTrace.js';
+export {
   clearDatasetSources,
   clearHosts,
   clearJudges,
@@ -408,6 +472,8 @@ export type {
   HostDriverConfig,
   HostDriverId,
   HostRunContext,
+  IsolatedDesktopProfile,
+  IsolatedDesktopProfilePaths,
   ObservationConfidence,
   TraceSource,
 } from './evals/externalHost/index.js';
@@ -417,7 +483,9 @@ export {
   parseDriverSlug,
   getExternalHostConfigJsonSchema,
   getExternalHostReference,
+  isolatedDesktopEnvironment,
   listExternalHostDriverReferences,
+  prepareIsolatedDesktopProfile,
   registerExternalHostCapability,
   runExternalHostScenario,
 } from './evals/externalHost/index.js';

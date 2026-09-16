@@ -1,0 +1,6 @@
+{
+  "name": "mcp-server-tester-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module"
+}
