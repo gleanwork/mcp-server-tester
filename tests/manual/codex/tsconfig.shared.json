@@ -1,0 +1,17 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "../../..",
+    "outDir": "../../../build/codex-shared",
+    "noEmit": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false
+  },
+  "include": [
+    "./cli-shared.ts",
+    "./run-shared.ts",
+    "./shared-config.ts",
+    "./files.ts"
+  ]
+}
