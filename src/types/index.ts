@@ -15,6 +15,7 @@
  * - 'none': No authentication
  */
 export type AuthType = 'oauth' | 'api-token' | 'none';
+export type { HostDiagnostics } from './hostDiagnostics.js';
 
 /**
  * Source of test results

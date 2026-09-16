@@ -507,6 +507,12 @@ export async function executeToolCall(
       );
 
       if (!simulationResult.success) {
+        if (evalCase.mcpHostConfig.cli?.claudeMcpServers !== undefined) {
+          return {
+            response: simulationResult,
+            error: simulationResult.error || 'MCP host simulation failed',
+          };
+        }
         throw new Error(simulationResult.error || 'MCP host simulation failed');
       }
 
@@ -1189,6 +1195,9 @@ async function runSingleIteration(
     toolRecall,
     mcpHostTrace,
     hostEvidence: evidence,
+    ...(isMCPHostSimulationResult(response) && response.diagnostics
+      ? { hostDiagnostics: response.diagnostics }
+      : {}),
     hostUsage,
     externalHost,
   };
@@ -1343,7 +1352,9 @@ export async function runEvalCase(
       // error is surfaced as result.error since executeToolCall swallows throws)
       const infraError =
         isExternalHostInfrastructureFailure(result.externalHost) ||
-        (result.error != null && isInfrastructureError(result.error));
+        (result.error != null &&
+          (result.hostDiagnostics?.failureKind !== undefined ||
+            isInfrastructureError(result.error)));
       iterationResults.push({
         pass: result.pass,
         durationMs: result.durationMs,
@@ -1351,6 +1362,9 @@ export async function runEvalCase(
         isInfrastructureError: infraError,
         mcpHostTrace: result.mcpHostTrace,
         hostEvidence: result.hostEvidence,
+        ...(result.hostDiagnostics
+          ? { hostDiagnostics: result.hostDiagnostics }
+          : {}),
         hostUsage: result.hostUsage,
         externalHost: result.externalHost,
       });
