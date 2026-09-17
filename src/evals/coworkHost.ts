@@ -13,7 +13,11 @@ import {
   waitForClaudeSession,
 } from './externalHost/builtins/anthropicClaude.js';
 import { simulationToHostTrace } from './hostTrace.js';
-import { ComputerUseHitlBudgetError } from './cowork/anthropicComputerUse.js';
+import {
+  ComputerUseDriverError,
+  ComputerUseHitlBudgetError,
+  type ComputerUseTelemetry,
+} from './cowork/anthropicComputerUse.js';
 
 const OptionsSchema = z
   .object({
@@ -110,6 +114,21 @@ async function runBatch(
         model: config.model,
       });
     for (const [index, request] of requests.entries()) {
+      const caseStartedAt = Date.now();
+      const computerUse: Record<
+        'submission' | 'hitl',
+        { status: string; telemetry?: ComputerUseTelemetry }
+      > = {
+        submission: { status: 'not-attempted' },
+        hitl: { status: 'not-attempted' },
+      };
+      const finishCase = () => {
+        results[index] = {
+          ...results[index]!,
+          durationMs: Date.now() - caseStartedAt,
+          telemetry: { ...results[index]!.telemetry, computerUse },
+        };
+      };
       // Bind each fresh task before another submission can create an identical prompt.
       const snapshot = await snapshotClaudeSessions(dataDir);
       const startedAtMs = Date.now();
@@ -127,12 +146,16 @@ async function runBatch(
         `[mst:cowork] case ${index + 1}/${requests.length}: submitting unchanged prompt\n`
       );
       try {
-        await platform.submit(request.input.scenario, {
+        const submission = await platform.submit(request.input.scenario, {
           deadlineAt,
           maxActions: config.options.computerUseMaxActions,
           model: config.options.computerUseModel,
           env,
         });
+        computerUse.submission = {
+          status: 'completed',
+          ...(submission.telemetry ? { telemetry: submission.telemetry } : {}),
+        };
         const bound = await waitForClaudeSession({
           ...match,
           timeoutMs: Math.max(0, Math.min(30_000, deadlineAt - Date.now())),
@@ -144,7 +167,16 @@ async function runBatch(
           );
         usedSessions.add(sessionPath);
       } catch (error) {
+        if (computerUse.submission.status !== 'completed') {
+          computerUse.submission = {
+            status: 'failed',
+            ...(error instanceof ComputerUseDriverError && error.telemetry
+              ? { telemetry: error.telemetry }
+              : {}),
+          };
+        }
         results[index] = failure(safeError(error));
+        finishCase();
         for (let n = index + 1; n < requests.length; n++)
           results[n] = failure(
             'Not submitted because a previous UI submission failed or was ambiguous. No retries were attempted.'
@@ -168,18 +200,33 @@ async function runBatch(
             'Bound native session is missing; no HITL action attempted.'
           );
         if (native[0]?.isComplete) {
+          computerUse.hitl = { status: 'skipped-native-complete' };
           process.stderr.write(
             `[mst:cowork] case ${index + 1} already completed; skipping HITL\n`
           );
-        } else
-          await platform.handleHitl({
+        } else {
+          const hitl = await platform.handleHitl({
             deadlineAt: deadlineAt,
             maxActions: config.options.hitlMaxActions,
             model: config.options.computerUseModel,
             env,
             task: `Handle only the currently open Cowork task just submitted with this exact query: ${request.input.scenario}. Do not switch tasks. Never create, type, or resubmit a task. If the current task cannot be identified uniquely, stop without an action.`,
           });
+          computerUse.hitl = {
+            status: 'completed',
+            ...(hitl.telemetry ? { telemetry: hitl.telemetry } : {}),
+          };
+        }
       } catch (error) {
+        computerUse.hitl = {
+          status:
+            error instanceof ComputerUseHitlBudgetError
+              ? 'budget-exhausted'
+              : 'failed',
+          ...(error instanceof ComputerUseDriverError && error.telemetry
+            ? { telemetry: error.telemetry }
+            : {}),
+        };
         const message = safeError(error);
         if (error instanceof ComputerUseHitlBudgetError) {
           hitlWarning = message;
@@ -232,6 +279,7 @@ async function runBatch(
           error: result.error ?? hitlError,
           telemetry: {
             source: 'claude-native',
+            costScope: 'native-inference-only',
             ...trace.telemetry,
             nativeSessionId: trace.candidate.id,
             correlation: 'exact-initial-prompt',
@@ -242,6 +290,7 @@ async function runBatch(
       } catch (error) {
         results[index] = failure(safeError(error));
       }
+      finishCase();
     }
     return results;
   } finally {

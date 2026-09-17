@@ -12,7 +12,9 @@ import asyncio
 import base64
 import io
 import json
+import math
 import os
+import re
 import subprocess
 import sys
 import time
@@ -140,7 +142,77 @@ def execute_action(action: dict[str, Any]) -> tuple[Any, bool]:
     raise RuntimeError(f"unsupported Computer Use action: {name}")
 
 
+TOKEN_FIELDS = (
+    "input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens",
+)
+
+
+class ComputerUseDriverError(RuntimeError):
+    def __init__(self, message: str, telemetry: dict[str, Any]):
+        super().__init__(message)
+        self.telemetry = telemetry
+
+
+class Telemetry:
+    """Only completed API responses and allowlisted scalar data; never request content."""
+
+    def __init__(self) -> None:
+        self.started = time.monotonic()
+        self.models: list[str] = []
+        self.responses = 0
+        self.usage: dict[str, int | float] = {}
+        self.coverage = {field: 0 for field in TOKEN_FIELDS}
+        self.actions = 0
+        self.attempted = 0
+        self.executed = 0
+        self.refused = 0
+
+    def observe(self, response: Any) -> None:
+        self.responses += 1
+        model = getattr(response, "model", None)
+        secrets = [value for key, value in os.environ.items()
+                   if value and re.search(r"token|key|secret|password|authorization", key, re.I)]
+        if (isinstance(model, str) and re.fullmatch(r"claude-[a-z0-9][a-z0-9.-]{0,99}", model)
+                and not any(secret in model for secret in secrets) and model not in self.models):
+            self.models.append(model)
+        usage = getattr(response, "usage", None)
+        for field in TOKEN_FIELDS:
+            value = getattr(usage, field, None)
+            if (type(value) in (int, float) and 0 <= value <= 9007199254740991
+                    and math.isfinite(value) and value == int(value)):
+                total = self.usage.get(field, 0) + value
+                if total <= 9007199254740991:
+                    self.usage[field] = total
+                    self.coverage[field] += 1
+
+    def snapshot(self, accounting: str) -> dict[str, Any]:
+        return {
+            "accounting": accounting,
+            "response_models": list(self.models),
+            "planner_response_count": self.responses,
+            "usage": dict(self.usage),
+            "usage_observation_counts": dict(self.coverage),
+            "duration_ms": max(0, (time.monotonic() - self.started) * 1000),
+            "action_count": self.actions,
+            "attempted_action_count": self.attempted,
+            "executed_action_count": self.executed,
+            "refused_action_count": self.refused,
+            # Anthropic Messages usage does not supply authoritative dollar cost.
+            "cost": {"status": "unavailable"},
+        }
+
+
 async def run(query: str, max_actions: int, mode: str) -> dict[str, Any]:
+    telemetry = Telemetry()
+    try:
+        result = await run_driver(query, max_actions, mode, telemetry)
+        result["telemetry"] = telemetry.snapshot("complete")
+        return result
+    except Exception as error:
+        raise ComputerUseDriverError(str(error), telemetry.snapshot("partial")) from error
+
+
+async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemetry) -> dict[str, Any]:
     try:
         import anthropic
     except ImportError as error:
@@ -222,6 +294,7 @@ async def run(query: str, max_actions: int, mode: str) -> dict[str, Any]:
             messages=messages,
             betas=["computer-use-2025-11-24"],
         )
+        telemetry.observe(response)
         messages.append({"role": "assistant", "content": response.content})
         tool_results: list[dict[str, Any]] = []
         for block in response.content:
@@ -230,11 +303,13 @@ async def run(query: str, max_actions: int, mode: str) -> dict[str, Any]:
             if actions_executed >= max_actions:
                 raise RuntimeError("Computer Use action budget exhausted; no further actions executed")
             actions_executed += 1
+            telemetry.actions += 1
             tool_name = getattr(block, "name", "computer")
             action = block.input
             action_name = action.get('action', 'unknown')
             refusal = None
             if mode == "hitl" and (tool_name != "computer" or action_name not in {"screenshot", "wait", "mouse_move", "cursor_position", "left_click", "scroll"}):
+                telemetry.refused += 1
                 raise RuntimeError("HITL cannot type, press keys, drag, or submit tasks")
             if mode == "submit":
                 if tool_name == "fill_query":
@@ -255,6 +330,7 @@ async def run(query: str, max_actions: int, mode: str) -> dict[str, Any]:
                 elif typed_query and action_name not in {"screenshot", "wait", "cursor_position"}:
                     refusal = "The query is entered. Only screenshots or the single Enter submission are allowed."
             if refusal:
+                telemetry.refused += 1
                 # A rejected proposal has no desktop side effects. Let the planner correct it
                 # within the same action budget; never retry a failed physical text entry.
                 tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": refusal, "is_error": True})
@@ -267,7 +343,9 @@ async def run(query: str, max_actions: int, mode: str) -> dict[str, Any]:
                 "cursor_position",
             }:
                 hitl_action_taken = True
+            telemetry.attempted += 1
             result, submitted = execute_action(action)
+            telemetry.executed += 1
             if tool_name == "fill_query":
                 typed_query = True
             if submitted and mode != "hitl":
@@ -290,7 +368,7 @@ async def run(query: str, max_actions: int, mode: str) -> dict[str, Any]:
         if not tool_results:
             if mode == "hitl":
                 log("no HITL action was needed")
-                return {"status": "hitl_checked", "action_count": action_number, "model": model}
+                return {"status": "hitl_checked", "action_count": actions_executed, "model": model}
             raise RuntimeError("Computer Use planner stopped before submitting the Cowork query")
         messages.append({"role": "user", "content": tool_results})
 
@@ -298,7 +376,7 @@ async def run(query: str, max_actions: int, mode: str) -> dict[str, Any]:
         log("no visible HITL prompt found within the bounded check")
         return {
             "status": "hitl_checked",
-            "action_count": max_actions,
+            "action_count": actions_executed,
             "prompt_found": False,
             "model": model,
         }
@@ -320,7 +398,10 @@ def main() -> int:
         return 0
     except Exception as error:
         log(f"driver failed: {error}")
-        print(json.dumps({"status": "failed", "error": str(error)}), flush=True)
+        result = {"status": "failed", "error": str(error)}
+        if isinstance(error, ComputerUseDriverError):
+            result["telemetry"] = error.telemetry
+        print(json.dumps(result), flush=True)
         return 1
 
 

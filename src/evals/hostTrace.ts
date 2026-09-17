@@ -9,6 +9,8 @@ export interface EvalExecutionResult {
   error?: string;
   hostUsage?: UsageMetrics;
   hostTelemetry?: Record<string, unknown>;
+  /** Host time already spent outside the current evaluation timer. */
+  preExecutionDurationMs?: number;
   evidence?: HostEvidence;
 }
 
@@ -36,6 +38,8 @@ export function hostTraceToExecution(
           server: event.server,
           arguments: event.arguments ?? {},
           output: event.output,
+          ...(event.isError !== undefined ? { isError: event.isError } : {}),
+          ...(event.rawName !== undefined ? { rawName: event.rawName } : {}),
           id: event.id,
         })),
       usage: trace.usage,
@@ -86,6 +90,8 @@ export function simulationToHostTrace(
               (servers.length === 1 ? servers[0]?.label : undefined)),
         arguments: call.arguments,
         output: call.output,
+        ...(call.isError !== undefined ? { isError: call.isError } : {}),
+        ...(call.rawName !== undefined ? { rawName: call.rawName } : {}),
         id: call.id,
       };
     }),

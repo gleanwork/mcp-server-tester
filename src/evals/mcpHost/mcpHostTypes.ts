@@ -259,6 +259,8 @@ export interface LLMToolCall {
   id?: string;
   /** Tool result text, when the host surfaces it (paired to this call) */
   output?: string;
+  /** Explicit tool-result error status; absent when not observed. */
+  isError?: boolean;
 }
 
 /**
