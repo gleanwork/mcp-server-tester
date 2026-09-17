@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { open } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
@@ -28,6 +29,21 @@ interface Receipt {
   status: 'ready' | 'submitted' | 'hitl_checked' | 'failed';
   action_count: number;
   duration_ms: number;
+}
+
+async function readSettings(file: string): Promise<Record<string, unknown>> {
+  const handle = await open(
+    file,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+  );
+  try {
+    const metadata = await handle.stat();
+    if (!metadata.isFile() || metadata.size > 1024 * 1024)
+      throw new Error('Invalid prepared settings file.');
+    return JSON.parse(await handle.readFile('utf8')) as Record<string, unknown>;
+  } finally {
+    await handle.close();
+  }
 }
 
 function telemetry(
@@ -160,9 +176,7 @@ export const linuxCoworkPlatform: CoworkPlatform = {
     if (!isAbsolute(settingsFile))
       throw new Error('Linux Cowork settings path must be absolute.');
     try {
-      const settings = JSON.parse(
-        await readFile(settingsFile, 'utf8')
-      ) as Record<string, unknown>;
+      const settings = await readSettings(settingsFile);
       const models = settings.inferenceModels as
         | Array<{ name?: string }>
         | undefined;

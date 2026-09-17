@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
@@ -119,6 +119,26 @@ describe('caller-owned Linux Cowork desktop', () => {
       expect(child.exec).not.toHaveBeenCalled();
     }
   );
+  it('rejects symlinked or oversized prepared settings before touching the desktop', async () => {
+    const file = join(directory, 'actual.json');
+    const link = join(directory, 'linked.json');
+    await writeFile(file, JSON.stringify(settings));
+    await symlink(file, link);
+    await expect(
+      linuxCoworkPlatform.prepare({
+        manifest,
+        env: { ...session, MST_COWORK_SETTINGS_FILE: link },
+      })
+    ).rejects.toThrow('settings do not match');
+    await writeFile(file, ' '.repeat(1024 * 1024 + 1));
+    await expect(
+      linuxCoworkPlatform.prepare({
+        manifest,
+        env: { ...session, MST_COWORK_SETTINGS_FILE: file },
+      })
+    ).rejects.toThrow('settings do not match');
+    expect(child.exec).not.toHaveBeenCalled();
+  });
   it('does not perform caller-owned recovery', async () => {
     await expect(linuxCoworkPlatform.recover()).rejects.toThrow(
       'runtime owner'
