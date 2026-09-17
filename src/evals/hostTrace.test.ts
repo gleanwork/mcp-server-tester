@@ -5,6 +5,27 @@ import type { HostDefinition, HostEvidence } from './evalFrameworkTypes.js';
 import { z } from 'zod';
 
 describe('per-scenario host traces', () => {
+  it('retains tool-result evidence and error status through both adapters', () => {
+    const toolCalls = [
+      {
+        name: 'search',
+        rawName: 'mcp__glean__search',
+        arguments: {},
+        source: 'mcp' as const,
+        server: 'glean',
+        id: 'call-1',
+        output: '',
+        isError: true,
+      },
+      { name: 'Read', arguments: {}, source: 'host' as const, id: 'call-2' },
+    ];
+    const trace = simulationToHostTrace({ success: true, toolCalls }, []);
+    expect(trace.events[0]).toMatchObject(toolCalls[0]!);
+    expect(trace.events[1]).not.toHaveProperty('isError');
+    const execution = hostTraceToExecution(trace, 'structured');
+    expect(execution.response).toMatchObject({ toolCalls });
+    expect(execution.preExecutionDurationMs).toBeUndefined();
+  });
   it('retains failure diagnostics together with native telemetry, usage, and timing', async () => {
     const diagnostics = { failureKind: 'timeout' as const };
     const usage = {

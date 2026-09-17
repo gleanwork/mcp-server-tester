@@ -26,8 +26,8 @@ export default defineConfig({
         // Custom mcpConfig for stdio transport using mock server
         mcpConfig: {
           transport: 'stdio' as const,
-          command: 'npx',
-          args: ['tsx', 'tests/mocks/simpleMCPServer.ts'],
+          command: process.execPath,
+          args: ['--import', 'tsx', 'tests/mocks/simpleMCPServer.ts'],
           capabilities: {
             roots: { listChanged: true },
           },

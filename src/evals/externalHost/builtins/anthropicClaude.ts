@@ -63,7 +63,12 @@ export type ClaudeSessionSnapshot = Map<string, SnapshotEntry>;
 
 export interface ClaudeNativeTelemetry {
   resultCount: number;
-  apiCallCount: number;
+  /** Native logs do not establish an exact API request count. */
+  apiCallCount?: number;
+  /** Stable identities observed in native events, not exact API requests. */
+  observedRequestCount?: number;
+  observedAssistantMessageCount?: number;
+  observationSource: 'claude-native-audit-and-transcript';
   models: string[];
   inputTokens?: number;
   outputTokens?: number;
@@ -73,7 +78,8 @@ export interface ClaudeNativeTelemetry {
   durationMs?: number;
   durationApiMs?: number;
   toolCallCount: number;
-  toolErrorCount: number;
+  /** Observed tool_result errors; absent when no tool results were observed. */
+  toolErrorCount?: number;
 }
 
 export interface ClaudeTrace {
@@ -98,8 +104,23 @@ export interface ClaudeTrace {
   telemetry: ClaudeNativeTelemetry;
 }
 
+interface ClaudeContentBlock {
+  type?: string;
+  id?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+  text?: string;
+  tool_use_id?: string;
+  content?: unknown;
+  is_error?: boolean;
+}
+
 interface ClaudeAuditEvent {
   type?: string;
+  event?: ClaudeAuditEvent;
+  index?: number;
+  content_block?: ClaudeContentBlock;
+  delta?: { type?: string; partial_json?: string };
   result?: unknown;
   is_error?: boolean;
   duration_ms?: number;
@@ -111,15 +132,9 @@ interface ClaudeAuditEvent {
   request_id?: string;
   usage?: Record<string, unknown>;
   message?: {
+    id?: string;
     model?: string;
-    content?: Array<{
-      type?: string;
-      id?: string;
-      name?: string;
-      input?: Record<string, unknown>;
-      text?: string;
-      is_error?: boolean;
-    }>;
+    content?: ClaudeContentBlock[] | string;
   };
   timestamp?: string;
   terminal_reason?: string;
@@ -841,11 +856,7 @@ export async function parseClaudeTrace(
       ? resultEvent.result
       : extractAssistantText(combinedEventsForRun);
   const usage = extractAggregatedUsage(resultEvents);
-  const toolCalls = extractToolCalls(
-    transcriptEventsForRun.length > 0
-      ? transcriptEventsForRun
-      : combinedEventsForRun
-  );
+  const toolCalls = extractToolCalls(auditEventsForRun, transcriptEventsForRun);
 
   return {
     candidate,
@@ -1353,7 +1364,10 @@ function extractAssistantText(events: ClaudeAuditEvent[]): string | undefined {
   const parts: string[] = [];
 
   for (const event of events) {
-    for (const block of event.message?.content ?? []) {
+    const blocks = Array.isArray(event.message?.content)
+      ? event.message.content
+      : [];
+    for (const block of blocks) {
       if (block.type === 'text' && block.text) {
         parts.push(block.text);
       }
@@ -1363,26 +1377,136 @@ function extractAssistantText(events: ClaudeAuditEvent[]): string | undefined {
   return parts.length > 0 ? parts.join('') : undefined;
 }
 
-function extractToolCalls(events: ClaudeAuditEvent[]): LLMToolCall[] {
-  const toolCalls: LLMToolCall[] = [];
+function nativeEvent(event: ClaudeAuditEvent): ClaudeAuditEvent {
+  return event.type === 'stream_event' && event.event ? event.event : event;
+}
 
-  for (const event of events) {
-    for (const block of event.message?.content ?? []) {
-      if (block.type !== 'tool_use' || !block.name) {
-        continue;
+function contentBlocks(event: ClaudeAuditEvent): ClaudeContentBlock[] {
+  const native = nativeEvent(event);
+  if (native.type === 'content_block_start' && native.content_block) {
+    return [native.content_block];
+  }
+  return Array.isArray(native.message?.content) ? native.message.content : [];
+}
+
+function extractToolCalls(
+  auditEvents: ClaudeAuditEvent[],
+  transcriptEvents: ClaudeAuditEvent[]
+): LLMToolCall[] {
+  const events = [...auditEvents, ...transcriptEvents];
+  const auditCalls: LLMToolCall[] = [];
+  const transcriptCalls: LLMToolCall[] = [];
+  const timestamps = new Map<LLMToolCall, number>();
+  const byId = new Map<string, LLMToolCall>();
+  const streams = new Map<number, { call: LLMToolCall; json: string }>();
+
+  for (const [eventIndex, event] of events.entries()) {
+    // Stream indexes are local to each source, not shared across files.
+    if (eventIndex === auditEvents.length) streams.clear();
+    const sourceCalls =
+      eventIndex < auditEvents.length ? auditCalls : transcriptCalls;
+    const native = nativeEvent(event);
+    if (native.type === 'message_start') streams.clear();
+    if (native.type === 'content_block_delta' && native.index !== undefined) {
+      const stream = streams.get(native.index);
+      if (stream && typeof native.delta?.partial_json === 'string') {
+        stream.json += native.delta.partial_json;
+        try {
+          const input: unknown = JSON.parse(stream.json);
+          if (input && typeof input === 'object' && !Array.isArray(input)) {
+            stream.call.arguments = input as Record<string, unknown>;
+          }
+        } catch {
+          // Partial streamed JSON is not yet an argument object.
+        }
       }
-      const mcpMatch = /^mcp__(.+)__(.+)$/.exec(block.name);
-      toolCalls.push({
-        name: mcpMatch ? mcpMatch[2]! : block.name,
-        source: mcpMatch ? 'mcp' : 'host',
-        ...(mcpMatch ? { server: mcpMatch[1]! } : {}),
-        arguments: block.input ?? {},
-        id: block.id,
-      });
+    }
+    for (const block of contentBlocks(event)) {
+      if (block.type !== 'tool_use' || !block.name) continue;
+      let call = block.id ? byId.get(block.id) : undefined;
+      if (!call) {
+        const mcpMatch = /^mcp__(.+)__(.+)$/.exec(block.name);
+        call = {
+          name: mcpMatch ? mcpMatch[2]! : block.name,
+          rawName: block.name,
+          source: mcpMatch ? 'mcp' : 'host',
+          ...(mcpMatch ? { server: mcpMatch[1]! } : {}),
+          arguments: block.input ?? {},
+          id: block.id,
+        };
+        if (block.id) byId.set(block.id, call);
+      } else if (block.input && Object.keys(block.input).length > 0) {
+        // A completed block can enrich an earlier empty streaming start.
+        call.arguments = block.input;
+      }
+      if (!sourceCalls.includes(call)) sourceCalls.push(call);
+      const timestamp = metadataTimestampMs(
+        event.timestamp ?? native.timestamp
+      );
+      if (Number.isFinite(timestamp) && !timestamps.has(call)) {
+        timestamps.set(call, timestamp);
+      }
+      if (native.type === 'content_block_start' && native.index !== undefined) {
+        streams.set(native.index, { call, json: '' });
+      }
     }
   }
 
-  return toolCalls;
+  // Results can precede calls when audit and transcript evidence are combined.
+  for (const block of events.flatMap(contentBlocks)) {
+    if (block.type !== 'tool_result' || !block.tool_use_id) continue;
+    const call = byId.get(block.tool_use_id);
+    if (!call) continue;
+    if (Object.hasOwn(block, 'content')) {
+      call.output =
+        typeof block.content === 'string'
+          ? block.content
+          : JSON.stringify(block.content);
+    }
+    if (typeof block.is_error === 'boolean') {
+      call.isError = block.is_error;
+    }
+  }
+  return mergeToolCallOrder(auditCalls, transcriptCalls, timestamps);
+}
+
+function mergeToolCallOrder(
+  auditCalls: LLMToolCall[],
+  transcriptCalls: LLMToolCall[],
+  timestamps: Map<LLMToolCall, number>
+): LLMToolCall[] {
+  // Never reorder transcript calls. Shared calls anchor audit-only evidence;
+  // timestamps place it within those bounds when both sources supply them.
+  const ordered = [...transcriptCalls];
+  let cursor = 0;
+  for (const [index, call] of auditCalls.entries()) {
+    const sharedIndex = ordered.indexOf(call);
+    if (sharedIndex >= 0) {
+      cursor = Math.max(cursor, sharedIndex + 1);
+      continue;
+    }
+    const nextAnchor = auditCalls
+      .slice(index + 1)
+      .find((next) => ordered.indexOf(next) >= cursor);
+    const upperBound = nextAnchor
+      ? ordered.indexOf(nextAnchor)
+      : ordered.length;
+    let insertionIndex = upperBound;
+    const timestamp = timestamps.get(call);
+    if (timestamp !== undefined) {
+      for (let position = cursor; position < upperBound; position++) {
+        const nextTimestamp = timestamps.get(ordered[position]!);
+        if (nextTimestamp !== undefined && nextTimestamp > timestamp) {
+          insertionIndex = position;
+          break;
+        }
+      }
+    }
+    // Without time evidence, insert before the next shared call, or append.
+    ordered.splice(insertionIndex, 0, call);
+    cursor = insertionIndex + 1;
+  }
+  return ordered;
 }
 
 function dedupeResultEvents(events: ClaudeAuditEvent[]): ClaudeAuditEvent[] {
@@ -1511,17 +1635,35 @@ function buildNativeTelemetry(
         )
     ),
   ];
-  const toolErrorCount = resultEvents.reduce(
-    (count, event) =>
-      count +
-      (event.message?.content ?? []).filter(
-        (block) => block.type === 'tool_result' && block.is_error === true
-      ).length,
-    0
+  const requestIds = new Set<string>();
+  const messageIds = new Set<string>();
+  for (const event of events) {
+    const native = nativeEvent(event);
+    if (native.type !== 'assistant' && native.type !== 'message_start')
+      continue;
+    const requestId =
+      native.requestId ??
+      native.request_id ??
+      event.requestId ??
+      event.request_id;
+    if (requestId) requestIds.add(requestId);
+    if (native.message?.id) messageIds.add(native.message.id);
+  }
+  const toolResults = events
+    .flatMap(contentBlocks)
+    .filter((block) => block.type === 'tool_result');
+  const errorIds = new Set(
+    toolResults
+      .filter((block) => block.is_error === true)
+      .map((block) => block.tool_use_id ?? JSON.stringify(block))
   );
   return {
     resultCount: resultEvents.length,
-    apiCallCount: usage ? resultEvents.length : 0,
+    observationSource: 'claude-native-audit-and-transcript',
+    ...(requestIds.size > 0 ? { observedRequestCount: requestIds.size } : {}),
+    ...(messageIds.size > 0
+      ? { observedAssistantMessageCount: messageIds.size }
+      : {}),
     models,
     inputTokens: usage?.inputTokens,
     outputTokens: usage?.outputTokens,
@@ -1531,7 +1673,7 @@ function buildNativeTelemetry(
     durationMs: usage?.durationMs,
     durationApiMs: usage?.durationApiMs,
     toolCallCount: toolCalls.length,
-    toolErrorCount,
+    ...(toolResults.length > 0 ? { toolErrorCount: errorIds.size } : {}),
   };
 }
 

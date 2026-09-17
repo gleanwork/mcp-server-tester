@@ -23,15 +23,50 @@ export interface ComputerUseOptions {
   env?: NodeJS.ProcessEnv;
 }
 
+const TOKEN_FIELDS = [
+  'input_tokens',
+  'output_tokens',
+  'cache_creation_input_tokens',
+  'cache_read_input_tokens',
+] as const;
+type ComputerUseTokenField = (typeof TOKEN_FIELDS)[number];
+
+/** Usage totals cover only observed fields on completed planner responses. */
+export interface ComputerUseTelemetry {
+  accounting: 'complete' | 'partial';
+  response_models: string[];
+  planner_response_count: number;
+  usage: Partial<Record<ComputerUseTokenField, number>>;
+  usage_observation_counts: Record<ComputerUseTokenField, number>;
+  duration_ms: number;
+  /** Budget-consuming proposals, including refusals. */
+  action_count: number;
+  attempted_action_count: number;
+  executed_action_count: number;
+  refused_action_count: number;
+  /** No price-table estimates. Anthropic Messages supplies no dollar cost. */
+  cost: { status: 'unavailable' };
+}
+
+export class ComputerUseDriverError extends Error {
+  constructor(
+    message: string,
+    public readonly telemetry?: ComputerUseTelemetry
+  ) {
+    super(message);
+  }
+}
+
 export interface ComputerUseSubmissionResult {
   status: 'submitted';
   action_count: number;
   model: string;
   submission_action: Record<string, unknown>;
+  telemetry?: ComputerUseTelemetry;
 }
 
 /** Exhausted inspection is not proof that the native task failed. */
-export class ComputerUseHitlBudgetError extends Error {
+export class ComputerUseHitlBudgetError extends ComputerUseDriverError {
   override name = 'ComputerUseHitlBudgetError';
 }
 
@@ -39,6 +74,7 @@ export interface ComputerUseHitlResult {
   status: 'hitl_checked';
   action_count: number;
   model: string;
+  telemetry?: ComputerUseTelemetry;
 }
 
 export async function runAnthropicComputerUseSubmission(
@@ -95,7 +131,6 @@ async function runComputerUseDriver(
     `starting Computer Use ${label} (script=${DRIVER_PATH}, maxActions=${maxActions}, timeoutMs=${timeoutMs})`
   );
   let stdout = '';
-  let stderr = '';
   try {
     const result = await execFileAsync(
       python,
@@ -107,27 +142,17 @@ async function runComputerUseDriver(
       }
     );
     stdout = String(result.stdout ?? '');
-    stderr = String(result.stderr ?? '');
   } catch (error) {
-    const childError = error as { stdout?: string; stderr?: string };
+    const childError = error as { stdout?: string };
     stdout = String(childError.stdout ?? '');
-    stderr = String(childError.stderr ?? '');
-    const redact = (text: string): string => {
-      for (const [key, value] of Object.entries(env)) {
-        if (value && /token|key|secret|password|authorization/i.test(key))
-          text = text.split(value).join('[REDACTED]');
-      }
-      return text;
-    };
-    const details = [
-      formatError(error),
-      stdout ? `stdout=${stdout.slice(-1000)}` : '',
-      stderr ? `stderr=${stderr.slice(-1000)}` : '',
-    ]
-      .filter(Boolean)
-      .map(redact)
-      .join('; ');
+    // Child-process errors contain argv (the query), and provider errors can
+    // contain request content. Never copy raw stdout/stderr or error messages.
     const reported = parseLastJsonLine(stdout);
+    const telemetry = parseTelemetry(reported?.telemetry, env, 'partial');
+    const details =
+      (error as { killed?: boolean }).killed === true
+        ? 'driver terminated before completion; not retrying'
+        : 'driver exited unsuccessfully; not retrying';
     if (
       mode === 'hitl' &&
       reported?.status === 'failed' &&
@@ -140,11 +165,15 @@ async function runComputerUseDriver(
         'HITL inspection budget reached; native completion remains the success criterion.'
       );
       throw new ComputerUseHitlBudgetError(
-        `HITL inspection reached its ${maxActions}-action budget.`
+        `HITL inspection reached its ${maxActions}-action budget.`,
+        telemetry
       );
     }
     diagnostic(`Computer Use ${label} failed: ${details}`);
-    throw new Error(`Computer Use ${label} failed: ${details}`);
+    throw new ComputerUseDriverError(
+      `Computer Use ${label} failed: ${details}`,
+      telemetry
+    );
   }
 
   diagnostic(
@@ -153,18 +182,39 @@ async function runComputerUseDriver(
   const record = parseLastJsonLine(stdout);
   const expectedStatus = mode === 'submit' ? 'submitted' : 'hitl_checked';
   if (record?.status !== expectedStatus) {
-    const detail = JSON.stringify(record ?? stdout.slice(-1000));
-    diagnostic(`Computer Use ${label} stopped unexpectedly: ${detail}`);
-    throw new Error(
-      `Computer Use ${label} did not reach ${expectedStatus}: ${detail}`
+    throw new ComputerUseDriverError(
+      `Computer Use ${label} did not reach ${expectedStatus}.`,
+      parseTelemetry(record?.telemetry, env, 'partial')
     );
   }
+  if (!isCount(record.action_count) || !isSafeModel(record.model, env)) {
+    throw new ComputerUseDriverError(
+      `Computer Use ${label} returned invalid result fields.`,
+      parseTelemetry(record.telemetry, env, 'partial')
+    );
+  }
+  const telemetry = parseTelemetry(record.telemetry, env, 'complete');
+  const common = {
+    action_count: record.action_count,
+    model: record.model,
+    ...(telemetry ? { telemetry } : {}),
+  };
   diagnostic(
-    `Computer Use ${label} completed (actions=${typeof record.action_count === 'number' ? record.action_count : 'unknown'})`
+    `Computer Use ${label} completed (actions=${common.action_count})`
   );
-  return record as unknown as
-    | ComputerUseSubmissionResult
-    | ComputerUseHitlResult;
+  if (mode === 'hitl') return { status: 'hitl_checked', ...common };
+  const submission = asRecord(record.submission_action);
+  if (submission?.action !== 'key' || submission.text !== 'enter') {
+    throw new ComputerUseDriverError(
+      'Computer Use submission returned an invalid submission boundary.',
+      telemetry ? { ...telemetry, accounting: 'partial' } : undefined
+    );
+  }
+  return {
+    status: 'submitted',
+    ...common,
+    submission_action: { action: 'key', text: 'enter' },
+  };
 }
 
 function diagnostic(message: string): void {
@@ -186,6 +236,102 @@ function parseLastJsonLine(
   return undefined;
 }
 
-function formatError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function isCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isSafeModel(value: unknown, env: NodeJS.ProcessEnv): value is string {
+  return (
+    typeof value === 'string' &&
+    /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,106}$/.test(value) &&
+    !Object.entries(env).some(
+      ([key, secret]) =>
+        secret &&
+        /token|key|secret|password|authorization/i.test(key) &&
+        value.includes(secret)
+    )
+  );
+}
+
+/** Invalid telemetry is omitted, never coerced or allowed to change execution. */
+function parseTelemetry(
+  value: unknown,
+  env: NodeJS.ProcessEnv,
+  accounting: ComputerUseTelemetry['accounting']
+): ComputerUseTelemetry | undefined {
+  const record = asRecord(value);
+  if (
+    !record ||
+    (record.accounting !== 'complete' && record.accounting !== 'partial')
+  )
+    return undefined;
+  const counts = [
+    'planner_response_count',
+    'action_count',
+    'attempted_action_count',
+    'executed_action_count',
+    'refused_action_count',
+  ] as const;
+  for (const field of counts) if (!isCount(record[field])) return undefined;
+  if (
+    typeof record.duration_ms !== 'number' ||
+    !Number.isFinite(record.duration_ms) ||
+    record.duration_ms < 0 ||
+    !Array.isArray(record.response_models) ||
+    record.response_models.length > (record.planner_response_count as number)
+  )
+    return undefined;
+  const responseModels: string[] = [];
+  for (const model of record.response_models) {
+    if (
+      !isSafeModel(model, env) ||
+      !/^claude-[a-z0-9][a-z0-9.-]{0,99}$/.test(model)
+    )
+      return undefined;
+    if (!responseModels.includes(model)) responseModels.push(model);
+  }
+  const usage = asRecord(record.usage);
+  const coverage = asRecord(record.usage_observation_counts);
+  if (!usage || !coverage) return undefined;
+  const safeUsage: ComputerUseTelemetry['usage'] = {};
+  const safeCoverage = {} as ComputerUseTelemetry['usage_observation_counts'];
+  for (const field of TOKEN_FIELDS) {
+    const count = coverage[field];
+    if (!isCount(count) || count > (record.planner_response_count as number))
+      return undefined;
+    safeCoverage[field] = count;
+    if (usage[field] !== undefined) {
+      if (!isCount(usage[field]) || count === 0) return undefined;
+      safeUsage[field] = usage[field];
+    } else if (count !== 0) return undefined;
+  }
+  const actions = record.action_count as number;
+  const attempted = record.attempted_action_count as number;
+  const executed = record.executed_action_count as number;
+  const refused = record.refused_action_count as number;
+  if (
+    attempted > actions ||
+    executed > attempted ||
+    refused > actions - attempted
+  )
+    return undefined;
+  return {
+    accounting: accounting === 'partial' ? 'partial' : record.accounting,
+    response_models: responseModels,
+    planner_response_count: record.planner_response_count as number,
+    usage: safeUsage,
+    usage_observation_counts: safeCoverage,
+    duration_ms: record.duration_ms,
+    action_count: actions,
+    attempted_action_count: attempted,
+    executed_action_count: executed,
+    refused_action_count: refused,
+    cost: { status: 'unavailable' },
+  };
 }

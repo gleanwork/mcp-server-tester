@@ -306,6 +306,7 @@ function configuredJudges(
 export async function runEvalSuite(
   options: RunEvalSuiteOptions
 ): Promise<RunEvalSuiteResult> {
+  const suiteStartTime = Date.now();
   const rootDir = options.rootDir ?? process.cwd();
   const rawManifest = loadEvalManifest(options.manifestPath, { rootDir });
   const identity = manifestIdentity(rawManifest);
@@ -486,6 +487,7 @@ export async function runEvalSuite(
         const runHost =
           typeof host.definition.run === 'function' ||
           typeof host.definition.runBatch === 'function';
+        const batchStartTime = Date.now();
         const batchTraces = await prepareHostBatch(
           host.definition,
           effectiveDataset.cases,
@@ -493,6 +495,9 @@ export async function runEvalSuite(
           resolvedServers,
           { manifest: effectiveManifest, arm, env }
         );
+        // Batch execution (including shared setup/cleanup) precedes the runner's
+        // wall clock. Count its elapsed time once, not the sum of request times.
+        const batchDurationMs = batchTraces ? Date.now() - batchStartTime : 0;
         const result = await runEvalDataset(
           {
             dataset: effectiveDataset,
@@ -542,11 +547,14 @@ export async function runEvalSuite(
                         throw new Error(
                           'Batch trace already consumed or missing; refusing to resubmit.'
                         );
-                      return hostTraceToExecution(
-                        trace,
-                        definition.evidence ?? 'none',
-                        resolvedServers
-                      );
+                      return {
+                        ...hostTraceToExecution(
+                          trace,
+                          definition.evidence ?? 'none',
+                          resolvedServers
+                        ),
+                        preExecutionDurationMs: trace.durationMs,
+                      };
                     }
                     if (!definition.run)
                       throw new Error(
@@ -577,6 +585,7 @@ export async function runEvalSuite(
           },
           { mcp }
         );
+        result.durationMs += batchDurationMs;
         allDatasets.push({
           source: sourceConfig,
           dataset: executionDataset,
@@ -592,10 +601,6 @@ export async function runEvalSuite(
     armResults.push(summarizeArm(arm, servers, sourceResults));
   }
 
-  const durationMs = armResults.reduce(
-    (sum, arm) => sum + (arm.result?.durationMs ?? 0),
-    0
-  );
   const armMetrics = armResults.map((arm, index) => {
     const metricSpecs = (arms[index]?.metrics ??
       manifest.metrics ??
@@ -623,7 +628,7 @@ export async function runEvalSuite(
     schemaVersion: 1,
     ...identity,
     timestamp: new Date().toISOString(),
-    durationMs,
+    durationMs: Date.now() - suiteStartTime,
     manifestName: manifest.name,
     arms: armResults,
     metrics: {

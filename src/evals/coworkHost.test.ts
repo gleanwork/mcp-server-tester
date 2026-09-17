@@ -8,7 +8,10 @@ import { prepareHostBatch } from './prepareHostBatch.js';
 import { toCoworkServers } from './coworkSetup/config.js';
 import type { ClaudeTrace } from './externalHost/builtins/anthropicClaude.js';
 import type * as ClaudeNative from './externalHost/builtins/anthropicClaude.js';
-import { ComputerUseHitlBudgetError } from './cowork/anthropicComputerUse.js';
+import {
+  ComputerUseDriverError,
+  ComputerUseHitlBudgetError,
+} from './cowork/anthropicComputerUse.js';
 import type * as ComputerUse from './cowork/anthropicComputerUse.js';
 import type { HostBatchRequest, HostRunContext } from './evalFrameworkTypes.js';
 
@@ -125,7 +128,8 @@ beforeEach(() => {
       isComplete: true,
       telemetry: {
         resultCount: 1,
-        apiCallCount: 1,
+        observedAssistantMessageCount: 1,
+        observationSource: 'claude-native-audit-and-transcript',
         toolCallCount: 1,
         toolErrorCount: 0,
         models: ['native-model'],
@@ -141,6 +145,81 @@ afterEach(async () => {
 });
 
 describe('V2 Cowork host', () => {
+  const driverTelemetry: ComputerUse.ComputerUseTelemetry = {
+    accounting: 'complete',
+    response_models: ['observed-planner'],
+    planner_response_count: 2,
+    usage: { input_tokens: 40, output_tokens: 5 },
+    usage_observation_counts: {
+      input_tokens: 2,
+      output_tokens: 2,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+    },
+    duration_ms: 200,
+    action_count: 2,
+    attempted_action_count: 2,
+    executed_action_count: 2,
+    refused_action_count: 0,
+    cost: { status: 'unavailable' },
+  };
+  it('retains observed CU accounting separately from native usage and measures case wall time', async () => {
+    let now = 1000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    mocks.setup.mockImplementation(async () => {
+      now += 100;
+      return {
+        dispose: async () => {
+          now += 100;
+        },
+      };
+    });
+    mocks.submit.mockImplementation(async () => {
+      now += 200;
+      return { status: 'submitted', telemetry: driverTelemetry };
+    });
+    mocks.hitl.mockImplementation(async () => {
+      now += 300;
+      return { status: 'hitl_checked', telemetry: driverTelemetry };
+    });
+    const result = await COWORK_HOST.runBatch!(requests().slice(0, 1), context);
+    expect(result[0]).toMatchObject({
+      durationMs: 500,
+      usage: { inputTokens: 10, totalCostUsd: 0.01 },
+      telemetry: {
+        costScope: 'native-inference-only',
+        computerUse: {
+          submission: { status: 'completed', telemetry: driverTelemetry },
+          hitl: { status: 'completed', telemetry: driverTelemetry },
+        },
+      },
+    });
+    expect(now).toBe(1700);
+  });
+  it.each(['submission', 'hitl'] as const)(
+    'retains partial %s accounting on driver failure',
+    async (stage) => {
+      const partial = { ...driverTelemetry, accounting: 'partial' as const };
+      (stage === 'submission'
+        ? mocks.submit
+        : mocks.hitl
+      ).mockRejectedValueOnce(
+        new ComputerUseDriverError('driver failed', partial)
+      );
+      const result = await COWORK_HOST.runBatch!(requests(), context);
+      expect(result[0]).toMatchObject({
+        error: 'driver failed',
+        telemetry: {
+          computerUse: { [stage]: { status: 'failed', telemetry: partial } },
+        },
+      });
+      if (stage === 'submission') {
+        expect(result[1]?.durationMs).toBeUndefined();
+        expect(result[1]?.telemetry).toBeUndefined();
+        expect(mocks.submit).toHaveBeenCalledOnce();
+      }
+    }
+  );
   it('atomically claims the desktop across asynchronous default-platform resolution', async () => {
     mocks.submit.mockImplementation(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));

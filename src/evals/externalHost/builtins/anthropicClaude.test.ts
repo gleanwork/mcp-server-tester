@@ -30,7 +30,447 @@ async function writeJsonl(path: string, events: unknown[]): Promise<void> {
   );
 }
 
+async function parseNativeEvents(audit: unknown[], transcript: unknown[] = []) {
+  const sessionDir = await mkdtemp(join(tmpdir(), 'claude-native-telemetry-'));
+  onTestFinished(() => rm(sessionDir, { recursive: true, force: true }));
+  await writeJsonl(join(sessionDir, 'audit.jsonl'), audit);
+  await writeJsonl(join(sessionDir, 'cli.jsonl'), transcript);
+  return parseClaudeTrace({
+    id: 'native-telemetry',
+    metadataPath: join(sessionDir, 'metadata.json'),
+    sessionDir,
+    statMtimeMs: Date.now(),
+    metadata: { cliSessionId: 'cli' },
+  });
+}
+
+function toolUseEvent(id: string, name: string, timestamp?: string) {
+  return {
+    type: 'assistant',
+    timestamp,
+    message: { content: [{ type: 'tool_use', id, name }] },
+  };
+}
+
 describe('anthropicClaude trace parsing', () => {
+  it.each(['partial', 'conflicting'] as const)(
+    'preserves transcript ordering with %s audit coverage and audit-only results',
+    async (coverage) => {
+      const read = toolUseEvent('z-read', 'Read');
+      const write = toolUseEvent('a-write', 'Write');
+      const trace = await parseNativeEvents(
+        [
+          write,
+          ...(coverage === 'conflicting' ? [read] : []),
+          {
+            type: 'user',
+            message: {
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'z-read',
+                  content: false,
+                  is_error: false,
+                },
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'a-write',
+                  content: '',
+                  is_error: true,
+                },
+              ],
+            },
+          },
+        ],
+        [
+          read,
+          write,
+          {
+            type: 'user',
+            message: {
+              content: [{ type: 'tool_result', tool_use_id: 'a-write' }],
+            },
+          },
+        ]
+      );
+      expect(trace.toolCalls.map((call) => call.name)).toEqual([
+        'Read',
+        'Write',
+      ]);
+      expect(trace.toolCalls).toMatchObject([
+        { id: 'z-read', output: 'false', isError: false },
+        { id: 'a-write', output: '', isError: true },
+      ]);
+      expect(trace.telemetry.toolCallCount).toBe(2);
+    }
+  );
+
+  it('places audit-only earlier calls before a common anchor and retains trailing calls', async () => {
+    const anchor = toolUseEvent('a-anchor', 'Write');
+    const trace = await parseNativeEvents(
+      [
+        toolUseEvent('z-earlier', 'Read'),
+        toolUseEvent('y-earlier', 'Grep'),
+        anchor,
+        toolUseEvent('b-later', 'Bash'),
+        {
+          type: 'user',
+          message: {
+            content: [
+              { type: 'tool_result', tool_use_id: 'z-earlier', content: 0 },
+              { type: 'tool_result', tool_use_id: 'b-later', content: null },
+            ],
+          },
+        },
+      ],
+      [anchor, toolUseEvent('c-transcript', 'Read')]
+    );
+    expect(trace.toolCalls.map((call) => call.id)).toEqual([
+      'z-earlier',
+      'y-earlier',
+      'a-anchor',
+      'c-transcript',
+      'b-later',
+    ]);
+    expect(trace.toolCalls[0]).toHaveProperty('output', '0');
+    expect(trace.toolCalls[1]).not.toHaveProperty('output');
+    expect(trace.toolCalls[4]).toHaveProperty('output', 'null');
+  });
+
+  it('uses timestamps to place audit-only calls without sorting transcript calls or IDs', async () => {
+    const trace = await parseNativeEvents(
+      [
+        {
+          type: 'stream_event',
+          timestamp: '2026-09-17T00:00:01Z',
+          event: {
+            type: 'content_block_start',
+            index: 0,
+            content_block: { type: 'tool_use', id: 'z-first', name: 'Read' },
+          },
+        },
+        toolUseEvent('y-middle', 'Grep', '2026-09-17T00:00:03Z'),
+        toolUseEvent('x-last', 'Bash', 'invalid'),
+      ],
+      [
+        toolUseEvent('b-second', 'Write', '2026-09-17T00:00:02Z'),
+        toolUseEvent('a-fourth', 'Read', '2026-09-17T00:00:04Z'),
+        // A stale timestamp must not change authoritative transcript order.
+        toolUseEvent('c-fifth', 'Read', '2026-09-17T00:00:00Z'),
+      ]
+    );
+    expect(trace.toolCalls.map((call) => call.id)).toEqual([
+      'z-first',
+      'b-second',
+      'y-middle',
+      'a-fourth',
+      'c-fifth',
+      'x-last',
+    ]);
+  });
+
+  it('correlates results across sources and deduplicates calls and errors by tool ID', async () => {
+    const calls = {
+      type: 'assistant',
+      message: {
+        id: 'msg-1',
+        content: [
+          {
+            type: 'tool_use',
+            id: 'a',
+            name: 'mcp__my_server__search',
+            input: { query: 'docs' },
+          },
+          { type: 'tool_use', id: 'b', name: 'Bash', input: {} },
+        ],
+      },
+    };
+    const results = {
+      type: 'user',
+      message: {
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'a',
+            content: [{ type: 'text', text: 'denied' }],
+            is_error: true,
+          },
+          {
+            type: 'tool_result',
+            tool_use_id: 'b',
+            content: '',
+            is_error: false,
+          },
+          {
+            type: 'tool_result',
+            tool_use_id: 'orphan',
+            content: 'failed',
+            is_error: true,
+          },
+        ],
+      },
+    };
+    const terminal = {
+      type: 'result',
+      requestId: 'terminal',
+      result: 'done',
+      is_error: true,
+    };
+    const trace = await parseNativeEvents(
+      [results, calls, terminal],
+      [calls, results, terminal]
+    );
+    expect(trace.toolCalls).toEqual([
+      {
+        id: 'a',
+        name: 'search',
+        rawName: 'mcp__my_server__search',
+        source: 'mcp',
+        server: 'my_server',
+        arguments: { query: 'docs' },
+        output: '[{"type":"text","text":"denied"}]',
+        isError: true,
+      },
+      {
+        id: 'b',
+        name: 'Bash',
+        rawName: 'Bash',
+        source: 'host',
+        arguments: {},
+        output: '',
+        isError: false,
+      },
+    ]);
+    expect(trace.telemetry.toolErrorCount).toBe(2);
+    expect(trace.telemetry.toolCallCount).toBe(2);
+    expect(trace.telemetry.resultCount).toBe(1);
+  });
+
+  it.each(['', false, 0, null, [], {}])(
+    'retains present falsy or empty tool output %j',
+    async (content) => {
+      const trace = await parseNativeEvents([
+        {
+          type: 'assistant',
+          message: { content: [{ type: 'tool_use', id: 'a', name: 'Read' }] },
+        },
+        {
+          type: 'user',
+          message: {
+            content: [{ type: 'tool_result', tool_use_id: 'a', content }],
+          },
+        },
+      ]);
+      expect(trace.toolCalls[0]).toHaveProperty(
+        'output',
+        typeof content === 'string' ? content : JSON.stringify(content)
+      );
+      expect(trace.toolCalls[0]).not.toHaveProperty('isError');
+      expect(trace.telemetry.toolErrorCount).toBe(0);
+    }
+  );
+
+  it('keeps missing result fields unknown and never pairs a result by position', async () => {
+    const trace = await parseNativeEvents([
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'tool_use', id: 'a', name: 'Read' },
+            { type: 'tool_use', id: 'b', name: 'Read' },
+            { type: 'tool_use', name: 'Read' },
+          ],
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: 'a' },
+            { type: 'tool_result', content: 'not correlated', is_error: true },
+          ],
+        },
+      },
+    ]);
+    for (const call of trace.toolCalls) {
+      expect(call).not.toHaveProperty('output');
+      expect(call).not.toHaveProperty('isError');
+    }
+    expect(trace.toolCalls).toHaveLength(3);
+  });
+
+  it('merges streamed chunks and completed blocks without conflating multiple IDs', async () => {
+    const stream = (event: unknown) => ({ type: 'stream_event', event });
+    const events = [
+      stream({ type: 'message_start', message: { id: 'msg-1' } }),
+      stream({
+        type: 'content_block_start',
+        index: 0,
+        content_block: { type: 'tool_use', id: 'a', name: 'Read', input: {} },
+      }),
+      stream({
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'input_json_delta', partial_json: '{"path":' },
+      }),
+      stream({
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'input_json_delta', partial_json: '"a"}' },
+      }),
+      stream({
+        type: 'content_block_start',
+        index: 1,
+        content_block: { type: 'tool_use', id: 'b', name: 'Read', input: {} },
+      }),
+      stream({
+        type: 'content_block_delta',
+        index: 1,
+        delta: { type: 'input_json_delta', partial_json: '{"path":"b"}' },
+      }),
+      {
+        type: 'assistant',
+        message: {
+          id: 'msg-1',
+          content: [
+            { type: 'tool_use', id: 'a', name: 'Read', input: { path: 'a' } },
+          ],
+        },
+      },
+      stream({ type: 'message_start', message: { id: 'msg-2' } }),
+      stream({
+        type: 'content_block_start',
+        index: 0,
+        content_block: { type: 'tool_use', id: 'c', name: 'Read', input: {} },
+      }),
+      stream({
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'input_json_delta', partial_json: '{"path":"c"}' },
+      }),
+    ];
+    const trace = await parseNativeEvents(events, events);
+    expect(trace.toolCalls.map((call) => [call.id, call.arguments])).toEqual([
+      ['a', { path: 'a' }],
+      ['b', { path: 'b' }],
+      ['c', { path: 'c' }],
+    ]);
+    expect(trace.telemetry.observedAssistantMessageCount).toBe(2);
+    expect(trace.telemetry).not.toHaveProperty('apiCallCount');
+  });
+
+  it('counts stable native request/message observations, not terminal records or stream chunks', async () => {
+    const events = [
+      {
+        type: 'assistant',
+        requestId: 'request-a',
+        message: { id: 'message-a', content: [] },
+      },
+      {
+        type: 'assistant',
+        request_id: 'request-a',
+        message: { id: 'message-a', content: [] },
+      },
+      {
+        type: 'assistant',
+        requestId: 'request-b',
+        message: { id: 'message-b', content: [] },
+      },
+      { type: 'assistant', message: { content: [] } },
+      {
+        type: 'result',
+        requestId: 'terminal',
+        result: 'done',
+        usage: { input_tokens: 8, output_tokens: 3 },
+        total_cost_usd: 0.25,
+      },
+    ];
+    const trace = await parseNativeEvents(events, events);
+    expect(trace.telemetry).toMatchObject({
+      resultCount: 1,
+      observedRequestCount: 2,
+      observedAssistantMessageCount: 2,
+      observationSource: 'claude-native-audit-and-transcript',
+      inputTokens: 8,
+      outputTokens: 3,
+      totalCostUsd: 0.25,
+    });
+    expect(trace.telemetry).not.toHaveProperty('apiCallCount');
+    expect(trace.telemetry).not.toHaveProperty('toolErrorCount');
+  });
+
+  it('keeps aggregate usage deduplication across distinct terminal result identities', async () => {
+    const results = [
+      {
+        type: 'result',
+        requestId: 'turn-1',
+        result: 'first',
+        usage: {
+          input_tokens: 5,
+          output_tokens: 2,
+          cache_read_input_tokens: 3,
+        },
+        total_cost_usd: 0.25,
+        duration_ms: 100,
+        duration_api_ms: 80,
+      },
+      {
+        type: 'result',
+        request_id: 'turn-2',
+        result: 'second',
+        usage: {
+          input_tokens: 7,
+          output_tokens: 4,
+          cache_creation_input_tokens: 2,
+        },
+        total_cost_usd: 0.5,
+        duration_ms: 200,
+        duration_api_ms: 150,
+      },
+    ];
+    const trace = await parseNativeEvents(results, results);
+    expect(trace.telemetry.resultCount).toBe(2);
+    expect(trace.usage).toEqual({
+      inputTokens: 12,
+      outputTokens: 6,
+      cacheReadInputTokens: 3,
+      cacheCreationInputTokens: 2,
+      totalCostUsd: 0.75,
+      durationMs: 300,
+      durationApiMs: 230,
+    });
+    expect(trace.finalAnswer).toBe('second');
+    expect(trace.telemetry).not.toHaveProperty('apiCallCount');
+  });
+
+  it('omits unknown identity and error counts even when a terminal result has usage', async () => {
+    const trace = await parseNativeEvents([
+      {
+        type: 'user',
+        requestId: 'user-id',
+        message: { id: 'user-message', content: 'prompt' },
+      },
+      { type: 'assistant', message: { content: [] } },
+      {
+        type: 'result',
+        requestId: 'terminal',
+        is_error: true,
+        usage: { input_tokens: 1 },
+      },
+    ]);
+    for (const key of [
+      'apiCallCount',
+      'observedRequestCount',
+      'observedAssistantMessageCount',
+      'toolErrorCount',
+    ]) {
+      expect(trace.telemetry).not.toHaveProperty(key);
+    }
+    const empty = await parseNativeEvents([]);
+    expect(empty.telemetry).not.toHaveProperty('toolErrorCount');
+    expect(empty.telemetry).not.toHaveProperty('apiCallCount');
+  });
+
   it.each(['current', 'unrelated-cwd'] as const)(
     'resolves the current native session layout without trusting %s paths',
     async (mode) => {
@@ -226,6 +666,7 @@ describe('anthropicClaude trace parsing', () => {
       {
         id: 'toolu_1',
         name: 'search',
+        rawName: 'mcp__server__search',
         source: 'mcp',
         server: 'server',
         arguments: { query: 'planning' },

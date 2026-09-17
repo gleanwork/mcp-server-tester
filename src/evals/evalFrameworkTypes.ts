@@ -67,6 +67,9 @@ export interface HostEvent {
   server?: string;
   arguments?: Record<string, unknown>;
   output?: string;
+  /** Explicit tool-result error status, absent when not observed. */
+  isError?: boolean;
+  rawName?: string;
   id?: string;
 }
 
@@ -77,8 +80,10 @@ export interface HostRunResult {
   events: HostEvent[];
   error?: string;
   usage?: UsageMetrics;
-  /** Native-host measurements only; UI action counts are not usage. */
+  /** Native and driver observations remain separately scoped; UI actions are not LLM usage. */
   telemetry?: Record<string, unknown>;
+  /** Per-request wall time, excluding shared batch setup and cleanup. */
+  durationMs?: number;
   llmDurationMs?: number;
 }
 

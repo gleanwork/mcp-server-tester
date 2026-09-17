@@ -1189,7 +1189,10 @@ async function runSingleIteration(
     expectations: expectationResults,
     authType: context.mcp?.authType,
     project: context.mcp?.project,
-    durationMs: Date.now() - startTime,
+    // Only pre-executed traces need extra time. Live execution is already
+    // included in this iteration's wall clock.
+    durationMs:
+      Date.now() - startTime + (execution.preExecutionDurationMs ?? 0),
     tags: evalCase.tags,
     toolPrecision,
     toolRecall,
