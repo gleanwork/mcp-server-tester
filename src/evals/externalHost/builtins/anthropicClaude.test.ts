@@ -1,7 +1,7 @@
-import { mkdtemp, mkdir, utimes, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import {
   buildClaudeTraceMetadata,
   findMatchingClaudeSessions,
@@ -31,6 +31,113 @@ async function writeJsonl(path: string, events: unknown[]): Promise<void> {
 }
 
 describe('anthropicClaude trace parsing', () => {
+  it.each(['current', 'unrelated-cwd'] as const)(
+    'resolves the current native session layout without trusting %s paths',
+    async (mode) => {
+      const root = await mkdtemp(join(tmpdir(), 'claude-short-session-'));
+      onTestFinished(() => rm(root, { recursive: true, force: true }));
+      const id = 'local_12345678-1234-1234-1234-123456789abc';
+      const native = join(root, '12345678');
+      const transcript = join(native, '.claude', 'projects', 'fixture');
+      await mkdir(transcript, { recursive: true });
+      const marker = 'MCP_SERVER_TESTER_LAYOUT';
+      const events = [
+        { type: 'user', message: { content: `query [${marker}]` } },
+        {
+          type: 'assistant',
+          message: { model: 'claude-opus-4-6', content: [] },
+        },
+        {
+          type: 'assistant',
+          message: {
+            content: [
+              {
+                type: 'tool_use',
+                name: 'mcp__glean__search',
+                id: 'call-1',
+                input: {},
+              },
+            ],
+          },
+        },
+        {
+          type: 'assistant',
+          message: {
+            content: [
+              { type: 'tool_use', name: 'Grep', id: 'call-2', input: {} },
+              {
+                type: 'tool_use',
+                name: 'mcp__workspace__bash',
+                id: 'call-3',
+                input: {},
+              },
+            ],
+          },
+        },
+        {
+          type: 'result',
+          result: 'READY',
+          usage: { input_tokens: 5, output_tokens: 2 },
+          total_cost_usd: 0.01,
+        },
+      ];
+      await writeFile(
+        join(root, `${id}.json`),
+        JSON.stringify({
+          sessionId: id,
+          cliSessionId: 'native-cli',
+          initialMessage: `query [${marker}]`,
+          createdAt: Date.now(),
+          cwd: join(
+            root,
+            mode === 'current' ? '12345678' : 'other-session',
+            'outputs'
+          ),
+        })
+      );
+      await writeJsonl(join(native, 'audit.jsonl'), events);
+      await writeJsonl(join(transcript, 'native-cli.jsonl'), events);
+      const found = await findMatchingClaudeSessions({
+        dataDir: root,
+        marker,
+        snapshot: new Map(),
+        startedAtMs: Date.now() - 1000,
+      });
+      expect(found).toHaveLength(1);
+      expect(found[0]!.isComplete).toBe(mode === 'current');
+      if (mode === 'current') {
+        const trace = await waitForClaudeTrace({
+          dataDir: root,
+          marker,
+          snapshot: new Map(),
+          startedAtMs: Date.now() - 1000,
+          timeoutMs: 1000,
+          correlation: {
+            strategy: 'prompt_marker',
+            includedInPrompt: true,
+            marker,
+          },
+        });
+        expect(trace.finalAnswer).toBe('READY');
+        expect(trace.telemetry.models).toEqual(['claude-opus-4-6']);
+        expect(trace.toolCalls[0]).toMatchObject({
+          name: 'search',
+          source: 'mcp',
+          server: 'glean',
+        });
+        expect(trace.toolCalls[1]).toMatchObject({
+          name: 'Grep',
+          source: 'host',
+        });
+        expect(trace.toolCalls[2]).toMatchObject({
+          name: 'bash',
+          source: 'mcp',
+          server: 'workspace',
+        });
+        expect(trace.usage?.inputTokens).toBe(5);
+      }
+    }
+  );
   it('parses final answer, usage, tool calls, and artifacts from local Claude files', async () => {
     const root = await mkdtemp(join(tmpdir(), 'claude-trace-'));
     const sessionId = 'local_test';
@@ -119,6 +226,8 @@ describe('anthropicClaude trace parsing', () => {
       {
         id: 'toolu_1',
         name: 'search',
+        source: 'mcp',
+        server: 'server',
         arguments: { query: 'planning' },
       },
     ]);

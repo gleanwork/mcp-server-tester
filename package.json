@@ -28,6 +28,8 @@
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
     },
+    "./cowork-runtime": "./scripts/cowork_computer_use.py",
+    "./cowork-requirements": "./scripts/cowork-requirements.txt",
     "./types": {
       "types": "./dist/types/index.d.ts",
       "import": "./dist/types/index.js",
@@ -55,7 +57,8 @@
   },
   "files": [
     "dist",
-    "scripts/cowork_computer_use.py"
+    "scripts/cowork_computer_use.py",
+    "scripts/cowork-requirements.txt"
   ],
   "scripts": {
     "build": "npm run build:ui && tsup && npm run build:copy-ui",

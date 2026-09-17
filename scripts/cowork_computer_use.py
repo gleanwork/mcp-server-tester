@@ -183,7 +183,7 @@ async def run(query: str, max_actions: int, mode: str) -> dict[str, Any]:
         tools.append({
             "name": "fill_query",
             "description": (
-                "Insert the original evaluation query and its correlation marker into the focused "
+                "Insert the unchanged original evaluation query into the focused "
                 "empty Cowork task composer. First locate and focus that composer using a screenshot. "
                 "This tool takes no text: the harness supplies the exact text. It may run only once. "
                 "After it succeeds, use computer key Enter to submit, never click Send."

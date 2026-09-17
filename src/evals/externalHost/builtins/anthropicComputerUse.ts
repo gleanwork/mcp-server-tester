@@ -1,5 +1,7 @@
 import { execFile } from 'node:child_process';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import { createRequire } from 'node:module';
+import { ensureCoworkPython } from '../../cowork/pythonRuntime.js';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -9,25 +11,15 @@ function resolveDriverPath(env: NodeJS.ProcessEnv): string {
     return join(configuredRoot, 'scripts', 'cowork_computer_use.py');
   }
 
-  const pythonPath = env.MST_COWORK_PYTHON;
-  if (pythonPath) {
-    // .../mcp-server-tester/.venv/cowork-cu/bin/python -> repo root.
-    return join(
-      dirname(pythonPath),
-      '..',
-      '..',
-      '..',
-      'scripts',
-      'cowork_computer_use.py'
-    );
-  }
-
-  return join(process.cwd(), 'scripts', 'cowork_computer_use.py');
+  return createRequire(
+    typeof __filename === 'string' ? __filename : import.meta.url
+  ).resolve('@gleanwork/mcp-server-tester/cowork-runtime');
 }
 
-interface ComputerUseOptions {
+export interface ComputerUseOptions {
   deadlineAt: number;
   maxActions?: number;
+  model?: string;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -36,6 +28,11 @@ export interface ComputerUseSubmissionResult {
   action_count: number;
   model: string;
   submission_action: Record<string, unknown>;
+}
+
+/** Exhausted inspection is not proof that the native task failed. */
+export class ComputerUseHitlBudgetError extends Error {
+  override name = 'ComputerUseHitlBudgetError';
 }
 
 export interface ComputerUseHitlResult {
@@ -81,7 +78,14 @@ async function runComputerUseDriver(
   mode: 'submit' | 'hitl',
   label: string
 ): Promise<ComputerUseSubmissionResult | ComputerUseHitlResult> {
-  const env = { ...process.env, ...options.env };
+  const env = {
+    ...process.env,
+    ...options.env,
+    ...(options.model ? { MST_COWORK_CUA_MODEL: options.model } : {}),
+  };
+  if (options.deadlineAt <= Date.now())
+    throw new Error(`Computer Use ${label} deadline exceeded; not retrying.`);
+  const python = await ensureCoworkPython(env);
   const DRIVER_PATH = resolveDriverPath(env);
   const timeoutMs = options.deadlineAt - Date.now();
   if (timeoutMs <= 0)
@@ -94,7 +98,7 @@ async function runComputerUseDriver(
   let stderr = '';
   try {
     const result = await execFileAsync(
-      env.MST_COWORK_PYTHON ?? 'python3',
+      python,
       [DRIVER_PATH, query, '--max-actions', String(maxActions), '--mode', mode],
       {
         timeout: timeoutMs,
@@ -123,6 +127,22 @@ async function runComputerUseDriver(
       .filter(Boolean)
       .map(redact)
       .join('; ');
+    const reported = parseLastJsonLine(stdout);
+    if (
+      mode === 'hitl' &&
+      reported?.status === 'failed' &&
+      typeof reported.error === 'string' &&
+      /^Computer Use HITL check exceeded \d+ actions after attempting a visible prompt$/.test(
+        reported.error
+      )
+    ) {
+      diagnostic(
+        'HITL inspection budget reached; native completion remains the success criterion.'
+      );
+      throw new ComputerUseHitlBudgetError(
+        `HITL inspection reached its ${maxActions}-action budget.`
+      );
+    }
     diagnostic(`Computer Use ${label} failed: ${details}`);
     throw new Error(`Computer Use ${label} failed: ${details}`);
   }

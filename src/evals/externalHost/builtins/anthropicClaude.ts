@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { parse as parseNdjson } from 'ndjson';
 import type { LLMToolCall } from '../../mcpHost/mcpHostTypes.js';
@@ -111,10 +111,12 @@ interface ClaudeAuditEvent {
   duration_api_ms?: number;
   total_cost_usd?: number;
   model?: string;
+  modelUsage?: Record<string, unknown>;
   requestId?: string;
   request_id?: string;
   usage?: Record<string, unknown>;
   message?: {
+    model?: string;
     content?: Array<{
       type?: string;
       id?: string;
@@ -541,15 +543,34 @@ export async function snapshotClaudeSessions(
   return snapshot;
 }
 
-export async function waitForClaudeTrace(options: {
+interface ClaudeSessionMatchOptions {
   dataDir: string;
-  marker: string;
-  correlation: HostRunContext['correlation'];
+  marker?: string;
+  correlation?: HostRunContext['correlation'];
   snapshot: ClaudeSessionSnapshot;
-  timeoutMs: number;
   startedAtMs: number;
   scenario?: string;
-}): Promise<ClaudeTrace> {
+  /** Fresh-session correlation: exact initial user text, never raw-text substring matching. */
+  exactPrompt?: string;
+  sessionPath?: string;
+}
+
+export async function waitForClaudeSession(
+  options: ClaudeSessionMatchOptions & { timeoutMs: number }
+): Promise<ClaudeTrace> {
+  return waitForClaudeMatch(options, false);
+}
+
+export async function waitForClaudeTrace(
+  options: ClaudeSessionMatchOptions & { timeoutMs: number }
+): Promise<ClaudeTrace> {
+  return waitForClaudeMatch(options, true);
+}
+
+async function waitForClaudeMatch(
+  options: ClaudeSessionMatchOptions & { timeoutMs: number },
+  requireCompletion: boolean
+): Promise<ClaudeTrace> {
   const deadline = Date.now() + options.timeoutMs;
   let lastPending: ClaudeTrace | undefined;
   let completeTraceFirstSeenAtMs: number | undefined;
@@ -567,7 +588,10 @@ export async function waitForClaudeTrace(options: {
 
     if (matches.length === 1) {
       const trace = matches[0]!;
-      if (isTraceReady(trace, completeTraceFirstSeenAtMs)) {
+      if (
+        !requireCompletion ||
+        isTraceReady(trace, completeTraceFirstSeenAtMs)
+      ) {
         return trace;
       }
       if (trace.isComplete && completeTraceFirstSeenAtMs === undefined) {
@@ -608,14 +632,9 @@ function isTraceReady(
   );
 }
 
-export async function findMatchingClaudeSessions(options: {
-  dataDir: string;
-  marker: string;
-  correlation?: HostRunContext['correlation'];
-  snapshot: ClaudeSessionSnapshot;
-  startedAtMs: number;
-  scenario?: string;
-}): Promise<ClaudeTrace[]> {
+export async function findMatchingClaudeSessions(
+  options: ClaudeSessionMatchOptions
+): Promise<ClaudeTrace[]> {
   const sessions = await listSessionCandidates(options.dataDir);
   const traces: ClaudeTrace[] = [];
 
@@ -627,24 +646,44 @@ export async function findMatchingClaudeSessions(options: {
     const isRecent =
       !Number.isNaN(createdAtMs) && createdAtMs >= options.startedAtMs - 5_000;
 
+    if (options.sessionPath && session.metadataPath !== options.sessionPath)
+      continue;
+    if (options.exactPrompt !== undefined) {
+      // Existing sessions remain excluded even if they change. The creation window
+      // alone is never evidence of ownership. Do not match answers or tool output.
+      if (
+        previous !== undefined ||
+        !isRecent ||
+        createdAtMs > Date.now() + 5_000 ||
+        session.metadata.initialMessage !== options.exactPrompt
+      )
+        continue;
+      traces.push(await parseClaudeTrace(session));
+      continue;
+    }
     if (!isNewOrUpdated && !isRecent) {
       continue;
     }
 
+    if (!options.marker && options.correlation?.includedInPrompt !== false)
+      continue;
     let trace = await parseClaudeTrace(
       session,
       options.correlation?.includedInPrompt === false
         ? undefined
         : options.marker
     );
-    if (options.scenario && trace.rawText.includes(options.marker) === false) {
+    if (
+      options.scenario &&
+      (!options.marker || !trace.rawText.includes(options.marker))
+    ) {
       trace = await parseClaudeTrace(session, undefined);
     }
     if (
       sessionMatchesCorrelation({
         session,
         trace,
-        marker: options.marker,
+        marker: options.marker ?? '',
         correlation: options.correlation,
         scenario: options.scenario,
         isNewOrUpdated,
@@ -658,11 +697,9 @@ export async function findMatchingClaudeSessions(options: {
   return traces;
 }
 
-function describeCorrelation(options: {
-  marker: string;
-  correlation?: HostRunContext['correlation'];
-  scenario?: string;
-}): string {
+function describeCorrelation(options: ClaudeSessionMatchOptions): string {
+  if (options.exactPrompt !== undefined)
+    return 'exact initial prompt in a new native session';
   if (options.correlation?.includedInPrompt) {
     return `marker ${options.marker}`;
   }
@@ -914,7 +951,12 @@ export async function parseClaudeTrace(
     ),
     parseWarnings,
     rawText: `${rawAudit}\n${rawTranscript}`,
-    telemetry: buildNativeTelemetry(resultEvents, toolCalls, usage),
+    telemetry: buildNativeTelemetry(
+      resultEvents,
+      toolCalls,
+      usage,
+      combinedEventsForRun
+    ),
   };
 }
 
@@ -1210,7 +1252,19 @@ async function listSessionCandidates(
       ) as ClaudeSessionMetadata;
       const metadataStat = await stat(metadataPath);
       const id = basename(metadataPath, '.json');
-      const sessionDir = join(dirname(metadataPath), id);
+      // Claude 2.110 stores files under <short UUID>/ and points cwd at
+      // that directory's outputs folder. Retain the legacy local_<UUID>/ layout.
+      const shortId = /^local_([a-f0-9]{8})-/i.exec(id)?.[1];
+      const nativeDir = shortId
+        ? join(dirname(metadataPath), shortId)
+        : undefined;
+      const sessionDir =
+        nativeDir &&
+        typeof metadata.cwd === 'string' &&
+        isAbsolute(metadata.cwd) &&
+        dirname(resolve(metadata.cwd)) === resolve(nativeDir)
+          ? nativeDir
+          : join(dirname(metadataPath), id);
       const statMtimeMs = await getSessionObservedMtime({
         sessionDir,
         cliSessionId: metadata.cliSessionId,
@@ -1409,6 +1463,8 @@ function extractToolCalls(events: ClaudeAuditEvent[]): LLMToolCall[] {
       const mcpMatch = /^mcp__(.+)__(.+)$/.exec(block.name);
       toolCalls.push({
         name: mcpMatch ? mcpMatch[2]! : block.name,
+        source: mcpMatch ? 'mcp' : 'host',
+        ...(mcpMatch ? { server: mcpMatch[1]! } : {}),
         arguments: block.input ?? {},
         id: block.id,
       });
@@ -1524,13 +1580,24 @@ function extractUsage(event: ClaudeAuditEvent): UsageMetrics | undefined {
 function buildNativeTelemetry(
   resultEvents: ClaudeAuditEvent[],
   toolCalls: LLMToolCall[],
-  usage: UsageMetrics | undefined
+  usage: UsageMetrics | undefined,
+  events: ClaudeAuditEvent[]
 ): ClaudeNativeTelemetry {
   const models = [
     ...new Set(
-      resultEvents
-        .map((event) => event.model)
-        .filter((model): model is string => Boolean(model))
+      events
+        .filter(
+          (event) => event.type === 'assistant' || event.type === 'result'
+        )
+        .flatMap((event) => [
+          event.model,
+          event.message?.model,
+          ...Object.keys(event.modelUsage ?? {}),
+        ])
+        .filter(
+          (model): model is string =>
+            typeof model === 'string' && model.length > 0
+        )
     ),
   ];
   const toolErrorCount = resultEvents.reduce(

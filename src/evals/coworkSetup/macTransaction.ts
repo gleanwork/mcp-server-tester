@@ -528,6 +528,7 @@ type InstallOptions = {
   profileDirectory: string;
   stagingDirectory: string;
   manifest: EvalManifest;
+  model?: string;
   arm?: string;
   managedPreferencePaths: string[];
   /** Explicit runtime credentials only; never falls back to process.env. */
@@ -535,6 +536,12 @@ type InstallOptions = {
 };
 
 async function validateInstall(options: InstallOptions) {
+  const model = options.model;
+  if (
+    model !== undefined &&
+    (typeof model !== 'string' || !/^[A-Za-z0-9._:-]+$/.test(model))
+  )
+    fail();
   const profileDirectory = resolve(options.profileDirectory);
   const directory = options.stagingDirectory;
   validateStaging(directory, profileDirectory);
@@ -594,6 +601,7 @@ async function validateInstall(options: InstallOptions) {
   )
     fail();
   return {
+    model,
     profileDirectory,
     directory,
     env,
@@ -680,6 +688,9 @@ export async function installMacCoworkSettings(
       fail();
     const profile = jsonBytes({
       ...settings,
+      ...(validated.model
+        ? { inferenceModels: [validated.model], modelDiscoveryEnabled: false }
+        : {}),
       inferenceProvider: 'anthropic',
       inferenceCredentialKind: 'helper-script',
       inferenceCredentialHelper: join(directory, HELPER),

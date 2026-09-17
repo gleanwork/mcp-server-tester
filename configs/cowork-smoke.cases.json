@@ -1,0 +1,11 @@
+{
+  "name": "cowork-native-smoke",
+  "cases": [
+    {
+      "id": "ready",
+      "mode": "host",
+      "scenario": "Reply with READY. Do not use tools, create files, or change settings.",
+      "expect": { "containsText": "READY", "isError": false }
+    }
+  ]
+}

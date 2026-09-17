@@ -89,6 +89,7 @@ export async function prepareMacCoworkSession(options: {
   manifest: EvalManifest;
   env: Record<string, string | undefined>;
   profileDirectory?: string;
+  model?: string;
 }): Promise<{
   setupStatus: 'applied-not-verified';
   serverCount: number;
@@ -123,6 +124,7 @@ export async function prepareMacCoworkSession(options: {
     );
     const installOptions = {
       manifest,
+      model: options.model,
       env,
       profileDirectory,
       stagingDirectory,

@@ -272,6 +272,7 @@ export function registerBuiltinHosts(): void {
   }
   registerHost(ANTHROPIC_API_HOST);
   registerHost(COWORK_HOST);
+  registerHost({ ...COWORK_HOST, name: 'cowork' });
   registerHost({
     ...COWORK_HOST,
     name: 'anthropic.claude.cowork.desktop-app.macos',

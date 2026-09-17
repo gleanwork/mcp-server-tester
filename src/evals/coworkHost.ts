@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type {
   HostDefinition,
@@ -6,21 +5,15 @@ import type {
   HostRunContext,
   HostRunResult,
 } from './evalFrameworkTypes.js';
-import type { ExternalHostConfig } from './externalHost/types.js';
-import { CLAUDE_COWORK_DESKTOP_MACOS_DRIVER } from './externalHost/driverIdentity.js';
+import { getCoworkPlatform, type CoworkPlatform } from './cowork/platform.js';
 import {
-  getClaudeDataDir,
+  findMatchingClaudeSessions,
   snapshotClaudeSessions,
   waitForClaudeTrace,
+  waitForClaudeSession,
 } from './externalHost/builtins/anthropicClaude.js';
-import {
-  runAnthropicComputerUseSubmission,
-  runAnthropicComputerUseHitl,
-} from './externalHost/builtins/anthropicComputerUse.js';
-import { prepareMacCoworkSession } from './coworkSetup/macSession.js';
-import { recoverMacCoworkSession } from './coworkSetup/recoverSession.js';
-import { normalizeCorrelation } from './externalHost/runtime.js';
 import { simulationToHostTrace } from './hostTrace.js';
+import { ComputerUseHitlBudgetError } from './externalHost/builtins/anthropicComputerUse.js';
 
 const OptionsSchema = z
   .object({
@@ -29,6 +22,10 @@ const OptionsSchema = z
       .default('anthropic-computer-use'),
     computerUseMaxActions: z.number().int().min(1).max(64).default(24),
     hitlMaxActions: z.number().int().min(1).max(24).default(12),
+    computerUseModel: z
+      .string()
+      .regex(/^[A-Za-z0-9._:-]+$/)
+      .optional(),
     dataDir: z.string().min(1).optional(),
   })
   .strict();
@@ -37,8 +34,11 @@ const CoworkSchema = z
     type: z.string(),
     options: OptionsSchema.default(() => OptionsSchema.parse({})),
     timeout: z.number().int().positive().default(900_000),
-    model: z.string().optional(),
-    provider: z.string().optional(),
+    model: z
+      .string()
+      .regex(/^[A-Za-z0-9._:-]+$/)
+      .optional(),
+    provider: z.literal('anthropic').optional(),
     env: z.record(z.string(), z.string()).optional(),
   })
   .strict();
@@ -52,7 +52,8 @@ const failure = (error: string): HostRunResult => ({
 /** Shared desktop, one managed transaction, then ordinary V2 trace evaluation. */
 async function runBatch(
   requests: HostBatchRequest[],
-  context: HostRunContext
+  context: HostRunContext,
+  selectedPlatform?: CoworkPlatform
 ): Promise<HostRunResult[]> {
   if (!requests.length) return [];
   if (active)
@@ -70,25 +71,19 @@ async function runBatch(
   const env = { ...process.env, ...context.env, ...config.env };
   if (!env.ANTHROPIC_API_KEY)
     throw new Error('ANTHROPIC_API_KEY is required for Cowork Computer Use.');
-  const external: ExternalHostConfig = {
-    driver: CLAUDE_COWORK_DESKTOP_MACOS_DRIVER,
-    options: config.options,
-  };
-  const dataDir = getClaudeDataDir(external);
+  const platform = selectedPlatform ?? (await getCoworkPlatform());
+  const dataDir = platform.dataDirectory(config.options);
   const servers = requests[0]!.input.servers;
   // Pass only the selected arm. Setup intentionally rejects multi-arm manifests.
   const { arms: _arms, ...manifest } = context.manifest;
   const managedManifest = { ...manifest, servers };
-  let session: Awaited<ReturnType<typeof prepareMacCoworkSession>> | undefined;
+  let session: Awaited<ReturnType<CoworkPlatform['prepare']>> | undefined;
   const results = requests.map(() =>
     failure('Cowork submission was not attempted.')
   );
-  const submitted: Array<{
-    index: number;
-    marker: string;
-    startedAtMs: number;
-    deadlineAt: number;
-  }> = [];
+  const hitlErrors = new Map<number, string>();
+  const hitlWarnings = new Map<number, string>();
+  const usedSessions = new Set<string>();
   const safeError = (error: unknown): string => {
     let text =
       error instanceof Error ? error.message : 'Cowork operation failed.';
@@ -106,28 +101,53 @@ async function runBatch(
     for (const secret of secrets) text = text.split(secret).join('[REDACTED]');
     return text;
   };
+  // Platform loading above is asynchronous. Claim the desktop atomically after it.
+  if (active)
+    throw new Error(
+      'Cowork desktop is already in use by another batch. Run with --workers 1.'
+    );
   active = true;
   try {
-    if (env.MST_COWORK_RECOVER === '1') await recoverMacCoworkSession();
-    if (servers.length)
-      session = await prepareMacCoworkSession({
+    if (env.MST_COWORK_RECOVER === '1') await platform.recover();
+    if (servers.length || config.model)
+      session = await platform.prepare({
         manifest: managedManifest,
         env,
+        model: config.model,
       });
-    const snapshot = await snapshotClaudeSessions(dataDir);
-    process.stderr.write(
-      `[mst:cowork] batch phase 1/3: submitting ${requests.length} case iteration(s)\n`
-    );
     for (const [index, request] of requests.entries()) {
-      const marker = `MCP_SERVER_TESTER_${randomUUID()}`;
+      // Bind each fresh task before another submission can create an identical prompt.
+      const snapshot = await snapshotClaudeSessions(dataDir);
       const startedAtMs = Date.now();
       const deadlineAt = startedAtMs + config.timeout;
+      const run = { index, startedAtMs, deadlineAt };
+      let sessionPath: string;
+      const match = {
+        dataDir,
+        exactPrompt: request.input.scenario,
+        snapshot,
+        startedAtMs,
+      };
+      process.stderr.write(
+        `[mst:cowork] case ${index + 1}/${requests.length}: submitting unchanged prompt\n`
+      );
       try {
-        await runAnthropicComputerUseSubmission(
-          `${request.input.scenario}\n\n[${marker}]`,
-          { deadlineAt, maxActions: config.options.computerUseMaxActions, env }
-        );
-        submitted.push({ index, marker, startedAtMs, deadlineAt });
+        await platform.submit(request.input.scenario, {
+          deadlineAt,
+          maxActions: config.options.computerUseMaxActions,
+          model: config.options.computerUseModel,
+          env,
+        });
+        const bound = await waitForClaudeSession({
+          ...match,
+          timeoutMs: Math.max(0, Math.min(30_000, deadlineAt - Date.now())),
+        });
+        sessionPath = bound.candidate.metadataPath;
+        if (usedSessions.has(sessionPath))
+          throw new Error(
+            'Native session matched more than one case; refusing duplicate attribution.'
+          );
+        usedSessions.add(sessionPath);
       } catch (error) {
         results[index] = failure(safeError(error));
         for (let n = index + 1; n < requests.length; n++)
@@ -136,47 +156,72 @@ async function runBatch(
           );
         break;
       }
-    }
-    process.stderr.write('[mst:cowork] batch phase 2/3: bounded HITL checks\n');
-    for (const run of submitted) {
+      process.stderr.write(
+        '[mst:cowork] bounded HITL check for the bound native session\n'
+      );
       try {
-        await runAnthropicComputerUseHitl({
-          deadlineAt: run.deadlineAt,
-          maxActions: config.options.hitlMaxActions,
-          env,
-          task: `Find the already submitted Cowork task containing marker ${run.marker}. Its query was: ${requests[run.index]!.input.scenario}. Never create or resubmit a task.`,
+        const native = await findMatchingClaudeSessions({
+          ...match,
+          sessionPath,
         });
+        if (native.length > 1)
+          throw new Error(
+            'Ambiguous native sessions; no HITL action attempted.'
+          );
+        if (!native.length)
+          throw new Error(
+            'Bound native session is missing; no HITL action attempted.'
+          );
+        if (native[0]?.isComplete) {
+          process.stderr.write(
+            `[mst:cowork] case ${run.index + 1} already completed; skipping HITL\n`
+          );
+        } else
+          await platform.handleHitl({
+            deadlineAt: run.deadlineAt,
+            maxActions: config.options.hitlMaxActions,
+            model: config.options.computerUseModel,
+            env,
+            task: `Handle only the currently open Cowork task just submitted with this exact query: ${request.input.scenario}. Do not switch tasks. Never create, type, or resubmit a task. If the current task cannot be identified uniquely, stop without an action.`,
+          });
       } catch (error) {
-        results[run.index] = failure(safeError(error));
+        const message = safeError(error);
+        if (error instanceof ComputerUseHitlBudgetError) {
+          hitlWarnings.set(run.index, message);
+        } else {
+          hitlErrors.set(run.index, message);
+          results[run.index] = failure(message);
+        }
       }
-    }
-    process.stderr.write(
-      '[mst:cowork] batch phase 3/3: collecting native Claude telemetry\n'
-    );
-    const usedSessions = new Set<string>();
-    for (const run of submitted) {
+      process.stderr.write(
+        '[mst:cowork] collecting bound native Claude telemetry\n'
+      );
       try {
         const remaining = run.deadlineAt - Date.now();
         if (remaining <= 0)
           throw new Error(
             'Native Claude trace deadline exceeded. No resubmission attempted.'
           );
+        process.stderr.write(
+          `[mst:cowork] collecting case ${run.index + 1}/${requests.length}\n`
+        );
         const trace = await waitForClaudeTrace({
-          dataDir,
-          marker: run.marker,
-          correlation: normalizeCorrelation(
-            { strategy: 'prompt_marker', includeInPrompt: true },
-            run.marker
-          ),
-          snapshot,
+          ...match,
+          sessionPath,
           timeoutMs: remaining,
-          startedAtMs: run.startedAtMs,
         });
-        if (usedSessions.has(trace.candidate.metadataPath))
+        if (trace.candidate.metadataPath !== sessionPath)
           throw new Error(
-            'Native session matched more than one case; refusing duplicate attribution.'
+            'Native session identity changed; refusing attribution.'
           );
-        usedSessions.add(trace.candidate.metadataPath);
+        process.stderr.write(
+          `[mst:cowork] case ${run.index + 1}: native completion found (${trace.toolCalls.length} tool calls)\n`
+        );
+        if (config.model && !trace.telemetry.models.includes(config.model)) {
+          throw new Error(
+            `Cowork model mismatch: requested ${config.model}, observed ${trace.telemetry.models.join(', ') || 'unavailable'}.`
+          );
+        }
         const result = simulationToHostTrace(
           {
             success: !trace.isError && trace.finalAnswer !== undefined,
@@ -193,7 +238,16 @@ async function runBatch(
         );
         results[run.index] = {
           ...result,
-          telemetry: { source: 'claude-native', ...trace.telemetry },
+          error: result.error ?? hitlErrors.get(run.index),
+          telemetry: {
+            source: 'claude-native',
+            ...trace.telemetry,
+            nativeSessionId: trace.candidate.id,
+            correlation: 'exact-initial-prompt',
+            ...(hitlWarnings.has(run.index)
+              ? { hitlWarning: hitlWarnings.get(run.index) }
+              : {}),
+          },
           llmDurationMs: trace.llmDurationMs,
         };
       } catch (error) {
@@ -210,16 +264,20 @@ async function runBatch(
   }
 }
 
-export const COWORK_HOST: HostDefinition = {
-  name: 'cowork_cu',
-  schema: CoworkSchema,
-  evidence: 'structured',
-  runBatch,
-  run: async (input, config, context) =>
-    (
-      await runBatch(
-        [{ caseId: 'single', iteration: 0, input, config }],
-        context
-      )
-    )[0]!,
-};
+export function createCoworkHost(platform?: CoworkPlatform): HostDefinition {
+  return {
+    name: 'cowork_cu',
+    schema: CoworkSchema,
+    evidence: 'structured',
+    runBatch: (requests, context) => runBatch(requests, context, platform),
+    run: async (input, config, context) =>
+      (
+        await runBatch(
+          [{ caseId: 'single', iteration: 0, input, config }],
+          context,
+          platform
+        )
+      )[0]!,
+  };
+}
+export const COWORK_HOST = createCoworkHost();

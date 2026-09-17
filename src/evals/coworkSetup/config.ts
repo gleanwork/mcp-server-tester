@@ -1,5 +1,5 @@
+import type { HttpMCPConfig, MCPConfig } from '../../config/mcpConfig.js';
 import { resolveCoworkSetupConfig, type CoworkSetupConfig } from './options.js';
-import type { MCPConfig } from '../../config/mcpConfig.js';
 
 export type CoworkMcpSettings = {
   managedMcpServers: Array<{
@@ -14,6 +14,8 @@ export type CoworkMcpSettings = {
   allowManagedMcpServersOnly: true;
 };
 
+type CoworkMcpServer = { label: string; url: string; helperName?: string };
+
 export interface CoworkMcpServerConfig {
   transport: 'http';
   label: string;
@@ -21,8 +23,6 @@ export interface CoworkMcpServerConfig {
   headers?: Record<string, string>;
   auth?: { accessToken?: string; accessTokenEnv?: string };
 }
-
-type CoworkMcpServer = { label: string; url: string; helperName?: string };
 
 /** Adapt V2 connection declarations without silently accepting unsupported auth. */
 export function toCoworkServers(servers: MCPConfig[]): CoworkMcpServerConfig[] {
@@ -130,7 +130,7 @@ function validateHelperDirectory(directory: string): string {
 }
 
 /** Validate structure only. Never read static header values or bearer tokens. */
-function describeServers(servers: CoworkMcpServerConfig[]): CoworkMcpServer[] {
+function describeServers(servers: MCPConfig[]): CoworkMcpServer[] {
   if (!Array.isArray(servers)) invalidConfig();
   const labels = new Set<string>();
   const urls = new Set<string>();
@@ -189,7 +189,7 @@ function describeServers(servers: CoworkMcpServerConfig[]): CoworkMcpServer[] {
 
 /** Build secret-free managed settings without resolving environment variables. */
 export function createCoworkMcpPlan(
-  servers: CoworkMcpServerConfig[],
+  servers: MCPConfig[],
   helperDirectory: string,
   setup?: CoworkSetupConfig
 ): { settings: CoworkMcpSettings; servers: CoworkMcpServer[] } {
@@ -227,7 +227,7 @@ function validateHeaderValue(value: unknown): string {
 
 /** Resolve secrets only at runtime, using the supplied environment exclusively. */
 export function resolveCoworkMcpHeaders(
-  servers: CoworkMcpServerConfig[],
+  servers: MCPConfig[],
   env: Record<string, string | undefined>
 ): Record<string, Record<string, string>> {
   const descriptions = describeServers(servers);
@@ -235,7 +235,7 @@ export function resolveCoworkMcpHeaders(
   return Object.fromEntries(
     descriptions.map((description, index) => {
       // describeServers has validated the transport and all relevant metadata.
-      const server = servers[index]!;
+      const server = servers[index] as HttpMCPConfig;
       const entries = Object.entries(server.headers ?? {}).map(
         ([name, value]) => [name, validateHeaderValue(value)]
       );

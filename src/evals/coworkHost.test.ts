@@ -3,11 +3,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runEvalBatch } from './runEvalBatch.js';
-import { COWORK_HOST } from './coworkHost.js';
+import { COWORK_HOST, createCoworkHost } from './coworkHost.js';
 import { prepareHostBatch } from './prepareHostBatch.js';
 import { toCoworkServers } from './coworkSetup/config.js';
 import type { ClaudeTrace } from './externalHost/builtins/anthropicClaude.js';
 import type * as ClaudeNative from './externalHost/builtins/anthropicClaude.js';
+import { ComputerUseHitlBudgetError } from './externalHost/builtins/anthropicComputerUse.js';
+import type * as ComputerUse from './externalHost/builtins/anthropicComputerUse.js';
 import type { HostBatchRequest, HostRunContext } from './evalFrameworkTypes.js';
 
 const mocks = vi.hoisted(() => ({
@@ -17,7 +19,12 @@ const mocks = vi.hoisted(() => ({
   hitl: vi.fn(),
   snapshot: vi.fn(),
   trace: vi.fn(),
+  matches: vi.fn(),
+  bind: vi.fn(),
   order: [] as string[],
+}));
+vi.mock('./cowork/pythonRuntime.js', () => ({
+  ensureCoworkPython: vi.fn().mockResolvedValue('/fake/python'),
 }));
 vi.mock('./coworkSetup/recoverSession.js', () => ({
   recoverMacCoworkSession: vi.fn(),
@@ -25,16 +32,22 @@ vi.mock('./coworkSetup/recoverSession.js', () => ({
 vi.mock('./coworkSetup/macSession.js', () => ({
   prepareMacCoworkSession: mocks.setup,
 }));
-vi.mock('./externalHost/builtins/anthropicComputerUse.js', () => ({
-  runAnthropicComputerUseSubmission: mocks.submit,
-  runAnthropicComputerUseHitl: mocks.hitl,
-}));
+vi.mock(
+  './externalHost/builtins/anthropicComputerUse.js',
+  async (original) => ({
+    ...(await original<typeof ComputerUse>()),
+    runAnthropicComputerUseSubmission: mocks.submit,
+    runAnthropicComputerUseHitl: mocks.hitl,
+  })
+);
 vi.mock(
   './externalHost/builtins/anthropicClaude.js',
   async (importOriginal) => ({
     ...(await importOriginal<typeof ClaudeNative>()),
     snapshotClaudeSessions: mocks.snapshot,
     waitForClaudeTrace: mocks.trace,
+    waitForClaudeSession: mocks.bind,
+    findMatchingClaudeSessions: mocks.matches,
   })
 );
 const dirs: string[] = [];
@@ -71,6 +84,7 @@ function requests(): HostBatchRequest[] {
   }));
 }
 beforeEach(() => {
+  vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin');
   vi.clearAllMocks();
   mocks.order.length = 0;
   mocks.setup.mockImplementation(async () => {
@@ -81,6 +95,7 @@ beforeEach(() => {
     mocks.order.push('dispose');
   });
   mocks.snapshot.mockResolvedValue(new Map());
+  mocks.matches.mockReset().mockResolvedValue([{ isComplete: false }]);
   mocks.submit.mockImplementation(async () => {
     mocks.order.push('submit');
     return { status: 'submitted' };
@@ -90,10 +105,13 @@ beforeEach(() => {
     return { status: 'hitl_checked' };
   });
   let index = 0;
-  mocks.trace.mockImplementation(async () => {
+  mocks.bind.mockReset().mockImplementation(async () => ({
+    candidate: { metadataPath: `/fixture/session-${index++}` },
+  }));
+  mocks.trace.mockImplementation(async ({ sessionPath }) => {
     mocks.order.push('trace');
     return {
-      candidate: { metadataPath: `/fixture/session-${index++}` },
+      candidate: { metadataPath: sessionPath },
       finalAnswer: 'answer',
       toolCalls: [
         { name: 'search', arguments: { query: 'test' }, output: 'found' },
@@ -120,20 +138,73 @@ beforeEach(() => {
   });
 });
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const dir of dirs.splice(0))
     await fs.rm(dir, { recursive: true, force: true });
 });
 
 describe('V2 Cowork host', () => {
-  it('submits all selected iterations before HITL and native trace collection, then restores', async () => {
+  it('atomically claims the desktop across asynchronous default-platform resolution', async () => {
+    mocks.submit.mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return { status: 'submitted' };
+    });
+    const batch = requests()
+      .slice(0, 1)
+      .map((r) => ({ ...r, input: { ...r.input, servers: [] } }));
+    const results = await Promise.allSettled([
+      COWORK_HOST.runBatch!(batch, context),
+      COWORK_HOST.runBatch!(batch, context),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual([
+      'fulfilled',
+      'rejected',
+    ]);
+    const rejected = results.find(
+      (r) => r.status === 'rejected'
+    ) as PromiseRejectedResult;
+    expect(String(rejected.reason)).toContain('already in use');
+    expect(mocks.submit).toHaveBeenCalledOnce();
+    expect(mocks.setup).not.toHaveBeenCalled();
+  });
+  it('binds inference and planner models separately and verifies native evidence', async () => {
+    const batch = requests().map((r) => ({
+      ...r,
+      config: {
+        ...host,
+        model: 'native-model',
+        options: { ...host.options, computerUseModel: 'planner-model' },
+      },
+    }));
+    const result = await COWORK_HOST.runBatch!(batch, context);
+    expect(result.every((r) => !r.error)).toBe(true);
+    expect(mocks.setup).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'native-model' })
+    );
+    expect(mocks.submit).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ model: 'planner-model' })
+    );
+    expect(mocks.hitl).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'planner-model' })
+    );
+    const wrong = batch.map((r) => ({
+      ...r,
+      config: { ...r.config, model: 'different-model' },
+    }));
+    const failed = await COWORK_HOST.runBatch!(wrong, context);
+    expect(failed[0]!.error).toContain('Cowork model mismatch');
+    expect(mocks.dispose).toHaveBeenCalledTimes(2);
+  });
+  it('serializes marker-free cases, collects native telemetry, then restores', async () => {
     const result = await COWORK_HOST.runBatch!(requests(), context);
     expect(mocks.order).toEqual([
       'setup',
       'submit',
-      'submit',
-      'hitl',
       'hitl',
       'trace',
+      'submit',
+      'hitl',
       'trace',
       'dispose',
     ]);
@@ -143,9 +214,108 @@ describe('V2 Cowork host', () => {
       telemetry: { source: 'claude-native' },
       llmDurationMs: 150,
     });
-    expect(mocks.hitl.mock.calls[0]![0].task).toContain('MCP_SERVER_TESTER_');
-    expect(mocks.trace.mock.calls[0]![0].scenario).toBeUndefined(); // marker-only, no ambiguous fallback
+    expect(mocks.submit.mock.calls.map((call) => call[0] as string)).toEqual([
+      'query one',
+      'query two',
+    ]);
+    expect(mocks.hitl.mock.calls[0]![0].task).not.toContain(
+      'MCP_SERVER_TESTER_'
+    );
+    expect(mocks.trace.mock.calls[0]![0]).toMatchObject({
+      exactPrompt: 'query one',
+      sessionPath: '/fixture/session-0',
+    });
+    expect(mocks.snapshot).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(result)).not.toContain('test-secret');
+  });
+  it.each(['linux', 'win32'] as const)(
+    'keeps shared orchestration independent of %s via an injected platform',
+    async (platformName) => {
+      vi.spyOn(process, 'platform', 'get').mockReturnValue(platformName);
+      const prepare = vi.fn().mockResolvedValue({ dispose: mocks.dispose });
+      const portable = createCoworkHost({
+        dataDirectory: () => '/synthetic/native-data',
+        prepare,
+        recover: vi.fn(),
+        submit: mocks.submit,
+        handleHitl: mocks.hitl,
+      });
+      const result = await portable.runBatch!(requests(), context);
+      expect(result).toHaveLength(2);
+      expect(result[0]!.finalText).toBe('answer');
+      expect(prepare).toHaveBeenCalledOnce();
+      expect(mocks.setup).not.toHaveBeenCalled();
+    }
+  );
+  it('skips GUI HITL for already completed native tasks without hiding actual failures', async () => {
+    mocks.matches.mockResolvedValue([{ isComplete: true }]);
+    const result = await COWORK_HOST.runBatch!(requests(), context);
+    expect(mocks.hitl).not.toHaveBeenCalled();
+    expect(result.every((r) => r.finalText === 'answer' && !r.error)).toBe(
+      true
+    );
+    expect(mocks.trace).toHaveBeenCalledTimes(2);
+  });
+  it('refuses HITL when native correlation is ambiguous', async () => {
+    mocks.matches.mockResolvedValue([
+      { isComplete: true },
+      { isComplete: true },
+    ]);
+    const result = await COWORK_HOST.runBatch!(requests(), context);
+    expect(mocks.hitl).not.toHaveBeenCalled();
+    expect(result[0]!.error).toContain('Ambiguous');
+  });
+  it('records exhausted HITL inspection as a warning only when native completion succeeds', async () => {
+    mocks.hitl.mockRejectedValue(
+      new ComputerUseHitlBudgetError('inspection budget exhausted')
+    );
+    const result = await COWORK_HOST.runBatch!(requests(), context);
+    expect(result[0]).toMatchObject({
+      finalText: 'answer',
+      telemetry: { hitlWarning: 'inspection budget exhausted' },
+    });
+    expect(result[0]!.error).toBeUndefined();
+    mocks.trace.mockRejectedValueOnce(new Error('native task never completed'));
+    const missing = await COWORK_HOST.runBatch!(requests(), context);
+    expect(missing[0]!.error).toBe('native task never completed');
+  });
+  it('does not hide a HITL failure when native response collection succeeds', async () => {
+    mocks.hitl.mockRejectedValueOnce(new Error('HITL timed out'));
+    const result = await COWORK_HOST.runBatch!(requests(), context);
+    expect(result[0]).toMatchObject({
+      error: 'HITL timed out',
+      finalText: 'answer',
+      usage: { inputTokens: 10 },
+    });
+    expect(result[1]!.error).toBeUndefined();
+  });
+  it('stops after missing or ambiguous native binding without resubmission or HITL', async () => {
+    mocks.bind.mockRejectedValueOnce(
+      new Error('Ambiguous exact prompt sessions')
+    );
+    const result = await COWORK_HOST.runBatch!(requests(), context);
+    expect(mocks.submit).toHaveBeenCalledTimes(1);
+    expect(mocks.hitl).not.toHaveBeenCalled();
+    expect(mocks.trace).not.toHaveBeenCalled();
+    expect(result[0]!.error).toContain('Ambiguous');
+    expect(result[1]!.error).toContain('Not submitted');
+  });
+  it('preserves whitespace and Unicode and binds repeated identical prompts to different sessions', async () => {
+    const scenario = '  café\n重复 query  ';
+    const batch = requests().map((r) => ({
+      ...r,
+      input: { ...r.input, scenario },
+    }));
+    await COWORK_HOST.runBatch!(batch, context);
+    expect(mocks.submit.mock.calls.map((call) => call[0] as string)).toEqual([
+      scenario,
+      scenario,
+    ]);
+    expect(
+      mocks.trace.mock.calls.map(
+        (call) => (call[0] as { sessionPath: string }).sessionPath
+      )
+    ).toEqual(['/fixture/session-0', '/fixture/session-1']);
   });
   it('never retries an ambiguous submit and cancels later submissions', async () => {
     mocks.submit.mockRejectedValueOnce(new Error('uncertain test-secret-key'));
