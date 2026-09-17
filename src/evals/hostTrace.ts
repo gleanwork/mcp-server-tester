@@ -8,6 +8,7 @@ export interface EvalExecutionResult {
   response: unknown;
   error?: string;
   hostUsage?: UsageMetrics;
+  hostTelemetry?: Record<string, unknown>;
   evidence?: HostEvidence;
 }
 
@@ -38,10 +39,15 @@ export function hostTraceToExecution(
           id: event.id,
         })),
       usage: trace.usage,
+      ...(trace.telemetry ? { telemetry: trace.telemetry } : {}),
+      ...(trace.llmDurationMs !== undefined
+        ? { llmDurationMs: trace.llmDurationMs }
+        : {}),
       ...(trace.diagnostics ? { diagnostics: trace.diagnostics } : {}),
     },
     error: trace.error,
     hostUsage: trace.usage,
+    hostTelemetry: trace.telemetry,
     evidence,
   };
 }

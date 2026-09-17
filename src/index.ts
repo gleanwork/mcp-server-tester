@@ -269,6 +269,7 @@ export type {
   EvaluationSummary,
   HostDefinition,
   HostRunOptions,
+  HostBatchRequest,
   HostRunResult,
   HostRunInput,
   HostRunContext as EvaluationHostRunContext,

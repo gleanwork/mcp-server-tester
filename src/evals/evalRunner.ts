@@ -1199,6 +1199,7 @@ async function runSingleIteration(
       ? { hostDiagnostics: response.diagnostics }
       : {}),
     hostUsage,
+    hostTelemetry: execution.hostTelemetry,
     externalHost,
   };
 }
@@ -1366,6 +1367,7 @@ export async function runEvalCase(
           ? { hostDiagnostics: result.hostDiagnostics }
           : {}),
         hostUsage: result.hostUsage,
+        hostTelemetry: result.hostTelemetry,
         externalHost: result.externalHost,
       });
     } catch (err) {
@@ -1426,6 +1428,7 @@ export async function runEvalCase(
     infrastructureErrorCount: infraErrors.length,
     durationMs: iterationResults.reduce((sum, r) => sum + r.durationMs, 0),
     hostUsage: totalHostUsage,
+    hostTelemetry: undefined,
   };
 }
 

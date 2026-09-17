@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { parse as parseNdjson } from 'ndjson';
 import type { LLMToolCall } from '../../mcpHost/mcpHostTypes.js';
@@ -61,6 +61,21 @@ interface SnapshotEntry {
 
 export type ClaudeSessionSnapshot = Map<string, SnapshotEntry>;
 
+export interface ClaudeNativeTelemetry {
+  resultCount: number;
+  apiCallCount: number;
+  models: string[];
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
+  totalCostUsd?: number;
+  durationMs?: number;
+  durationApiMs?: number;
+  toolCallCount: number;
+  toolErrorCount: number;
+}
+
 export interface ClaudeTrace {
   candidate: SessionCandidate;
   auditPath?: string;
@@ -80,6 +95,7 @@ export interface ClaudeTrace {
   costAvailable: boolean;
   parseWarnings: string[];
   rawText: string;
+  telemetry: ClaudeNativeTelemetry;
 }
 
 interface ClaudeAuditEvent {
@@ -89,16 +105,20 @@ interface ClaudeAuditEvent {
   duration_ms?: number;
   duration_api_ms?: number;
   total_cost_usd?: number;
+  model?: string;
+  modelUsage?: Record<string, unknown>;
   requestId?: string;
   request_id?: string;
   usage?: Record<string, unknown>;
   message?: {
+    model?: string;
     content?: Array<{
       type?: string;
       id?: string;
       name?: string;
       input?: Record<string, unknown>;
       text?: string;
+      is_error?: boolean;
     }>;
   };
   timestamp?: string;
@@ -450,14 +470,33 @@ export async function snapshotClaudeSessions(
   return snapshot;
 }
 
-export async function waitForClaudeTrace(options: {
+interface ClaudeSessionMatchOptions {
   dataDir: string;
-  marker: string;
-  correlation: HostRunContext['correlation'];
+  marker?: string;
+  correlation?: HostRunContext['correlation'];
   snapshot: ClaudeSessionSnapshot;
-  timeoutMs: number;
   startedAtMs: number;
-}): Promise<ClaudeTrace> {
+  /** Fresh-session correlation: exact initial user text, never raw-text substring matching. */
+  exactPrompt?: string;
+  sessionPath?: string;
+}
+
+export async function waitForClaudeSession(
+  options: ClaudeSessionMatchOptions & { timeoutMs: number }
+): Promise<ClaudeTrace> {
+  return waitForClaudeMatch(options, false);
+}
+
+export async function waitForClaudeTrace(
+  options: ClaudeSessionMatchOptions & { timeoutMs: number }
+): Promise<ClaudeTrace> {
+  return waitForClaudeMatch(options, true);
+}
+
+async function waitForClaudeMatch(
+  options: ClaudeSessionMatchOptions & { timeoutMs: number },
+  requireCompletion: boolean
+): Promise<ClaudeTrace> {
   const deadline = Date.now() + options.timeoutMs;
   let lastPending: ClaudeTrace | undefined;
   let completeTraceFirstSeenAtMs: number | undefined;
@@ -475,7 +514,10 @@ export async function waitForClaudeTrace(options: {
 
     if (matches.length === 1) {
       const trace = matches[0]!;
-      if (isTraceReady(trace, completeTraceFirstSeenAtMs)) {
+      if (
+        !requireCompletion ||
+        isTraceReady(trace, completeTraceFirstSeenAtMs)
+      ) {
         return trace;
       }
       if (trace.isComplete && completeTraceFirstSeenAtMs === undefined) {
@@ -516,13 +558,9 @@ function isTraceReady(
   );
 }
 
-export async function findMatchingClaudeSessions(options: {
-  dataDir: string;
-  marker: string;
-  correlation?: HostRunContext['correlation'];
-  snapshot: ClaudeSessionSnapshot;
-  startedAtMs: number;
-}): Promise<ClaudeTrace[]> {
+export async function findMatchingClaudeSessions(
+  options: ClaudeSessionMatchOptions
+): Promise<ClaudeTrace[]> {
   const sessions = await listSessionCandidates(options.dataDir);
   const traces: ClaudeTrace[] = [];
 
@@ -534,10 +572,27 @@ export async function findMatchingClaudeSessions(options: {
     const isRecent =
       !Number.isNaN(createdAtMs) && createdAtMs >= options.startedAtMs - 5_000;
 
+    if (options.sessionPath && session.metadataPath !== options.sessionPath)
+      continue;
+    if (options.exactPrompt !== undefined) {
+      // Existing sessions remain excluded even if they change. The creation window
+      // alone is never evidence of ownership. Do not match answers or tool output.
+      if (
+        previous !== undefined ||
+        !isRecent ||
+        createdAtMs > Date.now() + 5_000 ||
+        session.metadata.initialMessage !== options.exactPrompt
+      )
+        continue;
+      traces.push(await parseClaudeTrace(session));
+      continue;
+    }
     if (!isNewOrUpdated && !isRecent) {
       continue;
     }
 
+    if (!options.marker && options.correlation?.includedInPrompt !== false)
+      continue;
     const trace = await parseClaudeTrace(
       session,
       options.correlation?.includedInPrompt === false
@@ -548,7 +603,7 @@ export async function findMatchingClaudeSessions(options: {
       sessionMatchesCorrelation({
         session,
         trace,
-        marker: options.marker,
+        marker: options.marker ?? '',
         correlation: options.correlation,
         isNewOrUpdated,
         isRecent,
@@ -561,10 +616,9 @@ export async function findMatchingClaudeSessions(options: {
   return traces;
 }
 
-function describeCorrelation(options: {
-  marker: string;
-  correlation?: HostRunContext['correlation'];
-}): string {
+function describeCorrelation(options: ClaudeSessionMatchOptions): string {
+  if (options.exactPrompt !== undefined)
+    return 'exact initial prompt in a new native session';
   if (options.correlation?.includedInPrompt) {
     return `marker ${options.marker}`;
   }
@@ -750,7 +804,7 @@ export async function parseClaudeTrace(
         'Claude transcript'
       );
       transcriptEvents = parsed.events;
-      transcriptParsed = parsed.ok;
+      transcriptParsed = parsed.ok && parsed.events.length > 0;
       parseWarnings.push(...parsed.warnings);
     } catch (err) {
       parseWarnings.push(
@@ -777,14 +831,16 @@ export async function parseClaudeTrace(
     ...auditEventsForRun,
     ...transcriptEventsForRun,
   ];
-  const resultEvent =
-    findLastResultEvent(auditEventsForRun) ??
-    findLastResultEvent(transcriptEventsForRun);
+  const resultEvents = dedupeResultEvents([
+    ...auditEventsForRun.filter((event) => event.type === 'result'),
+    ...transcriptEventsForRun.filter((event) => event.type === 'result'),
+  ]);
+  const resultEvent = resultEvents.at(-1);
   const finalAnswer =
     typeof resultEvent?.result === 'string'
       ? resultEvent.result
       : extractAssistantText(combinedEventsForRun);
-  const usage = resultEvent ? extractUsage(resultEvent) : undefined;
+  const usage = extractAggregatedUsage(resultEvents);
   const toolCalls = extractToolCalls(
     transcriptEventsForRun.length > 0
       ? transcriptEventsForRun
@@ -807,9 +863,17 @@ export async function parseClaudeTrace(
     auditParsed,
     transcriptParsed,
     usageAvailable: usage !== undefined,
-    costAvailable: typeof resultEvent?.total_cost_usd === 'number',
+    costAvailable: resultEvents.some(
+      (event) => typeof event.total_cost_usd === 'number'
+    ),
     parseWarnings,
     rawText: `${rawAudit}\n${rawTranscript}`,
+    telemetry: buildNativeTelemetry(
+      resultEvents,
+      toolCalls,
+      usage,
+      combinedEventsForRun
+    ),
   };
 }
 
@@ -829,7 +893,17 @@ function selectEventsForMarker(
     return metadata.initialMessage?.includes(marker) ? events : [];
   }
 
-  return events.slice(markerIndex);
+  const nextMarkerIndex = events.findIndex(
+    (event, index) =>
+      index > markerIndex &&
+      /\[eval-run-marker:MCP_SERVER_TESTER_[A-Za-z0-9_-]+\]/u.test(
+        JSON.stringify(event)
+      )
+  );
+  return events.slice(
+    markerIndex,
+    nextMarkerIndex >= 0 ? nextMarkerIndex : undefined
+  );
 }
 
 export function buildClaudeTraceMetadata(options: {
@@ -1094,7 +1168,19 @@ async function listSessionCandidates(
       ) as ClaudeSessionMetadata;
       const metadataStat = await stat(metadataPath);
       const id = basename(metadataPath, '.json');
-      const sessionDir = join(dirname(metadataPath), id);
+      // Claude 2.110 stores files under <short UUID>/ and points cwd at
+      // that directory's outputs folder. Retain the legacy local_<UUID>/ layout.
+      const shortId = /^local_([a-f0-9]{8})-/i.exec(id)?.[1];
+      const nativeDir = shortId
+        ? join(dirname(metadataPath), shortId)
+        : undefined;
+      const sessionDir =
+        nativeDir &&
+        typeof metadata.cwd === 'string' &&
+        isAbsolute(metadata.cwd) &&
+        dirname(resolve(metadata.cwd)) === resolve(nativeDir)
+          ? nativeDir
+          : join(dirname(metadataPath), id);
       const statMtimeMs = await getSessionObservedMtime({
         sessionDir,
         cliSessionId: metadata.cliSessionId,
@@ -1234,14 +1320,6 @@ async function parseNdjsonContent<T>(
   return { events, ok: warnings.length === 0, warnings };
 }
 
-function findLastResultEvent(
-  events: ClaudeAuditEvent[]
-): ClaudeAuditEvent | undefined {
-  return [...events]
-    .reverse()
-    .find((event) => event.type === 'result' || event.result !== undefined);
-}
-
 async function findFile(
   root: string,
   filename: string
@@ -1296,6 +1374,8 @@ function extractToolCalls(events: ClaudeAuditEvent[]): LLMToolCall[] {
       const mcpMatch = /^mcp__(.+)__(.+)$/.exec(block.name);
       toolCalls.push({
         name: mcpMatch ? mcpMatch[2]! : block.name,
+        source: mcpMatch ? 'mcp' : 'host',
+        ...(mcpMatch ? { server: mcpMatch[1]! } : {}),
         arguments: block.input ?? {},
         id: block.id,
       });
@@ -1303,6 +1383,77 @@ function extractToolCalls(events: ClaudeAuditEvent[]): LLMToolCall[] {
   }
 
   return toolCalls;
+}
+
+function dedupeResultEvents(events: ClaudeAuditEvent[]): ClaudeAuditEvent[] {
+  const byRequest = new Map<string, ClaudeAuditEvent>();
+  events.forEach((event) => {
+    const key =
+      event.requestId ??
+      event.request_id ??
+      JSON.stringify({
+        timestamp: event.timestamp,
+        result: event.result,
+        usage: event.usage,
+        cost: event.total_cost_usd,
+        duration: event.duration_ms,
+      });
+    byRequest.set(key, event);
+  });
+  return [...byRequest.values()];
+}
+
+function extractAggregatedUsage(
+  events: ClaudeAuditEvent[]
+): UsageMetrics | undefined {
+  const byRequest = new Map<string, UsageMetrics>();
+  events.forEach((event, index) => {
+    const usage = extractUsage(event);
+    if (!usage) return;
+    const requestId = event.requestId ?? event.request_id ?? `event-${index}`;
+    const previous = byRequest.get(requestId);
+    if (!previous) {
+      byRequest.set(requestId, usage);
+      return;
+    }
+    byRequest.set(requestId, {
+      inputTokens: Math.max(previous.inputTokens, usage.inputTokens),
+      outputTokens: Math.max(previous.outputTokens, usage.outputTokens),
+      totalCostUsd: Math.max(previous.totalCostUsd, usage.totalCostUsd),
+      durationMs: Math.max(previous.durationMs, usage.durationMs),
+      durationApiMs:
+        previous.durationApiMs === undefined &&
+        usage.durationApiMs === undefined
+          ? undefined
+          : Math.max(previous.durationApiMs ?? 0, usage.durationApiMs ?? 0),
+      cacheReadInputTokens: Math.max(
+        previous.cacheReadInputTokens ?? 0,
+        usage.cacheReadInputTokens ?? 0
+      ),
+      cacheCreationInputTokens: Math.max(
+        previous.cacheCreationInputTokens ?? 0,
+        usage.cacheCreationInputTokens ?? 0
+      ),
+    });
+  });
+
+  const values = [...byRequest.values()];
+  if (values.length === 0) return undefined;
+  return values.reduce((total, value) => ({
+    inputTokens: total.inputTokens + value.inputTokens,
+    outputTokens: total.outputTokens + value.outputTokens,
+    totalCostUsd: total.totalCostUsd + value.totalCostUsd,
+    durationMs: total.durationMs + value.durationMs,
+    durationApiMs:
+      total.durationApiMs === undefined && value.durationApiMs === undefined
+        ? undefined
+        : (total.durationApiMs ?? 0) + (value.durationApiMs ?? 0),
+    cacheReadInputTokens:
+      (total.cacheReadInputTokens ?? 0) + (value.cacheReadInputTokens ?? 0),
+    cacheCreationInputTokens:
+      (total.cacheCreationInputTokens ?? 0) +
+      (value.cacheCreationInputTokens ?? 0),
+  }));
 }
 
 function extractUsage(event: ClaudeAuditEvent): UsageMetrics | undefined {
@@ -1316,7 +1467,8 @@ function extractUsage(event: ClaudeAuditEvent): UsageMetrics | undefined {
     inputTokens === undefined &&
     outputTokens === undefined &&
     event.total_cost_usd === undefined &&
-    event.duration_ms === undefined
+    event.duration_ms === undefined &&
+    event.duration_api_ms === undefined
   ) {
     return undefined;
   }
@@ -1333,6 +1485,53 @@ function extractUsage(event: ClaudeAuditEvent): UsageMetrics | undefined {
     cacheCreationInputTokens:
       getNumber(usage, 'cache_creation_input_tokens') ??
       getNumber(usage, 'cacheCreationInputTokens'),
+  };
+}
+
+function buildNativeTelemetry(
+  resultEvents: ClaudeAuditEvent[],
+  toolCalls: LLMToolCall[],
+  usage: UsageMetrics | undefined,
+  events: ClaudeAuditEvent[]
+): ClaudeNativeTelemetry {
+  const models = [
+    ...new Set(
+      events
+        .filter(
+          (event) => event.type === 'assistant' || event.type === 'result'
+        )
+        .flatMap((event) => [
+          event.model,
+          event.message?.model,
+          ...Object.keys(event.modelUsage ?? {}),
+        ])
+        .filter(
+          (model): model is string =>
+            typeof model === 'string' && model.length > 0
+        )
+    ),
+  ];
+  const toolErrorCount = resultEvents.reduce(
+    (count, event) =>
+      count +
+      (event.message?.content ?? []).filter(
+        (block) => block.type === 'tool_result' && block.is_error === true
+      ).length,
+    0
+  );
+  return {
+    resultCount: resultEvents.length,
+    apiCallCount: usage ? resultEvents.length : 0,
+    models,
+    inputTokens: usage?.inputTokens,
+    outputTokens: usage?.outputTokens,
+    cacheReadInputTokens: usage?.cacheReadInputTokens,
+    cacheCreationInputTokens: usage?.cacheCreationInputTokens,
+    totalCostUsd: usage?.totalCostUsd,
+    durationMs: usage?.durationMs,
+    durationApiMs: usage?.durationApiMs,
+    toolCallCount: toolCalls.length,
+    toolErrorCount,
   };
 }
 

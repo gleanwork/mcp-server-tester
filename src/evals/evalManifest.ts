@@ -3,6 +3,10 @@ import path from 'node:path';
 import { z } from 'zod';
 import { MCPConfigSchema, type MCPConfig } from '../config/mcpConfig.js';
 import type { ToolOverrideVariant } from '../types/index.js';
+import {
+  CoworkSetupConfigSchema,
+  type CoworkSetupConfig,
+} from './coworkSetup/options.js';
 
 /** A tagged configuration block resolved by a public registry. */
 export interface TaggedConfig {
@@ -37,6 +41,7 @@ export interface EvalArm {
   scenarioTemplate?: string;
   metrics?: ExtensionConfig[];
   judges?: ExtensionConfig[];
+  coworkSetup?: CoworkSetupConfig;
 }
 
 /** A complete, organization-neutral evaluation manifest. */
@@ -51,6 +56,7 @@ export interface EvalManifest {
   arms?: EvalArm[];
   metrics?: ExtensionConfig[];
   judges?: ExtensionConfig[];
+  coworkSetup?: CoworkSetupConfig;
   results?: {
     store: ExtensionConfig;
   };
@@ -108,6 +114,7 @@ const EvalArmSchema = z
     scenarioTemplate: z.string().optional(),
     metrics: z.array(ExtensionConfigSchema).optional(),
     judges: z.array(ExtensionConfigSchema).optional(),
+    coworkSetup: CoworkSetupConfigSchema.optional(),
   })
   .strict();
 
@@ -123,6 +130,7 @@ export const EvalManifestSchema = z
     arms: z.array(EvalArmSchema).optional(),
     metrics: z.array(ExtensionConfigSchema).optional(),
     judges: z.array(ExtensionConfigSchema).optional(),
+    coworkSetup: CoworkSetupConfigSchema.optional(),
     results: z.object({ store: ExtensionConfigSchema }).strict().optional(),
     plugins: z.array(z.string().min(1)).optional(),
     model: z.string().optional(),
