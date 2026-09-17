@@ -53,6 +53,14 @@ Set `MST_COWORK_PYTHON` to reuse a worker-prepared interpreter instead; MST neve
 modifies it. `MST_COWORK_DRIVER_ROOT` remains an explicit development override.
 The source-checkout wrapper is a convenience, not required by Scio or `batch`.
 
+## Install an unreleased source pin
+
+A Git dependency must run the package's `prepare` lifecycle to generate `dist`.
+Use an immutable Git commit and explicitly allow this package's build in your
+package manager. `--ignore-scripts` is appropriate for prebuilt registry packages,
+but leaves a Git source dependency without its CLI. No build tooling is required
+when installing the normal published package.
+
 ## Attach to a prepared Linux desktop
 
 Use `host.type: "cowork"` and `host.options.computerUseProvider: "linux-desktop"`
