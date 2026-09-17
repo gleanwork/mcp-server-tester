@@ -14,6 +14,17 @@
 
 
 
+
+## v2.0.0-beta.1 (2026-09-17)
+
+#### :bug: Bug Fix
+* [#273](https://github.com/gleanwork/mcp-server-tester/pull/273) fix: make repeated regex checks consistent ([@JiangLLM](https://github.com/JiangLLM))
+
+#### Committers: 2
+- Chenhao Yang ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+- Jiang Wu ([@JiangLLM](https://github.com/JiangLLM))
+
+
 ## v2.0.0-beta.0 (2026-09-14)
 
 #### :rocket: Enhancement
