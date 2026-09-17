@@ -6,7 +6,7 @@
  */
 
 import type { MCPFixtureApi } from '../../mcp/fixtures/mcpFixture.js';
-import type { UsageMetrics } from '../../types/index.js';
+import type { HostDiagnostics, UsageMetrics } from '../../types/index.js';
 
 /**
  * Host type for MCP host simulation.
@@ -89,6 +89,8 @@ export type CLIOutputFormat = 'stream-json' | 'json';
  * ```
  */
 export interface CLIConfig {
+  /** Claude Code only: validate these MCP servers in its startup stream. */
+  claudeMcpServers?: string[];
   /** Child-process-only environment overrides. Undefined removes an inherited key. */
   env?: Record<string, string | undefined>;
   /**
@@ -263,6 +265,8 @@ export interface LLMToolCall {
  * Result from an MCP host simulation
  */
 export interface MCPHostSimulationResult {
+  /** Sanitized startup evidence, retained even when execution fails. */
+  diagnostics?: HostDiagnostics;
   /** Whether the simulation succeeded */
   success: boolean;
 

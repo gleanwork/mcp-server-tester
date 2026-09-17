@@ -196,6 +196,15 @@ async function runBuiltinHost(
   }
 
   try {
+    if (
+      config.hostType === 'cli' &&
+      config.cli?.claudeMcpServers !== undefined
+    ) {
+      // The Claude process runner settles on this controller's abort. Do not
+      // race away its partial trace/diagnostics at the same deadline.
+      void expired.catch(() => {});
+      return await execute();
+    }
     const result = await Promise.race([execute(), expired]);
     checkDeadline();
     return result;
@@ -458,11 +467,14 @@ function claudeCliHost(options: BuiltinHostOptions): MCPHostConfig {
     model,
     cli: {
       command: 'claude',
+      claudeMcpServers: Object.keys(mcpServers),
       args: baseArgs,
       outputFormat: 'stream-json',
       timeout: options.timeout ?? 180_000,
       env: {
         ...env,
+        MCP_CONNECTION_NONBLOCKING: 'false',
+        MCP_CONNECT_TIMEOUT_MS: env.MCP_CONNECT_TIMEOUT_MS ?? '30000',
         CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
         CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1',
         ...(provider === 'vertex'

@@ -358,6 +358,7 @@ const MCPHostConfigSchema = z.object({
       command: z.string(),
       args: z.array(z.string()),
       outputFormat: z.enum(['stream-json', 'json']).optional(),
+      claudeMcpServers: z.array(z.string().min(1)).optional(),
       timeout: z.number().optional(),
     })
     .optional(),

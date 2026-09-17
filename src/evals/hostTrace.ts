@@ -38,6 +38,7 @@ export function hostTraceToExecution(
           id: event.id,
         })),
       usage: trace.usage,
+      ...(trace.diagnostics ? { diagnostics: trace.diagnostics } : {}),
     },
     error: trace.error,
     hostUsage: trace.usage,
@@ -56,6 +57,7 @@ export function simulationToHostTrace(
       ? undefined
       : (result.error ?? 'Host execution failed.'),
     usage: result.usage,
+    ...(result.diagnostics ? { diagnostics: result.diagnostics } : {}),
     events: result.toolCalls.map((call) => {
       const server = servers.find(
         (server) => server.label && call.name.startsWith(`${server.label}.`)
