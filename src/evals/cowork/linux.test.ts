@@ -145,6 +145,41 @@ describe('caller-owned Linux Cowork desktop', () => {
     );
     expect(child.exec).not.toHaveBeenCalled();
   });
+  it('bounds UI submission independently of the native execution deadline', async () => {
+    await linuxCoworkPlatform.submit('unchanged', {
+      deadlineAt: Date.now() + 900_000,
+      env: session,
+    });
+    const [, args, execution] = child.exec.mock.calls[0]!;
+    expect(execution.timeout).toBe(60_000);
+    expect(args[args.indexOf('--timeout-ms') + 1]).toBe('59000');
+  });
+  it('reports bounded driver error codes without including arbitrary diagnostics', async () => {
+    child.responses.push({
+      failed: true,
+      value: {
+        status: 'failed',
+        action_count: 1,
+        duration_ms: 5,
+        error: 'deadline_exceeded',
+      },
+    });
+    await expect(
+      linuxCoworkPlatform.submit('unchanged', options())
+    ).rejects.toThrow('deadline_exceeded');
+    child.responses.push({
+      failed: true,
+      value: {
+        status: 'failed',
+        action_count: 1,
+        duration_ms: 5,
+        error: 'secret child diagnostic',
+      },
+    });
+    await expect(
+      linuxCoworkPlatform.submit('unchanged', options())
+    ).rejects.not.toThrow('secret child diagnostic');
+  });
   it('passes the exact prompt over stdin and reports no imaginary planner usage', async () => {
     const prompt = '  Unicode 中文\nsecond line  ';
     const result = await linuxCoworkPlatform.submit(prompt, options());

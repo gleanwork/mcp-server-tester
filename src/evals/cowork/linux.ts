@@ -29,6 +29,7 @@ interface Receipt {
   status: 'ready' | 'submitted' | 'hitl_checked' | 'failed';
   action_count: number;
   duration_ms: number;
+  errorCode?: string;
 }
 
 async function readSettings(file: string): Promise<Record<string, unknown>> {
@@ -82,6 +83,10 @@ function receipt(stdout: string): Receipt | undefined {
       status: r.status as Receipt['status'],
       action_count: r.action_count,
       duration_ms: r.duration_ms,
+      errorCode:
+        typeof r.error === 'string' && /^[a-z_]{1,64}$/.test(r.error)
+          ? r.error
+          : undefined,
     };
   } catch {
     return undefined;
@@ -107,7 +112,12 @@ async function execute(
   const script = createRequire(
     typeof __filename === 'string' ? __filename : import.meta.url
   ).resolve('@gleanwork/mcp-server-tester/cowork-linux-runtime');
-  const timeout = Math.min(remaining, mode === 'submit' ? remaining : 10_000);
+  const timeout = Math.min(remaining, mode === 'submit' ? 60_000 : 10_000);
+  // Reserve time for the bounded driver to return its final receipt.
+  const driverTimeout = Math.max(
+    1,
+    Math.floor(timeout - Math.min(1000, timeout / 10))
+  );
   const result = await new Promise<{ failed: boolean; stdout: string }>(
     (resolve) => {
       const child = execFile(
@@ -117,7 +127,7 @@ async function execute(
           '--mode',
           mode,
           '--timeout-ms',
-          String(Math.max(1, Math.floor(timeout))),
+          String(driverTimeout),
           '--max-actions',
           String(options.maxActions ?? 24),
         ],
@@ -154,7 +164,7 @@ async function execute(
     record.action_count > (options.maxActions ?? 24)
   )
     throw new CoworkDriverError(
-      `Linux desktop ${mode} failed or its receipt was uncertain; no retry attempted.`,
+      `Linux desktop ${mode} failed or its receipt was uncertain (${record?.errorCode ?? 'missing_or_invalid_receipt'}); no retry attempted.`,
       record ? telemetry(started, record.action_count, 'partial') : undefined
     );
   return record;

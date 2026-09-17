@@ -37,7 +37,7 @@ class Desktop:
             raise DriverFailure("desktop_missing_or_ambiguous")
         return matches[0]
 
-    def controls(self, names: set[str], roles: set[str]):
+    def controls(self, names: set[str], roles: set[str], *, require_enabled: bool = True):
         pending = [self.application()]
         found = []
         seen = 0
@@ -50,8 +50,10 @@ class Desktop:
                 states = node.get_state_set()
                 if (node.get_role_name() in roles and node.get_name() in names
                         and states.contains(self.api.StateType.VISIBLE)
-                        and states.contains(self.api.StateType.ENABLED)
-                        and states.contains(self.api.StateType.SENSITIVE)):
+                        and states.contains(self.api.StateType.SHOWING)
+                        and (not require_enabled or (
+                            states.contains(self.api.StateType.ENABLED)
+                            and states.contains(self.api.StateType.SENSITIVE)))):
                     found.append(node)
                 pending.extend(node.get_child_at_index(i) for i in range(node.get_child_count()))
             except DriverFailure:
@@ -72,7 +74,7 @@ class Desktop:
     def open_prompt(self, prompt: str, timeout: float) -> None:
         subprocess.run(
             ["/usr/bin/claude-desktop", "--no-sandbox", "claude://claude.ai/new?q=" + quote(prompt, safe="")],
-            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout,
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=min(timeout, 15),
         )
 
 
@@ -111,6 +113,13 @@ class Driver:
         requested = set()
         while True:
             self.remaining()
+            # The empty Cowork composer disables Start task until text is inserted.
+            # Its visible presence proves the mode, not permission to submit.
+            starts = self.desktop.controls({"Start task"}, {"button"}, require_enabled=False)
+            if len(starts) > 1:
+                raise DriverFailure("submission_control_ambiguous")
+            if starts:
+                return
             radios = self.desktop.controls({"Cowork"}, {"radio button"})
             if len(radios) > 1:
                 raise DriverFailure("cowork_control_ambiguous")
@@ -120,8 +129,6 @@ class Driver:
                 if "radio" not in requested:
                     requested.add("radio")
                     self.action(lambda: self.desktop.activate(radios[0]))
-            elif self.desktop.controls({"Start task"}, {"button"}):
-                return
             else:
                 tabs = self.desktop.controls({"Cowork"}, {"button"})
                 if len(tabs) > 1:

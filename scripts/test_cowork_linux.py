@@ -25,7 +25,7 @@ class Desktop:
         self.prompt = None
         self.fail = False
 
-    def controls(self, names, roles):
+    def controls(self, names, roles, *, require_enabled=True):
         return [node for node in self.starts + self.radios + self.approvals if node.name in names]
 
     def selected(self, node):
@@ -50,6 +50,30 @@ class LinuxDriverTests(unittest.TestCase):
         self.assertEqual(desktop.actions, ["Start task"])
         self.assertEqual(receipt["status"], "submitted")
         self.assertEqual(receipt["action_count"], 2)
+
+    def test_disabled_start_button_proves_mode_before_prefill(self):
+        class EmptyComposer(Desktop):
+            def controls(self, names, roles, *, require_enabled=True):
+                controls = super().controls(names, roles, require_enabled=require_enabled)
+                return [node for node in controls if node.name != 'Start task' or not require_enabled or self.prompt is not None]
+
+            def selected(self, node):
+                return False
+        desktop = EmptyComposer()
+        result = module.Driver(desktop, 1000, 4).submit('unchanged')
+        self.assertEqual(result['status'], 'submitted')
+        self.assertEqual(desktop.prompt, 'unchanged')
+        self.assertEqual(desktop.actions, ['Start task'])
+
+    def test_disabled_submit_is_never_activated(self):
+        class DisabledSubmit(Desktop):
+            def controls(self, names, roles, *, require_enabled=True):
+                return [] if require_enabled else self.starts
+        desktop = DisabledSubmit()
+        with self.assertRaisesRegex(module.DriverFailure, 'deadline'):
+            module.Driver(desktop, 5, 4).submit('unchanged')
+        self.assertEqual(desktop.actions, [])
+        self.assertEqual(desktop.prompt, 'unchanged')
 
     def test_probe_has_no_desktop_effects(self):
         desktop = Desktop()
@@ -122,6 +146,10 @@ class LinuxDriverTests(unittest.TestCase):
         arguments = run.call_args.args[0]
         self.assertEqual(arguments[-1], "claude://claude.ai/new?q=a%0Ab%20%26%20%22c%22")
         self.assertNotIn("shell", run.call_args.kwargs)
+        self.assertEqual(run.call_args.kwargs['timeout'], 1)
+        with patch.object(module.subprocess, 'run') as run:
+            desktop.open_prompt('unchanged', 900)
+        self.assertEqual(run.call_args.kwargs['timeout'], 15)
 
 
 if __name__ == "__main__":
