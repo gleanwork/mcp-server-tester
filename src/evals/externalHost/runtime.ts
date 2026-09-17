@@ -77,7 +77,7 @@ export async function runExternalHostScenario(
   return runner.run(context);
 }
 
-export function normalizeCorrelation(
+function normalizeCorrelation(
   correlation: ExternalHostCorrelationConfig | undefined,
   marker: string
 ): ExternalHostCorrelationMetadata {

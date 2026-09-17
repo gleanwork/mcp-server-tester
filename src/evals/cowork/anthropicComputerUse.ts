@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
-import { ensureCoworkPython } from '../../cowork/pythonRuntime.js';
+import { ensureCoworkPython } from './pythonRuntime.js';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);

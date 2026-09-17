@@ -46,21 +46,13 @@ const EXTERNAL_HOST_REGISTRY: Record<
       control: [
         { uses: 'builtin:platform.macos' },
         {
-          uses: 'builtin:desktop.macos.appLifecycle',
-          with: { appName: 'Claude' },
-        },
-        {
           uses: 'builtin:anthropic.claude.activateCoworkSurface',
           with: { appName: 'Claude' },
         },
       ],
       input: {
         uses: 'builtin:desktop.macos.accessibilitySubmit',
-        with: {
-          appName: 'Claude',
-          createNewConversation: false,
-          promptElementDescription: 'Write your prompt to Claude',
-        },
+        with: { appName: 'Claude', createNewConversation: true },
       },
       completion: {
         uses: 'builtin:anthropic.claude.localAgentTrace',

@@ -63,7 +63,7 @@
   "scripts": {
     "build": "npm run build:ui && tsup && npm run build:copy-ui",
     "build:copy-ui": "cp -r src/reporters/ui-dist dist/reporters/",
-    "build:ui": "node --import tsx src/reporters/build-ui.ts",
+    "build:ui": "tsx src/reporters/build-ui.ts",
     "dev": "tsup --watch",
     "dev:ui": "tsx src/reporters/build-ui.ts --watch",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",

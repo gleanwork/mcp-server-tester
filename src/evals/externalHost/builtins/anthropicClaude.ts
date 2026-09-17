@@ -20,14 +20,9 @@ import type {
 import type { UsageMetrics } from '../../../types/index.js';
 import { driverToSlug, hostTypeFromDriver } from '../driverIdentity.js';
 import {
-  getMacComputerUseRuntime,
-  waitForMacComputerUseText,
-} from './macComputerUse.js';
-import { ensureMacComputerUseApp } from './macCowork.js';
-import {
-  classifyMacosDesktopFailure,
   readMacosAccessibilityText,
   readMacosFrontWindowContents,
+  runAppleScript,
 } from './macosDesktop.js';
 
 const DEFAULT_APP_NAME = 'Claude';
@@ -161,9 +156,9 @@ export const ANTHROPIC_CLAUDE_CAPABILITIES: ExternalHostCapabilityImplementation
   ];
 
 /**
- * Deterministically switches the Claude desktop app to the Home/Cowork surface
- * via Cmd+1. The current Claude UI uses Cmd+2 for Code, so the driver also waits
- * for and verifies Cowork-specific accessibility labels before input. Replaces the older
+ * Deterministically switches the Claude desktop app to the Cowork surface via
+ * Cmd+2 (the app's built-in shortcut for the Cowork sidebar tab). Idempotent —
+ * sending Cmd+2 while already on Cowork is a no-op. Replaces the older
  * rejectClaudeChatSurface capability for use cases that need automatic surface
  * activation (e.g. CI runs).
  */
@@ -175,34 +170,21 @@ async function activateCoworkSurfaceCapability({
 }: ExternalHostCapabilityContext): Promise<ExternalHostRunResult | void> {
   const appName =
     runStringOption(config, binding, 'appName') ?? DEFAULT_APP_NAME;
-  const computerUseProvider =
-    runStringOption(config, binding, 'computerUseProvider') ?? 'native-macos';
-  if (computerUseProvider === 'anthropic-computer-use') return;
-  const appReadyTimeoutMs =
-    runNumberOption(config, binding, 'appReadyTimeoutMs') ?? 60_000;
-  const deadlineAt = Math.min(
-    run.startedAtMs + run.timeoutMs,
-    Date.now() + appReadyTimeoutMs
-  );
+  const settleDelayMs = 700;
+  const script = `
+tell application ${JSON.stringify(appName)} to activate
+delay 0.4
+tell application "System Events"
+  tell process ${JSON.stringify(appName)}
+    set frontmost to true
+    keystroke "2" using command down
+  end tell
+end tell
+delay ${settleDelayMs / 1000}
+return "ok"
+`;
   try {
-    const computerUseProvider =
-      runStringOption(config, binding, 'computerUseProvider') ??
-      'anthropic-computer-use';
-    const app =
-      await getMacComputerUseRuntime(computerUseProvider).getApp(appName);
-    await ensureMacComputerUseApp(app, deadlineAt);
-    await waitForMacComputerUseText(
-      app,
-      (observation) =>
-        isClaudeDesktopNavigationAccessibilityText(observation.text),
-      { deadlineAt }
-    );
-    await app.pressKey('CMD+1');
-    await waitForMacComputerUseText(
-      app,
-      (observation) => isClaudeCoworkAccessibilityText(observation.text),
-      { deadlineAt }
-    );
+    await runAppleScript(script, { timeoutMs: 8_000 });
   } catch (err) {
     return failureResult({
       config,
@@ -210,27 +192,14 @@ async function activateCoworkSurfaceCapability({
       driver: state.driver,
       displayName: state.displayName,
       capabilitiesUsed: state.capabilitiesUsed,
-      failureKind: classifyMacosDesktopFailure(formatError(err)),
-      error: `Failed to activate the Cowork Home surface: ${formatError(err)}`,
+      failureKind: 'submission_failed',
+      error: `Failed to activate Cowork surface via Cmd+2: ${formatError(err)}`,
       artifacts: [],
       limitations: [
-        'Cowork surface activation requires an initialized Computer Use runtime exposing globalThis.cua.getApp("Claude").',
+        'Cowork surface activation depends on Cmd+2 being bound to the Cowork sidebar tab in the user-installed Claude app version.',
       ],
     });
   }
-}
-
-export function isClaudeDesktopNavigationAccessibilityText(
-  text: string
-): boolean {
-  return text.includes('Home') && text.includes('Code');
-}
-
-export function isClaudeCoworkAccessibilityText(text: string): boolean {
-  return (
-    text.includes('Write your prompt to Claude') &&
-    (text.includes('Learn more about Cowork') || text.includes('Cowork'))
-  );
 }
 
 async function rejectClaudeChatSurfaceCapability({
@@ -301,10 +270,7 @@ async function captureClaudeChatAccessibilityResultCapability({
       driver: state.driver,
       displayName: state.displayName,
       capabilitiesUsed: state.capabilitiesUsed,
-      timeoutMs: Math.max(
-        1,
-        Math.min(run.timeoutMs, run.startedAtMs + run.timeoutMs - Date.now())
-      ),
+      timeoutMs: run.timeoutMs,
       appName: runStringOption(config, binding, 'appName'),
     });
   } catch (err) {
@@ -359,10 +325,7 @@ async function captureClaudeCoworkAgentTraceCapability({
       marker: run.marker,
       correlation: run.correlation,
       snapshot,
-      timeoutMs: Math.max(
-        1,
-        Math.min(run.timeoutMs, run.startedAtMs + run.timeoutMs - Date.now())
-      ),
+      timeoutMs: run.timeoutMs,
       startedAtMs: run.startedAtMs,
     });
   } catch (err) {
@@ -379,29 +342,6 @@ async function captureClaudeCoworkAgentTraceCapability({
       limitations: [`Claude data directory: ${dataDir}`],
     });
   }
-}
-
-export async function normalizeClaudeTraceForRun(options: {
-  config: ExternalHostConfig;
-  context: HostRunContext;
-  driver: HostDriverId;
-  displayName: string;
-  capabilitiesUsed: HostCapability[];
-  trace: ClaudeTrace;
-}): Promise<ExternalHostRunResult> {
-  return normalizeClaudeCoworkAgentTraceCapability({
-    config: options.config,
-    run: options.context,
-    capability: 'normalize',
-    binding: { uses: 'builtin:anthropic.claude.localAgentNormalize' },
-    state: {
-      driver: options.driver,
-      driverSlug: driverToSlug(options.driver),
-      displayName: options.displayName,
-      capabilitiesUsed: options.capabilitiesUsed,
-      data: { claudeTrace: options.trace },
-    },
-  });
 }
 
 async function normalizeClaudeCoworkAgentTraceCapability({
@@ -499,19 +439,6 @@ function runStringOption(
   return stringOption(binding.with, key) ?? configStringOption(config, key);
 }
 
-function runNumberOption(
-  config: ExternalHostConfig,
-  binding: { with?: Record<string, unknown> },
-  key: string
-): number | undefined {
-  const bindingValue = binding.with?.[key];
-  if (typeof bindingValue === 'number') {
-    return bindingValue;
-  }
-  const configValue = config.options?.[key];
-  return typeof configValue === 'number' ? configValue : undefined;
-}
-
 export function getClaudeDataDir(
   config: ExternalHostConfig,
   binding?: { with?: Record<string, unknown> }
@@ -526,7 +453,7 @@ export function getClaudeDataDir(
       homedir(),
       'Library',
       'Application Support',
-      'Claude-3p',
+      'Claude',
       'local-agent-mode-sessions'
     )
   );
@@ -549,7 +476,6 @@ interface ClaudeSessionMatchOptions {
   correlation?: HostRunContext['correlation'];
   snapshot: ClaudeSessionSnapshot;
   startedAtMs: number;
-  scenario?: string;
   /** Fresh-session correlation: exact initial user text, never raw-text substring matching. */
   exactPrompt?: string;
   sessionPath?: string;
@@ -667,25 +593,18 @@ export async function findMatchingClaudeSessions(
 
     if (!options.marker && options.correlation?.includedInPrompt !== false)
       continue;
-    let trace = await parseClaudeTrace(
+    const trace = await parseClaudeTrace(
       session,
       options.correlation?.includedInPrompt === false
         ? undefined
         : options.marker
     );
     if (
-      options.scenario &&
-      (!options.marker || !trace.rawText.includes(options.marker))
-    ) {
-      trace = await parseClaudeTrace(session, undefined);
-    }
-    if (
       sessionMatchesCorrelation({
         session,
         trace,
         marker: options.marker ?? '',
         correlation: options.correlation,
-        scenario: options.scenario,
         isNewOrUpdated,
         isRecent,
       })
@@ -703,9 +622,7 @@ function describeCorrelation(options: ClaudeSessionMatchOptions): string {
   if (options.correlation?.includedInPrompt) {
     return `marker ${options.marker}`;
   }
-  return options.scenario
-    ? `query correlation near the run start: ${options.scenario}`
-    : `${options.correlation?.strategy ?? 'none'} correlation near the run start`;
+  return `${options.correlation?.strategy ?? 'none'} correlation near the run start`;
 }
 
 async function readAccessibilityFallback(
@@ -1043,7 +960,6 @@ export function buildClaudeTraceMetadata(options: {
     traceConfidence,
     traceLimitations: limitations.length > 0 ? limitations : undefined,
     artifacts: options.artifacts,
-    telemetry: options.trace.telemetry,
     session: {
       id:
         options.trace.candidate.metadata.sessionId ??
@@ -1364,16 +1280,11 @@ function sessionMatchesCorrelation(options: {
   trace: ClaudeTrace;
   marker: string;
   correlation?: HostRunContext['correlation'];
-  scenario?: string;
   isNewOrUpdated: boolean;
   isRecent: boolean;
 }): boolean {
   if (options.correlation?.includedInPrompt !== false) {
-    return (
-      sessionMatchesMarker(options.session, options.trace, options.marker) ||
-      (options.scenario !== undefined &&
-        options.trace.rawText.includes(options.scenario))
-    );
+    return sessionMatchesMarker(options.session, options.trace, options.marker);
   }
 
   return options.isNewOrUpdated || options.isRecent;

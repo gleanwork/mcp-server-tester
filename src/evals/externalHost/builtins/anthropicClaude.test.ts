@@ -324,6 +324,30 @@ describe('anthropicClaude trace parsing', () => {
     );
   });
 
+  it('does not claim tool-call evidence for an empty transcript', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'claude-empty-transcript-'));
+    onTestFinished(() => rm(root, { recursive: true, force: true }));
+    const sessionId = 'local_empty_transcript';
+    const cliSessionId = 'cli_empty_transcript';
+    const sessionDir = join(root, sessionId);
+    await mkdir(sessionDir, { recursive: true });
+    const metadataPath = join(root, `${sessionId}.json`);
+    await writeFile(metadataPath, JSON.stringify({ sessionId, cliSessionId }));
+    await writeJsonl(join(sessionDir, 'audit.jsonl'), [
+      { type: 'result', result: 'final answer' },
+    ]);
+    await writeFile(join(sessionDir, `${cliSessionId}.jsonl`), '');
+    const trace = await parseClaudeTrace({
+      id: sessionId,
+      metadataPath,
+      sessionDir,
+      statMtimeMs: Date.now(),
+      metadata: { sessionId, cliSessionId },
+    });
+    expect(trace.isComplete).toBe(true);
+    expect(trace.transcriptParsed).toBe(false);
+  });
+
   it('only marks evidence fields high confidence when the parsed trace supports them', async () => {
     const root = await mkdtemp(join(tmpdir(), 'claude-evidence-'));
     const sessionId = 'local_evidence';

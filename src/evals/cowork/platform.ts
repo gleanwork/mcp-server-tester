@@ -3,7 +3,7 @@ import type {
   ComputerUseOptions,
   ComputerUseSubmissionResult,
   ComputerUseHitlResult,
-} from '../externalHost/builtins/anthropicComputerUse.js';
+} from './anthropicComputerUse.js';
 
 /** The shared batch lifecycle does not choose OS paths or control an application.
  * Implementations must retain the existing bounded, no-resubmission contract. */

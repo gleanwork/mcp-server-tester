@@ -4,6 +4,16 @@ set +x
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+has_manifest=false
+for arg in "$@"; do
+  case "$arg" in
+    --manifests|--manifests=*|--manifest-dir|--manifest-dir=*) has_manifest=true;;
+  esac
+done
+if [[ "$has_manifest" == false ]]; then
+  echo 'Provide --manifests <path> or --manifest-dir <directory>; no default evaluation is bundled.' >&2
+  exit 2
+fi
 if [[ "$(uname -s)" != Darwin ]]; then
   echo 'The shared runner is portable; this live desktop adapter requires macOS.' >&2
   exit 1
@@ -20,15 +30,6 @@ if [[ -z "${MST_COWORK_PYTHON:-}" ]]; then
 fi
 export MST_COWORK_DRIVER_ROOT="$ROOT"
 npm run build
-has_manifest=false
-for arg in "$@"; do
-  case "$arg" in
-    --manifests|--manifests=*|--manifest-dir|--manifest-dir=*) has_manifest=true;;
-  esac
-done
-if [[ "$has_manifest" == false ]]; then
-  set -- --manifests configs/cowork-smoke.json "$@"
-fi
 # Node parses dotenv as data, not shell code. This also supplies custom judges.
 if [[ -n "${COWORK_ENV_FILE:-}" ]]; then
   exec node --env-file="$COWORK_ENV_FILE" dist/cli/index.js batch --workers 1 --output-root .mcp-test-results/cowork "$@"

@@ -204,7 +204,7 @@ describe('Mac Cowork settings transaction', () => {
       await installed.restore();
       await expectClean();
     }
-  });
+  }, 15_000); // Four filesystem transactions and nine real Python helper invocations.
 
   it('installs a private, secret-free flat profile and recovers exact original bytes', async () => {
     const result = await installMacCoworkSettings(options());

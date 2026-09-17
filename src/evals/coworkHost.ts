@@ -13,7 +13,7 @@ import {
   waitForClaudeSession,
 } from './externalHost/builtins/anthropicClaude.js';
 import { simulationToHostTrace } from './hostTrace.js';
-import { ComputerUseHitlBudgetError } from './externalHost/builtins/anthropicComputerUse.js';
+import { ComputerUseHitlBudgetError } from './cowork/anthropicComputerUse.js';
 
 const OptionsSchema = z
   .object({
@@ -56,10 +56,6 @@ async function runBatch(
   selectedPlatform?: CoworkPlatform
 ): Promise<HostRunResult[]> {
   if (!requests.length) return [];
-  if (active)
-    throw new Error(
-      'Cowork desktop is already in use by another batch. Run with --workers 1.'
-    );
   const configs = requests.map((r) => CoworkSchema.parse(r.config));
   if (requests.some((r) => !r.input.scenario.trim()))
     throw new Error('Cowork cases require a non-empty scenario.');
@@ -81,8 +77,6 @@ async function runBatch(
   const results = requests.map(() =>
     failure('Cowork submission was not attempted.')
   );
-  const hitlErrors = new Map<number, string>();
-  const hitlWarnings = new Map<number, string>();
   const usedSessions = new Set<string>();
   const safeError = (error: unknown): string => {
     let text =
@@ -120,7 +114,8 @@ async function runBatch(
       const snapshot = await snapshotClaudeSessions(dataDir);
       const startedAtMs = Date.now();
       const deadlineAt = startedAtMs + config.timeout;
-      const run = { index, startedAtMs, deadlineAt };
+      let hitlError: string | undefined;
+      let hitlWarning: string | undefined;
       let sessionPath: string;
       const match = {
         dataDir,
@@ -174,11 +169,11 @@ async function runBatch(
           );
         if (native[0]?.isComplete) {
           process.stderr.write(
-            `[mst:cowork] case ${run.index + 1} already completed; skipping HITL\n`
+            `[mst:cowork] case ${index + 1} already completed; skipping HITL\n`
           );
         } else
           await platform.handleHitl({
-            deadlineAt: run.deadlineAt,
+            deadlineAt: deadlineAt,
             maxActions: config.options.hitlMaxActions,
             model: config.options.computerUseModel,
             env,
@@ -187,23 +182,19 @@ async function runBatch(
       } catch (error) {
         const message = safeError(error);
         if (error instanceof ComputerUseHitlBudgetError) {
-          hitlWarnings.set(run.index, message);
+          hitlWarning = message;
         } else {
-          hitlErrors.set(run.index, message);
-          results[run.index] = failure(message);
+          hitlError = message;
         }
       }
-      process.stderr.write(
-        '[mst:cowork] collecting bound native Claude telemetry\n'
-      );
       try {
-        const remaining = run.deadlineAt - Date.now();
+        const remaining = deadlineAt - Date.now();
         if (remaining <= 0)
           throw new Error(
             'Native Claude trace deadline exceeded. No resubmission attempted.'
           );
         process.stderr.write(
-          `[mst:cowork] collecting case ${run.index + 1}/${requests.length}\n`
+          `[mst:cowork] collecting case ${index + 1}/${requests.length}\n`
         );
         const trace = await waitForClaudeTrace({
           ...match,
@@ -215,7 +206,7 @@ async function runBatch(
             'Native session identity changed; refusing attribution.'
           );
         process.stderr.write(
-          `[mst:cowork] case ${run.index + 1}: native completion found (${trace.toolCalls.length} tool calls)\n`
+          `[mst:cowork] case ${index + 1}: native completion found (${trace.toolCalls.length} tool calls)\n`
         );
         if (config.model && !trace.telemetry.models.includes(config.model)) {
           throw new Error(
@@ -236,22 +227,20 @@ async function runBatch(
           },
           servers
         );
-        results[run.index] = {
+        results[index] = {
           ...result,
-          error: result.error ?? hitlErrors.get(run.index),
+          error: result.error ?? hitlError,
           telemetry: {
             source: 'claude-native',
             ...trace.telemetry,
             nativeSessionId: trace.candidate.id,
             correlation: 'exact-initial-prompt',
-            ...(hitlWarnings.has(run.index)
-              ? { hitlWarning: hitlWarnings.get(run.index) }
-              : {}),
+            ...(hitlWarning ? { hitlWarning } : {}),
           },
           llmDurationMs: trace.llmDurationMs,
         };
       } catch (error) {
-        results[run.index] = failure(safeError(error));
+        results[index] = failure(safeError(error));
       }
     }
     return results;

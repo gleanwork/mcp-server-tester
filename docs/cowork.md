@@ -1,24 +1,23 @@
 # Cowork through the normal MST batch runner
 
-This uses the existing Anthropic Computer Use driver and native Claude telemetry,
-with PR #271's managed profile/MCP configuration and the V2 connection adapter.
-It borrows interface separation and focused testing from #252, not its Cua runtime,
-AXURL checks, clipboard input, approval rules, or strict evidence state machine.
+Cowork runs through MST V2's normal `batch` command. The implementation has three
+parts: managed application setup, the Anthropic Computer Use driver, and native
+Claude trace collection. There is no alternative native/CUA UI driver in this path.
 
 ## Run from a source checkout
 
 ```bash
-COWORK_ENV_FILE=/absolute/path/to/existing.env ./scripts/run-cowork.sh
+COWORK_ENV_FILE=/absolute/path/to/existing.env ./scripts/run-cowork.sh --manifests /absolute/path/to/manifest.json
 ```
 
-This prepares a local Python environment, builds MST, and runs a one-case READY
-smoke test through `batch`. It submits a real Claude task. The invoking terminal
+This prepares a local Python environment, builds MST, and runs the supplied
+evaluation through `batch`. It submits real Claude tasks. The invoking terminal
 must have Accessibility and Screen Recording permission. Credentials remain in
 the existing dotenv file or exported environment; the runner never rewrites or
 shell-sources that file. Node loads dotenv before plugins/custom judges start.
 
-Pass `--manifests /absolute/path/to/manifest.json` for a real MCP evaluation.
-Use the normal file/GCS dataset sources and plugins. Scio keeps its existing thin
+An explicit `--manifests` or `--manifest-dir` is required; no default evaluation is
+bundled. Use the normal file/GCS dataset sources and plugins. Scio keeps its existing thin
 adapter and `batch` invocation. Its custom judges also need
 `SCIO_MCP_PROMPTS_DIR` set to Scio's `data/prompts/templates` directory.
 `--dry-run` checks configuration, not GUI execution or model behavior.
@@ -26,8 +25,7 @@ adapter and `batch` invocation. Its custom judges also need
 Use host `cowork` (`cowork_cu` remains an alias). `host.model` selects the Cowork
 inference model; `host.options.computerUseModel` independently selects the planner.
 The only supported provider is `anthropic`, and the driver selector is
-`host.options.computerUseProvider: "anthropic-computer-use"`. See
-[`configs/cowork-smoke.json`](../configs/cowork-smoke.json) for both model settings.
+`host.options.computerUseProvider: "anthropic-computer-use"`.
 
 MST applies a fixed inference model list with discovery disabled. Native telemetry
 must report the requested exact model ID; a mismatch or missing model evidence
@@ -59,8 +57,10 @@ The source-checkout wrapper is a convenience, not required by Scio or `batch`.
 - `coworkHost.ts`: batching, correlation, native collection, and trace conversion.
 - `cowork/platform.ts`: small injectable platform interface and OS selection.
 - `cowork/macos.ts`: wiring to the existing setup, recovery, and desktop functions.
-- `coworkSetup/`: #271 profile settings, private header helpers, transactional restore.
-- `scripts/cowork_computer_use.py`: unchanged screenshot navigation, executor-owned
+- `coworkSetup/`: profile/MCP settings, private header helpers, and guarded restore.
+  Its `macController.ts` handles only application start/stop, not UI automation.
+- `cowork/anthropicComputerUse.ts`: the single CU driver entry point and process limits.
+- `scripts/cowork_computer_use.py`: bounded screenshot navigation, executor-owned
   query insertion, one submit boundary, and bounded first-option HITL handling.
 
 Cases run sequentially: snapshot, submit, bind, HITL, then native collection.

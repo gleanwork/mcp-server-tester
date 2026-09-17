@@ -17,10 +17,6 @@ describe('macOS desktop built-in capabilities', () => {
         capabilities: ['control'],
       },
       {
-        id: 'builtin:desktop.macos.appLifecycle',
-        capabilities: ['control'],
-      },
-      {
         id: 'builtin:desktop.macos.accessibilitySubmit',
         capabilities: ['control', 'input'],
       },

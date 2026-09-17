@@ -8,8 +8,8 @@ import { prepareHostBatch } from './prepareHostBatch.js';
 import { toCoworkServers } from './coworkSetup/config.js';
 import type { ClaudeTrace } from './externalHost/builtins/anthropicClaude.js';
 import type * as ClaudeNative from './externalHost/builtins/anthropicClaude.js';
-import { ComputerUseHitlBudgetError } from './externalHost/builtins/anthropicComputerUse.js';
-import type * as ComputerUse from './externalHost/builtins/anthropicComputerUse.js';
+import { ComputerUseHitlBudgetError } from './cowork/anthropicComputerUse.js';
+import type * as ComputerUse from './cowork/anthropicComputerUse.js';
 import type { HostBatchRequest, HostRunContext } from './evalFrameworkTypes.js';
 
 const mocks = vi.hoisted(() => ({
@@ -32,14 +32,11 @@ vi.mock('./coworkSetup/recoverSession.js', () => ({
 vi.mock('./coworkSetup/macSession.js', () => ({
   prepareMacCoworkSession: mocks.setup,
 }));
-vi.mock(
-  './externalHost/builtins/anthropicComputerUse.js',
-  async (original) => ({
-    ...(await original<typeof ComputerUse>()),
-    runAnthropicComputerUseSubmission: mocks.submit,
-    runAnthropicComputerUseHitl: mocks.hitl,
-  })
-);
+vi.mock('./cowork/anthropicComputerUse.js', async (original) => ({
+  ...(await original<typeof ComputerUse>()),
+  runAnthropicComputerUseSubmission: mocks.submit,
+  runAnthropicComputerUseHitl: mocks.hitl,
+}));
 vi.mock(
   './externalHost/builtins/anthropicClaude.js',
   async (importOriginal) => ({
