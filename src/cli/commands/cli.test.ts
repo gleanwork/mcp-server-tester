@@ -62,6 +62,7 @@ describe('mcp-server-tester CLI', () => {
       expect(result.stdout).toContain('generate');
       expect(result.stdout).toContain('login');
       expect(result.stdout).toContain('token');
+      expect(result.stdout).toContain('cowork');
     });
 
     it('shows version', async () => {

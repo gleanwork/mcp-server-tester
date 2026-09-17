@@ -10,6 +10,7 @@ import { token } from './commands/token/index.js';
 import { open } from './commands/open/index.js';
 import { run } from './commands/run/index.js';
 import { batch } from './commands/batch/index.js';
+import { setupCowork } from './commands/cowork/index.js';
 import packageJson from '../../package.json' with { type: 'json' };
 
 const program = new Command();
@@ -113,6 +114,14 @@ program
       dryRun: options.dryRun,
     })
   );
+
+// Cowork setup command
+program
+  .command('cowork')
+  .description('Prepare the local macOS Claude 3P profile for Cowork')
+  .command('setup')
+  .description('Initialize or validate the empty Claude 3P profile')
+  .action(setupCowork);
 
 // Open command
 program

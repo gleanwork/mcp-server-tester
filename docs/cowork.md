@@ -4,6 +4,33 @@ Cowork runs through MST V2's normal `batch` command. The implementation has thre
 parts: managed application setup, the Anthropic Computer Use driver, and native
 Claude trace collection. There is no alternative native/CUA UI driver in this path.
 
+## First-time macOS setup
+
+Run this once on a new Mac before the first Cowork evaluation:
+
+```bash
+node --import tsx src/cli/index.ts cowork setup
+```
+
+For an installed package, use the package binary instead:
+
+```bash
+mcp-server-tester cowork setup
+```
+
+The command creates the minimal empty Claude 3P profile only when the profile
+library is missing. It never overwrites an existing profile. After it completes,
+launch Claude Desktop, sign in through the normal user-controlled flow, open one
+normal conversation, and quit Claude Desktop. The next `batch` run manages a
+temporary Cowork profile and restores the empty base profile afterward.
+
+If the profile already exists but is not empty, setup stops without changing it.
+Use a dedicated Claude Desktop user/profile or contact the MST owner; do not
+manually edit `configLibrary` files.
+
+The batch preflight reports this setup command immediately when the profile is
+missing. It does not wait for a case timeout.
+
 ## Run from a source checkout
 
 ```bash
