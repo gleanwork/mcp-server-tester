@@ -155,6 +155,40 @@ interface CLIConfig {
 - **`sdk`** (default) — Programmatic via Vercel AI SDK. Reuses the framework's MCP connection. Requires `provider`.
 - **`cli`** — CLI-based hosts (e.g., Claude Code, Codex). Spawns a process with its own MCP connection. Requires `cli`.
 
+## Claude Code startup and failure evidence
+
+The built-in `claude-cli` host uses blocking MCP initialization
+(`MCP_CONNECTION_NONBLOCKING=false`). Its connection wait defaults to 30 seconds
+(`MCP_CONNECT_TIMEOUT_MS`); an explicit environment value is preserved. The
+configured overall host deadline still includes startup and is not extended.
+
+Before accepting a run, MST checks Claude's `system/init` event for every
+configured MCP server. Missing, pending, failed, or unauthenticated servers cause
+a host infrastructure failure. The actual tool catalog is recorded; a connected
+resource-only server may legitimately expose no tools. Tool expectations remain
+the responsibility of the eval assertions. MST does not alter the scenario,
+model, tool search, tool exposure, or assertions.
+
+`hostDiagnostics.claudeStartup` records server names/statuses, tool names,
+model/version, and startup timing. `hostDiagnostics.failureKind` distinguishes
+startup, timeout, process, and output failures. Each `iterationResults` entry
+retains its own diagnostics, and infrastructure failures keep the framework's
+existing separate accuracy accounting. Credentials, MCP config bodies, and raw
+stderr are not included in diagnostics. Existing result redaction still applies
+to retained conversation/tool traces.
+
+On timeout or nonzero exit, Claude's partial trace is retained instead of being
+replaced by an empty tool-call list. Missing usage remains unknown. On POSIX,
+Claude runs in an invocation-owned process group so cancellation also stops its
+MCP servers and subprocesses without affecting other runs. Windows retains
+direct-child cancellation.
+
+These controls apply to generated `claude-cli` commands, not generic CLI or SDK
+hosts. A caller-authored Claude CLI config can opt in with
+`cli.claudeMcpServers: ["server-name"]` and `outputFormat: "stream-json"`; legacy
+custom commands are otherwise left unchanged. The built-in host supplies the
+server names from its generated MCP config.
+
 ## MCPHostSimulationResult
 
 The response for a `mcp_host` case is an `MCPHostSimulationResult`:

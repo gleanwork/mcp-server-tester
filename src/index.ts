@@ -140,6 +140,7 @@ export type {
   MCPConformanceResultData,
   MCPServerCapabilitiesData,
   MCPEvalData,
+  HostDiagnostics,
 } from './types/index.js';
 export { SnapshotSanitizers } from './types/index.js';
 

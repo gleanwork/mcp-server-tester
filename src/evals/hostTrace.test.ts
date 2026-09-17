@@ -5,6 +5,63 @@ import type { HostDefinition, HostEvidence } from './evalFrameworkTypes.js';
 import { z } from 'zod';
 
 describe('per-scenario host traces', () => {
+  it('retains failure diagnostics together with native telemetry, usage, and timing', async () => {
+    const diagnostics = { failureKind: 'timeout' as const };
+    const usage = {
+      inputTokens: 10,
+      outputTokens: 2,
+      totalCostUsd: 0.01,
+      durationMs: 200,
+    };
+    const telemetry = { source: 'claude-native', models: ['test-model'] };
+    const execution = hostTraceToExecution(
+      {
+        ...simulationToHostTrace(
+          {
+            success: false,
+            error: 'Host timed out',
+            response: 'partial answer',
+            toolCalls: [],
+            diagnostics,
+            usage,
+          },
+          []
+        ),
+        telemetry,
+        llmDurationMs: 123,
+      },
+      'structured'
+    );
+    expect(execution).toMatchObject({
+      error: 'Host timed out',
+      hostUsage: usage,
+      hostTelemetry: telemetry,
+      response: {
+        success: false,
+        diagnostics,
+        telemetry,
+        usage,
+        llmDurationMs: 123,
+      },
+    });
+    const result = await runEvalDataset(
+      {
+        dataset: {
+          name: 'combined-evidence',
+          cases: [{ id: 'one', mode: 'host', scenario: 'query' }],
+        },
+        executeCase: async () => execution,
+      },
+      {}
+    );
+    expect(result.caseResults[0]).toMatchObject({
+      pass: false,
+      hostDiagnostics: diagnostics,
+      hostUsage: usage,
+      hostTelemetry: telemetry,
+      response: { diagnostics, telemetry, llmDurationMs: 123 },
+    });
+  });
   it('preserves explicit native and MCP provenance regardless of server count', () => {
     const result = simulationToHostTrace(
       {

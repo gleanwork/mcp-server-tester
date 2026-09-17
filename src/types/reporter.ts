@@ -13,6 +13,7 @@ import type {
   EvalExpectationResult,
   ExpectationBreakdown,
   UsageMetrics,
+  HostDiagnostics,
 } from './index.js';
 import type { EvalResultStoreLike } from '../evals/resultStore.js';
 import type { HostEvidence } from '../evals/evalFrameworkTypes.js';
@@ -228,6 +229,8 @@ export interface IterationResult {
     }>;
     missed: Array<{ name: string }>;
   };
+  /** Sanitized host evidence for this specific attempt. */
+  hostDiagnostics?: HostDiagnostics;
   /** Evidence level retained even when raw responses are redacted. */
   hostEvidence?: HostEvidence;
   /** Token usage from mcp_host LLM simulation in this iteration */
@@ -447,6 +450,8 @@ export interface EvalCaseResult {
     }>;
   };
 
+  /** Sanitized host evidence; each iteration retains its own diagnostics. */
+  hostDiagnostics?: HostDiagnostics;
   /** Evidence level retained in persisted comparisons after response redaction. */
   hostEvidence?: HostEvidence;
 

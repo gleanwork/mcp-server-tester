@@ -1,7 +1,7 @@
 import type { ZodType } from 'zod';
 import type { EvalDataset, EvalCase } from './datasetTypes.js';
 import type { EvalCaseResult } from '../types/reporter.js';
-import type { UsageMetrics } from '../types/index.js';
+import type { HostDiagnostics, UsageMetrics } from '../types/index.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import type {
   DatasetConfig,
@@ -72,6 +72,7 @@ export interface HostEvent {
 
 /** One execution trace. Hosts never return evaluation verdicts. */
 export interface HostRunResult {
+  diagnostics?: HostDiagnostics;
   finalText: string;
   events: HostEvent[];
   error?: string;
