@@ -145,6 +145,49 @@ afterEach(async () => {
 });
 
 describe('V2 Cowork host', () => {
+  it('selects the semantic Linux driver without requiring a planner API key', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+    expect(COWORK_HOST.schema.parse({ type: 'cowork' })).toMatchObject({
+      options: { computerUseProvider: 'linux-desktop' },
+    });
+    expect(
+      COWORK_HOST.schema.safeParse({
+        type: 'cowork',
+        options: {
+          computerUseProvider: 'linux-desktop',
+          computerUseModel: 'unused-model',
+        },
+      }).success
+    ).toBe(false);
+    const prepared = createCoworkHost({
+      dataDirectory: () => '/prepared/session',
+      prepare: mocks.setup,
+      recover: vi.fn(),
+      submit: mocks.submit,
+      handleHitl: mocks.hitl,
+    });
+    const batch = requests().map((r) => ({
+      ...r,
+      config: { ...host, options: { computerUseProvider: 'linux-desktop' } },
+    }));
+    const result = await prepared.runBatch!(batch, { ...context, env: {} });
+    expect(result.every((r) => !r.error)).toBe(true);
+    expect(mocks.submit).toHaveBeenCalledTimes(2);
+    expect(mocks.hitl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        isComplete: expect.any(Function),
+        approveWriteTools: true,
+      })
+    );
+  });
+  it('rejects a driver/platform mismatch before any desktop action', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+    await expect(COWORK_HOST.runBatch!(requests(), context)).rejects.toThrow(
+      'not supported on linux'
+    );
+    expect(mocks.setup).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
   const driverTelemetry: ComputerUse.ComputerUseTelemetry = {
     accounting: 'complete',
     response_models: ['observed-planner'],

@@ -1,10 +1,11 @@
 # Cowork through the normal MST batch runner
 
-Cowork runs through MST V2's normal `batch` command. The implementation has three
-parts: managed application setup, the Anthropic Computer Use driver, and native
-Claude trace collection. There is no alternative native/CUA UI driver in this path.
+Cowork runs through MST's normal `batch` command with a platform-specific desktop
+driver and shared native Claude trace collection. macOS uses managed application
+setup and Anthropic Computer Use. Linux attaches to an externally prepared desktop
+and uses bounded AT-SPI actions; it does not provision or authenticate that runtime.
 
-## Run from a source checkout
+## Run on macOS from a source checkout
 
 ```bash
 COWORK_ENV_FILE=/absolute/path/to/existing.env ./scripts/run-cowork.sh --manifests /absolute/path/to/manifest.json
@@ -24,7 +25,7 @@ adapter and `batch` invocation. Its custom judges also need
 
 Use host `cowork` (`cowork_cu` remains an alias). `host.model` selects the Cowork
 inference model; `host.options.computerUseModel` independently selects the planner.
-The only supported provider is `anthropic`, and the driver selector is
+The inference provider is `anthropic`. On macOS the desktop driver selector is
 `host.options.computerUseProvider: "anthropic-computer-use"`.
 
 MST applies a fixed inference model list with discovery disabled. Native telemetry
@@ -52,6 +53,46 @@ Set `MST_COWORK_PYTHON` to reuse a worker-prepared interpreter instead; MST neve
 modifies it. `MST_COWORK_DRIVER_ROOT` remains an explicit development override.
 The source-checkout wrapper is a convenience, not required by Scio or `batch`.
 
+## Attach to a prepared Linux desktop
+
+Use `host.type: "cowork"` and `host.options.computerUseProvider: "linux-desktop"`
+with the normal `batch` command. `computerUseModel` is rejected for this backend:
+there is no LLM desktop planner. If omitted, the driver defaults to the native
+backend for the current OS. Cross-platform provider combinations fail before UI
+activity rather than silently selecting another driver.
+
+The caller must prepare an authenticated Claude Desktop session with X11, D-Bus,
+AT-SPI (system Python `gi`), genuine nested KVM, and the desired model/MCP settings.
+Run MST in that same filesystem and desktop-session context, not in a detached host
+shell with different native paths. `DISPLAY` and `DBUS_SESSION_BUS_ADDRESS` are
+required. `MST_COWORK_PYTHON` can select a prepared system interpreter; MST does not
+install Linux desktop dependencies. The packaged `cowork-linux-runtime` export
+resolves the Python driver independently of the working directory.
+
+The driver reads `/etc/claude-desktop/managed-settings.json` (or the absolute
+`MST_COWORK_SETTINGS_FILE`) and fails if its model, HTTP MCP servers, or wildcard
+approval policy disagree with the manifest. Native sessions default to
+`$XDG_CONFIG_HOME/Claude-3p/local-agent-mode-sessions`, or
+`$HOME/.config/Claude-3p/local-agent-mode-sessions`; `options.dataDir` overrides it.
+Preparation is read-only. Disposal does not stop the app, container, or VM. The
+caller owns authentication, resource cleanup, host-wide exclusion, and recovery.
+
+Submission uses the native deep link to prefill the unchanged prompt, then attempts
+one semantic `Start task` action. There is no keyboard fallback or retry after an
+uncertain action. The shared native collector still requires a new exact-prompt
+session. HITL only operates on approval controls while that bound session is pending;
+it never types, creates tasks, or continues onboarding. Unclassified approval prompts
+fail closed unless `coworkSetup.approveWriteTools` explicitly permits approval.
+
+`hostTelemetry.computerUse` records `driver: "linux-desktop"`, observed semantic
+actions, and elapsed time. Planner tokens and planner cost are **not applicable**,
+not synthetic zero-usage Anthropic calls. Native usage and cost retain their own scope.
+
+Linux qualification requires an authenticated two-case run plus failure/cleanup
+checks in the deployment environment. Installation or `desktop-app verify` alone is
+not that gate. This branch's fresh-profile VM probe reached the sign-in screen;
+there is no claim of authenticated Linux end-to-end qualification yet.
+
 ## Structure and behavior
 
 - `coworkHost.ts`: batching, correlation, native collection, and trace conversion.
@@ -59,7 +100,10 @@ The source-checkout wrapper is a convenience, not required by Scio or `batch`.
 - `cowork/macos.ts`: wiring to the existing setup, recovery, and desktop functions.
 - `coworkSetup/`: profile/MCP settings, private header helpers, and guarded restore.
   Its `macController.ts` handles only application start/stop, not UI automation.
-- `cowork/anthropicComputerUse.ts`: the single CU driver entry point and process limits.
+- `cowork/driver.ts`: shared receipts, error classifications, and scoped telemetry.
+- `cowork/linux.ts`: readiness checks and execution against a caller-owned desktop.
+- `scripts/cowork_linux.py`: bounded semantic UI actions; no lifecycle or answer parsing.
+- `cowork/anthropicComputerUse.ts`: the macOS CU driver entry point and process limits.
 - `scripts/cowork_computer_use.py`: bounded screenshot navigation, executor-owned
   query insertion, one submit boundary, and bounded first-option HITL handling.
 
@@ -85,9 +129,8 @@ These describe native Claude execution, not the separate Computer Use planner's
 API cost. A test assertion or judge failure is distinct from a driver failure.
 
 The shared orchestration is OS-neutral and tested with injected platform doubles.
-Only the macOS desktop adapter is implemented; live macOS E2E is the release gate.
-This does not claim native Windows/Linux Cowork support. Those adapters require separate work
-and live qualification; there is no fallback to a different product.
+macOS is live-qualified. Linux has separate qualification requirements described
+above. Windows is unsupported; there is no fallback to a different product.
 
 Do not rerun an ambiguous submission blindly. Inspect native completion and retained
 setup state. After confirming work has stopped, explicit guarded recovery is:

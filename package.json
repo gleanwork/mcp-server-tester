@@ -29,6 +29,7 @@
       "require": "./dist/index.cjs"
     },
     "./cowork-runtime": "./scripts/cowork_computer_use.py",
+    "./cowork-linux-runtime": "./scripts/cowork_linux.py",
     "./cowork-requirements": "./scripts/cowork-requirements.txt",
     "./types": {
       "types": "./dist/types/index.d.ts",
@@ -58,10 +59,12 @@
   "files": [
     "dist",
     "scripts/cowork_computer_use.py",
+    "scripts/cowork_linux.py",
     "scripts/cowork-requirements.txt"
   ],
   "scripts": {
     "build": "npm run build:ui && tsup && npm run build:copy-ui",
+    "prepare": "npm run build",
     "build:copy-ui": "cp -r src/reporters/ui-dist dist/reporters/",
     "build:ui": "node --import tsx src/reporters/build-ui.ts",
     "dev": "tsup --watch",

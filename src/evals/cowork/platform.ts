@@ -1,9 +1,10 @@
 import type { EvalManifest } from '../evalManifest.js';
 import type {
-  ComputerUseOptions,
-  ComputerUseSubmissionResult,
-  ComputerUseHitlResult,
-} from './anthropicComputerUse.js';
+  CoworkDriverOptions,
+  CoworkDriverProvider,
+  CoworkSubmissionReceipt,
+  CoworkHitlReceipt,
+} from './driver.js';
 
 /** The shared batch lifecycle does not choose OS paths or control an application.
  * Implementations must retain the existing bounded, no-resubmission contract. */
@@ -17,17 +18,21 @@ export interface CoworkPlatform {
   recover(): Promise<unknown>;
   submit(
     query: string,
-    options: ComputerUseOptions
-  ): Promise<ComputerUseSubmissionResult>;
+    options: CoworkDriverOptions
+  ): Promise<CoworkSubmissionReceipt>;
   handleHitl(
-    options: ComputerUseOptions & { task?: string }
-  ): Promise<ComputerUseHitlResult>;
+    options: CoworkDriverOptions & { task?: string }
+  ): Promise<CoworkHitlReceipt>;
 }
 
-export async function getCoworkPlatform(): Promise<CoworkPlatform> {
-  if (process.platform === 'darwin')
+export async function getCoworkPlatform(
+  provider: CoworkDriverProvider
+): Promise<CoworkPlatform> {
+  if (process.platform === 'darwin' && provider === 'anthropic-computer-use')
     return (await import('./macos.js')).macCoworkPlatform;
+  if (process.platform === 'linux' && provider === 'linux-desktop')
+    return (await import('./linux.js')).linuxCoworkPlatform;
   throw new Error(
-    `Cowork has no qualified ${process.platform} desktop adapter. The shared runner is portable; native execution is currently macOS-only.`
+    `Cowork driver ${provider} is not supported on ${process.platform}.`
   );
 }
