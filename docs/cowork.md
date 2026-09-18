@@ -18,9 +18,8 @@ the existing dotenv file or exported environment; the runner never rewrites or
 shell-sources that file. Node loads dotenv before plugins/custom judges start.
 
 An explicit `--manifests` or `--manifest-dir` is required; no default evaluation is
-bundled. Use the normal file/GCS dataset sources and plugins. Scio keeps its existing thin
-adapter and `batch` invocation. Its custom judges also need
-`SCIO_MCP_PROMPTS_DIR` set to Scio's `data/prompts/templates` directory.
+bundled. Use the normal file/GCS dataset sources and plugins. Configure custom
+judges according to their plugin's requirements.
 `--dry-run` checks configuration, not GUI execution or model behavior.
 
 Use host `cowork` (`cowork_cu` remains an alias). `host.model` selects the Cowork
@@ -51,7 +50,7 @@ installs the bundled requirements, reuses it within the process, and removes it
 at process exit. This requires Python 3.10+, pip access, and macOS desktop permissions.
 Set `MST_COWORK_PYTHON` to reuse a worker-prepared interpreter instead; MST never
 modifies it. `MST_COWORK_DRIVER_ROOT` remains an explicit development override.
-The source-checkout wrapper is a convenience, not required by Scio or `batch`.
+The source-checkout wrapper is a convenience, not required by `batch`.
 
 ## Install an unreleased source pin
 
@@ -69,10 +68,9 @@ there is no LLM desktop planner. If omitted, the driver defaults to the native
 backend for the current OS. Cross-platform provider combinations fail before UI
 activity rather than silently selecting another driver.
 
-The caller must prepare an authenticated Claude Desktop session with X11, D-Bus,
-AT-SPI (system Python `gi`), genuine nested KVM, and the desired model/MCP settings.
-Run MST in that same filesystem and desktop-session context, not in a detached host
-shell with different native paths. `DISPLAY` and `DBUS_SESSION_BUS_ADDRESS` are
+The caller supplies a working Claude Desktop session with the desired model/MCP
+settings. MST accesses that session through X11, D-Bus, and AT-SPI (Python `gi`).
+Run MST in the prepared desktop's filesystem and session context. `DISPLAY` and `DBUS_SESSION_BUS_ADDRESS` are
 required. `MST_COWORK_PYTHON` can select a prepared system interpreter; MST does not
 install Linux desktop dependencies. The packaged `cowork-linux-runtime` export
 resolves the Python driver independently of the working directory.
@@ -82,11 +80,15 @@ The driver reads `/etc/claude-desktop/managed-settings.json` (or the absolute
 approval policy disagree with the manifest. Native sessions default to
 `$XDG_CONFIG_HOME/Claude-3p/local-agent-mode-sessions`, or
 `$HOME/.config/Claude-3p/local-agent-mode-sessions`; `options.dataDir` overrides it.
-Preparation is read-only. Disposal does not stop the app, container, or VM. The
-caller owns authentication, resource cleanup, host-wide exclusion, and recovery.
+Preparation is read-only. MST does not provision or authenticate the environment,
+change its launch policy, or manage its lifecycle.
 
-Submission uses the native deep link to prefill the unchanged prompt, then attempts
-one semantic `Start task` action. There is no keyboard fallback or retry after an
+Submission opens the native deep link through the prepared environment's `xdg-open`
+handler, then attempts one semantic `Start task` action. Alternatively, set
+`MST_COWORK_URL_OPENER` to an absolute executable path that accepts the URL as its
+sole argument. The caller owns protocol registration and application launch flags;
+MST does not select an application binary or sandbox policy. The prompt is preserved
+unchanged, and the opener runs without a shell and with a bounded deadline. There is no keyboard fallback or retry after an
 uncertain action. The shared native collector still requires a new exact-prompt
 session. HITL only operates on approval controls while that bound session is pending;
 it never types, creates tasks, or continues onboarding. Unclassified approval prompts
@@ -96,10 +98,9 @@ fail closed unless `coworkSetup.approveWriteTools` explicitly permits approval.
 actions, and elapsed time. Planner tokens and planner cost are **not applicable**,
 not synthetic zero-usage Anthropic calls. Native usage and cost retain their own scope.
 
-Linux qualification requires an authenticated two-case run plus failure/cleanup
-checks in the deployment environment. Installation or `desktop-app verify` alone is
-not that gate. This branch's fresh-profile VM probe reached the sign-in screen;
-there is no claim of authenticated Linux end-to-end qualification yet.
+Installation and configuration checks do not establish end-to-end correctness.
+Validate the prepared desktop with representative cases and audit their captured
+native evidence.
 
 ## Audit a saved Linux native run
 

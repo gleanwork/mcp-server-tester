@@ -22,6 +22,7 @@ const SESSION_ENV = [
   'AT_SPI_BUS_ADDRESS',
   'XDG_RUNTIME_DIR',
   'XDG_CONFIG_HOME',
+  'MST_COWORK_URL_OPENER',
   'LANG',
   'LC_ALL',
 ];
@@ -108,6 +109,13 @@ async function execute(
   if (!env.DISPLAY || !env.DBUS_SESSION_BUS_ADDRESS)
     throw new CoworkDriverError(
       'Linux Cowork requires a prepared DISPLAY and D-Bus desktop session.'
+    );
+  if (
+    env.MST_COWORK_URL_OPENER !== undefined &&
+    !isAbsolute(env.MST_COWORK_URL_OPENER)
+  )
+    throw new CoworkDriverError(
+      'MST_COWORK_URL_OPENER must be an absolute executable path.'
     );
   const script = createRequire(
     typeof __filename === 'string' ? __filename : import.meta.url

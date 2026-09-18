@@ -1,6 +1,9 @@
 import importlib.util
 from pathlib import Path
+import os
+import subprocess
 import unittest
+from urllib.parse import parse_qs, urlsplit
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("cowork_linux", Path(__file__).with_name("cowork_linux.py"))
@@ -41,6 +44,37 @@ class Desktop:
 
 
 class LinuxDriverTests(unittest.TestCase):
+    def test_url_opener_is_a_prepared_environment_boundary(self):
+        prompt = "  Find 中文 & \"quoted\" text\nwith a new line  "
+        desktop = object.__new__(module.Desktop)
+        for env, expected in (({}, "xdg-open"), ({"MST_COWORK_URL_OPENER": "/prepared/open-url"}, "/prepared/open-url")):
+            with self.subTest(env=env), patch.dict(os.environ, env, clear=True), patch.object(module.subprocess, "run") as run:
+                desktop.open_prompt(prompt, 30)
+                argv = run.call_args.args[0]
+                self.assertEqual(argv[0], expected)
+                self.assertEqual(len(argv), 2)
+                self.assertEqual(parse_qs(urlsplit(argv[1]).query)["q"], [prompt])
+                self.assertEqual(run.call_args.kwargs, {
+                    "check": True, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "timeout": 15,
+                })
+
+    def test_invalid_url_opener_fails_before_launch(self):
+        desktop = object.__new__(module.Desktop)
+        for opener in ("", "relative-program", "program --flag"):
+            with self.subTest(opener=opener), patch.dict(os.environ, {"MST_COWORK_URL_OPENER": opener}), patch.object(module.subprocess, "run") as run:
+                with self.assertRaisesRegex(module.DriverFailure, "invalid_url_opener"):
+                    desktop.open_prompt("query", 1)
+                run.assert_not_called()
+
+    def test_uncertain_url_opener_failure_is_not_retried(self):
+        desktop = object.__new__(module.Desktop)
+        for error in (subprocess.TimeoutExpired("opener", 1), subprocess.CalledProcessError(1, "opener")):
+            with self.subTest(error=type(error)), patch.dict(os.environ, {}, clear=True), patch.object(module.subprocess, "run", side_effect=error) as run:
+                with self.assertRaises(type(error)):
+                    desktop.open_prompt("query", 1)
+                run.assert_called_once()
+                self.assertEqual(run.call_args.kwargs["timeout"], 1)
+
     def test_exact_unicode_multiline_prompt_and_one_submit(self):
         desktop = Desktop()
         driver = module.Driver(desktop, 1000, 4)

@@ -19,6 +19,7 @@ let directory: string;
 const session = {
   DISPLAY: ':1',
   DBUS_SESSION_BUS_ADDRESS: 'unix:path=/fake/session',
+  MST_COWORK_URL_OPENER: '/prepared/open-url',
   ANTHROPIC_API_KEY: 'do-not-forward-secret',
 };
 const options = () => ({ deadlineAt: Date.now() + 10000, env: session });
@@ -185,6 +186,9 @@ describe('caller-owned Linux Cowork desktop', () => {
     const result = await linuxCoworkPlatform.submit(prompt, options());
     expect(child.payloads).toEqual([JSON.stringify({ prompt })]);
     expect(child.exec.mock.calls[0]![1]).not.toContain(prompt);
+    expect(child.exec.mock.calls[0]![2].env).toMatchObject({
+      MST_COWORK_URL_OPENER: '/prepared/open-url',
+    });
     expect(child.exec.mock.calls[0]![2].env).not.toHaveProperty(
       'ANTHROPIC_API_KEY'
     );
@@ -224,6 +228,18 @@ describe('caller-owned Linux Cowork desktop', () => {
     ).rejects.toBeInstanceOf(CoworkDriverError);
     expect(child.exec).toHaveBeenCalledOnce();
   });
+  it.each(['', 'relative-opener', 'program --flag'])(
+    'rejects an invalid configured URL opener before launching: %j',
+    async (opener) => {
+      await expect(
+        linuxCoworkPlatform.submit('query', {
+          ...options(),
+          env: { ...session, MST_COWORK_URL_OPENER: opener },
+        })
+      ).rejects.toThrow('absolute executable path');
+      expect(child.exec).not.toHaveBeenCalled();
+    }
+  );
   it('does not launch a process after its deadline', async () => {
     await expect(
       linuxCoworkPlatform.submit('query', { ...options(), deadlineAt: 0 })

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -72,8 +73,11 @@ class Desktop:
             raise DriverFailure("action_acknowledgement_uncertain")
 
     def open_prompt(self, prompt: str, timeout: float) -> None:
+        configured_opener = os.environ.get("MST_COWORK_URL_OPENER")
+        if configured_opener is not None and not os.path.isabs(configured_opener):
+            raise DriverFailure("invalid_url_opener")
         subprocess.run(
-            ["/usr/bin/claude-desktop", "--no-sandbox", "claude://claude.ai/new?q=" + quote(prompt, safe="")],
+            [configured_opener or "xdg-open", "claude://claude.ai/new?q=" + quote(prompt, safe="")],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=min(timeout, 15),
         )
 
