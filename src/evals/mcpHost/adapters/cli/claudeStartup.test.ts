@@ -83,11 +83,11 @@ describe('Claude Code MCP startup', () => {
     async () => {
       const marker = path.join(directory, 'descendant.txt');
       const pidFile = path.join(directory, 'descendant.pid');
-      const descendant = `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); process.on('SIGTERM', () => {}); setInterval(() => require('node:fs').appendFileSync(${JSON.stringify(marker)}, 'x'), 20);`;
+      const descendant = `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); fs.writeFileSync(${JSON.stringify(marker)}, 'x'); process.on('SIGTERM', () => {}); setInterval(() => fs.appendFileSync(${JSON.stringify(marker)}, 'x'), 20);`;
       try {
         const result = await host(
           `console.log(${JSON.stringify(line(init))}); require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(descendant)}], { stdio: 'inherit' }); setInterval(() => {}, 1000);`,
-          2500
+          2000
         );
         expect(result.error).toContain('timed out');
         const before = fs.readFileSync(marker, 'utf8');

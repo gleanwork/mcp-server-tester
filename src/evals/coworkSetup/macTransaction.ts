@@ -1,11 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
+import { homedir } from 'node:os';
 import {
   lstat,
   mkdir,
   open,
   readdir,
   rename,
+  rm,
   rmdir,
   unlink,
   writeFile,
@@ -27,6 +29,9 @@ const MARKER = '.mst-setup-marker';
 const HELPER = 'inference-helper.sh';
 const LIMIT = 1024 * 1024;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+export function macCoworkProfileDirectory(): string {
+  return join(homedir(), 'Library/Application Support/Claude-3p/configLibrary');
+}
 const HASH = /^[a-f0-9]{64}$/;
 const MetadataSchema = z
   .object({
@@ -621,8 +626,84 @@ export async function preflightMacCoworkSettings(
   try {
     await validateInstall(options);
   } catch {
-    throw new Error(ERROR);
+    throw new Error(
+      `${ERROR}\nRun 'mst cowork setup' first if the Claude 3P profile library is missing.`
+    );
   }
+}
+
+/**
+ * Create the minimal empty Claude 3P profile that MST can safely manage.
+ * Existing profile data is never modified. Authentication remains a user action
+ * in Claude Desktop after this command completes.
+ */
+export async function initializeMacCoworkProfile(
+  profileDirectory = macCoworkProfileDirectory()
+): Promise<{ profileDirectory: string; created: boolean }> {
+  if (process.platform !== 'darwin')
+    throw new Error('Cowork profile setup requires macOS.');
+
+  const directory = resolve(profileDirectory);
+  const parent = dirname(directory);
+  await mkdir(parent, { recursive: true, mode: 0o700 });
+
+  try {
+    await validateEmptyCoworkProfile(directory);
+    return { profileDirectory: directory, created: false };
+  } catch {
+    // Only initialize a profile when the directory does not exist. A malformed
+    // or non-empty existing profile must remain untouched for explicit recovery.
+    try {
+      await lstat(directory);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      const temporary = `${directory}.mst-init-${randomUUID()}`;
+      await mkdir(temporary, { mode: 0o700 });
+      const id = randomUUID();
+      try {
+        await writeFile(
+          join(temporary, '_meta.json'),
+          JSON.stringify({
+            appliedId: id,
+            entries: [{ id, name: 'MST base' }],
+          }) + '\n',
+          { mode: 0o600 }
+        );
+        await writeFile(join(temporary, `${id}.json`), '{}\n', {
+          mode: 0o600,
+        });
+        await rename(temporary, directory);
+        return { profileDirectory: directory, created: true };
+      } catch (setupError) {
+        await rm(temporary, { recursive: true, force: true }).catch(() => {});
+        if ((setupError as NodeJS.ErrnoException).code === 'EEXIST') {
+          await validateEmptyCoworkProfile(directory);
+          return { profileDirectory: directory, created: false };
+        }
+        throw setupError;
+      }
+    }
+    throw new Error(
+      'Claude 3P profile exists but is not an empty MST-managed profile. No files were changed.'
+    );
+  }
+}
+
+async function validateEmptyCoworkProfile(directory: string): Promise<void> {
+  const original = await readBytes(join(directory, '_meta.json'));
+  const meta = metadata(original);
+  const source = JSON.parse(
+    (await readBytes(join(directory, `${meta.appliedId}.json`))).toString(
+      'utf8'
+    )
+  ) as unknown;
+  if (
+    typeof source !== 'object' ||
+    source === null ||
+    Array.isArray(source) ||
+    Object.keys(source).length !== 0
+  )
+    throw new Error('Claude 3P profile is not empty.');
 }
 
 /** Install a new, private test profile, leaving the initially empty source intact.
