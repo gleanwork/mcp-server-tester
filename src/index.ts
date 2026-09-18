@@ -6,6 +6,17 @@
  * @packageDocumentation
  */
 
+export { auditCoworkNativeRun } from './evals/auditCoworkNativeRun.js';
+export type {
+  AuditCoworkNativeRunOptions,
+  CoworkNativeAuditReport,
+  CoworkNativeAuditCase,
+  CoworkNativeAuditIssue,
+  CoworkNativeAuditUsage,
+  CoworkNativeAuditTiming,
+  CoworkNativeAuditAttachment,
+} from './evals/auditCoworkNativeRun.js';
+
 // Types
 export type {
   // Config

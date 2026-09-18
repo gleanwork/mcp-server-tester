@@ -98,6 +98,8 @@ export interface ClaudeTrace {
   auditParsed: boolean;
   transcriptParsed: boolean;
   usageAvailable: boolean;
+  /** Fields explicitly present and valid in every native result, before defaults. */
+  knownUsageFields: (keyof UsageMetrics)[];
   costAvailable: boolean;
   parseWarnings: string[];
   rawText: string;
@@ -874,6 +876,7 @@ export async function parseClaudeTrace(
     auditParsed,
     transcriptParsed,
     usageAvailable: usage !== undefined,
+    knownUsageFields: knownUsageFields(resultEvents),
     costAvailable: resultEvents.some(
       (event) => typeof event.total_cost_usd === 'number'
     ),
@@ -1578,6 +1581,49 @@ function extractAggregatedUsage(
       (total.cacheCreationInputTokens ?? 0) +
       (value.cacheCreationInputTokens ?? 0),
   }));
+}
+
+function knownUsageFields(events: ClaudeAuditEvent[]): (keyof UsageMetrics)[] {
+  const fields: [keyof UsageMetrics, (event: ClaudeAuditEvent) => unknown][] = [
+    [
+      'inputTokens',
+      (event) => event.usage?.input_tokens ?? event.usage?.inputTokens,
+    ],
+    [
+      'outputTokens',
+      (event) => event.usage?.output_tokens ?? event.usage?.outputTokens,
+    ],
+    [
+      'cacheReadInputTokens',
+      (event) =>
+        event.usage?.cache_read_input_tokens ??
+        event.usage?.cacheReadInputTokens,
+    ],
+    [
+      'cacheCreationInputTokens',
+      (event) =>
+        event.usage?.cache_creation_input_tokens ??
+        event.usage?.cacheCreationInputTokens,
+    ],
+    ['totalCostUsd', (event) => event.total_cost_usd],
+    ['durationMs', (event) => event.duration_ms],
+    ['durationApiMs', (event) => event.duration_api_ms],
+  ];
+  return fields
+    .filter(
+      ([key, value]) =>
+        events.length > 0 &&
+        events.every((event) => {
+          const number = value(event);
+          return (
+            typeof number === 'number' &&
+            Number.isFinite(number) &&
+            number >= 0 &&
+            (key === 'totalCostUsd' || Number.isSafeInteger(number))
+          );
+        })
+    )
+    .map(([key]) => key);
 }
 
 function extractUsage(event: ClaudeAuditEvent): UsageMetrics | undefined {

@@ -101,6 +101,88 @@ checks in the deployment environment. Installation or `desktop-app verify` alone
 not that gate. This branch's fresh-profile VM probe reached the sign-in screen;
 there is no claim of authenticated Linux end-to-end qualification yet.
 
+## Audit a saved Linux native run
+
+Use the supported package-root API. It is offline: it does not invoke the desktop,
+MCP servers, or judges. No CLI or private parser import is required.
+
+```typescript
+import { auditCoworkNativeRun } from '@gleanwork/mcp-server-tester';
+
+const report = await auditCoworkNativeRun({
+  rawResultsPath: '/archive/results/raw-results.json',
+  nativeRoot: '/archive/native',
+  expectedCases: 2,
+  expectedModel: 'claude-opus-4-6', // optional exact native model assertion
+});
+
+if (!report.evidencePassed) {
+  console.error(
+    report.issues,
+    report.cases.map(({ id, issues }) => ({ id, issues }))
+  );
+}
+```
+
+The input is MST schema-v1 `raw-results.json`, including `results` and `arms`.
+Each case must have a unique ID and `hostTelemetry.nativeSessionId`. Retain this
+archive layout, including the actual saved tool-output bytes:
+
+```text
+native/
+  local_<UUID>/
+    local_<UUID>.json
+    audit.jsonl
+    .claude/projects/<project>/<CLI UUID>.jsonl
+    .claude/projects/<project>/<CLI UUID>/tool-results/<name>.txt
+```
+
+The audit uses MST's existing native parser and both host normalizers. It checks
+exact case count, unique case/session identities, exact initial prompt, final
+response, ordered normalized events and tool calls (arguments, output, IDs and
+provenance), usage/cache/cost, native/API durations, completion/nonerror flags,
+parsed audit and transcript, no parser warnings, and native-derived telemetry in
+both saved envelopes. Only live `computerUse` and `hitlWarning` fields are excluded
+from telemetry equality. An expected model must match the single observed native
+model. Models must use the recognized Claude opus/sonnet/haiku version-ID format.
+
+`Output has been saved to ...` notices require nonempty real `.txt` files. Recorded
+absolute paths are never read directly: only the same `local_<UUID>` session's
+`.claude/projects/<project>/<CLI UUID>/tool-results/*.txt` suffix can resolve below
+`nativeRoot`. Traversal, encoded paths, foreign sessions and symlinks fail closed.
+Attachment records contain tool-call indexes, byte sizes and SHA-256 hashes, never
+paths or contents. A saved notice alone is not complete evidence.
+
+`CoworkNativeAuditReport` is exported from the package root:
+
+- `schemaVersion: 1`, `expectedCases`, `observedCases`, `issues` (fixed codes).
+- `qualityPassed: boolean | null` reflects saved case `pass` values. A failed judge
+  does **not** fail evidence. `null` means missing/unknown quality, not success.
+- `evidencePassed: boolean`; `status: 'verified' | 'failed'` describes evidence only.
+- `cases[]`: `id`, `pass`, `sessionId`, `model`, `usage`, `timing`, `toolCounts`,
+  `validity`, `attachments`, `evidencePassed`, `issues`. Validity includes
+  `auditParsed`, `transcriptParsed`, `complete`, `nonError`, `hasUsage`, `hasCost`,
+  and `noWarnings`. Unknown fields stay `null`, not zero.
+- `totals`: `null` unless the entire evidence audit passes. Otherwise native-only
+  token/cache/cost/duration sums plus `costScope: 'native-inference-only'`. Unknown
+  cache fields stay `null`. This excludes controller and judge cost/time.
+
+Reports never include prompts, answers, tool arguments/results, native paths,
+parser error messages, server URLs, or credentials. Numeric `e2e-<digits>` and
+`case-<digits>` IDs are retained; other case IDs use SHA-256 pseudonyms. Invalid
+session/model identifiers are not echoed. Errors use fixed issue codes.
+
+Bounds: 1–1,000 expected cases, 32 MiB raw results, 16 MiB per native file,
+64 MiB per session, 4,096 directory entries per session, depth 12, and 1,024 output
+notices per case. The parser reads a private temporary snapshot of the two bounded
+trace files, which is removed after parsing. User-controlled symlinks are rejected
+(including roots and trace paths); fixed macOS `/tmp` and `/var` system aliases are
+allowed. Audit a quiescent archive under trusted filesystem ownership: portable
+Node path checks cannot eliminate hostile concurrent directory-replacement races.
+A verified report establishes internal consistency, not cryptographic authenticity
+or independent verification of the saved judge result. Attachment hashes describe
+the bytes present at audit time; notices contain no original digest to authenticate.
+
 ## Structure and behavior
 
 - `coworkHost.ts`: batching, correlation, native collection, and trace conversion.
