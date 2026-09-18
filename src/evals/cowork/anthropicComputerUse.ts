@@ -3,6 +3,13 @@ import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { ensureCoworkPython } from './pythonRuntime.js';
 import { promisify } from 'node:util';
+import {
+  COMPUTER_USE_TOKEN_FIELDS as TOKEN_FIELDS,
+  CoworkDriverError,
+  type CoworkDriverOptions,
+  type ComputerUseTelemetry,
+} from './driver.js';
+export type { ComputerUseTelemetry } from './driver.js';
 
 const execFileAsync = promisify(execFile);
 function resolveDriverPath(env: NodeJS.ProcessEnv): string {
@@ -16,44 +23,14 @@ function resolveDriverPath(env: NodeJS.ProcessEnv): string {
   ).resolve('@gleanwork/mcp-server-tester/cowork-runtime');
 }
 
-export interface ComputerUseOptions {
-  deadlineAt: number;
-  maxActions?: number;
-  model?: string;
-  env?: NodeJS.ProcessEnv;
-}
+export type ComputerUseOptions = CoworkDriverOptions;
 
-const TOKEN_FIELDS = [
-  'input_tokens',
-  'output_tokens',
-  'cache_creation_input_tokens',
-  'cache_read_input_tokens',
-] as const;
-type ComputerUseTokenField = (typeof TOKEN_FIELDS)[number];
-
-/** Usage totals cover only observed fields on completed planner responses. */
-export interface ComputerUseTelemetry {
-  accounting: 'complete' | 'partial';
-  response_models: string[];
-  planner_response_count: number;
-  usage: Partial<Record<ComputerUseTokenField, number>>;
-  usage_observation_counts: Record<ComputerUseTokenField, number>;
-  duration_ms: number;
-  /** Budget-consuming proposals, including refusals. */
-  action_count: number;
-  attempted_action_count: number;
-  executed_action_count: number;
-  refused_action_count: number;
-  /** No price-table estimates. Anthropic Messages supplies no dollar cost. */
-  cost: { status: 'unavailable' };
-}
-
-export class ComputerUseDriverError extends Error {
+export class ComputerUseDriverError extends CoworkDriverError {
   constructor(
     message: string,
-    public readonly telemetry?: ComputerUseTelemetry
+    public override readonly telemetry?: ComputerUseTelemetry
   ) {
-    super(message);
+    super(message, telemetry);
   }
 }
 
@@ -68,6 +45,7 @@ export interface ComputerUseSubmissionResult {
 /** Exhausted inspection is not proof that the native task failed. */
 export class ComputerUseHitlBudgetError extends ComputerUseDriverError {
   override name = 'ComputerUseHitlBudgetError';
+  override readonly kind = 'hitl-budget-exhausted';
 }
 
 export interface ComputerUseHitlResult {

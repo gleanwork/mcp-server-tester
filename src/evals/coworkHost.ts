@@ -14,16 +14,19 @@ import {
 } from './externalHost/builtins/anthropicClaude.js';
 import { simulationToHostTrace } from './hostTrace.js';
 import {
-  ComputerUseDriverError,
-  ComputerUseHitlBudgetError,
-  type ComputerUseTelemetry,
-} from './cowork/anthropicComputerUse.js';
+  CoworkDriverError,
+  type CoworkDriverTelemetry,
+} from './cowork/driver.js';
 
 const OptionsSchema = z
   .object({
     computerUseProvider: z
-      .literal('anthropic-computer-use')
-      .default('anthropic-computer-use'),
+      .enum(['anthropic-computer-use', 'linux-desktop'])
+      .default(() =>
+        process.platform === 'linux'
+          ? 'linux-desktop'
+          : 'anthropic-computer-use'
+      ),
     computerUseMaxActions: z.number().int().min(1).max(64).default(24),
     hitlMaxActions: z.number().int().min(1).max(24).default(12),
     computerUseModel: z
@@ -32,7 +35,18 @@ const OptionsSchema = z
       .optional(),
     dataDir: z.string().min(1).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((options, context) => {
+    if (
+      options.computerUseProvider === 'linux-desktop' &&
+      options.computerUseModel !== undefined
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['computerUseModel'],
+        message: 'linux-desktop does not use a planner model.',
+      });
+  });
 const CoworkSchema = z
   .object({
     type: z.string(),
@@ -69,9 +83,14 @@ async function runBatch(
     );
   const config = configs[0]!;
   const env = { ...process.env, ...context.env, ...config.env };
-  if (!env.ANTHROPIC_API_KEY)
+  if (
+    config.options.computerUseProvider === 'anthropic-computer-use' &&
+    !env.ANTHROPIC_API_KEY
+  )
     throw new Error('ANTHROPIC_API_KEY is required for Cowork Computer Use.');
-  const platform = selectedPlatform ?? (await getCoworkPlatform());
+  const platform =
+    selectedPlatform ??
+    (await getCoworkPlatform(config.options.computerUseProvider));
   const dataDir = platform.dataDirectory(config.options);
   const servers = requests[0]!.input.servers;
   // Pass only the selected arm. Setup intentionally rejects multi-arm manifests.
@@ -107,7 +126,11 @@ async function runBatch(
   active = true;
   try {
     if (env.MST_COWORK_RECOVER === '1') await platform.recover();
-    if (servers.length || config.model)
+    if (
+      config.options.computerUseProvider === 'linux-desktop' ||
+      servers.length ||
+      config.model
+    )
       session = await platform.prepare({
         manifest: managedManifest,
         env,
@@ -117,7 +140,7 @@ async function runBatch(
       const caseStartedAt = Date.now();
       const computerUse: Record<
         'submission' | 'hitl',
-        { status: string; telemetry?: ComputerUseTelemetry }
+        { status: string; telemetry?: CoworkDriverTelemetry }
       > = {
         submission: { status: 'not-attempted' },
         hitl: { status: 'not-attempted' },
@@ -170,7 +193,7 @@ async function runBatch(
         if (computerUse.submission.status !== 'completed') {
           computerUse.submission = {
             status: 'failed',
-            ...(error instanceof ComputerUseDriverError && error.telemetry
+            ...(error instanceof CoworkDriverError && error.telemetry
               ? { telemetry: error.telemetry }
               : {}),
           };
@@ -210,6 +233,19 @@ async function runBatch(
             maxActions: config.options.hitlMaxActions,
             model: config.options.computerUseModel,
             env,
+            approveWriteTools:
+              context.manifest.coworkSetup?.approveWriteTools === true,
+            isComplete: async () => {
+              const current = await findMatchingClaudeSessions({
+                ...match,
+                sessionPath,
+              });
+              if (current.length !== 1)
+                throw new Error(
+                  'Bound native session is missing or ambiguous.'
+                );
+              return current[0]!.isComplete;
+            },
             task: `Handle only the currently open Cowork task just submitted with this exact query: ${request.input.scenario}. Do not switch tasks. Never create, type, or resubmit a task. If the current task cannot be identified uniquely, stop without an action.`,
           });
           computerUse.hitl = {
@@ -220,15 +256,19 @@ async function runBatch(
       } catch (error) {
         computerUse.hitl = {
           status:
-            error instanceof ComputerUseHitlBudgetError
+            error instanceof CoworkDriverError &&
+            error.kind === 'hitl-budget-exhausted'
               ? 'budget-exhausted'
               : 'failed',
-          ...(error instanceof ComputerUseDriverError && error.telemetry
+          ...(error instanceof CoworkDriverError && error.telemetry
             ? { telemetry: error.telemetry }
             : {}),
         };
         const message = safeError(error);
-        if (error instanceof ComputerUseHitlBudgetError) {
+        if (
+          error instanceof CoworkDriverError &&
+          error.kind === 'hitl-budget-exhausted'
+        ) {
           hitlWarning = message;
         } else {
           hitlError = message;

@@ -255,7 +255,9 @@ console.log(${JSON.stringify(line(init))});
 console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'call1', name: 'mcp__glean__search', input: { query: 'sample' } }] } }));
 setInterval(() => {}, 1000);
 `,
-      350
+      // Allow process startup under parallel CI load; test the enclosing deadline,
+      // not whether the OS schedules a new Node process within 350ms.
+      1500
     );
     expect(result.error).toContain('timed out');
     expect(result.events).toMatchObject([
