@@ -193,6 +193,34 @@ function records(value: unknown): RecordValue[] {
 }
 
 describe('auditCoworkNativeRun', () => {
+  it('audits more than 1000 cases without treating incomplete evidence as valid', async () => {
+    const f = await fixture();
+    const cases = Array.from({ length: 1001 }, (_, index) => ({
+      ...f.saved,
+      id: `case-${index + 1}`,
+      response: {},
+      hostTelemetry: {},
+    }));
+    f.raw.results = cases;
+    f.raw.arms = [{ servers: [], result: { caseResults: cases } }];
+    const report = await f.audit(1001);
+    expect(report.expectedCases).toBe(1001);
+    expect(report.observedCases).toBe(1001);
+    expect(report.cases).toHaveLength(1001);
+    expect(report.issues).not.toContain('INVALID_OPTIONS');
+    expect(report.issues).not.toContain('INVALID_RESULTS');
+    expect(report.issues).not.toContain('CASE_COUNT_MISMATCH');
+    expect(report.evidencePassed).toBe(false);
+    expect(report.cases.every((entry) => !entry.evidencePassed)).toBe(true);
+  });
+
+  it('still rejects a truncated run when more than 1000 cases were expected', async () => {
+    const report = await (await fixture()).audit(1001);
+    expect(report.issues).toContain('CASE_COUNT_MISMATCH');
+    expect(report.issues).not.toContain('INVALID_OPTIONS');
+    expect(report.evidencePassed).toBe(false);
+  });
+
   it('replays the native parser and normalizers, hashes attachments, and returns no content or paths', async () => {
     const f = await fixture();
     const report = await f.audit();

@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => ({
   submit: vi.fn(),
   hitl: vi.fn(),
   snapshot: vi.fn(),
-  trace: vi.fn(),
+  trace: vi.fn<typeof ClaudeNative.waitForClaudeTrace>(),
   matches: vi.fn(),
   bind: vi.fn(),
   order: [] as string[],
@@ -106,7 +106,10 @@ beforeEach(() => {
   });
   let index = 0;
   mocks.bind.mockReset().mockImplementation(async () => ({
-    candidate: { metadataPath: `/fixture/session-${index++}` },
+    candidate: {
+      id: `session-${index}`,
+      metadataPath: `/fixture/session-${index++}`,
+    },
   }));
   mocks.trace.mockImplementation(async ({ sessionPath }) => {
     mocks.order.push('trace');
@@ -139,9 +142,305 @@ beforeEach(() => {
   });
 });
 afterEach(async () => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   for (const dir of dirs.splice(0))
     await fs.rm(dir, { recursive: true, force: true });
+});
+
+function deferredRequests(
+  count = 2,
+  collectionTimeoutMs = 3_600_000
+): HostBatchRequest[] {
+  return Array.from({ length: count }, (_, index) => ({
+    ...requests()[index % 2]!,
+    caseId: `deferred-${index}`,
+    config: {
+      ...host,
+      options: {
+        ...host.options,
+        submissionMode: 'deferred',
+        collectionTimeoutMs,
+      },
+    },
+  }));
+}
+
+describe('deferred Cowork collection', () => {
+  it('defaults to sequential and validates explicit bounded collection options', () => {
+    expect(COWORK_HOST.schema.parse(host)).toMatchObject({
+      options: { submissionMode: 'sequential', collectionTimeoutMs: 3_600_000 },
+    });
+    for (const collectionTimeoutMs of [
+      0,
+      -1,
+      1.5,
+      Infinity,
+      Number.MAX_SAFE_INTEGER + 1,
+    ]) {
+      expect(
+        COWORK_HOST.schema.safeParse({
+          ...host,
+          options: { ...host.options, collectionTimeoutMs },
+        }).success
+      ).toBe(false);
+    }
+    expect(
+      COWORK_HOST.schema.safeParse({
+        ...host,
+        options: { ...host.options, submissionMode: 'parallel' },
+      }).success
+    ).toBe(false);
+  });
+
+  it('submits and binds serially before collecting, with no background HITL', async () => {
+    let index = 0;
+    mocks.bind.mockImplementation(async () => {
+      mocks.order.push('bind');
+      return {
+        candidate: {
+          id: `session-${index}`,
+          metadataPath: `/fixture/session-${index++}`,
+        },
+      };
+    });
+    const scenario = '  café\n重复 query  ';
+    const snapshots = [
+      new Map(),
+      new Map([['/fixture/session-0', { mtimeMs: 1 }]]),
+    ];
+    mocks.snapshot
+      .mockResolvedValueOnce(snapshots[0])
+      .mockResolvedValueOnce(snapshots[1]);
+    const batch = deferredRequests().map((r) => ({
+      ...r,
+      input: { ...r.input, scenario },
+    }));
+    const result = await COWORK_HOST.runBatch!(batch, context);
+    expect(mocks.order).toEqual([
+      'setup',
+      'submit',
+      'bind',
+      'submit',
+      'bind',
+      'trace',
+      'trace',
+      'dispose',
+    ]);
+    expect(mocks.submit.mock.calls.map((call) => call[0] as string)).toEqual([
+      scenario,
+      scenario,
+    ]);
+    expect(mocks.hitl).not.toHaveBeenCalled();
+    expect(mocks.matches).not.toHaveBeenCalled();
+    for (let i = 0; i < 2; i++) {
+      expect(mocks.trace.mock.calls[i]![0]).toMatchObject({
+        exactPrompt: scenario,
+        sessionPath: `/fixture/session-${i}`,
+        snapshot: snapshots[i],
+      });
+      expect(mocks.trace.mock.calls[i]![0].snapshot).toBe(snapshots[i]);
+      expect(result[i]).toMatchObject({
+        finalText: 'answer',
+        telemetry: {
+          nativeSessionId: `session-${i}`,
+          computerUse: {
+            hitl: {
+              status: 'not-attempted',
+              reason: expect.stringContaining('preapproved/unattended'),
+            },
+          },
+        },
+      });
+    }
+  });
+
+  it.each(['submit', 'missing', 'ambiguous', 'duplicate', 'snapshot'])(
+    'drains the first bound session after later %s failure and never submits remaining prompts',
+    async (stage) => {
+      if (stage === 'submit')
+        mocks.submit
+          .mockResolvedValueOnce({ status: 'submitted' })
+          .mockRejectedValueOnce(new Error('uncertain submission'));
+      else if (stage === 'snapshot')
+        mocks.snapshot
+          .mockResolvedValueOnce(new Map())
+          .mockRejectedValueOnce(new Error('snapshot failed'));
+      else {
+        mocks.bind.mockResolvedValueOnce({
+          candidate: { id: 'session-0', metadataPath: '/fixture/session-0' },
+        });
+        if (stage === 'duplicate')
+          mocks.bind.mockResolvedValueOnce({
+            candidate: { id: 'session-0', metadataPath: '/fixture/session-0' },
+          });
+        else
+          mocks.bind.mockRejectedValueOnce(
+            new Error(`${stage} exact prompt session`)
+          );
+      }
+      const result = await COWORK_HOST.runBatch!(deferredRequests(3), context);
+      expect(mocks.submit).toHaveBeenCalledTimes(stage === 'snapshot' ? 1 : 2);
+      expect(mocks.trace).toHaveBeenCalledOnce();
+      expect(mocks.trace.mock.calls[0]![0].sessionPath).toBe(
+        '/fixture/session-0'
+      );
+      expect(result[0]!.finalText).toBe('answer');
+      expect(result[1]!.error).toBeTruthy();
+      expect(result[2]!.error).toContain('Not submitted');
+      expect(mocks.hitl).not.toHaveBeenCalled();
+      expect(mocks.order.slice(-2)).toEqual(['trace', 'dispose']);
+    }
+  );
+
+  it('bounds native polling without limiting the number of submitted cases', async () => {
+    const originalTrace = mocks.trace.getMockImplementation()!;
+    let activeCollectors = 0;
+    let peakCollectors = 0;
+    mocks.trace.mockImplementation(async (options) => {
+      activeCollectors++;
+      peakCollectors = Math.max(peakCollectors, activeCollectors);
+      try {
+        await new Promise((resolve) => setImmediate(resolve));
+        return await originalTrace(options);
+      } finally {
+        activeCollectors--;
+      }
+    });
+    const result = await COWORK_HOST.runBatch!(deferredRequests(12), context);
+    expect(mocks.submit).toHaveBeenCalledTimes(12);
+    expect(mocks.trace).toHaveBeenCalledTimes(12);
+    expect(result).toHaveLength(12);
+    expect(result.every((entry) => !entry.error)).toBe(true);
+    expect(peakCollectors).toBe(4);
+  });
+
+  it('starts one collection budget after submission, independent of per-case deadlines', async () => {
+    let now = 1000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    mocks.submit.mockImplementation(async () => {
+      now += 800_000;
+      return { status: 'submitted' };
+    });
+    const originalTrace = mocks.trace.getMockImplementation()!;
+    mocks.trace.mockImplementation(async (options) => {
+      // The next collector still uses the same deadline, even if it starts at expiry.
+      now += 5000;
+      return originalTrace(options);
+    });
+    const result = await COWORK_HOST.runBatch!(
+      deferredRequests(2, 5000),
+      context
+    );
+    expect(
+      mocks.bind.mock.calls.map((call) => call[0].timeoutMs as number)
+    ).toEqual([30_000, 30_000]);
+    expect(
+      mocks.submit.mock.calls.map((call) => call[1].deadlineAt as number)
+    ).toEqual([901_000, 1_701_000]);
+    expect(mocks.trace.mock.calls.map((call) => call[0].deadlineAt)).toEqual([
+      1_606_000, 1_606_000,
+    ]);
+    expect(mocks.trace.mock.calls.map((call) => call[0].timeoutMs)).toEqual([
+      5000, 0,
+    ]);
+    expect(result.every((r) => r.finalText === 'answer' && !r.error)).toBe(
+      true
+    );
+  });
+
+  it('collects later completed sessions while pending sessions expire, retaining exclusivity and diagnostics', async () => {
+    vi.useFakeTimers();
+    const originalTrace = mocks.trace.getMockImplementation()!;
+    let started!: () => void;
+    const collectionStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    mocks.trace.mockImplementation(async (options) => {
+      if (options.sessionPath === '/fixture/session-1')
+        return originalTrace(options);
+      started();
+      await new Promise((resolve) =>
+        setTimeout(resolve, options.deadlineAt! - Date.now())
+      );
+      throw new Error('Timed out waiting for bound native session to complete');
+    });
+    const pending = COWORK_HOST.runBatch!(deferredRequests(3, 250), context);
+    await collectionStarted;
+    await expect(
+      COWORK_HOST.runBatch!(deferredRequests(1), context)
+    ).rejects.toThrow('already in use');
+    expect(mocks.dispose).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(250);
+    const result = await pending;
+    expect(result[1]!.finalText).toBe('answer');
+    for (const index of [0, 2]) {
+      expect(result[index]!.error).toContain(
+        'preapprove only authorized tools'
+      );
+      expect(result[index]!.telemetry).toMatchObject({
+        nativeSessionId: `session-${index}`,
+        computerUse: { hitl: { status: 'not-attempted' } },
+      });
+    }
+    expect(mocks.hitl).not.toHaveBeenCalled();
+    expect(mocks.dispose).toHaveBeenCalledOnce();
+    mocks.trace.mockImplementation(originalTrace);
+    await expect(
+      COWORK_HOST.runBatch!(deferredRequests(1), context)
+    ).resolves.toHaveLength(1);
+  });
+
+  it('uses the same deferred flow on the injected Linux backend', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+    const linux = createCoworkHost({
+      dataDirectory: () => '/synthetic/native-data',
+      prepare: mocks.setup,
+      recover: vi.fn(),
+      submit: mocks.submit,
+      handleHitl: mocks.hitl,
+    });
+    const batch = deferredRequests().map((r) => ({
+      ...r,
+      config: {
+        ...r.config,
+        options: {
+          submissionMode: 'deferred',
+          computerUseProvider: 'linux-desktop',
+        },
+      },
+    }));
+    const result = await linux.runBatch!(batch, { ...context, env: {} });
+    expect(result.every((r) => !r.error)).toBe(true);
+    expect(mocks.order).toEqual([
+      'setup',
+      'submit',
+      'submit',
+      'trace',
+      'trace',
+      'dispose',
+    ]);
+    expect(mocks.hitl).not.toHaveBeenCalled();
+  });
+
+  it('refuses changed session identity during deferred collection', async () => {
+    const originalTrace = mocks.trace.getMockImplementation()!;
+    mocks.trace.mockImplementation(async (options) => {
+      const trace = await originalTrace(options);
+      return {
+        ...trace,
+        candidate: {
+          ...trace.candidate,
+          id: 'foreign',
+          metadataPath: '/fixture/foreign',
+        },
+      };
+    });
+    const result = await COWORK_HOST.runBatch!(deferredRequests(1), context);
+    expect(result[0]!.error).toContain('identity changed');
+    expect(result[0]!.finalText).toBe('');
+    expect(mocks.hitl).not.toHaveBeenCalled();
+  });
 });
 
 describe('V2 Cowork host', () => {
@@ -486,64 +785,68 @@ describe('V2 Cowork host', () => {
     ).rejects.toThrow('unique');
     expect(mocks.submit).toHaveBeenCalledTimes(3);
   });
-  it('runs the actual V2 batch evaluator and persists native metrics and failures', async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cowork-v2-'));
-    dirs.push(dir);
-    await fs.writeFile(
-      path.join(dir, 'cases.json'),
-      JSON.stringify({
-        name: 'cases',
-        cases: [
-          {
-            id: 'one',
-            mode: 'host',
-            scenario: 'one',
-            expect: { toolCallCount: { min: 1 } },
-          },
-          {
-            id: 'two',
-            mode: 'host',
-            scenario: 'two',
-            expect: { toolCallCount: { min: 2 } },
-          },
-          { id: 'excluded', mode: 'host', scenario: 'excluded' },
-        ],
-      })
-    );
-    const manifestPath = path.join(dir, 'manifest.json');
-    await fs.writeFile(
-      manifestPath,
-      JSON.stringify({
-        ...context.manifest,
-        maxCases: 2,
-        datasets: [{ type: 'file', path: './cases.json' }],
-      })
-    );
-    const secretsFile = path.join(dir, 'test-env.json');
-    await fs.writeFile(secretsFile, JSON.stringify(context.env));
-    const batch = await runEvalBatch({
-      manifestPaths: [manifestPath],
-      rootDir: dir,
-      secretsFile,
-      outputRoot: path.join(dir, 'out'),
-    });
-    expect(batch.items[0]!.error).toBeUndefined();
-    const summary = batch.items[0]!.result!.summary;
-    expect(summary.results).toHaveLength(2);
-    expect(summary.results.map((r) => r.pass)).toEqual([true, false]);
-    expect(mocks.submit).toHaveBeenCalledTimes(2);
-    expect(summary.telemetry?.totalHostUsage).toMatchObject({
-      inputTokens: 20,
-      outputTokens: 8,
-      totalCostUsd: 0.02,
-    });
-    const persisted = await fs.readFile(
-      path.join(batch.items[0]!.result!.outputDir, 'results.json'),
-      'utf8'
-    );
-    expect(persisted).toContain('claude-native');
-    expect(persisted).not.toContain('test-secret');
-  });
+  it.each(['sequential', 'deferred'])(
+    'runs the actual V2 batch evaluator in %s mode and persists native metrics and failures',
+    async (submissionMode) => {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cowork-v2-'));
+      dirs.push(dir);
+      await fs.writeFile(
+        path.join(dir, 'cases.json'),
+        JSON.stringify({
+          name: 'cases',
+          cases: [
+            {
+              id: 'one',
+              mode: 'host',
+              scenario: 'one',
+              expect: { toolCallCount: { min: 1 } },
+            },
+            {
+              id: 'two',
+              mode: 'host',
+              scenario: 'two',
+              expect: { toolCallCount: { min: 2 } },
+            },
+            { id: 'excluded', mode: 'host', scenario: 'excluded' },
+          ],
+        })
+      );
+      const manifestPath = path.join(dir, 'manifest.json');
+      await fs.writeFile(
+        manifestPath,
+        JSON.stringify({
+          ...context.manifest,
+          host: { ...host, options: { ...host.options, submissionMode } },
+          maxCases: 2,
+          datasets: [{ type: 'file', path: './cases.json' }],
+        })
+      );
+      const secretsFile = path.join(dir, 'test-env.json');
+      await fs.writeFile(secretsFile, JSON.stringify(context.env));
+      const batch = await runEvalBatch({
+        manifestPaths: [manifestPath],
+        rootDir: dir,
+        secretsFile,
+        outputRoot: path.join(dir, 'out'),
+      });
+      expect(batch.items[0]!.error).toBeUndefined();
+      const summary = batch.items[0]!.result!.summary;
+      expect(summary.results).toHaveLength(2);
+      expect(summary.results.map((r) => r.pass)).toEqual([true, false]);
+      expect(mocks.submit).toHaveBeenCalledTimes(2);
+      expect(summary.telemetry?.totalHostUsage).toMatchObject({
+        inputTokens: 20,
+        outputTokens: 8,
+        totalCostUsd: 0.02,
+      });
+      const persisted = await fs.readFile(
+        path.join(batch.items[0]!.result!.outputDir, 'results.json'),
+        'utf8'
+      );
+      expect(persisted).toContain('claude-native');
+      expect(persisted).not.toContain('test-secret');
+    }
+  );
   it('rejects unsupported authentication instead of casting it to managed HTTP', () => {
     expect(() =>
       toCoworkServers([{ transport: 'stdio', command: 'no' }])

@@ -129,6 +129,64 @@ Installation and configuration checks do not establish end-to-end correctness.
 Validate the prepared desktop with representative cases and audit their captured
 native evidence.
 
+## Opt in to deferred collection
+
+The default `host.options.submissionMode` is `"sequential"`: submit, bind, handle
+current-task approvals, and collect completion before submitting the next case.
+For preapproved, unattended tasks, explicitly select `"deferred"` on either
+supported platform:
+
+```json
+{
+  "host": {
+    "type": "cowork",
+    "timeout": 900000,
+    "options": {
+      "submissionMode": "deferred",
+      "collectionTimeoutMs": 3600000
+    }
+  }
+}
+```
+
+This is a host configuration fragment, not a complete evaluation manifest.
+`submissionMode` accepts only `"sequential"` or `"deferred"`.
+`collectionTimeoutMs` must be a positive safe integer; its default is 3,600,000 ms
+(one hour). It applies only to deferred collection. All cases in a batch must
+have identical host settings.
+
+Deferred mode still submits **serially**. It snapshots native sessions, submits the
+unchanged prompt once, and binds the unique new exact-prompt session before it
+advances. `host.timeout` (default 900,000 ms) bounds each submission/binding phase;
+the post-submit binding wait remains capped at 30 seconds and the remaining case
+budget. It does not impose a 15-minute completion deadline on deferred tasks.
+
+After the submission phase ends, one `collectionTimeoutMs` budget starts for all
+bound sessions, including tasks that finished during submission. Collection waits
+use at most four concurrent native-file readers against the same absolute deadline,
+not a new timeout per case. This bounds filesystem load without limiting task count.
+Each session gets an initial inspection even at expiry, so already-ready traces
+are not discarded because another task is pending. Polling sleeps use the remaining
+shared budget. Native filesystem reads, parsing, teardown, and normal assertion/
+judge execution can add overhead; this is bounded waiting, not unlimited execution
+or a strict total wall-clock cutoff.
+
+Deferred mode **never invokes current-task-only HITL**, even for the last task or
+when `coworkSetup.approveWriteTools` is enabled. Results record
+`hostTelemetry.computerUse.hitl.status: "not-attempted"` with a reason. Use only
+authorized preapproved tools and tasks that need no interactive input. For an
+incomplete task, inspect its recorded `hostTelemetry.nativeSessionId` for pending
+approvals, errors, or unfinished work. Use sequential mode when current-task HITL
+is needed. Do not blindly resubmit an incomplete or ambiguous task.
+
+A failed, missing, duplicate, or ambiguous binding stops all remaining submissions
+without retries. Already-bound sessions are still collected. Collection uses the
+existing native parser, exact prompt/snapshot checks, session identity, model
+validation, and ordinary V2 assertions/judges; there is no second evaluator.
+Desktop exclusivity remains held through collection and managed-session disposal.
+Use `--workers 1` and a dedicated desktop; do not switch tasks manually. Deferred
+orchestration is unit-tested, not live-qualified on either desktop backend.
+
 ## Audit a saved Linux native run
 
 Use the supported package-root API. It is offline: it does not invoke the desktop,
@@ -200,7 +258,8 @@ parser error messages, server URLs, or credentials. Numeric `e2e-<digits>` and
 `case-<digits>` IDs are retained; other case IDs use SHA-256 pseudonyms. Invalid
 session/model identifiers are not echoed. Errors use fixed issue codes.
 
-Bounds: 1–1,000 expected cases, 32 MiB raw results, 16 MiB per native file,
+The expected case count must be a positive safe integer; there is no fixed case-count
+ceiling. Resource bounds remain: 32 MiB raw results, 16 MiB per native file,
 64 MiB per session, 4,096 directory entries per session, depth 12, and 1,024 output
 notices per case. The parser reads a private temporary snapshot of the two bounded
 trace files, which is removed after parsing. User-controlled symlinks are rejected
@@ -225,7 +284,8 @@ the bytes present at audit time; notices contain no original digest to authentic
 - `scripts/cowork_computer_use.py`: bounded screenshot navigation, executor-owned
   query insertion, one submit boundary, and bounded first-option HITL handling.
 
-Cases run sequentially: snapshot, submit, bind, HITL, then native collection.
+By default, cases run sequentially: snapshot, submit, bind, HITL, then native collection.
+The explicit deferred mode above separates submission from completion collection.
 Already-complete native tasks skip unnecessary HITL navigation. An exhausted inspection budget is
 recorded as a warning: passing still requires native completion and the normal
 assertions/judges. Other HITL errors remain failures. Native paths support

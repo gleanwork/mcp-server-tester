@@ -505,20 +505,31 @@ export async function waitForClaudeSession(
 }
 
 export async function waitForClaudeTrace(
-  options: ClaudeSessionMatchOptions & { timeoutMs: number }
+  options: ClaudeSessionMatchOptions & {
+    timeoutMs: number;
+    /** Shared collection deadline. Always inspect once, even at expiry. */
+    deadlineAt?: number;
+  }
 ): Promise<ClaudeTrace> {
   return waitForClaudeMatch(options, true);
 }
 
 async function waitForClaudeMatch(
-  options: ClaudeSessionMatchOptions & { timeoutMs: number },
+  options: ClaudeSessionMatchOptions & {
+    timeoutMs: number;
+    deadlineAt?: number;
+  },
   requireCompletion: boolean
 ): Promise<ClaudeTrace> {
-  const deadline = Date.now() + options.timeoutMs;
+  if (options.deadlineAt !== undefined && !Number.isFinite(options.deadlineAt))
+    throw new Error('Claude collection deadline must be finite.');
+  const deadline = options.deadlineAt ?? Date.now() + options.timeoutMs;
   let lastPending: ClaudeTrace | undefined;
   let completeTraceFirstSeenAtMs: number | undefined;
 
-  while (Date.now() < deadline) {
+  // Shared collection always inspects initially and once at expiry, including
+  // completions written during the last bounded polling sleep.
+  while (options.deadlineAt !== undefined || Date.now() < deadline) {
     const matches = await findMatchingClaudeSessions(options);
 
     if (matches.length > 1) {
@@ -543,7 +554,13 @@ async function waitForClaudeMatch(
       lastPending = trace;
     }
 
-    await delay(POLL_INTERVAL_MS);
+    if (options.deadlineAt !== undefined && Date.now() >= deadline) break;
+    // A shared batch deadline must not gain a full polling interval per case.
+    const pollMs =
+      options.deadlineAt === undefined
+        ? POLL_INTERVAL_MS
+        : Math.min(POLL_INTERVAL_MS, Math.max(0, deadline - Date.now()));
+    if (pollMs > 0) await delay(pollMs);
   }
 
   if (lastPending) {

@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import {
   buildClaudeTraceMetadata,
   findMatchingClaudeSessions,
@@ -1200,6 +1200,131 @@ describe('anthropicClaude trace parsing', () => {
     });
 
     expect(trace.toolCalls[0]?.name).toBe('search');
+  });
+
+  it.each([NaN, Infinity, -Infinity])(
+    'rejects a nonfinite shared deadline %s',
+    async (deadlineAt) => {
+      await expect(
+        waitForClaudeTrace({
+          dataDir: '/unused',
+          snapshot: new Map(),
+          startedAtMs: Date.now(),
+          timeoutMs: 1,
+          deadlineAt,
+        })
+      ).rejects.toThrow('deadline must be finite');
+    }
+  );
+
+  it('inspects each exact bound session at an expired shared deadline without restarting a budget', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'claude-shared-deadline-'));
+    onTestFinished(() => rm(root, { recursive: true, force: true }));
+    const startedAtMs = Date.now();
+    const paths: string[] = [];
+    for (const id of ['local_pending', 'local_complete']) {
+      const sessionDir = join(root, id);
+      await mkdir(sessionDir);
+      const metadataPath = join(root, `${id}.json`);
+      paths.push(metadataPath);
+      await writeFile(
+        metadataPath,
+        JSON.stringify({
+          sessionId: id,
+          initialMessage: 'same exact prompt',
+          createdAt: new Date(startedAtMs).toISOString(),
+        })
+      );
+      await writeJsonl(
+        join(sessionDir, 'audit.jsonl'),
+        id === 'local_complete'
+          ? [{ type: 'result', result: 'done before collection' }]
+          : [
+              {
+                type: 'assistant',
+                message: { content: [{ type: 'text', text: 'working' }] },
+              },
+            ]
+      );
+    }
+    const options = {
+      dataDir: root,
+      exactPrompt: 'same exact prompt',
+      snapshot: new Map(),
+      startedAtMs,
+      timeoutMs: 999_999,
+      deadlineAt: Date.now() - 1,
+    };
+    await expect(
+      waitForClaudeTrace({ ...options, sessionPath: paths[0] })
+    ).rejects.toThrow('Timed out');
+    await expect(
+      waitForClaudeTrace({ ...options, sessionPath: paths[1] })
+    ).resolves.toMatchObject({
+      finalAnswer: 'done before collection',
+      isComplete: true,
+    });
+    await expect(waitForClaudeTrace(options)).rejects.toThrow('Ambiguous');
+    await expect(
+      waitForClaudeTrace({
+        ...options,
+        sessionPath: paths[1],
+        exactPrompt: 'different',
+      })
+    ).rejects.toThrow('No matching');
+  });
+
+  it('caps shared-deadline polling by remaining time rather than a full interval', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'claude-poll-deadline-'));
+    onTestFinished(() => rm(root, { recursive: true, force: true }));
+    const timer = vi.spyOn(globalThis, 'setTimeout');
+    onTestFinished(() => timer.mockRestore());
+    await expect(
+      waitForClaudeTrace({
+        dataDir: root,
+        exactPrompt: 'missing',
+        snapshot: new Map(),
+        startedAtMs: Date.now(),
+        timeoutMs: 999_999,
+        deadlineAt: Date.now() + 100,
+      })
+    ).rejects.toThrow('No matching');
+    for (const call of timer.mock.calls)
+      expect(call[1]).toBeLessThanOrEqual(100);
+  });
+
+  it('collects completion written during the last shared-deadline polling sleep', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'claude-last-poll-'));
+    onTestFinished(() => rm(root, { recursive: true, force: true }));
+    const sessionDir = join(root, 'local_last');
+    await mkdir(sessionDir);
+    const sessionPath = join(root, 'local_last.json');
+    await writeFile(
+      sessionPath,
+      JSON.stringify({
+        sessionId: 'local_last',
+        initialMessage: 'exact',
+        createdAt: new Date().toISOString(),
+      })
+    );
+    const audit = join(sessionDir, 'audit.jsonl');
+    await writeJsonl(audit, []);
+    const result = waitForClaudeTrace({
+      dataDir: root,
+      exactPrompt: 'exact',
+      sessionPath,
+      snapshot: new Map(),
+      startedAtMs: Date.now(),
+      timeoutMs: 1000,
+      deadlineAt: Date.now() + 250,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await writeJsonl(audit, [
+      { type: 'result', result: 'finished during sleep' },
+    ]);
+    await expect(result).resolves.toMatchObject({
+      finalAnswer: 'finished during sleep',
+    });
   });
 
   it('waits for a terminal result event before returning a matched trace', async () => {

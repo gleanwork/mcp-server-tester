@@ -27,6 +27,13 @@ const OptionsSchema = z
           ? 'linux-desktop'
           : 'anthropic-computer-use'
       ),
+    submissionMode: z.enum(['sequential', 'deferred']).default('sequential'),
+    collectionTimeoutMs: z
+      .number()
+      .int()
+      .positive()
+      .max(Number.MAX_SAFE_INTEGER)
+      .default(3_600_000),
     computerUseMaxActions: z.number().int().min(1).max(64).default(24),
     hitlMaxActions: z.number().int().min(1).max(24).default(12),
     computerUseModel: z
@@ -101,6 +108,8 @@ async function runBatch(
     failure('Cowork submission was not attempted.')
   );
   const usedSessions = new Set<string>();
+  const deferred = config.options.submissionMode === 'deferred';
+  const collectors: Array<(deadlineAt: number) => Promise<void>> = [];
   const safeError = (error: unknown): string => {
     let text =
       error instanceof Error ? error.message : 'Cowork operation failed.';
@@ -140,7 +149,7 @@ async function runBatch(
       const caseStartedAt = Date.now();
       const computerUse: Record<
         'submission' | 'hitl',
-        { status: string; telemetry?: CoworkDriverTelemetry }
+        { status: string; reason?: string; telemetry?: CoworkDriverTelemetry }
       > = {
         submission: { status: 'not-attempted' },
         hitl: { status: 'not-attempted' },
@@ -153,22 +162,23 @@ async function runBatch(
         };
       };
       // Bind each fresh task before another submission can create an identical prompt.
-      const snapshot = await snapshotClaudeSessions(dataDir);
       const startedAtMs = Date.now();
       const deadlineAt = startedAtMs + config.timeout;
       let hitlError: string | undefined;
       let hitlWarning: string | undefined;
       let sessionPath: string;
-      const match = {
-        dataDir,
-        exactPrompt: request.input.scenario,
-        snapshot,
-        startedAtMs,
-      };
+      let nativeSessionId: string;
+      let match: Omit<Parameters<typeof waitForClaudeSession>[0], 'timeoutMs'>;
       process.stderr.write(
         `[mst:cowork] case ${index + 1}/${requests.length}: submitting unchanged prompt\n`
       );
       try {
+        match = {
+          dataDir,
+          exactPrompt: request.input.scenario,
+          snapshot: await snapshotClaudeSessions(dataDir),
+          startedAtMs,
+        };
         const submission = await platform.submit(request.input.scenario, {
           deadlineAt,
           maxActions: config.options.computerUseMaxActions,
@@ -184,6 +194,7 @@ async function runBatch(
           timeoutMs: Math.max(0, Math.min(30_000, deadlineAt - Date.now())),
         });
         sessionPath = bound.candidate.metadataPath;
+        nativeSessionId = bound.candidate.id;
         if (usedSessions.has(sessionPath))
           throw new Error(
             'Native session matched more than one case; refusing duplicate attribution.'
@@ -206,132 +217,172 @@ async function runBatch(
           );
         break;
       }
-      process.stderr.write(
-        '[mst:cowork] bounded HITL check for the bound native session\n'
-      );
-      try {
-        const native = await findMatchingClaudeSessions({
-          ...match,
-          sessionPath,
-        });
-        if (native.length > 1)
-          throw new Error(
-            'Ambiguous native sessions; no HITL action attempted.'
-          );
-        if (!native.length)
-          throw new Error(
-            'Bound native session is missing; no HITL action attempted.'
-          );
-        if (native[0]?.isComplete) {
-          computerUse.hitl = { status: 'skipped-native-complete' };
-          process.stderr.write(
-            `[mst:cowork] case ${index + 1} already completed; skipping HITL\n`
-          );
-        } else {
-          const hitl = await platform.handleHitl({
-            deadlineAt: deadlineAt,
-            maxActions: config.options.hitlMaxActions,
-            model: config.options.computerUseModel,
-            env,
-            approveWriteTools:
-              context.manifest.coworkSetup?.approveWriteTools === true,
-            isComplete: async () => {
-              const current = await findMatchingClaudeSessions({
-                ...match,
-                sessionPath,
-              });
-              if (current.length !== 1)
-                throw new Error(
-                  'Bound native session is missing or ambiguous.'
-                );
-              return current[0]!.isComplete;
-            },
-            task: `Handle only the currently open Cowork task just submitted with this exact query: ${request.input.scenario}. Do not switch tasks. Never create, type, or resubmit a task. If the current task cannot be identified uniquely, stop without an action.`,
-          });
-          computerUse.hitl = {
-            status: 'completed',
-            ...(hitl.telemetry ? { telemetry: hitl.telemetry } : {}),
-          };
-        }
-      } catch (error) {
+      if (deferred) {
         computerUse.hitl = {
-          status:
+          status: 'not-attempted',
+          reason:
+            'Deferred collection requires preapproved/unattended tasks. Current-task-only HITL cannot safely act on background sessions.',
+        };
+      } else {
+        process.stderr.write(
+          '[mst:cowork] bounded HITL check for the bound native session\n'
+        );
+        try {
+          const native = await findMatchingClaudeSessions({
+            ...match,
+            sessionPath,
+          });
+          if (native.length > 1)
+            throw new Error(
+              'Ambiguous native sessions; no HITL action attempted.'
+            );
+          if (!native.length)
+            throw new Error(
+              'Bound native session is missing; no HITL action attempted.'
+            );
+          if (native[0]?.isComplete) {
+            computerUse.hitl = { status: 'skipped-native-complete' };
+            process.stderr.write(
+              `[mst:cowork] case ${index + 1} already completed; skipping HITL\n`
+            );
+          } else {
+            const hitl = await platform.handleHitl({
+              deadlineAt: deadlineAt,
+              maxActions: config.options.hitlMaxActions,
+              model: config.options.computerUseModel,
+              env,
+              approveWriteTools:
+                context.manifest.coworkSetup?.approveWriteTools === true,
+              isComplete: async () => {
+                const current = await findMatchingClaudeSessions({
+                  ...match,
+                  sessionPath,
+                });
+                if (current.length !== 1)
+                  throw new Error(
+                    'Bound native session is missing or ambiguous.'
+                  );
+                return current[0]!.isComplete;
+              },
+              task: `Handle only the currently open Cowork task just submitted with this exact query: ${request.input.scenario}. Do not switch tasks. Never create, type, or resubmit a task. If the current task cannot be identified uniquely, stop without an action.`,
+            });
+            computerUse.hitl = {
+              status: 'completed',
+              ...(hitl.telemetry ? { telemetry: hitl.telemetry } : {}),
+            };
+          }
+        } catch (error) {
+          computerUse.hitl = {
+            status:
+              error instanceof CoworkDriverError &&
+              error.kind === 'hitl-budget-exhausted'
+                ? 'budget-exhausted'
+                : 'failed',
+            ...(error instanceof CoworkDriverError && error.telemetry
+              ? { telemetry: error.telemetry }
+              : {}),
+          };
+          const message = safeError(error);
+          if (
             error instanceof CoworkDriverError &&
             error.kind === 'hitl-budget-exhausted'
-              ? 'budget-exhausted'
-              : 'failed',
-          ...(error instanceof CoworkDriverError && error.telemetry
-            ? { telemetry: error.telemetry }
-            : {}),
-        };
-        const message = safeError(error);
-        if (
-          error instanceof CoworkDriverError &&
-          error.kind === 'hitl-budget-exhausted'
-        ) {
-          hitlWarning = message;
-        } else {
-          hitlError = message;
+          ) {
+            hitlWarning = message;
+          } else {
+            hitlError = message;
+          }
         }
       }
-      try {
-        const remaining = deadlineAt - Date.now();
-        if (remaining <= 0)
-          throw new Error(
-            'Native Claude trace deadline exceeded. No resubmission attempted.'
+      const collect = async (collectionDeadlineAt: number) => {
+        try {
+          const remaining = collectionDeadlineAt - Date.now();
+          if (!deferred && remaining <= 0)
+            throw new Error(
+              'Native Claude trace deadline exceeded. No resubmission attempted.'
+            );
+          process.stderr.write(
+            `[mst:cowork] collecting case ${index + 1}/${requests.length}\n`
           );
-        process.stderr.write(
-          `[mst:cowork] collecting case ${index + 1}/${requests.length}\n`
-        );
-        const trace = await waitForClaudeTrace({
-          ...match,
-          sessionPath,
-          timeoutMs: remaining,
-        });
-        if (trace.candidate.metadataPath !== sessionPath)
-          throw new Error(
-            'Native session identity changed; refusing attribution.'
+          const trace = await waitForClaudeTrace({
+            ...match,
+            sessionPath,
+            timeoutMs: Math.max(0, remaining),
+            ...(deferred ? { deadlineAt: collectionDeadlineAt } : {}),
+          });
+          if (trace.candidate.metadataPath !== sessionPath)
+            throw new Error(
+              'Native session identity changed; refusing attribution.'
+            );
+          process.stderr.write(
+            `[mst:cowork] case ${index + 1}: native completion found (${trace.toolCalls.length} tool calls)\n`
           );
-        process.stderr.write(
-          `[mst:cowork] case ${index + 1}: native completion found (${trace.toolCalls.length} tool calls)\n`
-        );
-        if (config.model && !trace.telemetry.models.includes(config.model)) {
-          throw new Error(
-            `Cowork model mismatch: requested ${config.model}, observed ${trace.telemetry.models.join(', ') || 'unavailable'}.`
+          if (config.model && !trace.telemetry.models.includes(config.model)) {
+            throw new Error(
+              `Cowork model mismatch: requested ${config.model}, observed ${trace.telemetry.models.join(', ') || 'unavailable'}.`
+            );
+          }
+          const result = simulationToHostTrace(
+            {
+              success: !trace.isError && trace.finalAnswer !== undefined,
+              response: trace.finalAnswer,
+              toolCalls: trace.toolCalls,
+              usage: trace.usage,
+              error: trace.isError
+                ? 'Native Claude task failed.'
+                : trace.finalAnswer === undefined
+                  ? 'Native trace has no final answer.'
+                  : undefined,
+            },
+            servers
+          );
+          results[index] = {
+            ...result,
+            error: result.error ?? hitlError,
+            telemetry: {
+              source: 'claude-native',
+              costScope: 'native-inference-only',
+              ...trace.telemetry,
+              nativeSessionId: trace.candidate.id,
+              correlation: 'exact-initial-prompt',
+              ...(hitlWarning ? { hitlWarning } : {}),
+            },
+            llmDurationMs: trace.llmDurationMs,
+          };
+        } catch (error) {
+          results[index] = failure(
+            safeError(error) +
+              (deferred
+                ? ' Deferred collection did not produce a usable bound trace. Inspect the bound native session for pending approvals or incomplete work; preapprove only authorized tools and use unattended tasks, or use sequential mode for current-task HITL. No resubmission or background approval was attempted.'
+                : '')
           );
         }
-        const result = simulationToHostTrace(
-          {
-            success: !trace.isError && trace.finalAnswer !== undefined,
-            response: trace.finalAnswer,
-            toolCalls: trace.toolCalls,
-            usage: trace.usage,
-            error: trace.isError
-              ? 'Native Claude task failed.'
-              : trace.finalAnswer === undefined
-                ? 'Native trace has no final answer.'
-                : undefined,
-          },
-          servers
-        );
-        results[index] = {
-          ...result,
-          error: result.error ?? hitlError,
-          telemetry: {
-            source: 'claude-native',
-            costScope: 'native-inference-only',
-            ...trace.telemetry,
-            nativeSessionId: trace.candidate.id,
+        if (deferred) {
+          results[index].telemetry = {
+            ...results[index].telemetry,
+            nativeSessionId,
             correlation: 'exact-initial-prompt',
-            ...(hitlWarning ? { hitlWarning } : {}),
-          },
-          llmDurationMs: trace.llmDurationMs,
-        };
-      } catch (error) {
-        results[index] = failure(safeError(error));
-      }
-      finishCase();
+          };
+        }
+        finishCase();
+      };
+      if (deferred) collectors.push(collect);
+      else await collect(deadlineAt);
     }
+    // Start one batch-wide budget only after all safe submissions, including an
+    // early abort. Drain every bound session before releasing the managed desktop.
+    const collectionDeadlineAt =
+      Date.now() + config.options.collectionTimeoutMs;
+    // Bound native-file polling independently of task submission. An arbitrarily
+    // large dataset must not start one filesystem polling loop per case at once.
+    let nextCollector = 0;
+    await Promise.all(
+      Array.from({ length: Math.min(4, collectors.length) }, async () => {
+        while (nextCollector < collectors.length) {
+          const collect = collectors[nextCollector++]!;
+          await collect(collectionDeadlineAt);
+        }
+      })
+    );
     return results;
   } finally {
     try {
