@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  verifyCoworkMcpServers,
   CoworkMcpReadinessError,
+  verifyCoworkMcpServers,
 } from './mcpReadiness.js';
 import {
   closeMCPClient,
@@ -25,13 +25,17 @@ describe('Cowork MCP preflight', () => {
     } as never);
 
     await expect(
-      verifyCoworkMcpServers([
-        {
-          transport: 'http',
-          label: 'glean',
-          serverUrl: 'https://example.test/mcp',
-        },
-      ])
+      verifyCoworkMcpServers(
+        [
+          {
+            transport: 'http',
+            label: 'glean',
+            serverUrl: 'https://example.test/mcp',
+            auth: { accessTokenEnv: 'TOKEN' },
+          },
+        ],
+        { TOKEN: 'secret' }
+      )
     ).resolves.toMatchObject([
       { label: 'glean', status: 'connected', toolCount: 1 },
     ]);
@@ -48,13 +52,17 @@ describe('Cowork MCP preflight', () => {
     vi.mocked(createMCPClientForConfig).mockResolvedValue(client as never);
 
     await expect(
-      verifyCoworkMcpServers([
-        {
-          transport: 'http',
-          label: 'glean',
-          serverUrl: 'https://example.test/mcp',
-        },
-      ])
+      verifyCoworkMcpServers(
+        [
+          {
+            transport: 'http',
+            label: 'glean',
+            serverUrl: 'https://example.test/mcp',
+            auth: { accessTokenEnv: 'TOKEN' },
+          },
+        ],
+        { TOKEN: 'secret' }
+      )
     ).rejects.toMatchObject({
       name: 'CoworkMcpReadinessError',
       servers: [
@@ -72,18 +80,21 @@ describe('Cowork MCP preflight', () => {
       } as never);
 
     await expect(
-      verifyCoworkMcpServers([
-        {
-          transport: 'http',
-          label: 'first',
-          serverUrl: 'https://first.test/mcp',
-        },
-        {
-          transport: 'http',
-          label: 'second',
-          serverUrl: 'https://second.test/mcp',
-        },
-      ])
+      verifyCoworkMcpServers(
+        [
+          {
+            transport: 'http',
+            label: 'first',
+            serverUrl: 'https://first.test/mcp',
+          },
+          {
+            transport: 'http',
+            label: 'second',
+            serverUrl: 'https://second.test/mcp',
+          },
+        ],
+        {}
+      )
     ).rejects.toBeInstanceOf(CoworkMcpReadinessError);
     expect(createMCPClientForConfig).toHaveBeenCalledTimes(2);
   });

@@ -138,7 +138,7 @@ async function runBatch(
         model: config.model,
       });
     if (servers.length) {
-      const readiness = await verifyCoworkMcpServers(servers);
+      const readiness = await verifyCoworkMcpServers(servers, env);
       process.stderr.write(
         `[mst:cowork] MCP preflight ready: ${readiness
           .map(

@@ -179,7 +179,7 @@ describe('V2 Cowork host', () => {
     }));
     const result = await prepared.runBatch!(batch, { ...context, env: {} });
     expect(result.every((r) => !r.error)).toBe(true);
-    expect(mocks.readiness).toHaveBeenCalledWith([server]);
+    expect(mocks.readiness).toHaveBeenCalledWith([server], expect.any(Object));
     expect(mocks.submit).toHaveBeenCalledTimes(2);
     expect(mocks.hitl).toHaveBeenCalledWith(
       expect.objectContaining({

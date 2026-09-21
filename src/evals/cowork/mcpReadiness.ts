@@ -2,7 +2,7 @@ import {
   closeMCPClient,
   createMCPClientForConfig,
 } from '../../mcp/clientFactory.js';
-import type { MCPConfig } from '../../config/mcpConfig.js';
+import { isHttpConfig, type MCPConfig } from '../../config/mcpConfig.js';
 
 export interface CoworkMcpServerReadiness {
   label: string;
@@ -55,6 +55,22 @@ async function withTimeout<T>(
   }
 }
 
+function resolveServer(
+  server: MCPConfig,
+  env: Record<string, string | undefined>
+): MCPConfig {
+  if (!isHttpConfig(server)) return server;
+  const tokenEnv = server.auth?.accessTokenEnv;
+  if (!tokenEnv) return server;
+  const token = env[tokenEnv];
+  if (!token)
+    throw new Error(`MCP token environment variable ${tokenEnv} is not set.`);
+  return {
+    ...server,
+    auth: { ...server.auth, accessToken: token, accessTokenEnv: undefined },
+  };
+}
+
 function safeError(error: unknown): string {
   const message = error instanceof Error ? error.message : 'connection_failed';
   return message
@@ -71,7 +87,8 @@ function safeError(error: unknown): string {
  * platform-owned diagnostic because MST cannot inspect every Desktop runtime.
  */
 export async function verifyCoworkMcpServers(
-  servers: MCPConfig[]
+  servers: MCPConfig[],
+  env: Record<string, string | undefined>
 ): Promise<CoworkMcpServerReadiness[]> {
   const results = await Promise.all(
     servers.map(async (server, index): Promise<CoworkMcpServerReadiness> => {
@@ -80,7 +97,7 @@ export async function verifyCoworkMcpServers(
         | Awaited<ReturnType<typeof createMCPClientForConfig>>
         | undefined;
       try {
-        client = await createMCPClientForConfig(server);
+        client = await createMCPClientForConfig(resolveServer(server, env));
         const tools = await withTimeout(
           client.listTools(),
           PREFLIGHT_TIMEOUT_MS
