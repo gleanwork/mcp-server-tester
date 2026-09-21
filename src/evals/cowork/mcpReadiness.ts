@@ -18,7 +18,14 @@ export class CoworkMcpReadinessError extends Error {
   readonly servers: CoworkMcpServerReadiness[];
 
   constructor(servers: CoworkMcpServerReadiness[]) {
-    super('Cowork MCP preflight failed; no task was submitted.');
+    super(
+      `Cowork MCP preflight failed; no task was submitted. ${servers
+        .map(
+          (server) =>
+            `${server.label}=${server.status}${server.error ? `(${server.error})` : ''}(${server.elapsedMs}ms)`
+        )
+        .join(', ')}`
+    );
     this.name = 'CoworkMcpReadinessError';
     this.servers = servers;
   }
