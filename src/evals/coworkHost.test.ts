@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   matches: vi.fn(),
   bind: vi.fn(),
   order: [] as string[],
+  readiness: vi.fn(),
 }));
 vi.mock('./cowork/pythonRuntime.js', () => ({
   ensureCoworkPython: vi.fn().mockResolvedValue('/fake/python'),
@@ -34,6 +35,9 @@ vi.mock('./coworkSetup/recoverSession.js', () => ({
 }));
 vi.mock('./coworkSetup/macSession.js', () => ({
   prepareMacCoworkSession: mocks.setup,
+}));
+vi.mock('./cowork/mcpReadiness.js', () => ({
+  verifyCoworkMcpServers: mocks.readiness,
 }));
 vi.mock('./cowork/anthropicComputerUse.js', async (original) => ({
   ...(await original<typeof ComputerUse>()),
@@ -87,6 +91,9 @@ beforeEach(() => {
   vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin');
   vi.clearAllMocks();
   mocks.order.length = 0;
+  mocks.readiness.mockResolvedValue([
+    { label: 'glean', status: 'connected', toolCount: 22, elapsedMs: 10 },
+  ]);
   mocks.setup.mockImplementation(async () => {
     mocks.order.push('setup');
     return { dispose: mocks.dispose };
@@ -172,6 +179,7 @@ describe('V2 Cowork host', () => {
     }));
     const result = await prepared.runBatch!(batch, { ...context, env: {} });
     expect(result.every((r) => !r.error)).toBe(true);
+    expect(mocks.readiness).toHaveBeenCalledWith([server]);
     expect(mocks.submit).toHaveBeenCalledTimes(2);
     expect(mocks.hitl).toHaveBeenCalledWith(
       expect.objectContaining({

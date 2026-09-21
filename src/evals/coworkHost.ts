@@ -6,6 +6,7 @@ import type {
   HostRunResult,
 } from './evalFrameworkTypes.js';
 import { getCoworkPlatform, type CoworkPlatform } from './cowork/platform.js';
+import { verifyCoworkMcpServers } from './cowork/mcpReadiness.js';
 import {
   findMatchingClaudeSessions,
   snapshotClaudeSessions,
@@ -136,6 +137,17 @@ async function runBatch(
         env,
         model: config.model,
       });
+    if (servers.length) {
+      const readiness = await verifyCoworkMcpServers(servers);
+      process.stderr.write(
+        `[mst:cowork] MCP preflight ready: ${readiness
+          .map(
+            (server) =>
+              `${server.label}(${server.toolCount ?? 0} tools, ${server.elapsedMs}ms)`
+          )
+          .join(', ')}\\n`
+      );
+    }
     for (const [index, request] of requests.entries()) {
       const caseStartedAt = Date.now();
       const computerUse: Record<
