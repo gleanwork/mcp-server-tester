@@ -67,7 +67,14 @@ function resolveServer(
     throw new Error(`MCP token environment variable ${tokenEnv} is not set.`);
   return {
     ...server,
-    auth: { ...server.auth, accessToken: token, accessTokenEnv: undefined },
+    // Match Claude Desktop's headers-helper contract exactly. Some eval MCP
+    // endpoints reject the SDK auth option even though it produces the same
+    // nominal Authorization value.
+    auth: undefined,
+    headers: {
+      ...server.headers,
+      Authorization: `Bearer ${token}`,
+    },
   };
 }
 

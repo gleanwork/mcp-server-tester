@@ -39,7 +39,13 @@ describe('Cowork MCP preflight', () => {
     ).resolves.toMatchObject([
       { label: 'glean', status: 'connected', toolCount: 1 },
     ]);
-    expect(createMCPClientForConfig).toHaveBeenCalledOnce();
+    expect(createMCPClientForConfig).toHaveBeenCalledWith({
+      transport: 'http',
+      label: 'glean',
+      serverUrl: 'https://example.test/mcp',
+      auth: undefined,
+      headers: { Authorization: 'Bearer secret' },
+    });
     expect(closeMCPClient).toHaveBeenCalledOnce();
   });
 
