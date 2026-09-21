@@ -251,6 +251,9 @@ export interface LLMToolCall {
   server?: string;
   /** Original provider-encoded name, retained for diagnostics. */
   rawName?: string;
+  durationMs?: number;
+  startedAt?: string;
+  completedAt?: string;
   /** Tool name */
   name: string;
   /** Tool arguments (as provided by LLM) */

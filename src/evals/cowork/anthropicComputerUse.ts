@@ -23,7 +23,12 @@ function resolveDriverPath(env: NodeJS.ProcessEnv): string {
   ).resolve('@gleanwork/mcp-server-tester/cowork-runtime');
 }
 
-export type ComputerUseOptions = CoworkDriverOptions;
+export interface ComputerUseOptions extends CoworkDriverOptions {
+  /** App-specific instructions; the screenshot/action loop remains shared. */
+  application?: 'cowork' | 'chatgpt';
+  targetModel?: string;
+  reasoningEffort?: string;
+}
 
 export class ComputerUseDriverError extends CoworkDriverError {
   constructor(
@@ -112,7 +117,19 @@ async function runComputerUseDriver(
   try {
     const result = await execFileAsync(
       python,
-      [DRIVER_PATH, query, '--max-actions', String(maxActions), '--mode', mode],
+      [
+        DRIVER_PATH,
+        query,
+        '--max-actions',
+        String(maxActions),
+        '--mode',
+        mode,
+        ...(options.application ? ['--app', options.application] : []),
+        ...(options.targetModel ? ['--target-model', options.targetModel] : []),
+        ...(options.reasoningEffort
+          ? ['--reasoning-effort', options.reasoningEffort]
+          : []),
+      ],
       {
         timeout: timeoutMs,
         maxBuffer: 2 * 1024 * 1024,
@@ -127,6 +144,13 @@ async function runComputerUseDriver(
     // contain request content. Never copy raw stdout/stderr or error messages.
     const reported = parseLastJsonLine(stdout);
     const telemetry = parseTelemetry(reported?.telemetry, env, 'partial');
+    const blocker =
+      typeof reported?.error_code === 'string' &&
+      /^(model_unavailable|reasoning_unavailable|sign_in_required|permissions_required|app_unavailable|navigation_blocked|screen_recording_required|accessibility_required|action_budget_exhausted|provider_rate_limit|provider_authentication|provider_request_rejected|provider_unavailable)$/.test(
+        reported.error_code
+      )
+        ? reported.error_code
+        : undefined;
     const details =
       (error as { killed?: boolean }).killed === true
         ? 'driver terminated before completion; not retrying'
@@ -149,7 +173,7 @@ async function runComputerUseDriver(
     }
     diagnostic(`Computer Use ${label} failed: ${details}`);
     throw new ComputerUseDriverError(
-      `Computer Use ${label} failed: ${details}`,
+      `Computer Use ${label} failed: ${details}${blocker ? ` (${blocker})` : ''}`,
       telemetry
     );
   }

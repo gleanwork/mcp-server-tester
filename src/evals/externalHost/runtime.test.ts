@@ -23,6 +23,15 @@ describe('external host runtime', () => {
     expect(submitted).toBe('Reply with exactly: acknowledged.');
   });
 
+  it('keeps exact-prompt input byte-for-byte unchanged', () => {
+    const scenario = '  snake_case\\value\nUnicode α  ';
+    expect(
+      formatSubmittedScenario(scenario, 'internal-id', {
+        strategy: 'exact_prompt',
+      })
+    ).toBe(scenario);
+  });
+
   it('supports prompt marker correlation without including it in the prompt', () => {
     const submitted = formatSubmittedScenario(
       'Reply with exactly: acknowledged.',

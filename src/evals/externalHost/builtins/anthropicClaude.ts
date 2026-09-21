@@ -1546,7 +1546,12 @@ function extractAggregatedUsage(
     byRequest.set(requestId, {
       inputTokens: Math.max(previous.inputTokens, usage.inputTokens),
       outputTokens: Math.max(previous.outputTokens, usage.outputTokens),
-      totalCostUsd: Math.max(previous.totalCostUsd, usage.totalCostUsd),
+      totalCostUsd:
+        previous.totalCostUsd === undefined
+          ? usage.totalCostUsd
+          : usage.totalCostUsd === undefined
+            ? previous.totalCostUsd
+            : Math.max(previous.totalCostUsd, usage.totalCostUsd),
       durationMs: Math.max(previous.durationMs, usage.durationMs),
       durationApiMs:
         previous.durationApiMs === undefined &&
@@ -1569,7 +1574,10 @@ function extractAggregatedUsage(
   return values.reduce((total, value) => ({
     inputTokens: total.inputTokens + value.inputTokens,
     outputTokens: total.outputTokens + value.outputTokens,
-    totalCostUsd: total.totalCostUsd + value.totalCostUsd,
+    totalCostUsd:
+      total.totalCostUsd === undefined || value.totalCostUsd === undefined
+        ? undefined
+        : total.totalCostUsd + value.totalCostUsd,
     durationMs: total.durationMs + value.durationMs,
     durationApiMs:
       total.durationApiMs === undefined && value.durationApiMs === undefined

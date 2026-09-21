@@ -9,6 +9,35 @@ import {
   runAnthropicComputerUseSubmission,
 } from './anthropicComputerUse.js';
 
+it('passes ChatGPT target selection to the shared packaged driver separately from the planner', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'cu-chatgpt-'));
+  onTestFinished(() => rm(directory, { recursive: true, force: true }));
+  await mkdir(join(directory, 'scripts'));
+  await writeFile(join(directory, 'package.json'), '{"type":"commonjs"}');
+  await writeFile(
+    join(directory, 'scripts/cowork_computer_use.py'),
+    `
+    const args = process.argv;
+    for (const [key,value] of [['--app','chatgpt'],['--target-model','gpt-test'],['--reasoning-effort','medium']]) {
+      if (args[args.indexOf(key)+1] !== value) process.exit(1);
+    }
+    console.log(JSON.stringify({status:'submitted',action_count:2,submission_action:{action:'key',text:'enter'},model:process.env.MST_COWORK_CUA_MODEL}));
+  `
+  );
+  const result = await runAnthropicComputerUseSubmission('query', {
+    deadlineAt: Date.now() + 10000,
+    application: 'chatgpt',
+    targetModel: 'gpt-test',
+    reasoningEffort: 'medium',
+    model: 'claude-sonnet-4-6',
+    env: {
+      MST_COWORK_DRIVER_ROOT: directory,
+      MST_COWORK_PYTHON: process.execPath,
+    },
+  });
+  expect(result.model).toBe('claude-sonnet-4-6');
+});
+
 it('passes an explicit planner model over the legacy environment default', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'cu-model-'));
   onTestFinished(() => rm(directory, { recursive: true, force: true }));
@@ -74,6 +103,30 @@ async function driverOptions(record: unknown, exitCode = 0) {
     },
   };
 }
+
+it.each(['model_unavailable', 'provider_rate_limit', 'private-api-key'])(
+  'only exposes allowlisted blocker codes: %s',
+  async (code) => {
+    const options = await driverOptions(
+      {
+        status: 'failed',
+        error_code: code,
+        error: 'private prompt private-api-key',
+        telemetry: telemetry(),
+      },
+      1
+    );
+    try {
+      await runAnthropicComputerUseSubmission('query', options);
+      throw new Error('Expected failure');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ComputerUseDriverError);
+      expect(String(error)).not.toContain('private-api-key');
+      expect(String(error)).not.toContain('private prompt');
+      if (code === 'model_unavailable') expect(String(error)).toContain(code);
+    }
+  }
+);
 
 it.each(['submit', 'hitl'] as const)(
   'returns allowlisted telemetry for %s',

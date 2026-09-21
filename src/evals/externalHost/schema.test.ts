@@ -28,6 +28,7 @@ describe('external host schema and reference', () => {
     expect(choices[0]).toMatchObject({
       type: 'string',
       enum: [
+        'openai.chatgpt.agent.desktop-app.macos',
         'anthropic.claude.chat.desktop-app.macos',
         'anthropic.claude.cowork.desktop-app.macos',
       ],

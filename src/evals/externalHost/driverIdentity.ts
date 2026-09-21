@@ -28,6 +28,14 @@ export const CLAUDE_CODE_CLI_MACOS_DRIVER: HostDriverId = {
   platform: 'macos',
 };
 
+export const OPENAI_CHATGPT_AGENT_DESKTOP_MACOS_DRIVER: HostDriverId = {
+  provider: 'openai',
+  product: 'chatgpt',
+  surface: 'agent',
+  runtime: 'desktop-app',
+  platform: 'macos',
+};
+
 export function driverToSlug(driver: HostDriverId): string {
   return [
     driver.provider,
