@@ -19,6 +19,23 @@ describe('Cowork MCP preflight', () => {
     vi.mocked(closeMCPClient).mockResolvedValue(undefined);
   });
 
+  it('accepts Scio-verified native Desktop readiness', async () => {
+    await expect(
+      verifyCoworkMcpServers(
+        [
+          {
+            transport: 'http',
+            label: 'glean',
+            serverUrl: 'https://example.test/mcp',
+            auth: { accessTokenEnv: 'TOKEN' },
+          },
+        ],
+        { MST_COWORK_NATIVE_MCP_READY: '1' }
+      )
+    ).resolves.toMatchObject([{ label: 'glean', status: 'connected' }]);
+    expect(createMCPClientForConfig).not.toHaveBeenCalled();
+  });
+
   it('connects and lists tools for every configured server', async () => {
     vi.mocked(createMCPClientForConfig).mockResolvedValue({
       listTools: vi.fn().mockResolvedValue({ tools: [{ name: 'search' }] }),

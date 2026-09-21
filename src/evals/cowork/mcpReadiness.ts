@@ -97,6 +97,18 @@ export async function verifyCoworkMcpServers(
   servers: MCPConfig[],
   env: Record<string, string | undefined>
 ): Promise<CoworkMcpServerReadiness[]> {
+  // Linux Scio performs an equivalent, stronger check against Claude Desktop's
+  // own MCP pool before invoking MST. The native check proves that Desktop
+  // authenticated and listed tools, while a second standalone SDK connection
+  // is rejected by this endpoint even with the same credentials.
+  if (env.MST_COWORK_NATIVE_MCP_READY === '1') {
+    return servers.map((server, index) => ({
+      label: label(server, index),
+      status: 'connected',
+      elapsedMs: 0,
+    }));
+  }
+
   const results = await Promise.all(
     servers.map(async (server, index): Promise<CoworkMcpServerReadiness> => {
       const started = Date.now();
