@@ -14,12 +14,17 @@ import { ProxyAgent, Agent as UndiciAgent } from 'undici';
 import { readFileSync } from 'node:fs';
 import packageJson from '../../package.json' with { type: 'json' };
 import { performClientCredentialsFlow } from '../auth/oauthFlow.js';
+import {
+  MCPHttpConnectionError,
+  formatMCPConnectionFailure,
+} from './connectionDiagnostics.js';
 
 /**
  * Extracts the Retry-After delay in milliseconds from an error response, if present.
  * Returns null if no Retry-After header is found or parseable.
  */
 function getRetryAfterDelayMs(err: unknown): number | null {
+  if (err instanceof MCPHttpConnectionError) return err.retryAfterMs;
   const response = (err as Record<string, unknown>)?.response as
     | Response
     | undefined;
@@ -62,6 +67,7 @@ function isTransientNetworkError(err: unknown): boolean {
  * Returns true if the error should be retried
  */
 function isRetryableError(err: unknown): boolean {
+  if (err instanceof MCPHttpConnectionError) return err.retryable;
   return isTransientNetworkError(err) || isRateLimitError(err);
 }
 
@@ -90,7 +96,7 @@ async function retryWithBackoff<T>(
           attempt + 1,
           maxAttempts + 1,
           delayMs,
-          (err as Error).message
+          formatMCPConnectionFailure(err)
         );
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       } else {
@@ -367,17 +373,26 @@ export async function createMCPClientForConfig(
       } catch (err) {
         debugHttp(
           'streamableHttp failed (%s), falling back to SSE',
-          (err as Error).message
+          formatMCPConnectionFailure(err)
         );
         debugClient('Streamable HTTP failed, falling back to SSE transport');
         debugHttp('Attempting transport: sse');
-        const sseTransport = new SSEClientTransport(url, {
-          requestInit,
-          ...(options?.authProvider
-            ? { authProvider: options.authProvider }
-            : {}),
-        });
-        await client.connect(sseTransport, connectOptions);
+        try {
+          const sseTransport = new SSEClientTransport(url, {
+            requestInit,
+            ...(options?.authProvider
+              ? { authProvider: options.authProvider }
+              : {}),
+          });
+          await client.connect(sseTransport, connectOptions);
+        } catch (sseError) {
+          throw new MCPHttpConnectionError(
+            err,
+            sseError,
+            isRetryableError(err) || isRetryableError(sseError),
+            getRetryAfterDelayMs(err) ?? getRetryAfterDelayMs(sseError)
+          );
+        }
         debugClient('Connected via SSE');
         debugHttp('Connection established via sse');
       }
