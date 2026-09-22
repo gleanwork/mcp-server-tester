@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CodexSetupConfigSchema } from '../codexSetup/config.js';
 import {
   getRegisteredExternalHostConfig,
   getRegisteredExternalHostDescription,
@@ -36,7 +37,7 @@ export const ExternalHostCapabilityBindingSchema = z.object({
 
 export const ExternalHostCorrelationSchema = z.object({
   strategy: z
-    .enum(['prompt_marker', 'host_session_metadata', 'none'])
+    .enum(['exact_prompt', 'prompt_marker', 'host_session_metadata', 'none'])
     .optional(),
   includeInPrompt: z.boolean().optional(),
   promptTemplate: z.string().optional(),
@@ -48,6 +49,10 @@ export const ExternalHostConfigSchema = z.object({
   hostType: z.enum(['cli', 'browser', 'desktop', 'custom']).optional(),
   variant: z.string().optional(),
   timeoutMs: z.number().int().positive().optional(),
+  model: z.string().min(1).optional(),
+  reasoningEffort: z
+    .enum(['low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
+    .optional(),
   capabilities: z
     .partialRecord(
       HostCapabilitySchema,
@@ -58,6 +63,7 @@ export const ExternalHostConfigSchema = z.object({
     )
     .optional(),
   correlation: ExternalHostCorrelationSchema.optional(),
+  codexSetup: CodexSetupConfigSchema.optional(),
   options: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -160,6 +166,35 @@ export function getExternalHostConfigJsonSchema(): Record<string, unknown> {
         description: 'End-to-end timeout for the host run in milliseconds.',
       },
       correlation: externalHostCorrelationJsonSchema(),
+      codexSetup: {
+        description:
+          'Managed Codex config.toml lifecycle. Define servers or named configs; named configs can be selected with configName.',
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          configPath: { type: 'string' },
+          configName: { type: 'string' },
+          servers: {
+            type: 'array',
+            items: codexMcpServerJsonSchema(),
+          },
+          configs: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['name', 'servers'],
+              properties: {
+                name: { type: 'string', minLength: 1 },
+                servers: {
+                  type: 'array',
+                  items: codexMcpServerJsonSchema(),
+                },
+              },
+            },
+          },
+        },
+      },
       options: {
         type: 'object',
         additionalProperties: true,
@@ -207,7 +242,12 @@ function externalHostCorrelationJsonSchema(): Record<string, unknown> {
     properties: {
       strategy: {
         type: 'string',
-        enum: ['prompt_marker', 'host_session_metadata', 'none'],
+        enum: [
+          'exact_prompt',
+          'prompt_marker',
+          'host_session_metadata',
+          'none',
+        ],
       },
       includeInPrompt: {
         type: 'boolean',
@@ -219,6 +259,40 @@ function externalHostCorrelationJsonSchema(): Record<string, unknown> {
         description: 'Prompt suffix template. Supports {{marker}}.',
       },
     },
+  };
+}
+
+function codexMcpServerJsonSchema(): Record<string, unknown> {
+  return {
+    anyOf: [
+      {
+        type: 'object',
+        additionalProperties: false,
+        required: ['transport', 'label', 'command'],
+        properties: {
+          transport: { const: 'stdio' },
+          label: { type: 'string', pattern: '^[A-Za-z][A-Za-z0-9_-]{0,63}$' },
+          command: { type: 'string', minLength: 1 },
+          args: { type: 'array', items: { type: 'string' } },
+          cwd: { type: 'string' },
+          env: { type: 'object', additionalProperties: { type: 'string' } },
+        },
+      },
+      {
+        type: 'object',
+        additionalProperties: false,
+        required: ['transport', 'label', 'url'],
+        properties: {
+          transport: { const: 'http' },
+          label: { type: 'string', pattern: '^[A-Za-z][A-Za-z0-9_-]{0,63}$' },
+          url: { type: 'string', format: 'uri' },
+          bearerTokenEnvVar: {
+            type: 'string',
+            pattern: '^[A-Za-z_][A-Za-z0-9_]*$',
+          },
+        },
+      },
+    ],
   };
 }
 

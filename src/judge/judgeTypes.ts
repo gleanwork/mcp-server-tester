@@ -32,7 +32,10 @@ export interface UsageMetrics {
   /**
    * Total cost in USD
    */
-  totalCostUsd: number;
+  totalCostUsd?: number;
+
+  /** Reasoning tokens, already included in outputTokens. */
+  reasoningOutputTokens?: number;
 
   /**
    * Execution duration in milliseconds

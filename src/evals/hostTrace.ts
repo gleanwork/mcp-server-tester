@@ -41,6 +41,11 @@ export function hostTraceToExecution(
           ...(event.isError !== undefined ? { isError: event.isError } : {}),
           ...(event.rawName !== undefined ? { rawName: event.rawName } : {}),
           id: event.id,
+          ...(event.durationMs !== undefined
+            ? { durationMs: event.durationMs }
+            : {}),
+          ...(event.startedAt ? { startedAt: event.startedAt } : {}),
+          ...(event.completedAt ? { completedAt: event.completedAt } : {}),
         })),
       usage: trace.usage,
       ...(trace.telemetry ? { telemetry: trace.telemetry } : {}),
@@ -93,6 +98,11 @@ export function simulationToHostTrace(
         ...(call.isError !== undefined ? { isError: call.isError } : {}),
         ...(call.rawName !== undefined ? { rawName: call.rawName } : {}),
         id: call.id,
+        ...(call.durationMs !== undefined
+          ? { durationMs: call.durationMs }
+          : {}),
+        ...(call.startedAt ? { startedAt: call.startedAt } : {}),
+        ...(call.completedAt ? { completedAt: call.completedAt } : {}),
       };
     }),
   };

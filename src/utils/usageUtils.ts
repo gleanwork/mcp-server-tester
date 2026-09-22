@@ -15,7 +15,14 @@ export function sumUsage(
   return {
     inputTokens: a.inputTokens + b.inputTokens,
     outputTokens: a.outputTokens + b.outputTokens,
-    totalCostUsd: a.totalCostUsd + b.totalCostUsd,
+    totalCostUsd:
+      a.totalCostUsd === undefined || b.totalCostUsd === undefined
+        ? undefined
+        : a.totalCostUsd + b.totalCostUsd,
+    reasoningOutputTokens: optionalSum(
+      a.reasoningOutputTokens,
+      b.reasoningOutputTokens
+    ),
     durationMs: a.durationMs + b.durationMs,
     durationApiMs: optionalSum(a.durationApiMs, b.durationApiMs),
     cacheReadInputTokens: optionalSum(

@@ -71,6 +71,9 @@ export interface HostEvent {
   isError?: boolean;
   rawName?: string;
   id?: string;
+  durationMs?: number;
+  startedAt?: string;
+  completedAt?: string;
 }
 
 /** One execution trace. Hosts never return evaluation verdicts. */

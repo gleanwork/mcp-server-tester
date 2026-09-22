@@ -3,6 +3,8 @@ import type {
   MCPHostSimulationResult,
 } from '../mcpHost/mcpHostTypes.js';
 import type { UsageMetrics } from '../../types/index.js';
+import type { CodexSetupConfig } from '../codexSetup/config.js';
+import type { ComputerUseTelemetry } from '../cowork/anthropicComputerUse.js';
 
 export type ExternalHostType = 'cli' | 'browser' | 'desktop' | 'custom';
 
@@ -29,6 +31,7 @@ export type TraceSource =
 export type ObservationConfidence = 'high' | 'medium' | 'low' | 'unknown';
 
 export type ExternalHostCorrelationStrategy =
+  | 'exact_prompt'
   | 'prompt_marker'
   | 'host_session_metadata'
   | 'none';
@@ -53,6 +56,7 @@ export type ExternalHostFailureKind =
   | 'timeout'
   | 'parse_failure'
   | 'host_run_failed'
+  | 'cleanup_failed'
   | 'unsupported_host'
   | 'unknown';
 
@@ -74,10 +78,47 @@ export interface HostArtifact {
   summary?: string;
 }
 
+export interface ExternalHostTelemetry {
+  resultCount?: number;
+  apiCallCount?: number;
+  models?: string[];
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
+  totalCostUsd?: number;
+  durationMs?: number;
+  durationApiMs?: number;
+  toolCallCount?: number;
+  toolErrorCount?: number;
+  mcpToolCallCount?: number;
+  mcpToolErrorCount?: number;
+  hostToolCallCount?: number;
+  hostToolErrorCount?: number;
+  hostToolDurationMs?: number;
+  /** Wall-clock union of all native tool intervals, including built-in host tools. */
+  toolWallDurationMs?: number;
+  /** Original native identities, independent of framework event source normalization. */
+  toolProvenance?: Array<{
+    id?: string;
+    source: 'mcp' | 'host';
+    nativeServer?: string;
+    nativeTool: string;
+    nativeItemType?: string;
+  }>;
+  reasoningOutputTokens?: number;
+  reasoningEffort?: string;
+  timeToFirstTokenMs?: number;
+  /** Wall-clock union of MCP call intervals; excludes overlap. */
+  mcpWallDurationMs?: number;
+}
+
 export interface ExternalHostSession {
   id?: string;
-  runMarker: string;
+  /** Absent when no marker was sent to the native host. */
+  runMarker?: string;
   requestId?: string;
+  turnId?: string;
   cliSessionId?: string;
   cwd?: string;
   startedAt?: string;
@@ -88,6 +129,7 @@ export interface ExternalHostCorrelationConfig {
   /**
    * How this run should be correlated with host-native evidence.
    *
+   * - exact_prompt: match unchanged user text in a fresh native session.
    * - prompt_marker: append a marker to the submitted prompt.
    * - host_session_metadata: rely on host-native session metadata.
    * - none: no host-visible marker is submitted.
@@ -106,8 +148,15 @@ export interface ExternalHostCorrelationConfig {
 
 export interface ExternalHostCorrelationMetadata {
   strategy: ExternalHostCorrelationStrategy;
+  /** Internal run identifier; not sent to the host unless includedInPrompt is true. */
   marker: string;
   includedInPrompt: boolean;
+  /** SHA-256 of the exact submitted UTF-8 prompt, where supported. */
+  promptSha256?: string;
+  promptUnchanged?: boolean;
+  /** Native user text: literal match, or the app's single appended LF. */
+  nativePromptMatch?: 'exact' | 'native_terminal_lf';
+  nativePromptSha256?: string;
 }
 
 export interface ExternalHostMetadata {
@@ -130,6 +179,15 @@ export interface ExternalHostMetadata {
     toolCalls?: TraceSource;
     usage?: TraceSource;
     cost?: TraceSource;
+  };
+  telemetry?: ExternalHostTelemetry;
+  /** Controller API accounting is separate from the evaluated application's usage. */
+  computerUse?: {
+    provider: 'anthropic-computer-use';
+    submission: {
+      status: 'completed' | 'failed';
+      telemetry?: ComputerUseTelemetry;
+    };
   };
   evidence?: {
     finalAnswer?: EvidenceSource;
@@ -161,6 +219,9 @@ export interface ExternalHostConfig {
    * End-to-end timeout for the host run.
    */
   timeoutMs?: number;
+  /** Requested ChatGPT model ID (verified against the native turn record). */
+  model?: string;
+  reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
   /**
    * Capability bindings used to compose this external host runner.
    * If omitted, the runtime may provide a built-in default for known drivers.
@@ -170,6 +231,10 @@ export interface ExternalHostConfig {
    * Run correlation strategy. Built-in drivers may provide defaults.
    */
   correlation?: ExternalHostCorrelationConfig;
+  /**
+   * Optional managed MCP configuration lifecycle for the ChatGPT desktop driver.
+   */
+  codexSetup?: CodexSetupConfig;
   /**
    * Driver-wide options available to capability implementations.
    */
@@ -262,6 +327,7 @@ export interface ExternalHostCapabilityImplementation {
   run?(
     context: ExternalHostCapabilityContext
   ): Promise<ExternalHostRunResult | void>;
+  teardown?(context: ExternalHostCapabilityContext): Promise<void>;
 }
 
 export interface ExternalHostRunner {

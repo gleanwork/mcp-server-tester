@@ -579,7 +579,7 @@ async function auditCase(
 
 function sumKnown(
   cases: CoworkNativeAuditCase[],
-  key: keyof UsageMetrics
+  key: keyof CoworkNativeAuditUsage | keyof CoworkNativeAuditTiming
 ): number | null {
   const values = cases.map(
     (result) => ({ ...result.usage, ...result.timing })[key]

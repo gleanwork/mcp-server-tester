@@ -10,6 +10,17 @@ import {
 } from './index.js';
 
 describe('external host driver identity and built-in defaults', () => {
+  it('defaults ChatGPT to exact-prompt matching and allows explicit markers', async () => {
+    const driver = 'openai.chatgpt.agent.desktop-app.macos';
+    expect(getRegisteredExternalHostConfig(driver)?.correlation).toEqual({
+      strategy: 'exact_prompt',
+    });
+    const loaded = await loadExternalHostConfig({
+      driver,
+      correlation: { strategy: 'prompt_marker' },
+    });
+    expect(loaded.config.correlation).toEqual({ strategy: 'prompt_marker' });
+  });
   it('round-trips structured driver ids to slugs', () => {
     const slug = driverToSlug(CLAUDE_COWORK_DESKTOP_MACOS_DRIVER);
 
@@ -84,6 +95,7 @@ describe('external host driver identity and built-in defaults', () => {
 
   it('lists registered external hosts by structured driver slug', () => {
     expect(listRegisteredExternalHostSlugs()).toEqual([
+      'openai.chatgpt.agent.desktop-app.macos',
       'anthropic.claude.chat.desktop-app.macos',
       'anthropic.claude.cowork.desktop-app.macos',
     ]);

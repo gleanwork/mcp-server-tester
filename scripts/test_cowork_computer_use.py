@@ -13,7 +13,7 @@ ENTER = {'action': 'key', 'text': 'Return'}
 
 
 class DriverTests(unittest.TestCase):
-    def run_actions(self, actions, mode='submit', budget=8, query='query', next_plan=None, entry_error=False, response_metadata=None, planner_error=None):
+    def run_actions(self, actions, mode='submit', budget=8, query='query', next_plan=None, entry_error=False, response_metadata=None, planner_error=None, application='cowork', target_model=None, reasoning_effort=None):
         api = MagicMock()
 
         def response(plan):
@@ -35,15 +35,86 @@ class DriverTests(unittest.TestCase):
                 raise RuntimeError('uncertain keyboard failure')
             return 'done', action.get('action') == 'key'
 
-        with patch.dict(sys.modules, {'anthropic': api}), patch.dict(driver.os.environ, {'ANTHROPIC_API_KEY': 'test-only'}), patch.object(driver.subprocess, 'run'), patch.object(driver.time, 'sleep'), patch.object(driver, 'screenshot', return_value={'type': 'image'}), patch.object(driver, 'execute_action', side_effect=execute) as performed:
+        with patch.dict(sys.modules, {'anthropic': api}), patch.dict(driver.os.environ, {'ANTHROPIC_API_KEY': 'test-only'}), patch.object(driver.subprocess, 'run') as launched, patch.object(driver, 'check_chatgpt_permissions'), patch.object(driver.time, 'sleep'), patch.object(driver, 'screenshot', return_value={'type': 'image'}), patch.object(driver, 'execute_action', side_effect=execute) as performed:
             try:
-                result = asyncio.run(driver.run(query, budget, mode))
+                result = asyncio.run(driver.run(query, budget, mode, application, target_model, reasoning_effort))
             except RuntimeError as error:
                 result = str(error)
                 self.error_telemetry = getattr(error, 'telemetry', None)
+                self.error_code = getattr(error, 'code', None)
             self.executed_actions = [call.args[0] for call in performed.call_args_list]
-            self.requested_tools = planner.call_args.kwargs['tools']
+            self.requested_tools = planner.call_args.kwargs['tools'] if planner.call_args else []
+            self.planner_request = planner.call_args.kwargs if planner.call_args else {}
+            self.launches = launched.call_args_list
             return result, performed.call_count
+
+    def test_chatgpt_uses_shared_ai_loop_with_app_model_and_power_instructions(self):
+        result, count = self.run_actions([FILL, ENTER, ENTER], application='chatgpt',
+                                        target_model='test-chatgpt-model', reasoning_effort='medium')
+        self.assertEqual(result['status'], 'submitted')
+        self.assertEqual(count, 2)
+        self.assertEqual(self.launches[0].args[0], ['open', '-a', 'ChatGPT'])
+        instruction = self.planner_request['messages'][0]['content'][0]['text']
+        self.assertIn('ChatGPT Work', instruction)
+        self.assertIn('test-chatgpt-model', instruction)
+        self.assertIn('Standard', instruction)
+        self.assertIn('Do not change account settings', instruction)
+        self.assertEqual(self.executed_actions[0], {'action': 'type', 'text': 'query'})
+        self.assertEqual(self.planner_request['tools'][0]['type'], 'computer_20251124')
+
+    def test_permission_denial_stops_before_planner_launch_or_input(self):
+        api, quartz = MagicMock(), MagicMock()
+        quartz.CGPreflightScreenCaptureAccess.return_value = False
+        with patch.dict(sys.modules, {'Quartz': quartz, 'anthropic': api}), patch.object(driver.subprocess, 'run') as launch, patch.object(driver, 'execute_action') as action:
+            with self.assertRaises(driver.ComputerUseDriverError) as failed:
+                asyncio.run(driver.run('query', 8, 'submit', 'chatgpt'))
+            self.assertEqual(failed.exception.code, 'screen_recording_required')
+            self.assertEqual(failed.exception.telemetry['planner_response_count'], 0)
+            api.Anthropic.assert_not_called()
+            launch.assert_not_called()
+            action.assert_not_called()
+
+    def test_accessibility_permission_is_checked_separately(self):
+        quartz, framework = MagicMock(), MagicMock()
+        quartz.CGPreflightScreenCaptureAccess.return_value = True
+        framework.AXIsProcessTrusted.return_value = False
+        with patch.dict(sys.modules, {'Quartz': quartz}), patch('ctypes.CDLL', return_value=framework):
+            with self.assertRaises(driver.DesktopBlockedError) as failed:
+                driver.check_chatgpt_permissions()
+            self.assertEqual(failed.exception.code, 'accessibility_required')
+
+    def test_chatgpt_classifies_provider_status_without_exposing_response_content(self):
+        error = RuntimeError('sensitive provider response')
+        error.status_code = 429
+        self.run_actions([{'action': 'screenshot'}], application='chatgpt', planner_error=error)
+        self.assertEqual(self.error_code, 'provider_rate_limit')
+
+    def test_screenshot_history_preserves_three_latest_images_and_tool_structure(self):
+        images = [{'type': 'image', 'source': {'data': str(i)}} for i in range(6)]
+        messages = [{'role': 'user', 'content': [images[0]]},
+                    {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': '1', 'content': images[1:]}]}]
+        driver.trim_screenshot_history(messages)
+        self.assertTrue(all(image['type'] == 'text' for image in images[:3]))
+        self.assertEqual([image['source']['data'] for image in images[3:]], ['3', '4', '5'])
+        self.assertEqual(messages[1]['content'][0]['tool_use_id'], '1')
+
+    def test_chatgpt_reports_only_a_blocker_code_without_further_actions(self):
+        result, count = self.run_actions([{'tool': 'report_blocker', 'input': {'code': 'reasoning_unavailable'}}, FILL, ENTER], application='chatgpt')
+        self.assertEqual(self.error_code, 'reasoning_unavailable')
+        self.assertEqual(count, 0)
+        self.assertEqual(self.error_telemetry['refused_action_count'], 1)
+
+    def test_chatgpt_rejects_automatic_permission_approval(self):
+        result, count = self.run_actions([], mode='hitl', application='chatgpt')
+        self.assertIn('approvals are not automated', result)
+        self.assertEqual(count, 0)
+        self.assertEqual(self.launches, [])
+
+    def test_chatgpt_no_click_or_retyping_after_fill(self):
+        result, count = self.run_actions([FILL, {'action': 'left_click', 'coordinate': [5, 5]}, FILL, ENTER], application='chatgpt')
+        self.assertEqual(result['status'], 'submitted')
+        self.assertEqual(count, 2)
+        self.assertEqual(result['telemetry']['refused_action_count'], 2)
 
     def test_observed_response_models_and_cached_usage_sum_each_completed_plan(self):
         metadata = {'model': 'claude-sonnet-4-6', 'usage': types.SimpleNamespace(
