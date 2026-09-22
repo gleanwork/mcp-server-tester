@@ -21,6 +21,18 @@ describe('external host driver identity and built-in defaults', () => {
     });
     expect(loaded.config.correlation).toEqual({ strategy: 'prompt_marker' });
   });
+  it('registers Linux native capabilities without a planner', async () => {
+    const loaded = await loadExternalHostConfig({
+      driver: 'openai.chatgpt.agent.desktop-app.linux',
+    });
+    expect(loaded.loadedCapabilities.map((c) => c.binding.uses)).toEqual([
+      'builtin:openai.chatgpt.configLifecycle',
+      'builtin:openai.chatgpt.appLifecycle',
+      'builtin:openai.chatgpt.nativeSurface',
+      'builtin:openai.chatgpt.nativeSubmit',
+      'builtin:openai.chatgpt.nativeTrace',
+    ]);
+  });
   it('round-trips structured driver ids to slugs', () => {
     const slug = driverToSlug(CLAUDE_COWORK_DESKTOP_MACOS_DRIVER);
 
@@ -96,6 +108,7 @@ describe('external host driver identity and built-in defaults', () => {
   it('lists registered external hosts by structured driver slug', () => {
     expect(listRegisteredExternalHostSlugs()).toEqual([
       'openai.chatgpt.agent.desktop-app.macos',
+      'openai.chatgpt.agent.desktop-app.linux',
       'anthropic.claude.chat.desktop-app.macos',
       'anthropic.claude.cowork.desktop-app.macos',
     ]);

@@ -15,15 +15,24 @@ import {
 } from '../codexSetup/config.js';
 import type { ExternalHostConfig } from '../externalHost/types.js';
 import {
+  chatgptDesktopEnvironment,
+  isLinuxChatgpt,
   readLaunchEnvironment,
   stringOption,
   validateChatgptConfig,
+  type ChatgptApplicationController,
 } from '../chatgpt/driver.js';
+
+import { getLinuxChatgptApplicationController } from '../externalHost/builtins/chatgptLinuxController.js';
+import {
+  runLinuxChatgptDesktop,
+  validateLinuxChatgptPaths,
+} from '../chatgpt/linux.js';
 
 const activeApplications = new Set<string>();
 
 interface ChatgptLifecycleState {
-  controller: Awaited<ReturnType<typeof getChatgptApplicationController>>;
+  controller: ChatgptApplicationController;
   wasRunning: boolean;
   stopped: boolean;
   launchAttempted: boolean;
@@ -48,20 +57,29 @@ function sessionSettings(
     throw new Error(
       'ChatGPT loads CODEX_HOME/config.toml; configPath must end in config.toml.'
     );
+  const linux = isLinuxChatgpt(config);
+  const desktopEnvironment = linux
+    ? chatgptDesktopEnvironment(config)
+    : undefined;
+  if (linux) validateLinuxChatgptPaths(config);
   return {
+    linux,
+    desktopEnvironment,
     setup,
     model: config.model,
     reasoningEffort: config.reasoningEffort,
     surface: config.options?.surface ?? 'chatgpt-work',
     environment: readLaunchEnvironment(config.options?.environment),
-    appPath:
-      stringOption(binding, 'appPath') ??
-      stringOption(config.options, 'chatgptAppPath') ??
-      defaultChatgptAppPath(),
-    bundleId:
-      stringOption(binding, 'bundleId') ??
-      stringOption(config.options, 'chatgptBundleId') ??
-      defaultChatgptBundleId(),
+    appPath: linux
+      ? undefined
+      : (stringOption(binding, 'appPath') ??
+        stringOption(config.options, 'chatgptAppPath') ??
+        defaultChatgptAppPath()),
+    bundleId: linux
+      ? `linux:${desktopEnvironment!.HOME}`
+      : (stringOption(binding, 'bundleId') ??
+        stringOption(config.options, 'chatgptBundleId') ??
+        defaultChatgptBundleId()),
     sessionsRoot: stringOption(config.options, 'chatgptSessionRoot'),
   };
 }
@@ -109,13 +127,16 @@ export class ChatgptAppSession {
         );
       activeApplications.add(settings.bundleId);
       this.#lease = settings.bundleId;
-      process.stderr.write(
-        '[mst:chatgpt] Anthropic Computer Use requires Screen Recording and Accessibility permission. Keep ChatGPT visible and the desktop idle.\n'
-      );
-      const controller = await getChatgptApplicationController({
-        appPath: settings.appPath,
-        bundleId: settings.bundleId,
-      });
+      if (!settings.linux)
+        process.stderr.write(
+          '[mst:chatgpt] Anthropic Computer Use requires Screen Recording and Accessibility permission. Keep ChatGPT visible and the desktop idle.\n'
+        );
+      const controller = settings.linux
+        ? getLinuxChatgptApplicationController(settings.desktopEnvironment)
+        : await getChatgptApplicationController({
+            appPath: settings.appPath,
+            bundleId: settings.bundleId,
+          });
       const wasRunning = (await controller.state()).running;
       const lifecycle = (this.#lifecycle = {
         controller,
@@ -138,6 +159,7 @@ export class ChatgptAppSession {
         this.record('setup', 'install_config');
         const configHome = dirname(lifecycle.installation.configPath);
         if (
+          settings.linux ||
           configHome !== defaultChatgptConfigHome() ||
           environment.CODEX_HOME !== undefined
         )
@@ -154,6 +176,14 @@ export class ChatgptAppSession {
       lifecycle.launchAttempted = true;
       await controller.start(environment);
       this.record('setup', 'start');
+      if (settings.linux) {
+        await runLinuxChatgptDesktop(
+          'prepare',
+          config,
+          Date.now() + (config.timeoutMs ?? 60_000)
+        );
+        this.record('setup', 'verify_surface');
+      }
       this.#ready = true;
       this.telemetry.setupStatus = 'completed';
     } catch (error) {

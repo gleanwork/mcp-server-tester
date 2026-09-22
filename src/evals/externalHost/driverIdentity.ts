@@ -36,6 +36,11 @@ export const OPENAI_CHATGPT_AGENT_DESKTOP_MACOS_DRIVER: HostDriverId = {
   platform: 'macos',
 };
 
+export const OPENAI_CHATGPT_AGENT_DESKTOP_LINUX_DRIVER: HostDriverId = {
+  ...OPENAI_CHATGPT_AGENT_DESKTOP_MACOS_DRIVER,
+  platform: 'linux',
+};
+
 export function driverToSlug(driver: HostDriverId): string {
   return [
     driver.provider,

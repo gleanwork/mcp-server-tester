@@ -4,7 +4,10 @@ import type {
 } from '../mcpHost/mcpHostTypes.js';
 import type { UsageMetrics } from '../../types/index.js';
 import type { CodexSetupConfig } from '../codexSetup/config.js';
-import type { ComputerUseTelemetry } from '../cowork/anthropicComputerUse.js';
+import type {
+  ComputerUseTelemetry,
+  SemanticDesktopTelemetry,
+} from '../cowork/driver.js';
 
 export type ExternalHostType = 'cli' | 'browser' | 'desktop' | 'custom';
 
@@ -187,6 +190,15 @@ export interface ExternalHostMetadata {
     submission: {
       status: 'completed' | 'failed';
       telemetry?: ComputerUseTelemetry;
+    };
+  };
+  /** Deterministic native UI accounting; never reported as planner/model usage. */
+  nativeController?: {
+    provider: 'linux-atspi';
+    surface: 'chatgpt-work' | 'codex';
+    submission: {
+      status: 'completed' | 'failed';
+      telemetry?: SemanticDesktopTelemetry;
     };
   };
   evidence?: {

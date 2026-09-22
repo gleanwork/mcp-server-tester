@@ -29,6 +29,7 @@ describe('external host schema and reference', () => {
       type: 'string',
       enum: [
         'openai.chatgpt.agent.desktop-app.macos',
+        'openai.chatgpt.agent.desktop-app.linux',
         'anthropic.claude.chat.desktop-app.macos',
         'anthropic.claude.cowork.desktop-app.macos',
       ],

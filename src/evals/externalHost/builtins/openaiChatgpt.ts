@@ -12,6 +12,8 @@ import { resolveCodexSetup } from '../../codexSetup/config.js';
 import { ChatgptAppSession } from '../../chatgptSetup/macSession.js';
 import {
   ComputerUseDriverError,
+  chatgptSurface,
+  isLinuxChatgpt,
   submitChatgptQuery,
   stringOption,
   validateChatgptConfig,
@@ -28,9 +30,15 @@ import type {
 } from '../types.js';
 import { driverToSlug, hostTypeFromDriver } from '../driverIdentity.js';
 
+import {
+  NativeChatgptDriverError,
+  runLinuxChatgptDesktop,
+  validateLinuxChatgptPaths,
+} from '../../chatgpt/linux.js';
+
 const POLL_INTERVAL_MS = 750;
 
-/** The planner owns all UI navigation. Native code owns only app/config lifecycle. */
+/** Platform-specific input; shared lifecycle and strict native evidence. */
 export const OPENAI_CHATGPT_CAPABILITIES: ExternalHostCapabilityImplementation[] =
   [
     {
@@ -59,6 +67,21 @@ export const OPENAI_CHATGPT_CAPABILITIES: ExternalHostCapabilityImplementation[]
       capabilities: ['completion', 'trace', 'normalize'],
       run: captureChatgptComputerUseResult,
     },
+    {
+      id: 'builtin:openai.chatgpt.nativeSurface',
+      capabilities: ['control'],
+      setup: snapshotBeforeSubmission,
+    },
+    {
+      id: 'builtin:openai.chatgpt.nativeSubmit',
+      capabilities: ['input'],
+      run: submitChatgptPrompt,
+    },
+    {
+      id: 'builtin:openai.chatgpt.nativeTrace',
+      capabilities: ['completion', 'trace', 'normalize'],
+      run: captureChatgptComputerUseResult,
+    },
   ];
 
 async function setupChatgptConfig({
@@ -69,6 +92,7 @@ async function setupChatgptConfig({
 }: ExternalHostCapabilityContext): Promise<ExternalHostRunResult | void> {
   try {
     validateChatgptConfig(config);
+    if (isLinuxChatgpt(config)) validateLinuxChatgptPaths(config);
     if (run.correlation.strategy === 'exact_prompt') {
       if (
         run.correlation.includedInPrompt ||
@@ -144,7 +168,7 @@ async function setupChatgptAppLifecycle({
       failureKind: 'app_unavailable',
       error: `Failed to prepare ChatGPT desktop app: ${formatError(error)}`,
       limitations: [
-        'The app lifecycle controller is macOS-only; it does not navigate the UI.',
+        'The caller must provide the authenticated desktop and platform permissions.',
       ],
     });
   }
@@ -171,6 +195,47 @@ async function submitChatgptPrompt({
   run,
   state,
 }: ExternalHostCapabilityContext): Promise<ExternalHostRunResult | void> {
+  if (isLinuxChatgpt(config)) {
+    try {
+      const receipt = await runLinuxChatgptDesktop(
+        'submit',
+        config,
+        run.startedAtMs + run.timeoutMs,
+        run.submittedScenario
+      );
+      state.data.chatgptPromptSubmitted = true;
+      state.data.chatgptNativeController = {
+        provider: 'linux-atspi',
+        surface: chatgptSurface(config),
+        submission: { status: 'completed', telemetry: receipt.telemetry },
+      } satisfies ExternalHostMetadata['nativeController'];
+      return;
+    } catch (error) {
+      const nativeController: ExternalHostMetadata['nativeController'] = {
+        provider: 'linux-atspi',
+        surface: chatgptSurface(config),
+        submission: {
+          status: 'failed',
+          ...(error instanceof NativeChatgptDriverError
+            ? { telemetry: error.telemetry }
+            : {}),
+        },
+      };
+      return failureResult({
+        config,
+        context: run,
+        driver: state.driver,
+        displayName: state.displayName,
+        capabilitiesUsed: state.capabilitiesUsed,
+        nativeController,
+        failureKind: 'submission_failed',
+        error: `ChatGPT native submission failed: ${formatError(error)}`,
+        limitations: [
+          'No automatic resubmission is attempted after a failed or ambiguous native action.',
+        ],
+      });
+    }
+  }
   try {
     const receipt = await submitChatgptQuery(
       run.submittedScenario,
@@ -233,6 +298,8 @@ async function captureChatgptComputerUseResult({
     displayName: state.displayName,
     capabilitiesUsed: state.capabilitiesUsed,
     computerUse,
+    nativeController: state.data
+      .chatgptNativeController as ExternalHostMetadata['nativeController'],
   };
   try {
     const baseline = state.data.chatgptSessionBaseline as
@@ -388,6 +455,7 @@ interface MetadataOptions {
   displayName: string;
   capabilitiesUsed: readonly HostCapability[];
   computerUse?: ExternalHostMetadata['computerUse'];
+  nativeController?: ExternalHostMetadata['nativeController'];
 }
 function buildMetadata(options: MetadataOptions): ExternalHostMetadata {
   return {
@@ -413,6 +481,7 @@ function buildMetadata(options: MetadataOptions): ExternalHostMetadata {
         options.context.submittedScenario === options.context.scenario,
     },
     computerUse: options.computerUse,
+    nativeController: options.nativeController,
   };
 }
 function failureResult(

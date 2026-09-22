@@ -3,7 +3,7 @@ import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import type * as OsModule from 'node:os';
 import { join } from 'node:path';
-import { CHATGPT_HOST } from './chatgptHost.js';
+import { CHATGPT_HOST, CHATGPT_LINUX_HOST } from './chatgptHost.js';
 import { runExternalHostScenario } from './externalHost/runtime.js';
 import { hostTraceToExecution } from './hostTrace.js';
 import type { HostBatchRequest } from './evalFrameworkTypes.js';
@@ -114,6 +114,62 @@ afterEach(async () => {
 });
 
 describe('ChatGPT V2 batch host', () => {
+  it('routes Linux through the native identity and isolated batch lifecycle', async () => {
+    const batch = requests();
+    for (const request of batch)
+      request.config = {
+        ...config,
+        type: 'openai.chatgpt.agent.desktop-app.linux',
+        options: {
+          surface: 'codex',
+          configPath: join(home.value, '.codex', 'config.toml'),
+        },
+        env: {
+          HOME: home.value,
+          MST_CHATGPT_ISOLATED_HOME: home.value,
+          DISPLAY: ':1',
+          DBUS_SESSION_BUS_ADDRESS: 'unix:path=/fixture/bus',
+        },
+      };
+    await CHATGPT_LINUX_HOST.runBatch!(batch, context);
+    expect(lifecycle.prepare).toHaveBeenCalledTimes(1);
+    expect(lifecycle.dispose).toHaveBeenCalledTimes(1);
+    expect(runExternalHostScenario).toHaveBeenCalledTimes(2);
+    for (const [prompt, external] of vi.mocked(runExternalHostScenario).mock
+      .calls) {
+      expect(prompt).toMatch(/^Answer (one|two)$/);
+      expect(external.driver).toBe('openai.chatgpt.agent.desktop-app.linux');
+      expect(external.options?.surface).toBe('codex');
+      expect(external.options?.computerUseProvider).toBeUndefined();
+      expect(external.options?.desktopEnvironment).toMatchObject({
+        HOME: home.value,
+      });
+    }
+  });
+
+  it('rejects Linux without explicit isolation before lifecycle or query execution', async () => {
+    await expect(
+      CHATGPT_LINUX_HOST.runBatch!(requests(), context)
+    ).rejects.toThrow('ISOLATED_HOME');
+    expect(lifecycle.prepare).not.toHaveBeenCalled();
+    expect(runExternalHostScenario).not.toHaveBeenCalled();
+  });
+
+  it.each(['codex', 'chatgpt-work'])(
+    'forwards explicit macOS %s surface without prompt instructions',
+    async (surface) => {
+      const batch = requests().slice(0, 1);
+      batch[0]!.config = { ...config, options: { surface } };
+      await CHATGPT_HOST.runBatch!(batch, context);
+      expect(runExternalHostScenario).toHaveBeenCalledWith(
+        'Answer one',
+        expect.objectContaining({
+          options: expect.objectContaining({ surface }),
+        }),
+        expect.anything()
+      );
+    }
+  );
   it('defaults to exact-prompt matching and passes the eval query without any suffix', async () => {
     const batch = requests().slice(0, 1);
     batch[0]!.input.scenario =

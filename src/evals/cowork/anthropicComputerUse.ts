@@ -26,6 +26,7 @@ function resolveDriverPath(env: NodeJS.ProcessEnv): string {
 export interface ComputerUseOptions extends CoworkDriverOptions {
   /** App-specific instructions; the screenshot/action loop remains shared. */
   application?: 'cowork' | 'chatgpt';
+  chatgptSurface?: 'chatgpt-work' | 'codex';
   targetModel?: string;
   reasoningEffort?: string;
 }
@@ -125,6 +126,9 @@ async function runComputerUseDriver(
         '--mode',
         mode,
         ...(options.application ? ['--app', options.application] : []),
+        ...(options.chatgptSurface
+          ? ['--surface', options.chatgptSurface]
+          : []),
         ...(options.targetModel ? ['--target-model', options.targetModel] : []),
         ...(options.reasoningEffort
           ? ['--reasoning-effort', options.reasoningEffort]

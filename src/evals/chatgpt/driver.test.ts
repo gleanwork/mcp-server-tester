@@ -53,6 +53,7 @@ describe('ChatGPT shared Computer Use adapter', () => {
     expect(runAnthropicComputerUseSubmission).toHaveBeenCalledTimes(1);
     expect(runAnthropicComputerUseSubmission).toHaveBeenCalledWith(query, {
       application: 'chatgpt',
+      chatgptSurface: 'chatgpt-work',
       targetModel: 'test-chatgpt-model',
       reasoningEffort: 'medium',
       model: 'test-planner-model',
@@ -63,6 +64,36 @@ describe('ChatGPT shared Computer Use adapter', () => {
     expect(
       vi.mocked(runAnthropicComputerUseSubmission).mock.calls[0]![1].env
     ).not.toHaveProperty('MST_TEST_LAUNCH_ONLY');
+  });
+
+  it('forwards explicit Codex selection without changing the query', async () => {
+    await submitChatgptQuery(
+      'unchanged',
+      { ...config, options: { surface: 'codex' } },
+      123
+    );
+    expect(runAnthropicComputerUseSubmission).toHaveBeenCalledWith(
+      'unchanged',
+      expect.objectContaining({ chatgptSurface: 'codex' })
+    );
+  });
+
+  it('Linux preflight needs no Anthropic key and rejects planner configuration', () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', '');
+    const linux = {
+      ...config,
+      driver: 'openai.chatgpt.agent.desktop-app.linux',
+    };
+    expect(() => validateChatgptConfig(linux)).not.toThrow();
+    expect(() =>
+      validateChatgptConfig({
+        ...linux,
+        options: { computerUseProvider: 'anthropic-computer-use' },
+      })
+    ).toThrow('native AT-SPI');
+    expect(() =>
+      validateChatgptConfig({ ...linux, options: { surface: 'chat' } })
+    ).toThrow('surface');
   });
 
   it('preserves the default action budget and does not retry a driver failure', async () => {

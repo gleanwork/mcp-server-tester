@@ -15,7 +15,10 @@ import { chatgptServers } from './chatgptSetup/config.js';
 import type { ExternalHostConfig } from './externalHost/types.js';
 import { simulationToHostTrace } from './hostTrace.js';
 
+import { linuxChatgptHome } from './chatgpt/linux.js';
+
 const DRIVER = 'openai.chatgpt.agent.desktop-app.macos';
+const LINUX_DRIVER = 'openai.chatgpt.agent.desktop-app.linux';
 const Schema = z
   .object({
     type: z.string(),
@@ -34,27 +37,26 @@ const Schema = z
         correlation: z
           .enum(['exact_prompt', 'prompt_marker'])
           .default('exact_prompt'),
-        computerUseProvider: z
-          .literal('anthropic-computer-use')
-          .default('anthropic-computer-use'),
+        computerUseProvider: z.literal('anthropic-computer-use').optional(),
+        nativeMaxActions: z.number().int().min(1).max(64).optional(),
         computerUseModel: z
           .string()
           .regex(/^[A-Za-z0-9._:-]+$/)
           .optional(),
-        computerUseMaxActions: z.number().int().min(1).max(64).default(32),
+        computerUseMaxActions: z.number().int().min(1).max(64).optional(),
       })
       .strict()
       .default({
         correlation: 'exact_prompt',
-        computerUseProvider: 'anthropic-computer-use',
-        computerUseMaxActions: 32,
+        surface: 'chatgpt-work',
       }),
   })
   .strict();
 
 async function runBatch(
   requests: HostBatchRequest[],
-  context: HostRunContext
+  context: HostRunContext,
+  driver = DRIVER
 ): Promise<HostRunResult[]> {
   if (!requests.length) return [];
   if ((context.manifest.concurrency ?? 1) !== 1)
@@ -85,7 +87,7 @@ async function runBatch(
       const config = configs[index]!;
       const serverConfig = prepared[index]!;
       return {
-        driver: DRIVER,
+        driver,
         model: config.model,
         reasoningEffort: config.reasoningEffort,
         timeoutMs: config.timeout,
@@ -99,10 +101,28 @@ async function runBatch(
         },
         options: {
           environment: { ...config.env, ...serverConfig.environment },
-          computerUseProvider: config.options.computerUseProvider,
+          computerUseProvider:
+            driver === LINUX_DRIVER
+              ? config.options.computerUseProvider
+              : (config.options.computerUseProvider ??
+                'anthropic-computer-use'),
           computerUseModel: config.options.computerUseModel,
-          computerUseMaxActions: config.options.computerUseMaxActions,
+          computerUseMaxActions:
+            driver === LINUX_DRIVER
+              ? config.options.computerUseMaxActions
+              : (config.options.computerUseMaxActions ?? 32),
           surface: config.options.surface,
+          nativeMaxActions: config.options.nativeMaxActions,
+          desktopEnvironment:
+            driver === LINUX_DRIVER
+              ? Object.fromEntries(
+                  Object.entries({
+                    ...context.env,
+                    ...request.input.env,
+                    ...config.env,
+                  }).filter(([, value]) => value !== undefined)
+                )
+              : undefined,
           computerUseEnvironment: Object.fromEntries(
             Object.entries({
               ...context.env,
@@ -123,7 +143,16 @@ async function runBatch(
       'ChatGPT batch requires identical MCP servers, credentials, and environment.'
     );
   // Claim before any lifecycle operation: another process must not stop the active app.
-  const directory = join(homedir(), '.mcp-server-tester');
+  const directory = join(
+    driver === LINUX_DRIVER
+      ? linuxChatgptHome({
+          ...process.env,
+          ...(externalConfigs[0]!.options
+            ?.desktopEnvironment as NodeJS.ProcessEnv),
+        })
+      : homedir(),
+    '.mcp-server-tester'
+  );
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const path = join(directory, 'chatgpt-desktop.lock');
   const lease = await open(path, 'wx', 0o600).catch(() => {
@@ -249,6 +278,7 @@ async function runBatch(
           },
           externalHost: result.externalHost,
           computerUse: result.externalHost.computerUse,
+          nativeController: result.externalHost.nativeController,
           ...(result.success
             ? {
                 conversationHistory: result.conversationHistory,
@@ -309,6 +339,24 @@ async function runBatch(
   if (cleanupError && !results.length) throw cleanupError;
   return results;
 }
+
+export const CHATGPT_LINUX_HOST: HostDefinition = {
+  name: LINUX_DRIVER,
+  schema: Schema,
+  evidence: 'structured',
+  runBatch(requests, context) {
+    return runBatch(requests, context, LINUX_DRIVER);
+  },
+  async run(input, config, context) {
+    return (
+      await runBatch(
+        [{ caseId: 'single', iteration: 0, input, config }],
+        context,
+        LINUX_DRIVER
+      )
+    )[0]!;
+  },
+};
 
 export const CHATGPT_HOST: HostDefinition = {
   name: DRIVER,
