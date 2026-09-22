@@ -29,6 +29,7 @@ vi.mock('@modelcontextprotocol/sdk/client/sse.js', () => ({
 }));
 
 import { createMCPClientForConfig, closeMCPClient } from './clientFactory.js';
+import { MCPHttpConnectionError } from './connectionDiagnostics.js';
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 
 describe('clientFactory', () => {
@@ -176,6 +177,77 @@ describe('clientFactory', () => {
         expect(mocks.MockStreamableHTTPClientTransport).toHaveBeenCalled();
         expect(mocks.MockSSEClientTransport).toHaveBeenCalled();
         expect(mocks.mockConnect).toHaveBeenCalledTimes(2);
+      });
+
+      it('preserves primary HTTP failure and SSE 401 without retaining raw errors', async () => {
+        mocks.mockConnect
+          .mockRejectedValueOnce(
+            new Error(
+              'HTTP 403 Authorization: Bearer private-token request-body https://example.test/?key=private-token'
+            )
+          )
+          .mockRejectedValueOnce(
+            Object.assign(new Error('SSE private-token'), { code: 401 })
+          );
+
+        const error = await createMCPClientForConfig({
+          transport: 'http',
+          serverUrl: 'https://example.test/mcp',
+          headers: { 'X-Custom-Header': 'custom-value' },
+          auth: { accessToken: 'private-token' },
+        }).catch((failure: unknown) => failure);
+
+        expect(error).toBeInstanceOf(MCPHttpConnectionError);
+        expect(error).toMatchObject({
+          message:
+            'MCP connection failed: streamableHttp=http_403; sse=http_401',
+          streamableHttpFailure: 'http_403',
+          sseFailure: 'http_401',
+        });
+        expect(String(error)).not.toMatch(
+          /private-token|request-body|https:\/\//
+        );
+        expect(JSON.stringify(error)).not.toMatch(
+          /private-token|request-body|https:\/\//
+        );
+        for (const transport of [
+          mocks.MockStreamableHTTPClientTransport,
+          mocks.MockSSEClientTransport,
+        ]) {
+          expect(transport).toHaveBeenCalledWith(
+            expect.any(URL),
+            expect.objectContaining({
+              requestInit: expect.objectContaining({
+                headers: expect.objectContaining({
+                  Authorization: 'Bearer private-token',
+                  'X-Custom-Header': 'custom-value',
+                }),
+              }),
+            })
+          );
+        }
+      });
+
+      it('retries a transient primary failure even when SSE fails with 401', async () => {
+        vi.useFakeTimers();
+        try {
+          mocks.mockConnect
+            .mockRejectedValueOnce(new Error('fetch failed'))
+            .mockRejectedValueOnce(
+              Object.assign(new Error('unauthorized'), { code: 401 })
+            )
+            .mockResolvedValueOnce(undefined);
+          const pending = createMCPClientForConfig({
+            transport: 'http',
+            serverUrl: 'https://example.test/mcp',
+            retryAttempts: 1,
+          });
+          await vi.runAllTimersAsync();
+          await pending;
+          expect(mocks.mockConnect).toHaveBeenCalledTimes(3);
+        } finally {
+          vi.useRealTimers();
+        }
       });
 
       it('passes authProvider to SSE transport fallback', async () => {

@@ -3,6 +3,11 @@ import {
   createMCPClientForConfig,
 } from '../../mcp/clientFactory.js';
 import { isHttpConfig, type MCPConfig } from '../../config/mcpConfig.js';
+import { formatMCPConnectionFailure } from '../../mcp/connectionDiagnostics.js';
+import {
+  resolveCoworkMcpHeaders,
+  toCoworkServers,
+} from '../coworkSetup/config.js';
 
 export interface CoworkMcpServerReadiness {
   label: string;
@@ -60,32 +65,15 @@ function resolveServer(
   env: Record<string, string | undefined>
 ): MCPConfig {
   if (!isHttpConfig(server)) return server;
-  const tokenEnv = server.auth?.accessTokenEnv;
-  if (!tokenEnv) return server;
-  const token = env[tokenEnv];
-  if (!token)
-    throw new Error(`MCP token environment variable ${tokenEnv} is not set.`);
+  const [coworkServer] = toCoworkServers([server]);
+  if (!coworkServer) throw new Error('Invalid Cowork MCP configuration.');
+  const headers = resolveCoworkMcpHeaders([coworkServer], env);
   return {
     ...server,
-    // Match Claude Desktop's headers-helper contract exactly. Some eval MCP
-    // endpoints reject the SDK auth option even though it produces the same
-    // nominal Authorization value.
+    // Use the same validated runtime headers as Cowork setup.
     auth: undefined,
-    headers: {
-      ...server.headers,
-      Authorization: `Bearer ${token}`,
-    },
+    headers: headers[coworkServer.label],
   };
-}
-
-function safeError(error: unknown): string {
-  const message = error instanceof Error ? error.message : 'connection_failed';
-  return message
-    .replace(/https?:\/\/[^\s)]+/g, '[REDACTED_URL]')
-    .replace(
-      /(token|key|secret|password|authorization)[^\s=]*[=:\s]+[^\s]+/gi,
-      '$1=[REDACTED]'
-    );
 }
 
 /**
@@ -97,18 +85,6 @@ export async function verifyCoworkMcpServers(
   servers: MCPConfig[],
   env: Record<string, string | undefined>
 ): Promise<CoworkMcpServerReadiness[]> {
-  // Linux Scio performs an equivalent, stronger check against Claude Desktop's
-  // own MCP pool before invoking MST. The native check proves that Desktop
-  // authenticated and listed tools, while a second standalone SDK connection
-  // is rejected by this endpoint even with the same credentials.
-  if (env.MST_COWORK_NATIVE_MCP_READY === '1') {
-    return servers.map((server, index) => ({
-      label: label(server, index),
-      status: 'connected',
-      elapsedMs: 0,
-    }));
-  }
-
   const results = await Promise.all(
     servers.map(async (server, index): Promise<CoworkMcpServerReadiness> => {
       const started = Date.now();
@@ -132,7 +108,7 @@ export async function verifyCoworkMcpServers(
           label: label(server, index),
           status: 'failed',
           elapsedMs: Date.now() - started,
-          error: safeError(error),
+          error: formatMCPConnectionFailure(error),
         };
       } finally {
         if (client) await closeMCPClient(client).catch(() => undefined);
