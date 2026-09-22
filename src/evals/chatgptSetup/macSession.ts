@@ -52,6 +52,7 @@ function sessionSettings(
     setup,
     model: config.model,
     reasoningEffort: config.reasoningEffort,
+    surface: config.options?.surface ?? 'chatgpt-work',
     environment: readLaunchEnvironment(config.options?.environment),
     appPath:
       stringOption(binding, 'appPath') ??

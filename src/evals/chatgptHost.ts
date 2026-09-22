@@ -30,6 +30,7 @@ const Schema = z
       .object({
         configPath: z.string().min(1).optional(),
         requireMcpCalls: z.boolean().optional(),
+        surface: z.enum(['chatgpt-work', 'codex']).default('chatgpt-work'),
         correlation: z
           .enum(['exact_prompt', 'prompt_marker'])
           .default('exact_prompt'),
@@ -101,6 +102,7 @@ async function runBatch(
           computerUseProvider: config.options.computerUseProvider,
           computerUseModel: config.options.computerUseModel,
           computerUseMaxActions: config.options.computerUseMaxActions,
+          surface: config.options.surface,
           computerUseEnvironment: Object.fromEntries(
             Object.entries({
               ...context.env,

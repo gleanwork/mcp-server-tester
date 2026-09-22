@@ -6,6 +6,8 @@ import type { ExternalHostConfig } from '../externalHost/types.js';
 
 export { ComputerUseDriverError } from '../cowork/anthropicComputerUse.js';
 
+export type ChatgptSurface = 'chatgpt-work' | 'codex';
+
 export interface ChatgptApplicationController {
   state(): Promise<{ running: boolean }>;
   stop(): Promise<void>;
@@ -37,6 +39,9 @@ function plannerEnvironment(config: ExternalHostConfig): NodeJS.ProcessEnv {
 }
 
 export function validateChatgptConfig(config: ExternalHostConfig): void {
+  const surface = config.options?.surface ?? 'chatgpt-work';
+  if (surface !== 'chatgpt-work' && surface !== 'codex')
+    throw new Error('ChatGPT surface must be chatgpt-work or codex.');
   if (
     (config.options?.computerUseProvider ?? 'anthropic-computer-use') !==
     'anthropic-computer-use'
