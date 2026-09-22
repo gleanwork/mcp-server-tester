@@ -21,6 +21,19 @@ and `concurrency: 1`. Python 3.10+ and the packaged Cowork dependencies are requ
 the normal runtime prepares them automatically unless a worker interpreter is
 configured. Xcode command-line tooling is used only for app start/stop control.
 
+## Code organization
+
+The driver follows the same host/driver/setup split as Cowork:
+
+- `src/evals/chatgptHost.ts` owns V2 batch orchestration and measurement checks.
+- `src/evals/chatgpt/driver.ts` adapts ChatGPT options to the shared Anthropic
+  computer-use loop. It does not implement a second Python runner.
+- `src/evals/chatgptSetup/` owns MCP server translation, the macOS controller,
+  and the app/config session transaction, with setup tests alongside the code.
+- `src/evals/externalHost/builtins/openaiChatgpt.ts` wires the existing external-host
+  capabilities and native evidence collection. `chatgptTrace.ts` remains the
+  authoritative native transcript parser, alongside the other built-in evidence helpers.
+
 ## Manifest
 
 ```json

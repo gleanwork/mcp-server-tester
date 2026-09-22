@@ -3,14 +3,14 @@ import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import type * as OsModule from 'node:os';
 import { join } from 'node:path';
-import { CHATGPT_HOST, chatgptServers } from './chatgptHost.js';
+import { CHATGPT_HOST } from './chatgptHost.js';
 import { runExternalHostScenario } from './externalHost/runtime.js';
 import { hostTraceToExecution } from './hostTrace.js';
 import type { HostBatchRequest } from './evalFrameworkTypes.js';
 
 const home = vi.hoisted(() => ({ value: '' }));
 const lifecycle = vi.hoisted(() => ({ prepare: vi.fn(), dispose: vi.fn() }));
-vi.mock('./externalHost/builtins/openaiChatgpt.js', () => ({
+vi.mock('./chatgptSetup/macSession.js', () => ({
   ChatgptAppSession: class {
     prepare = lifecycle.prepare;
     dispose = lifecycle.dispose;
@@ -551,71 +551,6 @@ describe('ChatGPT V2 batch host', () => {
 });
 
 describe('ChatGPT server translation', () => {
-  it('resolves HTTP auth only into launch environment and preserves stdio servers', () => {
-    const mapped = chatgptServers(
-      [
-        {
-          transport: 'http',
-          label: 'http',
-          serverUrl: 'https://example.test/eval',
-          auth: { accessTokenEnv: 'TOKEN' },
-        },
-        {
-          transport: 'stdio',
-          label: 'stdio',
-          command: 'node',
-          args: ['fixture.mjs'],
-        },
-      ],
-      { TOKEN: 'fixture-token' }
-    );
-    expect(mapped.environment).toEqual({
-      MST_CHATGPT_MCP_TOKEN_0: 'fixture-token',
-    });
-    expect(JSON.stringify(mapped.servers)).not.toContain('fixture-token');
-    expect(mapped.servers[1]).toMatchObject({
-      label: 'stdio',
-      command: 'node',
-      args: ['fixture.mjs'],
-    });
-  });
-  it('rejects configured servers impersonating built-in host namespaces', () => {
-    expect(() =>
-      chatgptServers(
-        [{ transport: 'stdio', label: 'cua_repl', command: 'node' }],
-        {}
-      )
-    ).toThrow('reserved');
-  });
-  it('rejects missing credentials, duplicate labels and unsupported headers', () => {
-    expect(() =>
-      chatgptServers(
-        requests()[0]!.input.servers.map((s) => ({
-          ...s,
-          auth: { accessTokenEnv: 'MISSING' },
-        })),
-        {}
-      )
-    ).toThrow('credential');
-    expect(() =>
-      chatgptServers(
-        [...requests()[0]!.input.servers, ...requests()[0]!.input.servers],
-        {}
-      )
-    ).toThrow('unique');
-    expect(() =>
-      chatgptServers(
-        [
-          {
-            transport: 'http',
-            serverUrl: 'https://example.test',
-            headers: { 'x-secret': 'value' },
-          },
-        ],
-        {}
-      )
-    ).toThrow('custom headers');
-  });
   it('retains explicit MCP provenance when multiple servers are configured', async () => {
     const batch = requests().slice(0, 1);
     batch[0]!.input.servers.push({

@@ -1,3 +1,4 @@
+import type { ChatgptApplicationController } from '../chatgpt/driver.js';
 import { execFile } from 'node:child_process';
 import { rmSync } from 'node:fs';
 import { chmod, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
@@ -5,7 +6,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
-import { CHATGPT_CONTROLLER_SOURCE } from './chatgptControllerSource.js';
+import { CHATGPT_CONTROLLER_SOURCE } from './macControllerSource.js';
 
 const exec = promisify(execFile);
 const ERROR = 'Unable to control the ChatGPT desktop application safely.';
@@ -17,12 +18,6 @@ const StateSchema = z.object({
 export interface ChatgptApplicationOptions {
   bundleId?: string;
   appPath?: string;
-}
-
-export interface ChatgptApplicationController {
-  state(): Promise<{ running: boolean }>;
-  stop(): Promise<void>;
-  start(environment?: Record<string, string>): Promise<void>;
 }
 
 const controllers = new Map<string, Promise<ChatgptApplicationController>>();

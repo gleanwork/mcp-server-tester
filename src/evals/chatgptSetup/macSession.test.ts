@@ -1,38 +1,38 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type * as ControllerModule from './chatgptController.js';
-import type * as ConfigModule from '../../codexSetup/config.js';
-import type * as TraceModule from './chatgptTrace.js';
-import type * as ComputerUseModule from '../../cowork/anthropicComputerUse.js';
+import type * as ControllerModule from './macController.js';
+import type * as ConfigModule from '../codexSetup/config.js';
+import type * as TraceModule from '../externalHost/builtins/chatgptTrace.js';
+import type * as ComputerUseModule from '../cowork/anthropicComputerUse.js';
 import {
   findChatgptTrace,
   parseChatgptTrace,
   snapshotChatgptSessions,
-} from './chatgptTrace.js';
-import { runExternalHostScenario } from '../runtime.js';
-import { ChatgptAppSession } from './openaiChatgpt.js';
-import type { ExternalHostConfig } from '../types.js';
-import { getChatgptApplicationController } from './chatgptController.js';
-import { installCodexConfig } from '../../codexSetup/config.js';
+} from '../externalHost/builtins/chatgptTrace.js';
+import { runExternalHostScenario } from '../externalHost/runtime.js';
+import { ChatgptAppSession } from './macSession.js';
+import type { ExternalHostConfig } from '../externalHost/types.js';
+import { getChatgptApplicationController } from './macController.js';
+import { installCodexConfig } from '../codexSetup/config.js';
 import {
   runAnthropicComputerUseSubmission,
   ComputerUseDriverError,
   type ComputerUseTelemetry,
-} from '../../cowork/anthropicComputerUse.js';
+} from '../cowork/anthropicComputerUse.js';
 
-vi.mock('./chatgptController.js', async (original) => ({
+vi.mock('./macController.js', async (original) => ({
   ...(await original<typeof ControllerModule>()),
   getChatgptApplicationController: vi.fn(),
 }));
-vi.mock('../../codexSetup/config.js', async (original) => ({
+vi.mock('../codexSetup/config.js', async (original) => ({
   ...(await original<typeof ConfigModule>()),
   installCodexConfig: vi.fn(),
 }));
-vi.mock('../../cowork/anthropicComputerUse.js', async (original) => ({
+vi.mock('../cowork/anthropicComputerUse.js', async (original) => ({
   ...(await original<typeof ComputerUseModule>()),
   runAnthropicComputerUseSubmission: vi.fn(),
 }));
 vi.mock('node:timers/promises', () => ({ setTimeout: async () => undefined }));
-vi.mock('./chatgptTrace.js', async (original) => ({
+vi.mock('../externalHost/builtins/chatgptTrace.js', async (original) => ({
   ...(await original<typeof TraceModule>()),
   findChatgptTrace: vi.fn(),
   snapshotChatgptSessions: vi.fn(),
