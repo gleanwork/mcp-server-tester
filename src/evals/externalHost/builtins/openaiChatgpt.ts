@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
-import { basename } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
+  diagnoseChatgptBinding,
   findChatgptTrace,
   snapshotChatgptSessions,
   type ChatgptSessionSnapshot,
@@ -37,6 +38,15 @@ import {
 } from '../../chatgpt/linux.js';
 
 const POLL_INTERVAL_MS = 750;
+
+/** Cold Linux first turns need time to flush; neither platform can exceed the run deadline. */
+export function chatgptBindingDeadline(
+  linux: boolean,
+  now: number,
+  runDeadline: number
+): number {
+  return Math.min(now + (linux ? 120_000 : 30_000), runDeadline);
+}
 
 /** Platform-specific input; shared lifecycle and strict native evidence. */
 export const OPENAI_CHATGPT_CAPABILITIES: ExternalHostCapabilityImplementation[] =
@@ -221,19 +231,24 @@ async function submitChatgptPrompt({
             : {}),
         },
       };
-      return failureResult({
+      return withBindingDiagnostics(
+        failureResult({
+          config,
+          context: run,
+          driver: state.driver,
+          displayName: state.displayName,
+          capabilitiesUsed: state.capabilitiesUsed,
+          nativeController,
+          failureKind: 'submission_failed',
+          error: `ChatGPT native submission failed: ${formatError(error)}`,
+          limitations: [
+            'No automatic resubmission is attempted after a failed or ambiguous native action.',
+          ],
+        }),
         config,
-        context: run,
-        driver: state.driver,
-        displayName: state.displayName,
-        capabilitiesUsed: state.capabilitiesUsed,
-        nativeController,
-        failureKind: 'submission_failed',
-        error: `ChatGPT native submission failed: ${formatError(error)}`,
-        limitations: [
-          'No automatic resubmission is attempted after a failed or ambiguous native action.',
-        ],
-      });
+        run,
+        state
+      );
     }
   }
   try {
@@ -285,8 +300,9 @@ async function captureChatgptComputerUseResult({
     run.correlation.strategy === 'exact_prompt'
       ? { strategy: 'exact_prompt', prompt: run.submittedScenario }
       : run.marker;
-  const bindingDeadline = Math.min(
-    Date.now() + 30_000,
+  const bindingDeadline = chatgptBindingDeadline(
+    isLinuxChatgpt(config),
+    Date.now(),
     run.startedAtMs + run.timeoutMs
   );
   const computerUse = state.data
@@ -418,34 +434,101 @@ async function captureChatgptComputerUseResult({
       await delay(
         Math.min(
           POLL_INTERVAL_MS,
-          Math.max(1, run.startedAtMs + run.timeoutMs - Date.now())
+          Math.max(
+            1,
+            (matched ? run.startedAtMs + run.timeoutMs : bindingDeadline) -
+              Date.now()
+          )
         )
       );
     }
-    return failureResult({
-      ...metadataOptions,
-      failureKind: matched ? 'timeout' : 'no_matching_session',
-      error: matched
-        ? 'Timed out waiting for the native ChatGPT turn to complete.'
-        : 'No unique fresh native ChatGPT session matched the submitted query within the binding deadline.',
-      limitations: [],
-    });
+    return withBindingDiagnostics(
+      failureResult({
+        ...metadataOptions,
+        failureKind: matched ? 'timeout' : 'no_matching_session',
+        error: matched
+          ? 'Timed out waiting for the native ChatGPT turn to complete.'
+          : 'No unique fresh native ChatGPT session matched the submitted query within the binding deadline.',
+        limitations: [],
+      }),
+      config,
+      run,
+      state
+    );
   } catch (error) {
     const message = formatError(error);
-    return failureResult({
-      ...metadataOptions,
-      failureKind: message.includes('Ambiguous')
-        ? 'ambiguous_matching_sessions'
-        : message.includes('mismatch') ||
-            message.includes('aborted') ||
-            message.includes('Bound ChatGPT') ||
-            message.includes('fresh ChatGPT')
-          ? 'host_run_failed'
-          : 'parse_failure',
-      error: message,
-      limitations: [],
-    });
+    return withBindingDiagnostics(
+      failureResult({
+        ...metadataOptions,
+        failureKind: message.includes('Ambiguous')
+          ? 'ambiguous_matching_sessions'
+          : message.includes('mismatch') ||
+              message.includes('aborted') ||
+              message.includes('Bound ChatGPT') ||
+              message.includes('fresh ChatGPT')
+            ? 'host_run_failed'
+            : 'parse_failure',
+        error: message,
+        limitations: [],
+      }),
+      config,
+      run,
+      state
+    );
   }
+}
+
+async function withBindingDiagnostics(
+  result: ExternalHostRunResult,
+  config: ExternalHostConfig,
+  run: ExternalHostCapabilityContext['run'],
+  state: ExternalHostCapabilityContext['state']
+): Promise<ExternalHostRunResult> {
+  const root = state.data.chatgptSessionsRoot;
+  const baseline = state.data.chatgptSessionBaseline;
+  if (typeof root !== 'string' || !(baseline instanceof Map)) return result;
+  let options: { isolatedLinuxHome?: string; expectedRoot?: string } = {};
+  if (isLinuxChatgpt(config)) {
+    try {
+      options = {
+        isolatedLinuxHome: validateLinuxChatgptPaths(config),
+        expectedRoot: join(dirname(config.codexSetup!.configPath!), 'sessions'),
+      };
+    } catch {
+      // Never inspect private Linux content without the caller's isolated-HOME attestation.
+      return result;
+    }
+  }
+  const diagnostic = await diagnoseChatgptBinding(
+    root,
+    baseline as ChatgptSessionSnapshot,
+    run.submittedScenario,
+    options
+  );
+  if (result.externalHost) {
+    result.externalHost.artifacts.push(
+      {
+        kind: 'metadata',
+        name: 'ChatGPT binding diagnostics — UNVERIFIED',
+        contentType: 'application/json',
+        summary: JSON.stringify(diagnostic.metadata),
+      },
+      ...diagnostic.candidatePaths.map((path, index) => ({
+        kind: 'metadata' as const,
+        name: `Private ChatGPT diagnostic candidate ${index + 1} — UNVERIFIED`,
+        path,
+        contentType: 'application/x-ndjson',
+        summary:
+          'Private diagnostic reference only. Not an accepted native trace, final answer, or authoritative source count. Preserve after app stop and before isolated profile deletion.',
+      }))
+    );
+    result.externalHost.traceLimitations = [
+      ...(result.externalHost.traceLimitations ?? []),
+      'UNVERIFIED binding diagnostics are bounded observations, not authoritative source counts. Missing records do not prove that Send was a no-op or that execution did not occur. No resubmission was attempted.',
+      'Diagnostic candidate paths are private references, not preserved copies; the owner must capture files after stopping the app and before deleting the isolated profile.',
+    ];
+  }
+  return result;
 }
 
 interface MetadataOptions {

@@ -1,9 +1,18 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import {
+  appendFile,
+  link,
+  mkdtemp,
+  mkdir,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
+  diagnoseChatgptBinding,
   findChatgptTrace,
   parseChatgptTrace,
   snapshotChatgptSessions,
@@ -772,4 +781,250 @@ it('discovers only changed/new rollout files and rejects duplicate sessions', as
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+describe('UNVERIFIED binding diagnostics', () => {
+  async function fixture() {
+    const home = await mkdtemp(join(tmpdir(), 'chatgpt-diagnostic-'));
+    const root = join(home, '.codex', 'sessions');
+    await mkdir(root, { recursive: true });
+    return {
+      home,
+      root,
+      options: { isolatedLinuxHome: home, expectedRoot: root },
+    };
+  }
+
+  it('reports new and modified baseline metadata without accepting either', async () => {
+    const { home, root, options } = await fixture();
+    try {
+      const old = join(root, 'rollout-old.jsonl');
+      await writeFile(old, serialize([]));
+      const baseline = await snapshotChatgptSessions(root);
+      const prompt = 'PRIVATE submitted prompt';
+      await appendFile(
+        old,
+        exactTurn(prompt)
+          .map((record) => JSON.stringify(record))
+          .join('\n') + '\n'
+      );
+      const fresh = join(root, 'rollout-new.jsonl');
+      await writeFile(
+        fresh,
+        serialize(exactTurn(prompt)).replace(
+          'codex_work_desktop',
+          'unconfirmed-linux-origin'
+        )
+      );
+      const { metadata, candidatePaths } = await diagnoseChatgptBinding(
+        root,
+        baseline,
+        prompt,
+        options
+      );
+      expect(metadata).toMatchObject({
+        status: 'UNVERIFIED',
+        authoritative: false,
+        rootExists: true,
+        currentFileCount: 2,
+        freshFileCount: 1,
+        modifiedBaselineCount: 1,
+        metadataRead: 'isolated-linux',
+        expectedRootRelativeToHome: '.codex/sessions',
+        originatorCount: { codex_work_desktop: 1, other: 1 },
+        nativeUserMessageCount: 2,
+        userTurnCount: 2,
+      });
+      expect(metadata.nativeUserMessageSha256).toEqual([
+        metadata.submittedSha256,
+        metadata.submittedSha256,
+      ]);
+      expect(candidatePaths.sort()).toEqual([fresh, old].sort());
+      expect(JSON.stringify(metadata)).not.toContain(prompt);
+      expect(JSON.stringify(metadata)).not.toContain(home);
+      expect(JSON.stringify(metadata)).not.toContain(
+        'unconfirmed-linux-origin'
+      );
+      expect(
+        await findChatgptTrace(root, baseline, exact(prompt), 0, {
+          requireFreshSession: true,
+        })
+      ).toBeUndefined();
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('does not inspect content or return candidates without isolated Linux attestation', async () => {
+    const { home, root } = await fixture();
+    try {
+      const path = join(root, 'rollout-old.jsonl');
+      await writeFile(path, serialize([]));
+      const baseline = await snapshotChatgptSessions(root);
+      await appendFile(path, 'not even JSON\n');
+      await writeFile(join(root, 'rollout-new.jsonl'), serialize());
+      const { metadata, candidatePaths } = await diagnoseChatgptBinding(
+        root,
+        baseline,
+        'prompt'
+      );
+      expect(metadata).toMatchObject({
+        metadataRead: 'disabled',
+        currentFileCount: 2,
+        freshFileCount: 1,
+        modifiedBaselineCount: 1,
+        recordTypes: {},
+        originatorCount: {},
+        malformedRecordCount: 0,
+      });
+      expect(candidatePaths).toEqual([]);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('never reads unchanged isolated baseline content and caps total diagnostic bytes', async () => {
+    const { home, root, options } = await fixture();
+    try {
+      await writeFile(
+        join(root, 'rollout-unchanged.jsonl'),
+        serialize(exactTurn('old private text'))
+      );
+      const baseline = await snapshotChatgptSessions(root);
+      const content =
+        JSON.stringify({
+          type: 'response_item',
+          payload: { role: 'assistant', content: 'private'.repeat(450_000) },
+        }) + '\n';
+      for (let i = 0; i < 3; i++)
+        await writeFile(join(root, `rollout-new-${i}.jsonl`), content);
+      const { metadata, candidatePaths } = await diagnoseChatgptBinding(
+        root,
+        baseline,
+        'prompt',
+        options
+      );
+      expect(metadata).toMatchObject({
+        baselineFileCount: 1,
+        currentFileCount: 4,
+        freshFileCount: 3,
+        modifiedBaselineCount: 0,
+        truncated: true,
+        skippedFileCount: 1,
+        nativeUserMessageCount: 0,
+        originatorCount: {},
+      });
+      expect(candidatePaths).toHaveLength(2);
+      expect(
+        candidatePaths.some((path) => path.endsWith('unchanged.jsonl'))
+      ).toBe(false);
+      expect(metadata.recordTypes.response_item).toBe(2);
+      expect(metadata.nativeUserMessageSha256).toEqual([]);
+      expect(JSON.stringify(metadata)).not.toContain('private');
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('reports a missing root without claiming no execution occurred', async () => {
+    const { home, root, options } = await fixture();
+    try {
+      await rm(root, { recursive: true });
+      const { metadata, candidatePaths } = await diagnoseChatgptBinding(
+        root,
+        new Map(),
+        'prompt',
+        options
+      );
+      expect(metadata.rootExists).toBe(false);
+      expect(metadata.currentFileCount).toBe(0);
+      expect(candidatePaths).toEqual([]);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects symlinked roots, ancestors, file links, hardlinks, and unexpected roots', async () => {
+    const { home, root, options } = await fixture();
+    try {
+      const outside = join(home, 'private');
+      await mkdir(outside);
+      const source = join(outside, 'rollout-private.jsonl');
+      await writeFile(source, serialize());
+      await symlink(source, join(root, 'rollout-symlink.jsonl'));
+      await link(source, join(root, 'rollout-hardlink.jsonl'));
+      await symlink(outside, join(root, '2026'));
+      const result = await diagnoseChatgptBinding(
+        root,
+        new Map(),
+        'prompt',
+        options
+      );
+      expect(result.candidatePaths).toEqual([]);
+      expect(result.metadata.skippedFileCount).toBe(1);
+      const wrongRoot = await diagnoseChatgptBinding(
+        outside,
+        new Map(),
+        'prompt',
+        options
+      );
+      expect(wrongRoot.metadata.metadataRead).toBe('unavailable');
+      expect(wrongRoot.candidatePaths).toEqual([]);
+      await rm(join(home, '.codex'), { recursive: true });
+      await symlink(outside, join(home, '.codex'));
+      const linkedRoot = await diagnoseChatgptBinding(
+        root,
+        new Map(),
+        'prompt',
+        options
+      );
+      expect(linkedRoot.metadata.metadataRead).toBe('unavailable');
+      expect(linkedRoot.candidatePaths).toEqual([]);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('caps files, file bytes and hashes; emits only allowlisted labels for poisoned records', async () => {
+    const { home, root, options } = await fixture();
+    try {
+      const records = [
+        event('session_meta', { originator: '__proto__' }),
+        event('PRIVATE secret type', {}),
+      ];
+      for (let i = 0; i < 80; i++)
+        records.push(exactTurn(`secret-${i}`, `turn-${i}`)[2]!);
+      const content =
+        records.map((record) => JSON.stringify(record)).join('\n') +
+        '\nBAD\n{"unfinished":';
+      await writeFile(join(root, 'rollout-00.jsonl'), content);
+      await writeFile(
+        join(root, 'rollout-01-big.jsonl'),
+        'x'.repeat(4 * 1024 * 1024 + 1)
+      );
+      for (let i = 2; i < 20; i++)
+        await writeFile(join(root, `rollout-${i}.jsonl`), serialize([]));
+      const { metadata, candidatePaths } = await diagnoseChatgptBinding(
+        root,
+        new Map(),
+        'prompt',
+        options
+      );
+      expect(metadata.truncated).toBe(true);
+      expect(metadata.skippedFileCount).toBeGreaterThanOrEqual(4);
+      expect(candidatePaths.length).toBeLessThanOrEqual(16);
+      expect(candidatePaths.some((path) => path.endsWith('big.jsonl'))).toBe(
+        false
+      );
+      expect(metadata.nativeUserMessageSha256).toHaveLength(64);
+      expect(metadata.nativeUserMessageCount).toBe(80);
+      expect(metadata.recordTypes.other).toBe(1);
+      expect(metadata.originatorCount.other).toBe(1);
+      expect(metadata.malformedRecordCount).toBe(1);
+      expect(JSON.stringify(metadata)).not.toContain('secret-');
+      expect(JSON.stringify(metadata)).not.toContain('__proto__');
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
 });

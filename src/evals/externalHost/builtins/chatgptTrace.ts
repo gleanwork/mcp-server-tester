@@ -1,7 +1,7 @@
-import { open, readdir, stat } from 'node:fs/promises';
+import { lstat, open, readdir, realpath, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { UsageMetrics } from '../../../types/index.js';
 import type {
   LLMToolCall,
@@ -80,6 +80,268 @@ export async function snapshotChatgptSessions(
   }
   await walk(root, 0);
   return files;
+}
+
+const MAX_DIAGNOSTIC_FILES = 16;
+const MAX_DIAGNOSTIC_BYTES = 4 * 1024 * 1024;
+const MAX_DIAGNOSTIC_TOTAL_BYTES = 8 * 1024 * 1024;
+const MAX_DIAGNOSTIC_USER_MESSAGES = 64;
+
+export interface ChatgptBindingDiagnostics {
+  status: 'UNVERIFIED';
+  authoritative: false;
+  rootExists: boolean;
+  baselineFileCount: number;
+  currentFileCount: number;
+  freshFileCount: number;
+  modifiedBaselineCount: number;
+  submittedSha256: string;
+  expectedRootRelativeToHome?: string;
+  metadataRead: 'disabled' | 'isolated-linux' | 'unavailable';
+  truncated: boolean;
+  skippedFileCount: number;
+  originatorCount: Record<string, number>;
+  recordTypes: Record<string, number>;
+  nativeUserMessageCount: number;
+  userTurnCount: number;
+  nativeUserMessageSha256: string[];
+  malformedRecordCount: number;
+}
+
+/** Diagnostic evidence only. Never feed these candidates into native acceptance. */
+export async function diagnoseChatgptBinding(
+  root: string,
+  baseline: ChatgptSessionSnapshot,
+  submittedPrompt: string,
+  options: { isolatedLinuxHome?: string; expectedRoot?: string } = {}
+): Promise<{ metadata: ChatgptBindingDiagnostics; candidatePaths: string[] }> {
+  const metadata: ChatgptBindingDiagnostics = {
+    status: 'UNVERIFIED',
+    authoritative: false,
+    rootExists: false,
+    baselineFileCount: baseline.size,
+    currentFileCount: 0,
+    freshFileCount: 0,
+    modifiedBaselineCount: 0,
+    submittedSha256: createHash('sha256')
+      .update(submittedPrompt, 'utf8')
+      .digest('hex'),
+    metadataRead: 'disabled',
+    truncated: false,
+    skippedFileCount: 0,
+    originatorCount: {},
+    recordTypes: {},
+    nativeUserMessageCount: 0,
+    userTurnCount: 0,
+    nativeUserMessageSha256: [],
+    malformedRecordCount: 0,
+  };
+  const candidatePaths: string[] = [];
+  try {
+    const home = options.isolatedLinuxHome;
+    if (home) {
+      if (
+        !options.expectedRoot ||
+        resolve(root) !== resolve(options.expectedRoot)
+      )
+        throw new Error('Unexpected diagnostic root.');
+      const subpath = relative(home, root);
+      if (
+        !subpath ||
+        subpath.startsWith(`..${sep}`) ||
+        subpath === '..' ||
+        isAbsolute(subpath)
+      )
+        throw new Error('Diagnostic root is outside isolated HOME.');
+      metadata.expectedRootRelativeToHome = subpath;
+      await assertOwnedDiagnosticPath(home, root, true);
+    }
+    let rootInfo;
+    try {
+      rootInfo = await lstat(root);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+        return { metadata, candidatePaths };
+      throw error;
+    }
+    metadata.rootExists = true;
+    if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink())
+      throw new Error('Unsafe diagnostic root.');
+    const current = await snapshotChatgptSessions(root);
+    metadata.currentFileCount = current.size;
+    const candidates: Array<[string, { size: number; mtimeMs: number }]> = [];
+    for (const [path, info] of current) {
+      const old = baseline.get(path);
+      if (!old) metadata.freshFileCount++;
+      else if (old.size !== info.size || old.mtimeMs !== info.mtimeMs)
+        metadata.modifiedBaselineCount++;
+      else continue;
+      candidates.push([path, info]);
+    }
+    // macOS and non-attested homes get filesystem metadata only, including baseline files.
+    if (!home) return { metadata, candidatePaths };
+    metadata.metadataRead = 'isolated-linux';
+    const canonicalHome = await realpath(home);
+    let totalBytes = 0;
+    const turns = new Set<string>();
+    for (const [index, [path, info]] of candidates.entries()) {
+      if (
+        index >= MAX_DIAGNOSTIC_FILES ||
+        info.size > MAX_DIAGNOSTIC_BYTES ||
+        totalBytes + info.size > MAX_DIAGNOSTIC_TOTAL_BYTES
+      ) {
+        metadata.skippedFileCount++;
+        metadata.truncated = true;
+        continue;
+      }
+      try {
+        await assertOwnedDiagnosticPath(home, path);
+        const file = await open(
+          path,
+          constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+        );
+        try {
+          const opened = await file.stat();
+          const checked = await lstat(path);
+          await assertOwnedDiagnosticPath(home, path);
+          if (
+            !opened.isFile() ||
+            opened.nlink !== 1 ||
+            opened.ino !== checked.ino ||
+            opened.dev !== checked.dev ||
+            opened.size > MAX_DIAGNOSTIC_BYTES ||
+            totalBytes + opened.size > MAX_DIAGNOSTIC_TOTAL_BYTES
+          )
+            throw new Error('Unsafe diagnostic candidate.');
+          const expectedPath = join(canonicalHome, relative(home, path));
+          if ((await realpath(path)) !== expectedPath)
+            throw new Error('Diagnostic candidate escaped its owned root.');
+          // Linux validates the opened object too, not just the requested pathname.
+          if (
+            process.platform === 'linux' &&
+            (await realpath(`/proc/self/fd/${file.fd}`)) !== expectedPath
+          )
+            throw new Error('Diagnostic candidate changed.');
+          const buffer = Buffer.alloc(opened.size);
+          totalBytes += opened.size;
+          const { bytesRead } = await file.read(buffer, 0, opened.size, 0);
+          const content = buffer.subarray(0, bytesRead).toString('utf8');
+          candidatePaths.push(path);
+          const lines = content.split('\n');
+          if (content.length > 0 && !content.endsWith('\n')) {
+            lines.pop();
+            metadata.truncated = true;
+          }
+          let activeTurn: string | undefined;
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            let raw;
+            try {
+              raw = object(JSON.parse(line)) ?? {};
+            } catch {
+              metadata.malformedRecordCount++;
+              continue;
+            }
+            const payload = object(raw.payload) ?? {};
+            incrementDiagnosticCount(metadata.recordTypes, raw.type, [
+              'session_meta',
+              'turn_context',
+              'event_msg',
+              'response_item',
+              'token_usage_record',
+            ]);
+            if (raw.type === 'session_meta')
+              incrementDiagnosticCount(
+                metadata.originatorCount,
+                payload.originator,
+                ['codex_work_desktop', 'codex_cli']
+              );
+            if (
+              raw.type === 'turn_context' ||
+              (raw.type === 'event_msg' && payload.type === 'task_started')
+            )
+              activeTurn = string(payload.turn_id);
+            const item = object(payload.item);
+            if (
+              raw.type !== 'event_msg' ||
+              payload.type !== 'item_completed' ||
+              item?.type !== 'UserMessage'
+            )
+              continue;
+            metadata.nativeUserMessageCount++;
+            const turnId =
+              string(payload.turn_id) ??
+              string(
+                object(payload.internal_chat_message_metadata_passthrough)
+                  ?.turn_id
+              ) ??
+              activeTurn;
+            if (turnId) turns.add(`${index}:${turnId}`);
+            if (
+              metadata.nativeUserMessageSha256.length <
+              MAX_DIAGNOSTIC_USER_MESSAGES
+            )
+              metadata.nativeUserMessageSha256.push(
+                createHash('sha256')
+                  .update(contentText(item.content), 'utf8')
+                  .digest('hex')
+              );
+            else metadata.truncated = true;
+          }
+        } finally {
+          await file.close();
+        }
+      } catch {
+        metadata.skippedFileCount++;
+        metadata.truncated = true;
+      }
+    }
+    metadata.userTurnCount = turns.size;
+  } catch {
+    // Diagnostics must not mask the original failure or emit paths/errors from private profiles.
+    metadata.metadataRead = 'unavailable';
+    metadata.truncated = true;
+  }
+  return { metadata, candidatePaths };
+}
+
+function incrementDiagnosticCount(
+  counts: Record<string, number>,
+  value: unknown,
+  allowlist: string[]
+): void {
+  const key =
+    typeof value === 'string' && allowlist.includes(value) ? value : 'other';
+  counts[key] = (counts[key] ?? 0) + 1;
+}
+
+async function assertOwnedDiagnosticPath(
+  home: string,
+  path: string,
+  allowMissing = false
+): Promise<void> {
+  if (!isAbsolute(home) || resolve(home) === '/')
+    throw new Error('Invalid isolated HOME.');
+  const parts = relative(home, path).split(sep);
+  if (parts.includes('..') || isAbsolute(relative(home, path)))
+    throw new Error('Outside isolated HOME.');
+  let current = resolve(home);
+  for (const part of ['', ...parts]) {
+    if (part) current = join(current, part);
+    let info;
+    try {
+      info = await lstat(current);
+    } catch (error) {
+      if (allowMissing && (error as NodeJS.ErrnoException).code === 'ENOENT')
+        return;
+      throw error;
+    }
+    if (
+      info.isSymbolicLink() ||
+      (process.getuid && info.uid !== process.getuid())
+    )
+      throw new Error('Unowned or symlinked diagnostic path.');
+  }
 }
 
 export type ChatgptTraceSelector =
