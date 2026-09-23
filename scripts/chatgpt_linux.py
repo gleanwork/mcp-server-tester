@@ -423,6 +423,12 @@ def composer(nodes):
     return unique(editor_roots(nodes), 'composer_missing_or_ambiguous')
 
 
+def matches_prompt(text, prompt):
+    # Same bounded representation as native exact_prompt correlation. Do not
+    # trim text or alter the prompt dispatched to the opener.
+    return text == prompt or text == prompt + '\n'
+
+
 class Driver:
     def __init__(self, desktop, timeout_ms, max_actions):
         self.desktop = desktop
@@ -569,11 +575,12 @@ class Driver:
         self.step = 'draft-open'
         self.action(lambda: self.desktop.open_prompt(''))
         self.step = 'draft-surface'
-        nodes = self.wait(lambda ns: any(self.ready(ns, candidate) for candidate in SURFACES)
-                          and self.desktop.text(composer(ns)) == '')
+        # Setup has no user prompt to match. A new chat can expose a visible
+        # placeholder as Text; ready means controls/surface, not verified emptiness.
+        nodes = self.wait(lambda ns: any(self.ready(ns, candidate) for candidate in SURFACES))
         self.select_surface(nodes, surface)
         self.step = 'draft-readback'
-        self.wait(lambda ns: self.ready(ns, surface) and self.desktop.text(composer(ns)) == '')
+        self.wait(lambda ns: self.ready(ns, surface))
         self.step = None
         return self.receipt('ready', surface)
 
@@ -593,13 +600,13 @@ class Driver:
         self.action(lambda: self.desktop.open_prompt(prompt))
         self.step = 'draft-surface'
         nodes = self.wait(lambda ns: any(self.ready(ns, candidate) for candidate in SURFACES)
-                          and self.desktop.text(composer(ns)) == prompt)
+                          and matches_prompt(self.desktop.text(composer(ns)), prompt))
         # A deep link may change mode. One fixed UI selection is allowed, but it
         # must preserve the draft. Never reopen, refill, or fall back on loss.
         self.select_surface(nodes, surface)
         self.step = 'draft-readback'
         nodes = self.wait(lambda ns: self.ready(ns, surface)
-                          and self.desktop.text(composer(ns)) == prompt
+                          and matches_prompt(self.desktop.text(composer(ns)), prompt)
                           and len(controls(ns, {'Send'})) == 1)
         # Exactly one send. No retry, Enter fallback, or resubmission on missing trace.
         self.step = 'send'

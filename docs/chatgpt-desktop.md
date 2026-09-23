@@ -157,15 +157,27 @@ available. The only mouse command is `xdotool mousemove x y click 1`, with no
 enabled Continue on the observed profession page; a stale checked bit does not
 block it. Unknown onboarding and ambiguous controls fail closed.
 
-Preparation selects the surface, opens the canonical empty chat exactly once,
-and verifies the requested surface and one exactly empty composer. It never
-supplies an evaluation query or activates Send.
+Preparation selects the surface and calls `open_prompt('')` exactly once to open
+the canonical new chat. It then verifies the requested surface, one available
+editable composer, and one visible Send control (which can be disabled). If the
+deep link changed mode, one fixed Switch mode correction is allowed. Setup has
+no user prompt: it does not require or claim an empty Text readback. A visible
+placeholder can appear as nonempty composer Text. `ready` means the controls and
+surface are ready, not that empty text was verified or a model task ran.
+Preparation never supplies an evaluation query or activates Send.
 
-Submission re-verifies the prepared surface, opens the exact prompt once, then
-verifies the requested surface. If the deep link changed mode, MST permits one
-fixed Switch mode menu selection back to the requested surface. The draft must
-survive that selection unchanged. There is no reopen, rewrite, fresh-chat button,
-File menu, keyboard shortcut, clipboard input, or fallback if the draft is lost.
+Submission re-verifies the prepared surface and passes the original prompt to
+the opener unchanged, including all Unicode and whitespace. It opens that draft
+once and requires matching composer Text **before and after** any optional mode
+correction. A match is only `text == prompt` or `text == prompt + '\n'`: the one
+additional native terminal LF is a bounded representation, not a query edit.
+This is the same allowance as native `exact_prompt` correlation. Two or more
+additional LFs, changed prefixes or suffixes, and trimmed spaces do not match.
+If the deep link changed mode, MST permits one fixed Switch mode menu selection
+back to the requested surface. The draft must still match after that selection.
+There is no trimming, newline cleanup, other normalization, reopen, rewrite,
+fresh-chat button, File menu, keyboard shortcut, clipboard input, or fallback if
+the draft is lost.
 
 The composer must be unique, visible, showing, enabled, sensitive, have EDITABLE
 state, an allowed non-password role, and a real Text interface. Nested editable
@@ -201,9 +213,11 @@ characters and static leaf content) and expanded output, within the driver deadl
 
 All other literal text is unchanged, including whitespace, line feeds, and
 unresolved U+FFFC. No paragraph separators are invented: missing reported
-separators cause an exact comparison to fail if the prompt contains them. Send stays blocked until the expanded text matches the
-unchanged prompt and exactly one enabled Send control exists. MST activates Send
-once. It never presses Enter or retries an uncertain Send.
+separators cause the comparison to fail if the prompt contains them. Send stays
+blocked until the expanded text equals the unchanged prompt or that prompt plus
+one terminal LF, and exactly one enabled Send control exists. This also applies
+when the original prompt already ends in LF; only one additional LF is allowed.
+MST activates Send once. It never presses Enter or retries an uncertain Send.
 
 The action count records each opener invocation and each native selection/click
 attempt separately. Typical preparation is one action; typical submission is two
@@ -239,9 +253,10 @@ mandatory even after a successful UI receipt.
 ## Evidence and continuation
 
 The existing strict native trace contract is shared across both platforms:
-unchanged `exact_prompt` matching (including only the existing permitted native
-terminal-LF normalization), a fresh session and turn for each query, and complete
-native final-answer/model/effort evidence. UI text is never treated as an answer.
+unchanged `exact_prompt` matching (only exact text or one additional native
+terminal LF, reported as `native_terminal_lf`), a fresh session and turn for each
+query, and complete native final-answer/model/effort evidence. UI text is never
+treated as an answer.
 Explicit `prompt_marker` correlation remains opt-in.
 
 Native or controller uncertainty blocks the remaining batch. There is no automatic

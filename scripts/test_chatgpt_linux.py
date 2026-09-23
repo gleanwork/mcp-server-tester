@@ -245,21 +245,26 @@ class DriverTest(unittest.TestCase):
             self.assertNotIn('draftState', driver.receipt(status, 'chatgpt-work'))
         desktop.text.assert_not_called()
 
-    @patch('chatgpt_linux.time.sleep')
-    def test_stalled_draft_reports_last_surface_and_placeholder_without_normalizing(self, _sleep):
-        desktop = FakeDesktop()
-        def open_empty(prompt):
-            desktop.actions.append(('open', prompt))
-            desktop.nodes = ready('Codex', '\ufffc')
-        desktop.open_prompt = open_empty
-        driver = self.driver(desktop)
-        with self.assertRaisesRegex(DriverFailure, 'state_transition_unobserved'):
-            driver.prepare('chatgpt-work')
-        receipt = driver.receipt('failed')
-        self.assertEqual(receipt['step'], 'draft-surface')
-        self.assertEqual(receipt['draftState']['observedSurface'], 'codex')
-        self.assertEqual(receipt['draftState']['embeddedObjectCount'], 1)
-        self.assertEqual(desktop.actions, [('open', '')])
+    def test_setup_placeholder_is_ready_without_text_read_or_send(self):
+        for surface, label in [('chatgpt-work', 'ChatGPT Work'), ('codex', 'Codex')]:
+            desktop = FakeDesktop(ready(label))
+            def open_empty(prompt):
+                desktop.actions.append(('open', prompt))
+                desktop.nodes = ready('ChatGPT Work', 'Ask anything here\n')
+                desktop.nodes[1]['enabled'] = False
+            desktop.open_prompt = open_empty
+            desktop.text = Mock(side_effect=AssertionError('setup has no prompt to read back'))
+            # Fake mode selection must also avoid reading placeholder content.
+            desktop.preserve_draft = False
+            receipt = self.driver(desktop).prepare(surface)
+            self.assertEqual(receipt['status'], 'ready')
+            self.assertEqual(receipt['surface'], surface)
+            self.assertEqual(set(receipt), {'status', 'surface', 'action_count', 'duration_ms'})
+            self.assertEqual(desktop.actions[0], ('open', ''))
+            self.assertEqual(self.actions(desktop).count('open'), 1)
+            self.assertEqual(self.actions(desktop).count('Send'), 0)
+            self.assertEqual(receipt['action_count'], 1 if surface == 'chatgpt-work' else 3)
+            desktop.text.assert_not_called()
 
     def test_setup_onboarding_surface_then_one_empty_open_no_send(self):
         desktop = FakeDesktop([node('Engineering', 'radio button'), node('Continue')])
@@ -324,6 +329,56 @@ class DriverTest(unittest.TestCase):
             self.assertEqual(set(result), {'status', 'surface', 'action_count', 'duration_ms'})
             self.assertEqual(desktop.actions[0], ('open', prompt))
             self.assertEqual(self.actions(desktop), ['open', 'Send'])
+
+    def test_exact_or_one_native_terminal_lf_preserves_opener_payload(self):
+        for prompt in ('Find docs', '  π 😀e\u0301\n\nExact.  \n', 'π\n\n'):
+            for suffix in ('', '\n'):
+                for corrected in (False, True):
+                    with self.subTest(prompt=prompt, suffix=suffix, corrected=corrected):
+                        desktop = FakeDesktop()
+                        original = desktop.open_prompt
+                        def open_prompt(value):
+                            original(value)
+                            composer(desktop.nodes)['text'] = value + suffix
+                        desktop.open_prompt = open_prompt
+                        desktop.open_surface = 'Codex' if corrected else None
+                        receipt = self.driver(desktop).submit(prompt, 'chatgpt-work')
+                        self.assertEqual(receipt['status'], 'submitted')
+                        self.assertEqual(receipt['action_count'], 4 if corrected else 2)
+                        self.assertEqual(desktop.actions[0], ('open', prompt))
+                        self.assertEqual(desktop.actions[0][1].encode('utf-8'), prompt.encode('utf-8'))
+                        self.assertEqual(self.actions(desktop).count('open'), 1)
+                        self.assertEqual(self.actions(desktop).count('Send'), 1)
+                        self.assertEqual(composer(desktop.nodes)['text'], prompt + suffix)
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_draft_mismatch_blocks_before_and_after_mode_correction(self, _sleep):
+        prompt = '  π 😀e\u0301\nExact.  \n'
+        mismatches = [prompt + '\n\n', prompt + '\n\n\n', 'prefix' + prompt,
+                      prompt + 'suffix', prompt.strip(), prompt.lstrip(), prompt.rstrip(),
+                      prompt[:-1], prompt + '\r\n', prompt.replace('\n', ''), '']
+        for text in mismatches:
+            for after_correction in (False, True):
+                with self.subTest(text=text, after_correction=after_correction):
+                    desktop = FakeDesktop()
+                    desktop.open_surface = 'Codex'
+                    original_open, original_activate = desktop.open_prompt, desktop.activate
+                    def open_prompt(value):
+                        original_open(value)
+                        composer(desktop.nodes)['text'] = value + '\n' if after_correction else text
+                    def activate(control, allowed):
+                        original_activate(control, allowed)
+                        if control['name'] == 'ChatGPT Work Create, learn, and explore':
+                            composer(desktop.nodes)['text'] = text
+                    desktop.open_prompt, desktop.activate = open_prompt, activate
+                    driver = self.driver(desktop)
+                    with self.assertRaisesRegex(DriverFailure, 'state_transition_unobserved'):
+                        driver.submit(prompt, 'chatgpt-work')
+                    expected = ['open', 'Switch mode, current mode: Codex',
+                                'ChatGPT Work Create, learn, and explore'] if after_correction else ['open']
+                    self.assertEqual(self.actions(desktop), expected)
+                    self.assertEqual(desktop.actions[0], ('open', prompt))
+                    self.assertEqual(driver.step, 'draft-readback' if after_correction else 'draft-surface')
 
     def test_surface_mismatch_before_open_blocks(self):
         desktop = FakeDesktop(ready('Codex'))
@@ -393,13 +448,39 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(self.actions(desktop), [
             'open', 'Switch mode, current mode: Codex', 'ChatGPT Work Create, learn, and explore'])
 
-    @patch('chatgpt_linux.time.sleep')
-    def test_setup_does_not_reopen_nonempty_composer(self, _sleep):
+    def test_setup_ready_does_not_claim_nonempty_text_became_empty(self):
         desktop = FakeDesktop(ready(text='prior draft'))
         desktop.stall = 'open'
-        with self.assertRaisesRegex(DriverFailure, 'state_transition_unobserved'):
-            self.driver(desktop).prepare('chatgpt-work')
+        desktop.text = Mock(side_effect=AssertionError('no setup emptiness predicate'))
+        receipt = self.driver(desktop).prepare('chatgpt-work')
+        self.assertEqual(receipt['status'], 'ready')
+        self.assertNotIn('draftState', receipt)
         self.assertEqual(desktop.actions, [('open', '')])
+        self.assertEqual(composer(desktop.nodes)['text'], 'prior draft')
+        desktop.text.assert_not_called()
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_setup_still_requires_surface_unique_composer_and_send_after_open(self, _sleep):
+        for kind in ('surface', 'composer-missing', 'composer-ambiguous', 'send-missing', 'send-ambiguous'):
+            with self.subTest(kind=kind):
+                desktop = FakeDesktop()
+                def open_empty(prompt):
+                    desktop.actions.append(('open', prompt))
+                    desktop.nodes = ready(text='Ask anything here\n')
+                    if kind == 'surface':
+                        desktop.nodes[0]['name'] = 'unknown mode'
+                    elif kind == 'composer-missing':
+                        desktop.nodes.pop()
+                    elif kind == 'composer-ambiguous':
+                        desktop.nodes.append(node('other', 'entry', editable=True))
+                    elif kind == 'send-missing':
+                        desktop.nodes.pop(1)
+                    else:
+                        desktop.nodes.append(node('Send'))
+                desktop.open_prompt = open_empty
+                with self.assertRaises(DriverFailure):
+                    self.driver(desktop).prepare('chatgpt-work')
+                self.assertEqual(desktop.actions, [('open', '')])
 
     @patch('chatgpt_linux.time.sleep')
     def test_exact_echo_and_unique_send_required_before_send_no_replay(self, sleep):
@@ -879,24 +960,31 @@ class RichTextTest(unittest.TestCase):
             setattr(editor, method, Mock(side_effect=FakeGLibError('private UI content')))
             self.assert_unavailable(desktop, editor)
 
-    def test_structural_prepare_and_submit_validate_only_input_and_do_not_export_content(self):
+    def test_structural_prepare_placeholder_and_submit_readback_do_not_export_content(self):
+        prompt = '  π 😀\n\nExact.  \n'
         for static in (False, True):
-            for prompt in ('', '  π 😀\n\nExact.  \n'):
+            for query, readback in [('', 'Ask anything here\n'), (prompt, prompt), (prompt, prompt + '\n')]:
                 desktop, editor, paragraph, _ = self.structural('prior draft', static=static)
                 target, field = (paragraph.children[0], 'name') if static else (paragraph, 'value')
                 desktop.require_helpers = Mock()
-                desktop.open_prompt = Mock(side_effect=lambda value: setattr(target, field, value))
+                desktop.open_prompt = Mock(side_effect=lambda value: setattr(target, field, readback))
                 desktop.activate = Mock()
+                desktop.api.Text.get_text = Mock(wraps=desktop.api.Text.get_text)
                 driver = Driver(desktop, 60_000, 24)
-                receipt = (driver.submit(prompt, 'chatgpt-work') if prompt
+                receipt = (driver.submit(query, 'chatgpt-work') if query
                            else driver.prepare('chatgpt-work'))
-                self.assertEqual(receipt['status'], 'submitted' if prompt else 'ready')
-                desktop.open_prompt.assert_called_once_with(prompt)
-                self.assertEqual(desktop.activate.call_count, 1 if prompt else 0)
+                self.assertEqual(receipt['status'], 'submitted' if query else 'ready')
+                desktop.open_prompt.assert_called_once_with(query)
+                self.assertEqual(desktop.activate.call_count, 1 if query else 0)
+                if not query:
+                    desktop.api.Text.get_text.assert_not_called()
+                    self.assertEqual(len(readback), 18)
+                    self.assertEqual(readback.count('\n'), 1)
                 state = driver.receipt('failed')['draftState']
-                self.assertEqual(state['textLength'], len(prompt))
-                self.assertEqual(state['textSha256'], hashlib.sha256(prompt.encode('utf-8')).hexdigest())
+                self.assertEqual(state['textLength'], len(readback))
+                self.assertEqual(state['textSha256'], hashlib.sha256(readback.encode('utf-8')).hexdigest())
                 self.assertNotIn('Exact', json.dumps(state))
+                self.assertNotIn('Ask anything', json.dumps(state))
 
     @patch('chatgpt_linux.time.sleep')
     def test_structural_ambiguous_paragraphs_never_send(self, _sleep):
