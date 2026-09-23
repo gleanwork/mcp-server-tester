@@ -14,7 +14,7 @@ from itertools import chain, repeat
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
-from chatgpt_linux import (Driver, DriverFailure, Desktop, composer, main,
+from chatgpt_linux import (SCREEN_LABELS, Driver, DriverFailure, Desktop, composer, main,
                            error_code, ERROR_CODES, INPUT_LIMIT, SESSION_KEYS, XDOTOOL)
 
 
@@ -188,6 +188,22 @@ class DriverTest(unittest.TestCase):
             self.assertNotIn('private', json.dumps(receipt))
             desktop.text.assert_called_once_with(desktop.nodes[2], limit=INPUT_LIMIT)
             self.assertEqual(desktop.actions, [])
+
+    def test_failure_draft_state_reports_only_counts_and_known_labels_without_composer(self):
+        # A screen with no composer and no mode switch: counts and fixed labels only.
+        desktop = FakeDesktop([node('Send'), node('Continue'), node('private dialog text')])
+        driver = self.driver(desktop)
+        driver.phase, driver.step = 'composer', 'draft-surface'
+        driver.snapshot()
+        state = driver.receipt('failed')['draftState']
+        self.assertEqual(state['observedSurface'], 'unknown')
+        self.assertEqual(state['composerRootCount'], 0)
+        self.assertEqual(state['screen']['knownLabels'], ['Continue', 'Send'])
+        self.assertEqual(state['screen']['visibleButtonCount'], 3)
+        self.assertEqual(set(state['screen']), {'nodeCount', 'visibleButtonCount',
+                                                'visibleFrameCount', 'dialogCount', 'knownLabels'})
+        self.assertNotIn('private', json.dumps(state))
+        self.assertLessEqual(set(state['screen']['knownLabels']), SCREEN_LABELS)
 
     def test_failure_draft_state_deduplicates_entry_and_paragraph(self):
         desktop = FakeDesktop(ready())

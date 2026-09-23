@@ -147,6 +147,19 @@ describe('Linux ChatGPT runtime adapter', () => {
       embeddedObjectCount: 1,
       newlineCount: 2,
     },
+    {
+      ...unreadableDraftState,
+      observedSurface: 'unknown',
+      composerRootCount: 0,
+      sendControlCount: 1,
+      screen: {
+        nodeCount: 40,
+        visibleButtonCount: 3,
+        visibleFrameCount: 1,
+        dialogCount: 0,
+        knownLabels: ['Continue', 'Send'],
+      },
+    },
   ])(
     'exposes only validated draft state in error metadata %#',
     async (draftState) => {
@@ -208,6 +221,32 @@ describe('Linux ChatGPT runtime adapter', () => {
         [key]: 'private UI value',
       })
     ),
+    {
+      ...unreadableDraftState,
+      screen: {
+        ...{
+          nodeCount: 40,
+          visibleButtonCount: 3,
+          visibleFrameCount: 1,
+          dialogCount: 0,
+          knownLabels: ['Continue', 'Send'],
+        },
+        knownLabels: ['private dialog text'],
+      },
+    },
+    {
+      ...unreadableDraftState,
+      screen: {
+        ...{
+          nodeCount: 40,
+          visibleButtonCount: 3,
+          visibleFrameCount: 1,
+          dialogCount: 0,
+          knownLabels: ['Continue', 'Send'],
+        },
+        names: ['private UI value'],
+      },
+    },
     null,
     {},
   ])(

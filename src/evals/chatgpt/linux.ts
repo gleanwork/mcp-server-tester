@@ -15,6 +15,7 @@ import { CodexSetupError } from '../codexSetup/native.js';
 import { readLinuxChatgptEnvironment } from '../chatgptSetup/linuxProfile.js';
 import {
   LINUX_CHATGPT_ERROR_CODES,
+  LINUX_CHATGPT_SCREEN_LABELS,
   LINUX_CHATGPT_RUNTIME_ENVIRONMENT,
   pickEnvironment,
 } from './linuxContract.js';
@@ -39,6 +40,16 @@ const DraftState = z
     composerRootCount: z.number().int().min(0).max(5000),
     sendControlCount: z.number().int().min(0).max(5000),
     textReadable: z.boolean(),
+    screen: z
+      .object({
+        nodeCount: z.number().int().min(0).max(5000),
+        visibleButtonCount: z.number().int().min(0).max(5000),
+        visibleFrameCount: z.number().int().min(0).max(5000),
+        dialogCount: z.number().int().min(0).max(5000),
+        knownLabels: z.array(z.enum(LINUX_CHATGPT_SCREEN_LABELS)).max(64),
+      })
+      .strict()
+      .optional(),
     textLength: z
       .number()
       .int()

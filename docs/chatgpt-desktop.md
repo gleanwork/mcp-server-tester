@@ -244,7 +244,10 @@ accessible names. Failure-only `draftState` measurements use
 the same bounded, expanded readback: `textLength`, `embeddedObjectCount`, and
 `newlineCount` count observed Unicode code points; `textSha256` hashes the exact
 UTF-8 bytes. Resolved object markers are not counted. Unreadable text omits these
-measurements. Readback failures return `composer_text_unavailable`, never raw RPC
+measurements. When there is no composer and no mode switch, `draftState.screen`
+adds node, visible-button, frame, and dialog counts, plus only the fixed
+`screenLabels` from the shared contract that are visible. It never contains
+other UI text. Readback failures return `composer_text_unavailable`, never raw RPC
 errors. The successful receipt schema is unchanged.
 
 Offline tests cover these controller contracts. Verify the app flags and hand-off

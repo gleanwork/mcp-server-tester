@@ -18,7 +18,10 @@
     "CODEX_HOME"
   ],
   "helperEnvironment": ["NO_AT_BRIDGE"],
-  "maxActions": { "default": 24, "max": 64 },
+  "maxActions": {
+    "default": 24,
+    "max": 64
+  },
   "errorCodes": [
     "accessibility_event_budget",
     "accessibility_tree_budget",
@@ -52,5 +55,27 @@
     "desktop_type_error",
     "desktop_glib_error",
     "desktop_driver_failed"
+  ],
+  "screenLabels": [
+    "Allow",
+    "Cancel",
+    "ChatGPT Work Create, learn, and explore",
+    "Close",
+    "Codex Build, debug, and ship",
+    "Continue",
+    "Engineering",
+    "Get started",
+    "Go to ChatGPT",
+    "Keep setting up",
+    "Leave a note on my Desktop",
+    "Log in",
+    "New chat",
+    "Open",
+    "Open Codex",
+    "Send",
+    "Settings",
+    "Sign in",
+    "Skip",
+    "Try again"
   ]
 }

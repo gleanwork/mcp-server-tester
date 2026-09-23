@@ -43,6 +43,8 @@ SESSION_KEYS = tuple(CONTRACT['sessionEnvironment'] + CONTRACT['profileEnvironme
                      + CONTRACT['helperEnvironment'])
 MAX_ACTIONS = CONTRACT['maxActions']
 ERROR_CODES = frozenset(CONTRACT['errorCodes'])
+# Fixed labels the driver knows; only these may appear in failure diagnostics.
+SCREEN_LABELS = frozenset(CONTRACT['screenLabels'])
 
 
 def error_code(error, glib_error=()):
@@ -602,6 +604,17 @@ class Driver:
         state = {'observedSurface': observed, 'composerRootCount': len(roots),
                  'sendControlCount': len(controls(nodes, {'Send'}, enabled=False)),
                  'textReadable': False}
+        if not roots and not switches:
+            # No composer and no mode switch: report only counts and fixed,
+            # allowlisted onboarding/dialog labels, never other UI text.
+            shown = [n for n in nodes if available(n, False)]
+            state['screen'] = {
+                'nodeCount': len(nodes),
+                'visibleButtonCount': sum(n['role'] in BUTTONS for n in shown),
+                'visibleFrameCount': sum(n['role'] == 'frame' for n in shown),
+                'dialogCount': sum(n['role'] in {'dialog', 'alert'} for n in shown),
+                'knownLabels': sorted({n['name'] for n in shown if n['name'] in SCREEN_LABELS}),
+            }
         if len(roots) != 1:
             return state
         try:

@@ -33,6 +33,7 @@ describe('Linux ChatGPT shared contract', () => {
       'helperEnvironment',
       'maxActions',
       'errorCodes',
+      'screenLabels',
     ]);
   });
 
