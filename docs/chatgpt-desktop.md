@@ -137,9 +137,65 @@ closed. Stdout is bounded to 1 KiB; stderr is discarded. Each invocation has a
 calls are not retried. The helper must terminate pending work when killed.
 The receipt acknowledges draft dispatch only, not submission or model execution.
 
+### Standalone setup-only MCP settings inspection
+
+The caller can run the packaged `chatgpt-linux-runtime` script with
+`--mode inspect-mcp --timeout-ms 15000 --max-actions 2` and exactly this JSON stdin:
+
+```json
+{ "surface": "chatgpt-work", "serverLabel": "glean-eval" }
+```
+
+`surface` also accepts `codex`. `serverLabel` must be exactly `glean-eval`;
+extra fields (including `prompt`) are rejected. Invoke this **only after prepare
+completes, in a fresh isolated profile, before any queries**. The caller must
+preserve the prepared desktop environment, especially `HOME`, `CODEX_HOME`,
+D-Bus/display settings, and `MST_CHATGPT_URL_OPENER`. Isolation and query-free
+history are caller obligations, not properties the script can prove.
+
+For this mode only, the same caller-owned opener must accept the fixed argument
+`--settings` and exactly `{}` on stdin. It must dispatch `codex://settings` through
+owned-app IPC, without a browser, another app profile, draft, or inference call.
+The existing strict `{ "opened": true }` acknowledgement, output limit, timeout,
+and no-retry rules still apply. Normal draft invocations remain unchanged.
+
+After settings dispatch is acknowledged, the script snapshots AT-SPI. It can
+activate exactly one visible, enabled button/tab/menu-item named `MCP servers`
+(case and whitespace normalized), then takes one more snapshot. It never fills
+a field, reads composer Text, clicks Send, selects a surface, changes server
+settings, or uses coordinates. Missing, ambiguous, disabled, or unrecognized
+navigation produces an inventory, not an inferred status. Snapshots do not poll
+for loading completion; unknown metadata can reflect a settings page still loading.
+The caller must handle leaving settings before later query submission.
+
+A successful receipt has `status: "inspected"`, requested `surface`,
+`action_count`, `duration_ms`, and `metadata` with:
+
+- `setupOnly: true`, `navigationControlCount`, and `navigationActivated`.
+- `controlCount` and at most 40 visible, non-editable `controls` (`role`, `name`).
+  Names are limited to 120 characters. Whole names containing secret prefixes,
+  Bearer tokens, email/URL patterns, long tokens (20+ characters), or unsafe control
+  characters are redacted. Editable descendants and arbitrary static text are excluded.
+- `serverLabelMatchCount`, `serverRowObserved`, and `connectionStatus`.
+  Status is `unknown` unless navigation was activated and one exact server label
+  has an explicit containing AT-SPI table row/list item with unambiguous fixed
+  status text in that same row.
+  Generic groups, duplicate matches, nested rows, and global `Connected` labels
+  do not establish server status.
+- Optional `serverRow` with its role, control count, and allowlisted `staticLabels`.
+  Connection/authentication failures appear only as fixed categories, never error
+  bodies, credentials, editable values, URLs, or query text.
+
+`inspected` means the bounded inspection completed, not that navigation succeeded,
+MCP is enabled/authenticated, or a model can use it. No model-availability claim is
+made. Failure receipts also carry `metadata.setupOnly: true` and never read or hash
+the composer. This mode is standalone: the TypeScript prepare/submit adapter never
+invokes it and rejects inspection receipts. It does not run evaluation queries.
+
 ### Native UI protocol and limits
 
-The packaged `chatgpt-linux-runtime` script has two modes: `prepare` and `submit`.
+The Node adapter uses only the `prepare` and `submit` modes of the packaged
+`chatgpt-linux-runtime` script.
 It accepts `--timeout-ms` and `--max-actions`, with JSON stdin containing `surface`
 and, only for submission, `prompt`. A successful receipt contains `status`
 (`ready` or `submitted`), `surface`, `action_count`, and `duration_ms`. The Node

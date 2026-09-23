@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded ChatGPT AT-SPI setup/submission. Caller owns login and desktop lifecycle.
+"""Bounded ChatGPT AT-SPI setup/submission/inspection. Caller owns desktop lifecycle.
 
 No inference API, shell, arbitrary keyboard input, answer extraction, or action retry.
 Input is JSON on stdin; output never contains query text. Failed setup may
@@ -25,6 +25,21 @@ class DriverFailure(RuntimeError):
 
 BUTTONS = {'button', 'push button'}
 SETUP_CONTROL_ROLES = BUTTONS | {'toggle button', 'radio button', 'menu item'}
+MCP_NAVIGATION_ROLES = BUTTONS | {'tab', 'page tab', 'menu item', 'menuitem'}
+MCP_CONTROL_ROLES = SETUP_CONTROL_ROLES | MCP_NAVIGATION_ROLES
+MCP_STATIC_ROLES = {'label', 'static', 'static text', 'text'}
+MCP_ROW_ROLES = {'table row', 'list item'}
+MCP_CONNECTION_LABELS = {
+    'connected': 'connected', 'disconnected': 'disconnected',
+    'not connected': 'disconnected', 'connecting': 'connecting',
+    'connection failed': 'connection-error', 'connection error': 'connection-error',
+    'authentication required': 'authentication-required',
+    'authentication failed': 'authentication-error', 'error': 'error',
+}
+MCP_STATIC_LABELS = set(MCP_CONNECTION_LABELS) | {
+    'mcp servers', 'enabled', 'disabled', 'authenticated', 'not authenticated',
+}
+MCP_PRIVATE_TOKEN = re.compile(r'[\w+/=-]{20,}', re.UNICODE)
 PRIVATE_CONTROL_NAME = re.compile(
     r'sk-|bearer|[a-z][a-z0-9+.-]*:|www\.|[a-z0-9-]+\.[a-z]{2,}|@|[^\W_]{20,}',
     re.IGNORECASE)
@@ -307,6 +322,10 @@ class Desktop:
     def environment(self):
         return {key: os.environ[key] for key in SESSION_KEYS if key in os.environ}
 
+    def open_settings(self):
+        # Only the caller-owned helper can dispatch codex://settings to its app.
+        self._open(b'{}', ('--settings',))
+
     def open_prompt(self, prompt):
         # The caller-owned helper dispatches native app IPC. It must only open a
         # draft (empty -> codex://threads/new; otherwise codex://new?prompt=...).
@@ -316,6 +335,9 @@ class Desktop:
         data = json.dumps({'prompt': prompt}, ensure_ascii=False).encode('utf-8')
         if len(data) > INPUT_LIMIT:
             raise DriverFailure('input_too_large')
+        self._open(data)
+
+    def _open(self, data, arguments=()):
         expires = time.monotonic() + self.remaining(15)
         process = None
 
@@ -327,7 +349,7 @@ class Desktop:
 
         try:
             process = subprocess.Popen(
-                [self.opener], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                [self.opener, *arguments], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL, env=self.environment(), shell=False)
             output = bytearray()
             os.set_blocking(process.stdin.fileno(), False)
@@ -440,6 +462,65 @@ def editor_roots(nodes):
 def composer(nodes):
     # Separate editors (including dialogs) remain ambiguous and cannot authorize input.
     return unique(editor_roots(nodes), 'composer_missing_or_ambiguous')
+
+
+def normalized_label(name):
+    return ' '.join(name.split()).casefold() if isinstance(name, str) and len(name) <= 4096 else ''
+
+
+def inspection_control_name(name):
+    safe = setup_control_name(name)
+    if safe == '[redacted]' or MCP_PRIVATE_TOKEN.search(name):
+        return '[redacted]'
+    return safe
+
+
+def inspection_safe(node, nodes):
+    # Names inside editors can be values even when a child has a static role.
+    return all(not (candidate['editableState'] or candidate['editableInterface']
+                    or candidate['editable'] or candidate['role'] == 'password text')
+               for candidate in [node, *[nodes[i] for i in node['ancestors']]])
+
+
+def mcp_inspection(nodes, server_label, navigation_activated):
+    visible = [(i, node) for i, node in enumerate(nodes)
+               if available(node, enabled=False) and inspection_safe(node, nodes)]
+    control_nodes = [node for _, node in visible if node['role'] in MCP_CONTROL_ROLES]
+    records = [{'role': node['role'], 'name': inspection_control_name(node['name'])}
+               for node in control_nodes[:40]]
+    matches = [i for i, node in visible
+               if node['role'] in MCP_STATIC_ROLES | MCP_CONTROL_ROLES | MCP_ROW_ROLES
+               and node['name'] == server_label]
+    row_index = None
+    if navigation_activated and len(matches) == 1:
+        match = matches[0]
+        # Only an explicit row/list-item boundary establishes ownership. A
+        # generic pane/group might contain several servers: never infer scope.
+        row_index = next((i for i in reversed((*nodes[match]['ancestors'], match))
+                          if nodes[i]['role'] in MCP_ROW_ROLES
+                          and available(nodes[i], enabled=False)), None)
+        if row_index is not None and any(
+                node['role'] in MCP_ROW_ROLES and row_index in node['ancestors']
+                for i, node in visible if i != row_index):
+            row_index = None
+    metadata = {'setupOnly': True, 'controlCount': len(control_nodes), 'controls': records,
+                'serverLabelMatchCount': len(matches), 'serverRowObserved': row_index is not None,
+                'connectionStatus': 'unknown'}
+    if row_index is not None:
+        scoped = [node for i, node in visible
+                  if i == row_index or row_index in node['ancestors']]
+        labels = {normalized_label(node['name']) for node in scoped
+                  if node['role'] in MCP_STATIC_ROLES}
+        statuses = {MCP_CONNECTION_LABELS[label] for label in labels
+                    if label in MCP_CONNECTION_LABELS}
+        if len(statuses) == 1:
+            metadata['connectionStatus'] = next(iter(statuses))
+        metadata['serverRow'] = {
+            'role': nodes[row_index]['role'],
+            'staticLabels': sorted(labels & MCP_STATIC_LABELS),
+            'controlCount': sum(node['role'] in MCP_CONTROL_ROLES for node in scoped),
+        }
+    return metadata
 
 
 def matches_prompt(text, prompt):
@@ -605,6 +686,29 @@ class Driver:
         self.step = None
         return self.receipt('ready', surface)
 
+    def inspect_mcp(self, surface, server_label):
+        # Standalone setup only. The caller must use a fresh, isolated profile
+        # after prepare and before any queries. Never read Text or open a draft.
+        self.mode = 'inspect-mcp'
+        if surface not in SURFACES:
+            raise DriverFailure('invalid_surface')
+        if server_label != 'glean-eval':
+            raise DriverFailure('invalid_input')
+        self.desktop.require_helpers()
+        self.action(self.desktop.open_settings)
+        nodes = self.snapshot()
+        navigation = [node for node in nodes if available(node)
+                      and node['role'] in MCP_NAVIGATION_ROLES
+                      and normalized_label(node['name']) == 'mcp servers'
+                      and inspection_safe(node, nodes)]
+        if len(navigation) == 1:
+            self.click(navigation[0])
+            nodes = self.snapshot()
+        metadata = mcp_inspection(nodes, server_label, navigation_activated=len(navigation) == 1)
+        metadata.update(navigationControlCount=len(navigation),
+                        navigationActivated=len(navigation) == 1)
+        return {**self.receipt('inspected', surface), 'metadata': metadata}
+
     def submit(self, prompt, surface):
         # Reset even when reusing a driver after prepare, before any validation.
         self.mode = 'submit'
@@ -687,7 +791,8 @@ class Driver:
         return {'setupOnly': True, 'controls': records}
 
     def receipt(self, status, surface=None):
-        draft_state = self.draft_state() if status == 'failed' else None
+        # Inspection failures must not read or fingerprint a composer either.
+        draft_state = self.draft_state() if status == 'failed' and self.mode != 'inspect-mcp' else None
         setup_controls = self.setup_controls() if status == 'failed' else None
         return {'status': status, 'action_count': self.actions,
                 'duration_ms': (time.monotonic() - self.started) * 1000,
@@ -703,7 +808,7 @@ class Driver:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--mode', choices=['prepare', 'submit'], required=True)
+    parser.add_argument('--mode', choices=['prepare', 'submit', 'inspect-mcp'], required=True)
     parser.add_argument('--timeout-ms', type=int, required=True)
     parser.add_argument('--max-actions', type=int, default=24)
     args = parser.parse_args()
@@ -717,13 +822,22 @@ def main():
         payload = json.loads(data)
         if not isinstance(payload, dict):
             raise DriverFailure('invalid_input')
+        if args.mode == 'inspect-mcp' and (set(payload) != {'surface', 'serverLabel'}
+                or payload.get('serverLabel') != 'glean-eval'
+                or payload.get('surface') not in SURFACES):
+            raise DriverFailure('invalid_input')
         driver = Driver(Desktop(), args.timeout_ms, args.max_actions)
         surface = payload.get('surface')
-        result = driver.prepare(surface) if args.mode == 'prepare' else driver.submit(payload.get('prompt'), surface)
+        if args.mode == 'inspect-mcp':
+            result = driver.inspect_mcp(surface, payload['serverLabel'])
+        else:
+            result = driver.prepare(surface) if args.mode == 'prepare' else driver.submit(payload.get('prompt'), surface)
         print(json.dumps(result))
         return 0
     except Exception as error:
         result = driver.receipt('failed') if driver else {'status': 'failed', 'action_count': 0, 'duration_ms': 0}
+        if args.mode == 'inspect-mcp':
+            result['metadata'] = {'setupOnly': True}
         result['error'] = error_code(error)
         print(json.dumps(result))
         return 1

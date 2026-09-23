@@ -752,6 +752,195 @@ class DriverTest(unittest.TestCase):
             self.assertNotIn('private', output.getvalue())
 
 
+class McpInspectionTest(unittest.TestCase):
+    def inspect(self, nodes, after=None, actions=24, navigate=False):
+        if navigate:
+            nodes, after = [node('MCP servers', ancestors=())], nodes
+        desktop = FakeDesktop(nodes)
+        desktop.open_settings = Mock()
+        desktop.open_prompt = Mock(side_effect=AssertionError('no drafts'))
+        desktop.text = Mock(side_effect=AssertionError('no text reads'))
+        desktop.activate = Mock()
+        if after is not None:
+            desktop.snapshot = Mock(side_effect=[nodes, after])
+        driver = Driver(desktop, 60_000, actions)
+        result = driver.inspect_mcp('codex', 'glean-eval')
+        desktop.open_settings.assert_called_once_with()
+        desktop.open_prompt.assert_not_called()
+        desktop.text.assert_not_called()
+        self.assertEqual(result['status'], 'inspected')
+        self.assertEqual(result['surface'], 'codex')
+        self.assertIs(result['metadata']['setupOnly'], True)
+        self.assertNotIn('modelAvailability', json.dumps(result))
+        return desktop, result
+
+    def row(self, labels=('Connected',)):
+        return [node('settings', 'frame', ancestors=()),
+                node('', 'list item', ancestors=(0,)),
+                node('glean-eval', 'static', ancestors=(0, 1)),
+                *[node(label, 'static', ancestors=(0, 1)) for label in labels]]
+
+    def test_only_unique_observed_navigation_can_be_activated(self):
+        for role in ('button', 'push button', 'tab', 'page tab', 'menu item', 'menuitem'):
+            with self.subTest(role=role):
+                navigation = node('  mCp   SeRvErS  ', role, ancestors=())
+                desktop, result = self.inspect([navigation], self.row())
+                desktop.activate.assert_called_once_with(navigation, frozenset({'click', 'press'}))
+                self.assertEqual(result['action_count'], 2)
+                self.assertEqual(result['metadata']['navigationControlCount'], 1)
+                self.assertIs(result['metadata']['navigationActivated'], True)
+                self.assertIs(result['metadata']['serverRowObserved'], True)
+                self.assertEqual(result['metadata']['connectionStatus'], 'connected')
+                self.assertEqual(result['metadata']['serverRow'], {
+                    'role': 'list item', 'staticLabels': ['connected'], 'controlCount': 0})
+
+    def test_missing_ambiguous_disabled_or_wrong_navigation_only_inventories(self):
+        candidates = [[], [node('MCP servers'), node('MCP servers', 'tab')],
+                      [node('MCP servers', enabled=False)], [node('MCP servers', sensitive=False)],
+                      [node('MCP servers', visible=False)], [node('MCP servers', showing=False)],
+                      [node('MCP servers', 'label')], [node('Open MCP servers')],
+                      [node('MCP servers', editableState=True)]]
+        for nodes in candidates:
+            with self.subTest(nodes=nodes):
+                desktop, result = self.inspect(nodes + [node('Send'), node('Delete server')])
+                desktop.activate.assert_not_called()
+                self.assertEqual(result['action_count'], 1)
+                self.assertFalse(result['metadata']['navigationActivated'])
+                self.assertEqual(result['metadata']['connectionStatus'], 'unknown')
+                self.assertFalse(result['metadata']['serverRowObserved'])
+
+    def test_missing_or_ambiguous_navigation_never_claims_status_even_with_a_row(self):
+        for navigation in ([], [node('MCP servers'), node('MCP servers', 'tab')]):
+            desktop, result = self.inspect(self.row() + navigation)
+            desktop.activate.assert_not_called()
+            self.assertEqual(result['metadata']['connectionStatus'], 'unknown')
+            self.assertNotIn('serverRow', result['metadata'])
+            self.assertEqual(result['metadata']['serverLabelMatchCount'], 1)
+
+    def test_global_other_row_hidden_editable_and_arbitrary_text_never_supply_status(self):
+        for other in ([node('Connected', 'static', ancestors=(0,))],
+                      [node('', 'list item', ancestors=(0,)),
+                       node('Connected', 'static', ancestors=(0, 3))],
+                      [node('Connected', 'static', ancestors=(0, 1), visible=False)],
+                      [node('Connected', 'static', ancestors=(0, 1), editableState=True)],
+                      [node('Connected to private.example', 'static', ancestors=(0, 1))],
+                      [node('Authentication failed: private details', 'static', ancestors=(0, 1))]):
+            _, result = self.inspect(self.row(()) + other, navigate=True)
+            self.assertTrue(result['metadata']['serverRowObserved'])
+            self.assertEqual(result['metadata']['connectionStatus'], 'unknown')
+            self.assertEqual(result['metadata']['serverRow']['staticLabels'], [])
+            self.assertNotIn('private', json.dumps(result))
+
+    def test_only_fixed_categories_and_unambiguous_same_row_status(self):
+        for labels, expected in [
+                (('Connected', 'Disconnected'), 'unknown'),
+                (('Connected', 'Connection failed'), 'unknown'),
+                (('Connected', 'CONNECTED'), 'connected'),
+                (('Connection failed',), 'connection-error'),
+                (('Authentication required',), 'authentication-required'),
+                (('Authentication failed',), 'authentication-error'),
+                (('Not connected',), 'disconnected'),
+                (('Connecting',), 'connecting'), (('Error',), 'error'),
+                (('Enabled', 'Authenticated'), 'unknown')]:
+            with self.subTest(labels=labels):
+                _, result = self.inspect(self.row(labels), navigate=True)
+                self.assertEqual(result['metadata']['connectionStatus'], expected)
+
+    def test_unknown_or_ambiguous_row_is_not_guessed_from_generic_ancestors(self):
+        for nodes in (
+                [node('glean-eval', 'label'), node('Connected', 'static')],
+                [node('', 'panel', ancestors=()), node('glean-eval', 'label'), node('Connected', 'static')],
+                self.row() + [node('glean-eval', 'label', ancestors=(0,))],
+                self.row() + [node('', 'table row', ancestors=(0, 1))],
+                [node('glean-eval extra', 'list item', ancestors=()), node('Connected', 'static')],
+                [node('Glean-Eval', 'list item', ancestors=()), node('Connected', 'static')]):
+            _, result = self.inspect(nodes, navigate=True)
+            self.assertFalse(result['metadata']['serverRowObserved'])
+            self.assertEqual(result['metadata']['connectionStatus'], 'unknown')
+            self.assertNotIn('serverRow', result['metadata'])
+
+    def test_table_row_and_nearest_row_scope(self):
+        nodes = self.row(('Disabled', 'Not authenticated'))
+        nodes[1]['role'] = 'table row'
+        _, result = self.inspect(nodes, navigate=True)
+        self.assertEqual(result['metadata']['serverRow']['staticLabels'], ['disabled', 'not authenticated'])
+        self.assertEqual(result['metadata']['connectionStatus'], 'unknown')
+
+    def test_inventory_is_visible_role_allowlisted_and_excludes_editable_descendants(self):
+        nodes = [node('private editor', 'text', ancestors=(), editableState=True),
+                 node('private value', 'button', ancestors=(0,)),
+                 node('private label', 'static', ancestors=()),
+                 node('hidden', visible=False, ancestors=()),
+                 node('MCP servers', enabled=False, ancestors=())]
+        nodes += [node('Control ' + str(i), ancestors=()) for i in range(50)]
+        _, result = self.inspect(nodes)
+        metadata = result['metadata']
+        self.assertEqual(metadata['controlCount'], 51)
+        self.assertEqual(len(metadata['controls']), 40)
+        self.assertEqual(metadata['controls'][0], {'role': 'button', 'name': 'MCP servers'})
+        self.assertNotIn('private', json.dumps(result))
+        self.assertNotIn('hidden', json.dumps(result))
+        self.assertTrue(all(set(record) == {'role', 'name'} for record in metadata['controls']))
+
+    def test_inventory_redacts_whole_private_names_before_truncating(self):
+        private = ['sk-test', 'BEARER token', 'user@example.test', 'https://example.test',
+                   'codex://settings', 'a' * 20, 'abcde_fghij_klmno_pqrst',
+                   'π' * 20, 'x ' * 80 + 'token_' * 4, 'private\nvalue', 'x' * 4097]
+        _, result = self.inspect([node(name, ancestors=()) for name in private]
+                                 + [node('safe ' * 30, ancestors=())])
+        records = result['metadata']['controls']
+        self.assertEqual([r['name'] for r in records[:-1]], ['[redacted]'] * len(private))
+        self.assertEqual(len(records[-1]['name']), 120)
+
+    def test_failed_ack_or_click_never_retries_or_reads_composer(self):
+        for failing in ('open_settings', 'activate'):
+            desktop = FakeDesktop([node('MCP servers')])
+            desktop.open_settings = Mock()
+            desktop.activate = Mock()
+            desktop.open_prompt = Mock()
+            desktop.text = Mock(side_effect=AssertionError('no text reads'))
+            getattr(desktop, failing).side_effect = DriverFailure('action_acknowledgement_uncertain')
+            driver = Driver(desktop, 60_000, 24)
+            with self.assertRaisesRegex(DriverFailure, '^action_acknowledgement_uncertain$'):
+                driver.inspect_mcp('codex', 'glean-eval')
+            self.assertNotIn('draftState', driver.receipt('failed'))
+            getattr(desktop, failing).assert_called_once()
+            desktop.open_prompt.assert_not_called()
+            desktop.text.assert_not_called()
+
+    def test_budget_blocks_navigation_without_retry(self):
+        desktop = FakeDesktop([node('MCP servers')])
+        desktop.open_settings = Mock()
+        desktop.activate = Mock()
+        with self.assertRaisesRegex(DriverFailure, '^action_budget_exhausted$'):
+            Driver(desktop, 60_000, 1).inspect_mcp('codex', 'glean-eval')
+        desktop.open_settings.assert_called_once()
+        desktop.activate.assert_not_called()
+
+    def test_main_strict_payload_and_no_query_driver_mode_expansion(self):
+        valid = {'surface': 'codex', 'serverLabel': 'glean-eval'}
+        payloads = [valid, {**valid, 'prompt': 'private query'},
+                    {'surface': 'codex'}, {**valid, 'surface': 'private'},
+                    *[{**valid, 'serverLabel': label} for label in
+                      ('glean-eval extra', 'glean-eval\n', 'Glean-Eval', 'sk-private', None)]]
+        for payload in payloads:
+            desktop = FakeDesktop([])
+            desktop.open_settings = Mock()
+            desktop.text = Mock(side_effect=AssertionError('no composer reads'))
+            with patch('chatgpt_linux.Desktop', return_value=desktop) as constructor, \
+                    patch('sys.argv', ['driver', '--mode', 'inspect-mcp', '--timeout-ms', '60000']), \
+                    patch('sys.stdin', SimpleNamespace(buffer=io.BytesIO(json.dumps(payload).encode()))), \
+                    patch('sys.stdout', new_callable=io.StringIO) as output:
+                self.assertEqual(main(), 0 if payload == valid else 1)
+            receipt = json.loads(output.getvalue())
+            self.assertIs(receipt['metadata']['setupOnly'], True)
+            self.assertNotIn('private', output.getvalue())
+            desktop.text.assert_not_called()
+            if payload != valid:
+                constructor.assert_not_called()
+                desktop.open_settings.assert_not_called()
+
+
 class OpenerTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -788,6 +977,21 @@ class OpenerTest(unittest.TestCase):
         self.assertNotIn('ANTHROPIC_API_KEY', value['env'])
         self.assertNotIn('MCP_TOKEN', value['env'])
         self.assertNotIn('MST_CHATGPT_URL_OPENER', value['env'])
+
+    def test_settings_uses_only_fixed_argument_and_empty_object(self):
+        self.helper('import json, sys\n'
+                    'assert json.load(sys.stdin) == {}\n'
+                    'assert sys.argv[1:] == ["--settings"]\n'
+                    'print("{\\"opened\\":true}")\n')
+        self.desktop.open_settings()
+
+    def test_settings_rejects_uncertain_ack_without_retry(self):
+        for output in ('', 'private-query', '{"opened":false}', '{"opened":1}',
+                       '{"opened":true,"extra":"private"}', '{"opened":true,"opened":true}',
+                       '[["opened",true]]', '{"opened":true}\n{}', 'x' * 1025):
+            self.helper('import sys\nsys.stdin.read()\n' + f'print({output!r})\n')
+            with self.assertRaisesRegex(DriverFailure, '^helper_failed$'):
+                self.desktop.open_settings()
 
     def test_empty_prompt_is_exact_empty_json_not_a_query(self):
         self.helper('import json, sys\n'

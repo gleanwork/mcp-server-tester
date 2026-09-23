@@ -98,6 +98,32 @@ const composerFailure = {
 };
 
 describe('Linux ChatGPT runtime adapter', () => {
+  it.each(['prepare', 'submit'] as const)(
+    'rejects standalone inspect-mcp receipts during %s',
+    async (mode) => {
+      await helper('receipt', {
+        status: 'inspected',
+        surface: 'chatgpt-work',
+        action_count: 1,
+        duration_ms: 4,
+        metadata: {
+          setupOnly: true,
+          serverRowObserved: false,
+          connectionStatus: 'unknown',
+          controls: [{ role: 'button', name: 'MCP servers' }],
+        },
+      });
+      await expect(
+        runLinuxChatgptDesktop(mode, config, Date.now() + 5000)
+      ).rejects.toMatchObject({
+        metadata: undefined,
+        message: expect.stringContaining('missing_or_invalid_receipt'),
+      });
+      const calls = await readFile(join(root, 'calls.jsonl'), 'utf8');
+      expect(calls).not.toContain('inspect-mcp');
+      expect(calls.trim().split('\n')).toHaveLength(1);
+    }
+  );
   const setupControls = {
     setupOnly: true,
     controls: [{ role: 'button', name: 'Trust folder' }],
