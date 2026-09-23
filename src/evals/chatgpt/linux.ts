@@ -30,6 +30,17 @@ const FailurePhase = z.enum([
   'surface',
   'composer',
 ]);
+const ComposerCandidate = z
+  .object({
+    role: z.string().regex(/^[a-z][a-z -]{0,63}$/),
+    showing: z.boolean(),
+    visible: z.boolean(),
+    enabled: z.boolean(),
+    sensitive: z.boolean(),
+    editableState: z.boolean(),
+    editableInterface: z.boolean(),
+  })
+  .strict();
 const Receipt = z
   .object({
     status: z.enum(['ready', 'submitted', 'failed']),
@@ -37,6 +48,7 @@ const Receipt = z
     action_count: z.number().int().nonnegative(),
     duration_ms: z.number().finite().nonnegative(),
     phase: FailurePhase.optional(),
+    composerCandidates: z.array(ComposerCandidate).max(16).optional(),
     error: z
       .string()
       .regex(/^[a-z_]{1,64}$/)
@@ -45,13 +57,19 @@ const Receipt = z
   .strict()
   .refine(
     (receipt) => receipt.phase === undefined || receipt.status === 'failed'
+  )
+  .refine(
+    (receipt) =>
+      receipt.composerCandidates === undefined ||
+      (receipt.status === 'failed' && receipt.phase === 'composer')
   );
 
 export class NativeChatgptDriverError extends Error {
   constructor(
     message: string,
     public readonly telemetry?: SemanticDesktopTelemetry,
-    public readonly phase?: z.infer<typeof FailurePhase>
+    public readonly phase?: z.infer<typeof FailurePhase>,
+    public readonly composerCandidates?: z.infer<typeof ComposerCandidate>[]
   ) {
     super(message);
   }
@@ -192,7 +210,8 @@ export async function runLinuxChatgptDesktop(
     throw new NativeChatgptDriverError(
       `Linux ChatGPT ${mode} failed or its receipt was uncertain (${record?.error ?? 'missing_or_invalid_receipt'}${record?.phase ? `; phase=${record.phase}` : ''}); no retry attempted.`,
       telemetry,
-      record?.phase
+      record?.phase,
+      record?.composerCandidates
     );
   return { telemetry };
 }

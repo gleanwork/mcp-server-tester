@@ -20,6 +20,7 @@ BUTTONS = {'button', 'push button'}
 SURFACES = {'chatgpt-work': 'ChatGPT Work', 'codex': 'Codex'}
 MENU_LABELS = {'chatgpt-work': 'ChatGPT Work Create, learn, and explore',
                'codex': 'Codex Build, debug, and ship'}
+EDITOR_ROLES = {'entry', 'text', 'text area', 'editable text', 'paragraph'}
 
 
 class Desktop:
@@ -58,14 +59,19 @@ class Desktop:
             index = len(nodes)
             # A stale or incomplete tree cannot authorize an action.
             states = node.get_state_set()
-            visible = states.contains(self.api.StateType.SHOWING) and states.contains(self.api.StateType.VISIBLE)
-            enabled = states.contains(self.api.StateType.ENABLED) and states.contains(self.api.StateType.SENSITIVE)
+            showing = states.contains(self.api.StateType.SHOWING)
+            visible = states.contains(self.api.StateType.VISIBLE)
+            enabled = states.contains(self.api.StateType.ENABLED)
+            sensitive = states.contains(self.api.StateType.SENSITIVE)
             role = node.get_role_name()
-            editable = (role in {'entry', 'text', 'text area', 'editable text', 'paragraph'}
-                        and states.contains(self.api.StateType.EDITABLE)
-                        and node.get_editable_text_iface() is not None)
+            # Observe every role, but do not widen the action-authorizing gate.
+            editable_state = states.contains(self.api.StateType.EDITABLE)
+            editable_interface = node.get_editable_text_iface() is not None
+            editable = role in EDITOR_ROLES and editable_state and editable_interface
             nodes.append({'node': node, 'ancestors': ancestors, 'name': node.get_name() or '',
-                          'role': role, 'visible': visible, 'enabled': enabled, 'editable': editable,
+                          'role': role, 'showing': showing, 'visible': visible,
+                          'enabled': enabled, 'sensitive': sensitive, 'editable': editable,
+                          'editableState': editable_state, 'editableInterface': editable_interface,
                           'selected': states.contains(self.api.StateType.CHECKED)
                           or states.contains(self.api.StateType.SELECTED)})
             pending.extend((node.get_child_at_index(i), ancestors + (index,))
@@ -93,8 +99,13 @@ class Desktop:
             raise DriverFailure('fill_acknowledgement_uncertain')
 
 
+def available(node, enabled=True):
+    return (node['showing'] and node['visible']
+            and (not enabled or (node['enabled'] and node['sensitive'])))
+
+
 def controls(nodes, names, roles=BUTTONS, enabled=True):
-    return [n for n in nodes if n['visible'] and (n['enabled'] or not enabled)
+    return [n for n in nodes if available(n, enabled)
             and n['role'] in roles and n['name'] in names]
 
 
@@ -106,7 +117,7 @@ def unique(nodes, code):
 
 def composer(nodes):
     # Role alone is insufficient: Chromium also exposes static text with role text.
-    return unique([n for n in nodes if n['visible'] and n['enabled'] and n['editable']],
+    return unique([n for n in nodes if available(n) and n['editable']],
                   'composer_missing_or_ambiguous')
 
 
@@ -129,6 +140,7 @@ class Driver:
         self.max_actions = max_actions
         self.actions = 0
         self.phase = None
+        self.composer_candidates = None
 
     def check(self):
         if time.monotonic() >= self.deadline:
@@ -147,6 +159,16 @@ class Driver:
     def snapshot(self):
         self.check()
         nodes = self.desktop.snapshot()
+        # Keep only the latest bounded structural evidence, never UI text or names.
+        self.composer_candidates = []
+        for node in nodes:
+            if (node['editableState'] or node['editableInterface']
+                    or node['role'] in EDITOR_ROLES):
+                self.composer_candidates.append({key: node[key] for key in (
+                    'role', 'showing', 'visible', 'enabled', 'sensitive',
+                    'editableState', 'editableInterface')})
+                if len(self.composer_candidates) == 16:
+                    break
         self.check()
         return nodes
 
@@ -169,7 +191,7 @@ class Driver:
     def ready(self, nodes, surface):
         if not self.selected(nodes, surface):
             return False
-        editors = [n for n in nodes if n['visible'] and n['enabled'] and n['editable']]
+        editors = [n for n in nodes if available(n) and n['editable']]
         sends = controls(nodes, {'Send'}, enabled=False)
         if not editors or not sends:
             return False
@@ -253,7 +275,10 @@ class Driver:
         return {'status': status, 'action_count': self.actions,
                 'duration_ms': (time.monotonic() - self.started) * 1000,
                 **({'surface': surface} if surface else {}),
-                **({'phase': self.phase} if status == 'failed' and self.phase else {})}
+                **({'phase': self.phase} if status == 'failed' and self.phase else {}),
+                **({'composerCandidates': self.composer_candidates}
+                   if status == 'failed' and self.phase == 'composer'
+                   and self.composer_candidates is not None else {})}
 
 
 def main():

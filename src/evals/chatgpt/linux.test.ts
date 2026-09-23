@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   linuxChatgptHome,
+  NativeChatgptDriverError,
   runLinuxChatgptDesktop,
   validateLinuxChatgptPaths,
 } from './linux.js';
@@ -33,7 +34,7 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-async function helper(mode = 'valid') {
+async function helper(mode = 'valid', receipt?: unknown) {
   const path = join(root, 'python-fixture.mjs');
   await writeFile(
     path,
@@ -43,6 +44,7 @@ const payload = JSON.parse(fs.readFileSync(0, 'utf8'));
 fs.appendFileSync(${JSON.stringify(join(root, 'calls.jsonl'))}, JSON.stringify({ payload, argv: process.argv.slice(2), env: Object.keys(process.env) })+'\\n');
 if (${JSON.stringify(mode)} === 'malformed') { console.log('private-receipt'); process.exit(0); }
 if (${JSON.stringify(mode)} === 'failure') { console.error('private-error'); process.exit(1); }
+if (${JSON.stringify(mode)} === 'receipt') { console.log(JSON.stringify(${JSON.stringify(receipt) ?? 'null'})); process.exit(0); }
 const prepare = process.argv.includes('prepare');
 console.log(JSON.stringify({status: prepare ? 'ready' : 'submitted', surface: ${JSON.stringify(mode)} === 'wrong-surface' ? 'codex' : payload.surface, action_count: ${JSON.stringify(mode)} === 'over-budget' ? 65 : 3, duration_ms: 4}));
 `,
@@ -55,7 +57,111 @@ console.log(JSON.stringify({status: prepare ? 'ready' : 'submitted', surface: ${
   };
 }
 
+const composerCandidate = {
+  role: 'document web',
+  showing: false,
+  visible: true,
+  enabled: true,
+  sensitive: false,
+  editableState: true,
+  editableInterface: false,
+};
+const composerFailure = {
+  status: 'failed',
+  phase: 'composer',
+  error: 'state_transition_unobserved',
+  action_count: 0,
+  duration_ms: 4,
+};
+
 describe('Linux ChatGPT runtime adapter', () => {
+  it.each([0, 1, 16])(
+    'preserves %i allowlisted candidates as error metadata only',
+    async (count) => {
+      const composerCandidates = Array.from({ length: count }, () => ({
+        ...composerCandidate,
+      }));
+      await helper('receipt', { ...composerFailure, composerCandidates });
+      const error: unknown = await runLinuxChatgptDesktop(
+        'prepare',
+        config,
+        Date.now() + 5000
+      ).catch((failure: unknown) => failure);
+      expect(error).toBeInstanceOf(NativeChatgptDriverError);
+      expect(error).toMatchObject({
+        phase: 'composer',
+        composerCandidates,
+        telemetry: { accounting: 'partial', action_count: 0 },
+      });
+      expect((error as Error).message).not.toContain('document web');
+    }
+  );
+  it('accepts legacy composer failures without diagnostics', async () => {
+    await helper('receipt', composerFailure);
+    await expect(
+      runLinuxChatgptDesktop('prepare', config, Date.now() + 5000)
+    ).rejects.toMatchObject({
+      phase: 'composer',
+      composerCandidates: undefined,
+    });
+  });
+  it.each([
+    { composerCandidates: Array.from({ length: 17 }, () => composerCandidate) },
+    { composerCandidates: [{ ...composerCandidate, name: 'private UI text' }] },
+    { composerCandidates: [{ ...composerCandidate, text: 'private prompt' }] },
+    {
+      composerCandidates: [{ ...composerCandidate, config: 'private config' }],
+    },
+    {
+      composerCandidates: [
+        { ...composerCandidate, url: 'https://private.example' },
+      ],
+    },
+    {
+      composerCandidates: [
+        { ...composerCandidate, credentials: 'private key' },
+      ],
+    },
+    { composerCandidates: [{ ...composerCandidate, showing: 1 }] },
+    { composerCandidates: [{ ...composerCandidate, editableState: 'true' }] },
+    { composerCandidates: [{ ...composerCandidate, editableInterface: null }] },
+    { composerCandidates: [{ role: 'text' }] },
+    { composerCandidates: [{ ...composerCandidate, role: 'x'.repeat(65) }] },
+    {
+      composerCandidates: [
+        { ...composerCandidate, role: 'https://private.example' },
+      ],
+    },
+    { composerCandidates: {} },
+    { composerCandidates: null },
+    { composerCandidates: [], phase: 'surface' },
+    { composerCandidates: [], phase: undefined },
+    {
+      composerCandidates: [],
+      status: 'ready',
+      surface: 'chatgpt-work',
+      phase: undefined,
+    },
+    { composerCandidates: [], status: 'submitted', phase: 'composer' },
+  ])(
+    'rejects invalid diagnostic receipt %# without exposing it',
+    async (override) => {
+      await helper('receipt', { ...composerFailure, ...override });
+      const error: unknown = await runLinuxChatgptDesktop(
+        'prepare',
+        config,
+        Date.now() + 5000
+      ).catch((failure: unknown) => failure);
+      expect(error).toBeInstanceOf(NativeChatgptDriverError);
+      expect(error).toMatchObject({
+        phase: undefined,
+        composerCandidates: undefined,
+      });
+      expect((error as Error).message).toContain('missing_or_invalid_receipt');
+      expect(JSON.stringify(error)).not.toContain('private');
+      expect((error as Error).message).not.toContain('private');
+    }
+  );
   it('requires an explicitly isolated desktop and bounded config path', () => {
     expect(() => linuxChatgptHome({})).toThrow('ISOLATED_HOME');
     expect(validateLinuxChatgptPaths(config)).toBe(root);

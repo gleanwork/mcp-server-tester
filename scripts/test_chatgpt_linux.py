@@ -8,7 +8,9 @@ from chatgpt_linux import Driver, DriverFailure, Desktop, composer, fresh_chat, 
 
 
 def node(name, role='button', **values):
-    return {'name': name, 'role': role, 'visible': True, 'enabled': True,
+    return {'name': name, 'role': role, 'showing': True, 'visible': True,
+            'enabled': True, 'sensitive': True, 'editableState': False,
+            'editableInterface': False,
             'editable': False, 'selected': False, 'ancestors': (0,), **values}
 
 
@@ -16,7 +18,8 @@ def ready(surface='ChatGPT Work', text=''):
     return [node('Switch mode, current mode: ' + surface),
             node('Send', enabled=bool(text), ancestors=(0, 2)),
             node('New chat', ancestors=(0,)), node('New chat', ancestors=(0, 2)),
-            node('composer', 'text', editable=True, text=text, ancestors=(0, 2))]
+            node('composer', 'text', editable=True, editableState=True,
+                 editableInterface=True, text=text, ancestors=(0, 2))]
 
 
 class FakeGLibContext:
@@ -211,16 +214,23 @@ class DriverTest(unittest.TestCase):
             def __init__(self, name, role, states, editable=None, children=()):
                 self.name, self.role, self.states = name, role, states
                 self.editable, self.children = editable, children
+                self.interface_reads = 0
             def get_name(self): return self.name
             def get_role_name(self): return self.role
             def get_state_set(self): return SimpleNamespace(contains=lambda state: state in self.states)
-            def get_editable_text_iface(self): return self.editable
+            def get_editable_text_iface(self):
+                self.interface_reads += 1
+                return self.editable
             def get_child_count(self): return len(self.children)
             def get_child_at_index(self, index): return self.children[index]
         static = Node('static', 'text', {1, 2, 3, 4}, object())
         no_interface = Node('not editable', 'text', {1, 2, 3, 4, 5})
         editor = Node('composer', 'text', {1, 2, 3, 4, 5}, object())
-        app = Node('ChatGPT', 'application', {1, 2, 3, 4}, children=[static, no_interface, editor])
+        unexpected = Node('private document', 'document web', {1, 2, 3, 4, 5}, object())
+        hidden = Node('private hidden', 'entry', {2, 3, 4, 5}, object())
+        insensitive = Node('private disabled', 'entry', {1, 2, 3, 5}, object())
+        children = [static, no_interface, editor, unexpected, hidden, insensitive]
+        app = Node('ChatGPT', 'application', {1, 2, 3, 4}, children=children)
         root = Node('desktop', 'desktop', set(), children=[app])
         desktop = object.__new__(Desktop)
         desktop.api = SimpleNamespace(StateType=state_type, get_desktop=lambda index: root)
@@ -229,6 +239,20 @@ class DriverTest(unittest.TestCase):
         self.assertIs(composer(nodes)['node'], editor)
         self.assertFalse(next(n for n in nodes if n['name'] == 'static')['editable'])
         self.assertFalse(next(n for n in nodes if n['name'] == 'not editable')['editable'])
+        for item in [app, *children]:
+            self.assertEqual(item.interface_reads, 1)
+        by_role = next(n for n in nodes if n['role'] == 'document web')
+        self.assertTrue(by_role['editableState'])
+        self.assertTrue(by_role['editableInterface'])
+        self.assertFalse(by_role['editable'])
+        hidden_node = next(n for n in nodes if n['node'] is hidden)
+        self.assertFalse(hidden_node['showing'])
+        self.assertTrue(hidden_node['visible'])
+        insensitive_node = next(n for n in nodes if n['node'] is insensitive)
+        self.assertTrue(insensitive_node['enabled'])
+        self.assertFalse(insensitive_node['sensitive'])
+        self.assertFalse(self.driver(FakeDesktop()).ready(
+            ready()[:-1] + [by_role, hidden_node, insensitive_node], 'chatgpt-work'))
 
     @patch('chatgpt_linux.time.sleep')
     def test_initial_wait_allows_300_polls(self, sleep):
@@ -294,6 +318,48 @@ class DriverTest(unittest.TestCase):
                 self.assertEqual(driver.receipt('failed')['phase'], phase)
                 self.assertNotIn('phase', driver.receipt('ready', 'chatgpt-work'))
 
+    @patch('chatgpt_linux.time.sleep')
+    def test_composer_failure_candidates_are_bounded_structural_only(self, _sleep):
+        candidates = [
+            node('private name', 'document web', editableState=True,
+                 text='private prompt', url='https://private.example', config='private key'),
+            node('private interface', 'section', editableInterface=True),
+            node('private hidden', 'entry', showing=False, visible=True,
+                 enabled=True, sensitive=False),
+            node('private static', 'text'),
+        ] + [node('private overflow', 'text area') for _ in range(20)]
+        desktop = FakeDesktop(ready()[:-1] + [node('not a candidate', 'section')] + candidates)
+        driver = self.driver(desktop)
+        with self.assertRaisesRegex(DriverFailure, 'state_transition_unobserved'):
+            driver.prepare('chatgpt-work')
+        receipt = driver.receipt('failed')
+        records = receipt['composerCandidates']
+        self.assertEqual(len(records), 16)
+        keys = {'role', 'showing', 'visible', 'enabled', 'sensitive',
+                'editableState', 'editableInterface'}
+        for actual, expected in zip(records, candidates):
+            self.assertEqual(set(actual), keys)
+            self.assertEqual(actual, {key: expected[key] for key in keys})
+        self.assertNotIn('private', json.dumps(receipt))
+        self.assertEqual(desktop.actions, [])
+        for status in ('ready', 'submitted'):
+            self.assertNotIn('composerCandidates', driver.receipt(status, 'chatgpt-work'))
+        driver.phase = 'surface'
+        self.assertNotIn('composerCandidates', driver.receipt('failed'))
+        desktop.nodes = []
+        driver.snapshot()
+        driver.phase = 'composer'
+        self.assertEqual(driver.receipt('failed')['composerCandidates'], [])
+
+    def test_each_availability_flag_is_required_for_composer(self):
+        for flag in ('showing', 'visible', 'enabled', 'sensitive'):
+            with self.subTest(flag=flag):
+                nodes = ready()
+                nodes[-1][flag] = False
+                with self.assertRaisesRegex(DriverFailure, 'composer_missing_or_ambiguous'):
+                    composer(nodes)
+                self.assertFalse(self.driver(FakeDesktop()).ready(nodes, 'chatgpt-work'))
+
     def test_main_hides_raw_exception_with_safe_phase(self):
         desktop = FakeDesktop()
         def fail():
@@ -328,6 +394,7 @@ class DriverTest(unittest.TestCase):
         cached = SimpleNamespace(
             get_name=lambda: 'ChatGPT', get_role_name=lambda: 'radio button',
             get_state_set=lambda: SimpleNamespace(contains=lambda state: state in states),
+            get_editable_text_iface=lambda: None,
             get_child_count=lambda: 0)
         root = SimpleNamespace(get_child_count=lambda: 1, get_child_at_index=lambda _: cached)
         desktop = object.__new__(Desktop)
