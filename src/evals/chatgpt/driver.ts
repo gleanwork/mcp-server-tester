@@ -14,6 +14,8 @@ export interface ChatgptApplicationController {
   state(): Promise<{ running: boolean }>;
   stop(): Promise<void>;
   start(environment?: Record<string, string>): Promise<void>;
+  /** Linux only: hand a draft to the running app. Never sends. */
+  openPrompt?(prompt: string): Promise<void>;
 }
 
 /** App-specific options only; the screenshot/action loop is shared with Cowork. */

@@ -10,13 +10,6 @@ export const LINUX_CHATGPT_ERROR_CODES = contract.errorCodes as [
 export const LINUX_CHATGPT_RUNTIME_ENVIRONMENT: readonly string[] = [
   ...contract.sessionEnvironment,
   ...contract.profileEnvironment,
-  ...contract.runtimeEnvironment,
-];
-
-/** Desktop variables forwarded to the caller-owned app controller. */
-export const LINUX_CHATGPT_CONTROLLER_ENVIRONMENT: readonly string[] = [
-  ...contract.sessionEnvironment,
-  ...contract.controllerEnvironment,
 ];
 
 export const NATIVE_MAX_ACTIONS = contract.maxActions;

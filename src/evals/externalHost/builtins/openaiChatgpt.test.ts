@@ -10,6 +10,7 @@ import {
   chatgptBindingDeadline,
   OPENAI_CHATGPT_CAPABILITIES,
 } from './openaiChatgpt.js';
+import { linuxEnvironment } from '../../chatgpt/linuxEnvironment.fixture.js';
 
 const clock = vi.hoisted(() => ({ now: 1000 }));
 vi.mock('node:timers/promises', () => ({
@@ -36,18 +37,8 @@ function context(
   return {
     config: {
       driver,
-      codexSetup: {
-        configPath: join(home, '.codex', 'config.toml'),
-        servers: [],
-      },
-      options: {
-        desktopEnvironment: {
-          HOME: home,
-          MST_CHATGPT_ISOLATED_HOME: home,
-          DISPLAY: ':1',
-          DBUS_SESSION_BUS_ADDRESS: 'unix:path=/test-bus',
-        },
-      },
+      codexSetup: { servers: [] },
+      options: { desktopEnvironment: linuxEnvironment(home) },
     },
     run: {
       runId: 'run',
@@ -72,6 +63,7 @@ function context(
       capabilitiesUsed: ['trace'],
       data: {
         chatgptSessionsRoot: join(home, '.codex', 'sessions'),
+        chatgptEvidenceDir: linux ? join(home, 'evidence') : undefined,
         chatgptSessionBaseline: new Map(),
         chatgptPromptSubmitted: true,
         chatgptNativeController: linux
@@ -113,6 +105,7 @@ describe('bounded native binding wait and failure classification', () => {
         const ctx = context(home, linux, timeout);
         const root = ctx.state.data.chatgptSessionsRoot as string;
         await mkdir(root, { recursive: true });
+        await mkdir(join(home, 'evidence'), { mode: 0o700 });
         await writeFile(
           join(root, 'rollout-unbound.jsonl'),
           JSON.stringify({
@@ -138,25 +131,25 @@ describe('bounded native binding wait and failure classification', () => {
         expect(result).not.toHaveProperty('response');
         if (!result) throw new Error('Missing result');
         const artifacts = result.externalHost.artifacts;
-        expect(
-          artifacts.every((artifact) => artifact.kind === 'metadata')
-        ).toBe(true);
-        const metadata = JSON.parse(artifacts[0]!.summary!);
-        expect(metadata).toMatchObject({
-          authoritative: false,
-          status: 'UNVERIFIED',
-          currentFileCount: 1,
-        });
-        expect(metadata.originatorCount).toEqual(linux ? { other: 1 } : {});
-        expect(artifacts.filter((artifact) => artifact.path)).toHaveLength(
-          linux ? 1 : 0
-        );
-        expect(JSON.stringify(metadata)).not.toContain(home);
+        // Linux copies bounded fresh candidates, labeled UNVERIFIED; macOS copies nothing.
+        expect(artifacts).toHaveLength(linux ? 1 : 0);
+        if (linux) {
+          const [artifact] = artifacts;
+          expect(artifact).toMatchObject({
+            kind: 'metadata',
+            name: expect.stringContaining('UNVERIFIED'),
+            summary: expect.stringMatching(/sha256=[a-f0-9]{64}$/),
+          });
+          expect(artifact!.path!.startsWith(join(home, 'evidence'))).toBe(true);
+          expect(await readFile(artifact!.path!, 'utf8')).toContain(
+            'unconfirmed-origin'
+          );
+          expect(result.externalHost.traceLimitations?.join(' ')).toContain(
+            'missing records do not prove'
+          );
+        }
         expect(JSON.stringify(result.externalHost)).not.toContain(
           'private-session'
-        );
-        expect(result.externalHost.traceLimitations?.join(' ')).toContain(
-          'Missing records do not prove'
         );
         expect(findChatgptTrace).toHaveBeenCalledWith(
           root,
@@ -192,6 +185,7 @@ describe('bounded native binding wait and failure classification', () => {
         ctx.config.options!.surface = surface;
         const root = ctx.state.data.chatgptSessionsRoot as string;
         await mkdir(root, { recursive: true });
+        await mkdir(join(home, 'evidence'), { mode: 0o700 });
         const records = [
           { type: 'session_meta', payload: { id: 'session', originator } },
           {
@@ -270,6 +264,7 @@ describe('bounded native binding wait and failure classification', () => {
       clock.now = Date.parse('2026-09-23T15:36:01Z');
       const root = ctx.state.data.chatgptSessionsRoot as string;
       await mkdir(root, { recursive: true });
+      await mkdir(join(home, 'evidence'), { mode: 0o700 });
       const content = await readFile(
         new URL('./fixtures/codexDesktopAborted.jsonl', import.meta.url),
         'utf8'
@@ -288,14 +283,18 @@ describe('bounded native binding wait and failure classification', () => {
       expect(result).not.toHaveProperty('response');
       expect(findChatgptTrace).toHaveBeenCalledTimes(1);
       if (!result) throw new Error('Missing result');
-      const diagnostic = result.externalHost.artifacts.find((artifact) =>
-        artifact.summary?.includes('originatorCount')
-      );
-      expect(JSON.parse(diagnostic!.summary!)).toMatchObject({
-        expectedNativeOriginator: 'Codex Desktop',
-        originatorCount: { 'Codex Desktop': 1 },
-        authoritative: false,
-      });
+      // The bound (aborted) transcript is preserved as evidence, not accepted.
+      expect(result.externalHost.artifacts).toEqual([
+        expect.objectContaining({
+          kind: 'transcript',
+          summary: expect.stringMatching(
+            /^Bound turn .+; did not complete successfully; sha256=[a-f0-9]{64}$/
+          ),
+        }),
+      ]);
+      expect(
+        await readFile(result.externalHost.artifacts[0]!.path!, 'utf8')
+      ).toBe(content);
     } finally {
       await rm(home, { recursive: true, force: true });
     }
@@ -368,13 +367,11 @@ describe('bounded native binding wait and failure classification', () => {
     }
   });
 
-  it('does not attach content diagnostics when Linux HOME attestation is absent', async () => {
+  it('does not copy evidence without an MST-owned evidence directory', async () => {
     const home = await mkdtemp(join(tmpdir(), 'chatgpt-unattested-'));
     try {
       const ctx = context(home, true, 1);
-      ctx.config.options = {
-        desktopEnvironment: { HOME: home, MST_CHATGPT_ISOLATED_HOME: '' },
-      };
+      ctx.state.data.chatgptEvidenceDir = undefined;
       const result = await capture(ctx);
       expect(result?.externalHost.artifacts).toEqual([]);
     } finally {

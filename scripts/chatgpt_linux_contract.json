@@ -17,12 +17,7 @@
     "XDG_STATE_HOME",
     "CODEX_HOME"
   ],
-  "runtimeEnvironment": ["MST_CHATGPT_URL_OPENER"],
   "helperEnvironment": ["NO_AT_BRIDGE"],
-  "controllerEnvironment": [
-    "GNOME_KEYRING_CONTROL",
-    "MST_CHATGPT_CONTROL_SOCKET"
-  ],
   "maxActions": { "default": 24, "max": 64 },
   "errorCodes": [
     "accessibility_event_budget",

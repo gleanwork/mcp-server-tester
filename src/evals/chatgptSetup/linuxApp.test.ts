@@ -23,22 +23,24 @@ interface Call {
 async function fakeApp(handoffExit = 0, mainExitsImmediately = false) {
   const path = join(root, 'chatgpt');
   const calls = join(root, 'calls.jsonl');
-  await writeFile(
-    path,
-    `#!${process.execPath}
+  if (mainExitsImmediately)
+    await writeFile(path, '#!/bin/sh\nexit 0\n', { mode: 0o700 });
+  else
+    await writeFile(
+      path,
+      `#!${process.execPath}
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ args, env: process.env, pid: process.pid }) + '\\n');
 const url = args.find((arg) => arg.startsWith('codex://'));
 if (url) process.exit(${handoffExit});
-if (${mainExitsImmediately}) process.exit(0);
 const helper = spawn('/bin/sleep', ['60'], { stdio: 'ignore' });
 fs.writeFileSync(${JSON.stringify(join(root, 'helper.pid'))}, String(helper.pid));
 setInterval(() => {}, 1000);
 `,
-    { mode: 0o700 }
-  );
+      { mode: 0o700 }
+    );
   const environment = {
     HOME: root,
     CODEX_HOME: join(root, '.codex'),
@@ -103,7 +105,10 @@ describe('in-process Linux ChatGPT app controller', () => {
     });
     expect(await controller.state()).toEqual({ running: true });
     await controller.openPrompt('  α 😀\nline  ');
-    const [main, handoff] = await calls();
+    await expect.poll(async () => (await calls()).length).toBe(2);
+    const [main, handoff] = (await calls()).sort(
+      (a, b) => a.args.length - b.args.length
+    );
     expect(main!.args).toEqual([...LINUX_CHATGPT_APP_FLAGS]);
     expect(main!.env).toMatchObject({
       MST_CHATGPT_MCP_TOKEN_0: 'fixture-token',
@@ -120,6 +125,9 @@ describe('in-process Linux ChatGPT app controller', () => {
     ]);
     // The hand-off process never receives MCP credentials.
     expect(handoff!.env.MST_CHATGPT_MCP_TOKEN_0).toBeUndefined();
+    await expect
+      .poll(() => readFile(join(root, 'helper.pid'), 'utf8').catch(() => ''))
+      .not.toBe('');
     const helper = Number(await readFile(join(root, 'helper.pid'), 'utf8'));
     expect(alive(main!.pid)).toBe(true);
     expect(alive(helper)).toBe(true);
@@ -154,8 +162,17 @@ describe('in-process Linux ChatGPT app controller', () => {
 
   it('fails closed on an exited main process', async () => {
     const controller = await fakeApp(0, true);
-    await expect(controller.start()).rejects.toMatchObject({
-      code: 'app_exited',
+    // Either start observes the exit, or state and hand-off do; never a draft.
+    const started = await controller.start().then(
+      () => undefined,
+      (error: unknown) => error
+    );
+    if (started) expect(started).toMatchObject({ code: 'app_exited' });
+    await expect
+      .poll(async () => (await controller.state()).running)
+      .toBe(false);
+    await expect(controller.openPrompt('query')).rejects.toMatchObject({
+      code: 'app_not_running',
     });
   });
 
@@ -165,12 +182,15 @@ describe('in-process Linux ChatGPT app controller', () => {
     await expect(controller.openPrompt('query')).rejects.toMatchObject({
       code: 'url_handoff_failed',
     });
-    expect(await calls()).toHaveLength(2);
+    await expect.poll(async () => (await calls()).length).toBe(2);
   });
 
   it('rejects an oversized URL before spawning a hand-off', async () => {
     const controller = await fakeApp();
     await controller.start();
+    await expect
+      .poll(() => readFile(join(root, 'calls.jsonl'), 'utf8'))
+      .toContain('args');
     await expect(
       controller.openPrompt('😀'.repeat(20_000))
     ).rejects.toMatchObject({ code: 'prompt_too_large' });

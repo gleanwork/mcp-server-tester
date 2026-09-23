@@ -1,7 +1,8 @@
-import { execFile } from 'node:child_process';
-import { accessSync, constants, statSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import type { Duplex } from 'node:stream';
+import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import type { ExternalHostConfig } from '../externalHost/types.js';
 import type { SemanticDesktopTelemetry } from '../cowork/driver.js';
@@ -9,8 +10,9 @@ import {
   chatgptDesktopEnvironment,
   chatgptSurface,
   nativeMaxActions,
-  readLaunchEnvironment,
 } from './driver.js';
+import { CodexSetupError } from '../codexSetup/native.js';
+import { readLinuxChatgptEnvironment } from '../chatgptSetup/linuxProfile.js';
 import {
   LINUX_CHATGPT_ERROR_CODES,
   LINUX_CHATGPT_RUNTIME_ENVIRONMENT,
@@ -125,57 +127,17 @@ export class NativeChatgptDriverError extends Error {
   }
 }
 
-/** The caller explicitly attests to an isolated HOME; never fall back to a user profile. */
-export function linuxChatgptHome(environment: NodeJS.ProcessEnv): string {
-  const home = environment.MST_CHATGPT_ISOLATED_HOME;
-  if (
-    !home ||
-    !isAbsolute(home) ||
-    resolve(home) === '/' ||
-    environment.HOME !== home
-  )
-    throw new Error(
-      'Linux ChatGPT requires MST_CHATGPT_ISOLATED_HOME equal to the caller-prepared absolute HOME.'
-    );
-  if (!environment.DISPLAY || !environment.DBUS_SESSION_BUS_ADDRESS)
-    throw new Error(
-      'Linux ChatGPT requires a prepared DISPLAY and D-Bus session.'
-    );
-  return home;
-}
+/** MST's draft hand-off. Called at most once per native invocation. */
+export type ChatgptPromptOpener = (prompt: string) => Promise<void>;
 
-export function validateLinuxChatgptPaths(config: ExternalHostConfig): string {
-  const desktop = chatgptDesktopEnvironment(config);
-  const home = linuxChatgptHome(desktop);
-  const launch = readLaunchEnvironment(config.options?.environment);
-  for (const key of LINUX_CHATGPT_RUNTIME_ENVIRONMENT) {
-    if (launch[key] !== undefined && launch[key] !== desktop[key])
-      throw new Error(
-        'Linux ChatGPT launch environment must not override the prepared desktop session.'
-      );
-  }
-  const path = config.codexSetup?.configPath;
-  if (
-    !path ||
-    !isAbsolute(path) ||
-    relative(home, path).startsWith('..') ||
-    isAbsolute(relative(home, path))
-  )
-    throw new Error(
-      'Linux ChatGPT requires an explicit configPath inside its isolated HOME.'
-    );
-  if (config.options?.chatgptSessionRoot !== undefined)
-    throw new Error(
-      'Linux ChatGPT reads native sessions only from the configured CODEX_HOME.'
-    );
-  return home;
-}
+const OPEN_REQUEST_LIMIT = 1024;
 
 export async function runLinuxChatgptDesktop(
   mode: 'prepare' | 'submit',
   config: ExternalHostConfig,
   deadlineAt: number,
-  prompt?: string
+  prompt?: string,
+  openPrompt?: ChatgptPromptOpener
 ): Promise<{ telemetry: SemanticDesktopTelemetry }> {
   const started = Date.now();
   const timeout = Math.min(deadlineAt - started, 60_000);
@@ -183,21 +145,23 @@ export async function runLinuxChatgptDesktop(
     throw new NativeChatgptDriverError(
       'Linux ChatGPT deadline exceeded; no action attempted.'
     );
-  const env = chatgptDesktopEnvironment(config);
-  linuxChatgptHome(env);
-  const opener = env.MST_CHATGPT_URL_OPENER;
+  const desktop = chatgptDesktopEnvironment(config);
+  let python: string | undefined;
+  let env: Record<string, string>;
   try {
-    if (!opener || !isAbsolute(opener) || !statSync(opener).isFile())
-      throw new Error();
-    accessSync(opener, constants.X_OK);
-  } catch {
+    const linux = readLinuxChatgptEnvironment(desktop);
+    python = linux.python;
+    // The profile installed by setup, never an inherited CLI profile.
+    env = {
+      ...pickEnvironment(desktop, LINUX_CHATGPT_RUNTIME_ENVIRONMENT),
+      CODEX_HOME: linux.codexHome,
+      NO_AT_BRIDGE: '0',
+    };
+  } catch (error) {
     throw new NativeChatgptDriverError(
-      'Linux ChatGPT requires an existing absolute executable MST_CHATGPT_URL_OPENER; no action attempted.'
+      `${error instanceof Error ? error.message : 'Invalid Linux ChatGPT environment.'}`
     );
   }
-  // Match the profile installed by setup, rather than an inherited CLI profile.
-  if (config.codexSetup?.configPath)
-    env.CODEX_HOME = dirname(config.codexSetup.configPath);
   const surface = chatgptSurface(config);
   let maxActions: number;
   try {
@@ -205,6 +169,7 @@ export async function runLinuxChatgptDesktop(
   } catch {
     throw new NativeChatgptDriverError('Invalid Linux ChatGPT action budget.');
   }
+  const draft = mode === 'submit' ? (prompt ?? '') : '';
   const payload = JSON.stringify({
     surface,
     ...(mode === 'submit' ? { prompt } : {}),
@@ -216,10 +181,12 @@ export async function runLinuxChatgptDesktop(
   const script = createRequire(
     typeof __filename === 'string' ? __filename : import.meta.url
   ).resolve('@gleanwork/mcp-server-tester/chatgpt-linux-runtime');
+  let openFailure: string | undefined;
+  let handoff: Promise<void> | undefined;
   const result = await new Promise<{ failed: boolean; stdout: string }>(
     (resolveResult) => {
-      const child = execFile(
-        env.MST_CHATGPT_PYTHON ?? 'python3',
+      const child = spawn(
+        python ?? 'python3',
         [
           script,
           '--mode',
@@ -230,25 +197,90 @@ export async function runLinuxChatgptDesktop(
           ),
           '--max-actions',
           String(maxActions),
+          ...(openPrompt ? ['--open-fd', '3'] : []),
         ],
         {
-          timeout,
-          killSignal: 'SIGKILL',
-          maxBuffer: 64 * 1024,
-          env: {
-            ...pickEnvironment(env, LINUX_CHATGPT_RUNTIME_ENVIRONMENT),
-            NO_AT_BRIDGE: '0',
-          },
-        },
-        (error, stdout) =>
-          resolveResult({ failed: error !== null, stdout: String(stdout) })
+          env,
+          shell: false,
+          stdio: [
+            'pipe',
+            'pipe',
+            'ignore',
+            ...(openPrompt ? ['pipe' as const] : []),
+          ],
+        }
       );
+      let stdout = '';
+      let overflow = false;
+      let settled = false;
+      const timer = setTimeout(() => child.kill('SIGKILL'), timeout);
+      const settle = (failed: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolveResult({ failed: failed || overflow, stdout });
+      };
+      child.stdout?.on('data', (chunk: Buffer) => {
+        if (stdout.length + chunk.length > 64 * 1024) {
+          overflow = true;
+          child.kill('SIGKILL');
+          return;
+        }
+        stdout += chunk.toString('utf8');
+      });
+      child.on('error', () => settle(true));
+      child.on('close', (code) => settle(code !== 0));
       child.stdin?.on('error', () => {
         /* Never retry an uncertain write. */
       });
       child.stdin?.end(payload);
+      const channel = child.stdio[3] as Duplex | null | undefined;
+      if (openPrompt && channel) {
+        let request = '';
+        let requested = false;
+        channel.on('error', () => undefined);
+        channel.on('data', (chunk: Buffer) => {
+          if (requested) return;
+          request += chunk.toString('utf8');
+          if (request.length > OPEN_REQUEST_LIMIT) {
+            requested = true;
+            channel.end(`${JSON.stringify({ opened: false })}\n`);
+            return;
+          }
+          const newline = request.indexOf('\n');
+          if (newline < 0) return;
+          // Exactly one hand-off per invocation, bound to the expected draft.
+          requested = true;
+          let valid = false;
+          try {
+            const message = JSON.parse(request.slice(0, newline)) as unknown;
+            valid = isDeepStrictEqual(message, {
+              open: createHash('sha256').update(draft, 'utf8').digest('hex'),
+            });
+          } catch {
+            valid = false;
+          }
+          const reply = (opened: boolean): void => {
+            channel.end(`${JSON.stringify({ opened })}\n`);
+          };
+          if (!valid) {
+            reply(false);
+            return;
+          }
+          handoff = openPrompt(draft).then(
+            () => reply(true),
+            (error: unknown) => {
+              openFailure =
+                error instanceof CodexSetupError ? error.code : 'open_failed';
+              reply(false);
+            }
+          );
+        });
+      }
     }
   );
+  // Never return while a deep-link hand-off process is still in flight.
+  await handoff;
   let record: z.infer<typeof Receipt> | undefined;
   try {
     record = Receipt.parse(JSON.parse(result.stdout));
@@ -270,7 +302,7 @@ export async function runLinuxChatgptDesktop(
   };
   if (!valid)
     throw new NativeChatgptDriverError(
-      `Linux ChatGPT ${mode} failed or its receipt was uncertain (${record?.error ?? 'missing_or_invalid_receipt'}${record?.phase ? `; phase=${record.phase}` : ''}${record?.step ? `; step=${record.step}` : ''}); no retry attempted.`,
+      `Linux ChatGPT ${mode} failed or its receipt was uncertain (${record?.error ?? 'missing_or_invalid_receipt'}${record?.phase ? `; phase=${record.phase}` : ''}${record?.step ? `; step=${record.step}` : ''}${openFailure ? `; open=${openFailure}` : ''}); no retry attempted.`,
       {
         telemetry,
         error: record?.error,

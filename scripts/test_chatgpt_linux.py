@@ -3,9 +3,11 @@ import hashlib
 import io
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from itertools import chain, repeat
@@ -627,111 +629,109 @@ class DriverTest(unittest.TestCase):
 
 
 class OpenerTest(unittest.TestCase):
+    """The MST parent owns the hand-off; Python sends one sha-bound request."""
+
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temp.cleanup)
-        self.path = Path(self.temp.name) / 'opener'
+        self.driver_end, self.parent_end = socket.socketpair()
+        self.addCleanup(self.driver_end.close)
+        self.addCleanup(self.parent_end.close)
         self.desktop = object.__new__(Desktop)
         self.desktop.deadline = time.monotonic() + 30
+        self.desktop.open_fd = self.driver_end.fileno()
+        self.requests = []
 
-    def helper(self, body):
-        self.path.write_text('#!' + sys.executable + '\n' + body)
-        self.path.chmod(0o700)
-        self.desktop.opener = str(self.path)
+    def parent(self, reply, delay=0):
+        def serve():
+            data = b''
+            while b'\n' not in data:
+                chunk = self.parent_end.recv(4096)
+                if not chunk:
+                    return
+                data += chunk
+            self.requests.append(data)
+            time.sleep(delay)
+            if reply is not None:
+                self.parent_end.sendall(reply)
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join, 1)
 
-    def test_exact_stdin_no_prompt_argv_filtered_env_boolean_receipt(self):
+    def test_sends_only_the_utf8_sha256_and_accepts_one_boolean_receipt(self):
         prompt = '  π 😀\n\nprivate "quoted" \\draft\t  \n'
-        record = Path(self.temp.name) / 'record.json'
-        self.helper('import json, os, sys\n'
-                    'payload = json.load(sys.stdin)\n'
-                    f'with open({str(record)!r}, "w") as output:\n'
-                    ' json.dump({"payload":payload,"argv":sys.argv,"env":dict(os.environ)}, output)\n'
-                    'print("{\\"opened\\":true}")\n')
-        with patch.dict(os.environ, {'MST_CHATGPT_URL_OPENER': str(self.path), 'HOME': self.temp.name,
-                                     'CODEX_HOME': self.temp.name + '/.codex',
-                                     'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/test/bus',
-                                     'ANTHROPIC_API_KEY': 'private-key', 'MCP_TOKEN': 'private-token'}):
-            self.desktop.require_helpers()
-            self.desktop.open_prompt(prompt)
-        value = json.loads(record.read_text())
-        self.assertEqual(value['payload'], {'prompt': prompt})
-        self.assertEqual(value['argv'], [str(self.path)])
-        self.assertEqual(value['env']['HOME'], self.temp.name)
-        self.assertEqual(value['env']['CODEX_HOME'], self.temp.name + '/.codex')
-        self.assertEqual(value['env']['DBUS_SESSION_BUS_ADDRESS'], 'unix:path=/test/bus')
-        self.assertNotIn('ANTHROPIC_API_KEY', value['env'])
-        self.assertNotIn('MCP_TOKEN', value['env'])
-        self.assertNotIn('MST_CHATGPT_URL_OPENER', value['env'])
+        self.parent(b'{"opened": true}\n')
+        self.desktop.require_helpers()
+        self.desktop.open_prompt(prompt)
+        self.assertEqual(json.loads(self.requests[0]),
+                         {'open': hashlib.sha256(prompt.encode('utf-8')).hexdigest()})
+        self.assertNotIn(b'private', self.requests[0])
 
-    def test_empty_prompt_is_exact_empty_json_not_a_query(self):
-        self.helper('import json, sys\n'
-                    'assert json.load(sys.stdin) == {"prompt":""}\n'
-                    'assert len(sys.argv) == 1\n'
-                    'print("{\\"opened\\":true}")\n')
+    def test_empty_prompt_is_the_empty_sha_not_a_query(self):
+        self.parent(b'{"opened":true}\n')
         self.desktop.open_prompt('')
+        self.assertEqual(json.loads(self.requests[0]), {'open': hashlib.sha256(b'').hexdigest()})
 
     def test_invalid_or_oversized_receipts_fail_without_raw_output(self):
-        for output in ('', 'private-query', '{"opened":false}', '{"opened":1}',
-                       '{"opened":true,"url":"private-query"}',
-                       '{"opened":true,"opened":true}', '[["opened",true]]',
-                       '{"opened":true}\n{}', 'x' * 1025):
+        for output in (b'private-query\n', b'{"opened":false}\n', b'{"opened":1}\n',
+                       b'{"opened":true,"url":"private-query"}\n',
+                       b'{"opened":true,"opened":true}\n', b'[["opened",true]]\n',
+                       b'{"opened":true}\n{}', b'x' * 1025, b''):
             with self.subTest(output=output[:40]):
-                self.helper('import sys\nsys.stdin.read()\n'
-                            'print("private-stderr", file=sys.stderr)\n'
-                            f'print({output!r})\n')
+                self.setUp()
+                self.parent(output)
+                if not output:
+                    self.parent_end.shutdown(socket.SHUT_WR)
                 with self.assertRaisesRegex(DriverFailure, '^helper_failed$'):
                     self.desktop.open_prompt('private')
 
-    def test_nonzero_exit_rejects_even_valid_receipt(self):
-        self.helper('import sys\nsys.stdin.read()\nprint("{\\"opened\\":true}")\nsys.exit(1)\n')
+    def test_one_request_per_process_never_retried(self):
+        self.parent(b'{"opened":false}\n')
         with self.assertRaisesRegex(DriverFailure, '^helper_failed$'):
             self.desktop.open_prompt('private')
+        with self.assertRaisesRegex(DriverFailure, '^helper_failed$'):
+            self.desktop.open_prompt('private')
+        self.assertEqual(len(self.requests), 1)
 
-    def test_oversized_utf8_input_never_spawns(self):
-        with patch('chatgpt_linux.subprocess.Popen') as popen:
-            with self.assertRaisesRegex(DriverFailure, 'input_too_large'):
-                self.desktop.open_prompt('😀' * (INPUT_LIMIT // 4))
-            popen.assert_not_called()
+    def test_oversized_or_unencodable_input_never_requests(self):
+        with self.assertRaisesRegex(DriverFailure, 'input_too_large'):
+            self.desktop.open_prompt('😀' * (INPUT_LIMIT // 4 + 1))
+        with self.assertRaisesRegex(DriverFailure, 'invalid_prompt'):
+            self.desktop.open_prompt('bad\ud800')
+        self.assertEqual(self.requests, [])
 
-    def test_missing_relative_directory_nonexecutable_helpers_block(self):
-        self.path.write_text('not executable')
-        for path in ('', 'relative', '/missing/mst-opener', self.temp.name, str(self.path)):
-            with patch.dict(os.environ, {'MST_CHATGPT_URL_OPENER': path}):
+    def test_missing_or_invalid_channel_blocks(self):
+        for fd in (None, 0, 2, 999):
+            with self.subTest(fd=fd):
+                self.desktop.open_fd = fd
                 with self.assertRaisesRegex(DriverFailure, 'helper_missing'):
                     self.desktop.require_helpers()
+        with tempfile.TemporaryFile() as regular:
+            self.desktop.open_fd = regular.fileno()
+            with self.assertRaisesRegex(DriverFailure, 'helper_missing'):
+                self.desktop.require_helpers()
 
-    def test_timeout_is_capped_and_process_killed_without_retry(self):
-        self.helper('import sys, time\nsys.stdin.read()\ntime.sleep(20)\n')
+    def test_timeout_is_capped_by_the_driver_deadline_without_retry(self):
+        self.parent(None)
         self.desktop.deadline = time.monotonic() + 0.08
-        real_popen = subprocess.Popen
-        processes = []
-        def spawn(*args, **kwargs):
-            process = real_popen(*args, **kwargs)
-            processes.append(process)
-            return process
         started = time.monotonic()
-        with patch('chatgpt_linux.subprocess.Popen', side_effect=spawn) as popen:
-            with self.assertRaisesRegex(DriverFailure, '^helper_timeout$'):
-                self.desktop.open_prompt('private')
+        with self.assertRaisesRegex(DriverFailure, '^helper_timeout$'):
+            self.desktop.open_prompt('private')
         self.assertLess(time.monotonic() - started, 2)
-        popen.assert_called_once()
-        self.assertIsNotNone(processes[0].poll())
-        with patch.object(self.desktop, 'remaining', return_value=0.01) as remaining:
+        desktop = object.__new__(Desktop)
+        desktop.open_fd = self.driver_end.fileno()
+        with patch.object(desktop, 'remaining', return_value=0.01, create=True) as remaining:
             with self.assertRaisesRegex(DriverFailure, '^helper_timeout$'):
-                self.desktop.open_prompt('private')
-            remaining.assert_called_once_with(15)
+                desktop.open_prompt('private')
+            remaining.assert_called_once_with(30)
 
-    def test_spawn_error_is_static_and_not_retried(self):
-        self.desktop.opener = '/missing/helper'
-        with patch('chatgpt_linux.subprocess.Popen', side_effect=OSError('private path')) as popen:
-            with self.assertRaisesRegex(DriverFailure, '^helper_failed$'):
-                self.desktop.open_prompt('private')
-            popen.assert_called_once()
-
-    def test_large_output_while_input_pending_is_bounded(self):
-        self.helper('import sys\nsys.stdout.write("x" * 1000000)\nsys.stdout.flush()\nsys.stdin.read()\n')
-        with self.assertRaisesRegex(DriverFailure, '^helper_failed$'):
-            self.desktop.open_prompt('a' * 200_000)
+    def test_main_passes_the_open_fd(self):
+        desktop = FakeDesktop()
+        with patch('chatgpt_linux.Desktop', return_value=desktop), \
+                patch('sys.argv', ['driver', '--mode', 'prepare', '--timeout-ms', '60000',
+                                   '--open-fd', '7']), \
+                patch('sys.stdin', SimpleNamespace(buffer=io.BytesIO(b'{"surface":"codex"}'))), \
+                patch('sys.stdout', new_callable=io.StringIO):
+            main()
+        self.assertEqual(desktop.open_fd, 7)
 
 
 class GeometryTest(unittest.TestCase):
@@ -1287,12 +1287,12 @@ class AccessibilityTest(unittest.TestCase):
             desktop.activate({'node': SimpleNamespace(get_action_iface=lambda: action)}, {'click'})
         action.do_action.assert_called_once()
 
-    def test_contract_is_shared_and_helpers_never_get_the_opener_path(self):
+    def test_contract_is_shared_and_helpers_never_get_mst_paths(self):
         contract = json.loads((Path(__file__).parent / 'chatgpt_linux_contract.json').read_text())
         self.assertEqual(ERROR_CODES, frozenset(contract['errorCodes']))
         self.assertEqual(len(contract['errorCodes']), len(ERROR_CODES))
         self.assertIn('NO_AT_BRIDGE', SESSION_KEYS)
-        self.assertNotIn('MST_CHATGPT_URL_OPENER', SESSION_KEYS)
+        self.assertFalse([key for key in SESSION_KEYS if key.startswith('MST_')])
 
     def test_exception_codes_are_static(self):
         for error, code in [(AttributeError('private'), 'desktop_attribute_error'),

@@ -1,19 +1,23 @@
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type { SemanticDesktopTelemetry } from '../cowork/driver.js';
 import {
   chatgptDesktopEnvironment,
   isLinuxChatgpt,
-  readLaunchEnvironment,
   stringOption,
   type ChatgptApplicationController,
 } from '../chatgpt/driver.js';
 import {
-  linuxChatgptHome,
   runLinuxChatgptDesktop,
-  validateLinuxChatgptPaths,
+  type ChatgptPromptOpener,
 } from '../chatgpt/linux.js';
 import type { ExternalHostConfig } from '../externalHost/types.js';
-import { getLinuxChatgptApplicationController } from './linuxController.js';
+import {
+  createLinuxChatgptProfile,
+  readLinuxChatgptEnvironment,
+  validateLinuxChatgptConfig,
+  type ChatgptPlatformProfile,
+} from './linuxProfile.js';
 import {
   defaultChatgptAppPath,
   defaultChatgptBundleId,
@@ -33,6 +37,8 @@ export interface ChatgptApplication {
   appPath?: string;
   bundleId?: string;
   desktopEnvironment?: NodeJS.ProcessEnv;
+  /** Platform-owned config.toml; overrides codexSetup.configPath. */
+  configPath?: string;
 }
 
 /** The shared batch lifecycle does not choose OS paths or control an application.
@@ -53,11 +59,19 @@ export interface ChatgptPlatform {
     config: ExternalHostConfig,
     binding?: Record<string, unknown>
   ): ChatgptApplication;
-  controller(
+  /** macOS: control the user's installed app. */
+  controller?(
     application: ChatgptApplication
   ): Promise<ChatgptApplicationController>;
+  /** Linux: create a fresh MST-owned profile, app controller, and readiness gate. */
+  createProfile?(
+    application: ChatgptApplication
+  ): Promise<ChatgptPlatformProfile>;
   /** Optional native post-launch surface verification. */
-  verifyReady?(config: ExternalHostConfig): Promise<SemanticDesktopTelemetry>;
+  verifyReady?(
+    config: ExternalHostConfig,
+    openPrompt: ChatgptPromptOpener
+  ): Promise<SemanticDesktopTelemetry>;
 }
 
 export const MAC_CHATGPT_PLATFORM: ChatgptPlatform = {
@@ -110,26 +124,28 @@ export const LINUX_CHATGPT_PLATFORM: ChatgptPlatform = {
     };
   },
   lockHome(config) {
-    return linuxChatgptHome({
-      ...process.env,
-      ...readLaunchEnvironment(config.options?.desktopEnvironment),
-    });
+    return validateLinuxChatgptConfig(config).home;
   },
   application(config) {
-    const desktopEnvironment = chatgptDesktopEnvironment(config);
+    const environment = validateLinuxChatgptConfig(config);
     return {
-      leaseKey: validateLinuxChatgptPaths(config),
-      desktopEnvironment,
+      leaseKey: environment.home,
+      configPath: join(environment.codexHome, 'config.toml'),
+      desktopEnvironment: chatgptDesktopEnvironment(config),
     };
   },
-  async controller(application) {
-    return getLinuxChatgptApplicationController(application.desktopEnvironment);
+  async createProfile(application) {
+    return createLinuxChatgptProfile(
+      readLinuxChatgptEnvironment(application.desktopEnvironment ?? {})
+    );
   },
-  async verifyReady(config) {
+  async verifyReady(config, openPrompt) {
     const prepared = await runLinuxChatgptDesktop(
       'prepare',
       config,
-      Date.now() + (config.timeoutMs ?? 60_000)
+      Date.now() + (config.timeoutMs ?? 60_000),
+      undefined,
+      openPrompt
     );
     return prepared.telemetry;
   },

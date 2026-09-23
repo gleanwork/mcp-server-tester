@@ -2,44 +2,32 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import {
-  linuxChatgptHome,
-  NativeChatgptDriverError,
-  runLinuxChatgptDesktop,
-  validateLinuxChatgptPaths,
-} from './linux.js';
+import { NativeChatgptDriverError, runLinuxChatgptDesktop } from './linux.js';
+import { validateLinuxChatgptConfig } from '../chatgptSetup/linuxProfile.js';
+import { linuxEnvironment } from './linuxEnvironment.fixture.js';
 import type { ExternalHostConfig } from '../externalHost/types.js';
 
 let root: string;
 let config: ExternalHostConfig;
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'mst-chatgpt-native-'));
-  await writeFile(join(root, 'url-opener'), '#!/bin/sh\nexit 1\n', {
-    mode: 0o700,
-  });
   config = {
     driver: 'openai.chatgpt.agent.desktop-app.linux',
-    codexSetup: {
-      configPath: join(root, '.codex', 'config.toml'),
-      servers: [],
-    },
-    options: {
-      desktopEnvironment: {
-        HOME: root,
-        MST_CHATGPT_ISOLATED_HOME: root,
-        DISPLAY: ':1',
-        DBUS_SESSION_BUS_ADDRESS: 'unix:path=/fixture/bus',
-        MST_CHATGPT_URL_OPENER: join(root, 'url-opener'),
-        XDG_DATA_HOME: join(root, '.local/share'),
-        XDG_CACHE_HOME: join(root, '.cache'),
-        XDG_STATE_HOME: join(root, '.local/state'),
-      },
-    },
+    codexSetup: { servers: [] },
+    options: { desktopEnvironment: linuxEnvironment(root) },
   };
 });
 afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
+
+/** Fake MST parent: records the fd-3 request and replies. */
+function opener(calls: string[], fail = false) {
+  return async (prompt: string) => {
+    calls.push(prompt);
+    if (fail) throw new Error('private failure');
+  };
+}
 
 async function helper(mode = 'valid', receipt?: unknown) {
   const path = join(root, 'python-fixture.mjs');
@@ -48,7 +36,19 @@ async function helper(mode = 'valid', receipt?: unknown) {
     `#!/usr/bin/env node
 import fs from 'node:fs';
 const payload = JSON.parse(fs.readFileSync(0, 'utf8'));
-fs.appendFileSync(${JSON.stringify(join(root, 'calls.jsonl'))}, JSON.stringify({ payload, argv: process.argv.slice(2), env: Object.keys(process.env), codexHome: process.env.CODEX_HOME, opener: process.env.MST_CHATGPT_URL_OPENER })+'\\n');
+let opened;
+if (process.argv.includes('--open-fd')) {
+  const crypto = await import('node:crypto');
+  const net = await import('node:net');
+  const socket = new net.Socket({ fd: 3, readable: true, writable: true });
+  const draft = payload.prompt ?? '';
+  const hash = ${JSON.stringify(mode)} === 'wrong-hash' ? '0'.repeat(64) : crypto.createHash('sha256').update(draft, 'utf8').digest('hex');
+  socket.write(JSON.stringify({ open: hash }) + '\\n');
+  opened = await new Promise((resolve) => socket.once('data', (d) => resolve(JSON.parse(String(d)).opened)));
+  socket.destroy();
+}
+fs.appendFileSync(${JSON.stringify(join(root, 'calls.jsonl'))}, JSON.stringify({ payload, argv: process.argv.slice(2), env: Object.keys(process.env), codexHome: process.env.CODEX_HOME, opened })+'\\n');
+if (opened === false) { console.log(JSON.stringify({status:'failed', action_count: 1, duration_ms: 1, error: 'helper_failed'})); process.exit(1); }
 if (${JSON.stringify(mode)} === 'malformed') { console.log('private-receipt'); process.exit(0); }
 if (${JSON.stringify(mode)} === 'failure') { console.error('private-error'); process.exit(1); }
 if (${JSON.stringify(mode)} === 'receipt') { console.log(JSON.stringify(${JSON.stringify(receipt) ?? 'null'})); process.exit(0); }
@@ -329,20 +329,28 @@ describe('Linux ChatGPT runtime adapter', () => {
       expect((error as Error).message).not.toContain('private');
     }
   );
-  it('requires an explicitly isolated desktop and bounded config path', () => {
-    expect(() => linuxChatgptHome({})).toThrow('ISOLATED_HOME');
-    expect(validateLinuxChatgptPaths(config)).toBe(root);
+  it('validates the Scio environment contract and owns $HOME/.codex', () => {
+    expect(validateLinuxChatgptConfig(config)).toMatchObject({
+      home: root,
+      codexHome: join(root, '.codex'),
+    });
+    expect(
+      validateLinuxChatgptConfig({
+        ...config,
+        codexSetup: {
+          configPath: join(root, '.codex', 'config.toml'),
+          servers: [],
+        },
+      }).home
+    ).toBe(root);
     expect(() =>
-      validateLinuxChatgptPaths({ ...config, codexSetup: { servers: [] } })
-    ).toThrow('explicit configPath');
-    expect(() =>
-      validateLinuxChatgptPaths({
+      validateLinuxChatgptConfig({
         ...config,
         codexSetup: { configPath: '/other/config.toml', servers: [] },
       })
-    ).toThrow('isolated HOME');
+    ).toThrow('owns $HOME/.codex');
     expect(() =>
-      validateLinuxChatgptPaths({
+      validateLinuxChatgptConfig({
         ...config,
         options: { ...config.options, environment: { HOME: '/normal/user' } },
       })
@@ -371,25 +379,76 @@ describe('Linux ChatGPT runtime adapter', () => {
       argv: string[];
       env: string[];
       codexHome: string;
-      opener: string;
     };
     expect(record.payload).toEqual({ prompt, surface: 'chatgpt-work' });
     expect(record.argv).not.toContain(prompt);
     expect(record.env).not.toContain('ANTHROPIC_API_KEY');
+    expect(record.env.filter((key) => key.startsWith('MST_'))).toEqual([]);
     expect(record.env).toEqual(
       expect.arrayContaining([
         'HOME',
         'DISPLAY',
         'DBUS_SESSION_BUS_ADDRESS',
         'CODEX_HOME',
-        'MST_CHATGPT_URL_OPENER',
         'XDG_DATA_HOME',
         'XDG_CACHE_HOME',
         'XDG_STATE_HOME',
       ])
     );
     expect(record.codexHome).toBe(join(root, '.codex'));
-    expect(record.opener).toBe(join(root, 'url-opener'));
+  });
+  it('serves exactly one sha-bound draft hand-off over fd 3', async () => {
+    await helper();
+    const prompt = 'exact α query\n';
+    const opened: string[] = [];
+    await runLinuxChatgptDesktop(
+      'submit',
+      config,
+      Date.now() + 5000,
+      prompt,
+      opener(opened)
+    );
+    expect(opened).toEqual([prompt]);
+    const record = JSON.parse(
+      (await readFile(join(root, 'calls.jsonl'), 'utf8')).trim()
+    ) as { argv: string[]; opened: boolean };
+    expect(record.opened).toBe(true);
+    expect(record.argv).toEqual(expect.arrayContaining(['--open-fd', '3']));
+    const prepared: string[] = [];
+    await runLinuxChatgptDesktop(
+      'prepare',
+      config,
+      Date.now() + 5000,
+      undefined,
+      opener(prepared)
+    );
+    expect(prepared).toEqual(['']);
+  });
+  it('refuses a mismatched draft hash and reports a failed hand-off', async () => {
+    await helper('wrong-hash');
+    const opened: string[] = [];
+    await expect(
+      runLinuxChatgptDesktop(
+        'submit',
+        config,
+        Date.now() + 5000,
+        'private-query',
+        opener(opened)
+      )
+    ).rejects.toThrow('helper_failed');
+    expect(opened).toEqual([]);
+  });
+  it('replies opened=false without leaking an opener failure', async () => {
+    await helper();
+    const error: unknown = await runLinuxChatgptDesktop(
+      'submit',
+      config,
+      Date.now() + 5000,
+      'private-query',
+      opener([], true)
+    ).catch((failure: unknown) => failure);
+    expect(String(error)).toContain('open=open_failed');
+    expect(String(error)).not.toContain('private');
   });
   it.each(['failure', 'malformed', 'wrong-surface', 'over-budget'])(
     'does not retry or expose raw output on %s',
@@ -417,25 +476,10 @@ describe('Linux ChatGPT runtime adapter', () => {
     ) as { payload: unknown };
     expect(record.payload).toEqual({ surface: 'codex' });
   });
-  it.each([
-    '',
-    'relative-helper',
-    '/nonexistent/mst-opener',
-    'directory',
-    'not-executable',
-  ])('blocks invalid opener %s before spawning', async (path) => {
+  it('blocks an invalid Scio environment before spawning', async () => {
     await helper();
-    const notExecutable = join(root, 'not-executable');
-    await writeFile(notExecutable, '', { mode: 0o600 });
-    config.options!.desktopEnvironment = {
-      ...(config.options!.desktopEnvironment as object),
-      MST_CHATGPT_URL_OPENER:
-        path === 'directory'
-          ? root
-          : path === 'not-executable'
-            ? notExecutable
-            : path,
-    };
+    delete (config.options!.desktopEnvironment as Record<string, string>)
+      .AT_SPI_BUS_ADDRESS;
     await expect(
       runLinuxChatgptDesktop(
         'submit',
@@ -443,7 +487,7 @@ describe('Linux ChatGPT runtime adapter', () => {
         Date.now() + 5000,
         'private-query'
       )
-    ).rejects.toThrow('MST_CHATGPT_URL_OPENER');
+    ).rejects.toThrow('AT_SPI_BUS_ADDRESS');
     await expect(readFile(join(root, 'calls.jsonl'))).rejects.toMatchObject({
       code: 'ENOENT',
     });

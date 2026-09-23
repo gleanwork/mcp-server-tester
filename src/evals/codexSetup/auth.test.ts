@@ -129,7 +129,7 @@ describe('bounded native commands', () => {
     const result = await runBounded(script, [], {
       env: env(),
       cwd: root,
-      timeoutMs: 300,
+      timeoutMs: 2000,
       maxOutputBytes: 0,
     });
     expect(result.failure).toBe('timeout');

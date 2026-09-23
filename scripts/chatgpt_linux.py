@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Bounded ChatGPT AT-SPI setup/submission. Caller owns desktop lifecycle.
+"""Bounded ChatGPT AT-SPI setup/submission. MST owns the app and draft hand-off.
 
 No inference API, shell, arbitrary keyboard input, answer extraction, or action retry.
 Input is JSON on stdin; output never contains query text or accessible names.
+Draft opening is one request to the MST parent over --open-fd; MST performs the
+codex://new deep-link hand-off and replies with a fixed receipt.
 """
 from __future__ import annotations
 
@@ -10,7 +12,8 @@ import argparse
 import hashlib
 import json
 import os
-import selectors
+import select
+import stat
 import subprocess
 import sys
 import time
@@ -33,7 +36,8 @@ INPUT_LIMIT = 2 * 1024 * 1024
 TEXT_NODE_LIMIT = 256
 TEXT_DEPTH_LIMIT = 16
 OUTPUT_LIMIT = 1024
-# Shared with the Node adapter. Helpers get the session, not the runtime's opener path.
+OPEN_TIMEOUT = 30
+# Shared with the Node adapter.
 CONTRACT = json.loads(Path(__file__).with_name('chatgpt_linux_contract.json').read_text('utf-8'))
 SESSION_KEYS = tuple(CONTRACT['sessionEnvironment'] + CONTRACT['profileEnvironment']
                      + CONTRACT['helperEnvironment'])
@@ -66,12 +70,17 @@ class Desktop:
         self.api = Atspi
         self.context = GLib.MainContext.default()
         self.deadline = float('inf')
+        self.open_fd = None
 
     def require_helpers(self):
-        path = os.environ.get('MST_CHATGPT_URL_OPENER', '')
-        if not (os.path.isabs(path) and os.path.isfile(path) and os.access(path, os.X_OK)):
-            raise DriverFailure('helper_missing')
-        self.opener = path
+        # The MST parent owns the deep-link hand-off. Without its channel no
+        # draft can be opened, so fail before any UI action.
+        fd = self.open_fd
+        try:
+            if type(fd) is not int or fd < 3 or not stat.S_ISSOCK(os.fstat(fd).st_mode):
+                raise OSError
+        except OSError:
+            raise DriverFailure('helper_missing') from None
 
     def remaining(self, cap=2):
         remaining = self.deadline - time.monotonic()
@@ -278,19 +287,25 @@ class Desktop:
         return {key: os.environ[key] for key in SESSION_KEYS if key in os.environ}
 
     def open_prompt(self, prompt):
-        # The caller-owned helper dispatches native app IPC. It must only open a
-        # draft (empty -> codex://threads/new; otherwise codex://new?prompt=...).
-        # No URL/prompt argv, shell, CLI inference, clipboard, or retry.
+        # One request to MST, bound to the exact draft by its UTF-8 SHA-256.
+        # MST knows the prompt; it is never echoed. No argv, shell, or retry.
         if not isinstance(prompt, str):
             raise DriverFailure('invalid_prompt')
-        data = json.dumps({'prompt': prompt}, ensure_ascii=False).encode('utf-8')
-        if len(data) > INPUT_LIMIT:
+        try:
+            encoded = prompt.encode('utf-8', errors='strict')
+        except UnicodeEncodeError:
+            raise DriverFailure('invalid_prompt') from None
+        if len(encoded) > INPUT_LIMIT:
             raise DriverFailure('input_too_large')
-        self._open(data)
+        request = json.dumps({'open': hashlib.sha256(encoded).hexdigest()}).encode('ascii') + b'\n'
+        self._open(request)
 
-    def _open(self, data):
-        expires = time.monotonic() + self.remaining(15)
-        process = None
+    def _open(self, request):
+        fd = self.open_fd
+        if getattr(self, 'open_used', False):
+            raise DriverFailure('helper_failed')
+        self.open_used = True
+        expires = time.monotonic() + self.remaining(OPEN_TIMEOUT)
 
         def remaining():
             seconds = expires - time.monotonic()
@@ -299,52 +314,31 @@ class Desktop:
             return seconds
 
         try:
-            process = subprocess.Popen(
-                [self.opener], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL, env=self.environment(), shell=False)
+            offset = 0
+            while offset < len(request):
+                _, writable, _ = select.select([], [fd], [], remaining())
+                if not writable:
+                    raise DriverFailure('helper_timeout')
+                offset += os.write(fd, request[offset:])
             output = bytearray()
-            os.set_blocking(process.stdin.fileno(), False)
-            os.set_blocking(process.stdout.fileno(), False)
-            with selectors.DefaultSelector() as selector:
-                selector.register(process.stdin, selectors.EVENT_WRITE)
-                selector.register(process.stdout, selectors.EVENT_READ)
-                offset = 0
-                while selector.get_map():
-                    events = selector.select(remaining())
-                    if not events:
-                        raise DriverFailure('helper_timeout')
-                    for key, _ in events:
-                        if key.fileobj is process.stdin:
-                            offset += os.write(process.stdin.fileno(), data[offset:offset + 65536])
-                            if offset == len(data):
-                                selector.unregister(process.stdin)
-                                process.stdin.close()
-                        else:
-                            chunk = os.read(process.stdout.fileno(), OUTPUT_LIMIT + 1 - len(output))
-                            if not chunk:
-                                selector.unregister(process.stdout)
-                            output.extend(chunk)
-                            if len(output) > OUTPUT_LIMIT:
-                                raise DriverFailure('helper_failed')
-            if process.wait(timeout=remaining()) != 0:
-                raise DriverFailure('helper_failed')
+            while b'\n' not in output:
+                readable, _, _ = select.select([fd], [], [], remaining())
+                if not readable:
+                    raise DriverFailure('helper_timeout')
+                chunk = os.read(fd, OUTPUT_LIMIT + 1 - len(output))
+                if not chunk:
+                    raise DriverFailure('helper_failed')
+                output.extend(chunk)
+                if len(output) > OUTPUT_LIMIT:
+                    raise DriverFailure('helper_failed')
+            line, _, rest = bytes(output).partition(b'\n')
             # Preserve pairs to reject duplicate keys as well as extra keys and
             # non-boolean values. Only this receipt can acknowledge dispatch.
-            receipt = json.loads(output.decode('utf-8'), object_pairs_hook=list)
-            if receipt != [('opened', True)] or type(receipt[0][1]) is not bool:
+            receipt = json.loads(line.decode('utf-8'), object_pairs_hook=list)
+            if rest or receipt != [('opened', True)] or type(receipt[0][1]) is not bool:
                 raise DriverFailure('helper_failed')
-        except subprocess.TimeoutExpired:
-            raise DriverFailure('helper_timeout') from None
         except (OSError, ValueError):
             raise DriverFailure('helper_failed') from None
-        finally:
-            if process is not None:
-                if process.poll() is None:
-                    process.kill()
-                process.wait(timeout=0.5)
-                for pipe in (process.stdin, process.stdout):
-                    if not pipe.closed:
-                        pipe.close()
 
     def select_profession(self, nodes, choice):
         # Primary selection path: the observed radio's WINDOW extents plus its
@@ -417,7 +411,7 @@ def composer(nodes):
 
 def matches_prompt(text, prompt):
     # Same bounded representation as native exact_prompt correlation. Do not
-    # trim text or alter the prompt dispatched to the opener.
+    # trim text or alter the prompt handed to MST for the deep link.
     return text == prompt or text == prompt + '\n'
 
 
@@ -641,6 +635,7 @@ def main():
     parser.add_argument('--mode', choices=['prepare', 'submit'], required=True)
     parser.add_argument('--timeout-ms', type=int, required=True)
     parser.add_argument('--max-actions', type=int, default=MAX_ACTIONS['default'])
+    parser.add_argument('--open-fd', type=int)
     args = parser.parse_args()
     driver = None
     try:
@@ -652,7 +647,9 @@ def main():
         payload = json.loads(data)
         if not isinstance(payload, dict):
             raise DriverFailure('invalid_input')
-        driver = Driver(Desktop(), args.timeout_ms, args.max_actions)
+        desktop = Desktop()
+        desktop.open_fd = args.open_fd
+        driver = Driver(desktop, args.timeout_ms, args.max_actions)
         surface = payload.get('surface')
         result = driver.prepare(surface) if args.mode == 'prepare' else driver.submit(payload.get('prompt'), surface)
         print(json.dumps(result))

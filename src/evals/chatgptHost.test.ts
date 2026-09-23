@@ -7,6 +7,7 @@ import { CHATGPT_HOST, CHATGPT_LINUX_HOST } from './chatgptHost.js';
 import { runExternalHostScenario } from './externalHost/runtime.js';
 import { hostTraceToExecution } from './hostTrace.js';
 import type { HostBatchRequest } from './evalFrameworkTypes.js';
+import { linuxEnvironment } from './chatgpt/linuxEnvironment.fixture.js';
 
 const home = vi.hoisted(() => ({ value: '' }));
 const lifecycle = vi.hoisted(() => ({ prepare: vi.fn(), dispose: vi.fn() }));
@@ -110,6 +111,7 @@ beforeEach(async () => {
     }));
 });
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await rm(home.value, { recursive: true, force: true });
 });
 
@@ -120,16 +122,8 @@ describe('ChatGPT V2 batch host', () => {
       request.config = {
         ...config,
         type: 'openai.chatgpt.agent.desktop-app.linux',
-        options: {
-          surface: 'codex',
-          configPath: join(home.value, '.codex', 'config.toml'),
-        },
-        env: {
-          HOME: home.value,
-          MST_CHATGPT_ISOLATED_HOME: home.value,
-          DISPLAY: ':1',
-          DBUS_SESSION_BUS_ADDRESS: 'unix:path=/fixture/bus',
-        },
+        options: { surface: 'codex' },
+        env: linuxEnvironment(home.value),
       };
     await CHATGPT_LINUX_HOST.runBatch!(batch, context);
     expect(lifecycle.prepare).toHaveBeenCalledTimes(1);
@@ -147,10 +141,11 @@ describe('ChatGPT V2 batch host', () => {
     }
   });
 
-  it('rejects Linux without explicit isolation before lifecycle or query execution', async () => {
+  it('rejects an incomplete Linux environment before lifecycle or query execution', async () => {
+    vi.stubEnv('AT_SPI_BUS_ADDRESS', '');
     await expect(
       CHATGPT_LINUX_HOST.runBatch!(requests(), context)
-    ).rejects.toThrow('ISOLATED_HOME');
+    ).rejects.toThrow('environment_invalid');
     expect(lifecycle.prepare).not.toHaveBeenCalled();
     expect(runExternalHostScenario).not.toHaveBeenCalled();
   });
