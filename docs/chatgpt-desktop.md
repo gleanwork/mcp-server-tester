@@ -8,8 +8,9 @@ Codex CLI, Codex APIs, or an inference API to run the evaluated query.
 Use `type: 'openai.chatgpt.agent.desktop-app.macos'` for macOS or
 `type: 'openai.chatgpt.agent.desktop-app.linux'` for Linux. The `chatgpt` alias
 selects the local platform. Both accept `options.surface: 'chatgpt-work' | 'codex'`,
-with `chatgpt-work` as the default. Surface selection is UI setup; MST does not add
-surface instructions to the evaluated prompt.
+with `chatgpt-work` as the default. Surface selection controls UI setup and the
+expected native originator; MST does not add surface instructions to the evaluated
+prompt.
 
 macOS keeps the Anthropic Computer Use submission driver. It receives the selected
 surface and must verify the current-mode label before filling the composer. It
@@ -312,10 +313,9 @@ UTF-8 bytes. Resolved object markers are not counted. Unreadable text omits thes
 measurements. Readback failures return `composer_text_unavailable`, never raw RPC
 errors. The successful receipt schema is unchanged.
 
-These contracts have offline tests only. No Linux evaluation queries have been
-sent; prior live batch setup failed before query submission. Verify the new path
-against the caller's pinned image. A native fresh-session binding remains
-mandatory even after a successful UI receipt.
+Offline tests cover these controller contracts. Verify the controller path against
+the caller's pinned image. A native fresh-session binding remains mandatory even
+after a successful UI receipt.
 
 ## Evidence and continuation
 
@@ -325,6 +325,35 @@ terminal LF, reported as `native_terminal_lf`), a fresh session and turn for eac
 query, and complete native final-answer/model/effort evidence. UI text is never
 treated as an answer.
 Explicit `prompt_marker` correlation remains opt-in.
+
+Native originator acceptance is surface-specific and case-sensitive:
+
+- Default or explicit `options.surface: 'chatgpt-work'` requires exactly
+  `session_meta.payload.originator: 'codex_work_desktop'`.
+- Explicit `options.surface: 'codex'` requires exactly `'Codex Desktop'`, as
+  observed in preserved Linux run `35881948713` (`source: 'vscode'`).
+- Neither surface accepts the other surface's originator, CLI identities such as
+  `codex_cli_rs` or `codex_cli`, case changes, whitespace changes, or name variants.
+  Native metadata never selects or changes the configured surface. `source` alone
+  does not establish the surface.
+
+The internal parser API preserves existing callers: `findChatgptTrace` accepts
+`surface` in its fifth-argument options; `parseChatgptTrace` accepts an optional
+fifth argument `{ surface }` after `observedBeforeMs`. Both default to Work.
+`expectedChatgptOriginator(surface)` provides the same fixed mapping.
+
+Binding diagnostics remain `UNVERIFIED` and non-authoritative. They report the
+configured `expectedNativeOriginator`. The bounded `originatorCount` allowlist
+includes exact `Codex Desktop` alongside existing `codex_work_desktop` and
+`codex_cli`; other names remain `other`. Diagnostics do not add prompt text or
+private native metadata and never feed candidate acceptance.
+
+The preserved Codex trace above contains `gpt-5.6-terra`, medium effort, and the
+native terminal-LF prompt form. It ends in `turn_aborted`, without `task_complete`.
+It is evidence for originator binding, **not a completed or passing evaluation**.
+The parser's `complete` flag means terminal: an abort also sets `error`, and the
+adapter returns `host_run_failed` before accepting any final answer. Offline tests
+use a minimized, redacted abort fixture; no model calls are needed.
 
 Native or controller uncertainty blocks the remaining batch. There is no automatic
 retry. A completed, reliably attributed turn can fail the configured-MCP

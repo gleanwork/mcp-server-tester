@@ -8,10 +8,30 @@ import type {
   MCPHostSimulationResult,
 } from '../../mcpHost/mcpHostTypes.js';
 import type { ExternalHostTelemetry } from '../types.js';
+import type { ChatgptSurface } from '../../chatgpt/driver.js';
 
 const MAX_FILES = 10_000;
 const MAX_BYTES = 32 * 1024 * 1024;
 type ObjectValue = Record<string, unknown>;
+
+/** Fixed observed native identities. The caller selects the surface, never the transcript. */
+export function expectedChatgptOriginator(
+  surface: ChatgptSurface = 'chatgpt-work'
+): 'codex_work_desktop' | 'Codex Desktop' {
+  switch (surface) {
+    case 'chatgpt-work':
+      return 'codex_work_desktop';
+    case 'codex':
+      return 'Codex Desktop';
+    default:
+      throw new Error('ChatGPT surface must be chatgpt-work or codex.');
+  }
+}
+
+export interface ChatgptTracePolicy {
+  /** Defaults to Work for existing macOS and marker-based callers. */
+  surface?: ChatgptSurface;
+}
 
 /** Confirmed ChatGPT Work built-in namespace; never allow a configured MCP server to impersonate it. */
 export function isChatgptBuiltinServer(server: string): boolean {
@@ -32,6 +52,7 @@ export interface ChatgptTrace {
   reasoningEffort?: string;
   startedAt?: string;
   completedAt?: string;
+  /** Terminal, not necessarily successful: an aborted turn also has error set. */
   complete: boolean;
   error?: string;
   response?: string;
@@ -100,6 +121,7 @@ export interface ChatgptBindingDiagnostics {
   metadataRead: 'disabled' | 'isolated-linux' | 'unavailable';
   truncated: boolean;
   skippedFileCount: number;
+  expectedNativeOriginator: ReturnType<typeof expectedChatgptOriginator>;
   originatorCount: Record<string, number>;
   recordTypes: Record<string, number>;
   nativeUserMessageCount: number;
@@ -113,7 +135,10 @@ export async function diagnoseChatgptBinding(
   root: string,
   baseline: ChatgptSessionSnapshot,
   submittedPrompt: string,
-  options: { isolatedLinuxHome?: string; expectedRoot?: string } = {}
+  options: ChatgptTracePolicy & {
+    isolatedLinuxHome?: string;
+    expectedRoot?: string;
+  } = {}
 ): Promise<{ metadata: ChatgptBindingDiagnostics; candidatePaths: string[] }> {
   const metadata: ChatgptBindingDiagnostics = {
     status: 'UNVERIFIED',
@@ -129,6 +154,7 @@ export async function diagnoseChatgptBinding(
     metadataRead: 'disabled',
     truncated: false,
     skippedFileCount: 0,
+    expectedNativeOriginator: expectedChatgptOriginator(options.surface),
     originatorCount: {},
     recordTypes: {},
     nativeUserMessageCount: 0,
@@ -254,7 +280,7 @@ export async function diagnoseChatgptBinding(
               incrementDiagnosticCount(
                 metadata.originatorCount,
                 payload.originator,
-                ['codex_work_desktop', 'codex_cli']
+                ['codex_work_desktop', 'Codex Desktop', 'codex_cli']
               );
             if (
               raw.type === 'turn_context' ||
@@ -359,7 +385,7 @@ export async function findChatgptTrace(
   baseline: ChatgptSessionSnapshot,
   selector: ChatgptTraceSelector,
   startedAfterMs: number,
-  options: {
+  options: ChatgptTracePolicy & {
     requireFreshSession?: boolean;
     observedBeforeMs?: number;
     bound?: ChatgptTraceBinding;
@@ -389,7 +415,8 @@ export async function findChatgptTrace(
       content,
       selector,
       startedAfterMs,
-      options.observedBeforeMs
+      options.observedBeforeMs,
+      options
     );
     if (trace && old && options.requireFreshSession)
       throw new Error(
@@ -417,8 +444,10 @@ export function parseChatgptTrace(
   content: string,
   selector: ChatgptTraceSelector,
   startedAfterMs = 0,
-  observedBeforeMs = Infinity
+  observedBeforeMs = Infinity,
+  options: ChatgptTracePolicy = {}
 ): ChatgptTrace | undefined {
+  const expectedOriginator = expectedChatgptOriginator(options.surface);
   if (typeof selector !== 'string' && !selector.prompt.trim())
     throw new Error('Exact-prompt correlation requires a non-empty prompt.');
   const events: Event[] = [];
@@ -498,7 +527,7 @@ export function parseChatgptTrace(
     )
       matches.add(turnId);
   }
-  if (!sessionId || originator !== 'codex_work_desktop' || matches.size === 0)
+  if (!sessionId || originator !== expectedOriginator || matches.size === 0)
     return undefined;
   if (matches.size > 1)
     throw new Error('Ambiguous matching ChatGPT turns for this query.');

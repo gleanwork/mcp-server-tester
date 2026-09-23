@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -163,13 +163,143 @@ describe('bounded native binding wait and failure classification', () => {
           ctx.state.data.chatgptSessionBaseline,
           { strategy: 'exact_prompt', prompt: 'private prompt' },
           1000,
-          expect.objectContaining({ requireFreshSession: true })
+          expect.objectContaining({
+            requireFreshSession: true,
+            surface: 'chatgpt-work',
+          })
         );
       } finally {
         await rm(home, { recursive: true, force: true });
       }
     }
   );
+
+  it.each([
+    [true, undefined, 'codex_work_desktop'],
+    [false, undefined, 'codex_work_desktop'],
+    [true, 'chatgpt-work', 'codex_work_desktop'],
+    [true, 'codex', 'Codex Desktop'],
+    [false, 'codex', 'Codex Desktop'],
+  ] as const)(
+    'uses configured surface for real discovery (linux=%s surface=%s)',
+    async (linux, surface, originator) => {
+      const home = await mkdtemp(join(tmpdir(), 'chatgpt-origin-'));
+      try {
+        const actual =
+          await vi.importActual<typeof TraceModule>('./chatgptTrace.js');
+        vi.mocked(findChatgptTrace).mockImplementation(actual.findChatgptTrace);
+        const ctx = context(home, linux);
+        ctx.config.options!.surface = surface;
+        const root = ctx.state.data.chatgptSessionsRoot as string;
+        await mkdir(root, { recursive: true });
+        const records = [
+          { type: 'session_meta', payload: { id: 'session', originator } },
+          {
+            type: 'turn_context',
+            payload: { turn_id: 'turn', model: 'gpt-test', effort: 'medium' },
+          },
+          {
+            type: 'event_msg',
+            payload: {
+              type: 'item_completed',
+              turn_id: 'turn',
+              item: {
+                type: 'UserMessage',
+                id: 'user',
+                content: [{ text: 'private prompt\n' }],
+              },
+            },
+          },
+          {
+            type: 'event_msg',
+            payload: {
+              type: 'task_complete',
+              turn_id: 'turn',
+              last_agent_message: 'done',
+            },
+          },
+        ];
+        await writeFile(
+          join(root, 'rollout-complete.jsonl'),
+          records
+            .map((record) =>
+              JSON.stringify({
+                timestamp: new Date(1000).toISOString(),
+                ...record,
+              })
+            )
+            .join('\n') + '\n'
+        );
+        const result = await capture(ctx);
+        expect(result).toMatchObject({
+          success: true,
+          response: 'done',
+          externalHost: {
+            traceSource: 'host-local-transcript',
+            correlation: { nativePromptMatch: 'native_terminal_lf' },
+          },
+        });
+        expect(findChatgptTrace).toHaveBeenCalledWith(
+          root,
+          ctx.state.data.chatgptSessionBaseline,
+          { strategy: 'exact_prompt', prompt: 'private prompt' },
+          1000,
+          expect.objectContaining({
+            surface: surface ?? 'chatgpt-work',
+            requireFreshSession: true,
+          })
+        );
+      } finally {
+        await rm(home, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it('binds the preserved Codex abort shape as host_run_failed, never completed success', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'chatgpt-codex-abort-'));
+    try {
+      const actual =
+        await vi.importActual<typeof TraceModule>('./chatgptTrace.js');
+      vi.mocked(findChatgptTrace).mockImplementation(actual.findChatgptTrace);
+      clock.now = Date.parse('2026-09-23T15:34:00Z');
+      const ctx = context(home, true);
+      ctx.config.options!.surface = 'codex';
+      ctx.config.model = 'gpt-5.6-terra';
+      ctx.config.reasoningEffort = 'medium';
+      ctx.run.scenario = ctx.run.submittedScenario = 'Find documents.';
+      clock.now = Date.parse('2026-09-23T15:36:01Z');
+      const root = ctx.state.data.chatgptSessionsRoot as string;
+      await mkdir(root, { recursive: true });
+      const content = await readFile(
+        new URL('./fixtures/codexDesktopAborted.jsonl', import.meta.url),
+        'utf8'
+      );
+      await writeFile(join(root, 'rollout-aborted.jsonl'), content);
+      const result = await capture(ctx);
+      expect(result).toMatchObject({
+        success: false,
+        error: 'ChatGPT turn was aborted.',
+        externalHost: {
+          failureKind: 'host_run_failed',
+          traceSource: 'none',
+          traceConfidence: 'unknown',
+        },
+      });
+      expect(result).not.toHaveProperty('response');
+      expect(findChatgptTrace).toHaveBeenCalledTimes(1);
+      if (!result) throw new Error('Missing result');
+      const diagnostic = result.externalHost.artifacts.find((artifact) =>
+        artifact.summary?.includes('originatorCount')
+      );
+      expect(JSON.parse(diagnostic!.summary!)).toMatchObject({
+        expectedNativeOriginator: 'Codex Desktop',
+        originatorCount: { 'Codex Desktop': 1 },
+        authoritative: false,
+      });
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
 
   it('classifies an incomplete bound turn as timeout, not no matching session', async () => {
     const home = await mkdtemp(join(tmpdir(), 'chatgpt-bound-'));

@@ -8,6 +8,7 @@ import {
   type ChatgptSessionSnapshot,
   type ChatgptTraceBinding,
   type ChatgptTraceSelector,
+  type ChatgptTracePolicy,
 } from './chatgptTrace.js';
 import { resolveCodexSetup } from '../../codexSetup/config.js';
 import { ChatgptAppSession } from '../../chatgptSetup/macSession.js';
@@ -335,6 +336,7 @@ async function captureChatgptComputerUseResult({
         selector,
         run.startedAtMs,
         {
+          surface: chatgptSurface(config),
           requireFreshSession: true,
           observedBeforeMs: Math.min(
             Date.now(),
@@ -487,10 +489,14 @@ async function withBindingDiagnostics(
   const root = state.data.chatgptSessionsRoot;
   const baseline = state.data.chatgptSessionBaseline;
   if (typeof root !== 'string' || !(baseline instanceof Map)) return result;
-  let options: { isolatedLinuxHome?: string; expectedRoot?: string } = {};
+  let options: ChatgptTracePolicy & {
+    isolatedLinuxHome?: string;
+    expectedRoot?: string;
+  } = { surface: chatgptSurface(config) };
   if (isLinuxChatgpt(config)) {
     try {
       options = {
+        ...options,
         isolatedLinuxHome: validateLinuxChatgptPaths(config),
         expectedRoot: join(dirname(config.codexSetup!.configPath!), 'sessions'),
       };

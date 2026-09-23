@@ -3,6 +3,7 @@ import {
   link,
   mkdtemp,
   mkdir,
+  readFile,
   rm,
   symlink,
   writeFile,
@@ -13,6 +14,7 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   diagnoseChatgptBinding,
+  expectedChatgptOriginator,
   findChatgptTrace,
   parseChatgptTrace,
   snapshotChatgptSessions,
@@ -132,12 +134,16 @@ function turn(id = 'turn', runMarker = marker) {
     ),
   ];
 }
-function serialize(events = turn(), sessionId = 'session') {
+function serialize(
+  events = turn(),
+  sessionId = 'session',
+  originator = 'codex_work_desktop'
+) {
   return (
     [
       event('session_meta', {
         id: sessionId,
-        originator: 'codex_work_desktop',
+        originator,
       }),
       ...events,
     ]
@@ -163,6 +169,153 @@ function exactTurn(prompt: string, id = 'turn') {
 const exact = (prompt: string) => ({
   strategy: 'exact_prompt' as const,
   prompt,
+});
+
+describe.each([
+  { surface: undefined, originator: 'codex_work_desktop' },
+  { surface: 'chatgpt-work' as const, originator: 'codex_work_desktop' },
+  { surface: 'codex' as const, originator: 'Codex Desktop' },
+])('native originator policy ($surface)', ({ surface, originator }) => {
+  it('accepts only the configured surface identity for exact and marker selectors', () => {
+    expect(expectedChatgptOriginator(surface)).toBe(originator);
+    for (const [records, selector] of [
+      [exactTurn('Find docs'), exact('Find docs')],
+      [exactTurn('Find docs\n'), exact('Find docs')],
+      [turn(), marker],
+    ] as const) {
+      const trace = parseChatgptTrace(
+        serialize(records, 'session', originator),
+        selector,
+        1000,
+        2000,
+        { surface }
+      );
+      expect(trace).toMatchObject({ complete: true, response: 'done' });
+      expect(trace?.error).toBeUndefined();
+    }
+  });
+
+  it.each(
+    [
+      'codex_work_desktop',
+      'Codex Desktop',
+      'codex_cli_rs',
+      'codex_cli',
+      'codex',
+      'codex_desktop',
+      'codex desktop',
+      'Codex desktop',
+      'CODEX DESKTOP',
+      'Codex Desktop ',
+      ' Codex Desktop',
+      'Codex_Work_Desktop',
+      'codex_work_desktop\n',
+    ].filter((candidate) => candidate !== originator)
+  )('rejects cross-surface, CLI, and variant originator %j', (candidate) => {
+    for (const selector of [exact('Find docs'), marker]) {
+      const records =
+        typeof selector === 'string' ? turn() : exactTurn('Find docs');
+      expect(
+        parseChatgptTrace(
+          serialize(records, 'session', candidate),
+          selector,
+          0,
+          Infinity,
+          { surface }
+        )
+      ).toBeUndefined();
+    }
+  });
+
+  it('preserves exact-prompt and timestamp limits', () => {
+    for (const prompt of [
+      'find docs',
+      ' Find docs',
+      'Find docs ',
+      'Find docs\n\n',
+      'Find docs \n',
+    ]) {
+      expect(
+        parseChatgptTrace(
+          serialize(exactTurn(prompt), 'session', originator),
+          exact('Find docs'),
+          0,
+          Infinity,
+          { surface }
+        )
+      ).toBeUndefined();
+    }
+    const content = serialize(exactTurn('Find docs'), 'session', originator);
+    expect(
+      parseChatgptTrace(content, exact('Find docs'), 1001, Infinity, {
+        surface,
+      })
+    ).toBeUndefined();
+    expect(
+      parseChatgptTrace(content, exact('Find docs'), 0, 999, { surface })
+    ).toBeUndefined();
+  });
+
+  it('threads policy through discovery without accepting baseline or changing bindings', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'chatgpt-surface-'));
+    try {
+      const path = join(root, 'rollout-new.jsonl');
+      const baseline = await snapshotChatgptSessions(root);
+      await writeFile(
+        path,
+        serialize(exactTurn('Find docs'), 'session', originator)
+      );
+      const found = await findChatgptTrace(
+        root,
+        baseline,
+        exact('Find docs'),
+        1000,
+        { surface, observedBeforeMs: 2000, requireFreshSession: true }
+      );
+      expect(found?.trace.response).toBe('done');
+      const existing = await snapshotChatgptSessions(root);
+      await appendFile(path, '\n');
+      expect(
+        await findChatgptTrace(root, existing, exact('Find docs'), 0, {
+          surface,
+        })
+      ).toBeUndefined();
+      await expect(
+        findChatgptTrace(root, baseline, exact('Find docs'), 0, {
+          surface,
+          bound: { path, sessionId: 'other-session', turnId: 'turn' },
+        })
+      ).rejects.toThrow('Bound ChatGPT');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+it('keeps the observed Codex abort terminal but unsuccessful', async () => {
+  // Minimized/redacted shape from preserved run 35881948713, not a completed run.
+  const content = await readFile(
+    new URL('./fixtures/codexDesktopAborted.jsonl', import.meta.url),
+    'utf8'
+  );
+  expect(parseChatgptTrace(content, exact('Find documents.'))).toBeUndefined();
+  const trace = parseChatgptTrace(
+    content,
+    exact('Find documents.'),
+    Date.parse('2026-09-23T15:34:00Z'),
+    Date.parse('2026-09-23T15:36:01Z'),
+    { surface: 'codex' }
+  );
+  expect(trace).toMatchObject({
+    promptMatch: 'native_terminal_lf',
+    model: 'gpt-5.6-terra',
+    reasoningEffort: 'medium',
+    complete: true,
+    error: 'ChatGPT turn was aborted.',
+    telemetry: { resultCount: 0 },
+  });
+  expect(trace?.response).toBeUndefined();
+  expect(trace?.usage).toBeUndefined();
 });
 
 describe('marker-free native correlation', () => {
@@ -850,6 +1003,53 @@ describe('UNVERIFIED binding diagnostics', () => {
           requireFreshSession: true,
         })
       ).toBeUndefined();
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('counts only exact known originators without selecting a surface from native metadata', async () => {
+    const { home, root, options } = await fixture();
+    try {
+      const origins = [
+        'Codex Desktop',
+        'codex_work_desktop',
+        'codex_cli_rs',
+        'codex desktop',
+        'Codex Desktop ',
+        'private-origin',
+      ];
+      for (const [index, originator] of origins.entries()) {
+        await writeFile(
+          join(root, `rollout-${index}.jsonl`),
+          serialize([], 'session', originator)
+        );
+      }
+      const { metadata } = await diagnoseChatgptBinding(
+        root,
+        new Map(),
+        'private prompt',
+        { ...options, surface: 'codex' }
+      );
+      expect(metadata).toMatchObject({
+        authoritative: false,
+        expectedNativeOriginator: 'Codex Desktop',
+        originatorCount: {
+          'Codex Desktop': 1,
+          codex_work_desktop: 1,
+          other: 4,
+        },
+      });
+      expect(JSON.stringify(metadata)).not.toMatch(
+        /private-origin|private prompt|codex_cli_rs|codex desktop/
+      );
+      const work = await diagnoseChatgptBinding(
+        root,
+        new Map(),
+        'private prompt',
+        options
+      );
+      expect(work.metadata.expectedNativeOriginator).toBe('codex_work_desktop');
     } finally {
       await rm(home, { recursive: true, force: true });
     }
