@@ -215,6 +215,20 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(desktop.actions[-1][0], 'Codex Build, debug, and ship')
         self.assertTrue(desktop.nodes[0]['name'].endswith('Codex'))
 
+    def test_nested_editable_paragraph_is_part_of_one_composer(self):
+        nodes = ready()
+        nodes.append(node('nested paragraph', 'paragraph', editable=True,
+                          ancestors=(0, 2, 4)))
+        self.assertIs(composer(nodes), nodes[4])
+        result = self.driver(FakeDesktop(nodes)).prepare('chatgpt-work')
+        self.assertEqual(result['status'], 'ready')
+
+    def test_independent_editable_field_remains_ambiguous(self):
+        nodes = ready()
+        nodes.append(node('separate field', 'entry', editable=True, ancestors=(0,)))
+        with self.assertRaisesRegex(DriverFailure, 'composer_missing_or_ambiguous'):
+            composer(nodes)
+
     def test_no_action_when_surface_already_selected(self):
         desktop = FakeDesktop()
         self.driver(desktop).prepare('chatgpt-work')

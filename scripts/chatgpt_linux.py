@@ -263,10 +263,17 @@ def unique(nodes, code):
     return nodes[0]
 
 
+def editor_roots(nodes):
+    # Chromium exposes an editable entry and editable paragraphs inside it.
+    # Select the containing editor by live ancestry, not role priority or order.
+    eligible = {i: n for i, n in enumerate(nodes) if available(n) and n['editable']}
+    return [n for n in eligible.values()
+            if not any(parent in eligible for parent in n['ancestors'])]
+
+
 def composer(nodes):
-    # Role alone is insufficient: Chromium also exposes static text with role text.
-    return unique([n for n in nodes if available(n) and n['editable']],
-                  'composer_missing_or_ambiguous')
+    # Separate editors (including dialogs) remain ambiguous and cannot authorize input.
+    return unique(editor_roots(nodes), 'composer_missing_or_ambiguous')
 
 
 def fresh_chat(nodes, editor):
@@ -340,7 +347,7 @@ class Driver:
     def ready(self, nodes, surface):
         if not self.selected(nodes, surface):
             return False
-        editors = [n for n in nodes if available(n) and n['editable']]
+        editors = editor_roots(nodes)
         sends = controls(nodes, {'Send'}, enabled=False)
         if not editors or not sends:
             return False
