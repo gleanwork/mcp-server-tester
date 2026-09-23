@@ -1,4 +1,5 @@
 """Offline native draft/AT-SPI contracts. No live app, credentials, or queries."""
+import hashlib
 import io
 import json
 import os
@@ -78,7 +79,8 @@ def public_desktop():
         get_desktop=lambda _: root,
         StateType=SimpleNamespace(**{key: key for key in (
             'SHOWING', 'VISIBLE', 'ENABLED', 'SENSITIVE', 'EDITABLE', 'CHECKED', 'SELECTED')}),
-        Text=SimpleNamespace(get_text=lambda node, start, end: node.value))
+        Text=SimpleNamespace(get_text=lambda node, start, end: node.value,
+                             get_character_count=lambda node: len(node.value)))
     return desktop, editor, app
 
 
@@ -93,7 +95,7 @@ class FakeDesktop:
 
     def require_helpers(self): pass
     def snapshot(self): return self.nodes
-    def text(self, control): return control.get('text', '')
+    def text(self, control, limit=None): return control.get('text', '')
 
     def surface(self):
         return 'Codex' if self.nodes[0]['name'].endswith('Codex') else 'ChatGPT Work'
@@ -133,6 +135,122 @@ class FakeDesktop:
 class DriverTest(unittest.TestCase):
     def driver(self, desktop, actions=24): return Driver(desktop, 60_000, actions)
     def actions(self, desktop): return [action[0] for action in desktop.actions]
+
+    def test_failure_draft_state_exact_measurements_and_privacy(self):
+        for text in ('', '\ufffc', '\ufffc\ufffc\n\r\nπ😀', 'private prompt'):
+            desktop = FakeDesktop(ready(text=text))
+            desktop.nodes[2].update(name='private UI name', url='https://private.example',
+                                    config='private config', prompt='private prompt')
+            driver = self.driver(desktop)
+            driver.phase, driver.step = 'composer', 'draft-surface'
+            driver.snapshot()
+            desktop.snapshot = Mock(side_effect=AssertionError('no fresh snapshot'))
+            desktop.text = Mock(wraps=desktop.text)
+            receipt = driver.receipt('failed')
+            self.assertEqual(receipt['draftState'], {
+                'observedSurface': 'chatgpt-work', 'composerRootCount': 1,
+                'sendControlCount': 1, 'textReadable': True, 'textLength': len(text),
+                'textSha256': hashlib.sha256(text.encode('utf-8')).hexdigest(),
+                'embeddedObjectCount': text.count('\ufffc'), 'newlineCount': text.count('\n')})
+            self.assertEqual(receipt['step'], 'draft-surface')
+            self.assertNotIn('private', json.dumps(receipt))
+            desktop.text.assert_called_once_with(desktop.nodes[2], limit=INPUT_LIMIT)
+            self.assertEqual(desktop.actions, [])
+
+    def test_failure_draft_state_deduplicates_entry_and_paragraph(self):
+        desktop = FakeDesktop(ready())
+        desktop.nodes[2].update(role='entry')
+        desktop.nodes.append(node('private paragraph', 'paragraph', editable=True,
+                                  ancestors=(0, 2), text='must not read'))
+        driver = self.driver(desktop)
+        driver.snapshot()
+        desktop.text = Mock(wraps=desktop.text)
+        self.assertEqual(driver.receipt('failed')['draftState']['composerRootCount'], 1)
+        desktop.text.assert_called_once_with(desktop.nodes[2], limit=INPUT_LIMIT)
+
+    def test_ambiguous_missing_hidden_disabled_editors_never_read(self):
+        for editors in ([], [node('a', 'entry', editable=True), node('b', 'paragraph', editable=True)],
+                        [node('a', 'entry', editable=True, visible=False)],
+                        [node('a', 'entry', editable=True, showing=False)],
+                        [node('a', 'entry', editable=True, enabled=False)],
+                        [node('a', 'entry', editable=True, sensitive=False)]):
+            desktop = FakeDesktop(ready()[:2] + editors)
+            driver = self.driver(desktop)
+            driver.snapshot()
+            desktop.text = Mock(side_effect=AssertionError('must not read'))
+            state = driver.receipt('failed')['draftState']
+            self.assertFalse(state['textReadable'])
+            self.assertEqual(set(state), {'observedSurface', 'composerRootCount',
+                                         'sendControlCount', 'textReadable'})
+            desktop.text.assert_not_called()
+
+    def test_draft_state_uses_only_known_visible_surface_labels(self):
+        for switches, expected in [([], 'unknown'),
+                ([node('private surface')], 'unknown'),
+                ([node('Switch mode, current mode: Codex')], 'codex'),
+                ([node('Switch mode, current mode: ChatGPT Work')], 'chatgpt-work'),
+                ([node('Switch mode, current mode: Codex', visible=False)], 'unknown'),
+                ([node('Switch mode, current mode: Codex')] * 2, 'ambiguous'),
+                ([node('Switch mode, current mode: Codex'),
+                  node('Switch mode, current mode: ChatGPT Work')], 'ambiguous')]:
+            desktop = FakeDesktop(switches)
+            driver = self.driver(desktop)
+            driver.snapshot()
+            self.assertEqual(driver.receipt('failed')['draftState']['observedSurface'], expected)
+
+    def test_draft_state_read_failures_and_oversized_text_omit_measurements(self):
+        for text in (None, 1, 'a' * (INPUT_LIMIT + 1), '😀' * (INPUT_LIMIT // 4 + 1), '\ud800'):
+            desktop = FakeDesktop(ready(text=text))
+            driver = self.driver(desktop)
+            driver.snapshot()
+            state = driver.receipt('failed')['draftState']
+            self.assertFalse(state['textReadable'])
+            self.assertNotIn('textLength', state)
+            self.assertNotIn('textSha256', state)
+        desktop.text = Mock(side_effect=RuntimeError('private UI error'))
+        self.assertNotIn('private', json.dumps(driver.receipt('failed')))
+        self.assertFalse(driver.receipt('failed')['draftState']['textReadable'])
+
+    def test_draft_diagnostics_use_bounded_unbound_text_read(self):
+        desktop, editor, _app = public_desktop()
+        editor.value = '\ufffc'
+        driver = self.driver(desktop)
+        driver.snapshot()
+        desktop.api.Text.get_text = Mock(wraps=desktop.api.Text.get_text)
+        state = driver.receipt('failed')['draftState']
+        self.assertEqual(state['embeddedObjectCount'], 1)
+        self.assertEqual(state['textLength'], 1)
+        desktop.api.Text.get_text.assert_called_once_with(editor, 0, 1)
+        desktop.api.Text.get_text.reset_mock()
+        editor.value = 'a' * (INPUT_LIMIT + 1)
+        self.assertFalse(driver.receipt('failed')['draftState']['textReadable'])
+        desktop.api.Text.get_text.assert_not_called()
+
+    def test_draft_diagnostics_success_and_no_snapshot_do_not_read(self):
+        desktop = FakeDesktop()
+        driver = self.driver(desktop)
+        self.assertNotIn('draftState', driver.receipt('failed'))
+        driver.snapshot()
+        desktop.text = Mock(side_effect=AssertionError('no diagnostic read on success'))
+        for status in ('ready', 'submitted'):
+            self.assertNotIn('draftState', driver.receipt(status, 'chatgpt-work'))
+        desktop.text.assert_not_called()
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_stalled_draft_reports_last_surface_and_placeholder_without_normalizing(self, _sleep):
+        desktop = FakeDesktop()
+        def open_empty(prompt):
+            desktop.actions.append(('open', prompt))
+            desktop.nodes = ready('Codex', '\ufffc')
+        desktop.open_prompt = open_empty
+        driver = self.driver(desktop)
+        with self.assertRaisesRegex(DriverFailure, 'state_transition_unobserved'):
+            driver.prepare('chatgpt-work')
+        receipt = driver.receipt('failed')
+        self.assertEqual(receipt['step'], 'draft-surface')
+        self.assertEqual(receipt['draftState']['observedSurface'], 'codex')
+        self.assertEqual(receipt['draftState']['embeddedObjectCount'], 1)
+        self.assertEqual(desktop.actions, [('open', '')])
 
     def test_setup_onboarding_surface_then_one_empty_open_no_send(self):
         desktop = FakeDesktop([node('Engineering', 'radio button'), node('Continue')])

@@ -7,6 +7,7 @@ Input is JSON on stdin; output contains only a fixed receipt, never UI/query tex
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import selectors
@@ -158,12 +159,18 @@ class Desktop:
         if not action.do_action(matches[0]):
             raise DriverFailure('action_acknowledgement_uncertain')
 
-    def text(self, control):
+    def text(self, control, limit=None):
         text = control['node'].get_text_iface()
         if text is None:
             raise DriverFailure('composer_text_unavailable')
         # Accessible.get_text_iface() may return the Accessible itself. Its bound
         # get_text is not necessarily Text.get_text in PyGObject.
+        # Diagnostic reads are bounded and never normalize object placeholders.
+        if limit is not None:
+            count = self.api.Text.get_character_count(control['node'])
+            if not 0 <= count <= limit:
+                raise DriverFailure('composer_text_unavailable')
+            return self.api.Text.get_text(control['node'], 0, count)
         return self.api.Text.get_text(control['node'], 0, -1)
 
     def environment(self):
@@ -315,6 +322,7 @@ class Driver:
         self.phase = None
         self.step = None
         self.composer_candidates = None
+        self.last_snapshot = None
 
     def check(self):
         if time.monotonic() >= self.deadline:
@@ -333,7 +341,8 @@ class Driver:
     def snapshot(self):
         self.check()
         nodes = self.desktop.snapshot()
-        # Keep only the latest bounded structural evidence, never UI text or names.
+        self.last_snapshot = nodes
+        # Keep only the latest bounded structural evidence in candidate diagnostics.
         self.composer_candidates = []
         for node in nodes:
             if (node['editableState'] or node['editableInterface']
@@ -486,12 +495,50 @@ class Driver:
         self.step = None
         return self.receipt('submitted', surface)
 
+    def draft_state(self):
+        # Failure-only, read-only evidence from the last complete snapshot. Never
+        # serialize nodes, names, URLs, prompt/config values, or exception details.
+        nodes = self.last_snapshot
+        if nodes is None:
+            return None
+        roots = editor_roots(nodes)
+        switches = controls(nodes, {'Switch mode, current mode: ' + label
+                                   for label in SURFACES.values()})
+        observed = 'unknown'
+        if len(switches) > 1:
+            observed = 'ambiguous'
+        elif len(switches) == 1:
+            observed = next(surface for surface, label in SURFACES.items()
+                            if switches[0]['name'] == 'Switch mode, current mode: ' + label)
+        state = {'observedSurface': observed, 'composerRootCount': len(roots),
+                 'sendControlCount': len(controls(nodes, {'Send'}, enabled=False)),
+                 'textReadable': False}
+        if len(roots) != 1:
+            return state
+        try:
+            text = self.desktop.text(roots[0], limit=INPUT_LIMIT)
+            if not isinstance(text, str) or len(text) > INPUT_LIMIT:
+                return state
+            encoded = text.encode('utf-8')
+            if len(encoded) > INPUT_LIMIT:
+                return state
+            # Length/counts are Unicode code points; hash is exact UTF-8 bytes.
+            state.update(textReadable=True, textLength=len(text),
+                         textSha256=hashlib.sha256(encoded).hexdigest(),
+                         embeddedObjectCount=text.count('\ufffc'), newlineCount=text.count('\n'))
+        except Exception:
+            # Diagnostics must not replace the original failure or expose its text.
+            pass
+        return state
+
     def receipt(self, status, surface=None):
+        draft_state = self.draft_state() if status == 'failed' else None
         return {'status': status, 'action_count': self.actions,
                 'duration_ms': (time.monotonic() - self.started) * 1000,
                 **({'surface': surface} if surface else {}),
                 **({'phase': self.phase} if status == 'failed' and self.phase else {}),
                 **({'step': self.step} if status == 'failed' and self.step else {}),
+                **({'draftState': draft_state} if draft_state is not None else {}),
                 **({'composerCandidates': self.composer_candidates}
                    if status == 'failed' and self.phase == 'composer'
                    and self.composer_candidates is not None else {})}

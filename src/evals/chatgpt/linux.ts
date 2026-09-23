@@ -54,6 +54,54 @@ const ComposerCandidate = z
     textInterface: z.boolean().optional(),
   })
   .strict();
+const DraftState = z
+  .object({
+    observedSurface: z.enum(['chatgpt-work', 'codex', 'unknown', 'ambiguous']),
+    composerRootCount: z.number().int().min(0).max(5000),
+    sendControlCount: z.number().int().min(0).max(5000),
+    textReadable: z.boolean(),
+    textLength: z
+      .number()
+      .int()
+      .min(0)
+      .max(2 * 1024 * 1024)
+      .optional(),
+    textSha256: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+    embeddedObjectCount: z
+      .number()
+      .int()
+      .min(0)
+      .max(2 * 1024 * 1024)
+      .optional(),
+    newlineCount: z
+      .number()
+      .int()
+      .min(0)
+      .max(2 * 1024 * 1024)
+      .optional(),
+  })
+  .strict()
+  .refine((state) => {
+    const measurements = [
+      state.textLength,
+      state.textSha256,
+      state.embeddedObjectCount,
+      state.newlineCount,
+    ];
+    if (!state.textReadable)
+      return measurements.every((value) => value === undefined);
+    return (
+      state.composerRootCount === 1 &&
+      state.textLength !== undefined &&
+      state.textSha256 !== undefined &&
+      state.embeddedObjectCount !== undefined &&
+      state.newlineCount !== undefined &&
+      state.embeddedObjectCount + state.newlineCount <= state.textLength
+    );
+  });
 const Receipt = z
   .object({
     status: z.enum(['ready', 'submitted', 'failed']),
@@ -63,6 +111,7 @@ const Receipt = z
     phase: FailurePhase.optional(),
     step: FailureStep.optional(),
     composerCandidates: z.array(ComposerCandidate).max(16).optional(),
+    draftState: DraftState.optional(),
     error: z
       .enum([
         'accessibility_event_budget',
@@ -105,6 +154,9 @@ const Receipt = z
     (receipt) => receipt.phase === undefined || receipt.status === 'failed'
   )
   .refine(
+    (receipt) => receipt.draftState === undefined || receipt.status === 'failed'
+  )
+  .refine(
     (receipt) =>
       receipt.step === undefined ||
       (receipt.status === 'failed' && receipt.phase === 'composer')
@@ -121,7 +173,8 @@ export class NativeChatgptDriverError extends Error {
     public readonly telemetry?: SemanticDesktopTelemetry,
     public readonly phase?: z.infer<typeof FailurePhase>,
     public readonly composerCandidates?: z.infer<typeof ComposerCandidate>[],
-    public readonly step?: z.infer<typeof FailureStep>
+    public readonly step?: z.infer<typeof FailureStep>,
+    public readonly metadata?: { draftState: z.infer<typeof DraftState> }
   ) {
     super(message);
   }
@@ -277,7 +330,8 @@ export async function runLinuxChatgptDesktop(
       telemetry,
       record?.phase,
       record?.composerCandidates,
-      record?.step
+      record?.step,
+      record?.draftState ? { draftState: record.draftState } : undefined
     );
   return { telemetry };
 }

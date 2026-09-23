@@ -74,6 +74,21 @@ const composerCandidate = {
   editableInterface: false,
   textInterface: true,
 };
+const unreadableDraftState = {
+  observedSurface: 'chatgpt-work',
+  composerRootCount: 1,
+  sendControlCount: 1,
+  textReadable: false,
+};
+const readableDraftState = {
+  ...unreadableDraftState,
+  textReadable: true,
+  textLength: 0,
+  textSha256:
+    'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+  embeddedObjectCount: 0,
+  newlineCount: 0,
+};
 const composerFailure = {
   status: 'failed',
   phase: 'composer',
@@ -83,6 +98,132 @@ const composerFailure = {
 };
 
 describe('Linux ChatGPT runtime adapter', () => {
+  it.each([
+    readableDraftState,
+    unreadableDraftState,
+    {
+      ...unreadableDraftState,
+      observedSurface: 'unknown',
+      composerRootCount: 0,
+      sendControlCount: 0,
+    },
+    {
+      ...unreadableDraftState,
+      observedSurface: 'ambiguous',
+      composerRootCount: 5000,
+      sendControlCount: 5000,
+    },
+    {
+      ...readableDraftState,
+      observedSurface: 'codex',
+      textLength: 2 * 1024 * 1024,
+      embeddedObjectCount: 1,
+      newlineCount: 2,
+    },
+  ])(
+    'exposes only validated draft state in error metadata %#',
+    async (draftState) => {
+      await helper('receipt', {
+        ...composerFailure,
+        step: 'draft-surface',
+        draftState,
+      });
+      const error: unknown = await runLinuxChatgptDesktop(
+        'prepare',
+        config,
+        Date.now() + 5000
+      ).catch((failure: unknown) => failure);
+      expect(error).toBeInstanceOf(NativeChatgptDriverError);
+      expect(error).toMatchObject({
+        metadata: { draftState },
+        step: 'draft-surface',
+      });
+      expect((error as Error).message).not.toContain('textSha256');
+      expect(
+        (await readFile(join(root, 'calls.jsonl'), 'utf8')).trim().split('\n')
+      ).toHaveLength(1);
+    }
+  );
+  it.each([
+    { ...unreadableDraftState, observedSurface: 'private surface' },
+    { ...unreadableDraftState, composerRootCount: -1 },
+    { ...unreadableDraftState, composerRootCount: 5001 },
+    { ...unreadableDraftState, composerRootCount: 1.5 },
+    { ...unreadableDraftState, sendControlCount: -1 },
+    { ...unreadableDraftState, sendControlCount: 5001 },
+    { ...unreadableDraftState, sendControlCount: 1.5 },
+    { ...unreadableDraftState, textReadable: 'true' },
+    { ...unreadableDraftState, textLength: 0 },
+    { ...unreadableDraftState, textSha256: readableDraftState.textSha256 },
+    { ...unreadableDraftState, embeddedObjectCount: 0 },
+    { ...unreadableDraftState, newlineCount: 0 },
+    { ...readableDraftState, composerRootCount: 0 },
+    { ...readableDraftState, composerRootCount: 2 },
+    { ...readableDraftState, textLength: undefined },
+    { ...readableDraftState, textSha256: undefined },
+    { ...readableDraftState, embeddedObjectCount: undefined },
+    { ...readableDraftState, newlineCount: undefined },
+    { ...readableDraftState, textLength: 2 * 1024 * 1024 + 1 },
+    { ...readableDraftState, textLength: -1 },
+    { ...readableDraftState, textLength: 1.5 },
+    { ...readableDraftState, textSha256: 'private hash' },
+    { ...readableDraftState, textSha256: 'A'.repeat(64) },
+    { ...readableDraftState, embeddedObjectCount: -1 },
+    { ...readableDraftState, newlineCount: 1.5 },
+    {
+      ...readableDraftState,
+      textLength: 1,
+      embeddedObjectCount: 1,
+      newlineCount: 1,
+    },
+    ...['text', 'name', 'url', 'prompt', 'config', 'credentials'].map(
+      (key) => ({
+        ...readableDraftState,
+        [key]: 'private UI value',
+      })
+    ),
+    null,
+    {},
+  ])(
+    'rejects malformed or private draft diagnostics %#',
+    async (draftState) => {
+      await helper('receipt', { ...composerFailure, draftState });
+      const error: unknown = await runLinuxChatgptDesktop(
+        'prepare',
+        config,
+        Date.now() + 5000
+      ).catch((failure: unknown) => failure);
+      expect(error).toBeInstanceOf(NativeChatgptDriverError);
+      expect(error).toMatchObject({
+        metadata: undefined,
+        phase: undefined,
+        step: undefined,
+      });
+      expect((error as Error).message).toContain('missing_or_invalid_receipt');
+      expect(JSON.stringify(error)).not.toContain('private');
+      expect((error as Error).message).not.toContain('private');
+    }
+  );
+  it.each(['ready', 'submitted'])(
+    'rejects draft diagnostics on %s receipts',
+    async (status) => {
+      await helper('receipt', {
+        status,
+        surface: 'chatgpt-work',
+        action_count: 1,
+        duration_ms: 1,
+        draftState: readableDraftState,
+      });
+      const error: unknown = await runLinuxChatgptDesktop(
+        status === 'ready' ? 'prepare' : 'submit',
+        config,
+        Date.now() + 5000,
+        'private prompt'
+      ).catch((failure: unknown) => failure);
+      expect(error).toMatchObject({ metadata: undefined });
+      expect((error as Error).message).toContain('missing_or_invalid_receipt');
+    }
+  );
   it.each([0, 1, 16])(
     'preserves %i allowlisted candidates as error metadata only',
     async (count) => {
@@ -146,6 +287,7 @@ describe('Linux ChatGPT runtime adapter', () => {
     ).rejects.toMatchObject({
       phase: 'composer',
       composerCandidates: undefined,
+      metadata: undefined,
     });
   });
   it.each([
