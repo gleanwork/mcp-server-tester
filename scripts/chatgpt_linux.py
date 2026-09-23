@@ -2,7 +2,8 @@
 """Bounded ChatGPT AT-SPI setup/submission. Caller owns login and desktop lifecycle.
 
 No inference API, shell, arbitrary keyboard input, answer extraction, or action retry.
-Input is JSON on stdin; output contains only a fixed receipt, never UI/query text.
+Input is JSON on stdin; output never contains query text. Failed setup may
+include bounded, redacted control names; submit receipts never include names.
 """
 from __future__ import annotations
 
@@ -10,10 +11,12 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import selectors
 import subprocess
 import sys
 import time
+import unicodedata
 
 
 class DriverFailure(RuntimeError):
@@ -21,6 +24,12 @@ class DriverFailure(RuntimeError):
 
 
 BUTTONS = {'button', 'push button'}
+SETUP_CONTROL_ROLES = BUTTONS | {'toggle button', 'radio button', 'menu item'}
+PRIVATE_CONTROL_NAME = re.compile(
+    r'sk-|bearer|[a-z][a-z0-9+.-]*:|www\.|[a-z0-9-]+\.[a-z]{2,}|@|[^\W_]{20,}',
+    re.IGNORECASE)
+
+
 SURFACES = {'chatgpt-work': 'ChatGPT Work', 'codex': 'Codex'}
 MENU_LABELS = {'chatgpt-work': 'ChatGPT Work Create, learn, and explore',
                'codex': 'Codex Build, debug, and ship'}
@@ -48,6 +57,16 @@ ERROR_CODES = frozenset({
     'desktop_attribute_error', 'desktop_type_error',
     'desktop_glib_error', 'desktop_driver_failed',
 })
+
+
+def setup_control_name(name):
+    # Bound inspection, then inspect the whole name before truncating. Never
+    # retain a secret prefix even when the unsafe part is beyond 120 characters.
+    if (not isinstance(name, str) or len(name) > 4096 or PRIVATE_CONTROL_NAME.search(name)
+            or any(character != ' ' and unicodedata.category(character)[0] in {'C', 'Z'}
+                   for character in name)):
+        return '[redacted]'
+    return name[:120]
 
 
 def error_code(error):
@@ -441,6 +460,7 @@ class Driver:
         self.step = None
         self.composer_candidates = None
         self.last_snapshot = None
+        self.mode = None
 
     def check(self):
         if time.monotonic() >= self.deadline:
@@ -532,6 +552,7 @@ class Driver:
         return True
 
     def prepare(self, surface):
+        self.mode = 'prepare'
         if surface not in SURFACES:
             raise DriverFailure('invalid_surface')
         self.desktop.require_helpers()
@@ -585,6 +606,8 @@ class Driver:
         return self.receipt('ready', surface)
 
     def submit(self, prompt, surface):
+        # Reset even when reusing a driver after prepare, before any validation.
+        self.mode = 'submit'
         if not isinstance(prompt, str) or not prompt.strip():
             raise DriverFailure('invalid_prompt')
         if surface not in SURFACES:
@@ -650,14 +673,29 @@ class Driver:
             pass
         return state
 
+    def setup_controls(self):
+        # Setup has no query. Use cached control names only, never frames, labels,
+        # editor values, fresh RPCs, or actions. Disabled loading controls matter.
+        if self.mode != 'prepare' or self.last_snapshot is None:
+            return None
+        records = []
+        for node in self.last_snapshot:
+            if node['role'] in SETUP_CONTROL_ROLES and available(node, enabled=False):
+                records.append({'role': node['role'], 'name': setup_control_name(node['name'])})
+                if len(records) == 32:
+                    break
+        return {'setupOnly': True, 'controls': records}
+
     def receipt(self, status, surface=None):
         draft_state = self.draft_state() if status == 'failed' else None
+        setup_controls = self.setup_controls() if status == 'failed' else None
         return {'status': status, 'action_count': self.actions,
                 'duration_ms': (time.monotonic() - self.started) * 1000,
                 **({'surface': surface} if surface else {}),
                 **({'phase': self.phase} if status == 'failed' and self.phase else {}),
                 **({'step': self.step} if status == 'failed' and self.step else {}),
                 **({'draftState': draft_state} if draft_state is not None else {}),
+                **({'setupControls': setup_controls} if setup_controls is not None else {}),
                 **({'composerCandidates': self.composer_candidates}
                    if status == 'failed' and self.phase == 'composer'
                    and self.composer_candidates is not None else {})}

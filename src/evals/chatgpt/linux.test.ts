@@ -98,6 +98,195 @@ const composerFailure = {
 };
 
 describe('Linux ChatGPT runtime adapter', () => {
+  const setupControls = {
+    setupOnly: true,
+    controls: [{ role: 'button', name: 'Trust folder' }],
+  };
+  it.each([
+    { ...setupControls, controls: [] },
+    setupControls,
+    {
+      ...setupControls,
+      controls: [
+        'button',
+        'push button',
+        'toggle button',
+        'radio button',
+        'menu item',
+      ].map((role) => ({ role, name: '' })),
+    },
+    {
+      ...setupControls,
+      controls: Array.from({ length: 32 }, () => ({
+        role: 'button',
+        name: 'é 😀 '.repeat(30),
+      })),
+    },
+    { ...setupControls, controls: [{ role: 'button', name: '[redacted]' }] },
+  ])(
+    'exposes bounded setup controls on failed prepare only %#',
+    async (diagnostic) => {
+      await helper('receipt', {
+        ...composerFailure,
+        setupControls: diagnostic,
+        draftState: unreadableDraftState,
+      });
+      const error: unknown = await runLinuxChatgptDesktop(
+        'prepare',
+        config,
+        Date.now() + 5000
+      ).catch((failure: unknown) => failure);
+      expect(error).toBeInstanceOf(NativeChatgptDriverError);
+      expect(error).toMatchObject({
+        phase: 'composer',
+        metadata: {
+          setupControls: diagnostic,
+          draftState: unreadableDraftState,
+        },
+        telemetry: { accounting: 'partial' },
+      });
+      expect((error as Error).message).not.toContain('Trust folder');
+    }
+  );
+  it('allows setup controls at the initial folder-trust stage', async () => {
+    await helper('receipt', {
+      ...composerFailure,
+      phase: 'waiting-for-initial-ui',
+      setupControls,
+    });
+    await expect(
+      runLinuxChatgptDesktop('prepare', config, Date.now() + 5000)
+    ).rejects.toMatchObject({
+      phase: 'waiting-for-initial-ui',
+      metadata: { setupControls },
+    });
+  });
+  it.each([undefined, false, 'true', 1])(
+    'requires a literal setupOnly assertion: %s',
+    async (setupOnly) => {
+      await helper('receipt', {
+        ...composerFailure,
+        setupControls: { ...setupControls, setupOnly },
+      });
+      await expect(
+        runLinuxChatgptDesktop('prepare', config, Date.now() + 5000)
+      ).rejects.toMatchObject({
+        metadata: undefined,
+        phase: undefined,
+        message: expect.stringContaining('missing_or_invalid_receipt'),
+      });
+    }
+  );
+  it.each([
+    null,
+    {},
+    [],
+    { ...setupControls, private: 'private value' },
+    {
+      ...setupControls,
+      controls: Array.from({ length: 33 }, () => setupControls.controls[0]),
+    },
+    ...[
+      'frame',
+      'label',
+      'entry',
+      'text',
+      'paragraph',
+      'static',
+      'password text',
+    ].map((role) => ({
+      ...setupControls,
+      controls: [{ role, name: 'private value' }],
+    })),
+    ...['text', 'value', 'url', 'prompt', 'credentials'].map((key) => ({
+      ...setupControls,
+      controls: [{ role: 'button', name: '', [key]: 'private value' }],
+    })),
+    ...[
+      'sk-private',
+      'BEARER private',
+      'https://private.example/path',
+      'codex://new?prompt=private',
+      'www.private.example',
+      'private.example',
+      'person@private.example',
+      'a'.repeat(20),
+      'π'.repeat(20),
+      'private\nvalue',
+      'private\tvalue',
+      'private\u0000value',
+      'private\u007fvalue',
+      'private\u0085value',
+      'private\u200bvalue',
+      'private\u202evalue',
+      'private\u00a0value',
+      'private\ud800value',
+      'a '.repeat(61),
+      1,
+      null,
+    ].map((name) => ({
+      ...setupControls,
+      controls: [{ role: 'button', name }],
+    })),
+  ])(
+    'rejects malformed or unsafe setup controls without leaking values %#',
+    async (diagnostic) => {
+      await helper('receipt', {
+        ...composerFailure,
+        setupControls: diagnostic,
+      });
+      const error: unknown = await runLinuxChatgptDesktop(
+        'prepare',
+        config,
+        Date.now() + 5000
+      ).catch((failure: unknown) => failure);
+      expect(error).toMatchObject({ metadata: undefined, phase: undefined });
+      expect((error as Error).message).toContain('missing_or_invalid_receipt');
+      expect(JSON.stringify(error)).not.toContain('private');
+      expect((error as Error).message).not.toContain('private');
+    }
+  );
+  it.each(['ready', 'submitted', 'failed'] as const)(
+    'never accepts setup diagnostics during submit (%s)',
+    async (status) => {
+      await helper('receipt', {
+        status,
+        surface: 'chatgpt-work',
+        action_count: 0,
+        duration_ms: 0,
+        setupControls,
+      });
+      await expect(
+        runLinuxChatgptDesktop(
+          'submit',
+          config,
+          Date.now() + 5000,
+          'private prompt'
+        )
+      ).rejects.toMatchObject({
+        metadata: undefined,
+        message: expect.stringContaining('missing_or_invalid_receipt'),
+      });
+    }
+  );
+  it.each(['ready', 'submitted'])(
+    'setup diagnostics cannot fake successful prepare (%s)',
+    async (status) => {
+      await helper('receipt', {
+        status,
+        surface: 'chatgpt-work',
+        action_count: 0,
+        duration_ms: 0,
+        setupControls,
+      });
+      await expect(
+        runLinuxChatgptDesktop('prepare', config, Date.now() + 5000)
+      ).rejects.toMatchObject({
+        metadata: undefined,
+        message: expect.stringContaining('missing_or_invalid_receipt'),
+      });
+    }
+  );
   it.each([
     readableDraftState,
     unreadableDraftState,
