@@ -143,7 +143,22 @@ paste retry after an uncertain setter, repeated paste, approval handler, or
 repeated Send.
 
 When two New chat buttons are visible, the driver chooses the one with the nearest
-shared ancestor container to the composer; an equal-depth tie fails closed.
+shared ancestor container to the composer. It detects an equal-depth tie before
+any UI action and uses the documented Linux **New chat: Ctrl+N** shortcut
+([ChatGPT commands](https://learn.chatgpt.com/docs/reference/commands)). It focuses
+the unique composer with unbound `Atspi.Component.grab_focus(node)`, refreshes the
+snapshot, and requires the same editor with FOCUSED on its root or a descendant
+whose ancestry proves it belongs to that editor. Missing focus, focus outside the
+editor, or independent editors block the shortcut. Only then does it run the fixed
+`xdotool key ctrl+n` command, without a shell or arbitrary keyboard strings.
+Focus verification and the shortcut count as one logical action. Failure is not
+retried through the shortcut, a button, or the File menu. Missing New chat buttons
+still fail closed.
+
+Preparation uses this same shortcut on a tie to verify fresh-chat readiness. It
+never fills or sends a prompt. After either fresh-chat path, the driver waits for
+the requested surface and an exactly empty composer before filling. There is no
+text normalization, URL-scheme launch, new app process, or extra dependency.
 Read-only snapshot traversal can restart at most twice on transient GLib errors;
 partial trees never authorize actions. Actions are never retried.
 

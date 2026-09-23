@@ -243,29 +243,11 @@ class DriverTest(unittest.TestCase):
         self.assertEqual([a[0] for a in desktop.actions], ['Continue'])
         self.assertEqual(_sleep.call_count, 100)
 
-    def test_ambiguous_toolbar_uses_unique_native_file_menu(self):
-        class MenuDesktop(FakeDesktop):
-            def activate(self, control, allowed):
-                if control['name'] == 'File':
-                    self.actions.append(('File', allowed))
-                    self.nodes.append(node('New Chat', 'menu item'))
-                elif control['name'] == 'New Chat':
-                    self.actions.append(('New Chat', allowed))
-                    self.nodes = ready()
-                else:
-                    super().activate(control, allowed)
+    def test_missing_new_chat_does_not_act(self):
         nodes = ready()
-        nodes[3]['ancestors'] = nodes[2]['ancestors']
-        nodes.append(node('File', 'menu item'))
-        desktop = MenuDesktop(nodes)
-        result = self.driver(desktop).prepare('chatgpt-work')
-        self.assertEqual(result['status'], 'ready')
-        self.assertEqual([action[0] for action in desktop.actions], ['File', 'New Chat'])
-        self.assertFalse(any(action[0] in {'fill', 'Send'} for action in desktop.actions))
-
-    def test_ambiguous_toolbar_without_file_menu_does_not_act(self):
-        nodes = ready()
-        nodes[3]['ancestors'] = nodes[2]['ancestors']
+        for item in nodes:
+            if item['name'] == 'New chat':
+                item['name'] = 'unrelated button'
         desktop = FakeDesktop(nodes)
         with self.assertRaisesRegex(DriverFailure, 'new_chat_missing_or_ambiguous'):
             self.driver(desktop).prepare('chatgpt-work')
@@ -557,6 +539,201 @@ class DriverTest(unittest.TestCase):
         desktop = object.__new__(Desktop)
         with self.assertRaisesRegex(DriverFailure, 'action_missing_or_ambiguous'):
             desktop.activate({'node': Node()}, {'click'})
+
+
+class NewChatShortcutTest(unittest.TestCase):
+    def desktop(self, surface='ChatGPT Work'):
+        desktop, editor, app, calls = public_desktop(setter=True)
+        app.children[0].name = 'Switch mode, current mode: ' + surface
+        app.children.extend([PublicNode('New chat'), PublicNode('File', 'menu item')])
+        editor.value = 'prior draft'
+        def shortcut(argv):
+            self.assertEqual(argv, [XDOTOOL, 'key', 'ctrl+n'])
+            calls.append(('shortcut',))
+            editor.value = ''
+        desktop.helper = Mock(side_effect=shortcut)
+        return desktop, editor, app, calls
+
+    def run_mode(self, driver, mode, surface='chatgpt-work'):
+        if mode == 'prepare':
+            return driver.prepare(surface)
+        return driver.submit('  π 😀\n\nDo not trim.  \n', surface)
+
+    def test_duplicate_buttons_use_focused_native_shortcut_never_file(self):
+        for mode in ('prepare', 'submit'):
+            for surface, label in (('chatgpt-work', 'ChatGPT Work'), ('codex', 'Codex')):
+                with self.subTest(mode=mode, surface=surface):
+                    desktop, editor, _, calls = self.desktop(label)
+                    driver = Driver(desktop, 60000, 24)
+                    result = self.run_mode(driver, mode, surface)
+                    self.assertEqual(result['status'], 'ready' if mode == 'prepare' else 'submitted')
+                    self.assertEqual(result['action_count'], 1 if mode == 'prepare' else 3)
+                    expected = [('focus',), ('shortcut',)]
+                    if mode == 'submit':
+                        prompt = '  π 😀\n\nDo not trim.  \n'
+                        expected += [('setter', prompt), ('Send',)]
+                        self.assertEqual(editor.value, prompt)
+                    else:
+                        self.assertEqual(editor.value, '')
+                    self.assertEqual(calls, expected)
+                    desktop.helper.assert_called_once_with([XDOTOOL, 'key', 'ctrl+n'])
+
+    def test_unique_button_never_uses_shortcut(self):
+        desktop, _, _, calls = public_desktop(setter=True)
+        desktop.helper = Mock(side_effect=AssertionError('must not use shortcut'))
+        result = self.run_mode(Driver(desktop, 60000, 24), 'submit')
+        self.assertEqual(result['action_count'], 3)
+        self.assertEqual([call[0] for call in calls], ['New chat', 'setter', 'Send'])
+        desktop.helper.assert_not_called()
+
+    def test_shortcut_does_not_require_file_menu(self):
+        desktop, _, app, calls = self.desktop()
+        app.children = [child for child in app.children if child.name != 'File']
+        self.run_mode(Driver(desktop, 60000, 24), 'prepare')
+        self.assertEqual(calls, [('focus',), ('shortcut',)])
+
+    def test_focus_failure_or_unverified_focus_blocks_shortcut_and_send(self):
+        for mode in ('prepare', 'submit'):
+            for acknowledged in (False, True):
+                with self.subTest(mode=mode, acknowledged=acknowledged):
+                    desktop, _, _, calls = self.desktop()
+                    desktop.api.Component.grab_focus = Mock(return_value=acknowledged)
+                    driver = Driver(desktop, 60000, 24)
+                    with self.assertRaisesRegex(DriverFailure, '^focus_failed$'):
+                        self.run_mode(driver, mode)
+                    self.assertEqual(driver.actions, 1)
+                    desktop.api.Component.grab_focus.assert_called_once()
+                    desktop.helper.assert_not_called()
+                    self.assertEqual(calls, [])
+
+    def test_refreshed_descendant_focus_proves_editor_ownership(self):
+        desktop, editor, _, calls = self.desktop()
+        paragraph = PublicNode('nested paragraph', 'paragraph', editable=True)
+        editor.children.append(paragraph)
+        def focus(control):
+            self.assertIs(control, editor)
+            calls.append(('focus',))
+            desktop.context.events.append(lambda: paragraph.states.add('FOCUSED'))
+            return True
+        desktop.api.Component.grab_focus = focus
+        self.run_mode(Driver(desktop, 60000, 24), 'prepare')
+        self.assertEqual(calls, [('focus',), ('shortcut',)])
+        self.assertEqual(desktop.context.iterations, 1)
+        self.assertNotIn('FOCUSED', editor.states)
+
+    def test_focus_in_unrelated_field_never_authorizes_shortcut(self):
+        for root_focused in (False, True):
+            with self.subTest(root_focused=root_focused):
+                desktop, editor, app, calls = self.desktop()
+                other = PublicNode('other field', 'password text', editable=True)
+                app.children.append(other)
+                def focus(_):
+                    other.states.add('FOCUSED')
+                    if root_focused:
+                        editor.states.add('FOCUSED')
+                    return True
+                desktop.api.Component.grab_focus = focus
+                with self.assertRaisesRegex(DriverFailure, '^focus_failed$'):
+                    self.run_mode(Driver(desktop, 60000, 24), 'submit')
+                desktop.helper.assert_not_called()
+                self.assertEqual(calls, [])
+
+    def test_replacement_editor_after_focus_blocks_shortcut(self):
+        desktop, editor, app, calls = self.desktop()
+        def focus(_):
+            replacement = PublicNode('replacement', 'text', editable=True)
+            replacement.states.add('FOCUSED')
+            app.children[app.children.index(editor)] = replacement
+            return True
+        desktop.api.Component.grab_focus = focus
+        with self.assertRaisesRegex(DriverFailure, '^focus_failed$'):
+            self.run_mode(Driver(desktop, 60000, 24), 'submit')
+        desktop.helper.assert_not_called()
+        self.assertEqual(calls, [])
+
+    def test_independent_editors_block_before_focus_or_shortcut(self):
+        for mode in ('prepare', 'submit'):
+            with self.subTest(mode=mode):
+                desktop, _, app, calls = self.desktop()
+                app.children.append(PublicNode('separate field', 'entry', editable=True))
+                desktop.api.Component.grab_focus = Mock()
+                driver = Driver(desktop, 60000, 24)
+                with self.assertRaisesRegex(DriverFailure, '^composer_missing_or_ambiguous$'):
+                    self.run_mode(driver, mode)
+                self.assertEqual(driver.actions, 0)
+                desktop.api.Component.grab_focus.assert_not_called()
+                desktop.helper.assert_not_called()
+                self.assertEqual(calls, [])
+
+    def test_independent_editor_appearing_after_focus_blocks_shortcut(self):
+        desktop, editor, app, calls = self.desktop()
+        def focus(_):
+            editor.states.add('FOCUSED')
+            app.children.append(PublicNode('popup', 'entry', editable=True))
+            return True
+        desktop.api.Component.grab_focus = focus
+        with self.assertRaisesRegex(DriverFailure, '^composer_missing_or_ambiguous$'):
+            self.run_mode(Driver(desktop, 60000, 24), 'submit')
+        desktop.helper.assert_not_called()
+        self.assertEqual(calls, [])
+
+    def test_keyboard_failure_never_retries_or_fills_or_sends(self):
+        for mode in ('prepare', 'submit'):
+            for error, code in [(subprocess.TimeoutExpired('private', 2), 'helper_timeout'),
+                                (subprocess.CalledProcessError(1, 'private'), 'helper_failed'),
+                                (OSError('private'), 'helper_failed')]:
+                with self.subTest(mode=mode, code=code):
+                    desktop, _, _, calls = self.desktop()
+                    desktop.helper = lambda argv: Desktop.helper(desktop, argv)
+                    driver = Driver(desktop, 60000, 24)
+                    with patch('chatgpt_linux.subprocess.run', side_effect=error) as run:
+                        with self.assertRaisesRegex(DriverFailure, '^' + code + '$'):
+                            self.run_mode(driver, mode)
+                    self.assertEqual(driver.actions, 1)
+                    self.assertEqual(calls, [('focus',)])
+                    self.assertEqual(run.call_count, 1)
+                    self.assertEqual(run.call_args.args[0], [XDOTOOL, 'key', 'ctrl+n'])
+                    self.assertNotIn('private', json.dumps(driver.receipt('failed')))
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_shortcut_requires_requested_surface_and_exact_empty_composer(self, _sleep):
+        for mode in ('prepare', 'submit'):
+            for state in ('nonempty', 'wrong-surface'):
+                with self.subTest(mode=mode, state=state):
+                    desktop, editor, app, calls = self.desktop()
+                    def shortcut(argv):
+                        calls.append(('shortcut',))
+                        if state == 'wrong-surface':
+                            editor.value = ''
+                            app.children[0].name = 'Switch mode, current mode: Codex'
+                    desktop.helper = Mock(side_effect=shortcut)
+                    driver = Driver(desktop, 60000, 24)
+                    with self.assertRaisesRegex(DriverFailure, '^state_transition_unobserved$'):
+                        self.run_mode(driver, mode)
+                    self.assertEqual(driver.actions, 1)
+                    self.assertEqual(calls, [('focus',), ('shortcut',)])
+                    desktop.helper.assert_called_once_with([XDOTOOL, 'key', 'ctrl+n'])
+
+    def test_shortcut_obeys_action_budget_before_focus(self):
+        desktop, _, _, calls = self.desktop()
+        driver = Driver(desktop, 60000, 1)
+        driver.actions = 1
+        with self.assertRaisesRegex(DriverFailure, '^action_budget_exhausted$'):
+            self.run_mode(driver, 'prepare')
+        self.assertEqual(calls, [])
+        desktop.helper.assert_not_called()
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_shortcut_submission_still_requires_exact_readback(self, _sleep):
+        desktop, editor, _, calls = self.desktop()
+        def setter(_, prompt):
+            calls.append(('setter',))
+            editor.value = prompt.strip()
+            return True
+        desktop.api.EditableText.set_text_contents = setter
+        with self.assertRaisesRegex(DriverFailure, '^state_transition_unobserved$'):
+            self.run_mode(Driver(desktop, 60000, 24), 'submit')
+        self.assertEqual(calls, [('focus',), ('shortcut',), ('setter',)])
 
 
 class ChromiumInputTest(unittest.TestCase):

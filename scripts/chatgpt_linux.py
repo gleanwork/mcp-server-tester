@@ -221,6 +221,25 @@ class Desktop:
         except OSError:
             raise DriverFailure('helper_failed') from None
 
+    def new_chat_shortcut(self, control):
+        # Fixed Linux New chat command, not a generic keyboard-input API.
+        # https://learn.chatgpt.com/docs/reference/commands
+        if not self.api.Component.grab_focus(control['node']):
+            raise DriverFailure('focus_failed')
+        nodes = self.snapshot()
+        current = composer(nodes)
+        if current['node'] != control['node']:
+            raise DriverFailure('focus_failed')
+        editor_index = next(i for i, node in enumerate(nodes) if node is current)
+        focused = [node for node in nodes if available(node, enabled=False)
+                   and node['node'].get_state_set().contains(self.api.StateType.FOCUSED)]
+        # Chromium may focus a descendant of the editor root. Ancestry in this
+        # complete, refreshed tree must prove ownership; another field cannot.
+        if not focused or any(node is not current and editor_index not in node['ancestors']
+                              for node in focused):
+            raise DriverFailure('focus_failed')
+        self.helper([XDOTOOL, 'key', 'ctrl+n'])
+
     def fill(self, control, prompt):
         if not available(control) or not control['editable']:
             raise DriverFailure('composer_missing_or_ambiguous')
@@ -414,21 +433,16 @@ class Driver:
         return self.receipt('ready', surface)
 
     def new_chat(self, nodes, surface):
+        editor = composer(nodes)
         try:
-            target = fresh_chat(nodes, composer(nodes))
+            target = fresh_chat(nodes, editor)
         except DriverFailure as error:
-            if str(error) != 'new_chat_missing_or_ambiguous':
+            if (str(error) != 'new_chat_missing_or_ambiguous'
+                    or len(controls(nodes, {'New chat'})) < 2):
                 raise
-            # Ambiguity is detected before any action. Use the app's native File
-            # menu instead of guessing between duplicated toolbar buttons.
-            self.click(unique(controls(nodes, {'File'}, {'menu item'}),
-                              'new_chat_missing_or_ambiguous'), {'select', 'open', 'press'})
-            def menu_items(snapshot):
-                return [n for n in snapshot if available(n) and n['role'] == 'menu item'
-                        and n['name'].casefold() == 'new chat']
-            nodes = self.wait(lambda ns: bool(menu_items(ns)))
-            self.click(unique(menu_items(nodes), 'new_chat_missing_or_ambiguous'),
-                       {'select', 'press', 'click'})
+            # Resolve ambiguity before any UI action. Focus verification and the
+            # fixed shortcut form one logical action, never retried on failure.
+            self.action(lambda: self.desktop.new_chat_shortcut(editor))
         else:
             self.click(target)
         return self.wait(lambda ns: self.ready(ns, surface) and self.desktop.text(composer(ns)) == '')
