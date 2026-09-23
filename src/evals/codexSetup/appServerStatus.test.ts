@@ -5,7 +5,6 @@ import { PassThrough } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import {
   AppServerFailureError,
-  appServerHostToolDisabled,
   appServerServerReady,
   exchangeAppServerStatus,
   probeAppServerStatus,
@@ -46,11 +45,7 @@ describe('app-server MCP status exchange', () => {
         { name: 'other', tools: {}, authStatus: 'oAuth' },
       ]),
     ]);
-    const { servers, hostTools } = await exchangeAppServerStatus(
-      channel,
-      ['glean', 'absent'],
-      ['cua_repl']
-    );
+    const servers = await exchangeAppServerStatus(channel, ['glean', 'absent']);
     expect(channel.sent.map((message) => message.method)).toEqual([
       'initialize',
       'initialized',
@@ -70,20 +65,14 @@ describe('app-server MCP status exchange', () => {
         authStatus: 'unknown',
       },
     ]);
-    expect(hostTools).toEqual({
-      unconfiguredServerWithTools: false,
-      disabled: [{ label: 'cua_repl', present: false, toolCount: null }],
-    });
-    expect(appServerHostToolDisabled(hostTools.disabled[0]!)).toBe(true);
-    expect(JSON.stringify({ servers, hostTools })).not.toContain('private');
-    expect(JSON.stringify(hostTools)).not.toContain('other');
+    expect(JSON.stringify(servers)).not.toContain('private');
     expect(appServerServerReady(servers[0]!, 'bearerToken')).toBe(true);
     expect(appServerServerReady(servers[0]!, 'unsupported')).toBe(false);
     expect(appServerServerReady(servers[1]!, 'bearerToken')).toBe(false);
   });
 
   it('maps unknown auth strings and object tool maps safely', async () => {
-    const { servers } = await exchangeAppServerStatus(
+    const servers = await exchangeAppServerStatus(
       new FakeChannel([
         initialized,
         list([{ name: 'glean', tools: { a: {} }, authStatus: 'secret-mode' }]),
@@ -92,37 +81,6 @@ describe('app-server MCP status exchange', () => {
     );
     expect(servers[0]).toMatchObject({ toolCount: 1, authStatus: 'unknown' });
     expect(appServerServerReady(servers[0]!, 'bearerToken')).toBe(false);
-  });
-
-  it('flags a disabled host server that still lists tools, without tool names', async () => {
-    const { hostTools } = await exchangeAppServerStatus(
-      new FakeChannel([
-        initialized,
-        list([
-          { name: 'glean', tools: [{}], authStatus: 'bearerToken' },
-          {
-            name: 'cua_repl',
-            tools: [{ name: 'js', description: 'private-desc' }],
-          },
-          { name: 'idle', tools: [] },
-        ]),
-      ]),
-      ['glean'],
-      ['cua_repl']
-    );
-    expect(hostTools).toEqual({
-      unconfiguredServerWithTools: true,
-      disabled: [{ label: 'cua_repl', present: true, toolCount: 1 }],
-    });
-    expect(appServerHostToolDisabled(hostTools.disabled[0]!)).toBe(false);
-    expect(JSON.stringify(hostTools)).not.toMatch(/js|private-desc|idle/);
-    expect(
-      appServerHostToolDisabled({
-        label: 'cua_repl',
-        present: true,
-        toolCount: 0,
-      })
-    ).toBe(true);
   });
 
   it.each([
@@ -161,10 +119,6 @@ describe('app-server MCP status exchange', () => {
     [[initialized, list([{ name: 'glean', tools: [1] }])], 'invalid-response'],
     [[initialized, list([{ name: 'glean' }])], 'invalid-response'],
     [
-      [initialized, list([{ name: 'cua_repl', tools: 'unknown' }])],
-      'invalid-response',
-    ],
-    [
       [
         initialized,
         list(
@@ -177,7 +131,7 @@ describe('app-server MCP status exchange', () => {
   ])('fails closed on %j with %s', async (lines, reason) => {
     const channel = new FakeChannel(lines);
     await expect(
-      exchangeAppServerStatus(channel, ['glean'], ['cua_repl'])
+      exchangeAppServerStatus(channel, ['glean'])
     ).rejects.toMatchObject({ reason });
     expect(
       channel.sent.every((message) =>
@@ -268,8 +222,7 @@ setInterval(() => {}, 1000);
       const status = await probeAppServerStatus(
         codex,
         { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: root },
-        ['glean'],
-        ['cua_repl']
+        ['glean']
       );
       expect(status).toEqual({
         status: 'available',
@@ -281,10 +234,6 @@ setInterval(() => {}, 1000);
             authStatus: 'bearerToken',
           },
         ],
-        hostTools: {
-          unconfiguredServerWithTools: false,
-          disabled: [{ label: 'cua_repl', present: false, toolCount: null }],
-        },
       });
       const missing = await probeAppServerStatus(
         join(root, 'missing'),

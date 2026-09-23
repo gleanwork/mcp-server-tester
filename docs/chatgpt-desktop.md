@@ -91,18 +91,9 @@ MST then owns, in order:
 7. Copy evidence, stop the app group (TERM, then KILL, then verify no member
    remains), restore config, and remove the workspace. The caller deletes HOME.
 
-Headless host tool policy: the VM has no usable screen, so the bundled
-computer-use tool (`cua_repl`) never returns. On Linux, MST always writes
-`[plugins."computer-use@openai-bundled"] enabled = false` to `config.toml`.
-It does not write a `[mcp_servers.cua_repl]` table: a table without a transport
-breaks native login. The app-server probe runs even without configured servers.
-If `cua_repl` is listed with any tool, setup fails before the prompt with
-`host_tool_policy_unenforced`. If it is not listed, the policy holds. The policy
-is recorded, not hidden: `nativeReadiness.hostToolPolicy` lists the disabled
-plugin (`disabled`) and the server that must be absent (`requiredAbsent`), and
-`nativeReadiness.mcpStatus.hostTools` records `cua_repl` presence and whether any
-unconfigured server exposes tools (booleans only, no tool names). macOS is
-unchanged.
+Computer use: on Linux, the built-in computer-use tool (`cua_repl`) is available
+to the model. Config cannot disable it in this ChatGPT build. Its calls are
+recorded as host tool calls, separate from MCP calls.
 
 Execution policy: on Linux, MST writes `approval_policy = "never"` and
 `sandbox_mode = "danger-full-access"`. Native command execution needs
@@ -115,8 +106,8 @@ unchanged.
 
 There is no setup-only mode. Setup failures carry fixed codes such as
 `home_not_fresh`, `login_unverified`, `mcp_preflight_failed`,
-`mcp_status_unavailable`, `mcp_server_not_ready`,
-`host_tool_policy_unenforced`, `app_exited`, and `app_stop_failed`. Batch telemetry records `nativeReadiness` (login state,
+`mcp_status_unavailable`, `mcp_server_not_ready`, `app_exited`, and
+`app_stop_failed`. Batch telemetry records `nativeReadiness` (login state,
 sanitized per-server preflight and app-server status) next to `nativeSetup`
 (AT-SPI accounting). No native output, URL, token, or key is recorded.
 

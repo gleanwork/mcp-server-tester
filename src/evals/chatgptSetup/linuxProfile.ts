@@ -19,18 +19,15 @@ import {
 } from '../chatgpt/driver.js';
 import { LINUX_CHATGPT_RUNTIME_ENVIRONMENT } from '../chatgpt/linuxContract.js';
 import {
-  appServerHostToolDisabled,
   appServerServerReady,
   probeAppServerStatus,
   type AppServerStatus,
 } from '../codexSetup/appServerStatus.js';
 import { loginWithApiKey } from '../codexSetup/auth.js';
-import {
-  disabledHostToolName,
-  type CodexConfigInstallOptions,
-  type CodexDisabledHostTool,
-  type CodexExecutionPolicy,
-  type ResolvedCodexSetup,
+import type {
+  CodexConfigInstallOptions,
+  CodexExecutionPolicy,
+  ResolvedCodexSetup,
 } from '../codexSetup/config.js';
 import {
   CodexSetupError,
@@ -174,20 +171,6 @@ export function validateLinuxChatgptConfig(
 }
 
 /**
- * The headless VM has no usable screen, so the bundled computer-use tool never
- * returns. Linux always disables the plugin that contributes `cua_repl` and
- * records the policy in telemetry. A transport-less `[mcp_servers.cua_repl]`
- * table breaks native login, so the server itself is not written; the
- * app-server probe verifies it is absent instead.
- */
-export const LINUX_CHATGPT_DISABLED_HOST_TOOLS: readonly CodexDisabledHostTool[] =
-  [{ kind: 'plugin', id: 'computer-use@openai-bundled' }];
-/** Host MCP servers that must not be exposed to the model on Linux. */
-export const LINUX_CHATGPT_ABSENT_HOST_SERVERS: readonly string[] = [
-  'cua_repl',
-];
-
-/**
  * bwrap cannot run inside the Scio container, and nobody can answer an
  * approval request in a headless run. Scio runs the whole app in a disposable
  * no-new-privileges container with a fresh tmpfs profile, so that container is
@@ -200,7 +183,6 @@ export const LINUX_CHATGPT_EXECUTION_POLICY: CodexExecutionPolicy = {
 
 /** Sanitized setup receipt. No prompts, URLs, tokens, or native output. */
 export interface LinuxChatgptReadiness {
-  hostToolPolicy: { disabled: string[]; requiredAbsent: string[] };
   executionPolicy: CodexExecutionPolicy;
   login: 'not-run' | 'verified' | 'failed';
   mcpPreflight: McpServerReadiness[];
@@ -212,10 +194,7 @@ export interface ChatgptPlatformProfile {
   readonly configPath: string;
   readonly install: Pick<
     CodexConfigInstallOptions,
-    | 'credentialStore'
-    | 'trustedProject'
-    | 'disabledHostTools'
-    | 'executionPolicy'
+    'credentialStore' | 'trustedProject' | 'executionPolicy'
   >;
   readonly controller: ChatgptApplicationController;
   readonly evidenceDir?: string;
@@ -258,10 +237,6 @@ export async function createLinuxChatgptProfile(
   );
   await privateDirectory(workspace, 'workspace_unsafe');
   const readiness: LinuxChatgptReadiness = {
-    hostToolPolicy: {
-      disabled: LINUX_CHATGPT_DISABLED_HOST_TOOLS.map(disabledHostToolName),
-      requiredAbsent: [...LINUX_CHATGPT_ABSENT_HOST_SERVERS],
-    },
     executionPolicy: { ...LINUX_CHATGPT_EXECUTION_POLICY },
     login: 'not-run',
     mcpPreflight: [],
@@ -275,7 +250,6 @@ export async function createLinuxChatgptProfile(
     install: {
       credentialStore: 'keyring',
       trustedProject: workspace,
-      disabledHostTools: LINUX_CHATGPT_DISABLED_HOST_TOOLS,
       executionPolicy: LINUX_CHATGPT_EXECUTION_POLICY,
     },
     controller: createLinuxChatgptApp({
@@ -328,12 +302,11 @@ export async function createLinuxChatgptProfile(
         )
       )
         throw fail('mcp_preflight_failed');
-      // Probe even without configured servers: the host tool policy must hold.
+      if (!setup.servers.length) return;
       readiness.mcpStatus = await probeAppServerStatus(
         environment.codexPath,
         { ...native, ...tokens },
-        setup.servers.map((server) => server.label),
-        LINUX_CHATGPT_ABSENT_HOST_SERVERS
+        setup.servers.map((server) => server.label)
       );
       if (readiness.mcpStatus.status !== 'available')
         throw fail('mcp_status_unavailable');
@@ -346,10 +319,6 @@ export async function createLinuxChatgptProfile(
         if (!appServerServerReady(server, auth))
           throw fail('mcp_server_not_ready');
       }
-      if (
-        !readiness.mcpStatus.hostTools.disabled.every(appServerHostToolDisabled)
-      )
-        throw fail('host_tool_policy_unenforced');
     },
     async dispose() {
       // Owner-checked: remove only the workspace MST created. Scio owns HOME.

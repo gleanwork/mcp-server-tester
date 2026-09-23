@@ -192,10 +192,6 @@ beforeEach(() => {
       controller,
       evidenceDir: env.evidenceDir,
       readiness: {
-        hostToolPolicy: {
-          disabled: ['computer-use@openai-bundled'],
-          requiredAbsent: ['cua_repl'],
-        },
         executionPolicy: {
           approvalPolicy: 'never',
           sandboxMode: 'danger-full-access',

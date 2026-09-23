@@ -74,21 +74,6 @@ export type CodexNamedConfig = z.infer<typeof CodexNamedConfigSchema>;
 export type CodexSetupConfig = z.infer<typeof CodexSetupConfigSchema>;
 
 /**
- * A bundled host tool that MST turns off. It is not an MCP server config: it
- * renders only `enabled = false`, never a command, URL, or credential.
- */
-export type CodexDisabledHostTool =
-  | { kind: 'plugin'; id: string }
-  | { kind: 'mcpServer'; label: string };
-
-const PLUGIN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9._-]+$/;
-
-/** The label a host tool policy reports, e.g. in setup telemetry. */
-export function disabledHostToolName(tool: CodexDisabledHostTool): string {
-  return tool.kind === 'plugin' ? tool.id : tool.label;
-}
-
-/**
  * Native per-command execution policy. The only supported value turns off the
  * native sandbox and approval prompts; use it only when the caller provides
  * process isolation (for example, a disposable container).
@@ -172,8 +157,7 @@ export function resolveCodexSetup(
 }
 
 export function renderCodexConfig(
-  servers: readonly CodexMcpServerConfig[],
-  disabledHostTools: readonly CodexDisabledHostTool[] = []
+  servers: readonly CodexMcpServerConfig[]
 ): string {
   const labels = new Set<string>();
   const blocks = servers.map((server) => {
@@ -185,21 +169,6 @@ export function renderCodexConfig(
       ? renderStdioServer(server)
       : renderHttpServer(server);
   });
-  const plugins = new Set<string>();
-  for (const tool of disabledHostTools) {
-    if (tool.kind === 'plugin') {
-      if (!PLUGIN_ID_PATTERN.test(tool.id) || plugins.has(tool.id))
-        throw new Error(`Invalid disabled Codex plugin: ${tool.id}`);
-      plugins.add(tool.id);
-      blocks.push(`[plugins.${tomlString(tool.id)}]\nenabled = false`);
-    } else {
-      // A configured server must never share a disabled host namespace.
-      if (!LABEL_PATTERN.test(tool.label) || labels.has(tool.label))
-        throw new Error(`Invalid disabled Codex MCP server: ${tool.label}`);
-      labels.add(tool.label);
-      blocks.push(`[mcp_servers.${tool.label}]\nenabled = false`);
-    }
-  }
   const content = [
     '# Managed by MCP Server Tester. Restored after the host run.',
     ...blocks,
@@ -218,8 +187,6 @@ export interface CodexConfigInstallOptions {
   credentialStore?: 'keyring';
   /** Trust exactly this one absolute directory; any other project trust is removed. */
   trustedProject?: string;
-  /** Bundled host tools to render as `enabled = false`. */
-  disabledHostTools?: readonly CodexDisabledHostTool[];
   /** Rendered as top-level `approval_policy` and `sandbox_mode`. */
   executionPolicy?: CodexExecutionPolicy;
 }
@@ -259,9 +226,6 @@ export async function installCodexConfig(
   )
     throw new Error('Invalid Codex execution policy.');
   const resolved = resolveCodexSetup(setup, options.configName);
-  const managed = parse(
-    renderCodexConfig(resolved.servers, options.disabledHostTools)
-  );
   const target = resolved.configPath;
   const lock = `${target}${LOCK_SUFFIX}`;
   const originalPath = join(lock, 'original.toml');
@@ -288,12 +252,7 @@ export async function installCodexConfig(
     // Keep app preferences and startup hooks. Replacing the whole document makes
     // ChatGPT rewrite defaults during startup and loses the selected Work settings.
     const settings = original ? parse(original.toString('utf8')) : {};
-    settings.mcp_servers = managed.mcp_servers ?? {};
-    if (isTable(managed.plugins))
-      settings.plugins = {
-        ...(isTable(settings.plugins) ? settings.plugins : {}),
-        ...managed.plugins,
-      };
+    settings.mcp_servers = parse(resolved.content).mcp_servers ?? {};
     if (options.model !== undefined) settings.model = options.model;
     if (options.reasoningEffort !== undefined)
       settings.model_reasoning_effort = options.reasoningEffort;
@@ -481,10 +440,6 @@ async function assertSafeParent(path: string): Promise<void> {
       'Codex configuration parent must be owned by the current user.'
     );
   }
-}
-
-function isTable(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function sha256(value: Uint8Array): string {
