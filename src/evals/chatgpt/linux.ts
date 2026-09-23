@@ -34,6 +34,32 @@ const FailureStep = z.enum([
   'draft-readback',
   'send',
 ]);
+const Count = z.number().int().min(0).max(5000);
+const TimelineEntry = z.union([
+  // Empty snapshot: no matching app was on the desktop.
+  z
+    .object({ ms: z.number().int().min(0).max(3_600_000), nodes: z.literal(0) })
+    .strict(),
+  z
+    .object({
+      ms: z.number().int().min(0).max(3_600_000),
+      nodes: z.number().int().min(1).max(5000),
+      surface: z.enum(['chatgpt-work', 'codex', 'unknown', 'ambiguous']),
+      composers: Count,
+      sends: Count,
+      dialogs: Count,
+      labels: z.array(z.enum(LINUX_CHATGPT_SCREEN_LABELS)).max(64),
+    })
+    .strict(),
+]);
+const DraftTimeline = z
+  .object({
+    polls: Count,
+    truncated: z.boolean(),
+    apps: Count.optional(),
+    entries: z.array(TimelineEntry).max(24),
+  })
+  .strict();
 const DraftState = z
   .object({
     observedSurface: z.enum(['chatgpt-work', 'codex', 'unknown', 'ambiguous']),
@@ -50,6 +76,7 @@ const DraftState = z
       })
       .strict()
       .optional(),
+    timeline: DraftTimeline.optional(),
     textLength: z
       .number()
       .int()

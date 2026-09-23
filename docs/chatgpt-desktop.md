@@ -238,7 +238,10 @@ UTF-8 bytes. Resolved object markers are not counted. Unreadable text omits thes
 measurements. When there is no composer and no mode switch, `draftState.screen`
 adds node, visible-button, frame, and dialog counts, plus only the fixed
 `screenLabels` from the shared contract that are visible. It never contains
-other UI text. Readback failures return `composer_text_unavailable`, never raw RPC
+other UI text. Failed composer waits add `draftState.timeline`: poll count, the
+matching-app count, and at most 24 distinct screen signatures (elapsed ms, node,
+composer, Send, and dialog counts, surface, and the same fixed labels; `truncated`
+keeps the first and last 12). Readback failures return `composer_text_unavailable`, never raw RPC
 errors. The successful receipt schema is unchanged.
 
 Offline tests cover these controller contracts. Verify the app flags and hand-off

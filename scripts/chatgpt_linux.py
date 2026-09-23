@@ -45,6 +45,8 @@ MAX_ACTIONS = CONTRACT['maxActions']
 ERROR_CODES = frozenset(CONTRACT['errorCodes'])
 # Fixed labels the driver knows; only these may appear in failure diagnostics.
 SCREEN_LABELS = frozenset(CONTRACT['screenLabels'])
+APP_NAMES = frozenset({'chatgpt', 'codex', 'codex-launcher'})
+TIMELINE_LIMIT = 24
 
 
 def error_code(error, glib_error=()):
@@ -73,6 +75,8 @@ class Desktop:
         self.context = GLib.MainContext.default()
         self.deadline = float('inf')
         self.open_fd = None
+        # Diagnostic only: matching desktop apps in the last snapshot attempt.
+        self.app_count = None
 
     def require_helpers(self):
         # The MST parent owns the deep-link hand-off. Without its channel no
@@ -111,8 +115,8 @@ class Desktop:
             raise DriverFailure('accessibility_event_budget')
         root = self.api.get_desktop(0)
         apps = [root.get_child_at_index(i) for i in range(min(root.get_child_count(), 128))]
-        apps = [a for a in apps if a and (a.get_name() or '').casefold()
-                in {'chatgpt', 'codex', 'codex-launcher'}]
+        apps = [a for a in apps if a and (a.get_name() or '').casefold() in APP_NAMES]
+        self.app_count = len(apps)
         if not apps:
             return []
         if len(apps) != 1:
@@ -411,6 +415,29 @@ def composer(nodes):
     return unique(editor_roots(nodes), 'composer_missing_or_ambiguous')
 
 
+def observed_surface(nodes):
+    switches = controls(nodes, set(MODE_LABELS.values()))
+    if len(switches) > 1:
+        return 'ambiguous'
+    if len(switches) == 1:
+        return next(surface for surface, label in MODE_LABELS.items()
+                    if switches[0]['name'] == label)
+    return 'unknown'
+
+
+def signature(nodes):
+    # Privacy-safe screen summary: fixed enums, counts, and allowlisted labels only.
+    # An empty snapshot (no matching app) is only a node count.
+    if not nodes:
+        return {'nodes': 0}
+    shown = [n for n in nodes if available(n, False)]
+    return {'nodes': len(nodes), 'surface': observed_surface(nodes),
+            'composers': len(editor_roots(nodes)),
+            'sends': len(controls(nodes, {'Send'}, enabled=False)),
+            'dialogs': sum(n['role'] in {'dialog', 'alert'} for n in shown),
+            'labels': sorted({n['name'] for n in shown if n['name'] in SCREEN_LABELS})}
+
+
 def matches_prompt(text, prompt):
     # Same bounded representation as native exact_prompt correlation. Do not
     # trim text or alter the prompt handed to MST for the deep link.
@@ -428,6 +455,7 @@ class Driver:
         self.phase = None
         self.step = None
         self.last_snapshot = None
+        self.timeline = None
 
     def check(self):
         if time.monotonic() >= self.deadline:
@@ -453,8 +481,12 @@ class Driver:
     def wait(self, predicate, polls=100):
         # Poll only; an acknowledged action that does not change state is NOT retried.
         # The cold-app wait gets 30 seconds; all waits share the overall deadline.
-        wait_deadline = min(self.deadline, time.monotonic() + polls * 0.1)
+        wait_started = time.monotonic()
+        wait_deadline = min(self.deadline, wait_started + polls * 0.1)
         ambiguity = None
+        # Composer waits keep a bounded record of distinct observed screens.
+        self.timeline = ({'polls': 0, 'truncated': False, 'entries': []}
+                         if self.phase == 'composer' else None)
         for _ in range(polls):
             try:
                 nodes = self.snapshot()
@@ -462,6 +494,7 @@ class Driver:
                 if str(error) == 'deadline_exceeded' and ambiguity is not None:
                     raise ambiguity from None
                 raise
+            self.observe(nodes, wait_started)
             if time.monotonic() >= wait_deadline:
                 break
             try:
@@ -481,6 +514,21 @@ class Driver:
         if ambiguity is not None:
             raise ambiguity
         raise DriverFailure('state_transition_unobserved')
+
+    def observe(self, nodes, wait_started):
+        timeline = self.timeline
+        if timeline is None:
+            return
+        timeline['polls'] += 1
+        entries = timeline['entries']
+        current = signature(nodes)
+        if entries and {k: v for k, v in entries[-1].items() if k != 'ms'} == current:
+            return
+        if len(entries) >= TIMELINE_LIMIT:
+            # Keep the first and the most recent halves.
+            del entries[TIMELINE_LIMIT // 2]
+            timeline['truncated'] = True
+        entries.append({'ms': int((time.monotonic() - wait_started) * 1000), **current})
 
     def selected(self, nodes, surface):
         switches = controls(nodes, set(MODE_LABELS.values()))
@@ -594,17 +642,12 @@ class Driver:
         if nodes is None:
             return None
         roots = editor_roots(nodes)
-        switches = controls(nodes, set(MODE_LABELS.values()))
-        observed = 'unknown'
-        if len(switches) > 1:
-            observed = 'ambiguous'
-        elif len(switches) == 1:
-            observed = next(surface for surface, label in MODE_LABELS.items()
-                            if switches[0]['name'] == label)
-        state = {'observedSurface': observed, 'composerRootCount': len(roots),
-                 'sendControlCount': len(controls(nodes, {'Send'}, enabled=False)),
+        summary = signature(nodes)
+        state = {'observedSurface': summary.get('surface', 'unknown'),
+                 'composerRootCount': summary.get('composers', 0),
+                 'sendControlCount': summary.get('sends', 0),
                  'textReadable': False}
-        if not roots and not switches:
+        if not roots and not controls(nodes, set(MODE_LABELS.values())):
             # No composer and no mode switch: report only counts and fixed,
             # allowlisted onboarding/dialog labels, never other UI text.
             shown = [n for n in nodes if available(n, False)]
@@ -612,9 +655,17 @@ class Driver:
                 'nodeCount': len(nodes),
                 'visibleButtonCount': sum(n['role'] in BUTTONS for n in shown),
                 'visibleFrameCount': sum(n['role'] == 'frame' for n in shown),
-                'dialogCount': sum(n['role'] in {'dialog', 'alert'} for n in shown),
-                'knownLabels': sorted({n['name'] for n in shown if n['name'] in SCREEN_LABELS}),
+                'dialogCount': summary.get('dialogs', 0),
+                'knownLabels': summary.get('labels', []),
             }
+        if self.timeline is not None:
+            # Copy so later polls cannot mutate a returned receipt.
+            apps = getattr(self.desktop, 'app_count', None)
+            state['timeline'] = {
+                'polls': self.timeline['polls'], 'truncated': self.timeline['truncated'],
+                **({'apps': apps} if type(apps) is int else {}),
+                'entries': [{k: list(v) if k == 'labels' else v for k, v in e.items()}
+                            for e in self.timeline['entries']]}
         if len(roots) != 1:
             return state
         try:

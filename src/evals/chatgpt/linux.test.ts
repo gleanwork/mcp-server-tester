@@ -79,6 +79,21 @@ const readableDraftState = {
   embeddedObjectCount: 0,
   newlineCount: 0,
 };
+const timelineEntry = {
+  ms: 750,
+  nodes: 40,
+  surface: 'unknown',
+  composers: 0,
+  sends: 0,
+  dialogs: 1,
+  labels: ['Allow'],
+};
+const timeline = {
+  polls: 100,
+  truncated: false,
+  apps: 1,
+  entries: [{ ms: 0, nodes: 0 }, timelineEntry],
+};
 const composerFailure = {
   status: 'failed',
   phase: 'composer',
@@ -158,6 +173,24 @@ describe('Linux ChatGPT runtime adapter', () => {
         visibleFrameCount: 1,
         dialogCount: 0,
         knownLabels: ['Continue', 'Send'],
+      },
+    },
+    { ...unreadableDraftState, timeline },
+    {
+      ...unreadableDraftState,
+      timeline: {
+        polls: 5000,
+        truncated: true,
+        entries: Array.from({ length: 24 }, (_, index) => ({
+          ...timelineEntry,
+          ms: 3_600_000,
+          nodes: 5000 - index,
+          surface: 'codex',
+          composers: 5000,
+          sends: 5000,
+          dialogs: 5000,
+          labels: ['Send', 'Try again'],
+        })),
       },
     },
   ])(
@@ -247,6 +280,22 @@ describe('Linux ChatGPT runtime adapter', () => {
         names: ['private UI value'],
       },
     },
+    ...[
+      { ...timeline, entries: [{ ...timelineEntry, labels: ['private'] }] },
+      { ...timeline, entries: [{ ...timelineEntry, name: 'private UI' }] },
+      { ...timeline, entries: [{ ms: 0, nodes: 0, labels: [] }] },
+      { ...timeline, entries: [{ ...timelineEntry, nodes: 0 }] },
+      { ...timeline, entries: [{ ...timelineEntry, ms: 3_600_001 }] },
+      { ...timeline, entries: [{ ...timelineEntry, ms: 1.5 }] },
+      { ...timeline, entries: [{ ...timelineEntry, composers: 5001 }] },
+      { ...timeline, entries: [{ ...timelineEntry, surface: 'private' }] },
+      { ...timeline, entries: Array(25).fill(timelineEntry) },
+      { ...timeline, polls: 5001 },
+      { ...timeline, apps: -1 },
+      { ...timeline, truncated: 'yes' },
+      { ...timeline, url: 'private URL' },
+      { polls: 1, truncated: false },
+    ].map((invalid) => ({ ...unreadableDraftState, timeline: invalid })),
     null,
     {},
   ])(
