@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 import unittest
+from itertools import chain, repeat
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -762,7 +763,7 @@ class McpInspectionTest(unittest.TestCase):
         desktop.text = Mock(side_effect=AssertionError('no text reads'))
         desktop.activate = Mock()
         if after is not None:
-            desktop.snapshot = Mock(side_effect=[nodes, after])
+            desktop.snapshot = Mock(side_effect=chain([nodes], repeat(after)))
         driver = Driver(desktop, 60_000, actions)
         result = driver.inspect_mcp('codex', 'glean-eval')
         desktop.open_settings.assert_called_once_with()
@@ -781,11 +782,11 @@ class McpInspectionTest(unittest.TestCase):
                 *[node(label, 'static', ancestors=(0, 1)) for label in labels]]
 
     def test_only_unique_observed_navigation_can_be_activated(self):
-        for role in ('button', 'push button', 'tab', 'page tab', 'menu item', 'menuitem'):
+        for role in ('button', 'push button', 'tab', 'page tab', 'menu item', 'menuitem', 'link', 'list item'):
             with self.subTest(role=role):
                 navigation = node('  mCp   SeRvErS  ', role, ancestors=())
                 desktop, result = self.inspect([navigation], self.row())
-                desktop.activate.assert_called_once_with(navigation, frozenset({'click', 'press'}))
+                desktop.activate.assert_called_once_with(navigation, {'click', 'press', 'select', 'open'})
                 self.assertEqual(result['action_count'], 2)
                 self.assertEqual(result['metadata']['navigationControlCount'], 1)
                 self.assertIs(result['metadata']['navigationActivated'], True)

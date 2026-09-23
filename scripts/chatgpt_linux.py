@@ -25,7 +25,7 @@ class DriverFailure(RuntimeError):
 
 BUTTONS = {'button', 'push button'}
 SETUP_CONTROL_ROLES = BUTTONS | {'toggle button', 'radio button', 'menu item'}
-MCP_NAVIGATION_ROLES = BUTTONS | {'tab', 'page tab', 'menu item', 'menuitem'}
+MCP_NAVIGATION_ROLES = BUTTONS | {'tab', 'page tab', 'menu item', 'menuitem', 'link', 'list item'}
 MCP_CONTROL_ROLES = SETUP_CONTROL_ROLES | MCP_NAVIGATION_ROLES
 MCP_STATIC_ROLES = {'label', 'static', 'static text', 'text'}
 MCP_ROW_ROLES = {'table row', 'list item'}
@@ -518,7 +518,8 @@ def mcp_inspection(nodes, server_label, navigation_activated):
         metadata['serverRow'] = {
             'role': nodes[row_index]['role'],
             'staticLabels': sorted(labels & MCP_STATIC_LABELS),
-            'controlCount': sum(node['role'] in MCP_CONTROL_ROLES for node in scoped),
+            'controlCount': sum(node is not nodes[row_index] and node['role'] in MCP_CONTROL_ROLES
+                                for node in scoped),
         }
     return metadata
 
@@ -701,14 +702,20 @@ class Driver:
             nodes = self.snapshot()
             navigation = [node for node in nodes if available(node)
                           and node['role'] in MCP_NAVIGATION_ROLES
-                          and normalized_label(node['name']) == 'mcp servers'
+                          and (normalized_label(node['name']) == 'mcp'
+                               or normalized_label(node['name']).startswith('mcp servers'))
                           and inspection_safe(node, nodes)]
             if navigation:
                 break
             time.sleep(0.1)
         if len(navigation) == 1:
-            self.click(navigation[0])
-            nodes = self.snapshot()
+            self.click(navigation[0], {'click', 'press', 'select', 'open'})
+            for _ in range(20):
+                nodes = self.snapshot()
+                if any(node['name'] == server_label and available(node, enabled=False)
+                       for node in nodes):
+                    break
+                time.sleep(0.1)
         metadata = mcp_inspection(nodes, server_label, navigation_activated=len(navigation) == 1)
         metadata.update(navigationControlCount=len(navigation),
                         navigationActivated=len(navigation) == 1)
