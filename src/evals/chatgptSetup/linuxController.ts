@@ -1,11 +1,11 @@
 import { execFile } from 'node:child_process';
 import { isAbsolute } from 'node:path';
 import { z } from 'zod';
-import type { ChatgptApplicationController } from '../../chatgpt/driver.js';
+import type { ChatgptApplicationController } from '../chatgpt/driver.js';
 import {
   LINUX_CHATGPT_CONTROLLER_ENVIRONMENT,
   pickEnvironment,
-} from '../../chatgpt/linuxContract.js';
+} from '../chatgpt/linuxContract.js';
 
 /** Control only the app through a caller-owned helper, never provision a Linux desktop. */
 export function getLinuxChatgptApplicationController(

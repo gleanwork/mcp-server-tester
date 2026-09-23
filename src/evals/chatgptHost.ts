@@ -1,5 +1,4 @@
 import { mkdir, open, unlink } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
@@ -10,16 +9,17 @@ import type {
   HostRunResult,
 } from './evalFrameworkTypes.js';
 import { runExternalHostScenario } from './externalHost/runtime.js';
-import { ChatgptAppSession } from './chatgptSetup/macSession.js';
+import { ChatgptAppSession } from './chatgptSetup/session.js';
 import { chatgptServers } from './chatgptSetup/config.js';
 import type { ExternalHostConfig } from './externalHost/types.js';
 import { simulationToHostTrace } from './hostTrace.js';
 import { NATIVE_MAX_ACTIONS } from './chatgpt/linuxContract.js';
+import {
+  LINUX_CHATGPT_PLATFORM,
+  MAC_CHATGPT_PLATFORM,
+  type ChatgptPlatform,
+} from './chatgptSetup/platform.js';
 
-import { linuxChatgptHome } from './chatgpt/linux.js';
-
-const DRIVER = 'openai.chatgpt.agent.desktop-app.macos';
-const LINUX_DRIVER = 'openai.chatgpt.agent.desktop-app.linux';
 const Schema = z
   .object({
     type: z.string(),
@@ -62,7 +62,7 @@ const Schema = z
 async function runBatch(
   requests: HostBatchRequest[],
   context: HostRunContext,
-  driver = DRIVER
+  platform: ChatgptPlatform
 ): Promise<HostRunResult[]> {
   if (!requests.length) return [];
   if ((context.manifest.concurrency ?? 1) !== 1)
@@ -92,8 +92,15 @@ async function runBatch(
     (request, index) => {
       const config = configs[index]!;
       const serverConfig = prepared[index]!;
+      const environment = Object.fromEntries(
+        Object.entries({
+          ...context.env,
+          ...request.input.env,
+          ...config.env,
+        }).filter((entry): entry is [string, string] => entry[1] !== undefined)
+      );
       return {
-        driver,
+        driver: platform.driver,
         model: config.model,
         reasoningEffort: config.reasoningEffort,
         timeoutMs: config.timeout,
@@ -107,35 +114,11 @@ async function runBatch(
         },
         options: {
           environment: { ...config.env, ...serverConfig.environment },
-          computerUseProvider:
-            driver === LINUX_DRIVER
-              ? config.options.computerUseProvider
-              : (config.options.computerUseProvider ??
-                'anthropic-computer-use'),
           computerUseModel: config.options.computerUseModel,
-          computerUseMaxActions:
-            driver === LINUX_DRIVER
-              ? config.options.computerUseMaxActions
-              : (config.options.computerUseMaxActions ?? 32),
           surface: config.options.surface,
           nativeMaxActions: config.options.nativeMaxActions,
-          desktopEnvironment:
-            driver === LINUX_DRIVER
-              ? Object.fromEntries(
-                  Object.entries({
-                    ...context.env,
-                    ...request.input.env,
-                    ...config.env,
-                  }).filter(([, value]) => value !== undefined)
-                )
-              : undefined,
-          computerUseEnvironment: Object.fromEntries(
-            Object.entries({
-              ...context.env,
-              ...request.input.env,
-              ...config.env,
-            }).filter(([, value]) => value !== undefined)
-          ),
+          ...platform.hostOptions(config.options, environment),
+          computerUseEnvironment: environment,
         },
       };
     }
@@ -150,13 +133,7 @@ async function runBatch(
     );
   // Claim before any lifecycle operation: another process must not stop the active app.
   const directory = join(
-    driver === LINUX_DRIVER
-      ? linuxChatgptHome({
-          ...process.env,
-          ...(externalConfigs[0]!.options
-            ?.desktopEnvironment as NodeJS.ProcessEnv),
-        })
-      : homedir(),
+    platform.lockHome(externalConfigs[0]!),
     '.mcp-server-tester'
   );
   await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -346,35 +323,25 @@ async function runBatch(
   return results;
 }
 
-export const CHATGPT_LINUX_HOST: HostDefinition = {
-  name: LINUX_DRIVER,
-  schema: Schema,
-  evidence: 'structured',
-  runBatch(requests, context) {
-    return runBatch(requests, context, LINUX_DRIVER);
-  },
-  async run(input, config, context) {
-    return (
-      await runBatch(
-        [{ caseId: 'single', iteration: 0, input, config }],
-        context,
-        LINUX_DRIVER
-      )
-    )[0]!;
-  },
-};
+function chatgptHost(platform: ChatgptPlatform): HostDefinition {
+  return {
+    name: platform.driver,
+    schema: Schema,
+    evidence: 'structured',
+    runBatch(requests, context) {
+      return runBatch(requests, context, platform);
+    },
+    async run(input, config, context) {
+      return (
+        await runBatch(
+          [{ caseId: 'single', iteration: 0, input, config }],
+          context,
+          platform
+        )
+      )[0]!;
+    },
+  };
+}
 
-export const CHATGPT_HOST: HostDefinition = {
-  name: DRIVER,
-  schema: Schema,
-  evidence: 'structured',
-  runBatch,
-  async run(input, config, context) {
-    return (
-      await runBatch(
-        [{ caseId: 'single', iteration: 0, input, config }],
-        context
-      )
-    )[0]!;
-  },
-};
+export const CHATGPT_LINUX_HOST = chatgptHost(LINUX_CHATGPT_PLATFORM);
+export const CHATGPT_HOST = chatgptHost(MAC_CHATGPT_PLATFORM);

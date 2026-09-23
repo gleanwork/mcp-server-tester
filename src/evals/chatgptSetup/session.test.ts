@@ -9,7 +9,7 @@ import {
   snapshotChatgptSessions,
 } from '../externalHost/builtins/chatgptTrace.js';
 import { runExternalHostScenario } from '../externalHost/runtime.js';
-import { ChatgptAppSession } from './macSession.js';
+import { ChatgptAppSession } from './session.js';
 import type { ExternalHostConfig } from '../externalHost/types.js';
 import { getChatgptApplicationController } from './macController.js';
 import { installCodexConfig } from '../codexSetup/config.js';
@@ -38,13 +38,13 @@ vi.mock('../externalHost/builtins/chatgptTrace.js', async (original) => ({
   snapshotChatgptSessions: vi.fn(),
 }));
 
-import { getLinuxChatgptApplicationController } from '../externalHost/builtins/chatgptLinuxController.js';
+import { getLinuxChatgptApplicationController } from './linuxController.js';
 import {
   runLinuxChatgptDesktop,
   NativeChatgptDriverError,
 } from '../chatgpt/linux.js';
 import type * as LinuxModule from '../chatgpt/linux.js';
-vi.mock('../externalHost/builtins/chatgptLinuxController.js', () => ({
+vi.mock('./linuxController.js', () => ({
   getLinuxChatgptApplicationController: vi.fn(),
 }));
 vi.mock('../chatgpt/linux.js', async (original) => ({
@@ -414,6 +414,20 @@ describe('ChatGPT Linux native lifecycle', () => {
       await session.dispose();
     }
     expect(events.slice(-3)).toEqual(['stop', 'restore', 'start']);
+  });
+  it('claims one in-process lease per isolated Linux HOME', async () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', '');
+    const first = new ChatgptAppSession();
+    const second = new ChatgptAppSession();
+    try {
+      await first.prepare(linuxConfig());
+      await expect(second.prepare(linuxConfig())).rejects.toThrow(
+        'already managing this ChatGPT application'
+      );
+    } finally {
+      await second.dispose();
+      await first.dispose();
+    }
   });
   it('does not submit or read evidence after failed surface setup', async () => {
     vi.mocked(runLinuxChatgptDesktop).mockRejectedValueOnce(

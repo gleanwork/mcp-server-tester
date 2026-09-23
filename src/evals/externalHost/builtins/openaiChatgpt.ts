@@ -11,7 +11,7 @@ import {
   type ChatgptTracePolicy,
 } from './chatgptTrace.js';
 import { resolveCodexSetup } from '../../codexSetup/config.js';
-import { ChatgptAppSession } from '../../chatgptSetup/macSession.js';
+import { ChatgptAppSession } from '../../chatgptSetup/session.js';
 import {
   ComputerUseDriverError,
   chatgptSurface,

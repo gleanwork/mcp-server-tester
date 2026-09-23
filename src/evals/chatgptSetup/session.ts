@@ -2,12 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { basename, dirname, join } from 'node:path';
 import { isChatgptBuiltinServer } from '../externalHost/builtins/chatgptTrace.js';
-import {
-  defaultChatgptAppPath,
-  defaultChatgptBundleId,
-  defaultChatgptConfigHome,
-  getChatgptApplicationController,
-} from './macController.js';
+import { defaultChatgptConfigHome } from './macController.js';
 import {
   installCodexConfig,
   resolveCodexSetup,
@@ -16,21 +11,14 @@ import {
 import type { ExternalHostConfig } from '../externalHost/types.js';
 import type { SemanticDesktopTelemetry } from '../cowork/driver.js';
 import {
-  chatgptDesktopEnvironment,
   chatgptSurface,
-  isLinuxChatgpt,
   readLaunchEnvironment,
   stringOption,
   validateChatgptConfig,
   type ChatgptApplicationController,
 } from '../chatgpt/driver.js';
-
-import { getLinuxChatgptApplicationController } from '../externalHost/builtins/chatgptLinuxController.js';
-import {
-  NativeChatgptDriverError,
-  runLinuxChatgptDesktop,
-  validateLinuxChatgptPaths,
-} from '../chatgpt/linux.js';
+import { NativeChatgptDriverError } from '../chatgpt/linux.js';
+import { chatgptPlatform } from './platform.js';
 
 const activeApplications = new Set<string>();
 
@@ -60,29 +48,15 @@ function sessionSettings(
     throw new Error(
       'ChatGPT loads CODEX_HOME/config.toml; configPath must end in config.toml.'
     );
-  const linux = isLinuxChatgpt(config);
-  const desktopEnvironment = linux
-    ? chatgptDesktopEnvironment(config)
-    : undefined;
-  if (linux) validateLinuxChatgptPaths(config);
+  const platform = chatgptPlatform(config);
   return {
-    linux,
-    desktopEnvironment,
+    platform: platform.name,
+    application: platform.application(config, binding),
     setup,
     model: config.model,
     reasoningEffort: config.reasoningEffort,
     surface: chatgptSurface(config),
     environment: readLaunchEnvironment(config.options?.environment),
-    appPath: linux
-      ? undefined
-      : (stringOption(binding, 'appPath') ??
-        stringOption(config.options, 'chatgptAppPath') ??
-        defaultChatgptAppPath()),
-    bundleId: linux
-      ? `linux:${desktopEnvironment!.HOME}`
-      : (stringOption(binding, 'bundleId') ??
-        stringOption(config.options, 'chatgptBundleId') ??
-        defaultChatgptBundleId()),
     sessionsRoot: stringOption(config.options, 'chatgptSessionRoot'),
   };
 }
@@ -123,24 +97,19 @@ export class ChatgptAppSession {
     const started = Date.now();
     try {
       validateChatgptConfig(config);
+      const platform = chatgptPlatform(config);
       const settings = sessionSettings(config, binding);
       this.#settings = settings;
-      if (activeApplications.has(settings.bundleId))
+      const lease = `${platform.name}:${settings.application.leaseKey}`;
+      if (activeApplications.has(lease))
         throw new Error(
           'Another MST run is already managing this ChatGPT application.'
         );
-      activeApplications.add(settings.bundleId);
-      this.#lease = settings.bundleId;
-      if (!settings.linux)
-        process.stderr.write(
-          '[mst:chatgpt] Anthropic Computer Use requires Screen Recording and Accessibility permission. Keep ChatGPT visible and the desktop idle.\n'
-        );
-      const controller = settings.linux
-        ? getLinuxChatgptApplicationController(settings.desktopEnvironment)
-        : await getChatgptApplicationController({
-            appPath: settings.appPath,
-            bundleId: settings.bundleId,
-          });
+      activeApplications.add(lease);
+      this.#lease = lease;
+      if (platform.permissionNotice)
+        process.stderr.write(platform.permissionNotice);
+      const controller = await platform.controller(settings.application);
       const wasRunning = (await controller.state()).running;
       const lifecycle = (this.#lifecycle = {
         controller,
@@ -163,7 +132,7 @@ export class ChatgptAppSession {
         this.record('setup', 'install_config');
         const configHome = dirname(lifecycle.installation.configPath);
         if (
-          settings.linux ||
+          platform.isolatedConfigHome ||
           configHome !== defaultChatgptConfigHome() ||
           environment.CODEX_HOME !== undefined
         )
@@ -180,13 +149,8 @@ export class ChatgptAppSession {
       lifecycle.launchAttempted = true;
       await controller.start(environment);
       this.record('setup', 'start');
-      if (settings.linux) {
-        const prepared = await runLinuxChatgptDesktop(
-          'prepare',
-          config,
-          Date.now() + (config.timeoutMs ?? 60_000)
-        );
-        this.telemetry.nativeSetup = prepared.telemetry;
+      if (platform.verifyReady) {
+        this.telemetry.nativeSetup = await platform.verifyReady(config);
         this.record('setup', 'verify_surface');
       }
       this.#ready = true;

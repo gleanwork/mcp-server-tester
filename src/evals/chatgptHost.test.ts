@@ -10,7 +10,7 @@ import type { HostBatchRequest } from './evalFrameworkTypes.js';
 
 const home = vi.hoisted(() => ({ value: '' }));
 const lifecycle = vi.hoisted(() => ({ prepare: vi.fn(), dispose: vi.fn() }));
-vi.mock('./chatgptSetup/macSession.js', () => ({
+vi.mock('./chatgptSetup/session.js', () => ({
   ChatgptAppSession: class {
     prepare = lifecycle.prepare;
     dispose = lifecycle.dispose;
