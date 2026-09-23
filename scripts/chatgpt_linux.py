@@ -23,6 +23,8 @@ class DriverFailure(RuntimeError):
 
 BUTTONS = {'button', 'push button'}
 SURFACES = {'chatgpt-work': 'ChatGPT Work', 'codex': 'Codex'}
+MODE_LABELS = {surface: 'Switch mode, current mode: ' + label
+               for surface, label in SURFACES.items()}
 MENU_LABELS = {'chatgpt-work': 'ChatGPT Work Create, learn, and explore',
                'codex': 'Codex Build, debug, and ship'}
 EDITOR_ROLES = {'entry', 'text', 'text area', 'editable text', 'paragraph'}
@@ -36,18 +38,17 @@ CONTRACT = json.loads(Path(__file__).with_name('chatgpt_linux_contract.json').re
 SESSION_KEYS = tuple(CONTRACT['sessionEnvironment'] + CONTRACT['profileEnvironment']
                      + CONTRACT['helperEnvironment'])
 MAX_ACTIONS = CONTRACT['maxActions']
-GLIB_ERROR = ()
 ERROR_CODES = frozenset(CONTRACT['errorCodes'])
 
 
-def error_code(error):
+def error_code(error, glib_error=()):
     if isinstance(error, DriverFailure) and str(error) in ERROR_CODES:
         return str(error)
     if isinstance(error, AttributeError):
         return 'desktop_attribute_error'
     if isinstance(error, TypeError):
         return 'desktop_type_error'
-    if isinstance(error, GLIB_ERROR):
+    if isinstance(error, glib_error):
         return 'desktop_glib_error'
     return 'desktop_driver_failed'
 
@@ -61,8 +62,6 @@ class Desktop:
         import gi
         gi.require_version('Atspi', '2.0')
         from gi.repository import Atspi, GLib
-        global GLIB_ERROR
-        GLIB_ERROR = GLib.Error
         self.glib_error = GLib.Error
         self.api = Atspi
         self.context = GLib.MainContext.default()
@@ -488,14 +487,13 @@ class Driver:
         raise DriverFailure('state_transition_unobserved')
 
     def selected(self, nodes, surface):
-        switches = controls(nodes, {'Switch mode, current mode: ' + label for label in SURFACES.values()})
-        return len(switches) == 1 and switches[0]['name'] == 'Switch mode, current mode: ' + SURFACES[surface]
+        switches = controls(nodes, set(MODE_LABELS.values()))
+        return len(switches) == 1 and switches[0]['name'] == MODE_LABELS[surface]
 
     def select_surface(self, nodes, surface):
         if self.selected(nodes, surface):
             return nodes
-        switch = unique(controls(nodes, {'Switch mode, current mode: ChatGPT Work',
-                                         'Switch mode, current mode: Codex'}), 'mode_missing_or_ambiguous')
+        switch = unique(controls(nodes, set(MODE_LABELS.values())), 'mode_missing_or_ambiguous')
         self.click(switch, {'open'})
         nodes = self.wait(lambda ns: bool(controls(ns, {MENU_LABELS[surface]}, {'menu item'})))
         item = unique(controls(nodes, {MENU_LABELS[surface]}, {'menu item'}), 'surface_item_ambiguous')
@@ -520,8 +518,7 @@ class Driver:
         self.phase = 'waiting-for-initial-ui'
         nodes = self.wait(lambda ns: bool(controls(ns, {'Engineering'}, {'radio button', 'toggle button'})
                                           or controls(ns, {'Leave a note on my Desktop', 'Go to ChatGPT',
-                                                           'Switch mode, current mode: ChatGPT Work',
-                                                           'Switch mode, current mode: Codex'})), polls=300)
+                                                           *MODE_LABELS.values()})), polls=300)
         engineering = controls(nodes, {'Engineering'}, {'radio button', 'toggle button'})
         if engineering:
             self.phase = 'profession-selected'
@@ -538,8 +535,7 @@ class Driver:
             self.phase = 'intro-dismiss'
             nodes = self.wait(lambda ns: not controls(ns, {'Engineering'}, {'radio button', 'toggle button'})
                               and bool(controls(ns, {'Leave a note on my Desktop', 'Go to ChatGPT',
-                                                     'Switch mode, current mode: ChatGPT Work',
-                                                     'Switch mode, current mode: Codex'})))
+                                                     *MODE_LABELS.values()})))
         self.phase = 'intro-dismiss'
         # Only skip the observed, specific product-introduction screen.
         if (controls(nodes, {'Leave a note on my Desktop'})
@@ -548,8 +544,7 @@ class Driver:
             nodes = self.wait(lambda ns: bool(controls(ns, {'Go to ChatGPT'})))
         if controls(nodes, {'Go to ChatGPT'}) and controls(nodes, {'Keep setting up'}):
             self.click(unique(controls(nodes, {'Go to ChatGPT'}), 'intro_confirmation_ambiguous'))
-            nodes = self.wait(lambda ns: bool(controls(ns, {
-                'Switch mode, current mode: ChatGPT Work', 'Switch mode, current mode: Codex'})))
+            nodes = self.wait(lambda ns: bool(controls(ns, set(MODE_LABELS.values()))))
         self.phase = 'surface'
         self.select_surface(nodes, surface)
         self.phase = 'composer'
@@ -603,14 +598,13 @@ class Driver:
         if nodes is None:
             return None
         roots = editor_roots(nodes)
-        switches = controls(nodes, {'Switch mode, current mode: ' + label
-                                   for label in SURFACES.values()})
+        switches = controls(nodes, set(MODE_LABELS.values()))
         observed = 'unknown'
         if len(switches) > 1:
             observed = 'ambiguous'
         elif len(switches) == 1:
-            observed = next(surface for surface, label in SURFACES.items()
-                            if switches[0]['name'] == 'Switch mode, current mode: ' + label)
+            observed = next(surface for surface, label in MODE_LABELS.items()
+                            if switches[0]['name'] == label)
         state = {'observedSurface': observed, 'composerRootCount': len(roots),
                  'sendControlCount': len(controls(nodes, {'Send'}, enabled=False)),
                  'textReadable': False}
@@ -665,7 +659,9 @@ def main():
         return 0
     except Exception as error:
         result = driver.receipt('failed') if driver else {'status': 'failed', 'action_count': 0, 'duration_ms': 0}
-        result['error'] = error_code(error)
+        # Desktop owns the GLib error type; never map through module globals.
+        glib_error = getattr(driver.desktop, 'glib_error', ()) if driver else ()
+        result['error'] = error_code(error, glib_error)
         print(json.dumps(result))
         return 1
 

@@ -1295,13 +1295,25 @@ class AccessibilityTest(unittest.TestCase):
         self.assertNotIn('MST_CHATGPT_URL_OPENER', SESSION_KEYS)
 
     def test_exception_codes_are_static(self):
-        with patch('chatgpt_linux.GLIB_ERROR', FakeGLibError):
-            for error, code in [(AttributeError('private'), 'desktop_attribute_error'),
-                                (TypeError('private'), 'desktop_type_error'),
-                                (FakeGLibError('private'), 'desktop_glib_error'),
-                                (DriverFailure('private'), 'desktop_driver_failed')]:
-                self.assertEqual(error_code(error), code)
-                self.assertIn(code, ERROR_CODES)
+        for error, code in [(AttributeError('private'), 'desktop_attribute_error'),
+                            (TypeError('private'), 'desktop_type_error'),
+                            (FakeGLibError('private'), 'desktop_glib_error'),
+                            (DriverFailure('private'), 'desktop_driver_failed')]:
+            self.assertEqual(error_code(error, FakeGLibError), code)
+            self.assertIn(code, ERROR_CODES)
+        self.assertEqual(error_code(FakeGLibError('private')), 'desktop_driver_failed')
+
+    def test_main_maps_the_desktop_glib_error_without_global_state(self):
+        desktop = FakeDesktop()
+        desktop.glib_error = FakeGLibError
+        desktop.snapshot = Mock(side_effect=FakeGLibError('private'))
+        with patch('chatgpt_linux.Desktop', return_value=desktop), \
+                patch('sys.argv', ['driver', '--mode', 'prepare', '--timeout-ms', '60000']), \
+                patch('sys.stdin', SimpleNamespace(buffer=io.BytesIO(b'{"surface":"codex"}'))), \
+                patch('sys.stdout', new_callable=io.StringIO) as output:
+            self.assertEqual(main(), 1)
+        self.assertEqual(json.loads(output.getvalue())['error'], 'desktop_glib_error')
+        self.assertNotIn('private', output.getvalue())
 
 
 if __name__ == '__main__':
