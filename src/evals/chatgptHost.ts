@@ -262,12 +262,11 @@ async function runBatch(
           externalHost: result.externalHost,
           computerUse: result.externalHost.computerUse,
           nativeController: result.externalHost.nativeController,
-          ...(result.success
-            ? {
-                conversationHistory: result.conversationHistory,
-                mcpDurationMs: result.mcpDurationMs,
-              }
+          // Failed bound turns keep their partial native history.
+          ...(result.conversationHistory
+            ? { conversationHistory: result.conversationHistory }
             : {}),
+          ...(result.success ? { mcpDurationMs: result.mcpDurationMs } : {}),
         },
       });
     }

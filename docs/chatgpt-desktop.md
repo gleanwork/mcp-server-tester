@@ -273,7 +273,8 @@ Native originator acceptance is surface-specific and case-sensitive:
 
 The internal parser API preserves existing callers: `findChatgptTrace` accepts
 `surface` in its fifth-argument options; `parseChatgptTrace` accepts an optional
-fifth argument `{ surface }` after `observedBeforeMs`. Both default to Work.
+fifth argument `{ surface, mcpServers }` after `observedBeforeMs`. Both default to
+Work and no configured labels.
 `expectedChatgptOriginator(surface)` provides the same fixed mapping.
 
 On Linux, MST copies native evidence into `MST_CHATGPT_EVIDENCE_DIR` before
@@ -291,8 +292,35 @@ The preserved Codex trace above contains `gpt-5.6-terra`, medium effort, and the
 native terminal-LF prompt form. It ends in `turn_aborted`, without `task_complete`.
 It is evidence for originator binding, **not a completed or passing evaluation**.
 The parser's `complete` flag means terminal: an abort also sets `error`, and the
-adapter returns `host_run_failed` before accepting any final answer. Offline tests
+adapter returns `host_run_failed` (with partial telemetry) before accepting any
+final answer. Offline tests
 use a minimized, redacted abort fixture; no model calls are needed.
+
+### Native telemetry
+
+The parser reads only native structure in the matched turn, never tool-result text:
+
+- `response_item` `function_call` / `custom_tool_call`, paired with their
+  `*_output` by `call_id`. Duration is the `create_time` difference. A call
+  without output is marked `pending` in `toolProvenance`.
+- A `function_call` namespace `mcp__<label>` is an MCP call. Configured labels map
+  back with the app's namespace form (non-alphanumeric → `_`, so `glean-eval` is
+  `mcp__glean_eval`). `executed_tool_calls` must agree. `cua_repl.js` stays a host
+  tool. Unknown namespaces remain external MCP calls.
+- Work code mode: a `custom_tool_call` `exec` is one host call. MST keeps only the
+  nested host tool names (for example `web__run`, `exec_command`), input length,
+  and sha256, never the code. Each nested `tools.mcp__<label>__<tool>` reference
+  (or `executed_tool_calls` entry) is also an MCP call on that label. These nested
+  calls have no separate arguments or latency, and a trace limitation says so.
+- `item_completed` `McpToolCall`, `CommandExecution`, and `Extension` `web.search`
+  items (other builds) remain supported; a shared id counts once.
+- Usage comes from `token_usage_record` (`turn_token_usage`).
+
+A bound turn that times out or aborts still fails (`timeout` or
+`host_run_failed`). The result keeps the recorded tool calls, usage, and
+conversation, with `telemetry.partial: true`, `traceConfidence: 'low'`, and the
+limitation "Turn did not complete; tool calls and usage are partial." Partial
+usage duration is the native elapsed time so far.
 
 Native or controller uncertainty blocks the remaining batch. There is no automatic
 retry. A completed, reliably attributed turn can fail the configured-MCP

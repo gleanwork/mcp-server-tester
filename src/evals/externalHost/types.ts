@@ -108,7 +108,13 @@ export interface ExternalHostTelemetry {
     nativeServer?: string;
     nativeTool: string;
     nativeItemType?: string;
+    /** Native call has no recorded output yet. */
+    pending?: boolean;
+    /** Referenced inside a code-mode `exec` runner; no own arguments or timing. */
+    viaCodeMode?: boolean;
   }>;
+  /** The turn did not complete; calls and usage cover only what was recorded. */
+  partial?: boolean;
   reasoningOutputTokens?: number;
   reasoningEffort?: string;
   timeToFirstTokenMs?: number;
@@ -285,6 +291,9 @@ export interface ExternalHostRunFailure {
   success: false;
   error: string;
   toolCalls: LLMToolCall[];
+  /** Partial native evidence from a bound turn that did not complete. */
+  conversationHistory?: MCPHostSimulationResult['conversationHistory'];
+  usage?: UsageMetrics;
   externalHost: ExternalHostMetadata;
 }
 

@@ -274,10 +274,22 @@ describe('bounded native binding wait and failure classification', () => {
       expect(result).toMatchObject({
         success: false,
         error: 'ChatGPT turn was aborted.',
+        // Aborted turns keep partial native calls at low confidence; still failed.
+        toolCalls: [
+          { source: 'host', server: 'cua_repl', rawName: 'cua_repl.js' },
+        ],
         externalHost: {
           failureKind: 'host_run_failed',
-          traceSource: 'none',
-          traceConfidence: 'unknown',
+          traceSource: 'host-local-transcript',
+          traceConfidence: 'low',
+          telemetry: {
+            hostToolCallCount: 1,
+            toolProvenance: [expect.objectContaining({ pending: true })],
+          },
+          evidence: {
+            finalAnswer: { source: 'none' },
+            toolCalls: { confidence: 'low' },
+          },
         },
       });
       expect(result).not.toHaveProperty('response');
@@ -310,10 +322,20 @@ describe('bounded native binding wait and failure classification', () => {
           sessionId: 'session',
           turnId: 'turn',
           complete: false,
-          toolCalls: [],
-          conversationHistory: [],
-          telemetry: {},
-          limitations: [],
+          toolCalls: [
+            {
+              source: 'mcp',
+              server: 'glean-eval',
+              name: 'search',
+              arguments: {},
+            },
+          ],
+          conversationHistory: [{ role: 'user', content: 'private prompt' }],
+          usage: { inputTokens: 100, outputTokens: 10, durationMs: 400 },
+          telemetry: { partial: true, mcpToolCallCount: 1 },
+          limitations: [
+            'Turn did not complete; tool calls and usage are partial.',
+          ],
         },
       });
       const result = await capture(ctx);
@@ -321,10 +343,18 @@ describe('bounded native binding wait and failure classification', () => {
         success: false,
         externalHost: {
           failureKind: 'timeout',
-          traceConfidence: 'unknown',
-          traceSource: 'none',
-          session: {},
+          traceConfidence: 'low',
+          traceSource: 'host-local-transcript',
+          session: { id: 'session', turnId: 'turn' },
+          telemetry: { partial: true, mcpToolCallCount: 1 },
+          traceLimitations: expect.arrayContaining([
+            'Turn did not complete; tool calls and usage are partial.',
+          ]),
+          evidence: { usage: { confidence: 'low' } },
         },
+        toolCalls: [{ source: 'mcp', server: 'glean-eval' }],
+        usage: { inputTokens: 100, outputTokens: 10 },
+        conversationHistory: [{ role: 'user' }],
       });
       expect(clock.now).toBe(2500);
       expect(result).not.toHaveProperty('response');

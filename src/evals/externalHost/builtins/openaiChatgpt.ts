@@ -5,6 +5,7 @@ import {
   findChatgptTrace,
   snapshotChatgptSessions,
   type ChatgptSessionSnapshot,
+  type ChatgptTrace,
   type ChatgptTraceBinding,
   type ChatgptTraceSelector,
 } from './chatgptTrace.js';
@@ -308,6 +309,7 @@ async function captureChatgptComputerUseResult({
 }: ExternalHostCapabilityContext): Promise<ExternalHostRunResult> {
   let matched = false;
   let bound: ChatgptTraceBinding | undefined;
+  let latest: { path: string; trace: ChatgptTrace } | undefined;
   const selector: ChatgptTraceSelector =
     run.correlation.strategy === 'exact_prompt'
       ? { strategy: 'exact_prompt', prompt: run.submittedScenario }
@@ -337,6 +339,12 @@ async function captureChatgptComputerUseResult({
       throw new Error(
         'Native telemetry requires a session baseline and a submitted prompt.'
       );
+    const mcpServers = config.codexSetup
+      ? resolveCodexSetup(
+          config.codexSetup,
+          state.data.chatgptConfigName as string | undefined
+        ).servers.map((server) => server.label)
+      : [];
     while (
       Date.now() < run.startedAtMs + run.timeoutMs &&
       (matched || Date.now() < bindingDeadline)
@@ -348,6 +356,7 @@ async function captureChatgptComputerUseResult({
         run.startedAtMs,
         {
           surface: chatgptSurface(config),
+          mcpServers,
           requireFreshSession: true,
           observedBeforeMs: Math.min(
             Date.now(),
@@ -360,8 +369,20 @@ async function captureChatgptComputerUseResult({
         matched = true;
         const { trace, path } = found;
         bound ??= { path, sessionId: trace.sessionId, turnId: trace.turnId };
+        latest = found;
         if (trace.complete) {
-          if (trace.error) throw new Error(trace.error);
+          if (trace.error)
+            return withEvidence(
+              partialFailure(
+                metadataOptions,
+                found,
+                'host_run_failed',
+                trace.error
+              ),
+              run,
+              state,
+              boundEvidence(bound)
+            );
           if (config.model && trace.model !== config.model)
             throw new Error(
               `ChatGPT model mismatch: requested ${config.model}, recorded ${trace.model ?? 'unknown'}.`
@@ -460,15 +481,19 @@ async function captureChatgptComputerUseResult({
         )
       );
     }
+    const timeoutError =
+      'Timed out waiting for the native ChatGPT turn to complete.';
     return withEvidence(
-      failureResult({
-        ...metadataOptions,
-        failureKind: matched ? 'timeout' : 'no_matching_session',
-        error: matched
-          ? 'Timed out waiting for the native ChatGPT turn to complete.'
-          : 'No unique fresh native ChatGPT session matched the submitted query within the binding deadline.',
-        limitations: [],
-      }),
+      latest
+        ? partialFailure(metadataOptions, latest, 'timeout', timeoutError)
+        : failureResult({
+            ...metadataOptions,
+            failureKind: matched ? 'timeout' : 'no_matching_session',
+            error: matched
+              ? timeoutError
+              : 'No unique fresh native ChatGPT session matched the submitted query within the binding deadline.',
+            limitations: [],
+          }),
       run,
       state,
       boundEvidence(bound)
@@ -494,6 +519,66 @@ async function captureChatgptComputerUseResult({
       boundEvidence(bound)
     );
   }
+}
+
+/**
+ * A bound turn that timed out or aborted: the case fails, but the native calls,
+ * usage, and messages recorded so far are kept at low (partial) confidence.
+ */
+function partialFailure(
+  options: MetadataOptions,
+  { path, trace }: { path: string; trace: ChatgptTrace },
+  failureKind: ExternalHostFailureKind,
+  error: string
+): ExternalHostRunResult {
+  const metadata = buildMetadata(options);
+  const usageSource = trace.usage ? 'host-local-transcript' : 'none';
+  return {
+    success: false,
+    error,
+    toolCalls: trace.toolCalls,
+    conversationHistory: trace.conversationHistory,
+    usage: trace.usage,
+    externalHost: {
+      ...metadata,
+      failureKind,
+      traceSource: 'host-local-transcript',
+      traceConfidence: 'low',
+      traceLimitations: trace.limitations,
+      artifacts: [
+        {
+          kind: 'transcript',
+          name: 'ChatGPT native session',
+          path,
+          contentType: 'application/x-ndjson',
+          summary: `Bound turn ${trace.turnId}; did not complete successfully`,
+        },
+      ],
+      session: {
+        ...metadata.session,
+        id: trace.sessionId,
+        turnId: trace.turnId,
+        startedAt: trace.startedAt,
+        completedAt: trace.completedAt,
+      },
+      telemetry: trace.telemetry,
+      sources: {
+        finalAnswer: 'none',
+        toolCalls: 'host-local-transcript',
+        usage: usageSource,
+        cost: 'none',
+      },
+      evidence: {
+        finalAnswer: { source: 'none', confidence: 'unknown' },
+        toolCalls: { source: 'host-local-transcript', confidence: 'low' },
+        usage: {
+          source: usageSource,
+          confidence: trace.usage ? 'low' : 'unknown',
+        },
+        cost: { source: 'none', confidence: 'unknown' },
+      },
+    },
+  };
 }
 
 function boundEvidence(
