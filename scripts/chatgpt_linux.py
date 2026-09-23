@@ -24,21 +24,25 @@ SURFACES = {'chatgpt-work': 'ChatGPT Work', 'codex': 'Codex'}
 MENU_LABELS = {'chatgpt-work': 'ChatGPT Work Create, learn, and explore',
                'codex': 'Codex Build, debug, and ship'}
 EDITOR_ROLES = {'entry', 'text', 'text area', 'editable text', 'paragraph'}
-XCLIP = '/usr/bin/xclip'
 XDOTOOL = '/usr/bin/xdotool'
+INPUT_LIMIT = 2 * 1024 * 1024
+OUTPUT_LIMIT = 1024
+SESSION_KEYS = ('PATH', 'HOME', 'DISPLAY', 'XAUTHORITY', 'DBUS_SESSION_BUS_ADDRESS',
+                'AT_SPI_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'XDG_CONFIG_HOME',
+                'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'XDG_STATE_HOME', 'CODEX_HOME',
+                'LANG', 'LC_ALL', 'NO_AT_BRIDGE')
 GLIB_ERROR = ()
 ERROR_CODES = frozenset({
     'accessibility_event_budget', 'accessibility_tree_budget', 'desktop_ambiguous',
     'action_unavailable', 'action_missing_or_ambiguous', 'action_acknowledgement_uncertain',
-    'composer_text_unavailable', 'fill_acknowledgement_uncertain',
-    'composer_missing_or_ambiguous', 'new_chat_missing_or_ambiguous',
+    'composer_text_unavailable', 'composer_missing_or_ambiguous',
     'deadline_exceeded', 'action_budget_exhausted', 'state_transition_unobserved',
     'send_missing_or_ambiguous', 'invalid_surface', 'profession_ambiguous',
     'continue_missing_or_ambiguous', 'skip_missing_or_ambiguous',
     'intro_confirmation_ambiguous', 'mode_missing_or_ambiguous', 'surface_item_ambiguous',
     'invalid_prompt', 'surface_mismatch', 'invalid_budget', 'input_too_large', 'invalid_input',
-    'helper_missing', 'helper_failed', 'helper_timeout', 'clipboard_unavailable',
-    'focus_failed', 'composer_not_empty', 'desktop_attribute_error', 'desktop_type_error',
+    'helper_missing', 'helper_failed', 'helper_timeout', 'profession_geometry_invalid',
+    'desktop_attribute_error', 'desktop_type_error',
     'desktop_glib_error', 'desktop_driver_failed',
 })
 
@@ -65,13 +69,13 @@ class Desktop:
         self.glib_error = GLib.Error
         self.api = Atspi
         self.context = GLib.MainContext.default()
-        self.clipboard = None
         self.deadline = float('inf')
 
     def require_helpers(self):
-        if not all(os.path.isfile(path) and os.access(path, os.X_OK)
-                   for path in (XCLIP, XDOTOOL)):
+        path = os.environ.get('MST_CHATGPT_URL_OPENER', '')
+        if not (os.path.isabs(path) and os.path.isfile(path) and os.access(path, os.X_OK)):
             raise DriverFailure('helper_missing')
+        self.opener = path
 
     def remaining(self, cap=2):
         remaining = self.deadline - time.monotonic()
@@ -162,120 +166,113 @@ class Desktop:
         # get_text is not necessarily Text.get_text in PyGObject.
         return self.api.Text.get_text(control['node'], 0, -1)
 
-    def helper(self, argv, allow_unavailable=False):
-        try:
-            return subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                  stderr=subprocess.DEVNULL, timeout=self.remaining(), check=True).stdout
-        except subprocess.TimeoutExpired:
-            raise DriverFailure('helper_timeout') from None
-        except subprocess.CalledProcessError:
-            if allow_unavailable:
-                return None
-            raise DriverFailure('helper_failed') from None
-        except OSError:
-            raise DriverFailure('helper_failed') from None
+    def environment(self):
+        return {key: os.environ[key] for key in SESSION_KEYS if key in os.environ}
 
-    def release_clipboard(self):
-        process = getattr(self, 'clipboard', None)
-        self.clipboard = None
-        if process is not None:
-            try:
-                if process.poll() is None:
-                    process.terminate()
-                process.wait(timeout=0.5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=0.5)
-            finally:
-                if process.stdin and not process.stdin.closed:
-                    process.stdin.close()
+    def open_prompt(self, prompt):
+        # The caller-owned helper dispatches native app IPC. It must only open a
+        # draft (empty -> codex://threads/new; otherwise codex://new?prompt=...).
+        # No URL/prompt argv, shell, CLI inference, clipboard, or retry.
+        if not isinstance(prompt, str):
+            raise DriverFailure('invalid_prompt')
+        data = json.dumps({'prompt': prompt}, ensure_ascii=False).encode('utf-8')
+        if len(data) > INPUT_LIMIT:
+            raise DriverFailure('input_too_large')
+        expires = time.monotonic() + self.remaining(15)
+        process = None
 
-    def own_clipboard(self, prompt):
-        data = prompt.encode('utf-8')
+        def remaining():
+            seconds = expires - time.monotonic()
+            if seconds <= 0:
+                raise DriverFailure('helper_timeout')
+            return seconds
+
         try:
-            # -quiet keeps xclip in the foreground. No detached selection owner,
-            # shell, prompt argv, or user clipboard backup is permitted.
             process = subprocess.Popen(
-                [XCLIP, '-selection', 'clipboard', '-in', '-quiet'],
-                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            self.clipboard = process
+                [self.opener], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL, env=self.environment(), shell=False)
+            output = bytearray()
             os.set_blocking(process.stdin.fileno(), False)
+            os.set_blocking(process.stdout.fileno(), False)
             with selectors.DefaultSelector() as selector:
                 selector.register(process.stdin, selectors.EVENT_WRITE)
+                selector.register(process.stdout, selectors.EVENT_READ)
                 offset = 0
-                while offset < len(data):
-                    if not selector.select(self.remaining()):
+                while selector.get_map():
+                    events = selector.select(remaining())
+                    if not events:
                         raise DriverFailure('helper_timeout')
-                    offset += os.write(process.stdin.fileno(), data[offset:offset + 65536])
-            process.stdin.close()
-            # The owner starts serving only after stdin EOF. Read-only probes are
-            # bounded and never cause another paste or overwrite.
-            for _ in range(20):
-                if process.poll() is not None:
-                    raise DriverFailure('clipboard_unavailable')
-                if self.helper([XCLIP, '-selection', 'clipboard', '-out'],
-                               allow_unavailable=True) == data:
-                    return
-                time.sleep(min(0.01, self.remaining()))
-            raise DriverFailure('clipboard_unavailable')
-        except OSError:
+                    for key, _ in events:
+                        if key.fileobj is process.stdin:
+                            offset += os.write(process.stdin.fileno(), data[offset:offset + 65536])
+                            if offset == len(data):
+                                selector.unregister(process.stdin)
+                                process.stdin.close()
+                        else:
+                            chunk = os.read(process.stdout.fileno(), OUTPUT_LIMIT + 1 - len(output))
+                            if not chunk:
+                                selector.unregister(process.stdout)
+                            output.extend(chunk)
+                            if len(output) > OUTPUT_LIMIT:
+                                raise DriverFailure('helper_failed')
+            if process.wait(timeout=remaining()) != 0:
+                raise DriverFailure('helper_failed')
+            # Preserve pairs to reject duplicate keys as well as extra keys and
+            # non-boolean values. Only this receipt can acknowledge dispatch.
+            receipt = json.loads(output.decode('utf-8'), object_pairs_hook=list)
+            if receipt != [('opened', True)] or type(receipt[0][1]) is not bool:
+                raise DriverFailure('helper_failed')
+        except subprocess.TimeoutExpired:
+            raise DriverFailure('helper_timeout') from None
+        except (OSError, ValueError):
             raise DriverFailure('helper_failed') from None
+        finally:
+            if process is not None:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=0.5)
+                for pipe in (process.stdin, process.stdout):
+                    if not pipe.closed:
+                        pipe.close()
 
-    def focus_editor(self, control, wait=None):
-        # One focus action, followed only by bounded read-only observations.
-        if not self.api.Component.grab_focus(control['node']):
-            raise DriverFailure('focus_failed')
-
-        def owned_focus(nodes):
-            current = composer(nodes)
-            if current['node'] != control['node']:
-                raise DriverFailure('focus_failed')
-            editor_index = next(i for i, node in enumerate(nodes) if node is current)
-            focused = [node for node in nodes if available(node, enabled=False)
-                       and node['node'].get_state_set().contains(self.api.StateType.FOCUSED)]
-            # Chromium may focus a descendant of the editor root. Another field
-            # must fail closed, even if the intended editor also reports focus.
-            if any(node is not current and editor_index not in node['ancestors']
-                   for node in focused):
-                raise DriverFailure('focus_failed')
-            return bool(focused)
-
-        if wait is None:
-            nodes = self.snapshot()
-            if not owned_focus(nodes):
-                raise DriverFailure('focus_failed')
-        else:
-            try:
-                nodes = wait(owned_focus)
-            except DriverFailure as error:
-                if str(error) == 'state_transition_unobserved':
-                    raise DriverFailure('focus_failed') from None
-                raise
-        return composer(nodes)
-
-    def new_chat_shortcut(self):
-        # Fixed Linux New chat command, not a generic keyboard-input API.
-        # https://learn.chatgpt.com/docs/reference/commands
-        self.helper([XDOTOOL, 'key', 'ctrl+n'])
-
-    def fill(self, control, prompt, wait=None):
-        if not available(control) or not control['editable']:
-            raise DriverFailure('composer_missing_or_ambiguous')
-        if self.text(control) != '':
-            raise DriverFailure('composer_not_empty')
-        if control['editableInterface']:
-            if not self.api.EditableText.set_text_contents(control['node'], prompt):
-                raise DriverFailure('fill_acknowledgement_uncertain')
-            return
+    def select_profession(self, nodes, choice):
+        # Primary selection path: the observed radio's WINDOW extents plus its
+        # top-level frame's SCREEN origin. Never reuse guessed coordinates.
+        if not (os.path.isfile(XDOTOOL) and os.access(XDOTOOL, os.X_OK)):
+            raise DriverFailure('helper_missing')
+        frames = [nodes[i] for i in choice['ancestors'] if nodes[i]['role'] == 'frame'
+                  and available(nodes[i], enabled=False)]
+        frame = unique(frames, 'profession_geometry_invalid')
+        for control in (choice, frame):
+            if 'Component' not in control['node'].get_interfaces():
+                raise DriverFailure('profession_geometry_invalid')
+        target = self.api.Component.get_extents(choice['node'], self.api.CoordType.WINDOW)
+        bounds = self.api.Component.get_extents(frame['node'], self.api.CoordType.SCREEN)
+        if any(type(value) is not int for rect in (target, bounds)
+               for value in (rect.x, rect.y, rect.width, rect.height)):
+            raise DriverFailure('profession_geometry_invalid')
+        if (target.x < 0 or target.y < 0 or target.width <= 0 or target.height <= 0
+                or bounds.width <= 0 or bounds.height <= 0
+                or target.x + target.width > bounds.width
+                or target.y + target.height > bounds.height):
+            raise DriverFailure('profession_geometry_invalid')
+        x = bounds.x + target.x + target.width // 2
+        y = bounds.y + target.y + target.height // 2
+        if x < 0 or y < 0:
+            raise DriverFailure('profession_geometry_invalid')
+        # Public Component.contains is a hit test on this actual accessible.
+        contains = getattr(self.api.Component, 'contains', None)
+        if contains is not None and not contains(choice['node'], x, y, self.api.CoordType.SCREEN):
+            raise DriverFailure('profession_geometry_invalid')
         try:
-            self.own_clipboard(prompt)
-            current = self.focus_editor(control, wait)
-            if self.text(current) != '':
-                raise DriverFailure('composer_not_empty')
-            self.helper([XDOTOOL, 'key', 'ctrl+v'])
-        except Exception:
-            self.release_clipboard()
-            raise
+            subprocess.run([XDOTOOL, 'mousemove', str(x), str(y), 'click', '1'],
+                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, env=self.environment(),
+                           timeout=self.remaining(), check=True, shell=False)
+        except subprocess.TimeoutExpired:
+            raise DriverFailure('helper_timeout') from None
+        except (OSError, subprocess.CalledProcessError):
+            raise DriverFailure('helper_failed') from None
 
 
 def available(node, enabled=True):
@@ -305,17 +302,6 @@ def editor_roots(nodes):
 def composer(nodes):
     # Separate editors (including dialogs) remain ambiguous and cannot authorize input.
     return unique(editor_roots(nodes), 'composer_missing_or_ambiguous')
-
-
-def fresh_chat(nodes, editor):
-    candidates = controls(nodes, {'New chat'})
-    # Two visible New chat controls occur in the app. Prefer the one in the
-    # nearest shared container with the actual composer, never tree order.
-    scores = [(len(set(n['ancestors']) & set(editor['ancestors'])), n) for n in candidates]
-    if not scores:
-        raise DriverFailure('new_chat_missing_or_ambiguous')
-    best = max(score for score, _ in scores)
-    return unique([n for score, n in scores if score == best], 'new_chat_missing_or_ambiguous')
 
 
 class Driver:
@@ -393,7 +379,19 @@ class Driver:
         raise DriverFailure('state_transition_unobserved')
 
     def selected(self, nodes, surface):
-        return len(controls(nodes, {'Switch mode, current mode: ' + SURFACES[surface]})) == 1
+        switches = controls(nodes, {'Switch mode, current mode: ' + label for label in SURFACES.values()})
+        return len(switches) == 1 and switches[0]['name'] == 'Switch mode, current mode: ' + SURFACES[surface]
+
+    def select_surface(self, nodes, surface):
+        if self.selected(nodes, surface):
+            return nodes
+        switch = unique(controls(nodes, {'Switch mode, current mode: ChatGPT Work',
+                                         'Switch mode, current mode: Codex'}), 'mode_missing_or_ambiguous')
+        self.click(switch, {'open'})
+        nodes = self.wait(lambda ns: bool(controls(ns, {MENU_LABELS[surface]}, {'menu item'})))
+        item = unique(controls(nodes, {MENU_LABELS[surface]}, {'menu item'}), 'surface_item_ambiguous')
+        self.click(item, {'select'})
+        return self.wait(lambda ns: self.selected(ns, surface))
 
     def ready(self, nodes, surface):
         if not self.selected(nodes, surface):
@@ -420,15 +418,13 @@ class Driver:
             self.phase = 'profession-selected'
             choice = unique(engineering, 'profession_ambiguous')
             if not choice['selected']:
-                self.click(choice, {'check', 'toggle', 'click', 'press'})
-            # Selection acknowledgement and Continue enablement can arrive in
-            # separate accessibility updates. Observe both; never retry check.
-            def continue_ready(ns):
-                selected = any(n['selected'] for n in controls(
-                    ns, {'Engineering'}, {'radio button', 'toggle button'}))
-                self.phase = 'continue-ready' if selected else 'profession-selected'
-                return selected and bool(controls(ns, {'Continue'}))
-            nodes = self.wait(continue_ready)
+                self.action(lambda: self.desktop.select_profession(nodes, choice))
+            # Chromium can keep the checked bit stale after a real selection.
+            # Observe the same profession page and enabled Continue, not that bit.
+            self.phase = 'continue-ready'
+            nodes = self.wait(lambda ns: len(controls(
+                ns, {'Engineering'}, {'radio button', 'toggle button'})) == 1
+                and bool(controls(ns, {'Continue'})))
             self.click(unique(controls(nodes, {'Continue'}), 'continue_missing_or_ambiguous'))
             self.phase = 'intro-dismiss'
             nodes = self.wait(lambda ns: not controls(ns, {'Engineering'}, {'radio button', 'toggle button'})
@@ -446,47 +442,15 @@ class Driver:
             nodes = self.wait(lambda ns: bool(controls(ns, {
                 'Switch mode, current mode: ChatGPT Work', 'Switch mode, current mode: Codex'})))
         self.phase = 'surface'
-        if not self.selected(nodes, surface):
-            switch = unique(controls(nodes, {'Switch mode, current mode: ChatGPT Work',
-                                             'Switch mode, current mode: Codex'}), 'mode_missing_or_ambiguous')
-            self.click(switch, {'open'})
-            nodes = self.wait(lambda ns: bool(controls(ns, {MENU_LABELS[surface]}, {'menu item'})))
-            item = unique(controls(nodes, {MENU_LABELS[surface]}, {'menu item'}), 'surface_item_ambiguous')
-            self.click(item, {'select'})
-            nodes = self.wait(lambda ns: self.selected(ns, surface))
+        self.select_surface(nodes, surface)
         self.phase = 'composer'
-        nodes = self.wait(lambda ns: self.ready(ns, surface))
-        try:
-            fresh_chat(nodes, composer(nodes))
-        except DriverFailure as error:
-            if str(error) != 'new_chat_missing_or_ambiguous':
-                raise
-            self.new_chat(nodes, surface)
-        return self.receipt('ready', surface)
-
-    def new_chat(self, nodes, surface):
-        self.step = 'new-chat-resolve'
-        editor = composer(nodes)
-        try:
-            target = fresh_chat(nodes, editor)
-        except DriverFailure as error:
-            if (str(error) != 'new_chat_missing_or_ambiguous'
-                    or len(controls(nodes, {'New chat'})) < 2):
-                raise
-            # Resolve ambiguity before any UI action. Focus verification and the
-            # fixed shortcut form one logical action, never retried on failure.
-            def shortcut():
-                self.step = 'new-chat-focus'
-                self.desktop.focus_editor(editor, self.wait)
-                self.step = 'new-chat-shortcut'
-                self.desktop.new_chat_shortcut()
-            self.action(shortcut)
-        else:
-            self.click(target)
-        self.step = 'new-chat-empty'
-        nodes = self.wait(lambda ns: self.ready(ns, surface) and self.desktop.text(composer(ns)) == '')
+        self.wait(lambda ns: self.ready(ns, surface))
+        self.step = 'draft-open'
+        self.action(lambda: self.desktop.open_prompt(''))
+        self.step = 'draft-readback'
+        self.wait(lambda ns: self.ready(ns, surface) and self.desktop.text(composer(ns)) == '')
         self.step = None
-        return nodes
+        return self.receipt('ready', surface)
 
     def submit(self, prompt, surface):
         if not isinstance(prompt, str) or not prompt.strip():
@@ -500,16 +464,22 @@ class Driver:
         if not self.ready(nodes, surface):
             raise DriverFailure('surface_mismatch')
         self.phase = 'composer'
-        nodes = self.new_chat(nodes, surface)
-        try:
-            self.action(lambda: self.desktop.fill(composer(nodes), prompt, self.wait))
-            nodes = self.wait(lambda ns: self.ready(ns, surface)
-                              and self.desktop.text(composer(ns)) == prompt
-                              and len(controls(ns, {'Send'})) == 1)
-        finally:
-            self.desktop.release_clipboard()
+        self.step = 'draft-open'
+        self.action(lambda: self.desktop.open_prompt(prompt))
+        self.step = 'draft-surface'
+        nodes = self.wait(lambda ns: any(self.ready(ns, candidate) for candidate in SURFACES)
+                          and self.desktop.text(composer(ns)) == prompt)
+        # A deep link may change mode. One fixed UI selection is allowed, but it
+        # must preserve the draft. Never reopen, refill, or fall back on loss.
+        self.select_surface(nodes, surface)
+        self.step = 'draft-readback'
+        nodes = self.wait(lambda ns: self.ready(ns, surface)
+                          and self.desktop.text(composer(ns)) == prompt
+                          and len(controls(ns, {'Send'})) == 1)
         # Exactly one send. No retry, Enter fallback, or resubmission on missing trace.
+        self.step = 'send'
         self.click(unique(controls(nodes, {'Send'}), 'send_missing_or_ambiguous'))
+        self.step = None
         return self.receipt('submitted', surface)
 
     def receipt(self, status, surface=None):
@@ -533,8 +503,8 @@ def main():
     try:
         if args.timeout_ms <= 0 or not 1 <= args.max_actions <= 64:
             raise DriverFailure('invalid_budget')
-        data = sys.stdin.read(2 * 1024 * 1024 + 1)
-        if len(data) > 2 * 1024 * 1024:
+        data = sys.stdin.buffer.read(INPUT_LIMIT + 1)
+        if len(data) > INPUT_LIMIT:
             raise DriverFailure('input_too_large')
         payload = json.loads(data)
         if not isinstance(payload, dict):

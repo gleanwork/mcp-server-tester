@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
+import { accessSync, constants, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { z } from 'zod';
 import type { ExternalHostConfig } from '../externalHost/types.js';
 import type { SemanticDesktopTelemetry } from '../cowork/driver.js';
@@ -19,6 +20,11 @@ const SESSION_KEYS = [
   'AT_SPI_BUS_ADDRESS',
   'XDG_RUNTIME_DIR',
   'XDG_CONFIG_HOME',
+  'XDG_DATA_HOME',
+  'XDG_CACHE_HOME',
+  'XDG_STATE_HOME',
+  'CODEX_HOME',
+  'MST_CHATGPT_URL_OPENER',
   'LANG',
   'LC_ALL',
 ];
@@ -31,10 +37,10 @@ const FailurePhase = z.enum([
   'composer',
 ]);
 const FailureStep = z.enum([
-  'new-chat-resolve',
-  'new-chat-focus',
-  'new-chat-shortcut',
-  'new-chat-empty',
+  'draft-open',
+  'draft-surface',
+  'draft-readback',
+  'send',
 ]);
 const ComposerCandidate = z
   .object({
@@ -66,9 +72,7 @@ const Receipt = z
         'action_missing_or_ambiguous',
         'action_acknowledgement_uncertain',
         'composer_text_unavailable',
-        'fill_acknowledgement_uncertain',
         'composer_missing_or_ambiguous',
-        'new_chat_missing_or_ambiguous',
         'deadline_exceeded',
         'action_budget_exhausted',
         'state_transition_unobserved',
@@ -88,9 +92,7 @@ const Receipt = z
         'helper_missing',
         'helper_failed',
         'helper_timeout',
-        'clipboard_unavailable',
-        'focus_failed',
-        'composer_not_empty',
+        'profession_geometry_invalid',
         'desktop_attribute_error',
         'desktop_type_error',
         'desktop_glib_error',
@@ -185,6 +187,19 @@ export async function runLinuxChatgptDesktop(
     );
   const env = chatgptDesktopEnvironment(config);
   linuxChatgptHome(env);
+  const opener = env.MST_CHATGPT_URL_OPENER;
+  try {
+    if (!opener || !isAbsolute(opener) || !statSync(opener).isFile())
+      throw new Error();
+    accessSync(opener, constants.X_OK);
+  } catch {
+    throw new NativeChatgptDriverError(
+      'Linux ChatGPT requires an existing absolute executable MST_CHATGPT_URL_OPENER; no action attempted.'
+    );
+  }
+  // Match the profile installed by setup, rather than an inherited CLI profile.
+  if (config.codexSetup?.configPath)
+    env.CODEX_HOME = dirname(config.codexSetup.configPath);
   const surface = chatgptSurface(config);
   const maxActions = Number(config.options?.nativeMaxActions ?? 24);
   if (!Number.isInteger(maxActions) || maxActions < 1 || maxActions > 64)

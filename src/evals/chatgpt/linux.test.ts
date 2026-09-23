@@ -14,6 +14,9 @@ let root: string;
 let config: ExternalHostConfig;
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'mst-chatgpt-native-'));
+  await writeFile(join(root, 'url-opener'), '#!/bin/sh\nexit 1\n', {
+    mode: 0o700,
+  });
   config = {
     driver: 'openai.chatgpt.agent.desktop-app.linux',
     codexSetup: {
@@ -26,6 +29,10 @@ beforeEach(async () => {
         MST_CHATGPT_ISOLATED_HOME: root,
         DISPLAY: ':1',
         DBUS_SESSION_BUS_ADDRESS: 'unix:path=/fixture/bus',
+        MST_CHATGPT_URL_OPENER: join(root, 'url-opener'),
+        XDG_DATA_HOME: join(root, '.local/share'),
+        XDG_CACHE_HOME: join(root, '.cache'),
+        XDG_STATE_HOME: join(root, '.local/state'),
       },
     },
   };
@@ -41,12 +48,12 @@ async function helper(mode = 'valid', receipt?: unknown) {
     `#!/usr/bin/env node
 import fs from 'node:fs';
 const payload = JSON.parse(fs.readFileSync(0, 'utf8'));
-fs.appendFileSync(${JSON.stringify(join(root, 'calls.jsonl'))}, JSON.stringify({ payload, argv: process.argv.slice(2), env: Object.keys(process.env) })+'\\n');
+fs.appendFileSync(${JSON.stringify(join(root, 'calls.jsonl'))}, JSON.stringify({ payload, argv: process.argv.slice(2), env: Object.keys(process.env), codexHome: process.env.CODEX_HOME, opener: process.env.MST_CHATGPT_URL_OPENER })+'\\n');
 if (${JSON.stringify(mode)} === 'malformed') { console.log('private-receipt'); process.exit(0); }
 if (${JSON.stringify(mode)} === 'failure') { console.error('private-error'); process.exit(1); }
 if (${JSON.stringify(mode)} === 'receipt') { console.log(JSON.stringify(${JSON.stringify(receipt) ?? 'null'})); process.exit(0); }
 const prepare = process.argv.includes('prepare');
-console.log(JSON.stringify({status: prepare ? 'ready' : 'submitted', surface: ${JSON.stringify(mode)} === 'wrong-surface' ? 'codex' : payload.surface, action_count: ${JSON.stringify(mode)} === 'over-budget' ? 65 : 3, duration_ms: 4}));
+console.log(JSON.stringify({status: prepare ? 'ready' : 'submitted', surface: ${JSON.stringify(mode)} === 'wrong-surface' ? 'codex' : payload.surface, action_count: ${JSON.stringify(mode)} === 'over-budget' ? 65 : 2, duration_ms: 4}));
 `,
     { mode: 0o700 }
   );
@@ -101,9 +108,7 @@ describe('Linux ChatGPT runtime adapter', () => {
     'helper_missing',
     'helper_failed',
     'helper_timeout',
-    'clipboard_unavailable',
-    'focus_failed',
-    'composer_not_empty',
+    'profession_geometry_invalid',
     'desktop_attribute_error',
     'desktop_type_error',
     'desktop_glib_error',
@@ -117,25 +122,23 @@ describe('Linux ChatGPT runtime adapter', () => {
       .split('\n');
     expect(calls).toHaveLength(1);
   });
-  it.each([
-    'new-chat-resolve',
-    'new-chat-focus',
-    'new-chat-shortcut',
-    'new-chat-empty',
-  ])('preserves fixed failure step %s', async (step) => {
-    await helper('receipt', { ...composerFailure, step });
-    const error: unknown = await runLinuxChatgptDesktop(
-      'prepare',
-      config,
-      Date.now() + 5000
-    ).catch((failure: unknown) => failure);
-    expect(error).toBeInstanceOf(NativeChatgptDriverError);
-    expect(error).toMatchObject({ phase: 'composer', step });
-    expect((error as Error).message).toContain(`step=${step}`);
-    expect(
-      (await readFile(join(root, 'calls.jsonl'), 'utf8')).trim().split('\n')
-    ).toHaveLength(1);
-  });
+  it.each(['draft-open', 'draft-surface', 'draft-readback', 'send'])(
+    'preserves fixed failure step %s',
+    async (step) => {
+      await helper('receipt', { ...composerFailure, step });
+      const error: unknown = await runLinuxChatgptDesktop(
+        'prepare',
+        config,
+        Date.now() + 5000
+      ).catch((failure: unknown) => failure);
+      expect(error).toBeInstanceOf(NativeChatgptDriverError);
+      expect(error).toMatchObject({ phase: 'composer', step });
+      expect((error as Error).message).toContain(`step=${step}`);
+      expect(
+        (await readFile(join(root, 'calls.jsonl'), 'utf8')).trim().split('\n')
+      ).toHaveLength(1);
+    }
+  );
   it('accepts legacy composer failures without diagnostics', async () => {
     await helper('receipt', composerFailure);
     await expect(
@@ -168,10 +171,10 @@ describe('Linux ChatGPT runtime adapter', () => {
     { composerCandidates: [{ ...composerCandidate, textInterface: 'true' }] },
     { step: 'private_step_text' },
     { step: null },
-    { step: 'new-chat-focus', phase: 'surface' },
-    { step: 'new-chat-focus', phase: undefined },
-    { step: 'new-chat-focus', status: 'ready', phase: undefined },
-    { step: 'new-chat-focus', status: 'submitted', phase: 'composer' },
+    { step: 'draft-open', phase: 'surface' },
+    { step: 'draft-open', phase: undefined },
+    { step: 'draft-open', status: 'ready', phase: undefined },
+    { step: 'draft-open', status: 'submitted', phase: 'composer' },
     { error: 'private_error_text' },
     { error: 'AttributeError: private prompt' },
     { composerCandidates: [{ role: 'text' }] },
@@ -233,7 +236,7 @@ describe('Linux ChatGPT runtime adapter', () => {
   });
   it('sends exact prompt through stdin and reports no planner usage or cost', async () => {
     await helper();
-    const prompt = '  α\nline\n';
+    const prompt = '  α 😀\nline\n\nKeep trailing spaces.  \n';
     const result = await runLinuxChatgptDesktop(
       'submit',
       config,
@@ -243,16 +246,36 @@ describe('Linux ChatGPT runtime adapter', () => {
     expect(result.telemetry).toMatchObject({
       driver: 'linux-desktop',
       accounting: 'complete',
-      action_count: 3,
+      action_count: 2,
       planner: { status: 'not-applicable' },
       cost: { status: 'not-applicable' },
     });
     const record = JSON.parse(
       (await readFile(join(root, 'calls.jsonl'), 'utf8')).trim()
-    ) as { payload: unknown; argv: string[]; env: string[] };
+    ) as {
+      payload: unknown;
+      argv: string[];
+      env: string[];
+      codexHome: string;
+      opener: string;
+    };
     expect(record.payload).toEqual({ prompt, surface: 'chatgpt-work' });
     expect(record.argv).not.toContain(prompt);
     expect(record.env).not.toContain('ANTHROPIC_API_KEY');
+    expect(record.env).toEqual(
+      expect.arrayContaining([
+        'HOME',
+        'DISPLAY',
+        'DBUS_SESSION_BUS_ADDRESS',
+        'CODEX_HOME',
+        'MST_CHATGPT_URL_OPENER',
+        'XDG_DATA_HOME',
+        'XDG_CACHE_HOME',
+        'XDG_STATE_HOME',
+      ])
+    );
+    expect(record.codexHome).toBe(join(root, '.codex'));
+    expect(record.opener).toBe(join(root, 'url-opener'));
   });
   it.each(['failure', 'malformed', 'wrong-surface', 'over-budget'])(
     'does not retry or expose raw output on %s',
@@ -279,6 +302,51 @@ describe('Linux ChatGPT runtime adapter', () => {
       (await readFile(join(root, 'calls.jsonl'), 'utf8')).trim()
     ) as { payload: unknown };
     expect(record.payload).toEqual({ surface: 'codex' });
+  });
+  it.each([
+    '',
+    'relative-helper',
+    '/nonexistent/mst-opener',
+    'directory',
+    'not-executable',
+  ])('blocks invalid opener %s before spawning', async (path) => {
+    await helper();
+    const notExecutable = join(root, 'not-executable');
+    await writeFile(notExecutable, '', { mode: 0o600 });
+    config.options!.desktopEnvironment = {
+      ...(config.options!.desktopEnvironment as object),
+      MST_CHATGPT_URL_OPENER:
+        path === 'directory'
+          ? root
+          : path === 'not-executable'
+            ? notExecutable
+            : path,
+    };
+    await expect(
+      runLinuxChatgptDesktop(
+        'submit',
+        config,
+        Date.now() + 5000,
+        'private-query'
+      )
+    ).rejects.toThrow('MST_CHATGPT_URL_OPENER');
+    await expect(readFile(join(root, 'calls.jsonl'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+  it('rejects oversized UTF-8 input before spawning', async () => {
+    await helper();
+    await expect(
+      runLinuxChatgptDesktop(
+        'submit',
+        config,
+        Date.now() + 5000,
+        '😀'.repeat(600_000)
+      )
+    ).rejects.toThrow('control message limit');
+    await expect(readFile(join(root, 'calls.jsonl'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
   });
   it('does not spawn after the deadline', async () => {
     await helper();

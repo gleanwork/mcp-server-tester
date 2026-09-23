@@ -14,8 +14,9 @@ surface instructions to the evaluated prompt.
 macOS keeps the Anthropic Computer Use submission driver. It receives the selected
 surface and must verify the current-mode label before filling the composer. It
 requires `ANTHROPIC_API_KEY`, Accessibility and Screen Recording permission.
-Linux uses deterministic AT-SPI actions. It requires no Anthropic key and rejects
-Computer Use planner configuration. It does not fall back to macOS CUA.
+Linux uses native draft deep links and deterministic AT-SPI actions. It requires
+no Anthropic key and rejects Computer Use planner configuration. It does not fall
+back to macOS CUA.
 
 Example Linux host settings (inside a V2 evaluation manifest):
 
@@ -53,20 +54,21 @@ Supply these variables through the process environment or evaluation environment
   home. The caller must prevent profile/config symlinks into personal data.
 - `DISPLAY` and `DBUS_SESSION_BUS_ADDRESS`: the prepared desktop session.
   Forward `XAUTHORITY`, `AT_SPI_BUS_ADDRESS`, `XDG_RUNTIME_DIR`, `XDG_CONFIG_HOME`,
-  and `GNOME_KEYRING_CONTROL` when needed. Use one worker per desktop.
+  `XDG_DATA_HOME`, `XDG_CACHE_HOME`, and `XDG_STATE_HOME` when needed. Use one worker
+  per desktop.
 - `MST_CHATGPT_APP_CONTROLLER`: absolute path to the caller-owned executable
   described below. Optional `MST_CHATGPT_CONTROL_SOCKET` must be absolute.
 - `MST_CHATGPT_PYTHON`: optional Python executable (default `python3`). It must
   provide PyGObject with `gi.repository.Atspi` 2.0. MST does not install Linux
   system packages. The app must expose its UI on that AT-SPI bus.
-- Install `xclip` and `xdotool` (Debian/Ubuntu packages of the same names) at
-  `/usr/bin/xclip` and `/usr/bin/xdotool`. Both are checked before any UI action;
-  absence returns `helper_missing`. Typical accessibility dependencies are
-  `python3-gi`, `gir1.2-atspi-2.0`, and `at-spi2-core`.
-- The display must be an isolated X11 desktop, not a personal desktop or a shared
-  clipboard session. Disable clipboard managers and clipboard forwarding. The
-  caller's isolation contract covers the X11 CLIPBOARD selection as well as HOME.
-  MST does not save or restore a personal clipboard.
+- `MST_CHATGPT_URL_OPENER`: an existing absolute executable path to the caller's
+  native draft opener, described below. It is checked before UI actions.
+- Install `/usr/bin/xdotool` only if the observed profession onboarding page can
+  appear. MST uses it for one geometry-derived mouse click, never keyboard input.
+  Typical accessibility dependencies are `python3-gi`, `gir1.2-atspi-2.0`, and
+  `at-spi2-core`. No clipboard helper or `xclip` dependency is required.
+- The display must be an isolated X11 desktop, not a personal desktop. MST does
+  not read, overwrite, save, or restore the clipboard.
 
 `options.configPath` must explicitly name `config.toml` inside the isolated HOME.
 MST sets `CODEX_HOME` to that directory and reads only its `sessions/` native
@@ -106,6 +108,35 @@ the app, and selects/verifies the surface once per batch. It restores config at
 cleanup and restarts the app only if it was running before setup. A failed cleanup
 retains the lock for inspection. The caller owns stale-lock recovery.
 
+### Native draft opener protocol
+
+MST runs `MST_CHATGPT_URL_OPENER` directly, without a shell or arguments. It sends
+exactly one JSON object on UTF-8 stdin, bounded to 2 MiB:
+
+```json
+{ "prompt": "unchanged query text" }
+```
+
+The caller-owned helper must use native app IPC to dispatch the documented
+[ChatGPT deep links](https://learn.chatgpt.com/docs/reference/commands):
+
+- Empty `prompt`: open `codex://threads/new` (canonical new local chat).
+- Nonempty `prompt`: open `codex://new?prompt=<URL-encoded text>`. This prefills
+  the composer and **does not send**. Preserve Unicode and all whitespace.
+
+The helper must validate the isolated `HOME` and target only that prepared app.
+It must not invoke the Codex binary, CLI/API inference, a browser, or a second
+app profile. It must not log prompts or URLs. MST sends neither in argv. Only
+allowlisted desktop variables, including `HOME`, D-Bus settings, XDG paths, and
+`CODEX_HOME`, reach it; model and MCP credential variables do not.
+
+Exit status must be 0, and stdout must contain only `{ "opened": true }`. Extra
+or duplicate keys, non-boolean values, raw logs, and uncertain receipts fail
+closed. Stdout is bounded to 1 KiB; stderr is discarded. Each invocation has a
+15-second timeout capped by the remaining driver deadline. Failed or timed-out
+calls are not retried. The helper must terminate pending work when killed.
+The receipt acknowledges draft dispatch only, not submission or model execution.
+
 ### Native UI protocol and limits
 
 The packaged `chatgpt-linux-runtime` script has two modes: `prepare` and `submit`.
@@ -118,62 +149,57 @@ only desktop environment variables, not model or MCP credentials, to Python.
 The English selectors come from ChatGPT 26.915.31945 observations. Preparation can
 select Engineering, advance Continue, skip the specific example-introduction
 screen, confirm Go to ChatGPT, and select the requested Switch mode menu item.
-An acknowledged action without an observed state change gets bounded resnapshots,
-not another click. Unknown onboarding, authentication, permission requests, stale
-trees, and ambiguous controls fail closed.
+Engineering selection uses the unique observed radio/toggle's public AT-SPI
+Component WINDOW extents plus its containing frame's SCREEN origin. Integer
+geometry must fit within the frame and pass the public Component hit test when
+available. The only mouse command is `xdotool mousemove x y click 1`, with no
+`--sync`, hard-coded coordinates, or fallback checkbox action. MST then polls for
+enabled Continue on the observed profession page; a stale checked bit does not
+block it. Unknown onboarding and ambiguous controls fail closed.
 
-Each query re-verifies the selected surface, requires one visible, showing,
-enabled, sensitive composer with EDITABLE state, an allowed non-password role,
-and a real Text interface (not generic static text), selects New chat once, and
-verifies the composer is exactly empty. Chromium can expose EDITABLE and Text
-without EditableText. When EditableText is present, MST calls the unbound
-`Atspi.EditableText.set_text_contents(node, prompt)` method. Otherwise, its native
-input path owns the isolated X11 clipboard with foreground `xclip -quiet`, passes
-UTF-8 through stdin (never argv), focuses the same unique composer with unbound
-`Atspi.Component.grab_focus(node)`, verifies FOCUSED and emptiness again, and runs
-only the fixed `xdotool key ctrl+v` command. It never types the
-prompt as keystrokes or presses Enter.
+Preparation selects the surface, opens the canonical empty chat exactly once,
+and verifies the requested surface and one exactly empty composer. It never
+supplies an evaluation query or activates Send.
 
+Submission re-verifies the prepared surface, opens the exact prompt once, then
+verifies the requested surface. If the deep link changed mode, MST permits one
+fixed Switch mode menu selection back to the requested surface. The draft must
+survive that selection unchanged. There is no reopen, rewrite, fresh-chat button,
+File menu, keyboard shortcut, clipboard input, or fallback if the draft is lost.
+
+The composer must be unique, visible, showing, enabled, sensitive, have EDITABLE
+state, an allowed non-password role, and a real Text interface. Nested editable
+paragraphs belong to their containing editor; independent fields stay ambiguous.
 Readback uses unbound `Atspi.Text.get_text(node, 0, -1)` to avoid the PyGObject
-Accessible/Text binding collision. Send remains blocked until the complete text
-matches the unchanged prompt, including Unicode and terminal line feeds. MST
-releases its clipboard owner after readback or failure. Clipboard helper calls
-have bounded timeouts, suppress stderr, and use no shell. There is no setter-to-
-paste retry after an uncertain setter, repeated paste, approval handler, or
-repeated Send.
+Accessible/Text binding collision. Send stays blocked until the complete text
+matches the unchanged prompt, including Unicode, trailing spaces, and terminal
+line feeds, and exactly one enabled Send control exists. MST activates Send once.
+It never presses Enter or retries an uncertain Send.
 
-When two New chat buttons are visible, the driver chooses the one with the nearest
-shared ancestor container to the composer. It detects an equal-depth tie before
-any UI action and uses the documented Linux **New chat: Ctrl+N** shortcut
-([ChatGPT commands](https://learn.chatgpt.com/docs/reference/commands)). It focuses
-the unique composer with unbound `Atspi.Component.grab_focus(node)`, refreshes the
-snapshot, and requires the same editor with FOCUSED on its root or a descendant
-whose ancestry proves it belongs to that editor. Missing focus, focus outside the
-editor, or independent editors block the shortcut. Only then does it run the fixed
-`xdotool key ctrl+n` command, without a shell or arbitrary keyboard strings.
-Focus verification and the shortcut count as one logical action. Failure is not
-retried through the shortcut, a button, or the File menu. Missing New chat buttons
-still fail closed.
+The action count records each opener invocation and each native selection/click
+attempt separately. Typical preparation is one action; typical submission is two
+(open draft, Send). A mode correction adds two menu actions. These are controller
+actions, not model requests or MCP calls. A ready/opened receipt is not evidence
+of a submission. Read-only polls do not increment the action count.
 
-Preparation uses this same shortcut on a tie to verify fresh-chat readiness. It
-never fills or sends a prompt. After either fresh-chat path, the driver waits for
-the requested surface and an exactly empty composer before filling. There is no
-text normalization, URL-scheme launch, new app process, or extra dependency.
-Read-only snapshot traversal can restart at most twice on transient GLib errors;
-partial trees never authorize actions. Actions are never retried.
+An acknowledged action without an observed state change gets bounded resnapshots,
+not another click. Read-only snapshot traversal can restart at most twice on
+transient GLib errors; partial trees never authorize actions. Authentication and
+permission requests are not handled automatically.
 
 Failed receipts retain `status: 'failed'` and an allowlisted `error` code. Unexpected
 AttributeError, TypeError, and GLib.Error map to `desktop_attribute_error`,
 `desktop_type_error`, and `desktop_glib_error`; other exceptions map to
-`desktop_driver_failed`. Raw exception text is never returned. New input failures
-are `helper_missing`, `helper_failed`, `helper_timeout`, `clipboard_unavailable`,
-`focus_failed`, and `composer_not_empty`. Bounded composer diagnostics add the
-boolean `textInterface` alongside `editableState` and `editableInterface`. Callers
-that validate error codes or diagnostic fields must accept these additions.
+`desktop_driver_failed`. Raw exception text is never returned. Helper failures
+are `helper_missing`, `helper_failed`, and `helper_timeout`; invalid profession
+geometry returns `profession_geometry_invalid`. Fixed composer failure steps are
+`draft-open`, `draft-surface`, `draft-readback`, and `send`. Bounded composer
+diagnostics include `textInterface`, `editableState`, and `editableInterface`,
+never prompt text or accessible names. The successful receipt schema is unchanged.
 
-These selectors, native input paths, and hierarchy rules have offline tests.
-Chromium compatibility changes have not had a live Linux evaluation run. Verify
-them against the caller's pinned image. A native fresh-session binding remains
+These contracts have offline tests only. No Linux evaluation queries have been
+sent; prior live batch setup failed before query submission. Verify the new path
+against the caller's pinned image. A native fresh-session binding remains
 mandatory even after a successful UI receipt.
 
 ## Evidence and continuation
