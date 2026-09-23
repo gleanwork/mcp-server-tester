@@ -29,6 +29,7 @@ MCP_NAVIGATION_ROLES = BUTTONS | {'tab', 'page tab', 'menu item', 'menuitem', 'l
 MCP_CONTROL_ROLES = SETUP_CONTROL_ROLES | MCP_NAVIGATION_ROLES
 MCP_STATIC_ROLES = {'label', 'static', 'static text', 'text'}
 MCP_ROW_ROLES = {'table row', 'list item'}
+MCP_SETTINGS_PAGES = ('Configuration', 'Plugins', 'Connections')
 MCP_CONNECTION_LABELS = {
     'connected': 'connected', 'disconnected': 'disconnected',
     'not connected': 'disconnected', 'connecting': 'connecting',
@@ -482,7 +483,7 @@ def inspection_safe(node, nodes):
                for candidate in [node, *[nodes[i] for i in node['ancestors']]])
 
 
-def mcp_inspection(nodes, server_label, navigation_activated):
+def mcp_inspection(nodes, server_label, settings_page_observed):
     visible = [(i, node) for i, node in enumerate(nodes)
                if available(node, enabled=False) and inspection_safe(node, nodes)]
     control_nodes = [node for _, node in visible if node['role'] in MCP_CONTROL_ROLES]
@@ -492,7 +493,7 @@ def mcp_inspection(nodes, server_label, navigation_activated):
                if node['role'] in MCP_STATIC_ROLES | MCP_CONTROL_ROLES | MCP_ROW_ROLES
                and node['name'] == server_label]
     row_index = None
-    if navigation_activated and len(matches) == 1:
+    if settings_page_observed and len(matches) == 1:
         match = matches[0]
         # Only an explicit row/list-item boundary establishes ownership. A
         # generic pane/group might contain several servers: never infer scope.
@@ -697,28 +698,61 @@ class Driver:
             raise DriverFailure('invalid_input')
         self.desktop.require_helpers()
         self.action(self.desktop.open_settings)
-        navigation = []
-        for _ in range(20):
-            nodes = self.snapshot()
-            navigation = [node for node in nodes if available(node)
-                          and node['role'] in MCP_NAVIGATION_ROLES
-                          and (normalized_label(node['name']) == 'mcp'
-                               or normalized_label(node['name']).startswith('mcp servers'))
-                          and inspection_safe(node, nodes)]
-            if navigation:
-                break
-            time.sleep(0.1)
-        if len(navigation) == 1:
-            self.click(navigation[0], {'click', 'press', 'select', 'open'})
-            for _ in range(20):
+        visited_pages = []
+        navigation_activated = False
+
+        def observed_controls(nodes, names, roles):
+            # Whole normalized names only. A suffix such as "Add" must never
+            # turn a navigation label into permission for a mutating action.
+            return [node for node in nodes if available(node)
+                    and node['role'] in roles and normalized_label(node['name']) in names
+                    and inspection_safe(node, nodes)]
+
+        def navigation_controls(nodes):
+            return observed_controls(nodes, {'mcp', 'mcp servers'}, MCP_NAVIGATION_ROLES)
+
+        def page_controls(nodes, page):
+            # These three sidebar buttons were observed in the pinned app.
+            return observed_controls(nodes, {page.casefold()}, {'button'})
+
+        def poll_settings(initial=False, after_navigation=False):
+            # Polls are read-only. Each page/navigation action occurs at most once.
+            for attempt in range(20):
                 nodes = self.snapshot()
-                if any(node['name'] == server_label and available(node, enabled=False)
-                       for node in nodes):
-                    break
+                metadata = mcp_inspection(nodes, server_label,
+                                          bool(visited_pages) or navigation_activated)
+                if after_navigation:
+                    found = metadata['serverRowObserved']
+                else:
+                    found = (len(navigation_controls(nodes)) == 1
+                             or (bool(visited_pages) and metadata['serverLabelMatchCount'] > 0)
+                             or (initial and any(page_controls(nodes, page)
+                                                 for page in MCP_SETTINGS_PAGES)))
+                if found or attempt == 19:
+                    return nodes
                 time.sleep(0.1)
-        metadata = mcp_inspection(nodes, server_label, navigation_activated=len(navigation) == 1)
+
+        nodes = poll_settings(initial=True)
+        for page in (*MCP_SETTINGS_PAGES, None):
+            navigation = navigation_controls(nodes)
+            if len(navigation) == 1:
+                self.click(navigation[0], {'click', 'press', 'select', 'open'})
+                navigation_activated = True
+                nodes = poll_settings(after_navigation=True)
+                break
+            if (visited_pages and mcp_inspection(nodes, server_label, True)['serverLabelMatchCount']
+                    or page is None):
+                break
+            candidates = page_controls(nodes, page)
+            if len(candidates) == 1:
+                self.click(candidates[0], {'click', 'press'})
+                visited_pages.append(page)
+                nodes = poll_settings()
+        metadata = mcp_inspection(nodes, server_label,
+                                  bool(visited_pages) or navigation_activated)
         metadata.update(navigationControlCount=len(navigation),
-                        navigationActivated=len(navigation) == 1)
+                        navigationActivated=navigation_activated,
+                        visitedSettingsPages=visited_pages)
         return {**self.receipt('inspected', surface), 'metadata': metadata}
 
     def submit(self, prompt, surface):

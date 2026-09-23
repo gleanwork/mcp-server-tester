@@ -795,6 +795,163 @@ class McpInspectionTest(unittest.TestCase):
                 self.assertEqual(result['metadata']['serverRow'], {
                     'role': 'list item', 'staticLabels': ['connected'], 'controlCount': 0})
 
+    def inspect_pages(self, pages, actions=24):
+        desktop = FakeDesktop(pages['Settings'])
+        desktop.open_settings = Mock()
+        desktop.open_prompt = Mock(side_effect=AssertionError('no query or draft'))
+        desktop.text = Mock(side_effect=AssertionError('no body reads'))
+
+        def transition(control, allowed):
+            desktop.actions.append((control['name'], allowed))
+            # Only exact page/navigation controls have a transition in this fake.
+            desktop.nodes = pages[' '.join(control['name'].split()).casefold()]
+
+        desktop.activate = Mock(side_effect=transition)
+        result = Driver(desktop, 60_000, actions).inspect_mcp('codex', 'glean-eval')
+        desktop.open_settings.assert_called_once_with()
+        desktop.open_prompt.assert_not_called()
+        desktop.text.assert_not_called()
+        self.assertEqual(result['status'], 'inspected')
+        self.assertNotIn('draftState', result)
+        self.assertNotIn('modelAvailability', json.dumps(result))
+        return desktop, result
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_fixed_pages_route_to_mcp_once_with_parent_action_budget(self, _sleep):
+        sidebar = [node(name, ancestors=()) for name in
+                   ('Configuration', 'Plugins', 'Connections')]
+        forbidden = [node(name, ancestors=()) for name in
+                     ('Connect', 'Authenticate', 'Restart', 'Toggle', 'Add', 'Remove', 'Enable')]
+        desktop, result = self.inspect_pages({
+            'Settings': sidebar + forbidden,
+            'configuration': sidebar + forbidden,
+            'plugins': sidebar + forbidden,
+            'connections': sidebar + forbidden + [node('MCP servers', ancestors=())],
+            'mcp servers': self.row() + forbidden,
+        }, actions=12)
+        self.assertEqual([action[0] for action in desktop.actions],
+                         ['Configuration', 'Plugins', 'Connections', 'MCP servers'])
+        self.assertEqual(result['action_count'], 5)
+        self.assertEqual(result['metadata']['visitedSettingsPages'],
+                         ['Configuration', 'Plugins', 'Connections'])
+        self.assertTrue(result['metadata']['navigationActivated'])
+        self.assertEqual(result['metadata']['connectionStatus'], 'connected')
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_configuration_direct_row_stops_without_mcp_navigation(self, _sleep):
+        desktop, result = self.inspect_pages({
+            'Settings': [node('  cOnFiGuRaTiOn  ', ancestors=())],
+            'configuration': self.row() + [node('Plugins'), node('Connect')],
+        })
+        self.assertEqual(len(desktop.actions), 1)
+        self.assertEqual(result['metadata']['visitedSettingsPages'], ['Configuration'])
+        self.assertFalse(result['metadata']['navigationActivated'])
+        self.assertTrue(result['metadata']['serverRowObserved'])
+        self.assertEqual(result['metadata']['connectionStatus'], 'connected')
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_page_row_ambiguity_and_global_status_stay_unknown(self, _sleep):
+        for rows in (self.row() + [node('glean-eval', 'label', ancestors=())],
+                     self.row(()) + [node('Connected', 'static', ancestors=(0,))],
+                     [node('glean-eval', 'label', ancestors=()),
+                      node('Connected', 'static', ancestors=())]):
+            desktop, result = self.inspect_pages({
+                'Settings': [node('Configuration', ancestors=())],
+                'configuration': rows + [node('Plugins')],
+            })
+            self.assertEqual(len(desktop.actions), 1)
+            self.assertEqual(result['metadata']['connectionStatus'], 'unknown')
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_missing_navigation_inventories_last_page_and_fixed_names_only(self, _sleep):
+        sidebar = [node(name, ancestors=()) for name in
+                   ('Configuration', 'Plugins', 'Connections')]
+        desktop, result = self.inspect_pages({
+            'Settings': sidebar,
+            'configuration': sidebar + [node('Configuration only')],
+            'plugins': sidebar + [node('Plugins only')],
+            'connections': sidebar + [node('Last page'), node('sk-private')],
+        })
+        self.assertEqual([action[0] for action in desktop.actions],
+                         ['Configuration', 'Plugins', 'Connections'])
+        metadata = result['metadata']
+        self.assertEqual(metadata['visitedSettingsPages'], ['Configuration', 'Plugins', 'Connections'])
+        self.assertEqual(metadata['navigationControlCount'], 0)
+        self.assertFalse(metadata['navigationActivated'])
+        self.assertEqual(metadata['connectionStatus'], 'unknown')
+        self.assertEqual([item['name'] for item in metadata['controls']],
+                         ['Configuration', 'Plugins', 'Connections', 'Last page', '[redacted]'])
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_sidebar_requires_unique_safe_exact_observed_button(self, _sleep):
+        for controls in ([node('Configuration'), node('Configuration')],
+                         [node('Configuration', 'tab')],
+                         [node('Configuration', 'push button')],
+                         [node('Configuration', enabled=False)],
+                         [node('Configuration', visible=False)],
+                         [node('Configuration', editableState=True)],
+                         [node('Configuration Add')], [node('Open Configuration')],
+                         [node('Plugins Enable')], [node('Connections Connect')],
+                         [node('MCP servers Add')], [node('MCP servers Restart')]):
+            desktop, result = self.inspect_pages({'Settings': controls})
+            desktop.activate.assert_not_called()
+            self.assertEqual(result['metadata']['visitedSettingsPages'], [])
+            self.assertEqual(result['metadata']['connectionStatus'], 'unknown')
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_absent_configuration_can_use_observed_plugins(self, _sleep):
+        desktop, result = self.inspect_pages({
+            'Settings': [node('Plugins', ancestors=())],
+            'plugins': [node('MCP', ancestors=())],
+            'mcp': self.row(),
+        })
+        self.assertEqual([action[0] for action in desktop.actions], ['Plugins', 'MCP'])
+        self.assertEqual(result['metadata']['visitedSettingsPages'], ['Plugins'])
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_mcp_navigation_has_priority_over_sidebar_pages(self, _sleep):
+        desktop, result = self.inspect_pages({
+            'Settings': [node('Configuration', ancestors=()), node('MCP', ancestors=())],
+            'mcp': self.row(),
+        })
+        self.assertEqual([action[0] for action in desktop.actions], ['MCP'])
+        self.assertEqual(result['metadata']['visitedSettingsPages'], [])
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_page_budget_and_uncertain_ack_stop_without_retry_or_body_reads(self, _sleep):
+        for budget, expected in ((1, 'action_budget_exhausted'),
+                                 (12, 'action_acknowledgement_uncertain')):
+            desktop = FakeDesktop([node('Configuration', ancestors=())])
+            desktop.open_settings = Mock()
+            desktop.activate = Mock(side_effect=DriverFailure('action_acknowledgement_uncertain'))
+            desktop.text = Mock(side_effect=AssertionError('no body reads'))
+            desktop.open_prompt = Mock(side_effect=AssertionError('no query'))
+            driver = Driver(desktop, 60_000, budget)
+            with self.assertRaisesRegex(DriverFailure, '^' + expected + '$'):
+                driver.inspect_mcp('codex', 'glean-eval')
+            self.assertEqual(desktop.activate.call_count, 0 if budget == 1 else 1)
+            self.assertNotIn('draftState', driver.receipt('failed'))
+            desktop.open_prompt.assert_not_called()
+            desktop.text.assert_not_called()
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_settings_and_page_poll_until_observed_navigation_then_row(self, _sleep):
+        desktop = FakeDesktop()
+        desktop.open_settings = Mock()
+        desktop.activate = Mock()
+        desktop.open_prompt = Mock(side_effect=AssertionError('no query'))
+        desktop.text = Mock(side_effect=AssertionError('no body'))
+        desktop.snapshot = Mock(side_effect=[
+            [], [node('Configuration', ancestors=())], [],
+            [node('MCP servers', ancestors=())], [], self.row(),
+        ])
+        result = Driver(desktop, 60_000, 12).inspect_mcp('codex', 'glean-eval')
+        self.assertEqual(desktop.snapshot.call_count, 6)
+        self.assertEqual(result['action_count'], 3)
+        self.assertEqual(result['metadata']['connectionStatus'], 'connected')
+        desktop.text.assert_not_called()
+        desktop.open_prompt.assert_not_called()
+
     def test_missing_ambiguous_disabled_or_wrong_navigation_only_inventories(self):
         candidates = [[], [node('MCP servers'), node('MCP servers', 'tab')],
                       [node('MCP servers', enabled=False)], [node('MCP servers', sensitive=False)],
