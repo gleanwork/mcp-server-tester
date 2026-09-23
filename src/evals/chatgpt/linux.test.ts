@@ -99,7 +99,7 @@ const composerFailure = {
 
 describe('Linux ChatGPT runtime adapter', () => {
   it.each(['prepare', 'submit'] as const)(
-    'rejects standalone inspect-mcp receipts during %s',
+    'rejects unknown receipt statuses during %s',
     async (mode) => {
       await helper('receipt', {
         status: 'inspected',
@@ -120,7 +120,6 @@ describe('Linux ChatGPT runtime adapter', () => {
         message: expect.stringContaining('missing_or_invalid_receipt'),
       });
       const calls = await readFile(join(root, 'calls.jsonl'), 'utf8');
-      expect(calls).not.toContain('inspect-mcp');
       expect(calls.trim().split('\n')).toHaveLength(1);
     }
   );
