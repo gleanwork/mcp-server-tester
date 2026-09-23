@@ -23,6 +23,7 @@ export const CODEX_SETUP_ERROR_CODES = [
   'app_exited',
   'app_stop_failed',
   'app_not_running',
+  'prompt_invalid',
   'prompt_too_large',
   'url_handoff_failed',
   'url_handoff_unverified',
