@@ -796,6 +796,49 @@ describe('ChatGPT native telemetry', () => {
     );
   });
 
+  describe('native rewrite of a truncated record under the same ordinal', () => {
+    // Observed on Linux ChatGPT Work 26.915.31945: a truncated record, then the
+    // same record complete with the ordinal the truncated one would have had.
+    const numbered = () =>
+      serialize()
+        .trimEnd()
+        .split('\n')
+        .map((line, ordinal) =>
+          JSON.stringify({ ...JSON.parse(line), ordinal })
+        );
+    const truncate = (line: string) =>
+      line.slice(0, Math.floor(line.length / 2));
+
+    it('uses the rewritten record and records a limitation', () => {
+      const lines = numbered();
+      lines.splice(4, 0, truncate(lines[4]!));
+      const trace = parseChatgptTrace(lines.join('\n') + '\n', marker);
+      expect(trace?.complete).toBe(true);
+      expect(trace?.limitations).toContain(
+        '1 truncated native record(s) were rewritten by the host under the same ordinal; the rewritten record was used.'
+      );
+    });
+
+    it.each([
+      [
+        'the next record skips an ordinal',
+        (l: string[]) => l.splice(4, 1, truncate(l[4]!)),
+      ],
+      [
+        'two malformed records in a row',
+        (l: string[]) => l.splice(4, 0, '{bad', '{bad'),
+      ],
+      ['the first record', (l: string[]) => l.splice(0, 0, '{bad')],
+      ['the last complete record', (l: string[]) => l.push('{bad')],
+    ])('fails closed when the malformed line is followed by %s', (_, edit) => {
+      const lines = numbered();
+      edit(lines);
+      expect(() => parseChatgptTrace(lines.join('\n') + '\n', marker)).toThrow(
+        'Malformed complete JSONL record'
+      );
+    });
+  });
+
   it('does not call a final answer complete until task_complete', () => {
     expect(
       parseChatgptTrace(serialize(turn().slice(0, -1)), marker)?.complete

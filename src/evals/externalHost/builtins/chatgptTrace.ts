@@ -218,14 +218,34 @@ export function parseChatgptTrace(
   const lines = content.split('\n');
   // The writer may be in the middle of its last JSONL record.
   if (!content.endsWith('\n')) lines.pop();
+  // The native writer can leave a truncated record and then rewrite it whole
+  // under the same ordinal. Skip a malformed line only when that happens.
+  let lastOrdinal: number | undefined;
+  let pendingMalformed = false;
+  let supersededRecords = 0;
   for (const line of lines) {
     if (!line.trim()) continue;
     let raw: ObjectValue;
     try {
       raw = object(JSON.parse(line)) ?? {};
     } catch {
-      throw new Error('Malformed complete JSONL record in ChatGPT transcript.');
+      if (pendingMalformed || lastOrdinal === undefined)
+        throw new Error(
+          'Malformed complete JSONL record in ChatGPT transcript.'
+        );
+      pendingMalformed = true;
+      continue;
     }
+    const ordinal = number(raw.ordinal);
+    if (pendingMalformed) {
+      if (ordinal === undefined || ordinal !== lastOrdinal! + 1)
+        throw new Error(
+          'Malformed complete JSONL record in ChatGPT transcript.'
+        );
+      pendingMalformed = false;
+      supersededRecords += 1;
+    }
+    if (ordinal !== undefined) lastOrdinal = ordinal;
     const payload = object(raw.payload) ?? {};
     if (raw.type === 'session_meta') {
       sessionId = string(payload.id);
@@ -285,6 +305,8 @@ export function parseChatgptTrace(
     )
       matches.add(turnId);
   }
+  if (pendingMalformed)
+    throw new Error('Malformed complete JSONL record in ChatGPT transcript.');
   if (!sessionId || originator !== expectedOriginator || matches.size === 0)
     return undefined;
   if (matches.size > 1)
@@ -563,6 +585,10 @@ export function parseChatgptTrace(
     'Conversation history contains user/assistant messages and native tool results, not hidden reasoning.',
     'Confirmed ChatGPT Work cua_repl.js, CommandExecution, and Extension.web.search actions are host tools; unknown native MCP namespaces remain external MCP calls.',
   ];
+  if (supersededRecords)
+    limitations.push(
+      `${supersededRecords} truncated native record(s) were rewritten by the host under the same ordinal; the rewritten record was used.`
+    );
   if (nestedIds.size)
     limitations.push(
       'Some MCP calls were made through the code-mode exec runner; per-call arguments and latency are not separately reported, and nested calls are counted once per observed reference.'
