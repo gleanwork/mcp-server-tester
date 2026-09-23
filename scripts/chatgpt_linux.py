@@ -404,8 +404,34 @@ class Driver:
             self.click(item, {'select'})
             nodes = self.wait(lambda ns: self.selected(ns, surface))
         self.phase = 'composer'
-        self.wait(lambda ns: self.ready(ns, surface))
+        nodes = self.wait(lambda ns: self.ready(ns, surface))
+        try:
+            fresh_chat(nodes, composer(nodes))
+        except DriverFailure as error:
+            if str(error) != 'new_chat_missing_or_ambiguous':
+                raise
+            self.new_chat(nodes, surface)
         return self.receipt('ready', surface)
+
+    def new_chat(self, nodes, surface):
+        try:
+            target = fresh_chat(nodes, composer(nodes))
+        except DriverFailure as error:
+            if str(error) != 'new_chat_missing_or_ambiguous':
+                raise
+            # Ambiguity is detected before any action. Use the app's native File
+            # menu instead of guessing between duplicated toolbar buttons.
+            self.click(unique(controls(nodes, {'File'}, {'menu item'}),
+                              'new_chat_missing_or_ambiguous'), {'select', 'open', 'press'})
+            def menu_items(snapshot):
+                return [n for n in snapshot if available(n) and n['role'] == 'menu item'
+                        and n['name'].casefold() == 'new chat']
+            nodes = self.wait(lambda ns: bool(menu_items(ns)))
+            self.click(unique(menu_items(nodes), 'new_chat_missing_or_ambiguous'),
+                       {'select', 'press', 'click'})
+        else:
+            self.click(target)
+        return self.wait(lambda ns: self.ready(ns, surface) and self.desktop.text(composer(ns)) == '')
 
     def submit(self, prompt, surface):
         if not isinstance(prompt, str) or not prompt.strip():
@@ -419,8 +445,7 @@ class Driver:
         if not self.ready(nodes, surface):
             raise DriverFailure('surface_mismatch')
         self.phase = 'composer'
-        self.click(fresh_chat(nodes, composer(nodes)))
-        nodes = self.wait(lambda ns: self.ready(ns, surface) and self.desktop.text(composer(ns)) == '')
+        nodes = self.new_chat(nodes, surface)
         try:
             self.action(lambda: self.desktop.fill(composer(nodes), prompt))
             nodes = self.wait(lambda ns: self.ready(ns, surface)

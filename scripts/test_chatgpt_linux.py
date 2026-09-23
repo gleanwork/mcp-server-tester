@@ -243,6 +243,34 @@ class DriverTest(unittest.TestCase):
         self.assertEqual([a[0] for a in desktop.actions], ['Continue'])
         self.assertEqual(_sleep.call_count, 100)
 
+    def test_ambiguous_toolbar_uses_unique_native_file_menu(self):
+        class MenuDesktop(FakeDesktop):
+            def activate(self, control, allowed):
+                if control['name'] == 'File':
+                    self.actions.append(('File', allowed))
+                    self.nodes.append(node('New Chat', 'menu item'))
+                elif control['name'] == 'New Chat':
+                    self.actions.append(('New Chat', allowed))
+                    self.nodes = ready()
+                else:
+                    super().activate(control, allowed)
+        nodes = ready()
+        nodes[3]['ancestors'] = nodes[2]['ancestors']
+        nodes.append(node('File', 'menu item'))
+        desktop = MenuDesktop(nodes)
+        result = self.driver(desktop).prepare('chatgpt-work')
+        self.assertEqual(result['status'], 'ready')
+        self.assertEqual([action[0] for action in desktop.actions], ['File', 'New Chat'])
+        self.assertFalse(any(action[0] in {'fill', 'Send'} for action in desktop.actions))
+
+    def test_ambiguous_toolbar_without_file_menu_does_not_act(self):
+        nodes = ready()
+        nodes[3]['ancestors'] = nodes[2]['ancestors']
+        desktop = FakeDesktop(nodes)
+        with self.assertRaisesRegex(DriverFailure, 'new_chat_missing_or_ambiguous'):
+            self.driver(desktop).prepare('chatgpt-work')
+        self.assertEqual(desktop.actions, [])
+
     def test_exact_prompt_fresh_chat_once_send_once(self):
         desktop = FakeDesktop(ready(text='prior draft'))
         prompt = '  Find snake_case — π\n\nDo not trim.  \n'
