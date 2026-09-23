@@ -221,26 +221,44 @@ class Desktop:
         except OSError:
             raise DriverFailure('helper_failed') from None
 
-    def new_chat_shortcut(self, control):
-        # Fixed Linux New chat command, not a generic keyboard-input API.
-        # https://learn.chatgpt.com/docs/reference/commands
+    def focus_editor(self, control, wait=None):
+        # One focus action, followed only by bounded read-only observations.
         if not self.api.Component.grab_focus(control['node']):
             raise DriverFailure('focus_failed')
-        nodes = self.snapshot()
-        current = composer(nodes)
-        if current['node'] != control['node']:
-            raise DriverFailure('focus_failed')
-        editor_index = next(i for i, node in enumerate(nodes) if node is current)
-        focused = [node for node in nodes if available(node, enabled=False)
-                   and node['node'].get_state_set().contains(self.api.StateType.FOCUSED)]
-        # Chromium may focus a descendant of the editor root. Ancestry in this
-        # complete, refreshed tree must prove ownership; another field cannot.
-        if not focused or any(node is not current and editor_index not in node['ancestors']
-                              for node in focused):
-            raise DriverFailure('focus_failed')
+
+        def owned_focus(nodes):
+            current = composer(nodes)
+            if current['node'] != control['node']:
+                raise DriverFailure('focus_failed')
+            editor_index = next(i for i, node in enumerate(nodes) if node is current)
+            focused = [node for node in nodes if available(node, enabled=False)
+                       and node['node'].get_state_set().contains(self.api.StateType.FOCUSED)]
+            # Chromium may focus a descendant of the editor root. Another field
+            # must fail closed, even if the intended editor also reports focus.
+            if any(node is not current and editor_index not in node['ancestors']
+                   for node in focused):
+                raise DriverFailure('focus_failed')
+            return bool(focused)
+
+        if wait is None:
+            nodes = self.snapshot()
+            if not owned_focus(nodes):
+                raise DriverFailure('focus_failed')
+        else:
+            try:
+                nodes = wait(owned_focus)
+            except DriverFailure as error:
+                if str(error) == 'state_transition_unobserved':
+                    raise DriverFailure('focus_failed') from None
+                raise
+        return composer(nodes)
+
+    def new_chat_shortcut(self):
+        # Fixed Linux New chat command, not a generic keyboard-input API.
+        # https://learn.chatgpt.com/docs/reference/commands
         self.helper([XDOTOOL, 'key', 'ctrl+n'])
 
-    def fill(self, control, prompt):
+    def fill(self, control, prompt, wait=None):
         if not available(control) or not control['editable']:
             raise DriverFailure('composer_missing_or_ambiguous')
         if self.text(control) != '':
@@ -251,13 +269,7 @@ class Desktop:
             return
         try:
             self.own_clipboard(prompt)
-            if not self.api.Component.grab_focus(control['node']):
-                raise DriverFailure('focus_failed')
-            # Drain focus events through a fresh snapshot, and reject popup editors.
-            current = composer(self.snapshot())
-            if (current['node'] != control['node']
-                    or not current['node'].get_state_set().contains(self.api.StateType.FOCUSED)):
-                raise DriverFailure('focus_failed')
+            current = self.focus_editor(control, wait)
             if self.text(current) != '':
                 raise DriverFailure('composer_not_empty')
             self.helper([XDOTOOL, 'key', 'ctrl+v'])
@@ -315,6 +327,7 @@ class Driver:
         self.max_actions = max_actions
         self.actions = 0
         self.phase = None
+        self.step = None
         self.composer_candidates = None
 
     def check(self):
@@ -351,13 +364,32 @@ class Driver:
         # Poll only; an acknowledged action that does not change state is NOT retried.
         # The cold-app wait gets 30 seconds; all waits share the overall deadline.
         wait_deadline = min(self.deadline, time.monotonic() + polls * 0.1)
+        ambiguity = None
         for _ in range(polls):
-            nodes = self.snapshot()
+            try:
+                nodes = self.snapshot()
+            except DriverFailure as error:
+                if str(error) == 'deadline_exceeded' and ambiguity is not None:
+                    raise ambiguity from None
+                raise
             if time.monotonic() >= wait_deadline:
                 break
-            if predicate(nodes):
-                return nodes
+            try:
+                matched = predicate(nodes)
+            except DriverFailure as error:
+                # Only predicate reads may tolerate transient editor/Send overlap.
+                # Snapshot failures and every action remain fail-closed, with no retry.
+                if str(error) not in {'composer_missing_or_ambiguous', 'send_missing_or_ambiguous'}:
+                    raise
+                if ambiguity is None:
+                    ambiguity = error
+            else:
+                ambiguity = None
+                if matched:
+                    return nodes
             time.sleep(min(0.1, max(0, wait_deadline - time.monotonic())))
+        if ambiguity is not None:
+            raise ambiguity
         raise DriverFailure('state_transition_unobserved')
 
     def selected(self, nodes, surface):
@@ -433,6 +465,7 @@ class Driver:
         return self.receipt('ready', surface)
 
     def new_chat(self, nodes, surface):
+        self.step = 'new-chat-resolve'
         editor = composer(nodes)
         try:
             target = fresh_chat(nodes, editor)
@@ -442,10 +475,18 @@ class Driver:
                 raise
             # Resolve ambiguity before any UI action. Focus verification and the
             # fixed shortcut form one logical action, never retried on failure.
-            self.action(lambda: self.desktop.new_chat_shortcut(editor))
+            def shortcut():
+                self.step = 'new-chat-focus'
+                self.desktop.focus_editor(editor, self.wait)
+                self.step = 'new-chat-shortcut'
+                self.desktop.new_chat_shortcut()
+            self.action(shortcut)
         else:
             self.click(target)
-        return self.wait(lambda ns: self.ready(ns, surface) and self.desktop.text(composer(ns)) == '')
+        self.step = 'new-chat-empty'
+        nodes = self.wait(lambda ns: self.ready(ns, surface) and self.desktop.text(composer(ns)) == '')
+        self.step = None
+        return nodes
 
     def submit(self, prompt, surface):
         if not isinstance(prompt, str) or not prompt.strip():
@@ -461,7 +502,7 @@ class Driver:
         self.phase = 'composer'
         nodes = self.new_chat(nodes, surface)
         try:
-            self.action(lambda: self.desktop.fill(composer(nodes), prompt))
+            self.action(lambda: self.desktop.fill(composer(nodes), prompt, self.wait))
             nodes = self.wait(lambda ns: self.ready(ns, surface)
                               and self.desktop.text(composer(ns)) == prompt
                               and len(controls(ns, {'Send'})) == 1)
@@ -476,6 +517,7 @@ class Driver:
                 'duration_ms': (time.monotonic() - self.started) * 1000,
                 **({'surface': surface} if surface else {}),
                 **({'phase': self.phase} if status == 'failed' and self.phase else {}),
+                **({'step': self.step} if status == 'failed' and self.step else {}),
                 **({'composerCandidates': self.composer_candidates}
                    if status == 'failed' and self.phase == 'composer'
                    and self.composer_candidates is not None else {})}

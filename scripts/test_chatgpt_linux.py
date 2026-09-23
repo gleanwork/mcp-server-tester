@@ -154,7 +154,7 @@ class FakeDesktop:
         elif name == 'Send' and self.uncertain_send:
             raise DriverFailure('action_acknowledgement_uncertain')
 
-    def fill(self, control, prompt):
+    def fill(self, control, prompt, wait=None):
         self.actions.append(('fill', prompt))
         control['text'] = prompt
         self.nodes[1]['enabled'] = True
@@ -208,6 +208,114 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(driver.receipt('failed')['phase'], 'continue-ready')
         self.assertEqual([a[0] for a in desktop.actions], ['Engineering'])
         self.assertEqual(_sleep.call_count, 100)
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_prepare_waits_for_transient_composer_or_send_duplicates(self, sleep):
+        for kind in ('composer', 'send'):
+            with self.subTest(kind=kind):
+                desktop = FakeDesktop()
+                extra = node('extra', 'entry', editable=True) if kind == 'composer' else node('Send')
+                desktop.nodes.append(extra)
+                sleep.reset_mock()
+                sleep.side_effect = lambda _: desktop.nodes.remove(extra)
+                result = self.driver(desktop).prepare('chatgpt-work')
+                self.assertEqual(result['status'], 'ready')
+                self.assertEqual(desktop.actions, [])
+                sleep.assert_called_once()
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_new_chat_transition_duplicates_never_repeat_action(self, sleep):
+        for kind in ('composer', 'send'):
+            for settles in (False, True):
+                with self.subTest(kind=kind, settles=settles):
+                    desktop = FakeDesktop()
+                    activate = desktop.activate
+                    extra = node('extra', 'entry', editable=True) if kind == 'composer' else node('Send')
+                    def activate_with_overlap(control, allowed):
+                        activate(control, allowed)
+                        if control['name'] == 'New chat':
+                            desktop.nodes.append(extra)
+                    desktop.activate = activate_with_overlap
+                    sleep.reset_mock()
+                    sleep.side_effect = (lambda _: desktop.nodes.remove(extra)) if settles else None
+                    driver = self.driver(desktop)
+                    if settles:
+                        result = driver.submit('  π\n\nexact\n', 'chatgpt-work')
+                        self.assertEqual(result['status'], 'submitted')
+                        self.assertEqual([a[0] for a in desktop.actions], ['New chat', 'fill', 'Send'])
+                        self.assertEqual(desktop.actions[1][1], '  π\n\nexact\n')
+                        self.assertNotIn('step', result)
+                        sleep.assert_called_once()
+                    else:
+                        with self.assertRaisesRegex(DriverFailure, '^' + kind + '_missing_or_ambiguous$'):
+                            driver.submit('private', 'chatgpt-work')
+                        self.assertEqual([a[0] for a in desktop.actions], ['New chat'])
+                        self.assertEqual(sleep.call_count, 100)
+                        self.assertEqual(driver.receipt('failed')['step'], 'new-chat-empty')
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_send_overlap_after_fill_never_repeats_fill_or_sends_ambiguously(self, sleep):
+        for settles in (False, True):
+            with self.subTest(settles=settles):
+                desktop = FakeDesktop()
+                fill = desktop.fill
+                duplicate = node('Send')
+                def fill_with_overlap(control, prompt, wait=None):
+                    fill(control, prompt, wait)
+                    desktop.nodes.append(duplicate)
+                desktop.fill = fill_with_overlap
+                sleep.reset_mock()
+                sleep.side_effect = (lambda _: desktop.nodes.remove(duplicate)) if settles else None
+                driver = self.driver(desktop)
+                if settles:
+                    result = driver.submit('exact\n', 'chatgpt-work')
+                    self.assertEqual(result['status'], 'submitted')
+                    self.assertEqual([a[0] for a in desktop.actions], ['New chat', 'fill', 'Send'])
+                    sleep.assert_called_once()
+                else:
+                    with self.assertRaisesRegex(DriverFailure, '^send_missing_or_ambiguous$'):
+                        driver.submit('exact\n', 'chatgpt-work')
+                    self.assertEqual([a[0] for a in desktop.actions], ['New chat', 'fill'])
+                    self.assertNotIn('step', driver.receipt('failed'))
+                    self.assertEqual(sleep.call_count, 100)
+
+    def test_wait_preserves_persistent_ambiguity_at_overall_deadline(self):
+        for kind in ('composer', 'send'):
+            now = [0.0]
+            desktop = FakeDesktop()
+            desktop.nodes.append(node('extra', 'entry', editable=True) if kind == 'composer' else node('Send'))
+            with patch('chatgpt_linux.time.monotonic', side_effect=lambda: now[0]), \
+                    patch('chatgpt_linux.time.sleep', side_effect=lambda seconds: now.__setitem__(0, now[0] + seconds)):
+                driver = Driver(desktop, 250, 24)
+                with self.assertRaisesRegex(DriverFailure, '^' + kind + '_missing_or_ambiguous$'):
+                    driver.wait(lambda ns: driver.ready(ns, 'chatgpt-work'))
+                self.assertEqual(driver.actions, 0)
+                self.assertEqual(now[0], 0.25)
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_wait_only_retries_allowlisted_predicate_failures(self, sleep):
+        for source in ('snapshot', 'predicate'):
+            desktop = FakeDesktop()
+            driver = self.driver(desktop)
+            if source == 'snapshot':
+                desktop.snapshot = Mock(side_effect=DriverFailure('composer_missing_or_ambiguous'))
+                predicate = Mock()
+                code = 'composer_missing_or_ambiguous'
+            else:
+                predicate = Mock(side_effect=DriverFailure('focus_failed'))
+                code = 'focus_failed'
+            with self.assertRaisesRegex(DriverFailure, '^' + code + '$'):
+                driver.wait(predicate)
+            sleep.assert_not_called()
+            self.assertEqual(driver.actions, 0)
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_resolved_ambiguity_does_not_mask_unobserved_transition(self, sleep):
+        driver = self.driver(FakeDesktop())
+        predicate = Mock(side_effect=[DriverFailure('send_missing_or_ambiguous'), False])
+        with self.assertRaisesRegex(DriverFailure, '^state_transition_unobserved$'):
+            driver.wait(predicate, polls=2)
+        self.assertEqual(sleep.call_count, 2)
 
     def test_codex_explicit_selection(self):
         desktop = FakeDesktop()
@@ -300,7 +408,7 @@ class DriverTest(unittest.TestCase):
     @patch('chatgpt_linux.time.sleep')
     def test_fill_mismatch_never_sends(self, _sleep):
         desktop = FakeDesktop()
-        desktop.fill = lambda control, prompt: None
+        desktop.fill = lambda control, prompt, wait=None: None
         with self.assertRaisesRegex(DriverFailure, 'state_transition_unobserved'):
             self.driver(desktop).submit('test', 'chatgpt-work')
         self.assertEqual([a[0] for a in desktop.actions], ['New chat'])
@@ -592,7 +700,8 @@ class NewChatShortcutTest(unittest.TestCase):
         self.run_mode(Driver(desktop, 60000, 24), 'prepare')
         self.assertEqual(calls, [('focus',), ('shortcut',)])
 
-    def test_focus_failure_or_unverified_focus_blocks_shortcut_and_send(self):
+    @patch('chatgpt_linux.time.sleep')
+    def test_focus_failure_or_unverified_focus_blocks_shortcut_and_send(self, _sleep):
         for mode in ('prepare', 'submit'):
             for acknowledged in (False, True):
                 with self.subTest(mode=mode, acknowledged=acknowledged):
@@ -602,9 +711,53 @@ class NewChatShortcutTest(unittest.TestCase):
                     with self.assertRaisesRegex(DriverFailure, '^focus_failed$'):
                         self.run_mode(driver, mode)
                     self.assertEqual(driver.actions, 1)
+                    self.assertEqual(driver.receipt('failed')['step'], 'new-chat-focus')
                     desktop.api.Component.grab_focus.assert_called_once()
                     desktop.helper.assert_not_called()
                     self.assertEqual(calls, [])
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_focus_once_then_read_polls_before_shortcut_or_paste(self, sleep):
+        prompt = '  π 😀\n\nDo not trim.  \n'
+        for operation in ('shortcut', 'paste'):
+            with self.subTest(operation=operation):
+                if operation == 'shortcut':
+                    desktop, editor, app, calls = self.desktop()
+                else:
+                    desktop, editor, app, calls = public_desktop()
+                    desktop.own_clipboard = lambda value: calls.append(('clipboard', value))
+                    def paste(argv):
+                        self.assertEqual(argv, [XDOTOOL, 'key', 'ctrl+v'])
+                        calls.append(('paste',))
+                        editor.value = prompt
+                    desktop.helper = Mock(side_effect=paste)
+                popup = PublicNode('transient editor', 'entry', editable=True)
+                paragraph = PublicNode('paragraph', 'paragraph', editable=True)
+                editor.children.append(paragraph)
+                def focus(control):
+                    self.assertIs(control, editor)
+                    calls.append(('focus',))
+                    app.children.append(popup)
+                    return True
+                desktop.api.Component.grab_focus = Mock(side_effect=focus)
+                sleep.reset_mock()
+                def settle(_):
+                    desktop.helper.assert_not_called()
+                    if sleep.call_count == 1:
+                        app.children.remove(popup)
+                    else:
+                        paragraph.states.add('FOCUSED')
+                sleep.side_effect = settle
+                result = Driver(desktop, 60000, 24).submit(prompt, 'chatgpt-work')
+                self.assertEqual(result['status'], 'submitted')
+                self.assertEqual(set(result), {'status', 'surface', 'action_count', 'duration_ms'})
+                self.assertEqual(result['action_count'], 3)
+                self.assertEqual(editor.value, prompt)
+                desktop.api.Component.grab_focus.assert_called_once_with(editor)
+                desktop.helper.assert_called_once()
+                self.assertEqual(sleep.call_count, 2)
+                self.assertEqual(sum(call[0] == 'Send' for call in calls), 1)
+                self.assertEqual(sum(call[0] == operation for call in calls), 1)
 
     def test_refreshed_descendant_focus_proves_editor_ownership(self):
         desktop, editor, _, calls = self.desktop()
@@ -651,7 +804,8 @@ class NewChatShortcutTest(unittest.TestCase):
         desktop.helper.assert_not_called()
         self.assertEqual(calls, [])
 
-    def test_independent_editors_block_before_focus_or_shortcut(self):
+    @patch('chatgpt_linux.time.sleep')
+    def test_independent_editors_block_before_focus_or_shortcut(self, _sleep):
         for mode in ('prepare', 'submit'):
             with self.subTest(mode=mode):
                 desktop, _, app, calls = self.desktop()
@@ -665,7 +819,8 @@ class NewChatShortcutTest(unittest.TestCase):
                 desktop.helper.assert_not_called()
                 self.assertEqual(calls, [])
 
-    def test_independent_editor_appearing_after_focus_blocks_shortcut(self):
+    @patch('chatgpt_linux.time.sleep')
+    def test_independent_editor_appearing_after_focus_blocks_shortcut(self, _sleep):
         desktop, editor, app, calls = self.desktop()
         def focus(_):
             editor.states.add('FOCUSED')
@@ -691,6 +846,7 @@ class NewChatShortcutTest(unittest.TestCase):
                             self.run_mode(driver, mode)
                     self.assertEqual(driver.actions, 1)
                     self.assertEqual(calls, [('focus',)])
+                    self.assertEqual(driver.receipt('failed')['step'], 'new-chat-shortcut')
                     self.assertEqual(run.call_count, 1)
                     self.assertEqual(run.call_args.args[0], [XDOTOOL, 'key', 'ctrl+n'])
                     self.assertNotIn('private', json.dumps(driver.receipt('failed')))
@@ -712,7 +868,40 @@ class NewChatShortcutTest(unittest.TestCase):
                         self.run_mode(driver, mode)
                     self.assertEqual(driver.actions, 1)
                     self.assertEqual(calls, [('focus',), ('shortcut',)])
+                    self.assertEqual(driver.receipt('failed')['step'], 'new-chat-empty')
                     desktop.helper.assert_called_once_with([XDOTOOL, 'key', 'ctrl+n'])
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_shortcut_empty_wait_tolerates_only_bounded_read_overlap(self, sleep):
+        for mode in ('prepare', 'submit'):
+            for kind in ('composer', 'send'):
+                for settles in (False, True):
+                    with self.subTest(mode=mode, kind=kind, settles=settles):
+                        desktop, _, app, calls = self.desktop()
+                        helper = desktop.helper
+                        extra = (PublicNode('new editor', 'entry', editable=True)
+                                 if kind == 'composer' else PublicNode('Send'))
+                        def shortcut(argv):
+                            helper(argv)
+                            app.children.append(extra)
+                        desktop.helper = Mock(side_effect=shortcut)
+                        sleep.reset_mock()
+                        sleep.side_effect = (lambda _: app.children.remove(extra)) if settles else None
+                        driver = Driver(desktop, 60000, 24)
+                        if settles:
+                            result = self.run_mode(driver, mode)
+                            self.assertEqual(result['status'], 'ready' if mode == 'prepare' else 'submitted')
+                            self.assertEqual(result['action_count'], 1 if mode == 'prepare' else 3)
+                            self.assertNotIn('step', result)
+                            sleep.assert_called_once()
+                        else:
+                            with self.assertRaisesRegex(DriverFailure, '^' + kind + '_missing_or_ambiguous$'):
+                                self.run_mode(driver, mode)
+                            self.assertEqual(driver.actions, 1)
+                            self.assertEqual(calls, [('focus',), ('shortcut',)])
+                            self.assertEqual(driver.receipt('failed')['step'], 'new-chat-empty')
+                            self.assertEqual(sleep.call_count, 100)
+                        desktop.helper.assert_called_once_with([XDOTOOL, 'key', 'ctrl+n'])
 
     def test_shortcut_obeys_action_budget_before_focus(self):
         desktop, _, _, calls = self.desktop()
@@ -721,6 +910,7 @@ class NewChatShortcutTest(unittest.TestCase):
         with self.assertRaisesRegex(DriverFailure, '^action_budget_exhausted$'):
             self.run_mode(driver, 'prepare')
         self.assertEqual(calls, [])
+        self.assertEqual(driver.receipt('failed')['step'], 'new-chat-resolve')
         desktop.helper.assert_not_called()
 
     @patch('chatgpt_linux.time.sleep')
@@ -771,7 +961,8 @@ class ChromiumInputTest(unittest.TestCase):
             with self.assertRaisesRegex(DriverFailure, 'composer_missing_or_ambiguous'):
                 composer(desktop.snapshot())
 
-    def test_focus_failure_or_unverified_focus_never_pastes_or_sends(self):
+    @patch('chatgpt_linux.time.sleep')
+    def test_focus_failure_or_unverified_focus_never_pastes_or_sends(self, _sleep):
         for acknowledge in (False, True):
             desktop, _, _, calls = public_desktop()
             desktop.own_clipboard = lambda _: None
@@ -782,7 +973,8 @@ class ChromiumInputTest(unittest.TestCase):
             self.assertEqual(calls, [('New chat',)])
             desktop.helper.assert_not_called()
 
-    def test_popup_editor_after_focus_blocks_paste(self):
+    @patch('chatgpt_linux.time.sleep')
+    def test_popup_editor_after_focus_blocks_paste(self, _sleep):
         desktop, editor, app, calls = public_desktop()
         desktop.own_clipboard = lambda _: None
         def focus(_):
@@ -794,6 +986,28 @@ class ChromiumInputTest(unittest.TestCase):
         with self.assertRaisesRegex(DriverFailure, 'composer_missing_or_ambiguous'):
             Driver(desktop, 60000, 24).submit('private', 'chatgpt-work')
         self.assertEqual(calls, [('New chat',)])
+
+    def test_wrong_or_replaced_editor_after_focus_never_pastes(self):
+        for replacement in (False, True):
+            with self.subTest(replacement=replacement):
+                desktop, editor, app, calls = public_desktop()
+                desktop.own_clipboard = lambda _: None
+                def focus(_):
+                    other = PublicNode('other', 'entry' if replacement else 'password text', editable=True)
+                    other.states.add('FOCUSED')
+                    if replacement:
+                        app.children[app.children.index(editor)] = other
+                    else:
+                        app.children.append(other)
+                        editor.states.add('FOCUSED')
+                    return True
+                desktop.api.Component.grab_focus = Mock(side_effect=focus)
+                desktop.helper = Mock()
+                with self.assertRaisesRegex(DriverFailure, '^focus_failed$'):
+                    Driver(desktop, 60000, 24).submit('private', 'chatgpt-work')
+                desktop.api.Component.grab_focus.assert_called_once_with(editor)
+                desktop.helper.assert_not_called()
+                self.assertEqual(calls, [('New chat',)])
 
     @patch('chatgpt_linux.time.sleep')
     def test_nonempty_new_chat_never_fills(self, _sleep):

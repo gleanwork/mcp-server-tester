@@ -30,6 +30,12 @@ const FailurePhase = z.enum([
   'surface',
   'composer',
 ]);
+const FailureStep = z.enum([
+  'new-chat-resolve',
+  'new-chat-focus',
+  'new-chat-shortcut',
+  'new-chat-empty',
+]);
 const ComposerCandidate = z
   .object({
     role: z.string().regex(/^[a-z][a-z -]{0,63}$/),
@@ -49,6 +55,7 @@ const Receipt = z
     action_count: z.number().int().nonnegative(),
     duration_ms: z.number().finite().nonnegative(),
     phase: FailurePhase.optional(),
+    step: FailureStep.optional(),
     composerCandidates: z.array(ComposerCandidate).max(16).optional(),
     error: z
       .enum([
@@ -97,6 +104,11 @@ const Receipt = z
   )
   .refine(
     (receipt) =>
+      receipt.step === undefined ||
+      (receipt.status === 'failed' && receipt.phase === 'composer')
+  )
+  .refine(
+    (receipt) =>
       receipt.composerCandidates === undefined ||
       (receipt.status === 'failed' && receipt.phase === 'composer')
   );
@@ -106,7 +118,8 @@ export class NativeChatgptDriverError extends Error {
     message: string,
     public readonly telemetry?: SemanticDesktopTelemetry,
     public readonly phase?: z.infer<typeof FailurePhase>,
-    public readonly composerCandidates?: z.infer<typeof ComposerCandidate>[]
+    public readonly composerCandidates?: z.infer<typeof ComposerCandidate>[],
+    public readonly step?: z.infer<typeof FailureStep>
   ) {
     super(message);
   }
@@ -245,10 +258,11 @@ export async function runLinuxChatgptDesktop(
   };
   if (!valid)
     throw new NativeChatgptDriverError(
-      `Linux ChatGPT ${mode} failed or its receipt was uncertain (${record?.error ?? 'missing_or_invalid_receipt'}${record?.phase ? `; phase=${record.phase}` : ''}); no retry attempted.`,
+      `Linux ChatGPT ${mode} failed or its receipt was uncertain (${record?.error ?? 'missing_or_invalid_receipt'}${record?.phase ? `; phase=${record.phase}` : ''}${record?.step ? `; step=${record.step}` : ''}); no retry attempted.`,
       telemetry,
       record?.phase,
-      record?.composerCandidates
+      record?.composerCandidates,
+      record?.step
     );
   return { telemetry };
 }

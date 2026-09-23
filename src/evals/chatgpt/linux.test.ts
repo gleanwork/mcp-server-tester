@@ -117,6 +117,25 @@ describe('Linux ChatGPT runtime adapter', () => {
       .split('\n');
     expect(calls).toHaveLength(1);
   });
+  it.each([
+    'new-chat-resolve',
+    'new-chat-focus',
+    'new-chat-shortcut',
+    'new-chat-empty',
+  ])('preserves fixed failure step %s', async (step) => {
+    await helper('receipt', { ...composerFailure, step });
+    const error: unknown = await runLinuxChatgptDesktop(
+      'prepare',
+      config,
+      Date.now() + 5000
+    ).catch((failure: unknown) => failure);
+    expect(error).toBeInstanceOf(NativeChatgptDriverError);
+    expect(error).toMatchObject({ phase: 'composer', step });
+    expect((error as Error).message).toContain(`step=${step}`);
+    expect(
+      (await readFile(join(root, 'calls.jsonl'), 'utf8')).trim().split('\n')
+    ).toHaveLength(1);
+  });
   it('accepts legacy composer failures without diagnostics', async () => {
     await helper('receipt', composerFailure);
     await expect(
@@ -147,6 +166,12 @@ describe('Linux ChatGPT runtime adapter', () => {
     { composerCandidates: [{ ...composerCandidate, editableState: 'true' }] },
     { composerCandidates: [{ ...composerCandidate, editableInterface: null }] },
     { composerCandidates: [{ ...composerCandidate, textInterface: 'true' }] },
+    { step: 'private_step_text' },
+    { step: null },
+    { step: 'new-chat-focus', phase: 'surface' },
+    { step: 'new-chat-focus', phase: undefined },
+    { step: 'new-chat-focus', status: 'ready', phase: undefined },
+    { step: 'new-chat-focus', status: 'submitted', phase: 'composer' },
     { error: 'private_error_text' },
     { error: 'AttributeError: private prompt' },
     { composerCandidates: [{ role: 'text' }] },
@@ -180,6 +205,7 @@ describe('Linux ChatGPT runtime adapter', () => {
       expect(error).toMatchObject({
         phase: undefined,
         composerCandidates: undefined,
+        step: undefined,
       });
       expect((error as Error).message).toContain('missing_or_invalid_receipt');
       expect(JSON.stringify(error)).not.toContain('private');
