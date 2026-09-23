@@ -126,7 +126,8 @@ The AT-SPI script does not open drafts itself. When it needs a draft, it writes
 MST accepts one request per invocation, only when the hash matches the draft it
 expects (empty for setup, the unchanged prompt for submission), performs the
 hand-off, and replies `{"opened": true}` or `{"opened": false}`. The script waits
-at most 30 seconds (capped by its deadline). Nothing is retried.
+at most 30 seconds (capped by its deadline). After the hand-off, it polls up to
+30 seconds for the draft to appear; this is read-only. Nothing is retried.
 
 ### Native UI protocol and limits
 

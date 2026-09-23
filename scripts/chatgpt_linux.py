@@ -47,6 +47,9 @@ ERROR_CODES = frozenset(CONTRACT['errorCodes'])
 SCREEN_LABELS = frozenset(CONTRACT['screenLabels'])
 APP_NAMES = frozenset({'chatgpt', 'codex', 'codex-launcher'})
 TIMELINE_LIMIT = 24
+# After the one deep-link hand-off the draft usually appears in 1-3 s, but live
+# runs rarely exceeded 10 s. Waiting is read-only; the hand-off is never repeated.
+DRAFT_POLLS = 300
 
 
 def error_code(error, glib_error=()):
@@ -598,7 +601,8 @@ class Driver:
         self.step = 'draft-surface'
         # Setup has no user prompt to match. A new chat can expose a visible
         # placeholder as Text; ready means controls/surface, not verified emptiness.
-        nodes = self.wait(lambda ns: any(self.ready(ns, candidate) for candidate in SURFACES))
+        nodes = self.wait(lambda ns: any(self.ready(ns, candidate) for candidate in SURFACES),
+                          polls=DRAFT_POLLS)
         self.select_surface(nodes, surface)
         self.step = 'draft-readback'
         self.wait(lambda ns: self.ready(ns, surface))
@@ -621,7 +625,8 @@ class Driver:
         self.action(lambda: self.desktop.open_prompt(prompt))
         self.step = 'draft-surface'
         nodes = self.wait(lambda ns: any(self.ready(ns, candidate) for candidate in SURFACES)
-                          and matches_prompt(self.desktop.text(composer(ns)), prompt))
+                          and matches_prompt(self.desktop.text(composer(ns)), prompt),
+                          polls=DRAFT_POLLS)
         # A deep link may change mode. One fixed UI selection is allowed, but it
         # must preserve the draft. Never reopen, refill, or fall back on loss.
         self.select_surface(nodes, surface)

@@ -14,7 +14,7 @@ from itertools import chain, repeat
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
-from chatgpt_linux import (SCREEN_LABELS, Driver, DriverFailure, Desktop, composer, main,
+from chatgpt_linux import (DRAFT_POLLS, SCREEN_LABELS, Driver, DriverFailure, Desktop, composer, main,
                            error_code, ERROR_CODES, INPUT_LIMIT, SESSION_KEYS, XDOTOOL)
 
 
@@ -351,6 +351,24 @@ class DriverTest(unittest.TestCase):
         self.assertNotIn('timeline', json.dumps(receipt))
 
     @patch('chatgpt_linux.time.sleep')
+    def test_slow_draft_after_one_hand_off_is_awaited_without_reopening(self, sleep):
+        # Live runs showed drafts that did not appear within 10 s; wait (read-only)
+        # up to 30 s after the single hand-off, and never reopen or refill.
+        desktop = FakeDesktop()
+        driver = self.driver(desktop)
+        driver.prepare('chatgpt-work')
+        desktop.actions.clear()
+        desktop.stall = 'open'
+        polls = iter(range(10_000))
+        def settle(_):
+            if next(polls) == 150:  # about 15 s of 0.1 s polls
+                desktop.nodes = ready('ChatGPT Work', 'private prompt')
+        sleep.side_effect = settle
+        receipt = driver.submit('private prompt', 'chatgpt-work')
+        self.assertEqual(receipt['status'], 'submitted')
+        self.assertEqual(self.actions(desktop), ['open', 'Send'])
+
+    @patch('chatgpt_linux.time.sleep')
     def test_failed_submit_receipt_includes_draft_wait_timeline(self, sleep):
         desktop = FakeDesktop()
         desktop.stall = 'open'
@@ -373,7 +391,7 @@ class DriverTest(unittest.TestCase):
         self.assertEqual((receipt['error'], receipt['phase'], receipt['step']),
                          ('state_transition_unobserved', 'composer', 'draft-surface'))
         timeline = receipt['draftState']['timeline']
-        self.assertEqual((timeline['polls'], timeline['apps']), (100, 1))
+        self.assertEqual((timeline['polls'], timeline['apps']), (300, 1))
         self.assertEqual([e['nodes'] for e in timeline['entries']], [3, 0, 2])
         self.assertNotIn('private', output.getvalue())
         self.assertEqual(self.actions(desktop), ['open'])
@@ -655,7 +673,10 @@ class DriverTest(unittest.TestCase):
                         with self.assertRaises(DriverFailure):
                             driver.submit(prompt, 'chatgpt-work')
                         self.assertEqual(self.actions(desktop), ['open'])
-                        self.assertEqual(sleep.call_count, 100)
+                        # A draft that never appears waits the draft window; a draft
+                        # whose Send stays disabled fails the shorter readback.
+                        self.assertEqual(sleep.call_count,
+                                         100 if kind == 'send-disabled' else DRAFT_POLLS)
 
     def test_uncertain_send_is_not_retried(self):
         desktop = FakeDesktop()
