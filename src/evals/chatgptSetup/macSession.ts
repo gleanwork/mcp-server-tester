@@ -14,6 +14,7 @@ import {
   type CodexConfigInstallation,
 } from '../codexSetup/config.js';
 import type { ExternalHostConfig } from '../externalHost/types.js';
+import type { SemanticDesktopTelemetry } from '../cowork/driver.js';
 import {
   chatgptDesktopEnvironment,
   isLinuxChatgpt,
@@ -25,6 +26,7 @@ import {
 
 import { getLinuxChatgptApplicationController } from '../externalHost/builtins/chatgptLinuxController.js';
 import {
+  NativeChatgptDriverError,
   runLinuxChatgptDesktop,
   validateLinuxChatgptPaths,
 } from '../chatgpt/linux.js';
@@ -99,6 +101,7 @@ export class ChatgptAppSession {
     cleanupStatus: 'not-started' as 'not-started' | 'completed' | 'failed',
     setupDurationMs: 0,
     cleanupDurationMs: 0,
+    nativeSetup: undefined as SemanticDesktopTelemetry | undefined,
     events: [] as Array<{
       phase: 'setup' | 'cleanup';
       operation: string;
@@ -177,17 +180,20 @@ export class ChatgptAppSession {
       await controller.start(environment);
       this.record('setup', 'start');
       if (settings.linux) {
-        await runLinuxChatgptDesktop(
+        const prepared = await runLinuxChatgptDesktop(
           'prepare',
           config,
           Date.now() + (config.timeoutMs ?? 60_000)
         );
+        this.telemetry.nativeSetup = prepared.telemetry;
         this.record('setup', 'verify_surface');
       }
       this.#ready = true;
       this.telemetry.setupStatus = 'completed';
     } catch (error) {
       this.telemetry.setupStatus = 'failed';
+      if (error instanceof NativeChatgptDriverError)
+        this.telemetry.nativeSetup = error.telemetry;
       throw error;
     } finally {
       this.telemetry.setupDurationMs = Date.now() - started;

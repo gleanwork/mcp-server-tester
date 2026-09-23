@@ -173,8 +173,11 @@ class Driver:
             choice = unique(engineering, 'profession_ambiguous')
             if not choice['selected']:
                 self.click(choice, {'check', 'toggle', 'click', 'press'})
-                nodes = self.wait(lambda ns: any(n['selected'] for n in controls(
-                    ns, {'Engineering'}, {'radio button', 'toggle button'})))
+            # Selection acknowledgement and Continue enablement can arrive in
+            # separate accessibility updates. Observe both; never retry check.
+            nodes = self.wait(lambda ns: any(n['selected'] for n in controls(
+                ns, {'Engineering'}, {'radio button', 'toggle button'}))
+                and bool(controls(ns, {'Continue'})))
             self.click(unique(controls(nodes, {'Continue'}), 'continue_missing_or_ambiguous'))
             nodes = self.wait(lambda ns: not controls(ns, {'Engineering'}, {'radio button', 'toggle button'})
                               and bool(controls(ns, {'Leave a note on my Desktop', 'Go to ChatGPT',

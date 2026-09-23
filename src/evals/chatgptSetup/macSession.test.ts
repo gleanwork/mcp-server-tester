@@ -368,6 +368,13 @@ describe('ChatGPT Linux native lifecycle', () => {
     const config = linuxConfig();
     try {
       await session.prepare(config);
+      expect(session.telemetry.nativeSetup).toMatchObject({
+        driver: 'linux-desktop',
+        accounting: 'complete',
+        action_count: 3,
+        planner: { status: 'not-applicable' },
+        cost: { status: 'not-applicable' },
+      });
       for (let i = 0; i < 2; i++) {
         const result = await runExternalHostScenario('exact query', {
           ...config,

@@ -76,6 +76,38 @@ class DriverTest(unittest.TestCase):
             'Engineering', 'Continue', 'Skip', 'Go to ChatGPT',
             'Switch mode, current mode: Codex', 'ChatGPT Work Create, learn, and explore'])
 
+    @patch('chatgpt_linux.time.sleep')
+    def test_waits_for_continue_after_engineering_selection(self, _sleep):
+        class DelayedContinueDesktop(FakeDesktop):
+            selected_snapshots = 0
+
+            def snapshot(self):
+                if self.nodes[0]['name'] == 'Engineering' and self.nodes[0]['selected']:
+                    self.selected_snapshots += 1
+                    if self.selected_snapshots == 4:
+                        self.nodes[1]['enabled'] = True
+                return self.nodes
+
+        for selected in (False, True):
+            with self.subTest(selected=selected):
+                desktop = DelayedContinueDesktop([
+                    node('Engineering', 'radio button', selected=selected),
+                    node('Continue', enabled=False)])
+                result = self.driver(desktop).prepare('chatgpt-work')
+                self.assertEqual(result['status'], 'ready')
+                self.assertEqual(sum(a[0] == 'Engineering' for a in desktop.actions),
+                                 0 if selected else 1)
+                self.assertEqual(sum(a[0] == 'Continue' for a in desktop.actions), 1)
+                self.assertEqual(desktop.selected_snapshots, 4)
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_disabled_continue_never_clicked_or_engineering_retried(self, _sleep):
+        desktop = FakeDesktop([node('Engineering', 'radio button'),
+                               node('Continue', enabled=False)])
+        with self.assertRaisesRegex(DriverFailure, 'state_transition_unobserved'):
+            self.driver(desktop).prepare('chatgpt-work')
+        self.assertEqual([a[0] for a in desktop.actions], ['Engineering'])
+
     def test_codex_explicit_selection(self):
         desktop = FakeDesktop()
         self.driver(desktop).prepare('codex')
