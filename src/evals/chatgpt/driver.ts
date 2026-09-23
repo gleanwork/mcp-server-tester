@@ -4,6 +4,7 @@ import {
 } from '../cowork/anthropicComputerUse.js';
 import type { ExternalHostConfig } from '../externalHost/types.js';
 import { normalizeHostDriver } from '../externalHost/driverIdentity.js';
+import { NATIVE_MAX_ACTIONS } from './linuxContract.js';
 
 export { ComputerUseDriverError } from '../cowork/anthropicComputerUse.js';
 
@@ -44,6 +45,22 @@ export function chatgptSurface(config: ExternalHostConfig): ChatgptSurface {
   return surface;
 }
 
+/** The only validation of the Linux native action budget. */
+export function nativeMaxActions(config: ExternalHostConfig): number {
+  const actions = Number(
+    config.options?.nativeMaxActions ?? NATIVE_MAX_ACTIONS.default
+  );
+  if (
+    !Number.isInteger(actions) ||
+    actions < 1 ||
+    actions > NATIVE_MAX_ACTIONS.max
+  )
+    throw new Error(
+      `Native action budget must be an integer from 1 to ${NATIVE_MAX_ACTIONS.max}.`
+    );
+  return actions;
+}
+
 export function isLinuxChatgpt(config: ExternalHostConfig): boolean {
   return normalizeHostDriver(config.driver).platform === 'linux';
 }
@@ -79,13 +96,7 @@ export function validateChatgptConfig(config: ExternalHostConfig): void {
       throw new Error(
         'Linux ChatGPT uses native AT-SPI, not a Computer Use planner.'
       );
-    const actions = config.options?.nativeMaxActions ?? 24;
-    if (
-      !Number.isInteger(actions) ||
-      Number(actions) < 1 ||
-      Number(actions) > 64
-    )
-      throw new Error('Native action budget must be an integer from 1 to 64.');
+    nativeMaxActions(config);
     return;
   }
   if (

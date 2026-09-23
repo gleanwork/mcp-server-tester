@@ -14,6 +14,7 @@ import selectors
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 
 class DriverFailure(RuntimeError):
@@ -30,24 +31,13 @@ INPUT_LIMIT = 2 * 1024 * 1024
 TEXT_NODE_LIMIT = 256
 TEXT_DEPTH_LIMIT = 16
 OUTPUT_LIMIT = 1024
-SESSION_KEYS = ('PATH', 'HOME', 'DISPLAY', 'XAUTHORITY', 'DBUS_SESSION_BUS_ADDRESS',
-                'AT_SPI_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'XDG_CONFIG_HOME',
-                'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'XDG_STATE_HOME', 'CODEX_HOME',
-                'LANG', 'LC_ALL', 'NO_AT_BRIDGE')
+# Shared with the Node adapter. Helpers get the session, not the runtime's opener path.
+CONTRACT = json.loads(Path(__file__).with_name('chatgpt_linux_contract.json').read_text('utf-8'))
+SESSION_KEYS = tuple(CONTRACT['sessionEnvironment'] + CONTRACT['profileEnvironment']
+                     + CONTRACT['helperEnvironment'])
+MAX_ACTIONS = CONTRACT['maxActions']
 GLIB_ERROR = ()
-ERROR_CODES = frozenset({
-    'accessibility_event_budget', 'accessibility_tree_budget', 'desktop_ambiguous',
-    'action_unavailable', 'action_missing_or_ambiguous', 'action_acknowledgement_uncertain',
-    'composer_text_unavailable', 'composer_missing_or_ambiguous',
-    'deadline_exceeded', 'action_budget_exhausted', 'state_transition_unobserved',
-    'send_missing_or_ambiguous', 'invalid_surface', 'profession_ambiguous',
-    'continue_missing_or_ambiguous', 'skip_missing_or_ambiguous',
-    'intro_confirmation_ambiguous', 'mode_missing_or_ambiguous', 'surface_item_ambiguous',
-    'invalid_prompt', 'surface_mismatch', 'invalid_budget', 'input_too_large', 'invalid_input',
-    'helper_missing', 'helper_failed', 'helper_timeout', 'profession_geometry_invalid',
-    'desktop_attribute_error', 'desktop_type_error',
-    'desktop_glib_error', 'desktop_driver_failed',
-})
+ERROR_CODES = frozenset(CONTRACT['errorCodes'])
 
 
 def error_code(error):
@@ -656,11 +646,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--mode', choices=['prepare', 'submit'], required=True)
     parser.add_argument('--timeout-ms', type=int, required=True)
-    parser.add_argument('--max-actions', type=int, default=24)
+    parser.add_argument('--max-actions', type=int, default=MAX_ACTIONS['default'])
     args = parser.parse_args()
     driver = None
     try:
-        if args.timeout_ms <= 0 or not 1 <= args.max_actions <= 64:
+        if args.timeout_ms <= 0 or not 1 <= args.max_actions <= MAX_ACTIONS['max']:
             raise DriverFailure('invalid_budget')
         data = sys.stdin.buffer.read(INPUT_LIMIT + 1)
         if len(data) > INPUT_LIMIT:

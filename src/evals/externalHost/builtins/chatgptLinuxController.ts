@@ -2,21 +2,10 @@ import { execFile } from 'node:child_process';
 import { isAbsolute } from 'node:path';
 import { z } from 'zod';
 import type { ChatgptApplicationController } from '../../chatgpt/driver.js';
-
-const SESSION_KEYS = [
-  'PATH',
-  'HOME',
-  'DISPLAY',
-  'XAUTHORITY',
-  'DBUS_SESSION_BUS_ADDRESS',
-  'AT_SPI_BUS_ADDRESS',
-  'XDG_RUNTIME_DIR',
-  'XDG_CONFIG_HOME',
-  'GNOME_KEYRING_CONTROL',
-  'LANG',
-  'LC_ALL',
-  'MST_CHATGPT_CONTROL_SOCKET',
-];
+import {
+  LINUX_CHATGPT_CONTROLLER_ENVIRONMENT,
+  pickEnvironment,
+} from '../../chatgpt/linuxContract.js';
 
 /** Control only the app through a caller-owned helper, never provision a Linux desktop. */
 export function getLinuxChatgptApplicationController(
@@ -40,10 +29,9 @@ export function getLinuxChatgptApplicationController(
     !isAbsolute(environment.MST_CHATGPT_CONTROL_SOCKET)
   )
     throw new Error('MST_CHATGPT_CONTROL_SOCKET must be an absolute path.');
-  const env = Object.fromEntries(
-    SESSION_KEYS.flatMap((key) =>
-      environment[key] === undefined ? [] : [[key, environment[key]]]
-    )
+  const env = pickEnvironment(
+    environment,
+    LINUX_CHATGPT_CONTROLLER_ENVIRONMENT
   );
   async function invoke(
     operation: 'state' | 'start' | 'stop',

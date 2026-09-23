@@ -8,26 +8,15 @@ import type { SemanticDesktopTelemetry } from '../cowork/driver.js';
 import {
   chatgptDesktopEnvironment,
   chatgptSurface,
+  nativeMaxActions,
   readLaunchEnvironment,
 } from './driver.js';
+import {
+  LINUX_CHATGPT_ERROR_CODES,
+  LINUX_CHATGPT_RUNTIME_ENVIRONMENT,
+  pickEnvironment,
+} from './linuxContract.js';
 
-const SESSION_KEYS = [
-  'PATH',
-  'HOME',
-  'DISPLAY',
-  'XAUTHORITY',
-  'DBUS_SESSION_BUS_ADDRESS',
-  'AT_SPI_BUS_ADDRESS',
-  'XDG_RUNTIME_DIR',
-  'XDG_CONFIG_HOME',
-  'XDG_DATA_HOME',
-  'XDG_CACHE_HOME',
-  'XDG_STATE_HOME',
-  'CODEX_HOME',
-  'MST_CHATGPT_URL_OPENER',
-  'LANG',
-  'LC_ALL',
-];
 const FailurePhase = z.enum([
   'waiting-for-initial-ui',
   'profession-selected',
@@ -99,42 +88,7 @@ const Receipt = z
     phase: FailurePhase.optional(),
     step: FailureStep.optional(),
     draftState: DraftState.optional(),
-    error: z
-      .enum([
-        'accessibility_event_budget',
-        'accessibility_tree_budget',
-        'desktop_ambiguous',
-        'action_unavailable',
-        'action_missing_or_ambiguous',
-        'action_acknowledgement_uncertain',
-        'composer_text_unavailable',
-        'composer_missing_or_ambiguous',
-        'deadline_exceeded',
-        'action_budget_exhausted',
-        'state_transition_unobserved',
-        'send_missing_or_ambiguous',
-        'invalid_surface',
-        'profession_ambiguous',
-        'continue_missing_or_ambiguous',
-        'skip_missing_or_ambiguous',
-        'intro_confirmation_ambiguous',
-        'mode_missing_or_ambiguous',
-        'surface_item_ambiguous',
-        'invalid_prompt',
-        'surface_mismatch',
-        'invalid_budget',
-        'input_too_large',
-        'invalid_input',
-        'helper_missing',
-        'helper_failed',
-        'helper_timeout',
-        'profession_geometry_invalid',
-        'desktop_attribute_error',
-        'desktop_type_error',
-        'desktop_glib_error',
-        'desktop_driver_failed',
-      ])
-      .optional(),
+    error: z.enum(LINUX_CHATGPT_ERROR_CODES).optional(),
   })
   .strict()
   .refine(
@@ -194,7 +148,7 @@ export function validateLinuxChatgptPaths(config: ExternalHostConfig): string {
   const desktop = chatgptDesktopEnvironment(config);
   const home = linuxChatgptHome(desktop);
   const launch = readLaunchEnvironment(config.options?.environment);
-  for (const key of SESSION_KEYS) {
+  for (const key of LINUX_CHATGPT_RUNTIME_ENVIRONMENT) {
     if (launch[key] !== undefined && launch[key] !== desktop[key])
       throw new Error(
         'Linux ChatGPT launch environment must not override the prepared desktop session.'
@@ -245,9 +199,12 @@ export async function runLinuxChatgptDesktop(
   if (config.codexSetup?.configPath)
     env.CODEX_HOME = dirname(config.codexSetup.configPath);
   const surface = chatgptSurface(config);
-  const maxActions = Number(config.options?.nativeMaxActions ?? 24);
-  if (!Number.isInteger(maxActions) || maxActions < 1 || maxActions > 64)
+  let maxActions: number;
+  try {
+    maxActions = nativeMaxActions(config);
+  } catch {
     throw new NativeChatgptDriverError('Invalid Linux ChatGPT action budget.');
+  }
   const payload = JSON.stringify({
     surface,
     ...(mode === 'submit' ? { prompt } : {}),
@@ -279,11 +236,7 @@ export async function runLinuxChatgptDesktop(
           killSignal: 'SIGKILL',
           maxBuffer: 64 * 1024,
           env: {
-            ...Object.fromEntries(
-              SESSION_KEYS.flatMap((key) =>
-                env[key] === undefined ? [] : [[key, env[key]]]
-              )
-            ),
+            ...pickEnvironment(env, LINUX_CHATGPT_RUNTIME_ENVIRONMENT),
             NO_AT_BRIDGE: '0',
           },
         },

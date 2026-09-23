@@ -13,7 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from chatgpt_linux import (Driver, DriverFailure, Desktop, composer, main,
-                           error_code, ERROR_CODES, INPUT_LIMIT, XDOTOOL)
+                           error_code, ERROR_CODES, INPUT_LIMIT, SESSION_KEYS, XDOTOOL)
 
 
 def node(name, role='button', **values):
@@ -1286,6 +1286,13 @@ class AccessibilityTest(unittest.TestCase):
         with self.assertRaises(FakeGLibError):
             desktop.activate({'node': SimpleNamespace(get_action_iface=lambda: action)}, {'click'})
         action.do_action.assert_called_once()
+
+    def test_contract_is_shared_and_helpers_never_get_the_opener_path(self):
+        contract = json.loads((Path(__file__).parent / 'chatgpt_linux_contract.json').read_text())
+        self.assertEqual(ERROR_CODES, frozenset(contract['errorCodes']))
+        self.assertEqual(len(contract['errorCodes']), len(ERROR_CODES))
+        self.assertIn('NO_AT_BRIDGE', SESSION_KEYS)
+        self.assertNotIn('MST_CHATGPT_URL_OPENER', SESSION_KEYS)
 
     def test_exception_codes_are_static(self):
         with patch('chatgpt_linux.GLIB_ERROR', FakeGLibError):

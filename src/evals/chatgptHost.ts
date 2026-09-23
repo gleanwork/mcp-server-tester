@@ -14,6 +14,7 @@ import { ChatgptAppSession } from './chatgptSetup/macSession.js';
 import { chatgptServers } from './chatgptSetup/config.js';
 import type { ExternalHostConfig } from './externalHost/types.js';
 import { simulationToHostTrace } from './hostTrace.js';
+import { NATIVE_MAX_ACTIONS } from './chatgpt/linuxContract.js';
 
 import { linuxChatgptHome } from './chatgpt/linux.js';
 
@@ -38,7 +39,12 @@ const Schema = z
           .enum(['exact_prompt', 'prompt_marker'])
           .default('exact_prompt'),
         computerUseProvider: z.literal('anthropic-computer-use').optional(),
-        nativeMaxActions: z.number().int().min(1).max(64).optional(),
+        nativeMaxActions: z
+          .number()
+          .int()
+          .min(1)
+          .max(NATIVE_MAX_ACTIONS.max)
+          .optional(),
         computerUseModel: z
           .string()
           .regex(/^[A-Za-z0-9._:-]+$/)

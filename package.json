@@ -62,6 +62,7 @@
     "scripts/cowork_computer_use.py",
     "scripts/cowork_linux.py",
     "scripts/chatgpt_linux.py",
+    "scripts/chatgpt_linux_contract.json",
     "scripts/cowork-requirements.txt"
   ],
   "scripts": {

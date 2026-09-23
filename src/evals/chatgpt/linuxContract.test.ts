@@ -1,0 +1,47 @@
+import { describe, expect, it } from 'vitest';
+import contract from '../../../scripts/chatgpt_linux_contract.json' with { type: 'json' };
+import packageJson from '../../../package.json' with { type: 'json' };
+import {
+  LINUX_CHATGPT_CONTROLLER_ENVIRONMENT,
+  LINUX_CHATGPT_ERROR_CODES,
+  LINUX_CHATGPT_RUNTIME_ENVIRONMENT,
+  pickEnvironment,
+} from './linuxContract.js';
+
+describe('Linux ChatGPT shared contract', () => {
+  it('ships with the Python runtime', () => {
+    expect(packageJson.files).toContain('scripts/chatgpt_linux.py');
+    expect(packageJson.files).toContain('scripts/chatgpt_linux_contract.json');
+  });
+
+  it('has unique error codes and environment keys', () => {
+    expect(new Set(LINUX_CHATGPT_ERROR_CODES).size).toBe(
+      contract.errorCodes.length
+    );
+    for (const keys of [
+      LINUX_CHATGPT_RUNTIME_ENVIRONMENT,
+      LINUX_CHATGPT_CONTROLLER_ENVIRONMENT,
+    ])
+      expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('never forwards model or MCP credentials', () => {
+    for (const key of [
+      ...LINUX_CHATGPT_RUNTIME_ENVIRONMENT,
+      ...LINUX_CHATGPT_CONTROLLER_ENVIRONMENT,
+    ])
+      expect(key).not.toMatch(/(^|_)(API_KEY|TOKEN|SECRET|PASSWORD)(_|$)/);
+    expect(LINUX_CHATGPT_CONTROLLER_ENVIRONMENT).not.toContain(
+      'MST_CHATGPT_URL_OPENER'
+    );
+  });
+
+  it('picks only defined allowlisted values', () => {
+    expect(
+      pickEnvironment(
+        { HOME: '/fixture', DISPLAY: undefined, OPENAI_API_KEY: 'private' },
+        LINUX_CHATGPT_RUNTIME_ENVIRONMENT
+      )
+    ).toEqual({ HOME: '/fixture' });
+  });
+});

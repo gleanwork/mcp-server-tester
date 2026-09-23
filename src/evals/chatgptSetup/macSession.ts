@@ -17,6 +17,7 @@ import type { ExternalHostConfig } from '../externalHost/types.js';
 import type { SemanticDesktopTelemetry } from '../cowork/driver.js';
 import {
   chatgptDesktopEnvironment,
+  chatgptSurface,
   isLinuxChatgpt,
   readLaunchEnvironment,
   stringOption,
@@ -70,7 +71,7 @@ function sessionSettings(
     setup,
     model: config.model,
     reasoningEffort: config.reasoningEffort,
-    surface: config.options?.surface ?? 'chatgpt-work',
+    surface: chatgptSurface(config),
     environment: readLaunchEnvironment(config.options?.environment),
     appPath: linux
       ? undefined
