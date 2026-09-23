@@ -19,6 +19,7 @@ export const CODEX_SETUP_ERROR_CODES = [
   'mcp_preflight_failed',
   'mcp_status_unavailable',
   'mcp_server_not_ready',
+  'host_tool_policy_unenforced',
   'app_start_failed',
   'app_exited',
   'app_stop_failed',

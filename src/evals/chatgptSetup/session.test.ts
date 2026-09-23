@@ -191,7 +191,13 @@ beforeEach(() => {
       install: { credentialStore: 'keyring', trustedProject: '/tmp/ws' },
       controller,
       evidenceDir: env.evidenceDir,
-      readiness: { login: 'verified', mcpPreflight: [] },
+      readiness: {
+        hostToolPolicy: {
+          disabled: ['computer-use@openai-bundled', 'cua_repl'],
+        },
+        login: 'verified',
+        mcpPreflight: [],
+      },
       beforeStart,
       dispose: disposeProfile,
     };

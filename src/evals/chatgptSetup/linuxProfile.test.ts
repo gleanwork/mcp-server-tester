@@ -74,6 +74,10 @@ beforeEach(async () => {
         authStatus: 'bearerToken',
       },
     ],
+    hostTools: {
+      unconfiguredServerWithTools: false,
+      disabled: [{ label: 'cua_repl', present: false, toolCount: null }],
+    },
   });
 });
 afterEach(async () => {
@@ -155,7 +159,13 @@ describe('fresh MST-owned Linux profile', () => {
     expect(await readdir(workspace)).toEqual([]);
     expect(profile).toMatchObject({
       configPath: join(home, '.codex', 'config.toml'),
-      install: { credentialStore: 'keyring' },
+      install: {
+        credentialStore: 'keyring',
+        disabledHostTools: [
+          { kind: 'plugin', id: 'computer-use@openai-bundled' },
+          { kind: 'mcpServer', label: 'cua_repl' },
+        ],
+      },
       evidenceDir: join(home, 'evidence'),
     });
     await profile.dispose();
@@ -208,7 +218,13 @@ describe('fresh MST-owned Linux profile', () => {
     const [, probeEnv, labels] = vi.mocked(probeAppServerStatus).mock.calls[0]!;
     expect(probeEnv.MST_CHATGPT_MCP_TOKEN_0).toBe('tok-sentinel');
     expect(labels).toEqual(['glean']);
+    expect(vi.mocked(probeAppServerStatus).mock.calls[0]![3]).toEqual([
+      'cua_repl',
+    ]);
     expect(profile.readiness).toMatchObject({
+      hostToolPolicy: {
+        disabled: ['computer-use@openai-bundled', 'cua_repl'],
+      },
       login: 'verified',
       mcpPreflight: [{ status: 'connected', toolCount: 3 }],
       mcpStatus: { status: 'available' },
@@ -223,6 +239,7 @@ describe('fresh MST-owned Linux profile', () => {
     ['status unavailable', 'mcp_status_unavailable'],
     ['not initialized', 'mcp_server_not_ready'],
     ['wrong auth', 'mcp_server_not_ready'],
+    ['cua_repl with tools', 'host_tool_policy_unenforced'],
   ])('fails before app start on %s', async (kind, code) => {
     if (kind === 'preflight')
       vi.mocked(checkMcpServers).mockResolvedValue([
@@ -255,6 +272,26 @@ describe('fresh MST-owned Linux profile', () => {
                 authStatus: 'unknown',
               },
         ],
+        hostTools: {
+          unconfiguredServerWithTools: false,
+          disabled: [{ label: 'cua_repl', present: false, toolCount: null }],
+        },
+      });
+    if (kind === 'cua_repl with tools')
+      vi.mocked(probeAppServerStatus).mockResolvedValue({
+        status: 'available',
+        servers: [
+          {
+            label: 'glean',
+            initialized: true,
+            toolCount: 3,
+            authStatus: 'bearerToken',
+          },
+        ],
+        hostTools: {
+          unconfiguredServerWithTools: true,
+          disabled: [{ label: 'cua_repl', present: true, toolCount: 1 }],
+        },
       });
     const profile = await createLinuxChatgptProfile(
       readLinuxChatgptEnvironment(env),
@@ -264,6 +301,27 @@ describe('fresh MST-owned Linux profile', () => {
       profile.beforeStart(setup, { MST_CHATGPT_MCP_TOKEN_0: 'tok-sentinel' })
     ).rejects.toMatchObject({ code });
     expect(profile.readiness.error).toBe(code);
+    await profile.dispose();
+  });
+
+  it('verifies the host tool policy even without configured MCP servers', async () => {
+    vi.mocked(checkMcpServers).mockResolvedValue([]);
+    vi.mocked(probeAppServerStatus).mockResolvedValue({
+      status: 'available',
+      servers: [],
+      hostTools: {
+        unconfiguredServerWithTools: true,
+        disabled: [{ label: 'cua_repl', present: true, toolCount: 2 }],
+      },
+    });
+    const profile = await createLinuxChatgptProfile(
+      readLinuxChatgptEnvironment(env),
+      'linux'
+    );
+    await expect(
+      profile.beforeStart({ ...setup, servers: [] }, {})
+    ).rejects.toMatchObject({ code: 'host_tool_policy_unenforced' });
+    expect(probeAppServerStatus).toHaveBeenCalledOnce();
     await profile.dispose();
   });
 

@@ -19,14 +19,17 @@ import {
 } from '../chatgpt/driver.js';
 import { LINUX_CHATGPT_RUNTIME_ENVIRONMENT } from '../chatgpt/linuxContract.js';
 import {
+  appServerHostToolDisabled,
   appServerServerReady,
   probeAppServerStatus,
   type AppServerStatus,
 } from '../codexSetup/appServerStatus.js';
 import { loginWithApiKey } from '../codexSetup/auth.js';
-import type {
-  CodexConfigInstallOptions,
-  ResolvedCodexSetup,
+import {
+  disabledHostToolName,
+  type CodexConfigInstallOptions,
+  type CodexDisabledHostTool,
+  type ResolvedCodexSetup,
 } from '../codexSetup/config.js';
 import {
   CodexSetupError,
@@ -169,8 +172,19 @@ export function validateLinuxChatgptConfig(
   return environment;
 }
 
+/**
+ * The headless VM has no usable screen, so the bundled computer-use tool never
+ * returns. Linux always disables it and records the policy in telemetry.
+ */
+export const LINUX_CHATGPT_DISABLED_HOST_TOOLS: readonly CodexDisabledHostTool[] =
+  [
+    { kind: 'plugin', id: 'computer-use@openai-bundled' },
+    { kind: 'mcpServer', label: 'cua_repl' },
+  ];
+
 /** Sanitized setup receipt. No prompts, URLs, tokens, or native output. */
 export interface LinuxChatgptReadiness {
+  hostToolPolicy: { disabled: string[] };
   login: 'not-run' | 'verified' | 'failed';
   mcpPreflight: McpServerReadiness[];
   mcpStatus?: AppServerStatus;
@@ -181,7 +195,7 @@ export interface ChatgptPlatformProfile {
   readonly configPath: string;
   readonly install: Pick<
     CodexConfigInstallOptions,
-    'credentialStore' | 'trustedProject'
+    'credentialStore' | 'trustedProject' | 'disabledHostTools'
   >;
   readonly controller: ChatgptApplicationController;
   readonly evidenceDir?: string;
@@ -224,6 +238,9 @@ export async function createLinuxChatgptProfile(
   );
   await privateDirectory(workspace, 'workspace_unsafe');
   const readiness: LinuxChatgptReadiness = {
+    hostToolPolicy: {
+      disabled: LINUX_CHATGPT_DISABLED_HOST_TOOLS.map(disabledHostToolName),
+    },
     login: 'not-run',
     mcpPreflight: [],
   };
@@ -233,7 +250,11 @@ export async function createLinuxChatgptProfile(
   };
   return {
     configPath: join(environment.codexHome, 'config.toml'),
-    install: { credentialStore: 'keyring', trustedProject: workspace },
+    install: {
+      credentialStore: 'keyring',
+      trustedProject: workspace,
+      disabledHostTools: LINUX_CHATGPT_DISABLED_HOST_TOOLS,
+    },
     controller: createLinuxChatgptApp({
       appPath: environment.appPath,
       environment: environment.session,
@@ -284,11 +305,14 @@ export async function createLinuxChatgptProfile(
         )
       )
         throw fail('mcp_preflight_failed');
-      if (!setup.servers.length) return;
+      // Probe even without configured servers: the host tool policy must hold.
       readiness.mcpStatus = await probeAppServerStatus(
         environment.codexPath,
         { ...native, ...tokens },
-        setup.servers.map((server) => server.label)
+        setup.servers.map((server) => server.label),
+        LINUX_CHATGPT_DISABLED_HOST_TOOLS.flatMap((tool) =>
+          tool.kind === 'mcpServer' ? [tool.label] : []
+        )
       );
       if (readiness.mcpStatus.status !== 'available')
         throw fail('mcp_status_unavailable');
@@ -301,6 +325,10 @@ export async function createLinuxChatgptProfile(
         if (!appServerServerReady(server, auth))
           throw fail('mcp_server_not_ready');
       }
+      if (
+        !readiness.mcpStatus.hostTools.disabled.every(appServerHostToolDisabled)
+      )
+        throw fail('host_tool_policy_unenforced');
     },
     async dispose() {
       // Owner-checked: remove only the workspace MST created. Scio owns HOME.

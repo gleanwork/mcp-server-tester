@@ -44,6 +44,44 @@ describe('Codex configuration rendering', () => {
     expect(output).toContain('bearer_token_env_var = "GLEAN_API_TOKEN"');
   });
 
+  it('renders disabled host tools as enabled = false tables only', () => {
+    const output = renderCodexConfig(
+      [{ transport: 'stdio', label: 'local', command: 'node' }],
+      [
+        { kind: 'plugin', id: 'computer-use@openai-bundled' },
+        { kind: 'mcpServer', label: 'cua_repl' },
+      ]
+    );
+    expect(output).toContain(
+      '[plugins."computer-use@openai-bundled"]\nenabled = false'
+    );
+    expect(output).toContain('[mcp_servers.cua_repl]\nenabled = false');
+    expect(parse(output)).toMatchObject({
+      plugins: { 'computer-use@openai-bundled': { enabled: false } },
+      mcp_servers: { cua_repl: { enabled: false } },
+    });
+    expect(
+      (parse(output).mcp_servers as Record<string, object>).cua_repl
+    ).toEqual({ enabled: false });
+    expect(renderCodexConfig([])).not.toContain('enabled');
+  });
+
+  it.each([
+    [{ kind: 'mcpServer', label: 'local' }],
+    [{ kind: 'mcpServer', label: 'bad label' }],
+    [{ kind: 'plugin', id: 'no-marketplace' }],
+  ] as const)(
+    'rejects an invalid or colliding disabled host tool %j',
+    (tool) => {
+      expect(() =>
+        renderCodexConfig(
+          [{ transport: 'stdio', label: 'local', command: 'node' }],
+          [tool]
+        )
+      ).toThrow('Invalid disabled Codex');
+    }
+  );
+
   it('requires a name when selecting among multiple configs', () => {
     expect(() =>
       resolveCodexSetup({
@@ -172,6 +210,33 @@ describe('Codex configuration lifecycle', () => {
     const installed = parse(await readFile(configPath, 'utf8'));
     expect(installed.desktop).toEqual({ followUpQueueMode: 'steer' });
     expect(Object.keys(installed.mcp_servers as object)).toEqual(['selected']);
+    await installation.restore();
+  });
+
+  it('installs disabled host tools and keeps other plugin settings', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'mst-codex-config-'));
+    temporaryDirectories.push(directory);
+    const configPath = join(directory, 'config.toml');
+    await writeFile(
+      configPath,
+      '[plugins."other@market"]\nenabled = true\n[plugins."computer-use@openai-bundled"]\nenabled = true\n',
+      { mode: 0o600 }
+    );
+    const installation = await installCodexConfig(
+      { configPath, servers: [] },
+      {
+        disabledHostTools: [
+          { kind: 'plugin', id: 'computer-use@openai-bundled' },
+          { kind: 'mcpServer', label: 'cua_repl' },
+        ],
+      }
+    );
+    const installed = parse(await readFile(configPath, 'utf8'));
+    expect(installed.plugins).toEqual({
+      'other@market': { enabled: true },
+      'computer-use@openai-bundled': { enabled: false },
+    });
+    expect(installed.mcp_servers).toEqual({ cua_repl: { enabled: false } });
     await installation.restore();
   });
 

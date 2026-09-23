@@ -46,9 +46,28 @@ export interface AppServerServerStatus {
   authStatus: AppServerAuthStatus;
 }
 
+/** A host tool MST disabled. Absence from the list means the policy held. */
+export interface AppServerDisabledServerStatus {
+  label: string;
+  present: boolean;
+  toolCount: number | null;
+}
+
+/** Only booleans and MST-owned labels; never native names or descriptions. */
+export interface AppServerHostToolStatus {
+  /** Some listed server that MST did not configure exposes at least one tool. */
+  unconfiguredServerWithTools: boolean;
+  disabled: AppServerDisabledServerStatus[];
+}
+
+export interface AppServerExchange {
+  servers: AppServerServerStatus[];
+  hostTools: AppServerHostToolStatus;
+}
+
 /** Sanitized receipt: labels come from MST config, never from native output. */
 export type AppServerStatus =
-  | { status: 'available'; servers: AppServerServerStatus[] }
+  | ({ status: 'available' } & AppServerExchange)
   | { status: 'unavailable'; reason: AppServerFailure };
 
 export class AppServerFailureError extends Error {
@@ -212,8 +231,9 @@ async function response(
 /** initialize, initialized, one bounded mcpServerStatus/list page. Nothing else. */
 export async function exchangeAppServerStatus(
   channel: JsonlChannel,
-  labels: readonly string[]
-): Promise<AppServerServerStatus[]> {
+  labels: readonly string[],
+  disabledLabels: readonly string[] = []
+): Promise<AppServerExchange> {
   await channel.send({
     id: 0,
     method: 'initialize',
@@ -247,12 +267,14 @@ export async function exchangeAppServerStatus(
     rows.some((row) => !isObject(row) || typeof row.name !== 'string')
   )
     throw new AppServerFailureError('invalid-response');
-  return labels.map((label) => {
-    const matches = (rows as Array<Record<string, unknown>>).filter(
-      (row) => row.name === label
-    );
-    if (matches.length > 1) throw new AppServerFailureError('invalid-response');
-    const row = matches[0];
+  const listed = rows as Array<Record<string, unknown>>;
+  const names = listed.map((row) => row.name as string);
+  if (new Set(names).size !== names.length)
+    throw new AppServerFailureError('invalid-response');
+  // Every row's tools must parse; an unknown shape is never read as zero.
+  const counts = new Map(listed.map((row) => [row.name, toolCount(row)]));
+  const servers = labels.map((label): AppServerServerStatus => {
+    const row = listed.find((candidate) => candidate.name === label);
     if (!row)
       return {
         label,
@@ -260,25 +282,43 @@ export async function exchangeAppServerStatus(
         toolCount: null,
         authStatus: 'unknown',
       };
-    const tools = row.tools;
-    const values = Array.isArray(tools)
-      ? tools
-      : isObject(tools)
-        ? Object.values(tools)
-        : undefined;
-    if (!values || !values.every(isObject))
-      throw new AppServerFailureError('invalid-response');
     const auth = row.authStatus;
     return {
       label,
       initialized: true,
-      toolCount: values.length,
+      toolCount: counts.get(label)!,
       authStatus:
         typeof auth === 'string' && AUTH_STATUSES.has(auth)
           ? (auth as AppServerAuthStatus)
           : 'unknown',
     };
   });
+  const configured = new Set(labels);
+  return {
+    servers,
+    hostTools: {
+      unconfiguredServerWithTools: [...counts].some(
+        ([name, count]) => !configured.has(name as string) && count > 0
+      ),
+      disabled: disabledLabels.map((label) => ({
+        label,
+        present: counts.has(label),
+        toolCount: counts.get(label) ?? null,
+      })),
+    },
+  };
+}
+
+function toolCount(row: Record<string, unknown>): number {
+  const tools = row.tools;
+  const values = Array.isArray(tools)
+    ? tools
+    : isObject(tools)
+      ? Object.values(tools)
+      : undefined;
+  if (!values || !values.every(isObject))
+    throw new AppServerFailureError('invalid-response');
+  return values.length;
 }
 
 /**
@@ -288,7 +328,8 @@ export async function exchangeAppServerStatus(
 export async function probeAppServerStatus(
   codexPath: string,
   env: Record<string, string>,
-  labels: readonly string[]
+  labels: readonly string[],
+  disabledLabels: readonly string[] = []
 ): Promise<AppServerStatus> {
   const cwd = env.HOME;
   if (!cwd) return { status: 'unavailable', reason: 'io-error' };
@@ -306,11 +347,12 @@ export async function probeAppServerStatus(
   try {
     if (!(await spawned) || !child.stdin || !child.stdout)
       return { status: 'unavailable', reason: 'io-error' };
-    const servers = await exchangeAppServerStatus(
+    const exchange = await exchangeAppServerStatus(
       new StreamJsonlChannel(child.stdin, child.stdout),
-      labels
+      labels,
+      disabledLabels
     );
-    return { status: 'available', servers };
+    return { status: 'available', ...exchange };
   } catch (error) {
     return {
       status: 'unavailable',
@@ -342,6 +384,13 @@ export function appServerServerReady(
     server.toolCount >= 1 &&
     server.authStatus === expectedAuth
   );
+}
+
+/** Enforced when the disabled server is absent or lists no tools. */
+export function appServerHostToolDisabled(
+  server: AppServerDisabledServerStatus
+): boolean {
+  return !server.present || server.toolCount === 0;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
