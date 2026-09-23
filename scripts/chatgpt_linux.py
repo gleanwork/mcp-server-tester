@@ -696,11 +696,16 @@ class Driver:
             raise DriverFailure('invalid_input')
         self.desktop.require_helpers()
         self.action(self.desktop.open_settings)
-        nodes = self.snapshot()
-        navigation = [node for node in nodes if available(node)
-                      and node['role'] in MCP_NAVIGATION_ROLES
-                      and normalized_label(node['name']) == 'mcp servers'
-                      and inspection_safe(node, nodes)]
+        navigation = []
+        for _ in range(20):
+            nodes = self.snapshot()
+            navigation = [node for node in nodes if available(node)
+                          and node['role'] in MCP_NAVIGATION_ROLES
+                          and normalized_label(node['name']) == 'mcp servers'
+                          and inspection_safe(node, nodes)]
+            if navigation:
+                break
+            time.sleep(0.1)
         if len(navigation) == 1:
             self.click(navigation[0])
             nodes = self.snapshot()
