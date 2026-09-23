@@ -147,115 +147,9 @@ class DriverTest(unittest.TestCase):
     def actions(self, desktop): return [action[0] for action in desktop.actions]
 
     @patch('chatgpt_linux.time.sleep')
-    def test_setup_controls_are_read_only_visible_role_allowlisted_and_bounded(self, _sleep):
-        roles = ('button', 'push button', 'toggle button', 'radio button', 'menu item')
-        desktop = FakeDesktop([
-            node('private excluded', role) for role in
-            ('frame', 'label', 'entry', 'text', 'paragraph', 'static', 'password text')
-        ] + [node('hidden', visible=False), node('not showing', showing=False)] + [
-            node('', 'button'), node('Loading', enabled=False, sensitive=False),
-            *[node('Trust folder', role) for role in roles],
-            *[node('Control ' + str(i)) for i in range(40)]])
-        driver = self.driver(desktop)
-        with self.assertRaisesRegex(DriverFailure, '^state_transition_unobserved$'):
-            driver.prepare('codex')
-        desktop.snapshot = Mock(side_effect=AssertionError('no new diagnostic snapshot'))
-        desktop.text = Mock(side_effect=AssertionError('no editor or label reads'))
-        diagnostic = driver.receipt('failed')['setupControls']
-        self.assertIs(diagnostic['setupOnly'], True)
-        self.assertEqual(len(diagnostic['controls']), 32)
-        self.assertEqual(diagnostic['controls'][:2], [
-            {'role': 'button', 'name': ''}, {'role': 'button', 'name': 'Loading'}])
-        self.assertEqual([item['role'] for item in diagnostic['controls'][2:7]], list(roles))
-        self.assertTrue(all(set(item) == {'role', 'name'} for item in diagnostic['controls']))
-        self.assertNotIn('private', json.dumps(diagnostic))
-        self.assertEqual(driver.actions, 0)
-        self.assertEqual(desktop.actions, [])
-        desktop.snapshot.assert_not_called()
-        desktop.text.assert_not_called()
-
-    @patch('chatgpt_linux.time.sleep')
-    def test_setup_controls_redact_whole_private_names_before_truncation(self, _sleep):
-        private = ['sk-test', 'BEARER secret', 'https://private.example/path',
-                   'codex://new?prompt=secret', 'www.private.example', 'private.example',
-                   'person@private.example', 'a' * 20, 'π' * 20,
-                   'name\nsecret', 'name\tsecret', 'name\x00secret', 'name\x7fsecret',
-                   'name\u0085secret', 'name\u200bsecret', 'name\u202esecret',
-                   'name\u00a0secret', 'name\ud800secret',
-                   'Safe label ' * 20 + 'sk-secret', 'Safe label ' * 500]
-        desktop = FakeDesktop([node(value) for value in private] + [
-            node('Open folder'), node('a' * 19), node('é 😀 ' * 40)])
-        driver = self.driver(desktop)
-        with self.assertRaises(DriverFailure):
-            driver.prepare('codex')
-        controls = driver.receipt('failed')['setupControls']['controls']
-        self.assertEqual([item['name'] for item in controls[:len(private)]],
-                         ['[redacted]'] * len(private))
-        self.assertEqual([item['name'] for item in controls[len(private):]],
-                         ['Open folder', 'a' * 19, ('é 😀 ' * 40)[:120]])
-        self.assertEqual(desktop.actions, [])
-
-    @patch('chatgpt_linux.time.sleep')
-    def test_setup_controls_last_complete_snapshot_and_empty_snapshot(self, _sleep):
-        for nodes in ([], [node('Trust folder')]):
-            desktop = FakeDesktop(nodes)
-            desktop.snapshot = Mock(side_effect=[nodes, FakeGLibError('private')])
-            driver = self.driver(desktop)
-            with self.assertRaises(FakeGLibError):
-                driver.prepare('codex')
-            self.assertEqual(driver.receipt('failed')['setupControls'], {
-                'setupOnly': True,
-                'controls': [{'role': 'button', 'name': 'Trust folder'}] if nodes else []})
-            self.assertEqual(desktop.snapshot.call_count, 2)
-            self.assertEqual(desktop.actions, [])
-        driver = self.driver(FakeDesktop())
-        driver.desktop.require_helpers = Mock(side_effect=DriverFailure('helper_missing'))
-        with self.assertRaises(DriverFailure):
-            driver.prepare('codex')
-        self.assertNotIn('setupControls', driver.receipt('failed'))
-
-    @patch('chatgpt_linux.time.sleep')
-    def test_setup_controls_never_emitted_for_success_or_submit_even_after_prepare(self, _sleep):
-        desktop = FakeDesktop([node('private query in control')])
-        driver = self.driver(desktop)
-        with self.assertRaises(DriverFailure):
-            driver.prepare('codex')
-        for status in ('ready', 'submitted'):
-            self.assertNotIn('setupControls', driver.receipt(status))
-        for prompt in (None, 'private query'):
-            with self.assertRaises(DriverFailure):
-                driver.submit(prompt, 'codex')
-            receipt = driver.receipt('failed')
-            self.assertNotIn('setupControls', receipt)
-            self.assertNotIn('private query', json.dumps(receipt))
-        self.assertEqual(desktop.actions, [])
-
-    @patch('chatgpt_linux.time.sleep')
-    def test_setup_controls_on_draft_modal_preserve_phase_step_and_draft_state(self, _sleep):
-        desktop = FakeDesktop(ready('Codex'))
-        def open_empty(prompt):
-            desktop.actions.append(('open', prompt))
-            desktop.nodes = [node('Trust folder'), node('Loading', enabled=False),
-                             node('private content', 'paragraph')]
-        desktop.open_prompt = open_empty
-        driver = self.driver(desktop)
-        with self.assertRaisesRegex(DriverFailure, '^state_transition_unobserved$'):
-            driver.prepare('codex')
-        receipt = driver.receipt('failed')
-        self.assertEqual((receipt['phase'], receipt['step']), ('composer', 'draft-surface'))
-        self.assertEqual(receipt['draftState'], {
-            'observedSurface': 'unknown', 'composerRootCount': 0,
-            'sendControlCount': 0, 'textReadable': False})
-        self.assertEqual(receipt['setupControls']['controls'], [
-            {'role': 'button', 'name': 'Trust folder'}, {'role': 'button', 'name': 'Loading'}])
-        self.assertEqual(desktop.actions, [('open', '')])
-        self.assertNotIn('private', json.dumps(receipt))
-
-    @patch('chatgpt_linux.time.sleep')
-    def test_main_emits_setup_assertion_only_on_failed_prepare(self, _sleep):
+    def test_failed_receipts_carry_only_fixed_diagnostics(self, _sleep):
         for mode in ('prepare', 'submit'):
             desktop = FakeDesktop([node('Loading'), node('sk-private'),
-                                   node('https://private.example'), node('person@private.example'),
                                    node('private content', 'paragraph')])
             payload = json.dumps({'surface': 'codex', 'prompt': 'private prompt'}).encode()
             with patch('chatgpt_linux.Desktop', return_value=desktop), \
@@ -264,19 +158,12 @@ class DriverTest(unittest.TestCase):
                     patch('sys.stdout', new_callable=io.StringIO) as output:
                 self.assertEqual(main(), 1)
             receipt = json.loads(output.getvalue())
-            self.assertEqual(receipt['status'], 'failed')
+            self.assertLessEqual(set(receipt), {
+                'status', 'action_count', 'duration_ms', 'phase', 'step', 'draftState', 'error'})
+            self.assertEqual(receipt['error'], 'state_transition_unobserved'
+                             if mode == 'prepare' else 'surface_mismatch')
             self.assertNotIn('private', output.getvalue())
-            if mode == 'prepare':
-                self.assertEqual(receipt['error'], 'state_transition_unobserved')
-                self.assertEqual(receipt['phase'], 'waiting-for-initial-ui')
-                self.assertEqual(receipt['setupControls'], {
-                    'setupOnly': True, 'controls': [
-                        {'role': 'button', 'name': 'Loading'},
-                        *[{'role': 'button', 'name': '[redacted]'} for _ in range(3)]]})
-            else:
-                self.assertEqual(receipt['error'], 'surface_mismatch')
-                self.assertNotIn('setupControls', receipt)
-                self.assertNotIn('Loading', output.getvalue())
+            self.assertNotIn('Loading', output.getvalue())
             self.assertEqual(desktop.actions, [])
 
     def test_failure_draft_state_exact_measurements_and_privacy(self):
@@ -724,20 +611,6 @@ class DriverTest(unittest.TestCase):
                 composer(nodes)
         with self.assertRaisesRegex(DriverFailure, 'composer_missing_or_ambiguous'):
             composer(ready() + [node('separate', 'entry', editable=True)])
-
-    @patch('chatgpt_linux.time.sleep')
-    def test_failure_diagnostics_are_bounded_structural_only(self, _sleep):
-        desktop = FakeDesktop(ready()[:-1] + [node('private', 'text', text='private query')] * 20)
-        driver = self.driver(desktop)
-        with self.assertRaises(DriverFailure):
-            driver.prepare('chatgpt-work')
-        receipt = driver.receipt('failed')
-        self.assertEqual(len(receipt['composerCandidates']), 16)
-        self.assertEqual(set(receipt['composerCandidates'][0]), {
-            'role', 'showing', 'visible', 'enabled', 'sensitive',
-            'editableState', 'editableInterface', 'textInterface'})
-        self.assertNotIn('private', json.dumps(receipt))
-        self.assertNotIn('composerCandidates', driver.receipt('ready', 'chatgpt-work'))
 
     def test_main_hides_exceptions_and_enforces_byte_limit(self):
         for payload, error in [(b'{"surface":"chatgpt-work"}', 'desktop_driver_failed'),

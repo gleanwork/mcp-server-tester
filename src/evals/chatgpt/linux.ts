@@ -42,49 +42,6 @@ const FailureStep = z.enum([
   'draft-readback',
   'send',
 ]);
-const ComposerCandidate = z
-  .object({
-    role: z.string().regex(/^[a-z][a-z -]{0,63}$/),
-    showing: z.boolean(),
-    visible: z.boolean(),
-    enabled: z.boolean(),
-    sensitive: z.boolean(),
-    editableState: z.boolean(),
-    editableInterface: z.boolean(),
-    textInterface: z.boolean().optional(),
-  })
-  .strict();
-// Match the runtime's whole-name redaction. Reject unsafe raw helper output too.
-const PrivateControlName =
-  /sk-|bearer|[a-z][a-z0-9+.-]*:|www\.|[a-z0-9-]+\.[a-z]{2,}|@|[\p{L}\p{N}]{20,}/iu;
-const SetupControls = z
-  .object({
-    setupOnly: z.literal(true),
-    controls: z
-      .array(
-        z
-          .object({
-            role: z.enum([
-              'button',
-              'push button',
-              'toggle button',
-              'radio button',
-              'menu item',
-            ]),
-            name: z
-              .string()
-              .refine(
-                (name) =>
-                  [...name].length <= 120 &&
-                  !PrivateControlName.test(name) &&
-                  !/[\p{C}\p{Z}]/u.test(name.replaceAll(' ', ''))
-              ),
-          })
-          .strict()
-      )
-      .max(32),
-  })
-  .strict();
 const DraftState = z
   .object({
     observedSurface: z.enum(['chatgpt-work', 'codex', 'unknown', 'ambiguous']),
@@ -141,9 +98,7 @@ const Receipt = z
     duration_ms: z.number().finite().nonnegative(),
     phase: FailurePhase.optional(),
     step: FailureStep.optional(),
-    composerCandidates: z.array(ComposerCandidate).max(16).optional(),
     draftState: DraftState.optional(),
-    setupControls: SetupControls.optional(),
     error: z
       .enum([
         'accessibility_event_budget',
@@ -190,32 +145,29 @@ const Receipt = z
   )
   .refine(
     (receipt) =>
-      receipt.setupControls === undefined || receipt.status === 'failed'
-  )
-  .refine(
-    (receipt) =>
       receipt.step === undefined ||
       (receipt.status === 'failed' && receipt.phase === 'composer')
-  )
-  .refine(
-    (receipt) =>
-      receipt.composerCandidates === undefined ||
-      (receipt.status === 'failed' && receipt.phase === 'composer')
   );
+
+/** Failure-only fields from a validated receipt. Never raw helper output. */
+export interface NativeChatgptDriverDiagnostics {
+  telemetry?: SemanticDesktopTelemetry;
+  error?: z.infer<typeof Receipt>['error'];
+  phase?: z.infer<typeof FailurePhase>;
+  step?: z.infer<typeof FailureStep>;
+  draftState?: z.infer<typeof DraftState>;
+}
 
 export class NativeChatgptDriverError extends Error {
   constructor(
     message: string,
-    public readonly telemetry?: SemanticDesktopTelemetry,
-    public readonly phase?: z.infer<typeof FailurePhase>,
-    public readonly composerCandidates?: z.infer<typeof ComposerCandidate>[],
-    public readonly step?: z.infer<typeof FailureStep>,
-    public readonly metadata?: {
-      draftState?: z.infer<typeof DraftState>;
-      setupControls?: z.infer<typeof SetupControls>;
-    }
+    public readonly diagnostics: NativeChatgptDriverDiagnostics = {}
   ) {
     super(message);
+  }
+
+  get telemetry(): SemanticDesktopTelemetry | undefined {
+    return this.diagnostics.telemetry;
   }
 }
 
@@ -325,7 +277,6 @@ export async function runLinuxChatgptDesktop(
         {
           timeout,
           killSignal: 'SIGKILL',
-          // 32 names of 120 Unicode characters can expand in JSON escaping.
           maxBuffer: 64 * 1024,
           env: {
             ...Object.fromEntries(
@@ -347,10 +298,7 @@ export async function runLinuxChatgptDesktop(
   );
   let record: z.infer<typeof Receipt> | undefined;
   try {
-    const parsed = Receipt.parse(JSON.parse(result.stdout));
-    // A setupOnly assertion from a submit helper is never trusted or exported.
-    if (mode === 'prepare' || parsed.setupControls === undefined)
-      record = parsed;
+    record = Receipt.parse(JSON.parse(result.stdout));
   } catch {
     /* Never expose raw output. */
   }
@@ -370,18 +318,13 @@ export async function runLinuxChatgptDesktop(
   if (!valid)
     throw new NativeChatgptDriverError(
       `Linux ChatGPT ${mode} failed or its receipt was uncertain (${record?.error ?? 'missing_or_invalid_receipt'}${record?.phase ? `; phase=${record.phase}` : ''}${record?.step ? `; step=${record.step}` : ''}); no retry attempted.`,
-      telemetry,
-      record?.phase,
-      record?.composerCandidates,
-      record?.step,
-      record?.draftState || record?.setupControls
-        ? {
-            ...(record.draftState ? { draftState: record.draftState } : {}),
-            ...(record.setupControls
-              ? { setupControls: record.setupControls }
-              : {}),
-          }
-        : undefined
+      {
+        telemetry,
+        error: record?.error,
+        phase: record?.phase,
+        step: record?.step,
+        draftState: record?.draftState,
+      }
     );
   return { telemetry };
 }

@@ -64,16 +64,6 @@ console.log(JSON.stringify({status: prepare ? 'ready' : 'submitted', surface: ${
   };
 }
 
-const composerCandidate = {
-  role: 'document web',
-  showing: false,
-  visible: true,
-  enabled: true,
-  sensitive: false,
-  editableState: true,
-  editableInterface: false,
-  textInterface: true,
-};
 const unreadableDraftState = {
   observedSurface: 'chatgpt-work',
   composerRootCount: 1,
@@ -116,202 +106,25 @@ describe('Linux ChatGPT runtime adapter', () => {
       await expect(
         runLinuxChatgptDesktop(mode, config, Date.now() + 5000)
       ).rejects.toMatchObject({
-        metadata: undefined,
+        diagnostics: { phase: undefined, draftState: undefined },
         message: expect.stringContaining('missing_or_invalid_receipt'),
       });
       const calls = await readFile(join(root, 'calls.jsonl'), 'utf8');
       expect(calls.trim().split('\n')).toHaveLength(1);
     }
   );
-  const setupControls = {
-    setupOnly: true,
-    controls: [{ role: 'button', name: 'Trust folder' }],
-  };
   it.each([
-    { ...setupControls, controls: [] },
-    setupControls,
-    {
-      ...setupControls,
-      controls: [
-        'button',
-        'push button',
-        'toggle button',
-        'radio button',
-        'menu item',
-      ].map((role) => ({ role, name: '' })),
-    },
-    {
-      ...setupControls,
-      controls: Array.from({ length: 32 }, () => ({
-        role: 'button',
-        name: 'é 😀 '.repeat(30),
-      })),
-    },
-    { ...setupControls, controls: [{ role: 'button', name: '[redacted]' }] },
-  ])(
-    'exposes bounded setup controls on failed prepare only %#',
-    async (diagnostic) => {
-      await helper('receipt', {
-        ...composerFailure,
-        setupControls: diagnostic,
-        draftState: unreadableDraftState,
-      });
-      const error: unknown = await runLinuxChatgptDesktop(
-        'prepare',
-        config,
-        Date.now() + 5000
-      ).catch((failure: unknown) => failure);
-      expect(error).toBeInstanceOf(NativeChatgptDriverError);
-      expect(error).toMatchObject({
-        phase: 'composer',
-        metadata: {
-          setupControls: diagnostic,
-          draftState: unreadableDraftState,
-        },
-        telemetry: { accounting: 'partial' },
-      });
-      expect((error as Error).message).not.toContain('Trust folder');
-    }
-  );
-  it('allows setup controls at the initial folder-trust stage', async () => {
-    await helper('receipt', {
-      ...composerFailure,
-      phase: 'waiting-for-initial-ui',
-      setupControls,
-    });
+    { setupControls: { setupOnly: true, controls: [] } },
+    { composerCandidates: [] },
+  ])('rejects removed diagnostic fields %#', async (removed) => {
+    await helper('receipt', { ...composerFailure, ...removed });
     await expect(
       runLinuxChatgptDesktop('prepare', config, Date.now() + 5000)
     ).rejects.toMatchObject({
-      phase: 'waiting-for-initial-ui',
-      metadata: { setupControls },
+      diagnostics: { phase: undefined },
+      message: expect.stringContaining('missing_or_invalid_receipt'),
     });
   });
-  it.each([undefined, false, 'true', 1])(
-    'requires a literal setupOnly assertion: %s',
-    async (setupOnly) => {
-      await helper('receipt', {
-        ...composerFailure,
-        setupControls: { ...setupControls, setupOnly },
-      });
-      await expect(
-        runLinuxChatgptDesktop('prepare', config, Date.now() + 5000)
-      ).rejects.toMatchObject({
-        metadata: undefined,
-        phase: undefined,
-        message: expect.stringContaining('missing_or_invalid_receipt'),
-      });
-    }
-  );
-  it.each([
-    null,
-    {},
-    [],
-    { ...setupControls, private: 'private value' },
-    {
-      ...setupControls,
-      controls: Array.from({ length: 33 }, () => setupControls.controls[0]),
-    },
-    ...[
-      'frame',
-      'label',
-      'entry',
-      'text',
-      'paragraph',
-      'static',
-      'password text',
-    ].map((role) => ({
-      ...setupControls,
-      controls: [{ role, name: 'private value' }],
-    })),
-    ...['text', 'value', 'url', 'prompt', 'credentials'].map((key) => ({
-      ...setupControls,
-      controls: [{ role: 'button', name: '', [key]: 'private value' }],
-    })),
-    ...[
-      'sk-private',
-      'BEARER private',
-      'https://private.example/path',
-      'codex://new?prompt=private',
-      'www.private.example',
-      'private.example',
-      'person@private.example',
-      'a'.repeat(20),
-      'π'.repeat(20),
-      'private\nvalue',
-      'private\tvalue',
-      'private\u0000value',
-      'private\u007fvalue',
-      'private\u0085value',
-      'private\u200bvalue',
-      'private\u202evalue',
-      'private\u00a0value',
-      'private\ud800value',
-      'a '.repeat(61),
-      1,
-      null,
-    ].map((name) => ({
-      ...setupControls,
-      controls: [{ role: 'button', name }],
-    })),
-  ])(
-    'rejects malformed or unsafe setup controls without leaking values %#',
-    async (diagnostic) => {
-      await helper('receipt', {
-        ...composerFailure,
-        setupControls: diagnostic,
-      });
-      const error: unknown = await runLinuxChatgptDesktop(
-        'prepare',
-        config,
-        Date.now() + 5000
-      ).catch((failure: unknown) => failure);
-      expect(error).toMatchObject({ metadata: undefined, phase: undefined });
-      expect((error as Error).message).toContain('missing_or_invalid_receipt');
-      expect(JSON.stringify(error)).not.toContain('private');
-      expect((error as Error).message).not.toContain('private');
-    }
-  );
-  it.each(['ready', 'submitted', 'failed'] as const)(
-    'never accepts setup diagnostics during submit (%s)',
-    async (status) => {
-      await helper('receipt', {
-        status,
-        surface: 'chatgpt-work',
-        action_count: 0,
-        duration_ms: 0,
-        setupControls,
-      });
-      await expect(
-        runLinuxChatgptDesktop(
-          'submit',
-          config,
-          Date.now() + 5000,
-          'private prompt'
-        )
-      ).rejects.toMatchObject({
-        metadata: undefined,
-        message: expect.stringContaining('missing_or_invalid_receipt'),
-      });
-    }
-  );
-  it.each(['ready', 'submitted'])(
-    'setup diagnostics cannot fake successful prepare (%s)',
-    async (status) => {
-      await helper('receipt', {
-        status,
-        surface: 'chatgpt-work',
-        action_count: 0,
-        duration_ms: 0,
-        setupControls,
-      });
-      await expect(
-        runLinuxChatgptDesktop('prepare', config, Date.now() + 5000)
-      ).rejects.toMatchObject({
-        metadata: undefined,
-        message: expect.stringContaining('missing_or_invalid_receipt'),
-      });
-    }
-  );
   it.each([
     readableDraftState,
     unreadableDraftState,
@@ -349,8 +162,7 @@ describe('Linux ChatGPT runtime adapter', () => {
       ).catch((failure: unknown) => failure);
       expect(error).toBeInstanceOf(NativeChatgptDriverError);
       expect(error).toMatchObject({
-        metadata: { draftState },
-        step: 'draft-surface',
+        diagnostics: { draftState, step: 'draft-surface' },
       });
       expect((error as Error).message).not.toContain('textSha256');
       expect(
@@ -409,9 +221,11 @@ describe('Linux ChatGPT runtime adapter', () => {
       ).catch((failure: unknown) => failure);
       expect(error).toBeInstanceOf(NativeChatgptDriverError);
       expect(error).toMatchObject({
-        metadata: undefined,
-        phase: undefined,
-        step: undefined,
+        diagnostics: {
+          draftState: undefined,
+          phase: undefined,
+          step: undefined,
+        },
       });
       expect((error as Error).message).toContain('missing_or_invalid_receipt');
       expect(JSON.stringify(error)).not.toContain('private');
@@ -434,29 +248,8 @@ describe('Linux ChatGPT runtime adapter', () => {
         Date.now() + 5000,
         'private prompt'
       ).catch((failure: unknown) => failure);
-      expect(error).toMatchObject({ metadata: undefined });
+      expect(error).toMatchObject({ diagnostics: { draftState: undefined } });
       expect((error as Error).message).toContain('missing_or_invalid_receipt');
-    }
-  );
-  it.each([0, 1, 16])(
-    'preserves %i allowlisted candidates as error metadata only',
-    async (count) => {
-      const composerCandidates = Array.from({ length: count }, () => ({
-        ...composerCandidate,
-      }));
-      await helper('receipt', { ...composerFailure, composerCandidates });
-      const error: unknown = await runLinuxChatgptDesktop(
-        'prepare',
-        config,
-        Date.now() + 5000
-      ).catch((failure: unknown) => failure);
-      expect(error).toBeInstanceOf(NativeChatgptDriverError);
-      expect(error).toMatchObject({
-        phase: 'composer',
-        composerCandidates,
-        telemetry: { accounting: 'partial', action_count: 0 },
-      });
-      expect((error as Error).message).not.toContain('document web');
     }
   );
   it.each([
@@ -487,44 +280,28 @@ describe('Linux ChatGPT runtime adapter', () => {
         Date.now() + 5000
       ).catch((failure: unknown) => failure);
       expect(error).toBeInstanceOf(NativeChatgptDriverError);
-      expect(error).toMatchObject({ phase: 'composer', step });
+      expect(error).toMatchObject({ diagnostics: { phase: 'composer', step } });
       expect((error as Error).message).toContain(`step=${step}`);
       expect(
         (await readFile(join(root, 'calls.jsonl'), 'utf8')).trim().split('\n')
       ).toHaveLength(1);
     }
   );
-  it('accepts legacy composer failures without diagnostics', async () => {
+  it('accepts composer failures without draft state', async () => {
     await helper('receipt', composerFailure);
     await expect(
       runLinuxChatgptDesktop('prepare', config, Date.now() + 5000)
     ).rejects.toMatchObject({
-      phase: 'composer',
-      composerCandidates: undefined,
-      metadata: undefined,
+      diagnostics: {
+        telemetry: { accounting: 'partial', action_count: 0 },
+        error: 'state_transition_unobserved',
+        phase: 'composer',
+        step: undefined,
+        draftState: undefined,
+      },
     });
   });
   it.each([
-    { composerCandidates: Array.from({ length: 17 }, () => composerCandidate) },
-    { composerCandidates: [{ ...composerCandidate, name: 'private UI text' }] },
-    { composerCandidates: [{ ...composerCandidate, text: 'private prompt' }] },
-    {
-      composerCandidates: [{ ...composerCandidate, config: 'private config' }],
-    },
-    {
-      composerCandidates: [
-        { ...composerCandidate, url: 'https://private.example' },
-      ],
-    },
-    {
-      composerCandidates: [
-        { ...composerCandidate, credentials: 'private key' },
-      ],
-    },
-    { composerCandidates: [{ ...composerCandidate, showing: 1 }] },
-    { composerCandidates: [{ ...composerCandidate, editableState: 'true' }] },
-    { composerCandidates: [{ ...composerCandidate, editableInterface: null }] },
-    { composerCandidates: [{ ...composerCandidate, textInterface: 'true' }] },
     { step: 'private_step_text' },
     { step: null },
     { step: 'draft-open', phase: 'surface' },
@@ -533,24 +310,7 @@ describe('Linux ChatGPT runtime adapter', () => {
     { step: 'draft-open', status: 'submitted', phase: 'composer' },
     { error: 'private_error_text' },
     { error: 'AttributeError: private prompt' },
-    { composerCandidates: [{ role: 'text' }] },
-    { composerCandidates: [{ ...composerCandidate, role: 'x'.repeat(65) }] },
-    {
-      composerCandidates: [
-        { ...composerCandidate, role: 'https://private.example' },
-      ],
-    },
-    { composerCandidates: {} },
-    { composerCandidates: null },
-    { composerCandidates: [], phase: 'surface' },
-    { composerCandidates: [], phase: undefined },
-    {
-      composerCandidates: [],
-      status: 'ready',
-      surface: 'chatgpt-work',
-      phase: undefined,
-    },
-    { composerCandidates: [], status: 'submitted', phase: 'composer' },
+    { phase: 'private_phase_text' },
   ])(
     'rejects invalid diagnostic receipt %# without exposing it',
     async (override) => {
@@ -562,9 +322,7 @@ describe('Linux ChatGPT runtime adapter', () => {
       ).catch((failure: unknown) => failure);
       expect(error).toBeInstanceOf(NativeChatgptDriverError);
       expect(error).toMatchObject({
-        phase: undefined,
-        composerCandidates: undefined,
-        step: undefined,
+        diagnostics: { phase: undefined, step: undefined },
       });
       expect((error as Error).message).toContain('missing_or_invalid_receipt');
       expect(JSON.stringify(error)).not.toContain('private');

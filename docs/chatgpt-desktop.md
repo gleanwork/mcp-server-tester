@@ -238,9 +238,9 @@ AttributeError, TypeError, and GLib.Error map to `desktop_attribute_error`,
 `desktop_driver_failed`. Raw exception text is never returned. Helper failures
 are `helper_missing`, `helper_failed`, and `helper_timeout`; invalid profession
 geometry returns `profession_geometry_invalid`. Fixed composer failure steps are
-`draft-open`, `draft-surface`, `draft-readback`, and `send`. Bounded composer
-diagnostics include `textInterface`, `editableState`, and `editableInterface`,
-never prompt text or accessible names. Failure-only `draftState` measurements use
+`draft-open`, `draft-surface`, `draft-readback`, and `send`. Failure receipts
+carry only `error`, `phase`, `step`, and `draftState`; never prompt text or
+accessible names. Failure-only `draftState` measurements use
 the same bounded, expanded readback: `textLength`, `embeddedObjectCount`, and
 `newlineCount` count observed Unicode code points; `textSha256` hashes the exact
 UTF-8 bytes. Resolved object markers are not counted. Unreadable text omits these
