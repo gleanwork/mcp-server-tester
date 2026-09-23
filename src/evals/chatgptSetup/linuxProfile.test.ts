@@ -164,6 +164,10 @@ describe('fresh MST-owned Linux profile', () => {
         disabledHostTools: [
           { kind: 'plugin', id: 'computer-use@openai-bundled' },
         ],
+        executionPolicy: {
+          approvalPolicy: 'never',
+          sandboxMode: 'danger-full-access',
+        },
       },
       evidenceDir: join(home, 'evidence'),
     });
@@ -224,6 +228,10 @@ describe('fresh MST-owned Linux profile', () => {
       hostToolPolicy: {
         disabled: ['computer-use@openai-bundled'],
         requiredAbsent: ['cua_repl'],
+      },
+      executionPolicy: {
+        approvalPolicy: 'never',
+        sandboxMode: 'danger-full-access',
       },
       login: 'verified',
       mcpPreflight: [{ status: 'connected', toolCount: 3 }],

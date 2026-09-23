@@ -45,7 +45,7 @@ to display labels such as `5.6 Terra Medium`. Linux rejects `options.configPath`
 
 The caller (for example, Scio) owns the VM/container, display, D-Bus, keyring,
 AT-SPI bus, the fresh HOME and API-key file (creation and deletion), the package
-version check, and uploading `MST_CHATGPT_EVIDENCE_DIR`. It runs MST as the
+version check, the disposable no-new-privileges container, and uploading `MST_CHATGPT_EVIDENCE_DIR`. It runs MST as the
 unprivileged desktop user with this process environment. There is no controller
 helper, socket, opener, or attestation variable.
 
@@ -64,6 +64,7 @@ helper, socket, opener, or attestation variable.
 | `MST_CHATGPT_MCP_TOKEN_<n>`                          | Set by MST from `mcpServers[].auth`    | Config uses `bearer_token_env_var`; never written to disk.                            |
 | `MST_CHATGPT_EVIDENCE_DIR`                           | Empty 0700 dir that the caller uploads | Owned, mode 0700, empty at start.                                                     |
 | `MST_CHATGPT_PYTHON` (optional)                      | `/usr/bin/python3`                     | Absolute path. Needs PyGObject with `gi.repository.Atspi` 2.0.                        |
+| Process isolation (no variable)                      | Disposable no-new-privileges container | Not checked. Required: MST turns off the native sandbox (see below).                  |
 
 Any violation fails the case before a prompt with `environment_invalid: <NAME>`
 or another fixed code. A set `CODEX_HOME` must equal `$HOME/.codex`.
@@ -74,7 +75,8 @@ MST then owns, in order:
    `mkdtemp($TMPDIR/mst-chatgpt-workspace-*)`.
 2. Write `config.toml` with `cli_auth_credentials_store = "keyring"`, model,
    reasoning effort, MCP entries with `bearer_token_env_var`, and trust for only
-   that workspace.
+   that workspace, `approval_policy = "never"`, and
+   `sandbox_mode = "danger-full-access"`.
 3. `codex login --with-api-key` with the key on stdin only, then `codex login status`.
 4. Direct MCP preflight (connect and list tools for each configured server) and a
    read-only `codex app-server` probe (`initialize`, `initialized`,
@@ -100,6 +102,15 @@ is recorded, not hidden: `nativeReadiness.hostToolPolicy` lists the disabled
 plugin (`disabled`) and the server that must be absent (`requiredAbsent`), and
 `nativeReadiness.mcpStatus.hostTools` records `cua_repl` presence and whether any
 unconfigured server exposes tools (booleans only, no tool names). macOS is
+unchanged.
+
+Execution policy: on Linux, MST writes `approval_policy = "never"` and
+`sandbox_mode = "danger-full-access"`. Native command execution needs
+bubblewrap, which cannot run inside the container, and nobody can answer an
+approval request in a headless run, so a sandboxed command would hang the turn.
+This relies on the caller's isolation: Scio must run the whole app in a
+disposable no-new-privileges container with a fresh tmpfs profile. MST does not
+verify this. `nativeReadiness.executionPolicy` records the fixed values. macOS is
 unchanged.
 
 There is no setup-only mode. Setup failures carry fixed codes such as

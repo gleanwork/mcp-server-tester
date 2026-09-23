@@ -29,6 +29,7 @@ import {
   disabledHostToolName,
   type CodexConfigInstallOptions,
   type CodexDisabledHostTool,
+  type CodexExecutionPolicy,
   type ResolvedCodexSetup,
 } from '../codexSetup/config.js';
 import {
@@ -186,9 +187,21 @@ export const LINUX_CHATGPT_ABSENT_HOST_SERVERS: readonly string[] = [
   'cua_repl',
 ];
 
+/**
+ * bwrap cannot run inside the Scio container, and nobody can answer an
+ * approval request in a headless run. Scio runs the whole app in a disposable
+ * no-new-privileges container with a fresh tmpfs profile, so that container is
+ * the isolation boundary; the native per-command sandbox is turned off.
+ */
+export const LINUX_CHATGPT_EXECUTION_POLICY: CodexExecutionPolicy = {
+  approvalPolicy: 'never',
+  sandboxMode: 'danger-full-access',
+};
+
 /** Sanitized setup receipt. No prompts, URLs, tokens, or native output. */
 export interface LinuxChatgptReadiness {
   hostToolPolicy: { disabled: string[]; requiredAbsent: string[] };
+  executionPolicy: CodexExecutionPolicy;
   login: 'not-run' | 'verified' | 'failed';
   mcpPreflight: McpServerReadiness[];
   mcpStatus?: AppServerStatus;
@@ -199,7 +212,10 @@ export interface ChatgptPlatformProfile {
   readonly configPath: string;
   readonly install: Pick<
     CodexConfigInstallOptions,
-    'credentialStore' | 'trustedProject' | 'disabledHostTools'
+    | 'credentialStore'
+    | 'trustedProject'
+    | 'disabledHostTools'
+    | 'executionPolicy'
   >;
   readonly controller: ChatgptApplicationController;
   readonly evidenceDir?: string;
@@ -246,6 +262,7 @@ export async function createLinuxChatgptProfile(
       disabled: LINUX_CHATGPT_DISABLED_HOST_TOOLS.map(disabledHostToolName),
       requiredAbsent: [...LINUX_CHATGPT_ABSENT_HOST_SERVERS],
     },
+    executionPolicy: { ...LINUX_CHATGPT_EXECUTION_POLICY },
     login: 'not-run',
     mcpPreflight: [],
   };
@@ -259,6 +276,7 @@ export async function createLinuxChatgptProfile(
       credentialStore: 'keyring',
       trustedProject: workspace,
       disabledHostTools: LINUX_CHATGPT_DISABLED_HOST_TOOLS,
+      executionPolicy: LINUX_CHATGPT_EXECUTION_POLICY,
     },
     controller: createLinuxChatgptApp({
       appPath: environment.appPath,

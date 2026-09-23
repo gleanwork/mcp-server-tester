@@ -88,6 +88,16 @@ export function disabledHostToolName(tool: CodexDisabledHostTool): string {
   return tool.kind === 'plugin' ? tool.id : tool.label;
 }
 
+/**
+ * Native per-command execution policy. The only supported value turns off the
+ * native sandbox and approval prompts; use it only when the caller provides
+ * process isolation (for example, a disposable container).
+ */
+export interface CodexExecutionPolicy {
+  approvalPolicy: 'never';
+  sandboxMode: 'danger-full-access';
+}
+
 export interface ResolvedCodexSetup {
   configPath: string;
   configName: string;
@@ -210,6 +220,8 @@ export interface CodexConfigInstallOptions {
   trustedProject?: string;
   /** Bundled host tools to render as `enabled = false`. */
   disabledHostTools?: readonly CodexDisabledHostTool[];
+  /** Rendered as top-level `approval_policy` and `sandbox_mode`. */
+  executionPolicy?: CodexExecutionPolicy;
 }
 
 export async function installCodexConfig(
@@ -239,6 +251,13 @@ export async function installCodexConfig(
     throw new Error(
       'Codex trusted project must be a normalized absolute path.'
     );
+  const policy = options.executionPolicy;
+  if (
+    policy !== undefined &&
+    (policy.approvalPolicy !== 'never' ||
+      policy.sandboxMode !== 'danger-full-access')
+  )
+    throw new Error('Invalid Codex execution policy.');
   const resolved = resolveCodexSetup(setup, options.configName);
   const managed = parse(
     renderCodexConfig(resolved.servers, options.disabledHostTools)
@@ -280,6 +299,10 @@ export async function installCodexConfig(
       settings.model_reasoning_effort = options.reasoningEffort;
     if (options.credentialStore !== undefined)
       settings.cli_auth_credentials_store = options.credentialStore;
+    if (policy !== undefined) {
+      settings.approval_policy = policy.approvalPolicy;
+      settings.sandbox_mode = policy.sandboxMode;
+    }
     if (options.trustedProject !== undefined)
       settings.projects = {
         [options.trustedProject]: { trust_level: 'trusted' },

@@ -7,6 +7,7 @@ import {
   installCodexConfig,
   renderCodexConfig,
   resolveCodexSetup,
+  type CodexExecutionPolicy,
 } from './config.js';
 
 const temporaryDirectories: string[] = [];
@@ -175,6 +176,53 @@ describe('Codex configuration lifecycle', () => {
       },
     });
     await installation.restore();
+  });
+
+  it('renders the execution policy as top-level keys', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'mst-codex-policy-'));
+    temporaryDirectories.push(directory);
+    const configPath = join(directory, 'config.toml');
+    const original = 'approval_policy = "on-request"\n';
+    await writeFile(configPath, original, { mode: 0o600 });
+    const installation = await installCodexConfig(
+      { configPath, servers: [] },
+      {
+        executionPolicy: {
+          approvalPolicy: 'never',
+          sandboxMode: 'danger-full-access',
+        },
+      }
+    );
+    const installed = parse(await readFile(configPath, 'utf8'));
+    expect(installed.approval_policy).toBe('never');
+    expect(installed.sandbox_mode).toBe('danger-full-access');
+    await installation.restore();
+    expect(await readFile(configPath, 'utf8')).toBe(original);
+  });
+
+  it('omits the execution policy unless requested', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'mst-codex-policy-'));
+    temporaryDirectories.push(directory);
+    const configPath = join(directory, 'config.toml');
+    const installation = await installCodexConfig({ configPath, servers: [] });
+    const installed = parse(await readFile(configPath, 'utf8'));
+    expect(installed).not.toHaveProperty('approval_policy');
+    expect(installed).not.toHaveProperty('sandbox_mode');
+    await installation.restore();
+  });
+
+  it('rejects an unsupported execution policy before writing', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'mst-codex-policy-'));
+    temporaryDirectories.push(directory);
+    const configPath = join(directory, 'config.toml');
+    const executionPolicy = {
+      approvalPolicy: 'on-request',
+      sandboxMode: 'danger-full-access',
+    } as unknown as CodexExecutionPolicy;
+    await expect(
+      installCodexConfig({ configPath, servers: [] }, { executionPolicy })
+    ).rejects.toThrow('execution policy');
+    expect(await readdir(directory)).toEqual([]);
   });
 
   it.each(['relative/workspace', '/', '/tmp/../tmp/x'])(

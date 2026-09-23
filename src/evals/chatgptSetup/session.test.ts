@@ -196,6 +196,10 @@ beforeEach(() => {
           disabled: ['computer-use@openai-bundled'],
           requiredAbsent: ['cua_repl'],
         },
+        executionPolicy: {
+          approvalPolicy: 'never',
+          sandboxMode: 'danger-full-access',
+        },
         login: 'verified',
         mcpPreflight: [],
       },
@@ -517,7 +521,13 @@ describe('ChatGPT Linux native lifecycle', () => {
     expect(controller.openPrompt).not.toHaveBeenCalled();
     expect(session.telemetry).toMatchObject({
       setupStatus: 'failed',
-      nativeReadiness: { login: 'verified' },
+      nativeReadiness: {
+        login: 'verified',
+        executionPolicy: {
+          approvalPolicy: 'never',
+          sandboxMode: 'danger-full-access',
+        },
+      },
     });
     await session.dispose();
     expect(events.slice(-2)).toEqual(['restore', 'dispose-profile']);
