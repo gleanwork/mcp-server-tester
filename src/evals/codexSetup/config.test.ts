@@ -101,6 +101,60 @@ describe('Codex configuration lifecycle', () => {
     await installation.restore();
     expect(await readFile(configPath, 'utf8')).toBe(original);
   });
+  it('renders keyring credentials and exactly one trusted project', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'mst-codex-trust-'));
+    temporaryDirectories.push(directory);
+    const configPath = join(directory, 'config.toml');
+    await writeFile(
+      configPath,
+      'cli_auth_credentials_store = "file"\n[projects."/home/user"]\ntrust_level = "trusted"\n',
+      { mode: 0o600 }
+    );
+    const workspace = join(directory, 'workspace');
+    const installation = await installCodexConfig(
+      {
+        configPath,
+        servers: [
+          {
+            transport: 'http',
+            label: 'glean',
+            url: 'https://example.test/mcp',
+            bearerTokenEnvVar: 'MST_CHATGPT_MCP_TOKEN_0',
+          },
+        ],
+      },
+      { credentialStore: 'keyring', trustedProject: workspace }
+    );
+    const installed = parse(await readFile(configPath, 'utf8'));
+    expect(installed.cli_auth_credentials_store).toBe('keyring');
+    expect(installed.projects).toEqual({
+      [workspace]: { trust_level: 'trusted' },
+    });
+    expect(installed.mcp_servers).toEqual({
+      glean: {
+        url: 'https://example.test/mcp',
+        bearer_token_env_var: 'MST_CHATGPT_MCP_TOKEN_0',
+      },
+    });
+    await installation.restore();
+  });
+
+  it.each(['relative/workspace', '/', '/tmp/../tmp/x'])(
+    'rejects unsafe trusted project %s before writing',
+    async (trustedProject) => {
+      const directory = await mkdtemp(join(tmpdir(), 'mst-codex-trust-'));
+      temporaryDirectories.push(directory);
+      const configPath = join(directory, 'config.toml');
+      await expect(
+        installCodexConfig(
+          { configPath, servers: [] },
+          { trustedProject, credentialStore: 'keyring' }
+        )
+      ).rejects.toThrow('trusted project');
+      expect(await readdir(directory)).toEqual([]);
+    }
+  );
+
   it('preserves app settings while replacing only the MCP server selection', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'mst-codex-config-'));
     temporaryDirectories.push(directory);
