@@ -170,11 +170,26 @@ File menu, keyboard shortcut, clipboard input, or fallback if the draft is lost.
 The composer must be unique, visible, showing, enabled, sensitive, have EDITABLE
 state, an allowed non-password role, and a real Text interface. Nested editable
 paragraphs belong to their containing editor; independent fields stay ambiguous.
-Readback uses unbound `Atspi.Text.get_text(node, 0, -1)` to avoid the PyGObject
-Accessible/Text binding collision. Send stays blocked until the complete text
-matches the unchanged prompt, including Unicode, trailing spaces, and terminal
-line feeds, and exactly one enabled Send control exists. MST activates Send once.
-It never presses Enter or retries an uncertain Send.
+Readback uses unbound `Atspi.Text.get_character_count` and
+`Atspi.Text.get_text(node, 0, count)` to avoid the PyGObject Accessible/Text binding
+collision. Bare and `org.a11y.atspi.*` interface advertisements are supported.
+For each U+FFFC object character, an advertised Hypertext interface can supply an
+explicit reference through `Atspi.Hypertext.get_link_index(node, offset)` and
+`get_link(node, index)`. Only a link with exactly one anchor is expanded through
+`Atspi.Hyperlink.get_object(link, 0)` and recursive unbound Text reads. An empty
+linked paragraph therefore reads as empty. Accessible child order and names are
+never used as content. Images, password fields, non-Text targets, ambiguous links,
+cycles, incomplete reads, and exceeded budgets fail closed. Each read permits at
+most 256 node visits, 16 levels including the root, and 2 MiB of cumulative source
+UTF-8 bytes (including object characters) and expanded output, within the driver
+deadline.
+
+Literal text is unchanged, including whitespace, line feeds, and U+FFFC when no
+Hypertext interface exists or `get_link_index` returns -1. No paragraph separators
+are invented: missing reported separators cause an exact comparison to fail if
+the prompt contains them. Send stays blocked until the expanded text matches the
+unchanged prompt and exactly one enabled Send control exists. MST activates Send
+once. It never presses Enter or retries an uncertain Send.
 
 The action count records each opener invocation and each native selection/click
 attempt separately. Typical preparation is one action; typical submission is two
@@ -195,7 +210,12 @@ are `helper_missing`, `helper_failed`, and `helper_timeout`; invalid profession
 geometry returns `profession_geometry_invalid`. Fixed composer failure steps are
 `draft-open`, `draft-surface`, `draft-readback`, and `send`. Bounded composer
 diagnostics include `textInterface`, `editableState`, and `editableInterface`,
-never prompt text or accessible names. The successful receipt schema is unchanged.
+never prompt text or accessible names. Failure-only `draftState` measurements use
+the same bounded, expanded readback: `textLength`, `embeddedObjectCount`, and
+`newlineCount` count observed Unicode code points; `textSha256` hashes the exact
+UTF-8 bytes. Resolved object markers are not counted. Unreadable text omits these
+measurements. Readback failures return `composer_text_unavailable`, never raw RPC
+errors. The successful receipt schema is unchanged.
 
 These contracts have offline tests only. No Linux evaluation queries have been
 sent; prior live batch setup failed before query submission. Verify the new path

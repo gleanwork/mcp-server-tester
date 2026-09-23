@@ -52,6 +52,7 @@ class PublicNode:
         self.name, self.role, self.children = name, role, list(children)
         self.states = {'SHOWING', 'VISIBLE', 'ENABLED', 'SENSITIVE'}
         self.interfaces, self.value = [], ''
+        self.links = {}
         if editable:
             self.states.add('EDITABLE')
             self.interfaces.append('Text')
@@ -62,8 +63,10 @@ class PublicNode:
     def get_child_count(self): return len(self.children)
     def get_child_at_index(self, index): return self.children[index]
     def get_interfaces(self): return self.interfaces
-    def get_text_iface(self): return self if 'Text' in self.interfaces else None
-    def get_editable_text_iface(self): return self if 'EditableText' in self.interfaces else None
+    def get_text_iface(self):
+        return self if any(i in self.interfaces for i in ('Text', 'org.a11y.atspi.Text')) else None
+    def get_editable_text_iface(self):
+        return self if any(i in self.interfaces for i in ('EditableText', 'org.a11y.atspi.EditableText')) else None
     def get_text(self, *_): raise TypeError('private bound collision')
 
 
@@ -79,8 +82,14 @@ def public_desktop():
         get_desktop=lambda _: root,
         StateType=SimpleNamespace(**{key: key for key in (
             'SHOWING', 'VISIBLE', 'ENABLED', 'SENSITIVE', 'EDITABLE', 'CHECKED', 'SELECTED')}),
-        Text=SimpleNamespace(get_text=lambda node, start, end: node.value,
-                             get_character_count=lambda node: len(node.value)))
+        Text=SimpleNamespace(get_text=lambda node, start, end: node.value[start:end],
+                             get_character_count=lambda node: len(node.value)),
+        Hypertext=SimpleNamespace(
+            get_link_index=Mock(side_effect=lambda node, offset: offset if offset in node.links else -1),
+            get_link=Mock(side_effect=lambda node, index: node.links[index])),
+        Hyperlink=SimpleNamespace(
+            get_n_anchors=Mock(side_effect=lambda link: len(link.anchors)),
+            get_object=Mock(side_effect=lambda link, index: link.anchors[index])))
     return desktop, editor, app
 
 
@@ -711,6 +720,247 @@ class GeometryTest(unittest.TestCase):
                 with self.assertRaisesRegex(DriverFailure, code):
                     desktop.select_profession(nodes, nodes[1])
                 run.assert_called_once()
+
+
+class RichTextTest(unittest.TestCase):
+    def linked(self, value=''):
+        desktop, editor, app = public_desktop()
+        editor.role, editor.value = 'entry', '\ufffc'
+        paragraph = PublicNode('private paragraph name', 'paragraph', editable=True)
+        paragraph.value = value
+        editor.children = [paragraph]
+        paragraph.children = [PublicNode('private static name', 'static')]
+        self.link(editor, 0, paragraph)
+        return desktop, editor, paragraph, app
+
+    def link(self, parent, offset, *children):
+        if 'Hypertext' not in parent.interfaces:
+            parent.interfaces.append('Hypertext')
+        parent.links[offset] = SimpleNamespace(anchors=children)
+
+    def read(self, desktop, editor, limit=None):
+        return desktop.text({'node': editor}, limit=limit)
+
+    def assert_unavailable(self, desktop, editor, limit=None):
+        with self.assertRaisesRegex(DriverFailure, '^composer_text_unavailable$') as error:
+            self.read(desktop, editor, limit)
+        self.assertNotIn('private', str(error.exception))
+
+    def test_empty_embedded_paragraph_is_exact_empty_not_its_static_child_name(self):
+        desktop, editor, paragraph, _ = self.linked()
+        editor.get_name = paragraph.get_name = Mock(side_effect=AssertionError('no names'))
+        self.assertEqual(self.read(desktop, editor), '')
+        desktop.api.Hypertext.get_link_index.assert_called_once_with(editor, 0)
+        desktop.api.Hypertext.get_link.assert_called_once_with(editor, 0)
+        desktop.api.Hyperlink.get_object.assert_called_once_with(editor.links[0], 0)
+
+    def test_one_paragraph_preserves_unicode_whitespace_multiline_and_literal_marker(self):
+        for value in ('single line', '  π 😀e\u0301\t\r\n\nExact.  \n', '\ufffc', 'a\ufffcb'):
+            with self.subTest(value=value):
+                desktop, editor, paragraph, _ = self.linked(value)
+                paragraph.interfaces.append('Hypertext')
+                self.assertEqual(self.read(desktop, editor), value)
+                if '\ufffc' in value:
+                    desktop.api.Hypertext.get_link_index.assert_any_call(paragraph, value.index('\ufffc'))
+
+    def test_root_and_child_bound_get_text_collisions_are_never_called(self):
+        desktop, editor, paragraph, _ = self.linked('π😀\n')
+        editor.get_text = paragraph.get_text = Mock(side_effect=TypeError('private collision'))
+        desktop.api.Text.get_text = Mock(wraps=desktop.api.Text.get_text)
+        self.assertEqual(self.read(desktop, editor), paragraph.value)
+        self.assertEqual(desktop.api.Text.get_text.call_args_list,
+                         [unittest.mock.call(editor, 0, 1), unittest.mock.call(paragraph, 0, 3)])
+        editor.get_text.assert_not_called()
+
+    def test_bare_and_qualified_interfaces_support_snapshot_and_expansion(self):
+        for prefix in ('', 'org.a11y.atspi.'):
+            desktop, editor, paragraph, _ = self.linked('exact')
+            for item in (editor, paragraph):
+                item.interfaces.append('EditableText')
+                item.interfaces = [prefix + name for name in item.interfaces]
+            current = composer(desktop.snapshot())
+            self.assertIs(current['node'], editor)
+            self.assertTrue(current['textInterface'])
+            self.assertTrue(current['editableInterface'])
+            self.assertEqual(desktop.text(current), 'exact')
+
+    def test_only_linked_markers_expand_at_unicode_character_offsets(self):
+        desktop, editor, paragraph, _ = self.linked('child')
+        editor.value = '😀\ufffc \n\ufffc\t'
+        editor.links = {}
+        self.link(editor, 4, paragraph)
+        self.assertEqual(self.read(desktop, editor), '😀\ufffc \nchild\t')
+        self.assertEqual(desktop.api.Hypertext.get_link_index.call_args_list,
+                         [unittest.mock.call(editor, 1), unittest.mock.call(editor, 4)])
+        desktop.api.Hypertext.get_link.assert_called_once_with(editor, 4)
+
+    def test_unlinked_markers_remain_literal_with_or_without_hypertext(self):
+        for hypertext in (False, True):
+            desktop, editor, _ = public_desktop()
+            editor.value = '\ufffc\n\ufffc'
+            editor.children = [PublicNode('private child', 'paragraph', editable=True)]
+            if hypertext:
+                editor.interfaces.append('Hypertext')
+            self.assertEqual(self.read(desktop, editor), editor.value)
+            desktop.api.Hypertext.get_link.assert_not_called()
+            desktop.api.Hyperlink.get_object.assert_not_called()
+
+    def test_nested_links_preserve_reported_separators_only(self):
+        desktop, editor, paragraph, _ = self.linked('before\ufffcafter')
+        child = PublicNode('private nested name', 'text', editable=True)
+        child.value = 'inner\n'
+        self.link(paragraph, 6, child)
+        self.assertEqual(self.read(desktop, editor), 'beforeinner\nafter')
+        editor.value = '\ufffc\r\n\ufffc'
+        self.link(editor, 3, child)
+        self.assertEqual(self.read(desktop, editor), 'beforeinner\nafter\r\ninner\n')
+
+    def test_direct_and_nested_cycles_fail(self):
+        for nested in (False, True):
+            desktop, editor, paragraph, _ = self.linked('\ufffc')
+            self.link(paragraph if nested else editor, 0, editor)
+            self.assert_unavailable(desktop, editor)
+
+    def test_ambiguous_missing_or_invalid_links_fail_without_reading_children(self):
+        for anchors in ((), (None,), (PublicNode('private'), PublicNode('private'))):
+            desktop, editor, _, _ = self.linked()
+            self.link(editor, 0, *anchors)
+            self.assert_unavailable(desktop, editor)
+        for index in (-2, None, 'private', True):
+            desktop, editor, _, _ = self.linked()
+            desktop.api.Hypertext.get_link_index.return_value = index
+            desktop.api.Hypertext.get_link_index.side_effect = None
+            self.assert_unavailable(desktop, editor)
+            desktop.api.Hypertext.get_link.assert_not_called()
+        desktop, editor, _, _ = self.linked()
+        editor.links[0] = None
+        self.assert_unavailable(desktop, editor)
+
+    def test_image_password_and_nontext_children_fail_never_read_names(self):
+        for kind in ('image', 'password text', 'no-text', 'no-text-iface'):
+            desktop, editor, paragraph, _ = self.linked('private text')
+            if kind == 'no-text':
+                paragraph.interfaces = []
+            elif kind == 'no-text-iface':
+                paragraph.get_text_iface = lambda: None
+            else:
+                paragraph.role = kind
+            paragraph.get_name = Mock(side_effect=AssertionError('no names'))
+            desktop.api.Text.get_text = Mock(wraps=desktop.api.Text.get_text)
+            self.assert_unavailable(desktop, editor)
+            desktop.api.Text.get_text.assert_called_once_with(editor, 0, 1)
+            paragraph.get_name.assert_not_called()
+
+    def test_node_and_depth_budgets_include_root_and_bound_before_child_read(self):
+        for budget in ('TEXT_NODE_LIMIT', 'TEXT_DEPTH_LIMIT'):
+            desktop, editor, _, _ = self.linked('exact')
+            desktop.api.Text.get_text = Mock(wraps=desktop.api.Text.get_text)
+            with patch('chatgpt_linux.' + budget, 1):
+                self.assert_unavailable(desktop, editor)
+                desktop.api.Text.get_text.assert_called_once_with(editor, 0, 1)
+            with patch('chatgpt_linux.' + budget, 2):
+                self.assertEqual(self.read(desktop, editor), 'exact')
+        desktop, editor, paragraph, _ = self.linked('x')
+        editor.value = '\ufffc\ufffc'
+        self.link(editor, 1, paragraph)
+        with patch('chatgpt_linux.TEXT_NODE_LIMIT', 2):
+            self.assert_unavailable(desktop, editor)
+
+    def test_utf8_and_cumulative_source_byte_budgets_apply_to_all_reads(self):
+        desktop, editor, paragraph, _ = self.linked('😀')
+        self.assertEqual(self.read(desktop, editor, limit=7), '😀')
+        self.assert_unavailable(desktop, editor, limit=6)
+        paragraph.value = 'abcd'
+        self.assert_unavailable(desktop, editor, limit=6)
+        desktop.api.Text.get_text = Mock(wraps=desktop.api.Text.get_text)
+        self.assert_unavailable(desktop, editor, limit=0)
+        desktop.api.Text.get_text.assert_not_called()
+        with patch('chatgpt_linux.INPUT_LIMIT', 6):
+            self.assert_unavailable(desktop, editor)
+            self.assert_unavailable(desktop, editor, limit=100)
+        desktop, editor, _ = public_desktop()
+        editor.value = '😀'
+        self.assertEqual(self.read(desktop, editor, limit=4), '😀')
+        self.assert_unavailable(desktop, editor, limit=3)
+
+    def test_invalid_counts_and_incomplete_or_invalid_text_fail(self):
+        for count in (-1, True, 'private', INPUT_LIMIT + 1):
+            desktop, editor, _ = public_desktop()
+            desktop.api.Text.get_character_count = Mock(return_value=count)
+            desktop.api.Text.get_text = Mock()
+            self.assert_unavailable(desktop, editor)
+            desktop.api.Text.get_text.assert_not_called()
+        for value in (None, 1, 'private incomplete', '\ud800'):
+            desktop, editor, _ = public_desktop()
+            desktop.api.Text.get_character_count = Mock(return_value=1)
+            desktop.api.Text.get_text = Mock(return_value=value)
+            self.assert_unavailable(desktop, editor)
+
+    def test_rpc_errors_never_expose_content_and_diagnostics_are_unreadable(self):
+        for interface, method in (('Text', 'get_text'), ('Hypertext', 'get_link_index'),
+                                  ('Hypertext', 'get_link'), ('Hyperlink', 'get_n_anchors'),
+                                  ('Hyperlink', 'get_object')):
+            desktop, editor, _, _ = self.linked('private prompt')
+            setattr(getattr(desktop.api, interface), method,
+                    Mock(side_effect=FakeGLibError('private text and error')))
+            self.assert_unavailable(desktop, editor)
+            driver = Driver(desktop, 60_000, 24)
+            driver.snapshot()
+            receipt = driver.receipt('failed')
+            self.assertFalse(receipt['draftState']['textReadable'])
+            self.assertNotIn('textSha256', receipt['draftState'])
+            self.assertNotIn('private', json.dumps(receipt))
+
+    def test_expansion_checks_deadline(self):
+        desktop, editor, _, _ = self.linked('exact')
+        desktop.deadline = 0
+        with self.assertRaisesRegex(DriverFailure, '^deadline_exceeded$'):
+            self.read(desktop, editor)
+        desktop.api.Hypertext.get_link.assert_not_called()
+
+    def test_failure_diagnostics_measure_expanded_text_not_root_marker(self):
+        for value in ('', '  π 😀\n\ufffc\t'):
+            desktop, _, _, _ = self.linked(value)
+            driver = Driver(desktop, 60_000, 24)
+            driver.snapshot()
+            state = driver.receipt('failed')['draftState']
+            self.assertEqual(state, {
+                'observedSurface': 'chatgpt-work', 'composerRootCount': 1,
+                'sendControlCount': 1, 'textReadable': True, 'textLength': len(value),
+                'textSha256': hashlib.sha256(value.encode('utf-8')).hexdigest(),
+                'embeddedObjectCount': value.count('\ufffc'), 'newlineCount': value.count('\n')})
+
+    def test_empty_paragraph_passes_prepare_and_exact_paragraph_sends_once(self):
+        for prompt in ('', 'single line', '  π 😀\n\nExact.  \n'):
+            desktop, editor, paragraph, _ = self.linked('prior draft')
+            desktop.require_helpers = Mock()
+            desktop.open_prompt = Mock(side_effect=lambda value: setattr(paragraph, 'value', value))
+            def send(control, allowed):
+                self.assertEqual(control['name'], 'Send')
+                self.assertEqual(self.read(desktop, editor), prompt)
+            desktop.activate = Mock(side_effect=send)
+            driver = Driver(desktop, 60_000, 24)
+            receipt = (driver.submit(prompt, 'chatgpt-work') if prompt
+                       else driver.prepare('chatgpt-work'))
+            self.assertEqual(receipt['status'], 'submitted' if prompt else 'ready')
+            self.assertEqual(receipt['action_count'], 2 if prompt else 1)
+            desktop.open_prompt.assert_called_once_with(prompt)
+            self.assertEqual(desktop.activate.call_count, 1 if prompt else 0)
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_missing_paragraph_separators_never_guessed_or_sent(self, _sleep):
+        desktop, editor, _, _ = self.linked('first')
+        other = PublicNode('private second', 'paragraph', editable=True)
+        other.value = 'second'
+        editor.value = '\ufffc\ufffc'
+        self.link(editor, 1, other)
+        desktop.require_helpers, desktop.open_prompt, desktop.activate = Mock(), Mock(), Mock()
+        self.assertEqual(self.read(desktop, editor), 'firstsecond')
+        driver = Driver(desktop, 60_000, 24)
+        with self.assertRaisesRegex(DriverFailure, '^state_transition_unobserved$'):
+            driver.submit('first\nsecond', 'chatgpt-work')
+        desktop.open_prompt.assert_called_once_with('first\nsecond')
+        desktop.activate.assert_not_called()
 
 
 class AccessibilityTest(unittest.TestCase):

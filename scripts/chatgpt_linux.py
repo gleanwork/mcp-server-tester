@@ -27,6 +27,8 @@ MENU_LABELS = {'chatgpt-work': 'ChatGPT Work Create, learn, and explore',
 EDITOR_ROLES = {'entry', 'text', 'text area', 'editable text', 'paragraph'}
 XDOTOOL = '/usr/bin/xdotool'
 INPUT_LIMIT = 2 * 1024 * 1024
+TEXT_NODE_LIMIT = 256
+TEXT_DEPTH_LIMIT = 16
 OUTPUT_LIMIT = 1024
 SESSION_KEYS = ('PATH', 'HOME', 'DISPLAY', 'XAUTHORITY', 'DBUS_SESSION_BUS_ADDRESS',
                 'AT_SPI_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'XDG_CONFIG_HOME',
@@ -58,6 +60,10 @@ def error_code(error):
     if isinstance(error, GLIB_ERROR):
         return 'desktop_glib_error'
     return 'desktop_driver_failed'
+
+
+def has_interface(interfaces, name):
+    return name in interfaces or 'org.a11y.atspi.' + name in interfaces
 
 
 class Desktop:
@@ -134,8 +140,9 @@ class Desktop:
             editable_interface = False
             if role in EDITOR_ROLES and editable_state:
                 interfaces = node.get_interfaces()
-                text_interface = 'Text' in interfaces and node.get_text_iface() is not None
-                editable_interface = ('EditableText' in interfaces
+                text_interface = (has_interface(interfaces, 'Text')
+                                  and node.get_text_iface() is not None)
+                editable_interface = (has_interface(interfaces, 'EditableText')
                                       and node.get_editable_text_iface() is not None)
             editable = role in EDITOR_ROLES and editable_state and text_interface
             nodes.append({'node': node, 'ancestors': ancestors, 'name': node.get_name() or '',
@@ -160,18 +167,77 @@ class Desktop:
             raise DriverFailure('action_acknowledgement_uncertain')
 
     def text(self, control, limit=None):
-        text = control['node'].get_text_iface()
-        if text is None:
-            raise DriverFailure('composer_text_unavailable')
-        # Accessible.get_text_iface() may return the Accessible itself. Its bound
-        # get_text is not necessarily Text.get_text in PyGObject.
-        # Diagnostic reads are bounded and never normalize object placeholders.
-        if limit is not None:
-            count = self.api.Text.get_character_count(control['node'])
-            if not 0 <= count <= limit:
+        # Follow only public Hypertext references, never the accessibility child
+        # tree or accessible names. Bound both source reads and expanded output.
+        byte_limit = INPUT_LIMIT if limit is None else min(limit, INPUT_LIMIT)
+        nodes_read = 0
+        bytes_read = 0
+        output_bytes = 0
+        fragments = []
+
+        def append(value):
+            nonlocal output_bytes
+            output_bytes += len(value.encode('utf-8'))
+            if output_bytes > byte_limit:
                 raise DriverFailure('composer_text_unavailable')
-            return self.api.Text.get_text(control['node'], 0, count)
-        return self.api.Text.get_text(control['node'], 0, -1)
+            fragments.append(value)
+
+        def expand(node, ancestors):
+            nonlocal nodes_read, bytes_read
+            self.remaining()
+            if (node is None or len(ancestors) >= TEXT_DEPTH_LIMIT
+                    or nodes_read >= TEXT_NODE_LIMIT or node in ancestors):
+                raise DriverFailure('composer_text_unavailable')
+            nodes_read += 1
+            interfaces = node.get_interfaces()
+            if (node.get_role_name() in {'image', 'password text'}
+                    or not has_interface(interfaces, 'Text')
+                    or node.get_text_iface() is None):
+                raise DriverFailure('composer_text_unavailable')
+            # Accessible.get_text_iface() may return the Accessible itself.
+            # Always use unbound Text methods to avoid the PyGObject collision.
+            count = self.api.Text.get_character_count(node)
+            if type(count) is not int or not 0 <= count <= byte_limit - bytes_read:
+                raise DriverFailure('composer_text_unavailable')
+            value = self.api.Text.get_text(node, 0, count)
+            if not isinstance(value, str) or len(value) != count:
+                raise DriverFailure('composer_text_unavailable')
+            bytes_read += len(value.encode('utf-8'))
+            if bytes_read > byte_limit:
+                raise DriverFailure('composer_text_unavailable')
+            if not has_interface(interfaces, 'Hypertext'):
+                append(value)
+                return
+            start = 0
+            for offset, character in enumerate(value):
+                if character != '\ufffc':
+                    continue
+                self.remaining()
+                index = self.api.Hypertext.get_link_index(node, offset)
+                if type(index) is not int or index < -1:
+                    raise DriverFailure('composer_text_unavailable')
+                if index == -1:
+                    continue  # A literal object character is not an empty editor.
+                append(value[start:offset])
+                link = self.api.Hypertext.get_link(node, index)
+                if link is None:
+                    raise DriverFailure('composer_text_unavailable')
+                anchors = self.api.Hyperlink.get_n_anchors(link)
+                if type(anchors) is not int or anchors != 1:
+                    raise DriverFailure('composer_text_unavailable')
+                child = self.api.Hyperlink.get_object(link, 0)
+                expand(child, ancestors + (node,))
+                start = offset + 1
+            append(value[start:])
+
+        try:
+            expand(control['node'], ())
+            return ''.join(fragments)
+        except DriverFailure:
+            raise
+        except Exception:
+            # RPC errors can contain private text. Do not propagate their values.
+            raise DriverFailure('composer_text_unavailable') from None
 
     def environment(self):
         return {key: os.environ[key] for key in SESSION_KEYS if key in os.environ}
