@@ -193,7 +193,8 @@ beforeEach(() => {
       evidenceDir: env.evidenceDir,
       readiness: {
         hostToolPolicy: {
-          disabled: ['computer-use@openai-bundled', 'cua_repl'],
+          disabled: ['computer-use@openai-bundled'],
+          requiredAbsent: ['cua_repl'],
         },
         login: 'verified',
         mcpPreflight: [],

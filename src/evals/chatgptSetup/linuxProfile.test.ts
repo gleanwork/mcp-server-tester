@@ -163,7 +163,6 @@ describe('fresh MST-owned Linux profile', () => {
         credentialStore: 'keyring',
         disabledHostTools: [
           { kind: 'plugin', id: 'computer-use@openai-bundled' },
-          { kind: 'mcpServer', label: 'cua_repl' },
         ],
       },
       evidenceDir: join(home, 'evidence'),
@@ -223,7 +222,8 @@ describe('fresh MST-owned Linux profile', () => {
     ]);
     expect(profile.readiness).toMatchObject({
       hostToolPolicy: {
-        disabled: ['computer-use@openai-bundled', 'cua_repl'],
+        disabled: ['computer-use@openai-bundled'],
+        requiredAbsent: ['cua_repl'],
       },
       login: 'verified',
       mcpPreflight: [{ status: 'connected', toolCount: 3 }],

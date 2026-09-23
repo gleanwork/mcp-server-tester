@@ -174,17 +174,21 @@ export function validateLinuxChatgptConfig(
 
 /**
  * The headless VM has no usable screen, so the bundled computer-use tool never
- * returns. Linux always disables it and records the policy in telemetry.
+ * returns. Linux always disables the plugin that contributes `cua_repl` and
+ * records the policy in telemetry. A transport-less `[mcp_servers.cua_repl]`
+ * table breaks native login, so the server itself is not written; the
+ * app-server probe verifies it is absent instead.
  */
 export const LINUX_CHATGPT_DISABLED_HOST_TOOLS: readonly CodexDisabledHostTool[] =
-  [
-    { kind: 'plugin', id: 'computer-use@openai-bundled' },
-    { kind: 'mcpServer', label: 'cua_repl' },
-  ];
+  [{ kind: 'plugin', id: 'computer-use@openai-bundled' }];
+/** Host MCP servers that must not be exposed to the model on Linux. */
+export const LINUX_CHATGPT_ABSENT_HOST_SERVERS: readonly string[] = [
+  'cua_repl',
+];
 
 /** Sanitized setup receipt. No prompts, URLs, tokens, or native output. */
 export interface LinuxChatgptReadiness {
-  hostToolPolicy: { disabled: string[] };
+  hostToolPolicy: { disabled: string[]; requiredAbsent: string[] };
   login: 'not-run' | 'verified' | 'failed';
   mcpPreflight: McpServerReadiness[];
   mcpStatus?: AppServerStatus;
@@ -240,6 +244,7 @@ export async function createLinuxChatgptProfile(
   const readiness: LinuxChatgptReadiness = {
     hostToolPolicy: {
       disabled: LINUX_CHATGPT_DISABLED_HOST_TOOLS.map(disabledHostToolName),
+      requiredAbsent: [...LINUX_CHATGPT_ABSENT_HOST_SERVERS],
     },
     login: 'not-run',
     mcpPreflight: [],
@@ -310,9 +315,7 @@ export async function createLinuxChatgptProfile(
         environment.codexPath,
         { ...native, ...tokens },
         setup.servers.map((server) => server.label),
-        LINUX_CHATGPT_DISABLED_HOST_TOOLS.flatMap((tool) =>
-          tool.kind === 'mcpServer' ? [tool.label] : []
-        )
+        LINUX_CHATGPT_ABSENT_HOST_SERVERS
       );
       if (readiness.mcpStatus.status !== 'available')
         throw fail('mcp_status_unavailable');

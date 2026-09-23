@@ -91,12 +91,13 @@ MST then owns, in order:
 
 Headless host tool policy: the VM has no usable screen, so the bundled
 computer-use tool (`cua_repl`) never returns. On Linux, MST always writes
-`[plugins."computer-use@openai-bundled"] enabled = false` and
-`[mcp_servers.cua_repl] enabled = false` to `config.toml`. The app-server probe
-runs even without configured servers. If `cua_repl` is listed with any tool,
-setup fails before the prompt with `host_tool_policy_unenforced`. If it is not
-listed, the policy holds. The policy is recorded, not hidden:
-`nativeReadiness.hostToolPolicy.disabled` lists the disabled tools, and
+`[plugins."computer-use@openai-bundled"] enabled = false` to `config.toml`.
+It does not write a `[mcp_servers.cua_repl]` table: a table without a transport
+breaks native login. The app-server probe runs even without configured servers.
+If `cua_repl` is listed with any tool, setup fails before the prompt with
+`host_tool_policy_unenforced`. If it is not listed, the policy holds. The policy
+is recorded, not hidden: `nativeReadiness.hostToolPolicy` lists the disabled
+plugin (`disabled`) and the server that must be absent (`requiredAbsent`), and
 `nativeReadiness.mcpStatus.hostTools` records `cua_repl` presence and whether any
 unconfigured server exposes tools (booleans only, no tool names). macOS is
 unchanged.
