@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """Bounded ChatGPT AT-SPI setup/submission. Caller owns login and desktop lifecycle.
 
-No inference API, shell, keyboard fallback, answer extraction, or action retry.
+No inference API, shell, arbitrary keyboard input, answer extraction, or action retry.
 Input is JSON on stdin; output contains only a fixed receipt, never UI/query text.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
+import selectors
+import subprocess
 import sys
 import time
 
@@ -21,6 +24,35 @@ SURFACES = {'chatgpt-work': 'ChatGPT Work', 'codex': 'Codex'}
 MENU_LABELS = {'chatgpt-work': 'ChatGPT Work Create, learn, and explore',
                'codex': 'Codex Build, debug, and ship'}
 EDITOR_ROLES = {'entry', 'text', 'text area', 'editable text', 'paragraph'}
+XCLIP = '/usr/bin/xclip'
+XDOTOOL = '/usr/bin/xdotool'
+GLIB_ERROR = ()
+ERROR_CODES = frozenset({
+    'accessibility_event_budget', 'accessibility_tree_budget', 'desktop_ambiguous',
+    'action_unavailable', 'action_missing_or_ambiguous', 'action_acknowledgement_uncertain',
+    'composer_text_unavailable', 'fill_acknowledgement_uncertain',
+    'composer_missing_or_ambiguous', 'new_chat_missing_or_ambiguous',
+    'deadline_exceeded', 'action_budget_exhausted', 'state_transition_unobserved',
+    'send_missing_or_ambiguous', 'invalid_surface', 'profession_ambiguous',
+    'continue_missing_or_ambiguous', 'skip_missing_or_ambiguous',
+    'intro_confirmation_ambiguous', 'mode_missing_or_ambiguous', 'surface_item_ambiguous',
+    'invalid_prompt', 'surface_mismatch', 'invalid_budget', 'input_too_large', 'invalid_input',
+    'helper_missing', 'helper_failed', 'helper_timeout', 'clipboard_unavailable',
+    'focus_failed', 'composer_not_empty', 'desktop_attribute_error', 'desktop_type_error',
+    'desktop_glib_error', 'desktop_driver_failed',
+})
+
+
+def error_code(error):
+    if isinstance(error, DriverFailure) and str(error) in ERROR_CODES:
+        return str(error)
+    if isinstance(error, AttributeError):
+        return 'desktop_attribute_error'
+    if isinstance(error, TypeError):
+        return 'desktop_type_error'
+    if isinstance(error, GLIB_ERROR):
+        return 'desktop_glib_error'
+    return 'desktop_driver_failed'
 
 
 class Desktop:
@@ -28,10 +60,36 @@ class Desktop:
         import gi
         gi.require_version('Atspi', '2.0')
         from gi.repository import Atspi, GLib
+        global GLIB_ERROR
+        GLIB_ERROR = GLib.Error
+        self.glib_error = GLib.Error
         self.api = Atspi
         self.context = GLib.MainContext.default()
+        self.clipboard = None
+        self.deadline = float('inf')
+
+    def require_helpers(self):
+        if not all(os.path.isfile(path) and os.access(path, os.X_OK)
+                   for path in (XCLIP, XDOTOOL)):
+            raise DriverFailure('helper_missing')
+
+    def remaining(self, cap=2):
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise DriverFailure('deadline_exceeded')
+        return min(cap, remaining)
 
     def snapshot(self):
+        # Retry only a read-only traversal, discarding every partial tree.
+        for attempt in range(3):
+            try:
+                return self._snapshot()
+            except getattr(self, 'glib_error', ()):
+                if attempt == 2:
+                    raise
+                self.remaining()
+
+    def _snapshot(self):
         # AT-SPI cache invalidation runs on the default GLib context. Never
         # authorize actions from a snapshot while that event queue is still busy.
         for _ in range(256):
@@ -64,14 +122,22 @@ class Desktop:
             enabled = states.contains(self.api.StateType.ENABLED)
             sensitive = states.contains(self.api.StateType.SENSITIVE)
             role = node.get_role_name()
-            # Observe every role, but do not widen the action-authorizing gate.
             editable_state = states.contains(self.api.StateType.EDITABLE)
-            editable_interface = node.get_editable_text_iface() is not None
-            editable = role in EDITOR_ROLES and editable_state and editable_interface
+            # Unsupported interface RPCs can fail even on otherwise valid nodes.
+            # Query only candidate roles and use the advertised public interfaces.
+            text_interface = False
+            editable_interface = False
+            if role in EDITOR_ROLES and editable_state:
+                interfaces = node.get_interfaces()
+                text_interface = 'Text' in interfaces and node.get_text_iface() is not None
+                editable_interface = ('EditableText' in interfaces
+                                      and node.get_editable_text_iface() is not None)
+            editable = role in EDITOR_ROLES and editable_state and text_interface
             nodes.append({'node': node, 'ancestors': ancestors, 'name': node.get_name() or '',
                           'role': role, 'showing': showing, 'visible': visible,
                           'enabled': enabled, 'sensitive': sensitive, 'editable': editable,
                           'editableState': editable_state, 'editableInterface': editable_interface,
+                          'textInterface': text_interface,
                           'selected': states.contains(self.api.StateType.CHECKED)
                           or states.contains(self.api.StateType.SELECTED)})
             pending.extend((node.get_child_at_index(i), ancestors + (index,))
@@ -92,11 +158,93 @@ class Desktop:
         text = control['node'].get_text_iface()
         if text is None:
             raise DriverFailure('composer_text_unavailable')
-        return text.get_text(0, -1)
+        # Accessible.get_text_iface() may return the Accessible itself. Its bound
+        # get_text is not necessarily Text.get_text in PyGObject.
+        return self.api.Text.get_text(control['node'], 0, -1)
+
+    def helper(self, argv, allow_unavailable=False):
+        try:
+            return subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                  stderr=subprocess.DEVNULL, timeout=self.remaining(), check=True).stdout
+        except subprocess.TimeoutExpired:
+            raise DriverFailure('helper_timeout') from None
+        except subprocess.CalledProcessError:
+            if allow_unavailable:
+                return None
+            raise DriverFailure('helper_failed') from None
+        except OSError:
+            raise DriverFailure('helper_failed') from None
+
+    def release_clipboard(self):
+        process = getattr(self, 'clipboard', None)
+        self.clipboard = None
+        if process is not None:
+            try:
+                if process.poll() is None:
+                    process.terminate()
+                process.wait(timeout=0.5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=0.5)
+            finally:
+                if process.stdin and not process.stdin.closed:
+                    process.stdin.close()
+
+    def own_clipboard(self, prompt):
+        data = prompt.encode('utf-8')
+        try:
+            # -quiet keeps xclip in the foreground. No detached selection owner,
+            # shell, prompt argv, or user clipboard backup is permitted.
+            process = subprocess.Popen(
+                [XCLIP, '-selection', 'clipboard', '-in', '-quiet'],
+                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.clipboard = process
+            os.set_blocking(process.stdin.fileno(), False)
+            with selectors.DefaultSelector() as selector:
+                selector.register(process.stdin, selectors.EVENT_WRITE)
+                offset = 0
+                while offset < len(data):
+                    if not selector.select(self.remaining()):
+                        raise DriverFailure('helper_timeout')
+                    offset += os.write(process.stdin.fileno(), data[offset:offset + 65536])
+            process.stdin.close()
+            # The owner starts serving only after stdin EOF. Read-only probes are
+            # bounded and never cause another paste or overwrite.
+            for _ in range(20):
+                if process.poll() is not None:
+                    raise DriverFailure('clipboard_unavailable')
+                if self.helper([XCLIP, '-selection', 'clipboard', '-out'],
+                               allow_unavailable=True) == data:
+                    return
+                time.sleep(min(0.01, self.remaining()))
+            raise DriverFailure('clipboard_unavailable')
+        except OSError:
+            raise DriverFailure('helper_failed') from None
 
     def fill(self, control, prompt):
-        if not control['node'].get_editable_text_iface().set_text_contents(prompt):
-            raise DriverFailure('fill_acknowledgement_uncertain')
+        if not available(control) or not control['editable']:
+            raise DriverFailure('composer_missing_or_ambiguous')
+        if self.text(control) != '':
+            raise DriverFailure('composer_not_empty')
+        if control['editableInterface']:
+            if not self.api.EditableText.set_text_contents(control['node'], prompt):
+                raise DriverFailure('fill_acknowledgement_uncertain')
+            return
+        try:
+            self.own_clipboard(prompt)
+            if not self.api.Component.grab_focus(control['node']):
+                raise DriverFailure('focus_failed')
+            # Drain focus events through a fresh snapshot, and reject popup editors.
+            current = composer(self.snapshot())
+            if (current['node'] != control['node']
+                    or not current['node'].get_state_set().contains(self.api.StateType.FOCUSED)):
+                raise DriverFailure('focus_failed')
+            if self.text(current) != '':
+                raise DriverFailure('composer_not_empty')
+            self.helper([XDOTOOL, 'key', 'ctrl+v'])
+        except Exception:
+            self.release_clipboard()
+            raise
 
 
 def available(node, enabled=True):
@@ -137,6 +285,7 @@ class Driver:
         self.desktop = desktop
         self.started = time.monotonic()
         self.deadline = self.started + timeout_ms / 1000
+        self.desktop.deadline = self.deadline
         self.max_actions = max_actions
         self.actions = 0
         self.phase = None
@@ -166,7 +315,7 @@ class Driver:
                     or node['role'] in EDITOR_ROLES):
                 self.composer_candidates.append({key: node[key] for key in (
                     'role', 'showing', 'visible', 'enabled', 'sensitive',
-                    'editableState', 'editableInterface')})
+                    'editableState', 'editableInterface', 'textInterface')})
                 if len(self.composer_candidates) == 16:
                     break
         self.check()
@@ -202,6 +351,7 @@ class Driver:
     def prepare(self, surface):
         if surface not in SURFACES:
             raise DriverFailure('invalid_surface')
+        self.desktop.require_helpers()
         self.phase = 'waiting-for-initial-ui'
         nodes = self.wait(lambda ns: bool(controls(ns, {'Engineering'}, {'radio button', 'toggle button'})
                                           or controls(ns, {'Leave a note on my Desktop', 'Go to ChatGPT',
@@ -255,6 +405,7 @@ class Driver:
             raise DriverFailure('invalid_prompt')
         if surface not in SURFACES:
             raise DriverFailure('invalid_surface')
+        self.desktop.require_helpers()
         # Setup ran once for the batch. A changed surface blocks submission.
         self.phase = 'surface'
         nodes = self.snapshot()
@@ -263,10 +414,13 @@ class Driver:
         self.phase = 'composer'
         self.click(fresh_chat(nodes, composer(nodes)))
         nodes = self.wait(lambda ns: self.ready(ns, surface) and self.desktop.text(composer(ns)) == '')
-        self.action(lambda: self.desktop.fill(composer(nodes), prompt))
-        nodes = self.wait(lambda ns: self.ready(ns, surface)
-                          and self.desktop.text(composer(ns)) == prompt
-                          and len(controls(ns, {'Send'})) == 1)
+        try:
+            self.action(lambda: self.desktop.fill(composer(nodes), prompt))
+            nodes = self.wait(lambda ns: self.ready(ns, surface)
+                              and self.desktop.text(composer(ns)) == prompt
+                              and len(controls(ns, {'Send'})) == 1)
+        finally:
+            self.desktop.release_clipboard()
         # Exactly one send. No retry, Enter fallback, or resubmission on missing trace.
         self.click(unique(controls(nodes, {'Send'}), 'send_missing_or_ambiguous'))
         return self.receipt('submitted', surface)
@@ -304,7 +458,7 @@ def main():
         return 0
     except Exception as error:
         result = driver.receipt('failed') if driver else {'status': 'failed', 'action_count': 0, 'duration_ms': 0}
-        result['error'] = str(error) if isinstance(error, DriverFailure) else 'desktop_driver_failed'
+        result['error'] = error_code(error)
         print(json.dumps(result))
         return 1
 

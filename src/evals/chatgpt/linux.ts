@@ -39,6 +39,7 @@ const ComposerCandidate = z
     sensitive: z.boolean(),
     editableState: z.boolean(),
     editableInterface: z.boolean(),
+    textInterface: z.boolean().optional(),
   })
   .strict();
 const Receipt = z
@@ -50,8 +51,44 @@ const Receipt = z
     phase: FailurePhase.optional(),
     composerCandidates: z.array(ComposerCandidate).max(16).optional(),
     error: z
-      .string()
-      .regex(/^[a-z_]{1,64}$/)
+      .enum([
+        'accessibility_event_budget',
+        'accessibility_tree_budget',
+        'desktop_ambiguous',
+        'action_unavailable',
+        'action_missing_or_ambiguous',
+        'action_acknowledgement_uncertain',
+        'composer_text_unavailable',
+        'fill_acknowledgement_uncertain',
+        'composer_missing_or_ambiguous',
+        'new_chat_missing_or_ambiguous',
+        'deadline_exceeded',
+        'action_budget_exhausted',
+        'state_transition_unobserved',
+        'send_missing_or_ambiguous',
+        'invalid_surface',
+        'profession_ambiguous',
+        'continue_missing_or_ambiguous',
+        'skip_missing_or_ambiguous',
+        'intro_confirmation_ambiguous',
+        'mode_missing_or_ambiguous',
+        'surface_item_ambiguous',
+        'invalid_prompt',
+        'surface_mismatch',
+        'invalid_budget',
+        'input_too_large',
+        'invalid_input',
+        'helper_missing',
+        'helper_failed',
+        'helper_timeout',
+        'clipboard_unavailable',
+        'focus_failed',
+        'composer_not_empty',
+        'desktop_attribute_error',
+        'desktop_type_error',
+        'desktop_glib_error',
+        'desktop_driver_failed',
+      ])
       .optional(),
   })
   .strict()

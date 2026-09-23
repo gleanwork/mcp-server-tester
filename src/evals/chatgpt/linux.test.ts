@@ -65,6 +65,7 @@ const composerCandidate = {
   sensitive: false,
   editableState: true,
   editableInterface: false,
+  textInterface: true,
 };
 const composerFailure = {
   status: 'failed',
@@ -96,6 +97,26 @@ describe('Linux ChatGPT runtime adapter', () => {
       expect((error as Error).message).not.toContain('document web');
     }
   );
+  it.each([
+    'helper_missing',
+    'helper_failed',
+    'helper_timeout',
+    'clipboard_unavailable',
+    'focus_failed',
+    'composer_not_empty',
+    'desktop_attribute_error',
+    'desktop_type_error',
+    'desktop_glib_error',
+  ])('preserves static native error %s', async (code) => {
+    await helper('receipt', { ...composerFailure, error: code });
+    await expect(
+      runLinuxChatgptDesktop('prepare', config, Date.now() + 5000)
+    ).rejects.toThrow(code);
+    const calls = (await readFile(join(root, 'calls.jsonl'), 'utf8'))
+      .trim()
+      .split('\n');
+    expect(calls).toHaveLength(1);
+  });
   it('accepts legacy composer failures without diagnostics', async () => {
     await helper('receipt', composerFailure);
     await expect(
@@ -125,6 +146,9 @@ describe('Linux ChatGPT runtime adapter', () => {
     { composerCandidates: [{ ...composerCandidate, showing: 1 }] },
     { composerCandidates: [{ ...composerCandidate, editableState: 'true' }] },
     { composerCandidates: [{ ...composerCandidate, editableInterface: null }] },
+    { composerCandidates: [{ ...composerCandidate, textInterface: 'true' }] },
+    { error: 'private_error_text' },
+    { error: 'AttributeError: private prompt' },
     { composerCandidates: [{ role: 'text' }] },
     { composerCandidates: [{ ...composerCandidate, role: 'x'.repeat(65) }] },
     {
