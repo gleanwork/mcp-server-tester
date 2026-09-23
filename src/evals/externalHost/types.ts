@@ -199,6 +199,8 @@ export interface ExternalHostMetadata {
     submission: {
       status: 'completed' | 'failed';
       telemetry?: SemanticDesktopTelemetry;
+      /** Failure-only sanitized UI state: surface, counts, and text hash. Never text. */
+      draftState?: Record<string, string | number | boolean>;
     };
   };
   evidence?: {

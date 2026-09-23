@@ -559,7 +559,14 @@ describe('ChatGPT Linux native lifecycle', () => {
   it('uncertain native send is not retried or interpreted as native evidence', async () => {
     vi.mocked(runLinuxChatgptDesktop).mockImplementation(async (mode) => {
       if (mode === 'submit')
-        throw new NativeChatgptDriverError('uncertain send');
+        throw new NativeChatgptDriverError('uncertain send', {
+          draftState: {
+            observedSurface: 'chatgpt-work',
+            composerRootCount: 1,
+            sendControlCount: 1,
+            textReadable: false,
+          },
+        });
       return {
         telemetry: {
           driver: 'linux-desktop',
@@ -573,9 +580,15 @@ describe('ChatGPT Linux native lifecycle', () => {
     });
     const result = await runExternalHostScenario('query', linuxConfig());
     expect(result.success).toBe(false);
-    expect(result.externalHost.nativeController?.submission.status).toBe(
-      'failed'
-    );
+    expect(result.externalHost.nativeController?.submission).toMatchObject({
+      status: 'failed',
+      draftState: {
+        observedSurface: 'chatgpt-work',
+        composerRootCount: 1,
+        sendControlCount: 1,
+        textReadable: false,
+      },
+    });
     expect(result.externalHost.computerUse).toBeUndefined();
     expect(findChatgptTrace).not.toHaveBeenCalled();
     expect(runLinuxChatgptDesktop).toHaveBeenCalledTimes(2);

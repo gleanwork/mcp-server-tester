@@ -235,7 +235,12 @@ async function submitChatgptPrompt({
         submission: {
           status: 'failed',
           ...(error instanceof NativeChatgptDriverError
-            ? { telemetry: error.telemetry }
+            ? {
+                telemetry: error.telemetry,
+                ...(error.diagnostics.draftState
+                  ? { draftState: { ...error.diagnostics.draftState } }
+                  : {}),
+              }
             : {}),
         },
       };
