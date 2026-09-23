@@ -255,7 +255,9 @@ after a successful UI receipt.
 
 The existing strict native trace contract is shared across both platforms:
 unchanged `exact_prompt` matching (only exact text or one additional native
-terminal LF, reported as `native_terminal_lf`), a fresh session and turn for each
+terminal LF, reported as `native_terminal_lf`; on Linux only, Markdown
+punctuation backslash-escaped by the app, reported as
+`native_markdown_escaped`), a fresh session and turn for each
 query, and complete native final-answer/model/effort evidence. UI text is never
 treated as an answer.
 Explicit `prompt_marker` correlation remains opt-in.

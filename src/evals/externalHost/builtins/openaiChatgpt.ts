@@ -357,6 +357,7 @@ async function captureChatgptComputerUseResult({
         {
           surface: chatgptSurface(config),
           mcpServers,
+          nativeMarkdownEscapes: isLinuxChatgpt(config),
           requireFreshSession: true,
           observedBeforeMs: Math.min(
             Date.now(),

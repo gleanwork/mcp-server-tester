@@ -33,6 +33,11 @@ export interface ChatgptTracePolicy {
   surface?: ChatgptSurface;
   /** Configured MCP labels; native `mcp__<label>` namespaces map back to them. */
   mcpServers?: readonly string[];
+  /**
+   * Linux only: the app stores the prompt with Markdown punctuation
+   * backslash-escaped. Accept exactly that form (`native_markdown_escaped`).
+   */
+  nativeMarkdownEscapes?: boolean;
 }
 
 /** The app's namespace form of an MCP label: every non-alphanumeric character becomes `_`. */
@@ -69,7 +74,7 @@ interface Event {
   turnId?: string;
 }
 export interface ChatgptTrace {
-  promptMatch?: 'exact' | 'native_terminal_lf';
+  promptMatch?: ChatgptPromptMatch;
   nativePromptSha256?: string;
   sessionId: string;
   turnId: string;
@@ -296,7 +301,7 @@ export function parseChatgptTrace(
         ? (isUserItem || isUserMessage) &&
           unescapeMarkdown(text).includes(`[eval-run-marker:${selector}]`)
         : isUserItem &&
-          (text === selector.prompt || text === `${selector.prompt}\n`);
+          promptMatchKind(text, selector.prompt, options) !== undefined;
     if (
       turnId &&
       time(event.timestamp) >= startedAfterMs &&
@@ -323,10 +328,7 @@ export function parseChatgptTrace(
   const promptEvidence =
     typeof selector !== 'string' && nativePrompt !== undefined
       ? {
-          promptMatch:
-            nativePrompt === selector.prompt
-              ? ('exact' as const)
-              : ('native_terminal_lf' as const),
+          promptMatch: promptMatchKind(nativePrompt, selector.prompt, options)!,
           nativePromptSha256: createHash('sha256')
             .update(nativePrompt, 'utf8')
             .digest('hex'),
@@ -542,6 +544,15 @@ export function parseChatgptTrace(
     }
   }
   response = string(end?.payload.last_agent_message) ?? response;
+  // Builds that record nested MCP calls as timed McpToolCall items make the
+  // references synthesized from exec input redundant; keep the native items.
+  if (nestedIds.size && [...nativeItemTypes.values()].includes('McpToolCall')) {
+    for (const id of nestedIds) {
+      calls.delete(id);
+      nativeItemTypes.delete(id);
+    }
+    nestedIds.clear();
+  }
   // Untimed code-mode nested calls sort with their exec call.
   const sortKey = (call: LLMToolCall) =>
     time(
@@ -895,6 +906,33 @@ function contentText(value: unknown): string {
   return Array.isArray(value)
     ? value.map((part) => string(object(part)?.text) ?? '').join('\n')
     : '';
+}
+/**
+ * How the host's stored user message equals the submitted prompt. The app may
+ * add one terminal LF. On Linux it may also backslash-escape Markdown
+ * punctuation (observed: `ALL_TOOLS` stored as `ALL\\_TOOLS`). Any other
+ * difference is not a match.
+ */
+export type ChatgptPromptMatch =
+  | 'exact'
+  | 'native_terminal_lf'
+  | 'native_markdown_escaped';
+function promptMatchKind(
+  stored: string,
+  prompt: string,
+  options: ChatgptTracePolicy
+): ChatgptPromptMatch | undefined {
+  if (stored === prompt) return 'exact';
+  const body = stored.endsWith('\n') ? stored.slice(0, -1) : stored;
+  if (body === prompt) return 'native_terminal_lf';
+  if (!options.nativeMarkdownEscapes) return undefined;
+  // Every stored backslash must start a Markdown escape; the unescaped text
+  // must then equal the prompt exactly.
+  if (body.replace(/\\[\\`*_{}[\]()#+.!:>-]/g, '').includes('\\'))
+    return undefined;
+  return unescapeMarkdown(body) === prompt
+    ? 'native_markdown_escaped'
+    : undefined;
 }
 function unescapeMarkdown(text: string): string {
   return text.replace(/\\([\\`*_{}[\]()#+.!:>-])/g, '$1');

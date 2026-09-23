@@ -164,7 +164,10 @@ export interface ExternalHostCorrelationMetadata {
   promptSha256?: string;
   promptUnchanged?: boolean;
   /** Native user text: literal match, or the app's single appended LF. */
-  nativePromptMatch?: 'exact' | 'native_terminal_lf';
+  nativePromptMatch?:
+    | 'exact'
+    | 'native_terminal_lf'
+    | 'native_markdown_escaped';
   nativePromptSha256?: string;
 }
 

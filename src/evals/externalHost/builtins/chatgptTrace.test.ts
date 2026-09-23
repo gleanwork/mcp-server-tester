@@ -316,6 +316,52 @@ it('keeps the observed Codex abort terminal but unsuccessful', async () => {
 });
 
 describe('marker-free native correlation', () => {
+  it('accepts the Linux native Markdown-escaped form of the exact prompt only', () => {
+    const linux = { nativeMarkdownEscapes: true };
+    // Observed on Linux ChatGPT Work 26.915.31945.
+    const prompt = 'run text(ALL_TOOLS.filter(t => /glean/i.test(t.name)))';
+    const stored = 'run text(ALL\\_TOOLS.filter(t => /glean/i.test(t.name)))\n';
+    const trace = parseChatgptTrace(
+      serialize(exactTurn(stored)),
+      exact(prompt),
+      0,
+      Infinity,
+      linux
+    )!;
+    expect(trace.promptMatch).toBe('native_markdown_escaped');
+    // macOS (default policy) stays strict.
+    expect(
+      parseChatgptTrace(serialize(exactTurn(stored)), exact(prompt))
+    ).toBeUndefined();
+    expect(trace.nativePromptSha256).toBe(
+      createHash('sha256').update(stored).digest('hex')
+    );
+    for (const other of [
+      'run text(ALL\\_TOOLS.filter(t => /glean/i.test(t.names)))',
+      'run text(ALL\\TOOLS.filter(t => /glean/i.test(t.name)))',
+      'run text(ALL\\_TOOLS.filter(t => /glean/i.test(t.name)))\n\n',
+    ])
+      expect(
+        parseChatgptTrace(
+          serialize(exactTurn(other)),
+          exact(prompt),
+          0,
+          Infinity,
+          linux
+        )
+      ).toBeUndefined();
+    // A literal backslash in the prompt must be stored escaped, not bare.
+    expect(
+      parseChatgptTrace(
+        serialize(exactTurn('a\\\\b')),
+        exact('a\\b'),
+        0,
+        Infinity,
+        linux
+      )?.promptMatch
+    ).toBe('native_markdown_escaped');
+  });
+
   it('records the native single-terminal-LF form without general whitespace folding', () => {
     const trace = parseChatgptTrace(
       serialize(exactTurn('Find docs\n')),
@@ -1207,6 +1253,49 @@ describe('ChatGPT native response_item tool calls', () => {
     });
     expect(trace.mcpDurationMs).toBeUndefined();
     expect(trace.limitations.join(' ')).toContain('code-mode exec runner');
+  });
+
+  it('counts a native McpToolCall item once, not again as an exec reference', () => {
+    // Observed on Linux ChatGPT Work 26.915.31945: exec references the tool and
+    // the host also records a timed McpToolCall item for the same call.
+    const trace = parse(
+      nativeTurn([
+        ...execCall(
+          'call_mcp',
+          'await tools.mcp__glean_eval__search({ query: "x" })',
+          1,
+          3
+        ),
+        event(
+          'event_msg',
+          {
+            type: 'item_completed',
+            turn_id: T,
+            item: {
+              type: 'McpToolCall',
+              id: 'mcp-item-1',
+              server: 'glean-eval',
+              tool: 'search',
+              arguments: { query: 'x' },
+              status: 'completed',
+              result: { content: [] },
+            },
+            started_at_ms: at(1.5),
+            completed_at_ms: at(2.5),
+          },
+          at(2.5)
+        ),
+      ])
+    );
+    expect(
+      trace.toolCalls.map((call) => [call.source, call.server, call.name])
+    ).toEqual([
+      ['host', undefined, 'exec'],
+      ['mcp', 'glean-eval', 'search'],
+    ]);
+    expect(trace.toolCalls[1]!.durationMs).toBe(1000);
+    expect(trace.telemetry.mcpToolCallCount).toBe(1);
+    expect(trace.limitations.join(' ')).not.toContain('code-mode exec runner');
   });
 
   it('uses executed_tool_calls for nested exec arguments and counts', () => {
