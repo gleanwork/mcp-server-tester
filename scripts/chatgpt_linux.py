@@ -26,10 +26,19 @@ class Desktop:
     def __init__(self):
         import gi
         gi.require_version('Atspi', '2.0')
-        from gi.repository import Atspi
+        from gi.repository import Atspi, GLib
         self.api = Atspi
+        self.context = GLib.MainContext.default()
 
     def snapshot(self):
+        # AT-SPI cache invalidation runs on the default GLib context. Never
+        # authorize actions from a snapshot while that event queue is still busy.
+        for _ in range(256):
+            if not self.context.pending():
+                break
+            self.context.iteration(False)
+        if self.context.pending():
+            raise DriverFailure('accessibility_event_budget')
         root = self.api.get_desktop(0)
         apps = [root.get_child_at_index(i) for i in range(min(root.get_child_count(), 128))]
         apps = [a for a in apps if a and (a.get_name() or '').casefold()
@@ -119,6 +128,7 @@ class Driver:
         self.deadline = self.started + timeout_ms / 1000
         self.max_actions = max_actions
         self.actions = 0
+        self.phase = None
 
     def check(self):
         if time.monotonic() >= self.deadline:
@@ -136,15 +146,21 @@ class Driver:
 
     def snapshot(self):
         self.check()
-        return self.desktop.snapshot()
+        nodes = self.desktop.snapshot()
+        self.check()
+        return nodes
 
-    def wait(self, predicate):
+    def wait(self, predicate, polls=100):
         # Poll only; an acknowledged action that does not change state is NOT retried.
-        for _ in range(100):
+        # The cold-app wait gets 30 seconds; all waits share the overall deadline.
+        wait_deadline = min(self.deadline, time.monotonic() + polls * 0.1)
+        for _ in range(polls):
             nodes = self.snapshot()
+            if time.monotonic() >= wait_deadline:
+                break
             if predicate(nodes):
                 return nodes
-            time.sleep(0.1)
+            time.sleep(min(0.1, max(0, wait_deadline - time.monotonic())))
         raise DriverFailure('state_transition_unobserved')
 
     def selected(self, nodes, surface):
@@ -164,25 +180,32 @@ class Driver:
     def prepare(self, surface):
         if surface not in SURFACES:
             raise DriverFailure('invalid_surface')
+        self.phase = 'waiting-for-initial-ui'
         nodes = self.wait(lambda ns: bool(controls(ns, {'Engineering'}, {'radio button', 'toggle button'})
                                           or controls(ns, {'Leave a note on my Desktop', 'Go to ChatGPT',
                                                            'Switch mode, current mode: ChatGPT Work',
-                                                           'Switch mode, current mode: Codex'})))
+                                                           'Switch mode, current mode: Codex'})), polls=300)
         engineering = controls(nodes, {'Engineering'}, {'radio button', 'toggle button'})
         if engineering:
+            self.phase = 'profession-selected'
             choice = unique(engineering, 'profession_ambiguous')
             if not choice['selected']:
                 self.click(choice, {'check', 'toggle', 'click', 'press'})
             # Selection acknowledgement and Continue enablement can arrive in
             # separate accessibility updates. Observe both; never retry check.
-            nodes = self.wait(lambda ns: any(n['selected'] for n in controls(
-                ns, {'Engineering'}, {'radio button', 'toggle button'}))
-                and bool(controls(ns, {'Continue'})))
+            def continue_ready(ns):
+                selected = any(n['selected'] for n in controls(
+                    ns, {'Engineering'}, {'radio button', 'toggle button'}))
+                self.phase = 'continue-ready' if selected else 'profession-selected'
+                return selected and bool(controls(ns, {'Continue'}))
+            nodes = self.wait(continue_ready)
             self.click(unique(controls(nodes, {'Continue'}), 'continue_missing_or_ambiguous'))
+            self.phase = 'intro-dismiss'
             nodes = self.wait(lambda ns: not controls(ns, {'Engineering'}, {'radio button', 'toggle button'})
                               and bool(controls(ns, {'Leave a note on my Desktop', 'Go to ChatGPT',
                                                      'Switch mode, current mode: ChatGPT Work',
                                                      'Switch mode, current mode: Codex'})))
+        self.phase = 'intro-dismiss'
         # Only skip the observed, specific product-introduction screen.
         if (controls(nodes, {'Leave a note on my Desktop'})
                 and controls(nodes, {'Turn this spreadsheet into a chart'})):
@@ -192,6 +215,7 @@ class Driver:
             self.click(unique(controls(nodes, {'Go to ChatGPT'}), 'intro_confirmation_ambiguous'))
             nodes = self.wait(lambda ns: bool(controls(ns, {
                 'Switch mode, current mode: ChatGPT Work', 'Switch mode, current mode: Codex'})))
+        self.phase = 'surface'
         if not self.selected(nodes, surface):
             switch = unique(controls(nodes, {'Switch mode, current mode: ChatGPT Work',
                                              'Switch mode, current mode: Codex'}), 'mode_missing_or_ambiguous')
@@ -200,6 +224,7 @@ class Driver:
             item = unique(controls(nodes, {MENU_LABELS[surface]}, {'menu item'}), 'surface_item_ambiguous')
             self.click(item, {'select'})
             nodes = self.wait(lambda ns: self.selected(ns, surface))
+        self.phase = 'composer'
         self.wait(lambda ns: self.ready(ns, surface))
         return self.receipt('ready', surface)
 
@@ -209,9 +234,11 @@ class Driver:
         if surface not in SURFACES:
             raise DriverFailure('invalid_surface')
         # Setup ran once for the batch. A changed surface blocks submission.
+        self.phase = 'surface'
         nodes = self.snapshot()
         if not self.ready(nodes, surface):
             raise DriverFailure('surface_mismatch')
+        self.phase = 'composer'
         self.click(fresh_chat(nodes, composer(nodes)))
         nodes = self.wait(lambda ns: self.ready(ns, surface) and self.desktop.text(composer(ns)) == '')
         self.action(lambda: self.desktop.fill(composer(nodes), prompt))
@@ -225,7 +252,8 @@ class Driver:
     def receipt(self, status, surface=None):
         return {'status': status, 'action_count': self.actions,
                 'duration_ms': (time.monotonic() - self.started) * 1000,
-                **({'surface': surface} if surface else {})}
+                **({'surface': surface} if surface else {}),
+                **({'phase': self.phase} if status == 'failed' and self.phase else {})}
 
 
 def main():

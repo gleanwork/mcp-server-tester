@@ -1,8 +1,10 @@
 """Offline AT-SPI state-machine contracts. No live desktop, credentials, or queries."""
+import io
+import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
-from chatgpt_linux import Driver, DriverFailure, Desktop, composer, fresh_chat
+from chatgpt_linux import Driver, DriverFailure, Desktop, composer, fresh_chat, main
 
 
 def node(name, role='button', **values):
@@ -15,6 +17,24 @@ def ready(surface='ChatGPT Work', text=''):
             node('Send', enabled=bool(text), ancestors=(0, 2)),
             node('New chat', ancestors=(0,)), node('New chat', ancestors=(0, 2)),
             node('composer', 'text', editable=True, text=text, ancestors=(0, 2))]
+
+
+class FakeGLibContext:
+    def __init__(self, events=(), busy=False):
+        self.events = list(events)
+        self.busy = busy
+        self.iterations = 0
+
+    def pending(self):
+        return self.busy or bool(self.events)
+
+    def iteration(self, may_block):
+        if may_block:
+            raise AssertionError('event pumping must not block')
+        self.iterations += 1
+        if self.events:
+            self.events.pop(0)()
+        return True
 
 
 class FakeDesktop:
@@ -72,6 +92,7 @@ class DriverTest(unittest.TestCase):
         result = self.driver(desktop).prepare('chatgpt-work')
         self.assertEqual(result['status'], 'ready')
         self.assertEqual(result['surface'], 'chatgpt-work')
+        self.assertEqual(set(result), {'status', 'surface', 'action_count', 'duration_ms'})
         self.assertEqual([a[0] for a in desktop.actions], [
             'Engineering', 'Continue', 'Skip', 'Go to ChatGPT',
             'Switch mode, current mode: Codex', 'ChatGPT Work Create, learn, and explore'])
@@ -104,9 +125,12 @@ class DriverTest(unittest.TestCase):
     def test_disabled_continue_never_clicked_or_engineering_retried(self, _sleep):
         desktop = FakeDesktop([node('Engineering', 'radio button'),
                                node('Continue', enabled=False)])
+        driver = self.driver(desktop)
         with self.assertRaisesRegex(DriverFailure, 'state_transition_unobserved'):
-            self.driver(desktop).prepare('chatgpt-work')
+            driver.prepare('chatgpt-work')
+        self.assertEqual(driver.receipt('failed')['phase'], 'continue-ready')
         self.assertEqual([a[0] for a in desktop.actions], ['Engineering'])
+        self.assertEqual(_sleep.call_count, 100)
 
     def test_codex_explicit_selection(self):
         desktop = FakeDesktop()
@@ -133,6 +157,7 @@ class DriverTest(unittest.TestCase):
         prompt = '  Find snake_case — π\n\nDo not trim.  \n'
         result = self.driver(desktop).submit(prompt, 'chatgpt-work')
         self.assertEqual(result['status'], 'submitted')
+        self.assertEqual(set(result), {'status', 'surface', 'action_count', 'duration_ms'})
         self.assertEqual([a[0] for a in desktop.actions], ['New chat', 'fill', 'Send'])
         self.assertEqual(desktop.actions[1][1], prompt)
 
@@ -199,10 +224,141 @@ class DriverTest(unittest.TestCase):
         root = Node('desktop', 'desktop', set(), children=[app])
         desktop = object.__new__(Desktop)
         desktop.api = SimpleNamespace(StateType=state_type, get_desktop=lambda index: root)
+        desktop.context = FakeGLibContext()
         nodes = desktop.snapshot()
         self.assertIs(composer(nodes)['node'], editor)
         self.assertFalse(next(n for n in nodes if n['name'] == 'static')['editable'])
         self.assertFalse(next(n for n in nodes if n['name'] == 'not editable')['editable'])
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_initial_wait_allows_300_polls(self, sleep):
+        desktop = FakeDesktop([])
+        driver = self.driver(desktop)
+        with self.assertRaisesRegex(DriverFailure, 'state_transition_unobserved'):
+            driver.prepare('chatgpt-work')
+        self.assertEqual(sleep.call_count, 300)
+        self.assertEqual(driver.receipt('failed')['phase'], 'waiting-for-initial-ui')
+        self.assertEqual(desktop.actions, [])
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_cold_app_can_appear_after_100_polls(self, sleep):
+        desktop = FakeDesktop([])
+        def tick(_seconds):
+            if sleep.call_count == 150:
+                desktop.nodes = ready()
+        sleep.side_effect = tick
+        self.assertEqual(self.driver(desktop).prepare('chatgpt-work')['status'], 'ready')
+        self.assertEqual(sleep.call_count, 150)
+        self.assertEqual(desktop.actions, [])
+
+    def test_initial_wait_still_obeys_overall_deadline(self):
+        now = [0.0]
+        def tick(seconds):
+            now[0] += seconds
+        with patch('chatgpt_linux.time.monotonic', side_effect=lambda: now[0]), \
+                patch('chatgpt_linux.time.sleep', side_effect=tick) as sleep:
+            driver = Driver(FakeDesktop([]), 250, 24)
+            with self.assertRaisesRegex(DriverFailure, 'deadline_exceeded'):
+                driver.prepare('chatgpt-work')
+            self.assertEqual(sleep.call_count, 3)
+            self.assertEqual(driver.actions, 0)
+
+    def test_cold_app_wait_rejects_snapshot_after_30_seconds(self):
+        now = [0.0]
+        desktop = FakeDesktop()
+        def slow_snapshot():
+            now[0] = 30.0
+            return ready()
+        desktop.snapshot = slow_snapshot
+        with patch('chatgpt_linux.time.monotonic', side_effect=lambda: now[0]):
+            driver = self.driver(desktop)
+            with self.assertRaisesRegex(DriverFailure, 'state_transition_unobserved'):
+                driver.prepare('chatgpt-work')
+        self.assertEqual(desktop.actions, [])
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_failed_receipts_identify_only_fixed_phases(self, _sleep):
+        cases = [
+            ([node('Engineering', 'radio button'), node('Continue')], 'Engineering', 'profession-selected'),
+            ([node('Engineering', 'radio button', selected=True), node('Continue')], 'Continue', 'intro-dismiss'),
+            (ready('Codex'), 'Switch mode, current mode: Codex', 'surface'),
+            (ready()[:-1], None, 'composer'),
+        ]
+        for nodes, stall, phase in cases:
+            with self.subTest(phase=phase):
+                desktop = FakeDesktop(nodes)
+                desktop.stall = stall
+                driver = self.driver(desktop)
+                with self.assertRaises(DriverFailure):
+                    driver.prepare('chatgpt-work')
+                self.assertEqual(driver.receipt('failed')['phase'], phase)
+                self.assertNotIn('phase', driver.receipt('ready', 'chatgpt-work'))
+
+    def test_main_hides_raw_exception_with_safe_phase(self):
+        desktop = FakeDesktop()
+        def fail():
+            raise RuntimeError('private UI text or query')
+        desktop.snapshot = fail
+        with patch('chatgpt_linux.Desktop', return_value=desktop), \
+                patch('sys.argv', ['driver', '--mode', 'prepare', '--timeout-ms', '60000']), \
+                patch('sys.stdin', io.StringIO('{"surface":"chatgpt-work"}')), \
+                patch('sys.stdout', new_callable=io.StringIO) as output:
+            self.assertEqual(main(), 1)
+        receipt = json.loads(output.getvalue())
+        self.assertEqual(receipt['error'], 'desktop_driver_failed')
+        self.assertEqual(receipt['phase'], 'waiting-for-initial-ui')
+        self.assertNotIn('private', output.getvalue())
+
+    def test_desktop_uses_default_glib_context(self):
+        context = FakeGLibContext()
+        api = SimpleNamespace()
+        glib = SimpleNamespace(MainContext=SimpleNamespace(default=lambda: context))
+        with patch.dict('sys.modules', {
+            'gi': SimpleNamespace(require_version=lambda *_: None),
+            'gi.repository': SimpleNamespace(Atspi=api, GLib=glib),
+        }):
+            desktop = Desktop()
+        self.assertIs(desktop.context, context)
+        self.assertIs(desktop.api, api)
+
+    def test_snapshot_pumps_cached_selected_and_enabled_updates(self):
+        states = {1, 2}
+        state_type = SimpleNamespace(SHOWING=1, VISIBLE=2, ENABLED=3, SENSITIVE=4,
+                                     EDITABLE=5, CHECKED=6, SELECTED=7)
+        cached = SimpleNamespace(
+            get_name=lambda: 'ChatGPT', get_role_name=lambda: 'radio button',
+            get_state_set=lambda: SimpleNamespace(contains=lambda state: state in states),
+            get_child_count=lambda: 0)
+        root = SimpleNamespace(get_child_count=lambda: 1, get_child_at_index=lambda _: cached)
+        desktop = object.__new__(Desktop)
+        desktop.api = SimpleNamespace(StateType=state_type, get_desktop=lambda _: root)
+        desktop.context = FakeGLibContext()
+        before = desktop.snapshot()[0]
+        self.assertFalse(before['selected'])
+        self.assertFalse(before['enabled'])
+        desktop.context.events = [lambda: states.add(6), lambda: states.update({3, 4})]
+        # Cache changes occur only in iteration(False), not in pending().
+        self.assertTrue(desktop.context.pending())
+        self.assertEqual(states, {1, 2})
+        after = desktop.snapshot()[0]
+        self.assertTrue(after['selected'])
+        self.assertTrue(after['enabled'])
+        self.assertEqual(desktop.context.iterations, 2)
+
+    def test_busy_event_context_fails_closed_before_tree_read(self):
+        desktop = object.__new__(Desktop)
+        desktop.context = FakeGLibContext(busy=True)
+        # No API is installed: reaching the tree would fail this test.
+        with self.assertRaisesRegex(DriverFailure, 'accessibility_event_budget'):
+            desktop.snapshot()
+        self.assertEqual(desktop.context.iterations, 256)
+
+    def test_event_context_can_quiesce_at_exact_budget(self):
+        desktop = object.__new__(Desktop)
+        desktop.context = FakeGLibContext([lambda: None] * 256)
+        desktop.api = SimpleNamespace(get_desktop=lambda _: SimpleNamespace(get_child_count=lambda: 0))
+        self.assertEqual(desktop.snapshot(), [])
+        self.assertEqual(desktop.context.iterations, 256)
 
     def test_action_name_must_be_observed_and_unique(self):
         class Action:

@@ -22,23 +22,36 @@ const SESSION_KEYS = [
   'LANG',
   'LC_ALL',
 ];
+const FailurePhase = z.enum([
+  'waiting-for-initial-ui',
+  'profession-selected',
+  'continue-ready',
+  'intro-dismiss',
+  'surface',
+  'composer',
+]);
 const Receipt = z
   .object({
     status: z.enum(['ready', 'submitted', 'failed']),
     surface: z.enum(['chatgpt-work', 'codex']).optional(),
     action_count: z.number().int().nonnegative(),
     duration_ms: z.number().finite().nonnegative(),
+    phase: FailurePhase.optional(),
     error: z
       .string()
       .regex(/^[a-z_]{1,64}$/)
       .optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (receipt) => receipt.phase === undefined || receipt.status === 'failed'
+  );
 
 export class NativeChatgptDriverError extends Error {
   constructor(
     message: string,
-    public readonly telemetry?: SemanticDesktopTelemetry
+    public readonly telemetry?: SemanticDesktopTelemetry,
+    public readonly phase?: z.infer<typeof FailurePhase>
   ) {
     super(message);
   }
@@ -177,8 +190,9 @@ export async function runLinuxChatgptDesktop(
   };
   if (!valid)
     throw new NativeChatgptDriverError(
-      `Linux ChatGPT ${mode} failed or its receipt was uncertain (${record?.error ?? 'missing_or_invalid_receipt'}); no retry attempted.`,
-      telemetry
+      `Linux ChatGPT ${mode} failed or its receipt was uncertain (${record?.error ?? 'missing_or_invalid_receipt'}${record?.phase ? `; phase=${record.phase}` : ''}); no retry attempted.`,
+      telemetry,
+      record?.phase
     );
   return { telemetry };
 }
