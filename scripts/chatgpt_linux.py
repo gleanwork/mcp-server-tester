@@ -447,6 +447,10 @@ class Driver:
         self.wait(lambda ns: self.ready(ns, surface))
         self.step = 'draft-open'
         self.action(lambda: self.desktop.open_prompt(''))
+        self.step = 'draft-surface'
+        nodes = self.wait(lambda ns: any(self.ready(ns, candidate) for candidate in SURFACES)
+                          and self.desktop.text(composer(ns)) == '')
+        self.select_surface(nodes, surface)
         self.step = 'draft-readback'
         self.wait(lambda ns: self.ready(ns, surface) and self.desktop.text(composer(ns)) == '')
         self.step = None

@@ -259,17 +259,20 @@ class DriverTest(unittest.TestCase):
             self.assertEqual(driver.actions, 0)
             self.assertEqual(desktop.actions, [])
 
+    def test_setup_corrects_surface_once_without_reopening_empty_chat(self):
+        desktop = FakeDesktop(ready(text='prior draft'))
+        desktop.open_surface = 'Codex'
+        self.assertEqual(self.driver(desktop).prepare('chatgpt-work')['status'], 'ready')
+        self.assertEqual(self.actions(desktop), [
+            'open', 'Switch mode, current mode: Codex', 'ChatGPT Work Create, learn, and explore'])
+
     @patch('chatgpt_linux.time.sleep')
-    def test_setup_does_not_reopen_on_wrong_surface_or_nonempty_composer(self, _sleep):
-        for state in ('wrong-surface', 'nonempty'):
-            desktop = FakeDesktop(ready(text='prior draft'))
-            if state == 'wrong-surface':
-                desktop.open_surface = 'Codex'
-            else:
-                desktop.stall = 'open'
-            with self.assertRaisesRegex(DriverFailure, 'state_transition_unobserved'):
-                self.driver(desktop).prepare('chatgpt-work')
-            self.assertEqual(desktop.actions, [('open', '')])
+    def test_setup_does_not_reopen_nonempty_composer(self, _sleep):
+        desktop = FakeDesktop(ready(text='prior draft'))
+        desktop.stall = 'open'
+        with self.assertRaisesRegex(DriverFailure, 'state_transition_unobserved'):
+            self.driver(desktop).prepare('chatgpt-work')
+        self.assertEqual(desktop.actions, [('open', '')])
 
     @patch('chatgpt_linux.time.sleep')
     def test_exact_echo_and_unique_send_required_before_send_no_replay(self, sleep):
