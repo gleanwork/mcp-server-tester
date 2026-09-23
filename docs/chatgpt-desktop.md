@@ -177,17 +177,31 @@ For each U+FFFC object character, an advertised Hypertext interface can supply a
 explicit reference through `Atspi.Hypertext.get_link_index(node, offset)` and
 `get_link(node, index)`. Only a link with exactly one anchor is expanded through
 `Atspi.Hyperlink.get_object(link, 0)` and recursive unbound Text reads. An empty
-linked paragraph therefore reads as empty. Accessible child order and names are
-never used as content. Images, password fields, non-Text targets, ambiguous links,
-cycles, incomplete reads, and exceeded budgets fail closed. Each read permits at
-most 256 node visits, 16 levels including the root, and 2 MiB of cumulative source
-UTF-8 bytes (including object characters) and expanded output, within the driver
-deadline.
+linked paragraph therefore reads as empty. Invalid or ambiguous links fail closed;
+they do not trigger a structural fallback.
 
-Literal text is unchanged, including whitespace, line feeds, and U+FFFC when no
-Hypertext interface exists or `get_link_index` returns -1. No paragraph separators
-are invented: missing reported separators cause an exact comparison to fail if
-the prompt contains them. Send stays blocked until the expanded text matches the
+If Hypertext is not advertised or its link index is -1, a narrow structural
+fallback applies only when the **entire Text value is one U+FFFC**. Starting at the
+owned editable composer, each expanded node must have exactly one direct child.
+That child must be a `paragraph` or `text` with a real Text interface, read with the
+same unbound methods. A paragraph can instead contain one visible, showing leaf
+with role `static` or `static text` and no children. Only that leaf's accessible
+name may supply content when it has no Text interface. Text remains preferred
+when available. This fallback follows direct composer descendants only; a
+Hypertext target alone does not establish ownership for structural expansion.
+Arbitrary labels, buttons, images, password fields, and non-Text paragraph/text
+children are rejected. Static leaf content is input validation only and is never
+exported as raw diagnostics or used as answer evidence.
+
+Zero or multiple direct children leave the marker literal; there is no child-order
+or paragraph-joining guess. Cycles, incomplete reads, invalid metadata, and
+exceeded budgets fail closed. Each read permits at most 256 node visits, 16 levels
+including the root, and 2 MiB of cumulative source UTF-8 bytes (including object
+characters and static leaf content) and expanded output, within the driver deadline.
+
+All other literal text is unchanged, including whitespace, line feeds, and
+unresolved U+FFFC. No paragraph separators are invented: missing reported
+separators cause an exact comparison to fail if the prompt contains them. Send stays blocked until the expanded text matches the
 unchanged prompt and exactly one enabled Send control exists. MST activates Send
 once. It never presses Enter or retries an uncertain Send.
 

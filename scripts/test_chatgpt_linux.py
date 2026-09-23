@@ -746,6 +746,171 @@ class RichTextTest(unittest.TestCase):
             self.read(desktop, editor, limit)
         self.assertNotIn('private', str(error.exception))
 
+    def structural(self, value='', static=False, hypertext=False):
+        desktop, editor, paragraph, app = self.linked(value)
+        editor.interfaces = ['Text', 'Hypertext'] if hypertext else ['Text']
+        editor.links = {}
+        if static:
+            paragraph.value = '\ufffc'
+            paragraph.children[0].name = value
+        return desktop, editor, paragraph, app
+
+    def test_structural_single_paragraph_empty_and_exact_unicode(self):
+        for hypertext in (False, True):
+            for role in ('paragraph', 'text'):
+                for value in ('', '  π 😀e\u0301\t\r\n\nExact.  \n'):
+                    desktop, editor, paragraph, _ = self.structural(value, hypertext=hypertext)
+                    paragraph.role = role
+                    paragraph.states.discard('EDITABLE')
+                    editor.get_name = paragraph.get_name = Mock(side_effect=AssertionError('no labels'))
+                    desktop.api.Text.get_text = Mock(wraps=desktop.api.Text.get_text)
+                    self.assertEqual(self.read(desktop, editor), value)
+                    self.assertEqual(desktop.api.Text.get_text.call_args_list, [
+                        unittest.mock.call(editor, 0, 1),
+                        unittest.mock.call(paragraph, 0, len(value))])
+                    desktop.api.Hypertext.get_link.assert_not_called()
+
+    def test_structural_static_leaf_exact_content_only_under_paragraph(self):
+        for role in ('static', 'static text'):
+            for value in ('', '  π 😀\r\n\nExact. \t\n', '\ufffc', 'a\ufffcb'):
+                desktop, editor, paragraph, _ = self.structural(value, static=True)
+                paragraph.children[0].role = role
+                editor.get_name = paragraph.get_name = Mock(side_effect=AssertionError('no labels'))
+                self.assertEqual(self.read(desktop, editor), value)
+        desktop, editor, paragraph, _ = self.structural('name', static=True)
+        leaf = paragraph.children[0]
+        leaf.interfaces, leaf.value = ['Text'], 'actual Text value'
+        leaf.get_name = Mock(side_effect=AssertionError('Text is preferred'))
+        self.assertEqual(self.read(desktop, editor), leaf.value)
+
+    def test_structural_never_changes_nonmarker_literals_or_guesses_child_order(self):
+        for value in ('', 'literal', ' \ufffc', '\ufffc\n', '\ufffc\ufffc', 'a\ufffcb'):
+            desktop, editor, _, _ = self.structural('not content')
+            editor.value = value
+            editor.get_child_count = Mock(side_effect=AssertionError('no traversal'))
+            self.assertEqual(self.read(desktop, editor), value)
+            editor.get_child_count.assert_not_called()
+        for hypertext in (False, True):
+            for count in (0, 2):
+                desktop, editor, paragraph, _ = self.structural('', hypertext=hypertext)
+                editor.children = [paragraph] * count
+                editor.get_child_at_index = Mock(side_effect=AssertionError('no guessing'))
+                self.assertEqual(self.read(desktop, editor), '\ufffc')
+                editor.get_child_at_index.assert_not_called()
+
+    def test_structural_rejects_unsafe_children_without_reading_names(self):
+        for role in ('image', 'password text', 'label', 'button', 'static', 'entry'):
+            for text_iface in (False, True):
+                desktop, editor, paragraph, _ = self.structural('private')
+                paragraph.role = role
+                paragraph.interfaces = ['Text'] if text_iface else []
+                paragraph.get_name = Mock(side_effect=AssertionError('no labels'))
+                self.assert_unavailable(desktop, editor)
+                paragraph.get_name.assert_not_called()
+        for kind in ('no-text', 'no-text-iface', 'static-not-leaf', 'hidden', 'not-showing'):
+            desktop, editor, paragraph, _ = self.structural('private', static=True)
+            leaf = paragraph.children[0]
+            leaf.get_name = Mock(side_effect=AssertionError('no labels'))
+            if kind == 'no-text':
+                paragraph.interfaces = []
+            elif kind == 'no-text-iface':
+                paragraph.get_text_iface = lambda: None
+            elif kind == 'static-not-leaf':
+                leaf.children = [PublicNode('private')]
+            else:
+                leaf.states.discard('VISIBLE' if kind == 'hidden' else 'SHOWING')
+            self.assert_unavailable(desktop, editor)
+            leaf.get_name.assert_not_called()
+
+    def test_structural_requires_owned_editable_root_and_does_not_extend_link_targets(self):
+        desktop, editor, _, _ = self.structural('not owned')
+        editor.states.discard('EDITABLE')
+        self.assertEqual(self.read(desktop, editor), '\ufffc')
+        desktop, editor, paragraph, _ = self.linked('\ufffc')
+        # A hyperlink alone does not establish direct composer-tree ownership.
+        editor.children = []
+        paragraph.children[0].get_name = Mock(side_effect=AssertionError('outside tree'))
+        self.assertEqual(self.read(desktop, editor), '\ufffc')
+        paragraph.children[0].get_name.assert_not_called()
+
+    def test_structural_hypertext_reference_remains_preferred(self):
+        desktop, editor, paragraph, _ = self.linked('linked value')
+        alternative = PublicNode('not a label', 'paragraph', editable=True)
+        alternative.value = 'different structural value'
+        editor.children = [alternative]
+        editor.get_child_count = Mock(side_effect=AssertionError('link wins'))
+        self.assertEqual(self.read(desktop, editor), paragraph.value)
+        editor.get_child_count.assert_not_called()
+
+    def test_structural_cycles_depth_node_and_utf8_budgets(self):
+        desktop, editor, paragraph, _ = self.structural('\ufffc')
+        paragraph.children = [paragraph]
+        self.assert_unavailable(desktop, editor)
+        for static in (False, True):
+            visits = 3 if static else 2
+            for budget in ('TEXT_NODE_LIMIT', 'TEXT_DEPTH_LIMIT'):
+                desktop, editor, _, _ = self.structural('😀', static=static)
+                with patch('chatgpt_linux.' + budget, visits - 1):
+                    self.assert_unavailable(desktop, editor)
+                with patch('chatgpt_linux.' + budget, visits):
+                    self.assertEqual(self.read(desktop, editor), '😀')
+            total = 10 if static else 7
+            self.assertEqual(self.read(desktop, editor, limit=total), '😀')
+            self.assert_unavailable(desktop, editor, limit=total - 1)
+        desktop, editor, paragraph, _ = self.structural('\ufffc')
+        current = paragraph
+        for _ in range(16):
+            child = PublicNode('private', 'paragraph', editable=True)
+            child.value = '\ufffc'
+            current.children, current = [child], child
+        self.assert_unavailable(desktop, editor)
+
+    def test_structural_invalid_metadata_and_private_rpc_failures(self):
+        for count in (-1, True, None, 'private'):
+            desktop, editor, _, _ = self.structural('')
+            editor.get_child_count = Mock(return_value=count)
+            self.assert_unavailable(desktop, editor)
+        for value in (None, 1, '\ud800'):
+            desktop, editor, paragraph, _ = self.structural('', static=True)
+            paragraph.children[0].name = value
+            self.assert_unavailable(desktop, editor)
+        for method in ('get_child_count', 'get_child_at_index', 'get_role_name'):
+            desktop, editor, _, _ = self.structural('')
+            setattr(editor, method, Mock(side_effect=FakeGLibError('private UI content')))
+            self.assert_unavailable(desktop, editor)
+
+    def test_structural_prepare_and_submit_validate_only_input_and_do_not_export_content(self):
+        for static in (False, True):
+            for prompt in ('', '  π 😀\n\nExact.  \n'):
+                desktop, editor, paragraph, _ = self.structural('prior draft', static=static)
+                target, field = (paragraph.children[0], 'name') if static else (paragraph, 'value')
+                desktop.require_helpers = Mock()
+                desktop.open_prompt = Mock(side_effect=lambda value: setattr(target, field, value))
+                desktop.activate = Mock()
+                driver = Driver(desktop, 60_000, 24)
+                receipt = (driver.submit(prompt, 'chatgpt-work') if prompt
+                           else driver.prepare('chatgpt-work'))
+                self.assertEqual(receipt['status'], 'submitted' if prompt else 'ready')
+                desktop.open_prompt.assert_called_once_with(prompt)
+                self.assertEqual(desktop.activate.call_count, 1 if prompt else 0)
+                state = driver.receipt('failed')['draftState']
+                self.assertEqual(state['textLength'], len(prompt))
+                self.assertEqual(state['textSha256'], hashlib.sha256(prompt.encode('utf-8')).hexdigest())
+                self.assertNotIn('Exact', json.dumps(state))
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_structural_ambiguous_paragraphs_never_send(self, _sleep):
+        desktop, editor, paragraph, _ = self.structural('first')
+        other = PublicNode('private second', 'paragraph', editable=True)
+        other.value = 'second'
+        editor.children.append(other)
+        desktop.require_helpers, desktop.open_prompt, desktop.activate = Mock(), Mock(), Mock()
+        self.assertEqual(self.read(desktop, editor), '\ufffc')
+        with self.assertRaisesRegex(DriverFailure, '^state_transition_unobserved$'):
+            Driver(desktop, 60_000, 24).submit('first\nsecond', 'chatgpt-work')
+        desktop.open_prompt.assert_called_once_with('first\nsecond')
+        desktop.activate.assert_not_called()
+
     def test_empty_embedded_paragraph_is_exact_empty_not_its_static_child_name(self):
         desktop, editor, paragraph, _ = self.linked()
         editor.get_name = paragraph.get_name = Mock(side_effect=AssertionError('no names'))

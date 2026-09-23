@@ -167,8 +167,9 @@ class Desktop:
             raise DriverFailure('action_acknowledgement_uncertain')
 
     def text(self, control, limit=None):
-        # Follow only public Hypertext references, never the accessibility child
-        # tree or accessible names. Bound both source reads and expanded output.
+        # Prefer public Hypertext references. The structural fallback follows
+        # only a single direct child of a whole-marker owned composer node.
+        # Bound both source reads and expanded output; never export UI content.
         byte_limit = INPUT_LIMIT if limit is None else min(limit, INPUT_LIMIT)
         nodes_read = 0
         bytes_read = 0
@@ -182,7 +183,28 @@ class Desktop:
                 raise DriverFailure('composer_text_unavailable')
             fragments.append(value)
 
-        def expand(node, ancestors):
+        def structural(node, role, ancestors, owned):
+            if not owned:
+                return False
+            if not ancestors and (role not in EDITOR_ROLES or not
+                    node.get_state_set().contains(self.api.StateType.EDITABLE)):
+                return False
+            count = node.get_child_count()
+            if type(count) is not int or count < 0:
+                raise DriverFailure('composer_text_unavailable')
+            if count != 1:
+                return False  # No separators or child order can be inferred.
+            child = node.get_child_at_index(0)
+            if child is None:
+                raise DriverFailure('composer_text_unavailable')
+            child_role = child.get_role_name()
+            static = role == 'paragraph' and child_role in {'static', 'static text'}
+            if child_role not in {'paragraph', 'text'} and not static:
+                raise DriverFailure('composer_text_unavailable')
+            expand(child, ancestors + (node,), owned=True, static=static)
+            return True
+
+        def expand(node, ancestors, owned=False, static=False):
             nonlocal nodes_read, bytes_read
             self.remaining()
             if (node is None or len(ancestors) >= TEXT_DEPTH_LIMIT
@@ -190,7 +212,27 @@ class Desktop:
                 raise DriverFailure('composer_text_unavailable')
             nodes_read += 1
             interfaces = node.get_interfaces()
-            if (node.get_role_name() in {'image', 'password text'}
+            role = node.get_role_name()
+            if static:
+                count = node.get_child_count()
+                states = node.get_state_set()
+                if (type(count) is not int or count != 0
+                        or role not in {'static', 'static text'}
+                        or not states.contains(self.api.StateType.SHOWING)
+                        or not states.contains(self.api.StateType.VISIBLE)):
+                    raise DriverFailure('composer_text_unavailable')
+                if not has_interface(interfaces, 'Text'):
+                    # Only a visible static leaf under an owned paragraph has
+                    # a name that represents content, not an arbitrary label.
+                    value = node.get_name()
+                    if not isinstance(value, str):
+                        raise DriverFailure('composer_text_unavailable')
+                    bytes_read += len(value.encode('utf-8'))
+                    if bytes_read > byte_limit:
+                        raise DriverFailure('composer_text_unavailable')
+                    append(value)
+                    return
+            if (role in {'image', 'password text'}
                     or not has_interface(interfaces, 'Text')
                     or node.get_text_iface() is None):
                 raise DriverFailure('composer_text_unavailable')
@@ -206,6 +248,8 @@ class Desktop:
             if bytes_read > byte_limit:
                 raise DriverFailure('composer_text_unavailable')
             if not has_interface(interfaces, 'Hypertext'):
+                if value == '\ufffc' and structural(node, role, ancestors, owned):
+                    return
                 append(value)
                 return
             start = 0
@@ -217,7 +261,9 @@ class Desktop:
                 if type(index) is not int or index < -1:
                     raise DriverFailure('composer_text_unavailable')
                 if index == -1:
-                    continue  # A literal object character is not an empty editor.
+                    if value == '\ufffc' and structural(node, role, ancestors, owned):
+                        return
+                    continue  # An unresolved object character is not empty.
                 append(value[start:offset])
                 link = self.api.Hypertext.get_link(node, index)
                 if link is None:
@@ -231,7 +277,7 @@ class Desktop:
             append(value[start:])
 
         try:
-            expand(control['node'], ())
+            expand(control['node'], (), owned=True)
             return ''.join(fragments)
         except DriverFailure:
             raise
