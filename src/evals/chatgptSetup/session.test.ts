@@ -207,6 +207,7 @@ beforeEach(() => {
       evidenceDir: env.evidenceDir,
       readiness: {
         executionPolicy: POLICY,
+        hostToolPolicy: { disabledPlugins: [], webSearch: 'disabled' },
         login: 'verified',
         mcpPreflight: [],
       },

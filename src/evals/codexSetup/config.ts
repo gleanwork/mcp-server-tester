@@ -83,6 +83,18 @@ export interface CodexExecutionPolicy {
   sandboxMode: 'danger-full-access';
 }
 
+/**
+ * Bundled host tools to turn off, for hosts where they compete with the MCP
+ * server under test. Renders only `enabled = false` and `web_search`.
+ */
+export interface CodexHostToolPolicy {
+  /** Bundled plugin IDs, e.g. `unified-computer-use@openai-bundled`. */
+  disabledPlugins: readonly string[];
+  webSearch: 'disabled';
+}
+
+const PLUGIN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9._-]+$/;
+
 export interface ResolvedCodexSetup {
   configPath: string;
   configName: string;
@@ -189,6 +201,8 @@ export interface CodexConfigInstallOptions {
   trustedProject?: string;
   /** Rendered as top-level `approval_policy` and `sandbox_mode`. */
   executionPolicy?: CodexExecutionPolicy;
+  /** Rendered as `[plugins."<id>"] enabled = false` and `web_search`. */
+  hostToolPolicy?: CodexHostToolPolicy;
 }
 
 export async function installCodexConfig(
@@ -225,6 +239,14 @@ export async function installCodexConfig(
       policy.sandboxMode !== 'danger-full-access')
   )
     throw new Error('Invalid Codex execution policy.');
+  const tools = options.hostToolPolicy;
+  if (
+    tools !== undefined &&
+    (tools.webSearch !== 'disabled' ||
+      new Set(tools.disabledPlugins).size !== tools.disabledPlugins.length ||
+      !tools.disabledPlugins.every((id) => PLUGIN_ID_PATTERN.test(id)))
+  )
+    throw new Error('Invalid Codex host tool policy.');
   const resolved = resolveCodexSetup(setup, options.configName);
   const target = resolved.configPath;
   const lock = `${target}${LOCK_SUFFIX}`;
@@ -261,6 +283,16 @@ export async function installCodexConfig(
     if (policy !== undefined) {
       settings.approval_policy = policy.approvalPolicy;
       settings.sandbox_mode = policy.sandboxMode;
+    }
+    if (tools !== undefined) {
+      settings.web_search = tools.webSearch;
+      const plugins = isTable(settings.plugins) ? settings.plugins : {};
+      for (const id of tools.disabledPlugins)
+        plugins[id] = {
+          ...(isTable(plugins[id]) ? plugins[id] : {}),
+          enabled: false,
+        };
+      settings.plugins = plugins;
     }
     if (options.trustedProject !== undefined)
       settings.projects = {
@@ -440,6 +472,10 @@ async function assertSafeParent(path: string): Promise<void> {
       'Codex configuration parent must be owned by the current user.'
     );
   }
+}
+
+function isTable(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function sha256(value: Uint8Array): string {

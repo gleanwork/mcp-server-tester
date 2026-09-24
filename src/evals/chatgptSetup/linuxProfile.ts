@@ -27,6 +27,7 @@ import { loginWithApiKey } from '../codexSetup/auth.js';
 import type {
   CodexConfigInstallOptions,
   CodexExecutionPolicy,
+  CodexHostToolPolicy,
   ResolvedCodexSetup,
 } from '../codexSetup/config.js';
 import {
@@ -181,9 +182,23 @@ export const LINUX_CHATGPT_EXECUTION_POLICY: CodexExecutionPolicy = {
   sandboxMode: 'danger-full-access',
 };
 
+/**
+ * Code mode hides MCP tools until the model searches for them, so the model
+ * uses the first capable visible tool. On the headless VM that is the bundled
+ * browser (`cua_repl`, from `unified-computer-use`) or web search, and the
+ * MCP server under test is never tried. Turn both off. The app reads the
+ * plugin `enabled` flag before it adds `cua_repl`; the rollout records the
+ * result in `turn_context.disabled_plugin_ids`.
+ */
+export const LINUX_CHATGPT_HOST_TOOL_POLICY: CodexHostToolPolicy = {
+  disabledPlugins: ['unified-computer-use@openai-bundled'],
+  webSearch: 'disabled',
+};
+
 /** Sanitized setup receipt. No prompts, URLs, tokens, or native output. */
 export interface LinuxChatgptReadiness {
   executionPolicy: CodexExecutionPolicy;
+  hostToolPolicy: CodexHostToolPolicy;
   login: 'not-run' | 'verified' | 'failed';
   mcpPreflight: McpServerReadiness[];
   mcpStatus?: AppServerStatus;
@@ -194,7 +209,7 @@ export interface ChatgptPlatformProfile {
   readonly configPath: string;
   readonly install: Pick<
     CodexConfigInstallOptions,
-    'credentialStore' | 'trustedProject' | 'executionPolicy'
+    'credentialStore' | 'trustedProject' | 'executionPolicy' | 'hostToolPolicy'
   >;
   readonly controller: ChatgptApplicationController;
   readonly evidenceDir?: string;
@@ -238,6 +253,10 @@ export async function createLinuxChatgptProfile(
   await privateDirectory(workspace, 'workspace_unsafe');
   const readiness: LinuxChatgptReadiness = {
     executionPolicy: { ...LINUX_CHATGPT_EXECUTION_POLICY },
+    hostToolPolicy: {
+      disabledPlugins: [...LINUX_CHATGPT_HOST_TOOL_POLICY.disabledPlugins],
+      webSearch: LINUX_CHATGPT_HOST_TOOL_POLICY.webSearch,
+    },
     login: 'not-run',
     mcpPreflight: [],
   };
@@ -251,6 +270,7 @@ export async function createLinuxChatgptProfile(
       credentialStore: 'keyring',
       trustedProject: workspace,
       executionPolicy: LINUX_CHATGPT_EXECUTION_POLICY,
+      hostToolPolicy: LINUX_CHATGPT_HOST_TOOL_POLICY,
     },
     controller: createLinuxChatgptApp({
       appPath: environment.appPath,

@@ -113,7 +113,7 @@ describe('Codex configuration lifecycle', () => {
 
   it('renders keyring, one trusted project, bearer env, and policy, then restores', async () => {
     const original =
-      'approval_policy = "on-request"\ncli_auth_credentials_store = "file"\n[projects."/home/user"]\ntrust_level = "trusted"\n';
+      'approval_policy = "on-request"\ncli_auth_credentials_store = "file"\n[projects."/home/user"]\ntrust_level = "trusted"\n[plugins."unified-computer-use@openai-bundled"]\nenabled = true\n[plugins."visualize@openai-bundled"]\nenabled = true\n';
     const { directory, configPath } = await tempConfig(original);
     const workspace = join(directory, 'workspace');
     const installation = await installCodexConfig(
@@ -135,12 +135,21 @@ describe('Codex configuration lifecycle', () => {
           approvalPolicy: 'never',
           sandboxMode: 'danger-full-access',
         },
+        hostToolPolicy: {
+          disabledPlugins: ['unified-computer-use@openai-bundled'],
+          webSearch: 'disabled',
+        },
       }
     );
     expect(parse(await readFile(configPath, 'utf8'))).toEqual({
       approval_policy: 'never',
       sandbox_mode: 'danger-full-access',
       cli_auth_credentials_store: 'keyring',
+      web_search: 'disabled',
+      plugins: {
+        'unified-computer-use@openai-bundled': { enabled: false },
+        'visualize@openai-bundled': { enabled: true },
+      },
       projects: { [workspace]: { trust_level: 'trusted' } },
       mcp_servers: {
         glean: {
@@ -153,12 +162,14 @@ describe('Codex configuration lifecycle', () => {
     expect(await readFile(configPath, 'utf8')).toBe(original);
   });
 
-  it('omits the execution policy unless requested', async () => {
+  it('omits the execution and host tool policies unless requested', async () => {
     const { configPath } = await tempConfig();
     const installation = await installCodexConfig({ configPath, servers: [] });
     const installed = parse(await readFile(configPath, 'utf8'));
     expect(installed).not.toHaveProperty('approval_policy');
     expect(installed).not.toHaveProperty('sandbox_mode');
+    expect(installed).not.toHaveProperty('web_search');
+    expect(installed).not.toHaveProperty('plugins');
     await installation.restore();
   });
 
@@ -168,6 +179,21 @@ describe('Codex configuration lifecycle', () => {
   };
   it.each([
     ['executionPolicy', invalidPolicy, 'execution policy'],
+    [
+      'hostToolPolicy',
+      { disabledPlugins: ['a@b', 'a@b'], webSearch: 'disabled' },
+      'host tool policy',
+    ],
+    [
+      'hostToolPolicy',
+      { disabledPlugins: ['x"]\nenabled = true'], webSearch: 'disabled' },
+      'host tool policy',
+    ],
+    [
+      'hostToolPolicy',
+      { disabledPlugins: [], webSearch: 'live' },
+      'host tool policy',
+    ],
     ['trustedProject', 'relative/workspace', 'trusted project'],
     ['trustedProject', '/', 'trusted project'],
     ['trustedProject', '/tmp/../tmp/x', 'trusted project'],

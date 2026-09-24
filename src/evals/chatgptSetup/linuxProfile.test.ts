@@ -149,7 +149,20 @@ describe('fresh MST-owned Linux profile', () => {
     expect(await readdir(workspace)).toEqual([]);
     expect(profile).toMatchObject({
       configPath: join(home, '.codex', 'config.toml'),
-      install: { credentialStore: 'keyring', executionPolicy: POLICY },
+      install: {
+        credentialStore: 'keyring',
+        executionPolicy: POLICY,
+        hostToolPolicy: {
+          disabledPlugins: ['unified-computer-use@openai-bundled'],
+          webSearch: 'disabled',
+        },
+      },
+      readiness: {
+        hostToolPolicy: {
+          disabledPlugins: ['unified-computer-use@openai-bundled'],
+          webSearch: 'disabled',
+        },
+      },
       evidenceDir: join(home, 'evidence'),
     });
     await profile.dispose();

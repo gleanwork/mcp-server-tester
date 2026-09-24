@@ -91,9 +91,16 @@ MST then owns, in order:
 7. Copy evidence, stop the app group (TERM, then KILL, then verify no member
    remains), restore config, and remove the workspace. The caller deletes HOME.
 
-Computer use: on Linux, the built-in computer-use tool (`cua_repl`) is available
-to the model. Config cannot disable it in this ChatGPT build. Its calls are
-recorded as host tool calls, separate from MCP calls.
+Host tool policy: code mode hides MCP tools until the model searches for them,
+so the model uses the first capable tool it can see. On the headless VM, that
+is the bundled browser (`cua_repl`) or web search, and the MCP server under
+test is never tried. On Linux, MST writes
+`[plugins."unified-computer-use@openai-bundled"] enabled = false` (the plugin
+that adds `cua_repl`) and `web_search = "disabled"`.
+`nativeReadiness.hostToolPolicy` records both values. The rollout records
+the disabled plugin in `turn_context.disabled_plugin_ids`. Shell commands
+stay available. Any host tool call is recorded separately from MCP calls.
+macOS is unchanged.
 
 Execution policy: on Linux, MST writes `approval_policy = "never"` and
 `sandbox_mode = "danger-full-access"`. Native command execution needs
