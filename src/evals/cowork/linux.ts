@@ -201,17 +201,27 @@ export const linuxCoworkPlatform: CoworkPlatform = {
       if (model && !models?.some((m) => m.name === model))
         throw new Error('model');
       const expected = manifest.servers ?? [];
-      const actual = settings.managedMcpServers as
+      const managed = settings.managedMcpServers as
         | Array<{
             name?: string;
             transport?: string;
             url?: string;
+            env?: Record<string, string>;
             toolPolicy?: Record<string, string>;
           }>
         | undefined;
+      // A plugin's own server may only appear as a fully blocked policy entry.
+      const actual = managed?.filter((s) => s.transport !== 'policy-only');
       if (
-        !Array.isArray(actual) ||
+        !Array.isArray(managed) ||
+        !actual ||
         actual.length !== expected.length ||
+        managed.some(
+          (s) =>
+            s.transport === 'policy-only' &&
+            (Object.keys(s.toolPolicy ?? {}).join() !== '*' ||
+              s.toolPolicy?.['*'] !== 'blocked')
+        ) ||
         settings.allowManagedMcpServersOnly !== true
       )
         throw new Error('servers');
@@ -220,10 +230,15 @@ export const linuxCoworkPlatform: CoworkPlatform = {
         const observed = actual.find(
           (s) => s.name === (server.label ?? `server-${index + 1}`)
         );
+        // Direct HTTP, or a plugin MCP adapter pinned to the same eval endpoint.
         if (
           !observed ||
-          observed.transport !== 'http' ||
-          observed.url !== server.serverUrl
+          !(
+            (observed.transport === 'http' &&
+              observed.url === server.serverUrl) ||
+            (observed.transport === 'stdio' &&
+              observed.env?.GLEAN_MCP_SERVER_URL === server.serverUrl)
+          )
         )
           throw new Error('server');
         if (

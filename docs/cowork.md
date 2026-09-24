@@ -104,7 +104,11 @@ resolves the Python driver independently of the working directory.
 
 The driver reads `/etc/claude-desktop/managed-settings.json` (or the absolute
 `MST_COWORK_SETTINGS_FILE`) and fails if its model, HTTP MCP servers, or wildcard
-approval policy disagree with the manifest. Native sessions default to
+approval policy disagree with the manifest. A server may instead be a stdio plugin
+MCP adapter whose `env.GLEAN_MCP_SERVER_URL` equals the manifest URL. The caller
+installs the plugin through `allowedPluginMarketplaces` and runs its adapter under
+the eval label. Any other plugin server must be a `policy-only` entry that blocks
+all tools (`{"*": "blocked"}`). Native sessions default to
 `$XDG_CONFIG_HOME/Claude-3p/local-agent-mode-sessions`, or
 `$HOME/.config/Claude-3p/local-agent-mode-sessions`; `options.dataDir` overrides it.
 Preparation is read-only. MST does not provision or authenticate the environment,

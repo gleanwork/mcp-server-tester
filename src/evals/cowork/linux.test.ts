@@ -98,6 +98,26 @@ describe('caller-owned Linux Cowork desktop', () => {
     expect(child.exec).toHaveBeenCalledOnce();
     expect(child.exec.mock.calls[0]![1]).toContain('probe');
   });
+  it('accepts a plugin MCP adapter on the eval endpoint with its own server blocked', async () => {
+    const plugin = {
+      ...settings,
+      managedMcpServers: [
+        {
+          name: 'glean',
+          transport: 'stdio',
+          command: '/usr/bin/node',
+          env: { GLEAN_MCP_SERVER_URL: 'https://example.com/eval' },
+        },
+        {
+          name: 'glean_plugin',
+          transport: 'policy-only',
+          toolPolicy: { '*': 'blocked' },
+        },
+      ],
+    };
+    await (await prepare(plugin)).dispose();
+    expect(child.exec).toHaveBeenCalledOnce();
+  });
   it.each([
     { ...settings, inferenceModels: [{ name: 'wrong-model' }] },
     { ...settings, managedMcpServers: [] },
@@ -111,6 +131,27 @@ describe('caller-owned Linux Cowork desktop', () => {
       ...settings,
       managedMcpServers: [
         { ...settings.managedMcpServers[0], toolPolicy: { '*': 'allow' } },
+      ],
+    },
+    {
+      ...settings,
+      managedMcpServers: [
+        {
+          name: 'glean',
+          transport: 'stdio',
+          env: { GLEAN_MCP_SERVER_URL: 'https://wrong.example/eval' },
+        },
+      ],
+    },
+    {
+      ...settings,
+      managedMcpServers: [
+        ...settings.managedMcpServers,
+        {
+          name: 'glean_plugin',
+          transport: 'policy-only',
+          toolPolicy: { '*': 'allow' },
+        },
       ],
     },
   ])(
