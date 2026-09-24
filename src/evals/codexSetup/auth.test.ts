@@ -17,7 +17,11 @@ let codex: string;
 let keyFile: string;
 const env = () => ({ PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: root });
 
-async function fakeCodex(status = 'Logged in using an API key', code = 0) {
+async function fakeCodex(
+  status = 'Logged in using an API key',
+  code = 0,
+  loginExit = 0
+) {
   await writeFile(
     codex,
     `#!/usr/bin/env node
@@ -26,7 +30,7 @@ const args = process.argv.slice(2);
 const input = fs.readFileSync(0);
 fs.appendFileSync(${JSON.stringify(join(root, 'calls.jsonl'))}, JSON.stringify({ args, stdinBytes: input.length, keyOnStdin: input.toString() === 'sk-test-key\\n' }) + '\\n');
 if (args.join(' ') === 'login status') { console.error(${JSON.stringify(status)}); process.exit(${code}); }
-process.exit(0);
+process.exit(${loginExit});
 `,
     { mode: 0o700 }
   );
@@ -62,60 +66,46 @@ describe('native API-key login', () => {
       ['login', 'status'],
     ]);
     expect(recorded[0]!.keyOnStdin).toBe(true);
-    expect(JSON.stringify(recorded.map((call) => call.args))).not.toContain(
-      'sk-test'
-    );
+    expect(JSON.stringify(recorded)).not.toContain('sk-test');
   });
 
+  // Status never runs after a failed login, and nothing is retried.
   it.each([
-    ['Not logged in', 0],
-    ['Logged in using an API key', 1],
-  ])('fails closed with a fixed code on status %s/%s', async (status, code) => {
-    await fakeCodex(`${status} private-diagnostic`, code);
-    const error: unknown = await loginWithApiKey(codex, env(), keyFile).catch(
-      (failure: unknown) => failure
-    );
-    expect(error).toBeInstanceOf(CodexSetupError);
-    expect(error).toMatchObject({ code: 'login_unverified' });
-    expect(String(error)).not.toContain('private-diagnostic');
-    expect(await calls()).toHaveLength(2);
-  });
-
-  it('never runs status after a failed login and never retries', async () => {
-    await writeFile(codex, '#!/bin/sh\necho private >&2\nexit 3\n', {
-      mode: 0o700,
-    });
-    await expect(loginWithApiKey(codex, env(), keyFile)).rejects.toMatchObject({
-      code: 'login_failed',
-    });
-  });
-
-  it.each(['mode', 'symlink', 'empty', 'control'])(
-    'rejects an unsafe or invalid key file (%s) before spawning',
-    async (kind) => {
-      await fakeCodex();
-      if (kind === 'mode') await chmod(keyFile, 0o640);
-      if (kind === 'symlink') {
-        await rm(keyFile);
-        await writeFile(join(root, 'target'), 'sk-test-key', { mode: 0o600 });
-        await symlink(join(root, 'target'), keyFile);
-      }
-      if (kind === 'empty') await writeFile(keyFile, ' \n');
-      if (kind === 'control') await writeFile(keyFile, 'sk-a\u0001b');
-      await expect(readApiKeyFile(keyFile)).rejects.toMatchObject({
-        code:
-          kind === 'mode' || kind === 'symlink'
-            ? 'api_key_file_unsafe'
-            : 'api_key_invalid',
-      });
-      await expect(
-        loginWithApiKey(codex, env(), keyFile)
-      ).rejects.toBeInstanceOf(CodexSetupError);
-      await expect(readFile(join(root, 'calls.jsonl'))).rejects.toMatchObject({
-        code: 'ENOENT',
-      });
+    ['Not logged in', 0, 0, 'login_unverified', 2],
+    ['Logged in using an API key', 1, 0, 'login_unverified', 2],
+    ['Logged in using an API key', 0, 3, 'login_failed', 1],
+  ])(
+    'fails closed on %s/%s, login %s',
+    async (status, exit, login, code, n) => {
+      await fakeCodex(`${status} private-diagnostic`, exit, login);
+      const error = await loginWithApiKey(codex, env(), keyFile).catch(
+        (failure: unknown) => failure
+      );
+      expect(error).toBeInstanceOf(CodexSetupError);
+      expect(error).toMatchObject({ code });
+      expect(String(error)).not.toContain('private-diagnostic');
+      expect(await calls()).toHaveLength(n);
     }
   );
+
+  async function symlinkKey() {
+    await rm(keyFile);
+    await writeFile(join(root, 'target'), 'sk-test-key', { mode: 0o600 });
+    await symlink(join(root, 'target'), keyFile);
+  }
+  it.each([
+    ['mode', 'api_key_file_unsafe', () => chmod(keyFile, 0o640)],
+    ['symlink', 'api_key_file_unsafe', symlinkKey],
+    ['empty', 'api_key_invalid', () => writeFile(keyFile, ' \n')],
+    ['control', 'api_key_invalid', () => writeFile(keyFile, 'sk-a\u0001b')],
+  ])('rejects a %s key file with %s before spawning', async (_, code, fn) => {
+    await fakeCodex();
+    await fn();
+    await expect(readApiKeyFile(keyFile)).rejects.toMatchObject({ code });
+    const login = loginWithApiKey(codex, env(), keyFile);
+    await expect(login).rejects.toMatchObject({ code });
+    await expect(readFile(join(root, 'calls.jsonl'))).rejects.toThrow();
+  });
 });
 
 describe('bounded native commands', () => {

@@ -17,39 +17,30 @@ interface Call {
   args: string[];
   env: Record<string, string>;
   pid: number;
-  pgid: number;
 }
 
 async function fakeApp(handoffExit = 0, mainExitsImmediately = false) {
   const path = join(root, 'chatgpt');
-  const calls = join(root, 'calls.jsonl');
-  if (mainExitsImmediately)
-    await writeFile(path, '#!/bin/sh\nexit 0\n', { mode: 0o700 });
-  else
-    await writeFile(
-      path,
-      `#!${process.execPath}
+  const script = `#!${process.execPath}
 const fs = require('node:fs');
-const { spawn } = require('node:child_process');
 const args = process.argv.slice(2);
-fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ args, env: process.env, pid: process.pid }) + '\\n');
-const url = args.find((arg) => arg.startsWith('codex://'));
-if (url) process.exit(${handoffExit});
-const helper = spawn('/bin/sleep', ['60'], { stdio: 'ignore' });
+fs.appendFileSync(${JSON.stringify(join(root, 'calls.jsonl'))}, JSON.stringify({ args, env: process.env, pid: process.pid }) + '\\n');
+if (args.some((arg) => arg.startsWith('codex://'))) process.exit(${handoffExit});
+const helper = require('node:child_process').spawn('/bin/sleep', ['60'], { stdio: 'ignore' });
 fs.writeFileSync(${JSON.stringify(join(root, 'helper.pid'))}, String(helper.pid));
 setInterval(() => {}, 1000);
-`,
-      { mode: 0o700 }
-    );
-  const environment = {
-    HOME: root,
-    CODEX_HOME: join(root, '.codex'),
-    DISPLAY: ':99',
-    DBUS_SESSION_BUS_ADDRESS: 'unix:path=/fixture/bus',
-  };
+`;
+  await writeFile(path, mainExitsImmediately ? '#!/bin/sh\nexit 0\n' : script, {
+    mode: 0o700,
+  });
   app = createLinuxChatgptApp({
     appPath: path,
-    environment,
+    environment: {
+      HOME: root,
+      CODEX_HOME: join(root, '.codex'),
+      DISPLAY: ':99',
+      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/fixture/bus',
+    },
     workspace: join(root, 'workspace dir'),
   });
   return app;
@@ -125,48 +116,33 @@ describe('in-process Linux ChatGPT app controller', () => {
     ]);
     // The hand-off process never receives MCP credentials.
     expect(handoff!.env.MST_CHATGPT_MCP_TOKEN_0).toBeUndefined();
-    await expect
-      .poll(() => readFile(join(root, 'helper.pid'), 'utf8').catch(() => ''))
-      .not.toBe('');
-    const helper = Number(await readFile(join(root, 'helper.pid'), 'utf8'));
-    expect(alive(main!.pid)).toBe(true);
-    expect(alive(helper)).toBe(true);
+    const helperPid = () => readFile(join(root, 'helper.pid'), 'utf8');
+    await expect.poll(() => helperPid().catch(() => '')).not.toBe('');
+    const group = [main!.pid, Number(await helperPid())];
+    expect(group.map(alive)).toEqual([true, true]);
     await controller.stop();
     expect(await controller.state()).toEqual({ running: false });
-    expect(alive(main!.pid)).toBe(false);
-    expect(alive(helper)).toBe(false);
+    expect(group.map(alive)).toEqual([false, false]);
   });
 
-  it('rejects a mismatched CODEX_HOME and invalid tokens before spawning', async () => {
+  const invalid = 'environment_invalid';
+  it.each([
+    ['a mismatched CODEX_HOME', { CODEX_HOME: '/home/user/.codex' }, invalid],
+    ['an invalid token', { MST_CHATGPT_MCP_TOKEN_0: 'a\nb' }, invalid],
+    ['a hand-off without a main process', undefined, 'app_not_running'],
+  ])('rejects %s before spawning', async (_, environment, code) => {
     const controller = await fakeApp();
-    await expect(
-      controller.start({ CODEX_HOME: '/home/user/.codex' })
-    ).rejects.toMatchObject({ code: 'environment_invalid' });
-    await expect(
-      controller.start({ MST_CHATGPT_MCP_TOKEN_0: 'a\nb' })
-    ).rejects.toMatchObject({ code: 'environment_invalid' });
-    await expect(readFile(join(root, 'calls.jsonl'))).rejects.toMatchObject({
-      code: 'ENOENT',
-    });
-  });
-
-  it('does not hand off without a running main process', async () => {
-    const controller = await fakeApp();
-    await expect(controller.openPrompt('query')).rejects.toMatchObject({
-      code: 'app_not_running',
-    });
-    await expect(readFile(join(root, 'calls.jsonl'))).rejects.toMatchObject({
-      code: 'ENOENT',
-    });
+    const failure = environment
+      ? controller.start(environment)
+      : controller.openPrompt('query');
+    await expect(failure).rejects.toMatchObject({ code });
+    await expect(readFile(join(root, 'calls.jsonl'))).rejects.toThrow();
   });
 
   it('fails closed on an exited main process', async () => {
     const controller = await fakeApp(0, true);
     // Either start observes the exit, or state and hand-off do; never a draft.
-    const started = await controller.start().then(
-      () => undefined,
-      (error: unknown) => error
-    );
+    const started = await controller.start().catch((error: unknown) => error);
     if (started) expect(started).toMatchObject({ code: 'app_exited' });
     await expect
       .poll(async () => (await controller.state()).running)
@@ -176,24 +152,15 @@ describe('in-process Linux ChatGPT app controller', () => {
     });
   });
 
-  it('treats a failed hand-off as uncertain and does not retry', async () => {
-    const controller = await fakeApp(3);
+  // A failed hand-off is uncertain and never retried; an oversized URL never spawns.
+  it.each([
+    [3, 'query', 'url_handoff_failed', 2],
+    [0, '😀'.repeat(20_000), 'prompt_too_large', 1],
+  ])('hand-off exit %s fails with %s', async (exit, prompt, code, count) => {
+    const controller = await fakeApp(exit);
     await controller.start();
-    await expect(controller.openPrompt('query')).rejects.toMatchObject({
-      code: 'url_handoff_failed',
-    });
-    await expect.poll(async () => (await calls()).length).toBe(2);
-  });
-
-  it('rejects an oversized URL before spawning a hand-off', async () => {
-    const controller = await fakeApp();
-    await controller.start();
-    await expect
-      .poll(() => readFile(join(root, 'calls.jsonl'), 'utf8'))
-      .toContain('args');
-    await expect(
-      controller.openPrompt('😀'.repeat(20_000))
-    ).rejects.toMatchObject({ code: 'prompt_too_large' });
-    expect(await calls()).toHaveLength(1);
+    await expect.poll(async () => (await calls()).length).toBe(1);
+    await expect(controller.openPrompt(prompt)).rejects.toMatchObject({ code });
+    await expect.poll(async () => (await calls()).length).toBe(count);
   });
 });

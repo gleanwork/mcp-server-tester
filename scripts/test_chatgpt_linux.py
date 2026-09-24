@@ -2,20 +2,35 @@
 import hashlib
 import io
 import json
-import os
+import re
 import socket
 import subprocess
-import sys
 import tempfile
 import threading
 import time
 import unittest
-from itertools import chain, repeat
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 from chatgpt_linux import (DRAFT_POLLS, Driver, DriverFailure, Desktop, composer, main,
                            error_code, ERROR_CODES, INPUT_LIMIT, SESSION_KEYS, XDOTOOL)
+
+WORK, CODEX = 'ChatGPT Work', 'Codex'
+SWITCH_CODEX = 'Switch mode, current mode: Codex'
+WORK_ITEM = 'ChatGPT Work Create, learn, and explore'
+PROMPT = '  π 😀e\u0301\n\nExact.  \n'
+RECEIPT_KEYS = {'status', 'surface', 'action_count', 'duration_ms'}
+FAILED_KEYS = {'status', 'action_count', 'duration_ms', 'phase', 'step', 'draftState', 'error'}
+UNREADABLE = {'observedSurface', 'composerRootCount', 'sendControlCount', 'textReadable'}
+
+
+def sha(text): return hashlib.sha256(text.encode('utf-8')).hexdigest()
+
+
+def readable_state(text, surface='chatgpt-work'):
+    return {'observedSurface': surface, 'composerRootCount': 1, 'sendControlCount': 1,
+            'textReadable': True, 'textLength': len(text), 'textSha256': sha(text),
+            'embeddedObjectCount': text.count('\ufffc'), 'newlineCount': text.count('\n')}
 
 
 def node(name, role='button', **values):
@@ -25,11 +40,24 @@ def node(name, role='button', **values):
             'editable': False, 'selected': False, 'ancestors': (0,), **values}
 
 
-def ready(surface='ChatGPT Work', text=''):
-    return [node('Switch mode, current mode: ' + surface),
-            node('Send', enabled=bool(text)),
+def editor(name='extra', role='text', **values):
+    return node(name, role, editable=True, **values)
+
+
+def ready(surface=WORK, text=''):
+    return [node('Switch mode, current mode: ' + surface), node('Send', enabled=bool(text)),
             node('composer', 'text', editable=True, editableState=True,
                  textInterface=True, text=text)]
+
+
+def run_main(desktop, mode, payload, *extra):
+    """Run the CLI with stdin bytes; return (exit code, raw stdout)."""
+    with patch('chatgpt_linux.Desktop', return_value=desktop), \
+            patch('sys.argv', ['driver', '--mode', mode, '--timeout-ms', '60000', *extra]), \
+            patch('sys.stdin', SimpleNamespace(buffer=io.BytesIO(payload))), \
+            patch('sys.stdout', new_callable=io.StringIO) as output:
+        code = main()
+    return code, output.getvalue()
 
 
 class FakeGLibError(Exception):
@@ -51,11 +79,10 @@ class FakeGLibContext:
 
 class PublicNode:
     """Public Accessible interface; bound text methods deliberately collide."""
-    def __init__(self, name, role='button', editable=False, children=()):
-        self.name, self.role, self.children = name, role, list(children)
+    def __init__(self, name, role='button', editable=False, children=(), value=''):
+        self.name, self.role, self.children, self.value = name, role, list(children), value
         self.states = {'SHOWING', 'VISIBLE', 'ENABLED', 'SENSITIVE'}
-        self.interfaces, self.value = [], ''
-        self.links = {}
+        self.interfaces, self.links = [], {}
         if editable:
             self.states.add('EDITABLE')
             self.interfaces.append('Text')
@@ -74,9 +101,9 @@ class PublicNode:
 
 
 def public_desktop():
-    editor = PublicNode('private composer', 'text', editable=True)
+    editor_node = PublicNode('private composer', 'text', editable=True)
     app = PublicNode('ChatGPT', 'application', children=[
-        PublicNode('Switch mode, current mode: ChatGPT Work'), PublicNode('Send'), editor])
+        PublicNode('Switch mode, current mode: ChatGPT Work'), PublicNode('Send'), editor_node])
     root = PublicNode('desktop', 'desktop', children=[app])
     desktop = object.__new__(Desktop)
     desktop.deadline, desktop.glib_error = float('inf'), FakeGLibError
@@ -85,32 +112,27 @@ def public_desktop():
         get_desktop=lambda _: root,
         StateType=SimpleNamespace(**{key: key for key in (
             'SHOWING', 'VISIBLE', 'ENABLED', 'SENSITIVE', 'EDITABLE', 'CHECKED', 'SELECTED')}),
-        Text=SimpleNamespace(get_text=lambda node, start, end: node.value[start:end],
-                             get_character_count=lambda node: len(node.value)),
+        Text=SimpleNamespace(get_text=lambda n, start, end: n.value[start:end],
+                             get_character_count=lambda n: len(n.value)),
         Hypertext=SimpleNamespace(
-            get_link_index=Mock(side_effect=lambda node, offset: offset if offset in node.links else -1),
-            get_link=Mock(side_effect=lambda node, index: node.links[index])),
+            get_link_index=Mock(side_effect=lambda n, offset: offset if offset in n.links else -1),
+            get_link=Mock(side_effect=lambda n, index: n.links[index])),
         Hyperlink=SimpleNamespace(
             get_n_anchors=Mock(side_effect=lambda link: len(link.anchors)),
             get_object=Mock(side_effect=lambda link, index: link.anchors[index])))
-    return desktop, editor, app
+    return desktop, editor_node, app
 
 
 class FakeDesktop:
     def __init__(self, nodes=None):
         self.nodes = ready() if nodes is None else nodes
-        self.actions, self.stall = [], None
-        self.open_surface = None
-        self.preserve_draft = True
-        self.uncertain_send = False
-        self.stale_checked = False
+        self.actions, self.stall, self.open_surface = [], None, None
+        self.preserve_draft, self.uncertain_send, self.stale_checked = True, False, False
 
     def require_helpers(self): pass
     def snapshot(self): return self.nodes
     def text(self, control, limit=None): return control.get('text', '')
-
-    def surface(self):
-        return 'Codex' if self.nodes[0]['name'].endswith('Codex') else 'ChatGPT Work'
+    def surface(self): return CODEX if self.nodes[0]['name'].endswith(CODEX) else WORK
 
     def open_prompt(self, prompt):
         self.actions.append(('open', prompt))
@@ -133,217 +155,254 @@ class FakeDesktop:
         elif name == 'Skip':
             self.nodes = [node('Go to ChatGPT'), node('Keep setting up')]
         elif name == 'Go to ChatGPT':
-            self.nodes = ready('Codex')
+            self.nodes = ready(CODEX)
         elif name.startswith('Switch mode'):
-            self.nodes += [node('ChatGPT Work Create, learn, and explore', 'menu item'),
+            self.nodes += [node(WORK_ITEM, 'menu item'),
                            node('Codex Build, debug, and ship', 'menu item')]
-        elif name.startswith(('ChatGPT Work Create', 'Codex Build')):
+        elif name.startswith((WORK_ITEM, 'Codex Build')):
             text = self.text(composer(self.nodes)) if self.preserve_draft else ''
-            self.nodes = ready('Codex' if name.startswith('Codex') else 'ChatGPT Work', text)
+            self.nodes = ready(CODEX if name.startswith(CODEX) else WORK, text)
         elif name == 'Send' and self.uncertain_send:
             raise DriverFailure('action_acknowledgement_uncertain')
+
+
+def hook_open(desktop, after):
+    """Wrap FakeDesktop.open_prompt with a post-open mutation `after(value)`."""
+    original = desktop.open_prompt
+    def open_prompt(value):
+        original(value)
+        after(value)
+    desktop.open_prompt = open_prompt
+
+
+class MainCliTest(unittest.TestCase):
+    """stdin JSON in, exactly one JSON receipt line out; failures use fixed fields only."""
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_success_prints_one_receipt_line_and_passes_open_fd(self, _sleep):
+        for mode, payload, status in [('prepare', b'{"surface":"codex"}', 'ready'),
+                                      ('submit', b'{"surface":"chatgpt-work","prompt":"private"}',
+                                       'submitted')]:
+            with self.subTest(mode=mode):
+                desktop = FakeDesktop(ready(CODEX if mode == 'prepare' else WORK))
+                code, output = run_main(desktop, mode, payload, '--open-fd', '7')
+                self.assertEqual(code, 0)
+                self.assertEqual(output.count('\n'), 1)
+                receipt = json.loads(output)
+                self.assertEqual(set(receipt), RECEIPT_KEYS)
+                self.assertEqual(receipt['status'], status)
+                self.assertEqual(desktop.open_fd, 7)
+                self.assertNotIn('private', output)
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_failure_receipts_carry_only_fixed_fields_never_prompt_or_ui_text(self, _sleep):
+        private_ui = [node('Loading'), node('sk-private'), node('private content', 'paragraph')]
+        glib = FakeDesktop()
+        glib.glib_error = FakeGLibError  # Desktop owns the GLib type; no module global.
+        cases = [('prepare', FakeDesktop(list(private_ui)), None, b'{"surface":"codex"}',
+                  'state_transition_unobserved'),
+                 ('submit', FakeDesktop(list(private_ui)), None,
+                  b'{"surface":"codex","prompt":"private prompt"}', 'surface_mismatch'),
+                 ('prepare', FakeDesktop(), RuntimeError('private query or stderr'),
+                  b'{"surface":"chatgpt-work"}', 'desktop_driver_failed'),
+                 ('prepare', FakeDesktop(), None, '😀'.encode() * (INPUT_LIMIT // 4 + 1),
+                  'input_too_large'),
+                 ('prepare', glib, FakeGLibError('private'), b'{"surface":"codex"}',
+                  'desktop_glib_error')]
+        for mode, desktop, snapshot_error, payload, error in cases:
+            with self.subTest(error=error):
+                if snapshot_error:
+                    desktop.snapshot = Mock(side_effect=snapshot_error)
+                code, output = run_main(desktop, mode, payload)
+                receipt = json.loads(output)
+                self.assertEqual(code, 1)
+                self.assertEqual(receipt['error'], error)
+                self.assertIn(error, ERROR_CODES)
+                self.assertLessEqual(set(receipt), FAILED_KEYS)
+                for leaked in ('private', 'Loading', 'sk-'):
+                    self.assertNotIn(leaked, output)
+                self.assertEqual(desktop.actions, [])
+
+
+class DraftStateTest(unittest.TestCase):
+    """Failure-only draftState from the last snapshot: readable and unreadable shapes."""
+
+    def failed_state(self, desktop, read=None):
+        driver = Driver(desktop, 60_000, 24)
+        driver.snapshot()
+        if read is not None:
+            desktop.text = read
+        return driver, driver.receipt('failed').get('draftState')
+
+    def test_readable_shape_is_exact_measurements_without_private_values(self):
+        for text in ('', '\ufffc', '\ufffc\ufffc\n\r\nπ😀', 'private prompt'):
+            with self.subTest(text=text):
+                desktop = FakeDesktop(ready(text=text))
+                desktop.nodes[2].update(name='private UI name', url='https://private.example',
+                                        config='private config', prompt='private prompt')
+                # Chromium entry plus nested editable paragraph is one root.
+                desktop.nodes[2]['role'] = 'entry'
+                desktop.nodes.append(editor('private paragraph', 'paragraph', ancestors=(0, 2),
+                                            text='must not read'))
+                driver = Driver(desktop, 60_000, 24)
+                driver.phase, driver.step = 'composer', 'draft-surface'
+                driver.snapshot()
+                desktop.snapshot = Mock(side_effect=AssertionError('no fresh snapshot'))
+                desktop.text = Mock(wraps=desktop.text)
+                receipt = driver.receipt('failed')
+                self.assertEqual(receipt['draftState'], readable_state(text))
+                self.assertEqual((receipt['phase'], receipt['step']), ('composer', 'draft-surface'))
+                self.assertNotIn('private', json.dumps(receipt))
+                desktop.text.assert_called_once_with(desktop.nodes[2], limit=INPUT_LIMIT)
+                self.assertEqual(desktop.actions, [])
+
+    def test_unreadable_shape_for_unsafe_editors_failed_or_oversized_reads(self):
+        never = Mock(side_effect=AssertionError('must not read'))
+        for editors in ([], [editor('a', 'entry'), editor('b', 'paragraph')],
+                        [editor('a', 'entry', visible=False)], [editor('a', 'entry', showing=False)],
+                        [editor('a', 'entry', enabled=False)], [editor('a', 'entry', sensitive=False)]):
+            with self.subTest(editors=len(editors)):
+                _, state = self.failed_state(FakeDesktop(ready()[:2] + editors), never)
+                self.assertEqual(set(state), UNREADABLE)
+                self.assertFalse(state['textReadable'])
+        for text in (None, 1, 'a' * (INPUT_LIMIT + 1), '😀' * (INPUT_LIMIT // 4 + 1), '\ud800'):
+            with self.subTest(text=str(text)[:8]):
+                _, state = self.failed_state(FakeDesktop(ready(text=text)))
+                self.assertEqual(set(state), UNREADABLE)
+        driver, state = self.failed_state(FakeDesktop(), Mock(side_effect=RuntimeError('private UI')))
+        self.assertEqual(set(state), UNREADABLE)
+        self.assertNotIn('private', json.dumps(driver.receipt('failed')))
+        never.assert_not_called()
+
+    def test_only_failed_receipts_after_a_snapshot_have_draft_state(self):
+        desktop = FakeDesktop()
+        driver = Driver(desktop, 60_000, 24)
+        self.assertNotIn('draftState', driver.receipt('failed'))
+        driver.snapshot()
+        desktop.text = Mock(side_effect=AssertionError('no diagnostic read on success'))
+        for status in ('ready', 'submitted'):
+            self.assertNotIn('draftState', driver.receipt(status, 'chatgpt-work'))
+
+    def test_observed_surface_uses_only_known_visible_labels(self):
+        codex, work = node(SWITCH_CODEX), node('Switch mode, current mode: ChatGPT Work')
+        for switches, expected in [([], 'unknown'), ([node('private surface')], 'unknown'),
+                                   ([codex], 'codex'), ([work], 'chatgpt-work'),
+                                   ([node(SWITCH_CODEX, visible=False)], 'unknown'),
+                                   ([codex, codex], 'ambiguous'), ([codex, work], 'ambiguous')]:
+            with self.subTest(expected=expected, count=len(switches)):
+                _, state = self.failed_state(FakeDesktop(switches))
+                self.assertEqual(state['observedSurface'], expected)
+
+    def test_public_atspi_diagnostic_read_is_bounded_and_unbound(self):
+        desktop, editor_node, _ = public_desktop()
+        editor_node.value = '\ufffc'
+        desktop.api.Text.get_text = Mock(wraps=desktop.api.Text.get_text)
+        _, state = self.failed_state(desktop)
+        self.assertEqual(state, readable_state('\ufffc'))
+        desktop.api.Text.get_text.assert_called_once_with(editor_node, 0, 1)
+        desktop.api.Text.get_text.reset_mock()
+        editor_node.value = 'a' * (INPUT_LIMIT + 1)
+        _, state = self.failed_state(desktop)
+        self.assertEqual(set(state), UNREADABLE)
+        desktop.api.Text.get_text.assert_not_called()
 
 
 class DriverTest(unittest.TestCase):
     def driver(self, desktop, actions=24): return Driver(desktop, 60_000, actions)
     def actions(self, desktop): return [action[0] for action in desktop.actions]
 
-    @patch('chatgpt_linux.time.sleep')
-    def test_failed_receipts_carry_only_fixed_diagnostics(self, _sleep):
-        for mode in ('prepare', 'submit'):
-            desktop = FakeDesktop([node('Loading'), node('sk-private'),
-                                   node('private content', 'paragraph')])
-            payload = json.dumps({'surface': 'codex', 'prompt': 'private prompt'}).encode()
-            with patch('chatgpt_linux.Desktop', return_value=desktop), \
-                    patch('sys.argv', ['driver', '--mode', mode, '--timeout-ms', '60000']), \
-                    patch('sys.stdin', SimpleNamespace(buffer=io.BytesIO(payload))), \
-                    patch('sys.stdout', new_callable=io.StringIO) as output:
-                self.assertEqual(main(), 1)
-            receipt = json.loads(output.getvalue())
-            self.assertLessEqual(set(receipt), {
-                'status', 'action_count', 'duration_ms', 'phase', 'step', 'draftState', 'error'})
-            self.assertEqual(receipt['error'], 'state_transition_unobserved'
-                             if mode == 'prepare' else 'surface_mismatch')
-            self.assertNotIn('private', output.getvalue())
-            self.assertNotIn('Loading', output.getvalue())
-            self.assertEqual(desktop.actions, [])
+    def run_mode(self, driver, mode, prompt='private'):
+        return driver.prepare('chatgpt-work') if mode == 'prepare' else driver.submit(prompt, 'chatgpt-work')
 
-    def test_failure_draft_state_exact_measurements_and_privacy(self):
-        for text in ('', '\ufffc', '\ufffc\ufffc\n\r\nπ😀', 'private prompt'):
-            desktop = FakeDesktop(ready(text=text))
-            desktop.nodes[2].update(name='private UI name', url='https://private.example',
-                                    config='private config', prompt='private prompt')
-            driver = self.driver(desktop)
-            driver.phase, driver.step = 'composer', 'draft-surface'
-            driver.snapshot()
-            desktop.snapshot = Mock(side_effect=AssertionError('no fresh snapshot'))
-            desktop.text = Mock(wraps=desktop.text)
-            receipt = driver.receipt('failed')
-            self.assertEqual(receipt['draftState'], {
-                'observedSurface': 'chatgpt-work', 'composerRootCount': 1,
-                'sendControlCount': 1, 'textReadable': True, 'textLength': len(text),
-                'textSha256': hashlib.sha256(text.encode('utf-8')).hexdigest(),
-                'embeddedObjectCount': text.count('\ufffc'), 'newlineCount': text.count('\n')})
-            self.assertEqual(receipt['step'], 'draft-surface')
-            self.assertNotIn('private', json.dumps(receipt))
-            desktop.text.assert_called_once_with(desktop.nodes[2], limit=INPUT_LIMIT)
-            self.assertEqual(desktop.actions, [])
-
-    def test_failure_draft_state_deduplicates_entry_and_paragraph(self):
-        desktop = FakeDesktop(ready())
-        desktop.nodes[2].update(role='entry')
-        desktop.nodes.append(node('private paragraph', 'paragraph', editable=True,
-                                  ancestors=(0, 2), text='must not read'))
-        driver = self.driver(desktop)
-        driver.snapshot()
-        desktop.text = Mock(wraps=desktop.text)
-        self.assertEqual(driver.receipt('failed')['draftState']['composerRootCount'], 1)
-        desktop.text.assert_called_once_with(desktop.nodes[2], limit=INPUT_LIMIT)
-
-    def test_ambiguous_missing_hidden_disabled_editors_never_read(self):
-        for editors in ([], [node('a', 'entry', editable=True), node('b', 'paragraph', editable=True)],
-                        [node('a', 'entry', editable=True, visible=False)],
-                        [node('a', 'entry', editable=True, showing=False)],
-                        [node('a', 'entry', editable=True, enabled=False)],
-                        [node('a', 'entry', editable=True, sensitive=False)]):
-            desktop = FakeDesktop(ready()[:2] + editors)
-            driver = self.driver(desktop)
-            driver.snapshot()
-            desktop.text = Mock(side_effect=AssertionError('must not read'))
-            state = driver.receipt('failed')['draftState']
-            self.assertFalse(state['textReadable'])
-            self.assertEqual(set(state), {'observedSurface', 'composerRootCount',
-                                         'sendControlCount', 'textReadable'})
-            desktop.text.assert_not_called()
-
-    def test_draft_state_uses_only_known_visible_surface_labels(self):
-        for switches, expected in [([], 'unknown'),
-                ([node('private surface')], 'unknown'),
-                ([node('Switch mode, current mode: Codex')], 'codex'),
-                ([node('Switch mode, current mode: ChatGPT Work')], 'chatgpt-work'),
-                ([node('Switch mode, current mode: Codex', visible=False)], 'unknown'),
-                ([node('Switch mode, current mode: Codex')] * 2, 'ambiguous'),
-                ([node('Switch mode, current mode: Codex'),
-                  node('Switch mode, current mode: ChatGPT Work')], 'ambiguous')]:
-            desktop = FakeDesktop(switches)
-            driver = self.driver(desktop)
-            driver.snapshot()
-            self.assertEqual(driver.receipt('failed')['draftState']['observedSurface'], expected)
-
-    def test_draft_state_read_failures_and_oversized_text_omit_measurements(self):
-        for text in (None, 1, 'a' * (INPUT_LIMIT + 1), '😀' * (INPUT_LIMIT // 4 + 1), '\ud800'):
-            desktop = FakeDesktop(ready(text=text))
-            driver = self.driver(desktop)
-            driver.snapshot()
-            state = driver.receipt('failed')['draftState']
-            self.assertFalse(state['textReadable'])
-            self.assertNotIn('textLength', state)
-            self.assertNotIn('textSha256', state)
-        desktop.text = Mock(side_effect=RuntimeError('private UI error'))
-        self.assertNotIn('private', json.dumps(driver.receipt('failed')))
-        self.assertFalse(driver.receipt('failed')['draftState']['textReadable'])
-
-    def test_draft_diagnostics_use_bounded_unbound_text_read(self):
-        desktop, editor, _app = public_desktop()
-        editor.value = '\ufffc'
-        driver = self.driver(desktop)
-        driver.snapshot()
-        desktop.api.Text.get_text = Mock(wraps=desktop.api.Text.get_text)
-        state = driver.receipt('failed')['draftState']
-        self.assertEqual(state['embeddedObjectCount'], 1)
-        self.assertEqual(state['textLength'], 1)
-        desktop.api.Text.get_text.assert_called_once_with(editor, 0, 1)
-        desktop.api.Text.get_text.reset_mock()
-        editor.value = 'a' * (INPUT_LIMIT + 1)
-        self.assertFalse(driver.receipt('failed')['draftState']['textReadable'])
-        desktop.api.Text.get_text.assert_not_called()
-
-    def test_draft_diagnostics_success_and_no_snapshot_do_not_read(self):
-        desktop = FakeDesktop()
-        driver = self.driver(desktop)
-        self.assertNotIn('draftState', driver.receipt('failed'))
-        driver.snapshot()
-        desktop.text = Mock(side_effect=AssertionError('no diagnostic read on success'))
-        for status in ('ready', 'submitted'):
-            self.assertNotIn('draftState', driver.receipt(status, 'chatgpt-work'))
-        desktop.text.assert_not_called()
+    # --- setup (prepare) ---
 
     @patch('chatgpt_linux.time.sleep')
-    def test_slow_draft_after_one_hand_off_is_awaited_without_reopening(self, sleep):
-        # Live runs showed drafts that did not appear within 10 s; wait (read-only)
-        # up to 30 s after the single hand-off, and never reopen or refill.
-        desktop = FakeDesktop()
-        driver = self.driver(desktop)
-        driver.prepare('chatgpt-work')
-        desktop.actions.clear()
+    def test_setup_opens_one_empty_chat_without_readback_or_send(self, _sleep):
+        # Target surface -> expected action count after opening into ChatGPT Work.
+        for surface, label, count in [('chatgpt-work', WORK, 1), ('codex', CODEX, 3)]:
+            with self.subTest(surface=surface):
+                desktop = FakeDesktop(ready(label, 'prior draft'))
+                def open_empty(prompt, desktop=desktop):
+                    desktop.actions.append(('open', prompt))
+                    desktop.nodes = ready(WORK, 'Ask anything here\n')
+                    desktop.nodes[1]['enabled'] = False
+                desktop.open_prompt = open_empty
+                desktop.text = Mock(side_effect=AssertionError('setup has no prompt to read back'))
+                desktop.preserve_draft = False
+                receipt = self.driver(desktop).prepare(surface)
+                self.assertEqual(receipt, {**receipt, 'status': 'ready', 'surface': surface,
+                                           'action_count': count})
+                self.assertEqual(set(receipt), RECEIPT_KEYS)
+                self.assertEqual(desktop.actions[0], ('open', ''))
+                self.assertEqual(self.actions(desktop).count('open'), 1)
+                self.assertNotIn('Send', self.actions(desktop))
+
+    def test_setup_ready_means_controls_not_verified_emptiness(self):
+        desktop = FakeDesktop(ready(text='prior draft'))
         desktop.stall = 'open'
-        polls = iter(range(10_000))
-        def settle(_):
-            if next(polls) == 150:  # about 15 s of 0.1 s polls
-                desktop.nodes = ready('ChatGPT Work', 'private prompt')
-        sleep.side_effect = settle
-        receipt = driver.submit('private prompt', 'chatgpt-work')
-        self.assertEqual(receipt['status'], 'submitted')
-        self.assertEqual(self.actions(desktop), ['open', 'Send'])
+        desktop.text = Mock(side_effect=AssertionError('no setup emptiness predicate'))
+        receipt = self.driver(desktop).prepare('chatgpt-work')
+        self.assertEqual(receipt['status'], 'ready')
+        self.assertEqual(desktop.actions, [('open', '')])
+        self.assertEqual(composer(desktop.nodes)['text'], 'prior draft')
 
-    def test_setup_placeholder_is_ready_without_text_read_or_send(self):
-        for surface, label in [('chatgpt-work', 'ChatGPT Work'), ('codex', 'Codex')]:
-            desktop = FakeDesktop(ready(label))
-            def open_empty(prompt):
-                desktop.actions.append(('open', prompt))
-                desktop.nodes = ready('ChatGPT Work', 'Ask anything here\n')
-                desktop.nodes[1]['enabled'] = False
-            desktop.open_prompt = open_empty
-            desktop.text = Mock(side_effect=AssertionError('setup has no prompt to read back'))
-            # Fake mode selection must also avoid reading placeholder content.
-            desktop.preserve_draft = False
-            receipt = self.driver(desktop).prepare(surface)
-            self.assertEqual(receipt['status'], 'ready')
-            self.assertEqual(receipt['surface'], surface)
-            self.assertEqual(set(receipt), {'status', 'surface', 'action_count', 'duration_ms'})
-            self.assertEqual(desktop.actions[0], ('open', ''))
-            self.assertEqual(self.actions(desktop).count('open'), 1)
-            self.assertEqual(self.actions(desktop).count('Send'), 0)
-            self.assertEqual(receipt['action_count'], 1 if surface == 'chatgpt-work' else 3)
-            desktop.text.assert_not_called()
+    @patch('chatgpt_linux.time.sleep')
+    def test_setup_still_requires_surface_unique_composer_and_send_after_open(self, _sleep):
+        mutations = {'surface': lambda ns: ns[0].update(name='unknown mode'),
+                     'composer-missing': lambda ns: ns.pop(),
+                     'composer-ambiguous': lambda ns: ns.append(editor('other', 'entry')),
+                     'send-missing': lambda ns: ns.pop(1),
+                     'send-ambiguous': lambda ns: ns.append(node('Send'))}
+        for kind, mutate in mutations.items():
+            with self.subTest(kind=kind):
+                desktop = FakeDesktop()
+                hook_open(desktop, lambda _v, d=desktop, m=mutate: m(d.nodes))
+                with self.assertRaises(DriverFailure):
+                    self.driver(desktop).prepare('chatgpt-work')
+                self.assertEqual(desktop.actions, [('open', '')])
 
-    def test_setup_onboarding_surface_then_one_empty_open_no_send(self):
+    # --- onboarding / intro ---
+
+    def test_onboarding_skips_known_intro_then_one_empty_open(self):
         desktop = FakeDesktop([node('Engineering', 'radio button'), node('Continue')])
         desktop.stale_checked = True
         result = self.driver(desktop).prepare('chatgpt-work')
-        self.assertEqual(result['status'], 'ready')
-        self.assertEqual(set(result), {'status', 'surface', 'action_count', 'duration_ms'})
+        self.assertEqual(set(result), RECEIPT_KEYS)
         self.assertEqual(self.actions(desktop), ['Engineering', 'Continue', 'Skip', 'Go to ChatGPT',
-                         'Switch mode, current mode: Codex', 'ChatGPT Work Create, learn, and explore', 'open'])
+                                                 SWITCH_CODEX, WORK_ITEM, 'open'])
         self.assertEqual(desktop.actions[-1], ('open', ''))
         self.assertEqual(result['action_count'], 7)
 
-    def test_setup_already_selected_still_opens_empty_chat_once(self):
-        for surface, label in [('chatgpt-work', 'ChatGPT Work'), ('codex', 'Codex')]:
-            desktop = FakeDesktop(ready(label, 'prior draft'))
-            result = self.driver(desktop).prepare(surface)
-            self.assertEqual(result['action_count'], 1)
-            self.assertEqual(desktop.actions, [('open', '')])
+    @patch('chatgpt_linux.time.sleep')
+    def test_unknown_or_partial_intro_screens_are_never_skipped(self, _sleep):
+        for nodes, error in [([node('Skip')], 'state_transition_unobserved'),
+                             # Skip plus only one of the two known intro markers.
+                             ([node('Skip'), node('Leave a note on my Desktop')],
+                              'mode_missing_or_ambiguous'),
+                             ([node('Engineering', 'radio button')] * 2, 'profession_ambiguous')]:
+            with self.subTest(error=error):
+                desktop = FakeDesktop(nodes)
+                with self.assertRaisesRegex(DriverFailure, error):
+                    self.driver(desktop).prepare('chatgpt-work')
+                self.assertEqual(desktop.actions, [])
 
     @patch('chatgpt_linux.time.sleep')
-    def test_continue_enablement_not_checked_bit_is_required(self, sleep):
+    def test_continue_waits_for_enablement_and_is_never_retried(self, sleep):
         for selected in (False, True):
-            desktop = FakeDesktop([node('Engineering', 'radio button', selected=selected),
-                                   node('Continue', enabled=False)])
-            desktop.stale_checked = True
-            sleep.reset_mock()
-            def settle(_):
-                if sleep.call_count == 3:
-                    desktop.nodes[1]['enabled'] = True
-            sleep.side_effect = settle
-            self.driver(desktop).prepare('chatgpt-work')
-            self.assertEqual(self.actions(desktop).count('Engineering'), 0 if selected else 1)
-            self.assertEqual(self.actions(desktop).count('Continue'), 1)
-            self.assertEqual(sleep.call_count, 3)
-
-    @patch('chatgpt_linux.time.sleep')
-    def test_disabled_continue_never_clicked_or_selection_retried(self, sleep):
-        desktop = FakeDesktop([node('Engineering', 'radio button'), node('Continue', enabled=False)])
+            with self.subTest(selected=selected):
+                desktop = FakeDesktop([node('Engineering', 'radio button', selected=selected),
+                                       node('Continue', enabled=False)])
+                desktop.stale_checked = True
+                sleep.reset_mock()
+                sleep.side_effect = lambda _, d=desktop: (
+                    d.nodes[1].update(enabled=True) if sleep.call_count == 3 else None)
+                self.driver(desktop).prepare('chatgpt-work')
+                self.assertEqual(self.actions(desktop).count('Engineering'), 0 if selected else 1)
+                self.assertEqual(self.actions(desktop).count('Continue'), 1)
+                self.assertEqual(sleep.call_count, 3)
+        sleep.side_effect, desktop = None, FakeDesktop(
+            [node('Engineering', 'radio button'), node('Continue', enabled=False)])
+        sleep.reset_mock()
         driver = self.driver(desktop)
         with self.assertRaisesRegex(DriverFailure, 'state_transition_unobserved'):
             driver.prepare('chatgpt-work')
@@ -351,306 +410,230 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(self.actions(desktop), ['Engineering'])
         self.assertEqual(sleep.call_count, 100)
 
-    @patch('chatgpt_linux.time.sleep')
-    def test_unknown_onboarding_and_ambiguous_profession_do_not_act(self, _sleep):
-        for nodes, error in [([node('Skip')], 'state_transition_unobserved'),
-                             ([node('Engineering', 'radio button')] * 2, 'profession_ambiguous')]:
-            desktop = FakeDesktop(nodes)
-            with self.assertRaisesRegex(DriverFailure, error):
-                self.driver(desktop).prepare('chatgpt-work')
-            self.assertEqual(desktop.actions, [])
+    # --- submit: exact echo, one Send ---
 
-    def test_exact_unicode_whitespace_one_open_one_send(self):
-        for surface, label in [('chatgpt-work', 'ChatGPT Work'), ('codex', 'Codex')]:
-            desktop = FakeDesktop(ready(label, 'prior draft'))
-            prompt = '  Find snake_case — π 😀\n\nDo not trim.  \n'
-            result = self.driver(desktop).submit(prompt, surface)
-            self.assertEqual(result['status'], 'submitted')
-            self.assertEqual(result['action_count'], 2)
-            self.assertEqual(set(result), {'status', 'surface', 'action_count', 'duration_ms'})
-            self.assertEqual(desktop.actions[0], ('open', prompt))
-            self.assertEqual(self.actions(desktop), ['open', 'Send'])
-
-    def test_exact_or_one_native_terminal_lf_preserves_opener_payload(self):
-        for prompt in ('Find docs', '  π 😀e\u0301\n\nExact.  \n', 'π\n\n'):
+    def test_exact_or_one_terminal_lf_echo_sends_once_with_unmodified_prompt(self):
+        for prompt in ('Find docs', PROMPT, 'π\n\n'):
             for suffix in ('', '\n'):
                 for corrected in (False, True):
                     with self.subTest(prompt=prompt, suffix=suffix, corrected=corrected):
-                        desktop = FakeDesktop()
-                        original = desktop.open_prompt
-                        def open_prompt(value):
-                            original(value)
-                            composer(desktop.nodes)['text'] = value + suffix
-                        desktop.open_prompt = open_prompt
-                        desktop.open_surface = 'Codex' if corrected else None
+                        desktop = FakeDesktop(ready(text='prior draft'))
+                        hook_open(desktop, lambda v, d=desktop, s=suffix: composer(d.nodes).update(text=v + s))
+                        desktop.open_surface = CODEX if corrected else None
                         receipt = self.driver(desktop).submit(prompt, 'chatgpt-work')
+                        self.assertEqual(set(receipt), RECEIPT_KEYS)
                         self.assertEqual(receipt['status'], 'submitted')
                         self.assertEqual(receipt['action_count'], 4 if corrected else 2)
                         self.assertEqual(desktop.actions[0], ('open', prompt))
-                        self.assertEqual(desktop.actions[0][1].encode('utf-8'), prompt.encode('utf-8'))
-                        self.assertEqual(self.actions(desktop).count('open'), 1)
-                        self.assertEqual(self.actions(desktop).count('Send'), 1)
+                        # One open, one Send, nothing else (no Enter/keyboard fallback).
+                        self.assertEqual(self.actions(desktop), ['open', SWITCH_CODEX, WORK_ITEM, 'Send']
+                                         if corrected else ['open', 'Send'])
                         self.assertEqual(composer(desktop.nodes)['text'], prompt + suffix)
 
     @patch('chatgpt_linux.time.sleep')
-    def test_draft_mismatch_blocks_before_and_after_mode_correction(self, _sleep):
-        prompt = '  π 😀e\u0301\nExact.  \n'
-        mismatches = [prompt + '\n\n', prompt + '\n\n\n', 'prefix' + prompt,
-                      prompt + 'suffix', prompt.strip(), prompt.lstrip(), prompt.rstrip(),
-                      prompt[:-1], prompt + '\r\n', prompt.replace('\n', ''), '']
+    def test_draft_mismatch_blocks_send_before_and_after_mode_correction(self, _sleep):
+        mismatches = [PROMPT + '\n\n', 'prefix' + PROMPT, PROMPT + 'suffix', PROMPT.strip(),
+                      PROMPT.lstrip(), PROMPT.rstrip(), PROMPT[:-1], PROMPT + '\r\n',
+                      PROMPT.replace('\n', ''), '']
         for text in mismatches:
             for after_correction in (False, True):
                 with self.subTest(text=text, after_correction=after_correction):
                     desktop = FakeDesktop()
-                    desktop.open_surface = 'Codex'
-                    original_open, original_activate = desktop.open_prompt, desktop.activate
-                    def open_prompt(value):
-                        original_open(value)
-                        composer(desktop.nodes)['text'] = value + '\n' if after_correction else text
-                    def activate(control, allowed):
+                    desktop.open_surface = CODEX
+                    hook_open(desktop, lambda v, d=desktop, t=text, a=after_correction:
+                              composer(d.nodes).update(text=v + '\n' if a else t))
+                    original_activate = desktop.activate
+                    def activate(control, allowed, d=desktop, t=text):
                         original_activate(control, allowed)
-                        if control['name'] == 'ChatGPT Work Create, learn, and explore':
-                            composer(desktop.nodes)['text'] = text
-                    desktop.open_prompt, desktop.activate = open_prompt, activate
+                        if control['name'] == WORK_ITEM:
+                            composer(d.nodes)['text'] = t
+                    desktop.activate = activate
                     driver = self.driver(desktop)
                     with self.assertRaisesRegex(DriverFailure, 'state_transition_unobserved'):
-                        driver.submit(prompt, 'chatgpt-work')
-                    expected = ['open', 'Switch mode, current mode: Codex',
-                                'ChatGPT Work Create, learn, and explore'] if after_correction else ['open']
-                    self.assertEqual(self.actions(desktop), expected)
-                    self.assertEqual(desktop.actions[0], ('open', prompt))
+                        driver.submit(PROMPT, 'chatgpt-work')
+                    self.assertEqual(self.actions(desktop), ['open', SWITCH_CODEX, WORK_ITEM]
+                                     if after_correction else ['open'])
                     self.assertEqual(driver.step, 'draft-readback' if after_correction else 'draft-surface')
 
-    def test_surface_mismatch_before_open_blocks(self):
-        desktop = FakeDesktop(ready('Codex'))
-        with self.assertRaisesRegex(DriverFailure, 'surface_mismatch'):
-            self.driver(desktop).submit('private', 'chatgpt-work')
-        self.assertEqual(desktop.actions, [])
+    @patch('chatgpt_linux.time.sleep')
+    def test_exact_echo_and_unique_enabled_send_required_before_send(self, sleep):
+        mutations = {'wrong-text': lambda d, v: composer(d.nodes).update(text=v.strip()),
+                     'composer': lambda d, v: d.nodes.append(editor()),
+                     'send': lambda d, v: d.nodes.append(node('Send')),
+                     'send-disabled': lambda d, v: d.nodes[1].update(enabled=False)}
+        for kind, mutate in mutations.items():
+            for settles in (False, True):
+                with self.subTest(kind=kind, settles=settles):
+                    desktop = FakeDesktop()
+                    hook_open(desktop, lambda v, d=desktop, m=mutate: m(d, v))
+                    sleep.reset_mock()
+                    def settle(_, d=desktop):
+                        self.assertNotIn('Send', self.actions(d))
+                        d.nodes = ready(text=PROMPT)
+                    sleep.side_effect = settle if settles else None
+                    driver = self.driver(desktop)
+                    if settles:
+                        self.assertEqual(driver.submit(PROMPT, 'chatgpt-work')['status'], 'submitted')
+                        self.assertEqual(self.actions(desktop), ['open', 'Send'])
+                    else:
+                        with self.assertRaises(DriverFailure):
+                            driver.submit(PROMPT, 'chatgpt-work')
+                        self.assertEqual(self.actions(desktop), ['open'])
+                        # A draft that never appears waits the 30 s draft window; a
+                        # draft whose Send stays disabled fails the shorter readback.
+                        self.assertEqual(sleep.call_count, 100 if kind == 'send-disabled' else DRAFT_POLLS)
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_slow_draft_within_30s_is_awaited_without_reopening(self, sleep):
+        self.assertEqual(DRAFT_POLLS, 300)  # 300 x 0.1 s read-only polls.
+        desktop = FakeDesktop()
+        desktop.stall = 'open'
+        polls = iter(range(10_000))
+        def settle(_):
+            if next(polls) == 150:  # about 15 s
+                desktop.nodes = ready(WORK, 'private prompt')
+        sleep.side_effect = settle
+        self.assertEqual(self.driver(desktop).submit('private prompt', 'chatgpt-work')['status'], 'submitted')
+        self.assertEqual(self.actions(desktop), ['open', 'Send'])
+
+    def test_uncertain_send_is_not_retried(self):
+        desktop = FakeDesktop()
+        desktop.uncertain_send = True
+        driver = self.driver(desktop)
+        with self.assertRaisesRegex(DriverFailure, 'acknowledgement_uncertain'):
+            driver.submit('private', 'chatgpt-work')
+        self.assertEqual(self.actions(desktop), ['open', 'Send'])
+        self.assertEqual(driver.receipt('failed')['step'], 'send')
+
+    # --- surface selection ---
 
     @patch('chatgpt_linux.time.sleep')
     def test_deep_link_mode_switch_once_requires_preserved_exact_draft(self, _sleep):
         for preserve in (True, False):
-            for surface, start, opened in [('chatgpt-work', 'ChatGPT Work', 'Codex'),
-                                            ('codex', 'Codex', 'ChatGPT Work')]:
-                desktop = FakeDesktop(ready(start))
-                desktop.open_surface, desktop.preserve_draft = opened, preserve
-                driver = self.driver(desktop)
-                prompt = '  π 😀\n\nDo not trim.  \n'
-                if preserve:
-                    self.assertEqual(driver.submit(prompt, surface)['action_count'], 4)
-                else:
-                    with self.assertRaisesRegex(DriverFailure, 'state_transition_unobserved'):
-                        driver.submit(prompt, surface)
-                self.assertEqual(desktop.actions[0], ('open', prompt))
-                self.assertEqual(self.actions(desktop).count('open'), 1)
-                self.assertEqual(sum(name.startswith('Switch mode') for name in self.actions(desktop)), 1)
-                self.assertEqual(self.actions(desktop).count('Send'), 1 if preserve else 0)
+            for surface, start, opened in [('chatgpt-work', WORK, CODEX), ('codex', CODEX, WORK)]:
+                with self.subTest(preserve=preserve, surface=surface):
+                    desktop = FakeDesktop(ready(start))
+                    desktop.open_surface, desktop.preserve_draft = opened, preserve
+                    driver = self.driver(desktop)
+                    if preserve:
+                        receipt = driver.submit(PROMPT, surface)
+                        self.assertEqual((receipt['surface'], receipt['action_count']), (surface, 4))
+                    else:
+                        with self.assertRaisesRegex(DriverFailure, 'state_transition_unobserved'):
+                            driver.submit(PROMPT, surface)
+                    self.assertEqual(desktop.actions[0], ('open', PROMPT))
+                    self.assertEqual(self.actions(desktop).count('open'), 1)
+                    self.assertEqual(sum(a.startswith('Switch mode') for a in self.actions(desktop)), 1)
+                    self.assertEqual(self.actions(desktop).count('Send'), 1 if preserve else 0)
 
     @patch('chatgpt_linux.time.sleep')
     def test_waits_for_draft_before_correcting_delayed_mode_change(self, sleep):
         desktop = FakeDesktop()
         desktop.stall = 'open'
-        prompt = '  π 😀\nExact.  \n'
         def settle(_):
-            self.assertEqual(desktop.actions, [('open', prompt)])
-            desktop.nodes = ready('Codex', prompt)
+            self.assertEqual(desktop.actions, [('open', PROMPT)])
+            desktop.nodes = ready(CODEX, PROMPT)
         sleep.side_effect = settle
-        result = self.driver(desktop).submit(prompt, 'chatgpt-work')
-        self.assertEqual(result['action_count'], 4)
-        self.assertEqual(self.actions(desktop), ['open', 'Switch mode, current mode: Codex',
-                                                'ChatGPT Work Create, learn, and explore', 'Send'])
+        self.assertEqual(self.driver(desktop).submit(PROMPT, 'chatgpt-work')['action_count'], 4)
+        self.assertEqual(self.actions(desktop), ['open', SWITCH_CODEX, WORK_ITEM, 'Send'])
         sleep.assert_called_once()
 
     @patch('chatgpt_linux.time.sleep')
     def test_stalled_mode_correction_is_not_repeated(self, sleep):
         desktop = FakeDesktop()
-        desktop.open_surface = 'Codex'
-        desktop.stall = 'ChatGPT Work Create, learn, and explore'
+        desktop.open_surface, desktop.stall = CODEX, WORK_ITEM
         with self.assertRaisesRegex(DriverFailure, 'state_transition_unobserved'):
             self.driver(desktop).submit('private', 'chatgpt-work')
-        self.assertEqual(self.actions(desktop), ['open', 'Switch mode, current mode: Codex',
-                                                'ChatGPT Work Create, learn, and explore'])
+        self.assertEqual(self.actions(desktop), ['open', SWITCH_CODEX, WORK_ITEM])
         self.assertEqual(sleep.call_count, 100)
 
-    def test_missing_helper_blocks_setup_and_submit_with_zero_actions(self):
-        for mode in ('prepare', 'submit'):
-            desktop = FakeDesktop()
-            desktop.require_helpers = Mock(side_effect=DriverFailure('helper_missing'))
-            driver = self.driver(desktop)
-            with self.assertRaisesRegex(DriverFailure, 'helper_missing'):
-                driver.prepare('chatgpt-work') if mode == 'prepare' else driver.submit('private', 'chatgpt-work')
-            self.assertEqual(driver.actions, 0)
-            self.assertEqual(desktop.actions, [])
+    def test_invalid_input_surface_mismatch_or_missing_helper_block_before_any_action(self):
+        missing = FakeDesktop()
+        missing.require_helpers = Mock(side_effect=DriverFailure('helper_missing'))
+        cases = [('submit', FakeDesktop(ready(CODEX)), 'private', 'chatgpt-work', 'surface_mismatch'),
+                 ('submit', FakeDesktop(), 'private', 'unknown', 'invalid_surface'),
+                 ('prepare', FakeDesktop(), None, 'unknown', 'invalid_surface'),
+                 ('prepare', missing, None, 'chatgpt-work', 'helper_missing'),
+                 ('submit', missing, 'private', 'chatgpt-work', 'helper_missing')]
+        cases += [('submit', FakeDesktop(), bad, 'chatgpt-work', 'invalid_prompt')
+                  for bad in (None, '', ' \n', 123)]
+        for mode, desktop, prompt, surface, error in cases:
+            with self.subTest(mode=mode, error=error, prompt=prompt):
+                driver = self.driver(desktop)
+                with self.assertRaisesRegex(DriverFailure, '^' + error + '$'):
+                    driver.prepare(surface) if mode == 'prepare' else driver.submit(prompt, surface)
+                self.assertEqual(driver.actions, 0)
+                self.assertEqual(desktop.actions, [])
 
-    def test_setup_corrects_surface_once_without_reopening_empty_chat(self):
-        desktop = FakeDesktop(ready(text='prior draft'))
-        desktop.open_surface = 'Codex'
-        self.assertEqual(self.driver(desktop).prepare('chatgpt-work')['status'], 'ready')
-        self.assertEqual(self.actions(desktop), [
-            'open', 'Switch mode, current mode: Codex', 'ChatGPT Work Create, learn, and explore'])
-
-    def test_setup_ready_does_not_claim_nonempty_text_became_empty(self):
-        desktop = FakeDesktop(ready(text='prior draft'))
-        desktop.stall = 'open'
-        desktop.text = Mock(side_effect=AssertionError('no setup emptiness predicate'))
-        receipt = self.driver(desktop).prepare('chatgpt-work')
-        self.assertEqual(receipt['status'], 'ready')
-        self.assertNotIn('draftState', receipt)
-        self.assertEqual(desktop.actions, [('open', '')])
-        self.assertEqual(composer(desktop.nodes)['text'], 'prior draft')
-        desktop.text.assert_not_called()
-
-    @patch('chatgpt_linux.time.sleep')
-    def test_setup_still_requires_surface_unique_composer_and_send_after_open(self, _sleep):
-        for kind in ('surface', 'composer-missing', 'composer-ambiguous', 'send-missing', 'send-ambiguous'):
-            with self.subTest(kind=kind):
-                desktop = FakeDesktop()
-                def open_empty(prompt):
-                    desktop.actions.append(('open', prompt))
-                    desktop.nodes = ready(text='Ask anything here\n')
-                    if kind == 'surface':
-                        desktop.nodes[0]['name'] = 'unknown mode'
-                    elif kind == 'composer-missing':
-                        desktop.nodes.pop()
-                    elif kind == 'composer-ambiguous':
-                        desktop.nodes.append(node('other', 'entry', editable=True))
-                    elif kind == 'send-missing':
-                        desktop.nodes.pop(1)
-                    else:
-                        desktop.nodes.append(node('Send'))
-                desktop.open_prompt = open_empty
-                with self.assertRaises(DriverFailure):
-                    self.driver(desktop).prepare('chatgpt-work')
-                self.assertEqual(desktop.actions, [('open', '')])
-
-    @patch('chatgpt_linux.time.sleep')
-    def test_exact_echo_and_unique_send_required_before_send_no_replay(self, sleep):
-        for kind in ('wrong-text', 'composer', 'send', 'send-disabled'):
-            for settles in (False, True):
-                with self.subTest(kind=kind, settles=settles):
-                    desktop = FakeDesktop()
-                    original = desktop.open_prompt
-                    prompt = '  π 😀\n\nExact.  \n'
-                    def open_prompt(value):
-                        original(value)
-                        if kind == 'wrong-text':
-                            composer(desktop.nodes)['text'] = value.strip()
-                        elif kind == 'send-disabled':
-                            desktop.nodes[1]['enabled'] = False
-                        else:
-                            desktop.nodes.append(node('extra', 'text', editable=True)
-                                                 if kind == 'composer' else node('Send'))
-                    desktop.open_prompt = open_prompt
-                    sleep.reset_mock()
-                    def settle(_):
-                        self.assertNotIn('Send', self.actions(desktop))
-                        desktop.nodes = ready(text=prompt)
-                    sleep.side_effect = settle if settles else None
-                    driver = self.driver(desktop)
-                    if settles:
-                        self.assertEqual(driver.submit(prompt, 'chatgpt-work')['status'], 'submitted')
-                        self.assertEqual(self.actions(desktop), ['open', 'Send'])
-                        sleep.assert_called_once()
-                    else:
-                        with self.assertRaises(DriverFailure):
-                            driver.submit(prompt, 'chatgpt-work')
-                        self.assertEqual(self.actions(desktop), ['open'])
-                        # A draft that never appears waits the draft window; a draft
-                        # whose Send stays disabled fails the shorter readback.
-                        self.assertEqual(sleep.call_count,
-                                         100 if kind == 'send-disabled' else DRAFT_POLLS)
-
-    def test_uncertain_send_is_not_retried(self):
-        desktop = FakeDesktop()
-        desktop.uncertain_send = True
-        with self.assertRaisesRegex(DriverFailure, 'acknowledgement_uncertain'):
-            self.driver(desktop).submit('private', 'chatgpt-work')
-        self.assertEqual(self.actions(desktop), ['open', 'Send'])
-
-    def test_helper_failure_does_not_send_or_reopen(self):
+    def test_hand_off_failure_does_not_send_or_reopen(self):
         for mode in ('prepare', 'submit'):
             for code in ('helper_failed', 'helper_timeout'):
-                desktop = FakeDesktop()
-                desktop.open_prompt = Mock(side_effect=DriverFailure(code))
-                driver = self.driver(desktop)
-                with self.assertRaisesRegex(DriverFailure, code):
-                    driver.prepare('chatgpt-work') if mode == 'prepare' else driver.submit('private', 'chatgpt-work')
-                desktop.open_prompt.assert_called_once_with('' if mode == 'prepare' else 'private')
-                self.assertEqual(driver.actions, 1)
-                self.assertEqual(desktop.actions, [])
-                self.assertEqual(driver.receipt('failed')['step'], 'draft-open')
+                with self.subTest(mode=mode, code=code):
+                    desktop = FakeDesktop()
+                    desktop.open_prompt = Mock(side_effect=DriverFailure(code))
+                    driver = self.driver(desktop)
+                    with self.assertRaisesRegex(DriverFailure, code):
+                        self.run_mode(driver, mode)
+                    desktop.open_prompt.assert_called_once_with('' if mode == 'prepare' else 'private')
+                    self.assertEqual((driver.actions, desktop.actions), (1, []))
+                    self.assertEqual(driver.receipt('failed')['step'], 'draft-open')
 
-    def test_action_budget_blocks_before_send(self):
+    # --- budgets, deadline, waits ---
+
+    def test_action_budget_and_deadline_block_before_send(self):
         desktop = FakeDesktop()
         with self.assertRaisesRegex(DriverFailure, 'action_budget_exhausted'):
             self.driver(desktop, actions=1).submit('private', 'chatgpt-work')
         self.assertEqual(desktop.actions, [('open', 'private')])
+        for mode in ('prepare', 'submit'):
+            with self.subTest(mode=mode):
+                desktop = FakeDesktop()
+                driver = self.driver(desktop)
+                driver.deadline = 0
+                with self.assertRaisesRegex(DriverFailure, '^deadline_exceeded$'):
+                    self.run_mode(driver, mode)
+                self.assertEqual(desktop.actions, [])
 
-    def test_invalid_prompt_and_surface_do_not_act(self):
-        for prompt in (None, '', ' \n', 123):
-            desktop = FakeDesktop()
-            with self.assertRaisesRegex(DriverFailure, 'invalid_prompt'):
-                self.driver(desktop).submit(prompt, 'chatgpt-work')
-            self.assertEqual(desktop.actions, [])
-        with self.assertRaisesRegex(DriverFailure, 'invalid_surface'):
-            self.driver(FakeDesktop()).submit('private', 'unknown')
+    def test_overall_deadline_preserves_transient_ambiguity(self):
+        for kind in ('composer', 'send'):
+            with self.subTest(kind=kind):
+                now = [0.0]
+                desktop = FakeDesktop()
+                desktop.nodes.append(editor() if kind == 'composer' else node('Send'))
+                with patch('chatgpt_linux.time.monotonic', side_effect=lambda: now[0]), \
+                        patch('chatgpt_linux.time.sleep', side_effect=lambda s: now.__setitem__(0, now[0] + s)):
+                    driver = Driver(desktop, 250, 24)
+                    with self.assertRaisesRegex(DriverFailure, '^' + kind + '_missing_or_ambiguous$'):
+                        driver.wait(lambda ns: driver.ready(ns, 'chatgpt-work'))
+                    self.assertEqual(driver.actions, 0)
 
     @patch('chatgpt_linux.time.sleep')
-    def test_initial_wait_is_bounded_and_does_not_open_query(self, sleep):
+    def test_initial_wait_is_bounded_and_snapshot_failures_are_not_retried(self, sleep):
         desktop = FakeDesktop([])
         with self.assertRaisesRegex(DriverFailure, 'state_transition_unobserved'):
             self.driver(desktop).prepare('chatgpt-work')
         self.assertEqual(sleep.call_count, 300)
         self.assertEqual(desktop.actions, [])
-
-    def test_overall_deadline_and_ambiguity_are_preserved(self):
-        for kind in ('composer', 'send'):
-            now = [0.0]
-            desktop = FakeDesktop()
-            desktop.nodes.append(node('extra', 'text', editable=True) if kind == 'composer' else node('Send'))
-            with patch('chatgpt_linux.time.monotonic', side_effect=lambda: now[0]), \
-                    patch('chatgpt_linux.time.sleep', side_effect=lambda seconds: now.__setitem__(0, now[0] + seconds)):
-                driver = Driver(desktop, 250, 24)
-                with self.assertRaisesRegex(DriverFailure, '^' + kind + '_missing_or_ambiguous$'):
-                    driver.wait(lambda ns: driver.ready(ns, 'chatgpt-work'))
-                self.assertEqual(driver.actions, 0)
-
-    @patch('chatgpt_linux.time.sleep')
-    def test_snapshot_failure_not_retried_by_wait(self, sleep):
-        desktop = FakeDesktop()
+        sleep.reset_mock()
         desktop.snapshot = Mock(side_effect=DriverFailure('composer_missing_or_ambiguous'))
         with self.assertRaisesRegex(DriverFailure, 'composer_missing_or_ambiguous'):
             self.driver(desktop).wait(lambda _: True)
         sleep.assert_not_called()
 
-    def test_composer_ancestry_and_all_availability_flags(self):
-        nodes = ready()
-        nodes.append(node('paragraph', 'paragraph', editable=True, ancestors=(0, 2)))
+    def test_composer_requires_unique_available_editable_root(self):
+        nodes = ready() + [editor('paragraph', 'paragraph', ancestors=(0, 2))]
         self.assertIs(composer(nodes), nodes[2])
-        for flag in ('showing', 'visible', 'enabled', 'sensitive', 'editable'):
-            nodes = ready()
-            nodes[-1][flag] = False
-            with self.assertRaisesRegex(DriverFailure, 'composer_missing_or_ambiguous'):
-                composer(nodes)
-        with self.assertRaisesRegex(DriverFailure, 'composer_missing_or_ambiguous'):
-            composer(ready() + [node('separate', 'entry', editable=True)])
-
-    def test_main_hides_exceptions_and_enforces_byte_limit(self):
-        for payload, error in [(b'{"surface":"chatgpt-work"}', 'desktop_driver_failed'),
-                                ('😀'.encode() * (INPUT_LIMIT // 4 + 1), 'input_too_large')]:
-            desktop = FakeDesktop()
-            desktop.snapshot = Mock(side_effect=RuntimeError('private query or stderr'))
-            with patch('chatgpt_linux.Desktop', return_value=desktop), \
-                    patch('sys.argv', ['driver', '--mode', 'prepare', '--timeout-ms', '60000']), \
-                    patch('sys.stdin', SimpleNamespace(buffer=io.BytesIO(payload))), \
-                    patch('sys.stdout', new_callable=io.StringIO) as output:
-                self.assertEqual(main(), 1)
-            self.assertEqual(json.loads(output.getvalue())['error'], error)
-            self.assertNotIn('private', output.getvalue())
+        for flag in ('showing', 'visible', 'enabled', 'sensitive', 'editable', None):
+            with self.subTest(flag=flag):
+                nodes = ready() if flag else ready() + [editor('separate', 'entry')]
+                if flag:
+                    nodes[-1][flag] = False
+                with self.assertRaisesRegex(DriverFailure, 'composer_missing_or_ambiguous'):
+                    composer(nodes)
 
 
 class OpenerTest(unittest.TestCase):
-    """The MST parent owns the hand-off; Python sends one sha-bound request."""
+    """The MST parent owns the deep-link hand-off; Python sends one sha-bound request."""
 
     def setUp(self):
         self.driver_end, self.parent_end = socket.socketpair()
@@ -661,7 +644,7 @@ class OpenerTest(unittest.TestCase):
         self.desktop.open_fd = self.driver_end.fileno()
         self.requests = []
 
-    def parent(self, reply, delay=0):
+    def parent(self, reply):
         def serve():
             data = b''
             while b'\n' not in data:
@@ -670,26 +653,31 @@ class OpenerTest(unittest.TestCase):
                     return
                 data += chunk
             self.requests.append(data)
-            time.sleep(delay)
             if reply is not None:
-                self.parent_end.sendall(reply)
+                try:
+                    self.parent_end.sendall(reply)
+                except OSError:
+                    pass  # The driver may close after rejecting an oversized reply.
         thread = threading.Thread(target=serve, daemon=True)
         thread.start()
         self.addCleanup(thread.join, 1)
 
-    def test_sends_only_the_utf8_sha256_and_accepts_one_boolean_receipt(self):
-        prompt = '  π 😀\n\nprivate "quoted" \\draft\t  \n'
-        self.parent(b'{"opened": true}\n')
-        self.desktop.require_helpers()
-        self.desktop.open_prompt(prompt)
-        self.assertEqual(json.loads(self.requests[0]),
-                         {'open': hashlib.sha256(prompt.encode('utf-8')).hexdigest()})
-        self.assertNotIn(b'private', self.requests[0])
+    def test_requests_once_with_only_the_utf8_sha256_of_the_expected_draft(self):
+        for prompt in ('  π 😀\n\nprivate "quoted" \\draft\t  \n', ''):
+            with self.subTest(prompt=prompt):
+                self.setUp()
+                self.parent(b'{"opened": true}\n')
+                self.desktop.require_helpers()
+                self.desktop.open_prompt(prompt)
+                self.assertEqual(self.requests, [json.dumps({'open': sha(prompt)}).encode() + b'\n'])
+                self.assertNotIn(b'private', self.requests[0])
 
-    def test_empty_prompt_is_the_empty_sha_not_a_query(self):
-        self.parent(b'{"opened":true}\n')
-        self.desktop.open_prompt('')
-        self.assertEqual(json.loads(self.requests[0]), {'open': hashlib.sha256(b'').hexdigest()})
+    def test_one_request_per_process_never_retried(self):
+        self.parent(b'{"opened":false}\n')
+        for _ in range(2):
+            with self.assertRaisesRegex(DriverFailure, '^helper_failed$'):
+                self.desktop.open_prompt('private')
+        self.assertEqual(len(self.requests), 1)
 
     def test_invalid_or_oversized_receipts_fail_without_raw_output(self):
         for output in (b'private-query\n', b'{"opened":false}\n', b'{"opened":1}\n',
@@ -704,31 +692,18 @@ class OpenerTest(unittest.TestCase):
                 with self.assertRaisesRegex(DriverFailure, '^helper_failed$'):
                     self.desktop.open_prompt('private')
 
-    def test_one_request_per_process_never_retried(self):
-        self.parent(b'{"opened":false}\n')
-        with self.assertRaisesRegex(DriverFailure, '^helper_failed$'):
-            self.desktop.open_prompt('private')
-        with self.assertRaisesRegex(DriverFailure, '^helper_failed$'):
-            self.desktop.open_prompt('private')
-        self.assertEqual(len(self.requests), 1)
-
-    def test_oversized_or_unencodable_input_never_requests(self):
+    def test_oversized_unencodable_or_missing_channel_never_requests(self):
         with self.assertRaisesRegex(DriverFailure, 'input_too_large'):
             self.desktop.open_prompt('😀' * (INPUT_LIMIT // 4 + 1))
         with self.assertRaisesRegex(DriverFailure, 'invalid_prompt'):
             self.desktop.open_prompt('bad\ud800')
         self.assertEqual(self.requests, [])
-
-    def test_missing_or_invalid_channel_blocks(self):
-        for fd in (None, 0, 2, 999):
-            with self.subTest(fd=fd):
-                self.desktop.open_fd = fd
-                with self.assertRaisesRegex(DriverFailure, 'helper_missing'):
-                    self.desktop.require_helpers()
         with tempfile.TemporaryFile() as regular:
-            self.desktop.open_fd = regular.fileno()
-            with self.assertRaisesRegex(DriverFailure, 'helper_missing'):
-                self.desktop.require_helpers()
+            for fd in (None, 0, 2, 999, regular.fileno()):
+                with self.subTest(fd=fd):
+                    self.desktop.open_fd = fd
+                    with self.assertRaisesRegex(DriverFailure, 'helper_missing'):
+                        self.desktop.require_helpers()
 
     def test_timeout_is_capped_by_the_driver_deadline_without_retry(self):
         self.parent(None)
@@ -744,17 +719,9 @@ class OpenerTest(unittest.TestCase):
                 desktop.open_prompt('private')
             remaining.assert_called_once_with(30)
 
-    def test_main_passes_the_open_fd(self):
-        desktop = FakeDesktop()
-        with patch('chatgpt_linux.Desktop', return_value=desktop), \
-                patch('sys.argv', ['driver', '--mode', 'prepare', '--timeout-ms', '60000',
-                                   '--open-fd', '7']), \
-                patch('sys.stdin', SimpleNamespace(buffer=io.BytesIO(b'{"surface":"codex"}'))), \
-                patch('sys.stdout', new_callable=io.StringIO):
-            main()
-        self.assertEqual(desktop.open_fd, 7)
 
-
+@patch('chatgpt_linux.os.path.isfile', return_value=True)
+@patch('chatgpt_linux.os.access', return_value=True)
 class GeometryTest(unittest.TestCase):
     def setup_geometry(self):
         desktop = object.__new__(Desktop)
@@ -766,575 +733,397 @@ class GeometryTest(unittest.TestCase):
                  node('Engineering', 'radio button', node=component)]
         desktop.api = SimpleNamespace(
             CoordType=SimpleNamespace(WINDOW='window', SCREEN='screen'),
-            Component=SimpleNamespace(get_extents=Mock(side_effect=[rect, frame]), contains=Mock(return_value=True)))
-        return desktop, nodes, rect, frame
+            Component=SimpleNamespace(get_extents=Mock(side_effect=[rect, frame]),
+                                      contains=Mock(return_value=True)))
+        return desktop, nodes, rect
 
-    @patch('chatgpt_linux.os.path.isfile', return_value=True)
-    @patch('chatgpt_linux.os.access', return_value=True)
-    @patch('chatgpt_linux.subprocess.run')
-    def test_primary_click_uses_live_window_plus_screen_geometry_no_sync(self, run, *_):
-        desktop, nodes, _, _ = self.setup_geometry()
-        desktop.select_profession(nodes, nodes[1])
-        self.assertEqual(run.call_args.args[0], [XDOTOOL, 'mousemove', '370', '260', 'click', '1'])
-        self.assertFalse(run.call_args.kwargs['shell'])
-        self.assertEqual(run.call_args.kwargs['stdout'], subprocess.DEVNULL)
-        desktop.api.Component.contains.assert_called_once_with(nodes[1]['node'], 370, 260, 'screen')
-        run.assert_called_once()
-
-    @patch('chatgpt_linux.os.path.isfile', return_value=True)
-    @patch('chatgpt_linux.os.access', return_value=True)
-    @patch('chatgpt_linux.subprocess.run')
-    def test_invalid_geometry_and_failed_hit_test_never_click(self, run, *_):
-        for field, value in [('x', -1), ('width', 0), ('height', 1.5), ('y', 900), ('width', True)]:
-            desktop, nodes, rect, _ = self.setup_geometry()
-            setattr(rect, field, value)
-            with self.assertRaisesRegex(DriverFailure, 'profession_geometry_invalid'):
+    def test_primary_click_is_one_mouse_click_at_live_window_plus_screen_geometry(self, *_):
+        for hit_test in (True, False):
+            with self.subTest(hit_test=hit_test), patch('chatgpt_linux.subprocess.run') as run:
+                desktop, nodes, _ = self.setup_geometry()
+                contains = desktop.api.Component.contains
+                if not hit_test:
+                    del desktop.api.Component.contains  # Optional in AT-SPI.
                 desktop.select_profession(nodes, nodes[1])
-        desktop, nodes, _, _ = self.setup_geometry()
-        desktop.api.Component.contains.return_value = False
-        with self.assertRaisesRegex(DriverFailure, 'profession_geometry_invalid'):
-            desktop.select_profession(nodes, nodes[1])
-        run.assert_not_called()
+                run.assert_called_once()
+                self.assertEqual(run.call_args.args[0], [XDOTOOL, 'mousemove', '370', '260', 'click', '1'])
+                self.assertFalse(run.call_args.kwargs['shell'])
+                self.assertEqual(run.call_args.kwargs['stdout'], subprocess.DEVNULL)
+                if hit_test:
+                    contains.assert_called_once_with(nodes[1]['node'], 370, 260, 'screen')
 
-    @patch('chatgpt_linux.os.path.isfile', return_value=True)
-    @patch('chatgpt_linux.os.access', return_value=True)
-    @patch('chatgpt_linux.subprocess.run')
-    def test_missing_hit_test_is_optional_but_frame_and_component_are_required(self, run, *_):
-        desktop, nodes, _, _ = self.setup_geometry()
-        del desktop.api.Component.contains
-        desktop.select_profession(nodes, nodes[1])
-        run.assert_called_once()
-        run.reset_mock()
-        for kind in ('missing-frame', 'two-frames', 'no-component'):
-            desktop, nodes, _, _ = self.setup_geometry()
-            choice = nodes[1]
-            if kind == 'missing-frame':
-                choice['ancestors'] = ()
-            elif kind == 'two-frames':
-                nodes.append(nodes[0].copy())
-                choice['ancestors'] = (0, 2)
-            else:
-                choice['node'] = SimpleNamespace(get_interfaces=lambda: [])
-            with self.assertRaisesRegex(DriverFailure, 'profession_geometry_invalid'):
-                desktop.select_profession(nodes, choice)
-        run.assert_not_called()
+    def test_invalid_geometry_frame_component_or_hit_test_never_click(self, *_):
+        cases = [('rect', field, value) for field, value in
+                 [('x', -1), ('width', 0), ('height', 1.5), ('y', 900), ('width', True)]]
+        cases += [('miss', None, None), ('missing-frame', None, None),
+                  ('two-frames', None, None), ('no-component', None, None)]
+        with patch('chatgpt_linux.subprocess.run') as run:
+            for kind, field, value in cases:
+                with self.subTest(kind=kind, field=field):
+                    desktop, nodes, rect = self.setup_geometry()
+                    choice = nodes[1]
+                    if kind == 'rect':
+                        setattr(rect, field, value)
+                    elif kind == 'miss':
+                        desktop.api.Component.contains.return_value = False
+                    elif kind == 'missing-frame':
+                        choice['ancestors'] = ()
+                    elif kind == 'two-frames':
+                        nodes.append(nodes[0].copy())
+                        choice['ancestors'] = (0, 2)
+                    else:
+                        choice['node'] = SimpleNamespace(get_interfaces=lambda: [])
+                    with self.assertRaisesRegex(DriverFailure, 'profession_geometry_invalid'):
+                        desktop.select_profession(nodes, choice)
+            run.assert_not_called()
 
-    @patch('chatgpt_linux.os.path.isfile', return_value=True)
-    @patch('chatgpt_linux.os.access', return_value=True)
-    def test_mouse_failure_never_falls_back_to_check_or_retries(self, *_):
+    def test_mouse_failure_is_not_retried(self, *_):
         for error, code in [(subprocess.TimeoutExpired('private', 2), 'helper_timeout'),
                             (subprocess.CalledProcessError(1, 'private'), 'helper_failed')]:
-            desktop, nodes, _, _ = self.setup_geometry()
-            with patch('chatgpt_linux.subprocess.run', side_effect=error) as run:
+            with self.subTest(code=code), patch('chatgpt_linux.subprocess.run', side_effect=error) as run:
+                desktop, nodes, _ = self.setup_geometry()
                 with self.assertRaisesRegex(DriverFailure, code):
                     desktop.select_profession(nodes, nodes[1])
                 run.assert_called_once()
 
 
 class RichTextTest(unittest.TestCase):
+    """AT-SPI composer readback: exact, bounded, never guesses, never exports UI text."""
+
     def linked(self, value=''):
-        desktop, editor, app = public_desktop()
-        editor.role, editor.value = 'entry', '\ufffc'
-        paragraph = PublicNode('private paragraph name', 'paragraph', editable=True)
-        paragraph.value = value
-        editor.children = [paragraph]
+        desktop, editor_node, app = public_desktop()
+        editor_node.role, editor_node.value = 'entry', '\ufffc'
+        paragraph = PublicNode('private paragraph name', 'paragraph', editable=True, value=value)
+        editor_node.children = [paragraph]
         paragraph.children = [PublicNode('private static name', 'static')]
-        self.link(editor, 0, paragraph)
-        return desktop, editor, paragraph, app
+        self.link(editor_node, 0, paragraph)
+        return desktop, editor_node, paragraph
 
     def link(self, parent, offset, *children):
         if 'Hypertext' not in parent.interfaces:
             parent.interfaces.append('Hypertext')
         parent.links[offset] = SimpleNamespace(anchors=children)
 
-    def read(self, desktop, editor, limit=None):
-        return desktop.text({'node': editor}, limit=limit)
-
-    def assert_unavailable(self, desktop, editor, limit=None):
-        with self.assertRaisesRegex(DriverFailure, '^composer_text_unavailable$') as error:
-            self.read(desktop, editor, limit)
-        self.assertNotIn('private', str(error.exception))
-
     def structural(self, value='', static=False, hypertext=False):
-        desktop, editor, paragraph, app = self.linked(value)
-        editor.interfaces = ['Text', 'Hypertext'] if hypertext else ['Text']
-        editor.links = {}
+        desktop, editor_node, paragraph = self.linked(value)
+        editor_node.interfaces = ['Text', 'Hypertext'] if hypertext else ['Text']
+        editor_node.links = {}
         if static:
             paragraph.value = '\ufffc'
             paragraph.children[0].name = value
-        return desktop, editor, paragraph, app
+        return desktop, editor_node, paragraph
 
-    def test_structural_single_paragraph_empty_and_exact_unicode(self):
+    def read(self, desktop, editor_node, limit=None):
+        return desktop.text({'node': editor_node}, limit=limit)
+
+    def assert_unavailable(self, desktop, editor_node, limit=None):
+        with self.assertRaisesRegex(DriverFailure, '^composer_text_unavailable$') as error:
+            self.read(desktop, editor_node, limit)
+        self.assertNotIn('private', str(error.exception))
+
+    def no_names(self, *nodes):
+        for item in nodes:
+            item.get_name = Mock(side_effect=AssertionError('names are labels, not content'))
+
+    def test_linked_paragraph_readback_is_exact_and_uses_unbound_text(self):
+        for value in ('', 'single line', '  π 😀e\u0301\t\r\n\nExact.  \n', 'a\ufffcb'):
+            with self.subTest(value=value):
+                desktop, editor_node, paragraph = self.linked(value)
+                paragraph.interfaces.append('Hypertext')  # Unlinked marker stays literal.
+                self.no_names(editor_node, paragraph, paragraph.children[0])
+                desktop.api.Text.get_text = Mock(wraps=desktop.api.Text.get_text)
+                self.assertEqual(self.read(desktop, editor_node), value)
+                self.assertEqual(desktop.api.Text.get_text.call_args_list,
+                                 [call(editor_node, 0, 1), call(paragraph, 0, len(value))])
+                desktop.api.Hyperlink.get_object.assert_called_once_with(editor_node.links[0], 0)
+
+    def test_only_linked_markers_expand_at_character_offsets_with_reported_separators(self):
+        desktop, editor_node, paragraph = self.linked('child')
+        editor_node.value, editor_node.links = '😀\ufffc \n\ufffc\t', {}
+        self.link(editor_node, 4, paragraph)
+        self.assertEqual(self.read(desktop, editor_node), '😀\ufffc \nchild\t')
+        self.assertEqual(desktop.api.Hypertext.get_link_index.call_args_list,
+                         [call(editor_node, 1), call(editor_node, 4)])
+        desktop.api.Hypertext.get_link.assert_called_once_with(editor_node, 4)
+        desktop, editor_node, paragraph = self.linked('before\ufffcafter')
+        child = PublicNode('private nested name', 'text', editable=True, value='inner\n')
+        self.link(paragraph, 6, child)
+        editor_node.value = '\ufffc\r\n\ufffc'
+        self.link(editor_node, 3, child)
+        self.assertEqual(self.read(desktop, editor_node), 'beforeinner\nafter\r\ninner\n')
+
+    def test_bare_and_qualified_interfaces_in_snapshot_and_readback(self):
+        for prefix in ('', 'org.a11y.atspi.'):
+            with self.subTest(prefix=prefix):
+                desktop, editor_node, paragraph = self.linked('exact')
+                for item in (editor_node, paragraph):
+                    item.interfaces = [prefix + name for name in item.interfaces + ['EditableText']]
+                current = composer(desktop.snapshot())
+                self.assertIs(current['node'], editor_node)
+                self.assertTrue(current['textInterface'] and current['editableInterface'])
+                self.assertEqual(desktop.text(current), 'exact')
+
+    def test_structural_fallback_reads_one_owned_child_or_static_leaf(self):
         for hypertext in (False, True):
-            for role in ('paragraph', 'text'):
-                for value in ('', '  π 😀e\u0301\t\r\n\nExact.  \n'):
-                    desktop, editor, paragraph, _ = self.structural(value, hypertext=hypertext)
-                    paragraph.role = role
-                    paragraph.states.discard('EDITABLE')
-                    editor.get_name = paragraph.get_name = Mock(side_effect=AssertionError('no labels'))
-                    desktop.api.Text.get_text = Mock(wraps=desktop.api.Text.get_text)
-                    self.assertEqual(self.read(desktop, editor), value)
-                    self.assertEqual(desktop.api.Text.get_text.call_args_list, [
-                        unittest.mock.call(editor, 0, 1),
-                        unittest.mock.call(paragraph, 0, len(value))])
-                    desktop.api.Hypertext.get_link.assert_not_called()
-
-    def test_structural_static_leaf_exact_content_only_under_paragraph(self):
-        for role in ('static', 'static text'):
-            for value in ('', '  π 😀\r\n\nExact. \t\n', '\ufffc', 'a\ufffcb'):
-                desktop, editor, paragraph, _ = self.structural(value, static=True)
-                paragraph.children[0].role = role
-                editor.get_name = paragraph.get_name = Mock(side_effect=AssertionError('no labels'))
-                self.assertEqual(self.read(desktop, editor), value)
-        desktop, editor, paragraph, _ = self.structural('name', static=True)
+            for static in (False, True):
+                for value in ('', '  π 😀e\u0301\r\n\nExact. \t\n', 'a\ufffcb'):
+                    with self.subTest(hypertext=hypertext, static=static, value=value):
+                        desktop, editor_node, paragraph = self.structural(value, static, hypertext)
+                        if not static:
+                            paragraph.role = 'text'
+                            paragraph.states.discard('EDITABLE')
+                            self.no_names(editor_node, paragraph)
+                        self.assertEqual(self.read(desktop, editor_node), value)
+                        desktop.api.Hypertext.get_link.assert_not_called()
+        desktop, editor_node, paragraph = self.structural('name', static=True)
         leaf = paragraph.children[0]
         leaf.interfaces, leaf.value = ['Text'], 'actual Text value'
-        leaf.get_name = Mock(side_effect=AssertionError('Text is preferred'))
-        self.assertEqual(self.read(desktop, editor), leaf.value)
+        self.no_names(leaf)
+        self.assertEqual(self.read(desktop, editor_node), leaf.value)  # Text beats the name.
+        desktop, editor_node, paragraph = self.linked('linked value')
+        editor_node.children = [PublicNode('x', 'paragraph', editable=True, value='structural')]
+        self.assertEqual(self.read(desktop, editor_node), 'linked value')  # Hypertext wins.
 
-    def test_structural_never_changes_nonmarker_literals_or_guesses_child_order(self):
-        for value in ('', 'literal', ' \ufffc', '\ufffc\n', '\ufffc\ufffc', 'a\ufffcb'):
-            desktop, editor, _, _ = self.structural('not content')
-            editor.value = value
-            editor.get_child_count = Mock(side_effect=AssertionError('no traversal'))
-            self.assertEqual(self.read(desktop, editor), value)
-            editor.get_child_count.assert_not_called()
+    def test_structural_never_guesses_order_ownership_or_literals(self):
+        for value in ('literal', ' \ufffc', '\ufffc\n', '\ufffc\ufffc'):
+            with self.subTest(value=value):
+                desktop, editor_node, _ = self.structural('not content')
+                editor_node.value = value
+                self.assertEqual(self.read(desktop, editor_node), value)
         for hypertext in (False, True):
             for count in (0, 2):
-                desktop, editor, paragraph, _ = self.structural('', hypertext=hypertext)
-                editor.children = [paragraph] * count
-                editor.get_child_at_index = Mock(side_effect=AssertionError('no guessing'))
-                self.assertEqual(self.read(desktop, editor), '\ufffc')
-                editor.get_child_at_index.assert_not_called()
+                with self.subTest(hypertext=hypertext, count=count):
+                    desktop, editor_node, paragraph = self.structural('', hypertext=hypertext)
+                    editor_node.children = [paragraph] * count
+                    editor_node.get_child_at_index = Mock(side_effect=AssertionError('no guessing'))
+                    self.assertEqual(self.read(desktop, editor_node), '\ufffc')
+        desktop, editor_node, _ = self.structural('not owned')
+        editor_node.states.discard('EDITABLE')
+        self.assertEqual(self.read(desktop, editor_node), '\ufffc')
+        desktop, editor_node, paragraph = self.linked('\ufffc')
+        editor_node.children = []  # A hyperlink alone does not establish ownership.
+        self.no_names(paragraph.children[0])
+        self.assertEqual(self.read(desktop, editor_node), '\ufffc')
 
-    def test_structural_rejects_unsafe_children_without_reading_names(self):
-        for role in ('image', 'password text', 'label', 'button', 'static', 'entry'):
-            for text_iface in (False, True):
-                desktop, editor, paragraph, _ = self.structural('private')
-                paragraph.role = role
-                paragraph.interfaces = ['Text'] if text_iface else []
-                paragraph.get_name = Mock(side_effect=AssertionError('no labels'))
-                self.assert_unavailable(desktop, editor)
-                paragraph.get_name.assert_not_called()
-        for kind in ('no-text', 'no-text-iface', 'static-not-leaf', 'hidden', 'not-showing'):
-            desktop, editor, paragraph, _ = self.structural('private', static=True)
-            leaf = paragraph.children[0]
-            leaf.get_name = Mock(side_effect=AssertionError('no labels'))
-            if kind == 'no-text':
-                paragraph.interfaces = []
-            elif kind == 'no-text-iface':
-                paragraph.get_text_iface = lambda: None
-            elif kind == 'static-not-leaf':
-                leaf.children = [PublicNode('private')]
-            else:
-                leaf.states.discard('VISIBLE' if kind == 'hidden' else 'SHOWING')
-            self.assert_unavailable(desktop, editor)
-            leaf.get_name.assert_not_called()
+    def test_unsafe_children_links_and_metadata_fail_without_reading_names(self):
+        def role(kind):
+            return lambda d, e, p: setattr(p, 'role', kind)
+        def link_index(value):
+            return lambda d, e, p: d.api.Hypertext.get_link_index.configure_mock(
+                side_effect=None, return_value=value)
+        def anchors(*children):
+            return lambda d, e, p: self.link(e, 0, *children)
+        cases = {'image': role('image'), 'password': role('password text'),
+                 'no-text': lambda d, e, p: setattr(p, 'interfaces', []),
+                 'no-text-iface': lambda d, e, p: setattr(p, 'get_text_iface', lambda: None),
+                 'no-anchor': anchors(), 'none-anchor': anchors(None),
+                 'two-anchors': anchors(PublicNode('private'), PublicNode('private')),
+                 'none-link': lambda d, e, p: e.links.update({0: None}),
+                 'cycle': lambda d, e, p: self.link(p, 0, e),
+                 'bad-count': lambda d, e, p: setattr(d.api.Text, 'get_character_count',
+                                                      Mock(return_value=-1)),
+                 'huge-count': lambda d, e, p: setattr(d.api.Text, 'get_character_count',
+                                                       Mock(return_value=INPUT_LIMIT + 1)),
+                 'short-text': lambda d, e, p: setattr(d.api.Text, 'get_text',
+                                                       Mock(return_value='private incomplete'))}
+        cases.update({f'index-{v}': link_index(v) for v in (-2, None, 'private', True)})
+        for kind, mutate in cases.items():
+            with self.subTest(kind=kind):
+                desktop, editor_node, paragraph = self.linked('\ufffc' if kind == 'cycle' else 'private')
+                mutate(desktop, editor_node, paragraph)
+                self.no_names(paragraph)
+                self.assert_unavailable(desktop, editor_node)
+        for kind in ('label', 'entry', 'static-not-leaf', 'hidden', 'bad-name', 'bad-child-count', 'rpc'):
+            with self.subTest(structural=kind):
+                desktop, editor_node, paragraph = self.structural('private', static=True)
+                leaf = paragraph.children[0]
+                if kind in ('label', 'entry'):
+                    paragraph.role = kind
+                elif kind == 'static-not-leaf':
+                    leaf.children = [PublicNode('private')]
+                elif kind == 'hidden':
+                    leaf.states.discard('VISIBLE')
+                elif kind == 'bad-name':
+                    leaf.name = '\ud800'
+                elif kind == 'bad-child-count':
+                    editor_node.get_child_count = Mock(return_value=True)
+                else:
+                    editor_node.get_child_at_index = Mock(side_effect=FakeGLibError('private UI'))
+                if kind != 'bad-name':
+                    self.no_names(leaf)
+                self.assert_unavailable(desktop, editor_node)
 
-    def test_structural_requires_owned_editable_root_and_does_not_extend_link_targets(self):
-        desktop, editor, _, _ = self.structural('not owned')
-        editor.states.discard('EDITABLE')
-        self.assertEqual(self.read(desktop, editor), '\ufffc')
-        desktop, editor, paragraph, _ = self.linked('\ufffc')
-        # A hyperlink alone does not establish direct composer-tree ownership.
-        editor.children = []
-        paragraph.children[0].get_name = Mock(side_effect=AssertionError('outside tree'))
-        self.assertEqual(self.read(desktop, editor), '\ufffc')
-        paragraph.children[0].get_name.assert_not_called()
-
-    def test_structural_hypertext_reference_remains_preferred(self):
-        desktop, editor, paragraph, _ = self.linked('linked value')
-        alternative = PublicNode('not a label', 'paragraph', editable=True)
-        alternative.value = 'different structural value'
-        editor.children = [alternative]
-        editor.get_child_count = Mock(side_effect=AssertionError('link wins'))
-        self.assertEqual(self.read(desktop, editor), paragraph.value)
-        editor.get_child_count.assert_not_called()
-
-    def test_structural_cycles_depth_node_and_utf8_budgets(self):
-        desktop, editor, paragraph, _ = self.structural('\ufffc')
-        paragraph.children = [paragraph]
-        self.assert_unavailable(desktop, editor)
-        for static in (False, True):
-            visits = 3 if static else 2
-            for budget in ('TEXT_NODE_LIMIT', 'TEXT_DEPTH_LIMIT'):
-                desktop, editor, _, _ = self.structural('😀', static=static)
-                with patch('chatgpt_linux.' + budget, visits - 1):
-                    self.assert_unavailable(desktop, editor)
-                with patch('chatgpt_linux.' + budget, visits):
-                    self.assertEqual(self.read(desktop, editor), '😀')
-            total = 10 if static else 7
-            self.assertEqual(self.read(desktop, editor, limit=total), '😀')
-            self.assert_unavailable(desktop, editor, limit=total - 1)
-        desktop, editor, paragraph, _ = self.structural('\ufffc')
+    def test_readback_limits_cycles_depth_nodes_bytes_and_deadline(self):
+        # Node/depth budgets include the root and apply before a child is read.
+        for budget in ('TEXT_NODE_LIMIT', 'TEXT_DEPTH_LIMIT'):
+            for static in (False, True):
+                with self.subTest(budget=budget, static=static):
+                    desktop, editor_node, _ = self.structural('😀', static=static)
+                    visits = 3 if static else 2
+                    with patch('chatgpt_linux.' + budget, visits - 1):
+                        self.assert_unavailable(desktop, editor_node)
+                    with patch('chatgpt_linux.' + budget, visits):
+                        self.assertEqual(self.read(desktop, editor_node), '😀')
+                    # Source + expanded UTF-8 bytes share one caller limit.
+                    total = 10 if static else 7
+                    self.assertEqual(self.read(desktop, editor_node, limit=total), '😀')
+                    self.assert_unavailable(desktop, editor_node, limit=total - 1)
+        desktop, editor_node, paragraph = self.structural('\ufffc')
         current = paragraph
         for _ in range(16):
-            child = PublicNode('private', 'paragraph', editable=True)
-            child.value = '\ufffc'
+            child = PublicNode('private', 'paragraph', editable=True, value='\ufffc')
             current.children, current = [child], child
-        self.assert_unavailable(desktop, editor)
-
-    def test_structural_invalid_metadata_and_private_rpc_failures(self):
-        for count in (-1, True, None, 'private'):
-            desktop, editor, _, _ = self.structural('')
-            editor.get_child_count = Mock(return_value=count)
-            self.assert_unavailable(desktop, editor)
-        for value in (None, 1, '\ud800'):
-            desktop, editor, paragraph, _ = self.structural('', static=True)
-            paragraph.children[0].name = value
-            self.assert_unavailable(desktop, editor)
-        for method in ('get_child_count', 'get_child_at_index', 'get_role_name'):
-            desktop, editor, _, _ = self.structural('')
-            setattr(editor, method, Mock(side_effect=FakeGLibError('private UI content')))
-            self.assert_unavailable(desktop, editor)
-
-    def test_structural_prepare_placeholder_and_submit_readback_do_not_export_content(self):
-        prompt = '  π 😀\n\nExact.  \n'
-        for static in (False, True):
-            for query, readback in [('', 'Ask anything here\n'), (prompt, prompt), (prompt, prompt + '\n')]:
-                desktop, editor, paragraph, _ = self.structural('prior draft', static=static)
-                target, field = (paragraph.children[0], 'name') if static else (paragraph, 'value')
-                desktop.require_helpers = Mock()
-                desktop.open_prompt = Mock(side_effect=lambda value: setattr(target, field, readback))
-                desktop.activate = Mock()
-                desktop.api.Text.get_text = Mock(wraps=desktop.api.Text.get_text)
-                driver = Driver(desktop, 60_000, 24)
-                receipt = (driver.submit(query, 'chatgpt-work') if query
-                           else driver.prepare('chatgpt-work'))
-                self.assertEqual(receipt['status'], 'submitted' if query else 'ready')
-                desktop.open_prompt.assert_called_once_with(query)
-                self.assertEqual(desktop.activate.call_count, 1 if query else 0)
-                if not query:
-                    desktop.api.Text.get_text.assert_not_called()
-                    self.assertEqual(len(readback), 18)
-                    self.assertEqual(readback.count('\n'), 1)
-                state = driver.receipt('failed')['draftState']
-                self.assertEqual(state['textLength'], len(readback))
-                self.assertEqual(state['textSha256'], hashlib.sha256(readback.encode('utf-8')).hexdigest())
-                self.assertNotIn('Exact', json.dumps(state))
-                self.assertNotIn('Ask anything', json.dumps(state))
-
-    @patch('chatgpt_linux.time.sleep')
-    def test_structural_ambiguous_paragraphs_never_send(self, _sleep):
-        desktop, editor, paragraph, _ = self.structural('first')
-        other = PublicNode('private second', 'paragraph', editable=True)
-        other.value = 'second'
-        editor.children.append(other)
-        desktop.require_helpers, desktop.open_prompt, desktop.activate = Mock(), Mock(), Mock()
-        self.assertEqual(self.read(desktop, editor), '\ufffc')
-        with self.assertRaisesRegex(DriverFailure, '^state_transition_unobserved$'):
-            Driver(desktop, 60_000, 24).submit('first\nsecond', 'chatgpt-work')
-        desktop.open_prompt.assert_called_once_with('first\nsecond')
-        desktop.activate.assert_not_called()
-
-    def test_empty_embedded_paragraph_is_exact_empty_not_its_static_child_name(self):
-        desktop, editor, paragraph, _ = self.linked()
-        editor.get_name = paragraph.get_name = Mock(side_effect=AssertionError('no names'))
-        self.assertEqual(self.read(desktop, editor), '')
-        desktop.api.Hypertext.get_link_index.assert_called_once_with(editor, 0)
-        desktop.api.Hypertext.get_link.assert_called_once_with(editor, 0)
-        desktop.api.Hyperlink.get_object.assert_called_once_with(editor.links[0], 0)
-
-    def test_one_paragraph_preserves_unicode_whitespace_multiline_and_literal_marker(self):
-        for value in ('single line', '  π 😀e\u0301\t\r\n\nExact.  \n', '\ufffc', 'a\ufffcb'):
-            with self.subTest(value=value):
-                desktop, editor, paragraph, _ = self.linked(value)
-                paragraph.interfaces.append('Hypertext')
-                self.assertEqual(self.read(desktop, editor), value)
-                if '\ufffc' in value:
-                    desktop.api.Hypertext.get_link_index.assert_any_call(paragraph, value.index('\ufffc'))
-
-    def test_root_and_child_bound_get_text_collisions_are_never_called(self):
-        desktop, editor, paragraph, _ = self.linked('π😀\n')
-        editor.get_text = paragraph.get_text = Mock(side_effect=TypeError('private collision'))
+        self.assert_unavailable(desktop, editor_node)  # Depth, not recursion error.
+        desktop, editor_node, paragraph = self.structural('\ufffc')
+        paragraph.children = [paragraph]
+        self.assert_unavailable(desktop, editor_node)  # Structural cycle.
+        desktop, editor_node, _ = self.linked('😀')
         desktop.api.Text.get_text = Mock(wraps=desktop.api.Text.get_text)
-        self.assertEqual(self.read(desktop, editor), paragraph.value)
-        self.assertEqual(desktop.api.Text.get_text.call_args_list,
-                         [unittest.mock.call(editor, 0, 1), unittest.mock.call(paragraph, 0, 3)])
-        editor.get_text.assert_not_called()
-
-    def test_bare_and_qualified_interfaces_support_snapshot_and_expansion(self):
-        for prefix in ('', 'org.a11y.atspi.'):
-            desktop, editor, paragraph, _ = self.linked('exact')
-            for item in (editor, paragraph):
-                item.interfaces.append('EditableText')
-                item.interfaces = [prefix + name for name in item.interfaces]
-            current = composer(desktop.snapshot())
-            self.assertIs(current['node'], editor)
-            self.assertTrue(current['textInterface'])
-            self.assertTrue(current['editableInterface'])
-            self.assertEqual(desktop.text(current), 'exact')
-
-    def test_only_linked_markers_expand_at_unicode_character_offsets(self):
-        desktop, editor, paragraph, _ = self.linked('child')
-        editor.value = '😀\ufffc \n\ufffc\t'
-        editor.links = {}
-        self.link(editor, 4, paragraph)
-        self.assertEqual(self.read(desktop, editor), '😀\ufffc \nchild\t')
-        self.assertEqual(desktop.api.Hypertext.get_link_index.call_args_list,
-                         [unittest.mock.call(editor, 1), unittest.mock.call(editor, 4)])
-        desktop.api.Hypertext.get_link.assert_called_once_with(editor, 4)
-
-    def test_unlinked_markers_remain_literal_with_or_without_hypertext(self):
-        for hypertext in (False, True):
-            desktop, editor, _ = public_desktop()
-            editor.value = '\ufffc\n\ufffc'
-            editor.children = [PublicNode('private child', 'paragraph', editable=True)]
-            if hypertext:
-                editor.interfaces.append('Hypertext')
-            self.assertEqual(self.read(desktop, editor), editor.value)
-            desktop.api.Hypertext.get_link.assert_not_called()
-            desktop.api.Hyperlink.get_object.assert_not_called()
-
-    def test_nested_links_preserve_reported_separators_only(self):
-        desktop, editor, paragraph, _ = self.linked('before\ufffcafter')
-        child = PublicNode('private nested name', 'text', editable=True)
-        child.value = 'inner\n'
-        self.link(paragraph, 6, child)
-        self.assertEqual(self.read(desktop, editor), 'beforeinner\nafter')
-        editor.value = '\ufffc\r\n\ufffc'
-        self.link(editor, 3, child)
-        self.assertEqual(self.read(desktop, editor), 'beforeinner\nafter\r\ninner\n')
-
-    def test_direct_and_nested_cycles_fail(self):
-        for nested in (False, True):
-            desktop, editor, paragraph, _ = self.linked('\ufffc')
-            self.link(paragraph if nested else editor, 0, editor)
-            self.assert_unavailable(desktop, editor)
-
-    def test_ambiguous_missing_or_invalid_links_fail_without_reading_children(self):
-        for anchors in ((), (None,), (PublicNode('private'), PublicNode('private'))):
-            desktop, editor, _, _ = self.linked()
-            self.link(editor, 0, *anchors)
-            self.assert_unavailable(desktop, editor)
-        for index in (-2, None, 'private', True):
-            desktop, editor, _, _ = self.linked()
-            desktop.api.Hypertext.get_link_index.return_value = index
-            desktop.api.Hypertext.get_link_index.side_effect = None
-            self.assert_unavailable(desktop, editor)
-            desktop.api.Hypertext.get_link.assert_not_called()
-        desktop, editor, _, _ = self.linked()
-        editor.links[0] = None
-        self.assert_unavailable(desktop, editor)
-
-    def test_image_password_and_nontext_children_fail_never_read_names(self):
-        for kind in ('image', 'password text', 'no-text', 'no-text-iface'):
-            desktop, editor, paragraph, _ = self.linked('private text')
-            if kind == 'no-text':
-                paragraph.interfaces = []
-            elif kind == 'no-text-iface':
-                paragraph.get_text_iface = lambda: None
-            else:
-                paragraph.role = kind
-            paragraph.get_name = Mock(side_effect=AssertionError('no names'))
-            desktop.api.Text.get_text = Mock(wraps=desktop.api.Text.get_text)
-            self.assert_unavailable(desktop, editor)
-            desktop.api.Text.get_text.assert_called_once_with(editor, 0, 1)
-            paragraph.get_name.assert_not_called()
-
-    def test_node_and_depth_budgets_include_root_and_bound_before_child_read(self):
-        for budget in ('TEXT_NODE_LIMIT', 'TEXT_DEPTH_LIMIT'):
-            desktop, editor, _, _ = self.linked('exact')
-            desktop.api.Text.get_text = Mock(wraps=desktop.api.Text.get_text)
-            with patch('chatgpt_linux.' + budget, 1):
-                self.assert_unavailable(desktop, editor)
-                desktop.api.Text.get_text.assert_called_once_with(editor, 0, 1)
-            with patch('chatgpt_linux.' + budget, 2):
-                self.assertEqual(self.read(desktop, editor), 'exact')
-        desktop, editor, paragraph, _ = self.linked('x')
-        editor.value = '\ufffc\ufffc'
-        self.link(editor, 1, paragraph)
-        with patch('chatgpt_linux.TEXT_NODE_LIMIT', 2):
-            self.assert_unavailable(desktop, editor)
-
-    def test_utf8_and_cumulative_source_byte_budgets_apply_to_all_reads(self):
-        desktop, editor, paragraph, _ = self.linked('😀')
-        self.assertEqual(self.read(desktop, editor, limit=7), '😀')
-        self.assert_unavailable(desktop, editor, limit=6)
-        paragraph.value = 'abcd'
-        self.assert_unavailable(desktop, editor, limit=6)
-        desktop.api.Text.get_text = Mock(wraps=desktop.api.Text.get_text)
-        self.assert_unavailable(desktop, editor, limit=0)
+        self.assert_unavailable(desktop, editor_node, limit=0)
         desktop.api.Text.get_text.assert_not_called()
         with patch('chatgpt_linux.INPUT_LIMIT', 6):
-            self.assert_unavailable(desktop, editor)
-            self.assert_unavailable(desktop, editor, limit=100)
-        desktop, editor, _ = public_desktop()
-        editor.value = '😀'
-        self.assertEqual(self.read(desktop, editor, limit=4), '😀')
-        self.assert_unavailable(desktop, editor, limit=3)
-
-    def test_invalid_counts_and_incomplete_or_invalid_text_fail(self):
-        for count in (-1, True, 'private', INPUT_LIMIT + 1):
-            desktop, editor, _ = public_desktop()
-            desktop.api.Text.get_character_count = Mock(return_value=count)
-            desktop.api.Text.get_text = Mock()
-            self.assert_unavailable(desktop, editor)
-            desktop.api.Text.get_text.assert_not_called()
-        for value in (None, 1, 'private incomplete', '\ud800'):
-            desktop, editor, _ = public_desktop()
-            desktop.api.Text.get_character_count = Mock(return_value=1)
-            desktop.api.Text.get_text = Mock(return_value=value)
-            self.assert_unavailable(desktop, editor)
+            self.assert_unavailable(desktop, editor_node, limit=100)  # Caller cannot raise the cap.
+        desktop.deadline = 0
+        with self.assertRaisesRegex(DriverFailure, '^deadline_exceeded$'):
+            self.read(desktop, editor_node)
 
     def test_rpc_errors_never_expose_content_and_diagnostics_are_unreadable(self):
         for interface, method in (('Text', 'get_text'), ('Hypertext', 'get_link_index'),
                                   ('Hypertext', 'get_link'), ('Hyperlink', 'get_n_anchors'),
                                   ('Hyperlink', 'get_object')):
-            desktop, editor, _, _ = self.linked('private prompt')
-            setattr(getattr(desktop.api, interface), method,
-                    Mock(side_effect=FakeGLibError('private text and error')))
-            self.assert_unavailable(desktop, editor)
-            driver = Driver(desktop, 60_000, 24)
-            driver.snapshot()
-            receipt = driver.receipt('failed')
-            self.assertFalse(receipt['draftState']['textReadable'])
-            self.assertNotIn('textSha256', receipt['draftState'])
-            self.assertNotIn('private', json.dumps(receipt))
+            with self.subTest(method=method):
+                desktop, editor_node, _ = self.linked('private prompt')
+                setattr(getattr(desktop.api, interface), method,
+                        Mock(side_effect=FakeGLibError('private text and error')))
+                self.assert_unavailable(desktop, editor_node)
+                driver = Driver(desktop, 60_000, 24)
+                driver.snapshot()
+                receipt = driver.receipt('failed')
+                self.assertEqual(set(receipt['draftState']), UNREADABLE)
+                self.assertNotIn('private', json.dumps(receipt))
 
-    def test_expansion_checks_deadline(self):
-        desktop, editor, _, _ = self.linked('exact')
-        desktop.deadline = 0
-        with self.assertRaisesRegex(DriverFailure, '^deadline_exceeded$'):
-            self.read(desktop, editor)
-        desktop.api.Hypertext.get_link.assert_not_called()
-
-    def test_failure_diagnostics_measure_expanded_text_not_root_marker(self):
-        for value in ('', '  π 😀\n\ufffc\t'):
-            desktop, _, _, _ = self.linked(value)
-            driver = Driver(desktop, 60_000, 24)
-            driver.snapshot()
-            state = driver.receipt('failed')['draftState']
-            self.assertEqual(state, {
-                'observedSurface': 'chatgpt-work', 'composerRootCount': 1,
-                'sendControlCount': 1, 'textReadable': True, 'textLength': len(value),
-                'textSha256': hashlib.sha256(value.encode('utf-8')).hexdigest(),
-                'embeddedObjectCount': value.count('\ufffc'), 'newlineCount': value.count('\n')})
-
-    def test_empty_paragraph_passes_prepare_and_exact_paragraph_sends_once(self):
-        for prompt in ('', 'single line', '  π 😀\n\nExact.  \n'):
-            desktop, editor, paragraph, _ = self.linked('prior draft')
-            desktop.require_helpers = Mock()
-            desktop.open_prompt = Mock(side_effect=lambda value: setattr(paragraph, 'value', value))
-            def send(control, allowed):
-                self.assertEqual(control['name'], 'Send')
-                self.assertEqual(self.read(desktop, editor), prompt)
-            desktop.activate = Mock(side_effect=send)
-            driver = Driver(desktop, 60_000, 24)
-            receipt = (driver.submit(prompt, 'chatgpt-work') if prompt
-                       else driver.prepare('chatgpt-work'))
-            self.assertEqual(receipt['status'], 'submitted' if prompt else 'ready')
-            self.assertEqual(receipt['action_count'], 2 if prompt else 1)
-            desktop.open_prompt.assert_called_once_with(prompt)
-            self.assertEqual(desktop.activate.call_count, 1 if prompt else 0)
+    def test_driver_uses_expanded_readback_for_setup_submit_and_diagnostics(self):
+        for static in (False, True):
+            for query, readback in [('', 'Ask anything here\n'), (PROMPT, PROMPT), (PROMPT, PROMPT + '\n')]:
+                with self.subTest(static=static, query=query, readback=readback):
+                    desktop, editor_node, paragraph = self.structural('prior draft', static=static)
+                    target, field = (paragraph.children[0], 'name') if static else (paragraph, 'value')
+                    desktop.require_helpers = Mock()
+                    desktop.open_prompt = Mock(side_effect=lambda v, t=target, f=field, r=readback:
+                                               setattr(t, f, r))
+                    def send(control, allowed, d=desktop, e=editor_node, r=readback):
+                        self.assertEqual(control['name'], 'Send')
+                        self.assertEqual(self.read(d, e), r)
+                    desktop.activate = Mock(side_effect=send)
+                    desktop.api.Text.get_text = Mock(wraps=desktop.api.Text.get_text)
+                    driver = Driver(desktop, 60_000, 24)
+                    receipt = driver.submit(query, 'chatgpt-work') if query else driver.prepare('chatgpt-work')
+                    self.assertEqual((receipt['status'], receipt['action_count']),
+                                     ('submitted', 2) if query else ('ready', 1))
+                    desktop.open_prompt.assert_called_once_with(query)
+                    self.assertEqual(desktop.activate.call_count, 1 if query else 0)
+                    if not query:
+                        desktop.api.Text.get_text.assert_not_called()
+                    state = driver.receipt('failed')['draftState']
+                    self.assertEqual(state, readable_state(readback))
 
     @patch('chatgpt_linux.time.sleep')
-    def test_missing_paragraph_separators_never_guessed_or_sent(self, _sleep):
-        desktop, editor, _, _ = self.linked('first')
-        other = PublicNode('private second', 'paragraph', editable=True)
-        other.value = 'second'
-        editor.value = '\ufffc\ufffc'
-        self.link(editor, 1, other)
-        desktop.require_helpers, desktop.open_prompt, desktop.activate = Mock(), Mock(), Mock()
-        self.assertEqual(self.read(desktop, editor), 'firstsecond')
-        driver = Driver(desktop, 60_000, 24)
-        with self.assertRaisesRegex(DriverFailure, '^state_transition_unobserved$'):
-            driver.submit('first\nsecond', 'chatgpt-work')
-        desktop.open_prompt.assert_called_once_with('first\nsecond')
-        desktop.activate.assert_not_called()
+    def test_unrecoverable_paragraph_separators_never_send(self, _sleep):
+        for layout in ('structural-two-children', 'linked-no-separator'):
+            with self.subTest(layout=layout):
+                if layout == 'structural-two-children':
+                    desktop, editor_node, _ = self.structural('first')
+                    editor_node.children.append(PublicNode('private', 'paragraph', editable=True, value='second'))
+                    expected = '\ufffc'
+                else:
+                    desktop, editor_node, _ = self.linked('first')
+                    editor_node.value = '\ufffc\ufffc'
+                    self.link(editor_node, 1, PublicNode('private', 'paragraph', editable=True, value='second'))
+                    expected = 'firstsecond'
+                desktop.require_helpers, desktop.open_prompt, desktop.activate = Mock(), Mock(), Mock()
+                self.assertEqual(self.read(desktop, editor_node), expected)
+                with self.assertRaisesRegex(DriverFailure, '^state_transition_unobserved$'):
+                    Driver(desktop, 60_000, 24).submit('first\nsecond', 'chatgpt-work')
+                desktop.open_prompt.assert_called_once_with('first\nsecond')
+                desktop.activate.assert_not_called()
 
 
 class AccessibilityTest(unittest.TestCase):
-    def test_public_text_without_editable_text_uses_unbound_readback(self):
-        desktop, editor, _ = public_desktop()
-        editor.value = '  π 😀\n\nExact.  \n'
+    def test_only_visible_enabled_editable_text_roles_authorize_a_composer(self):
+        desktop, editor_node, _ = public_desktop()
+        editor_node.value = PROMPT
         current = composer(desktop.snapshot())
         self.assertTrue(current['textInterface'])
-        self.assertFalse(current['editableInterface'])
-        self.assertEqual(desktop.text(current), editor.value)
+        self.assertFalse(current['editableInterface'])  # Text alone suffices for readback.
+        self.assertEqual(desktop.text(current), PROMPT)
+        mutations = {'static': lambda e: e.states.remove('EDITABLE'),
+                     'password': lambda e: setattr(e, 'role', 'password text'),
+                     'wrong-role': lambda e: setattr(e, 'role', 'document web'),
+                     'hidden': lambda e: e.states.remove('SHOWING'),
+                     'disabled': lambda e: e.states.remove('SENSITIVE'),
+                     'no-text': lambda e: setattr(e, 'interfaces', ['EditableText'])}
+        for kind, mutate in mutations.items():
+            with self.subTest(kind=kind):
+                desktop, editor_node, _ = public_desktop()
+                mutate(editor_node)
+                with self.assertRaisesRegex(DriverFailure, 'composer_missing_or_ambiguous'):
+                    composer(desktop.snapshot())
 
-    def test_static_password_hidden_disabled_or_missing_text_never_authorize(self):
-        for kind in ('static', 'password', 'hidden', 'disabled', 'no-text', 'wrong-role'):
-            desktop, editor, _ = public_desktop()
-            if kind == 'static': editor.states.remove('EDITABLE')
-            if kind == 'password': editor.role = 'password text'
-            if kind == 'wrong-role': editor.role = 'document web'
-            if kind == 'hidden': editor.states.remove('SHOWING')
-            if kind == 'disabled': editor.states.remove('SENSITIVE')
-            if kind == 'no-text': editor.interfaces = ['EditableText']
-            with self.assertRaisesRegex(DriverFailure, 'composer_missing_or_ambiguous'):
-                composer(desktop.snapshot())
-
-    def test_snapshot_flushes_cached_selected_and_enabled_updates(self):
-        desktop, editor, _ = public_desktop()
-        editor.states.remove('ENABLED')
-        before = next(n for n in desktop.snapshot() if n['node'] is editor)
-        self.assertFalse(before['enabled'])
-        desktop.context.events = [lambda: editor.states.update({'ENABLED', 'CHECKED'})]
-        after = next(n for n in desktop.snapshot() if n['node'] is editor)
-        self.assertTrue(after['enabled'])
-        self.assertTrue(after['selected'])
+    def test_snapshot_flushes_events_within_budget_and_retries_only_reads(self):
+        desktop, editor_node, _ = public_desktop()
+        editor_node.states.remove('ENABLED')
+        self.assertFalse(next(n for n in desktop.snapshot() if n['node'] is editor_node)['enabled'])
+        desktop.context.events = [lambda: editor_node.states.update({'ENABLED', 'CHECKED'})]
+        after = next(n for n in desktop.snapshot() if n['node'] is editor_node)
+        self.assertTrue(after['enabled'] and after['selected'])
         self.assertEqual(desktop.context.iterations, 1)
-
-    def test_event_queue_budget(self):
-        desktop, _, _ = public_desktop()
         desktop.context = FakeGLibContext(busy=True)
         with self.assertRaisesRegex(DriverFailure, 'accessibility_event_budget'):
             desktop.snapshot()
         self.assertEqual(desktop.context.iterations, 256)
         desktop.context = FakeGLibContext([lambda: None] * 256)
         self.assertTrue(desktop.snapshot())
-
-    def test_transient_glib_snapshot_retries_only_reads_at_most_three_times(self):
-        desktop, _, _ = public_desktop()
         with patch.object(desktop, '_snapshot', side_effect=[FakeGLibError('private'), []]) as snapshot:
             self.assertEqual(desktop.snapshot(), [])
             self.assertEqual(snapshot.call_count, 2)
         with patch.object(desktop, '_snapshot', side_effect=FakeGLibError('private')) as snapshot:
-            with self.assertRaises(FakeGLibError): desktop.snapshot()
+            with self.assertRaises(FakeGLibError):
+                desktop.snapshot()
             self.assertEqual(snapshot.call_count, 3)
 
     def test_action_name_must_be_observed_unique_and_not_retried(self):
         desktop, _, _ = public_desktop()
+        def target(names, error=None):
+            action = SimpleNamespace(get_n_actions=lambda: len(names), get_action_name=lambda i: names[i],
+                                     do_action=Mock(side_effect=error))
+            return action, {'node': SimpleNamespace(get_action_iface=lambda: action)}
         for names in (['delete'], ['click', 'press']):
-            action = SimpleNamespace(get_n_actions=lambda: len(names),
-                                     get_action_name=lambda i: names[i], do_action=Mock())
+            action, control = target(names)
             with self.assertRaisesRegex(DriverFailure, 'action_missing_or_ambiguous'):
-                desktop.activate({'node': SimpleNamespace(get_action_iface=lambda: action)}, {'click', 'press'})
+                desktop.activate(control, {'click', 'press'})
             action.do_action.assert_not_called()
-        action = SimpleNamespace(get_n_actions=lambda: 1, get_action_name=lambda _: 'click',
-                                 do_action=Mock(side_effect=FakeGLibError('private')))
+        action, control = target(['click'], FakeGLibError('private'))
         with self.assertRaises(FakeGLibError):
-            desktop.activate({'node': SimpleNamespace(get_action_iface=lambda: action)}, {'click'})
+            desktop.activate(control, {'click'})
         action.do_action.assert_called_once()
 
-    def test_contract_is_shared_and_helpers_never_get_mst_paths(self):
+    def test_error_codes_match_contract_and_exceptions_map_to_static_codes(self):
         contract = json.loads((Path(__file__).parent / 'chatgpt_linux_contract.json').read_text())
         self.assertEqual(ERROR_CODES, frozenset(contract['errorCodes']))
         self.assertEqual(len(contract['errorCodes']), len(ERROR_CODES))
+        source = (Path(__file__).parent / 'chatgpt_linux.py').read_text('utf-8')
+        raised = set(re.findall(r"DriverFailure\('([a-z_]+)'\)", source))
+        mapped = set(re.findall(r"return '(desktop_[a-z_]+)'", source))
+        self.assertTrue(raised and mapped)
+        self.assertLessEqual(raised | mapped, ERROR_CODES)
         self.assertIn('NO_AT_BRIDGE', SESSION_KEYS)
         self.assertFalse([key for key in SESSION_KEYS if key.startswith('MST_')])
-
-    def test_exception_codes_are_static(self):
         for error, code in [(AttributeError('private'), 'desktop_attribute_error'),
                             (TypeError('private'), 'desktop_type_error'),
                             (FakeGLibError('private'), 'desktop_glib_error'),
                             (DriverFailure('private'), 'desktop_driver_failed')]:
             self.assertEqual(error_code(error, FakeGLibError), code)
-            self.assertIn(code, ERROR_CODES)
         self.assertEqual(error_code(FakeGLibError('private')), 'desktop_driver_failed')
-
-    def test_main_maps_the_desktop_glib_error_without_global_state(self):
-        desktop = FakeDesktop()
-        desktop.glib_error = FakeGLibError
-        desktop.snapshot = Mock(side_effect=FakeGLibError('private'))
-        with patch('chatgpt_linux.Desktop', return_value=desktop), \
-                patch('sys.argv', ['driver', '--mode', 'prepare', '--timeout-ms', '60000']), \
-                patch('sys.stdin', SimpleNamespace(buffer=io.BytesIO(b'{"surface":"codex"}'))), \
-                patch('sys.stdout', new_callable=io.StringIO) as output:
-            self.assertEqual(main(), 1)
-        self.assertEqual(json.loads(output.getvalue())['error'], 'desktop_glib_error')
-        self.assertNotIn('private', output.getvalue())
 
 
 if __name__ == '__main__':

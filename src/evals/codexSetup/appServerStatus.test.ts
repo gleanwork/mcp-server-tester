@@ -9,6 +9,8 @@ import {
   exchangeAppServerStatus,
   probeAppServerStatus,
   StreamJsonlChannel,
+  type AppServerAuthStatus,
+  type AppServerServerStatus,
   type JsonlChannel,
 } from './appServerStatus.js';
 
@@ -25,13 +27,28 @@ class FakeChannel implements JsonlChannel {
   }
 }
 
+const METHODS = ['initialize', 'initialized', 'mcpServerStatus/list'];
 const initialized = { id: 0, result: {} };
 function list(data: unknown[], extra: Record<string, unknown> = {}) {
   return { id: 1, result: { data, nextCursor: null, ...extra } };
 }
+function rpcError(message: string, code = 1) {
+  return [{ id: 0, error: { code, message } }];
+}
+function listed(data: unknown[]) {
+  return [initialized, list(data)];
+}
+const glean = { name: 'glean', tools: [] };
+function status(
+  label: string,
+  toolCount: number | null,
+  authStatus: AppServerAuthStatus = 'bearerToken'
+): AppServerServerStatus {
+  return { label, initialized: toolCount !== null, toolCount, authStatus };
+}
 
 describe('app-server MCP status exchange', () => {
-  it('sends only the allowlisted methods and parses the configured server', async () => {
+  it('sends only the allowlisted methods and parses configured servers', async () => {
     const channel = new FakeChannel([
       initialized,
       { method: 'notification/progress', params: { private: 'x' } },
@@ -42,89 +59,47 @@ describe('app-server MCP status exchange', () => {
           authStatus: 'bearerToken',
           private: 'https://private.example/token',
         },
+        { name: 'mapped', tools: { a: {} }, authStatus: 'secret-mode' },
         { name: 'other', tools: {}, authStatus: 'oAuth' },
       ]),
     ]);
-    const servers = await exchangeAppServerStatus(channel, ['glean', 'absent']);
-    expect(channel.sent.map((message) => message.method)).toEqual([
-      'initialize',
-      'initialized',
-      'mcpServerStatus/list',
+    const servers = await exchangeAppServerStatus(channel, [
+      'glean',
+      'mapped',
+      'absent',
     ]);
+    expect(channel.sent.map((message) => message.method)).toEqual(METHODS);
     expect(servers).toEqual([
-      {
-        label: 'glean',
-        initialized: true,
-        toolCount: 2,
-        authStatus: 'bearerToken',
-      },
-      {
-        label: 'absent',
-        initialized: false,
-        toolCount: null,
-        authStatus: 'unknown',
-      },
+      status('glean', 2),
+      // Unknown auth strings and object tool maps map safely.
+      status('mapped', 1, 'unknown'),
+      status('absent', null, 'unknown'),
     ]);
     expect(JSON.stringify(servers)).not.toContain('private');
     expect(appServerServerReady(servers[0]!, 'bearerToken')).toBe(true);
     expect(appServerServerReady(servers[0]!, 'unsupported')).toBe(false);
-    expect(appServerServerReady(servers[1]!, 'bearerToken')).toBe(false);
-  });
-
-  it('maps unknown auth strings and object tool maps safely', async () => {
-    const servers = await exchangeAppServerStatus(
-      new FakeChannel([
-        initialized,
-        list([{ name: 'glean', tools: { a: {} }, authStatus: 'secret-mode' }]),
-      ]),
-      ['glean']
-    );
-    expect(servers[0]).toMatchObject({ toolCount: 1, authStatus: 'unknown' });
-    expect(appServerServerReady(servers[0]!, 'bearerToken')).toBe(false);
+    for (const server of servers.slice(1))
+      expect(appServerServerReady(server, 'bearerToken')).toBe(false);
   });
 
   it.each([
-    [
-      [{ id: 7, method: 'account/login', params: {} }],
-      'server-request-unsupported',
-    ],
-    [
-      [{ id: 0, error: { code: -32601, message: 'no' } }],
-      'unsupported-method-or-params',
-    ],
-    [
-      [{ id: 0, error: { code: 1, message: 'HTTP status 401 private' } }],
-      'http-auth-error',
-    ],
-    [[{ id: 0, error: { code: 1, message: 'HTTP 404' } }], 'http-client-error'],
-    [[{ id: 0, error: { code: 1, message: 'HTTP 503' } }], 'http-server-error'],
-    [[{ id: 0, error: { code: 1, message: 'private detail' } }], 'rpc-error'],
+    [[{ id: 7, method: 'account/login' }], 'server-request-unsupported'],
+    [rpcError('no', -32601), 'unsupported-method-or-params'],
+    [rpcError('HTTP status 401 private'), 'http-auth-error'],
+    [rpcError('HTTP 404'), 'http-client-error'],
+    [rpcError('HTTP 503'), 'http-server-error'],
+    [rpcError('private detail'), 'rpc-error'],
     [['not json'], 'invalid-response'],
     [[{ id: '0', result: {} }], 'invalid-response'],
     [[initialized, list([], { nextCursor: 'more' })], 'invalid-response'],
+    [[initialized, list([], { data: {} })], 'invalid-response'],
+    [listed([glean, glean]), 'invalid-response'],
+    [listed([{ name: 'glean', tools: [1] }]), 'invalid-response'],
+    [listed([{ name: 'glean' }]), 'invalid-response'],
     [
-      [initialized, { id: 1, result: { data: {}, nextCursor: null } }],
-      'invalid-response',
-    ],
-    [
-      [
-        initialized,
-        list([
-          { name: 'glean', tools: [] },
-          { name: 'glean', tools: [] },
-        ]),
-      ],
-      'invalid-response',
-    ],
-    [[initialized, list([{ name: 'glean', tools: [1] }])], 'invalid-response'],
-    [[initialized, list([{ name: 'glean' }])], 'invalid-response'],
-    [
-      [
-        initialized,
-        list(
-          Array.from({ length: 101 }, (_, i) => ({ name: `s${i}`, tools: [] }))
-        ),
-      ],
+      listed(
+        Array.from({ length: 101 }, (_, i) => ({ ...glean, name: `${i}` }))
+      ),
       'invalid-response',
     ],
     [[initialized], 'unexpected-eof'],
@@ -133,70 +108,43 @@ describe('app-server MCP status exchange', () => {
     await expect(
       exchangeAppServerStatus(channel, ['glean'])
     ).rejects.toMatchObject({ reason });
-    expect(
-      channel.sent.every((message) =>
-        ['initialize', 'initialized', 'mcpServerStatus/list'].includes(
-          String(message.method)
-        )
-      )
-    ).toBe(true);
+    for (const { method } of channel.sent) expect(METHODS).toContain(method);
   });
 });
 
 describe('bounded JSONL stream channel', () => {
-  function channel(
-    limits = { timeoutMs: 1000, lineBytes: 16, totalBytes: 64, rows: 100 }
-  ) {
+  function channel(timeoutMs = 1000) {
     const input = new PassThrough();
     const output = new PassThrough();
-    return {
-      input,
-      output,
-      channel: new StreamJsonlChannel(input, output, limits),
-    };
+    const limits = { timeoutMs, lineBytes: 16, totalBytes: 64, rows: 100 };
+    const jsonl = new StreamJsonlChannel(input, output, limits);
+    const failure = (reason: string) =>
+      expect(jsonl.readLine()).rejects.toMatchObject({ reason });
+    return { input, output, jsonl, failure };
   }
 
   it('rejects methods outside the allowlist before writing', async () => {
-    const { input, channel: jsonl } = channel();
+    const { input, jsonl } = channel();
     await expect(jsonl.send({ method: 'thread/start' })).rejects.toMatchObject({
       reason: 'unsupported-method',
     });
     expect(input.read()).toBeNull();
   });
 
-  it('reads split lines and enforces per-line and total limits', async () => {
-    const first = channel();
-    first.output.write('{"a"');
-    first.output.write(':1}\n');
-    expect((await first.channel.readLine()).toString()).toBe('{"a":1}');
-    first.output.write('x'.repeat(17));
-    await expect(first.channel.readLine()).rejects.toMatchObject({
-      reason: 'output-limit',
-    });
+  it('reads split lines and enforces limits, deadline, and EOF', async () => {
+    const line = channel();
+    line.output.write('{"a"');
+    line.output.write(':1}\n');
+    expect((await line.jsonl.readLine()).toString()).toBe('{"a":1}');
+    line.output.write('x'.repeat(17));
+    await line.failure('output-limit');
     const total = channel();
-    for (let i = 0; i < 6; i++) total.output.write('0123456789012\n');
-    await expect(
-      (async () => {
-        for (;;) await total.channel.readLine();
-      })()
-    ).rejects.toMatchObject({ reason: 'output-limit' });
-  });
-
-  it('times out and reports EOF', async () => {
-    const slow = channel({
-      timeoutMs: 50,
-      lineBytes: 16,
-      totalBytes: 64,
-      rows: 100,
-    });
-    await expect(slow.channel.readLine()).rejects.toMatchObject({
-      reason: 'timeout',
-    });
+    total.output.write('0123456789012\n'.repeat(6));
+    await total.failure('output-limit');
+    await channel(50).failure('timeout');
     const closed = channel();
     closed.output.end();
-    await expect(closed.channel.readLine()).rejects.toMatchObject({
-      reason: 'unexpected-eof',
-    });
+    await closed.failure('unexpected-eof');
   });
 });
 
@@ -219,21 +167,14 @@ setInterval(() => {}, 1000);
 `,
         { mode: 0o700 }
       );
-      const status = await probeAppServerStatus(
+      const result = await probeAppServerStatus(
         codex,
         { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: root },
         ['glean']
       );
-      expect(status).toEqual({
+      expect(result).toEqual({
         status: 'available',
-        servers: [
-          {
-            label: 'glean',
-            initialized: true,
-            toolCount: 1,
-            authStatus: 'bearerToken',
-          },
-        ],
+        servers: [status('glean', 1)],
       });
       const missing = await probeAppServerStatus(
         join(root, 'missing'),
