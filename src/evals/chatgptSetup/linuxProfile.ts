@@ -37,10 +37,11 @@ import {
 import type { ExternalHostConfig } from '../externalHost/types.js';
 import { checkMcpServers, type McpServerReadiness } from '../mcpReadiness.js';
 import {
+  codexPluginReadinessTargets,
   installCodexPlugins,
-  type HostPlugin,
   type HostPluginReceipt,
 } from '../codexSetup/plugins.js';
+import type { HostPlugin, HostPluginCredentials } from '../hostPlugins.js';
 import { createLinuxChatgptApp } from './linuxApp.js';
 
 /** The Scio -> MST process environment. All paths are absolute and normalized. */
@@ -225,7 +226,8 @@ export interface ChatgptPlatformProfile {
   beforeStart(
     setup: ResolvedCodexSetup,
     environment: Record<string, string>,
-    plugins?: readonly HostPlugin[]
+    plugins?: readonly HostPlugin[],
+    credentials?: HostPluginCredentials
   ): Promise<void>;
   dispose(): Promise<void>;
 }
@@ -287,7 +289,7 @@ export async function createLinuxChatgptProfile(
     }),
     evidenceDir: environment.evidenceDir,
     readiness,
-    async beforeStart(setup, launch, plugins = []) {
+    async beforeStart(setup, launch, plugins = [], credentials = {}) {
       const native = {
         ...environment.session,
         PATH: '/usr/bin:/bin',
@@ -330,8 +332,7 @@ export async function createLinuxChatgptProfile(
         )
       )
         throw fail('mcp_preflight_failed');
-      // Plugin servers replace direct servers by label; traces keep the label.
-      const replaced = new Set<string>();
+      // Plugin MCP servers run under their own names and are eval servers too.
       if (plugins.length) {
         try {
           readiness.plugins = await installCodexPlugins({
@@ -339,42 +340,44 @@ export async function createLinuxChatgptProfile(
             env: native,
             codexHome: environment.codexHome,
             plugins,
-            replaced: servers.flatMap((server) =>
-              server.transport === 'http' && server.auth?.accessToken
-                ? [
-                    {
-                      label: server.label!,
-                      url: server.serverUrl,
-                      token: server.auth.accessToken,
-                    },
-                  ]
-                : []
-            ),
+            credentials,
+            reservedLabels: setup.servers.map((server) => server.label),
           });
         } catch (error) {
           readiness.error = 'plugin_setup_failed';
           throw error;
         }
-        for (const plugin of readiness.plugins)
-          if (plugin.replaces) replaced.add(plugin.replaces);
       }
-      if (!setup.servers.length) return;
+      const pluginTargets = codexPluginReadinessTargets(plugins);
+      const labels = [
+        ...setup.servers.map((server) => server.label),
+        ...pluginTargets.map((target) => target.label),
+      ];
+      if (!labels.length) return;
       readiness.mcpStatus = await probeAppServerStatus(
         environment.codexPath,
         { ...native, ...tokens },
-        setup.servers.map((server) => server.label)
+        labels
       );
       if (readiness.mcpStatus.status !== 'available')
         throw fail('mcp_status_unavailable');
       for (const [index, server] of readiness.mcpStatus.servers.entries()) {
-        const configured = setup.servers[index]!;
-        const auth =
-          configured.transport === 'http' &&
-          configured.bearerTokenEnvVar &&
-          !replaced.has(configured.label)
-            ? 'bearerToken'
-            : 'unsupported';
-        if (!appServerServerReady(server, auth))
+        const configured = setup.servers[index];
+        if (configured) {
+          const auth =
+            configured.transport === 'http' && configured.bearerTokenEnvVar
+              ? 'bearerToken'
+              : 'unsupported';
+          if (!appServerServerReady(server, auth))
+            throw fail('mcp_server_not_ready');
+          continue;
+        }
+        // A plugin stdio server: initialized with at least `minTools` tools.
+        const target = pluginTargets[index - setup.servers.length]!;
+        if (
+          !appServerServerReady(server, 'unsupported') ||
+          server.toolCount! < target.minTools
+        )
           throw fail('mcp_server_not_ready');
       }
     },

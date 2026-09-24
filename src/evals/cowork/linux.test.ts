@@ -2,7 +2,8 @@ import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { linuxCoworkPlatform } from './linux.js';
+import { coworkPluginSettingsMatch, linuxCoworkPlatform } from './linux.js';
+import type { HostPlugin } from '../hostPlugins.js';
 import { CoworkDriverError, CoworkHitlBudgetError } from './driver.js';
 import type { EvalManifest } from '../evalManifest.js';
 
@@ -78,15 +79,28 @@ afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 
-async function prepare(value: unknown = settings) {
+async function prepare(value: unknown = settings, plugins?: HostPlugin[]) {
   const file = join(directory, 'settings.json');
   await writeFile(file, JSON.stringify(value));
   return linuxCoworkPlatform.prepare({
     manifest,
     model: 'test-model',
     env: { ...session, MST_COWORK_SETTINGS_FILE: file },
+    ...(plugins ? { plugins } : {}),
   });
 }
+const SHA = 'c'.repeat(40);
+const plugin: HostPlugin = {
+  name: 'acme',
+  marketplace: { source: 'acme/plugins', ref: SHA },
+};
+const marketplace = {
+  source: 'github',
+  repo: 'Acme/Plugins',
+  ref: SHA,
+  installationPreference: 'required',
+  expectedName: 'acme-marketplace',
+};
 
 describe('caller-owned Linux Cowork desktop', () => {
   it('only probes prepared settings and never changes or tears down the runtime', async () => {
@@ -98,26 +112,57 @@ describe('caller-owned Linux Cowork desktop', () => {
     expect(child.exec).toHaveBeenCalledOnce();
     expect(child.exec.mock.calls[0]![1]).toContain('probe');
   });
-  it('accepts a plugin MCP adapter on the eval endpoint with its own server blocked', async () => {
-    const plugin = {
+  it('accepts a pinned required plugin marketplace with its own MCP server blocked', async () => {
+    const prepared = {
       ...settings,
+      allowedPluginMarketplaces: [marketplace],
       managedMcpServers: [
+        ...settings.managedMcpServers,
         {
-          name: 'glean',
-          transport: 'stdio',
-          command: '/usr/bin/node',
-          env: { GLEAN_MCP_SERVER_URL: 'https://example.com/eval' },
-        },
-        {
-          name: 'glean_plugin',
+          name: 'acme_mcp',
           transport: 'policy-only',
           toolPolicy: { '*': 'blocked' },
         },
       ],
     };
-    await (await prepare(plugin)).dispose();
+    await (await prepare(prepared, [plugin])).dispose();
     expect(child.exec).toHaveBeenCalledOnce();
+    expect(coworkPluginSettingsMatch(prepared, [plugin])).toBe(true);
   });
+  it.each([
+    ['missing', settings, [plugin]],
+    [
+      'unpinned',
+      {
+        ...settings,
+        allowedPluginMarketplaces: [{ ...marketplace, ref: 'main' }],
+      },
+      [plugin],
+    ],
+    [
+      'not required',
+      {
+        ...settings,
+        allowedPluginMarketplaces: [
+          { ...marketplace, installationPreference: 'available' },
+        ],
+      },
+      [plugin],
+    ],
+    [
+      'unexpected',
+      { ...settings, allowedPluginMarketplaces: [marketplace] },
+      undefined,
+    ],
+  ])(
+    'fails before UI when the plugin marketplace is %s',
+    async (_kind, value, plugins) => {
+      await expect(prepare(value, plugins)).rejects.toThrow(
+        'Prepared Linux desktop settings do not match'
+      );
+      expect(child.exec).not.toHaveBeenCalled();
+    }
+  );
   it.each([
     { ...settings, inferenceModels: [{ name: 'wrong-model' }] },
     { ...settings, managedMcpServers: [] },
@@ -136,11 +181,7 @@ describe('caller-owned Linux Cowork desktop', () => {
     {
       ...settings,
       managedMcpServers: [
-        {
-          name: 'glean',
-          transport: 'stdio',
-          env: { GLEAN_MCP_SERVER_URL: 'https://wrong.example/eval' },
-        },
+        { name: 'glean', transport: 'stdio', command: '/usr/bin/node' },
       ],
     },
     {

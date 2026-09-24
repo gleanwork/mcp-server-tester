@@ -103,7 +103,11 @@ stay available. Any host tool call is recorded separately from MCP calls.
 macOS is unchanged.
 
 Host plugins (Linux only): a fresh profile has no plugins, so the model has no
-skills that point it at the MCP server. List plugins in the host config:
+skills that point it at the MCP server. The host config has two independent
+parts: MCP servers (the manifest `servers`, which may be empty) and
+`plugins`. MST has no plugin-specific code. The caller supplies each plugin
+and, optionally, a declarative override for each of the plugin's own MCP
+servers:
 
 ```json
 "plugins": [
@@ -113,22 +117,52 @@ skills that point it at the MCP server. List plugins in the host config:
       "source": "gleanwork/codex-plugins",
       "ref": "<40-character commit SHA>"
     },
-    "mcp": { "server": "glean_plugin", "replaces": "glean-eval", "adapter": "glean" }
+    "mcp": {
+      "glean_plugin": {
+        "url": "https://example.glean.com/mcp/default/eval",
+        "auth": { "accessTokenEnv": "GLEAN_EVAL_TOKEN" },
+        "minTools": 3,
+        "env": {
+          "GLEAN_MCP_SERVER_URL": "${url}",
+          "CLAUDE_PLUGIN_DATA": "${dataDir}",
+          "ENABLE_HITL": "false"
+        },
+        "files": {
+          "mcp-credentials.json": {
+            "tokens": { "access_token": "${bearerToken}", "token_type": "Bearer" }
+          }
+        }
+      }
+    }
   }
 ]
 ```
 
-After login and MCP preflight, MST runs `codex plugin marketplace add` and
-`codex plugin add` for each entry. Git sources require a full commit SHA; an
-absolute local path is also accepted. With `mcp`, the plugin's own server runs
-under the replaced label (`glean-eval`), so traces, `requireMcpCalls`, and the
-app-server probe keep that label. MST disables the plugin's own entry. The
-`glean` adapter sets `GLEAN_MCP_SERVER_URL` to the replaced server's URL and
-seeds the resolved bearer token in a private `mcp-credentials.json` under
-`$CODEX_HOME/mst-plugin-data/<name>` (mode 0600). It also turns off approval
-prompts. Without `mcp`, only the plugin's skills are added. Any install error
-fails setup with `plugin_setup_failed` before the app starts.
-`nativeReadiness.plugins` records the name, marketplace, version, and ref.
+After login and direct MCP preflight, MST runs `codex plugin marketplace add`
+and `codex plugin add` for each entry. Git sources require a full commit SHA;
+an absolute local path (a pre-staged checkout) is also accepted, and its ref is
+only recorded. Each `mcp` key names a stdio server in the plugin's `.mcp.json`.
+MST writes a complete `[mcp_servers.<key>]` table under that same name:
+`command`, `args`, and `cwd` from the plugin, and the plugin's `env` merged with
+the override `env`. A partial env-only table would make the app reject the
+transport. `files` are written as JSON into a private per-server data dir,
+`$CODEX_HOME/mst-plugin-data/<plugin>/<server>` (directories 0700, files 0600,
+exclusive create, no symlinks). Only `${url}`, `${dataDir}`, and
+`${bearerToken}` are substituted; any other `${...}` fails validation.
+`${bearerToken}` is allowed only in `files`, so it never enters `config.toml`.
+The token comes from `auth.accessTokenEnv`, resolved from the same
+environment as direct MCP `auth.accessTokenEnv`; a missing token fails before
+the app starts. It is never logged, sent to the app environment, or put in a
+receipt.
+
+Plugin MCP servers are eval MCP servers. The app-server probe checks each one
+by name: it must be initialized with at least `minTools` tools (default 1).
+Native `mcp__<server>__<tool>` calls are attributed to `<server>`, and
+`requireMcpCalls` accepts them, also when `servers` is empty. A plugin server
+must not share a name with a direct server. Without `mcp`, only the plugin's
+skills are added. Any install error fails setup with `plugin_setup_failed`
+before the app starts. `nativeReadiness.plugins` records the name,
+marketplace, version, ref, and overridden server names.
 
 Execution policy: on Linux, MST writes `approval_policy = "never"` and
 `sandbox_mode = "danger-full-access"`. Native command execution needs

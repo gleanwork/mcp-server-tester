@@ -1,4 +1,5 @@
 import type { EvalManifest } from '../evalManifest.js';
+import type { HostPlugin } from '../hostPlugins.js';
 import type {
   CoworkDriverOptions,
   CoworkDriverProvider,
@@ -14,6 +15,8 @@ export interface CoworkPlatform {
     manifest: EvalManifest;
     env: Record<string, string | undefined>;
     model?: string;
+    /** Validated host plugins; Cowork installs them via allowedPluginMarketplaces. */
+    plugins?: readonly HostPlugin[];
   }): Promise<{ dispose(): Promise<void> }>;
   recover(): Promise<unknown>;
   submit(

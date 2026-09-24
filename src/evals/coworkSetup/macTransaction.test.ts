@@ -157,6 +157,28 @@ describe('Mac Cowork settings transaction', () => {
     await restoreMacCoworkSettings(profileDirectory);
     await expectClean();
   });
+  it('installs host plugins through a pinned, required marketplace entry', async () => {
+    const ref = 'e'.repeat(40);
+    const installed = await installMacCoworkSettings(
+      options({
+        plugins: [
+          { name: 'acme', marketplace: { source: 'acme/plugins', ref } },
+        ],
+      })
+    );
+    expect(await readJson(profile(installed.id))).toMatchObject({
+      allowedPluginMarketplaces: [
+        {
+          source: 'github',
+          repo: 'acme/plugins',
+          ref,
+          installationPreference: 'required',
+        },
+      ],
+    });
+    await restoreMacCoworkSettings(profileDirectory);
+    await expectClean();
+  });
   it('isolates exact replacement/empty server sets and opt-in policies across runs', async () => {
     for (const labels of [
       ['first', 'second'],

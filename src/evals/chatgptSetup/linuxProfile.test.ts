@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loginWithApiKey } from '../codexSetup/auth.js';
 import { probeAppServerStatus } from '../codexSetup/appServerStatus.js';
 import type * as AppServerModule from '../codexSetup/appServerStatus.js';
+import type * as PluginsModule from '../codexSetup/plugins.js';
 import type { AppServerAuthStatus } from '../codexSetup/appServerStatus.js';
 import { CodexSetupError } from '../codexSetup/native.js';
 import { checkMcpServers } from '../mcpReadiness.js';
@@ -31,7 +32,10 @@ vi.mock('../codexSetup/appServerStatus.js', async (original) => ({
   probeAppServerStatus: vi.fn(),
 }));
 vi.mock('../mcpReadiness.js', () => ({ checkMcpServers: vi.fn() }));
-vi.mock('../codexSetup/plugins.js', () => ({ installCodexPlugins: vi.fn() }));
+vi.mock('../codexSetup/plugins.js', async (original) => ({
+  ...(await original<typeof PluginsModule>()),
+  installCodexPlugins: vi.fn(),
+}));
 
 const TOKEN = 'tok-sentinel';
 const POLICY = { approvalPolicy: 'never', sandboxMode: 'danger-full-access' };
@@ -254,40 +258,98 @@ describe('fresh MST-owned Linux profile', () => {
     await profile.dispose();
   });
 
-  it('installs plugins after preflight and accepts the replaced stdio server', async () => {
-    preflight('connected');
-    appServer(true, 'unsupported');
+  const plugin = {
+    name: 'acme',
+    marketplace: { source: '/opt/plugins' },
+    mcp: { acme_mcp: { url: 'https://example.test/eval', minTools: 2 } },
+  };
+  function withPluginServer(toolCount: number | null) {
+    vi.mocked(probeAppServerStatus).mockResolvedValue({
+      status: 'available',
+      servers: [
+        {
+          label: 'glean',
+          initialized: true,
+          toolCount: 3,
+          authStatus: 'bearerToken',
+        },
+        {
+          label: 'acme_mcp',
+          initialized: toolCount !== null,
+          toolCount,
+          authStatus: 'unsupported',
+        },
+      ],
+    });
+  }
+
+  it('installs plugins after preflight and probes plugin servers under their own names', async () => {
+    withPluginServer(2);
     const receipt = {
-      name: 'glean',
+      name: 'acme',
       marketplace: 'mkt',
       version: '1.0.0',
-      mcpServer: 'glean_plugin',
-      replaces: 'glean',
+      mcpServers: ['acme_mcp'],
     };
     vi.mocked(installCodexPlugins).mockResolvedValue([receipt]);
-    const plugin = {
-      name: 'glean',
-      marketplace: { source: '/opt/plugins' },
-      mcp: {
-        server: 'glean_plugin',
-        replaces: 'glean',
-        adapter: 'glean' as const,
-      },
-    };
+    const credentials = { 'acme/acme_mcp': TOKEN };
     const profile = await createProfile();
-    await profile.beforeStart(setup, { MST_CHATGPT_MCP_TOKEN_0: TOKEN }, [
-      plugin,
-    ]);
+    await profile.beforeStart(
+      setup,
+      { MST_CHATGPT_MCP_TOKEN_0: TOKEN },
+      [plugin],
+      credentials
+    );
     const [options] = vi.mocked(installCodexPlugins).mock.calls[0]!;
     expect(options).toMatchObject({
       codexHome: join(home, '.codex'),
       plugins: [plugin],
-      replaced: [
-        { label: 'glean', url: 'https://example.test/mcp', token: TOKEN },
-      ],
+      credentials,
+      reservedLabels: ['glean'],
     });
     expect(JSON.stringify(options.env)).not.toContain(TOKEN);
+    expect(vi.mocked(probeAppServerStatus).mock.calls[0]![2]).toEqual([
+      'glean',
+      'acme_mcp',
+    ]);
     expect(profile.readiness.plugins).toEqual([receipt]);
+    expect(JSON.stringify(profile.readiness)).not.toContain(TOKEN);
+    await profile.dispose();
+  });
+
+  it.each([1, null])(
+    'fails closed when a plugin server has too few tools (%s)',
+    async (toolCount) => {
+      withPluginServer(toolCount);
+      vi.mocked(installCodexPlugins).mockResolvedValue([]);
+      const profile = await createProfile();
+      await expect(
+        profile.beforeStart(setup, { MST_CHATGPT_MCP_TOKEN_0: TOKEN }, [plugin])
+      ).rejects.toMatchObject({ code: 'mcp_server_not_ready' });
+      await profile.dispose();
+    }
+  );
+
+  it('probes plugin servers when no direct MCP server is configured', async () => {
+    vi.mocked(probeAppServerStatus).mockResolvedValue({
+      status: 'available',
+      servers: [
+        {
+          label: 'acme_mcp',
+          initialized: true,
+          toolCount: 2,
+          authStatus: 'unsupported',
+        },
+      ],
+    });
+    vi.mocked(installCodexPlugins).mockResolvedValue([]);
+    vi.mocked(checkMcpServers).mockResolvedValue([]);
+    const profile = await createProfile();
+    await profile.beforeStart({ ...setup, servers: [] }, {}, [plugin]);
+    expect(vi.mocked(probeAppServerStatus).mock.calls[0]![2]).toEqual([
+      'acme_mcp',
+    ]);
+    expect(profile.readiness.mcpStatus?.status).toBe('available');
     await profile.dispose();
   });
 
@@ -297,7 +359,7 @@ describe('fresh MST-owned Linux profile', () => {
     const profile = await createProfile();
     await expect(
       profile.beforeStart(setup, { MST_CHATGPT_MCP_TOKEN_0: TOKEN }, [
-        { name: 'glean', marketplace: { source: '/opt/plugins' } },
+        { name: 'acme', marketplace: { source: '/opt/plugins' } },
       ])
     ).rejects.toThrow('install');
     expect(profile.readiness.error).toBe('plugin_setup_failed');

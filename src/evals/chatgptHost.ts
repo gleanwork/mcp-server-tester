@@ -11,7 +11,11 @@ import type {
 import { runExternalHostScenario } from './externalHost/runtime.js';
 import { ChatgptAppSession } from './chatgptSetup/session.js';
 import { chatgptServers } from './chatgptSetup/config.js';
-import { HostPluginSchema } from './codexSetup/plugins.js';
+import {
+  HostPluginsSchema,
+  hostPluginMcpServers,
+  resolveHostPluginCredentials,
+} from './hostPlugins.js';
 import type { ExternalHostConfig } from './externalHost/types.js';
 import { simulationToHostTrace } from './hostTrace.js';
 import { NATIVE_MAX_ACTIONS } from './chatgpt/linuxContract.js';
@@ -31,7 +35,8 @@ const Schema = z
     provider: z.literal('openai').optional(),
     timeout: z.number().int().positive().default(300_000),
     env: z.record(z.string(), z.string()).optional(),
-    plugins: z.array(HostPluginSchema).max(16).optional(),
+    /** Host-owned: plugins installed into the fresh Linux profile. */
+    plugins: HostPluginsSchema.optional(),
     options: z
       .object({
         configPath: z.string().min(1).optional(),
@@ -82,13 +87,18 @@ async function runBatch(
     )
   )
     throw new Error('ChatGPT batch requires identical host settings.');
+  const credentialEnv = requests.map((request, index) => ({
+    ...process.env,
+    ...context.env,
+    ...request.input.env,
+    ...configs[index]!.env,
+  }));
   const prepared = requests.map((request, index) =>
-    chatgptServers(request.input.servers, {
-      ...process.env,
-      ...context.env,
-      ...request.input.env,
-      ...configs[index]!.env,
-    })
+    chatgptServers(request.input.servers, credentialEnv[index]!)
+  );
+  // Plugin credentials use the same environment lookup as direct servers.
+  const pluginCredentials = configs.map((config, index) =>
+    resolveHostPluginCredentials(config.plugins ?? [], credentialEnv[index]!)
   );
   const externalConfigs: ExternalHostConfig[] = requests.map(
     (request, index) => {
@@ -114,7 +124,12 @@ async function runBatch(
           configPath: config.options.configPath,
           servers: serverConfig.servers,
         },
-        ...(config.plugins?.length ? { plugins: config.plugins } : {}),
+        ...(config.plugins?.length
+          ? {
+              plugins: config.plugins,
+              pluginCredentials: pluginCredentials[index]!,
+            }
+          : {}),
         options: {
           environment: { ...config.env, ...serverConfig.environment },
           computerUseModel: config.options.computerUseModel,
@@ -174,9 +189,13 @@ async function runBatch(
       const config = configs[index]!;
       const serverConfig = prepared[index]!;
       const started = Date.now();
-      const serverLabels = new Set(
-        serverConfig.servers.map((server) => server.label)
-      );
+      // Plugin MCP servers are eval servers under their own names.
+      const serverLabels = new Set([
+        ...serverConfig.servers.map((server) => server.label),
+        ...hostPluginMcpServers(config.plugins ?? []).map(
+          (target) => target.server
+        ),
+      ]);
       // Eval prompts stay unchanged. Server selection is verified from native calls,
       // not enforced by adding evaluator instructions to the model's context.
       const result = await runExternalHostScenario(

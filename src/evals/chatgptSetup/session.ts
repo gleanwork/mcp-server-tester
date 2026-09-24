@@ -24,6 +24,7 @@ import type {
   ChatgptPlatformProfile,
   LinuxChatgptReadiness,
 } from './linuxProfile.js';
+import { hostPluginMcpServers } from '../hostPlugins.js';
 
 const activeApplications = new Set<string>();
 
@@ -57,7 +58,13 @@ function sessionSettings(
   const setup = codexSetup
     ? resolveCodexSetup(codexSetup, configName)
     : undefined;
-  if (setup?.servers.some((server) => isChatgptBuiltinServer(server.label)))
+  const pluginLabels = hostPluginMcpServers(config.plugins ?? []).map(
+    (target) => target.server
+  );
+  if (
+    setup?.servers.some((server) => isChatgptBuiltinServer(server.label)) ||
+    pluginLabels.some(isChatgptBuiltinServer)
+  )
     throw new Error(
       'ChatGPT MCP server labels must not collide with built-in host tool namespaces.'
     );
@@ -73,6 +80,7 @@ function sessionSettings(
     codexSetup,
     setup,
     plugins: config.plugins ?? [],
+    pluginCredentials: config.pluginCredentials ?? {},
     model: config.model,
     reasoningEffort: config.reasoningEffort,
     surface: chatgptSurface(config),
@@ -191,7 +199,8 @@ export class ChatgptAppSession {
         await this.#profile.beforeStart(
           settings.setup,
           environment,
-          settings.plugins
+          settings.plugins,
+          settings.pluginCredentials
         );
         this.record('setup', 'verify_login_and_mcp');
       }

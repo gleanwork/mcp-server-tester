@@ -37,6 +37,7 @@ import {
   runLinuxChatgptDesktop,
 } from '../../chatgpt/linux.js';
 import { validateLinuxChatgptConfig } from '../../chatgptSetup/linuxProfile.js';
+import { hostPluginMcpServers } from '../../hostPlugins.js';
 
 const POLL_INTERVAL_MS = 750;
 
@@ -339,12 +340,17 @@ async function captureChatgptComputerUseResult({
       throw new Error(
         'Native telemetry requires a session baseline and a submitted prompt.'
       );
-    const mcpServers = config.codexSetup
-      ? resolveCodexSetup(
-          config.codexSetup,
-          state.data.chatgptConfigName as string | undefined
-        ).servers.map((server) => server.label)
-      : [];
+    const mcpServers = [
+      ...(config.codexSetup
+        ? resolveCodexSetup(
+            config.codexSetup,
+            state.data.chatgptConfigName as string | undefined
+          ).servers.map((server) => server.label)
+        : []),
+      ...hostPluginMcpServers(config.plugins ?? []).map(
+        (target) => target.server
+      ),
+    ];
     while (
       Date.now() < run.startedAtMs + run.timeoutMs &&
       (matched || Date.now() < bindingDeadline)

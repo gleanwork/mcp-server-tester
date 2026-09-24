@@ -1,63 +1,21 @@
-import { constants } from 'node:fs';
-import {
-  chmod,
-  lstat,
-  mkdir,
-  open,
-  readFile,
-  realpath,
-  rename,
-  writeFile,
-} from 'node:fs/promises';
+import { lstat, readFile, realpath, rename, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { parse, stringify } from 'smol-toml';
-import { z } from 'zod';
+import {
+  HostPluginError,
+  HostPluginsSchema,
+  hostPluginMcpServers,
+  materializeHostPluginMcp,
+  type HostPlugin,
+  type HostPluginCredentials,
+} from '../hostPlugins.js';
 import { runBounded } from './native.js';
+
+export { HostPluginError, type HostPlugin } from '../hostPlugins.js';
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const COMMAND_TIMEOUT_MS = 180_000;
 const COMMAND_OUTPUT_BYTES = 256 * 1024;
-
-/**
- * A host plugin that MST installs into a fresh native profile. `mcp` points
- * the plugin's own MCP server at an eval server: the plugin's server replaces
- * the direct server with that label, so traces and readiness keep the label.
- */
-export const HostPluginSchema = z
-  .object({
-    name: z.string().regex(NAME),
-    marketplace: z
-      .object({
-        /** owner/repo, HTTPS Git URL, or an absolute local path. */
-        source: z.string().min(1).max(512),
-        /** Full commit SHA. Required for Git sources so runs are reproducible. */
-        ref: z
-          .string()
-          .regex(/^[0-9a-f]{40}$/)
-          .optional(),
-      })
-      .strict(),
-    mcp: z
-      .object({
-        /** Server name in the plugin's .mcp.json. */
-        server: z.string().regex(NAME),
-        /** Label of the direct eval server that this plugin server replaces. */
-        replaces: z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/),
-        /** How to point the plugin server at the replaced URL and credential. */
-        adapter: z.literal('glean'),
-      })
-      .strict()
-      .optional(),
-  })
-  .strict()
-  .refine(
-    (plugin) =>
-      isAbsolute(plugin.marketplace.source) ||
-      plugin.marketplace.ref !== undefined,
-    'Git plugin marketplaces require a full commit SHA ref.'
-  );
-
-export type HostPlugin = z.infer<typeof HostPluginSchema>;
 
 /** Sanitized install receipt. No paths, URLs, or credentials. */
 export interface HostPluginReceipt {
@@ -65,54 +23,40 @@ export interface HostPluginReceipt {
   marketplace: string;
   version: string;
   ref?: string;
-  mcpServer?: string;
-  replaces?: string;
+  /** The plugin's own MCP servers that now target the eval endpoint. */
+  mcpServers?: string[];
 }
 
-export class HostPluginError extends Error {
-  constructor(
-    readonly code:
-      | 'plugin_invalid'
-      | 'plugin_marketplace_failed'
-      | 'plugin_install_failed'
-      | 'plugin_mcp_invalid',
-    readonly plugin: string
-  ) {
-    super(
-      `Host plugin setup failed (${code}: ${plugin}); no prompt was sent and nothing was retried.`
-    );
-    this.name = 'HostPluginError';
-  }
-}
-
-export interface ReplacedServer {
+/** A plugin MCP server that must pass readiness under its own label. */
+export interface HostPluginReadinessTarget {
   label: string;
-  url: string;
-  /** Resolved bearer token for the replaced server. */
-  token: string;
+  minTools: number;
 }
 
 /**
- * Install plugins with the packaged Codex CLI into CODEX_HOME, then rewrite
- * config.toml so each `mcp` plugin server runs under the replaced label with
- * the eval URL and credential. The plugin's own server entry is disabled.
+ * Install plugins with the packaged Codex CLI into CODEX_HOME. For each
+ * declared MCP override, write a complete `[mcp_servers.<server>]` table under
+ * the plugin's own server name: command/args/cwd from the plugin's `.mcp.json`,
+ * env merged with the substituted override. A partial env-only table would
+ * make the app reject the transport. Override files go in a private data dir.
  */
 export async function installCodexPlugins(options: {
   codexPath: string;
   env: Record<string, string>;
   codexHome: string;
   plugins: readonly HostPlugin[];
-  replaced: readonly ReplacedServer[];
+  credentials: HostPluginCredentials;
+  /** Direct MCP labels; a plugin server must not shadow one. */
+  reservedLabels?: readonly string[];
 }): Promise<HostPluginReceipt[]> {
   const { codexPath, env, codexHome } = options;
-  const plugins = options.plugins.map((plugin) => {
-    const parsed = HostPluginSchema.safeParse(plugin);
-    if (!parsed.success)
-      throw new HostPluginError('plugin_invalid', String(plugin?.name));
-    return parsed.data;
-  });
-  if (new Set(plugins.map((p) => p.name)).size !== plugins.length)
-    throw new HostPluginError('plugin_invalid', 'duplicate');
+  const parsed = HostPluginsSchema.safeParse(options.plugins);
+  if (!parsed.success) throw new HostPluginError('plugin_invalid', 'config');
+  const plugins = parsed.data;
+  const reserved = new Set(options.reservedLabels ?? []);
+  for (const { plugin, server } of hostPluginMcpServers(plugins))
+    if (reserved.has(server))
+      throw new HostPluginError('plugin_invalid', plugin);
   const run = async (
     args: string[],
     code: HostPluginError['code'],
@@ -170,41 +114,41 @@ export async function installCodexPlugins(options: {
       version,
       ref,
     };
-    if (plugin.mcp) {
-      const target = options.replaced.find(
-        (s) => s.label === plugin.mcp!.replaces
-      );
-      if (!target) throw new HostPluginError('plugin_mcp_invalid', plugin.name);
+    const overrides = hostPluginMcpServers([plugin]);
+    if (overrides.length) {
       const declared = await readJson(join(root, '.mcp.json'), plugin.name);
-      const server = (
-        declared.mcpServers as Record<string, unknown> | undefined
-      )?.[plugin.mcp.server];
-      if (!isStdio(server))
-        throw new HostPluginError('plugin_mcp_invalid', plugin.name);
-      const cwd = resolve(
-        root,
-        typeof server.cwd === 'string' ? server.cwd : '.'
-      );
-      if (!inside(root, cwd, true))
-        throw new HostPluginError('plugin_mcp_invalid', plugin.name);
-      const base = {
-        command: server.command,
-        args: (server.args ?? []).map((arg) =>
+      for (const target of overrides) {
+        const server = (
+          declared.mcpServers as Record<string, unknown> | undefined
+        )?.[target.server];
+        if (!isStdio(server))
+          throw new HostPluginError('plugin_mcp_invalid', plugin.name);
+        const cwd = resolve(
+          root,
+          typeof server.cwd === 'string' ? server.cwd : '.'
+        );
+        const args = (server.args ?? []).map((arg) =>
           arg.startsWith('./') ? resolve(root, arg) : arg
-        ),
-        cwd,
-      };
-      // Disable the plugin's own entry; a full table keeps the transport valid.
-      servers[plugin.mcp.server] = { ...base, enabled: false };
-      servers[target.label] = {
-        ...base,
-        env: {
-          ...(server.env ?? {}),
-          ...(await gleanAdapter(codexHome, plugin.name, target)),
-        },
-      };
-      receipt.mcpServer = plugin.mcp.server;
-      receipt.replaces = target.label;
+        );
+        // Codex does not expand host placeholders in config.toml.
+        if (
+          !inside(root, cwd, true) ||
+          [server.command, ...args].some((value) => value.includes('${'))
+        )
+          throw new HostPluginError('plugin_mcp_invalid', plugin.name);
+        const { env: overrideEnv } = await materializeHostPluginMcp({
+          dataRoot: join(codexHome, 'mst-plugin-data'),
+          server: target,
+          credentials: options.credentials,
+        });
+        servers[target.server] = {
+          command: server.command,
+          args,
+          cwd,
+          env: { ...(server.env ?? {}), ...overrideEnv },
+        };
+      }
+      receipt.mcpServers = overrides.map((target) => target.server);
     }
     receipts.push(receipt);
   }
@@ -212,6 +156,8 @@ export async function installCodexPlugins(options: {
     const configPath = join(codexHome, 'config.toml');
     const settings = parse(await readFile(configPath, 'utf8'));
     const current = (settings.mcp_servers ?? {}) as Record<string, unknown>;
+    if (Object.keys(servers).some((name) => Object.hasOwn(current, name)))
+      throw new HostPluginError('plugin_invalid', 'label');
     settings.mcp_servers = { ...current, ...servers } as typeof settings;
     const temporary = `${configPath}.mst-plugins`;
     await writeFile(temporary, stringify(settings), {
@@ -223,44 +169,14 @@ export async function installCodexPlugins(options: {
   return receipts;
 }
 
-/**
- * The Glean plugin adapter reads its endpoint from GLEAN_MCP_SERVER_URL and
- * its credential from $CLAUDE_PLUGIN_DATA/mcp-credentials.json. Seed both in a
- * private directory; approval prompts are off because nobody can answer them.
- */
-async function gleanAdapter(
-  codexHome: string,
-  plugin: string,
-  target: ReplacedServer
-): Promise<Record<string, string>> {
-  if (!target.token || /[\r\n]/.test(target.token))
-    throw new HostPluginError('plugin_mcp_invalid', plugin);
-  const data = join(codexHome, 'mst-plugin-data', plugin);
-  await mkdir(data, { recursive: true, mode: 0o700 });
-  await chmod(join(codexHome, 'mst-plugin-data'), 0o700);
-  await chmod(data, 0o700);
-  const handle = await open(
-    join(data, 'mcp-credentials.json'),
-    constants.O_WRONLY |
-      constants.O_CREAT |
-      constants.O_EXCL |
-      constants.O_NOFOLLOW,
-    0o600
-  );
-  try {
-    await handle.writeFile(
-      JSON.stringify({
-        tokens: { access_token: target.token, token_type: 'Bearer' },
-      })
-    );
-  } finally {
-    await handle.close();
-  }
-  return {
-    ENABLE_HITL: 'false',
-    GLEAN_MCP_SERVER_URL: target.url,
-    CLAUDE_PLUGIN_DATA: data,
-  };
+/** Readiness targets: every overridden plugin server, under its own name. */
+export function codexPluginReadinessTargets(
+  plugins: readonly HostPlugin[]
+): HostPluginReadinessTarget[] {
+  return hostPluginMcpServers(plugins).map(({ server, override }) => ({
+    label: server,
+    minTools: override.minTools,
+  }));
 }
 
 function isStdio(value: unknown): value is {

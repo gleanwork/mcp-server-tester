@@ -528,6 +528,77 @@ describe('ChatGPT V2 batch host', () => {
     });
     expect(runExternalHostScenario).toHaveBeenCalledTimes(1);
   });
+  it('counts plugin MCP servers as eval servers when no direct server is configured', async () => {
+    vi.stubEnv('ACME_TOKEN', 'plugin-secret');
+    vi.mocked(runExternalHostScenario).mockResolvedValueOnce({
+      success: true,
+      response: 'answer',
+      externalHost: metadata,
+      toolCalls: [
+        { name: 'search', source: 'mcp', server: 'acme_mcp', arguments: {} },
+      ],
+    });
+    const plugins = [
+      {
+        name: 'acme',
+        marketplace: { source: 'acme/plugins', ref: 'f'.repeat(40) },
+        mcp: {
+          acme_mcp: {
+            url: 'https://example.test/eval',
+            auth: { accessTokenEnv: 'ACME_TOKEN' },
+            files: { 'c.json': { token: '${bearerToken}' } },
+          },
+        },
+      },
+    ];
+    const batch = requests()
+      .slice(0, 1)
+      .map((r) => ({
+        ...r,
+        config: { ...config, plugins, options: { requireMcpCalls: true } },
+        input: { ...r.input, servers: [] },
+      }));
+    const [trace] = await CHATGPT_HOST.runBatch!(batch, context);
+    expect(trace!.error).toBeUndefined();
+    expect(trace!.telemetry?.mcpSelection).toMatchObject({
+      status: 'passed',
+      selectedServers: ['acme_mcp'],
+      configuredMcpCallCount: 1,
+    });
+    const prepared = lifecycle.prepare.mock.calls[0]![0];
+    expect(prepared.pluginCredentials).toEqual({
+      'acme/acme_mcp': 'plugin-secret',
+    });
+    // The token reaches setup only through pluginCredentials, never the app env.
+    expect(JSON.stringify(prepared.options)).not.toContain('plugin-secret');
+    expect(JSON.stringify(trace)).not.toContain('plugin-secret');
+  });
+  it('fails before the app starts when a plugin credential is missing', async () => {
+    const batch = requests()
+      .slice(0, 1)
+      .map((r) => ({
+        ...r,
+        config: {
+          ...config,
+          plugins: [
+            {
+              name: 'acme',
+              marketplace: { source: 'acme/plugins', ref: 'f'.repeat(40) },
+              mcp: {
+                acme_mcp: {
+                  url: 'https://example.test/eval',
+                  auth: { accessTokenEnv: 'MISSING_ACME_TOKEN' },
+                },
+              },
+            },
+          ],
+        },
+      }));
+    await expect(CHATGPT_HOST.runBatch!(batch, context)).rejects.toMatchObject({
+      code: 'plugin_credential_missing',
+    });
+    expect(lifecycle.prepare).not.toHaveBeenCalled();
+  });
   it('requires native MCP calls when the eval explicitly requests them', async () => {
     vi.mocked(runExternalHostScenario).mockResolvedValueOnce({
       success: true,

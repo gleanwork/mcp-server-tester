@@ -6,6 +6,7 @@ import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { CoworkPlatform } from './platform.js';
+import { coworkPluginMarketplace, type HostPlugin } from '../hostPlugins.js';
 import {
   CoworkDriverError,
   CoworkHitlBudgetError,
@@ -178,6 +179,52 @@ async function execute(
   return record;
 }
 
+/**
+ * Caller contract for Linux Cowork plugins: managed settings contain exactly
+ * `coworkPluginMarketplace(plugin)` for each configured plugin (extra keys such
+ * as `expectedName` are allowed). With no plugins, the key must be absent or
+ * empty. Read-only; exported so callers can check what they generate.
+ */
+export function coworkPluginSettingsMatch(
+  settings: Record<string, unknown>,
+  plugins: readonly HostPlugin[]
+): boolean {
+  const actual = settings.allowedPluginMarketplaces;
+  if (actual === undefined) return plugins.length === 0;
+  if (!Array.isArray(actual) || actual.length !== plugins.length) return false;
+  const remaining: unknown[] = [...(actual as unknown[])];
+  for (const plugin of plugins) {
+    let expected: Record<string, unknown>;
+    try {
+      expected = coworkPluginMarketplace(plugin);
+    } catch {
+      return false;
+    }
+    // Desktop compares GitHub repos case-insensitively.
+    const normalize = (entry: unknown): Record<string, unknown> | undefined =>
+      entry && typeof entry === 'object'
+        ? {
+            ...(entry as Record<string, unknown>),
+            ...(typeof (entry as { repo?: unknown }).repo === 'string'
+              ? { repo: (entry as { repo: string }).repo.toLowerCase() }
+              : {}),
+          }
+        : undefined;
+    const index = remaining.findIndex((entry) => {
+      const observed = normalize(entry);
+      return (
+        !!observed &&
+        Object.entries(expected).every(
+          ([key, value]) => observed[key] === value
+        )
+      );
+    });
+    if (index < 0) return false;
+    remaining.splice(index, 1);
+  }
+  return true;
+}
+
 /** Attach to caller-owned resources. Never create, authenticate, or stop a desktop. */
 export const linuxCoworkPlatform: CoworkPlatform = {
   dataDirectory: (options) =>
@@ -187,7 +234,7 @@ export const linuxCoworkPlatform: CoworkPlatform = {
       'Claude-3p',
       'local-agent-mode-sessions'
     ),
-  async prepare({ manifest, env, model }) {
+  async prepare({ manifest, env, model, plugins = [] }) {
     const settingsFile =
       env.MST_COWORK_SETTINGS_FILE ??
       '/etc/claude-desktop/managed-settings.json';
@@ -200,13 +247,14 @@ export const linuxCoworkPlatform: CoworkPlatform = {
         | undefined;
       if (model && !models?.some((m) => m.name === model))
         throw new Error('model');
+      if (!coworkPluginSettingsMatch(settings, plugins))
+        throw new Error('plugins');
       const expected = manifest.servers ?? [];
       const managed = settings.managedMcpServers as
         | Array<{
             name?: string;
             transport?: string;
             url?: string;
-            env?: Record<string, string>;
             toolPolicy?: Record<string, string>;
           }>
         | undefined;
@@ -230,15 +278,10 @@ export const linuxCoworkPlatform: CoworkPlatform = {
         const observed = actual.find(
           (s) => s.name === (server.label ?? `server-${index + 1}`)
         );
-        // Direct HTTP, or a plugin MCP adapter pinned to the same eval endpoint.
         if (
           !observed ||
-          !(
-            (observed.transport === 'http' &&
-              observed.url === server.serverUrl) ||
-            (observed.transport === 'stdio' &&
-              observed.env?.GLEAN_MCP_SERVER_URL === server.serverUrl)
-          )
+          observed.transport !== 'http' ||
+          observed.url !== server.serverUrl
         )
           throw new Error('server');
         if (
@@ -249,7 +292,7 @@ export const linuxCoworkPlatform: CoworkPlatform = {
       }
     } catch {
       throw new Error(
-        'Prepared Linux desktop settings do not match the eval model, MCP servers, or approval policy.'
+        'Prepared Linux desktop settings do not match the eval model, MCP servers, plugins, or approval policy.'
       );
     }
     await execute(

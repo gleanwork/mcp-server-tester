@@ -14,6 +14,7 @@ import {
   waitForClaudeSession,
 } from './externalHost/builtins/anthropicClaude.js';
 import { simulationToHostTrace } from './hostTrace.js';
+import { HostPluginsSchema, assertCoworkHostPlugins } from './hostPlugins.js';
 import {
   CoworkDriverError,
   type CoworkDriverTelemetry,
@@ -59,6 +60,8 @@ const CoworkSchema = z
       .optional(),
     provider: z.literal('anthropic').optional(),
     env: z.record(z.string(), z.string()).optional(),
+    /** Host-owned: installed through managed allowedPluginMarketplaces. */
+    plugins: HostPluginsSchema.optional(),
   })
   .strict();
 let active = false;
@@ -83,6 +86,9 @@ async function runBatch(
       'Cowork batch requires identical host settings for all cases.'
     );
   const config = configs[0]!;
+  const plugins = config.plugins ?? [];
+  // Fail before any desktop action if Cowork cannot apply a plugin as declared.
+  assertCoworkHostPlugins(plugins);
   const env = { ...process.env, ...context.env, ...config.env };
   if (
     config.options.computerUseProvider === 'anthropic-computer-use' &&
@@ -130,12 +136,14 @@ async function runBatch(
     if (
       config.options.computerUseProvider === 'linux-desktop' ||
       servers.length ||
+      plugins.length ||
       config.model
     )
       session = await platform.prepare({
         manifest: managedManifest,
         env,
         model: config.model,
+        ...(plugins.length ? { plugins } : {}),
       });
     if (servers.length) {
       const readiness = await verifyCoworkMcpServers(servers, env);

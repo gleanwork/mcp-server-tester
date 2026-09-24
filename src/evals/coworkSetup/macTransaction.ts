@@ -15,6 +15,11 @@ import {
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import type { EvalManifest } from '../evalManifest.js';
+import {
+  assertCoworkHostPlugins,
+  coworkPluginMarketplace,
+  type HostPlugin,
+} from '../hostPlugins.js';
 import { prepareCoworkMcpBundle } from './bundle.js';
 import {
   createCoworkMcpPlan,
@@ -534,6 +539,8 @@ type InstallOptions = {
   stagingDirectory: string;
   manifest: EvalManifest;
   model?: string;
+  /** Installed through a pinned, required allowedPluginMarketplaces entry. */
+  plugins?: readonly HostPlugin[];
   arm?: string;
   managedPreferencePaths: string[];
   /** Explicit runtime credentials only; never falls back to process.env. */
@@ -547,6 +554,9 @@ async function validateInstall(options: InstallOptions) {
     (typeof model !== 'string' || !/^[A-Za-z0-9._:-]+$/.test(model))
   )
     fail();
+  const plugins = options.plugins ?? [];
+  assertCoworkHostPlugins(plugins);
+  const marketplaces = plugins.map(coworkPluginMarketplace);
   const profileDirectory = resolve(options.profileDirectory);
   const directory = options.stagingDirectory;
   validateStaging(directory, profileDirectory);
@@ -607,6 +617,7 @@ async function validateInstall(options: InstallOptions) {
     fail();
   return {
     model,
+    marketplaces,
     profileDirectory,
     directory,
     env,
@@ -771,6 +782,9 @@ export async function installMacCoworkSettings(
       ...settings,
       ...(validated.model
         ? { inferenceModels: [validated.model], modelDiscoveryEnabled: false }
+        : {}),
+      ...(validated.marketplaces.length
+        ? { allowedPluginMarketplaces: validated.marketplaces }
         : {}),
       inferenceProvider: 'anthropic',
       inferenceCredentialKind: 'helper-script',

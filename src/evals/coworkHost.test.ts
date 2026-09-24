@@ -374,6 +374,35 @@ describe('V2 Cowork host', () => {
       expect(mocks.setup).not.toHaveBeenCalled();
     }
   );
+  it('passes host plugins to platform setup and rejects plugin MCP overrides before any UI', async () => {
+    const plugin = {
+      name: 'acme',
+      marketplace: { source: 'acme/plugins', ref: 'd'.repeat(40) },
+    };
+    const prepare = vi.fn().mockResolvedValue({ dispose: mocks.dispose });
+    const platform = {
+      dataDirectory: () => '/synthetic/native-data',
+      prepare,
+      recover: vi.fn(),
+      submit: mocks.submit,
+      handleHitl: mocks.hitl,
+    };
+    const withPlugins = (plugins: unknown[]) =>
+      requests().map((r) => ({ ...r, config: { ...host, plugins } }));
+    await createCoworkHost(platform).runBatch!(withPlugins([plugin]), context);
+    expect(prepare.mock.calls[0]![0].plugins).toEqual([plugin]);
+    prepare.mockClear();
+    mocks.submit.mockClear();
+    const override = {
+      ...plugin,
+      mcp: { acme_mcp: { url: 'https://example.test/eval' } },
+    };
+    await expect(
+      createCoworkHost(platform).runBatch!(withPlugins([override]), context)
+    ).rejects.toMatchObject({ code: 'plugin_unsupported' });
+    expect(prepare).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
   it('skips GUI HITL for already completed native tasks without hiding actual failures', async () => {
     mocks.matches.mockResolvedValue([{ isComplete: true }]);
     const result = await COWORK_HOST.runBatch!(requests(), context);

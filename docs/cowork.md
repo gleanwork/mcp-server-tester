@@ -104,11 +104,11 @@ resolves the Python driver independently of the working directory.
 
 The driver reads `/etc/claude-desktop/managed-settings.json` (or the absolute
 `MST_COWORK_SETTINGS_FILE`) and fails if its model, HTTP MCP servers, or wildcard
-approval policy disagree with the manifest. A server may instead be a stdio plugin
-MCP adapter whose `env.GLEAN_MCP_SERVER_URL` equals the manifest URL. The caller
-installs the plugin through `allowedPluginMarketplaces` and runs its adapter under
-the eval label. Any other plugin server must be a `policy-only` entry that blocks
-all tools (`{"*": "blocked"}`). Native sessions default to
+approval policy disagree with the manifest. A plugin's own MCP server may appear
+only as a `policy-only` entry that blocks all tools (`{"*": "blocked"}`). With
+host `plugins`, `allowedPluginMarketplaces` must contain exactly one entry per
+plugin that matches `coworkPluginMarketplace(plugin)` (see Host plugins below);
+without `plugins`, it must be absent or empty. Native sessions default to
 `$XDG_CONFIG_HOME/Claude-3p/local-agent-mode-sessions`, or
 `$HOME/.config/Claude-3p/local-agent-mode-sessions`; `options.dataDir` overrides it.
 Preparation is read-only. MST does not provision or authenticate the environment,
@@ -263,3 +263,46 @@ node --import tsx scripts/recover-cowork.ts --confirm
 
 Never delete managed locks to force a retry. This is the existing managed desktop
 workflow, not a sandbox or a transactional guarantee over arbitrary UI actions.
+
+## Host plugins
+
+The Cowork host accepts the same `plugins` list as ChatGPT (see
+[chatgpt-desktop.md](chatgpt-desktop.md)). Cowork installs each plugin from a
+managed `allowedPluginMarketplaces` entry, pinned and required:
+
+```json
+"allowedPluginMarketplaces": [
+  {
+    "source": "github",
+    "repo": "gleanwork/claude-plugins",
+    "ref": "<40-character commit SHA>",
+    "installationPreference": "required"
+  }
+]
+```
+
+An `owner/repo` source becomes `source: "github"`; an HTTPS Git URL becomes
+`source: "git"` with `url`. Local paths are rejected, because Cowork cannot read
+them. On macOS, MST writes these entries into the MST-owned profile. On Linux,
+the caller writes them into its managed settings, and MST checks them before any
+UI action. Extra keys such as `expectedName` are allowed. Callers can use the
+exported `coworkPluginMarketplace` and `coworkPluginSettingsMatch` helpers.
+Plugin tools appear in traces as `mcp__plugin_<plugin>_<server>__<tool>`.
+
+Cowork rejects `plugins[].mcp` overrides with `plugin_unsupported` before any UI
+action. Claude Desktop 2.7032.0 has no managed way to give a plugin's own MCP
+server a custom endpoint, credential, or data directory:
+
+- Host-bridged plugin stdio servers get only the plugin's declared `env` and
+  `CLAUDE_PLUGIN_ROOT`. Placeholders expand only from `HOME`, `LOGNAME`, `PATH`,
+  `SHELL`, `TERM`, and `USER`. `${CLAUDE_PLUGIN_DATA}` is left unexpanded, and
+  a server that uses `${user_config.*}` is dropped.
+- `orgPluginSettings` sets only per-tool permissions. A `managedMcpServers`
+  entry with the same name decides only the tool policy.
+- The desktop starts local plugin servers only when `allowedPluginMcpServers`
+  is unset and local MCP is enabled. Local MCP is enabled when
+  `isLocalDevMcpEnabled` is not false and the organization feature flag allows
+  it. `allowManagedMcpServersOnly` is not an input to that check.
+
+So on Cowork, a plugin adds skills, and its own MCP servers run unmodified.
+Block them with `policy-only` entries if the eval must not call them.
