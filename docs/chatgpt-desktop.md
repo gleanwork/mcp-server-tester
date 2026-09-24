@@ -164,6 +164,12 @@ hand-off, and replies `{"opened": true}` or `{"opened": false}`. The script wait
 at most 30 seconds (capped by its deadline). After the hand-off, it polls up to
 30 seconds for the draft to appear; this is read-only. Nothing is retried.
 
+Before each submission, the script checks that the selected surface is idle:
+one composer and one Send control. After the previous turn, the app can briefly
+show neither. The script then polls up to 30 seconds (read-only, before any
+action) for them to appear. A different selected surface fails at once, and a
+surface that does not settle fails, both with `surface_mismatch`.
+
 ### Native UI protocol and limits
 
 The Node adapter uses only the `prepare` and `submit` modes of the packaged

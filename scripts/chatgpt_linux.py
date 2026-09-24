@@ -46,6 +46,8 @@ ERROR_CODES = frozenset(CONTRACT['errorCodes'])
 # After the one deep-link hand-off the draft usually appears in 1-3 s, but live
 # runs rarely exceeded 10 s. Waiting is read-only; the hand-off is never repeated.
 DRAFT_POLLS = 300
+# Read-only settle time before a batch's next submission (30 seconds).
+IDLE_POLLS = 300
 
 
 def error_code(error, glib_error=()):
@@ -566,10 +568,19 @@ class Driver:
             raise DriverFailure('invalid_surface')
         self.desktop.require_helpers()
         # Setup ran once for the batch. A changed surface blocks submission.
+        # After the previous turn the app may briefly show no enabled composer or
+        # Send; wait read-only for it to settle. Nothing is sent before this.
         self.phase = 'surface'
         nodes = self.snapshot()
         if not self.ready(nodes, surface):
-            raise DriverFailure('surface_mismatch')
+            if controls(nodes, set(MODE_LABELS.values())) and not self.selected(nodes, surface):
+                raise DriverFailure('surface_mismatch')
+            try:
+                nodes = self.wait(lambda ns: self.ready(ns, surface), polls=IDLE_POLLS)
+            except DriverFailure as error:
+                if str(error) == 'deadline_exceeded':
+                    raise
+                raise DriverFailure('surface_mismatch') from None
         self.phase = 'composer'
         self.step = 'draft-open'
         self.action(lambda: self.desktop.open_prompt(prompt))

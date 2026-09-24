@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
-from chatgpt_linux import (DRAFT_POLLS, Driver, DriverFailure, Desktop, composer, main,
+from chatgpt_linux import (DRAFT_POLLS, IDLE_POLLS, Driver, DriverFailure, Desktop, composer, main,
                            error_code, ERROR_CODES, INPUT_LIMIT, SESSION_KEYS, XDOTOOL)
 
 WORK, CODEX = 'ChatGPT Work', 'Codex'
@@ -546,6 +546,25 @@ class DriverTest(unittest.TestCase):
             self.driver(desktop).submit('private', 'chatgpt-work')
         self.assertEqual(self.actions(desktop), ['open', SWITCH_CODEX, WORK_ITEM])
         self.assertEqual(sleep.call_count, 100)
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_submit_waits_read_only_for_the_previous_turn_to_settle(self, sleep):
+        busy = [node('Switch mode, current mode: ' + WORK), node('Stop')]
+        desktop = FakeDesktop(busy)
+        snapshots = iter([busy, busy, busy])
+        desktop.snapshot = lambda: next(snapshots, desktop.nodes)
+        desktop.nodes = ready()
+        self.driver(desktop).submit('private', 'chatgpt-work')
+        self.assertEqual(self.actions(desktop)[0], 'open')
+        for kind, nodes in (('busy', busy), ('other surface', ready(CODEX))):
+            with self.subTest(kind=kind):
+                stuck = FakeDesktop(nodes)
+                driver = self.driver(stuck)
+                with self.assertRaisesRegex(DriverFailure, '^surface_mismatch$'):
+                    driver.submit('private', 'chatgpt-work')
+                self.assertEqual((driver.actions, stuck.actions), (0, []))
+        # A wrong surface fails at once; only an unsettled app is waited for.
+        self.assertEqual(sleep.call_count, 2 + IDLE_POLLS)
 
     def test_invalid_input_surface_mismatch_or_missing_helper_block_before_any_action(self):
         missing = FakeDesktop()
