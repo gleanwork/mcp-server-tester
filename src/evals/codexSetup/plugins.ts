@@ -138,7 +138,8 @@ export async function installCodexPlugins(options: {
         'marketplace',
         'add',
         source,
-        ...(ref ? ['--ref', ref] : []),
+        // A local source is already the pinned checkout; its ref is recorded only.
+        ...(ref && !isAbsolute(source) ? ['--ref', ref] : []),
         '--json',
       ],
       'plugin_marketplace_failed',

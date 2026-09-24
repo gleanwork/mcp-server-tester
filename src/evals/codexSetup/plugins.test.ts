@@ -198,6 +198,26 @@ describe('installCodexPlugins', () => {
     ).rejects.toMatchObject({ code });
   });
 
+  it('records the ref of a pre-staged local marketplace without passing it to the CLI', async () => {
+    const { home, script } = await fixture();
+    const [receipt] = await installCodexPlugins({
+      codexPath: script,
+      env: {},
+      codexHome: home,
+      plugins: [
+        {
+          name: 'glean',
+          marketplace: { source: '/opt/scio/app/plugins/glean', ref: SHA },
+        },
+      ],
+      replaced: [],
+    });
+    expect(receipt!.ref).toBe(SHA);
+    expect(await readFile(join(home, 'calls.log'), 'utf8')).toContain(
+      'plugin marketplace add /opt/scio/app/plugins/glean --json\n'
+    );
+  });
+
   it('requires a full commit SHA for Git marketplaces', () => {
     expect(
       HostPluginSchema.safeParse({ ...plugin, marketplace: { source: 'o/r' } })
