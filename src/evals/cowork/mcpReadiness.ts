@@ -4,6 +4,12 @@ import {
   resolveCoworkMcpHeaders,
   toCoworkServers,
 } from '../coworkSetup/config.js';
+import {
+  hostStdioReadinessConfig,
+  hostStdioServers,
+  type HostPlugin,
+  type HostStdioPaths,
+} from '../hostPlugins.js';
 
 export type CoworkMcpServerReadiness = McpServerReadiness;
 
@@ -26,9 +32,16 @@ export class CoworkMcpReadinessError extends Error {
 
 function resolveServer(
   server: MCPConfig,
-  env: Record<string, string | undefined>
+  env: Record<string, string | undefined>,
+  stdio: { plugins: readonly HostPlugin[]; paths: HostStdioPaths }
 ): MCPConfig {
-  if (!isHttpConfig(server)) return server;
+  if (!isHttpConfig(server)) {
+    // The same resolved launch Desktop runs, with only its declared env and
+    // the caller's data dir. Readiness fails closed below `minTools`.
+    const [parsed] = hostStdioServers([server], stdio.plugins);
+    if (!parsed) throw new Error('Invalid Cowork MCP configuration.');
+    return hostStdioReadinessConfig(parsed, stdio.paths);
+  }
   const [coworkServer] = toCoworkServers([server]);
   if (!coworkServer) throw new Error('Invalid Cowork MCP configuration.');
   const headers = resolveCoworkMcpHeaders([coworkServer], env);
@@ -47,10 +60,12 @@ function resolveServer(
  */
 export async function verifyCoworkMcpServers(
   servers: MCPConfig[],
-  env: Record<string, string | undefined>
+  env: Record<string, string | undefined>,
+  stdio: { plugins?: readonly HostPlugin[]; paths?: HostStdioPaths } = {}
 ): Promise<CoworkMcpServerReadiness[]> {
+  const context = { plugins: stdio.plugins ?? [], paths: stdio.paths ?? {} };
   const results = await checkMcpServers(servers, (server) =>
-    resolveServer(server, env)
+    resolveServer(server, env, context)
   );
   if (results.some((result) => result.status !== 'connected'))
     throw new CoworkMcpReadinessError(results);

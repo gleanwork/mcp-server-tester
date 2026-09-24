@@ -1,5 +1,5 @@
 import type { EvalManifest } from '../evalManifest.js';
-import type { HostPlugin } from '../hostPlugins.js';
+import type { HostPlugin, HostStdioPaths } from '../hostPlugins.js';
 import type {
   CoworkDriverOptions,
   CoworkDriverProvider,
@@ -17,6 +17,8 @@ export interface CoworkPlatform {
     model?: string;
     /** Validated host plugins; Cowork installs them via allowedPluginMarketplaces. */
     plugins?: readonly HostPlugin[];
+    /** Runtime paths for stdio eval servers (Linux only). */
+    stdioPaths?: HostStdioPaths;
   }): Promise<{ dispose(): Promise<void> }>;
   recover(): Promise<unknown>;
   submit(

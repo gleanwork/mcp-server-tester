@@ -136,7 +136,26 @@
             "connectTimeoutMs": { "type": "number", "exclusiveMinimum": 0 },
             "requestTimeoutMs": { "type": "number", "exclusiveMinimum": 0 },
             "callTimeoutMs": { "type": "number", "exclusiveMinimum": 0 },
-            "quiet": { "type": "boolean" }
+            "quiet": { "type": "boolean" },
+            "inheritEnv": { "type": "boolean" },
+            "url": { "type": "string", "format": "uri" },
+            "auth": {
+              "type": "object",
+              "properties": {
+                "accessTokenEnv": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                }
+              },
+              "required": ["accessTokenEnv"],
+              "additionalProperties": false
+            },
+            "minTools": { "type": "integer", "minimum": 1, "maximum": 10000 },
+            "files": {
+              "type": "object",
+              "propertyNames": { "type": "string" },
+              "additionalProperties": {}
+            }
           },
           "required": ["transport", "command"]
         },

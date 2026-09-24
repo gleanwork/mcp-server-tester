@@ -103,12 +103,13 @@ install Linux desktop dependencies. The packaged `cowork-linux-runtime` export
 resolves the Python driver independently of the working directory.
 
 The driver reads `/etc/claude-desktop/managed-settings.json` (or the absolute
-`MST_COWORK_SETTINGS_FILE`) and fails if its model, HTTP MCP servers, or wildcard
-approval policy disagree with the manifest. A plugin's own MCP server may appear
-only as a `policy-only` entry that blocks all tools (`{"*": "blocked"}`). With
-host `plugins`, `allowedPluginMarketplaces` must contain exactly one entry per
-plugin that matches `coworkPluginMarketplace(plugin)` (see Host plugins below);
-without `plugins`, it must be absent or empty. Native sessions default to
+`MST_COWORK_SETTINGS_FILE`) and fails if its model, MCP servers, or wildcard
+approval policy disagree with the manifest. Other `policy-only` entries must
+block all tools (`{"*": "blocked"}`). With host `plugins`,
+`allowedPluginMarketplaces` must contain exactly one entry per plugin that
+matches `coworkPluginMarketplace(plugin)`; without `plugins`, it must be absent
+or empty. Stdio eval servers and blocked plugin servers follow the contract in
+[Host plugins](#host-plugins). Native sessions default to
 `$XDG_CONFIG_HOME/Claude-3p/local-agent-mode-sessions`, or
 `$HOME/.config/Claude-3p/local-agent-mode-sessions`; `options.dataDir` overrides it.
 Preparation is read-only. MST does not provision or authenticate the environment,
@@ -266,28 +267,178 @@ workflow, not a sandbox or a transactional guarantee over arbitrary UI actions.
 
 ## Host plugins
 
-The Cowork host accepts the same `plugins` list as ChatGPT (see
-[chatgpt-desktop.md](chatgpt-desktop.md)). Cowork installs each plugin from a
-managed `allowedPluginMarketplaces` entry, pinned and required:
+The config has two independent parts:
+
+- `host.plugins[]` installs plugins (their skills). On Cowork, a plugin can
+  also block its own MCP servers with `blockMcpServers`.
+- `servers[]` is the MCP server set under test. A stdio entry with `url` is a
+  host-resolved eval server. It can launch a file from a plugin.
 
 ```json
-"allowedPluginMarketplaces": [
-  {
-    "source": "github",
-    "repo": "gleanwork/claude-plugins",
-    "ref": "<40-character commit SHA>",
-    "installationPreference": "required"
-  }
-]
+{
+  "host": {
+    "type": "cowork",
+    "options": {
+      "computerUseProvider": "linux-desktop",
+      "pluginRoots": { "glean": "/opt/scio/app/plugins/glean/plugins/glean" },
+      "mcpDataRoot": "/config/.scio-mcp-data"
+    },
+    "plugins": [
+      {
+        "name": "glean",
+        "marketplace": {
+          "source": "gleanwork/claude-plugins",
+          "ref": "<40-character commit SHA>"
+        },
+        "blockMcpServers": ["glean_plugin"]
+      }
+    ]
+  },
+  "servers": [
+    {
+      "transport": "stdio",
+      "label": "glean-eval",
+      "command": "/usr/bin/node",
+      "args": ["${pluginRoot:glean}/mcp/start.mjs"],
+      "url": "https://scio-prod-be.glean.com/mcp/default/eval",
+      "auth": { "accessTokenEnv": "GLEAN_API_TOKEN" },
+      "minTools": 4,
+      "env": {
+        "GLEAN_MCP_SERVER_URL": "${url}",
+        "CLAUDE_PLUGIN_DATA": "${dataDir}",
+        "ENABLE_HITL": "false"
+      },
+      "files": {
+        "mcp-credentials.json": {
+          "tokens": { "access_token": "${bearerToken}", "token_type": "Bearer" }
+        }
+      }
+    }
+  ]
+}
 ```
 
-An `owner/repo` source becomes `source: "github"`; an HTTPS Git URL becomes
-`source: "git"` with `url`. Local paths are rejected, because Cowork cannot read
-them. On macOS, MST writes these entries into the MST-owned profile. On Linux,
-the caller writes them into its managed settings, and MST checks them before any
-UI action. Extra keys such as `expectedName` are allowed. Callers can use the
-exported `coworkPluginMarketplace` and `coworkPluginSettingsMatch` helpers.
-Plugin tools appear in traces as `mcp__plugin_<plugin>_<server>__<tool>`.
+### Stdio eval servers
+
+A stdio `servers[]` entry with `url` has these fields: `label`, `command`,
+`args`, `env`, `url`, `auth.accessTokenEnv`, `minTools` (default 1), and
+`files`. Unknown keys, including `cwd`, fail. Placeholders:
+
+| Placeholder              | Allowed in                | Linux Cowork value                 |
+| ------------------------ | ------------------------- | ---------------------------------- |
+| `${url}`                 | command, args, env, files | `url`                              |
+| `${dataDir}`             | command, args, env, files | `<options.mcpDataRoot>/<label>`    |
+| `${pluginRoot:<plugin>}` | command, args, env, files | `options.pluginRoots[<plugin>]`    |
+| `${bearerToken}`         | `files` only              | the value of `auth.accessTokenEnv` |
+
+Any other `${...}` fails. `${url}` must appear in `args` or `env`, so the
+checked launch proves the endpoint. `<plugin>` must be a declared plugin. A
+token never appears in settings, env, args, logs, or receipts; it is only in
+`files`. `url` is the eval endpoint: `requireEvalEndpoint` checks it, and it is
+recorded in the manifest. Tool calls appear as `mcp__<label>__<tool>` and are
+attributed to `label` (for example, `mcp__glean-eval__search`).
+
+Only Linux Cowork (`linux-desktop`) supports stdio eval servers. The macOS
+driver, ChatGPT, and direct MCP clients reject them before any UI action or
+process launch. On ChatGPT, use `plugins[].mcp` instead. A stdio server without
+`url` is still rejected on Cowork.
+
+### Linux managed-settings contract
+
+The caller stages each plugin from its pinned ref, writes the private files,
+and writes `/etc/claude-desktop/managed-settings.json` before it starts Claude
+Desktop. MST only reads and checks them. For the example above:
+
+```json
+{
+  "managedMcpServers": [
+    {
+      "name": "glean-eval",
+      "transport": "stdio",
+      "command": "/usr/bin/node",
+      "args": ["/opt/scio/app/plugins/glean/plugins/glean/mcp/start.mjs"],
+      "env": {
+        "GLEAN_MCP_SERVER_URL": "https://scio-prod-be.glean.com/mcp/default/eval",
+        "CLAUDE_PLUGIN_DATA": "/config/.scio-mcp-data/glean-eval",
+        "ENABLE_HITL": "false"
+      }
+    },
+    {
+      "name": "glean_plugin",
+      "transport": "policy-only",
+      "toolPolicy": { "*": "blocked" }
+    }
+  ],
+  "allowedMcpServers": [{ "serverName": "glean-eval" }],
+  "allowManagedMcpServersOnly": true,
+  "allowedPluginMarketplaces": [
+    {
+      "source": "github",
+      "repo": "gleanwork/claude-plugins",
+      "ref": "<40-character commit SHA>",
+      "installationPreference": "required"
+    }
+  ]
+}
+```
+
+And one private file, owned by the desktop-session user that runs MST and
+Claude Desktop:
+
+```text
+/config/.scio-mcp-data/                                   0700
+/config/.scio-mcp-data/glean-eval/                        0700
+/config/.scio-mcp-data/glean-eval/mcp-credentials.json    0600
+  {"tokens":{"access_token":"<GLEAN_API_TOKEN>","token_type":"Bearer"}}
+```
+
+`prepare` fails closed, before any UI action, unless all of these hold:
+
+- Each stdio eval server is one managed entry named `label` with exactly
+  `transport: "stdio"`, the resolved `command`, `args`, and `env`. It has no
+  other keys, except `toolPolicy: {"*": "allow"}` with
+  `coworkSetup.approveWriteTools`. Its `env` has exactly the declared keys, so
+  the substituted URL equals `url`, and plugin env such as `ENABLE_HITL: "true"`
+  is replaced. Its `label` is in `allowedMcpServers`.
+- Each `blockMcpServers` name is a `policy-only` entry with exactly
+  `toolPolicy: {"*": "blocked"}`. Claude Desktop names plugin tools
+  `mcp__plugin_<plugin>_<server>__<tool>`; the managed entry uses the plugin's
+  own server name from its `.mcp.json` (for example, `glean_plugin`).
+- HTTP servers match as before, `allowManagedMcpServersOnly` is `true`, and the
+  pinned marketplace entries match.
+- Each plugin root is an absolute, real (no symlink), non-world-writable
+  directory. `mcpDataRoot` and each `<mcpDataRoot>/<label>` are real 0700
+  directories owned by MST's user. Each `files` entry is a regular 0600 file
+  owned by MST's user, with exactly the substituted JSON (the token from
+  `auth.accessTokenEnv` in MST's environment).
+
+Build the expected entries with `coworkManagedPluginSettings({servers, plugins,
+paths: {pluginRoots, dataRoot}})` and check a file with `coworkMcpSettingsMatch`.
+Both are exported from the package root and never include a token. Append HTTP
+entries as before. `materializeHostStdioFiles` writes the private files for TS
+callers.
+
+### Readiness
+
+Before the first prompt, MST launches each stdio eval server itself, with the
+same resolved command, args, env, and data dir, but without the parent
+environment. It fails closed with `too few tools (<n> < <minTools>)` when the
+server lists fewer than `minTools` tools. For example, a Glean adapter with a
+bad token lists only its static tools. Desktop-side readiness (for example, a
+caller's own log check) should also compare each server's `toolCount` with
+`minTools`.
+
+### Plugin marketplaces
+
+Cowork installs each plugin from a managed `allowedPluginMarketplaces` entry,
+pinned and required. An `owner/repo` source becomes `source: "github"`; an HTTPS
+Git URL becomes `source: "git"` with `url`. Local paths are rejected, because
+Cowork cannot read them. On macOS, MST writes these entries and the blocked
+`policy-only` entries into the MST-owned profile. On Linux, the caller writes
+them, and MST checks them before any UI action. Extra keys such as
+`expectedName` are allowed.
+
+### Why not `plugins[].mcp` on Cowork
 
 Cowork rejects `plugins[].mcp` overrides with `plugin_unsupported` before any UI
 action. Claude Desktop 2.7032.0 has no managed way to give a plugin's own MCP
@@ -304,5 +455,5 @@ server a custom endpoint, credential, or data directory:
   `isLocalDevMcpEnabled` is not false and the organization feature flag allows
   it. `allowManagedMcpServersOnly` is not an input to that check.
 
-So on Cowork, a plugin adds skills, and its own MCP servers run unmodified.
-Block them with `policy-only` entries if the eval must not call them.
+So declare the eval server as a stdio `servers[]` entry that runs the plugin's
+adapter, and block the plugin's own server with `blockMcpServers`.

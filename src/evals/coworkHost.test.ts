@@ -179,7 +179,10 @@ describe('V2 Cowork host', () => {
     }));
     const result = await prepared.runBatch!(batch, { ...context, env: {} });
     expect(result.every((r) => !r.error)).toBe(true);
-    expect(mocks.readiness).toHaveBeenCalledWith([server], expect.any(Object));
+    expect(mocks.readiness).toHaveBeenCalledWith([server], expect.any(Object), {
+      plugins: [],
+      paths: {},
+    });
     expect(mocks.submit).toHaveBeenCalledTimes(2);
     expect(mocks.hitl).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -402,6 +405,164 @@ describe('V2 Cowork host', () => {
     ).rejects.toMatchObject({ code: 'plugin_unsupported' });
     expect(prepare).not.toHaveBeenCalled();
     expect(mocks.submit).not.toHaveBeenCalled();
+  });
+  describe('stdio eval server launched from a plugin', () => {
+    const fake = {
+      name: 'fake',
+      marketplace: { source: 'acme/plugins', ref: 'd'.repeat(40) },
+      blockMcpServers: ['fake_plugin'],
+    };
+    const evalServer = {
+      transport: 'stdio' as const,
+      label: 'fake-eval',
+      command: 'node',
+      args: ['${pluginRoot:fake}/mcp/start.mjs'],
+      url: 'https://example.test/mcp/default/eval',
+      auth: { accessTokenEnv: 'FAKE_TOKEN' },
+      minTools: 4,
+      env: { FAKE_MCP_URL: '${url}', FAKE_PLUGIN_DATA: '${dataDir}' },
+      files: { 'creds.json': { token: '${bearerToken}' } },
+    };
+    const linuxHost = (options: Record<string, unknown> = {}) => ({
+      ...host,
+      options: {
+        computerUseProvider: 'linux-desktop',
+        pluginRoots: { fake: '/opt/plugins/fake' },
+        mcpDataRoot: '/run/mcp-data',
+        ...options,
+      },
+      plugins: [fake],
+    });
+    const platform = () => ({
+      dataDirectory: () => '/synthetic/native-data',
+      prepare: vi.fn().mockResolvedValue({ dispose: mocks.dispose }),
+      recover: vi.fn(),
+      submit: mocks.submit,
+      handleHitl: mocks.hitl,
+    });
+    const batch = (config: object): HostBatchRequest[] =>
+      requests().map((r) => ({
+        ...r,
+        config: config as HostBatchRequest['config'],
+        input: { ...r.input, servers: [evalServer] },
+      }));
+    const stdioContext = {
+      ...context,
+      manifest: { ...context.manifest, servers: [evalServer] },
+      env: { FAKE_TOKEN: 'secret-fake-token' },
+    };
+
+    it('passes plugins and paths to prepare/readiness and attributes mcp__<label>__* calls', async () => {
+      vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+      mocks.trace.mockImplementation(async ({ sessionPath }) => ({
+        candidate: { metadataPath: sessionPath },
+        finalAnswer: 'answer',
+        // Parsed from native `mcp__fake-eval__search`.
+        toolCalls: [
+          {
+            name: 'search',
+            rawName: 'mcp__fake-eval__search',
+            source: 'mcp',
+            server: 'fake-eval',
+            arguments: {},
+            output: 'found',
+          },
+        ],
+        usage: {},
+        isComplete: true,
+        telemetry: { models: [] },
+      }));
+      const selected = platform();
+      const results = await createCoworkHost(selected).runBatch!(
+        batch(linuxHost()),
+        stdioContext
+      );
+      const paths = {
+        pluginRoots: { fake: '/opt/plugins/fake' },
+        dataRoot: '/run/mcp-data',
+      };
+      expect(selected.prepare.mock.calls[0]![0]).toMatchObject({
+        plugins: [fake],
+        stdioPaths: paths,
+      });
+      expect(mocks.readiness).toHaveBeenCalledWith(
+        [evalServer],
+        expect.any(Object),
+        { plugins: [fake], paths }
+      );
+      expect(results[0]!.error).toBeUndefined();
+      expect(results[0]!.events).toEqual([
+        expect.objectContaining({
+          name: 'search',
+          source: 'mcp',
+          server: 'fake-eval',
+        }),
+      ]);
+    });
+
+    it.each([
+      [
+        'on macOS, where MST cannot stage a plugin root',
+        {
+          ...host,
+          plugins: [fake],
+        },
+        'mcp_server_unsupported',
+      ],
+      [
+        'with an undeclared plugin root',
+        linuxHost({ pluginRoots: { fake: '/opt/p', other: '/opt/o' } }),
+        'mcp_server_invalid',
+      ],
+      [
+        'without a plugin root',
+        linuxHost({ pluginRoots: {} }),
+        'mcp_server_invalid',
+      ],
+      [
+        'without a data root',
+        linuxHost({ mcpDataRoot: undefined }),
+        'mcp_server_invalid',
+      ],
+      [
+        'when a blocked name shadows the eval label',
+        {
+          ...linuxHost(),
+          plugins: [{ ...fake, blockMcpServers: ['fake-eval'] }],
+        },
+        'mcp_server_invalid',
+      ],
+    ])('rejects before any UI %s', async (_kind, config, code) => {
+      vi.spyOn(process, 'platform', 'get').mockReturnValue(
+        (config as { options: { computerUseProvider?: string } }).options
+          .computerUseProvider === 'linux-desktop'
+          ? 'linux'
+          : 'darwin'
+      );
+      const selected = platform();
+      await expect(
+        createCoworkHost(selected).runBatch!(batch(config), stdioContext)
+      ).rejects.toMatchObject({ code });
+      expect(selected.prepare).not.toHaveBeenCalled();
+      expect(mocks.submit).not.toHaveBeenCalled();
+    });
+
+    it('rejects plain stdio servers without a url, as before', async () => {
+      vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+      const selected = platform();
+      const plain = requests().map((r) => ({
+        ...r,
+        config: { ...host, options: { computerUseProvider: 'linux-desktop' } },
+        input: {
+          ...r.input,
+          servers: [{ transport: 'stdio' as const, command: 'x' }],
+        },
+      }));
+      await expect(
+        createCoworkHost(selected).runBatch!(plain, context)
+      ).rejects.toMatchObject({ code: 'mcp_server_invalid' });
+      expect(selected.prepare).not.toHaveBeenCalled();
+    });
   });
   it('skips GUI HITL for already completed native tasks without hiding actual failures', async () => {
     mocks.matches.mockResolvedValue([{ isComplete: true }]);

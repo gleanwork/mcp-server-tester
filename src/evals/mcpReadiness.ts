@@ -53,11 +53,24 @@ export async function checkMcpServers(
         | Awaited<ReturnType<typeof createMCPClientForConfig>>
         | undefined;
       try {
-        client = await createMCPClientForConfig(resolve(server));
+        const resolved = resolve(server);
+        client = await createMCPClientForConfig(resolved);
         const tools = await withTimeout(
           client.listTools(),
           MCP_PREFLIGHT_TIMEOUT_MS
         );
+        // A degraded server (e.g. static tools only, after an auth failure)
+        // can still list tools. Fail closed below the declared minimum.
+        const minTools =
+          resolved.transport === 'stdio' ? resolved.minTools : undefined;
+        if (minTools !== undefined && tools.tools.length < minTools)
+          return {
+            label,
+            status: 'failed',
+            toolCount: tools.tools.length,
+            elapsedMs: Date.now() - started,
+            error: `too few tools (${tools.tools.length} < ${minTools})`,
+          };
         return {
           label,
           status: 'connected',

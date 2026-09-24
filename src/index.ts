@@ -17,6 +17,28 @@ export type {
   CoworkNativeAuditAttachment,
 } from './evals/auditCoworkNativeRun.js';
 
+// Cowork managed-settings contract for plugins and stdio eval servers
+export {
+  coworkManagedPluginSettings,
+  coworkMcpSettingsMatch,
+  coworkPluginSettingsMatch,
+} from './evals/cowork/managedSettings.js';
+export type {
+  CoworkManagedPluginSettings,
+  CoworkManagedStdioServer,
+} from './evals/cowork/managedSettings.js';
+export {
+  coworkPluginMarketplace,
+  hostStdioServers,
+  materializeHostStdioFiles,
+  resolveHostStdioServer,
+} from './evals/hostPlugins.js';
+export type {
+  HostPlugin,
+  HostStdioPaths,
+  HostStdioServer,
+} from './evals/hostPlugins.js';
+
 // Types
 export type {
   // Config

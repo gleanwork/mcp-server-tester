@@ -8,6 +8,7 @@ import {
   validateMCPConfig,
   isStdioConfig,
   isHttpConfig,
+  usesHostResolvedFields,
 } from '../config/mcpConfig.js';
 import { debugClient, debugHttp } from '../debug.js';
 import { ProxyAgent, Agent as UndiciAgent } from 'undici';
@@ -201,6 +202,12 @@ export async function createMCPClientForConfig(
 
   // Create appropriate transport and connect
   if (isStdioConfig(validatedConfig)) {
+    // Unresolved `${...}` placeholders, `files`, or `auth` belong to a host.
+    if (usesHostResolvedFields(validatedConfig))
+      throw new Error(
+        'This stdio MCP server declares host-resolved eval fields (url, auth, files, or ${url}/${dataDir}/${pluginRoot:...}); only a host that supports them (Linux Cowork) can launch it.'
+      );
+    const inherit = validatedConfig.inheritEnv !== false;
     const transport = new StdioClientTransport({
       command: validatedConfig.command,
       args: validatedConfig.args ?? [],
@@ -209,7 +216,10 @@ export async function createMCPClientForConfig(
       ...(validatedConfig.quiet && { stderr: 'ignore' as const }),
       ...(validatedConfig.env && {
         env: Object.fromEntries(
-          Object.entries({ ...process.env, ...validatedConfig.env }).filter(
+          Object.entries({
+            ...(inherit ? process.env : {}),
+            ...validatedConfig.env,
+          }).filter(
             (entry): entry is [string, string] => entry[1] !== undefined
           )
         ),

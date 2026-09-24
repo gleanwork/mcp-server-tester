@@ -36,7 +36,10 @@ const Schema = z
     timeout: z.number().int().positive().default(300_000),
     env: z.record(z.string(), z.string()).optional(),
     /** Host-owned: plugins installed into the fresh Linux profile. */
-    plugins: HostPluginsSchema.optional(),
+    plugins: HostPluginsSchema.optional().refine(
+      (plugins) => !plugins?.some((p) => p.blockMcpServers?.length),
+      'ChatGPT does not support plugins[].blockMcpServers; use plugins[].mcp.'
+    ),
     options: z
       .object({
         configPath: z.string().min(1).optional(),

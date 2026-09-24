@@ -9,7 +9,7 @@ import {
 } from '../mcp/clientFactory.js';
 import { createMCPFixture } from '../mcp/fixtures/mcpFixture.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
-import { isHttpConfig } from '../config/mcpConfig.js';
+import { isHttpConfig, usesHostResolvedFields } from '../config/mcpConfig.js';
 import {
   loadEvalManifest,
   type DatasetConfig,
@@ -117,6 +117,8 @@ function resolveServerSecrets(
   server: MCPConfig,
   env: Record<string, string | undefined>
 ): MCPConfig {
+  // A host resolves these; merging process.env here would copy secrets.
+  if (usesHostResolvedFields(server)) return server;
   if (server.transport === 'stdio')
     return {
       ...server,
@@ -139,11 +141,14 @@ function resolveServerSecrets(
 }
 
 function assertEvalEndpoint(server: MCPConfig, manifest: EvalManifest): void {
-  if (!manifest.requireEvalEndpoint || !isHttpConfig(server)) return;
-  const pathname = new URL(server.serverUrl).pathname;
+  if (!manifest.requireEvalEndpoint) return;
+  // A host-resolved stdio server declares the endpoint it targets as `url`.
+  const endpoint = isHttpConfig(server) ? server.serverUrl : server.url;
+  if (endpoint === undefined) return;
+  const pathname = new URL(endpoint).pathname;
   if (!/\/eval(?:\/|$)/.test(pathname)) {
     throw new Error(
-      `Evaluation requires an /eval MCP endpoint; received "${server.serverUrl}".`
+      `Evaluation requires an /eval MCP endpoint; received "${endpoint}".`
     );
   }
 }

@@ -1,12 +1,30 @@
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
-import { open } from 'node:fs/promises';
+import { lstat, open, realpath } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { CoworkPlatform } from './platform.js';
-import { coworkPluginMarketplace, type HostPlugin } from '../hostPlugins.js';
+import {
+  hostStdioFileContents,
+  hostStdioServers,
+  resolveHostStdioCredentials,
+  resolveHostStdioServer,
+  type HostStdioPaths,
+  type HostStdioServer,
+} from '../hostPlugins.js';
+import {
+  coworkJsonEqual,
+  coworkMcpSettingsMatch,
+  coworkPluginSettingsMatch,
+} from './managedSettings.js';
+
+export {
+  coworkManagedPluginSettings,
+  coworkMcpSettingsMatch,
+  coworkPluginSettingsMatch,
+} from './managedSettings.js';
 import {
   CoworkDriverError,
   CoworkHitlBudgetError,
@@ -179,50 +197,69 @@ async function execute(
   return record;
 }
 
+async function privateDirectory(path: string): Promise<void> {
+  const info = await lstat(path);
+  if (
+    !info.isDirectory() ||
+    info.uid !== process.getuid?.() ||
+    (info.mode & 0o077) !== 0 ||
+    (await realpath(path)) !== path
+  )
+    throw new Error('data');
+}
+
 /**
- * Caller contract for Linux Cowork plugins: managed settings contain exactly
- * `coworkPluginMarketplace(plugin)` for each configured plugin (extra keys such
- * as `expectedName` are allowed). With no plugins, the key must be absent or
- * empty. Read-only; exported so callers can check what they generate.
+ * Verify the caller-prepared paths for each stdio eval server: every referenced
+ * plugin root is a real, non-world-writable directory, and `${dataDir}` is
+ * `<mcpDataRoot>/<label>` (both 0700, ours) holding each declared file (a
+ * regular 0600 file, ours) with exactly the substituted JSON content.
  */
-export function coworkPluginSettingsMatch(
-  settings: Record<string, unknown>,
-  plugins: readonly HostPlugin[]
-): boolean {
-  const actual = settings.allowedPluginMarketplaces;
-  if (actual === undefined) return plugins.length === 0;
-  if (!Array.isArray(actual) || actual.length !== plugins.length) return false;
-  const remaining: unknown[] = [...(actual as unknown[])];
-  for (const plugin of plugins) {
-    let expected: Record<string, unknown>;
-    try {
-      expected = coworkPluginMarketplace(plugin);
-    } catch {
-      return false;
+async function verifyStdioPaths(
+  servers: readonly HostStdioServer[],
+  paths: HostStdioPaths,
+  env: Record<string, string | undefined>
+): Promise<void> {
+  const tokens = resolveHostStdioCredentials(servers, env);
+  for (const server of servers) {
+    for (const plugin of server.pluginRoots) {
+      const root = paths.pluginRoots?.[plugin];
+      const info = root ? await lstat(root) : undefined;
+      if (
+        !root ||
+        !info?.isDirectory() ||
+        (info.mode & 0o002) !== 0 ||
+        (await realpath(root)) !== root
+      )
+        throw new Error('plugin root');
     }
-    // Desktop compares GitHub repos case-insensitively.
-    const normalize = (entry: unknown): Record<string, unknown> | undefined =>
-      entry && typeof entry === 'object'
-        ? {
-            ...(entry as Record<string, unknown>),
-            ...(typeof (entry as { repo?: unknown }).repo === 'string'
-              ? { repo: (entry as { repo: string }).repo.toLowerCase() }
-              : {}),
-          }
-        : undefined;
-    const index = remaining.findIndex((entry) => {
-      const observed = normalize(entry);
-      return (
-        !!observed &&
-        Object.entries(expected).every(
-          ([key, value]) => observed[key] === value
-        )
+    const launch = resolveHostStdioServer(server, paths);
+    if (!launch.dataDir) continue;
+    await privateDirectory(paths.dataRoot!);
+    await privateDirectory(launch.dataDir);
+    const files = hostStdioFileContents(server, paths, tokens[server.label]);
+    for (const [name, content] of Object.entries(files)) {
+      const handle = await open(
+        join(launch.dataDir, name),
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
       );
-    });
-    if (index < 0) return false;
-    remaining.splice(index, 1);
+      try {
+        const info = await handle.stat();
+        if (
+          !info.isFile() ||
+          info.uid !== process.getuid?.() ||
+          (info.mode & 0o077) !== 0 ||
+          info.size > 64 * 1024
+        )
+          throw new Error('file');
+        if (
+          !coworkJsonEqual(JSON.parse(await handle.readFile('utf8')), content)
+        )
+          throw new Error('file');
+      } finally {
+        await handle.close();
+      }
+    }
   }
-  return true;
 }
 
 /** Attach to caller-owned resources. Never create, authenticate, or stop a desktop. */
@@ -234,7 +271,7 @@ export const linuxCoworkPlatform: CoworkPlatform = {
       'Claude-3p',
       'local-agent-mode-sessions'
     ),
-  async prepare({ manifest, env, model, plugins = [] }) {
+  async prepare({ manifest, env, model, plugins = [], stdioPaths = {} }) {
     const settingsFile =
       env.MST_COWORK_SETTINGS_FILE ??
       '/etc/claude-desktop/managed-settings.json';
@@ -249,50 +286,24 @@ export const linuxCoworkPlatform: CoworkPlatform = {
         throw new Error('model');
       if (!coworkPluginSettingsMatch(settings, plugins))
         throw new Error('plugins');
-      const expected = manifest.servers ?? [];
-      const managed = settings.managedMcpServers as
-        | Array<{
-            name?: string;
-            transport?: string;
-            url?: string;
-            toolPolicy?: Record<string, string>;
-          }>
-        | undefined;
-      // A plugin's own server may only appear as a fully blocked policy entry.
-      const actual = managed?.filter((s) => s.transport !== 'policy-only');
+      const servers = manifest.servers ?? [];
       if (
-        !Array.isArray(managed) ||
-        !actual ||
-        actual.length !== expected.length ||
-        managed.some(
-          (s) =>
-            s.transport === 'policy-only' &&
-            (Object.keys(s.toolPolicy ?? {}).join() !== '*' ||
-              s.toolPolicy?.['*'] !== 'blocked')
-        ) ||
-        settings.allowManagedMcpServersOnly !== true
+        !coworkMcpSettingsMatch(settings, {
+          servers,
+          plugins,
+          paths: stdioPaths,
+          approveWriteTools: manifest.coworkSetup?.approveWriteTools === true,
+        })
       )
         throw new Error('servers');
-      for (const [index, server] of expected.entries()) {
-        if (server.transport !== 'http') throw new Error('transport');
-        const observed = actual.find(
-          (s) => s.name === (server.label ?? `server-${index + 1}`)
-        );
-        if (
-          !observed ||
-          observed.transport !== 'http' ||
-          observed.url !== server.serverUrl
-        )
-          throw new Error('server');
-        if (
-          observed.toolPolicy?.['*'] === 'allow' &&
-          manifest.coworkSetup?.approveWriteTools !== true
-        )
-          throw new Error('policy');
-      }
+      await verifyStdioPaths(
+        hostStdioServers(servers, plugins),
+        stdioPaths,
+        env
+      );
     } catch {
       throw new Error(
-        'Prepared Linux desktop settings do not match the eval model, MCP servers, plugins, or approval policy.'
+        'Prepared Linux desktop settings do not match the eval model, MCP servers, plugins, plugin/data paths, or approval policy.'
       );
     }
     await execute(

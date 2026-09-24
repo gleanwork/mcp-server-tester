@@ -14,7 +14,13 @@ import {
   waitForClaudeSession,
 } from './externalHost/builtins/anthropicClaude.js';
 import { simulationToHostTrace } from './hostTrace.js';
-import { HostPluginsSchema, assertCoworkHostPlugins } from './hostPlugins.js';
+import {
+  HostPluginError,
+  HostPluginsSchema,
+  assertCoworkHostPlugins,
+  hostStdioServers,
+} from './hostPlugins.js';
+import { coworkManagedPluginSettings } from './cowork/managedSettings.js';
 import {
   CoworkDriverError,
   type CoworkDriverTelemetry,
@@ -36,9 +42,30 @@ const OptionsSchema = z
       .regex(/^[A-Za-z0-9._:-]+$/)
       .optional(),
     dataDir: z.string().min(1).optional(),
+    /**
+     * Linux: absolute root of each staged plugin, for `${pluginRoot:<plugin>}`
+     * in stdio eval servers. The caller stages it from the pinned ref.
+     */
+    pluginRoots: z
+      .record(
+        z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),
+        z.string().min(2).max(4096)
+      )
+      .optional(),
+    /** Linux: absolute private (0700) root; a server's `${dataDir}` is `<root>/<label>`. */
+    mcpDataRoot: z.string().min(2).max(4096).optional(),
   })
   .strict()
   .superRefine((options, context) => {
+    if (
+      options.computerUseProvider !== 'linux-desktop' &&
+      (options.pluginRoots !== undefined || options.mcpDataRoot !== undefined)
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['pluginRoots'],
+        message: 'pluginRoots and mcpDataRoot require linux-desktop.',
+      });
     if (
       options.computerUseProvider === 'linux-desktop' &&
       options.computerUseModel !== undefined
@@ -89,6 +116,36 @@ async function runBatch(
   const plugins = config.plugins ?? [];
   // Fail before any desktop action if Cowork cannot apply a plugin as declared.
   assertCoworkHostPlugins(plugins);
+  const servers = requests[0]!.input.servers;
+  // Stdio servers are host-resolved eval servers: validate and resolve them
+  // (labels, placeholders, plugin roots, data root) before any desktop action.
+  const stdioServers = hostStdioServers(servers, plugins);
+  const stdioPaths = {
+    ...(config.options.pluginRoots
+      ? { pluginRoots: config.options.pluginRoots }
+      : {}),
+    ...(config.options.mcpDataRoot
+      ? { dataRoot: config.options.mcpDataRoot }
+      : {}),
+  };
+  if (stdioServers.length) {
+    // MST writes macOS settings but cannot stage a plugin root there.
+    if (config.options.computerUseProvider !== 'linux-desktop')
+      throw new HostPluginError(
+        'mcp_server_unsupported',
+        stdioServers[0]!.label
+      );
+  }
+  const referenced = new Set(stdioServers.flatMap((s) => s.pluginRoots));
+  const unknownRoot = Object.keys(config.options.pluginRoots ?? {}).find(
+    (name) => !referenced.has(name)
+  );
+  if (
+    unknownRoot ||
+    (config.options.mcpDataRoot && !stdioServers.some((s) => s.usesDataDir))
+  )
+    throw new HostPluginError('mcp_server_invalid', unknownRoot ?? 'dataRoot');
+  coworkManagedPluginSettings({ servers, plugins, paths: stdioPaths });
   const env = { ...process.env, ...context.env, ...config.env };
   if (
     config.options.computerUseProvider === 'anthropic-computer-use' &&
@@ -99,7 +156,6 @@ async function runBatch(
     selectedPlatform ??
     (await getCoworkPlatform(config.options.computerUseProvider));
   const dataDir = platform.dataDirectory(config.options);
-  const servers = requests[0]!.input.servers;
   // Pass only the selected arm. Setup intentionally rejects multi-arm manifests.
   const { arms: _arms, ...manifest } = context.manifest;
   const managedManifest = { ...manifest, servers };
@@ -121,6 +177,9 @@ async function runBatch(
         if (server.auth?.accessToken) secrets.push(server.auth.accessToken);
         for (const value of Object.values(server.headers ?? {}))
           secrets.push(value);
+      } else if (server.auth?.accessTokenEnv) {
+        const token = env[server.auth.accessTokenEnv];
+        if (token) secrets.push(token);
       }
     for (const secret of secrets) text = text.split(secret).join('[REDACTED]');
     return text;
@@ -144,9 +203,13 @@ async function runBatch(
         env,
         model: config.model,
         ...(plugins.length ? { plugins } : {}),
+        ...(stdioServers.length ? { stdioPaths } : {}),
       });
     if (servers.length) {
-      const readiness = await verifyCoworkMcpServers(servers, env);
+      const readiness = await verifyCoworkMcpServers(servers, env, {
+        plugins,
+        paths: stdioPaths,
+      });
       process.stderr.write(
         `[mst:cowork] MCP preflight ready: ${readiness
           .map(

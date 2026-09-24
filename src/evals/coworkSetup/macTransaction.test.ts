@@ -179,6 +179,51 @@ describe('Mac Cowork settings transaction', () => {
     await restoreMacCoworkSettings(profileDirectory);
     await expectClean();
   });
+  it("blocks a plugin's own MCP servers with policy-only entries after the eval servers", async () => {
+    const ref = 'e'.repeat(40);
+    const installed = await installMacCoworkSettings(
+      options({
+        plugins: [
+          {
+            name: 'acme',
+            marketplace: { source: 'acme/plugins', ref },
+            blockMcpServers: ['acme_mcp'],
+          },
+        ],
+      })
+    );
+    const written = await readJson<{
+      managedMcpServers: Array<Record<string, unknown>>;
+      allowedMcpServers: unknown;
+    }>(profile(installed.id));
+    expect(written.managedMcpServers).toEqual([
+      expect.objectContaining({ name: 'Search', transport: 'http' }),
+      {
+        name: 'acme_mcp',
+        transport: 'policy-only',
+        toolPolicy: { '*': 'blocked' },
+      },
+    ]);
+    expect(written.allowedMcpServers).toEqual([{ serverName: 'Search' }]);
+    await restoreMacCoworkSettings(profileDirectory);
+    await expectClean();
+  });
+  it('rejects a blocked plugin server that shadows an eval server label', async () => {
+    await expect(
+      installMacCoworkSettings(
+        options({
+          plugins: [
+            {
+              name: 'acme',
+              marketplace: { source: 'acme/plugins', ref: 'e'.repeat(40) },
+              blockMcpServers: ['search'],
+            },
+          ],
+        })
+      )
+    ).rejects.toThrow();
+    await expectOriginal();
+  });
   it('isolates exact replacement/empty server sets and opt-in policies across runs', async () => {
     for (const labels of [
       ['first', 'second'],

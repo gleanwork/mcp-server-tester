@@ -1,4 +1,7 @@
-import type { MCPConfig } from '../../config/mcpConfig.js';
+import {
+  usesHostResolvedFields,
+  type MCPConfig,
+} from '../../config/mcpConfig.js';
 import type { CodexMcpServerConfig } from '../codexSetup/config.js';
 import { isChatgptBuiltinServer } from '../externalHost/builtins/chatgptTrace.js';
 
@@ -25,6 +28,14 @@ export function chatgptServers(
           `ChatGPT MCP server label ${label} is reserved for a built-in host tool.`
         );
       labels.add(label);
+      // Codex cannot resolve host placeholders or write private files.
+      if (
+        server.transport === 'stdio' &&
+        (usesHostResolvedFields(server) || server.minTools !== undefined)
+      )
+        throw new Error(
+          `ChatGPT does not support host-resolved stdio eval servers (${label}: url, auth, files, minTools, or \${...} placeholders). Use plugins[].mcp to point a plugin's own server at the eval endpoint.`
+        );
       if (server.transport === 'stdio')
         return {
           transport: 'stdio',

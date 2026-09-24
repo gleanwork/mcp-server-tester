@@ -599,6 +599,21 @@ describe('ChatGPT V2 batch host', () => {
     });
     expect(lifecycle.prepare).not.toHaveBeenCalled();
   });
+  it('rejects Cowork-only blockMcpServers in the ChatGPT schema', () => {
+    const plugin = {
+      name: 'acme',
+      marketplace: { source: 'acme/plugins', ref: 'f'.repeat(40) },
+    };
+    expect(
+      CHATGPT_HOST.schema.safeParse({ ...config, plugins: [plugin] }).success
+    ).toBe(true);
+    expect(
+      CHATGPT_HOST.schema.safeParse({
+        ...config,
+        plugins: [{ ...plugin, blockMcpServers: ['acme_mcp'] }],
+      }).success
+    ).toBe(false);
+  });
   it('requires native MCP calls when the eval explicitly requests them', async () => {
     vi.mocked(runExternalHostScenario).mockResolvedValueOnce({
       success: true,

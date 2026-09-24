@@ -164,6 +164,12 @@ skills are added. Any install error fails setup with `plugin_setup_failed`
 before the app starts. `nativeReadiness.plugins` records the name,
 marketplace, version, ref, and overridden server names.
 
+ChatGPT rejects two Cowork-only forms before the app starts: host-resolved
+stdio `servers[]` entries (`url`, `auth`, `files`, `minTools`, or
+`${url}`/`${dataDir}`/`${pluginRoot:...}` placeholders) and
+`plugins[].blockMcpServers`. Use `plugins[].mcp` instead. See
+[cowork.md](cowork.md#host-plugins).
+
 Execution policy: on Linux, MST writes `approval_policy = "never"` and
 `sandbox_mode = "danger-full-access"`. Native command execution needs
 bubblewrap, which cannot run inside the container, and nobody can answer an

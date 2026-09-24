@@ -853,6 +853,33 @@ describe('suite review regressions', () => {
       expect(json).not.toContain(secret);
     expect(json).toContain('REVIEW_TOKEN');
   });
+  it('passes host-resolved stdio eval servers unmerged and checks their url against /eval', async () => {
+    vi.stubEnv('FAKE_TOKEN', 'dummy-token-do-not-merge');
+    const evalServer = {
+      transport: 'stdio',
+      label: 'fake-eval',
+      command: 'node',
+      args: ['${pluginRoot:fake}/mcp/start.mjs'],
+      url: 'https://example.com/mcp/default/eval',
+      auth: { accessTokenEnv: 'FAKE_TOKEN' },
+      env: { FAKE_MCP_URL: '${url}' },
+    };
+    const f = await fixture([scenario], {
+      servers: [evalServer],
+      requireEvalEndpoint: true,
+    });
+    await runEvalSuite({ manifestPath: f.manifestPath, rootDir: f.dir });
+    const passed = f.run.mock.calls[0]?.[0].servers;
+    expect(passed).toEqual([evalServer]);
+    expect(JSON.stringify(passed)).not.toContain('dummy-token-do-not-merge');
+    const bad = await fixture([scenario], {
+      servers: [{ ...evalServer, url: 'https://example.com/mcp/default' }],
+      requireEvalEndpoint: true,
+    });
+    await expect(
+      runEvalSuite({ manifestPath: bad.manifestPath, rootDir: bad.dir })
+    ).rejects.toThrow('/eval MCP endpoint');
+  });
   it.each([true, false])(
     'redacts every persisted response by default with explicit opt-out (%s)',
     async (redact) => {

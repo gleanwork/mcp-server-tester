@@ -40,6 +40,21 @@ describe('ChatGPT server translation', () => {
       args: ['fixture.mjs'],
     });
   });
+  it.each([
+    ['url', { url: 'https://example.test/eval', args: ['${url}'] }],
+    ['a plugin root placeholder', { args: ['${pluginRoot:fake}/start.mjs'] }],
+    ['a data dir placeholder', { env: { DATA: '${dataDir}' } }],
+    ['files', { files: { 'a.json': {} } }],
+    ['auth', { auth: { accessTokenEnv: 'TOKEN' } }],
+    ['minTools', { minTools: 4 }],
+  ])('rejects a host-resolved stdio eval server with %s', (_kind, change) => {
+    expect(() =>
+      chatgptServers(
+        [{ transport: 'stdio', label: 'eval', command: 'node', ...change }],
+        {}
+      )
+    ).toThrow('ChatGPT does not support host-resolved stdio eval servers');
+  });
   it('rejects configured servers impersonating built-in host namespaces', () => {
     expect(() =>
       chatgptServers(
