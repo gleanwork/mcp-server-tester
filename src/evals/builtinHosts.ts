@@ -27,7 +27,7 @@ import { getHost, registerHost } from './frameworkRegistries.js';
 import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
 import { ANTHROPIC_API_HOST } from './anthropicApiHost.js';
 import { COWORK_HOST } from './coworkHost.js';
-import { CHATGPT_HOST } from './chatgptHost.js';
+import { CHATGPT_HOST, CHATGPT_LINUX_HOST } from './chatgptHost.js';
 
 async function runBuiltinHost(
   input: HostRunInput,
@@ -282,7 +282,11 @@ export function registerBuiltinHosts(): void {
   }
   registerHost(ANTHROPIC_API_HOST);
   registerHost(CHATGPT_HOST);
-  registerHost({ ...CHATGPT_HOST, name: 'chatgpt' });
+  registerHost(CHATGPT_LINUX_HOST);
+  registerHost({
+    ...(process.platform === 'linux' ? CHATGPT_LINUX_HOST : CHATGPT_HOST),
+    name: 'chatgpt',
+  });
   registerHost(COWORK_HOST);
   registerHost({ ...COWORK_HOST, name: 'cowork' });
   registerHost({

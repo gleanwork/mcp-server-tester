@@ -30,6 +30,7 @@
     },
     "./cowork-runtime": "./scripts/cowork_computer_use.py",
     "./cowork-linux-runtime": "./scripts/cowork_linux.py",
+    "./chatgpt-linux-runtime": "./scripts/chatgpt_linux.py",
     "./cowork-requirements": "./scripts/cowork-requirements.txt",
     "./types": {
       "types": "./dist/types/index.d.ts",
@@ -60,6 +61,8 @@
     "dist",
     "scripts/cowork_computer_use.py",
     "scripts/cowork_linux.py",
+    "scripts/chatgpt_linux.py",
+    "scripts/chatgpt_linux_contract.json",
     "scripts/cowork-requirements.txt"
   ],
   "scripts": {

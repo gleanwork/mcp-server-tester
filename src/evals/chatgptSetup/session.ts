@@ -2,32 +2,46 @@ import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { basename, dirname, join } from 'node:path';
 import { isChatgptBuiltinServer } from '../externalHost/builtins/chatgptTrace.js';
-import {
-  defaultChatgptAppPath,
-  defaultChatgptBundleId,
-  defaultChatgptConfigHome,
-  getChatgptApplicationController,
-} from './macController.js';
+import { defaultChatgptConfigHome } from './macController.js';
 import {
   installCodexConfig,
   resolveCodexSetup,
   type CodexConfigInstallation,
+  type CodexSetupConfig,
 } from '../codexSetup/config.js';
 import type { ExternalHostConfig } from '../externalHost/types.js';
+import type { SemanticDesktopTelemetry } from '../cowork/driver.js';
 import {
+  chatgptSurface,
   readLaunchEnvironment,
   stringOption,
   validateChatgptConfig,
+  type ChatgptApplicationController,
 } from '../chatgpt/driver.js';
+import { NativeChatgptDriverError } from '../chatgpt/linux.js';
+import { chatgptPlatform } from './platform.js';
+import type {
+  ChatgptPlatformProfile,
+  LinuxChatgptReadiness,
+} from './linuxProfile.js';
 
 const activeApplications = new Set<string>();
 
 interface ChatgptLifecycleState {
-  controller: Awaited<ReturnType<typeof getChatgptApplicationController>>;
+  controller: ChatgptApplicationController;
   wasRunning: boolean;
   stopped: boolean;
   launchAttempted: boolean;
   installation?: CodexConfigInstallation;
+}
+
+/** Linux owns config even without MCP servers: keyring login needs it. */
+function effectiveSetup(
+  config: ExternalHostConfig,
+  configPath: string | undefined
+): CodexSetupConfig | undefined {
+  if (!configPath) return config.codexSetup;
+  return { ...(config.codexSetup ?? { servers: [] }), configPath };
 }
 
 function sessionSettings(
@@ -37,8 +51,11 @@ function sessionSettings(
   const configName =
     stringOption(binding, 'configName') ??
     stringOption(config.options, 'codexConfigName');
-  const setup = config.codexSetup
-    ? resolveCodexSetup(config.codexSetup, configName)
+  const platform = chatgptPlatform(config);
+  const application = platform.application(config, binding);
+  const codexSetup = effectiveSetup(config, application.configPath);
+  const setup = codexSetup
+    ? resolveCodexSetup(codexSetup, configName)
     : undefined;
   if (setup?.servers.some((server) => isChatgptBuiltinServer(server.label)))
     throw new Error(
@@ -49,18 +66,14 @@ function sessionSettings(
       'ChatGPT loads CODEX_HOME/config.toml; configPath must end in config.toml.'
     );
   return {
+    platform: platform.name,
+    application,
+    codexSetup,
     setup,
     model: config.model,
     reasoningEffort: config.reasoningEffort,
+    surface: chatgptSurface(config),
     environment: readLaunchEnvironment(config.options?.environment),
-    appPath:
-      stringOption(binding, 'appPath') ??
-      stringOption(config.options, 'chatgptAppPath') ??
-      defaultChatgptAppPath(),
-    bundleId:
-      stringOption(binding, 'bundleId') ??
-      stringOption(config.options, 'chatgptBundleId') ??
-      defaultChatgptBundleId(),
     sessionsRoot: stringOption(config.options, 'chatgptSessionRoot'),
   };
 }
@@ -68,11 +81,14 @@ function sessionSettings(
 /** One app/config transaction. Per-query native baselines and run state never live here. */
 export class ChatgptAppSession {
   #lifecycle?: ChatgptLifecycleState;
+  #profile?: ChatgptPlatformProfile;
   #lease?: string;
   #settings?: ReturnType<typeof sessionSettings>;
   #ready = false;
   #disposed = false;
   sessionsRoot?: string;
+  /** Linux: where native evidence is copied before profile teardown. */
+  evidenceDir?: string;
   readonly telemetry = {
     id: randomUUID(),
     scope: 'batch' as 'batch' | 'case',
@@ -80,6 +96,9 @@ export class ChatgptAppSession {
     cleanupStatus: 'not-started' as 'not-started' | 'completed' | 'failed',
     setupDurationMs: 0,
     cleanupDurationMs: 0,
+    nativeSetup: undefined as SemanticDesktopTelemetry | undefined,
+    /** Linux login and MCP readiness, sanitized. */
+    nativeReadiness: undefined as LinuxChatgptReadiness | undefined,
     events: [] as Array<{
       phase: 'setup' | 'cleanup';
       operation: string;
@@ -100,21 +119,29 @@ export class ChatgptAppSession {
     const started = Date.now();
     try {
       validateChatgptConfig(config);
+      const platform = chatgptPlatform(config);
       const settings = sessionSettings(config, binding);
       this.#settings = settings;
-      if (activeApplications.has(settings.bundleId))
+      const lease = `${platform.name}:${settings.application.leaseKey}`;
+      if (activeApplications.has(lease))
         throw new Error(
           'Another MST run is already managing this ChatGPT application.'
         );
-      activeApplications.add(settings.bundleId);
-      this.#lease = settings.bundleId;
-      process.stderr.write(
-        '[mst:chatgpt] Anthropic Computer Use requires Screen Recording and Accessibility permission. Keep ChatGPT visible and the desktop idle.\n'
-      );
-      const controller = await getChatgptApplicationController({
-        appPath: settings.appPath,
-        bundleId: settings.bundleId,
-      });
+      activeApplications.add(lease);
+      this.#lease = lease;
+      if (platform.permissionNotice)
+        process.stderr.write(platform.permissionNotice);
+      if (platform.createProfile) {
+        this.#profile = await platform.createProfile(settings.application);
+        this.telemetry.nativeReadiness = this.#profile.readiness;
+        this.evidenceDir = this.#profile.evidenceDir;
+        this.record('setup', 'create_profile');
+      }
+      const controller =
+        this.#profile?.controller ??
+        (await platform.controller?.(settings.application));
+      if (!controller)
+        throw new Error('ChatGPT platform has no application controller.');
       const wasRunning = (await controller.state()).running;
       const lifecycle = (this.#lifecycle = {
         controller,
@@ -128,15 +155,19 @@ export class ChatgptAppSession {
       }
       lifecycle.stopped = true;
       const environment = { ...settings.environment };
-      if (config.codexSetup) {
-        lifecycle.installation = await installCodexConfig(config.codexSetup, {
+      if (settings.codexSetup) {
+        lifecycle.installation = await installCodexConfig(settings.codexSetup, {
           configName: settings.setup?.configName,
           model: config.model,
           reasoningEffort: config.reasoningEffort,
+          ...this.#profile?.install,
         });
         this.record('setup', 'install_config');
-        const configHome = dirname(lifecycle.installation.configPath);
+        const configHome = dirname(
+          this.#profile?.configPath ?? lifecycle.installation.configPath
+        );
         if (
+          platform.isolatedConfigHome ||
           configHome !== defaultChatgptConfigHome() ||
           environment.CODEX_HOME !== undefined
         )
@@ -150,17 +181,43 @@ export class ChatgptAppSession {
             defaultChatgptConfigHome(),
           'sessions'
         );
+      if (this.#profile) {
+        if (!settings.setup)
+          throw new Error('ChatGPT platform profile requires a native config.');
+        // Login, direct MCP preflight, and app-server status: before any prompt.
+        await this.#profile.beforeStart(settings.setup, environment);
+        this.record('setup', 'verify_login_and_mcp');
+      }
       lifecycle.launchAttempted = true;
       await controller.start(environment);
       this.record('setup', 'start');
+      if (platform.verifyReady) {
+        this.telemetry.nativeSetup = await platform.verifyReady(
+          config,
+          (prompt) => this.openPrompt(prompt)
+        );
+        this.record('setup', 'verify_surface');
+      }
       this.#ready = true;
       this.telemetry.setupStatus = 'completed';
     } catch (error) {
       this.telemetry.setupStatus = 'failed';
+      if (error instanceof NativeChatgptDriverError)
+        this.telemetry.nativeSetup = error.telemetry;
       throw error;
     } finally {
       this.telemetry.setupDurationMs = Date.now() - started;
     }
+  }
+
+  /** Deep-link draft hand-off through the owned app. Never sends. */
+  async openPrompt(prompt: string): Promise<void> {
+    const lifecycle = this.#lifecycle;
+    if (this.#disposed || !lifecycle?.launchAttempted)
+      throw new Error('ChatGPT app session is not running.');
+    if (!lifecycle.controller.openPrompt)
+      throw new Error('ChatGPT platform cannot open native drafts.');
+    await lifecycle.controller.openPrompt(prompt);
   }
 
   assertCompatible(
@@ -197,6 +254,10 @@ export class ChatgptAppSession {
           await lifecycle.controller.start();
           this.record('cleanup', 'start');
         }
+      }
+      if (this.#profile && (!lifecycle || lifecycle.stopped)) {
+        await this.#profile.dispose();
+        this.record('cleanup', 'dispose_profile');
       }
       this.telemetry.cleanupStatus = 'completed';
     } catch (error) {

@@ -252,10 +252,11 @@ class Telemetry:
 
 
 async def run(query: str, max_actions: int, mode: str, application: str = 'cowork',
-              target_model: str | None = None, reasoning_effort: str | None = None) -> dict[str, Any]:
+              target_model: str | None = None, reasoning_effort: str | None = None,
+              chatgpt_surface: str = 'chatgpt-work') -> dict[str, Any]:
     telemetry = Telemetry()
     try:
-        result = await run_driver(query, max_actions, mode, telemetry, application, target_model, reasoning_effort)
+        result = await run_driver(query, max_actions, mode, telemetry, application, target_model, reasoning_effort, chatgpt_surface)
         result["telemetry"] = telemetry.snapshot("complete")
         return result
     except Exception as error:
@@ -265,7 +266,8 @@ async def run(query: str, max_actions: int, mode: str, application: str = 'cowor
 
 async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemetry,
                      application: str = 'cowork', target_model: str | None = None,
-                     reasoning_effort: str | None = None) -> dict[str, Any]:
+                     reasoning_effort: str | None = None,
+                     chatgpt_surface: str = 'chatgpt-work') -> dict[str, Any]:
     if application == 'chatgpt':
         check_chatgpt_permissions()
     try:
@@ -282,7 +284,9 @@ async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemet
     if application == 'chatgpt' and mode != 'submit':
         raise RuntimeError('ChatGPT permission approvals are not automated')
     app_name = 'ChatGPT' if application == 'chatgpt' else 'Claude'
-    surface = 'ChatGPT Work' if application == 'chatgpt' else 'Cowork'
+    if chatgpt_surface not in {'chatgpt-work', 'codex'}:
+        raise RuntimeError('Unsupported ChatGPT surface')
+    surface = ('ChatGPT Work' if chatgpt_surface == 'chatgpt-work' else 'Codex') if application == 'chatgpt' else 'Cowork'
     client = anthropic.Anthropic(api_key=api_key)
     model = os.environ.get("MST_COWORK_CUA_MODEL", DEFAULT_MODEL)
     log(f"starting driver with model={model}, max_actions={max_actions}, app={application}")
@@ -357,6 +361,8 @@ async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemet
             selection += (f"Select reasoning effort {reasoning_effort!r}; it may appear as "
                           f"{effort_labels.get(reasoning_effort, reasoning_effort)!r} under Power. ")
         messages[0]['content'] += selection + (
+            f" Before filling, select {surface} through Switch mode and verify its current-mode label. "
+            "Do not substitute another surface. Surface selection is UI setup, never text for the evaluated model. "
             " Use fresh screenshots to locate controls; do not assume their positions. "
             "The harness has already configured the requested defaults. Verify the visible selection before fill_query; if already correct, leave it unchanged and do not open menus. If it differs, select the requested settings using the UI. If unavailable, call report_blocker with the appropriate category. "
             "Operate only ChatGPT. Do not open a terminal, browser, files, or another app. "
@@ -490,12 +496,13 @@ def main() -> int:
     parser.add_argument("--max-actions", type=int, default=DEFAULT_MAX_ACTIONS)
     parser.add_argument("--mode", choices=["submit", "hitl"], default="submit")
     parser.add_argument("--app", choices=["cowork", "chatgpt"], default="cowork")
+    parser.add_argument('--surface', choices=['chatgpt-work', 'codex'], default='chatgpt-work')
     parser.add_argument("--target-model")
     parser.add_argument("--reasoning-effort", choices=['low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
     args = parser.parse_args()
     try:
         print(json.dumps(asyncio.run(run(args.query, args.max_actions, args.mode,
-                                        args.app, args.target_model, args.reasoning_effort))), flush=True)
+                                        args.app, args.target_model, args.reasoning_effort, args.surface))), flush=True)
         return 0
     except Exception as error:
         log(f"driver failed: {error}")

@@ -8,6 +8,7 @@
   "exclude": [
     "src/**/*.test.ts",
     "src/**/*.spec.ts",
+    "src/**/*.fixture.ts",
     "tests",
     "examples",
     "node_modules",

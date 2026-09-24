@@ -1,5 +1,4 @@
 import { mkdir, open, unlink } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
@@ -10,12 +9,17 @@ import type {
   HostRunResult,
 } from './evalFrameworkTypes.js';
 import { runExternalHostScenario } from './externalHost/runtime.js';
-import { ChatgptAppSession } from './chatgptSetup/macSession.js';
+import { ChatgptAppSession } from './chatgptSetup/session.js';
 import { chatgptServers } from './chatgptSetup/config.js';
 import type { ExternalHostConfig } from './externalHost/types.js';
 import { simulationToHostTrace } from './hostTrace.js';
+import { NATIVE_MAX_ACTIONS } from './chatgpt/linuxContract.js';
+import {
+  LINUX_CHATGPT_PLATFORM,
+  MAC_CHATGPT_PLATFORM,
+  type ChatgptPlatform,
+} from './chatgptSetup/platform.js';
 
-const DRIVER = 'openai.chatgpt.agent.desktop-app.macos';
 const Schema = z
   .object({
     type: z.string(),
@@ -30,30 +34,35 @@ const Schema = z
       .object({
         configPath: z.string().min(1).optional(),
         requireMcpCalls: z.boolean().optional(),
+        surface: z.enum(['chatgpt-work', 'codex']).default('chatgpt-work'),
         correlation: z
           .enum(['exact_prompt', 'prompt_marker'])
           .default('exact_prompt'),
-        computerUseProvider: z
-          .literal('anthropic-computer-use')
-          .default('anthropic-computer-use'),
+        computerUseProvider: z.literal('anthropic-computer-use').optional(),
+        nativeMaxActions: z
+          .number()
+          .int()
+          .min(1)
+          .max(NATIVE_MAX_ACTIONS.max)
+          .optional(),
         computerUseModel: z
           .string()
           .regex(/^[A-Za-z0-9._:-]+$/)
           .optional(),
-        computerUseMaxActions: z.number().int().min(1).max(64).default(32),
+        computerUseMaxActions: z.number().int().min(1).max(64).optional(),
       })
       .strict()
       .default({
         correlation: 'exact_prompt',
-        computerUseProvider: 'anthropic-computer-use',
-        computerUseMaxActions: 32,
+        surface: 'chatgpt-work',
       }),
   })
   .strict();
 
 async function runBatch(
   requests: HostBatchRequest[],
-  context: HostRunContext
+  context: HostRunContext,
+  platform: ChatgptPlatform
 ): Promise<HostRunResult[]> {
   if (!requests.length) return [];
   if ((context.manifest.concurrency ?? 1) !== 1)
@@ -83,8 +92,15 @@ async function runBatch(
     (request, index) => {
       const config = configs[index]!;
       const serverConfig = prepared[index]!;
+      const environment = Object.fromEntries(
+        Object.entries({
+          ...context.env,
+          ...request.input.env,
+          ...config.env,
+        }).filter((entry): entry is [string, string] => entry[1] !== undefined)
+      );
       return {
-        driver: DRIVER,
+        driver: platform.driver,
         model: config.model,
         reasoningEffort: config.reasoningEffort,
         timeoutMs: config.timeout,
@@ -98,16 +114,11 @@ async function runBatch(
         },
         options: {
           environment: { ...config.env, ...serverConfig.environment },
-          computerUseProvider: config.options.computerUseProvider,
           computerUseModel: config.options.computerUseModel,
-          computerUseMaxActions: config.options.computerUseMaxActions,
-          computerUseEnvironment: Object.fromEntries(
-            Object.entries({
-              ...context.env,
-              ...request.input.env,
-              ...config.env,
-            }).filter(([, value]) => value !== undefined)
-          ),
+          surface: config.options.surface,
+          nativeMaxActions: config.options.nativeMaxActions,
+          ...platform.hostOptions(config.options, environment),
+          computerUseEnvironment: environment,
         },
       };
     }
@@ -121,7 +132,10 @@ async function runBatch(
       'ChatGPT batch requires identical MCP servers, credentials, and environment.'
     );
   // Claim before any lifecycle operation: another process must not stop the active app.
-  const directory = join(homedir(), '.mcp-server-tester');
+  const directory = join(
+    platform.lockHome(externalConfigs[0]!),
+    '.mcp-server-tester'
+  );
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const path = join(directory, 'chatgpt-desktop.lock');
   const lease = await open(path, 'wx', 0o600).catch(() => {
@@ -247,12 +261,12 @@ async function runBatch(
           },
           externalHost: result.externalHost,
           computerUse: result.externalHost.computerUse,
-          ...(result.success
-            ? {
-                conversationHistory: result.conversationHistory,
-                mcpDurationMs: result.mcpDurationMs,
-              }
+          nativeController: result.externalHost.nativeController,
+          // Failed bound turns keep their partial native history.
+          ...(result.conversationHistory
+            ? { conversationHistory: result.conversationHistory }
             : {}),
+          ...(result.success ? { mcpDurationMs: result.mcpDurationMs } : {}),
         },
       });
     }
@@ -308,17 +322,25 @@ async function runBatch(
   return results;
 }
 
-export const CHATGPT_HOST: HostDefinition = {
-  name: DRIVER,
-  schema: Schema,
-  evidence: 'structured',
-  runBatch,
-  async run(input, config, context) {
-    return (
-      await runBatch(
-        [{ caseId: 'single', iteration: 0, input, config }],
-        context
-      )
-    )[0]!;
-  },
-};
+function chatgptHost(platform: ChatgptPlatform): HostDefinition {
+  return {
+    name: platform.driver,
+    schema: Schema,
+    evidence: 'structured',
+    runBatch(requests, context) {
+      return runBatch(requests, context, platform);
+    },
+    async run(input, config, context) {
+      return (
+        await runBatch(
+          [{ caseId: 'single', iteration: 0, input, config }],
+          context,
+          platform
+        )
+      )[0]!;
+    },
+  };
+}
+
+export const CHATGPT_LINUX_HOST = chatgptHost(LINUX_CHATGPT_PLATFORM);
+export const CHATGPT_HOST = chatgptHost(MAC_CHATGPT_PLATFORM);

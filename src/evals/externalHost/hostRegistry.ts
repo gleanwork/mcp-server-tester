@@ -1,6 +1,7 @@
 import type { ExternalHostConfig } from './types.js';
 import {
   OPENAI_CHATGPT_AGENT_DESKTOP_MACOS_DRIVER,
+  OPENAI_CHATGPT_AGENT_DESKTOP_LINUX_DRIVER,
   CLAUDE_CHAT_DESKTOP_MACOS_DRIVER,
   CLAUDE_COWORK_DESKTOP_MACOS_DRIVER,
   driverToSlug,
@@ -25,6 +26,25 @@ const EXTERNAL_HOST_REGISTRY: Record<
       input: { uses: 'builtin:openai.chatgpt.computerUseSubmit' },
       completion: {
         uses: 'builtin:openai.chatgpt.computerUseTrace',
+        provides: ['trace', 'normalize'],
+      },
+    },
+  },
+  [driverToSlug(OPENAI_CHATGPT_AGENT_DESKTOP_LINUX_DRIVER)]: {
+    driver: OPENAI_CHATGPT_AGENT_DESKTOP_LINUX_DRIVER,
+    name: 'ChatGPT Native Linux Desktop',
+    description:
+      'Drives a caller-prepared Linux ChatGPT desktop through AT-SPI with correlated native telemetry.',
+    correlation: { strategy: 'exact_prompt' },
+    capabilities: {
+      control: [
+        { uses: 'builtin:openai.chatgpt.configLifecycle' },
+        { uses: 'builtin:openai.chatgpt.appLifecycle' },
+        { uses: 'builtin:openai.chatgpt.nativeSurface' },
+      ],
+      input: { uses: 'builtin:openai.chatgpt.nativeSubmit' },
+      completion: {
+        uses: 'builtin:openai.chatgpt.nativeTrace',
         provides: ['trace', 'normalize'],
       },
     },

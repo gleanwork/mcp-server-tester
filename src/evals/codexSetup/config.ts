@@ -73,6 +73,16 @@ export type CodexMcpServerConfig = z.infer<typeof CodexMcpServerConfigSchema>;
 export type CodexNamedConfig = z.infer<typeof CodexNamedConfigSchema>;
 export type CodexSetupConfig = z.infer<typeof CodexSetupConfigSchema>;
 
+/**
+ * Native per-command execution policy. The only supported value turns off the
+ * native sandbox and approval prompts; use it only when the caller provides
+ * process isolation (for example, a disposable container).
+ */
+export interface CodexExecutionPolicy {
+  approvalPolicy: 'never';
+  sandboxMode: 'danger-full-access';
+}
+
 export interface ResolvedCodexSetup {
   configPath: string;
   configName: string;
@@ -169,13 +179,21 @@ export function renderCodexConfig(
   return `${content}\n`;
 }
 
+export interface CodexConfigInstallOptions {
+  configName?: string;
+  model?: string;
+  reasoningEffort?: string;
+  /** Store native CLI credentials in the OS keyring, never in CODEX_HOME files. */
+  credentialStore?: 'keyring';
+  /** Trust exactly this one absolute directory; any other project trust is removed. */
+  trustedProject?: string;
+  /** Rendered as top-level `approval_policy` and `sandbox_mode`. */
+  executionPolicy?: CodexExecutionPolicy;
+}
+
 export async function installCodexConfig(
   setup: CodexSetupConfig,
-  options: {
-    configName?: string;
-    model?: string;
-    reasoningEffort?: string;
-  } = {}
+  options: CodexConfigInstallOptions = {}
 ): Promise<CodexConfigInstallation> {
   if (options.model !== undefined && !/^[A-Za-z0-9._:-]+$/.test(options.model))
     throw new Error('Invalid ChatGPT model ID.');
@@ -186,6 +204,27 @@ export async function installCodexConfig(
     )
   )
     throw new Error('Invalid ChatGPT reasoning effort.');
+  if (
+    options.credentialStore !== undefined &&
+    options.credentialStore !== 'keyring'
+  )
+    throw new Error('Invalid Codex credential store.');
+  if (
+    options.trustedProject !== undefined &&
+    (!isAbsolute(options.trustedProject) ||
+      resolve(options.trustedProject) !== options.trustedProject ||
+      options.trustedProject === '/')
+  )
+    throw new Error(
+      'Codex trusted project must be a normalized absolute path.'
+    );
+  const policy = options.executionPolicy;
+  if (
+    policy !== undefined &&
+    (policy.approvalPolicy !== 'never' ||
+      policy.sandboxMode !== 'danger-full-access')
+  )
+    throw new Error('Invalid Codex execution policy.');
   const resolved = resolveCodexSetup(setup, options.configName);
   const target = resolved.configPath;
   const lock = `${target}${LOCK_SUFFIX}`;
@@ -217,6 +256,16 @@ export async function installCodexConfig(
     if (options.model !== undefined) settings.model = options.model;
     if (options.reasoningEffort !== undefined)
       settings.model_reasoning_effort = options.reasoningEffort;
+    if (options.credentialStore !== undefined)
+      settings.cli_auth_credentials_store = options.credentialStore;
+    if (policy !== undefined) {
+      settings.approval_policy = policy.approvalPolicy;
+      settings.sandbox_mode = policy.sandboxMode;
+    }
+    if (options.trustedProject !== undefined)
+      settings.projects = {
+        [options.trustedProject]: { trust_level: 'trusted' },
+      };
     const installedBytes = Buffer.from(stringify(settings), 'utf8');
     if (installedBytes.length > MAX_CONFIG_BYTES)
       throw new Error('Codex configuration is too large.');

@@ -8,10 +8,60 @@ import type {
   MCPHostSimulationResult,
 } from '../../mcpHost/mcpHostTypes.js';
 import type { ExternalHostTelemetry } from '../types.js';
+import type { ChatgptSurface } from '../../chatgpt/driver.js';
 
 const MAX_FILES = 10_000;
 const MAX_BYTES = 32 * 1024 * 1024;
 type ObjectValue = Record<string, unknown>;
+
+/** Fixed observed native identities. The caller selects the surface, never the transcript. */
+export function expectedChatgptOriginator(
+  surface: ChatgptSurface = 'chatgpt-work'
+): 'codex_work_desktop' | 'Codex Desktop' {
+  switch (surface) {
+    case 'chatgpt-work':
+      return 'codex_work_desktop';
+    case 'codex':
+      return 'Codex Desktop';
+    default:
+      throw new Error('ChatGPT surface must be chatgpt-work or codex.');
+  }
+}
+
+export interface ChatgptTracePolicy {
+  /** Defaults to Work for existing macOS and marker-based callers. */
+  surface?: ChatgptSurface;
+  /** Configured MCP labels; native `mcp__<label>` namespaces map back to them. */
+  mcpServers?: readonly string[];
+  /**
+   * Linux only: the app stores the prompt with Markdown punctuation
+   * backslash-escaped. Accept exactly that form (`native_markdown_escaped`).
+   */
+  nativeMarkdownEscapes?: boolean;
+}
+
+/** The app's namespace form of an MCP label: every non-alphanumeric character becomes `_`. */
+export function chatgptMcpNamespace(label: string): string {
+  return `mcp__${label.replace(/[^A-Za-z0-9]/g, '_')}`;
+}
+
+/**
+ * Split a native `mcp__<label>__<tool>` name. Configured labels win (longest
+ * first) so labels with `-` or `__` map back to their configured form; other
+ * names split at the first `__` and remain external MCP servers.
+ */
+function splitMcpName(
+  qualified: string,
+  configured: readonly string[]
+): { server: string; tool: string } | undefined {
+  for (const label of [...configured].sort((a, b) => b.length - a.length)) {
+    const prefix = `${chatgptMcpNamespace(label)}__`;
+    if (qualified.startsWith(prefix) && qualified.length > prefix.length)
+      return { server: label, tool: qualified.slice(prefix.length) };
+  }
+  const match = /^mcp__(.+?)__(.+)$/.exec(qualified);
+  return match ? { server: match[1]!, tool: match[2]! } : undefined;
+}
 
 /** Confirmed ChatGPT Work built-in namespace; never allow a configured MCP server to impersonate it. */
 export function isChatgptBuiltinServer(server: string): boolean {
@@ -24,7 +74,7 @@ interface Event {
   turnId?: string;
 }
 export interface ChatgptTrace {
-  promptMatch?: 'exact' | 'native_terminal_lf';
+  promptMatch?: ChatgptPromptMatch;
   nativePromptSha256?: string;
   sessionId: string;
   turnId: string;
@@ -32,6 +82,7 @@ export interface ChatgptTrace {
   reasoningEffort?: string;
   startedAt?: string;
   completedAt?: string;
+  /** Terminal, not necessarily successful: an aborted turn also has error set. */
   complete: boolean;
   error?: string;
   response?: string;
@@ -97,7 +148,7 @@ export async function findChatgptTrace(
   baseline: ChatgptSessionSnapshot,
   selector: ChatgptTraceSelector,
   startedAfterMs: number,
-  options: {
+  options: ChatgptTracePolicy & {
     requireFreshSession?: boolean;
     observedBeforeMs?: number;
     bound?: ChatgptTraceBinding;
@@ -127,7 +178,8 @@ export async function findChatgptTrace(
       content,
       selector,
       startedAfterMs,
-      options.observedBeforeMs
+      options.observedBeforeMs,
+      options
     );
     if (trace && old && options.requireFreshSession)
       throw new Error(
@@ -155,8 +207,10 @@ export function parseChatgptTrace(
   content: string,
   selector: ChatgptTraceSelector,
   startedAfterMs = 0,
-  observedBeforeMs = Infinity
+  observedBeforeMs = Infinity,
+  options: ChatgptTracePolicy = {}
 ): ChatgptTrace | undefined {
+  const expectedOriginator = expectedChatgptOriginator(options.surface);
   if (typeof selector !== 'string' && !selector.prompt.trim())
     throw new Error('Exact-prompt correlation requires a non-empty prompt.');
   const events: Event[] = [];
@@ -169,14 +223,34 @@ export function parseChatgptTrace(
   const lines = content.split('\n');
   // The writer may be in the middle of its last JSONL record.
   if (!content.endsWith('\n')) lines.pop();
+  // The native writer can leave a truncated record and then rewrite it whole
+  // under the same ordinal. Skip a malformed line only when that happens.
+  let lastOrdinal: number | undefined;
+  let pendingMalformed = false;
+  let supersededRecords = 0;
   for (const line of lines) {
     if (!line.trim()) continue;
     let raw: ObjectValue;
     try {
       raw = object(JSON.parse(line)) ?? {};
     } catch {
-      throw new Error('Malformed complete JSONL record in ChatGPT transcript.');
+      if (pendingMalformed || lastOrdinal === undefined)
+        throw new Error(
+          'Malformed complete JSONL record in ChatGPT transcript.'
+        );
+      pendingMalformed = true;
+      continue;
     }
+    const ordinal = number(raw.ordinal);
+    if (pendingMalformed) {
+      if (ordinal === undefined || ordinal !== lastOrdinal! + 1)
+        throw new Error(
+          'Malformed complete JSONL record in ChatGPT transcript.'
+        );
+      pendingMalformed = false;
+      supersededRecords += 1;
+    }
+    if (ordinal !== undefined) lastOrdinal = ordinal;
     const payload = object(raw.payload) ?? {};
     if (raw.type === 'session_meta') {
       sessionId = string(payload.id);
@@ -227,7 +301,7 @@ export function parseChatgptTrace(
         ? (isUserItem || isUserMessage) &&
           unescapeMarkdown(text).includes(`[eval-run-marker:${selector}]`)
         : isUserItem &&
-          (text === selector.prompt || text === `${selector.prompt}\n`);
+          promptMatchKind(text, selector.prompt, options) !== undefined;
     if (
       turnId &&
       time(event.timestamp) >= startedAfterMs &&
@@ -236,7 +310,9 @@ export function parseChatgptTrace(
     )
       matches.add(turnId);
   }
-  if (!sessionId || originator !== 'codex_work_desktop' || matches.size === 0)
+  if (pendingMalformed)
+    throw new Error('Malformed complete JSONL record in ChatGPT transcript.');
+  if (!sessionId || originator !== expectedOriginator || matches.size === 0)
     return undefined;
   if (matches.size > 1)
     throw new Error('Ambiguous matching ChatGPT turns for this query.');
@@ -252,10 +328,7 @@ export function parseChatgptTrace(
   const promptEvidence =
     typeof selector !== 'string' && nativePrompt !== undefined
       ? {
-          promptMatch:
-            nativePrompt === selector.prompt
-              ? ('exact' as const)
-              : ('native_terminal_lf' as const),
+          promptMatch: promptMatchKind(nativePrompt, selector.prompt, options)!,
           nativePromptSha256: createHash('sha256')
             .update(nativePrompt, 'utf8')
             .digest('hex'),
@@ -282,6 +355,17 @@ export function parseChatgptTrace(
       .map((event) => string(object(event.payload.item)?.id))
       .filter(Boolean)
   );
+  const outputs = new Map<string, Event>();
+  for (const event of turn)
+    if (
+      event.type === 'response_item' &&
+      (event.payload.type === 'function_call_output' ||
+        event.payload.type === 'custom_tool_call_output') &&
+      string(event.payload.call_id)
+    )
+      outputs.set(string(event.payload.call_id)!, event);
+  const pendingIds = new Set<string>();
+  const nestedIds = new Set<string>();
   let response: string | undefined;
   const usageRecords = new Map<string, ObjectValue>();
   let turnUsage: ObjectValue | undefined;
@@ -421,6 +505,35 @@ export function parseChatgptTrace(
       }
     } else if (
       event.type === 'response_item' &&
+      (p.type === 'function_call' || p.type === 'custom_tool_call')
+    ) {
+      const id = string(p.call_id) ?? string(p.id);
+      // item_completed records (other builds) own an id they share with a call.
+      if (
+        !id ||
+        calls.has(id) ||
+        nativeMessageIds.has(id) ||
+        nativeMessageIds.has(string(p.id))
+      )
+        continue;
+      const parsed = nativeResponseCall(
+        p,
+        id,
+        outputs.get(id),
+        event.timestamp,
+        options.mcpServers ?? []
+      );
+      for (const [index, call] of parsed.calls.entries()) {
+        calls.set(call.id!, call);
+        nativeItemTypes.set(call.id!, string(p.type)!);
+        if (index > 0) nestedIds.add(call.id!);
+      }
+      if (parsed.pending) pendingIds.add(id);
+      if (parsed.span)
+        intervals.push({ source: parsed.calls[0]!.source!, span: parsed.span });
+      history.push({ role: 'tool', toolCallId: id });
+    } else if (
+      event.type === 'response_item' &&
       p.type === 'message' &&
       p.role === 'assistant' &&
       !nativeMessageIds.has(string(p.id))
@@ -431,13 +544,40 @@ export function parseChatgptTrace(
     }
   }
   response = string(end?.payload.last_agent_message) ?? response;
-  const toolCalls = [...calls.values()].sort(
-    (a, b) => time(a.startedAt) - time(b.startedAt)
-  );
+  // Builds that record nested MCP calls as timed McpToolCall items make the
+  // references synthesized from exec input redundant; keep the native items.
+  if (nestedIds.size && [...nativeItemTypes.values()].includes('McpToolCall')) {
+    for (const id of nestedIds) {
+      calls.delete(id);
+      nativeItemTypes.delete(id);
+    }
+    nestedIds.clear();
+  }
+  // Untimed code-mode nested calls sort with their exec call.
+  const sortKey = (call: LLMToolCall) =>
+    time(
+      call.startedAt ??
+        (nestedIds.has(call.id!)
+          ? calls.get(call.id!.replace(/#\d+$/, ''))?.startedAt
+          : undefined)
+    );
+  const toolCalls = [...calls.values()].sort((a, b) => sortKey(a) - sortKey(b));
+  const complete = !!end || !!aborted;
   const durationMs = number(end?.payload.duration_ms);
-  const usage = usageFromRecords(turnUsage, usageRecords, durationMs);
+  // Partial turns: aborted duration, else elapsed native time so far.
+  const lastMs = Math.max(...turn.map((event) => time(event.timestamp)));
+  const partialDurationMs = end
+    ? undefined
+    : (number(aborted?.payload.duration_ms) ??
+      (start?.timestamp ? Math.max(0, lastMs - time(start.timestamp)) : 0));
+  const usage = usageFromRecords(
+    turnUsage,
+    usageRecords,
+    durationMs ?? partialDurationMs
+  );
   const mcpCalls = toolCalls.filter((call) => call.source === 'mcp');
   const hostCalls = toolCalls.filter((call) => call.source === 'host');
+  // Code-mode nested calls have no own timing; their time is inside the exec call.
   const mcpDurationMs = sumToolDuration(mcpCalls);
   const mcpIntervals = intervals.filter(
     (interval) => interval.source === 'mcp'
@@ -447,7 +587,7 @@ export function parseChatgptTrace(
       ? intervalUnion(mcpIntervals.map((interval) => interval.span))
       : undefined;
   const toolWallDurationMs =
-    intervals.length === toolCalls.length
+    intervals.length === toolCalls.length - nestedIds.size
       ? intervalUnion(intervals.map((interval) => interval.span))
       : undefined;
   const limitations = [
@@ -456,6 +596,22 @@ export function parseChatgptTrace(
     'Conversation history contains user/assistant messages and native tool results, not hidden reasoning.',
     'Confirmed ChatGPT Work cua_repl.js, CommandExecution, and Extension.web.search actions are host tools; unknown native MCP namespaces remain external MCP calls.',
   ];
+  if (supersededRecords)
+    limitations.push(
+      `${supersededRecords} truncated native record(s) were rewritten by the host under the same ordinal; the rewritten record was used.`
+    );
+  if (nestedIds.size)
+    limitations.push(
+      'Some MCP calls were made through the code-mode exec runner; per-call arguments and latency are not separately reported, and nested calls are counted once per observed reference.'
+    );
+  if (!end)
+    limitations.push(
+      'Turn did not complete; tool calls and usage are partial.'
+    );
+  if (pendingIds.size)
+    limitations.push(
+      'Some native tool calls have no recorded output and are pending.'
+    );
   if (!usage)
     limitations.push(
       'No complete native token-usage record was available for this turn.'
@@ -468,7 +624,7 @@ export function parseChatgptTrace(
     reasoningEffort: string(context?.effort),
     startedAt: start?.timestamp,
     completedAt: end?.timestamp ?? aborted?.timestamp,
-    complete: !!end || !!aborted,
+    complete,
     error: aborted ? 'ChatGPT turn was aborted.' : undefined,
     response,
     toolCalls,
@@ -482,6 +638,7 @@ export function parseChatgptTrace(
     telemetry: {
       models: string(context?.model) ? [string(context?.model)!] : undefined,
       reasoningEffort: string(context?.effort),
+      ...(end ? {} : { partial: true }),
       resultCount: end ? 1 : 0,
       apiCallCount: usageRecords.size || undefined,
       inputTokens: usage?.inputTokens,
@@ -506,10 +663,191 @@ export function parseChatgptTrace(
         nativeServer: call.server,
         nativeTool: call.name,
         nativeItemType: nativeItemTypes.get(call.id!),
+        ...(pendingIds.has(call.id!) ? { pending: true } : {}),
+        ...(nestedIds.has(call.id!) ? { viaCodeMode: true } : {}),
       })),
     },
     limitations,
   };
+}
+
+/**
+ * Convert a native `function_call` / `custom_tool_call` and its paired output.
+ * Attribution uses only the native namespace, name, and executed_tool_calls;
+ * tool-result text never changes provenance. The first call is the native call;
+ * later calls are MCP calls referenced inside a code-mode `exec` runner.
+ */
+function nativeResponseCall(
+  p: ObjectValue,
+  id: string,
+  outputEvent: Event | undefined,
+  timestamp: string | undefined,
+  configured: readonly string[]
+): { calls: LLMToolCall[]; span?: [number, number]; pending: boolean } {
+  const name = string(p.name);
+  if (!name)
+    throw new Error('Malformed native tool call in ChatGPT transcript.');
+  const out = outputEvent?.payload;
+  const outMeta = object(out?.internal_chat_message_metadata_passthrough);
+  const executed = (
+    Array.isArray(outMeta?.executed_tool_calls)
+      ? outMeta.executed_tool_calls
+      : []
+  )
+    .map((entry) => object(entry))
+    .filter((entry): entry is ObjectValue => !!string(entry?.name));
+  const startSec = number(
+    object(p.internal_chat_message_metadata_passthrough)?.create_time
+  );
+  const endSec = number(outMeta?.create_time);
+  const started =
+    startSec !== undefined
+      ? startSec * 1000
+      : timestamp
+        ? time(timestamp)
+        : undefined;
+  const completed =
+    out === undefined
+      ? undefined
+      : endSec !== undefined
+        ? endSec * 1000
+        : outputEvent?.timestamp
+          ? time(outputEvent.timestamp)
+          : undefined;
+  const span: [number, number] | undefined =
+    started !== undefined && completed !== undefined && completed >= started
+      ? [started, completed]
+      : undefined;
+  const output =
+    out === undefined
+      ? undefined
+      : typeof out.output === 'string'
+        ? out.output
+        : JSON.stringify(out.output);
+  const timing = {
+    durationMs: span ? span[1] - span[0] : undefined,
+    startedAt:
+      started === undefined ? undefined : new Date(started).toISOString(),
+    completedAt: span ? new Date(span[1]).toISOString() : undefined,
+  };
+  const isError = p.status === 'failed' || out?.status === 'failed';
+  if (p.type === 'function_call') {
+    const namespace = string(p.namespace);
+    const split = namespace?.startsWith('mcp__')
+      ? splitMcpName(`${namespace}__${name}`, configured)
+      : undefined;
+    const confirmed = executed.map((entry) =>
+      splitMcpName(string(entry.name)!, configured)
+    );
+    if (
+      split &&
+      confirmed.some(
+        (entry) =>
+          entry && (entry.server !== split.server || entry.tool !== split.tool)
+      )
+    )
+      throw new Error('Malformed native MCP call in ChatGPT transcript.');
+    const parsedArgs = parseArguments(p.arguments);
+    const argumentsValue =
+      parsedArgs ?? object(executed[0]?.arguments) ?? ({} as ObjectValue);
+    const source =
+      !split || (isChatgptBuiltinServer(split.server) && split.tool === 'js')
+        ? 'host'
+        : 'mcp';
+    return {
+      calls: [
+        {
+          source,
+          id,
+          name: split?.tool ?? name,
+          server: split?.server,
+          ...(source === 'host'
+            ? {
+                rawName: split
+                  ? `${split.server}.${split.tool}`
+                  : namespace
+                    ? `${namespace}.${name}`
+                    : name,
+              }
+            : {}),
+          arguments: argumentsValue,
+          output,
+          ...timing,
+          isError,
+        },
+      ],
+      span,
+      pending: out === undefined,
+    };
+  }
+  // custom_tool_call: never retain raw input (exec input is model-authored code).
+  const input = string(p.input) ?? '';
+  const referenced = [...input.matchAll(/\btools\.([A-Za-z0-9_]+)/g)].map(
+    (match) => match[1]!
+  );
+  const executedNames = executed.map((entry) => string(entry.name)!);
+  const nestedNames = [...new Set([...referenced, ...executedNames])];
+  const nested: LLMToolCall[] = [];
+  if (name === 'exec') {
+    const mcpNames = nestedNames.filter((nestedName) =>
+      splitMcpName(nestedName, configured)
+    );
+    for (const qualified of mcpNames) {
+      const split = splitMcpName(qualified, configured)!;
+      const runs = executed.filter((entry) => entry.name === qualified);
+      for (const run of runs.length ? runs : [undefined]) {
+        const builtin =
+          isChatgptBuiltinServer(split.server) && split.tool === 'js';
+        nested.push({
+          source: builtin ? 'host' : 'mcp',
+          id: `${id}#${nested.length + 1}`,
+          name: split.tool,
+          server: split.server,
+          rawName: builtin
+            ? `${split.server}.${split.tool}`
+            : `exec:${qualified}`,
+          arguments: object(run?.arguments) ?? {},
+          isError,
+        });
+      }
+    }
+  }
+  return {
+    calls: [
+      {
+        source: 'host',
+        id,
+        name,
+        rawName: name,
+        arguments: {
+          ...(name === 'exec'
+            ? {
+                nestedTools: nestedNames.filter(
+                  (nestedName) => !splitMcpName(nestedName, configured)
+                ),
+              }
+            : {}),
+          inputLength: input.length,
+          inputSha256: createHash('sha256').update(input, 'utf8').digest('hex'),
+        },
+        output,
+        ...timing,
+        isError,
+      },
+      ...nested,
+    ],
+    span,
+    pending: out === undefined,
+  };
+}
+
+function parseArguments(value: unknown): ObjectValue | undefined {
+  if (typeof value !== 'string') return object(value);
+  try {
+    return object(JSON.parse(value));
+  } catch {
+    return undefined;
+  }
 }
 
 function usageFromRecords(
@@ -568,6 +906,33 @@ function contentText(value: unknown): string {
   return Array.isArray(value)
     ? value.map((part) => string(object(part)?.text) ?? '').join('\n')
     : '';
+}
+/**
+ * How the host's stored user message equals the submitted prompt. The app may
+ * add one terminal LF. On Linux it may also backslash-escape Markdown
+ * punctuation (observed: `ALL_TOOLS` stored as `ALL\\_TOOLS`). Any other
+ * difference is not a match.
+ */
+export type ChatgptPromptMatch =
+  | 'exact'
+  | 'native_terminal_lf'
+  | 'native_markdown_escaped';
+function promptMatchKind(
+  stored: string,
+  prompt: string,
+  options: ChatgptTracePolicy
+): ChatgptPromptMatch | undefined {
+  if (stored === prompt) return 'exact';
+  const body = stored.endsWith('\n') ? stored.slice(0, -1) : stored;
+  if (body === prompt) return 'native_terminal_lf';
+  if (!options.nativeMarkdownEscapes) return undefined;
+  // Every stored backslash must start a Markdown escape; the unescaped text
+  // must then equal the prompt exactly.
+  if (body.replace(/\\[\\`*_{}[\]()#+.!:>-]/g, '').includes('\\'))
+    return undefined;
+  return unescapeMarkdown(body) === prompt
+    ? 'native_markdown_escaped'
+    : undefined;
 }
 function unescapeMarkdown(text: string): string {
   return text.replace(/\\([\\`*_{}[\]()#+.!:>-])/g, '$1');

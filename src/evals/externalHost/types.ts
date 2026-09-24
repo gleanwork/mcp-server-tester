@@ -4,7 +4,10 @@ import type {
 } from '../mcpHost/mcpHostTypes.js';
 import type { UsageMetrics } from '../../types/index.js';
 import type { CodexSetupConfig } from '../codexSetup/config.js';
-import type { ComputerUseTelemetry } from '../cowork/anthropicComputerUse.js';
+import type {
+  ComputerUseTelemetry,
+  SemanticDesktopTelemetry,
+} from '../cowork/driver.js';
 
 export type ExternalHostType = 'cli' | 'browser' | 'desktop' | 'custom';
 
@@ -105,7 +108,13 @@ export interface ExternalHostTelemetry {
     nativeServer?: string;
     nativeTool: string;
     nativeItemType?: string;
+    /** Native call has no recorded output yet. */
+    pending?: boolean;
+    /** Referenced inside a code-mode `exec` runner; no own arguments or timing. */
+    viaCodeMode?: boolean;
   }>;
+  /** The turn did not complete; calls and usage cover only what was recorded. */
+  partial?: boolean;
   reasoningOutputTokens?: number;
   reasoningEffort?: string;
   timeToFirstTokenMs?: number;
@@ -155,7 +164,10 @@ export interface ExternalHostCorrelationMetadata {
   promptSha256?: string;
   promptUnchanged?: boolean;
   /** Native user text: literal match, or the app's single appended LF. */
-  nativePromptMatch?: 'exact' | 'native_terminal_lf';
+  nativePromptMatch?:
+    | 'exact'
+    | 'native_terminal_lf'
+    | 'native_markdown_escaped';
   nativePromptSha256?: string;
 }
 
@@ -187,6 +199,17 @@ export interface ExternalHostMetadata {
     submission: {
       status: 'completed' | 'failed';
       telemetry?: ComputerUseTelemetry;
+    };
+  };
+  /** Deterministic native UI accounting; never reported as planner/model usage. */
+  nativeController?: {
+    provider: 'linux-atspi';
+    surface: 'chatgpt-work' | 'codex';
+    submission: {
+      status: 'completed' | 'failed';
+      telemetry?: SemanticDesktopTelemetry;
+      /** Failure-only sanitized UI state: surface, counts, and text hash. Never text. */
+      draftState?: Record<string, string | number | boolean>;
     };
   };
   evidence?: {
@@ -271,6 +294,9 @@ export interface ExternalHostRunFailure {
   success: false;
   error: string;
   toolCalls: LLMToolCall[];
+  /** Partial native evidence from a bound turn that did not complete. */
+  conversationHistory?: MCPHostSimulationResult['conversationHistory'];
+  usage?: UsageMetrics;
   externalHost: ExternalHostMetadata;
 }
 

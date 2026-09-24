@@ -7,6 +7,7 @@ import {
   installCodexConfig,
   renderCodexConfig,
   resolveCodexSetup,
+  type CodexExecutionPolicy,
 } from './config.js';
 
 const temporaryDirectories: string[] = [];
@@ -101,6 +102,86 @@ describe('Codex configuration lifecycle', () => {
     await installation.restore();
     expect(await readFile(configPath, 'utf8')).toBe(original);
   });
+  async function tempConfig(original?: string) {
+    const directory = await mkdtemp(join(tmpdir(), 'mst-codex-policy-'));
+    temporaryDirectories.push(directory);
+    const configPath = join(directory, 'config.toml');
+    if (original !== undefined)
+      await writeFile(configPath, original, { mode: 0o600 });
+    return { directory, configPath };
+  }
+
+  it('renders keyring, one trusted project, bearer env, and policy, then restores', async () => {
+    const original =
+      'approval_policy = "on-request"\ncli_auth_credentials_store = "file"\n[projects."/home/user"]\ntrust_level = "trusted"\n';
+    const { directory, configPath } = await tempConfig(original);
+    const workspace = join(directory, 'workspace');
+    const installation = await installCodexConfig(
+      {
+        configPath,
+        servers: [
+          {
+            transport: 'http',
+            label: 'glean',
+            url: 'https://example.test/mcp',
+            bearerTokenEnvVar: 'MST_CHATGPT_MCP_TOKEN_0',
+          },
+        ],
+      },
+      {
+        credentialStore: 'keyring',
+        trustedProject: workspace,
+        executionPolicy: {
+          approvalPolicy: 'never',
+          sandboxMode: 'danger-full-access',
+        },
+      }
+    );
+    expect(parse(await readFile(configPath, 'utf8'))).toEqual({
+      approval_policy: 'never',
+      sandbox_mode: 'danger-full-access',
+      cli_auth_credentials_store: 'keyring',
+      projects: { [workspace]: { trust_level: 'trusted' } },
+      mcp_servers: {
+        glean: {
+          url: 'https://example.test/mcp',
+          bearer_token_env_var: 'MST_CHATGPT_MCP_TOKEN_0',
+        },
+      },
+    });
+    await installation.restore();
+    expect(await readFile(configPath, 'utf8')).toBe(original);
+  });
+
+  it('omits the execution policy unless requested', async () => {
+    const { configPath } = await tempConfig();
+    const installation = await installCodexConfig({ configPath, servers: [] });
+    const installed = parse(await readFile(configPath, 'utf8'));
+    expect(installed).not.toHaveProperty('approval_policy');
+    expect(installed).not.toHaveProperty('sandbox_mode');
+    await installation.restore();
+  });
+
+  const invalidPolicy = {
+    approvalPolicy: 'on-request',
+    sandboxMode: 'danger-full-access',
+  };
+  it.each([
+    ['executionPolicy', invalidPolicy, 'execution policy'],
+    ['trustedProject', 'relative/workspace', 'trusted project'],
+    ['trustedProject', '/', 'trusted project'],
+    ['trustedProject', '/tmp/../tmp/x', 'trusted project'],
+  ])('rejects unsafe %s %j before writing', async (key, value, message) => {
+    const { directory, configPath } = await tempConfig();
+    const options = { credentialStore: 'keyring', [key]: value } as {
+      executionPolicy?: CodexExecutionPolicy;
+    };
+    await expect(
+      installCodexConfig({ configPath, servers: [] }, options)
+    ).rejects.toThrow(message);
+    expect(await readdir(directory)).toEqual([]);
+  });
+
   it('preserves app settings while replacing only the MCP server selection', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'mst-codex-config-'));
     temporaryDirectories.push(directory);

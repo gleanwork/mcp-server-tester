@@ -13,7 +13,7 @@ ENTER = {'action': 'key', 'text': 'Return'}
 
 
 class DriverTests(unittest.TestCase):
-    def run_actions(self, actions, mode='submit', budget=8, query='query', next_plan=None, entry_error=False, response_metadata=None, planner_error=None, application='cowork', target_model=None, reasoning_effort=None):
+    def run_actions(self, actions, mode='submit', budget=8, query='query', next_plan=None, entry_error=False, response_metadata=None, planner_error=None, application='cowork', target_model=None, reasoning_effort=None, chatgpt_surface='chatgpt-work'):
         api = MagicMock()
 
         def response(plan):
@@ -37,7 +37,7 @@ class DriverTests(unittest.TestCase):
 
         with patch.dict(sys.modules, {'anthropic': api}), patch.dict(driver.os.environ, {'ANTHROPIC_API_KEY': 'test-only'}), patch.object(driver.subprocess, 'run') as launched, patch.object(driver, 'check_chatgpt_permissions'), patch.object(driver.time, 'sleep'), patch.object(driver, 'screenshot', return_value={'type': 'image'}), patch.object(driver, 'execute_action', side_effect=execute) as performed:
             try:
-                result = asyncio.run(driver.run(query, budget, mode, application, target_model, reasoning_effort))
+                result = asyncio.run(driver.run(query, budget, mode, application, target_model, reasoning_effort, chatgpt_surface))
             except RuntimeError as error:
                 result = str(error)
                 self.error_telemetry = getattr(error, 'telemetry', None)
@@ -47,6 +47,18 @@ class DriverTests(unittest.TestCase):
             self.planner_request = planner.call_args.kwargs if planner.call_args else {}
             self.launches = launched.call_args_list
             return result, performed.call_count
+
+    def test_chatgpt_codex_surface_is_consumed_by_planner_not_added_to_query(self):
+        query = '  original query\n'
+        result, count = self.run_actions([FILL, ENTER], application='chatgpt',
+                                        chatgpt_surface='codex', query=query)
+        self.assertEqual(result['status'], 'submitted')
+        self.assertEqual(count, 2)
+        instruction = self.planner_request['messages'][0]['content'][0]['text']
+        self.assertIn('Open Codex', instruction)
+        self.assertIn('verify its current-mode label', instruction)
+        self.assertNotIn('ChatGPT Work', instruction)
+        self.assertEqual(self.executed_actions[0], {'action': 'type', 'text': query})
 
     def test_chatgpt_uses_shared_ai_loop_with_app_model_and_power_instructions(self):
         result, count = self.run_actions([FILL, ENTER, ENTER], application='chatgpt',

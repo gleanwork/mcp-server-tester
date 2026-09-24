@@ -1,23 +1,11 @@
-import {
-  closeMCPClient,
-  createMCPClientForConfig,
-} from '../../mcp/clientFactory.js';
 import { isHttpConfig, type MCPConfig } from '../../config/mcpConfig.js';
-import { formatMCPConnectionFailure } from '../../mcp/connectionDiagnostics.js';
+import { checkMcpServers, type McpServerReadiness } from '../mcpReadiness.js';
 import {
   resolveCoworkMcpHeaders,
   toCoworkServers,
 } from '../coworkSetup/config.js';
 
-export interface CoworkMcpServerReadiness {
-  label: string;
-  status: 'connected' | 'failed';
-  toolCount?: number;
-  elapsedMs: number;
-  error?: string;
-}
-
-const PREFLIGHT_TIMEOUT_MS = 30_000;
+export type CoworkMcpServerReadiness = McpServerReadiness;
 
 export class CoworkMcpReadinessError extends Error {
   readonly servers: CoworkMcpServerReadiness[];
@@ -33,30 +21,6 @@ export class CoworkMcpReadinessError extends Error {
     );
     this.name = 'CoworkMcpReadinessError';
     this.servers = servers;
-  }
-}
-
-function label(server: MCPConfig, index: number): string {
-  return server.label ?? `server-${index + 1}`;
-}
-
-async function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number
-): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new Error('MCP preflight timed out')),
-          timeoutMs
-        );
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
   }
 }
 
@@ -85,35 +49,8 @@ export async function verifyCoworkMcpServers(
   servers: MCPConfig[],
   env: Record<string, string | undefined>
 ): Promise<CoworkMcpServerReadiness[]> {
-  const results = await Promise.all(
-    servers.map(async (server, index): Promise<CoworkMcpServerReadiness> => {
-      const started = Date.now();
-      let client:
-        | Awaited<ReturnType<typeof createMCPClientForConfig>>
-        | undefined;
-      try {
-        client = await createMCPClientForConfig(resolveServer(server, env));
-        const tools = await withTimeout(
-          client.listTools(),
-          PREFLIGHT_TIMEOUT_MS
-        );
-        return {
-          label: label(server, index),
-          status: 'connected',
-          toolCount: tools.tools.length,
-          elapsedMs: Date.now() - started,
-        };
-      } catch (error) {
-        return {
-          label: label(server, index),
-          status: 'failed',
-          elapsedMs: Date.now() - started,
-          error: formatMCPConnectionFailure(error),
-        };
-      } finally {
-        if (client) await closeMCPClient(client).catch(() => undefined);
-      }
-    })
+  const results = await checkMcpServers(servers, (server) =>
+    resolveServer(server, env)
   );
   if (results.some((result) => result.status !== 'connected'))
     throw new CoworkMcpReadinessError(results);

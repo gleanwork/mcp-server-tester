@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ControllerModule from './macController.js';
 import type * as ConfigModule from '../codexSetup/config.js';
@@ -9,10 +12,13 @@ import {
   snapshotChatgptSessions,
 } from '../externalHost/builtins/chatgptTrace.js';
 import { runExternalHostScenario } from '../externalHost/runtime.js';
-import { ChatgptAppSession } from './macSession.js';
+import { ChatgptAppSession } from './session.js';
 import type { ExternalHostConfig } from '../externalHost/types.js';
 import { getChatgptApplicationController } from './macController.js';
-import { installCodexConfig } from '../codexSetup/config.js';
+import {
+  installCodexConfig,
+  type CodexExecutionPolicy,
+} from '../codexSetup/config.js';
 import {
   runAnthropicComputerUseSubmission,
   ComputerUseDriverError,
@@ -38,12 +44,47 @@ vi.mock('../externalHost/builtins/chatgptTrace.js', async (original) => ({
   snapshotChatgptSessions: vi.fn(),
 }));
 
+import { createLinuxChatgptProfile } from './linuxProfile.js';
+import type * as LinuxProfileModule from './linuxProfile.js';
+import { runLinuxChatgptDesktop } from '../chatgpt/linux.js';
+import { NativeChatgptDriverError } from '../chatgpt/linux.js';
+import type * as LinuxModule from '../chatgpt/linux.js';
+import { linuxEnvironment } from '../chatgpt/linuxEnvironment.fixture.js';
+import { CodexSetupError } from '../codexSetup/native.js';
+vi.mock('./linuxProfile.js', async (original) => ({
+  ...(await original<typeof LinuxProfileModule>()),
+  createLinuxChatgptProfile: vi.fn(),
+}));
+vi.mock('../chatgpt/linux.js', async (original) => ({
+  ...(await original<typeof LinuxModule>()),
+  runLinuxChatgptDesktop: vi.fn(),
+}));
+
 const events: string[] = [];
 const controller = {
   state: vi.fn(async () => ({ running: true })),
   stop: vi.fn(async () => undefined),
   start: vi.fn(async (_environment?: Record<string, string>) => undefined),
+  openPrompt: vi.fn(async (_prompt: string) => undefined),
 };
+const beforeStart = vi.fn(async () => undefined);
+const disposeProfile = vi.fn(async () => undefined);
+const POLICY: CodexExecutionPolicy = {
+  approvalPolicy: 'never',
+  sandboxMode: 'danger-full-access',
+};
+function linuxTelemetry(action_count = 3) {
+  return {
+    telemetry: {
+      driver: 'linux-desktop' as const,
+      accounting: 'complete' as const,
+      duration_ms: 5,
+      action_count,
+      planner: { status: 'not-applicable' as const },
+      cost: { status: 'not-applicable' as const },
+    },
+  };
+}
 const restore = vi.fn(async () => undefined);
 const plannerUsage: ComputerUseTelemetry = {
   accounting: 'complete',
@@ -151,6 +192,35 @@ beforeEach(() => {
     events.push('restore');
   });
   vi.mocked(getChatgptApplicationController).mockResolvedValue(controller);
+  for (const [mock, event] of [
+    [controller.openPrompt, 'open'],
+    [beforeStart, 'login-and-mcp'],
+    [disposeProfile, 'dispose-profile'],
+  ] as const)
+    mock.mockImplementation(async () => void events.push(event));
+  vi.mocked(createLinuxChatgptProfile).mockImplementation(async (env) => {
+    events.push('profile');
+    return {
+      configPath: join(env.codexHome, 'config.toml'),
+      install: { credentialStore: 'keyring', trustedProject: '/tmp/ws' },
+      controller,
+      evidenceDir: env.evidenceDir,
+      readiness: {
+        executionPolicy: POLICY,
+        login: 'verified',
+        mcpPreflight: [],
+      },
+      beforeStart,
+      dispose: disposeProfile,
+    };
+  });
+  vi.mocked(runLinuxChatgptDesktop).mockImplementation(
+    async (mode, _config, _deadline, prompt, openPrompt) => {
+      events.push(`native-${mode}`);
+      await openPrompt?.(mode === 'submit' ? (prompt ?? '') : '');
+      return linuxTelemetry();
+    }
+  );
   vi.mocked(installCodexConfig).mockImplementation(async () => {
     events.push('install');
     return {
@@ -313,6 +383,181 @@ describe('ChatGPT batch app lifecycle', () => {
       (await run('gpt-test', { managedChatgptSession: session })).success
     ).toBe(false);
     expect(runAnthropicComputerUseSubmission).not.toHaveBeenCalled();
+  });
+});
+
+describe('ChatGPT Linux native lifecycle', () => {
+  let home: string;
+  function linuxConfig(): ExternalHostConfig {
+    const base = testConfig();
+    return {
+      ...base,
+      driver: 'openai.chatgpt.agent.desktop-app.linux',
+      codexSetup: { ...base.codexSetup, configPath: undefined },
+      options: {
+        ...base.options,
+        surface: 'codex',
+        desktopEnvironment: linuxEnvironment(home),
+      },
+    };
+  }
+  beforeEach(async () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', '');
+    home = await realpath(await mkdtemp(join(tmpdir(), 'mst-linux-session-')));
+    const sessions = join(home, '.codex', 'sessions');
+    await mkdir(sessions, { recursive: true });
+    await mkdir(join(home, 'evidence'), { mode: 0o700 });
+    const transcript = join(sessions, 'rollout-native.jsonl');
+    await writeFile(transcript, '{"type":"session_meta"}\n');
+    const implementation = vi.mocked(findChatgptTrace).getMockImplementation()!;
+    vi.mocked(findChatgptTrace).mockImplementation(async (...args) => {
+      const found = await implementation(...args);
+      return found ? { ...found, path: transcript } : found;
+    });
+    // The MST-owned Linux app is never running before setup.
+    controller.state.mockImplementation(async () => {
+      events.push('state');
+      return { running: false };
+    });
+  });
+  afterEach(async () => {
+    await rm(home, { recursive: true, force: true });
+  });
+
+  it('prepares surface once per batch and keeps native controller separate from model accounting', async () => {
+    const session = new ChatgptAppSession();
+    const config = linuxConfig();
+    try {
+      await session.prepare(config);
+      expect(session.telemetry.nativeSetup).toEqual(linuxTelemetry().telemetry);
+      for (let i = 0; i < 2; i++) {
+        const result = await runExternalHostScenario('exact query', {
+          ...config,
+          options: { ...config.options, managedChatgptSession: session },
+        });
+        expect(result.success).toBe(true);
+        expect(result.externalHost).toMatchObject({
+          driver: { platform: 'linux' },
+          computerUse: undefined,
+          nativeController: {
+            provider: 'linux-atspi',
+            surface: 'codex',
+            submission: { status: 'completed' },
+          },
+          traceSource: 'host-local-transcript',
+          artifacts: [
+            {
+              kind: 'transcript',
+              summary: expect.stringMatching(/sha256=[a-f0-9]{64}$/),
+              path: expect.stringContaining(join(home, 'evidence')),
+            },
+          ],
+        });
+      }
+      // Extra snapshots after each trace are the bounded evidence-candidate scan.
+      const submit = ['open', 'snapshot', 'native-submit'];
+      expect(
+        events.filter(
+          (event, i) =>
+            event !== 'snapshot' || events[i + 1] === 'native-submit'
+        )
+      ).toEqual([
+        ...['profile', 'state', 'install', 'login-and-mcp', 'start'],
+        'native-prepare',
+        ...submit,
+        ...submit,
+        'open',
+      ]);
+      expect(session.sessionsRoot).toBe(join(home, '.codex/sessions'));
+      expect(session.evidenceDir).toBe(join(home, 'evidence'));
+      expect(vi.mocked(installCodexConfig).mock.calls[0]).toEqual([
+        expect.objectContaining({
+          configPath: join(home, '.codex/config.toml'),
+        }),
+        expect.objectContaining({
+          credentialStore: 'keyring',
+          trustedProject: '/tmp/ws',
+        }),
+      ]);
+      // Prepare opens an empty draft; each submit opens the exact prompt.
+      expect(controller.openPrompt.mock.calls.map((call) => call[0])).toEqual([
+        '',
+        'exact query',
+        'exact query',
+      ]);
+      expect(runAnthropicComputerUseSubmission).not.toHaveBeenCalled();
+      expect(getChatgptApplicationController).not.toHaveBeenCalled();
+    } finally {
+      await session.dispose();
+    }
+    expect(events.slice(-3)).toEqual(['stop', 'restore', 'dispose-profile']);
+  });
+
+  it('fails before any prompt when login or MCP readiness fails', async () => {
+    beforeStart.mockRejectedValueOnce(
+      new CodexSetupError('mcp_server_not_ready')
+    );
+    const session = new ChatgptAppSession();
+    await expect(session.prepare(linuxConfig())).rejects.toThrow(
+      'mcp_server_not_ready'
+    );
+    for (const fn of [controller.start, runLinuxChatgptDesktop])
+      expect(fn).not.toHaveBeenCalled();
+    expect(controller.openPrompt).not.toHaveBeenCalled();
+    expect(session.telemetry).toMatchObject({
+      setupStatus: 'failed',
+      nativeReadiness: { login: 'verified', executionPolicy: POLICY },
+    });
+    await session.dispose();
+    expect(events.slice(-2)).toEqual(['restore', 'dispose-profile']);
+  });
+
+  it('claims one in-process lease per isolated Linux HOME', async () => {
+    const first = new ChatgptAppSession();
+    const second = new ChatgptAppSession();
+    try {
+      await first.prepare(linuxConfig());
+      await expect(second.prepare(linuxConfig())).rejects.toThrow(
+        'already managing this ChatGPT application'
+      );
+    } finally {
+      await second.dispose();
+      await first.dispose();
+    }
+  });
+
+  it('does not submit or read evidence after failed surface setup', async () => {
+    vi.mocked(runLinuxChatgptDesktop).mockRejectedValueOnce(
+      new NativeChatgptDriverError('surface failed')
+    );
+    const result = await runExternalHostScenario('query', linuxConfig());
+    expect(result.success).toBe(false);
+    expect(runLinuxChatgptDesktop).toHaveBeenCalledTimes(1);
+    expect(snapshotChatgptSessions).not.toHaveBeenCalled();
+    expect(restore).toHaveBeenCalledTimes(1);
+  });
+
+  it('uncertain native send is not retried or interpreted as native evidence', async () => {
+    const draftState = {
+      observedSurface: 'chatgpt-work' as const,
+      composerRootCount: 1,
+      sendControlCount: 1,
+      textReadable: false,
+    };
+    vi.mocked(runLinuxChatgptDesktop).mockImplementation(async (mode) => {
+      if (mode === 'submit')
+        throw new NativeChatgptDriverError('uncertain send', { draftState });
+      return linuxTelemetry(0);
+    });
+    const result = await runExternalHostScenario('query', linuxConfig());
+    expect(result.success).toBe(false);
+    expect(result.externalHost.nativeController?.submission).toMatchObject({
+      status: 'failed',
+      draftState,
+    });
+    expect(result.externalHost.computerUse).toBeUndefined();
+    expect(findChatgptTrace).not.toHaveBeenCalled();
+    expect(runLinuxChatgptDesktop).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -1,0 +1,6 @@
+{"timestamp":"2026-09-23T15:34:00.703Z","type":"session_meta","payload":{"id":"codex-aborted-session","originator":"Codex Desktop","source":"vscode"}}
+{"timestamp":"2026-09-23T15:34:01.998Z","type":"event_msg","payload":{"type":"task_started","turn_id":"codex-aborted-turn","started_at":1790177641}}
+{"timestamp":"2026-09-23T15:34:02.137Z","type":"turn_context","payload":{"turn_id":"codex-aborted-turn","model":"gpt-5.6-terra","effort":"medium"}}
+{"timestamp":"2026-09-23T15:34:02.137Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"codex-aborted-turn","item":{"type":"UserMessage","id":"sanitized-user","content":[{"type":"text","text":"Find documents.\n","text_elements":[]}]}}}
+{"timestamp":"2026-09-23T15:34:03.946Z","type":"response_item","payload":{"type":"function_call","name":"js","namespace":"mcp__cua_repl","arguments":"{\"code\":\"await cua.getState()\"}","call_id":"sanitized-call"}}
+{"timestamp":"2026-09-23T15:36:00.798Z","type":"event_msg","payload":{"type":"turn_aborted","turn_id":"codex-aborted-turn","reason":"interrupted","started_at":1790177641,"completed_at":1790177760,"duration_ms":118803}}

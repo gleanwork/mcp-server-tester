@@ -1,9 +1,10 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
+  expectedChatgptOriginator,
   findChatgptTrace,
   parseChatgptTrace,
   snapshotChatgptSessions,
@@ -123,12 +124,16 @@ function turn(id = 'turn', runMarker = marker) {
     ),
   ];
 }
-function serialize(events = turn(), sessionId = 'session') {
+function serialize(
+  events = turn(),
+  sessionId = 'session',
+  originator = 'codex_work_desktop'
+) {
   return (
     [
       event('session_meta', {
         id: sessionId,
-        originator: 'codex_work_desktop',
+        originator,
       }),
       ...events,
     ]
@@ -156,7 +161,116 @@ const exact = (prompt: string) => ({
   prompt,
 });
 
+// Cross-surface, CLI, and variant spellings of the native originator.
+const originatorVariants = [
+  'codex_work_desktop',
+  'Codex Desktop',
+  'codex_cli_rs',
+  'codex_cli',
+  'codex',
+  'codex_desktop',
+  'codex desktop',
+  'Codex desktop',
+  'CODEX DESKTOP',
+  'Codex Desktop ',
+  ' Codex Desktop',
+  'Codex_Work_Desktop',
+  'codex_work_desktop\n',
+];
+
+it.each([
+  { surface: undefined, originator: 'codex_work_desktop' },
+  { surface: 'chatgpt-work' as const, originator: 'codex_work_desktop' },
+  { surface: 'codex' as const, originator: 'Codex Desktop' },
+])(
+  'accepts only the configured originator for exact and marker selectors ($surface)',
+  ({ surface, originator }) => {
+    expect(expectedChatgptOriginator(surface)).toBe(originator);
+    for (const [records, selector] of [
+      [exactTurn('Find docs'), exact('Find docs')],
+      [exactTurn('Find docs\n'), exact('Find docs')],
+      [turn(), marker],
+    ] as const) {
+      const parse = (from: string) =>
+        parseChatgptTrace(
+          serialize(records, 'session', from),
+          selector,
+          1000,
+          2000,
+          {
+            surface,
+          }
+        );
+      expect(parse(originator)).toMatchObject({
+        complete: true,
+        response: 'done',
+      });
+      expect(parse(originator)?.error).toBeUndefined();
+      for (const other of originatorVariants)
+        if (other !== originator) expect(parse(other)).toBeUndefined();
+    }
+  }
+);
+
+it('keeps the observed Codex abort terminal but unsuccessful', async () => {
+  // Minimized/redacted shape from preserved run 35881948713, not a completed run.
+  const content = await readFile(
+    new URL('./fixtures/codexDesktopAborted.jsonl', import.meta.url),
+    'utf8'
+  );
+  expect(parseChatgptTrace(content, exact('Find documents.'))).toBeUndefined();
+  const trace = parseChatgptTrace(
+    content,
+    exact('Find documents.'),
+    Date.parse('2026-09-23T15:34:00Z'),
+    Date.parse('2026-09-23T15:36:01Z'),
+    { surface: 'codex' }
+  );
+  expect(trace).toMatchObject({
+    promptMatch: 'native_terminal_lf',
+    model: 'gpt-5.6-terra',
+    reasoningEffort: 'medium',
+    complete: true,
+    error: 'ChatGPT turn was aborted.',
+    telemetry: { resultCount: 0 },
+  });
+  expect(trace?.response).toBeUndefined();
+  expect(trace?.usage).toBeUndefined();
+});
+
 describe('marker-free native correlation', () => {
+  it('accepts the Linux native Markdown-escaped form of the exact prompt only', () => {
+    // Observed on Linux ChatGPT Work 26.915.31945.
+    const prompt = 'run text(ALL_TOOLS.filter(t => /glean/i.test(t.name)))';
+    const stored = 'run text(ALL\\_TOOLS.filter(t => /glean/i.test(t.name)))\n';
+    const linux = (native: string, expected = prompt) =>
+      parseChatgptTrace(
+        serialize(exactTurn(native)),
+        exact(expected),
+        0,
+        Infinity,
+        { nativeMarkdownEscapes: true }
+      );
+    expect(linux(stored)).toMatchObject({
+      promptMatch: 'native_markdown_escaped',
+      nativePromptSha256: createHash('sha256').update(stored).digest('hex'),
+    });
+    // macOS (default policy) stays strict.
+    expect(
+      parseChatgptTrace(serialize(exactTurn(stored)), exact(prompt))
+    ).toBeUndefined();
+    for (const other of [
+      'run text(ALL\\_TOOLS.filter(t => /glean/i.test(t.names)))',
+      'run text(ALL\\TOOLS.filter(t => /glean/i.test(t.name)))',
+      'run text(ALL\\_TOOLS.filter(t => /glean/i.test(t.name)))\n\n',
+    ])
+      expect(linux(other)).toBeUndefined();
+    // A literal backslash in the prompt must be stored escaped, not bare.
+    expect(linux('a\\\\b', 'a\\b')?.promptMatch).toBe(
+      'native_markdown_escaped'
+    );
+  });
+
   it('records the native single-terminal-LF form without general whitespace folding', () => {
     const trace = parseChatgptTrace(
       serialize(exactTurn('Find docs\n')),
@@ -637,6 +751,49 @@ describe('ChatGPT native telemetry', () => {
     );
   });
 
+  describe('native rewrite of a truncated record under the same ordinal', () => {
+    // Observed on Linux ChatGPT Work 26.915.31945: a truncated record, then the
+    // same record complete with the ordinal the truncated one would have had.
+    const numbered = () =>
+      serialize()
+        .trimEnd()
+        .split('\n')
+        .map((line, ordinal) =>
+          JSON.stringify({ ...JSON.parse(line), ordinal })
+        );
+    const truncate = (line: string) =>
+      line.slice(0, Math.floor(line.length / 2));
+
+    it('uses the rewritten record and records a limitation', () => {
+      const lines = numbered();
+      lines.splice(4, 0, truncate(lines[4]!));
+      const trace = parseChatgptTrace(lines.join('\n') + '\n', marker);
+      expect(trace?.complete).toBe(true);
+      expect(trace?.limitations).toContain(
+        '1 truncated native record(s) were rewritten by the host under the same ordinal; the rewritten record was used.'
+      );
+    });
+
+    it.each([
+      [
+        'the next record skips an ordinal',
+        (l: string[]) => l.splice(4, 1, truncate(l[4]!)),
+      ],
+      [
+        'two malformed records in a row',
+        (l: string[]) => l.splice(4, 0, '{bad', '{bad'),
+      ],
+      ['the first record', (l: string[]) => l.splice(0, 0, '{bad')],
+      ['the last complete record', (l: string[]) => l.push('{bad')],
+    ])('fails closed when the malformed line is followed by %s', (_, edit) => {
+      const lines = numbered();
+      edit(lines);
+      expect(() => parseChatgptTrace(lines.join('\n') + '\n', marker)).toThrow(
+        'Malformed complete JSONL record'
+      );
+    });
+  });
+
   it('does not call a final answer complete until task_complete', () => {
     expect(
       parseChatgptTrace(serialize(turn().slice(0, -1)), marker)?.complete
@@ -772,4 +929,288 @@ it('discovers only changed/new rollout files and rejects duplicate sessions', as
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+/**
+ * Redacted synthetic records with the observed native shapes of package
+ * 26.915.31945: response_item function_call / custom_tool_call pairs,
+ * token_usage_record, and task_complete.
+ */
+describe('ChatGPT native response_item tool calls', () => {
+  type NativeEvent = ReturnType<typeof event>;
+  type Fields = Record<string, unknown>;
+  const T = 'native-turn';
+  const base = 1_790_000_000; // epoch seconds, as in create_time
+  const at = (seconds: number) => (base + seconds) * 1000;
+  const meta = (seconds: number, extra: Fields = {}) => ({
+    internal_chat_message_metadata_passthrough: {
+      turn_id: T,
+      create_time: base + seconds,
+      ...extra,
+    },
+  });
+  const executed = (...calls: Fields[]) => ({
+    executed_tool_calls: calls,
+    tool_calls_complete: true,
+  });
+  const item = (payload: Fields, from = 0, to = from) =>
+    event(
+      'event_msg',
+      {
+        type: 'item_completed',
+        turn_id: T,
+        item: payload,
+        started_at_ms: at(from),
+        completed_at_ms: at(to),
+      },
+      at(to)
+    );
+  const mcp = { type: 'McpToolCall', server: 'glean-eval', tool: 'search' };
+  /** A native call and, when `out` is given, its output paired by call_id. */
+  function call(
+    callId: string,
+    fields: Fields,
+    t0: number,
+    out?: { at: number; output?: unknown; meta?: Fields }
+  ): NativeEvent[] {
+    const type = 'input' in fields ? 'custom_tool_call' : 'function_call';
+    const start = { type, id: `item_${callId}`, call_id: callId, ...fields };
+    const output = out && {
+      type: `${type}_output`,
+      call_id: callId,
+      output: out.output ?? [{ type: 'input_text', text: 'redacted' }],
+      ...meta(out.at, out.meta),
+    };
+    return [
+      event('response_item', { ...start, ...meta(t0) }, at(t0)),
+      ...(output ? [event('response_item', output, at(out.at))] : []),
+    ];
+  }
+  const exec = (id: string, input: string, t0: number, t1?: number) =>
+    call(id, { name: 'exec', input }, t0, t1 ? { at: t1 } : undefined);
+  const complete = { type: 'task_complete', turn_id: T, duration_ms: 5000 };
+  const parse = (
+    body: NativeEvent[],
+    {
+      done = true,
+      surface = 'chatgpt-work' as 'chatgpt-work' | 'codex',
+      mcpServers = ['glean-eval'],
+    } = {}
+  ) =>
+    parseChatgptTrace(
+      serialize(
+        [
+          event('event_msg', { type: 'task_started', turn_id: T }, at(0)),
+          event('turn_context', { turn_id: T, model: 'gpt-test' }),
+          item({
+            type: 'UserMessage',
+            id: 'user',
+            content: [{ text: 'Find docs.\n' }],
+          }),
+          ...body,
+          event(
+            'token_usage_record',
+            {
+              turn_id: T,
+              response_id: 'r',
+              turn_token_usage: { input_tokens: 100, output_tokens: 10 },
+            },
+            at(4)
+          ),
+          ...(done ? [event('event_msg', complete, at(5))] : []),
+        ],
+        'session',
+        expectedChatgptOriginator(surface)
+      ),
+      exact('Find docs.'),
+      0,
+      Infinity,
+      { surface, mcpServers }
+    )!;
+
+  it('pairs a custom_tool_call exec with its output as a host call without raw input', () => {
+    const input = 'const r = await tools.web__run({ q: "redacted" }); r';
+    const trace = parse(exec('call_web', input, 1, 2));
+    expect(trace.toolCalls).toEqual([
+      expect.objectContaining({
+        source: 'host',
+        id: 'call_web',
+        name: 'exec',
+        rawName: 'exec',
+        durationMs: 1000,
+        output: JSON.stringify([{ type: 'input_text', text: 'redacted' }]),
+        arguments: {
+          nestedTools: ['web__run'],
+          inputLength: input.length,
+          inputSha256: createHash('sha256').update(input).digest('hex'),
+        },
+      }),
+    ]);
+    expect(JSON.stringify(trace.toolCalls)).not.toContain('await tools');
+    expect(trace.telemetry).toMatchObject({ mcpToolCallCount: 0 });
+    expect(trace.telemetry.partial).toBeUndefined();
+    expect(trace.limitations.join(' ')).not.toContain('code-mode');
+    expect(trace.usage).toMatchObject({ inputTokens: 100, durationMs: 5000 });
+  });
+
+  it('attributes nested code-mode MCP references inside exec to the configured label', () => {
+    const trace = parse(
+      exec(
+        'call_mcp',
+        'await tools.mcp__glean_eval__search({ query: "x" }); await tools.web__run({})',
+        1,
+        2
+      )
+    );
+    expect(trace.toolCalls).toMatchObject([
+      { source: 'host', arguments: { nestedTools: ['web__run'] } },
+      {
+        source: 'mcp',
+        server: 'glean-eval',
+        name: 'search',
+        rawName: 'exec:mcp__glean_eval__search',
+        arguments: {},
+      },
+    ]);
+    expect(trace.toolCalls[1]!.durationMs).toBeUndefined();
+    expect(trace.mcpDurationMs).toBeUndefined();
+    expect(trace.telemetry).toMatchObject({
+      mcpToolCallCount: 1,
+      hostToolCallCount: 1,
+      toolProvenance: [
+        { id: 'call_mcp', source: 'host' },
+        { id: 'call_mcp#1', source: 'mcp', viaCodeMode: true },
+      ],
+    });
+    expect(trace.limitations.join(' ')).toContain('code-mode exec runner');
+    // executed_tool_calls supplies nested arguments and counts.
+    const confirmed = call('call_mcp', { name: 'exec', input: 'code' }, 1, {
+      at: 2,
+      meta: executed(
+        { name: 'mcp__glean_eval__search', arguments: { query: 'a' } },
+        { name: 'mcp__glean_eval__search', arguments: { query: 'b' } }
+      ),
+    });
+    expect(
+      parse(confirmed).toolCalls.filter((c) => c.source === 'mcp')
+    ).toMatchObject([
+      { arguments: { query: 'a' } },
+      { arguments: { query: 'b' } },
+    ]);
+  });
+
+  it('counts each MCP call once when a native McpToolCall also exists', () => {
+    // Observed on Linux ChatGPT Work 26.915.31945: exec references the tool and
+    // the host also records a timed McpToolCall item for the same call.
+    const viaExec = parse([
+      ...exec('call_mcp', 'await tools.mcp__glean_eval__search({})', 1, 3),
+      item({ ...mcp, id: 'mcp-item-1', arguments: {} }, 1.5, 2.5),
+    ]);
+    expect(
+      viaExec.toolCalls.map((c) => [c.source, c.name, c.durationMs])
+    ).toEqual([
+      ['host', 'exec', 2000],
+      ['mcp', 'search', 1000],
+    ]);
+    expect(viaExec.telemetry.mcpToolCallCount).toBe(1);
+    expect(viaExec.limitations.join(' ')).not.toContain(
+      'code-mode exec runner'
+    );
+    const direct = parse([
+      ...call('shared', { name: 'search', namespace: 'mcp__glean_eval' }, 1),
+      item({ ...mcp, id: 'shared', arguments: {} }),
+    ]);
+    expect(direct.toolCalls).toHaveLength(1);
+    expect(direct.telemetry.toolProvenance?.[0]?.nativeItemType).toBe(
+      'McpToolCall'
+    );
+  });
+
+  it('pairs a direct function_call with its output by call_id and checks native confirmation', () => {
+    const direct = (namespace: string, runs: Fields[] = [], name = 'search') =>
+      call('call_fc', { name, namespace, arguments: '{"query":"x"}' }, 1, {
+        at: 1.5,
+        output: 'redacted',
+        meta: executed(...runs),
+      });
+    const codex = { surface: 'codex' as const };
+    const confirmed = [{ name: 'mcp__glean_eval__search' }];
+    const trace = parse(direct('mcp__glean_eval', confirmed), codex);
+    expect(trace.toolCalls).toEqual([
+      expect.objectContaining({
+        source: 'mcp',
+        id: 'call_fc',
+        server: 'glean-eval',
+        name: 'search',
+        arguments: { query: 'x' },
+        output: 'redacted',
+        durationMs: 500,
+      }),
+    ]);
+    expect(trace).toMatchObject({ mcpDurationMs: 500, llmDurationMs: 4500 });
+    expect(trace.telemetry).toMatchObject({
+      mcpToolCallCount: 1,
+      mcpWallDurationMs: 500,
+      toolProvenance: [
+        {
+          source: 'mcp',
+          nativeServer: 'glean-eval',
+          nativeItemType: 'function_call',
+        },
+      ],
+    });
+    // Unknown namespaces stay external MCP calls.
+    expect(parse(direct('mcp__other'), codex).toolCalls[0]).toMatchObject({
+      source: 'mcp',
+      server: 'other',
+    });
+    // Disagreeing native confirmation fails closed.
+    expect(() => parse(direct('mcp__other', confirmed), codex)).toThrow(
+      'Malformed native MCP'
+    );
+    // cua_repl stays a host tool even when a configured label impersonates it.
+    const cua = parse(direct('mcp__cua_repl', [], 'js'), {
+      mcpServers: ['cua_repl'],
+    });
+    expect(cua.toolCalls).toMatchObject([
+      { source: 'host', server: 'cua_repl', rawName: 'cua_repl.js' },
+    ]);
+    expect(cua.telemetry.mcpToolCallCount).toBe(0);
+  });
+
+  it('returns partial calls and usage for a turn that timed out mid-call', () => {
+    const trace = parse(
+      [
+        ...exec('call_1', 'await tools.exec_command({})', 1, 2),
+        ...exec('call_2', 'await tools.mcp__glean_eval__search({})', 3),
+      ],
+      { done: false }
+    );
+    expect(trace.complete).toBe(false);
+    expect(trace.response).toBeUndefined();
+    expect(trace.toolCalls).toMatchObject([
+      {
+        id: 'call_1',
+        source: 'host',
+        arguments: { nestedTools: ['exec_command'] },
+      },
+      { id: 'call_2', source: 'host', output: undefined },
+      { id: 'call_2#1', source: 'mcp' },
+    ]);
+    expect(trace.telemetry).toMatchObject({
+      partial: true,
+      resultCount: 0,
+      mcpToolCallCount: 1,
+      hostToolCallCount: 2,
+      toolProvenance: [{ id: 'call_1' }, { id: 'call_2', pending: true }, {}],
+    });
+    // Elapsed native time so far (task_started to last record), not a turn total.
+    expect(trace.usage).toMatchObject({ inputTokens: 100, durationMs: 4000 });
+    expect(trace.limitations).toEqual(
+      expect.arrayContaining([
+        'Turn did not complete; tool calls and usage are partial.',
+        'Some native tool calls have no recorded output and are pending.',
+      ])
+    );
+  });
 });

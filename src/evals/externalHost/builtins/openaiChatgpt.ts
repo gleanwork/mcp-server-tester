@@ -5,13 +5,17 @@ import {
   findChatgptTrace,
   snapshotChatgptSessions,
   type ChatgptSessionSnapshot,
+  type ChatgptTrace,
   type ChatgptTraceBinding,
   type ChatgptTraceSelector,
 } from './chatgptTrace.js';
+import { copyChatgptEvidence } from './chatgptEvidence.js';
 import { resolveCodexSetup } from '../../codexSetup/config.js';
-import { ChatgptAppSession } from '../../chatgptSetup/macSession.js';
+import { ChatgptAppSession } from '../../chatgptSetup/session.js';
 import {
   ComputerUseDriverError,
+  chatgptSurface,
+  isLinuxChatgpt,
   submitChatgptQuery,
   stringOption,
   validateChatgptConfig,
@@ -28,9 +32,24 @@ import type {
 } from '../types.js';
 import { driverToSlug, hostTypeFromDriver } from '../driverIdentity.js';
 
+import {
+  NativeChatgptDriverError,
+  runLinuxChatgptDesktop,
+} from '../../chatgpt/linux.js';
+import { validateLinuxChatgptConfig } from '../../chatgptSetup/linuxProfile.js';
+
 const POLL_INTERVAL_MS = 750;
 
-/** The planner owns all UI navigation. Native code owns only app/config lifecycle. */
+/** Cold Linux first turns need time to flush; neither platform can exceed the run deadline. */
+export function chatgptBindingDeadline(
+  linux: boolean,
+  now: number,
+  runDeadline: number
+): number {
+  return Math.min(now + (linux ? 120_000 : 30_000), runDeadline);
+}
+
+/** Platform-specific input; shared lifecycle and strict native evidence. */
 export const OPENAI_CHATGPT_CAPABILITIES: ExternalHostCapabilityImplementation[] =
   [
     {
@@ -59,6 +78,21 @@ export const OPENAI_CHATGPT_CAPABILITIES: ExternalHostCapabilityImplementation[]
       capabilities: ['completion', 'trace', 'normalize'],
       run: captureChatgptComputerUseResult,
     },
+    {
+      id: 'builtin:openai.chatgpt.nativeSurface',
+      capabilities: ['control'],
+      setup: snapshotBeforeSubmission,
+    },
+    {
+      id: 'builtin:openai.chatgpt.nativeSubmit',
+      capabilities: ['input'],
+      run: submitChatgptPrompt,
+    },
+    {
+      id: 'builtin:openai.chatgpt.nativeTrace',
+      capabilities: ['completion', 'trace', 'normalize'],
+      run: captureChatgptComputerUseResult,
+    },
   ];
 
 async function setupChatgptConfig({
@@ -69,6 +103,7 @@ async function setupChatgptConfig({
 }: ExternalHostCapabilityContext): Promise<ExternalHostRunResult | void> {
   try {
     validateChatgptConfig(config);
+    if (isLinuxChatgpt(config)) validateLinuxChatgptConfig(config);
     if (run.correlation.strategy === 'exact_prompt') {
       if (
         run.correlation.includedInPrompt ||
@@ -127,12 +162,16 @@ async function setupChatgptAppLifecycle({
       if (!(shared instanceof ChatgptAppSession))
         throw new Error('Invalid managed ChatGPT app session.');
       shared.assertCompatible(config, settings);
+      state.data.chatgptActiveSession = shared;
       state.data.chatgptSessionsRoot = shared.sessionsRoot;
+      state.data.chatgptEvidenceDir = shared.evidenceDir;
     } else {
       const session = new ChatgptAppSession('case');
       state.data.chatgptAppSession = session;
+      state.data.chatgptActiveSession = session;
       await session.prepare(config, settings);
       state.data.chatgptSessionsRoot = session.sessionsRoot;
+      state.data.chatgptEvidenceDir = session.evidenceDir;
     }
   } catch (error) {
     return failureResult({
@@ -144,7 +183,7 @@ async function setupChatgptAppLifecycle({
       failureKind: 'app_unavailable',
       error: `Failed to prepare ChatGPT desktop app: ${formatError(error)}`,
       limitations: [
-        'The app lifecycle controller is macOS-only; it does not navigate the UI.',
+        'The caller must provide the authenticated desktop and platform permissions.',
       ],
     });
   }
@@ -171,6 +210,60 @@ async function submitChatgptPrompt({
   run,
   state,
 }: ExternalHostCapabilityContext): Promise<ExternalHostRunResult | void> {
+  if (isLinuxChatgpt(config)) {
+    try {
+      const session = state.data.chatgptActiveSession;
+      if (!(session instanceof ChatgptAppSession))
+        throw new Error('Linux ChatGPT requires its MST-owned app session.');
+      const receipt = await runLinuxChatgptDesktop(
+        'submit',
+        config,
+        run.startedAtMs + run.timeoutMs,
+        run.submittedScenario,
+        (prompt) => session.openPrompt(prompt)
+      );
+      state.data.chatgptPromptSubmitted = true;
+      state.data.chatgptNativeController = {
+        provider: 'linux-atspi',
+        surface: chatgptSurface(config),
+        submission: { status: 'completed', telemetry: receipt.telemetry },
+      } satisfies ExternalHostMetadata['nativeController'];
+      return;
+    } catch (error) {
+      const nativeController: ExternalHostMetadata['nativeController'] = {
+        provider: 'linux-atspi',
+        surface: chatgptSurface(config),
+        submission: {
+          status: 'failed',
+          ...(error instanceof NativeChatgptDriverError
+            ? {
+                telemetry: error.telemetry,
+                ...(error.diagnostics.draftState
+                  ? { draftState: { ...error.diagnostics.draftState } }
+                  : {}),
+              }
+            : {}),
+        },
+      };
+      return withEvidence(
+        failureResult({
+          config,
+          context: run,
+          driver: state.driver,
+          displayName: state.displayName,
+          capabilitiesUsed: state.capabilitiesUsed,
+          nativeController,
+          failureKind: 'submission_failed',
+          error: `ChatGPT native submission failed: ${formatError(error)}`,
+          limitations: [
+            'No automatic resubmission is attempted after a failed or ambiguous native action.',
+          ],
+        }),
+        run,
+        state
+      );
+    }
+  }
   try {
     const receipt = await submitChatgptQuery(
       run.submittedScenario,
@@ -216,12 +309,14 @@ async function captureChatgptComputerUseResult({
 }: ExternalHostCapabilityContext): Promise<ExternalHostRunResult> {
   let matched = false;
   let bound: ChatgptTraceBinding | undefined;
+  let latest: { path: string; trace: ChatgptTrace } | undefined;
   const selector: ChatgptTraceSelector =
     run.correlation.strategy === 'exact_prompt'
       ? { strategy: 'exact_prompt', prompt: run.submittedScenario }
       : run.marker;
-  const bindingDeadline = Math.min(
-    Date.now() + 30_000,
+  const bindingDeadline = chatgptBindingDeadline(
+    isLinuxChatgpt(config),
+    Date.now(),
     run.startedAtMs + run.timeoutMs
   );
   const computerUse = state.data
@@ -233,6 +328,8 @@ async function captureChatgptComputerUseResult({
     displayName: state.displayName,
     capabilitiesUsed: state.capabilitiesUsed,
     computerUse,
+    nativeController: state.data
+      .chatgptNativeController as ExternalHostMetadata['nativeController'],
   };
   try {
     const baseline = state.data.chatgptSessionBaseline as
@@ -242,6 +339,12 @@ async function captureChatgptComputerUseResult({
       throw new Error(
         'Native telemetry requires a session baseline and a submitted prompt.'
       );
+    const mcpServers = config.codexSetup
+      ? resolveCodexSetup(
+          config.codexSetup,
+          state.data.chatgptConfigName as string | undefined
+        ).servers.map((server) => server.label)
+      : [];
     while (
       Date.now() < run.startedAtMs + run.timeoutMs &&
       (matched || Date.now() < bindingDeadline)
@@ -252,6 +355,9 @@ async function captureChatgptComputerUseResult({
         selector,
         run.startedAtMs,
         {
+          surface: chatgptSurface(config),
+          mcpServers,
+          nativeMarkdownEscapes: isLinuxChatgpt(config),
           requireFreshSession: true,
           observedBeforeMs: Math.min(
             Date.now(),
@@ -264,8 +370,20 @@ async function captureChatgptComputerUseResult({
         matched = true;
         const { trace, path } = found;
         bound ??= { path, sessionId: trace.sessionId, turnId: trace.turnId };
+        latest = found;
         if (trace.complete) {
-          if (trace.error) throw new Error(trace.error);
+          if (trace.error)
+            return withEvidence(
+              partialFailure(
+                metadataOptions,
+                found,
+                'host_run_failed',
+                trace.error
+              ),
+              run,
+              state,
+              boundEvidence(bound)
+            );
           if (config.model && trace.model !== config.model)
             throw new Error(
               `ChatGPT model mismatch: requested ${config.model}, recorded ${trace.model ?? 'unknown'}.`
@@ -282,103 +400,246 @@ async function captureChatgptComputerUseResult({
               'Completed ChatGPT turn has no native final answer.'
             );
           const metadata = buildMetadata(metadataOptions);
-          return {
-            success: true,
-            response: trace.response,
-            toolCalls: trace.toolCalls,
-            conversationHistory: trace.conversationHistory,
-            usage: trace.usage,
-            llmDurationMs: trace.llmDurationMs,
-            mcpDurationMs: trace.mcpDurationMs,
-            externalHost: {
-              ...metadata,
-              correlation: {
-                ...metadata.correlation,
-                ...(trace.promptMatch
-                  ? {
-                      nativePromptMatch: trace.promptMatch,
-                      nativePromptSha256: trace.nativePromptSha256,
-                    }
-                  : {}),
-              },
-              traceSource: 'host-local-transcript',
-              traceConfidence: 'high',
-              traceLimitations: trace.limitations,
-              artifacts: [
-                {
-                  kind: 'transcript',
-                  name: 'ChatGPT native session',
-                  path,
-                  contentType: 'application/x-ndjson',
-                  summary: `Matched turn ${trace.turnId}`,
+          return withEvidence(
+            {
+              success: true,
+              response: trace.response,
+              toolCalls: trace.toolCalls,
+              conversationHistory: trace.conversationHistory,
+              usage: trace.usage,
+              llmDurationMs: trace.llmDurationMs,
+              mcpDurationMs: trace.mcpDurationMs,
+              externalHost: {
+                ...metadata,
+                correlation: {
+                  ...metadata.correlation,
+                  ...(trace.promptMatch
+                    ? {
+                        nativePromptMatch: trace.promptMatch,
+                        nativePromptSha256: trace.nativePromptSha256,
+                      }
+                    : {}),
                 },
-              ],
-              session: {
-                id: trace.sessionId,
-                turnId: trace.turnId,
-                ...(run.correlation.includedInPrompt
-                  ? { runMarker: run.marker }
-                  : {}),
-                startedAt: trace.startedAt,
-                completedAt: trace.completedAt,
-              },
-              telemetry: trace.telemetry,
-              sources: {
-                finalAnswer: 'host-local-transcript',
-                toolCalls: 'host-local-transcript',
-                usage: trace.usage ? 'host-local-transcript' : 'none',
-                cost: 'none',
-              },
-              evidence: {
-                finalAnswer: {
-                  source: 'host-local-transcript',
-                  confidence: 'high',
+                traceSource: 'host-local-transcript',
+                traceConfidence: 'high',
+                traceLimitations: trace.limitations,
+                artifacts: [
+                  {
+                    kind: 'transcript',
+                    name: 'ChatGPT native session',
+                    path,
+                    contentType: 'application/x-ndjson',
+                    summary: `Matched turn ${trace.turnId}`,
+                  },
+                ],
+                session: {
+                  id: trace.sessionId,
+                  turnId: trace.turnId,
+                  ...(run.correlation.includedInPrompt
+                    ? { runMarker: run.marker }
+                    : {}),
+                  startedAt: trace.startedAt,
+                  completedAt: trace.completedAt,
                 },
-                toolCalls: {
-                  source: 'host-local-transcript',
-                  confidence: 'high',
+                telemetry: trace.telemetry,
+                sources: {
+                  finalAnswer: 'host-local-transcript',
+                  toolCalls: 'host-local-transcript',
+                  usage: trace.usage ? 'host-local-transcript' : 'none',
+                  cost: 'none',
                 },
-                usage: {
-                  source: trace.usage ? 'host-local-transcript' : 'none',
-                  confidence: trace.usage ? 'high' : 'unknown',
+                evidence: {
+                  finalAnswer: {
+                    source: 'host-local-transcript',
+                    confidence: 'high',
+                  },
+                  toolCalls: {
+                    source: 'host-local-transcript',
+                    confidence: 'high',
+                  },
+                  usage: {
+                    source: trace.usage ? 'host-local-transcript' : 'none',
+                    confidence: trace.usage ? 'high' : 'unknown',
+                  },
+                  cost: { source: 'none', confidence: 'unknown' },
                 },
-                cost: { source: 'none', confidence: 'unknown' },
               },
             },
-          };
+            run,
+            state,
+            { path, summary: `Matched turn ${trace.turnId}` }
+          );
         }
       }
       await delay(
         Math.min(
           POLL_INTERVAL_MS,
-          Math.max(1, run.startedAtMs + run.timeoutMs - Date.now())
+          Math.max(
+            1,
+            (matched ? run.startedAtMs + run.timeoutMs : bindingDeadline) -
+              Date.now()
+          )
         )
       );
     }
-    return failureResult({
-      ...metadataOptions,
-      failureKind: matched ? 'timeout' : 'no_matching_session',
-      error: matched
-        ? 'Timed out waiting for the native ChatGPT turn to complete.'
-        : 'No unique fresh native ChatGPT session matched the submitted query within the binding deadline.',
-      limitations: [],
-    });
+    const timeoutError =
+      'Timed out waiting for the native ChatGPT turn to complete.';
+    return withEvidence(
+      latest
+        ? partialFailure(metadataOptions, latest, 'timeout', timeoutError)
+        : failureResult({
+            ...metadataOptions,
+            failureKind: matched ? 'timeout' : 'no_matching_session',
+            error: matched
+              ? timeoutError
+              : 'No unique fresh native ChatGPT session matched the submitted query within the binding deadline.',
+            limitations: [],
+          }),
+      run,
+      state,
+      boundEvidence(bound)
+    );
   } catch (error) {
     const message = formatError(error);
-    return failureResult({
-      ...metadataOptions,
-      failureKind: message.includes('Ambiguous')
-        ? 'ambiguous_matching_sessions'
-        : message.includes('mismatch') ||
-            message.includes('aborted') ||
-            message.includes('Bound ChatGPT') ||
-            message.includes('fresh ChatGPT')
-          ? 'host_run_failed'
-          : 'parse_failure',
-      error: message,
-      limitations: [],
-    });
+    return withEvidence(
+      failureResult({
+        ...metadataOptions,
+        failureKind: message.includes('Ambiguous')
+          ? 'ambiguous_matching_sessions'
+          : message.includes('mismatch') ||
+              message.includes('aborted') ||
+              message.includes('Bound ChatGPT') ||
+              message.includes('fresh ChatGPT')
+            ? 'host_run_failed'
+            : 'parse_failure',
+        error: message,
+        limitations: [],
+      }),
+      run,
+      state,
+      boundEvidence(bound)
+    );
   }
+}
+
+/**
+ * A bound turn that timed out or aborted: the case fails, but the native calls,
+ * usage, and messages recorded so far are kept at low (partial) confidence.
+ */
+function partialFailure(
+  options: MetadataOptions,
+  { path, trace }: { path: string; trace: ChatgptTrace },
+  failureKind: ExternalHostFailureKind,
+  error: string
+): ExternalHostRunResult {
+  const metadata = buildMetadata(options);
+  const usageSource = trace.usage ? 'host-local-transcript' : 'none';
+  return {
+    success: false,
+    error,
+    toolCalls: trace.toolCalls,
+    conversationHistory: trace.conversationHistory,
+    usage: trace.usage,
+    externalHost: {
+      ...metadata,
+      failureKind,
+      traceSource: 'host-local-transcript',
+      traceConfidence: 'low',
+      traceLimitations: trace.limitations,
+      artifacts: [
+        {
+          kind: 'transcript',
+          name: 'ChatGPT native session',
+          path,
+          contentType: 'application/x-ndjson',
+          summary: `Bound turn ${trace.turnId}; did not complete successfully`,
+        },
+      ],
+      session: {
+        ...metadata.session,
+        id: trace.sessionId,
+        turnId: trace.turnId,
+        startedAt: trace.startedAt,
+        completedAt: trace.completedAt,
+      },
+      telemetry: trace.telemetry,
+      sources: {
+        finalAnswer: 'none',
+        toolCalls: 'host-local-transcript',
+        usage: usageSource,
+        cost: 'none',
+      },
+      evidence: {
+        finalAnswer: { source: 'none', confidence: 'unknown' },
+        toolCalls: { source: 'host-local-transcript', confidence: 'low' },
+        usage: {
+          source: usageSource,
+          confidence: trace.usage ? 'low' : 'unknown',
+        },
+        cost: { source: 'none', confidence: 'unknown' },
+      },
+    },
+  };
+}
+
+function boundEvidence(
+  bound: ChatgptTraceBinding | undefined
+): { path: string; summary: string } | undefined {
+  return bound
+    ? {
+        path: bound.path,
+        summary: `Bound turn ${bound.turnId}; did not complete successfully`,
+      }
+    : undefined;
+}
+
+/**
+ * Linux only: copy the matched transcript into MST_CHATGPT_EVIDENCE_DIR before
+ * teardown. The artifact references the copy.
+ * A matched transcript that cannot be preserved fails the case (fail closed).
+ */
+async function withEvidence(
+  result: ExternalHostRunResult,
+  run: ExternalHostCapabilityContext['run'],
+  state: ExternalHostCapabilityContext['state'],
+  matched?: { path: string; summary: string }
+): Promise<ExternalHostRunResult> {
+  const evidenceDir = state.data.chatgptEvidenceDir;
+  const sessionsRoot = state.data.chatgptSessionsRoot;
+  if (typeof evidenceDir !== 'string' || typeof sessionsRoot !== 'string')
+    return result;
+  const copy = await copyChatgptEvidence({
+    evidenceDir,
+    sessionsRoot,
+    caseId: run.caseId,
+    matched,
+  });
+  const external = result.externalHost;
+  if (!external) return result;
+  external.artifacts = [
+    ...external.artifacts.filter(
+      (artifact) => !(matched && artifact.path === matched.path)
+    ),
+    ...copy.artifacts,
+  ];
+  external.traceLimitations = [
+    ...(external.traceLimitations ?? []),
+    ...copy.limitations,
+  ];
+  if (result.success && copy.matchedCopied === false)
+    return {
+      success: false,
+      toolCalls: [],
+      error:
+        'The matched native ChatGPT transcript could not be preserved as evidence.',
+      externalHost: {
+        ...external,
+        failureKind: 'host_run_failed',
+        traceSource: 'none',
+        traceConfidence: 'unknown',
+      },
+    };
+  return result;
 }
 
 interface MetadataOptions {
@@ -388,6 +649,7 @@ interface MetadataOptions {
   displayName: string;
   capabilitiesUsed: readonly HostCapability[];
   computerUse?: ExternalHostMetadata['computerUse'];
+  nativeController?: ExternalHostMetadata['nativeController'];
 }
 function buildMetadata(options: MetadataOptions): ExternalHostMetadata {
   return {
@@ -413,6 +675,7 @@ function buildMetadata(options: MetadataOptions): ExternalHostMetadata {
         options.context.submittedScenario === options.context.scenario,
     },
     computerUse: options.computerUse,
+    nativeController: options.nativeController,
   };
 }
 function failureResult(
