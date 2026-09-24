@@ -594,8 +594,8 @@ function boundEvidence(
 }
 
 /**
- * Linux only: copy the matched transcript and bounded fresh unmatched candidates
- * into MST_CHATGPT_EVIDENCE_DIR before teardown. Artifacts reference the copies.
+ * Linux only: copy the matched transcript into MST_CHATGPT_EVIDENCE_DIR before
+ * teardown. The artifact references the copy.
  * A matched transcript that cannot be preserved fails the case (fail closed).
  */
 async function withEvidence(
@@ -608,15 +608,10 @@ async function withEvidence(
   const sessionsRoot = state.data.chatgptSessionsRoot;
   if (typeof evidenceDir !== 'string' || typeof sessionsRoot !== 'string')
     return result;
-  const baseline = state.data.chatgptSessionBaseline;
   const copy = await copyChatgptEvidence({
     evidenceDir,
     sessionsRoot,
     caseId: run.caseId,
-    baseline:
-      baseline instanceof Map
-        ? (baseline as ChatgptSessionSnapshot)
-        : undefined,
     matched,
   });
   const external = result.externalHost;
@@ -630,11 +625,6 @@ async function withEvidence(
   external.traceLimitations = [
     ...(external.traceLimitations ?? []),
     ...copy.limitations,
-    ...(copy.artifacts.some((artifact) => artifact.kind === 'metadata')
-      ? [
-          'UNVERIFIED fresh sessions are preserved for audit only. They are not accepted evidence, and missing records do not prove that Send was a no-op. No resubmission was attempted.',
-        ]
-      : []),
   ];
   if (result.success && copy.matchedCopied === false)
     return {

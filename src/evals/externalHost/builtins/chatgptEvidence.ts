@@ -3,16 +3,8 @@ import { constants } from 'node:fs';
 import { mkdtemp, open, readFile, realpath } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, sep } from 'node:path';
 import type { HostArtifact } from '../types.js';
-import {
-  snapshotChatgptSessions,
-  type ChatgptSessionSnapshot,
-} from './chatgptTrace.js';
 
-export const CHATGPT_EVIDENCE_LIMITS = {
-  fileBytes: 32 * 1024 * 1024,
-  candidateFiles: 8,
-  candidateBytes: 16 * 1024 * 1024,
-};
+const MAX_TRANSCRIPT_BYTES = 32 * 1024 * 1024;
 
 export interface ChatgptEvidenceCopy {
   artifacts: HostArtifact[];
@@ -22,15 +14,13 @@ export interface ChatgptEvidenceCopy {
 }
 
 /**
- * Copy native transcripts into the uploaded evidence directory before the MST
- * profile is torn down. The matched transcript is the only accepted evidence;
- * fresh unmatched sessions are bounded, labeled UNVERIFIED, and never parsed.
+ * Copy the matched native transcript into the uploaded evidence directory before
+ * the MST profile is torn down. It is the only accepted native evidence.
  */
 export async function copyChatgptEvidence(options: {
   evidenceDir: string;
   sessionsRoot: string;
   caseId: string;
-  baseline?: ChatgptSessionSnapshot;
   matched?: { path: string; summary: string };
 }): Promise<ChatgptEvidenceCopy> {
   const result: ChatgptEvidenceCopy = { artifacts: [], limitations: [] };
@@ -73,63 +63,6 @@ export async function copyChatgptEvidence(options: {
       );
     }
   }
-  if (!root || !options.baseline) return result;
-  let current: ChatgptSessionSnapshot;
-  try {
-    current = await snapshotChatgptSessions(root);
-  } catch {
-    result.limitations.push('Fresh native sessions could not be listed.');
-    return result;
-  }
-  const matched = options.matched
-    ? await realpath(options.matched.path).catch(() => options.matched!.path)
-    : undefined;
-  // Baseline keys use the caller's sessionsRoot spelling; compare by relative path.
-  const baseline = new Map(
-    [...options.baseline].map(([path, info]) => [
-      relative(options.sessionsRoot, path),
-      info,
-    ])
-  );
-  const candidates = [...current]
-    .filter(([path, info]) => {
-      if (path === matched) return false;
-      const old = baseline.get(relative(root, path));
-      return !old || old.size !== info.size || old.mtimeMs !== info.mtimeMs;
-    })
-    .map(([path]) => path)
-    .sort();
-  let bytes = 0;
-  let skipped = 0;
-  for (const [index, path] of candidates.entries()) {
-    if (index >= CHATGPT_EVIDENCE_LIMITS.candidateFiles) {
-      skipped++;
-      continue;
-    }
-    try {
-      const copy = await copyOwned(
-        path,
-        root,
-        directory,
-        `unverified-${index + 1}`,
-        CHATGPT_EVIDENCE_LIMITS.candidateBytes - bytes
-      );
-      bytes += copy.size;
-      result.artifacts.push({
-        kind: 'metadata',
-        name: `ChatGPT fresh native session ${index + 1} — UNVERIFIED`,
-        path: copy.path,
-        contentType: 'application/x-ndjson',
-        summary: `Fresh unmatched session; not accepted as this query's trace, answer, or source count. sha256=${copy.sha256}`,
-      });
-    } catch {
-      skipped++;
-    }
-  }
-  if (skipped)
-    result.limitations.push(
-      `${skipped} fresh unmatched native session(s) were not preserved (bounded copy).`
-    );
   return result;
 }
 
@@ -137,9 +70,8 @@ async function copyOwned(
   source: string,
   root: string,
   directory: string,
-  label: string,
-  budget = CHATGPT_EVIDENCE_LIMITS.fileBytes
-): Promise<{ path: string; sha256: string; size: number }> {
+  label: string
+): Promise<{ path: string; sha256: string }> {
   const canonical = await realpath(source);
   const path = relative(root, canonical);
   if (!path || path.startsWith(`..${sep}`) || path === '..' || isAbsolute(path))
@@ -151,12 +83,11 @@ async function copyOwned(
   let data: Buffer;
   try {
     const info = await handle.stat();
-    const limit = Math.min(budget, CHATGPT_EVIDENCE_LIMITS.fileBytes);
     if (
       !info.isFile() ||
       info.nlink !== 1 ||
       info.uid !== process.getuid?.() ||
-      info.size > limit
+      info.size > MAX_TRANSCRIPT_BYTES
     )
       throw new Error('unsafe source');
     data = Buffer.alloc(info.size);
@@ -176,5 +107,5 @@ async function copyOwned(
   const written = await readFile(target);
   if (createHash('sha256').update(written).digest('hex') !== sha256)
     throw new Error('copy mismatch');
-  return { path: target, sha256, size: data.length };
+  return { path: target, sha256 };
 }

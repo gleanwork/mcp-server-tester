@@ -12,11 +12,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import {
-  CHATGPT_EVIDENCE_LIMITS,
-  copyChatgptEvidence,
-} from './chatgptEvidence.js';
-import { snapshotChatgptSessions } from './chatgptTrace.js';
+import { copyChatgptEvidence } from './chatgptEvidence.js';
 
 let root: string;
 let sessions: string;
@@ -37,17 +33,14 @@ const sha = (value: string) =>
   createHash('sha256').update(value, 'utf8').digest('hex');
 
 describe('ChatGPT native evidence copy', () => {
-  it('copies the matched transcript and fresh candidates, never baseline files', async () => {
+  it('copies only the matched transcript, never other sessions', async () => {
     const sessionsRoot = join(root, '.codex', 'sessions');
-    await writeFile(join(sessions, 'rollout-old.jsonl'), 'old\n');
-    const baseline = await snapshotChatgptSessions(sessionsRoot);
     await writeFile(join(sessions, 'rollout-match.jsonl'), 'match\n');
     await writeFile(join(sessions, 'rollout-other.jsonl'), 'other\n');
     const copy = await copyChatgptEvidence({
       evidenceDir: evidence,
       sessionsRoot,
       caseId: 'case/../1',
-      baseline,
       matched: {
         path: join(sessions, 'rollout-match.jsonl'),
         summary: 'Matched turn t',
@@ -60,34 +53,15 @@ describe('ChatGPT native evidence copy', () => {
         kind: 'transcript',
         summary: `Matched turn t; sha256=${sha('match\n')}`,
       }),
-      expect.objectContaining({
-        kind: 'metadata',
-        name: 'ChatGPT fresh native session 1 — UNVERIFIED',
-        summary: expect.stringContaining(`sha256=${sha('other\n')}`),
-      }),
     ]);
-    for (const artifact of copy.artifacts)
-      expect(artifact.path!.startsWith(`${evidence}/case_.._1-`)).toBe(true);
+    expect(copy.artifacts[0]!.path!.startsWith(`${evidence}/case_.._1-`)).toBe(
+      true
+    );
     expect(await readFile(copy.artifacts[0]!.path!, 'utf8')).toBe('match\n');
     const [directory] = await readdir(evidence);
-    expect((await readdir(join(evidence, directory!))).sort()).toEqual([
+    expect(await readdir(join(evidence, directory!))).toEqual([
       'matched-rollout-match.jsonl',
-      'unverified-1-rollout-other.jsonl',
     ]);
-  });
-
-  it('bounds the number of unmatched candidates', async () => {
-    const sessionsRoot = join(root, '.codex', 'sessions');
-    for (let i = 0; i < CHATGPT_EVIDENCE_LIMITS.candidateFiles + 2; i++)
-      await writeFile(join(sessions, `rollout-${i}.jsonl`), `${i}\n`);
-    const copy = await copyChatgptEvidence({
-      evidenceDir: evidence,
-      sessionsRoot,
-      caseId: 'c',
-      baseline: new Map(),
-    });
-    expect(copy.artifacts).toHaveLength(CHATGPT_EVIDENCE_LIMITS.candidateFiles);
-    expect(copy.limitations.join(' ')).toContain('2 fresh unmatched');
   });
 
   it('refuses symlinked or out-of-root transcripts and reports a missing match', async () => {
@@ -101,7 +75,6 @@ describe('ChatGPT native evidence copy', () => {
       evidenceDir: evidence,
       sessionsRoot,
       caseId: 'c',
-      baseline: new Map(),
       matched: { path: join(root, 'private.jsonl'), summary: 'x' },
     });
     expect(copy.matchedCopied).toBe(false);

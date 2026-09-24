@@ -14,12 +14,6 @@ export const LINUX_CHATGPT_RUNTIME_ENVIRONMENT: readonly string[] = [
 
 export const NATIVE_MAX_ACTIONS = contract.maxActions;
 
-/** Fixed UI labels that failure diagnostics may report; never other UI text. */
-export const LINUX_CHATGPT_SCREEN_LABELS = contract.screenLabels as [
-  string,
-  ...string[],
-];
-
 export function pickEnvironment(
   environment: NodeJS.ProcessEnv,
   keys: readonly string[]

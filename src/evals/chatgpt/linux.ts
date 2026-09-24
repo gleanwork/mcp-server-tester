@@ -15,7 +15,6 @@ import { CodexSetupError } from '../codexSetup/native.js';
 import { readLinuxChatgptEnvironment } from '../chatgptSetup/linuxProfile.js';
 import {
   LINUX_CHATGPT_ERROR_CODES,
-  LINUX_CHATGPT_SCREEN_LABELS,
   LINUX_CHATGPT_RUNTIME_ENVIRONMENT,
   pickEnvironment,
 } from './linuxContract.js';
@@ -34,49 +33,12 @@ const FailureStep = z.enum([
   'draft-readback',
   'send',
 ]);
-const Count = z.number().int().min(0).max(5000);
-const TimelineEntry = z.union([
-  // Empty snapshot: no matching app was on the desktop.
-  z
-    .object({ ms: z.number().int().min(0).max(3_600_000), nodes: z.literal(0) })
-    .strict(),
-  z
-    .object({
-      ms: z.number().int().min(0).max(3_600_000),
-      nodes: z.number().int().min(1).max(5000),
-      surface: z.enum(['chatgpt-work', 'codex', 'unknown', 'ambiguous']),
-      composers: Count,
-      sends: Count,
-      dialogs: Count,
-      labels: z.array(z.enum(LINUX_CHATGPT_SCREEN_LABELS)).max(64),
-    })
-    .strict(),
-]);
-const DraftTimeline = z
-  .object({
-    polls: Count,
-    truncated: z.boolean(),
-    apps: Count.optional(),
-    entries: z.array(TimelineEntry).max(24),
-  })
-  .strict();
 const DraftState = z
   .object({
     observedSurface: z.enum(['chatgpt-work', 'codex', 'unknown', 'ambiguous']),
     composerRootCount: z.number().int().min(0).max(5000),
     sendControlCount: z.number().int().min(0).max(5000),
     textReadable: z.boolean(),
-    screen: z
-      .object({
-        nodeCount: z.number().int().min(0).max(5000),
-        visibleButtonCount: z.number().int().min(0).max(5000),
-        visibleFrameCount: z.number().int().min(0).max(5000),
-        dialogCount: z.number().int().min(0).max(5000),
-        knownLabels: z.array(z.enum(LINUX_CHATGPT_SCREEN_LABELS)).max(64),
-      })
-      .strict()
-      .optional(),
-    timeline: DraftTimeline.optional(),
     textLength: z
       .number()
       .int()

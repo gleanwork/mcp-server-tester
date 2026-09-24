@@ -14,7 +14,7 @@ from itertools import chain, repeat
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
-from chatgpt_linux import (DRAFT_POLLS, SCREEN_LABELS, Driver, DriverFailure, Desktop, composer, main,
+from chatgpt_linux import (DRAFT_POLLS, Driver, DriverFailure, Desktop, composer, main,
                            error_code, ERROR_CODES, INPUT_LIMIT, SESSION_KEYS, XDOTOOL)
 
 
@@ -189,22 +189,6 @@ class DriverTest(unittest.TestCase):
             desktop.text.assert_called_once_with(desktop.nodes[2], limit=INPUT_LIMIT)
             self.assertEqual(desktop.actions, [])
 
-    def test_failure_draft_state_reports_only_counts_and_known_labels_without_composer(self):
-        # A screen with no composer and no mode switch: counts and fixed labels only.
-        desktop = FakeDesktop([node('Send'), node('Continue'), node('private dialog text')])
-        driver = self.driver(desktop)
-        driver.phase, driver.step = 'composer', 'draft-surface'
-        driver.snapshot()
-        state = driver.receipt('failed')['draftState']
-        self.assertEqual(state['observedSurface'], 'unknown')
-        self.assertEqual(state['composerRootCount'], 0)
-        self.assertEqual(state['screen']['knownLabels'], ['Continue', 'Send'])
-        self.assertEqual(state['screen']['visibleButtonCount'], 3)
-        self.assertEqual(set(state['screen']), {'nodeCount', 'visibleButtonCount',
-                                                'visibleFrameCount', 'dialogCount', 'knownLabels'})
-        self.assertNotIn('private', json.dumps(state))
-        self.assertLessEqual(set(state['screen']['knownLabels']), SCREEN_LABELS)
-
     def test_failure_draft_state_deduplicates_entry_and_paragraph(self):
         desktop = FakeDesktop(ready())
         desktop.nodes[2].update(role='entry')
@@ -285,72 +269,6 @@ class DriverTest(unittest.TestCase):
         desktop.text.assert_not_called()
 
     @patch('chatgpt_linux.time.sleep')
-    def test_composer_wait_timeline_records_distinct_private_safe_transitions(self, _sleep):
-        private = [node('private dialog text', 'dialog'), node('Allow'),
-                   node('https://private.example', 'link')]
-        screens = [[], [], private, private, ready(), ready('Codex'), ready('Codex')]
-        desktop = FakeDesktop()
-        desktop.snapshot = Mock(side_effect=chain(screens, repeat(ready('Codex'))))
-        driver = self.driver(desktop)
-        driver.phase = 'composer'
-        with self.assertRaisesRegex(DriverFailure, 'state_transition_unobserved'):
-            driver.wait(lambda ns: False)
-        state = driver.receipt('failed')['draftState']
-        timeline = state['timeline']
-        self.assertEqual(timeline['polls'], 100)
-        self.assertFalse(timeline['truncated'])
-        self.assertEqual([{k: v for k, v in e.items() if k != 'ms'} for e in timeline['entries']], [
-            {'nodes': 0},
-            {'nodes': 3, 'surface': 'unknown', 'composers': 0, 'sends': 0, 'dialogs': 1,
-             'labels': ['Allow']},
-            {'nodes': 3, 'surface': 'chatgpt-work', 'composers': 1, 'sends': 1, 'dialogs': 0,
-             'labels': ['Send']},
-            {'nodes': 3, 'surface': 'codex', 'composers': 1, 'sends': 1, 'dialogs': 0,
-             'labels': ['Send']}])
-        ms = [e['ms'] for e in timeline['entries']]
-        self.assertTrue(all(type(v) is int and v >= 0 for v in ms))
-        self.assertEqual(ms, sorted(ms))
-        self.assertNotIn('private', json.dumps(state))
-        for entry in timeline['entries']:
-            self.assertLessEqual(set(entry.get('labels', [])), SCREEN_LABELS)
-        # A later wait resets the timeline.
-        with self.assertRaisesRegex(DriverFailure, 'state_transition_unobserved'):
-            driver.wait(lambda ns: False, polls=3)
-        timeline = driver.receipt('failed')['draftState']['timeline']
-        self.assertEqual(timeline['polls'], 3)
-        self.assertEqual(len(timeline['entries']), 1)
-
-    @patch('chatgpt_linux.time.sleep')
-    def test_composer_wait_timeline_caps_first_and_last_entries(self, _sleep):
-        flicker = [[node('x')] * count for count in range(1, 41)]
-        desktop = FakeDesktop()
-        desktop.snapshot = Mock(side_effect=chain(flicker, repeat(flicker[-1])))
-        driver = self.driver(desktop)
-        driver.phase = 'composer'
-        with self.assertRaisesRegex(DriverFailure, 'state_transition_unobserved'):
-            driver.wait(lambda ns: False)
-        timeline = driver.receipt('failed')['draftState']['timeline']
-        self.assertTrue(timeline['truncated'])
-        self.assertEqual([e['nodes'] for e in timeline['entries']],
-                         list(range(1, 13)) + list(range(29, 41)))
-
-    @patch('chatgpt_linux.time.sleep')
-    def test_wait_timeline_only_for_composer_failures(self, _sleep):
-        desktop = FakeDesktop([node('Continue')])
-        driver = self.driver(desktop)
-        driver.phase = 'surface'
-        with self.assertRaisesRegex(DriverFailure, 'state_transition_unobserved'):
-            driver.wait(lambda ns: False, polls=2)
-        self.assertNotIn('timeline', driver.receipt('failed')['draftState'])
-        desktop = FakeDesktop()
-        driver = self.driver(desktop)
-        driver.prepare('chatgpt-work')
-        receipt = driver.submit('private prompt', 'chatgpt-work')
-        self.assertEqual(receipt['status'], 'submitted')
-        self.assertNotIn('draftState', receipt)
-        self.assertNotIn('timeline', json.dumps(receipt))
-
-    @patch('chatgpt_linux.time.sleep')
     def test_slow_draft_after_one_hand_off_is_awaited_without_reopening(self, sleep):
         # Live runs showed drafts that did not appear within 10 s; wait (read-only)
         # up to 30 s after the single hand-off, and never reopen or refill.
@@ -367,42 +285,6 @@ class DriverTest(unittest.TestCase):
         receipt = driver.submit('private prompt', 'chatgpt-work')
         self.assertEqual(receipt['status'], 'submitted')
         self.assertEqual(self.actions(desktop), ['open', 'Send'])
-
-    @patch('chatgpt_linux.time.sleep')
-    def test_failed_submit_receipt_includes_draft_wait_timeline(self, sleep):
-        desktop = FakeDesktop()
-        desktop.stall = 'open'
-        screens = iter([[], [node('private dialog text', 'dialog'), node('Allow')]])
-        def settle(_):
-            nodes = next(screens, None)
-            if nodes is not None:
-                desktop.nodes = nodes
-        sleep.side_effect = settle
-        desktop.app_count = 1
-        payload = json.dumps({'surface': 'chatgpt-work', 'prompt': 'private prompt'}).encode()
-        with patch('chatgpt_linux.Desktop', return_value=desktop), \
-                patch('sys.argv', ['driver', '--mode', 'submit', '--timeout-ms', '60000']), \
-                patch('sys.stdin', SimpleNamespace(buffer=io.BytesIO(payload))), \
-                patch('sys.stdout', new_callable=io.StringIO) as output:
-            self.assertEqual(main(), 1)
-        receipt = json.loads(output.getvalue())
-        if os.environ.get('MST_PRINT_SAMPLE_RECEIPT'):
-            print(output.getvalue(), file=sys.stderr)
-        self.assertEqual((receipt['error'], receipt['phase'], receipt['step']),
-                         ('state_transition_unobserved', 'composer', 'draft-surface'))
-        timeline = receipt['draftState']['timeline']
-        self.assertEqual((timeline['polls'], timeline['apps']), (300, 1))
-        self.assertEqual([e['nodes'] for e in timeline['entries']], [3, 0, 2])
-        self.assertNotIn('private', output.getvalue())
-        self.assertEqual(self.actions(desktop), ['open'])
-
-    def test_snapshot_counts_matching_apps_without_changing_selection(self):
-        desktop, _editor, app = public_desktop()
-        self.assertEqual(len(desktop._snapshot()), 4)
-        self.assertEqual(desktop.app_count, 1)
-        app.name = 'Other'
-        self.assertEqual(desktop._snapshot(), [])
-        self.assertEqual(desktop.app_count, 0)
 
     def test_setup_placeholder_is_ready_without_text_read_or_send(self):
         for surface, label in [('chatgpt-work', 'ChatGPT Work'), ('codex', 'Codex')]:

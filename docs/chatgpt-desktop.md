@@ -236,13 +236,7 @@ accessible names. Failure-only `draftState` measurements use
 the same bounded, expanded readback: `textLength`, `embeddedObjectCount`, and
 `newlineCount` count observed Unicode code points; `textSha256` hashes the exact
 UTF-8 bytes. Resolved object markers are not counted. Unreadable text omits these
-measurements. When there is no composer and no mode switch, `draftState.screen`
-adds node, visible-button, frame, and dialog counts, plus only the fixed
-`screenLabels` from the shared contract that are visible. It never contains
-other UI text. Failed composer waits add `draftState.timeline`: poll count, the
-matching-app count, and at most 24 distinct screen signatures (elapsed ms, node,
-composer, Send, and dialog counts, surface, and the same fixed labels; `truncated`
-keeps the first and last 12). Readback failures return `composer_text_unavailable`, never raw RPC
+measurements. Readback failures return `composer_text_unavailable`, never raw RPC
 errors. The successful receipt schema is unchanged.
 
 Offline tests cover these controller contracts. Verify the app flags and hand-off
@@ -277,16 +271,14 @@ fifth argument `{ surface, mcpServers }` after `observedBeforeMs`. Both default 
 Work and no configured labels.
 `expectedChatgptOriginator(surface)` provides the same fixed mapping.
 
-On Linux, MST copies native evidence into `MST_CHATGPT_EVIDENCE_DIR` before
-teardown, in one `<caseId>-<random>/` directory per case. The matched (or bound
-but failed) transcript is copied as `matched-<name>`; up to 8 fresh unmatched
-sessions (16 MiB total, 32 MiB per file) are copied as `unverified-<n>-<name>`
-and labeled `UNVERIFIED`. Artifacts reference the copies and include each
-file's sha256. Copies read only regular, owned, single-link files inside the
-session root, without following symlinks, and are verified after writing.
-A successful case whose matched transcript cannot be preserved fails as
-`host_run_failed`. Unmatched copies never feed trace acceptance. macOS does not
-copy evidence; its artifact references the native transcript path.
+On Linux, MST copies the matched (or bound but failed) transcript into
+`MST_CHATGPT_EVIDENCE_DIR` before teardown, as `<caseId>-<random>/matched-<name>`
+(32 MiB limit). The artifact references the copy and includes its sha256. Copies
+read only regular, owned, single-link files inside the session root, without
+following symlinks, and are verified after writing. A successful case whose
+matched transcript cannot be preserved fails as `host_run_failed`. Unmatched
+sessions are not copied. macOS does not copy evidence; its artifact references
+the native transcript path.
 
 The preserved Codex trace above contains `gpt-5.6-terra`, medium effort, and the
 native terminal-LF prompt form. It ends in `turn_aborted`, without `task_complete`.

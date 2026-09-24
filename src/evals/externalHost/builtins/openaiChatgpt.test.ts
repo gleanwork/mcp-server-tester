@@ -130,24 +130,8 @@ describe('bounded native binding wait and failure classification', () => {
         });
         expect(result).not.toHaveProperty('response');
         if (!result) throw new Error('Missing result');
-        const artifacts = result.externalHost.artifacts;
-        // Linux copies bounded fresh candidates, labeled UNVERIFIED; macOS copies nothing.
-        expect(artifacts).toHaveLength(linux ? 1 : 0);
-        if (linux) {
-          const [artifact] = artifacts;
-          expect(artifact).toMatchObject({
-            kind: 'metadata',
-            name: expect.stringContaining('UNVERIFIED'),
-            summary: expect.stringMatching(/sha256=[a-f0-9]{64}$/),
-          });
-          expect(artifact!.path!.startsWith(join(home, 'evidence'))).toBe(true);
-          expect(await readFile(artifact!.path!, 'utf8')).toContain(
-            'unconfirmed-origin'
-          );
-          expect(result.externalHost.traceLimitations?.join(' ')).toContain(
-            'missing records do not prove'
-          );
-        }
+        // Unmatched sessions are never copied or referenced.
+        expect(result.externalHost.artifacts).toEqual([]);
         expect(JSON.stringify(result.externalHost)).not.toContain(
           'private-session'
         );

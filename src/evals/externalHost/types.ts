@@ -171,28 +171,6 @@ export interface ExternalHostCorrelationMetadata {
   nativePromptSha256?: string;
 }
 
-/**
- * Failure-only Linux draft-wait timeline: distinct observed screen signatures
- * with counts, fixed surface enums, and allowlisted screen labels only.
- */
-export interface NativeDraftTimeline {
-  polls: number;
-  truncated: boolean;
-  apps?: number;
-  entries: Array<
-    | { ms: number; nodes: 0 }
-    | {
-        ms: number;
-        nodes: number;
-        surface: 'chatgpt-work' | 'codex' | 'unknown' | 'ambiguous';
-        composers: number;
-        sends: number;
-        dialogs: number;
-        labels: string[];
-      }
-  >;
-}
-
 export interface ExternalHostMetadata {
   driver: HostDriverId;
   driverSlug: string;
@@ -230,18 +208,8 @@ export interface ExternalHostMetadata {
     submission: {
       status: 'completed' | 'failed';
       telemetry?: SemanticDesktopTelemetry;
-      /**
-       * Failure-only sanitized UI state: surface, counts, text hash, and fixed
-       * allowlisted screen labels. Never other UI or prompt text.
-       */
-      draftState?: Record<
-        string,
-        | string
-        | number
-        | boolean
-        | Record<string, number | string[]>
-        | NativeDraftTimeline
-      >;
+      /** Failure-only sanitized UI state: surface, counts, and text hash. Never text. */
+      draftState?: Record<string, string | number | boolean>;
     };
   };
   evidence?: {
