@@ -201,7 +201,7 @@ class MainCliTest(unittest.TestCase):
         glib.glib_error = FakeGLibError  # Desktop owns the GLib type; no module global.
         cases = [('prepare', FakeDesktop(list(private_ui)), None, b'{"surface":"codex"}',
                   'state_transition_unobserved'),
-                 ('submit', FakeDesktop(list(private_ui)), None,
+                 ('submit', FakeDesktop([*private_ui, *ready(WORK)]), None,
                   b'{"surface":"codex","prompt":"private prompt"}', 'surface_mismatch'),
                  ('prepare', FakeDesktop(), RuntimeError('private query or stderr'),
                   b'{"surface":"chatgpt-work"}', 'desktop_driver_failed'),
@@ -553,23 +553,42 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(sleep.call_count, 100)
 
     @patch('chatgpt_linux.time.sleep')
-    def test_submit_waits_read_only_for_the_previous_turn_to_settle(self, sleep):
-        busy = [node('Switch mode, current mode: ' + WORK), node('Stop')]
+    def test_later_case_opens_its_deep_link_from_the_previous_conversation(self, sleep):
+        # Runs 35975596364, 36049147146, 36055872782: after case 0 the app shows
+        # that conversation, with no mode switch, composer, or Send.
+        desktop = FakeDesktop([node('Share')])
+        desktop.open_surface = WORK
+        self.assertEqual(self.driver(desktop).submit('private', 'chatgpt-work')['action_count'], 2)
+        self.assertEqual(self.actions(desktop), ['open', 'Send'])
+        self.assertEqual(sleep.call_count, IDLE_POLLS)
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_later_case_settles_briefly_when_the_new_chat_is_ready(self, sleep):
+        busy = [node('Share')]
         desktop = FakeDesktop(busy)
         snapshots = iter([busy, busy, busy])
         desktop.snapshot = lambda: next(snapshots, desktop.nodes)
         desktop.nodes = ready()
         self.driver(desktop).submit('private', 'chatgpt-work')
-        self.assertEqual(self.actions(desktop)[0], 'open')
-        for kind, nodes in (('busy', busy), ('other surface', ready(CODEX))):
-            with self.subTest(kind=kind):
-                stuck = FakeDesktop(nodes)
-                driver = self.driver(stuck)
-                with self.assertRaisesRegex(DriverFailure, '^surface_mismatch$'):
-                    driver.submit('private', 'chatgpt-work')
-                self.assertEqual((driver.actions, stuck.actions), (0, []))
-        # A wrong surface fails at once; only an unsettled app is waited for.
-        self.assertEqual(sleep.call_count, 2 + IDLE_POLLS)
+        self.assertEqual(self.actions(desktop), ['open', 'Send'])
+        self.assertLess(sleep.call_count, IDLE_POLLS)
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_visible_other_surface_fails_before_any_action(self, sleep):
+        stuck = FakeDesktop(ready(CODEX))
+        driver = self.driver(stuck)
+        with self.assertRaisesRegex(DriverFailure, '^surface_mismatch$'):
+            driver.submit('private', 'chatgpt-work')
+        self.assertEqual((driver.actions, stuck.actions), (0, []))
+        sleep.assert_not_called()
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_deep_link_from_a_conversation_is_not_repeated_when_no_draft_appears(self, sleep):
+        desktop = FakeDesktop([node('Share')])
+        desktop.stall = 'open'
+        with self.assertRaisesRegex(DriverFailure, '^state_transition_unobserved$'):
+            self.driver(desktop).submit('private', 'chatgpt-work')
+        self.assertEqual(self.actions(desktop), ['open'])
 
     # --- late setup route (run 36050207512: composer kept only the placeholder) ---
 

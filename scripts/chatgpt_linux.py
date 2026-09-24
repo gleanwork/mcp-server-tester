@@ -46,8 +46,9 @@ ERROR_CODES = frozenset(CONTRACT['errorCodes'])
 # After the one deep-link hand-off the draft usually appears in 1-3 s, but live
 # runs rarely exceeded 10 s. Waiting is read-only; the hand-off is never repeated.
 DRAFT_POLLS = 300
-# Read-only settle time before a batch's next submission (30 seconds).
-IDLE_POLLS = 300
+# Read-only settle before a later submission (2 seconds). The previous
+# conversation view never shows the new-chat surface, so this is not a gate.
+IDLE_POLLS = 20
 # The app routes each deep link asynchronously and does not order them. If the
 # setup route lands after the first submission's route, it replaces that draft
 # with an empty new chat. Setup observes read-only for 5 seconds after its
@@ -614,20 +615,27 @@ class Driver:
         if surface not in SURFACES:
             raise DriverFailure('invalid_surface')
         self.desktop.require_helpers()
-        # Setup ran once for the batch. A changed surface blocks submission.
-        # After the previous turn the app may briefly show no enabled composer or
-        # Send; wait read-only for it to settle. Nothing is sent before this.
+        # Setup ran once for the batch. A visible switch in another mode blocks
+        # submission. After a previous turn the app stays on that conversation,
+        # which has no mode switch (runs 35975596364, 36049147146, 36055872782:
+        # case 1 waited with no switch, composer, or Send, then failed unsent).
+        # The case deep link opens a new chat; the draft checks below verify the
+        # surface and exact prompt before the one send. Nothing is sent here.
         self.phase = 'surface'
         nodes = self.snapshot()
+        if controls(nodes, set(MODE_LABELS.values())) and not self.selected(nodes, surface):
+            raise DriverFailure('surface_mismatch')
         if not self.ready(nodes, surface):
-            if controls(nodes, set(MODE_LABELS.values())) and not self.selected(nodes, surface):
-                raise DriverFailure('surface_mismatch')
+            # Brief read-only settle only; a conversation view never becomes ready.
             try:
                 nodes = self.wait(lambda ns: self.ready(ns, surface), polls=IDLE_POLLS)
             except DriverFailure as error:
-                if str(error) == 'deadline_exceeded':
+                if str(error) not in {'state_transition_unobserved', 'composer_missing_or_ambiguous',
+                                      'send_missing_or_ambiguous'}:
                     raise
-                raise DriverFailure('surface_mismatch') from None
+                nodes = self.last_snapshot
+            if controls(nodes, set(MODE_LABELS.values())) and not self.selected(nodes, surface):
+                raise DriverFailure('surface_mismatch')
         self.phase = 'composer'
         baseline = self.composer_digest(nodes)
         self.step = 'draft-open'

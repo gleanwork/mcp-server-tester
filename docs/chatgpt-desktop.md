@@ -218,11 +218,12 @@ ready and the composer text is exactly the text from before the hand-off. The
 comparison uses an in-memory hash only. Both codes fail closed with no Send,
 reopen, or retry.
 
-Before each submission, the script checks that the selected surface is idle:
-one composer and one Send control. After the previous turn, the app can briefly
-show neither. The script then polls up to 30 seconds (read-only, before any
-action) for them to appear. A different selected surface fails at once, and a
-surface that does not settle fails, both with `surface_mismatch`.
+Before each submission, a visible mode switch set to a different surface fails
+at once with `surface_mismatch`, before any action. After a previous turn, the
+app stays on that conversation, which has no mode switch, composer, or Send. The
+script observes read-only for up to 2 seconds, then opens the case deep link to
+a new chat. The draft checks above still require the selected surface and the
+exact prompt before the one send.
 
 ### Native UI protocol and limits
 
