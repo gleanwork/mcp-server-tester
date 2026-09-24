@@ -115,6 +115,18 @@ class LinuxDriverTests(unittest.TestCase):
         self.assertEqual(desktop.actions, [])
         self.assertIsNone(desktop.prompt)
 
+    def test_reset_opens_one_empty_task_and_never_sends(self):
+        desktop = Desktop()
+        self.assertEqual(module.Driver(desktop, 1000, 4).reset()["status"], "ready")
+        self.assertEqual(desktop.prompt, "")
+        self.assertEqual(desktop.actions, [])
+        # A surface that never returns fails at the deadline without more actions.
+        desktop = Desktop()
+        desktop.starts = desktop.radios = []
+        with self.assertRaisesRegex(module.DriverFailure, "deadline_exceeded"):
+            module.Driver(desktop, 200, 4).reset()
+        self.assertEqual((desktop.prompt, desktop.actions), ("", []))
+
     def test_uncertain_submit_never_retries(self):
         desktop = Desktop()
         desktop.fail = True

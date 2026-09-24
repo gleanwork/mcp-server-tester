@@ -219,7 +219,36 @@ async function runBatch(
           .join(', ')}\\n`
       );
     }
+    // Each case is self-contained: after a failed case, reset the app to a fresh
+    // task and continue. The failed case is never retried or resent.
+    let resetBeforeCase = false;
     for (const [index, request] of requests.entries()) {
+      if (resetBeforeCase) {
+        resetBeforeCase = false;
+        let resetError: string | undefined;
+        if (!platform.reset)
+          resetError = 'this Cowork platform cannot reset between cases';
+        else
+          try {
+            process.stderr.write(
+              `[mst:cowork] resetting to a fresh task before case ${index + 1}\n`
+            );
+            await platform.reset({
+              deadlineAt: Date.now() + 60_000,
+              maxActions: 1,
+              env,
+            });
+          } catch (error) {
+            resetError = safeError(error);
+          }
+        if (resetError) {
+          for (let n = index; n < requests.length; n++)
+            results[n] = failure(
+              `Not submitted because the Cowork app could not be reset after an earlier failed case: ${resetError}`
+            );
+          break;
+        }
+      }
       const caseStartedAt = Date.now();
       const computerUse: Record<
         'submission' | 'hitl',
@@ -283,11 +312,8 @@ async function runBatch(
         }
         results[index] = failure(safeError(error));
         finishCase();
-        for (let n = index + 1; n < requests.length; n++)
-          results[n] = failure(
-            'Not submitted because a previous UI submission failed or was ambiguous. No retries were attempted.'
-          );
-        break;
+        resetBeforeCase = true;
+        continue;
       }
       process.stderr.write(
         '[mst:cowork] bounded HITL check for the bound native session\n'
@@ -411,8 +437,12 @@ async function runBatch(
           llmDurationMs: trace.llmDurationMs,
         };
       } catch (error) {
+        // Trace collection or attribution failed: the app state is unknown.
         results[index] = failure(safeError(error));
+        if (platform.reset) resetBeforeCase = true;
       }
+      // A HITL failure may leave a prompt open; reset before the next task.
+      if (hitlError && platform.reset) resetBeforeCase = true;
       finishCase();
     }
     return results;

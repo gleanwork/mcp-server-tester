@@ -167,7 +167,8 @@ async function runBatch(
   const results: HostRunResult[] = [];
   const session = new ChatgptAppSession('batch');
   const usedSessions = new Set<string>();
-  let batchBlocked = false;
+  let restartBeforeCase = false;
+  let recoveryError: string | undefined;
   let executionError: unknown;
   let executionFailed = false;
   let cleanupError: Error | undefined;
@@ -177,12 +178,23 @@ async function runBatch(
     );
     await session.prepare(externalConfigs[0]!);
     for (const [index, request] of requests.entries()) {
-      if (batchBlocked) {
+      // Each case is self-contained: a failed case restarts the app for the next
+      // one and is never retried or resent itself.
+      if (restartBeforeCase && !recoveryError) {
+        restartBeforeCase = false;
+        try {
+          await session.restart();
+        } catch (error) {
+          recoveryError =
+            error instanceof Error ? error.message : 'restart failed';
+        }
+      }
+      if (recoveryError) {
+        // Without a verified app, nothing can be sent safely.
         results.push({
           finalText: '',
           events: [],
-          error:
-            'Not submitted because a previous ChatGPT execution or evidence failure blocked the batch. No automatic retries were attempted.',
+          error: `Not submitted because the ChatGPT app could not be restarted after an earlier failed case: ${recoveryError}`,
           telemetry: {
             caseExecution: { status: 'not-submitted', continuation: 'blocked' },
           },
@@ -230,10 +242,10 @@ async function runBatch(
           trace.error = 'Native cached input exceeds total input tokens.';
         else trace.usage = { ...trace.usage, inputTokens: uncached };
       }
-      // Native/controller/evidence failures block further submissions. A completed,
-      // reliably attributed turn can fail the MCP measurement without blocking peers.
+      // Native/controller/evidence failures restart the app before the next case.
+      // A completed, attributed turn can fail the MCP measurement without a restart.
       const executionTrusted = result.success && !trace.error;
-      batchBlocked = !executionTrusted;
+      restartBeforeCase = !executionTrusted;
       const mcpCalls = result.toolCalls.filter(
         (call) => call.source !== 'host'
       );
@@ -266,7 +278,7 @@ async function runBatch(
         telemetry: {
           caseExecution: {
             status: executionTrusted ? 'completed' : 'failed',
-            continuation: executionTrusted ? 'allowed' : 'blocked',
+            continuation: executionTrusted ? 'allowed' : 'restart',
           },
           mcpSelection: {
             status: !executionTrusted

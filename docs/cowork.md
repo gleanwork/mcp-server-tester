@@ -242,8 +242,14 @@ added. Correlation requires exact native `initialMessage` equality, a metadata p
 absent from the per-case snapshot, and a recent creation timestamp (five seconds
 of clock tolerance). Existing sessions remain excluded even if updated. Answers
 and tool output are never prompt matches. MST binds the unique new session within
-30 seconds after submission and pins collection to it. Missing or ambiguous
-binding stops further submissions without retrying. Per-case snapshots distinguish
+30 seconds after submission and pins collection to it. A failed case is never
+retried or resent. On Linux, each case is self-contained: after a submit, binding,
+HITL, or trace failure, MST records that case's failure, opens one empty new-task
+deep link, waits read-only (up to 60 seconds) for the Cowork start surface, and
+continues. The next case takes its own session snapshot, so a late session from
+the failed case cannot be attributed to it. If that reset fails, the remaining
+cases are not submitted. macOS has no reset yet; there, a submit or binding
+failure stops further submissions. Per-case snapshots distinguish
 repeated identical prompts. Use a dedicated desktop: do not manually create or
 switch tasks during evaluation.
 

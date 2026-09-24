@@ -114,7 +114,7 @@ function receipt(stdout: string): Receipt | undefined {
 }
 
 async function execute(
-  mode: 'probe' | 'submit' | 'hitl',
+  mode: 'probe' | 'reset' | 'submit' | 'hitl',
   payload: object,
   options: CoworkDriverOptions
 ): Promise<Receipt> {
@@ -180,7 +180,7 @@ async function execute(
   );
   const record = receipt(result.stdout);
   const expected =
-    mode === 'probe'
+    mode === 'probe' || mode === 'reset'
       ? 'ready'
       : mode === 'submit'
         ? 'submitted'
@@ -321,6 +321,10 @@ export const linuxCoworkPlatform: CoworkPlatform = {
     throw new Error(
       'Linux desktop recovery belongs to the runtime owner, not the MST driver.'
     );
+  },
+  async reset(options) {
+    // One empty new-task deep link, then a read-only wait. Never types or sends.
+    await execute('reset', {}, { ...options, maxActions: 1 });
   },
   async submit(query, options) {
     const started = Date.now();

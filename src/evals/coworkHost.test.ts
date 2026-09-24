@@ -634,7 +634,53 @@ describe('V2 Cowork host', () => {
       )
     ).toEqual(['/fixture/session-0', '/fixture/session-1']);
   });
-  it('never retries an ambiguous submit and cancels later submissions', async () => {
+  it('resets to a fresh task after a failed case and runs later cases independently', async () => {
+    const reset = vi.fn().mockResolvedValue(undefined);
+    const host = createCoworkHost({
+      dataDirectory: () => '/prepared/session',
+      prepare: mocks.setup,
+      recover: vi.fn(),
+      reset,
+      submit: mocks.submit,
+      handleHitl: mocks.hitl,
+    });
+    const batch = [...requests(), { ...requests()[0]!, caseId: 'three' }];
+    mocks.submit.mockRejectedValueOnce(new Error('uncertain submit'));
+    mocks.trace.mockRejectedValueOnce(new Error('native trace timeout'));
+    const result = await host.runBatch!(batch, context);
+    // Case 1 fails at submit, case 2 at trace; each is reset before the next case.
+    expect(result.map((r) => r.error)).toEqual([
+      'uncertain submit',
+      'native trace timeout',
+      undefined,
+    ]);
+    expect(mocks.submit).toHaveBeenCalledTimes(3);
+    expect(reset).toHaveBeenCalledTimes(2);
+    expect(reset.mock.calls[0]![0]).toMatchObject({ maxActions: 1 });
+    // The failed case is never resent: one submit per case, in order.
+    expect(mocks.submit.mock.calls.map((call) => call[0] as string)).toEqual(
+      batch.map((r) => r.input.scenario)
+    );
+    expect(mocks.dispose).toHaveBeenCalledOnce();
+  });
+  it('sends nothing more when the app cannot be reset after a failed case', async () => {
+    const reset = vi.fn().mockRejectedValue(new Error('cowork_not_ready'));
+    const host = createCoworkHost({
+      dataDirectory: () => '/prepared/session',
+      prepare: mocks.setup,
+      recover: vi.fn(),
+      reset,
+      submit: mocks.submit,
+      handleHitl: mocks.hitl,
+    });
+    mocks.submit.mockRejectedValueOnce(new Error('uncertain submit'));
+    const result = await host.runBatch!(requests(), context);
+    expect(mocks.submit).toHaveBeenCalledTimes(1);
+    expect(result[1]!.error).toContain('could not be reset');
+    expect(result[1]!.error).toContain('cowork_not_ready');
+    expect(mocks.dispose).toHaveBeenCalledOnce();
+  });
+  it('never retries an ambiguous submit and, without a reset, cancels later submissions', async () => {
     mocks.submit.mockRejectedValueOnce(new Error('uncertain test-secret-key'));
     const result = await COWORK_HOST.runBatch!(requests(), context);
     expect(mocks.submit).toHaveBeenCalledTimes(1);

@@ -21,6 +21,12 @@ export interface CoworkPlatform {
     stdioPaths?: HostStdioPaths;
   }): Promise<{ dispose(): Promise<void> }>;
   recover(): Promise<unknown>;
+  /**
+   * After a failed case, return the app to a fresh task so the next case is
+   * independent. Never types or submits. Optional: without it, a failed case
+   * stops the batch.
+   */
+  reset?(options: CoworkDriverOptions): Promise<void>;
   submit(
     query: string,
     options: CoworkDriverOptions

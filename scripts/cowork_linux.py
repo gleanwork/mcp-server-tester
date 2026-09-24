@@ -113,6 +113,17 @@ class Driver:
             raise DriverFailure("cowork_not_ready")
         return self.receipt("ready")
 
+    def reset(self) -> dict:
+        # After a failed case: leave its view with one empty new-task deep link,
+        # then wait read-only for the Cowork start surface. Never types or sends.
+        self.action(lambda: self.desktop.open_prompt("", self.remaining()))
+        while True:
+            self.remaining()
+            if self.desktop.controls({"Cowork", "Start task"}, {"button", "radio button"},
+                                     require_enabled=False):
+                return self.receipt("ready")
+            time.sleep(min(0.1, self.remaining()))
+
     def select_cowork(self) -> None:
         requested = set()
         while True:
@@ -179,7 +190,7 @@ class Driver:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["probe", "submit", "hitl"], required=True)
+    parser.add_argument("--mode", choices=["probe", "reset", "submit", "hitl"], required=True)
     parser.add_argument("--timeout-ms", type=int, required=True)
     parser.add_argument("--max-actions", type=int, default=24)
     args = parser.parse_args()
@@ -195,6 +206,8 @@ def main() -> int:
             result = driver.submit(payload.get("prompt"))
         elif args.mode == "hitl":
             result = driver.hitl(payload.get("approveWriteTools") is True)
+        elif args.mode == "reset":
+            result = driver.reset()
         else:
             result = driver.probe()
         print(json.dumps(result))

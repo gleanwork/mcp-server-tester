@@ -410,9 +410,14 @@ conversation, with `telemetry.partial: true`, `traceConfidence: 'low'`, and the
 limitation "Turn did not complete; tool calls and usage are partial." Partial
 usage duration is the native elapsed time so far.
 
-Native or controller uncertainty blocks the remaining batch. There is no automatic
-retry. A completed, reliably attributed turn can fail the configured-MCP
-measurement without blocking the next case. Host tool calls remain distinct from
+Each case is self-contained. After a case fails for a native, controller, or
+evidence reason, MST records that failure, then stops and restarts the owned app
+with the same profile and settings and verifies the surface again before the next
+case (`batchLifecycle.recoveryCount`). The failed case is never retried or resent.
+The next case still requires its own exact prompt and fresh native session, so a
+late answer from the failed case cannot be attributed to it. If the restart fails,
+the remaining cases are not submitted. A completed, reliably attributed turn can
+fail the configured-MCP measurement without a restart. Host tool calls remain distinct from
 MCP calls; unexpected or unattributed MCP servers fail measurement, and
 `requireMcpCalls` requires a call on the configured server selection.
 
