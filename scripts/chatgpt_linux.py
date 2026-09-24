@@ -48,6 +48,11 @@ ERROR_CODES = frozenset(CONTRACT['errorCodes'])
 DRAFT_POLLS = 300
 # Read-only settle time before a batch's next submission (30 seconds).
 IDLE_POLLS = 300
+# The app routes each deep link asynchronously and does not order them. If the
+# setup route lands after the first submission's route, it replaces that draft
+# with an empty new chat. Setup observes read-only for 5 seconds after its
+# hand-off so that its route lands first. Nothing is repeated.
+SETUP_SETTLE_POLLS = 50
 
 
 def error_code(error, glib_error=()):
@@ -485,6 +490,45 @@ class Driver:
             raise ambiguity
         raise DriverFailure('state_transition_unobserved')
 
+    def settle(self, polls):
+        # Read-only observation for a fixed time. It pumps AT-SPI events but never
+        # acts, matches, or retries. It shares the overall deadline.
+        settle_deadline = time.monotonic() + polls * 0.1
+        for _ in range(polls):
+            self.snapshot()
+            remaining = settle_deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(0.1, remaining))
+
+    def composer_digest(self, nodes):
+        # In-memory SHA-256 of the unique composer text, or None. Read-only; it is
+        # never exported and it cannot authorize an action.
+        try:
+            roots = editor_roots(nodes)
+            if len(roots) != 1:
+                return None
+            text = self.desktop.text(roots[0])
+            if not isinstance(text, str):
+                return None
+            return hashlib.sha256(text.encode('utf-8')).digest()
+        except Exception:
+            return None
+
+    def prompt_not_applied(self, baseline):
+        # True only if the last snapshot is a ready surface whose composer text is
+        # still exactly the text from before the hand-off (for example, only the
+        # empty-chat placeholder). Diagnosis only: nothing is reopened or retried.
+        nodes = self.last_snapshot
+        if baseline is None or nodes is None:
+            return False
+        try:
+            if not any(self.ready(nodes, candidate) for candidate in SURFACES):
+                return False
+        except DriverFailure:
+            return False
+        return self.composer_digest(nodes) == baseline
+
     def selected(self, nodes, surface):
         switches = controls(nodes, set(MODE_LABELS.values()))
         return len(switches) == 1 and switches[0]['name'] == MODE_LABELS[surface]
@@ -551,6 +595,9 @@ class Driver:
         self.step = 'draft-open'
         self.action(lambda: self.desktop.open_prompt(''))
         self.step = 'draft-surface'
+        # The pre-hand-off UI is already ready, so readiness cannot show that the
+        # setup route landed. Wait read-only so it cannot replace the first draft.
+        self.settle(SETUP_SETTLE_POLLS)
         # Setup has no user prompt to match. A new chat can expose a visible
         # placeholder as Text; ready means controls/surface, not verified emptiness.
         nodes = self.wait(lambda ns: any(self.ready(ns, candidate) for candidate in SURFACES),
@@ -582,12 +629,20 @@ class Driver:
                     raise
                 raise DriverFailure('surface_mismatch') from None
         self.phase = 'composer'
+        baseline = self.composer_digest(nodes)
         self.step = 'draft-open'
         self.action(lambda: self.desktop.open_prompt(prompt))
         self.step = 'draft-surface'
-        nodes = self.wait(lambda ns: any(self.ready(ns, candidate) for candidate in SURFACES)
-                          and matches_prompt(self.desktop.text(composer(ns)), prompt),
-                          polls=DRAFT_POLLS)
+        try:
+            nodes = self.wait(lambda ns: any(self.ready(ns, candidate) for candidate in SURFACES)
+                              and matches_prompt(self.desktop.text(composer(ns)), prompt),
+                              polls=DRAFT_POLLS)
+        except DriverFailure as error:
+            # Same fail-closed outcome; a more specific code when the app never
+            # applied the prompt. No reopen, refill, or typing.
+            if str(error) == 'state_transition_unobserved' and self.prompt_not_applied(baseline):
+                raise DriverFailure('draft_prompt_not_applied') from None
+            raise
         # A deep link may change mode. One fixed UI selection is allowed, but it
         # must preserve the draft. Never reopen, refill, or fall back on loss.
         self.select_surface(nodes, surface)

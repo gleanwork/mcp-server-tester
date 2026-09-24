@@ -164,6 +164,20 @@ hand-off, and replies `{"opened": true}` or `{"opened": false}`. The script wait
 at most 30 seconds (capped by its deadline). After the hand-off, it polls up to
 30 seconds for the draft to appear; this is read-only. Nothing is retried.
 
+The app routes each deep link asynchronously and does not order them. A setup
+route that lands after the first submission's route replaces that draft with an
+empty new chat, so the composer shows only its placeholder (for example,
+`Work with ChatGPT`). Because the UI is already ready before the setup hand-off,
+readiness cannot show that the setup route landed. Preparation therefore observes
+read-only for 5 seconds after its hand-off, within its deadline, before it checks
+the surface. It does not act, read text, or reopen during this time.
+
+If a submission's draft does not appear, the error is `state_transition_unobserved`.
+It is `draft_prompt_not_applied` when, at the end of the wait, the surface is
+ready and the composer text is exactly the text from before the hand-off. The
+comparison uses an in-memory hash only. Both codes fail closed with no Send,
+reopen, or retry.
+
 Before each submission, the script checks that the selected surface is idle:
 one composer and one Send control. After the previous turn, the app can briefly
 show neither. The script then polls up to 30 seconds (read-only, before any
@@ -192,7 +206,8 @@ enabled Continue on the observed profession page; a stale checked bit does not
 block it. Unknown onboarding and ambiguous controls fail closed.
 
 Preparation selects the surface and calls `open_prompt('')` exactly once to open
-the canonical new chat. It then verifies the requested surface, one available
+the canonical new chat. After the 5-second read-only settle described in
+[Draft hand-off](#draft-hand-off), it verifies the requested surface, one available
 editable composer, and one visible Send control (which can be disabled). If the
 deep link changed mode, one fixed Switch mode correction is allowed. Setup has
 no user prompt: it does not require or claim an empty Text readback. A visible
