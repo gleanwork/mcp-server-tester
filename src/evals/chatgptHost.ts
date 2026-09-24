@@ -11,6 +11,7 @@ import type {
 import { runExternalHostScenario } from './externalHost/runtime.js';
 import { ChatgptAppSession } from './chatgptSetup/session.js';
 import { chatgptServers } from './chatgptSetup/config.js';
+import { HostPluginSchema } from './codexSetup/plugins.js';
 import type { ExternalHostConfig } from './externalHost/types.js';
 import { simulationToHostTrace } from './hostTrace.js';
 import { NATIVE_MAX_ACTIONS } from './chatgpt/linuxContract.js';
@@ -30,6 +31,7 @@ const Schema = z
     provider: z.literal('openai').optional(),
     timeout: z.number().int().positive().default(300_000),
     env: z.record(z.string(), z.string()).optional(),
+    plugins: z.array(HostPluginSchema).max(16).optional(),
     options: z
       .object({
         configPath: z.string().min(1).optional(),
@@ -112,6 +114,7 @@ async function runBatch(
           configPath: config.options.configPath,
           servers: serverConfig.servers,
         },
+        ...(config.plugins?.length ? { plugins: config.plugins } : {}),
         options: {
           environment: { ...config.env, ...serverConfig.environment },
           computerUseModel: config.options.computerUseModel,

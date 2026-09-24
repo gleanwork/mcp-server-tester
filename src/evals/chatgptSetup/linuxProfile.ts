@@ -36,6 +36,11 @@ import {
 } from '../codexSetup/native.js';
 import type { ExternalHostConfig } from '../externalHost/types.js';
 import { checkMcpServers, type McpServerReadiness } from '../mcpReadiness.js';
+import {
+  installCodexPlugins,
+  type HostPlugin,
+  type HostPluginReceipt,
+} from '../codexSetup/plugins.js';
 import { createLinuxChatgptApp } from './linuxApp.js';
 
 /** The Scio -> MST process environment. All paths are absolute and normalized. */
@@ -202,7 +207,9 @@ export interface LinuxChatgptReadiness {
   login: 'not-run' | 'verified' | 'failed';
   mcpPreflight: McpServerReadiness[];
   mcpStatus?: AppServerStatus;
-  error?: CodexSetupErrorCode;
+  /** Installed host plugins; no paths, URLs, or credentials. */
+  plugins?: HostPluginReceipt[];
+  error?: CodexSetupErrorCode | 'plugin_setup_failed';
 }
 
 export interface ChatgptPlatformProfile {
@@ -217,7 +224,8 @@ export interface ChatgptPlatformProfile {
   /** After config install and before app start. Fails before any prompt. */
   beforeStart(
     setup: ResolvedCodexSetup,
-    environment: Record<string, string>
+    environment: Record<string, string>,
+    plugins?: readonly HostPlugin[]
   ): Promise<void>;
   dispose(): Promise<void>;
 }
@@ -279,7 +287,7 @@ export async function createLinuxChatgptProfile(
     }),
     evidenceDir: environment.evidenceDir,
     readiness,
-    async beforeStart(setup, launch) {
+    async beforeStart(setup, launch, plugins = []) {
       const native = {
         ...environment.session,
         PATH: '/usr/bin:/bin',
@@ -322,6 +330,34 @@ export async function createLinuxChatgptProfile(
         )
       )
         throw fail('mcp_preflight_failed');
+      // Plugin servers replace direct servers by label; traces keep the label.
+      const replaced = new Set<string>();
+      if (plugins.length) {
+        try {
+          readiness.plugins = await installCodexPlugins({
+            codexPath: environment.codexPath,
+            env: native,
+            codexHome: environment.codexHome,
+            plugins,
+            replaced: servers.flatMap((server) =>
+              server.transport === 'http' && server.auth?.accessToken
+                ? [
+                    {
+                      label: server.label!,
+                      url: server.serverUrl,
+                      token: server.auth.accessToken,
+                    },
+                  ]
+                : []
+            ),
+          });
+        } catch (error) {
+          readiness.error = 'plugin_setup_failed';
+          throw error;
+        }
+        for (const plugin of readiness.plugins)
+          if (plugin.replaces) replaced.add(plugin.replaces);
+      }
       if (!setup.servers.length) return;
       readiness.mcpStatus = await probeAppServerStatus(
         environment.codexPath,
@@ -333,7 +369,9 @@ export async function createLinuxChatgptProfile(
       for (const [index, server] of readiness.mcpStatus.servers.entries()) {
         const configured = setup.servers[index]!;
         const auth =
-          configured.transport === 'http' && configured.bearerTokenEnvVar
+          configured.transport === 'http' &&
+          configured.bearerTokenEnvVar &&
+          !replaced.has(configured.label)
             ? 'bearerToken'
             : 'unsupported';
         if (!appServerServerReady(server, auth))

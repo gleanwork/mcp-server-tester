@@ -102,6 +102,34 @@ the disabled plugin in `turn_context.disabled_plugin_ids`. Shell commands
 stay available. Any host tool call is recorded separately from MCP calls.
 macOS is unchanged.
 
+Host plugins (Linux only): a fresh profile has no plugins, so the model has no
+skills that point it at the MCP server. List plugins in the host config:
+
+```json
+"plugins": [
+  {
+    "name": "glean",
+    "marketplace": {
+      "source": "gleanwork/codex-plugins",
+      "ref": "<40-character commit SHA>"
+    },
+    "mcp": { "server": "glean_plugin", "replaces": "glean-eval", "adapter": "glean" }
+  }
+]
+```
+
+After login and MCP preflight, MST runs `codex plugin marketplace add` and
+`codex plugin add` for each entry. Git sources require a full commit SHA; an
+absolute local path is also accepted. With `mcp`, the plugin's own server runs
+under the replaced label (`glean-eval`), so traces, `requireMcpCalls`, and the
+app-server probe keep that label. MST disables the plugin's own entry. The
+`glean` adapter sets `GLEAN_MCP_SERVER_URL` to the replaced server's URL and
+seeds the resolved bearer token in a private `mcp-credentials.json` under
+`$CODEX_HOME/mst-plugin-data/<name>` (mode 0600). It also turns off approval
+prompts. Without `mcp`, only the plugin's skills are added. Any install error
+fails setup with `plugin_setup_failed` before the app starts.
+`nativeReadiness.plugins` records the name, marketplace, version, and ref.
+
 Execution policy: on Linux, MST writes `approval_policy = "never"` and
 `sandbox_mode = "danger-full-access"`. Native command execution needs
 bubblewrap, which cannot run inside the container, and nobody can answer an

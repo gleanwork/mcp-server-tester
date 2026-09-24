@@ -4,6 +4,7 @@ import type {
 } from '../mcpHost/mcpHostTypes.js';
 import type { UsageMetrics } from '../../types/index.js';
 import type { CodexSetupConfig } from '../codexSetup/config.js';
+import type { HostPlugin } from '../codexSetup/plugins.js';
 import type {
   ComputerUseTelemetry,
   SemanticDesktopTelemetry,
@@ -258,6 +259,10 @@ export interface ExternalHostConfig {
    * Optional managed MCP configuration lifecycle for the ChatGPT desktop driver.
    */
   codexSetup?: CodexSetupConfig;
+  /**
+   * Host plugins that MST installs into the fresh native profile before start.
+   */
+  plugins?: HostPlugin[];
   /**
    * Driver-wide options available to capability implementations.
    */

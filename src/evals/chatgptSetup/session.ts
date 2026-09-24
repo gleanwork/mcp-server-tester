@@ -65,11 +65,14 @@ function sessionSettings(
     throw new Error(
       'ChatGPT loads CODEX_HOME/config.toml; configPath must end in config.toml.'
     );
+  if (config.plugins?.length && !platform.createProfile)
+    throw new Error('ChatGPT host plugins require the Linux fresh profile.');
   return {
     platform: platform.name,
     application,
     codexSetup,
     setup,
+    plugins: config.plugins ?? [],
     model: config.model,
     reasoningEffort: config.reasoningEffort,
     surface: chatgptSurface(config),
@@ -185,7 +188,11 @@ export class ChatgptAppSession {
         if (!settings.setup)
           throw new Error('ChatGPT platform profile requires a native config.');
         // Login, direct MCP preflight, and app-server status: before any prompt.
-        await this.#profile.beforeStart(settings.setup, environment);
+        await this.#profile.beforeStart(
+          settings.setup,
+          environment,
+          settings.plugins
+        );
         this.record('setup', 'verify_login_and_mcp');
       }
       lifecycle.launchAttempted = true;

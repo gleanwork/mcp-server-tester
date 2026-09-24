@@ -425,6 +425,19 @@ describe('ChatGPT Linux native lifecycle', () => {
     await rm(home, { recursive: true, force: true });
   });
 
+  it('passes host plugins to the Linux profile before start', async () => {
+    const plugins = [
+      { name: 'glean', marketplace: { source: '/opt/plugins' } },
+    ];
+    const session = new ChatgptAppSession();
+    try {
+      await session.prepare({ ...linuxConfig(), plugins });
+      expect((beforeStart.mock.calls[0] as unknown[])[2]).toEqual(plugins);
+    } finally {
+      await session.dispose();
+    }
+  });
+
   it('prepares surface once per batch and keeps native controller separate from model accounting', async () => {
     const session = new ChatgptAppSession();
     const config = linuxConfig();

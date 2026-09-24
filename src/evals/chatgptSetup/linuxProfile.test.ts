@@ -17,6 +17,7 @@ import type * as AppServerModule from '../codexSetup/appServerStatus.js';
 import type { AppServerAuthStatus } from '../codexSetup/appServerStatus.js';
 import { CodexSetupError } from '../codexSetup/native.js';
 import { checkMcpServers } from '../mcpReadiness.js';
+import { installCodexPlugins } from '../codexSetup/plugins.js';
 import { linuxEnvironment } from '../chatgpt/linuxEnvironment.fixture.js';
 import {
   createLinuxChatgptProfile,
@@ -30,6 +31,7 @@ vi.mock('../codexSetup/appServerStatus.js', async (original) => ({
   probeAppServerStatus: vi.fn(),
 }));
 vi.mock('../mcpReadiness.js', () => ({ checkMcpServers: vi.fn() }));
+vi.mock('../codexSetup/plugins.js', () => ({ installCodexPlugins: vi.fn() }));
 
 const TOKEN = 'tok-sentinel';
 const POLICY = { approvalPolicy: 'never', sandboxMode: 'danger-full-access' };
@@ -249,6 +251,57 @@ describe('fresh MST-owned Linux profile', () => {
       profile.beforeStart(setup, { MST_CHATGPT_MCP_TOKEN_0: TOKEN })
     ).rejects.toMatchObject({ code });
     expect(profile.readiness.error).toBe(code);
+    await profile.dispose();
+  });
+
+  it('installs plugins after preflight and accepts the replaced stdio server', async () => {
+    preflight('connected');
+    appServer(true, 'unsupported');
+    const receipt = {
+      name: 'glean',
+      marketplace: 'mkt',
+      version: '1.0.0',
+      mcpServer: 'glean_plugin',
+      replaces: 'glean',
+    };
+    vi.mocked(installCodexPlugins).mockResolvedValue([receipt]);
+    const plugin = {
+      name: 'glean',
+      marketplace: { source: '/opt/plugins' },
+      mcp: {
+        server: 'glean_plugin',
+        replaces: 'glean',
+        adapter: 'glean' as const,
+      },
+    };
+    const profile = await createProfile();
+    await profile.beforeStart(setup, { MST_CHATGPT_MCP_TOKEN_0: TOKEN }, [
+      plugin,
+    ]);
+    const [options] = vi.mocked(installCodexPlugins).mock.calls[0]!;
+    expect(options).toMatchObject({
+      codexHome: join(home, '.codex'),
+      plugins: [plugin],
+      replaced: [
+        { label: 'glean', url: 'https://example.test/mcp', token: TOKEN },
+      ],
+    });
+    expect(JSON.stringify(options.env)).not.toContain(TOKEN);
+    expect(profile.readiness.plugins).toEqual([receipt]);
+    await profile.dispose();
+  });
+
+  it('fails setup when a plugin does not install', async () => {
+    preflight('connected');
+    vi.mocked(installCodexPlugins).mockRejectedValue(new Error('install'));
+    const profile = await createProfile();
+    await expect(
+      profile.beforeStart(setup, { MST_CHATGPT_MCP_TOKEN_0: TOKEN }, [
+        { name: 'glean', marketplace: { source: '/opt/plugins' } },
+      ])
+    ).rejects.toThrow('install');
+    expect(profile.readiness.error).toBe('plugin_setup_failed');
+    expect(probeAppServerStatus).not.toHaveBeenCalled();
     await profile.dispose();
   });
 
