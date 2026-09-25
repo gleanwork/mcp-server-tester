@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import select
 import stat
 import subprocess
@@ -420,10 +421,18 @@ def composer(nodes):
     return unique(editor_roots(nodes), 'composer_missing_or_ambiguous')
 
 
+# The composer shows `code` as a code span, so AT-SPI text omits its two
+# backticks (run 36077325110, e2e-0028). Match exactly that rendering: single
+# backticks, not part of a longer run, around text without backticks or newlines.
+INLINE_CODE = re.compile(r'(?<!`)`([^`\n]+)`(?!`)')
+
+
 def matches_prompt(text, prompt):
     # Same bounded representation as native exact_prompt correlation. Do not
-    # trim text or alter the prompt handed to MST for the deep link.
-    return text == prompt or text == prompt + '\n'
+    # trim text or alter the prompt handed to MST for the deep link. The sent
+    # message is still correlated with the exact prompt from the native trace.
+    candidates = {prompt, INLINE_CODE.sub(r'\1', prompt)}
+    return any(text in (value, value + '\n') for value in candidates)
 
 
 class Driver:

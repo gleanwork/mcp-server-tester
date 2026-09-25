@@ -432,6 +432,35 @@ class DriverTest(unittest.TestCase):
                                          if corrected else ['open', 'Send'])
                         self.assertEqual(composer(desktop.nodes)['text'], prompt + suffix)
 
+    def test_inline_code_rendered_without_backticks_sends_once(self):
+        # The composer shows `x` as a code span; AT-SPI text omits the backticks.
+        prompt = 'How do I use the `jira` CLI with `--json` output?'
+        for shown in (prompt, 'How do I use the jira CLI with --json output?'):
+            for suffix in ('', '\n'):
+                with self.subTest(shown=shown, suffix=suffix):
+                    desktop = FakeDesktop(ready(text='prior draft'))
+                    hook_open(desktop, lambda v, d=desktop, t=shown + suffix: composer(d.nodes).update(text=t))
+                    receipt = self.driver(desktop).submit(prompt, 'chatgpt-work')
+                    self.assertEqual(receipt['status'], 'submitted')
+                    self.assertEqual(desktop.actions[0], ('open', prompt))
+                    self.assertEqual(self.actions(desktop), ['open', 'Send'])
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_inline_code_rendering_is_the_only_backtick_relaxation(self, _sleep):
+        prompt = 'Use `a` and `b` with ``c`` and `d\ne`'
+        for text in ('Use a and `b` with ``c`` and `d\ne`',  # partial removal
+                     'Use a and b with c and d\ne',  # double/multiline spans stay literal
+                     'Use a and b with `c` and `d\ne`',
+                     'Use a and b with ``c`` and d\ne',
+                     'Use `a` and `b` with ``c`` and `d\ne` ',
+                     'Use and with ``c`` and `d\ne`'):
+            with self.subTest(text=text):
+                desktop = FakeDesktop()
+                hook_open(desktop, lambda v, d=desktop, t=text: composer(d.nodes).update(text=t))
+                with self.assertRaises(DriverFailure):
+                    self.driver(desktop).submit(prompt, 'chatgpt-work')
+                self.assertNotIn('Send', self.actions(desktop))
+
     @patch('chatgpt_linux.time.sleep')
     def test_draft_mismatch_blocks_send_before_and_after_mode_correction(self, _sleep):
         mismatches = [PROMPT + '\n\n', 'prefix' + PROMPT, PROMPT + 'suffix', PROMPT.strip(),

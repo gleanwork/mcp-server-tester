@@ -305,7 +305,12 @@ All other literal text is unchanged, including whitespace, line feeds, and
 unresolved U+FFFC. No paragraph separators are invented: missing reported
 separators cause the comparison to fail if the prompt contains them. Send stays
 blocked until the expanded text equals the unchanged prompt or that prompt plus
-one terminal LF, and exactly one enabled Send control exists. This also applies
+one terminal LF, and exactly one enabled Send control exists. The one exception is
+inline code: the composer shows `` `x` `` as a code span, so its accessible text
+omits those two backticks. A draft that equals the prompt with every single-backtick
+span (no backticks or line feeds inside, not part of a longer backtick run) shown
+without its backticks also matches. The sent message is still matched with the
+exact prompt in the native trace. This also applies
 when the original prompt already ends in LF; only one additional LF is allowed.
 MST activates Send once. It never presses Enter or retries an uncertain Send.
 
