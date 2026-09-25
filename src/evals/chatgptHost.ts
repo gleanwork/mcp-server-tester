@@ -11,6 +11,11 @@ import type {
 import { runExternalHostScenario } from './externalHost/runtime.js';
 import { ChatgptAppSession } from './chatgptSetup/session.js';
 import { chatgptServers } from './chatgptSetup/config.js';
+import {
+  HostPluginsSchema,
+  hostPluginMcpServers,
+  resolveHostPluginCredentials,
+} from './hostPlugins.js';
 import type { ExternalHostConfig } from './externalHost/types.js';
 import { simulationToHostTrace } from './hostTrace.js';
 import { NATIVE_MAX_ACTIONS } from './chatgpt/linuxContract.js';
@@ -30,6 +35,11 @@ const Schema = z
     provider: z.literal('openai').optional(),
     timeout: z.number().int().positive().default(300_000),
     env: z.record(z.string(), z.string()).optional(),
+    /** Host-owned: plugins installed into the fresh Linux profile. */
+    plugins: HostPluginsSchema.optional().refine(
+      (plugins) => !plugins?.some((p) => p.blockMcpServers?.length),
+      'ChatGPT does not support plugins[].blockMcpServers; use plugins[].mcp.'
+    ),
     options: z
       .object({
         configPath: z.string().min(1).optional(),
@@ -80,13 +90,18 @@ async function runBatch(
     )
   )
     throw new Error('ChatGPT batch requires identical host settings.');
+  const credentialEnv = requests.map((request, index) => ({
+    ...process.env,
+    ...context.env,
+    ...request.input.env,
+    ...configs[index]!.env,
+  }));
   const prepared = requests.map((request, index) =>
-    chatgptServers(request.input.servers, {
-      ...process.env,
-      ...context.env,
-      ...request.input.env,
-      ...configs[index]!.env,
-    })
+    chatgptServers(request.input.servers, credentialEnv[index]!)
+  );
+  // Plugin credentials use the same environment lookup as direct servers.
+  const pluginCredentials = configs.map((config, index) =>
+    resolveHostPluginCredentials(config.plugins ?? [], credentialEnv[index]!)
   );
   const externalConfigs: ExternalHostConfig[] = requests.map(
     (request, index) => {
@@ -112,6 +127,12 @@ async function runBatch(
           configPath: config.options.configPath,
           servers: serverConfig.servers,
         },
+        ...(config.plugins?.length
+          ? {
+              plugins: config.plugins,
+              pluginCredentials: pluginCredentials[index]!,
+            }
+          : {}),
         options: {
           environment: { ...config.env, ...serverConfig.environment },
           computerUseModel: config.options.computerUseModel,
@@ -146,7 +167,8 @@ async function runBatch(
   const results: HostRunResult[] = [];
   const session = new ChatgptAppSession('batch');
   const usedSessions = new Set<string>();
-  let batchBlocked = false;
+  let restartBeforeCase = false;
+  let recoveryError: string | undefined;
   let executionError: unknown;
   let executionFailed = false;
   let cleanupError: Error | undefined;
@@ -156,12 +178,23 @@ async function runBatch(
     );
     await session.prepare(externalConfigs[0]!);
     for (const [index, request] of requests.entries()) {
-      if (batchBlocked) {
+      // Each case is self-contained: a failed case restarts the app for the next
+      // one and is never retried or resent itself.
+      if (restartBeforeCase && !recoveryError) {
+        restartBeforeCase = false;
+        try {
+          await session.restart();
+        } catch (error) {
+          recoveryError =
+            error instanceof Error ? error.message : 'restart failed';
+        }
+      }
+      if (recoveryError) {
+        // Without a verified app, nothing can be sent safely.
         results.push({
           finalText: '',
           events: [],
-          error:
-            'Not submitted because a previous ChatGPT execution or evidence failure blocked the batch. No automatic retries were attempted.',
+          error: `Not submitted because the ChatGPT app could not be restarted after an earlier failed case: ${recoveryError}`,
           telemetry: {
             caseExecution: { status: 'not-submitted', continuation: 'blocked' },
           },
@@ -171,9 +204,13 @@ async function runBatch(
       const config = configs[index]!;
       const serverConfig = prepared[index]!;
       const started = Date.now();
-      const serverLabels = new Set(
-        serverConfig.servers.map((server) => server.label)
-      );
+      // Plugin MCP servers are eval servers under their own names.
+      const serverLabels = new Set([
+        ...serverConfig.servers.map((server) => server.label),
+        ...hostPluginMcpServers(config.plugins ?? []).map(
+          (target) => target.server
+        ),
+      ]);
       // Eval prompts stay unchanged. Server selection is verified from native calls,
       // not enforced by adding evaluator instructions to the model's context.
       const result = await runExternalHostScenario(
@@ -205,10 +242,10 @@ async function runBatch(
           trace.error = 'Native cached input exceeds total input tokens.';
         else trace.usage = { ...trace.usage, inputTokens: uncached };
       }
-      // Native/controller/evidence failures block further submissions. A completed,
-      // reliably attributed turn can fail the MCP measurement without blocking peers.
+      // Native/controller/evidence failures restart the app before the next case.
+      // A completed, attributed turn can fail the MCP measurement without a restart.
       const executionTrusted = result.success && !trace.error;
-      batchBlocked = !executionTrusted;
+      restartBeforeCase = !executionTrusted;
       const mcpCalls = result.toolCalls.filter(
         (call) => call.source !== 'host'
       );
@@ -241,7 +278,7 @@ async function runBatch(
         telemetry: {
           caseExecution: {
             status: executionTrusted ? 'completed' : 'failed',
-            continuation: executionTrusted ? 'allowed' : 'blocked',
+            continuation: executionTrusted ? 'allowed' : 'restart',
           },
           mcpSelection: {
             status: !executionTrusted

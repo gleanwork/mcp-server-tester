@@ -24,6 +24,7 @@ import type {
   ChatgptPlatformProfile,
   LinuxChatgptReadiness,
 } from './linuxProfile.js';
+import { hostPluginMcpServers } from '../hostPlugins.js';
 
 const activeApplications = new Set<string>();
 
@@ -57,7 +58,13 @@ function sessionSettings(
   const setup = codexSetup
     ? resolveCodexSetup(codexSetup, configName)
     : undefined;
-  if (setup?.servers.some((server) => isChatgptBuiltinServer(server.label)))
+  const pluginLabels = hostPluginMcpServers(config.plugins ?? []).map(
+    (target) => target.server
+  );
+  if (
+    setup?.servers.some((server) => isChatgptBuiltinServer(server.label)) ||
+    pluginLabels.some(isChatgptBuiltinServer)
+  )
     throw new Error(
       'ChatGPT MCP server labels must not collide with built-in host tool namespaces.'
     );
@@ -65,11 +72,15 @@ function sessionSettings(
     throw new Error(
       'ChatGPT loads CODEX_HOME/config.toml; configPath must end in config.toml.'
     );
+  if (config.plugins?.length && !platform.createProfile)
+    throw new Error('ChatGPT host plugins require the Linux fresh profile.');
   return {
     platform: platform.name,
     application,
     codexSetup,
     setup,
+    plugins: config.plugins ?? [],
+    pluginCredentials: config.pluginCredentials ?? {},
     model: config.model,
     reasoningEffort: config.reasoningEffort,
     surface: chatgptSurface(config),
@@ -86,6 +97,11 @@ export class ChatgptAppSession {
   #settings?: ReturnType<typeof sessionSettings>;
   #ready = false;
   #disposed = false;
+  #launch?: {
+    config: ExternalHostConfig;
+    environment: Record<string, string>;
+    platform: ReturnType<typeof chatgptPlatform>;
+  };
   sessionsRoot?: string;
   /** Linux: where native evidence is copied before profile teardown. */
   evidenceDir?: string;
@@ -96,11 +112,14 @@ export class ChatgptAppSession {
     cleanupStatus: 'not-started' as 'not-started' | 'completed' | 'failed',
     setupDurationMs: 0,
     cleanupDurationMs: 0,
+    /** Restarts after failed cases; each case still gets exactly one send. */
+    recoveryCount: 0,
+    recoveryDurationMs: 0,
     nativeSetup: undefined as SemanticDesktopTelemetry | undefined,
     /** Linux login and MCP readiness, sanitized. */
     nativeReadiness: undefined as LinuxChatgptReadiness | undefined,
     events: [] as Array<{
-      phase: 'setup' | 'cleanup';
+      phase: 'setup' | 'recovery' | 'cleanup';
       operation: string;
       completedAt: string;
     }>,
@@ -185,19 +204,17 @@ export class ChatgptAppSession {
         if (!settings.setup)
           throw new Error('ChatGPT platform profile requires a native config.');
         // Login, direct MCP preflight, and app-server status: before any prompt.
-        await this.#profile.beforeStart(settings.setup, environment);
+        await this.#profile.beforeStart(
+          settings.setup,
+          environment,
+          settings.plugins,
+          settings.pluginCredentials
+        );
         this.record('setup', 'verify_login_and_mcp');
       }
       lifecycle.launchAttempted = true;
-      await controller.start(environment);
-      this.record('setup', 'start');
-      if (platform.verifyReady) {
-        this.telemetry.nativeSetup = await platform.verifyReady(
-          config,
-          (prompt) => this.openPrompt(prompt)
-        );
-        this.record('setup', 'verify_surface');
-      }
+      this.#launch = { config, environment, platform };
+      await this.#start('setup');
       this.#ready = true;
       this.telemetry.setupStatus = 'completed';
     } catch (error) {
@@ -207,6 +224,40 @@ export class ChatgptAppSession {
       throw error;
     } finally {
       this.telemetry.setupDurationMs = Date.now() - started;
+    }
+  }
+
+  async #start(phase: 'setup' | 'recovery'): Promise<void> {
+    const { config, environment, platform } = this.#launch!;
+    await this.#lifecycle!.controller.start(environment);
+    this.record(phase, 'start');
+    if (platform.verifyReady) {
+      this.telemetry.nativeSetup = await platform.verifyReady(
+        config,
+        (prompt) => this.openPrompt(prompt)
+      );
+      this.record(phase, 'verify_surface');
+    }
+  }
+
+  /**
+   * After a failed case: stop and restart the owned app with the same profile,
+   * config, and environment, then verify the surface again. Never sends. A failed
+   * restart leaves the session unready, so no further case can use it.
+   */
+  async restart(): Promise<void> {
+    if (!this.#ready || this.#disposed || !this.#launch)
+      throw new Error('ChatGPT app session is not running.');
+    this.#ready = false;
+    const started = Date.now();
+    try {
+      await this.#lifecycle!.controller.stop();
+      this.record('recovery', 'stop');
+      await this.#start('recovery');
+      this.#ready = true;
+    } finally {
+      this.telemetry.recoveryCount += 1;
+      this.telemetry.recoveryDurationMs += Date.now() - started;
     }
   }
 
@@ -269,7 +320,10 @@ export class ChatgptAppSession {
     }
   }
 
-  private record(phase: 'setup' | 'cleanup', operation: string): void {
+  private record(
+    phase: 'setup' | 'recovery' | 'cleanup',
+    operation: string
+  ): void {
     this.telemetry.events.push({
       phase,
       operation,

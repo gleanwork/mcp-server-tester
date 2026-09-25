@@ -1,4 +1,5 @@
 import type { EvalManifest } from '../evalManifest.js';
+import type { HostPlugin, HostStdioPaths } from '../hostPlugins.js';
 import type {
   CoworkDriverOptions,
   CoworkDriverProvider,
@@ -14,8 +15,18 @@ export interface CoworkPlatform {
     manifest: EvalManifest;
     env: Record<string, string | undefined>;
     model?: string;
+    /** Validated host plugins; Cowork installs them via allowedPluginMarketplaces. */
+    plugins?: readonly HostPlugin[];
+    /** Runtime paths for stdio eval servers (Linux only). */
+    stdioPaths?: HostStdioPaths;
   }): Promise<{ dispose(): Promise<void> }>;
   recover(): Promise<unknown>;
+  /**
+   * After a failed case, return the app to a fresh task so the next case is
+   * independent. Never types or submits. Optional: without it, a failed case
+   * stops the batch.
+   */
+  reset?(options: CoworkDriverOptions): Promise<void>;
   submit(
     query: string,
     options: CoworkDriverOptions

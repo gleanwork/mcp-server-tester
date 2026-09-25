@@ -1,11 +1,30 @@
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
-import { open } from 'node:fs/promises';
+import { lstat, open, realpath } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { CoworkPlatform } from './platform.js';
+import {
+  hostStdioFileContents,
+  hostStdioServers,
+  resolveHostStdioCredentials,
+  resolveHostStdioServer,
+  type HostStdioPaths,
+  type HostStdioServer,
+} from '../hostPlugins.js';
+import {
+  coworkJsonEqual,
+  coworkMcpSettingsMatch,
+  coworkPluginSettingsMatch,
+} from './managedSettings.js';
+
+export {
+  coworkManagedPluginSettings,
+  coworkMcpSettingsMatch,
+  coworkPluginSettingsMatch,
+} from './managedSettings.js';
 import {
   CoworkDriverError,
   CoworkHitlBudgetError,
@@ -95,7 +114,7 @@ function receipt(stdout: string): Receipt | undefined {
 }
 
 async function execute(
-  mode: 'probe' | 'submit' | 'hitl',
+  mode: 'probe' | 'reset' | 'submit' | 'hitl',
   payload: object,
   options: CoworkDriverOptions
 ): Promise<Receipt> {
@@ -161,7 +180,7 @@ async function execute(
   );
   const record = receipt(result.stdout);
   const expected =
-    mode === 'probe'
+    mode === 'probe' || mode === 'reset'
       ? 'ready'
       : mode === 'submit'
         ? 'submitted'
@@ -178,6 +197,71 @@ async function execute(
   return record;
 }
 
+async function privateDirectory(path: string): Promise<void> {
+  const info = await lstat(path);
+  if (
+    !info.isDirectory() ||
+    info.uid !== process.getuid?.() ||
+    (info.mode & 0o077) !== 0 ||
+    (await realpath(path)) !== path
+  )
+    throw new Error('data');
+}
+
+/**
+ * Verify the caller-prepared paths for each stdio eval server: every referenced
+ * plugin root is a real, non-world-writable directory, and `${dataDir}` is
+ * `<mcpDataRoot>/<label>` (both 0700, ours) holding each declared file (a
+ * regular 0600 file, ours) with exactly the substituted JSON content.
+ */
+async function verifyStdioPaths(
+  servers: readonly HostStdioServer[],
+  paths: HostStdioPaths,
+  env: Record<string, string | undefined>
+): Promise<void> {
+  const tokens = resolveHostStdioCredentials(servers, env);
+  for (const server of servers) {
+    for (const plugin of server.pluginRoots) {
+      const root = paths.pluginRoots?.[plugin];
+      const info = root ? await lstat(root) : undefined;
+      if (
+        !root ||
+        !info?.isDirectory() ||
+        (info.mode & 0o002) !== 0 ||
+        (await realpath(root)) !== root
+      )
+        throw new Error('plugin root');
+    }
+    const launch = resolveHostStdioServer(server, paths);
+    if (!launch.dataDir) continue;
+    await privateDirectory(paths.dataRoot!);
+    await privateDirectory(launch.dataDir);
+    const files = hostStdioFileContents(server, paths, tokens[server.label]);
+    for (const [name, content] of Object.entries(files)) {
+      const handle = await open(
+        join(launch.dataDir, name),
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+      );
+      try {
+        const info = await handle.stat();
+        if (
+          !info.isFile() ||
+          info.uid !== process.getuid?.() ||
+          (info.mode & 0o077) !== 0 ||
+          info.size > 64 * 1024
+        )
+          throw new Error('file');
+        if (
+          !coworkJsonEqual(JSON.parse(await handle.readFile('utf8')), content)
+        )
+          throw new Error('file');
+      } finally {
+        await handle.close();
+      }
+    }
+  }
+}
+
 /** Attach to caller-owned resources. Never create, authenticate, or stop a desktop. */
 export const linuxCoworkPlatform: CoworkPlatform = {
   dataDirectory: (options) =>
@@ -187,7 +271,7 @@ export const linuxCoworkPlatform: CoworkPlatform = {
       'Claude-3p',
       'local-agent-mode-sessions'
     ),
-  async prepare({ manifest, env, model }) {
+  async prepare({ manifest, env, model, plugins = [], stdioPaths = {} }) {
     const settingsFile =
       env.MST_COWORK_SETTINGS_FILE ??
       '/etc/claude-desktop/managed-settings.json';
@@ -200,41 +284,26 @@ export const linuxCoworkPlatform: CoworkPlatform = {
         | undefined;
       if (model && !models?.some((m) => m.name === model))
         throw new Error('model');
-      const expected = manifest.servers ?? [];
-      const actual = settings.managedMcpServers as
-        | Array<{
-            name?: string;
-            transport?: string;
-            url?: string;
-            toolPolicy?: Record<string, string>;
-          }>
-        | undefined;
+      if (!coworkPluginSettingsMatch(settings, plugins))
+        throw new Error('plugins');
+      const servers = manifest.servers ?? [];
       if (
-        !Array.isArray(actual) ||
-        actual.length !== expected.length ||
-        settings.allowManagedMcpServersOnly !== true
+        !coworkMcpSettingsMatch(settings, {
+          servers,
+          plugins,
+          paths: stdioPaths,
+          approveWriteTools: manifest.coworkSetup?.approveWriteTools === true,
+        })
       )
         throw new Error('servers');
-      for (const [index, server] of expected.entries()) {
-        if (server.transport !== 'http') throw new Error('transport');
-        const observed = actual.find(
-          (s) => s.name === (server.label ?? `server-${index + 1}`)
-        );
-        if (
-          !observed ||
-          observed.transport !== 'http' ||
-          observed.url !== server.serverUrl
-        )
-          throw new Error('server');
-        if (
-          observed.toolPolicy?.['*'] === 'allow' &&
-          manifest.coworkSetup?.approveWriteTools !== true
-        )
-          throw new Error('policy');
-      }
+      await verifyStdioPaths(
+        hostStdioServers(servers, plugins),
+        stdioPaths,
+        env
+      );
     } catch {
       throw new Error(
-        'Prepared Linux desktop settings do not match the eval model, MCP servers, or approval policy.'
+        'Prepared Linux desktop settings do not match the eval model, MCP servers, plugins, plugin/data paths, or approval policy.'
       );
     }
     await execute(
@@ -252,6 +321,10 @@ export const linuxCoworkPlatform: CoworkPlatform = {
     throw new Error(
       'Linux desktop recovery belongs to the runtime owner, not the MST driver.'
     );
+  },
+  async reset(options) {
+    // One empty new-task deep link, then a read-only wait. Never types or sends.
+    await execute('reset', {}, { ...options, maxActions: 1 });
   },
   async submit(query, options) {
     const started = Date.now();

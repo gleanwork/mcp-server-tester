@@ -91,9 +91,84 @@ MST then owns, in order:
 7. Copy evidence, stop the app group (TERM, then KILL, then verify no member
    remains), restore config, and remove the workspace. The caller deletes HOME.
 
-Computer use: on Linux, the built-in computer-use tool (`cua_repl`) is available
-to the model. Config cannot disable it in this ChatGPT build. Its calls are
-recorded as host tool calls, separate from MCP calls.
+Host tool policy: code mode hides MCP tools until the model searches for them,
+so the model uses the first capable tool it can see. On the headless VM, that
+is the bundled browser (`cua_repl`) or web search, and the MCP server under
+test is never tried. On Linux, MST writes
+`[plugins."unified-computer-use@openai-bundled"] enabled = false` (the plugin
+that adds `cua_repl`) and `web_search = "disabled"`.
+`nativeReadiness.hostToolPolicy` records both values. The rollout records
+the disabled plugin in `turn_context.disabled_plugin_ids`. Shell commands
+stay available. Any host tool call is recorded separately from MCP calls.
+macOS is unchanged.
+
+Host plugins (Linux only): a fresh profile has no plugins, so the model has no
+skills that point it at the MCP server. The host config has two independent
+parts: MCP servers (the manifest `servers`, which may be empty) and
+`plugins`. MST has no plugin-specific code. The caller supplies each plugin
+and, optionally, a declarative override for each of the plugin's own MCP
+servers:
+
+```json
+"plugins": [
+  {
+    "name": "glean",
+    "marketplace": {
+      "source": "gleanwork/codex-plugins",
+      "ref": "<40-character commit SHA>"
+    },
+    "mcp": {
+      "glean_plugin": {
+        "url": "https://example.glean.com/mcp/default/eval",
+        "auth": { "accessTokenEnv": "GLEAN_EVAL_TOKEN" },
+        "minTools": 3,
+        "env": {
+          "GLEAN_MCP_SERVER_URL": "${url}",
+          "CLAUDE_PLUGIN_DATA": "${dataDir}",
+          "ENABLE_HITL": "false"
+        },
+        "files": {
+          "mcp-credentials.json": {
+            "tokens": { "access_token": "${bearerToken}", "token_type": "Bearer" }
+          }
+        }
+      }
+    }
+  }
+]
+```
+
+After login and direct MCP preflight, MST runs `codex plugin marketplace add`
+and `codex plugin add` for each entry. Git sources require a full commit SHA;
+an absolute local path (a pre-staged checkout) is also accepted, and its ref is
+only recorded. Each `mcp` key names a stdio server in the plugin's `.mcp.json`.
+MST writes a complete `[mcp_servers.<key>]` table under that same name:
+`command`, `args`, and `cwd` from the plugin, and the plugin's `env` merged with
+the override `env`. A partial env-only table would make the app reject the
+transport. `files` are written as JSON into a private per-server data dir,
+`$CODEX_HOME/mst-plugin-data/<plugin>/<server>` (directories 0700, files 0600,
+exclusive create, no symlinks). Only `${url}`, `${dataDir}`, and
+`${bearerToken}` are substituted; any other `${...}` fails validation.
+`${bearerToken}` is allowed only in `files`, so it never enters `config.toml`.
+The token comes from `auth.accessTokenEnv`, resolved from the same
+environment as direct MCP `auth.accessTokenEnv`; a missing token fails before
+the app starts. It is never logged, sent to the app environment, or put in a
+receipt.
+
+Plugin MCP servers are eval MCP servers. The app-server probe checks each one
+by name: it must be initialized with at least `minTools` tools (default 1).
+Native `mcp__<server>__<tool>` calls are attributed to `<server>`, and
+`requireMcpCalls` accepts them, also when `servers` is empty. A plugin server
+must not share a name with a direct server. Without `mcp`, only the plugin's
+skills are added. Any install error fails setup with `plugin_setup_failed`
+before the app starts. `nativeReadiness.plugins` records the name,
+marketplace, version, ref, and overridden server names.
+
+ChatGPT rejects two Cowork-only forms before the app starts: host-resolved
+stdio `servers[]` entries (`url`, `auth`, `files`, `minTools`, or
+`${url}`/`${dataDir}`/`${pluginRoot:...}` placeholders) and
+`plugins[].blockMcpServers`. Use `plugins[].mcp` instead. See
+[cowork.md](cowork.md#host-plugins).
 
 Execution policy: on Linux, MST writes `approval_policy = "never"` and
 `sandbox_mode = "danger-full-access"`. Native command execution needs
@@ -129,6 +204,27 @@ hand-off, and replies `{"opened": true}` or `{"opened": false}`. The script wait
 at most 30 seconds (capped by its deadline). After the hand-off, it polls up to
 30 seconds for the draft to appear; this is read-only. Nothing is retried.
 
+The app routes each deep link asynchronously and does not order them. A setup
+route that lands after the first submission's route replaces that draft with an
+empty new chat, so the composer shows only its placeholder (for example,
+`Work with ChatGPT`). Because the UI is already ready before the setup hand-off,
+readiness cannot show that the setup route landed. Preparation therefore observes
+read-only for 5 seconds after its hand-off, within its deadline, before it checks
+the surface. It does not act, read text, or reopen during this time.
+
+If a submission's draft does not appear, the error is `state_transition_unobserved`.
+It is `draft_prompt_not_applied` when, at the end of the wait, the surface is
+ready and the composer text is exactly the text from before the hand-off. The
+comparison uses an in-memory hash only. Both codes fail closed with no Send,
+reopen, or retry.
+
+Before each submission, a visible mode switch set to a different surface fails
+at once with `surface_mismatch`, before any action. After a previous turn, the
+app stays on that conversation, which has no mode switch, composer, or Send. The
+script observes read-only for up to 2 seconds, then opens the case deep link to
+a new chat. The draft checks above still require the selected surface and the
+exact prompt before the one send.
+
 ### Native UI protocol and limits
 
 The Node adapter uses only the `prepare` and `submit` modes of the packaged
@@ -151,7 +247,8 @@ enabled Continue on the observed profession page; a stale checked bit does not
 block it. Unknown onboarding and ambiguous controls fail closed.
 
 Preparation selects the surface and calls `open_prompt('')` exactly once to open
-the canonical new chat. It then verifies the requested surface, one available
+the canonical new chat. After the 5-second read-only settle described in
+[Draft hand-off](#draft-hand-off), it verifies the requested surface, one available
 editable composer, and one visible Send control (which can be disabled). If the
 deep link changed mode, one fixed Switch mode correction is allowed. Setup has
 no user prompt: it does not require or claim an empty Text readback. A visible
@@ -208,7 +305,12 @@ All other literal text is unchanged, including whitespace, line feeds, and
 unresolved U+FFFC. No paragraph separators are invented: missing reported
 separators cause the comparison to fail if the prompt contains them. Send stays
 blocked until the expanded text equals the unchanged prompt or that prompt plus
-one terminal LF, and exactly one enabled Send control exists. This also applies
+one terminal LF, and exactly one enabled Send control exists. The one exception is
+inline code: the composer shows `` `x` `` as a code span, so its accessible text
+omits those two backticks. A draft that equals the prompt with every single-backtick
+span (no backticks or line feeds inside, not part of a longer backtick run) shown
+without its backticks also matches. The sent message is still matched with the
+exact prompt in the native trace. This also applies
 when the original prompt already ends in LF; only one additional LF is allowed.
 MST activates Send once. It never presses Enter or retries an uncertain Send.
 
@@ -314,9 +416,14 @@ conversation, with `telemetry.partial: true`, `traceConfidence: 'low'`, and the
 limitation "Turn did not complete; tool calls and usage are partial." Partial
 usage duration is the native elapsed time so far.
 
-Native or controller uncertainty blocks the remaining batch. There is no automatic
-retry. A completed, reliably attributed turn can fail the configured-MCP
-measurement without blocking the next case. Host tool calls remain distinct from
+Each case is self-contained. After a case fails for a native, controller, or
+evidence reason, MST records that failure, then stops and restarts the owned app
+with the same profile and settings and verifies the surface again before the next
+case (`batchLifecycle.recoveryCount`). The failed case is never retried or resent.
+The next case still requires its own exact prompt and fresh native session, so a
+late answer from the failed case cannot be attributed to it. If the restart fails,
+the remaining cases are not submitted. A completed, reliably attributed turn can
+fail the configured-MCP measurement without a restart. Host tool calls remain distinct from
 MCP calls; unexpected or unattributed MCP servers fail measurement, and
 `requireMcpCalls` requires a call on the configured server selection.
 

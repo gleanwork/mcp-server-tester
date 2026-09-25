@@ -27,6 +27,7 @@ import { loginWithApiKey } from '../codexSetup/auth.js';
 import type {
   CodexConfigInstallOptions,
   CodexExecutionPolicy,
+  CodexHostToolPolicy,
   ResolvedCodexSetup,
 } from '../codexSetup/config.js';
 import {
@@ -35,6 +36,12 @@ import {
 } from '../codexSetup/native.js';
 import type { ExternalHostConfig } from '../externalHost/types.js';
 import { checkMcpServers, type McpServerReadiness } from '../mcpReadiness.js';
+import {
+  codexPluginReadinessTargets,
+  installCodexPlugins,
+  type HostPluginReceipt,
+} from '../codexSetup/plugins.js';
+import type { HostPlugin, HostPluginCredentials } from '../hostPlugins.js';
 import { createLinuxChatgptApp } from './linuxApp.js';
 
 /** The Scio -> MST process environment. All paths are absolute and normalized. */
@@ -181,20 +188,36 @@ export const LINUX_CHATGPT_EXECUTION_POLICY: CodexExecutionPolicy = {
   sandboxMode: 'danger-full-access',
 };
 
+/**
+ * Code mode hides MCP tools until the model searches for them, so the model
+ * uses the first capable visible tool. On the headless VM that is the bundled
+ * browser (`cua_repl`, from `unified-computer-use`) or web search, and the
+ * MCP server under test is never tried. Turn both off. The app reads the
+ * plugin `enabled` flag before it adds `cua_repl`; the rollout records the
+ * result in `turn_context.disabled_plugin_ids`.
+ */
+export const LINUX_CHATGPT_HOST_TOOL_POLICY: CodexHostToolPolicy = {
+  disabledPlugins: ['unified-computer-use@openai-bundled'],
+  webSearch: 'disabled',
+};
+
 /** Sanitized setup receipt. No prompts, URLs, tokens, or native output. */
 export interface LinuxChatgptReadiness {
   executionPolicy: CodexExecutionPolicy;
+  hostToolPolicy: CodexHostToolPolicy;
   login: 'not-run' | 'verified' | 'failed';
   mcpPreflight: McpServerReadiness[];
   mcpStatus?: AppServerStatus;
-  error?: CodexSetupErrorCode;
+  /** Installed host plugins; no paths, URLs, or credentials. */
+  plugins?: HostPluginReceipt[];
+  error?: CodexSetupErrorCode | 'plugin_setup_failed';
 }
 
 export interface ChatgptPlatformProfile {
   readonly configPath: string;
   readonly install: Pick<
     CodexConfigInstallOptions,
-    'credentialStore' | 'trustedProject' | 'executionPolicy'
+    'credentialStore' | 'trustedProject' | 'executionPolicy' | 'hostToolPolicy'
   >;
   readonly controller: ChatgptApplicationController;
   readonly evidenceDir?: string;
@@ -202,7 +225,9 @@ export interface ChatgptPlatformProfile {
   /** After config install and before app start. Fails before any prompt. */
   beforeStart(
     setup: ResolvedCodexSetup,
-    environment: Record<string, string>
+    environment: Record<string, string>,
+    plugins?: readonly HostPlugin[],
+    credentials?: HostPluginCredentials
   ): Promise<void>;
   dispose(): Promise<void>;
 }
@@ -238,6 +263,10 @@ export async function createLinuxChatgptProfile(
   await privateDirectory(workspace, 'workspace_unsafe');
   const readiness: LinuxChatgptReadiness = {
     executionPolicy: { ...LINUX_CHATGPT_EXECUTION_POLICY },
+    hostToolPolicy: {
+      disabledPlugins: [...LINUX_CHATGPT_HOST_TOOL_POLICY.disabledPlugins],
+      webSearch: LINUX_CHATGPT_HOST_TOOL_POLICY.webSearch,
+    },
     login: 'not-run',
     mcpPreflight: [],
   };
@@ -251,6 +280,7 @@ export async function createLinuxChatgptProfile(
       credentialStore: 'keyring',
       trustedProject: workspace,
       executionPolicy: LINUX_CHATGPT_EXECUTION_POLICY,
+      hostToolPolicy: LINUX_CHATGPT_HOST_TOOL_POLICY,
     },
     controller: createLinuxChatgptApp({
       appPath: environment.appPath,
@@ -259,7 +289,7 @@ export async function createLinuxChatgptProfile(
     }),
     evidenceDir: environment.evidenceDir,
     readiness,
-    async beforeStart(setup, launch) {
+    async beforeStart(setup, launch, plugins = [], credentials = {}) {
       const native = {
         ...environment.session,
         PATH: '/usr/bin:/bin',
@@ -302,21 +332,52 @@ export async function createLinuxChatgptProfile(
         )
       )
         throw fail('mcp_preflight_failed');
-      if (!setup.servers.length) return;
+      // Plugin MCP servers run under their own names and are eval servers too.
+      if (plugins.length) {
+        try {
+          readiness.plugins = await installCodexPlugins({
+            codexPath: environment.codexPath,
+            env: native,
+            codexHome: environment.codexHome,
+            plugins,
+            credentials,
+            reservedLabels: setup.servers.map((server) => server.label),
+          });
+        } catch (error) {
+          readiness.error = 'plugin_setup_failed';
+          throw error;
+        }
+      }
+      const pluginTargets = codexPluginReadinessTargets(plugins);
+      const labels = [
+        ...setup.servers.map((server) => server.label),
+        ...pluginTargets.map((target) => target.label),
+      ];
+      if (!labels.length) return;
       readiness.mcpStatus = await probeAppServerStatus(
         environment.codexPath,
         { ...native, ...tokens },
-        setup.servers.map((server) => server.label)
+        labels
       );
       if (readiness.mcpStatus.status !== 'available')
         throw fail('mcp_status_unavailable');
       for (const [index, server] of readiness.mcpStatus.servers.entries()) {
-        const configured = setup.servers[index]!;
-        const auth =
-          configured.transport === 'http' && configured.bearerTokenEnvVar
-            ? 'bearerToken'
-            : 'unsupported';
-        if (!appServerServerReady(server, auth))
+        const configured = setup.servers[index];
+        if (configured) {
+          const auth =
+            configured.transport === 'http' && configured.bearerTokenEnvVar
+              ? 'bearerToken'
+              : 'unsupported';
+          if (!appServerServerReady(server, auth))
+            throw fail('mcp_server_not_ready');
+          continue;
+        }
+        // A plugin stdio server: initialized with at least `minTools` tools.
+        const target = pluginTargets[index - setup.servers.length]!;
+        if (
+          !appServerServerReady(server, 'unsupported') ||
+          server.toolCount! < target.minTools
+        )
           throw fail('mcp_server_not_ready');
       }
     },

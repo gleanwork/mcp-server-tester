@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import select
 import stat
 import subprocess
@@ -46,6 +47,14 @@ ERROR_CODES = frozenset(CONTRACT['errorCodes'])
 # After the one deep-link hand-off the draft usually appears in 1-3 s, but live
 # runs rarely exceeded 10 s. Waiting is read-only; the hand-off is never repeated.
 DRAFT_POLLS = 300
+# Read-only settle before a later submission (2 seconds). The previous
+# conversation view never shows the new-chat surface, so this is not a gate.
+IDLE_POLLS = 20
+# The app routes each deep link asynchronously and does not order them. If the
+# setup route lands after the first submission's route, it replaces that draft
+# with an empty new chat. Setup observes read-only for 5 seconds after its
+# hand-off so that its route lands first. Nothing is repeated.
+SETUP_SETTLE_POLLS = 50
 
 
 def error_code(error, glib_error=()):
@@ -412,10 +421,18 @@ def composer(nodes):
     return unique(editor_roots(nodes), 'composer_missing_or_ambiguous')
 
 
+# The composer shows `code` as a code span, so AT-SPI text omits its two
+# backticks (run 36077325110, e2e-0028). Match exactly that rendering: single
+# backticks, not part of a longer run, around text without backticks or newlines.
+INLINE_CODE = re.compile(r'(?<!`)`([^`\n]+)`(?!`)')
+
+
 def matches_prompt(text, prompt):
     # Same bounded representation as native exact_prompt correlation. Do not
-    # trim text or alter the prompt handed to MST for the deep link.
-    return text == prompt or text == prompt + '\n'
+    # trim text or alter the prompt handed to MST for the deep link. The sent
+    # message is still correlated with the exact prompt from the native trace.
+    candidates = {prompt, INLINE_CODE.sub(r'\1', prompt)}
+    return any(text in (value, value + '\n') for value in candidates)
 
 
 class Driver:
@@ -483,6 +500,45 @@ class Driver:
             raise ambiguity
         raise DriverFailure('state_transition_unobserved')
 
+    def settle(self, polls):
+        # Read-only observation for a fixed time. It pumps AT-SPI events but never
+        # acts, matches, or retries. It shares the overall deadline.
+        settle_deadline = time.monotonic() + polls * 0.1
+        for _ in range(polls):
+            self.snapshot()
+            remaining = settle_deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(0.1, remaining))
+
+    def composer_digest(self, nodes):
+        # In-memory SHA-256 of the unique composer text, or None. Read-only; it is
+        # never exported and it cannot authorize an action.
+        try:
+            roots = editor_roots(nodes)
+            if len(roots) != 1:
+                return None
+            text = self.desktop.text(roots[0])
+            if not isinstance(text, str):
+                return None
+            return hashlib.sha256(text.encode('utf-8')).digest()
+        except Exception:
+            return None
+
+    def prompt_not_applied(self, baseline):
+        # True only if the last snapshot is a ready surface whose composer text is
+        # still exactly the text from before the hand-off (for example, only the
+        # empty-chat placeholder). Diagnosis only: nothing is reopened or retried.
+        nodes = self.last_snapshot
+        if baseline is None or nodes is None:
+            return False
+        try:
+            if not any(self.ready(nodes, candidate) for candidate in SURFACES):
+                return False
+        except DriverFailure:
+            return False
+        return self.composer_digest(nodes) == baseline
+
     def selected(self, nodes, surface):
         switches = controls(nodes, set(MODE_LABELS.values()))
         return len(switches) == 1 and switches[0]['name'] == MODE_LABELS[surface]
@@ -549,6 +605,9 @@ class Driver:
         self.step = 'draft-open'
         self.action(lambda: self.desktop.open_prompt(''))
         self.step = 'draft-surface'
+        # The pre-hand-off UI is already ready, so readiness cannot show that the
+        # setup route landed. Wait read-only so it cannot replace the first draft.
+        self.settle(SETUP_SETTLE_POLLS)
         # Setup has no user prompt to match. A new chat can expose a visible
         # placeholder as Text; ready means controls/surface, not verified emptiness.
         nodes = self.wait(lambda ns: any(self.ready(ns, candidate) for candidate in SURFACES),
@@ -565,18 +624,42 @@ class Driver:
         if surface not in SURFACES:
             raise DriverFailure('invalid_surface')
         self.desktop.require_helpers()
-        # Setup ran once for the batch. A changed surface blocks submission.
+        # Setup ran once for the batch. A visible switch in another mode blocks
+        # submission. After a previous turn the app stays on that conversation,
+        # which has no mode switch (runs 35975596364, 36049147146, 36055872782:
+        # case 1 waited with no switch, composer, or Send, then failed unsent).
+        # The case deep link opens a new chat; the draft checks below verify the
+        # surface and exact prompt before the one send. Nothing is sent here.
         self.phase = 'surface'
         nodes = self.snapshot()
-        if not self.ready(nodes, surface):
+        if controls(nodes, set(MODE_LABELS.values())) and not self.selected(nodes, surface):
             raise DriverFailure('surface_mismatch')
+        if not self.ready(nodes, surface):
+            # Brief read-only settle only; a conversation view never becomes ready.
+            try:
+                nodes = self.wait(lambda ns: self.ready(ns, surface), polls=IDLE_POLLS)
+            except DriverFailure as error:
+                if str(error) not in {'state_transition_unobserved', 'composer_missing_or_ambiguous',
+                                      'send_missing_or_ambiguous'}:
+                    raise
+                nodes = self.last_snapshot
+            if controls(nodes, set(MODE_LABELS.values())) and not self.selected(nodes, surface):
+                raise DriverFailure('surface_mismatch')
         self.phase = 'composer'
+        baseline = self.composer_digest(nodes)
         self.step = 'draft-open'
         self.action(lambda: self.desktop.open_prompt(prompt))
         self.step = 'draft-surface'
-        nodes = self.wait(lambda ns: any(self.ready(ns, candidate) for candidate in SURFACES)
-                          and matches_prompt(self.desktop.text(composer(ns)), prompt),
-                          polls=DRAFT_POLLS)
+        try:
+            nodes = self.wait(lambda ns: any(self.ready(ns, candidate) for candidate in SURFACES)
+                              and matches_prompt(self.desktop.text(composer(ns)), prompt),
+                              polls=DRAFT_POLLS)
+        except DriverFailure as error:
+            # Same fail-closed outcome; a more specific code when the app never
+            # applied the prompt. No reopen, refill, or typing.
+            if str(error) == 'state_transition_unobserved' and self.prompt_not_applied(baseline):
+                raise DriverFailure('draft_prompt_not_applied') from None
+            raise
         # A deep link may change mode. One fixed UI selection is allowed, but it
         # must preserve the draft. Never reopen, refill, or fall back on loss.
         self.select_surface(nodes, surface)

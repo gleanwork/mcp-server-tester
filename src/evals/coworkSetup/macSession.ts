@@ -13,6 +13,7 @@ import {
 import { homedir, tmpdir, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { EvalManifest } from '../evalManifest.js';
+import type { HostPlugin } from '../hostPlugins.js';
 import { getMacCoworkController } from './macController.js';
 import {
   installMacCoworkSettings,
@@ -90,6 +91,7 @@ export async function prepareMacCoworkSession(options: {
   env: Record<string, string | undefined>;
   profileDirectory?: string;
   model?: string;
+  plugins?: readonly HostPlugin[];
 }): Promise<{
   setupStatus: 'applied-not-verified';
   serverCount: number;
@@ -125,6 +127,7 @@ export async function prepareMacCoworkSession(options: {
     const installOptions = {
       manifest,
       model: options.model,
+      ...(options.plugins?.length ? { plugins: options.plugins } : {}),
       env,
       profileDirectory,
       stagingDirectory,

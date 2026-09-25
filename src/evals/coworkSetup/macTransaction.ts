@@ -15,6 +15,12 @@ import {
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import type { EvalManifest } from '../evalManifest.js';
+import {
+  assertCoworkHostPlugins,
+  coworkBlockedMcpEntries,
+  coworkPluginMarketplace,
+  type HostPlugin,
+} from '../hostPlugins.js';
 import { prepareCoworkMcpBundle } from './bundle.js';
 import {
   createCoworkMcpPlan,
@@ -534,6 +540,8 @@ type InstallOptions = {
   stagingDirectory: string;
   manifest: EvalManifest;
   model?: string;
+  /** Installed through a pinned, required allowedPluginMarketplaces entry. */
+  plugins?: readonly HostPlugin[];
   arm?: string;
   managedPreferencePaths: string[];
   /** Explicit runtime credentials only; never falls back to process.env. */
@@ -547,6 +555,10 @@ async function validateInstall(options: InstallOptions) {
     (typeof model !== 'string' || !/^[A-Za-z0-9._:-]+$/.test(model))
   )
     fail();
+  const plugins = options.plugins ?? [];
+  assertCoworkHostPlugins(plugins);
+  const marketplaces = plugins.map(coworkPluginMarketplace);
+  const blocked = coworkBlockedMcpEntries(plugins);
   const profileDirectory = resolve(options.profileDirectory);
   const directory = options.stagingDirectory;
   validateStaging(directory, profileDirectory);
@@ -578,6 +590,9 @@ async function validateInstall(options: InstallOptions) {
     resolveCoworkSetupConfig(options.manifest.coworkSetup, arm?.coworkSetup)
   );
   const headers = resolveCoworkMcpHeaders(servers, env);
+  // A blocked plugin server must never shadow an eval server (any case).
+  const labels = new Set(plan.servers.map((s) => s.label.toLowerCase()));
+  if (blocked.some((entry) => labels.has(entry.name.toLowerCase()))) fail();
   // macOS volumes are commonly case-insensitive. Reject helper/credential
   // collisions before a session stops the app, not during exclusive writes.
   const helperLabels = plan.servers
@@ -607,6 +622,8 @@ async function validateInstall(options: InstallOptions) {
     fail();
   return {
     model,
+    marketplaces,
+    blocked,
     profileDirectory,
     directory,
     env,
@@ -767,10 +784,21 @@ export async function installMacCoworkSettings(
       Array.isArray(settings)
     )
       fail();
+    const managed: unknown = (settings as { managedMcpServers?: unknown })
+      .managedMcpServers;
+    if (!Array.isArray(managed)) fail();
+    const entries = managed as unknown[];
     const profile = jsonBytes({
       ...settings,
+      // The plugin's own servers would bypass the eval endpoint; block them.
+      ...(validated.blocked.length
+        ? { managedMcpServers: [...entries, ...validated.blocked] }
+        : {}),
       ...(validated.model
         ? { inferenceModels: [validated.model], modelDiscoveryEnabled: false }
+        : {}),
+      ...(validated.marketplaces.length
+        ? { allowedPluginMarketplaces: validated.marketplaces }
         : {}),
       inferenceProvider: 'anthropic',
       inferenceCredentialKind: 'helper-script',

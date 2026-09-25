@@ -15,6 +15,13 @@ import {
 } from './externalHost/builtins/anthropicClaude.js';
 import { simulationToHostTrace } from './hostTrace.js';
 import {
+  HostPluginError,
+  HostPluginsSchema,
+  assertCoworkHostPlugins,
+  hostStdioServers,
+} from './hostPlugins.js';
+import { coworkManagedPluginSettings } from './cowork/managedSettings.js';
+import {
   CoworkDriverError,
   type CoworkDriverTelemetry,
 } from './cowork/driver.js';
@@ -35,9 +42,30 @@ const OptionsSchema = z
       .regex(/^[A-Za-z0-9._:-]+$/)
       .optional(),
     dataDir: z.string().min(1).optional(),
+    /**
+     * Linux: absolute root of each staged plugin, for `${pluginRoot:<plugin>}`
+     * in stdio eval servers. The caller stages it from the pinned ref.
+     */
+    pluginRoots: z
+      .record(
+        z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),
+        z.string().min(2).max(4096)
+      )
+      .optional(),
+    /** Linux: absolute private (0700) root; a server's `${dataDir}` is `<root>/<label>`. */
+    mcpDataRoot: z.string().min(2).max(4096).optional(),
   })
   .strict()
   .superRefine((options, context) => {
+    if (
+      options.computerUseProvider !== 'linux-desktop' &&
+      (options.pluginRoots !== undefined || options.mcpDataRoot !== undefined)
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['pluginRoots'],
+        message: 'pluginRoots and mcpDataRoot require linux-desktop.',
+      });
     if (
       options.computerUseProvider === 'linux-desktop' &&
       options.computerUseModel !== undefined
@@ -59,6 +87,8 @@ const CoworkSchema = z
       .optional(),
     provider: z.literal('anthropic').optional(),
     env: z.record(z.string(), z.string()).optional(),
+    /** Host-owned: installed through managed allowedPluginMarketplaces. */
+    plugins: HostPluginsSchema.optional(),
   })
   .strict();
 let active = false;
@@ -83,6 +113,39 @@ async function runBatch(
       'Cowork batch requires identical host settings for all cases.'
     );
   const config = configs[0]!;
+  const plugins = config.plugins ?? [];
+  // Fail before any desktop action if Cowork cannot apply a plugin as declared.
+  assertCoworkHostPlugins(plugins);
+  const servers = requests[0]!.input.servers;
+  // Stdio servers are host-resolved eval servers: validate and resolve them
+  // (labels, placeholders, plugin roots, data root) before any desktop action.
+  const stdioServers = hostStdioServers(servers, plugins);
+  const stdioPaths = {
+    ...(config.options.pluginRoots
+      ? { pluginRoots: config.options.pluginRoots }
+      : {}),
+    ...(config.options.mcpDataRoot
+      ? { dataRoot: config.options.mcpDataRoot }
+      : {}),
+  };
+  if (stdioServers.length) {
+    // MST writes macOS settings but cannot stage a plugin root there.
+    if (config.options.computerUseProvider !== 'linux-desktop')
+      throw new HostPluginError(
+        'mcp_server_unsupported',
+        stdioServers[0]!.label
+      );
+  }
+  const referenced = new Set(stdioServers.flatMap((s) => s.pluginRoots));
+  const unknownRoot = Object.keys(config.options.pluginRoots ?? {}).find(
+    (name) => !referenced.has(name)
+  );
+  if (
+    unknownRoot ||
+    (config.options.mcpDataRoot && !stdioServers.some((s) => s.usesDataDir))
+  )
+    throw new HostPluginError('mcp_server_invalid', unknownRoot ?? 'dataRoot');
+  coworkManagedPluginSettings({ servers, plugins, paths: stdioPaths });
   const env = { ...process.env, ...context.env, ...config.env };
   if (
     config.options.computerUseProvider === 'anthropic-computer-use' &&
@@ -93,7 +156,6 @@ async function runBatch(
     selectedPlatform ??
     (await getCoworkPlatform(config.options.computerUseProvider));
   const dataDir = platform.dataDirectory(config.options);
-  const servers = requests[0]!.input.servers;
   // Pass only the selected arm. Setup intentionally rejects multi-arm manifests.
   const { arms: _arms, ...manifest } = context.manifest;
   const managedManifest = { ...manifest, servers };
@@ -115,6 +177,9 @@ async function runBatch(
         if (server.auth?.accessToken) secrets.push(server.auth.accessToken);
         for (const value of Object.values(server.headers ?? {}))
           secrets.push(value);
+      } else if (server.auth?.accessTokenEnv) {
+        const token = env[server.auth.accessTokenEnv];
+        if (token) secrets.push(token);
       }
     for (const secret of secrets) text = text.split(secret).join('[REDACTED]');
     return text;
@@ -130,15 +195,21 @@ async function runBatch(
     if (
       config.options.computerUseProvider === 'linux-desktop' ||
       servers.length ||
+      plugins.length ||
       config.model
     )
       session = await platform.prepare({
         manifest: managedManifest,
         env,
         model: config.model,
+        ...(plugins.length ? { plugins } : {}),
+        ...(stdioServers.length ? { stdioPaths } : {}),
       });
     if (servers.length) {
-      const readiness = await verifyCoworkMcpServers(servers, env);
+      const readiness = await verifyCoworkMcpServers(servers, env, {
+        plugins,
+        paths: stdioPaths,
+      });
       process.stderr.write(
         `[mst:cowork] MCP preflight ready: ${readiness
           .map(
@@ -148,7 +219,36 @@ async function runBatch(
           .join(', ')}\\n`
       );
     }
+    // Each case is self-contained: after a failed case, reset the app to a fresh
+    // task and continue. The failed case is never retried or resent.
+    let resetBeforeCase = false;
     for (const [index, request] of requests.entries()) {
+      if (resetBeforeCase) {
+        resetBeforeCase = false;
+        let resetError: string | undefined;
+        if (!platform.reset)
+          resetError = 'this Cowork platform cannot reset between cases';
+        else
+          try {
+            process.stderr.write(
+              `[mst:cowork] resetting to a fresh task before case ${index + 1}\n`
+            );
+            await platform.reset({
+              deadlineAt: Date.now() + 60_000,
+              maxActions: 1,
+              env,
+            });
+          } catch (error) {
+            resetError = safeError(error);
+          }
+        if (resetError) {
+          for (let n = index; n < requests.length; n++)
+            results[n] = failure(
+              `Not submitted because the Cowork app could not be reset after an earlier failed case: ${resetError}`
+            );
+          break;
+        }
+      }
       const caseStartedAt = Date.now();
       const computerUse: Record<
         'submission' | 'hitl',
@@ -212,11 +312,8 @@ async function runBatch(
         }
         results[index] = failure(safeError(error));
         finishCase();
-        for (let n = index + 1; n < requests.length; n++)
-          results[n] = failure(
-            'Not submitted because a previous UI submission failed or was ambiguous. No retries were attempted.'
-          );
-        break;
+        resetBeforeCase = true;
+        continue;
       }
       process.stderr.write(
         '[mst:cowork] bounded HITL check for the bound native session\n'
@@ -340,8 +437,12 @@ async function runBatch(
           llmDurationMs: trace.llmDurationMs,
         };
       } catch (error) {
+        // Trace collection or attribution failed: the app state is unknown.
         results[index] = failure(safeError(error));
+        if (platform.reset) resetBeforeCase = true;
       }
+      // A HITL failure may leave a prompt open; reset before the next task.
+      if (hitlError && platform.reset) resetBeforeCase = true;
       finishCase();
     }
     return results;

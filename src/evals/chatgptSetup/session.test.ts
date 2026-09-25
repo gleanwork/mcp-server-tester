@@ -207,6 +207,7 @@ beforeEach(() => {
       evidenceDir: env.evidenceDir,
       readiness: {
         executionPolicy: POLICY,
+        hostToolPolicy: { disabledPlugins: [], webSearch: 'disabled' },
         login: 'verified',
         mcpPreflight: [],
       },
@@ -424,6 +425,19 @@ describe('ChatGPT Linux native lifecycle', () => {
     await rm(home, { recursive: true, force: true });
   });
 
+  it('passes host plugins to the Linux profile before start', async () => {
+    const plugins = [
+      { name: 'glean', marketplace: { source: '/opt/plugins' } },
+    ];
+    const session = new ChatgptAppSession();
+    try {
+      await session.prepare({ ...linuxConfig(), plugins });
+      expect((beforeStart.mock.calls[0] as unknown[])[2]).toEqual(plugins);
+    } finally {
+      await session.dispose();
+    }
+  });
+
   it('prepares surface once per batch and keeps native controller separate from model accounting', async () => {
     const session = new ChatgptAppSession();
     const config = linuxConfig();
@@ -487,6 +501,42 @@ describe('ChatGPT Linux native lifecycle', () => {
       ]);
       expect(runAnthropicComputerUseSubmission).not.toHaveBeenCalled();
       expect(getChatgptApplicationController).not.toHaveBeenCalled();
+    } finally {
+      await session.dispose();
+    }
+    expect(events.slice(-3)).toEqual(['stop', 'restore', 'dispose-profile']);
+  });
+
+  it('restarts the owned app with the same settings and verifies the surface without sending', async () => {
+    const session = new ChatgptAppSession();
+    try {
+      await session.prepare(linuxConfig());
+      const before = events.length;
+      const env = controller.start.mock.calls[0];
+      await session.restart();
+      // Same order as setup: start, verify the surface, open the empty draft.
+      expect(events.slice(before)).toEqual([
+        'stop',
+        'start',
+        'native-prepare',
+        'open',
+      ]);
+      expect(controller.start.mock.calls[1]).toEqual(env);
+      // Recovery opens only the empty setup draft, never a prompt.
+      expect(controller.openPrompt.mock.calls.map((call) => call[0])).toEqual([
+        '',
+        '',
+      ]);
+      expect(session.telemetry.recoveryCount).toBe(1);
+      // A restart that cannot verify the surface leaves the session unusable.
+      vi.mocked(runLinuxChatgptDesktop).mockRejectedValueOnce(
+        new NativeChatgptDriverError('surface failed')
+      );
+      await expect(session.restart()).rejects.toThrow('surface failed');
+      await expect(session.restart()).rejects.toThrow('not running');
+      expect(() => session.assertCompatible(linuxConfig())).toThrow(
+        'unavailable'
+      );
     } finally {
       await session.dispose();
     }

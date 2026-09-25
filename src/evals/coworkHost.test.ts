@@ -179,7 +179,10 @@ describe('V2 Cowork host', () => {
     }));
     const result = await prepared.runBatch!(batch, { ...context, env: {} });
     expect(result.every((r) => !r.error)).toBe(true);
-    expect(mocks.readiness).toHaveBeenCalledWith([server], expect.any(Object));
+    expect(mocks.readiness).toHaveBeenCalledWith([server], expect.any(Object), {
+      plugins: [],
+      paths: {},
+    });
     expect(mocks.submit).toHaveBeenCalledTimes(2);
     expect(mocks.hitl).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -374,6 +377,193 @@ describe('V2 Cowork host', () => {
       expect(mocks.setup).not.toHaveBeenCalled();
     }
   );
+  it('passes host plugins to platform setup and rejects plugin MCP overrides before any UI', async () => {
+    const plugin = {
+      name: 'acme',
+      marketplace: { source: 'acme/plugins', ref: 'd'.repeat(40) },
+    };
+    const prepare = vi.fn().mockResolvedValue({ dispose: mocks.dispose });
+    const platform = {
+      dataDirectory: () => '/synthetic/native-data',
+      prepare,
+      recover: vi.fn(),
+      submit: mocks.submit,
+      handleHitl: mocks.hitl,
+    };
+    const withPlugins = (plugins: unknown[]) =>
+      requests().map((r) => ({ ...r, config: { ...host, plugins } }));
+    await createCoworkHost(platform).runBatch!(withPlugins([plugin]), context);
+    expect(prepare.mock.calls[0]![0].plugins).toEqual([plugin]);
+    prepare.mockClear();
+    mocks.submit.mockClear();
+    const override = {
+      ...plugin,
+      mcp: { acme_mcp: { url: 'https://example.test/eval' } },
+    };
+    await expect(
+      createCoworkHost(platform).runBatch!(withPlugins([override]), context)
+    ).rejects.toMatchObject({ code: 'plugin_unsupported' });
+    expect(prepare).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+  describe('stdio eval server launched from a plugin', () => {
+    const fake = {
+      name: 'fake',
+      marketplace: { source: 'acme/plugins', ref: 'd'.repeat(40) },
+      blockMcpServers: ['fake_plugin'],
+    };
+    const evalServer = {
+      transport: 'stdio' as const,
+      label: 'fake-eval',
+      command: 'node',
+      args: ['${pluginRoot:fake}/mcp/start.mjs'],
+      url: 'https://example.test/mcp/default/eval',
+      auth: { accessTokenEnv: 'FAKE_TOKEN' },
+      minTools: 4,
+      env: { FAKE_MCP_URL: '${url}', FAKE_PLUGIN_DATA: '${dataDir}' },
+      files: { 'creds.json': { token: '${bearerToken}' } },
+    };
+    const linuxHost = (options: Record<string, unknown> = {}) => ({
+      ...host,
+      options: {
+        computerUseProvider: 'linux-desktop',
+        pluginRoots: { fake: '/opt/plugins/fake' },
+        mcpDataRoot: '/run/mcp-data',
+        ...options,
+      },
+      plugins: [fake],
+    });
+    const platform = () => ({
+      dataDirectory: () => '/synthetic/native-data',
+      prepare: vi.fn().mockResolvedValue({ dispose: mocks.dispose }),
+      recover: vi.fn(),
+      submit: mocks.submit,
+      handleHitl: mocks.hitl,
+    });
+    const batch = (config: object): HostBatchRequest[] =>
+      requests().map((r) => ({
+        ...r,
+        config: config as HostBatchRequest['config'],
+        input: { ...r.input, servers: [evalServer] },
+      }));
+    const stdioContext = {
+      ...context,
+      manifest: { ...context.manifest, servers: [evalServer] },
+      env: { FAKE_TOKEN: 'secret-fake-token' },
+    };
+
+    it('passes plugins and paths to prepare/readiness and attributes mcp__<label>__* calls', async () => {
+      vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+      mocks.trace.mockImplementation(async ({ sessionPath }) => ({
+        candidate: { metadataPath: sessionPath },
+        finalAnswer: 'answer',
+        // Parsed from native `mcp__fake-eval__search`.
+        toolCalls: [
+          {
+            name: 'search',
+            rawName: 'mcp__fake-eval__search',
+            source: 'mcp',
+            server: 'fake-eval',
+            arguments: {},
+            output: 'found',
+          },
+        ],
+        usage: {},
+        isComplete: true,
+        telemetry: { models: [] },
+      }));
+      const selected = platform();
+      const results = await createCoworkHost(selected).runBatch!(
+        batch(linuxHost()),
+        stdioContext
+      );
+      const paths = {
+        pluginRoots: { fake: '/opt/plugins/fake' },
+        dataRoot: '/run/mcp-data',
+      };
+      expect(selected.prepare.mock.calls[0]![0]).toMatchObject({
+        plugins: [fake],
+        stdioPaths: paths,
+      });
+      expect(mocks.readiness).toHaveBeenCalledWith(
+        [evalServer],
+        expect.any(Object),
+        { plugins: [fake], paths }
+      );
+      expect(results[0]!.error).toBeUndefined();
+      expect(results[0]!.events).toEqual([
+        expect.objectContaining({
+          name: 'search',
+          source: 'mcp',
+          server: 'fake-eval',
+        }),
+      ]);
+    });
+
+    it.each([
+      [
+        'on macOS, where MST cannot stage a plugin root',
+        {
+          ...host,
+          plugins: [fake],
+        },
+        'mcp_server_unsupported',
+      ],
+      [
+        'with an undeclared plugin root',
+        linuxHost({ pluginRoots: { fake: '/opt/p', other: '/opt/o' } }),
+        'mcp_server_invalid',
+      ],
+      [
+        'without a plugin root',
+        linuxHost({ pluginRoots: {} }),
+        'mcp_server_invalid',
+      ],
+      [
+        'without a data root',
+        linuxHost({ mcpDataRoot: undefined }),
+        'mcp_server_invalid',
+      ],
+      [
+        'when a blocked name shadows the eval label',
+        {
+          ...linuxHost(),
+          plugins: [{ ...fake, blockMcpServers: ['fake-eval'] }],
+        },
+        'mcp_server_invalid',
+      ],
+    ])('rejects before any UI %s', async (_kind, config, code) => {
+      vi.spyOn(process, 'platform', 'get').mockReturnValue(
+        (config as { options: { computerUseProvider?: string } }).options
+          .computerUseProvider === 'linux-desktop'
+          ? 'linux'
+          : 'darwin'
+      );
+      const selected = platform();
+      await expect(
+        createCoworkHost(selected).runBatch!(batch(config), stdioContext)
+      ).rejects.toMatchObject({ code });
+      expect(selected.prepare).not.toHaveBeenCalled();
+      expect(mocks.submit).not.toHaveBeenCalled();
+    });
+
+    it('rejects plain stdio servers without a url, as before', async () => {
+      vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+      const selected = platform();
+      const plain = requests().map((r) => ({
+        ...r,
+        config: { ...host, options: { computerUseProvider: 'linux-desktop' } },
+        input: {
+          ...r.input,
+          servers: [{ transport: 'stdio' as const, command: 'x' }],
+        },
+      }));
+      await expect(
+        createCoworkHost(selected).runBatch!(plain, context)
+      ).rejects.toMatchObject({ code: 'mcp_server_invalid' });
+      expect(selected.prepare).not.toHaveBeenCalled();
+    });
+  });
   it('skips GUI HITL for already completed native tasks without hiding actual failures', async () => {
     mocks.matches.mockResolvedValue([{ isComplete: true }]);
     const result = await COWORK_HOST.runBatch!(requests(), context);
@@ -444,7 +634,53 @@ describe('V2 Cowork host', () => {
       )
     ).toEqual(['/fixture/session-0', '/fixture/session-1']);
   });
-  it('never retries an ambiguous submit and cancels later submissions', async () => {
+  it('resets to a fresh task after a failed case and runs later cases independently', async () => {
+    const reset = vi.fn().mockResolvedValue(undefined);
+    const host = createCoworkHost({
+      dataDirectory: () => '/prepared/session',
+      prepare: mocks.setup,
+      recover: vi.fn(),
+      reset,
+      submit: mocks.submit,
+      handleHitl: mocks.hitl,
+    });
+    const batch = [...requests(), { ...requests()[0]!, caseId: 'three' }];
+    mocks.submit.mockRejectedValueOnce(new Error('uncertain submit'));
+    mocks.trace.mockRejectedValueOnce(new Error('native trace timeout'));
+    const result = await host.runBatch!(batch, context);
+    // Case 1 fails at submit, case 2 at trace; each is reset before the next case.
+    expect(result.map((r) => r.error)).toEqual([
+      'uncertain submit',
+      'native trace timeout',
+      undefined,
+    ]);
+    expect(mocks.submit).toHaveBeenCalledTimes(3);
+    expect(reset).toHaveBeenCalledTimes(2);
+    expect(reset.mock.calls[0]![0]).toMatchObject({ maxActions: 1 });
+    // The failed case is never resent: one submit per case, in order.
+    expect(mocks.submit.mock.calls.map((call) => call[0] as string)).toEqual(
+      batch.map((r) => r.input.scenario)
+    );
+    expect(mocks.dispose).toHaveBeenCalledOnce();
+  });
+  it('sends nothing more when the app cannot be reset after a failed case', async () => {
+    const reset = vi.fn().mockRejectedValue(new Error('cowork_not_ready'));
+    const host = createCoworkHost({
+      dataDirectory: () => '/prepared/session',
+      prepare: mocks.setup,
+      recover: vi.fn(),
+      reset,
+      submit: mocks.submit,
+      handleHitl: mocks.hitl,
+    });
+    mocks.submit.mockRejectedValueOnce(new Error('uncertain submit'));
+    const result = await host.runBatch!(requests(), context);
+    expect(mocks.submit).toHaveBeenCalledTimes(1);
+    expect(result[1]!.error).toContain('could not be reset');
+    expect(result[1]!.error).toContain('cowork_not_ready');
+    expect(mocks.dispose).toHaveBeenCalledOnce();
+  });
+  it('never retries an ambiguous submit and, without a reset, cancels later submissions', async () => {
     mocks.submit.mockRejectedValueOnce(new Error('uncertain test-secret-key'));
     const result = await COWORK_HOST.runBatch!(requests(), context);
     expect(mocks.submit).toHaveBeenCalledTimes(1);

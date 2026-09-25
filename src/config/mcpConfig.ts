@@ -169,6 +169,27 @@ export interface StdioMCPConfig {
    * Timeout in milliseconds for MCP tool/list operations. Default: 30000
    */
   callTimeoutMs?: number;
+
+  /**
+   * When false, the subprocess gets only `env` plus the SDK's minimal default
+   * environment, not the parent `process.env`. Default: true.
+   */
+  inheritEnv?: boolean;
+
+  /**
+   * Host-resolved eval server (desktop hosts only): the eval endpoint this
+   * stdio process talks to, substituted as `${url}`. See docs/cowork.md.
+   */
+  url?: string;
+
+  /** Host-resolved eval server: the credential substituted as `${bearerToken}` in `files`. */
+  auth?: { accessTokenEnv: string };
+
+  /** Readiness fails closed below this many tools. */
+  minTools?: number;
+
+  /** Host-resolved eval server: private JSON files written in `${dataDir}`. */
+  files?: Record<string, unknown>;
 }
 
 /**
@@ -342,7 +363,34 @@ const StdioConfigSchema = z.object({
   requestTimeoutMs: z.number().positive().optional(),
   callTimeoutMs: z.number().positive().optional(),
   quiet: z.boolean().optional(),
+  inheritEnv: z.boolean().optional(),
+  url: z.string().url().optional(),
+  auth: z
+    .object({ accessTokenEnv: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/) })
+    .strict()
+    .optional(),
+  minTools: z.number().int().min(1).max(10_000).optional(),
+  files: z.record(z.string(), z.unknown()).optional(),
 });
+
+const HOST_RESOLVED = /\$\{(?:url|dataDir|bearerToken|pluginRoot:[^}]*)\}/;
+
+/**
+ * True when a stdio server declares host-resolved eval fields (`url`, `auth`,
+ * `files`, or a `${url}`/`${dataDir}`/`${pluginRoot:...}` placeholder). Only a
+ * host that resolves them may launch it; see docs/cowork.md.
+ */
+export function usesHostResolvedFields(config: MCPConfig): boolean {
+  if (config.transport !== 'stdio') return false;
+  return (
+    config.url !== undefined ||
+    config.auth !== undefined ||
+    config.files !== undefined ||
+    [config.command, ...(config.args ?? []), ...Object.values(config.env ?? {})]
+      .concat(config.cwd ?? [])
+      .some((value) => HOST_RESOLVED.test(value))
+  );
+}
 
 /**
  * Returns true if the hostname refers to the loopback interface

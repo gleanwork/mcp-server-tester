@@ -12,8 +12,8 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
-from chatgpt_linux import (DRAFT_POLLS, Driver, DriverFailure, Desktop, composer, main,
-                           error_code, ERROR_CODES, INPUT_LIMIT, SESSION_KEYS, XDOTOOL)
+from chatgpt_linux import (DRAFT_POLLS, IDLE_POLLS, SETUP_SETTLE_POLLS, Driver, DriverFailure, Desktop,
+                           composer, main, error_code, ERROR_CODES, INPUT_LIMIT, SESSION_KEYS, XDOTOOL)
 
 WORK, CODEX = 'ChatGPT Work', 'Codex'
 SWITCH_CODEX = 'Switch mode, current mode: Codex'
@@ -201,7 +201,7 @@ class MainCliTest(unittest.TestCase):
         glib.glib_error = FakeGLibError  # Desktop owns the GLib type; no module global.
         cases = [('prepare', FakeDesktop(list(private_ui)), None, b'{"surface":"codex"}',
                   'state_transition_unobserved'),
-                 ('submit', FakeDesktop(list(private_ui)), None,
+                 ('submit', FakeDesktop([*private_ui, *ready(WORK)]), None,
                   b'{"surface":"codex","prompt":"private prompt"}', 'surface_mismatch'),
                  ('prepare', FakeDesktop(), RuntimeError('private query or stderr'),
                   b'{"surface":"chatgpt-work"}', 'desktop_driver_failed'),
@@ -337,7 +337,8 @@ class DriverTest(unittest.TestCase):
                 self.assertEqual(self.actions(desktop).count('open'), 1)
                 self.assertNotIn('Send', self.actions(desktop))
 
-    def test_setup_ready_means_controls_not_verified_emptiness(self):
+    @patch('chatgpt_linux.time.sleep')
+    def test_setup_ready_means_controls_not_verified_emptiness(self, _sleep):
         desktop = FakeDesktop(ready(text='prior draft'))
         desktop.stall = 'open'
         desktop.text = Mock(side_effect=AssertionError('no setup emptiness predicate'))
@@ -363,7 +364,8 @@ class DriverTest(unittest.TestCase):
 
     # --- onboarding / intro ---
 
-    def test_onboarding_skips_known_intro_then_one_empty_open(self):
+    @patch('chatgpt_linux.time.sleep')
+    def test_onboarding_skips_known_intro_then_one_empty_open(self, _sleep):
         desktop = FakeDesktop([node('Engineering', 'radio button'), node('Continue')])
         desktop.stale_checked = True
         result = self.driver(desktop).prepare('chatgpt-work')
@@ -399,7 +401,7 @@ class DriverTest(unittest.TestCase):
                 self.driver(desktop).prepare('chatgpt-work')
                 self.assertEqual(self.actions(desktop).count('Engineering'), 0 if selected else 1)
                 self.assertEqual(self.actions(desktop).count('Continue'), 1)
-                self.assertEqual(sleep.call_count, 3)
+                self.assertEqual(sleep.call_count, 3 + SETUP_SETTLE_POLLS)
         sleep.side_effect, desktop = None, FakeDesktop(
             [node('Engineering', 'radio button'), node('Continue', enabled=False)])
         sleep.reset_mock()
@@ -430,6 +432,35 @@ class DriverTest(unittest.TestCase):
                                          if corrected else ['open', 'Send'])
                         self.assertEqual(composer(desktop.nodes)['text'], prompt + suffix)
 
+    def test_inline_code_rendered_without_backticks_sends_once(self):
+        # The composer shows `x` as a code span; AT-SPI text omits the backticks.
+        prompt = 'How do I use the `jira` CLI with `--json` output?'
+        for shown in (prompt, 'How do I use the jira CLI with --json output?'):
+            for suffix in ('', '\n'):
+                with self.subTest(shown=shown, suffix=suffix):
+                    desktop = FakeDesktop(ready(text='prior draft'))
+                    hook_open(desktop, lambda v, d=desktop, t=shown + suffix: composer(d.nodes).update(text=t))
+                    receipt = self.driver(desktop).submit(prompt, 'chatgpt-work')
+                    self.assertEqual(receipt['status'], 'submitted')
+                    self.assertEqual(desktop.actions[0], ('open', prompt))
+                    self.assertEqual(self.actions(desktop), ['open', 'Send'])
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_inline_code_rendering_is_the_only_backtick_relaxation(self, _sleep):
+        prompt = 'Use `a` and `b` with ``c`` and `d\ne`'
+        for text in ('Use a and `b` with ``c`` and `d\ne`',  # partial removal
+                     'Use a and b with c and d\ne',  # double/multiline spans stay literal
+                     'Use a and b with `c` and `d\ne`',
+                     'Use a and b with ``c`` and d\ne',
+                     'Use `a` and `b` with ``c`` and `d\ne` ',
+                     'Use and with ``c`` and `d\ne`'):
+            with self.subTest(text=text):
+                desktop = FakeDesktop()
+                hook_open(desktop, lambda v, d=desktop, t=text: composer(d.nodes).update(text=t))
+                with self.assertRaises(DriverFailure):
+                    self.driver(desktop).submit(prompt, 'chatgpt-work')
+                self.assertNotIn('Send', self.actions(desktop))
+
     @patch('chatgpt_linux.time.sleep')
     def test_draft_mismatch_blocks_send_before_and_after_mode_correction(self, _sleep):
         mismatches = [PROMPT + '\n\n', 'prefix' + PROMPT, PROMPT + 'suffix', PROMPT.strip(),
@@ -449,7 +480,10 @@ class DriverTest(unittest.TestCase):
                             composer(d.nodes)['text'] = t
                     desktop.activate = activate
                     driver = self.driver(desktop)
-                    with self.assertRaisesRegex(DriverFailure, 'state_transition_unobserved'):
+                    # An unchanged (empty) draft has its own, equally fail-closed code.
+                    error = ('draft_prompt_not_applied' if text == '' and not after_correction
+                             else 'state_transition_unobserved')
+                    with self.assertRaisesRegex(DriverFailure, '^' + error + '$'):
                         driver.submit(PROMPT, 'chatgpt-work')
                     self.assertEqual(self.actions(desktop), ['open', SWITCH_CODEX, WORK_ITEM]
                                      if after_correction else ['open'])
@@ -546,6 +580,153 @@ class DriverTest(unittest.TestCase):
             self.driver(desktop).submit('private', 'chatgpt-work')
         self.assertEqual(self.actions(desktop), ['open', SWITCH_CODEX, WORK_ITEM])
         self.assertEqual(sleep.call_count, 100)
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_later_case_opens_its_deep_link_from_the_previous_conversation(self, sleep):
+        # Runs 35975596364, 36049147146, 36055872782: after case 0 the app shows
+        # that conversation, with no mode switch, composer, or Send.
+        desktop = FakeDesktop([node('Share')])
+        desktop.open_surface = WORK
+        self.assertEqual(self.driver(desktop).submit('private', 'chatgpt-work')['action_count'], 2)
+        self.assertEqual(self.actions(desktop), ['open', 'Send'])
+        self.assertEqual(sleep.call_count, IDLE_POLLS)
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_later_case_settles_briefly_when_the_new_chat_is_ready(self, sleep):
+        busy = [node('Share')]
+        desktop = FakeDesktop(busy)
+        snapshots = iter([busy, busy, busy])
+        desktop.snapshot = lambda: next(snapshots, desktop.nodes)
+        desktop.nodes = ready()
+        self.driver(desktop).submit('private', 'chatgpt-work')
+        self.assertEqual(self.actions(desktop), ['open', 'Send'])
+        self.assertLess(sleep.call_count, IDLE_POLLS)
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_visible_other_surface_fails_before_any_action(self, sleep):
+        stuck = FakeDesktop(ready(CODEX))
+        driver = self.driver(stuck)
+        with self.assertRaisesRegex(DriverFailure, '^surface_mismatch$'):
+            driver.submit('private', 'chatgpt-work')
+        self.assertEqual((driver.actions, stuck.actions), (0, []))
+        sleep.assert_not_called()
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_deep_link_from_a_conversation_is_not_repeated_when_no_draft_appears(self, sleep):
+        desktop = FakeDesktop([node('Share')])
+        desktop.stall = 'open'
+        with self.assertRaisesRegex(DriverFailure, '^state_transition_unobserved$'):
+            self.driver(desktop).submit('private', 'chatgpt-work')
+        self.assertEqual(self.actions(desktop), ['open'])
+
+    # --- late setup route (run 36050207512: composer kept only the placeholder) ---
+
+    PLACEHOLDER = '\nWork with ChatGPT'  # Matches the failure receipt hash.
+
+    def late_setup_route(self, sleep, due):
+        """The app applies the setup route `due` polls later and resets the draft."""
+        desktop = FakeDesktop(ready(text=self.PLACEHOLDER))
+        desktop.stall = 'open'  # The setup open has no immediate effect.
+        pending = {'due': due, 'polls': 0}
+        def poll(_):
+            pending['polls'] += 1
+            if pending['polls'] == pending['due']:
+                desktop.nodes = ready(text=self.PLACEHOLDER)  # Fresh empty chat.
+        sleep.side_effect = poll
+        def open_case(prompt):
+            desktop.actions.append(('open', prompt))
+            composer(desktop.nodes).update(text=prompt)
+        return desktop, open_case
+
+    def test_failure_receipt_hash_is_the_work_placeholder(self):
+        self.assertEqual(readable_state(self.PLACEHOLDER), {
+            'observedSurface': 'chatgpt-work', 'composerRootCount': 1, 'sendControlCount': 1,
+            'textReadable': True, 'textLength': 18, 'embeddedObjectCount': 0, 'newlineCount': 1,
+            'textSha256': '59e8647b3d83551c8a637c66a1e3eb278b72964a6793baa68ec2f99fac67f38c'})
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_setup_settles_read_only_so_a_late_setup_route_lands_before_submit(self, sleep):
+        self.assertEqual(SETUP_SETTLE_POLLS, 50)  # 5 s of read-only polls.
+        desktop, open_case = self.late_setup_route(sleep, due=SETUP_SETTLE_POLLS - 10)
+        self.assertEqual(self.driver(desktop).prepare('chatgpt-work')['status'], 'ready')
+        self.assertEqual(sleep.call_count, SETUP_SETTLE_POLLS)
+        desktop.open_prompt = open_case
+        self.assertEqual(self.driver(desktop).submit(PROMPT, 'chatgpt-work')['status'], 'submitted')
+        self.assertEqual(self.actions(desktop), ['open', 'open', 'Send'])
+        self.assertEqual(desktop.actions[:2], [('open', ''), ('open', PROMPT)])
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_setup_settle_is_observation_only_and_shares_the_deadline(self, sleep):
+        desktop = FakeDesktop()
+        desktop.activate = Mock(side_effect=AssertionError('settle never acts'))
+        desktop.text = Mock(side_effect=AssertionError('settle never reads text'))
+        snapshots = Mock(wraps=desktop.snapshot)
+        desktop.snapshot = snapshots
+        driver = self.driver(desktop)
+        driver.prepare('chatgpt-work')
+        self.assertEqual(desktop.actions, [('open', '')])
+        # 1 initial + 1 surface/composer + settle + draft-surface + readback snapshots.
+        self.assertEqual(snapshots.call_count, 3 + SETUP_SETTLE_POLLS + 1)
+        now = [0.0]
+        with patch('chatgpt_linux.time.monotonic', side_effect=lambda: now[0]):
+            sleep.side_effect = lambda s: now.__setitem__(0, now[0] + s)
+            driver = Driver(FakeDesktop(), 2_000, 24)
+            with self.assertRaisesRegex(DriverFailure, '^deadline_exceeded$'):
+                driver.prepare('chatgpt-work')
+            self.assertEqual(driver.actions, 1)
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_late_setup_route_during_submit_fails_closed_with_specific_code(self, sleep):
+        # Without the settle, setup returns before its route lands (no sleeps)...
+        desktop, open_case = self.late_setup_route(sleep, due=10**9)
+        with patch('chatgpt_linux.SETUP_SETTLE_POLLS', 0):
+            self.driver(desktop).prepare('chatgpt-work')
+        self.assertEqual(sleep.call_count, 0)
+        # ...and then lands after the case route, which resets the draft.
+        def open_then_late_setup(prompt, d=desktop):
+            open_case(prompt)
+            d.nodes = ready(text=self.PLACEHOLDER)
+        desktop.open_prompt = open_then_late_setup
+        driver = self.driver(desktop)
+        with self.assertRaisesRegex(DriverFailure, '^draft_prompt_not_applied$'):
+            driver.submit(PROMPT, 'chatgpt-work')
+        self.assertEqual(self.actions(desktop), ['open', 'open'])
+        self.assertEqual(sleep.call_count, DRAFT_POLLS)
+        receipt = driver.receipt('failed')
+        self.assertEqual((receipt['phase'], receipt['step']), ('composer', 'draft-surface'))
+        self.assertEqual(receipt['draftState'], readable_state(self.PLACEHOLDER))
+        self.assertNotIn(PROMPT, json.dumps(receipt))
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_specific_code_requires_ready_surface_and_unchanged_readable_text(self, _sleep):
+        placeholder = self.PLACEHOLDER
+        def changed(d):
+            composer(d.nodes).update(text='other text')
+        def send_gone(d):
+            d.nodes.pop(1)
+        for kind, after_open, error in [
+                ('unchanged', lambda d: None, 'draft_prompt_not_applied'),
+                ('changed', changed, 'state_transition_unobserved'),
+                ('not-ready', send_gone, 'state_transition_unobserved'),
+                ('baseline-unreadable', lambda d: None, 'state_transition_unobserved')]:
+            with self.subTest(kind=kind):
+                desktop = FakeDesktop(ready(text=placeholder))
+                desktop.open_prompt = lambda p, d=desktop, a=after_open: (
+                    d.actions.append(('open', p)), a(d))
+                if kind == 'baseline-unreadable':
+                    reads = iter([DriverFailure('composer_text_unavailable')])
+                    def text(control, limit=None, r=reads):
+                        failure = next(r, None)
+                        if failure:
+                            raise failure
+                        return control.get('text', '')
+                    desktop.text = text
+                driver = self.driver(desktop)
+                with self.assertRaisesRegex(DriverFailure, '^' + error + '$'):
+                    driver.submit(PROMPT, 'chatgpt-work')
+                self.assertIn(error, ERROR_CODES)
+                self.assertEqual(self.actions(desktop), ['open'])
+                self.assertEqual(driver.step, 'draft-surface')
 
     def test_invalid_input_surface_mismatch_or_missing_helper_block_before_any_action(self):
         missing = FakeDesktop()
@@ -1002,7 +1183,8 @@ class RichTextTest(unittest.TestCase):
                 self.assertEqual(set(receipt['draftState']), UNREADABLE)
                 self.assertNotIn('private', json.dumps(receipt))
 
-    def test_driver_uses_expanded_readback_for_setup_submit_and_diagnostics(self):
+    @patch('chatgpt_linux.time.sleep')
+    def test_driver_uses_expanded_readback_for_setup_submit_and_diagnostics(self, _sleep):
         for static in (False, True):
             for query, readback in [('', 'Ask anything here\n'), (PROMPT, PROMPT), (PROMPT, PROMPT + '\n')]:
                 with self.subTest(static=static, query=query, readback=readback):
@@ -1042,7 +1224,8 @@ class RichTextTest(unittest.TestCase):
                     expected = 'firstsecond'
                 desktop.require_helpers, desktop.open_prompt, desktop.activate = Mock(), Mock(), Mock()
                 self.assertEqual(self.read(desktop, editor_node), expected)
-                with self.assertRaisesRegex(DriverFailure, '^state_transition_unobserved$'):
+                # The hand-off never changed the composer, so the specific code applies.
+                with self.assertRaisesRegex(DriverFailure, '^draft_prompt_not_applied$'):
                     Driver(desktop, 60_000, 24).submit('first\nsecond', 'chatgpt-work')
                 desktop.open_prompt.assert_called_once_with('first\nsecond')
                 desktop.activate.assert_not_called()

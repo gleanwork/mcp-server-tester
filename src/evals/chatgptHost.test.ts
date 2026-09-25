@@ -10,10 +10,15 @@ import type { HostBatchRequest } from './evalFrameworkTypes.js';
 import { linuxEnvironment } from './chatgpt/linuxEnvironment.fixture.js';
 
 const home = vi.hoisted(() => ({ value: '' }));
-const lifecycle = vi.hoisted(() => ({ prepare: vi.fn(), dispose: vi.fn() }));
+const lifecycle = vi.hoisted(() => ({
+  prepare: vi.fn(),
+  restart: vi.fn(),
+  dispose: vi.fn(),
+}));
 vi.mock('./chatgptSetup/session.js', () => ({
   ChatgptAppSession: class {
     prepare = lifecycle.prepare;
+    restart = lifecycle.restart;
     dispose = lifecycle.dispose;
     telemetry = { scope: 'batch', id: 'test-batch' };
   },
@@ -75,6 +80,7 @@ const metadata = {
 beforeEach(async () => {
   home.value = await mkdtemp(join(tmpdir(), 'chatgpt-v2-test-'));
   lifecycle.prepare.mockReset().mockResolvedValue(undefined);
+  lifecycle.restart.mockReset().mockResolvedValue(undefined);
   lifecycle.dispose.mockReset().mockResolvedValue(undefined);
   vi.mocked(runExternalHostScenario)
     .mockReset()
@@ -230,7 +236,7 @@ describe('ChatGPT V2 batch host', () => {
       expect(lifecycle.prepare).not.toHaveBeenCalled();
     }
   );
-  it('rejects duplicate native sessions and does not submit the next query', async () => {
+  it('rejects duplicate native sessions and restarts before the next query', async () => {
     vi.mocked(runExternalHostScenario).mockResolvedValue({
       success: true,
       response: 'answer',
@@ -240,8 +246,11 @@ describe('ChatGPT V2 batch host', () => {
     const batch = [...requests(), { ...requests()[0]!, caseId: 'three' }];
     const traces = await CHATGPT_HOST.runBatch!(batch, context);
     expect(traces[1]!.error).toContain('duplicate attribution');
-    expect(traces[2]!.error).toContain('No automatic retries');
-    expect(runExternalHostScenario).toHaveBeenCalledTimes(2);
+    // The reused session id stays claimed, so case three is also refused.
+    // Restarts happen only before a later case, never after the last one.
+    expect(traces[2]!.error).toContain('duplicate attribution');
+    expect(runExternalHostScenario).toHaveBeenCalledTimes(3);
+    expect(lifecycle.restart).toHaveBeenCalledTimes(1);
     expect(lifecycle.dispose).toHaveBeenCalledTimes(1);
   });
   it('retains evidence and a recovery lock when batch cleanup fails', async () => {
@@ -503,7 +512,7 @@ describe('ChatGPT V2 batch host', () => {
       hostToolCallCount: 1,
     });
   });
-  it('blocks later submissions when native usage evidence is inconsistent', async () => {
+  it('restarts the app after a failed case and runs later cases independently', async () => {
     vi.mocked(runExternalHostScenario).mockResolvedValueOnce({
       success: true,
       response: 'answer',
@@ -516,17 +525,141 @@ describe('ChatGPT V2 batch host', () => {
         durationMs: 1,
       },
     });
-    const traces = await CHATGPT_HOST.runBatch!(requests(), context);
+    const batch = [
+      ...requests(),
+      {
+        ...requests()[0]!,
+        caseId: 'three',
+        input: { ...requests()[0]!.input, scenario: 'Answer three' },
+      },
+    ];
+    const traces = await CHATGPT_HOST.runBatch!(batch, context);
     expect(traces[0]!.error).toContain('cached input exceeds');
     expect(traces[0]!.telemetry?.caseExecution).toEqual({
       status: 'failed',
-      continuation: 'blocked',
+      continuation: 'restart',
     });
-    expect(traces[1]!.telemetry?.caseExecution).toEqual({
-      status: 'not-submitted',
-      continuation: 'blocked',
+    // One restart, before case 2 only; the failed case is never resent.
+    expect(lifecycle.restart).toHaveBeenCalledTimes(1);
+    expect(runExternalHostScenario).toHaveBeenCalledTimes(3);
+    expect(
+      vi.mocked(runExternalHostScenario).mock.calls.map((call) => call[0])
+    ).toEqual(batch.map((request) => request.input.scenario));
+    for (const trace of traces.slice(1)) {
+      expect(trace.error).toBeUndefined();
+      expect(trace.telemetry?.caseExecution).toEqual({
+        status: 'completed',
+        continuation: 'allowed',
+      });
+    }
+  });
+  it('sends nothing more when the app cannot be restarted after a failed case', async () => {
+    vi.mocked(runExternalHostScenario).mockResolvedValueOnce({
+      success: false,
+      error: 'surface_mismatch',
+      toolCalls: [],
+      externalHost: metadata,
     });
+    lifecycle.restart.mockRejectedValueOnce(new Error('app_exited'));
+    const traces = await CHATGPT_HOST.runBatch!(requests(), context);
+    expect(traces[0]!.error).toContain('surface_mismatch');
+    for (const trace of traces.slice(1)) {
+      expect(trace.error).toContain('could not be restarted');
+      expect(trace.error).toContain('app_exited');
+      expect(trace.telemetry?.caseExecution).toEqual({
+        status: 'not-submitted',
+        continuation: 'blocked',
+      });
+    }
     expect(runExternalHostScenario).toHaveBeenCalledTimes(1);
+    expect(lifecycle.restart).toHaveBeenCalledTimes(1);
+    expect(lifecycle.dispose).toHaveBeenCalledTimes(1);
+  });
+  it('counts plugin MCP servers as eval servers when no direct server is configured', async () => {
+    vi.stubEnv('ACME_TOKEN', 'plugin-secret');
+    vi.mocked(runExternalHostScenario).mockResolvedValueOnce({
+      success: true,
+      response: 'answer',
+      externalHost: metadata,
+      toolCalls: [
+        { name: 'search', source: 'mcp', server: 'acme_mcp', arguments: {} },
+      ],
+    });
+    const plugins = [
+      {
+        name: 'acme',
+        marketplace: { source: 'acme/plugins', ref: 'f'.repeat(40) },
+        mcp: {
+          acme_mcp: {
+            url: 'https://example.test/eval',
+            auth: { accessTokenEnv: 'ACME_TOKEN' },
+            files: { 'c.json': { token: '${bearerToken}' } },
+          },
+        },
+      },
+    ];
+    const batch = requests()
+      .slice(0, 1)
+      .map((r) => ({
+        ...r,
+        config: { ...config, plugins, options: { requireMcpCalls: true } },
+        input: { ...r.input, servers: [] },
+      }));
+    const [trace] = await CHATGPT_HOST.runBatch!(batch, context);
+    expect(trace!.error).toBeUndefined();
+    expect(trace!.telemetry?.mcpSelection).toMatchObject({
+      status: 'passed',
+      selectedServers: ['acme_mcp'],
+      configuredMcpCallCount: 1,
+    });
+    const prepared = lifecycle.prepare.mock.calls[0]![0];
+    expect(prepared.pluginCredentials).toEqual({
+      'acme/acme_mcp': 'plugin-secret',
+    });
+    // The token reaches setup only through pluginCredentials, never the app env.
+    expect(JSON.stringify(prepared.options)).not.toContain('plugin-secret');
+    expect(JSON.stringify(trace)).not.toContain('plugin-secret');
+  });
+  it('fails before the app starts when a plugin credential is missing', async () => {
+    const batch = requests()
+      .slice(0, 1)
+      .map((r) => ({
+        ...r,
+        config: {
+          ...config,
+          plugins: [
+            {
+              name: 'acme',
+              marketplace: { source: 'acme/plugins', ref: 'f'.repeat(40) },
+              mcp: {
+                acme_mcp: {
+                  url: 'https://example.test/eval',
+                  auth: { accessTokenEnv: 'MISSING_ACME_TOKEN' },
+                },
+              },
+            },
+          ],
+        },
+      }));
+    await expect(CHATGPT_HOST.runBatch!(batch, context)).rejects.toMatchObject({
+      code: 'plugin_credential_missing',
+    });
+    expect(lifecycle.prepare).not.toHaveBeenCalled();
+  });
+  it('rejects Cowork-only blockMcpServers in the ChatGPT schema', () => {
+    const plugin = {
+      name: 'acme',
+      marketplace: { source: 'acme/plugins', ref: 'f'.repeat(40) },
+    };
+    expect(
+      CHATGPT_HOST.schema.safeParse({ ...config, plugins: [plugin] }).success
+    ).toBe(true);
+    expect(
+      CHATGPT_HOST.schema.safeParse({
+        ...config,
+        plugins: [{ ...plugin, blockMcpServers: ['acme_mcp'] }],
+      }).success
+    ).toBe(false);
   });
   it('requires native MCP calls when the eval explicitly requests them', async () => {
     vi.mocked(runExternalHostScenario).mockResolvedValueOnce({
@@ -539,17 +672,6 @@ describe('ChatGPT V2 batch host', () => {
     batch[0]!.config = { ...config, options: { requireMcpCalls: true } };
     const [trace] = await CHATGPT_HOST.runBatch!(batch, context);
     expect(trace!.error).toContain('without calling');
-  });
-  it('does not submit subsequent cases after an ambiguous or failed run', async () => {
-    vi.mocked(runExternalHostScenario).mockResolvedValueOnce({
-      success: false,
-      error: 'no matching session',
-      toolCalls: [],
-      externalHost: metadata,
-    });
-    const traces = await CHATGPT_HOST.runBatch!(requests(), context);
-    expect(runExternalHostScenario).toHaveBeenCalledTimes(1);
-    expect(traces[1]!.error).toContain('No automatic retries');
   });
   it('fails before touching the app when a different process holds the desktop', async () => {
     await mkdir(join(home.value, '.mcp-server-tester'));
