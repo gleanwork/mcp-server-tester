@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { normalizeToolResponse, extractText } from './response.js';
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import type { CallToolResult } from '@modelcontextprotocol/client';
 
 describe('normalizeToolResponse', () => {
   describe('basic normalization', () => {

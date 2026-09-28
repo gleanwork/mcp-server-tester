@@ -15,6 +15,7 @@ import {
   closeMCPClient,
 } from '../mcp/clientFactory.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
+import { callToolNormalized } from '../mcp/callTool.js';
 import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
 import type {
   HostRunInput,
@@ -162,10 +163,10 @@ async function runBuiltinHost(
           if (!routes.size) await this.listTools();
           const route = routes.get(name);
           if (!route) throw new Error(`Unknown MCP tool: ${name}`);
-          return route.client.callTool({
+          return callToolNormalized(route.client, {
             name: route.name,
             arguments: args,
-          }) as ReturnType<MCPFixtureApi['callTool']>;
+          });
         },
       };
       if (config.cli) {

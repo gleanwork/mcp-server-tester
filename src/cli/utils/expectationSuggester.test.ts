@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { suggestExpectations } from './expectationSuggester.js';
-import type { Tool } from '@modelcontextprotocol/sdk/types.js';
+import type { Tool } from '@modelcontextprotocol/client';
 
 const dummyTool: Tool = {
   name: 'test_tool',

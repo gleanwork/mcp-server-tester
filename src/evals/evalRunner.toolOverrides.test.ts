@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { runEvalDataset, type EvalContext } from './evalRunner.js';
 import type { EvalDataset } from './datasetTypes.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
-import type { Tool } from '@modelcontextprotocol/sdk/types.js';
+import type { Tool } from '@modelcontextprotocol/client';
 
 const mocks = vi.hoisted(() => ({
   simulateMCPHost: vi.fn(),

@@ -1,11 +1,11 @@
 import type { TestInfo } from '@playwright/test';
-import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type {
-  Tool,
   CallToolResult,
-  ListToolsResult,
-} from '@modelcontextprotocol/sdk/types.js';
+  Client,
+  Tool,
+} from '@modelcontextprotocol/client';
 import type { AuthType } from '../../types/index.js';
+import { callToolNormalized } from '../callTool.js';
 
 // Re-export AuthType for backwards compatibility
 export type { AuthType } from '../../types/index.js';
@@ -180,7 +180,7 @@ export function createMCPFixture(
 
       async listTools(): Promise<Array<Tool>> {
         const result = await withCallTimeout(
-          client.listTools() as Promise<ListToolsResult>,
+          client.listTools(),
           callTimeout,
           'listTools'
         );
@@ -192,10 +192,7 @@ export function createMCPFixture(
         args: TArgs
       ): Promise<CallToolResult> {
         const result = await withCallTimeout(
-          client.callTool({
-            name,
-            arguments: args,
-          }) as Promise<CallToolResult>,
+          callToolNormalized(client, { name, arguments: args }),
           callTimeout,
           `callTool("${name}")`
         );
@@ -224,7 +221,7 @@ export function createMCPFixture(
     async listTools(): Promise<Array<Tool>> {
       const execute = async () => {
         const result = await withCallTimeout(
-          client.listTools() as Promise<ListToolsResult>,
+          client.listTools(),
           callTimeout,
           'listTools'
         );
@@ -263,10 +260,7 @@ export function createMCPFixture(
       const execute = async () => {
         const startTime = Date.now();
         const result = await withCallTimeout(
-          client.callTool({
-            name,
-            arguments: args,
-          }) as Promise<CallToolResult>,
+          callToolNormalized(client, { name, arguments: args }),
           callTimeout,
           `callTool("${name}")`
         );

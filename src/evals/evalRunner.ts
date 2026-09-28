@@ -3,7 +3,7 @@ import type { EvalDataset, EvalCase, EvalExpectBlock } from './datasetTypes.js';
 import type { EvalExecutionResult } from './hostTrace.js';
 import type { HostEvent } from './evalFrameworkTypes.js';
 import type { TestInfo, Expect } from '@playwright/test';
-import type { Tool } from '@modelcontextprotocol/sdk/types.js';
+import type { Tool } from '@modelcontextprotocol/client';
 import type { ZodType } from 'zod';
 import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
 import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';

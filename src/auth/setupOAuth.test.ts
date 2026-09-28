@@ -42,7 +42,7 @@ vi.mock('@playwright/test', () => ({
   },
 }));
 
-vi.mock('@modelcontextprotocol/sdk/client/auth.js', () => ({
+vi.mock('@modelcontextprotocol/client', () => ({
   discoverAuthorizationServerMetadata:
     mocks.discoverAuthorizationServerMetadata,
   startAuthorization: mocks.startAuthorization,

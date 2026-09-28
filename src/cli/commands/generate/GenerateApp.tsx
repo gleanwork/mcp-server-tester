@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import { Select, TextInput, ConfirmInput } from '@inkjs/ui';
-import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import type { Tool } from '@modelcontextprotocol/sdk/types.js';
+import type { Client } from '@modelcontextprotocol/client';
+import type { Tool } from '@modelcontextprotocol/client';
 import { Spinner, StatusMessage, JsonPreview } from '../../components/index.js';
 import {
   createMCPClientForConfig,

@@ -12,12 +12,11 @@ try {
   const serverPath = path.join(dir, 'server.mjs');
   await fs.writeFile(
     serverPath,
-    `import { Server } from ${JSON.stringify(import.meta.resolve('@modelcontextprotocol/sdk/server/index.js'))};
-import { StdioServerTransport } from ${JSON.stringify(import.meta.resolve('@modelcontextprotocol/sdk/server/stdio.js'))};
-import { ListToolsRequestSchema, CallToolRequestSchema } from ${JSON.stringify(import.meta.resolve('@modelcontextprotocol/sdk/types.js'))};
-const server = new Server({name:'local-review-fixture',version:'1'}, {capabilities:{tools:{}}});
-server.setRequestHandler(ListToolsRequestSchema, async () => ({tools:[{name:'echo',description:'Local echo',inputSchema:{type:'object',properties:{text:{type:'string'}}}}]}));
-server.setRequestHandler(CallToolRequestSchema, async (request) => ({content:[{type:'text',text:request.params.arguments.text}]}));
+    `import { McpServer } from ${JSON.stringify(import.meta.resolve('@modelcontextprotocol/server'))};
+import { StdioServerTransport } from ${JSON.stringify(import.meta.resolve('@modelcontextprotocol/server/stdio'))};
+import { z } from ${JSON.stringify(import.meta.resolve('zod'))};
+const server = new McpServer({name:'local-review-fixture',version:'1'});
+server.registerTool('echo', {description:'Local echo', inputSchema: z.object({text: z.string()})}, async ({text}) => ({content:[{type:'text',text}]}));
 await server.connect(new StdioServerTransport());`
   );
   const pluginPath = path.join(dir, 'plugin.mjs');

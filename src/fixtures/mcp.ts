@@ -1,7 +1,7 @@
 import { test as base } from '@playwright/test';
 import { expect } from '../assertions/matchers/index.js';
-import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
+import type { Client } from '@modelcontextprotocol/client';
+import type { OAuthClientProvider } from '@modelcontextprotocol/client';
 import {
   createMCPClientForConfig,
   closeMCPClient,

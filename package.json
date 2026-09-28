@@ -93,7 +93,7 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.71",
     "@inkjs/ui": "^2.0.0",
-    "@modelcontextprotocol/sdk": "^1.27.1",
+    "@modelcontextprotocol/client": "^2.2.0",
     "commander": "^14.0.2",
     "debug": "^4.4.3",
     "ink": "^5.2.1",
@@ -102,14 +102,14 @@
     "oauth4webapi": "^3.0.0",
     "open": "^10.1.0",
     "react": "^18.3.1",
-    "undici": "^7.24.0",
     "smol-toml": "^1.4.2",
+    "undici": "^7.24.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@ai-sdk/provider-utils": "^4.0.15",
+    "@modelcontextprotocol/server": "^2.2.0",
     "@playwright/test": "^1.49.0",
-    "playwright": "^1.57.0",
     "@release-it-plugins/lerna-changelog": "^8.0.1",
     "@types/debug": "^4.1.12",
     "@types/ndjson": "^2.0.4",
@@ -128,6 +128,7 @@
     "markdown-code": "^0.6.1",
     "memfs": "^4.51.1",
     "nock": "^14.0.10",
+    "playwright": "^1.57.0",
     "postcss": "^8.4.49",
     "prettier": "^3.4.2",
     "react-dom": "^18.3.1",
@@ -207,7 +208,6 @@
     }
   },
   "optionalDependencies": {
-    "@google-cloud/storage": "^7.17.1",
     "@ai-sdk/anthropic": "^3.0.46",
     "@ai-sdk/azure": "^3.0.0",
     "@ai-sdk/deepseek": "^2.0.0",
@@ -216,6 +216,7 @@
     "@ai-sdk/mistral": "^3.0.0",
     "@ai-sdk/openai": "^3.0.31",
     "@ai-sdk/xai": "^3.0.0",
+    "@google-cloud/storage": "^7.17.1",
     "@openrouter/ai-sdk-provider": "^2.0.0",
     "ai": "^6.0.97"
   },

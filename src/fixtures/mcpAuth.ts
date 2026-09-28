@@ -6,7 +6,7 @@
  */
 
 import { test as base } from '@playwright/test';
-import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
+import type { OAuthClientProvider } from '@modelcontextprotocol/client';
 import type { MCPAuthConfig, MCPOAuthConfig } from '../config/mcpConfig.js';
 import {
   PlaywrightOAuthClientProvider,

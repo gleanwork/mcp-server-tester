@@ -1,11 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { runConformanceChecks } from './conformanceChecks.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
-import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import type {
-  Tool,
-  ServerCapabilities,
-} from '@modelcontextprotocol/sdk/types.js';
+import type { Client } from '@modelcontextprotocol/client';
+import type { Tool, ServerCapabilities } from '@modelcontextprotocol/client';
 
 function createMockTool(name: string, description?: string): Tool {
   return {

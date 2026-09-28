@@ -6,7 +6,7 @@ import type {
   Prompt,
   ServerCapabilities,
   Implementation,
-} from '@modelcontextprotocol/sdk/types.js';
+} from '@modelcontextprotocol/client';
 import type { MCPConformanceCheck } from '../types/reporter.js';
 
 export type { MCPConformanceCheck };

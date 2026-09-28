@@ -230,6 +230,13 @@ export {
 
 // Response Normalization
 export { normalizeToolResponse, extractText } from './mcp/response.js';
+export {
+  callToolNormalized,
+  formatProtocolError,
+  getToolProtocolError,
+  PROTOCOL_ERROR_META_KEY,
+} from './mcp/callTool.js';
+export type { ToolProtocolError } from './mcp/callTool.js';
 
 // Assertions - Matchers (primary API)
 // The extended expect with MCP tool matchers is exported via fixtures

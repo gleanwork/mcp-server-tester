@@ -1,8 +1,10 @@
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
-import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
+import {
+  Client,
+  SSEClientTransport,
+  StreamableHTTPClientTransport,
+} from '@modelcontextprotocol/client';
+import type { OAuthClientProvider } from '@modelcontextprotocol/client';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import {
   validateMCPConfig,
@@ -430,9 +432,13 @@ export async function closeMCPClient(client: Client): Promise<void> {
   // transport teardown signal disconnection to the server.
   try {
     // Terminate the MCP session before closing so stateful servers can clean up.
-    // TODO: Remove once MCP moves to stateless protocol (see roadmap: https://blog.modelcontextprotocol.io/posts/2026-mcp-roadmap/)
+    // Sessions only exist on legacy-era (initialize-handshake) connections; the
+    // 2026-07-28 revision removed them, so modern connections just close.
     const transport = client.transport;
-    if (transport instanceof StreamableHTTPClientTransport) {
+    if (
+      transport instanceof StreamableHTTPClientTransport &&
+      client.getProtocolEra() !== 'modern'
+    ) {
       try {
         await transport.terminateSession();
       } catch (sessionError) {
