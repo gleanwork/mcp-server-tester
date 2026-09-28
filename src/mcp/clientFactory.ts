@@ -24,6 +24,8 @@ import {
   resolveProtocolClientOptions,
   setRequestedProtocol,
 } from './protocol.js';
+import { setConnectionTarget } from './connectionTarget.js';
+import { attachWireTap } from './wireTap.js';
 import { ProxyAgent, Agent as UndiciAgent } from 'undici';
 import { readFileSync } from 'node:fs';
 import packageJson from '../../package.json' with { type: 'json' };
@@ -280,22 +282,23 @@ export async function createMCPClientForConfig(
         'This stdio MCP server declares host-resolved eval fields (url, auth, files, or ${url}/${dataDir}/${pluginRoot:...}); only a host that supports them (Linux Cowork) can launch it.'
       );
     const inherit = validatedConfig.inheritEnv !== false;
-    const transport = new StdioClientTransport({
-      command: validatedConfig.command,
-      args: validatedConfig.args ?? [],
-      ...(validatedConfig.cwd && { cwd: validatedConfig.cwd }),
-      // Suppress server stderr when quiet mode is enabled
-      ...(validatedConfig.quiet && { stderr: 'ignore' as const }),
-      ...(validatedConfig.env && {
-        env: Object.fromEntries(
+    const env = validatedConfig.env
+      ? Object.fromEntries(
           Object.entries({
             ...(inherit ? process.env : {}),
             ...validatedConfig.env,
           }).filter(
             (entry): entry is [string, string] => entry[1] !== undefined
           )
-        ),
-      }),
+        )
+      : undefined;
+    const transport = new StdioClientTransport({
+      command: validatedConfig.command,
+      args: validatedConfig.args ?? [],
+      ...(validatedConfig.cwd && { cwd: validatedConfig.cwd }),
+      // Suppress server stderr when quiet mode is enabled
+      ...(validatedConfig.quiet && { stderr: 'ignore' as const }),
+      ...(env && { env }),
     });
 
     debugClient('Connecting via stdio: %O', {
@@ -314,6 +317,13 @@ export async function createMCPClientForConfig(
     } catch (error) {
       throw describeProtocolFailure(error, protocol);
     }
+    setConnectionTarget(client, {
+      transport: 'stdio',
+      command: validatedConfig.command,
+      args: validatedConfig.args ?? [],
+      ...(validatedConfig.cwd ? { cwd: validatedConfig.cwd } : {}),
+      ...(env ? { env } : {}),
+    });
   } else if (isHttpConfig(validatedConfig)) {
     // Build headers, including static token auth if configured and no authProvider.
     // User-provided headers take precedence over defaults (spread order).
@@ -493,8 +503,18 @@ export async function createMCPClientForConfig(
         debugHttp('Connection established via sse');
       }
     }, retryAttempts);
+    setConnectionTarget(client, {
+      transport: 'http',
+      url: url.toString(),
+      headers,
+      ...(agentRegistry.get(client)
+        ? { dispatcher: agentRegistry.get(client) }
+        : {}),
+      ...(options?.authProvider ? { authProvider: options.authProvider } : {}),
+    });
   }
 
+  attachWireTap(client);
   debugClient('Connected successfully');
   const serverInfo = client.getServerVersion();
   if (serverInfo) {

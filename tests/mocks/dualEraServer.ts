@@ -10,6 +10,8 @@
  *   MOCK_ERA=dual    (default) serve both eras
  *   MOCK_ERA=modern  reject legacy (initialize) openings
  *   MOCK_ERA=legacy  legacy only (stdio only; answers like a 2025 SDK server)
+ *   MOCK_DIVERGE=1   register an extra tool on modern connections only, to
+ *                    exercise cross-era parity checks
  */
 
 import { createServer } from 'node:http';
@@ -29,6 +31,19 @@ type MockEra = 'dual' | 'modern' | 'legacy';
 const era = (process.env.MOCK_ERA ?? 'dual') as MockEra;
 if (!['dual', 'modern', 'legacy'].includes(era)) {
   throw new Error(`Unknown MOCK_ERA "${era}"`);
+}
+
+/** Builds the server for one connection/request of the given era. */
+function buildServer(requestEra: 'legacy' | 'modern') {
+  const server = createMockMcpServer();
+  if (process.env.MOCK_DIVERGE && requestEra === 'modern') {
+    server.registerTool(
+      'modern_only',
+      { description: 'Only served on 2026-07-28 connections' },
+      async () => ({ content: [{ type: 'text', text: 'modern' }] })
+    );
+  }
+  return server;
 }
 
 const httpFlag = process.argv.indexOf('--http');
@@ -83,9 +98,12 @@ if (httpPort !== null) {
   if (era === 'legacy') {
     throw new Error('MOCK_ERA=legacy is only supported over stdio.');
   }
-  const handler = createMcpHandler(() => createMockMcpServer(), {
-    legacy: era === 'modern' ? 'reject' : 'stateless',
-  });
+  const handler = createMcpHandler(
+    ({ era: requestEra }) => buildServer(requestEra),
+    {
+      legacy: era === 'modern' ? 'reject' : 'stateless',
+    }
+  );
   const server = createServer((req, res) => {
     serveNode(handler, req, res, httpPort).catch((error: unknown) => {
       console.error('dual-era mock request failed', error);
@@ -107,7 +125,7 @@ if (httpPort !== null) {
   await createMockMcpServer().connect(new StdioServerTransport());
   console.error('Dual-era MCP mock (legacy only) on stdio');
 } else {
-  serveStdio(() => createMockMcpServer(), {
+  serveStdio(({ era: requestEra }) => buildServer(requestEra), {
     legacy: era === 'modern' ? 'reject' : 'serve',
   });
   console.error(`Dual-era MCP mock (${era}) on stdio`);

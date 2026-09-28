@@ -14,6 +14,7 @@ import type {
   ExpectationBreakdown,
   UsageMetrics,
   HostDiagnostics,
+  MCPProtocolInfo,
 } from './index.js';
 import type { EvalResultStoreLike } from '../evals/resultStore.js';
 import type { HostEvidence } from '../evals/evalFrameworkTypes.js';
@@ -126,7 +127,36 @@ export interface MCPConformanceCheck {
    * Human-readable message describing the result
    */
   message: string;
+
+  /**
+   * Requirement level. A failing 'should' check is a warning: it is reported
+   * but does not fail the conformance result. Absent means 'must'.
+   */
+  severity?: ConformanceSeverity;
+
+  /**
+   * True when the check did not run (not applicable to this server, era, or
+   * transport). Skipped checks never fail the result; `message` says why.
+   */
+  skipped?: boolean;
+
+  /**
+   * Protocol revision the check validates against (e.g. '2026-07-28').
+   */
+  specVersion?: string;
+
+  /**
+   * Where the requirement comes from, e.g. a spec section or an official
+   * conformance suite requirement ID.
+   */
+  specRef?: string;
 }
+
+/**
+ * Conformance requirement level: 'must' (fails the result) or 'should'
+ * (reported as a warning).
+ */
+export type ConformanceSeverity = 'must' | 'should';
 
 /**
  * Conformance check result as stored in reporter data
@@ -159,6 +189,17 @@ export interface MCPConformanceResultData {
    * Number of tools discovered
    */
   toolCount: number;
+
+  /**
+   * Protocol the checked connection requested and negotiated
+   */
+  protocol?: MCPProtocolInfo;
+
+  /**
+   * Label for results that span connections (e.g. 'cross-era: legacy ↔
+   * 2026-07-28'). The report groups by this instead of `protocol` when set.
+   */
+  scope?: string;
 
   /**
    * Auth type used for this check

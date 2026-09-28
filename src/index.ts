@@ -490,3 +490,10 @@ export {
 
 // Conformance
 export { runConformanceChecks } from './spec/conformanceChecks.js';
+export { runCrossEraChecks } from './spec/crossEra.js';
+export type {
+  CrossEraOptions,
+  CrossEraConnection,
+  MCPCrossEraResult,
+} from './spec/crossEra.js';
+export type { ConformanceSeverity } from './types/reporter.js';

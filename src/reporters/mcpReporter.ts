@@ -10,7 +10,7 @@ import { mkdir, writeFile, readdir, readFile, unlink, cp } from 'fs/promises';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import type { MCPEvalReporterConfig } from './types.js';
-import type { AuthType } from '../types/index.js';
+import type { AuthType, MCPProtocolInfo } from '../types/index.js';
 import type {
   MCPEvalRunData,
   MCPEvalHistoricalSummary,
@@ -180,17 +180,19 @@ export default class MCPReporter implements Reporter {
     }
 
     // Strategy 2: Extract conformance check results
-    // These are created by runConformanceChecks() when testInfo is passed
-    const conformanceAttachment = result.attachments.find(
+    // These are created by runConformanceChecks() and runCrossEraChecks()
+    // when testInfo is passed. A test may attach several.
+    const conformanceAttachments = result.attachments.filter(
       (a) =>
         a.name === 'mcp-conformance-checks' &&
         a.contentType === 'application/json'
     );
 
-    const conformanceContent = conformanceAttachment
-      ? await this.getAttachmentContent(conformanceAttachment)
-      : null;
-    if (conformanceContent) {
+    for (const conformanceAttachment of conformanceAttachments) {
+      const conformanceContent = await this.getAttachmentContent(
+        conformanceAttachment
+      );
+      if (!conformanceContent) continue;
       try {
         const conformanceData = JSON.parse(conformanceContent) as {
           operation: string;
@@ -198,6 +200,8 @@ export default class MCPReporter implements Reporter {
           checks: MCPConformanceCheck[];
           serverInfo?: { name?: string; version?: string };
           toolCount: number;
+          protocol?: MCPProtocolInfo;
+          scope?: string;
           authType?: AuthType;
           project?: string;
         };
@@ -210,6 +214,10 @@ export default class MCPReporter implements Reporter {
             checks: conformanceData.checks,
             serverInfo: conformanceData.serverInfo,
             toolCount: conformanceData.toolCount,
+            ...(conformanceData.protocol
+              ? { protocol: conformanceData.protocol }
+              : {}),
+            ...(conformanceData.scope ? { scope: conformanceData.scope } : {}),
             authType: conformanceData.authType,
             project: conformanceData.project,
           });
