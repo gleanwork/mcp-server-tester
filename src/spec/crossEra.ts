@@ -20,6 +20,8 @@ import type { MCPProtocolInfo, ProtocolSetting } from '../types/index.js';
 import type { MCPConformanceCheck } from '../types/reporter.js';
 import { conformancePasses } from './registry.js';
 import { errorMessage } from '../utils/errorMessage.js';
+import { getSkillsExtension, listSkills } from '../skills/skillsClient.js';
+import type { SkillEntry } from '../skills/skillsTypes.js';
 
 /** Options for {@link runCrossEraChecks}. */
 export interface CrossEraOptions {
@@ -50,6 +52,8 @@ export interface CrossEraConnection {
   tools?: Tool[];
   resources?: Resource[] | null;
   prompts?: Prompt[] | null;
+  /** skills/list entries, when the server declares the skills extension. */
+  skills?: SkillEntry[] | null;
 }
 
 /** Result of {@link runCrossEraChecks}. */
@@ -133,6 +137,9 @@ async function connect(
       : null;
     connection.prompts = capabilities?.prompts
       ? (await client.listPrompts()).prompts
+      : null;
+    connection.skills = getSkillsExtension(client)
+      ? await listSkills(client)
       : null;
   } catch (error) {
     connection.listError = errorMessage(error);
@@ -279,6 +286,16 @@ export async function runCrossEraChecks(
       (c) => (c.prompts ? identifiers(c.prompts) : null)
     );
     if (prompts) checks.push(prompts);
+
+    // Skill entries (frontmatter + digests) must be the same in every era.
+    const skills = compareLists(
+      'cross_era_skills_match',
+      'skills',
+      connected,
+      (c) =>
+        c.skills ? c.skills.map((entry) => stableStringify(entry)).sort() : null
+    );
+    if (skills) checks.push(skills);
 
     const capabilities = compareLists(
       'cross_era_capabilities_match',

@@ -4,7 +4,7 @@ import { protocolMatrix } from './src/config/protocolMatrix.js';
 /** Port for the dual-era HTTP mock started by `webServer` below. */
 const DUAL_ERA_HTTP_PORT = 3917;
 
-const dualEraSpecs = /(mcp-tests|protocol)\.spec\.ts/;
+const dualEraSpecs = /(mcp-tests|protocol|skills)\.spec\.ts/;
 
 /**
  * Playwright configuration for MCP eval tests

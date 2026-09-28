@@ -497,3 +497,38 @@ export type {
   MCPCrossEraResult,
 } from './spec/crossEra.js';
 export type { ConformanceSeverity } from './types/reporter.js';
+export type { SkillsCheckOptions } from './spec/checks/skills.js';
+
+// Agent Skills over MCP (SEP-2640)
+export {
+  SKILLS_EXTENSION_ID,
+  SKILL_LIMITS,
+  SkillEntrySchema,
+} from './skills/skillsTypes.js';
+export type {
+  SkillEntry,
+  SkillResourceEntry,
+  SkillsExtensionSettings,
+} from './skills/skillsTypes.js';
+export {
+  validateSkillEntry,
+  parseSkillFrontmatter,
+  skillDigest,
+} from './skills/skillEntry.js';
+export type { SkillEntryProblem } from './skills/skillEntry.js';
+export {
+  getSkillsExtension,
+  listSkills,
+  getSkill,
+  readSkillFile,
+  verifySkillFile,
+} from './skills/skillsClient.js';
+export type { SkillFileContent } from './skills/skillsClient.js';
+
+// Fixture extensions (resources, discovery, extension requests, skills)
+export { createFixtureExtensions } from './mcp/fixtures/fixtureExtensions.js';
+export type {
+  MCPFixtureExtensions,
+  MCPSkillsApi,
+  MCPSkillFileRead,
+} from './mcp/fixtures/fixtureExtensions.js';

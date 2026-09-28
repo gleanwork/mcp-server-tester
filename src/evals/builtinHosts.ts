@@ -17,6 +17,8 @@ import {
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import { callToolNormalized } from '../mcp/callTool.js';
 import { DEFAULT_PROTOCOL_SETTING, getProtocolInfo } from '../mcp/protocol.js';
+import { createFixtureExtensions } from '../mcp/fixtures/fixtureExtensions.js';
+import type { Client } from '@modelcontextprotocol/client';
 import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
 import type {
   HostRunInput,
@@ -30,6 +32,15 @@ import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
 import { ANTHROPIC_API_HOST } from './anthropicApiHost.js';
 import { COWORK_HOST } from './coworkHost.js';
 import { CHATGPT_HOST, CHATGPT_LINUX_HOST } from './chatgptHost.js';
+
+/** A stand-in client for hosts that manage their own connections. */
+function missingClient(): Client {
+  return new Proxy({} as Client, {
+    get() {
+      throw new Error('No MCP client for this host.');
+    },
+  });
+}
 
 async function runBuiltinHost(
   input: HostRunInput,
@@ -148,6 +159,8 @@ async function runBuiltinHost(
                 era: null,
               };
         },
+        // Resource and skills helpers address the first server.
+        ...createFixtureExtensions(clients[0] ?? missingClient()),
         getServerInfo: () => null,
         async listTools() {
           const tools = [];

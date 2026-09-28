@@ -7,6 +7,10 @@ import type {
 import type { AuthType, MCPProtocolInfo } from '../../types/index.js';
 import { callToolNormalized } from '../callTool.js';
 import { getProtocolInfo } from '../protocol.js';
+import {
+  createFixtureExtensions,
+  type MCPFixtureExtensions,
+} from './fixtureExtensions.js';
 
 // Re-export AuthType for backwards compatibility
 export type { AuthType } from '../../types/index.js';
@@ -80,7 +84,7 @@ export interface MCPFixtureOptions {
  *
  * This interface wraps the raw MCP Client with test-friendly methods
  */
-export interface MCPFixtureApi {
+export interface MCPFixtureApi extends MCPFixtureExtensions {
   /**
    * The underlying MCP client (for advanced usage)
    */
@@ -189,6 +193,7 @@ export function createMCPFixture(
       get protocol() {
         return getProtocolInfo(client);
       },
+      ...createFixtureExtensions(client),
 
       async listTools(): Promise<Array<Tool>> {
         const result = await withCallTimeout(
@@ -232,6 +237,7 @@ export function createMCPFixture(
     get protocol() {
       return getProtocolInfo(client);
     },
+    ...createFixtureExtensions(client),
 
     async listTools(): Promise<Array<Tool>> {
       const execute = async () => {

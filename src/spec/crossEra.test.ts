@@ -38,6 +38,8 @@ describe('runCrossEraChecks', () => {
     ]);
     expect(check(result, 'cross_era_tools_match')?.pass).toBe(true);
     expect(check(result, 'cross_era_tool_definitions_match')?.pass).toBe(true);
+    expect(check(result, 'cross_era_skills_match')?.pass).toBe(true);
+    expect(check(result, 'cross_era_resources_match')?.pass).toBe(true);
     expect(check(result, 'auto_selects_modern')?.pass).toBe(true);
   }, 60_000);
 
