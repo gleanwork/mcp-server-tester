@@ -66,6 +66,28 @@
           "description": "Arguments to pass to the tool. Required in 'direct' mode; optional in 'mcp_host' mode.",
           "additionalProperties": true
         },
+        "request": {
+          "type": "object",
+          "required": ["method"],
+          "additionalProperties": false,
+          "description": "Direct-mode alternative to toolName: send any MCP request (e.g. skills/get, resources/read) and assert on its JSON result. JSON-RPC errors become error results for expect.isError. Mutually exclusive with toolName. Built-in schemas for expect.schema: SkillEntry, SkillsListResult, SkillsGetResult, DiscoverResult.",
+          "properties": {
+            "method": {
+              "type": "string",
+              "minLength": 1,
+              "examples": ["skills/list", "skills/get", "resources/read"]
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "server": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Server label, when a manifest targets several servers."
+            }
+          }
+        },
         "scenario": {
           "type": "string",
           "description": "Natural language prompt that the LLM host will act on. Required in 'mcp_host' mode.",

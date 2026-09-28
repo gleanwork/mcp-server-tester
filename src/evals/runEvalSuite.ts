@@ -521,13 +521,15 @@ export async function runEvalSuite(
                           : resolvedServers.find(
                               (server) =>
                                 server.label &&
-                                evalCase.toolName?.startsWith(
-                                  `${server.label}.`
-                                )
+                                (evalCase.request
+                                  ? evalCase.request.server === server.label
+                                  : evalCase.toolName?.startsWith(
+                                      `${server.label}.`
+                                    ))
                             );
                       if (!selected)
                         throw new Error(
-                          'Direct cases require one server or a label-qualified tool name.'
+                          'Direct cases require one server, a label-qualified tool name, or request.server.'
                         );
                       const directClient =
                         await createMCPClientForConfig(selected);

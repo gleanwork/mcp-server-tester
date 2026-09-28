@@ -18,6 +18,10 @@ export interface StoredEvalArtifactMetadata {
   toolOverrideVariantId?: string;
   mcpHostModel?: string;
   judgeModel?: string;
+  /** Negotiated MCP protocol revision of the run, e.g. '2026-07-28'. */
+  protocolVersion?: string;
+  /** Protocol era of the run ('legacy' or 'modern'). */
+  protocolEra?: string;
   labels?: Record<string, string>;
   [key: string]: unknown;
 }

@@ -16,11 +16,11 @@ const SourceDatasetSchema = EvalDatasetSchema.extend({
     .array(
       EvalCaseSchema.strict().superRefine((case_, context) => {
         if ((case_.mode ?? 'direct') === 'direct') {
-          if (!case_.toolName) {
+          if (!case_.toolName && !case_.request) {
             context.addIssue({
               code: 'custom',
               path: ['toolName'],
-              message: 'Direct cases require toolName.',
+              message: 'Direct cases require toolName or request.',
             });
           }
         } else if (!case_.scenario) {

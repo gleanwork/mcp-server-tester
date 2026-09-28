@@ -4,7 +4,13 @@ import type { EvalExecutionResult } from './hostTrace.js';
 import type { HostEvent } from './evalFrameworkTypes.js';
 import type { TestInfo, Expect } from '@playwright/test';
 import type { Tool } from '@modelcontextprotocol/client';
-import type { ZodType } from 'zod';
+import { ProtocolError } from '@modelcontextprotocol/client';
+import { z, type ZodType } from 'zod';
+import { protocolErrorToToolResult } from '../mcp/callTool.js';
+import { BUILTIN_RESULT_SCHEMAS } from './builtinResultSchemas.js';
+
+/** Accepts any JSON-RPC result object (validated later by expectations). */
+const AnyResultSchema = z.looseObject({});
 import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
 import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
 import { runExternalHostScenario } from './externalHost/runtime.js';
@@ -544,11 +550,34 @@ export async function executeToolCall(
       }
 
       return { response: simulationResult };
+    } else if (evalCase.request) {
+      // Direct mode - send an arbitrary MCP request (e.g. skills/get)
+      if (evalCase.toolName) {
+        throw new Error(
+          `Eval case ${evalCase.id}: request and toolName are mutually exclusive`
+        );
+      }
+      if (!mcp) throw new Error('Direct requests require an MCP connection.');
+      try {
+        const result = await mcp.request(
+          evalCase.request.method,
+          evalCase.request.params,
+          AnyResultSchema
+        );
+        return { response: result };
+      } catch (error) {
+        // A JSON-RPC error is a result to assert on (expect.error), exactly
+        // as protocol errors from tools/call are.
+        if (error instanceof ProtocolError) {
+          return { response: protocolErrorToToolResult(error) };
+        }
+        throw error;
+      }
     } else {
       // Direct mode - call tool directly
       if (!evalCase.toolName) {
         throw new Error(
-          `Eval case ${evalCase.id}: toolName is required for direct mode`
+          `Eval case ${evalCase.id}: toolName or request is required for direct mode`
         );
       }
       if (!evalCase.args) {
@@ -632,7 +661,9 @@ async function runExpectBlockValidations(
 
   // schema (toMatchToolSchema)
   if (expectBlock.schema !== undefined) {
-    const schema = config.schemas?.[expectBlock.schema];
+    const schema =
+      config.schemas?.[expectBlock.schema] ??
+      BUILTIN_RESULT_SCHEMAS[expectBlock.schema];
     if (!schema) {
       results.schema = {
         pass: false,
@@ -1673,6 +1704,9 @@ export async function runEvalDataset(
     }),
     ...(mcpHostModel !== undefined && { mcpHostModel }),
     ...(judgeModel !== undefined && { judgeModel }),
+    ...(context.mcp?.protocol?.negotiated
+      ? { protocol: context.mcp.protocol }
+      : {}),
   };
 
   const runHostUsage = caseResults.reduce(
@@ -1775,6 +1809,14 @@ export async function runEvalDataset(
           ...(mcpHostModel !== undefined && { mcpHostModel }),
           ...(judgeModel !== undefined && { judgeModel }),
           ...(gitHash !== undefined && { gitHash }),
+          ...(metadata.protocol?.negotiated
+            ? {
+                protocolVersion: metadata.protocol.negotiated,
+                ...(metadata.protocol.era
+                  ? { protocolEra: metadata.protocol.era }
+                  : {}),
+              }
+            : {}),
           packageVersion: packageJson.version,
         },
       });

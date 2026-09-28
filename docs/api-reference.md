@@ -517,7 +517,9 @@ await saveEvalRunComparison({ store, comparison, id: 'candidate-comparison' });
 
 **Result Structure:**
 
-```typescript snippet=src/evals/evalRunner.ts#L129-L203
+```typescript snippet=src/evals/evalRunner.ts#L133-L210
+/**
+ * Overall result of running an eval dataset
  */
 export interface EvalRunnerResult {
   /**
@@ -593,6 +595,7 @@ export interface EvalRunnerResult {
    * Aggregate token usage from all mcp_host LLM simulations across all cases.
    */
   totalHostUsage?: UsageMetrics;
+}
 ```
 
 ### `runVariantExperiment(options, context)`
@@ -1169,7 +1172,7 @@ interface MCPConformanceResult {
 
 ### `EvalExpectBlock`
 
-```typescript snippet=src/evals/datasetTypes.ts#L199-L300
+```typescript snippet=src/evals/datasetTypes.ts#L221-L322
 /**
  * Unified expectation block for eval cases
  *
@@ -1276,11 +1279,11 @@ export interface EvalExpectBlock {
 
 ### `EvalCase`
 
-````typescript snippet=src/evals/datasetTypes.ts#L26-L153
+````typescript snippet=src/evals/datasetTypes.ts#L38-L175
 /**
  * A single eval test case
  *
- * For 'direct' mode: toolName and args are required
+ * For 'direct' mode: toolName and args, or request, are required
  * For 'mcp_host' mode: scenario and mcpHostConfig are required
  * For 'external_host' mode: scenario and externalHost are required
  */
@@ -1316,6 +1319,16 @@ export interface EvalCase {
    * Arguments to pass to the tool (required for 'direct' mode, optional for 'mcp_host' mode)
    */
   args?: Record<string, unknown>;
+
+  /**
+   * Direct mode alternative to `toolName`: send any MCP request (for example
+   * `skills/get` or `resources/read`) and run the expectations against its
+   * JSON result. A JSON-RPC error becomes an error result, so `expect.error`
+   * works as it does for tools. Mutually exclusive with `toolName`.
+   *
+   * @example { "method": "skills/get", "params": { "uri": "skill://docs/SKILL.md" } }
+   */
+  request?: EvalCaseRequestTarget;
 
   /**
    * Natural language scenario for LLM to execute (required for 'mcp_host' and 'external_host' modes)

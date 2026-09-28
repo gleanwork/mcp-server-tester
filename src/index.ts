@@ -110,6 +110,7 @@ export type {
   JudgeExpectConfig,
   SerializedEvalDataset,
   EvalMode,
+  EvalCaseRequestTarget,
   LoadDatasetOptions,
   EvalCaseRequest,
   EvalContext,
@@ -289,6 +290,7 @@ export {
   validateEvalCase,
   validateEvalDataset,
 } from './evals/datasetTypes.js';
+export { BUILTIN_RESULT_SCHEMAS } from './evals/builtinResultSchemas.js';
 
 // Eval Loader
 export {

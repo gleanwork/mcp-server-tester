@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { z } from 'zod';
+import { ProtocolError } from '@modelcontextprotocol/client';
 import {
   runEvalCase,
   runEvalDataset,
@@ -336,7 +337,103 @@ describe('runEvalCase', () => {
       const result = await runEvalCase(evalCase, context);
 
       expect(result.pass).toBe(false);
-      expect(result.error).toContain('toolName is required');
+      expect(result.error).toContain('toolName or request is required');
+    });
+
+    describe('request cases', () => {
+      const skillEntry = {
+        uri: 'skill://weather-report/SKILL.md',
+        frontmatter: { name: 'weather-report', description: 'Weather' },
+        resources: [
+          {
+            uri: 'skill://weather-report/SKILL.md',
+            digest: `sha256:${'a'.repeat(64)}`,
+            size: 10,
+          },
+        ],
+      };
+
+      function withRequest(request: MCPFixtureApi['request']) {
+        return createContext({ ...createMockMCP(), request });
+      }
+
+      it('sends the request and validates the result with a built-in schema', async () => {
+        const request = vi.fn().mockResolvedValue({ skills: [skillEntry] });
+        const result = await runEvalCase(
+          createEvalCase({
+            toolName: undefined,
+            args: undefined,
+            request: { method: 'skills/list', params: {} },
+            expect: {
+              schema: 'SkillsListResult',
+              containsText: 'weather-report',
+            },
+          }),
+          withRequest(request)
+        );
+
+        expect(request).toHaveBeenCalledWith(
+          'skills/list',
+          {},
+          expect.anything()
+        );
+        expect(result.error).toBeUndefined();
+        expect(result.pass).toBe(true);
+      });
+
+      it('fails the built-in schema for an entry that breaks SEP-2640', async () => {
+        const request = vi.fn().mockResolvedValue({
+          skill: {
+            ...skillEntry,
+            frontmatter: { name: 'other', description: 'x' },
+          },
+        });
+        const result = await runEvalCase(
+          createEvalCase({
+            toolName: undefined,
+            args: undefined,
+            request: { method: 'skills/get', params: { uri: skillEntry.uri } },
+            expect: { schema: 'SkillsGetResult' },
+          }),
+          withRequest(request)
+        );
+
+        expect(result.pass).toBe(false);
+        expect(result.expectations.schema?.details).toContain(
+          'frontmatter.name'
+        );
+      });
+
+      it('turns a JSON-RPC error into an error result for expect.isError', async () => {
+        const request = vi
+          .fn()
+          .mockRejectedValue(new ProtocolError(-32602, 'Unknown skill'));
+        const result = await runEvalCase(
+          createEvalCase({
+            toolName: undefined,
+            args: undefined,
+            request: {
+              method: 'skills/get',
+              params: { uri: 'skill://nope/SKILL.md' },
+            },
+            expect: { isError: 'MCP error -32602' },
+          }),
+          withRequest(request)
+        );
+
+        expect(result.error).toBeUndefined();
+        expect(result.pass).toBe(true);
+      });
+
+      it('rejects cases that set both request and toolName', async () => {
+        const result = await runEvalCase(
+          createEvalCase({ request: { method: 'skills/list' } }),
+          withRequest(vi.fn())
+        );
+
+        expect(result.pass).toBe(false);
+        expect(result.error).toContain('mutually exclusive');
+      });
     });
 
     it('should fail when args are missing', async () => {
@@ -834,6 +931,20 @@ describe('runEvalDataset', () => {
       cases,
     };
   }
+
+  it('records the protocol the run negotiated in its metadata', async () => {
+    const context = createContext();
+    const result = await runEvalDataset(
+      { dataset: createDataset([createEvalCase({ id: 'case-1' })]) },
+      context
+    );
+
+    expect(result.metadata?.protocol).toEqual({
+      requested: 'legacy',
+      negotiated: '2025-11-25',
+      era: 'legacy',
+    });
+  });
 
   it('should run all cases in dataset', async () => {
     const context = createContext();

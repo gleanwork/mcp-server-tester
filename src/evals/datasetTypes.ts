@@ -24,9 +24,21 @@ export type {
 export type EvalMode = 'direct' | 'host' | 'mcp_host' | 'external_host';
 
 /**
+ * A direct-mode MCP request, used instead of `toolName` + `args`.
+ */
+export interface EvalCaseRequestTarget {
+  /** JSON-RPC method, e.g. 'skills/list', 'skills/get', 'resources/read'. */
+  method: string;
+  /** Request params (without `_meta`; MST adds the protocol envelope). */
+  params?: Record<string, unknown>;
+  /** Server label to send it to, when a manifest targets several servers. */
+  server?: string;
+}
+
+/**
  * A single eval test case
  *
- * For 'direct' mode: toolName and args are required
+ * For 'direct' mode: toolName and args, or request, are required
  * For 'mcp_host' mode: scenario and mcpHostConfig are required
  * For 'external_host' mode: scenario and externalHost are required
  */
@@ -62,6 +74,16 @@ export interface EvalCase {
    * Arguments to pass to the tool (required for 'direct' mode, optional for 'mcp_host' mode)
    */
   args?: Record<string, unknown>;
+
+  /**
+   * Direct mode alternative to `toolName`: send any MCP request (for example
+   * `skills/get` or `resources/read`) and run the expectations against its
+   * JSON result. A JSON-RPC error becomes an error result, so `expect.error`
+   * works as it does for tools. Mutually exclusive with `toolName`.
+   *
+   * @example { "method": "skills/get", "params": { "uri": "skill://docs/SKILL.md" } }
+   */
+  request?: EvalCaseRequestTarget;
 
   /**
    * Natural language scenario for LLM to execute (required for 'mcp_host' and 'external_host' modes)
@@ -508,24 +530,42 @@ export const EvalExpectBlockSchema = z.object({
  *
  * toolName and args are optional for mcp_host mode (which uses scenario instead)
  */
-export const EvalCaseSchema = z.object({
-  id: z.string().min(1, 'id must not be empty'),
-  description: z.string().optional(),
-  mode: z.enum(['direct', 'host', 'mcp_host', 'external_host']).optional(),
-  host: TaggedConfigSchema.optional(),
-  toolName: z.string().min(1, 'toolName must not be empty').optional(),
-  args: z.record(z.string(), z.unknown()).optional(),
-  scenario: z.string().optional(),
-  mcpHostConfig: MCPHostConfigSchema.optional(),
-  externalHost: ExternalHostConfigSchema.optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-  iterations: z.number().int().min(1).optional(),
-  accuracyThreshold: z.number().min(0).max(1).optional(),
-  judgeReps: z.number().int().min(1).optional(),
-  canonicalAnswer: z.string().optional(),
-  tags: z.array(z.string()).optional(),
-  expect: EvalExpectBlockSchema.optional(),
-});
+export const EvalCaseSchema = z
+  .object({
+    id: z.string().min(1, 'id must not be empty'),
+    description: z.string().optional(),
+    mode: z.enum(['direct', 'host', 'mcp_host', 'external_host']).optional(),
+    host: TaggedConfigSchema.optional(),
+    toolName: z.string().min(1, 'toolName must not be empty').optional(),
+    args: z.record(z.string(), z.unknown()).optional(),
+    request: z
+      .object({
+        method: z.string().min(1, 'request.method must not be empty'),
+        params: z.record(z.string(), z.unknown()).optional(),
+        server: z.string().min(1).optional(),
+      })
+      .strict()
+      .optional(),
+    scenario: z.string().optional(),
+    mcpHostConfig: MCPHostConfigSchema.optional(),
+    externalHost: ExternalHostConfigSchema.optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+    iterations: z.number().int().min(1).optional(),
+    accuracyThreshold: z.number().min(0).max(1).optional(),
+    judgeReps: z.number().int().min(1).optional(),
+    canonicalAnswer: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+    expect: EvalExpectBlockSchema.optional(),
+  })
+  .superRefine((evalCase, context) => {
+    if (evalCase.request && evalCase.toolName) {
+      context.addIssue({
+        code: 'custom',
+        path: ['request'],
+        message: 'request and toolName are mutually exclusive',
+      });
+    }
+  });
 
 /**
  * Zod schema for EvalDataset (without schemas field, as schemas aren't serializable)
