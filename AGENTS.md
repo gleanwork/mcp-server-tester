@@ -33,13 +33,14 @@ npm run format:check        # Check formatting
 
 ### Core Modules (`src/`)
 
-- **`config/`** - `MCPConfig` types and Zod validation for stdio/HTTP transports
-- **`mcp/`** - Client factory (`createMCPClientForConfig`), fixtures (`MCPFixtureApi`), and response normalization
+- **`config/`** - `MCPConfig` types and Zod validation for stdio/HTTP transports, `protocolMatrix()`
+- **`mcp/`** - Client factory (`createMCPClientForConfig`), fixtures (`MCPFixtureApi`), protocol selection (`protocol.ts`), wire tap, and response normalization. Built on the MCP TypeScript SDK v2 (`@modelcontextprotocol/client`)
+- **`skills/`** - Agent Skills over MCP (SEP-2640): wire schemas, entry validation, and a skills client (the SDK has no skills API yet)
 - **`auth/`** - OAuth 2.1 with PKCE (`PlaywrightOAuthClientProvider`) and static token utilities
 - **`assertions/`** - Unified assertion architecture (see below)
 - **`evals/`** - Dataset types, loader, and runner (uses validators internally)
 - **`judge/`** - LLM-as-a-judge via Claude Agent SDK
-- **`spec/`** - MCP protocol conformance checks
+- **`spec/`** - Conformance check registry (`checks/core.ts`, `checks/modern.ts`, `checks/skills.ts`), raw probe channel, and cross-era checks
 - **`reporters/`** - Custom Playwright reporter with React-based UI
 - **`cli/`** - `mcp-server-tester init` and `mcp-server-tester generate` commands
 
@@ -89,9 +90,15 @@ if (!result.pass) console.log(result.message);
 The main test fixture provides:
 
 - `mcpClient: Client` - Raw MCP SDK client
-- `mcp: MCPFixtureApi` - High-level test API with `listTools()`, `callTool()`, etc.
+- `mcp: MCPFixtureApi` - High-level test API with `listTools()`, `callTool()`, `protocol`, `discover()`, `listResources()`, `readResource()`, `request()`, and `skills`
 
-Configuration is read from `project.use.mcpConfig` in playwright.config.ts.
+Configuration is read from `project.use.mcpConfig` in playwright.config.ts. The `mcpProtocol` option overrides `mcpConfig.protocol`.
+
+### Protocol Versions
+
+`mcpConfig.protocol` selects the MCP protocol: `'legacy'` (default; the `initialize` handshake, byte-identical to 1.x and guarded by `src/mcp/wireCompat.test.ts`), `'auto'`, or a revision such as `'2025-06-18'` or `'2026-07-28'`. `protocolMatrix(project, protocols)` expands a Playwright project per protocol. This repo's own `playwright.config.ts` runs the specs across `dual-stdio@{legacy,2025-06-18,2026-07-28,auto}` and `dual-http@{legacy,2026-07-28}` against `tests/mocks/dualEraServer.ts`. See `docs/protocol-versions.md`.
+
+`mcp.callTool()` folds JSON-RPC protocol errors (e.g. `-32602` unknown tool) into an `isError` result (`callToolNormalized`); local SDK errors still throw.
 
 ### Exports
 
@@ -155,7 +162,7 @@ The framework supports two evaluation modes:
 - **Direct mode** (`mode: 'direct'`, default): Call a specific tool with known arguments and assert on the response. Fast, deterministic, free. Use for regression testing.
 - **mcp_host mode** (`mode: 'mcp_host'`): An LLM receives a natural language `scenario` and discovers which tools to call. Non-deterministic, costs money, measures tool description quality. Use selectively for tool discoverability validation.
 
-Direct mode uses `toolName` + `args`. mcp_host mode uses `scenario` + `mcpHostConfig`. Tool call assertions (`toolsTriggered`, `toolCallCount`) only work in mcp_host mode.
+Direct mode uses `toolName` + `args`, or `request: { method, params }` for any MCP request (e.g. `skills/get`). mcp_host mode uses `scenario` + `mcpHostConfig`; `mcpHostConfig.skills: 'catalog' | 'preload'` lets the SDK host offer the server's Agent Skills (loads are `kind: 'skill'` events for `toolsTriggered`). Tool call assertions (`toolsTriggered`, `toolCallCount`) only work in mcp_host mode.
 
 ### Snapshot Testing
 
@@ -192,7 +199,9 @@ Multi-iteration: set `iterations` and `accuracyThreshold` on an eval case. The r
 
 ### Conformance Checking
 
-`runConformanceChecks(mcp)` validates MCP protocol compliance (tool listing, error handling, spec adherence). Returns `MCPConformanceResult[]` with pass/fail per check. Attach results to the reporter via `testInfo` for inclusion in the HTML report.
+`runConformanceChecks(mcp)` validates MCP protocol compliance for the negotiated era. Checks are definitions in `src/spec/checks/` with `eras`, `severity` ('must' fails the result, 'should' is a warning), and `specRef`. Legacy connections run the core checks unchanged from 1.x; 2026-07-28 connections add the modern checks (some send raw probes via `src/spec/probe.ts`; `probe: false` skips them); servers declaring the skills extension get the skills checks in every era. `runCrossEraChecks(config)` compares what a server serves across protocols. Attach results to the reporter via `testInfo`.
+
+To add a check: add a `ConformanceCheckDefinition` to the right file in `src/spec/checks/`, and prove it with a failing server. `tests/mocks/rawModernServer.mjs` (`FAULTS=...`) and `tests/mocks/mockSkills.ts` (`MOCK_SKILL_FAULTS=...`) switch on individual spec violations.
 
 ### Judge / Rubrics
 
@@ -212,6 +221,8 @@ Custom rubrics: pass a string prompt or `{ text: '...' }` object. Use `judgeReps
   - Wrong import path — use `@gleanwork/mcp-server-tester/fixtures/mcp` for tests, not the root path
   - Provider package not installed for mcp_host mode (`npm install ai @ai-sdk/<provider>`)
   - Missing `await` on async matchers (`toPassToolJudge`, `toMatchToolSnapshot`, `toSatisfyToolPredicate`)
+  - Importing from `@modelcontextprotocol/sdk` (v1): use `@modelcontextprotocol/client` (types, transports, auth) or `@modelcontextprotocol/server` (mock servers)
+  - Pinning `protocol: '2026-07-28'` against a legacy-only server fails by design; use `'legacy'` or `'auto'`
 
 ## Type Architecture
 

@@ -61,6 +61,7 @@ export default defineConfig({
     roots?: { listChanged?: boolean },
     sampling?: { ... },
   },
+  protocol?: 'legacy' | 'auto' | string, // Protocol to speak (default: 'legacy'); see below
 }
 ```
 
@@ -175,8 +176,13 @@ export default defineConfig({
   serverUrl: string,              // MCP server URL
   requestTimeoutMs?: number,      // Request timeout (default: 30000)
   headers?: Record<string, string>, // Custom HTTP headers
+  protocol?: 'legacy' | 'auto' | string, // Protocol to speak (default: 'legacy')
 }
 ```
+
+### Protocol Version
+
+Both transports accept `protocol`. The default, `'legacy'`, uses the `initialize` handshake exactly as MST 1.x did. Pin `'2026-07-28'` to test the stateless protocol, pin a legacy revision such as `'2025-06-18'`, or use `'auto'` to probe and fall back. A pinned 2026-07-28 connection never falls back to the legacy HTTP+SSE transport. See [Protocol Versions](./protocol-versions.md) for running a suite against several protocols.
 
 > **Security note:** When `serverUrl` uses `http://` with a non-localhost address, the framework emits a console warning: tokens and credentials are transmitted unencrypted over plain HTTP. Always use `https://` for remote servers. The warning is suppressed for `localhost` / `127.0.0.1` since local development traffic stays on the machine.
 

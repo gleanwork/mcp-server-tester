@@ -65,6 +65,21 @@ You call a tool yourself with explicit arguments. The result is checked against 
 
 **What you're testing:** The tool itself, not how well it's described.
 
+Direct cases can also send any MCP request instead of calling a tool, which is useful for resources and extensions such as [Agent Skills](./skills.md):
+
+```json
+{
+  "id": "skill-entry-valid",
+  "request": {
+    "method": "skills/get",
+    "params": { "uri": "skill://docs/SKILL.md" }
+  },
+  "expect": { "schema": "SkillsGetResult" }
+}
+```
+
+`request` replaces `toolName` and `args`. A JSON-RPC error becomes an error result, so `isError` works the same way it does for tools. The schemas `SkillEntry`, `SkillsListResult`, `SkillsGetResult`, and `DiscoverResult` are built in.
+
 ---
 
 ### LLM Host Mode
