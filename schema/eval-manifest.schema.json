@@ -133,6 +133,18 @@
                 }
               }
             },
+            "protocol": {
+              "type": "string",
+              "pattern": "^(legacy|auto|\\d{4}-\\d{2}-\\d{2})$",
+              "description": "MCP protocol: 'legacy' (default, initialize handshake), 'auto' (probe with server/discover, fall back to legacy), or a revision to pin such as '2025-06-18' or '2026-07-28'."
+            },
+            "protocolProbe": {
+              "type": "object",
+              "properties": {
+                "timeoutMs": { "type": "number", "exclusiveMinimum": 0 }
+              },
+              "additionalProperties": false
+            },
             "connectTimeoutMs": { "type": "number", "exclusiveMinimum": 0 },
             "requestTimeoutMs": { "type": "number", "exclusiveMinimum": 0 },
             "callTimeoutMs": { "type": "number", "exclusiveMinimum": 0 },
@@ -184,6 +196,18 @@
                   "required": ["listChanged"]
                 }
               }
+            },
+            "protocol": {
+              "type": "string",
+              "pattern": "^(legacy|auto|\\d{4}-\\d{2}-\\d{2})$",
+              "description": "MCP protocol: 'legacy' (default, initialize handshake), 'auto' (probe with server/discover, fall back to legacy), or a revision to pin such as '2025-06-18' or '2026-07-28'."
+            },
+            "protocolProbe": {
+              "type": "object",
+              "properties": {
+                "timeoutMs": { "type": "number", "exclusiveMinimum": 0 }
+              },
+              "additionalProperties": false
             },
             "connectTimeoutMs": { "type": "number", "exclusiveMinimum": 0 },
             "requestTimeoutMs": { "type": "number", "exclusiveMinimum": 0 },

@@ -1,7 +1,7 @@
 import { test as base } from '@playwright/test';
 import { expect } from '../assertions/matchers/index.js';
-import type { Client } from '@modelcontextprotocol/client';
-import type { OAuthClientProvider } from '@modelcontextprotocol/client';
+import type { Client, OAuthClientProvider } from '@modelcontextprotocol/client';
+import type { ProtocolSetting } from '../types/index.js';
 import {
   createMCPClientForConfig,
   closeMCPClient,
@@ -31,6 +31,13 @@ interface MCPFixtureState {
  */
 type MCPFixtures = {
   /**
+   * Protocol override for this project or file. Takes precedence over
+   * `mcpConfig.protocol`. Set with `test.use({ mcpProtocol: '2026-07-28' })`
+   * or in a project's `use` block. See {@link ProtocolSetting}.
+   */
+  mcpProtocol: ProtocolSetting | undefined;
+
+  /**
    * Raw MCP client instance (automatically connected and cleaned up)
    */
   mcpClient: Client;
@@ -58,6 +65,8 @@ type MCPFixtures = {
  * });
  */
 export const test = base.extend<MCPFixtures>({
+  mcpProtocol: [undefined, { option: true }],
+
   /**
    * Internal fixture state - tracks resolved auth type between fixtures
    */
@@ -83,7 +92,7 @@ export const test = base.extend<MCPFixtures>({
    * 3. HTTP transport with no auth → tries CLI-stored tokens (from `mcp-server-tester login`)
    *    with automatic token refresh
    */
-  mcpClient: async ({ _mcpFixtureState }, use, testInfo) => {
+  mcpClient: async ({ _mcpFixtureState, mcpProtocol }, use, testInfo) => {
     // Extract mcpConfig from project use settings
     const useConfig = testInfo.project.use as { mcpConfig?: MCPConfig };
     const mcpConfig = useConfig.mcpConfig;
@@ -161,6 +170,7 @@ export const test = base.extend<MCPFixtures>({
         version: packageJson.version,
       },
       authProvider,
+      ...(mcpProtocol !== undefined ? { protocol: mcpProtocol } : {}),
     });
 
     try {

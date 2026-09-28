@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { ProtocolSetting } from '../types/index.js';
 
 /**
  * OAuth configuration for MCP authentication
@@ -156,6 +157,18 @@ export interface StdioMCPConfig {
   capabilities?: MCPHostCapabilities;
 
   /**
+   * Protocol to speak. Default: 'legacy' (the `initialize` handshake,
+   * unchanged from MST 1.x). Use a revision like '2026-07-28' to pin it
+   * (connecting fails if the server does not offer it), or 'auto' to probe
+   * with `server/discover` and fall back to legacy. See
+   * docs/protocol-versions.md.
+   */
+  protocol?: ProtocolSetting;
+
+  /** Probe options for `protocol: 'auto'`. */
+  protocolProbe?: { timeoutMs?: number };
+
+  /**
    * Connection timeout in milliseconds
    */
   connectTimeoutMs?: number;
@@ -223,6 +236,18 @@ export interface HttpMCPConfig {
    * Host capabilities to register with the server
    */
   capabilities?: MCPHostCapabilities;
+
+  /**
+   * Protocol to speak. Default: 'legacy' (the `initialize` handshake,
+   * unchanged from MST 1.x). Use a revision like '2026-07-28' to pin it
+   * (connecting fails if the server does not offer it), or 'auto' to probe
+   * with `server/discover` and fall back to legacy. See
+   * docs/protocol-versions.md.
+   */
+  protocol?: ProtocolSetting;
+
+  /** Probe options for `protocol: 'auto'`. */
+  protocolProbe?: { timeoutMs?: number };
 
   /**
    * Connection timeout in milliseconds
@@ -295,6 +320,18 @@ export interface HttpMCPConfig {
 export type MCPConfig = StdioMCPConfig | HttpMCPConfig;
 
 /**
+ * Zod schema for the protocol setting
+ */
+const ProtocolSettingSchema = z
+  .string()
+  .regex(/^(legacy|auto|\d{4}-\d{2}-\d{2})$/, {
+    error: "protocol must be 'legacy', 'auto', or a revision like '2026-07-28'",
+  })
+  .describe(
+    "MCP protocol: 'legacy' (default, initialize handshake), 'auto' (probe with server/discover, fall back to legacy), or a revision to pin such as '2025-06-18' or '2026-07-28'."
+  );
+
+/**
  * Zod schema for MCPHostCapabilities
  */
 const MCPHostCapabilitiesSchema = z.object({
@@ -359,6 +396,11 @@ const StdioConfigSchema = z.object({
   cwd: z.string().optional(),
   env: z.record(z.string(), z.string()).optional(),
   capabilities: MCPHostCapabilitiesSchema.optional(),
+  protocol: ProtocolSettingSchema.optional(),
+  protocolProbe: z
+    .object({ timeoutMs: z.number().positive().optional() })
+    .strict()
+    .optional(),
   connectTimeoutMs: z.number().positive().optional(),
   requestTimeoutMs: z.number().positive().optional(),
   callTimeoutMs: z.number().positive().optional(),
@@ -427,6 +469,11 @@ const HttpConfigSchema = z.object({
     }),
   headers: z.record(z.string(), z.string()).optional(),
   capabilities: MCPHostCapabilitiesSchema.optional(),
+  protocol: ProtocolSettingSchema.optional(),
+  protocolProbe: z
+    .object({ timeoutMs: z.number().positive().optional() })
+    .strict()
+    .optional(),
   connectTimeoutMs: z.number().positive().optional(),
   requestTimeoutMs: z.number().positive().optional(),
   callTimeoutMs: z.number().positive().optional(),

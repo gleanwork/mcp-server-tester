@@ -92,6 +92,10 @@ export type {
 
   // Core
   AuthType,
+  ProtocolEra,
+  ProtocolRevision,
+  ProtocolSetting,
+  MCPProtocolInfo,
   ResultSource,
   ExpectationType,
   EvalExpectationResult,
@@ -227,6 +231,19 @@ export {
   createMCPClientForConfig,
   closeMCPClient,
 } from './mcp/clientFactory.js';
+
+// Protocol versions
+export {
+  DEFAULT_PROTOCOL_SETTING,
+  FIRST_MODERN_PROTOCOL_VERSION,
+  LEGACY_PROTOCOL_VERSIONS,
+  MODERN_PROTOCOL_VERSIONS,
+  eraOfRevision,
+  getProtocolInfo,
+  isProtocolRevision,
+} from './mcp/protocol.js';
+export { protocolMatrix } from './config/protocolMatrix.js';
+export type { ProtocolMatrixProject } from './config/protocolMatrix.js';
 
 // Response Normalization
 export { normalizeToolResponse, extractText } from './mcp/response.js';

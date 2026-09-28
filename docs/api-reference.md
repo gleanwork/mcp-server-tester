@@ -30,7 +30,7 @@ test('use raw client', async ({ mcpClient }) => {
 
 High-level test API with helper methods.
 
-```typescript snippet=src/mcp/fixtures/mcpFixture.ts#L82-L124
+```typescript snippet=src/mcp/fixtures/mcpFixture.ts#L83-L133
 export interface MCPFixtureApi {
   /**
    * The underlying MCP client (for advanced usage)
@@ -46,6 +46,14 @@ export interface MCPFixtureApi {
    * Playwright project name for this test session
    */
   project?: string;
+
+  /**
+   * The protocol this connection requested and negotiated, e.g.
+   * `{ requested: '2026-07-28', negotiated: '2026-07-28', era: 'modern' }`.
+   * Use it to skip era-specific tests:
+   * `test.skip(mcp.protocol.era !== 'modern')`.
+   */
+  readonly protocol: MCPProtocolInfo;
 
   /**
    * Lists all available tools from the MCP server

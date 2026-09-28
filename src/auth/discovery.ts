@@ -48,7 +48,12 @@ function validateAuthServerEndpoints(authServer: {
 }
 
 /**
- * MCP Protocol version header value
+ * `MCP-Protocol-Version` header value MST sends on OAuth discovery and
+ * registration requests.
+ *
+ * @deprecated This is not the protocol MCP connections speak; that is set per
+ * connection with `mcpConfig.protocol` (see `ProtocolSetting`). The value is
+ * kept for auth-endpoint compatibility and will be removed in a future major.
  */
 export const MCP_PROTOCOL_VERSION = '2025-06-18';
 

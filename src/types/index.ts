@@ -18,6 +18,49 @@ export type AuthType = 'oauth' | 'api-token' | 'none';
 export type { HostDiagnostics } from './hostDiagnostics.js';
 
 /**
+ * MCP protocol era.
+ *
+ * - 'legacy': revisions that open with the `initialize` handshake
+ *   (`2024-10-07` through `2025-11-25`)
+ * - 'modern': revisions with per-request `_meta` and `server/discover`
+ *   (`2026-07-28` and later)
+ */
+export type ProtocolEra = 'legacy' | 'modern';
+
+/**
+ * A dated MCP protocol revision, e.g. `'2025-06-18'` or `'2026-07-28'`.
+ */
+export type ProtocolRevision =
+  | '2024-11-05'
+  | '2025-03-26'
+  | '2025-06-18'
+  | '2025-11-25'
+  | '2026-07-28'
+  | (string & {});
+
+/**
+ * Which protocol a connection should speak.
+ *
+ * - 'legacy' (default): the `initialize` handshake, byte-identical to MST 1.x
+ * - 'auto': probe with `server/discover` and fall back to legacy
+ * - a revision: pin exactly that revision; connecting fails if the server
+ *   does not offer it
+ */
+export type ProtocolSetting = 'legacy' | 'auto' | ProtocolRevision;
+
+/**
+ * The protocol a connection requested and the one it actually negotiated.
+ */
+export interface MCPProtocolInfo {
+  /** The `protocol` setting the connection was created with. */
+  requested: ProtocolSetting;
+  /** The revision negotiated with the server (e.g. `'2025-11-25'`). */
+  negotiated: string | null;
+  /** The era the connection landed on. */
+  era: ProtocolEra | null;
+}
+
+/**
  * Source of test results
  *
  * - 'eval': From runEvalDataset() using JSON eval datasets
