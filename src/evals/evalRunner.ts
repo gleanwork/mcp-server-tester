@@ -486,7 +486,7 @@ function mapToolNames(
   }
   const events =
     'events' in response && Array.isArray(response.events)
-      ? (response.events as HostEvent[])
+      ? response.events
       : undefined;
   return {
     ...response,
@@ -1205,7 +1205,7 @@ async function runSingleIteration(
       const canonicalCalls =
         'events' in validationResponse &&
         Array.isArray(validationResponse.events)
-          ? (validationResponse.events as HostEvent[]).filter(
+          ? validationResponse.events.filter(
               (event) => event.kind === 'tool_call'
             )
           : validationResponse.toolCalls;

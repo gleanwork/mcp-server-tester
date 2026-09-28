@@ -90,6 +90,12 @@ export async function simulateMCPHost(
 ): Promise<MCPHostSimulationResult> {
   const hostType = config.hostType ?? 'sdk';
 
+  if (hostType !== 'sdk' && config.skills && config.skills !== 'off') {
+    throw new Error(
+      `mcpHostConfig.skills is only supported for the SDK host; '${hostType}' hosts manage skills themselves.`
+    );
+  }
+
   if (hostType === 'cli') {
     if (!config.cli) {
       throw new Error(

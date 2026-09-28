@@ -308,3 +308,31 @@ describe('per-scenario host traces', () => {
     });
   });
 });
+
+describe('simulationToHostTrace with skill loads', () => {
+  it('emits skill events in order with tool calls', () => {
+    const trace = simulationToHostTrace(
+      {
+        success: true,
+        response: 'done',
+        toolCalls: [{ name: 'get_weather', arguments: { city: 'London' } }],
+        skillLoads: [
+          {
+            name: 'weather-report',
+            uri: 'skill://weather-report/SKILL.md',
+            server: 'mcp',
+            kind: 'skill',
+            via: 'read_skill',
+            verified: true,
+            afterToolCalls: 0,
+          },
+        ],
+      },
+      []
+    );
+    expect(trace.events.map((e) => `${e.kind}:${e.name}`)).toEqual([
+      'skill:weather-report',
+      'tool_call:get_weather',
+    ]);
+  });
+});

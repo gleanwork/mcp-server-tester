@@ -7,6 +7,7 @@
 
 import type { MCPFixtureApi } from '../../mcp/fixtures/mcpFixture.js';
 import type { HostDiagnostics, UsageMetrics } from '../../types/index.js';
+import type { HostEvent } from '../evalFrameworkTypes.js';
 
 /**
  * Host type for MCP host simulation.
@@ -175,6 +176,29 @@ export interface BrowserConfig {
 /**
  * Configuration for MCP host simulation
  */
+/** How the simulated host offers Agent Skills to the model. */
+export type HostSkillsMode = 'off' | 'catalog' | 'preload';
+
+/** One skill (or skill file) the simulated host loaded for the model. */
+export interface SkillLoad {
+  /** Skill name (frontmatter `name`). */
+  name: string;
+  /** URI that was read: the skill's SKILL.md or a supporting file. */
+  uri: string;
+  /** Host label of the server that served it. */
+  server: string;
+  /** 'skill' for SKILL.md loads, 'file' for supporting files. */
+  kind: 'skill' | 'file';
+  /** How it reached the model. */
+  via: 'read_skill' | 'read_resource' | 'preload';
+  /** Result of verifying the read against the skill's entry. */
+  verified: boolean | null;
+  /** Verification problems or read errors; the model got an error instead. */
+  problems?: string[];
+  /** Number of MCP tool calls made before this load. */
+  afterToolCalls: number;
+}
+
 export interface MCPHostConfig {
   /** Execution-local environment overrides; never assigned to process.env. */
   env?: Record<string, string | undefined>;
@@ -223,6 +247,25 @@ export interface MCPHostConfig {
    * @default 10
    */
   maxToolCalls?: number;
+
+  /**
+   * How the simulated host uses Agent Skills the server serves over MCP
+   * (SEP-2640). SDK host only.
+   *
+   * - 'off' (default): skills are not offered to the model.
+   * - 'catalog': like a SEP-2640 host, the system prompt lists each skill's
+   *   name, description, server, and URI, and the model loads skills with a
+   *   `read_skill` tool and supporting files with `read_resource`. Reads are
+   *   verified against the skill's entry (digest, size, frontmatter).
+   * - 'preload': every SKILL.md is placed in the system prompt up front.
+   *
+   * Loads are reported as `skill` events (`toolsTriggered` with
+   * `kind: 'skill'`) and in `skillLoads`; they do not count as MCP tool
+   * calls.
+   *
+   * @default 'off'
+   */
+  skills?: HostSkillsMode;
 
   /**
    * CLI host configuration (required for 'cli' host type).
@@ -317,6 +360,16 @@ export interface MCPHostSimulationResult {
    * Populated by SDK-based hosts from the AI SDK response.
    */
   usage?: UsageMetrics;
+
+  /** Skills the host loaded for the model (when `skills` is enabled). */
+  skillLoads?: SkillLoad[];
+
+  /**
+   * Ordered trace of MCP tool calls and skill loads. Present when skills are
+   * enabled; tool-call expectations read it so `kind: 'skill'` entries and
+   * strict ordering work.
+   */
+  events?: HostEvent[];
 }
 
 /**

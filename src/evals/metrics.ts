@@ -55,6 +55,22 @@ function toolCalls(caseResult: EvalCaseResult): unknown[] {
   return Array.isArray(calls) ? calls : [];
 }
 
+/** Skill loads by the simulated host, or null when skills were not enabled. */
+function skillLoads(
+  caseResult: EvalCaseResult
+): Array<Record<string, unknown>> | null {
+  const loads = responseObject(caseResult).skillLoads;
+  return Array.isArray(loads)
+    ? (loads as Array<Record<string, unknown>>)
+    : null;
+}
+
+function verifiedSkillLoads(caseResult: EvalCaseResult) {
+  return (skillLoads(caseResult) ?? []).filter(
+    (load) => load.kind === 'skill' && load.verified !== false
+  );
+}
+
 function responseText(caseResult: EvalCaseResult): string {
   const response = responseObject(caseResult);
   if (typeof response.response === 'string') return response.response;
@@ -315,6 +331,37 @@ export const BUILT_IN_METRICS: Record<string, MetricDefinition> =
       (result) => toolCalls(result).length,
       meanAggregation,
       'calls'
+    ),
+    skill_loaded: metric(
+      'skill_loaded',
+      'binary',
+      (result) =>
+        skillLoads(result) === null
+          ? null
+          : verifiedSkillLoads(result).length > 0,
+      rateAggregation
+    ),
+    skill_before_tool: metric(
+      'skill_before_tool',
+      'binary',
+      (result) =>
+        skillLoads(result) === null
+          ? null
+          : verifiedSkillLoads(result).some(
+              (load) => load.afterToolCalls === 0
+            ),
+      rateAggregation
+    ),
+    skill_verification_failed: metric(
+      'skill_verification_failed',
+      'binary',
+      (result) => {
+        const loads = skillLoads(result);
+        return loads === null
+          ? null
+          : loads.some((load) => load.verified === false);
+      },
+      rateAggregation
     ),
     first_tool: metric('first_tool', 'categorical', (result) => {
       const first = toolCalls(result)[0];

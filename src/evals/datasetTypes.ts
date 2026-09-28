@@ -375,6 +375,7 @@ const MCPHostConfigSchema = z.object({
   maxTokens: z.number().optional(),
   temperature: z.number().optional(),
   maxToolCalls: z.number().optional(),
+  skills: z.enum(['off', 'catalog', 'preload']).optional(),
   cli: z
     .object({
       command: z.string(),

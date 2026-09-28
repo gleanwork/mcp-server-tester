@@ -177,6 +177,12 @@
           "minimum": 1,
           "default": 10,
           "description": "Maximum number of tool call steps allowed in a single LLM conversation"
+        },
+        "skills": {
+          "type": "string",
+          "enum": ["off", "catalog", "preload"],
+          "default": "off",
+          "description": "How the SDK host offers Agent Skills served over MCP (SEP-2640). 'catalog': list skills in the system prompt and load them with read_skill; 'preload': put every SKILL.md in the system prompt. Loads appear as kind 'skill' events for toolsTriggered."
         }
       }
     },

@@ -360,3 +360,43 @@ describe('computeMetrics', () => {
     );
   });
 });
+
+describe('skill metrics', () => {
+  const load = (verified: boolean, afterToolCalls: number) => ({
+    name: 'weather-report',
+    uri: 'skill://weather-report/SKILL.md',
+    server: 'mcp',
+    kind: 'skill',
+    via: 'read_skill',
+    verified,
+    afterToolCalls,
+  });
+
+  it('computes load, load-before-tool, and verification-failure rates', () => {
+    const cases = [
+      result('before', true, {
+        response: { toolCalls: [], skillLoads: [load(true, 0)] },
+      }),
+      result('after', true, {
+        response: { toolCalls: [], skillLoads: [load(true, 2)] },
+      }),
+      result('refused', false, {
+        response: { toolCalls: [], skillLoads: [load(false, 0)] },
+      }),
+      result('none', false, { response: { toolCalls: [], skillLoads: [] } }),
+      // Skills disabled: excluded from the rates.
+      result('off', true),
+    ];
+
+    const { perCase, aggregated } = computeMetrics(
+      ['skill_loaded', 'skill_before_tool', 'skill_verification_failed'],
+      cases
+    );
+
+    expect(perCase.off!.skill_loaded).toBeNull();
+    expect(perCase.refused!.skill_loaded).toBe(false);
+    expect(aggregated.skill_loaded_rate).toBe(0.5);
+    expect(aggregated.skill_before_tool_rate).toBe(0.25);
+    expect(aggregated.skill_verification_failed_rate).toBe(0.25);
+  });
+});
