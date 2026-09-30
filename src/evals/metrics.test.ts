@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { SkillLoad } from '../types/index.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import {
   BUILT_IN_METRICS,
@@ -362,7 +363,7 @@ describe('computeMetrics', () => {
 });
 
 describe('skill metrics', () => {
-  const load = (verified: boolean, afterToolCalls: number) => ({
+  const load = (verified: boolean, afterToolCalls: number): SkillLoad => ({
     name: 'weather-report',
     uri: 'skill://weather-report/SKILL.md',
     server: 'mcp',
@@ -394,9 +395,43 @@ describe('skill metrics', () => {
     );
 
     expect(perCase.off!.skill_loaded).toBeNull();
-    expect(perCase.refused!.skill_loaded).toBe(false);
+    expect(perCase.refused!.skill_loaded).toBe(0);
     expect(aggregated.skill_loaded_rate).toBe(0.5);
     expect(aggregated.skill_before_tool_rate).toBe(0.25);
     expect(aggregated.skill_verification_failed_rate).toBe(0.25);
+  });
+
+  it('averages across iterations', () => {
+    const multi = {
+      ...result('multi', true),
+      iterationResults: [
+        { pass: true, durationMs: 1, skillLoads: [load(true, 0)] },
+        { pass: false, durationMs: 1, skillLoads: [] },
+        { pass: true, durationMs: 1, skillLoads: [load(true, 1)] },
+        { pass: true, durationMs: 1, skillLoads: [load(true, 0)] },
+      ],
+    };
+    const { perCase } = computeMetrics(
+      ['skill_loaded', 'skill_before_tool'],
+      [multi]
+    );
+    expect(perCase.multi!.skill_loaded).toBe(0.75);
+    expect(perCase.multi!.skill_before_tool).toBe(0.5);
+  });
+
+  it('does not count preloaded skills as loads', () => {
+    const preloaded = result('preloaded', true, {
+      response: {
+        toolCalls: [],
+        skillLoads: [{ ...load(true, 0), via: 'preload' as const }],
+      },
+    });
+    const { perCase } = computeMetrics(
+      ['skill_loaded', 'skill_before_tool', 'skill_verification_failed'],
+      [preloaded]
+    );
+    expect(perCase.preloaded!.skill_loaded).toBeNull();
+    expect(perCase.preloaded!.skill_before_tool).toBeNull();
+    expect(perCase.preloaded!.skill_verification_failed).toBe(0);
   });
 });

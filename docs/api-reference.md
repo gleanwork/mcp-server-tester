@@ -522,7 +522,7 @@ await saveEvalRunComparison({ store, comparison, id: 'candidate-comparison' });
 
 **Result Structure:**
 
-```typescript snippet=src/evals/evalRunner.ts#L137-L214
+```typescript snippet=src/evals/evalRunner.ts#L138-L215
 /**
  * Overall result of running an eval dataset
  */
@@ -1177,7 +1177,7 @@ interface MCPConformanceResult {
 
 ### `EvalExpectBlock`
 
-```typescript snippet=src/evals/datasetTypes.ts#L221-L322
+```typescript snippet=src/evals/datasetTypes.ts#L224-L325
 /**
  * Unified expectation block for eval cases
  *
@@ -1284,7 +1284,7 @@ export interface EvalExpectBlock {
 
 ### `EvalCase`
 
-````typescript snippet=src/evals/datasetTypes.ts#L38-L175
+````typescript snippet=src/evals/datasetTypes.ts#L41-L178
 /**
  * A single eval test case
  *

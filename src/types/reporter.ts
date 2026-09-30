@@ -15,6 +15,7 @@ import type {
   UsageMetrics,
   HostDiagnostics,
   MCPProtocolInfo,
+  SkillLoad,
 } from './index.js';
 import type { EvalResultStoreLike } from '../evals/resultStore.js';
 import type { HostEvidence } from '../evals/evalFrameworkTypes.js';
@@ -281,6 +282,8 @@ export interface IterationResult {
   hostEvidence?: HostEvidence;
   /** Token usage from mcp_host LLM simulation in this iteration */
   hostUsage?: UsageMetrics;
+  /** Skills the simulated host loaded in this iteration (skills enabled). */
+  skillLoads?: SkillLoad[];
   /** Native numeric host measurements, retained after response redaction. */
   hostTelemetry?: Record<string, unknown>;
   /** External host metadata for this iteration */

@@ -55,20 +55,69 @@ function toolCalls(caseResult: EvalCaseResult): unknown[] {
   return Array.isArray(calls) ? calls : [];
 }
 
-/** Skill loads by the simulated host, or null when skills were not enabled. */
-function skillLoads(
+type SkillLoadRecord = Record<string, unknown>;
+
+/**
+ * Skill loads per attempt (one entry per iteration, or one for a single run),
+ * or null when skills were not enabled.
+ */
+function skillLoadsPerAttempt(
   caseResult: EvalCaseResult
-): Array<Record<string, unknown>> | null {
+): SkillLoadRecord[][] | null {
+  const iterations = (caseResult.iterationResults ?? [])
+    .map((iteration) => iteration.skillLoads)
+    .filter((loads): loads is NonNullable<typeof loads> => loads !== undefined);
+  if (iterations.length > 0) {
+    return iterations as unknown as SkillLoadRecord[][];
+  }
   const loads = responseObject(caseResult).skillLoads;
-  return Array.isArray(loads)
-    ? (loads as Array<Record<string, unknown>>)
-    : null;
+  return Array.isArray(loads) ? [loads as SkillLoadRecord[]] : null;
 }
 
-function verifiedSkillLoads(caseResult: EvalCaseResult) {
-  return (skillLoads(caseResult) ?? []).filter(
-    (load) => load.kind === 'skill' && load.verified !== false
+/**
+ * Fraction of attempts where `test` holds, skipping attempts it returns null
+ * for; null when there is nothing to measure.
+ */
+function attemptFraction(
+  caseResult: EvalCaseResult,
+  test: (loads: SkillLoadRecord[]) => boolean | null
+): number | null {
+  const values = (skillLoadsPerAttempt(caseResult) ?? [])
+    .map(test)
+    .filter((value): value is boolean => value !== null);
+  return values.length === 0
+    ? null
+    : values.filter(Boolean).length / values.length;
+}
+
+/**
+ * Skills the model chose to load (catalog mode). Preloaded skills are in
+ * context by construction, so an attempt with only preloads is not measured.
+ */
+function modelLoadedSkills(loads: SkillLoadRecord[]): SkillLoadRecord[] | null {
+  if (loads.length > 0 && loads.every((load) => load.via === 'preload')) {
+    return null;
+  }
+  return loads.filter(
+    (load) =>
+      load.via !== 'preload' && load.kind === 'skill' && load.verified !== false
   );
+}
+
+/** Mean of per-case fractions, reported under `<name>_rate`. */
+function fractionRateAggregation(
+  values: MetricValue[],
+  metric: ResolvedMetric
+): { key: string; value: unknown } | undefined {
+  const numbers = values.filter(
+    (value): value is number => typeof value === 'number'
+  );
+  return numbers.length > 0
+    ? {
+        key: `${metric.outName}_rate`,
+        value: numbers.reduce((sum, value) => sum + value, 0) / numbers.length,
+      }
+    : undefined;
 }
 
 function responseText(caseResult: EvalCaseResult): string {
@@ -332,36 +381,37 @@ export const BUILT_IN_METRICS: Record<string, MetricDefinition> =
       meanAggregation,
       'calls'
     ),
+    // Per case: the fraction of attempts (iterations) where it held.
     skill_loaded: metric(
       'skill_loaded',
-      'binary',
+      'continuous',
       (result) =>
-        skillLoads(result) === null
-          ? null
-          : verifiedSkillLoads(result).length > 0,
-      rateAggregation
+        attemptFraction(result, (loads) => {
+          const loaded = modelLoadedSkills(loads);
+          return loaded === null ? null : loaded.length > 0;
+        }),
+      fractionRateAggregation
     ),
     skill_before_tool: metric(
       'skill_before_tool',
-      'binary',
+      'continuous',
       (result) =>
-        skillLoads(result) === null
-          ? null
-          : verifiedSkillLoads(result).some(
-              (load) => load.afterToolCalls === 0
-            ),
-      rateAggregation
+        attemptFraction(result, (loads) => {
+          const loaded = modelLoadedSkills(loads);
+          return loaded === null
+            ? null
+            : loaded.some((load) => load.afterToolCalls === 0);
+        }),
+      fractionRateAggregation
     ),
     skill_verification_failed: metric(
       'skill_verification_failed',
-      'binary',
-      (result) => {
-        const loads = skillLoads(result);
-        return loads === null
-          ? null
-          : loads.some((load) => load.verified === false);
-      },
-      rateAggregation
+      'continuous',
+      (result) =>
+        attemptFraction(result, (loads) =>
+          loads.some((load) => load.verified === false)
+        ),
+      fractionRateAggregation
     ),
     first_tool: metric('first_tool', 'categorical', (result) => {
       const first = toolCalls(result)[0];

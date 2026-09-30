@@ -191,9 +191,10 @@ describe('SDK host with skills', () => {
         skillBeforeToolRate: 1,
         skillVerificationFailureRate: 0,
       });
-      // preload puts the skill in context without a read_skill call, so
-      // the preloaded skill still appears as a skill event before the tool.
-      expect(byMode.preload).toMatchObject({ skillLoadRate: 1 });
+      // preload puts the skill in context without the model choosing it:
+      // no skill event, so skill-first can't pass and no load rate is kept.
+      expect(byMode.preload).toMatchObject({ passRate: 0 });
+      expect(byMode.preload?.skillLoadRate).toBeUndefined();
 
       const catalog = result.comparisons.find((c) => c.candidate === 'catalog');
       expect(catalog?.comparison.improvedCases.map((c) => c.id)).toEqual([

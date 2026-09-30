@@ -25,6 +25,7 @@ import { getRegisteredExternalHostConfig } from './externalHost/hostRegistry.js'
 import type {
   EvalExpectationResult,
   MCPProtocolInfo,
+  SkillLoad,
   UsageMetrics,
 } from '../types/index.js';
 import type {
@@ -610,6 +611,15 @@ export async function executeToolCall(
       error: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+/** Skill loads to keep per iteration (responses are not kept). */
+function iterationSkillLoads(
+  response: unknown
+): Pick<IterationResult, 'skillLoads'> {
+  const loads = (response as { skillLoads?: unknown } | null | undefined)
+    ?.skillLoads;
+  return Array.isArray(loads) ? { skillLoads: loads as SkillLoad[] } : {};
 }
 
 /** The protocol a run used, from its connection or the runner options. */
@@ -1438,6 +1448,7 @@ export async function runEvalCase(
         hostUsage: result.hostUsage,
         hostTelemetry: result.hostTelemetry,
         externalHost: result.externalHost,
+        ...iterationSkillLoads(result.response),
       });
     } catch (err) {
       // runSingleIteration should not throw, but guard defensively

@@ -20,6 +20,12 @@ test.describe('Live skills eval (opt-in)', () => {
   test.setTimeout(10 * 60_000);
 
   test('off vs catalog vs preload', async ({ mcp }, testInfo) => {
+    // Guard against a vacuous run: the server must serve the skill.
+    expect(mcp.skills.supported()).toBe(true);
+    expect(
+      (await mcp.skills.list()).map((entry) => entry.frontmatter.name)
+    ).toContain('weather-report');
+
     const dataset: EvalDataset = {
       name: 'weather-report-skill',
       cases: [
@@ -61,9 +67,11 @@ test.describe('Live skills eval (opt-in)', () => {
     });
     console.log('Skills comparison:', JSON.stringify(summary, null, 2));
 
-    // Without skills there is nothing to load, so the strict skill-first
-    // expectation cannot pass; with them, the model should load the skill.
+    // The strict skill-first expectation needs the model to load the skill:
+    // impossible with skills off, and preloads are not model loads.
     expect(summary.off?.passRate).toBe(0);
+    expect(summary.preload?.passRate).toBe(0);
+    expect(summary.catalog?.skillLoadRate).toBeDefined();
     expect(summary.catalog?.skillVerificationFailureRate ?? 0).toBe(0);
   });
 });

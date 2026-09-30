@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
-import type { EvalCaseResult } from '../../types';
+import type { EvalCaseResult, SkillLoad } from '../../types';
 import { CollapsibleSection } from '../CollapsibleSection';
 
 /**
@@ -80,26 +80,33 @@ function resultToolCalls(
   );
 }
 
-interface SkillLoadView {
-  name: string;
-  uri: string;
-  kind?: string;
-  via?: string;
-  verified?: boolean | null;
-  problems?: string[];
-  afterToolCalls?: number;
-}
-
-/** Skill loads recorded by the simulated host (skills enabled). */
-function resultSkillLoads(result: EvalCaseResult): SkillLoadView[] {
-  const loads = responseRecord(result).skillLoads;
-  if (!Array.isArray(loads)) return [];
+/**
+ * Skill loads recorded by the simulated host (skills enabled): from the
+ * response, or the last iteration when responses were omitted.
+ */
+function resultSkillLoads(result: EvalCaseResult): SkillLoad[] {
+  const fromResponse = responseRecord(result).skillLoads;
+  const loads = Array.isArray(fromResponse)
+    ? fromResponse
+    : (result.iterationResults?.at(-1)?.skillLoads ?? []);
   return loads.filter(
-    (load): load is SkillLoadView =>
+    (load): load is SkillLoad =>
       isRecord(load) &&
       typeof load.name === 'string' &&
       typeof load.uri === 'string'
   );
+}
+
+function skillVerificationStyle(verified: boolean | null): string {
+  if (verified === null) return 'text-muted-foreground';
+  return verified
+    ? 'text-green-600 dark:text-green-400'
+    : 'text-red-600 dark:text-red-400';
+}
+
+function skillVerificationLabel(verified: boolean | null): string {
+  if (verified === null) return 'unverified';
+  return verified ? 'verified' : 'verification failed';
 }
 
 function finalAnswer(result: EvalCaseResult): string | undefined {
@@ -1037,17 +1044,11 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                                 call{load.afterToolCalls === 1 ? '' : 's'}
                               </span>
                               <span
-                                className={
-                                  load.verified === false
-                                    ? 'text-red-600 dark:text-red-400'
-                                    : 'text-green-600 dark:text-green-400'
-                                }
+                                className={skillVerificationStyle(
+                                  load.verified
+                                )}
                               >
-                                {load.verified === false
-                                  ? 'verification failed'
-                                  : load.verified
-                                    ? 'verified'
-                                    : 'unverified'}
+                                {skillVerificationLabel(load.verified)}
                               </span>
                             </div>
                             <div className="font-mono text-muted-foreground mt-1 break-all">

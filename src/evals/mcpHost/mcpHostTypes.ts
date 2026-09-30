@@ -6,7 +6,12 @@
  */
 
 import type { MCPFixtureApi } from '../../mcp/fixtures/mcpFixture.js';
-import type { HostDiagnostics, UsageMetrics } from '../../types/index.js';
+import type {
+  HostDiagnostics,
+  HostSkillsMode,
+  SkillLoad,
+  UsageMetrics,
+} from '../../types/index.js';
 import type { HostEvent } from '../evalFrameworkTypes.js';
 
 /**
@@ -173,32 +178,11 @@ export interface BrowserConfig {
   cookies?: BrowserCookie[];
 }
 
+export type { HostSkillsMode, SkillLoad } from '../../types/index.js';
+
 /**
  * Configuration for MCP host simulation
  */
-/** How the simulated host offers Agent Skills to the model. */
-export type HostSkillsMode = 'off' | 'catalog' | 'preload';
-
-/** One skill (or skill file) the simulated host loaded for the model. */
-export interface SkillLoad {
-  /** Skill name (frontmatter `name`). */
-  name: string;
-  /** URI that was read: the skill's SKILL.md or a supporting file. */
-  uri: string;
-  /** Host label of the server that served it. */
-  server: string;
-  /** 'skill' for SKILL.md loads, 'file' for supporting files. */
-  kind: 'skill' | 'file';
-  /** How it reached the model. */
-  via: 'read_skill' | 'read_resource' | 'preload';
-  /** Result of verifying the read against the skill's entry. */
-  verified: boolean | null;
-  /** Verification problems or read errors; the model got an error instead. */
-  problems?: string[];
-  /** Number of MCP tool calls made before this load. */
-  afterToolCalls: number;
-}
-
 export interface MCPHostConfig {
   /** Execution-local environment overrides; never assigned to process.env. */
   env?: Record<string, string | undefined>;

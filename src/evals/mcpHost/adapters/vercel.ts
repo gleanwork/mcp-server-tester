@@ -30,6 +30,7 @@ import {
   GenerationOptions,
   ProviderSchema,
   type HostEnvironment,
+  HostSkillsModeSchema,
 } from '../hostOptions.js';
 
 const SdkConfigSchema = z
@@ -39,7 +40,7 @@ const SdkConfigSchema = z
     ...GenerationOptions,
     apiKeyEnvVar: z.string().min(1).optional(),
     env: z.record(z.string(), z.string().optional()).optional(),
-    skills: z.enum(['off', 'catalog', 'preload']).optional(),
+    skills: HostSkillsModeSchema.optional(),
   })
   .strict();
 

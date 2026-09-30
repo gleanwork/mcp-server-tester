@@ -1,7 +1,10 @@
 import { z } from 'zod';
 import { TaggedConfigSchema, type HostConfig } from './evalManifest.js';
 import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
-import { GenerationOptions } from './mcpHost/hostOptions.js';
+import {
+  GenerationOptions,
+  HostSkillsModeSchema,
+} from './mcpHost/hostOptions.js';
 import type { ExternalHostConfig } from './externalHost/types.js';
 import { ExternalHostConfigSchema } from './externalHost/schema.js';
 import type { SnapshotSanitizer } from '../assertions/validators/types.js';
@@ -375,7 +378,7 @@ const MCPHostConfigSchema = z.object({
   maxTokens: z.number().optional(),
   temperature: z.number().optional(),
   maxToolCalls: z.number().optional(),
-  skills: z.enum(['off', 'catalog', 'preload']).optional(),
+  skills: HostSkillsModeSchema.optional(),
   cli: z
     .object({
       command: z.string(),

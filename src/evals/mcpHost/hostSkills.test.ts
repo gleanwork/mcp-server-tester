@@ -129,7 +129,7 @@ describe.each(['legacy', '2026-07-28'] as const)(
             server: 'mcp',
             uri: 'skill://weather-report/references/UNLISTED.md',
           })
-        ).toMatch(/not part of the loaded skill/);
+        ).toMatch(/not part of the skill/);
         expect(session.loads.at(-1)).toMatchObject({ verified: false });
 
         expect(
