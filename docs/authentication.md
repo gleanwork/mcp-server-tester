@@ -29,6 +29,17 @@ Choose based on your server's authentication requirements:
 - **OAuth 2.1**: Use when the server requires OAuth authentication with a user login step
 - **Client Credentials**: Use when running in CI/CD or as a service and the server accepts OAuth 2.1 client credentials tokens
 
+### Which credentials are used
+
+For an HTTP server, the `mcp` fixture picks the first of these that applies:
+
+1. `auth.oauth.authStatePath`: the Playwright OAuth state file written by `performOAuthSetup()`.
+2. `auth.accessToken`: a static bearer token.
+3. `auth.clientCredentials`: a token fetched from the token endpoint at connect.
+4. A `mcp-server-tester login` for the server, or tokens in `MCP_ACCESS_TOKEN`. A stored login is refreshed from its refresh token as the access token nears expiry, so long runs keep working. If the server rejects it, requests fail with a message to log in again.
+
+No match means no credentials. Stdio servers take none.
+
 ## Static Token Authentication
 
 The simplest authentication method - pass a pre-acquired token directly.

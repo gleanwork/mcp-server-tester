@@ -18,6 +18,7 @@ Other 2.0 changes have their own guides: [dataset sources](./dataset-sources.md)
 - [LLM judges share one prompt, parser and size limit](#llm-judges-share-one-prompt-parser-and-size-limit)
 - [MCP reporter attachments](#mcp-reporter-attachments)
 - [Stored results are redacted the same way everywhere](#stored-results-are-redacted-the-same-way-everywhere)
+- [Which credentials the `mcp` fixture uses](#which-credentials-the-mcp-fixture-uses)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
 ---
@@ -209,6 +210,15 @@ Every API that persists results now uses one policy (`redactStoredResponses` in 
 - **One pass rate.** Every run-level pass rate is `passed / total`, and 0 for a run without cases. The reporter's `metrics.passRate` was `NaN` for an empty run, which was stored as `null`.
 
 The reporter's local report (`index.html`, `data.js` and `run-*.json` in its `outputDir`) keeps responses so the report can show them. Its result-store artifacts follow the policy above.
+
+## Which credentials the `mcp` fixture uses
+
+**Affects:** HTTP servers tested with a `mcp-server-tester login`, and configs with `auth.clientCredentials`.
+
+One function (`resolveCredentials`) now decides which credentials a server config uses. See [Which credentials are used](../authentication.md#which-credentials-are-used).
+
+- **Stored logins refresh during a run.** The fixture used to read a stored login's token once and send it as a fixed header, so a test that outlived the token failed with 401. The token now comes from a provider that refreshes it from the stored refresh token before it expires.
+- **Configured client credentials win over a stored login.** With `auth.clientCredentials` set and a stored login for the same server, the stored login's token replaced the client-credentials token. The configured grant is now used, and the stored login isn't read.
 
 ## New in 2.0 (non-breaking)
 

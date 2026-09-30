@@ -14,6 +14,7 @@ import {
   buildAuthorizationUrl,
   exchangeCodeForTokens,
   refreshAccessToken,
+  testerClientMetadata,
   type AuthServerMetadata,
 } from './oauthFlow.js';
 import {
@@ -120,7 +121,6 @@ const DEFAULT_TIMEOUT_MS = 300_000;
 /**
  * Default client name for DCR
  */
-const DEFAULT_CLIENT_NAME = '@gleanwork/mcp-server-tester';
 
 /**
  * Default TTL for cached server metadata (24 hours)
@@ -442,13 +442,12 @@ export class CLIOAuthClient {
         'Content-Type': 'application/json',
         'MCP-Protocol-Version': MCP_PROTOCOL_VERSION,
       },
-      body: JSON.stringify({
-        redirect_uris: [redirectUri],
-        token_endpoint_auth_method: 'none',
-        grant_types: ['authorization_code', 'refresh_token'],
-        response_types: ['code'],
-        client_name: this.config.clientName ?? DEFAULT_CLIENT_NAME,
-      }),
+      body: JSON.stringify(
+        testerClientMetadata({
+          redirectUri,
+          clientName: this.config.clientName,
+        })
+      ),
     });
 
     if (!response.ok) {

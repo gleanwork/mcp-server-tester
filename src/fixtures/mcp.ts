@@ -1,6 +1,6 @@
 import { test as base } from '@playwright/test';
 import { expect } from '../assertions/matchers/index.js';
-import type { Client, OAuthClientProvider } from '@modelcontextprotocol/client';
+import type { Client } from '@modelcontextprotocol/client';
 import type { ProtocolSetting } from '../types/index.js';
 import {
   createMCPClientForConfig,
@@ -11,9 +11,8 @@ import {
   type MCPFixtureApi,
   type AuthType,
 } from '../mcp/fixtures/mcpFixture.js';
-import { PlaywrightOAuthClientProvider } from '../auth/oauthClientProvider.js';
-import { CLIOAuthClient } from '../auth/cli.js';
-import { isHttpConfig, type MCPConfig } from '../config/mcpConfig.js';
+import { resolveCredentials } from '../auth/credentials.js';
+import type { MCPConfig } from '../config/mcpConfig.js';
 import packageJson from '../../package.json' with { type: 'json' };
 
 /**
@@ -106,72 +105,17 @@ export const test = base.extend<MCPFixtures>({
       );
     }
 
-    // Track resolved auth type
-    let resolvedAuthType: AuthType = 'none';
-
-    // Narrow to HTTP config once for all auth-related logic (auth is HTTP-only)
-    const httpConfig = isHttpConfig(mcpConfig) ? mcpConfig : null;
-
-    // Create auth provider if OAuth authStatePath is configured
-    let authProvider: OAuthClientProvider | undefined;
-    if (httpConfig?.auth?.oauth?.authStatePath) {
-      authProvider = new PlaywrightOAuthClientProvider({
-        storagePath: httpConfig.auth.oauth.authStatePath,
-        redirectUri:
-          httpConfig.auth.oauth.redirectUri ??
-          'http://localhost:3000/oauth/callback',
-        clientId: httpConfig.auth.oauth.clientId,
-        clientSecret: httpConfig.auth.oauth.clientSecret,
-      });
-      resolvedAuthType = 'oauth';
-    }
-
-    // Build effective config - may add CLI tokens if no auth is configured
-    let effectiveConfig = mcpConfig;
-
-    // Check for explicit static API token
-    if (httpConfig?.auth?.accessToken) {
-      resolvedAuthType = 'api-token';
-    }
-
-    // If HTTP transport with no explicit auth, try to use CLI-stored tokens
-    // This enables the simple flow: `mcp-server-tester login <url>` then run tests
-    if (
-      httpConfig &&
-      !httpConfig.auth?.accessToken &&
-      !httpConfig.auth?.oauth?.authStatePath
-    ) {
-      const cliClient = new CLIOAuthClient({
-        mcpServerUrl: httpConfig.serverUrl,
-      });
-
-      // Try to get a valid token (will refresh if expired)
-      const tokenResult = await cliClient.tryGetAccessToken();
-
-      if (tokenResult) {
-        // Use the CLI token as static auth
-        effectiveConfig = {
-          ...httpConfig,
-          auth: {
-            ...httpConfig.auth,
-            accessToken: tokenResult.accessToken,
-          },
-        };
-        // CLI tokens come from OAuth flow
-        resolvedAuthType = 'oauth';
-      }
-    }
-
-    // Store resolved auth type for mcp fixture
-    _mcpFixtureState.resolvedAuthType = resolvedAuthType;
+    // One place decides the credentials: see resolveCredentials().
+    const credentials = await resolveCredentials(mcpConfig);
+    _mcpFixtureState.resolvedAuthType = credentials.authType;
 
     // Create and connect client
-    const client = await createMCPClientForConfig(effectiveConfig, {
+    const client = await createMCPClientForConfig(mcpConfig, {
       clientInfo: {
         name: '@gleanwork/mcp-server-tester',
         version: packageJson.version,
       },
-      authProvider,
+      authProvider: credentials.authProvider,
       ...(mcpProtocol !== undefined ? { protocol: mcpProtocol } : {}),
     });
 
