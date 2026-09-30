@@ -10,6 +10,7 @@ import { compareEvalRuns } from './evalRunComparison.js';
 import type { EvalRunComparisonResult } from './evalRunComparison.js';
 import type { MCPVariantExperimentData } from '../types/reporter.js';
 import type { ZodType } from 'zod';
+import { attachReporterData } from '../reporters/channel.js';
 
 /**
  * Metric used to rank variant candidates and decide improvement.
@@ -306,17 +307,13 @@ export async function runVariantExperiment(
     // Surface the best run's case results so the report reflects the optimized
     // state, plus a compact summary of how the experiment got there.
     const surfaceRun = winner?.result ?? bestAttempted?.result ?? baseline;
-    await context.testInfo.attach('mcp-test-results', {
-      contentType: 'application/json',
-      body: Buffer.from(
-        JSON.stringify({ caseResults: surfaceRun.caseResults })
-      ),
+    await attachReporterData(context.testInfo, {
+      kind: 'evalResults',
+      data: { caseResults: surfaceRun.caseResults },
     });
-    await context.testInfo.attach('mcp-variant-experiment', {
-      contentType: 'application/json',
-      body: Buffer.from(
-        JSON.stringify(buildExperimentData(result, baselineValue))
-      ),
+    await attachReporterData(context.testInfo, {
+      kind: 'variantExperiment',
+      data: buildExperimentData(result, baselineValue),
     });
   }
 

@@ -52,6 +52,7 @@ import { execFileNoThrow } from '../utils/execFileNoThrow.js';
 import { debugEval } from '../debug.js';
 import { sumUsage } from '../utils/usageUtils.js';
 import packageJson from '../../package.json' with { type: 'json' };
+import { attachReporterData } from '../reporters/channel.js';
 
 /**
  * Context passed to the eval runner
@@ -1377,9 +1378,9 @@ export async function runEvalDataset(
 
   // Attach results for MCP reporter if testInfo is provided
   if (context.testInfo) {
-    await context.testInfo.attach('mcp-test-results', {
-      contentType: 'application/json',
-      body: Buffer.from(JSON.stringify({ caseResults })),
+    await attachReporterData(context.testInfo, {
+      kind: 'evalResults',
+      data: { caseResults },
     });
   } else if (caseResults.length > 0 && !warnedNoTestInfo) {
     warnedNoTestInfo = true;

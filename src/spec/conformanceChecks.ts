@@ -20,6 +20,7 @@ import {
 import { coreChecks } from './checks/core.js';
 import { modernChecks } from './checks/modern.js';
 import { skillsChecks, type SkillsCheckOptions } from './checks/skills.js';
+import { attachReporterData } from '../reporters/channel.js';
 
 export type { MCPConformanceCheck };
 
@@ -250,23 +251,19 @@ export async function runConformanceChecks(
 
   // Attach results for MCP reporter if testInfo is provided
   if (testInfo) {
-    await testInfo.attach('mcp-conformance-checks', {
-      contentType: 'application/json',
-      body: JSON.stringify(
-        {
-          operation: 'conformanceChecks',
-          pass,
-          checks,
-          serverInfo: raw.serverInfo,
-          capabilities: raw.capabilities,
-          toolCount: raw.tools.length,
-          protocol,
-          authType: mcp.authType,
-          project: mcp.project,
-        },
-        null,
-        2
-      ),
+    await attachReporterData(testInfo, {
+      kind: 'conformance',
+      data: {
+        operation: 'conformanceChecks',
+        pass,
+        checks,
+        serverInfo: raw.serverInfo ?? undefined,
+        capabilities: raw.capabilities,
+        toolCount: raw.tools.length,
+        protocol,
+        authType: mcp.authType,
+        project: mcp.project,
+      },
     });
   }
 

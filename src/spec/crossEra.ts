@@ -22,6 +22,7 @@ import { conformancePasses } from './registry.js';
 import { errorMessage } from '../utils/errorMessage.js';
 import { getSkillsExtension, listSkills } from '../skills/skillsClient.js';
 import type { SkillEntry } from '../skills/skillsTypes.js';
+import { attachReporterData } from '../reporters/channel.js';
 
 /** Options for {@link runCrossEraChecks}. */
 export interface CrossEraOptions {
@@ -323,27 +324,23 @@ export async function runCrossEraChecks(
   const result: MCPCrossEraResult = { pass, checks, connections };
 
   if (testInfo) {
-    await testInfo.attach('mcp-conformance-checks', {
-      contentType: 'application/json',
-      body: JSON.stringify(
-        {
-          operation: 'crossEraChecks',
-          pass,
-          checks,
-          scope: `Cross-era: ${protocols.join(' ↔ ')}`,
-          toolCount: connected[0]?.tools?.length ?? 0,
-          connections: connections.map(
-            ({ protocol, connected, error, info }) => ({
-              protocol,
-              connected,
-              error,
-              info,
-            })
-          ),
-        },
-        null,
-        2
-      ),
+    await attachReporterData(testInfo, {
+      kind: 'conformance',
+      data: {
+        operation: 'crossEraChecks',
+        pass,
+        checks,
+        scope: `Cross-era: ${protocols.join(' ↔ ')}`,
+        toolCount: connected[0]?.tools?.length ?? 0,
+        connections: connections.map(
+          ({ protocol, connected, error, info }) => ({
+            protocol,
+            connected,
+            error,
+            info,
+          })
+        ),
+      },
     });
   }
 

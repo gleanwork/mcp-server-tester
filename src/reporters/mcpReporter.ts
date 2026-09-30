@@ -9,8 +9,8 @@ import type {
 import { mkdir, writeFile, readdir, readFile, unlink, cp } from 'fs/promises';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { stripVTControlCharacters } from 'node:util';
 import type { MCPEvalReporterConfig } from '../types/reporter.js';
-import type { AuthType, MCPProtocolInfo } from '../types/index.js';
 import type {
   MCPEvalRunData,
   MCPEvalHistoricalSummary,
@@ -18,10 +18,15 @@ import type {
   MCPServerCapabilitiesData,
   MCPVariantExperimentData,
   EvalCaseResult,
-  MCPConformanceCheck,
 } from '../types/reporter.js';
 import type { UsageMetrics } from '../types/index.js';
 import { sumUsage } from '../utils/usageUtils.js';
+import {
+  parseReporterAttachment,
+  reporterAttachmentKind,
+  type ReporterAttachment,
+  type ToolCallPayload,
+} from './channel.js';
 import {
   createStoredEvalArtifact,
   resolveEvalResultStore,
@@ -128,199 +133,70 @@ export default class MCPReporter implements Reporter {
   }
 
   async onTestEnd(test: TestCase, result: TestResult): Promise<void> {
-    // Strategy 1: Extract MCP eval results from runEvalDataset() attachments
-    const evalAttachment = result.attachments.find(
-      (a) =>
-        a.name === 'mcp-test-results' && a.contentType === 'application/json'
-    );
-
-    let hasEvalDataset = false;
-
-    const evalContent = evalAttachment
-      ? await this.getAttachmentContent(evalAttachment)
-      : null;
-    if (evalContent) {
+    const received: ReporterAttachment[] = [];
+    for (const attachment of result.attachments) {
+      const kind = reporterAttachmentKind(attachment);
+      if (kind === undefined) continue;
+      const content = await this.getAttachmentContent(attachment);
+      if (!content) continue;
       try {
-        const evalResults = JSON.parse(evalContent) as {
-          caseResults: Array<EvalCaseResult>;
-        };
-
-        // Trust the data from the attachment - evalRunner now includes
-        // authType and project from the mcp fixture (Playwright is source of truth)
-        this.allResults.push(...evalResults.caseResults);
-        hasEvalDataset = true;
+        received.push(parseReporterAttachment(kind, content));
       } catch (error) {
         this.logError(
-          `[MCP Reporter] Failed to parse eval results from test "${test.title}":`,
+          `[MCP Reporter] Failed to read attachment "${attachment.name}" from test "${test.title}":`,
           error
         );
       }
     }
 
-    // Strategy 1b: Extract variant-experiment summary (runVariantExperiment)
-    const experimentAttachment = result.attachments.find(
-      (a) =>
-        a.name === 'mcp-variant-experiment' &&
-        a.contentType === 'application/json'
+    // Auto-tracked calls would duplicate a test's eval results.
+    const hasEvalResults = received.some(
+      (attachment) => attachment.kind === 'evalResults'
     );
-    const experimentContent = experimentAttachment
-      ? await this.getAttachmentContent(experimentAttachment)
-      : null;
-    if (experimentContent) {
-      try {
-        this.variantExperiment = JSON.parse(
-          experimentContent
-        ) as MCPVariantExperimentData;
-      } catch (error) {
-        this.logError(
-          `[MCP Reporter] Failed to parse variant-experiment attachment for "${test.title}":`,
-          error
-        );
-      }
-    }
+    let sawExperiment = false;
+    let sawToolList = false;
 
-    // Strategy 2: Extract conformance check results
-    // These are created by runConformanceChecks() and runCrossEraChecks()
-    // when testInfo is passed. A test may attach several.
-    const conformanceAttachments = result.attachments.filter(
-      (a) =>
-        a.name === 'mcp-conformance-checks' &&
-        a.contentType === 'application/json'
-    );
-
-    for (const conformanceAttachment of conformanceAttachments) {
-      const conformanceContent = await this.getAttachmentContent(
-        conformanceAttachment
-      );
-      if (!conformanceContent) continue;
-      try {
-        const conformanceData = JSON.parse(conformanceContent) as {
-          operation: string;
-          pass: boolean;
-          checks: MCPConformanceCheck[];
-          serverInfo?: { name?: string; version?: string };
-          toolCount: number;
-          protocol?: MCPProtocolInfo;
-          scope?: string;
-          authType?: AuthType;
-          project?: string;
-        };
-
-        // Only push if checks array is valid
-        if (Array.isArray(conformanceData.checks)) {
+    for (const attachment of received) {
+      switch (attachment.kind) {
+        case 'evalResults':
+          // evalRunner includes authType and project from the mcp fixture
+          // (Playwright is the source of truth).
+          this.allResults.push(...attachment.data.caseResults);
+          break;
+        case 'variantExperiment':
+          if (!sawExperiment) this.variantExperiment = attachment.data;
+          sawExperiment = true;
+          break;
+        case 'conformance': {
+          const { data } = attachment;
           this.conformanceChecks.push({
             testTitle: test.title,
-            pass: conformanceData.pass,
-            checks: conformanceData.checks,
-            serverInfo: conformanceData.serverInfo,
-            toolCount: conformanceData.toolCount,
-            ...(conformanceData.protocol
-              ? { protocol: conformanceData.protocol }
-              : {}),
-            ...(conformanceData.scope ? { scope: conformanceData.scope } : {}),
-            authType: conformanceData.authType,
-            project: conformanceData.project,
+            pass: data.pass,
+            checks: data.checks,
+            serverInfo: data.serverInfo,
+            toolCount: data.toolCount,
+            ...(data.protocol ? { protocol: data.protocol } : {}),
+            ...(data.scope ? { scope: data.scope } : {}),
+            authType: data.authType,
+            project: data.project,
           });
+          break;
         }
-      } catch (error) {
-        this.logError(
-          `[MCP Reporter] Failed to parse conformance check attachment for "${test.title}":`,
-          error
-        );
-      }
-    }
-
-    // Strategy 2b: Extract server capabilities from mcp-list-tools attachments
-    // These are created by createMCPFixture().listTools()
-    const listToolsAttachment = result.attachments.find(
-      (a) => a.name === 'mcp-list-tools' && a.contentType === 'application/json'
-    );
-
-    const listToolsContent = listToolsAttachment
-      ? await this.getAttachmentContent(listToolsAttachment)
-      : null;
-    if (listToolsContent) {
-      try {
-        const listToolsData = JSON.parse(listToolsContent) as {
-          operation: string;
-          toolCount: number;
-          tools: Array<{ name: string; description?: string }>;
-        };
-
-        // Only push if tools array is valid
-        if (Array.isArray(listToolsData.tools)) {
-          this.serverCapabilities.push({
-            testTitle: test.title,
-            tools: listToolsData.tools,
-            toolCount: listToolsData.toolCount,
-            // Note: authType and project are available from the mcp fixture
-            // but not currently included in the listTools attachment
-          });
-        }
-      } catch (error) {
-        this.logError(
-          `[MCP Reporter] Failed to parse mcp-list-tools attachment for "${test.title}":`,
-          error
-        );
-      }
-    }
-
-    // Strategy 3: Extract MCP tool calls from auto-tracking attachments
-    // These are created by createMCPFixture()
-    // Skip if:
-    // - This test already has eval dataset results (to avoid duplicates)
-    // - Auto-tracking is disabled in config
-    if (hasEvalDataset || !this.config.includeAutoTracking) {
-      return;
-    }
-
-    const mcpCallAttachments = result.attachments.filter(
-      (a) =>
-        a.name &&
-        a.name.startsWith('mcp-call-') &&
-        a.contentType === 'application/json'
-    );
-
-    for (const attachment of mcpCallAttachments) {
-      const callContent = await this.getAttachmentContent(attachment);
-      if (!callContent) continue;
-
-      try {
-        // Attachment now includes authType and project from the mcp fixture
-        const callData = JSON.parse(callContent) as {
-          operation: string;
-          toolName: string;
-          args: Record<string, unknown>;
-          result: unknown;
-          durationMs: number;
-          isError: boolean;
-          authType?: AuthType;
-          project?: string;
-        };
-
-        const suiteName = test.parent?.title || 'Uncategorized Tests';
-        const testPassed = result.status === 'passed';
-
-        const syntheticResult: EvalCaseResult = {
-          id: test.title,
-          datasetName: suiteName,
-          toolName: callData.toolName,
-          source: 'test',
-          pass: testPassed,
-          response: callData.result,
-          error: !testPassed ? 'Test failed' : undefined,
-          expectations: {},
-          authType: callData.authType,
-          project: callData.project,
-          durationMs: callData.durationMs,
-        };
-
-        this.allResults.push(syntheticResult);
-      } catch (error) {
-        this.logError(
-          `[MCP Reporter] Failed to parse MCP call attachment "${attachment.name}":`,
-          error
-        );
+        case 'listTools':
+          if (!sawToolList)
+            this.serverCapabilities.push({
+              testTitle: test.title,
+              tools: attachment.data.tools,
+              toolCount: attachment.data.toolCount,
+            });
+          sawToolList = true;
+          break;
+        case 'toolCall':
+          if (!hasEvalResults && this.config.includeAutoTracking)
+            this.allResults.push(
+              autoTrackedResult(test, result, attachment.data)
+            );
+          break;
       }
     }
   }
@@ -612,6 +488,35 @@ export default class MCPReporter implements Reporter {
       this.log(`[MCP Reporter] Open manually: file://${resolve(reportPath)}`);
     }
   }
+}
+
+/** Why a test didn't pass, from Playwright's error, without terminal colours. */
+function testFailure(result: TestResult): string {
+  const message = result.error?.message ?? result.errors[0]?.message;
+  return message ? stripVTControlCharacters(message) : `Test ${result.status}`;
+}
+
+/** An auto-tracked fixture call, reported as a test result. */
+function autoTrackedResult(
+  test: TestCase,
+  result: TestResult,
+  call: ToolCallPayload
+): EvalCaseResult {
+  const passed = result.status === 'passed';
+  return {
+    id: test.title,
+    datasetName: test.parent?.title || 'Uncategorized Tests',
+    toolName: call.toolName,
+    source: 'test',
+    pass: passed,
+    request: { args: call.args },
+    response: call.result,
+    error: passed ? undefined : testFailure(result),
+    expectations: {},
+    authType: call.authType,
+    project: call.project,
+    durationMs: call.durationMs,
+  };
 }
 
 function toHistoricalSummary(

@@ -16,6 +16,7 @@ Other 2.0 changes have their own guides: [dataset sources](./dataset-sources.md)
 - [`external_host` results keep tool precision and recall](#external_host-results-keep-tool-precision-and-recall)
 - [`.not` works on `toSatisfyToolPredicate` and `toMatchToolSnapshot`](#not-works-on-tosatisfytoolpredicate-and-tomatchtoolsnapshot)
 - [LLM judges share one prompt, parser and size limit](#llm-judges-share-one-prompt-parser-and-size-limit)
+- [MCP reporter attachments](#mcp-reporter-attachments)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
 ---
@@ -182,6 +183,17 @@ Every provider now sends the same system prompt and user prompt and reads the ve
 - **All providers accept a verdict wrapped in prose.** Only `anthropic-agent-sdk` did; the others failed with "Failed to parse judge response as JSON".
 - **`provider: 'google'` honours `temperature`.** It was fixed at 0; the default is still 0.
 - **Judge usage always has a duration.** When a provider doesn't report one, `usage.durationMs` is the wall-clock time of the call. The `anthropic-agent-sdk` judge used to report 0.
+
+## MCP reporter attachments
+
+**Affects:** tools that read MST's Playwright attachments directly, and reports of auto-tracked `mcp.callTool()` calls.
+
+The MCP reporter reads test data through one typed channel (`src/reporters/channel.ts`). What changes:
+
+- **Auto-tracked calls keep their arguments and the real failure.** A test's `mcp.callTool()` results now carry `request.args`. A failing test reports Playwright's error message (for example the failed assertion) instead of `'Test failed'`.
+- **Every `runEvalDataset()` in a test is reported.** The reporter used to keep only the first eval-results attachment of each test.
+- **`getServerInfo()` no longer attaches `mcp-server-info`.** Nothing read it. The other attachment names are unchanged.
+- **A malformed MCP attachment is reported, not skipped silently.** It's logged, and the rest of the test's attachments are still read.
 
 ## New in 2.0 (non-breaking)
 

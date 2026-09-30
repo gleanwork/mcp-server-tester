@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { defineConfig } from '@playwright/test';
 import { protocolMatrix } from './src/config/protocolMatrix.js';
 
@@ -23,7 +24,22 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: 0,
   workers: process.env.CI ? 1 : undefined,
-  reporter: 'html',
+  // Run this package's own MCP reporter too, so every run reads what the
+  // fixtures, conformance checks and eval runner attach. Its UI is a build
+  // artifact, so it is enabled once `npm run build` has produced it (CI
+  // always builds first).
+  reporter: existsSync('src/reporters/ui-dist')
+    ? [
+        // Playwright drops its terminal summary once a custom reporter is
+        // configured; keep it for CI logs.
+        ['line'],
+        ['html'],
+        [
+          './src/reporters/mcpReporter.ts',
+          { outputDir: 'test-results/mcp-report', quiet: true },
+        ],
+      ]
+    : 'html',
   use: {
     trace: 'on-first-retry',
   },

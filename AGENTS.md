@@ -41,7 +41,7 @@ npm run format:check        # Check formatting
 - **`evals/`** - Dataset types, loader, and runner (uses validators internally). `evals/caseExecution.ts` is the only place a case runs: every path (direct tool/request, simulated `mcp_host`, `external_host`, suite hosts) returns a typed `CaseExecution`, and the runner reads its fields instead of inspecting `response`. `caseExecution.golden.test.ts` pins the resulting `EvalCaseResult` for every path. `evals/expectations.ts` grades a case's `expect` block: it decides once whether the evidence can support tool-call assertions (`toolEvidenceGap`), builds the `mcpHostTrace` view, resolves judge settings (including suite manifest judges), then calls the validators
 - **`judge/`** - LLM-as-a-judge via Claude Agent SDK
 - **`spec/`** - Conformance check registry (`checks/core.ts`, `checks/modern.ts`, `checks/skills.ts`), raw probe channel, and cross-era checks
-- **`reporters/`** - Custom Playwright reporter with React-based UI
+- **`reporters/`** - Custom Playwright reporter with React-based UI. `reporters/channel.ts` owns every attachment the reporter reads (names, payload types, read-side Zod schemas). Write with `attachReporterData(testInfo, { kind, data })`, never `testInfo.attach('mcp-...')` directly
 - **`cli/`** - `mcp-server-tester init` and `mcp-server-tester generate` commands
 
 ### Assertions Module (`src/assertions/`)

@@ -57,7 +57,7 @@ MCP protocol conformance checks. `conformanceChecks.ts` runs a set of server-lev
 
 ### `src/reporters/`
 
-Custom Playwright reporter. `mcpReporter.ts` is a Playwright `Reporter` implementation that collects eval case results attached to tests and writes them to a JSON/HTML output. The `ui-src/` subdirectory contains the React application that renders the report UI; it is compiled separately and embedded into `ui-dist/`. `build-ui.ts` is the build script for the React app.
+Custom Playwright reporter. `channel.ts` is the contract between the code that records results on a test (the fixture's `listTools`/`callTool`, conformance and cross-era checks, `runEvalDataset`, variant experiments) and the reporter: attachment names, payload types, one writer (`attachReporterData`) and a schema-checked reader. `mcpReporter.ts` is a Playwright `Reporter` implementation that reads channel data from each test and writes JSON/HTML output. This repo's own `playwright.config.ts` runs it once the UI is built. The `ui-src/` subdirectory contains the React application that renders the report UI; it is compiled separately and embedded into `ui-dist/`. `build-ui.ts` is the build script for the React app.
 
 ### `src/cli/`
 
