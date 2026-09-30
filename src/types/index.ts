@@ -48,6 +48,12 @@ export type ProtocolRevision =
  */
 export type ProtocolSetting = 'legacy' | 'auto' | ProtocolRevision;
 
+/** Probe options for `protocol: 'auto'`. */
+export interface ProtocolProbeOptions {
+  /** Probe timeout in milliseconds (defaults to the connect timeout). */
+  timeoutMs?: number;
+}
+
 /**
  * The protocol a connection requested and the one it actually negotiated.
  */

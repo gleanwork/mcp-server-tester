@@ -1,4 +1,7 @@
-import { SUPPORTED_PROTOCOL_VERSIONS } from '@modelcontextprotocol/client';
+import {
+  InMemoryResponseCacheStore,
+  SUPPORTED_PROTOCOL_VERSIONS,
+} from '@modelcontextprotocol/client';
 import type {
   Client,
   ClientOptions,
@@ -7,6 +10,7 @@ import type {
 import type {
   MCPProtocolInfo,
   ProtocolEra,
+  ProtocolProbeOptions,
   ProtocolSetting,
 } from '../types/index.js';
 
@@ -36,12 +40,6 @@ export function isProtocolRevision(value: string): boolean {
 export function eraOfRevision(revision: string): ProtocolEra {
   // Dated revisions compare correctly as strings.
   return revision >= FIRST_MODERN_PROTOCOL_VERSION ? 'modern' : 'legacy';
-}
-
-/** Probe options for `protocol: 'auto'`. */
-export interface ProtocolProbeOptions {
-  /** Probe timeout in milliseconds (defaults to the connect timeout). */
-  timeoutMs?: number;
 }
 
 /**
@@ -94,29 +92,30 @@ export function resolveProtocolClientOptions(
 }
 
 /**
- * A response cache that never stores anything.
+ * Creates the response cache MST clients use: entries are stored but never
+ * served as fresh.
  *
- * On 2026-07-28 connections the SDK caches list/read results according to the
- * server's `ttlMs`. A tester wants every call to reach the server, so MST
- * clients use this store to turn caching off.
+ * On 2026-07-28 connections the SDK serves list/read results from its cache
+ * while their server-sent `ttlMs` is fresh. A tester wants every call to
+ * reach the server, so entries are stored without `expiresAt` (which the SDK
+ * treats as never fresh). They are still stored because the SDK builds its
+ * `tools/list` index from the cache: `callTool()` uses it for output-schema
+ * validation and, on 2026-07-28, `Mcp-Param-*` header mirroring.
  */
-export const NO_RESPONSE_CACHE: ResponseCacheStore = {
-  get() {
-    return undefined;
-  },
-  set() {
-    return 0;
-  },
-  delete() {
-    return undefined;
-  },
-  evict() {
-    return undefined;
-  },
-  clear() {
-    return undefined;
-  },
-};
+export function createTesterResponseCache(): ResponseCacheStore {
+  const store = new InMemoryResponseCacheStore();
+  return {
+    get: (key) => store.get(key),
+    set: (key, entry) =>
+      store.set(key, {
+        value: entry.value,
+        ...(entry.scope !== undefined ? { scope: entry.scope } : {}),
+      }),
+    delete: (key) => store.delete(key),
+    evict: (method) => store.evict(method),
+    clear: () => store.clear(),
+  };
+}
 
 const requestedProtocols = new WeakMap<Client, ProtocolSetting>();
 
@@ -134,7 +133,7 @@ export function setRequestedProtocol(
 export function getProtocolInfo(client: Client): MCPProtocolInfo {
   return {
     requested: requestedProtocols.get(client) ?? DEFAULT_PROTOCOL_SETTING,
-    negotiated: client.getNegotiatedProtocolVersion?.() ?? null,
-    era: client.getProtocolEra?.() ?? null,
+    negotiated: client.getNegotiatedProtocolVersion() ?? null,
+    era: client.getProtocolEra() ?? null,
   };
 }

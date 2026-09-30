@@ -1,10 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import type { Client } from '@modelcontextprotocol/client';
+import {
+  Client,
+  InMemoryTransport,
+  ProtocolError,
+} from '@modelcontextprotocol/client';
 import {
   eraOfRevision,
   getProtocolInfo,
   isProtocolRevision,
-  NO_RESPONSE_CACHE,
+  createTesterResponseCache,
   resolveProtocolClientOptions,
   setRequestedProtocol,
 } from './protocol.js';
@@ -63,11 +67,66 @@ describe('eraOfRevision / isProtocolRevision', () => {
   });
 });
 
-describe('NO_RESPONSE_CACHE', () => {
-  it('never returns a cached entry', async () => {
+describe('createTesterResponseCache', () => {
+  it('stores entries without freshness, so the SDK never serves them', async () => {
+    const store = createTesterResponseCache();
     const key = { method: 'tools/list' };
-    await NO_RESPONSE_CACHE.set(key, { value: '{}' });
-    expect(await NO_RESPONSE_CACHE.get(key)).toBeUndefined();
+    await store.set(key, {
+      value: '{"tools":[]}',
+      expiresAt: Date.now() + 60_000,
+      scope: 'private',
+    });
+
+    const entry = await store.get(key);
+    // Kept (the SDK's tools/list index reads it) ...
+    expect(entry?.value).toBe('{"tools":[]}');
+    expect(entry?.scope).toBe('private');
+    // ... but never fresh: the SDK treats a missing expiresAt as stale.
+    expect(entry?.expiresAt).toBeUndefined();
+  });
+
+  it('keeps the SDK output-schema validation working', async () => {
+    // Scripted server: declares an output schema, then violates it.
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    serverSide.onmessage = (message) => {
+      const request = message as { id?: number; method?: string };
+      if (request.id === undefined) return;
+      const result =
+        request.method === 'initialize'
+          ? {
+              protocolVersion: '2025-11-25',
+              capabilities: { tools: {} },
+              serverInfo: { name: 'scripted', version: '1' },
+            }
+          : request.method === 'tools/list'
+            ? {
+                tools: [
+                  {
+                    name: 'typed',
+                    inputSchema: { type: 'object' },
+                    outputSchema: {
+                      type: 'object',
+                      properties: { count: { type: 'number' } },
+                      required: ['count'],
+                    },
+                  },
+                ],
+              }
+            : { content: [], structuredContent: { count: 'nope' } };
+      void serverSide.send({ jsonrpc: '2.0', id: request.id, result });
+    };
+    await serverSide.start();
+    const client = new Client(
+      { name: 'mst-test', version: '1' },
+      { responseCacheStore: createTesterResponseCache() }
+    );
+    await client.connect(clientSide);
+    await client.listTools();
+
+    await expect(
+      client.callTool({ name: 'typed', arguments: {} })
+    ).rejects.toBeInstanceOf(ProtocolError);
+    await client.close();
   });
 });
 

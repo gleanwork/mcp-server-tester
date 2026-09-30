@@ -95,6 +95,7 @@ export type {
   ProtocolEra,
   ProtocolRevision,
   ProtocolSetting,
+  ProtocolProbeOptions,
   MCPProtocolInfo,
   ResultSource,
   ExpectationType,
@@ -243,7 +244,10 @@ export {
   isProtocolRevision,
 } from './mcp/protocol.js';
 export { protocolMatrix } from './config/protocolMatrix.js';
-export type { ProtocolMatrixProject } from './config/protocolMatrix.js';
+export type {
+  ProtocolMatrixEntry,
+  ProtocolMatrixProject,
+} from './config/protocolMatrix.js';
 
 // Response Normalization
 export { normalizeToolResponse, extractText } from './mcp/response.js';

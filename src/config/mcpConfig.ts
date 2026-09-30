@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { ProtocolSetting } from '../types/index.js';
+import type { ProtocolProbeOptions, ProtocolSetting } from '../types/index.js';
 
 /**
  * OAuth configuration for MCP authentication
@@ -166,7 +166,7 @@ export interface StdioMCPConfig {
   protocol?: ProtocolSetting;
 
   /** Probe options for `protocol: 'auto'`. */
-  protocolProbe?: { timeoutMs?: number };
+  protocolProbe?: ProtocolProbeOptions;
 
   /**
    * Connection timeout in milliseconds
@@ -247,7 +247,7 @@ export interface HttpMCPConfig {
   protocol?: ProtocolSetting;
 
   /** Probe options for `protocol: 'auto'`. */
-  protocolProbe?: { timeoutMs?: number };
+  protocolProbe?: ProtocolProbeOptions;
 
   /**
    * Connection timeout in milliseconds
@@ -332,6 +332,13 @@ const ProtocolSettingSchema = z
   );
 
 /**
+ * Zod schema for ProtocolProbeOptions
+ */
+const ProtocolProbeSchema = z
+  .object({ timeoutMs: z.number().positive().optional() })
+  .strict();
+
+/**
  * Zod schema for MCPHostCapabilities
  */
 const MCPHostCapabilitiesSchema = z.object({
@@ -397,10 +404,7 @@ const StdioConfigSchema = z.object({
   env: z.record(z.string(), z.string()).optional(),
   capabilities: MCPHostCapabilitiesSchema.optional(),
   protocol: ProtocolSettingSchema.optional(),
-  protocolProbe: z
-    .object({ timeoutMs: z.number().positive().optional() })
-    .strict()
-    .optional(),
+  protocolProbe: ProtocolProbeSchema.optional(),
   connectTimeoutMs: z.number().positive().optional(),
   requestTimeoutMs: z.number().positive().optional(),
   callTimeoutMs: z.number().positive().optional(),
@@ -470,10 +474,7 @@ const HttpConfigSchema = z.object({
   headers: z.record(z.string(), z.string()).optional(),
   capabilities: MCPHostCapabilitiesSchema.optional(),
   protocol: ProtocolSettingSchema.optional(),
-  protocolProbe: z
-    .object({ timeoutMs: z.number().positive().optional() })
-    .strict()
-    .optional(),
+  protocolProbe: ProtocolProbeSchema.optional(),
   connectTimeoutMs: z.number().positive().optional(),
   requestTimeoutMs: z.number().positive().optional(),
   callTimeoutMs: z.number().positive().optional(),

@@ -31,9 +31,11 @@ interface MCPFixtureState {
  */
 type MCPFixtures = {
   /**
-   * Protocol override for this project or file. Takes precedence over
-   * `mcpConfig.protocol`. Set with `test.use({ mcpProtocol: '2026-07-28' })`
-   * or in a project's `use` block. See {@link ProtocolSetting}.
+   * Protocol override for this project or file, used by the `mcp` and
+   * `mcpClient` fixtures instead of `mcpConfig.protocol`. Set with
+   * `test.use({ mcpProtocol: '2026-07-28' })` or in a project's `use` block.
+   * Code that builds its own client from `mcpConfig` does not see it;
+   * `protocolMatrix()` sets both. See {@link ProtocolSetting}.
    */
   mcpProtocol: ProtocolSetting | undefined;
 

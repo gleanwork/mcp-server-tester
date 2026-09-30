@@ -16,7 +16,7 @@ import {
 } from '../mcp/clientFactory.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import { callToolNormalized } from '../mcp/callTool.js';
-import { getProtocolInfo } from '../mcp/protocol.js';
+import { DEFAULT_PROTOCOL_SETTING, getProtocolInfo } from '../mcp/protocol.js';
 import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
 import type {
   HostRunInput,
@@ -142,7 +142,11 @@ async function runBuiltinHost(
         get protocol() {
           return clients[0]
             ? getProtocolInfo(clients[0])
-            : { requested: 'legacy', negotiated: null, era: null };
+            : {
+                requested: DEFAULT_PROTOCOL_SETTING,
+                negotiated: null,
+                era: null,
+              };
         },
         getServerInfo: () => null,
         async listTools() {

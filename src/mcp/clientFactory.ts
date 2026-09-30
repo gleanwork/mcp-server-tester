@@ -19,9 +19,8 @@ import { debugClient, debugHttp } from '../debug.js';
 import type { ProtocolSetting } from '../types/index.js';
 import {
   DEFAULT_PROTOCOL_SETTING,
-  eraOfRevision,
   isProtocolRevision,
-  NO_RESPONSE_CACHE,
+  createTesterResponseCache,
   resolveProtocolClientOptions,
   setRequestedProtocol,
 } from './protocol.js';
@@ -180,6 +179,17 @@ function describeProtocolFailure(
       { cause: error }
     );
   }
+  // A pinned legacy revision the server answered with a different one.
+  if (
+    error instanceof Error &&
+    error.message.startsWith("Server's protocol version is not supported")
+  ) {
+    return new Error(
+      `MCP server answered initialize with a different protocol revision than the pinned "${protocol}" (${error.message}). ` +
+        `Pin the revision the server supports, or use 'legacy' to accept its choice.`,
+      { cause: error }
+    );
+  }
   if (error instanceof UnsupportedProtocolVersionError) {
     const data = error.data as
       | { supported?: string[]; requested?: string }
@@ -187,7 +197,7 @@ function describeProtocolFailure(
     const supported = data?.supported ?? [];
     return new Error(
       `MCP server does not support protocol "${data?.requested ?? protocol}" ` +
-        `(it supports: ${supported.join(', ') || 'unknown'}). ` +
+        `(it supports: ${supported.length > 0 ? supported.join(', ') : 'unknown'}). ` +
         `Set protocol to one of those revisions, or use 'auto'.`,
       { cause: error }
     );
@@ -234,8 +244,10 @@ export async function createMCPClientForConfig(
   const validatedConfig = validateMCPConfig(config);
   const protocol =
     options?.protocol ?? validatedConfig.protocol ?? DEFAULT_PROTOCOL_SETTING;
-  const pinsModernRevision =
-    isProtocolRevision(protocol) && eraOfRevision(protocol) === 'modern';
+  // The HTTP+SSE transport only speaks 2024-11-05, so a pin to any other
+  // revision has nothing to fall back to.
+  const pinsRevisionWithoutSse =
+    isProtocolRevision(protocol) && protocol !== '2024-11-05';
 
   // Create client with info
   const client = new Client(
@@ -253,9 +265,9 @@ export async function createMCPClientForConfig(
           : undefined,
       },
       ...resolveProtocolClientOptions(protocol, validatedConfig.protocolProbe),
-      // A tester wants every call on the wire, so never serve cached
-      // 2026-07-28 list/read results.
-      responseCacheStore: NO_RESPONSE_CACHE,
+      // A tester wants every call on the wire, so cached 2026-07-28
+      // list/read results are never served (see createTesterResponseCache).
+      responseCacheStore: createTesterResponseCache(),
     }
   );
   setRequestedProtocol(client, protocol);
@@ -448,7 +460,8 @@ export async function createMCPClientForConfig(
         // HTTP+SSE is a legacy-only transport, so a pinned modern revision
         // (or a failed era negotiation) has nothing to fall back to.
         if (
-          pinsModernRevision ||
+          pinsRevisionWithoutSse ||
+          err instanceof UnsupportedProtocolVersionError ||
           (err instanceof SdkError &&
             err.code === SdkErrorCode.EraNegotiationFailed)
         ) {
