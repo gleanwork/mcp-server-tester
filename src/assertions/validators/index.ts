@@ -33,7 +33,11 @@ export type { ToolCallExpectation, ToolCallCountOptions } from './toolCalls.js';
 export { validateJudge } from './judge.js';
 export type { JudgeValidatorConfig } from './judge.js';
 export { validateSnapshot, playwrightSnapshotStore } from './snapshot.js';
-export type { SnapshotStore, SnapshotValidatorOptions } from './snapshot.js';
+export type {
+  SnapshotMatchOptions,
+  SnapshotStore,
+  SnapshotValidatorOptions,
+} from './snapshot.js';
 export { validatePredicate } from './predicate.js';
 
 // Export utilities

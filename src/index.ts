@@ -83,6 +83,9 @@ export type {
   RegexSanitizer,
   FieldRemovalSanitizer,
   SchemaRegistry,
+  SnapshotStore,
+  SnapshotMatchOptions,
+  SnapshotValidatorOptions,
   ToolCallExpectation,
   ToolCallCountOptions,
   JudgeValidatorConfig,
@@ -275,10 +278,6 @@ export {
   validatePredicate,
   getResponseSizeBytes,
   normalizeWhitespace,
-} from './assertions/validators/index.js';
-export type {
-  SnapshotStore,
-  SnapshotValidatorOptions,
 } from './assertions/validators/index.js';
 
 // Fixtures

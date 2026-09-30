@@ -14,13 +14,13 @@ import {
 
 /** A snapshot store backed by a map; a missing snapshot fails. */
 function memoryStore(snapshots: Record<string, string>): SnapshotStore & {
-  seen: Array<{ name: string; content: string }>;
+  seen: Array<{ name: string; content: string; negated?: boolean }>;
 } {
-  const seen: Array<{ name: string; content: string }> = [];
+  const seen: Array<{ name: string; content: string; negated?: boolean }> = [];
   return {
     seen,
-    async match(name, content) {
-      seen.push({ name, content });
+    async match(name, content, options = {}) {
+      seen.push({ name, content, ...options });
       const saved = snapshots[name];
       if (saved === undefined)
         return { pass: false, message: `No snapshot "${name}"` };
@@ -54,6 +54,14 @@ describe('validateSnapshot', () => {
     });
     expect(store.seen).toEqual([
       { name: 'weather', content: 'id [UUID] at [TIMESTAMP]' },
+    ]);
+  });
+
+  it('asks the store for a negated comparison', async () => {
+    const store = memoryStore({ weather: 'x' });
+    await validateSnapshot('x', 'weather', { store, negated: true });
+    expect(store.seen).toEqual([
+      { name: 'weather', content: 'x', negated: true },
     ]);
   });
 

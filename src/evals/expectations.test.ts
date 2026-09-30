@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { Expect } from '@playwright/test';
 import {
   evaluateExpectations,
   mergeSuiteJudges,
@@ -318,6 +319,62 @@ describe('evaluateExpectations', () => {
       judgeName: 'expectations-test-judge',
     });
     expect(seen).toEqual([{ candidate: 'answer', reference: 'canonical' }]);
+  });
+
+  /** A Playwright-like expect whose toMatchSnapshot compares with saved text. */
+  function snapshotExpect(saved: Record<string, string>): Expect {
+    function stub(content: unknown) {
+      return {
+        async toMatchSnapshot(name: string) {
+          if (saved[name] !== content)
+            throw new Error(
+              `Snapshot "${name}" mismatched: ${String(content)}`
+            );
+        },
+      };
+    }
+    return stub as unknown as Expect;
+  }
+
+  it('grades a snapshot expectation through the Playwright store', async () => {
+    const playwrightExpect = snapshotExpect({ weather: 'id [UUID]' });
+    const response = 'id 123e4567-e89b-12d3-a456-426614174000';
+    const matches = await evaluateExpectations(
+      {
+        mode: 'direct',
+        expect: { snapshot: 'weather', snapshotSanitizers: ['uuid'] },
+      },
+      { response },
+      { playwrightExpect }
+    );
+    expect(matches.expectations.snapshot).toEqual({
+      pass: true,
+      details: 'Matches snapshot "weather"',
+    });
+    const differs = await evaluateExpectations(
+      { mode: 'direct', expect: { snapshot: 'weather' } },
+      { response },
+      { playwrightExpect }
+    );
+    expect(differs.expectations.snapshot).toEqual({
+      pass: false,
+      details: `Snapshot "weather" mismatched: ${response}`,
+    });
+  });
+
+  it('reports an invalid snapshot sanitizer on the expectation', async () => {
+    const outcome = await evaluateExpectations(
+      {
+        mode: 'direct',
+        expect: { snapshot: 'weather', snapshotSanitizers: [{ pattern: '(' }] },
+      },
+      { response: 'x' },
+      { playwrightExpect: snapshotExpect({}) }
+    );
+    expect(outcome.expectations.snapshot).toEqual({
+      pass: false,
+      details: 'invalid regex pattern "(" in snapshot sanitizer',
+    });
   });
 
   it('fails a snapshot expectation without Playwright expect', async () => {

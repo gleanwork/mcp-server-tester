@@ -21,4 +21,10 @@ export type {
 
 export type { JudgeValidatorConfig } from '../assertions/validators/judge.js';
 
+export type {
+  SnapshotMatchOptions,
+  SnapshotStore,
+  SnapshotValidatorOptions,
+} from '../assertions/validators/snapshot.js';
+
 export type { JudgeMatcherOptions } from '../assertions/matchers/types.js';

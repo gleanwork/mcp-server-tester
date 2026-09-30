@@ -292,7 +292,7 @@ Use conventional commits: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore
 
 1. Create `src/assertions/validators/myValidator.ts` returning `ValidationResult`
 2. Export from `src/assertions/validators/index.ts`
-3. Add unit tests in `src/assertions/validators/validators.test.ts`
+3. Add unit tests in `src/assertions/validators/validators.test.ts`, or in `myValidator.test.ts` when they need their own fixtures (as `snapshot.test.ts`, `judge.test.ts` and `toolCalls.test.ts` do)
 
 ### New Expectation Type (eval datasets)
 

@@ -29,15 +29,18 @@ export async function toMatchToolSnapshot(
   name: string,
   sanitizers: SnapshotSanitizer[] = []
 ): Promise<{ pass: boolean; message: () => string }> {
+  // Under .not, compare the way Playwright's own .not does (no writes);
+  // either way return the positive result and let Playwright negate it.
   const result = await validateSnapshot(received, name, {
     sanitizers,
     store: playwrightSnapshotStore(baseExpect),
+    negated: this.isNot,
   });
   return {
     pass: result.pass,
     message: () =>
       this.isNot
-        ? `Expected response NOT to match snapshot "${name}", but it did`
+        ? `Expected response NOT to match snapshot "${name}"\n\n${result.message}`
         : result.message,
   };
 }

@@ -124,7 +124,7 @@ export function applySanitizers(
           pattern = new RegExp(sanitizer.pattern, 'g');
         } catch {
           throw new Error(
-            `toMatchToolSnapshot: invalid regex pattern "${sanitizer.pattern}" in sanitizer`
+            `invalid regex pattern "${sanitizer.pattern}" in snapshot sanitizer`
           );
         }
       }
@@ -147,25 +147,59 @@ export function applySanitizers(
   return result;
 }
 
+export interface SnapshotMatchOptions {
+  /**
+   * Compare for a negated assertion (`.not`). The result is still the
+   * positive one (does the content match?), but the store must not write
+   * snapshots, and a missing snapshot counts as a match so the negated
+   * assertion fails.
+   */
+  negated?: boolean;
+}
+
 /** Where named snapshots live. */
 export interface SnapshotStore {
   /**
-   * Compares content with the named snapshot. The store decides what a
-   * missing snapshot means (Playwright writes it under its update policy).
+   * Whether content matches the named snapshot. For a positive comparison
+   * the store decides what a missing snapshot means (Playwright writes it
+   * under its update policy).
    */
   match(
     name: string,
-    content: string
+    content: string,
+    options?: SnapshotMatchOptions
   ): Promise<{ pass: boolean; message: string }>;
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }
 
 /**
  * The current Playwright test's snapshot store, via `toMatchSnapshot`.
- * Honours `--update-snapshots` and the project's `snapshotPathTemplate`.
+ * Honours `--update-snapshots`, `ignoreSnapshots` and the project's
+ * `snapshotPathTemplate`. Negated comparisons use Playwright's own
+ * `.not.toMatchSnapshot`, which never writes.
  */
 export function playwrightSnapshotStore(expect: Expect): SnapshotStore {
   return {
-    async match(name, content) {
+    async match(name, content, options = {}) {
+      if (options.negated) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/await-thenable
+          await expect(content).not.toMatchSnapshot(name);
+          return {
+            pass: false,
+            message: `Response does not match snapshot "${name}"`,
+          };
+        } catch (error) {
+          // Playwright explains why: it matched, or the snapshot is missing.
+          return {
+            pass: true,
+            message: errorMessage(error, `Response matches snapshot "${name}"`),
+          };
+        }
+      }
       try {
         // eslint-disable-next-line @typescript-eslint/await-thenable
         await expect(content).toMatchSnapshot(name);
@@ -173,17 +207,17 @@ export function playwrightSnapshotStore(expect: Expect): SnapshotStore {
       } catch (error) {
         return {
           pass: false,
-          message:
-            error instanceof Error
-              ? error.message
-              : `Response does not match snapshot "${name}"`,
+          message: errorMessage(
+            error,
+            `Response does not match snapshot "${name}"`
+          ),
         };
       }
     },
   };
 }
 
-export interface SnapshotValidatorOptions {
+export interface SnapshotValidatorOptions extends SnapshotMatchOptions {
   /** Where the named snapshot lives. */
   store: SnapshotStore;
   /** Applied to the response text before comparison. */
@@ -204,7 +238,9 @@ export async function validateSnapshot(
   const text = extractText(response);
   const content =
     sanitizers.length > 0 ? applySanitizers(text, sanitizers) : text;
-  const result = await options.store.match(name, content);
+  const result = await options.store.match(name, content, {
+    negated: options.negated,
+  });
   return {
     pass: result.pass,
     message: result.message,
