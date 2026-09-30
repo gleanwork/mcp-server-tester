@@ -70,14 +70,24 @@ function loadSkills(): MockSkill[] {
  * Spec violations for skills-check tests, from MOCK_SKILL_FAULTS
  * (comma-separated): bad-digest, wrong-size, frontmatter-mismatch,
  * name-mismatch, unlisted-skill-md, get-differs, get-unknown-ok,
- * no-cache-hints, bad-mime, dir-accepts-files.
+ * no-cache-hints, bad-mime, dir-accepts-files, dir-unknown-ok,
+ * no-resources, list-error, invalid-entry.
+ *
+ * SEP-legal variations that must still pass, from MOCK_SKILL_VARIANTS:
+ * blob (SKILL.md served as a blob), dynamic (resources: "dynamic"),
+ * paginate (skills/list over two pages), get-extra (skills/get adds _meta and
+ * reorders resources).
  */
-const faults = new Set(
-  (process.env.MOCK_SKILL_FAULTS ?? '')
-    .split(',')
-    .map((fault) => fault.trim())
-    .filter(Boolean)
-);
+function envSet(name: string): Set<string> {
+  return new Set(
+    (process.env[name] ?? '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean)
+  );
+}
+const faults = envSet('MOCK_SKILL_FAULTS');
+const variants = envSet('MOCK_SKILL_VARIANTS');
 
 function toEntry(skill: MockSkill) {
   const resources = skill.files
@@ -98,6 +108,7 @@ function toEntry(skill: MockSkill) {
     });
   return {
     uri: skill.uri,
+    ...(variants.has('dynamic') ? { resources: 'dynamic' as const } : {}),
     frontmatter: {
       ...skill.frontmatter,
       ...(faults.has('frontmatter-mismatch')
@@ -105,7 +116,7 @@ function toEntry(skill: MockSkill) {
         : {}),
       ...(faults.has('name-mismatch') ? { name: 'renamed-skill' } : {}),
     },
-    resources,
+    ...(variants.has('dynamic') ? {} : { resources }),
   };
 }
 
@@ -138,7 +149,8 @@ function directoryChildren(skills: MockSkill[], uri: string) {
 /** Registers the mock skills on a server and declares the extension. */
 export function registerMockSkills(server: McpServer): void {
   const skills = loadSkills();
-  for (const skill of skills) {
+  // no-resources: declares the extension without the resources capability.
+  for (const skill of faults.has('no-resources') ? [] : skills) {
     for (const file of skill.files) {
       const isSkillMd = file.relativePath === 'SKILL.md';
       server.registerResource(
@@ -155,11 +167,17 @@ export function registerMockSkills(server: McpServer): void {
         },
         async () => ({
           contents: [
-            {
-              uri: file.uri,
-              mimeType: file.mimeType,
-              text: file.bytes.toString('utf8'),
-            },
+            variants.has('blob') && isSkillMd
+              ? {
+                  uri: file.uri,
+                  mimeType: file.mimeType,
+                  blob: file.bytes.toString('base64'),
+                }
+              : {
+                  uri: file.uri,
+                  mimeType: file.mimeType,
+                  text: file.bytes.toString('utf8'),
+                },
           ],
         })
       );
@@ -179,7 +197,22 @@ export function registerMockSkills(server: McpServer): void {
   server.server.setRequestHandler(
     'skills/list',
     { params: z.looseObject({ cursor: z.string().optional() }).optional() },
-    async () => ({ skills: [...entries.values()], ...cacheHints() })
+    async (params) => {
+      if (faults.has('list-error')) {
+        throw new ProtocolError(
+          ProtocolErrorCode.InternalError,
+          'skills/list is broken'
+        );
+      }
+      const all: unknown[] = [...entries.values()];
+      if (faults.has('invalid-entry'))
+        all.push({ uri: 'skill://broken/SKILL.md' });
+      // paginate: an empty first page, then the skills.
+      if (variants.has('paginate') && params?.cursor !== 'page-2') {
+        return { skills: [], nextCursor: 'page-2', ...cacheHints() };
+      }
+      return { skills: all, ...cacheHints() };
+    }
   );
   server.server.setRequestHandler(
     'skills/get',
@@ -202,6 +235,17 @@ export function registerMockSkills(server: McpServer): void {
           `Unknown skill: ${uri}`
         );
       }
+      if (variants.has('get-extra')) {
+        return {
+          skill: {
+            ...skill,
+            _meta: { 'com.example/served-by': 'mock' },
+            ...(Array.isArray(skill.resources)
+              ? { resources: [...skill.resources].reverse() }
+              : {}),
+          },
+        };
+      }
       return { skill };
     }
   );
@@ -210,7 +254,14 @@ export function registerMockSkills(server: McpServer): void {
     { params: z.looseObject({ uri: z.string() }) },
     async ({ uri }) => {
       const children = directoryChildren(skills, uri);
-      if (!children && faults.has('dir-accepts-files')) {
+      const isKnownFile = skills.some((skill) =>
+        skill.files.some((file) => file.uri === uri)
+      );
+      if (
+        !children &&
+        ((isKnownFile && faults.has('dir-accepts-files')) ||
+          (!isKnownFile && faults.has('dir-unknown-ok')))
+      ) {
         return { resources: [] };
       }
       if (!children) {
@@ -223,7 +274,7 @@ export function registerMockSkills(server: McpServer): void {
     }
   );
   server.server.registerCapabilities({
-    resources: {},
+    ...(faults.has('no-resources') ? {} : { resources: {} }),
     extensions: { [SKILLS_EXTENSION_ID]: { directoryRead: true } },
   });
 }

@@ -140,3 +140,33 @@ describe('skillDigest / stableJson', () => {
     );
   });
 });
+
+describe('Agent Skills name and description rules', () => {
+  function named(name: string, description = 'Does a thing') {
+    return entry({
+      uri: `skill://${name}/SKILL.md`,
+      frontmatter: { name, description },
+      resources: [{ uri: `skill://${name}/SKILL.md`, digest: DIGEST, size: 1 }],
+    });
+  }
+
+  it.each(['pdf-processing', 'a', 'x1-y2'])('accepts %s', (name) => {
+    expect(validateSkillEntry(named(name))).toEqual([]);
+  });
+
+  it.each([
+    'PDF-Processing',
+    '-pdf',
+    'pdf-',
+    'pdf--processing',
+    'a'.repeat(65),
+  ])('rejects %s', (name) => {
+    expect(messages(named(name)).join(' ')).toContain('naming rules');
+  });
+
+  it('rejects descriptions over 1024 characters', () => {
+    expect(messages(named('ok', 'd'.repeat(1025))).join(' ')).toContain(
+      'limit is 1024'
+    );
+  });
+});

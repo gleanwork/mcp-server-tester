@@ -231,10 +231,8 @@ export async function runConformanceChecks(
   // When tools/list fails, the core checks stop at list_tools_succeeds, but
   // modern wire-level checks still run: the SDK can reject a malformed
   // result (e.g. missing cache hints) whose raw frame is what they inspect.
-  const skills =
-    options.skills === false || toolsError !== undefined
-      ? []
-      : skillsChecks(options.skills);
+  // Skills checks don't depend on tools/list, so they run even when it fails.
+  const skills = options.skills === false ? [] : skillsChecks(options.skills);
   const checks = [
     ...(await runCheckDefinitions(core, context)),
     ...(await runCheckDefinitions(skills, context)),

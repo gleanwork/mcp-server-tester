@@ -4,10 +4,11 @@ import type { Resource } from '@modelcontextprotocol/client';
 import {
   getSkill,
   getSkillsExtension,
-  listSkills,
+  listSkillsDetailed,
   readSkillDirectory,
   readSkillFile,
   verifySkillFile,
+  type SkillsListing,
 } from '../../skills/skillsClient.js';
 import {
   skillRootUri,
@@ -15,7 +16,9 @@ import {
   validateSkillEntry,
 } from '../../skills/skillEntry.js';
 import type { SkillEntry } from '../../skills/skillsTypes.js';
+import { errorMessage } from '../../utils/errorMessage.js';
 import type {
+  CheckOutcome,
   ConformanceCheckDefinition,
   ConformanceContext,
 } from '../registry.js';
@@ -34,22 +37,62 @@ export interface SkillsCheckOptions {
    * @default 'skill-md'
    */
   verifyFiles?: 'skill-md' | 'all';
+  /**
+   * How many `skills/list` pages to read. SEP-2640 allows listings of any
+   * size, so reaching the limit is reported, not failed.
+   * @default 64
+   */
+  maxPages?: number;
 }
 
 const SEP = 'https://modelcontextprotocol.io/seps/2640-skills-extension';
-const ENTRIES_KEY = 'skills.entries';
+const LISTING_KEY = 'skills.listing';
 const both = ['legacy', 'modern'] as const;
+const EMPTY: CheckOutcome = { skip: 'skills/list is empty.' };
+
+function listing(context: ConformanceContext): SkillsListing | undefined {
+  return context.shared.get(LISTING_KEY) as SkillsListing | undefined;
+}
 
 function entries(context: ConformanceContext): SkillEntry[] | undefined {
-  return context.shared.get(ENTRIES_KEY) as SkillEntry[] | undefined;
+  return listing(context)?.skills;
 }
 
 function declared(context: ConformanceContext): boolean {
   return getSkillsExtension(context.mcp.client) !== null;
 }
 
-function describeError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+/** Pass when there are no problems, otherwise fail listing them. */
+function fromProblems(problems: string[], passMessage: string): CheckOutcome {
+  return problems.length === 0
+    ? { pass: true, message: passMessage }
+    : { pass: false, message: problems.join('; ') };
+}
+
+/** The parts of an entry `skills/get` must agree on, independent of order. */
+function entryShape(entry: SkillEntry): string {
+  return stableJson({
+    uri: entry.uri,
+    frontmatter: entry.frontmatter,
+    resources:
+      entry.resources === 'dynamic'
+        ? 'dynamic'
+        : entry.resources
+            .map((file) => `${file.uri}|${file.digest}|${file.size}`)
+            .sort(),
+  });
+}
+
+/** The code the server sent, preferring the raw wire over the SDK's class. */
+function wireErrorCode(
+  context: ConformanceContext,
+  method: string,
+  error: unknown
+): number | null {
+  return (
+    errorCodeOf(context.tap?.lastExchange(method)?.response ?? null) ??
+    (error instanceof ProtocolError ? error.code : null)
+  );
 }
 
 /**
@@ -91,19 +134,26 @@ export function skillsChecks(
       specRef: `${SEP}#enumeration-via-skillslist`,
       async run(context) {
         if (!declared(context)) return null;
+        let result: SkillsListing;
         try {
-          const skills = await listSkills(context.mcp.client);
-          context.shared.set(ENTRIES_KEY, skills);
-          return {
-            pass: true,
-            message: `skills/list returned ${skills.length} skill${skills.length === 1 ? '' : 's'}`,
-          };
+          result = await listSkillsDetailed(context.mcp.client, {
+            maxPages: options.maxPages,
+          });
         } catch (error) {
           return {
             pass: false,
-            message: `skills/list failed: ${describeError(error)}`,
+            message: `skills/list failed: ${errorMessage(error)}`,
           };
         }
+        context.shared.set(LISTING_KEY, result);
+        const count = result.skills.length + result.invalid.length;
+        const truncated = result.truncated
+          ? ` (stopped after ${options.maxPages ?? 64} page(s); later checks use the entries read so far)`
+          : '';
+        return {
+          pass: true,
+          message: `skills/list returned ${count} entr${count === 1 ? 'y' : 'ies'}${truncated}`,
+        };
       },
     },
     {
@@ -112,17 +162,26 @@ export function skillsChecks(
       severity: 'must',
       specRef: `${SEP}#enumeration-via-skillslist`,
       async run(context) {
-        const skills = entries(context);
-        if (!skills) return null;
-        if (skills.length === 0) return { skip: 'skills/list is empty.' };
-        const problems = skills.flatMap((entry) =>
-          validateSkillEntry(entry)
-            .filter((problem) => problem.severity === 'must')
-            .map((problem) => problem.message)
+        const result = listing(context);
+        if (!result) return null;
+        if (result.skills.length === 0 && result.invalid.length === 0) {
+          return EMPTY;
+        }
+        const problems = [
+          ...result.invalid.map(
+            (raw) =>
+              `malformed entry ${JSON.stringify(raw).slice(0, 120)}: needs uri, frontmatter, and resources (an array or "dynamic")`
+          ),
+          ...result.skills.flatMap((entry) =>
+            validateSkillEntry(entry)
+              .filter((problem) => problem.severity === 'must')
+              .map((problem) => problem.message)
+          ),
+        ];
+        return fromProblems(
+          problems,
+          `All ${result.skills.length} entries are valid`
         );
-        return problems.length === 0
-          ? { pass: true, message: `All ${skills.length} entries are valid` }
-          : { pass: false, message: problems.join('; ') };
       },
     },
     {
@@ -132,18 +191,17 @@ export function skillsChecks(
       specRef: `${SEP}#limits`,
       async run(context) {
         const skills = entries(context);
-        if (!skills || skills.length === 0) return null;
+        if (!skills) return null;
+        if (skills.length === 0) return EMPTY;
         const problems = skills.flatMap((entry) =>
           validateSkillEntry(entry)
             .filter((problem) => problem.severity === 'should')
             .map((problem) => `${entry.uri}: ${problem.message}`)
         );
-        return problems.length === 0
-          ? {
-              pass: true,
-              message: 'Every skill is within the 512-file / 16 MiB limits',
-            }
-          : { pass: false, message: problems.join('; ') };
+        return fromProblems(
+          problems,
+          'Every skill is within the 512-file / 16 MiB limits'
+        );
       },
     },
     {
@@ -152,7 +210,7 @@ export function skillsChecks(
       severity: 'must',
       specRef: `${SEP}#enumeration-via-skillslist`,
       async run(context) {
-        if (!entries(context)) return null;
+        if (!listing(context)) return null;
         const exchange = context.tap?.lastExchange('skills/list');
         if (!exchange) {
           return {
@@ -181,33 +239,49 @@ export function skillsChecks(
     {
       name: 'skills_get_matches_list',
       eras: both,
-      severity: 'must',
+      // A differing entry is a warning (the listing is a point-in-time
+      // snapshot); a failing or invalid skills/get is a MUST failure.
+      severity: 'should',
       specRef: `${SEP}#retrieval-via-skillsget`,
       async run(context) {
-        const skills = sample(context);
         if (!entries(context)) return null;
-        if (skills.length === 0) return { skip: 'skills/list is empty.' };
-        const problems: string[] = [];
+        const skills = sample(context);
+        if (skills.length === 0) return EMPTY;
+        const broken: string[] = [];
+        const differing: string[] = [];
         for (const entry of skills) {
           try {
             const fetched = await getSkill(context.mcp.client, entry.uri);
-            if (stableJson(fetched) !== stableJson(entry)) {
-              problems.push(
-                `${entry.uri}: skills/get entry differs from skills/list`
+            const invalid = validateSkillEntry(fetched).filter(
+              (problem) => problem.severity === 'must'
+            );
+            if (fetched.uri !== entry.uri) {
+              broken.push(`${entry.uri}: skills/get returned ${fetched.uri}`);
+            } else if (invalid.length > 0) {
+              broken.push(
+                `${entry.uri}: skills/get entry is invalid (${invalid.map((p) => p.message).join('; ')})`
               );
+            } else if (entryShape(fetched) !== entryShape(entry)) {
+              differing.push(entry.uri);
             }
           } catch (error) {
-            problems.push(
-              `${entry.uri}: skills/get failed: ${describeError(error)}`
+            broken.push(
+              `${entry.uri}: skills/get failed: ${errorMessage(error)}`
             );
           }
         }
-        return problems.length === 0
+        if (broken.length > 0) {
+          return { pass: false, severity: 'must', message: broken.join('; ') };
+        }
+        return differing.length === 0
           ? {
               pass: true,
               message: `skills/get matches skills/list for ${skills.length} skill(s)`,
             }
-          : { pass: false, message: problems.join('; ') };
+          : {
+              pass: false,
+              message: `skills/get returned a different frontmatter or file set than skills/list for: ${differing.join(', ')}`,
+            };
       },
     },
     {
@@ -228,18 +302,15 @@ export function skillsChecks(
           if (!(error instanceof ProtocolError)) {
             return {
               pass: false,
-              message: `skills/get of an unknown URI failed locally: ${describeError(error)}`,
+              message: `skills/get of an unknown URI failed locally: ${errorMessage(error)}`,
             };
           }
-          const code =
-            errorCodeOf(
-              context.tap?.lastExchange('skills/get')?.response ?? null
-            ) ?? error.code;
+          const code = wireErrorCode(context, 'skills/get', error);
           return code === -32602
             ? { pass: true, message: 'Unknown skill URI returned -32602' }
             : {
                 pass: false,
-                message: `Unknown skill URI returned ${code}; expected -32602`,
+                message: `Unknown skill URI returned ${String(code)}; expected -32602`,
               };
         }
       },
@@ -250,19 +321,18 @@ export function skillsChecks(
       severity: 'must',
       specRef: `${SEP}#integrity-and-verification`,
       async run(context) {
-        const skills = sample(context);
         if (!entries(context)) return null;
-        if (skills.length === 0) return { skip: 'skills/list is empty.' };
+        const skills = sample(context);
+        if (skills.length === 0) return EMPTY;
         const problems: string[] = [];
         let files = 0;
         let dynamic = 0;
         for (const entry of skills) {
-          if (entry.resources === 'dynamic') {
-            dynamic += 1;
-            continue;
-          }
+          // A "dynamic" skill has no digests, but its SKILL.md frontmatter
+          // must still match the entry.
+          if (entry.resources === 'dynamic') dynamic += 1;
           const uris =
-            options.verifyFiles === 'all'
+            options.verifyFiles === 'all' && entry.resources !== 'dynamic'
               ? entry.resources.map((resource) => resource.uri)
               : [entry.uri];
           for (const uri of uris) {
@@ -276,22 +346,15 @@ export function skillsChecks(
               );
             } catch (error) {
               problems.push(
-                `${uri}: resources/read failed: ${describeError(error)}`
+                `${uri}: resources/read failed: ${errorMessage(error)}`
               );
             }
           }
         }
-        if (files === 0) {
-          return {
-            skip: `All ${dynamic} sampled skill(s) are "dynamic"; nothing to verify.`,
-          };
-        }
-        return problems.length === 0
-          ? {
-              pass: true,
-              message: `${files} file(s) match their digests, sizes, and frontmatter${dynamic ? ` (${dynamic} dynamic skill(s) not verifiable)` : ''}`,
-            }
-          : { pass: false, message: problems.join('; ') };
+        return fromProblems(
+          problems,
+          `${files} file(s) match their entries${dynamic > 0 ? ` (${dynamic} dynamic skill(s): frontmatter only)` : ''}`
+        );
       },
     },
     {
@@ -301,12 +364,14 @@ export function skillsChecks(
       specRef: `${SEP}#resource-metadata`,
       async run(context) {
         const skills = entries(context);
-        if (!skills || skills.length === 0) return null;
+        if (!skills) return null;
+        if (skills.length === 0) return EMPTY;
         let resources: Resource[];
         try {
+          // Without a cursor the SDK walks every page.
           resources = (await context.mcp.client.listResources()).resources;
         } catch (error) {
-          return { skip: `resources/list failed: ${describeError(error)}` };
+          return { skip: `resources/list failed: ${errorMessage(error)}` };
         }
         const byUri = new Map(
           resources.map((resource) => [resource.uri, resource])
@@ -334,12 +399,10 @@ export function skillsChecks(
             );
           }
         }
-        return problems.length === 0
-          ? {
-              pass: true,
-              message: `${listed.length} listed SKILL.md resource(s) carry frontmatter metadata`,
-            }
-          : { pass: false, message: problems.join('; ') };
+        return fromProblems(
+          problems,
+          `${listed.length} listed SKILL.md resource(s) carry frontmatter metadata`
+        );
       },
     },
     {
@@ -373,32 +436,39 @@ export function skillsChecks(
           }
         } catch (error) {
           problems.push(
-            `resources/directory/read ${root} failed: ${describeError(error)}`
+            `resources/directory/read ${root} failed: ${errorMessage(error)}`
           );
         }
-        try {
-          await readSkillDirectory(context.mcp.client, entry.uri);
-          problems.push(
-            `resources/directory/read of the file ${entry.uri} did not fail`
-          );
-        } catch (error) {
-          const code =
-            errorCodeOf(
-              context.tap?.lastExchange('resources/directory/read')?.response ??
-                null
-            ) ?? (error instanceof ProtocolError ? error.code : null);
-          if (code !== -32602) {
+        // Both a file and a URI that does not exist must be -32602.
+        for (const [label, uri] of [
+          ['the file', entry.uri],
+          [
+            'a missing directory',
+            `${root}/mst-missing-${randomUUID().slice(0, 8)}`,
+          ],
+        ] as const) {
+          try {
+            await readSkillDirectory(context.mcp.client, uri);
             problems.push(
-              `reading a non-directory returned ${String(code)}; expected -32602`
+              `resources/directory/read of ${label} ${uri} did not fail`
             );
+          } catch (error) {
+            const code = wireErrorCode(
+              context,
+              'resources/directory/read',
+              error
+            );
+            if (code !== -32602) {
+              problems.push(
+                `reading ${label} returned ${String(code)}; expected -32602`
+              );
+            }
           }
         }
-        return problems.length === 0
-          ? {
-              pass: true,
-              message: `resources/directory/read lists ${root} and rejects non-directories`,
-            }
-          : { pass: false, message: problems.join('; ') };
+        return fromProblems(
+          problems,
+          `resources/directory/read lists ${root} and rejects files and missing directories`
+        );
       },
     },
   ];

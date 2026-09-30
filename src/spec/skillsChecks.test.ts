@@ -35,13 +35,17 @@ const SKILLS_CHECKS = [
 async function check(
   protocol: ProtocolSetting,
   faults: string[] = [],
-  options: Parameters<typeof runConformanceChecks>[1] = {}
+  options: Parameters<typeof runConformanceChecks>[1] = {},
+  variants: string[] = []
 ): Promise<MCPConformanceResult> {
   const client = await createMCPClientForConfig({
     transport: 'stdio',
     command: process.execPath,
     args: ['--import', 'tsx', mock],
-    env: { MOCK_SKILL_FAULTS: faults.join(',') },
+    env: {
+      MOCK_SKILL_FAULTS: faults.join(','),
+      MOCK_SKILL_VARIANTS: variants.join(','),
+    },
     quiet: true,
     protocol,
   });
@@ -82,7 +86,11 @@ describe.each(['legacy', '2026-07-28'] as const)(
       ['frontmatter-mismatch', 'skills_content_verified', 'must'],
       ['name-mismatch', 'skills_entries_valid', 'must'],
       ['unlisted-skill-md', 'skills_entries_valid', 'must'],
-      ['get-differs', 'skills_get_matches_list', 'must'],
+      ['get-differs', 'skills_get_matches_list', 'should'],
+      ['no-resources', 'skills_extension_declares_resources', 'must'],
+      ['list-error', 'skills_list_succeeds', 'must'],
+      ['invalid-entry', 'skills_entries_valid', 'must'],
+      ['dir-unknown-ok', 'skills_directory_read', 'must'],
       ['get-unknown-ok', 'skills_get_unknown_uri', 'must'],
       ['bad-mime', 'skill_md_resource_metadata', 'should'],
       ['dir-accepts-files', 'skills_directory_read', 'must'],
@@ -97,6 +105,42 @@ describe.each(['legacy', '2026-07-28'] as const)(
       },
       30_000
     );
+  }
+);
+
+describe.each(['legacy', '2026-07-28'] as const)(
+  'SEP-legal skill variations pass on %s',
+  (protocol) => {
+    it.each([['blob'], ['dynamic'], ['paginate'], ['get-extra']])(
+      'variant %s passes every skills check',
+      async (variant) => {
+        const result = await check(protocol, [], {}, [variant]);
+        const notPassing = result.checks.filter(
+          (c) => c.name.startsWith('skill') && !c.pass
+        );
+        expect(notPassing, JSON.stringify(notPassing, null, 2)).toEqual([]);
+        expect(named(result, 'skills_content_verified').skipped).toBeFalsy();
+      },
+      30_000
+    );
+
+    it('reports a listing cut off at maxPages instead of failing it', async () => {
+      const result = await check(protocol, [], { skills: { maxPages: 1 } }, [
+        'paginate',
+      ]);
+      const listed = named(result, 'skills_list_succeeds');
+      expect(listed.pass).toBe(true);
+      expect(listed.message).toContain('stopped after 1 page(s)');
+    }, 30_000);
+
+    it('a malformed entry fails skills_entries_valid without hiding the rest', async () => {
+      const result = await check(protocol, ['invalid-entry']);
+      expect(named(result, 'skills_list_succeeds').pass).toBe(true);
+      expect(named(result, 'skills_entries_valid').message).toContain(
+        'malformed entry'
+      );
+      expect(named(result, 'skills_content_verified').pass).toBe(true);
+    }, 30_000);
   }
 );
 

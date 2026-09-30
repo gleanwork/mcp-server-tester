@@ -1,6 +1,12 @@
 import { createHash } from 'node:crypto';
 import { parse as parseYaml } from 'yaml';
 import { SKILL_LIMITS, type SkillEntry } from './skillsTypes.js';
+import type { ConformanceSeverity } from '../types/reporter.js';
+
+/** Agent Skills `name`: 1-64 of a-z, 0-9, and single inner hyphens. */
+const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const MAX_NAME_LENGTH = 64;
+const MAX_DESCRIPTION_LENGTH = 1024;
 
 /**
  * Pure helpers for SEP-2640 skill entries: validation, digests, and
@@ -12,7 +18,7 @@ const SKILL_MD_SUFFIX = '/SKILL.md';
 
 /** A problem found in a skill entry. */
 export interface SkillEntryProblem {
-  severity: 'must' | 'should';
+  severity: ConformanceSeverity;
   message: string;
 }
 
@@ -84,9 +90,18 @@ export function validateSkillEntry(entry: SkillEntry): SkillEntryProblem[] {
   };
   if (typeof name !== 'string' || name.length === 0) {
     must('frontmatter.name is missing');
+  } else if (name.length > MAX_NAME_LENGTH || !SKILL_NAME_PATTERN.test(name)) {
+    // SEP-2640 delegates naming to the Agent Skills specification.
+    must(
+      `frontmatter.name "${name}" breaks the Agent Skills naming rules (1-64 lowercase letters, digits, and single hyphens, not at either end)`
+    );
   }
   if (typeof description !== 'string' || description.length === 0) {
     must('frontmatter.description is missing');
+  } else if (description.length > MAX_DESCRIPTION_LENGTH) {
+    must(
+      `frontmatter.description is ${description.length} characters; the Agent Skills limit is ${MAX_DESCRIPTION_LENGTH}`
+    );
   }
 
   const root = skillRootUri(entry.uri);

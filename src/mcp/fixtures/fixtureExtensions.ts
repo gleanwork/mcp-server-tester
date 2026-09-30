@@ -13,6 +13,7 @@ import {
   verifySkillFile,
 } from '../../skills/skillsClient.js';
 import { skillRootUri } from '../../skills/skillEntry.js';
+import { errorMessage } from '../../utils/errorMessage.js';
 import type {
   SkillEntry,
   SkillsExtensionSettings,
@@ -86,9 +87,13 @@ export interface MCPFixtureExtensions {
 /** Finds the entry a file belongs to (longest matching skill root). */
 async function findEntry(
   client: Client,
-  uri: string
+  uri: string,
+  problems: string[]
 ): Promise<SkillEntry | null> {
-  const entries = await listSkills(client).catch(() => [] as SkillEntry[]);
+  const entries = await listSkills(client).catch((error: unknown) => {
+    problems.push(`skills/list failed: ${errorMessage(error)}`);
+    return [] as SkillEntry[];
+  });
   const owner = entries
     .filter((entry) => {
       const root = skillRootUri(entry.uri);
@@ -140,15 +145,25 @@ export function createFixtureExtensions(client: Client): MCPFixtureExtensions {
       },
       async read(uri, options = {}) {
         const file = await readSkillFile(client, uri);
-        const entry =
-          options.verify === false
-            ? null
-            : (options.entry ?? (await findEntry(client, uri)));
-        if (!entry || entry.resources === 'dynamic') {
+        if (options.verify === false) {
           return { ...file, verified: null, problems: [] };
         }
+        const lookupProblems: string[] = [];
+        const entry =
+          options.entry ?? (await findEntry(client, uri, lookupProblems));
+        if (!entry) {
+          return { ...file, verified: null, problems: lookupProblems };
+        }
         const problems = verifySkillFile(entry, file);
-        return { ...file, verified: problems.length === 0, problems };
+        // A "dynamic" skill has no digests, so a clean read is unverified;
+        // its SKILL.md frontmatter is still compared with the entry.
+        const verified =
+          problems.length > 0
+            ? false
+            : entry.resources === 'dynamic'
+              ? null
+              : true;
+        return { ...file, verified, problems };
       },
     },
   };

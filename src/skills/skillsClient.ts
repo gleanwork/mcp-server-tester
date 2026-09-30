@@ -35,13 +35,26 @@ export function getSkillsExtension(
     : null;
 }
 
-/** Calls `skills/list`, following `nextCursor` up to `maxPages` pages. */
-export async function listSkills(
+/** Everything one `skills/list` walk returned. */
+export interface SkillsListing {
+  /** Entries that parsed as skill entries. */
+  skills: SkillEntry[];
+  /** Raw entries that did not parse (missing uri, frontmatter, or resources). */
+  invalid: unknown[];
+  /** True when the walk stopped at `maxPages` with more pages available. */
+  truncated: boolean;
+}
+
+/**
+ * Calls `skills/list`, following `nextCursor` up to `maxPages` pages, and
+ * keeps going past malformed entries so callers can report them.
+ */
+export async function listSkillsDetailed(
   client: Client,
   options: { maxPages?: number } = {}
-): Promise<SkillEntry[]> {
+): Promise<SkillsListing> {
   const maxPages = options.maxPages ?? DEFAULT_MAX_PAGES;
-  const skills: SkillEntry[] = [];
+  const listing: SkillsListing = { skills: [], invalid: [], truncated: false };
   let cursor: string | undefined;
   for (let page = 0; page < maxPages; page++) {
     const result = await client.request(
@@ -51,11 +64,39 @@ export async function listSkills(
       },
       SkillsListResultSchema
     );
-    for (const raw of result.skills) skills.push(SkillEntrySchema.parse(raw));
+    for (const raw of result.skills) {
+      const parsed = SkillEntrySchema.safeParse(raw);
+      if (parsed.success) listing.skills.push(parsed.data);
+      else listing.invalid.push(raw);
+    }
     cursor = result.nextCursor;
-    if (!cursor) return skills;
+    if (!cursor) return listing;
   }
-  throw new Error(`skills/list returned more than ${maxPages} pages`);
+  listing.truncated = true;
+  return listing;
+}
+
+/**
+ * Calls `skills/list` (paginated). Throws when an entry is malformed or the
+ * listing has more than `maxPages` pages; use {@link listSkillsDetailed} to
+ * inspect those cases instead.
+ */
+export async function listSkills(
+  client: Client,
+  options: { maxPages?: number } = {}
+): Promise<SkillEntry[]> {
+  const listing = await listSkillsDetailed(client, options);
+  if (listing.invalid.length > 0) {
+    throw new Error(
+      `skills/list returned ${listing.invalid.length} malformed entr${listing.invalid.length === 1 ? 'y' : 'ies'}`
+    );
+  }
+  if (listing.truncated) {
+    throw new Error(
+      `skills/list has more than ${options.maxPages ?? DEFAULT_MAX_PAGES} pages; pass a larger maxPages`
+    );
+  }
+  return listing.skills;
 }
 
 /** Calls `skills/get` for a skill's SKILL.md URI. */
@@ -70,11 +111,35 @@ export async function getSkill(
   return SkillEntrySchema.parse(result.skill);
 }
 
-/** Calls `resources/directory/read` (only if the server declares it). */
-export async function readSkillDirectory(client: Client, uri: string) {
-  return client.request(
-    { method: 'resources/directory/read', params: { uri } },
-    DirectoryReadResultSchema
+/**
+ * Calls `resources/directory/read` (only if the server declares it),
+ * following `nextCursor` up to `maxPages` pages.
+ */
+export async function readSkillDirectory(
+  client: Client,
+  uri: string,
+  options: { maxPages?: number } = {}
+): Promise<{
+  resources: Array<{ uri: string; name?: string; mimeType?: string }>;
+}> {
+  const maxPages = options.maxPages ?? DEFAULT_MAX_PAGES;
+  const resources: Array<{ uri: string; name?: string; mimeType?: string }> =
+    [];
+  let cursor: string | undefined;
+  for (let page = 0; page < maxPages; page++) {
+    const result = await client.request(
+      {
+        method: 'resources/directory/read',
+        params: cursor ? { uri, cursor } : { uri },
+      },
+      DirectoryReadResultSchema
+    );
+    resources.push(...result.resources);
+    cursor = result.nextCursor;
+    if (!cursor) return { resources };
+  }
+  throw new Error(
+    `resources/directory/read ${uri} has more than ${maxPages} pages`
   );
 }
 
@@ -93,12 +158,15 @@ export async function readSkillFile(
   uri: string
 ): Promise<SkillFileContent> {
   const result: ReadResourceResult = await client.readResource({ uri });
+  // Prefer the requested URI; otherwise report what the server returned,
+  // so verification compares the right bytes.
   const content =
     result.contents.find((item) => item.uri === uri) ?? result.contents[0];
   if (!content) throw new Error(`resources/read ${uri} returned no contents`);
+  const returnedUri = content.uri || uri;
   if ('text' in content && typeof content.text === 'string') {
     return {
-      uri,
+      uri: returnedUri,
       ...(content.mimeType ? { mimeType: content.mimeType } : {}),
       bytes: new TextEncoder().encode(content.text),
       text: content.text,
@@ -106,7 +174,7 @@ export async function readSkillFile(
   }
   if ('blob' in content && typeof content.blob === 'string') {
     return {
-      uri,
+      uri: returnedUri,
       ...(content.mimeType ? { mimeType: content.mimeType } : {}),
       bytes: Uint8Array.from(Buffer.from(content.blob, 'base64')),
     };
@@ -145,8 +213,10 @@ export function verifySkillFile(
     }
   }
   if (file.uri === entry.uri) {
-    const frontmatter =
-      file.text !== undefined ? parseSkillFrontmatter(file.text) : null;
+    // A SKILL.md may be served as text or as a blob; both are UTF-8 bytes.
+    const frontmatter = parseSkillFrontmatter(
+      file.text ?? new TextDecoder().decode(file.bytes)
+    );
     if (!frontmatter) {
       problems.push(`${file.uri} does not start with YAML frontmatter`);
     } else if (stableJson(frontmatter) !== stableJson(entry.frontmatter)) {
