@@ -8,7 +8,6 @@ import type {
 import { getCoworkPlatform, type CoworkPlatform } from './cowork/platform.js';
 import { verifyCoworkMcpServers } from './cowork/mcpReadiness.js';
 import { hostSecretValues, redactHostError } from './hostSecrets.js';
-import { usesHostResolvedFields } from '../config/mcpConfig.js';
 import { validateMacLocalServers } from './coworkSetup/macLocalMcp.js';
 import {
   findMatchingClaudeSessions,
@@ -24,6 +23,7 @@ import {
   hostStdioServers,
 } from './hostPlugins.js';
 import { coworkManagedPluginSettings } from './cowork/managedSettings.js';
+import { resolveCoworkSetupConfig } from './coworkSetup/options.js';
 import {
   CoworkDriverError,
   type CoworkDriverTelemetry,
@@ -119,6 +119,8 @@ async function runBatch(
       'Cowork batch requires identical host settings for all cases.'
     );
   const config = configs[0]!;
+  const coworkSetup = resolveCoworkSetupConfig(context.manifest.coworkSetup);
+  const approvalTask = `Approve ${coworkSetup.approveWriteTools ? 'read and write' : 'read-only'} calls only using one-time or current-task approval. Never select persistent or always-allow approval, or change settings.`;
   const plugins = config.plugins ?? [];
   // Fail before any desktop action if Cowork cannot apply a plugin as declared.
   assertCoworkHostPlugins(plugins);
@@ -126,10 +128,7 @@ async function runBatch(
   // Validate declarations before desktop actions. macOS resolves host-resolved
   // paths inside its leased setup transaction; Linux uses prepared runtime paths.
   const mac = config.options.computerUseProvider === 'anthropic-computer-use';
-  const stdioServers = hostStdioServers(
-    mac ? servers.filter(usesHostResolvedFields) : servers,
-    plugins
-  );
+  const stdioServers = hostStdioServers(servers, plugins);
   let stdioPaths = {
     ...(config.options.pluginRoots
       ? { pluginRoots: config.options.pluginRoots }
@@ -155,18 +154,16 @@ async function runBatch(
     (config.options.mcpDataRoot && !stdioServers.some((s) => s.usesDataDir))
   )
     throw new HostPluginError('mcp_server_invalid', unknownRoot ?? 'dataRoot');
-  if (mac) {
-    const labeledServers = servers.map((server, index) =>
-      server.label ? server : { ...server, label: `server-${index + 1}` }
-    );
-    validateMacLocalServers(
-      labeledServers.filter((server) => server.transport === 'http')
-    );
-  }
+  const httpServers = servers
+    .map((server, index) => ({
+      ...server,
+      label: server.label ?? `server-${index + 1}`,
+    }))
+    .filter((server) => server.transport === 'http');
+  if (mac) validateMacLocalServers(httpServers);
   coworkManagedPluginSettings({
-    servers: mac
-      ? servers.filter((server) => server.transport === 'http')
-      : servers,
+    servers: mac ? httpServers : servers,
+    declaredServers: servers,
     plugins,
     paths: stdioPaths,
   });
@@ -182,7 +179,7 @@ async function runBatch(
   const dataDir = platform.dataDirectory(config.options);
   // Pass only the selected arm. Setup intentionally rejects multi-arm manifests.
   const { arms: _arms, ...manifest } = context.manifest;
-  const managedManifest = { ...manifest, servers };
+  const managedManifest = { ...manifest, coworkSetup, servers };
   let session: Awaited<ReturnType<CoworkPlatform['prepare']>> | undefined;
   const results = requests.map(() =>
     failure('Cowork submission was not attempted.')
@@ -305,6 +302,7 @@ async function runBatch(
           deadlineAt,
           maxActions: config.options.computerUseMaxActions,
           model: config.options.computerUseModel,
+          ...(mac && config.model ? { targetModel: config.model } : {}),
           env,
           ...(session?.appPath ? { appPath: session.appPath } : {}),
         });
@@ -357,6 +355,9 @@ async function runBatch(
           process.stderr.write(
             `[mst:cowork] case ${index + 1} already completed; skipping HITL\n`
           );
+        } else if (mac && coworkSetup.approveWriteTools) {
+          // Staged connector defaults must work without a click-through fallback.
+          computerUse.hitl = { status: 'not-attempted' };
         } else {
           const hitl = await platform.handleHitl({
             deadlineAt: deadlineAt,
@@ -364,8 +365,7 @@ async function runBatch(
             model: config.options.computerUseModel,
             env,
             ...(session?.appPath ? { appPath: session.appPath } : {}),
-            approveWriteTools:
-              context.manifest.coworkSetup?.approveWriteTools === true,
+            approveWriteTools: coworkSetup.approveWriteTools,
             isComplete: async () => {
               const current = await findMatchingClaudeSessions({
                 ...match,
@@ -377,7 +377,7 @@ async function runBatch(
                 );
               return current[0]!.isComplete;
             },
-            task: `Handle only the currently open Cowork task just submitted with this exact query: ${request.input.scenario}. Do not switch tasks. Never create, type, or resubmit a task. If the current task cannot be identified uniquely, stop without an action.`,
+            task: `Handle only the currently open Cowork task just submitted with this exact query: ${request.input.scenario}. ${approvalTask} Do not switch tasks. Never create, type, or resubmit a task. If the current task cannot be identified uniquely, stop without an action.`,
           });
           hitlActions += hitl.action_count;
           computerUse.hitl = {
@@ -421,7 +421,7 @@ async function runBatch(
           ...match,
           sessionPath,
           timeoutMs: remaining,
-          ...(mac
+          ...(mac && !coworkSetup.approveWriteTools
             ? {
                 onPending: async (pending) => {
                   // A tool request can arrive after the initial visual check. Revisit
@@ -448,10 +448,8 @@ async function runBatch(
                       model: config.options.computerUseModel,
                       env,
                       ...(session?.appPath ? { appPath: session.appPath } : {}),
-                      approveWriteTools:
-                        context.manifest.coworkSetup?.approveWriteTools ===
-                        true,
-                      task: `Handle only the pending tool approval in the current Cowork task for this exact query: ${request.input.scenario}. Approve read-only calls only. Do not switch tasks, change settings, type, or resubmit a query.`,
+                      approveWriteTools: coworkSetup.approveWriteTools,
+                      task: `Handle only the pending tool approval in the current Cowork task for this exact query: ${request.input.scenario}. ${approvalTask} Do not switch tasks, type, or resubmit a query. If the current task cannot be identified uniquely, stop without an action.`,
                     });
                     hitlActions += followup.action_count;
                     hitlFollowups.push({

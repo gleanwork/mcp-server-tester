@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import {
@@ -19,6 +19,11 @@ import {
   restoreMacLocalMcp,
 } from './macLocalMcp.js';
 
+import { installMacToolPermissions } from './macToolPermissionStore.js';
+
+vi.mock('node:fs/promises', async (original) => ({
+  ...(await original<typeof fs>()),
+}));
 vi.mock('node:os', async (original) => ({
   ...(await original<typeof os>()),
   homedir: vi.fn(),
@@ -65,6 +70,7 @@ async function entry(label = 'glean-eval'): Promise<StdioMCPConfig> {
 }
 describe('Mac local MCP transaction', () => {
   it('keeps credentials out of app settings and restores exact bytes after Claude reformats JSON', async () => {
+    await fs.chmod(config, 0o644);
     await installMacLocalMcp(directory, [remote], env);
     const installed = await fs.readFile(config, 'utf8');
     expect(installed).not.toContain(env.TEST_TOKEN);
@@ -76,22 +82,262 @@ describe('Mac local MCP transaction', () => {
     await fs.writeFile(config, JSON.stringify(JSON.parse(installed)));
     await restoreMacLocalMcp(directory);
     expect(await fs.readFile(config)).toEqual(original);
+    expect((await fs.stat(config)).mode & 0o777).toBe(0o644);
     await expect(fs.stat(directory)).rejects.toMatchObject({ code: 'ENOENT' });
     await restoreMacLocalMcp(directory);
   });
-  it('retains recovery state rather than clobbering a semantic user change', async () => {
+  it('preserves unrelated preference changes while restoring only mcpServers', async () => {
     await installMacLocalMcp(directory, [remote], env);
     const data = JSON.parse(await fs.readFile(config, 'utf8')) as Record<
       string,
       unknown
     >;
-    data.preferences = { theme: 'light' };
+    data.preferences = { theme: 'light', epitaxyPrefs: { enabled: true } };
+    data.newPreference = [1, 2];
     await fs.writeFile(config, JSON.stringify(data));
+    await restoreMacLocalMcp(directory);
+    expect(JSON.parse(await fs.readFile(config, 'utf8'))).toEqual({
+      preferences: { theme: 'light', epitaxyPrefs: { enabled: true } },
+      newPreference: [1, 2],
+      mcpServers: { existing: { command: 'existing' } },
+    });
+    await restoreMacLocalMcp(directory);
+  });
+  it.each(['added', 'edited', 'removed', 'null'])(
+    'retains recovery state for %s MCP entries',
+    async (kind) => {
+      await installMacLocalMcp(directory, [remote], env);
+      const data = JSON.parse(await fs.readFile(config, 'utf8')) as Record<
+        string,
+        unknown
+      >;
+      const servers = data.mcpServers as Record<string, unknown>;
+      if (kind === 'added') servers.newServer = { command: 'user' };
+      else if (kind === 'edited') servers['glean-eval'] = { command: 'user' };
+      else if (kind === 'removed') delete data.mcpServers;
+      else data.mcpServers = null;
+      await fs.writeFile(config, JSON.stringify(data));
+      const before = await fs.readFile(config);
+      const receipt = await fs.readFile(join(directory, 'journal.json'));
+      await expect(restoreMacLocalMcp(directory)).rejects.toThrow('safely');
+      expect(await fs.readFile(config)).toEqual(before);
+      expect(await fs.readFile(join(directory, 'journal.json'))).toEqual(
+        receipt
+      );
+    }
+  );
+  it.each([false, true])(
+    'keeps legacy journals strict (unrelated edit: %s)',
+    async (changed) => {
+      await installMacLocalMcp(directory, [remote], env);
+      const receipt = join(directory, 'journal.json');
+      const journal = JSON.parse(await fs.readFile(receipt, 'utf8')) as Record<
+        string,
+        unknown
+      >;
+      delete journal.installedMcpServersHash;
+      await fs.writeFile(receipt, JSON.stringify(journal));
+      const data = JSON.parse(await fs.readFile(config, 'utf8')) as Record<
+        string,
+        unknown
+      >;
+      if (changed) data.preferences = { theme: 'light' };
+      await fs.writeFile(config, JSON.stringify(data));
+      const before = await fs.readFile(config);
+      if (changed) {
+        await expect(restoreMacLocalMcp(directory)).rejects.toThrow('safely');
+        expect(await fs.readFile(config)).toEqual(before);
+        expect((await fs.stat(receipt)).isFile()).toBe(true);
+      } else {
+        await restoreMacLocalMcp(directory);
+        expect(await fs.readFile(config)).toEqual(original);
+      }
+    }
+  );
+  it.each(['missing file', 'missing map'])(
+    'preserves new preferences with an originally %s',
+    async (kind) => {
+      if (kind === 'missing file') await fs.unlink(config);
+      else await fs.writeFile(config, '{"preferences":{"theme":"dark"}}');
+      await installMacLocalMcp(directory, [], {});
+      await fs.writeFile(
+        config,
+        '{"preferences":{"epitaxyPrefs":true},"mcpServers":{}}'
+      );
+      await restoreMacLocalMcp(directory);
+      expect(JSON.parse(await fs.readFile(config, 'utf8'))).toEqual({
+        preferences: { epitaxyPrefs: true },
+      });
+    }
+  );
+  it.each(['owned edit', 'preference edit', 'same-byte replacement'])(
+    'refuses a %s race during restore staging',
+    async (kind) => {
+      await installMacLocalMcp(directory, [remote], env);
+      let changed: Buffer | undefined;
+      const writeFile = fs.writeFile;
+      vi.spyOn(fs, 'writeFile').mockImplementation(
+        async (path, data, options) => {
+          await writeFile(path, data, options);
+          if (typeof path === 'string' && path.includes('config.restore-')) {
+            const value = JSON.parse(
+              await fs.readFile(config, 'utf8')
+            ) as Record<string, unknown>;
+            if (kind === 'owned edit')
+              value.mcpServers = { user: { command: 'user' } };
+            else if (kind === 'preference edit')
+              value.preferences = { theme: 'concurrent' };
+            changed =
+              kind === 'same-byte replacement'
+                ? await fs.readFile(config)
+                : Buffer.from(JSON.stringify(value));
+            if (kind === 'same-byte replacement') {
+              const replacement = join(root, 'replacement');
+              await writeFile(replacement, changed, { mode: 0o600 });
+              await fs.rename(replacement, config);
+            } else await writeFile(config, changed);
+          }
+        }
+      );
+      await expect(restoreMacLocalMcp(directory)).rejects.toThrow('safely');
+      expect(changed).toBeDefined();
+      expect(await fs.readFile(config)).toEqual(changed);
+      expect((await fs.stat(join(directory, 'journal.json'))).isFile()).toBe(
+        true
+      );
+      expect(
+        (await fs.readdir(directory)).some((name) =>
+          name.startsWith('config.restore-')
+        )
+      ).toBe(false);
+    }
+  );
+  it('retains the journal if config changes after replacement', async () => {
+    await installMacLocalMcp(directory, [remote], env);
+    const rename = fs.rename;
+    vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      await rename(from, to);
+      if (to === config)
+        await fs.writeFile(config, '{"mcpServers":{"user":{}}}');
+    });
     await expect(restoreMacLocalMcp(directory)).rejects.toThrow('safely');
+    expect(await fs.readFile(config, 'utf8')).toBe(
+      '{"mcpServers":{"user":{}}}'
+    );
     expect((await fs.stat(join(directory, 'journal.json'))).isFile()).toBe(
       true
     );
-    expect(await fs.readFile(config, 'utf8')).toContain('light');
+  });
+  it('retries interrupted recovery and still restores tool permissions', async () => {
+    await fs.chmod(config, 0o644);
+    await installMacLocalMcp(directory, [remote], env);
+    const permissionConfig = join(
+      root,
+      'Library/Application Support/Claude-3p/local-agent-mode-sessions/1234abcd/87654321/cowork_account_settings.json'
+    );
+    await fs.mkdir(dirname(permissionConfig), { recursive: true, mode: 0o700 });
+    const permissions =
+      ' {"enabled_mcp_tools":{"local:glean-eval:search":false}}\n';
+    await fs.writeFile(permissionConfig, permissions, { mode: 0o644 });
+    await installMacToolPermissions(directory, {
+      'local:glean-eval:search': true,
+    });
+    const data = JSON.parse(await fs.readFile(config, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    data.preferences = { epitaxyPrefs: true };
+    await fs.writeFile(config, JSON.stringify(data));
+    const rename = fs.rename;
+    vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (to === permissionConfig) throw new Error('synthetic interruption');
+      await rename(from, to);
+    });
+    await expect(restoreMacLocalMcp(directory)).rejects.toThrow('safely');
+    const restored = await fs.readFile(config);
+    expect(JSON.parse(restored.toString())).toEqual({
+      preferences: { epitaxyPrefs: true },
+      mcpServers: { existing: { command: 'existing' } },
+    });
+    expect((await fs.stat(config)).mode & 0o777).toBe(0o644);
+    expect((await fs.stat(join(directory, 'permissions.json'))).isFile()).toBe(
+      true
+    );
+    vi.restoreAllMocks();
+    await restoreMacLocalMcp(directory);
+    expect(await fs.readFile(config)).toEqual(restored);
+    expect(await fs.readFile(permissionConfig, 'utf8')).toBe(permissions);
+    expect((await fs.stat(permissionConfig)).mode & 0o777).toBe(0o644);
+    await expect(fs.stat(directory)).rejects.toMatchObject({ code: 'ENOENT' });
+    await restoreMacLocalMcp(directory);
+  });
+  it('retries a failure before config replacement without leaving a staging collision', async () => {
+    await installMacLocalMcp(directory, [remote], env);
+    const before = await fs.readFile(config);
+    vi.spyOn(fs, 'rename').mockRejectedValueOnce(
+      new Error('synthetic interruption')
+    );
+    await expect(restoreMacLocalMcp(directory)).rejects.toThrow(
+      'synthetic interruption'
+    );
+    expect(await fs.readFile(config)).toEqual(before);
+    expect((await fs.stat(join(directory, 'journal.json'))).isFile()).toBe(
+      true
+    );
+    await restoreMacLocalMcp(directory);
+    expect(await fs.readFile(config)).toEqual(original);
+  });
+  it.each([
+    'config',
+    'journal',
+    'library',
+    'app support',
+    'app directory',
+    'session',
+  ])('refuses a symlinked %s during recovery', async (kind) => {
+    await installMacLocalMcp(directory, [remote], env);
+    const before = await fs.readFile(config);
+    const path =
+      kind === 'config'
+        ? config
+        : kind === 'journal'
+          ? join(directory, 'journal.json')
+          : kind === 'library'
+            ? join(root, 'Library')
+            : kind === 'app support'
+              ? join(root, 'Library/Application Support')
+              : kind === 'app directory'
+                ? dirname(config)
+                : directory;
+    await fs.rename(path, path + '.original');
+    await fs.symlink(path + '.original', path);
+    await expect(restoreMacLocalMcp(directory)).rejects.toThrow();
+    expect(await fs.readFile(config)).toEqual(before);
+    expect((await fs.stat(join(directory, 'journal.json'))).isFile()).toBe(
+      true
+    );
+  });
+  it.each([
+    'config mode',
+    'journal mode',
+    'parent mode',
+    'ownership',
+    'hardlink',
+  ])('refuses unsafe %s during recovery', async (kind) => {
+    await installMacLocalMcp(directory, [remote], env);
+    const before = await fs.readFile(config);
+    if (kind === 'config mode') await fs.chmod(config, 0o666);
+    else if (kind === 'journal mode')
+      await fs.chmod(join(directory, 'journal.json'), 0o644);
+    else if (kind === 'parent mode') await fs.chmod(dirname(config), 0o777);
+    else if (kind === 'ownership')
+      vi.spyOn(process, 'getuid').mockReturnValue(process.getuid!() + 1);
+    else await fs.link(config, join(root, 'linked-config'));
+    await expect(restoreMacLocalMcp(directory)).rejects.toThrow('safely');
+    expect(await fs.readFile(config)).toEqual(before);
+    expect((await fs.stat(join(directory, 'journal.json'))).isFile()).toBe(
+      true
+    );
   });
   it('restores a previously absent developer file to absent', async () => {
     await fs.unlink(config);
@@ -116,6 +362,18 @@ describe('Mac local MCP transaction', () => {
       await expect(preflightMacLocalMcp(servers, env)).rejects.toThrow();
     expect(await fs.readFile(config)).toEqual(original);
   });
+  it.each(['permissions', 'Permissions', 'PERMISSIONS'])(
+    'rejects the permission journal filename collision before installing %s',
+    async (label) => {
+      await expect(
+        installMacLocalMcp(directory, [{ ...remote, label }], env)
+      ).rejects.toThrow();
+      expect(await fs.readFile(config)).toEqual(original);
+      await expect(fs.stat(directory)).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+    }
+  );
   it('refuses a symlinked developer config', async () => {
     const other = join(root, 'other');
     await fs.rename(config, other);
@@ -128,11 +386,30 @@ describe('Mac local MCP transaction', () => {
   it('actually bridges HTTP initialize, tools/list and tools/call through local stdio', async () => {
     const upstream = new Server(
       { name: 'synthetic-upstream', version: '1' },
-      { capabilities: { tools: {} } }
+      { capabilities: { tools: { listChanged: true } } }
     );
-    upstream.setRequestHandler('tools/list', async () => ({
-      tools: [{ name: 'test_read', inputSchema: { type: 'object' } }],
-    }));
+    let inventoryRequests = 0;
+    let inventoryChanged = false;
+    upstream.setRequestHandler('tools/list', async () => {
+      inventoryRequests++;
+      return {
+        tools: [
+          {
+            name: inventoryChanged ? 'test_updated' : 'test_read',
+            description: 'x'.repeat(76000),
+            inputSchema: { type: 'object' },
+            annotations: { readOnlyHint: true },
+          },
+          ...Array.from({ length: 41 }, (_, index) => ({
+            name: `test_tool_${index}`,
+            inputSchema: { type: 'object' as const },
+          })),
+        ],
+        ttlMs: 60000,
+        cacheScope: 'private',
+        _meta: { fixture: 'preserved' },
+      };
+    });
     upstream.setRequestHandler('tools/call', async () => ({
       content: [{ type: 'text', text: 'read succeeded' }],
     }));
@@ -149,11 +426,6 @@ describe('Mac local MCP transaction', () => {
           return;
         }
         authenticated++;
-        // This fixture only needs request/response, not an unsolicited SSE stream.
-        if (request.method === 'GET') {
-          response.writeHead(405).end();
-          return;
-        }
         const headers = new Headers();
         for (const [name, value] of Object.entries(request.headers))
           if (value !== undefined)
@@ -172,7 +444,16 @@ describe('Mac local MCP transaction', () => {
           })
         );
         response.writeHead(result.status, Object.fromEntries(result.headers));
-        response.end(Buffer.from(await result.arrayBuffer()));
+        if (result.body) {
+          const reader = result.body.getReader();
+          response.on('close', () => void reader.cancel());
+          for (;;) {
+            const chunk = await reader.read();
+            if (chunk.done) break;
+            response.write(Buffer.from(chunk.value));
+          }
+        }
+        response.end();
       })().catch(() => response.writeHead(500).end());
     });
     await new Promise<void>((resolve) => http.listen(0, '127.0.0.1', resolve));
@@ -191,11 +472,29 @@ describe('Mac local MCP transaction', () => {
         ...(await entry()),
         connectTimeoutMs: 5000,
       });
-      expect((await client.listTools()).tools[0]?.name).toBe('test_read');
+      expect(inventoryRequests).toBe(1);
+      const listed = await client.listTools();
+      expect(listed.tools).toHaveLength(42);
+      expect(listed.tools[0]).toMatchObject({
+        name: 'test_read',
+        annotations: { readOnlyHint: true },
+      });
+      expect(listed._meta).toEqual({ fixture: 'preserved' });
+      expect(listed).not.toHaveProperty('ttlMs');
+      expect(listed).not.toHaveProperty('cacheScope');
+      expect(inventoryRequests).toBe(1);
       expect(
         await client.callTool({ name: 'test_read', arguments: {} })
       ).toMatchObject({ content: [{ text: 'read succeeded' }] });
       expect(authenticated).toBeGreaterThan(2);
+      inventoryChanged = true;
+      await upstream.notification({
+        method: 'notifications/tools/list_changed',
+      });
+      await expect.poll(() => inventoryRequests).toBe(2);
+      await expect
+        .poll(async () => (await client!.listTools()).tools[0]?.name)
+        .toBe('test_updated');
     } finally {
       if (client) await closeMCPClient(client);
       await upstream.close();

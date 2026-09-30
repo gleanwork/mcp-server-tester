@@ -339,6 +339,47 @@ describe('blocked plugin MCP servers', () => {
     ).toEqual([]);
   });
 
+  it.each(['http', 'stdio'] as const)(
+    'rejects case-folded blocked labels in the full %s declaration set',
+    (transport) => {
+      const declaredServers: MCPConfig[] = [
+        { transport: 'http', serverUrl: 'https://e.test/eval' },
+        { transport: 'stdio', command: '/bin/tool' },
+      ];
+      const blockedPlugin = { ...plugin, blockMcpServers: ['SERVER-2'] };
+      const options = {
+        servers: declaredServers
+          .map((entry, index) => ({ ...entry, label: `server-${index + 1}` }))
+          .filter((entry) => entry.transport === transport),
+        declaredServers,
+        plugins: [blockedPlugin],
+      };
+      expect(() => coworkManagedPluginSettings(options)).toThrow(
+        expect.objectContaining({
+          code: 'mcp_server_invalid',
+          plugin: 'SERVER-2',
+        })
+      );
+      expect(
+        coworkMcpSettingsMatch(
+          { allowManagedMcpServersOnly: true, managedMcpServers: [] },
+          options
+        )
+      ).toBe(false);
+      expect(() =>
+        coworkManagedPluginSettings({
+          servers: [{ ...declaredServers[1]!, label: 'Fake_Plugin' }],
+          plugins: [plugin],
+        })
+      ).toThrow(
+        expect.objectContaining({
+          code: 'mcp_server_invalid',
+          plugin: 'fake_plugin',
+        })
+      );
+    }
+  );
+
   it('rejects duplicate, invalid, or overridden-and-blocked names', () => {
     for (const bad of [
       { ...plugin, blockMcpServers: ['a', 'a'] },

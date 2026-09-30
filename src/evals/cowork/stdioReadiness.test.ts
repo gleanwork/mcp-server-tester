@@ -130,6 +130,53 @@ describe('Cowork stdio eval server readiness', () => {
     ]);
   }, 20_000);
 
+  it.each([1, 0])(
+    'checks plain stdio with declared env only and %i tools',
+    async (toolCount) => {
+      const config: MCPConfig = {
+        transport: 'stdio',
+        command: process.execPath,
+        args: [
+          '--input-type=module',
+          '-e',
+          `
+            import { McpServer } from '@modelcontextprotocol/server';
+            import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
+            if (process.env.FAKE_PARENT_SECRET !== undefined ||
+                process.env.RUNTIME_SECRET !== undefined ||
+                process.env.DECLARED !== 'only-this') throw new Error('env mismatch');
+            const server = new McpServer({ name: 'plain', version: '1.0.0' });
+            if (process.env.TOOL_COUNT === '1')
+              server.registerTool('help', {}, async () => ({ content: [] }));
+            await server.connect(new StdioServerTransport());
+          `,
+        ],
+        env: { DECLARED: 'only-this', TOOL_COUNT: String(toolCount) },
+      };
+      const readiness = verifyCoworkMcpServers(
+        [config],
+        toolCount === 1 ? { RUNTIME_SECRET: 'runtime-secret' } : {}
+      );
+      if (toolCount === 1)
+        await expect(readiness).resolves.toMatchObject([
+          { label: 'server-1', status: 'connected', toolCount: 1 },
+        ]);
+      else
+        await expect(readiness).rejects.toMatchObject({
+          name: 'CoworkMcpReadinessError',
+          servers: [
+            {
+              label: 'server-1',
+              status: 'failed',
+              toolCount: 0,
+              error: 'too few tools (0 < 1)',
+            },
+          ],
+        });
+    },
+    20_000
+  );
+
   it('keeps unnamed private paths aligned with the global server index', async () => {
     const configs: MCPConfig[] = [
       {

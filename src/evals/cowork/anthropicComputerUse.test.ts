@@ -9,34 +9,39 @@ import {
   runAnthropicComputerUseSubmission,
 } from './anthropicComputerUse.js';
 
-it('passes ChatGPT target selection to the shared packaged driver separately from the planner', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'cu-chatgpt-'));
-  onTestFinished(() => rm(directory, { recursive: true, force: true }));
-  await mkdir(join(directory, 'scripts'));
-  await writeFile(join(directory, 'package.json'), '{"type":"commonjs"}');
-  await writeFile(
-    join(directory, 'scripts/cowork_computer_use.py'),
-    `
+it.each(['chatgpt', 'cowork'] as const)(
+  'passes %s target selection to the shared packaged driver separately from the planner',
+  async (application) => {
+    const targetModel =
+      application === 'cowork' ? 'claude-opus-4-6' : 'gpt-test';
+    const directory = await mkdtemp(join(tmpdir(), 'cu-chatgpt-'));
+    onTestFinished(() => rm(directory, { recursive: true, force: true }));
+    await mkdir(join(directory, 'scripts'));
+    await writeFile(join(directory, 'package.json'), '{"type":"commonjs"}');
+    await writeFile(
+      join(directory, 'scripts/cowork_computer_use.py'),
+      `
     const args = process.argv;
-    for (const [key,value] of [['--app','chatgpt'],['--target-model','gpt-test'],['--reasoning-effort','medium']]) {
+    for (const [key,value] of [['--app','${application}'],['--target-model','${targetModel}'],['--reasoning-effort','medium']]) {
       if (args[args.indexOf(key)+1] !== value) process.exit(1);
     }
     console.log(JSON.stringify({status:'submitted',action_count:2,submission_action:{action:'key',text:'enter'},model:process.env.MST_COWORK_CUA_MODEL}));
   `
-  );
-  const result = await runAnthropicComputerUseSubmission('query', {
-    deadlineAt: Date.now() + 10000,
-    application: 'chatgpt',
-    targetModel: 'gpt-test',
-    reasoningEffort: 'medium',
-    model: 'claude-sonnet-4-6',
-    env: {
-      MST_COWORK_DRIVER_ROOT: directory,
-      MST_COWORK_PYTHON: process.execPath,
-    },
-  });
-  expect(result.model).toBe('claude-sonnet-4-6');
-});
+    );
+    const result = await runAnthropicComputerUseSubmission('query', {
+      deadlineAt: Date.now() + 10000,
+      application,
+      targetModel,
+      reasoningEffort: 'medium',
+      model: 'claude-sonnet-4-6',
+      env: {
+        MST_COWORK_DRIVER_ROOT: directory,
+        MST_COWORK_PYTHON: process.execPath,
+      },
+    });
+    expect(result.model).toBe('claude-sonnet-4-6');
+  }
+);
 
 it('passes the session bundle path over a caller environment override', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'cu-app-'));

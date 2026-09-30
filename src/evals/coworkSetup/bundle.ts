@@ -167,7 +167,7 @@ export function createCoworkBundlePlan(options: BundlePlanOptions) {
   const paths = { dataRoot: join(options.runtimeDirectory, 'stdio') };
   const privateFiles: Array<{ name: string; content: string }> = [];
   const stdioDirectories: string[] = [];
-  const managedStdio = stdio.map((server) => {
+  const launches = stdio.map((server) => {
     const launch = resolveHostStdioServer(server, paths);
     const files = hostStdioFileContents(server, paths, tokens[server.label]);
     const names = Object.keys(files).map((name) => name.toLowerCase());
@@ -181,27 +181,16 @@ export function createCoworkBundlePlan(options: BundlePlanOptions) {
         throw new Error(ERROR_MESSAGE);
       privateFiles.push({ name: `stdio/${server.label}/${name}`, content });
     }
-    return {
-      name: server.label,
-      transport: 'stdio' as const,
-      command: launch.command,
-      args: launch.args,
-      env: launch.env,
-      ...(setup.approveWriteTools
-        ? { toolPolicy: { '*': 'allow' as const } }
-        : {}),
-    };
+    return launch;
   });
-  const settings = {
-    ...plan.settings,
-    managedMcpServers: [...plan.settings.managedMcpServers, ...managedStdio],
-    allowedMcpServers: [
-      ...plan.settings.allowedMcpServers,
-      ...managedStdio.map((server) => ({ serverName: server.name })),
-    ],
-  };
+  // Stdio is launched only through localDeveloperMCP, never managed settings.
+  // Keep its resolved launch bound even though it is no longer in that file.
+  const settings = plan.settings;
   const settingsBytes = Buffer.from(JSON.stringify(settings, null, 2) + '\n');
-  if (settingsBytes.length > COWORK_SETTINGS_MAX_BYTES)
+  if (
+    settingsBytes.length + Buffer.byteLength(JSON.stringify(launches)) >
+    COWORK_SETTINGS_MAX_BYTES
+  )
     throw new Error(ERROR_MESSAGE);
   return {
     servers,
@@ -210,6 +199,7 @@ export function createCoworkBundlePlan(options: BundlePlanOptions) {
     privateFiles,
     stdioDirectories,
     serverCount: declarations.length,
+    serverLabels: labels,
     settings,
     settingsBytes,
   };

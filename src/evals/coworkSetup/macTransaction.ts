@@ -684,7 +684,7 @@ async function validateInstall(options: InstallOptions) {
   if (typeof key !== 'string' || !/^[A-Za-z0-9._~+/-]+=*$/.test(key)) fail();
   const inference = jsonBytes({ ANTHROPIC_API_KEY: key });
   if (inference.length > 64 * 1024) fail();
-  const { plan, settings, privateFiles, stdioDirectories } =
+  const { plan, settings, privateFiles, stdioDirectories, serverLabels } =
     createCoworkBundlePlan({
       manifest: options.manifest,
       arm: options.arm,
@@ -695,9 +695,7 @@ async function validateInstall(options: InstallOptions) {
   // Include every profile-only field before a session takes ownership or stops Desktop.
   profileBytes(settings, { directory, model, marketplaces, blocked });
   // A blocked plugin server must never shadow an eval server (any case).
-  const labels = new Set(
-    settings.managedMcpServers.map((s) => s.name.toLowerCase())
-  );
+  const labels = new Set(serverLabels);
   if (blocked.some((entry) => labels.has(entry.name.toLowerCase()))) fail();
   // macOS volumes are commonly case-insensitive. Reject helper/credential
   // collisions before a session stops the app, not during exclusive writes.

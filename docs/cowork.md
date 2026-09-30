@@ -80,8 +80,8 @@ can take precedence over a profile's MCP list. On macOS, MST now exposes declare
 servers through Claude's supported local Developer MCP surface instead:
 
 - HTTP declarations use a local stdio-to-HTTP bridge with the declared headers.
-- Plain stdio declarations run the caller's command, including vendor dry-run
-  proxies. Host-resolved plugin placeholders remain Linux-only.
+- Plain and private-file-backed stdio declarations run the caller's command,
+  including vendor dry-run proxies. Plugin-root placeholders remain Linux-only.
 - The temporary `claude_desktop_config.json` contains launcher paths, not tokens.
   Runtime credentials stay in private per-session files. Existing developer
   servers are replaced for isolation, then restored with the original file bytes.
@@ -114,21 +114,38 @@ inference model; `host.options.computerUseModel` independently selects the plann
 The inference provider is `anthropic`. On macOS the desktop driver selector is
 `host.options.computerUseProvider: "anthropic-computer-use"`.
 
-MST applies a fixed inference model list with discovery disabled. Native telemetry
-must report the requested exact model ID; a mismatch or missing model evidence
-fails the case. Omitting `host.model` preserves the existing application default.
+MST applies a fixed inference model list with discovery disabled. On macOS,
+managed settings can override that profile. The submission driver therefore
+selects and verifies the requested model in Cowork's visible model picker before
+entering the prompt. If the exact model is unavailable or cannot be confirmed,
+the case stops without submission; it never substitutes another model. Native
+telemetry must still report the requested exact model ID; a mismatch or missing
+model evidence fails the case. Omitting `host.model` preserves the existing
+application default.
 Configure `servers` with HTTP endpoints and literal or environment-backed bearer
-credentials, or plain stdio commands with their runtime environment. Every macOS
-batch owns one setup transaction, including an empty server set, which exposes no
-user-added MCP servers. `inheritEnv: false` limits a stdio command to its declared
-`env`; otherwise it receives the caller's runtime environment plus its declared
-values. Credentials are not inferred from arbitrary environment variable names.
+credentials, or stdio commands with declared `env` values. Every macOS batch owns
+one setup transaction, including an empty server set, which exposes no user-added
+MCP servers. Stdio receives only its declared `env`; omitted `inheritEnv` behaves
+like `false`, and `true` is rejected. Credentials are not inferred from arbitrary
+environment variable names.
 
 `coworkSetup.approveWriteTools` defaults to false. Mac Computer Use approves only
-clearly read-only tools by default; explicit opt-in permits tool writes for the
-current task, never persistent account-wide approval. This local path does not
-claim to install a managed wildcard policy. Keep vendor servers behind the
-caller's dry-run proxy. Delayed native tool requests trigger at most three further
+clearly read-only tools by default. On pinned Claude 1.52386.6, explicit opt-in
+stages local connector defaults for the declared tool inventory before launch,
+using the same enabled and content-fingerprint keys as the connector picker.
+Both bare `server:tool` and `local:server:tool` names are staged because the
+pinned renderer switches naming paths with `cowork_snapshot_sync`. Mac write
+opt-in disables the approval-click fallback: staging must work without clicking
+a pending approval. Managed wildcard policies do not cover these local
+Developer MCP connections.
+The existing third-party account-settings file must be unambiguous. The private
+session journal restores the original permission entries during cleanup and
+recovery; unrelated settings edits are preserved, and conflicting edits fail
+closed. MCP config cleanup also preserves unrelated preference changes, such as
+Claude's `epitaxyPrefs`, while refusing conflicting MCP edits. This does not grant
+permanent permissions or change tool annotations.
+Organization restrictions can still require approval. Keep vendor servers behind
+the caller's dry-run proxy. Delayed native tool requests trigger at most three further
 approval inspections within the original per-case action budget; prompts are
 never resubmitted. Follow-up usage is recorded under
 `hostTelemetry.computerUse.hitlFollowups`.
@@ -428,7 +445,8 @@ same Cowork behavior as `false`.
 Host-resolved entries can also set `url`, `auth.accessTokenEnv`, `files`, and
 `minTools` (default 1). The readiness client accepts `connectTimeoutMs`,
 `requestTimeoutMs`, `callTimeoutMs`, and `quiet`; these are not Desktop settings.
-Unknown keys fail. Supported placeholders are:
+Unknown keys fail; Cowork does not currently accept the general MCP client's
+`protocol` or `probe` options. Supported placeholders are:
 
 - `${url}`: the declared `url`; allowed in command, args, env, cwd, and files.
 - `${dataDir}`: the private per-server directory; allowed in command, args,
@@ -462,13 +480,15 @@ described in [chatgpt-desktop.md](chatgpt-desktop.md#linux-runtime-contract).
 MST's transport does not make a server read-only. Native-proxy write
 interception is a Scio/catalog policy responsibility, not a stdio guarantee.
 
-### macOS managed-settings contract
+### macOS setup contract
 
-MST validates the full server set before changing the app or profile. The Mac
-setup transaction stages plain stdio, private file-backed native proxies, and
-HTTP entries in one managed profile. Stdio directories are created with mode
-0700 and private JSON files with mode 0600. Credentials are resolved from the
-supplied runtime environment, not embedded in the manifest.
+MST validates the full server set before changing the app or profile. HTTP,
+plain stdio, and private-file-backed proxies all use the local Developer MCP
+surface, not the managed profile's MCP list. Even an empty manifest temporarily
+replaces the user's local MCP list. The profile transaction owns inference
+settings and private stdio files: directories use mode 0700 and JSON files use
+mode 0600. Credentials are resolved from the supplied runtime environment, not
+embedded in the manifest or public app configuration.
 
 Setup returns transaction-owned `stdioPaths`, which the shared readiness check
 uses after installation. Do not supply Linux-only `pluginRoots` or
@@ -476,11 +496,12 @@ uses after installation. Do not supply Linux-only `pluginRoots` or
 installing settings or starting the app does not prove Desktop adopted the MCP
 inventory or tool policy.
 
-Cleanup and explicit recovery validate the staged file inventory, ownership,
-permissions, and content hashes before removal. They remove only recorded
-files and empty directories, not an arbitrary tree. Unexpected or changed
-state fails closed and retains recovery state. Do not delete locks or modify
-staged credential files to force cleanup.
+Cleanup restores the original local MCP configuration before removing private
+stdio files. The private-file transaction validates inventory, ownership,
+permissions, and content hashes during cleanup and explicit recovery; it removes
+only recorded files and empty directories. Unexpected or changed state fails
+closed and retains recovery state. Do not delete locks or modify staged
+credential files to force cleanup.
 
 ### Linux managed-settings contract
 

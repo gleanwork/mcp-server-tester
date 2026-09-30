@@ -3,6 +3,7 @@ import * as os from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EvalManifest } from '../evalManifest.js';
+import { hostStdioServers, resolveHostStdioServer } from '../hostPlugins.js';
 import {
   COWORK_SETTINGS_MAX_BYTES as LIMIT,
   createCoworkBundlePlan,
@@ -15,6 +16,11 @@ import {
 } from './macApp.js';
 import type * as MacApp from './macApp.js';
 import { prepareMacCoworkSession } from './macSession.js';
+import { configureMacToolDefaults } from './macToolPermissions.js';
+
+vi.mock('./macToolPermissions.js', () => ({
+  configureMacToolDefaults: vi.fn(),
+}));
 
 vi.mock('./macController.js', () => ({ getMacCoworkController: vi.fn() }));
 vi.mock('./macApp.js', async (original) => ({
@@ -55,12 +61,15 @@ const ORIGINAL =
 const ERROR = 'Unable to prepare the Mac Cowork session safely.';
 const CLEANUP_ERROR =
   'Unable to restore the Mac Cowork session safely. Recovery state retained.';
+const PERSONAL =
+  ' { "mcpServers": {"personal": {"command": "never-run"}}, "theme": "dark" }\n';
 const env = {
   ANTHROPIC_API_KEY: 'synthetic-inference',
   MCP_KEY: 'synthetic-mcp',
 };
 let root: string;
 let profileDirectory: string;
+let localConfig: string;
 let lease: string;
 let lock: string;
 let running: boolean;
@@ -108,6 +117,7 @@ async function stage(): Promise<string> {
   return (await json(join(lease, 'session.json'))).stagingDirectory as string;
 }
 async function clean(original = ORIGINAL) {
+  expect(await fs.readFile(localConfig, 'utf8')).toBe(PERSONAL);
   expect(await fs.readFile(join(profileDirectory, '_meta.json'), 'utf8')).toBe(
     original
   );
@@ -121,6 +131,7 @@ async function clean(original = ORIGINAL) {
   ).toEqual([]);
 }
 beforeEach(async () => {
+  vi.mocked(configureMacToolDefaults).mockReset();
   vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin');
   root = await fs.realpath(
     await fs.mkdtemp(join(actualOs.tmpdir(), 'mst-mac-session-test-'))
@@ -133,6 +144,8 @@ beforeEach(async () => {
   lease = join(profileDirectory, '.mst-session-lock');
   lock = join(profileDirectory, '.mst-setup-lock');
   await fs.mkdir(profileDirectory, { mode: 0o700, recursive: true });
+  localConfig = join(profileDirectory, '../claude_desktop_config.json');
+  await fs.writeFile(localConfig, PERSONAL, { mode: 0o600 });
   await fs.writeFile(join(profileDirectory, '_meta.json'), ORIGINAL, {
     mode: 0o600,
   });
@@ -210,7 +223,11 @@ function sizedNativeManifest(bytes: number): EvalManifest {
     manifest: input,
     runtimeDirectory: join(root, 'unused'),
   });
-  let remaining = bytes - settingsBytes.length;
+  const launches = hostStdioServers(servers).map((server) =>
+    resolveHostStdioServer(server, {})
+  );
+  let remaining =
+    bytes - settingsBytes.length - Buffer.byteLength(JSON.stringify(launches));
   for (const server of servers) {
     server.args = server.args.map((arg) => {
       const count = Math.min(4095, remaining);
@@ -290,7 +307,7 @@ describe('automatic Mac Cowork session (no native execution)', () => {
     expect(fs.rename).not.toHaveBeenCalled();
     await expectNoSessionMutation(original);
   });
-  it('rejects oversized managed settings before controller or lease acquisition', async () => {
+  it('rejects oversized aggregate stdio launches before controller or lease acquisition', async () => {
     const input = sizedNativeManifest(LIMIT + 1);
     const mkdir = vi.spyOn(fs, 'mkdir');
     const writeFile = vi.spyOn(fs, 'writeFile');
@@ -309,39 +326,93 @@ describe('automatic Mac Cowork session (no native execution)', () => {
         blockMcpServers: ['PluginNative'],
       },
     ];
-    const small = sizedNativeManifest(10_000);
-    const session = await prepare({ manifest: small, model, plugins });
+    const input = { ...manifest(), servers: [] };
+    const session = await prepare({ manifest: input, model, plugins });
     const meta = await json(join(profileDirectory, '_meta.json'));
     const profile = await fs.readFile(
       join(profileDirectory, `${String(meta.appliedId)}.json`)
     );
-    const overhead = profile.length - 10_000;
+    const overhead = profile.length - model.length;
     expect(overhead).toBeGreaterThan(0);
     await session.dispose();
     await clean();
     vi.clearAllMocks();
     events = [];
-    const input = sizedNativeManifest(LIMIT - overhead + 1);
     const mkdir = vi.spyOn(fs, 'mkdir');
     const writeFile = vi.spyOn(fs, 'writeFile');
-    await expect(prepare({ manifest: input, model, plugins })).rejects.toThrow(
-      ERROR
-    );
+    await expect(
+      prepare({
+        manifest: input,
+        model: 'x'.repeat(LIMIT - overhead + 1),
+        plugins,
+      })
+    ).rejects.toThrow(ERROR);
     expect(mkdir).not.toHaveBeenCalled();
     expect(writeFile).not.toHaveBeenCalled();
     await expectNoSessionMutation();
   });
 
-  it('returns session-owned stdio paths and removes private files on disposal', async () => {
-    const session = await prepare({ manifest: nativeManifest() });
-    const directory = await stage();
-    expect(session.stdioPaths).toEqual({ dataRoot: join(directory, 'stdio') });
-    expect(await json(join(directory, 'stdio/Native/headers.json'))).toEqual({
-      Authorization: `Bearer ${env.MCP_KEY}`,
-    });
-    await session.dispose();
-    await clean();
-  });
+  it.each(['empty', 'plain', 'private'])(
+    'isolates personal MCP for %s sessions and restores exact bytes',
+    async (kind) => {
+      const input = nativeManifest();
+      if (kind === 'empty') input.servers = [];
+      if (kind === 'plain')
+        input.servers = [
+          {
+            transport: 'stdio',
+            command: '/synthetic/plain',
+            env: { ONLY: 'declared' },
+          },
+        ];
+      const session = await prepare({ manifest: input });
+      const directory = await stage();
+      expect(session.stdioPaths).toEqual({
+        dataRoot: join(directory, 'stdio'),
+      });
+      const local = await json(localConfig);
+      expect(local.theme).toBe('dark');
+      const entries = local.mcpServers as Record<
+        string,
+        { command: string; args: string[] }
+      >;
+      const label = kind === 'plain' ? 'server-1' : 'Native';
+      expect(Object.keys(entries)).toEqual(kind === 'empty' ? [] : [label]);
+      if (kind !== 'empty') {
+        expect(entries[label]).toEqual({
+          command: process.execPath,
+          args: [
+            join(`${directory}-mcp`, `${label}.cjs`),
+            join(`${directory}-mcp`, `${label}.json`),
+          ],
+        });
+        expect(await json(entries[label]!.args[1]!)).toEqual({
+          command: kind === 'plain' ? '/synthetic/plain' : '/synthetic/proxy',
+          args:
+            kind === 'plain'
+              ? []
+              : [
+                  'https://native.example.test/mcp',
+                  join(directory, 'stdio/Native/headers.json'),
+                ],
+          env: kind === 'plain' ? { ONLY: 'declared' } : {},
+        });
+        expect(
+          await fs.readFile(entries[label]!.args[0]!, 'utf8')
+        ).not.toContain(env.MCP_KEY);
+      }
+      expect(await json(join(directory, 'managed-mcp.json'))).toMatchObject({
+        managedMcpServers: [],
+        allowedMcpServers: [],
+      });
+      if (kind === 'private')
+        expect(
+          await json(join(directory, 'stdio/Native/headers.json'))
+        ).toEqual({ Authorization: `Bearer ${env.MCP_KEY}` });
+      await session.dispose();
+      await clean();
+    }
+  );
 
   it('rejects a missing stdio credential before controller or lease acquisition', async () => {
     vi.stubEnv('MCP_KEY', env.MCP_KEY);
@@ -361,6 +432,7 @@ describe('automatic Mac Cowork session (no native execution)', () => {
     await expect(session.dispose()).rejects.toThrow(CLEANUP_ERROR);
     expect(events).toEqual(['stop', 'start', 'stop']);
     expect(await fs.readFile(file, 'utf8')).toBe('changed');
+    expect(await fs.readFile(localConfig, 'utf8')).toBe(PERSONAL);
     await fs.access(join(lock, 'journal.json'));
     await fs.access(join(lease, 'session.json'));
   });
@@ -522,6 +594,8 @@ describe('automatic Mac Cowork session (no native execution)', () => {
     'missing-env',
     'invalid-token',
     'invalid-server',
+    'unresolved-launch',
+    'oversize-private-file',
     'oversize-header',
     'reserved-label',
     'reserved-label-case',
@@ -547,6 +621,18 @@ describe('automatic Mac Cowork session (no native execution)', () => {
       explicitEnv = { ...env, ANTHROPIC_API_KEY: 'synthetic invalid' };
     if (kind === 'invalid-server')
       input.servers = [{ transport: 'stdio', command: '' }];
+    if (kind === 'unresolved-launch')
+      input.servers = [
+        { transport: 'stdio', command: '${pluginRoot:missing}/proxy' },
+      ];
+    if (kind === 'oversize-private-file')
+      input.servers = [
+        {
+          transport: 'stdio',
+          command: '/synthetic/proxy',
+          files: { 'large.json': 'x'.repeat(65536) },
+        },
+      ];
     if (kind === 'oversize-header')
       input.servers = [
         {
@@ -572,6 +658,58 @@ describe('automatic Mac Cowork session (no native execution)', () => {
     expect(events).toEqual([]);
     await expect(fs.lstat(lease)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(fs.lstat(lock)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+  it.each(['Search', 'Native'])(
+    'rejects a case-insensitive blocked %s declaration before transport splitting',
+    async (label) => {
+      const input = manifest();
+      input.servers!.push({
+        transport: 'stdio',
+        label: 'Native',
+        command: '/synthetic/plain',
+      });
+      await expect(
+        prepare({
+          manifest: input,
+          plugins: [
+            {
+              name: 'workflows',
+              marketplace: {
+                source: 'example/workflows',
+                ref: 'e'.repeat(40),
+              },
+              blockMcpServers: [label.toLowerCase()],
+            },
+          ],
+        })
+      ).rejects.toThrow(ERROR);
+      expect(getMacCoworkController).not.toHaveBeenCalled();
+      expect(events).toEqual([]);
+      await expectNoSessionMutation();
+    }
+  );
+  it.each([false, true])(
+    'stages default tool permissions only on opt-in (%s)',
+    async (approved) => {
+      const input = nativeManifest();
+      input.coworkSetup = { approveWriteTools: approved };
+      const session = await prepare({ manifest: input });
+      if (approved)
+        expect(configureMacToolDefaults).toHaveBeenCalledWith(
+          `${await stage()}-mcp`,
+          ['Native']
+        );
+      else expect(configureMacToolDefaults).not.toHaveBeenCalled();
+      await session.dispose();
+      await clean();
+    }
+  );
+  it('restores setup without starting Claude if tool-default staging fails', async () => {
+    vi.mocked(configureMacToolDefaults).mockRejectedValueOnce(
+      new Error('synthetic failure')
+    );
+    await expect(prepare()).rejects.toThrow(ERROR);
+    await clean();
   });
   it.each(['.mst-session-lock', '.mst-setup-lock'])(
     'rejects existing %s without app actions',
@@ -604,17 +742,20 @@ describe('automatic Mac Cowork session (no native execution)', () => {
       if (result.status === 'fulfilled') await result.value.dispose();
     await clean();
   });
-  it('rolls back a failed launch even if it partially started the app', async () => {
-    controller.start.mockImplementationOnce(async () => {
-      events.push('failed-start');
-      running = true;
-      throw new Error(env.MCP_KEY);
-    });
-    await expect(prepare()).rejects.toThrow(ERROR);
-    expect(events).toEqual(['stop', 'failed-start', 'stop', 'start']);
-    expect(running).toBe(true);
-    await clean();
-  });
+  it.each([manifest(), nativeManifest(), { ...manifest(), servers: [] }])(
+    'rolls back a failed launch and restores personal MCP (#%#)',
+    async (input) => {
+      controller.start.mockImplementationOnce(async () => {
+        events.push('failed-start');
+        running = true;
+        throw new Error(env.MCP_KEY);
+      });
+      await expect(prepare({ manifest: input })).rejects.toThrow(ERROR);
+      expect(events).toEqual(['stop', 'failed-start', 'stop', 'start']);
+      expect(running).toBe(true);
+      await clean();
+    }
+  );
   it('self-rolls back a partial install and restores the prior running state', async () => {
     vi.mocked(fs.rename).mockImplementation(async (from, to) => {
       if (to === join(profileDirectory, '_meta.json'))

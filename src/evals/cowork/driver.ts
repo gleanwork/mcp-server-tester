@@ -5,6 +5,8 @@ export interface CoworkDriverOptions {
   deadlineAt: number;
   maxActions?: number;
   model?: string;
+  /** Requested task model, separate from the Computer Use planner model. */
+  targetModel?: string;
   env?: NodeJS.ProcessEnv;
   /** Exact macOS bundle selected by the session; never resolve by app name. */
   appPath?: string;

@@ -10,6 +10,7 @@ import cowork_computer_use as driver
 
 FILL = {'tool': 'fill_query', 'input': {}}
 ENTER = {'action': 'key', 'text': 'Return'}
+CONFIRM_MODEL = {'tool': 'confirm_model', 'input': {'model': 'claude-opus-4-6'}}
 
 
 class DriverTests(unittest.TestCase):
@@ -33,7 +34,9 @@ class DriverTests(unittest.TestCase):
         def execute(action):
             if entry_error and action.get('action') == 'type':
                 raise RuntimeError('uncertain keyboard failure')
-            return 'done', action.get('action') == 'key'
+            if action.get('action') == 'screenshot':
+                return {'type': 'image'}, False
+            return 'done', action.get('action') == 'key' and str(action.get('text', '')).lower() in {'enter', 'return'}
 
         with patch.dict(sys.modules, {'anthropic': api}), patch.dict(driver.os.environ, {'ANTHROPIC_API_KEY': 'test-only'}), patch.object(driver.subprocess, 'run') as launched, patch.object(driver, 'check_chatgpt_permissions'), patch.object(driver.time, 'sleep'), patch.object(driver, 'screenshot', return_value={'type': 'image'}), patch.object(driver, 'execute_action', side_effect=execute) as performed:
             try:
@@ -53,12 +56,15 @@ class DriverTests(unittest.TestCase):
             self.run_actions([], mode='hitl')
         self.assertIn('Never approve writes or tools with unknown effects', self.planner_request['system'])
         self.assertIn('Never grant persistent access', self.planner_request['system'])
+        self.assertIn('Prefer current-task approval', self.planner_request['system'])
+        self.assertIn('covers other tools, or could include ineligible writes, use Allow once', self.planner_request['system'])
 
     def test_cowork_write_opt_in_does_not_allow_persistent_approval(self):
         with patch.dict(driver.os.environ, {'MST_COWORK_APPROVE_WRITE_TOOLS': '1'}):
             self.run_actions([], mode='hitl')
         self.assertIn('explicitly permits tool writes', self.planner_request['system'])
         self.assertIn('Never grant persistent access', self.planner_request['system'])
+        self.assertIn('limited to this task and the eligible named tool or tools', self.planner_request['system'])
 
     def test_cowork_focuses_exact_pinned_bundle_for_submission_and_hitl(self):
         path = '/private/tmp/mst-test/unpacked/Claude.app'
@@ -67,6 +73,85 @@ class DriverTests(unittest.TestCase):
                 self.run_actions([FILL, ENTER], mode=mode)
                 self.assertEqual(self.launches[0].args[0], ['open', '-a', path])
                 self.assertTrue(self.launches[0].kwargs['check'])
+
+    def test_cowork_target_model_blocks_fill_without_confirmation(self):
+        result, count = self.run_actions([FILL, ENTER], budget=2, target_model='claude-opus-4-6')
+        self.assertIsInstance(result, str)
+        self.assertEqual(count, 0)
+        self.assertEqual(self.error_telemetry['refused_action_count'], 2)
+
+    def test_cowork_rejects_wrong_or_generic_model_confirmation(self):
+        for model in ('claude-opus-4-8', 'Opus', 'auto'):
+            with self.subTest(model=model):
+                result, count = self.run_actions([
+                    {'tool': 'confirm_model', 'input': {'model': model}}, FILL, ENTER,
+                ], budget=3, target_model='claude-opus-4-6')
+                self.assertIsInstance(result, str)
+                self.assertEqual(count, 0)
+                tool = next(tool for tool in self.requested_tools if tool['name'] == 'confirm_model')
+                self.assertEqual(tool['input_schema']['properties']['model']['enum'], ['claude-opus-4-6'])
+                self.assertEqual(self.error_telemetry['refused_action_count'], 3)
+
+    def test_cowork_initial_screenshot_can_ground_confirmation(self):
+        result, count = self.run_actions([CONFIRM_MODEL, FILL, ENTER], budget=3,
+                                        target_model='claude-opus-4-6')
+        self.assertEqual(result['status'], 'submitted')
+        self.assertEqual(count, 2)
+        self.assertEqual(result['action_count'], 3)
+        self.assertEqual(result['telemetry']['attempted_action_count'], 2)
+        self.assertEqual(result['telemetry']['executed_action_count'], 2)
+        instruction = self.planner_request['messages'][0]['content'][0]['text']
+        self.assertIn("EXACT model 'claude-opus-4-6'", instruction)
+        self.assertIn('Do not open a browser, terminal', instruction)
+        self.assertIn('native exact-model verification', instruction)
+
+    def test_cowork_fresh_observed_confirmation_submits_unchanged_query_once(self):
+        query = '  Original “query”\n\n[MCP_SERVER_TESTER_marker]\n'
+        result, count = self.run_actions([
+            {'action': 'left_click', 'coordinate': [5, 5]}, {'action': 'screenshot'},
+        ], next_plan=[CONFIRM_MODEL, FILL, ENTER, ENTER], budget=5,
+            target_model='claude-opus-4-6', query=query)
+        self.assertEqual(result['status'], 'submitted')
+        self.assertEqual(count, 4)
+        self.assertEqual(self.executed_actions[-2:], [{'action': 'type', 'text': query}, ENTER])
+        self.assertEqual(result['telemetry']['executed_action_count'], 4)
+        self.assertEqual(result['telemetry']['planner_response_count'], 2)
+
+    def test_cowork_unseen_screenshot_cannot_ground_same_plan_confirmation(self):
+        result, count = self.run_actions([
+            {'action': 'left_click', 'coordinate': [5, 5]}, {'action': 'screenshot'},
+            CONFIRM_MODEL, FILL, ENTER,
+        ], budget=5, target_model='claude-opus-4-6')
+        self.assertIsInstance(result, str)
+        self.assertEqual(count, 2)
+        self.assertEqual(self.error_telemetry['refused_action_count'], 3)
+
+    def test_cowork_navigation_invalidates_confirmation_before_fill(self):
+        for navigation in ({'action': 'left_click', 'coordinate': [5, 5]},
+                           {'action': 'key', 'text': 'Tab'},
+                           {'action': 'scroll', 'scroll_direction': 'down'}):
+            with self.subTest(navigation=navigation):
+                result, count = self.run_actions([CONFIRM_MODEL, navigation, FILL, ENTER],
+                                                budget=4, target_model='claude-opus-4-6')
+                self.assertIsInstance(result, str)
+                self.assertEqual(self.executed_actions, [navigation])
+                self.assertEqual(count, 1)
+
+    def test_cowork_unavailable_model_stops_without_input_or_submission(self):
+        result, count = self.run_actions([
+            {'tool': 'report_blocker', 'input': {'code': 'model_unavailable'}}, FILL, ENTER,
+        ], target_model='claude-opus-4-6')
+        self.assertIsInstance(result, str)
+        self.assertEqual(self.error_code, 'model_unavailable')
+        self.assertEqual(count, 0)
+        self.assertEqual(self.error_telemetry['attempted_action_count'], 0)
+
+    def test_cowork_model_gate_does_not_apply_to_hitl(self):
+        result, count = self.run_actions([], mode='hitl', target_model='claude-opus-4-6')
+        self.assertEqual(result['status'], 'hitl_checked')
+        self.assertEqual(count, 0)
+        self.assertEqual([tool['name'] for tool in self.requested_tools], ['computer'])
+        self.assertNotIn('claude-opus-4-6', self.planner_request['messages'][0]['content'][0]['text'])
 
     def test_chatgpt_ignores_cowork_bundle_override(self):
         with patch.dict(driver.os.environ, {'MST_COWORK_APP_PATH': '/private/tmp/Claude.app'}):

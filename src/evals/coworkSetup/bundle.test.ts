@@ -130,24 +130,15 @@ describe('prepareCoworkMcpBundle', () => {
         allowedMcpServers: unknown[];
       };
       expect(result.serverCount).toBe(mixed ? 2 : 1);
-      expect(settings.managedMcpServers).toContainEqual({
-        name: 'Native',
-        transport: 'stdio',
-        command: '/synthetic/proxy',
-        args: [
-          '--url',
-          'https://native.example.test/mcp',
-          '--headers',
-          join(runtimeDirectory, 'stdio/Native/headers.json'),
-        ],
-        env: {},
-        toolPolicy: { '*': 'allow' },
-      });
+      expect(settings.managedMcpServers).toHaveLength(mixed ? 1 : 0);
+      expect(settings.managedMcpServers).not.toContainEqual(
+        expect.objectContaining({ transport: 'stdio' })
+      );
       if (mixed)
         expect(settings.managedMcpServers).toContainEqual(
           expect.objectContaining({ name: 'server-2', transport: 'http' })
         );
-      expect(settings.allowedMcpServers).toContainEqual({
+      expect(settings.allowedMcpServers).not.toContainEqual({
         serverName: 'Native',
       });
       expect(await readJson(path('stdio/Native/headers.json'))).toEqual({

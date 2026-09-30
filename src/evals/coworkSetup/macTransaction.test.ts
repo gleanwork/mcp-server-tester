@@ -369,22 +369,26 @@ describe('Mac Cowork settings transaction', () => {
     await restoreMacCoworkSettings(profileDirectory);
     await expectClean();
   });
-  it('rejects a blocked plugin server that shadows an eval server label', async () => {
-    await expect(
-      installMacCoworkSettings(
-        options({
-          plugins: [
-            {
-              name: 'acme',
-              marketplace: { source: 'acme/plugins', ref: 'e'.repeat(40) },
-              blockMcpServers: ['search'],
-            },
-          ],
-        })
-      )
-    ).rejects.toThrow();
-    await expectOriginal();
-  });
+  it.each([manifest(), stdioManifest()])(
+    'rejects a blocked plugin server that shadows an eval server label (#%#)',
+    async (input) => {
+      await expect(
+        installMacCoworkSettings(
+          options({
+            manifest: input,
+            plugins: [
+              {
+                name: 'acme',
+                marketplace: { source: 'acme/plugins', ref: 'e'.repeat(40) },
+                blockMcpServers: [input.servers![0]!.label!.toLowerCase()],
+              },
+            ],
+          })
+        )
+      ).rejects.toThrow();
+      await expectOriginal();
+    }
+  );
   it('isolates exact replacement/empty server sets and opt-in policies across runs', async () => {
     for (const labels of [
       ['first', 'second'],
