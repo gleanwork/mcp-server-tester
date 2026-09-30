@@ -8,9 +8,23 @@ import { findChatgptTrace } from './chatgptTrace.js';
 import type * as TraceModule from './chatgptTrace.js';
 import {
   chatgptBindingDeadline,
+  chatgptRunState,
   OPENAI_CHATGPT_CAPABILITIES,
+  type ChatgptRunState,
 } from './openaiChatgpt.js';
 import { linuxEnvironment } from '../../chatgpt/linuxEnvironment.fixture.js';
+import { submitChatgptQuery } from '../../chatgpt/driver.js';
+import type * as DriverModule from '../../chatgpt/driver.js';
+import { runLinuxChatgptDesktop } from '../../chatgpt/linux.js';
+import type * as LinuxModule from '../../chatgpt/linux.js';
+import { ChatgptAppSession } from '../../chatgptSetup/session.js';
+import { NativeChatgptDriverError } from '../../chatgpt/linux.js';
+import { validateLinuxChatgptConfig } from '../../chatgptSetup/linuxProfile.js';
+import type * as LinuxProfileModule from '../../chatgptSetup/linuxProfile.js';
+import type {
+  ComputerUseTelemetry,
+  SemanticDesktopTelemetry,
+} from '../../cowork/driver.js';
 
 const clock = vi.hoisted(() => ({ now: 1000 }));
 vi.mock('node:timers/promises', () => ({
@@ -22,6 +36,22 @@ vi.mock('./chatgptTrace.js', async (original) => ({
   ...(await original<typeof TraceModule>()),
   findChatgptTrace: vi.fn(),
 }));
+vi.mock('../../chatgpt/driver.js', async (original) => ({
+  ...(await original<typeof DriverModule>()),
+  submitChatgptQuery: vi.fn(),
+}));
+vi.mock('../../chatgpt/linux.js', async (original) => ({
+  ...(await original<typeof LinuxModule>()),
+  runLinuxChatgptDesktop: vi.fn(),
+}));
+// The platform adapter captures the validator at load, so wrap it here.
+vi.mock('../../chatgptSetup/linuxProfile.js', async (original) => {
+  const actual = await original<typeof LinuxProfileModule>();
+  return {
+    ...actual,
+    validateLinuxChatgptConfig: vi.fn(actual.validateLinuxChatgptConfig),
+  };
+});
 
 const capture = OPENAI_CHATGPT_CAPABILITIES.find(
   (capability) => capability.id === 'builtin:openai.chatgpt.nativeTrace'
@@ -34,7 +64,7 @@ function context(
 ): ExternalHostCapabilityContext {
   const slug = `openai.chatgpt.agent.desktop-app.${linux ? 'linux' : 'macos'}`;
   const driver = normalizeHostDriver(slug);
-  return {
+  const context: ExternalHostCapabilityContext = {
     config: {
       driver,
       codexSetup: { servers: [] },
@@ -61,21 +91,23 @@ function context(
       driverSlug: slug,
       displayName: 'ChatGPT',
       capabilitiesUsed: ['trace'],
-      data: {
-        chatgptSessionsRoot: join(home, '.codex', 'sessions'),
-        chatgptEvidenceDir: linux ? join(home, 'evidence') : undefined,
-        chatgptSessionBaseline: new Map(),
-        chatgptPromptSubmitted: true,
-        chatgptNativeController: linux
-          ? {
-              provider: 'linux-atspi',
-              surface: 'chatgpt-work',
-              submission: { status: 'completed' },
-            }
-          : undefined,
-      },
+      data: {},
     },
   };
+  Object.assign(chatgptRunState(context.state), {
+    sessionsRoot: join(home, '.codex', 'sessions'),
+    evidenceDir: linux ? join(home, 'evidence') : undefined,
+    baseline: new Map(),
+    promptSubmitted: true,
+    nativeController: linux
+      ? {
+          provider: 'linux-atspi',
+          surface: 'chatgpt-work',
+          submission: { status: 'completed' },
+        }
+      : undefined,
+  } satisfies Partial<ChatgptRunState>);
+  return context;
 }
 
 beforeEach(() => {
@@ -88,9 +120,11 @@ afterEach(() => vi.restoreAllMocks());
 
 describe('bounded native binding wait and failure classification', () => {
   it('keeps Mac at 30s, gives Linux 120s, and never exceeds the run deadline', () => {
-    expect(chatgptBindingDeadline(false, 1000, 200_000)).toBe(31_000);
-    expect(chatgptBindingDeadline(true, 1000, 200_000)).toBe(121_000);
-    expect(chatgptBindingDeadline(true, 1000, 41_234)).toBe(41_234);
+    const mac = context('/home/synthetic', false).config;
+    const linux = context('/home/synthetic', true).config;
+    expect(chatgptBindingDeadline(mac, 1000, 200_000)).toBe(31_000);
+    expect(chatgptBindingDeadline(linux, 1000, 200_000)).toBe(121_000);
+    expect(chatgptBindingDeadline(linux, 1000, 41_234)).toBe(41_234);
   });
 
   it.each([
@@ -103,7 +137,7 @@ describe('bounded native binding wait and failure classification', () => {
       const home = await mkdtemp(join(tmpdir(), 'chatgpt-wait-'));
       try {
         const ctx = context(home, linux, timeout);
-        const root = ctx.state.data.chatgptSessionsRoot as string;
+        const root = chatgptRunState(ctx.state).sessionsRoot as string;
         await mkdir(root, { recursive: true });
         await mkdir(join(home, 'evidence'), { mode: 0o700 });
         await writeFile(
@@ -137,7 +171,7 @@ describe('bounded native binding wait and failure classification', () => {
         );
         expect(findChatgptTrace).toHaveBeenCalledWith(
           root,
-          ctx.state.data.chatgptSessionBaseline,
+          chatgptRunState(ctx.state).baseline,
           { strategy: 'exact_prompt', prompt: 'private prompt' },
           1000,
           expect.objectContaining({
@@ -167,7 +201,7 @@ describe('bounded native binding wait and failure classification', () => {
         vi.mocked(findChatgptTrace).mockImplementation(actual.findChatgptTrace);
         const ctx = context(home, linux);
         ctx.config.options!.surface = surface;
-        const root = ctx.state.data.chatgptSessionsRoot as string;
+        const root = chatgptRunState(ctx.state).sessionsRoot as string;
         await mkdir(root, { recursive: true });
         await mkdir(join(home, 'evidence'), { mode: 0o700 });
         const records = [
@@ -219,7 +253,7 @@ describe('bounded native binding wait and failure classification', () => {
         });
         expect(findChatgptTrace).toHaveBeenCalledWith(
           root,
-          ctx.state.data.chatgptSessionBaseline,
+          chatgptRunState(ctx.state).baseline,
           { strategy: 'exact_prompt', prompt: 'private prompt' },
           1000,
           expect.objectContaining({
@@ -246,7 +280,7 @@ describe('bounded native binding wait and failure classification', () => {
       ctx.config.reasoningEffort = 'medium';
       ctx.run.scenario = ctx.run.submittedScenario = 'Find documents.';
       clock.now = Date.parse('2026-09-23T15:36:01Z');
-      const root = ctx.state.data.chatgptSessionsRoot as string;
+      const root = chatgptRunState(ctx.state).sessionsRoot as string;
       await mkdir(root, { recursive: true });
       await mkdir(join(home, 'evidence'), { mode: 0o700 });
       const content = await readFile(
@@ -385,11 +419,299 @@ describe('bounded native binding wait and failure classification', () => {
     const home = await mkdtemp(join(tmpdir(), 'chatgpt-unattested-'));
     try {
       const ctx = context(home, true, 1);
-      ctx.state.data.chatgptEvidenceDir = undefined;
+      chatgptRunState(ctx.state).evidenceDir = undefined;
       const result = await capture(ctx);
       expect(result?.externalHost.artifacts).toEqual([]);
     } finally {
       await rm(home, { recursive: true, force: true });
     }
+  });
+});
+
+function submitter(id: string) {
+  return OPENAI_CHATGPT_CAPABILITIES.find((capability) => capability.id === id)!
+    .run!;
+}
+
+function unsubmitted(linux: boolean): ExternalHostCapabilityContext {
+  const ctx = context('/home/synthetic', linux);
+  Object.assign(chatgptRunState(ctx.state), {
+    promptSubmitted: false,
+    nativeController: undefined,
+  });
+  return ctx;
+}
+
+const computerUseTelemetry: ComputerUseTelemetry = {
+  accounting: 'complete',
+  response_models: ['planner-model'],
+  planner_response_count: 1,
+  usage: {},
+  usage_observation_counts: {
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 0,
+  },
+  duration_ms: 5,
+  action_count: 1,
+  attempted_action_count: 1,
+  executed_action_count: 1,
+  refused_action_count: 0,
+  cost: { status: 'unavailable' },
+};
+const semanticTelemetry: SemanticDesktopTelemetry = {
+  driver: 'linux-desktop',
+  accounting: 'complete',
+  duration_ms: 5,
+  action_count: 1,
+  planner: { status: 'not-applicable' },
+  cost: { status: 'not-applicable' },
+};
+
+describe('submission is chosen by the platform, not the capability id', () => {
+  it.each([
+    'builtin:openai.chatgpt.computerUseSubmit',
+    'builtin:openai.chatgpt.nativeSubmit',
+  ])(
+    'macOS submits with Computer Use through %s and records its receipt',
+    async (id) => {
+      vi.mocked(submitChatgptQuery).mockReset().mockResolvedValue({
+        status: 'submitted',
+        action_count: 1,
+        model: 'planner-model',
+        submission_action: {},
+        telemetry: computerUseTelemetry,
+      });
+      vi.mocked(runLinuxChatgptDesktop).mockReset();
+      const ctx = unsubmitted(false);
+      await expect(submitter(id)(ctx)).resolves.toBeUndefined();
+      expect(submitChatgptQuery).toHaveBeenCalledWith(
+        'private prompt',
+        ctx.config,
+        ctx.run.startedAtMs + ctx.run.timeoutMs
+      );
+      expect(runLinuxChatgptDesktop).not.toHaveBeenCalled();
+      expect(chatgptRunState(ctx.state)).toMatchObject({
+        promptSubmitted: true,
+        computerUse: {
+          provider: 'anthropic-computer-use',
+          submission: { status: 'completed', telemetry: computerUseTelemetry },
+        },
+      });
+    }
+  );
+
+  it.each([
+    'builtin:openai.chatgpt.computerUseSubmit',
+    'builtin:openai.chatgpt.nativeSubmit',
+  ])(
+    'Linux submits natively through %s via the MST-owned session',
+    async (id) => {
+      vi.mocked(submitChatgptQuery).mockReset();
+      vi.mocked(runLinuxChatgptDesktop)
+        .mockReset()
+        .mockResolvedValue({ telemetry: semanticTelemetry });
+      const ctx = unsubmitted(true);
+      const session = Object.create(
+        ChatgptAppSession.prototype
+      ) as ChatgptAppSession;
+      session.openPrompt = vi.fn(async () => {});
+      chatgptRunState(ctx.state).activeSession = session;
+      await expect(submitter(id)(ctx)).resolves.toBeUndefined();
+      expect(submitChatgptQuery).not.toHaveBeenCalled();
+      const [mode, config, deadline, prompt, open] = vi.mocked(
+        runLinuxChatgptDesktop
+      ).mock.calls[0]!;
+      expect([mode, config, deadline, prompt]).toEqual([
+        'submit',
+        ctx.config,
+        ctx.run.startedAtMs + ctx.run.timeoutMs,
+        'private prompt',
+      ]);
+      await open!('draft');
+      expect(session.openPrompt).toHaveBeenCalledWith('draft');
+      expect(chatgptRunState(ctx.state)).toMatchObject({
+        promptSubmitted: true,
+        nativeController: {
+          provider: 'linux-atspi',
+          surface: 'chatgpt-work',
+          submission: { status: 'completed', telemetry: semanticTelemetry },
+        },
+      });
+    }
+  );
+
+  it('fails Linux submission without an MST-owned session and never falls back to Computer Use', async () => {
+    vi.mocked(submitChatgptQuery).mockReset();
+    vi.mocked(runLinuxChatgptDesktop).mockReset();
+    const ctx = unsubmitted(true);
+    chatgptRunState(ctx.state).evidenceDir = undefined;
+    const result = await submitter('builtin:openai.chatgpt.nativeSubmit')(ctx);
+    expect(result).toMatchObject({
+      success: false,
+      error:
+        'ChatGPT native submission failed: Linux ChatGPT requires its MST-owned app session.',
+      externalHost: {
+        failureKind: 'submission_failed',
+        nativeController: {
+          provider: 'linux-atspi',
+          submission: { status: 'failed' },
+        },
+      },
+    });
+    expect(submitChatgptQuery).not.toHaveBeenCalled();
+    expect(runLinuxChatgptDesktop).not.toHaveBeenCalled();
+    expect(chatgptRunState(ctx.state).promptSubmitted).toBe(false);
+  });
+
+  it('records a failed macOS receipt without resubmitting', async () => {
+    vi.mocked(submitChatgptQuery)
+      .mockReset()
+      .mockRejectedValue(new Error('planner refused'));
+    const ctx = unsubmitted(false);
+    const result = await submitter('builtin:openai.chatgpt.computerUseSubmit')(
+      ctx
+    );
+    expect(submitChatgptQuery).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      success: false,
+      error: 'ChatGPT Computer Use submission failed: planner refused',
+      externalHost: { failureKind: 'submission_failed' },
+    });
+    expect(chatgptRunState(ctx.state)).toMatchObject({
+      promptSubmitted: false,
+      computerUse: {
+        provider: 'anthropic-computer-use',
+        submission: { status: 'failed' },
+      },
+    });
+  });
+});
+
+function capabilityById(id: string) {
+  const capability = OPENAI_CHATGPT_CAPABILITIES.find(
+    (candidate) => candidate.id === id
+  );
+  if (!capability) throw new Error(`Unknown ChatGPT capability id: ${id}`);
+  return capability;
+}
+
+describe('ChatGPT app session ownership', () => {
+  const lifecycle = capabilityById('builtin:openai.chatgpt.appLifecycle');
+
+  it('uses a shared batch session without disposing it', async () => {
+    const shared = Object.create(
+      ChatgptAppSession.prototype
+    ) as ChatgptAppSession;
+    shared.assertCompatible = vi.fn();
+    shared.dispose = vi.fn(async () => {});
+    shared.sessionsRoot = '/shared/sessions';
+    shared.evidenceDir = '/shared/evidence';
+    const ctx = unsubmitted(false);
+    ctx.config.options = {
+      ...ctx.config.options,
+      managedChatgptSession: shared,
+    };
+    await expect(lifecycle.setup!(ctx)).resolves.toBeUndefined();
+    const runState = chatgptRunState(ctx.state);
+    expect(runState.activeSession).toBe(shared);
+    expect(runState.ownedSession).toBeUndefined();
+    expect(runState).toMatchObject({
+      sessionsRoot: '/shared/sessions',
+      evidenceDir: '/shared/evidence',
+    });
+    await lifecycle.teardown!(ctx);
+    expect(shared.dispose).not.toHaveBeenCalled();
+  });
+
+  it('prepares, uses and disposes exactly once a session it creates', async () => {
+    const prepare = vi
+      .spyOn(ChatgptAppSession.prototype, 'prepare')
+      .mockResolvedValue(undefined);
+    const dispose = vi
+      .spyOn(ChatgptAppSession.prototype, 'dispose')
+      .mockResolvedValue(undefined);
+    const ctx = unsubmitted(false);
+    await expect(lifecycle.setup!(ctx)).resolves.toBeUndefined();
+    const runState = chatgptRunState(ctx.state);
+    expect(runState.ownedSession).toBeInstanceOf(ChatgptAppSession);
+    expect(runState.activeSession).toBe(runState.ownedSession);
+    expect(prepare).toHaveBeenCalledTimes(1);
+    await lifecycle.teardown!(ctx);
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('what the platform decides', () => {
+  it('validates Linux-only settings on Linux and not on macOS', async () => {
+    const preflight = capabilityById('builtin:openai.chatgpt.configLifecycle');
+    vi.mocked(validateLinuxChatgptConfig).mockClear();
+    await preflight.setup!(unsubmitted(false));
+    expect(validateLinuxChatgptConfig).not.toHaveBeenCalled();
+    const linux = unsubmitted(true);
+    await preflight.setup!(linux);
+    expect(validateLinuxChatgptConfig).toHaveBeenCalledWith(linux.config);
+  });
+
+  it.each([
+    [false, false],
+    [true, true],
+  ])(
+    'matches native transcripts with Markdown escapes only on Linux (linux=%s)',
+    async (linux, escapes) => {
+      vi.mocked(findChatgptTrace).mockClear();
+      const ctx = context('/home/synthetic', linux, 2_000);
+      chatgptRunState(ctx.state).evidenceDir = undefined;
+      await capture(ctx);
+      expect(vi.mocked(findChatgptTrace).mock.calls[0]![4]).toMatchObject({
+        nativeMarkdownEscapes: escapes,
+      });
+    }
+  );
+
+  it('keeps the native failure diagnostics and evidence handling on a failed Linux submission', async () => {
+    const draftState = {
+      observedSurface: 'chatgpt-work',
+      composerRootCount: 1,
+      sendControlCount: 0,
+      textReadable: true,
+      textLength: 14,
+    } as const;
+    vi.mocked(runLinuxChatgptDesktop)
+      .mockReset()
+      .mockRejectedValue(
+        new NativeChatgptDriverError('Send control missing.', {
+          telemetry: semanticTelemetry,
+          draftState,
+        })
+      );
+    const ctx = unsubmitted(true);
+    const session = Object.create(
+      ChatgptAppSession.prototype
+    ) as ChatgptAppSession;
+    chatgptRunState(ctx.state).activeSession = session;
+    // A missing evidence directory is reported, which shows evidence handling ran.
+    chatgptRunState(ctx.state).evidenceDir = '/nonexistent/mst-evidence';
+    const result = await capabilityById('builtin:openai.chatgpt.nativeSubmit')
+      .run!(ctx);
+    expect(result).toMatchObject({
+      success: false,
+      error: 'ChatGPT native submission failed: Send control missing.',
+      externalHost: {
+        failureKind: 'submission_failed',
+        nativeController: {
+          provider: 'linux-atspi',
+          submission: {
+            status: 'failed',
+            telemetry: semanticTelemetry,
+            draftState,
+          },
+        },
+      },
+    });
+    expect(result!.externalHost.traceLimitations).toContain(
+      'Native evidence directory is unavailable.'
+    );
   });
 });

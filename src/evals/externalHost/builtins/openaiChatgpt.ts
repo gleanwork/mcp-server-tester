@@ -41,13 +41,84 @@ import { hostPluginMcpServers } from '../../hostPlugins.js';
 
 const POLL_INTERVAL_MS = 750;
 
-/** Cold Linux first turns need time to flush; neither platform can exceed the run deadline. */
+type RunState = ExternalHostCapabilityContext['state'];
+
+/** What the ChatGPT capabilities share within one run. */
+export interface ChatgptRunState {
+  /** The resolved native config name, from config preflight. */
+  configName?: string;
+  /** The session this run uses: the batch's shared one or its own. */
+  activeSession?: ChatgptAppSession;
+  /** Set only when this run created the session, so only it disposes it. */
+  ownedSession?: ChatgptAppSession;
+  sessionsRoot?: string;
+  /** Linux only: where matched transcripts are copied before teardown. */
+  evidenceDir?: string;
+  /** Native sessions that existed before submission. */
+  baseline?: ChatgptSessionSnapshot;
+  promptSubmitted: boolean;
+  /** macOS submission receipt. */
+  computerUse?: ExternalHostMetadata['computerUse'];
+  /** Linux submission receipt. */
+  nativeController?: ExternalHostMetadata['nativeController'];
+}
+
+/** Reserved in `state.data`; a user `module:` capability must not use it. */
+const RUN_STATE_KEY = 'openai.chatgpt';
+
+/** The typed ChatGPT state for a run, created on first use. */
+export function chatgptRunState(state: RunState): ChatgptRunState {
+  const existing = state.data[RUN_STATE_KEY];
+  if (existing) return existing as ChatgptRunState;
+  const created: ChatgptRunState = { promptSubmitted: false };
+  state.data[RUN_STATE_KEY] = created;
+  return created;
+}
+
+/**
+ * What differs between the macOS and Linux ChatGPT desktops. Chosen once per
+ * run from the driver; the capabilities never branch on the OS themselves.
+ */
+interface ChatgptPlatform {
+  validate(config: ExternalHostConfig): void;
+  /** How long a fresh native session may take to appear after submission. */
+  bindingWindowMs: number;
+  /** Whether native transcripts escape Markdown in the recorded prompt. */
+  nativeMarkdownEscapes: boolean;
+  submit(
+    context: ExternalHostCapabilityContext,
+    runState: ChatgptRunState
+  ): Promise<ExternalHostRunResult | void>;
+}
+
+const MACOS_CHATGPT: ChatgptPlatform = {
+  validate() {
+    /* macOS needs no validation beyond the shared config checks. */
+  },
+  bindingWindowMs: 30_000,
+  nativeMarkdownEscapes: false,
+  submit: submitWithComputerUse,
+};
+
+/** Cold Linux first turns need time to flush. */
+const LINUX_CHATGPT: ChatgptPlatform = {
+  validate: validateLinuxChatgptConfig,
+  bindingWindowMs: 120_000,
+  nativeMarkdownEscapes: true,
+  submit: submitNatively,
+};
+
+function chatgptPlatform(config: ExternalHostConfig): ChatgptPlatform {
+  return isLinuxChatgpt(config) ? LINUX_CHATGPT : MACOS_CHATGPT;
+}
+
+/** When a fresh native session must have appeared; never after the run deadline. */
 export function chatgptBindingDeadline(
-  linux: boolean,
+  config: ExternalHostConfig,
   now: number,
   runDeadline: number
 ): number {
-  return Math.min(now + (linux ? 120_000 : 30_000), runDeadline);
+  return Math.min(now + chatgptPlatform(config).bindingWindowMs, runDeadline);
 }
 
 /** Platform-specific input; shared lifecycle and strict native evidence. */
@@ -104,7 +175,7 @@ async function setupChatgptConfig({
 }: ExternalHostCapabilityContext): Promise<ExternalHostRunResult | void> {
   try {
     validateChatgptConfig(config);
-    if (isLinuxChatgpt(config)) validateLinuxChatgptConfig(config);
+    chatgptPlatform(config).validate(config);
     if (run.correlation.strategy === 'exact_prompt') {
       if (
         run.correlation.includedInPrompt ||
@@ -130,7 +201,7 @@ async function setupChatgptConfig({
       throw new Error(
         'ChatGPT loads CODEX_HOME/config.toml; configPath must end in config.toml.'
       );
-    state.data.chatgptConfigName = resolved.configName;
+    chatgptRunState(state).configName = resolved.configName;
   } catch (error) {
     return failureResult({
       config,
@@ -153,26 +224,27 @@ async function setupChatgptAppLifecycle({
   state,
   run,
 }: ExternalHostCapabilityContext): Promise<ExternalHostRunResult | void> {
+  const runState = chatgptRunState(state);
   try {
     const shared = config.options?.managedChatgptSession;
     const settings = {
       ...binding.with,
-      configName: state.data.chatgptConfigName,
+      configName: runState.configName,
     };
     if (shared !== undefined) {
       if (!(shared instanceof ChatgptAppSession))
         throw new Error('Invalid managed ChatGPT app session.');
       shared.assertCompatible(config, settings);
-      state.data.chatgptActiveSession = shared;
-      state.data.chatgptSessionsRoot = shared.sessionsRoot;
-      state.data.chatgptEvidenceDir = shared.evidenceDir;
+      runState.activeSession = shared;
+      runState.sessionsRoot = shared.sessionsRoot;
+      runState.evidenceDir = shared.evidenceDir;
     } else {
       const session = new ChatgptAppSession('case');
-      state.data.chatgptAppSession = session;
-      state.data.chatgptActiveSession = session;
+      runState.ownedSession = session;
+      runState.activeSession = session;
       await session.prepare(config, settings);
-      state.data.chatgptSessionsRoot = session.sessionsRoot;
-      state.data.chatgptEvidenceDir = session.evidenceDir;
+      runState.sessionsRoot = session.sessionsRoot;
+      runState.evidenceDir = session.evidenceDir;
     }
   } catch (error) {
     return failureResult({
@@ -193,89 +265,102 @@ async function setupChatgptAppLifecycle({
 async function teardownChatgptAppLifecycle({
   state,
 }: ExternalHostCapabilityContext): Promise<void> {
-  await (
-    state.data.chatgptAppSession as ChatgptAppSession | undefined
-  )?.dispose();
+  await chatgptRunState(state).ownedSession?.dispose();
 }
 
 async function snapshotBeforeSubmission({
   state,
 }: ExternalHostCapabilityContext): Promise<void> {
-  state.data.chatgptSessionBaseline = await snapshotChatgptSessions(
-    state.data.chatgptSessionsRoot as string
+  const runState = chatgptRunState(state);
+  runState.baseline = await snapshotChatgptSessions(
+    runState.sessionsRoot as string
   );
 }
 
-async function submitChatgptPrompt({
-  config,
-  run,
-  state,
-}: ExternalHostCapabilityContext): Promise<ExternalHostRunResult | void> {
-  if (isLinuxChatgpt(config)) {
-    try {
-      const session = state.data.chatgptActiveSession;
-      if (!(session instanceof ChatgptAppSession))
-        throw new Error('Linux ChatGPT requires its MST-owned app session.');
-      const receipt = await runLinuxChatgptDesktop(
-        'submit',
+async function submitChatgptPrompt(
+  context: ExternalHostCapabilityContext
+): Promise<ExternalHostRunResult | void> {
+  return chatgptPlatform(context.config).submit(
+    context,
+    chatgptRunState(context.state)
+  );
+}
+
+/** Linux: deterministic AT-SPI actions through the MST-owned app session. */
+async function submitNatively(
+  { config, run, state }: ExternalHostCapabilityContext,
+  runState: ChatgptRunState
+): Promise<ExternalHostRunResult | void> {
+  try {
+    const session = runState.activeSession;
+    if (!(session instanceof ChatgptAppSession))
+      throw new Error('Linux ChatGPT requires its MST-owned app session.');
+    const receipt = await runLinuxChatgptDesktop(
+      'submit',
+      config,
+      run.startedAtMs + run.timeoutMs,
+      run.submittedScenario,
+      (prompt) => session.openPrompt(prompt)
+    );
+    runState.promptSubmitted = true;
+    runState.nativeController = {
+      provider: 'linux-atspi',
+      surface: chatgptSurface(config),
+      submission: { status: 'completed', telemetry: receipt.telemetry },
+    };
+    return;
+  } catch (error) {
+    const nativeController: ExternalHostMetadata['nativeController'] = {
+      provider: 'linux-atspi',
+      surface: chatgptSurface(config),
+      submission: {
+        status: 'failed',
+        ...(error instanceof NativeChatgptDriverError
+          ? {
+              telemetry: error.telemetry,
+              ...(error.diagnostics.draftState
+                ? { draftState: { ...error.diagnostics.draftState } }
+                : {}),
+            }
+          : {}),
+      },
+    };
+    return withEvidence(
+      failureResult({
         config,
-        run.startedAtMs + run.timeoutMs,
-        run.submittedScenario,
-        (prompt) => session.openPrompt(prompt)
-      );
-      state.data.chatgptPromptSubmitted = true;
-      state.data.chatgptNativeController = {
-        provider: 'linux-atspi',
-        surface: chatgptSurface(config),
-        submission: { status: 'completed', telemetry: receipt.telemetry },
-      } satisfies ExternalHostMetadata['nativeController'];
-      return;
-    } catch (error) {
-      const nativeController: ExternalHostMetadata['nativeController'] = {
-        provider: 'linux-atspi',
-        surface: chatgptSurface(config),
-        submission: {
-          status: 'failed',
-          ...(error instanceof NativeChatgptDriverError
-            ? {
-                telemetry: error.telemetry,
-                ...(error.diagnostics.draftState
-                  ? { draftState: { ...error.diagnostics.draftState } }
-                  : {}),
-              }
-            : {}),
-        },
-      };
-      return withEvidence(
-        failureResult({
-          config,
-          context: run,
-          driver: state.driver,
-          displayName: state.displayName,
-          capabilitiesUsed: state.capabilitiesUsed,
-          nativeController,
-          failureKind: 'submission_failed',
-          error: `ChatGPT native submission failed: ${formatError(error)}`,
-          limitations: [
-            'No automatic resubmission is attempted after a failed or ambiguous native action.',
-          ],
-        }),
-        run,
-        state
-      );
-    }
+        context: run,
+        driver: state.driver,
+        displayName: state.displayName,
+        capabilitiesUsed: state.capabilitiesUsed,
+        nativeController,
+        failureKind: 'submission_failed',
+        error: `ChatGPT native submission failed: ${formatError(error)}`,
+        limitations: [
+          'No automatic resubmission is attempted after a failed or ambiguous native action.',
+        ],
+      }),
+      run,
+      runState
+    );
   }
+}
+
+/** macOS: Anthropic Computer Use fills and submits the composer. */
+async function submitWithComputerUse(
+  { config, run, state }: ExternalHostCapabilityContext,
+  runState: ChatgptRunState
+): Promise<ExternalHostRunResult | void> {
   try {
     const receipt = await submitChatgptQuery(
       run.submittedScenario,
       config,
       run.startedAtMs + run.timeoutMs
     );
-    state.data.chatgptPromptSubmitted = true;
-    state.data.chatgptComputerUse = {
+    runState.promptSubmitted = true;
+    runState.computerUse = {
       provider: 'anthropic-computer-use',
       submission: { status: 'completed', telemetry: receipt.telemetry },
-    } satisfies ExternalHostMetadata['computerUse'];
+    };
   } catch (error) {
     const computerUse: ExternalHostMetadata['computerUse'] = {
       provider: 'anthropic-computer-use',
@@ -286,7 +371,7 @@ async function submitChatgptPrompt({
           : {}),
       },
     };
-    state.data.chatgptComputerUse = computerUse;
+    runState.computerUse = computerUse;
     return failureResult({
       config,
       context: run,
@@ -311,41 +396,37 @@ async function captureChatgptComputerUseResult({
   let matched = false;
   let bound: ChatgptTraceBinding | undefined;
   let latest: { path: string; trace: ChatgptTrace } | undefined;
+  const runState = chatgptRunState(state);
+  const platform = chatgptPlatform(config);
   const selector: ChatgptTraceSelector =
     run.correlation.strategy === 'exact_prompt'
       ? { strategy: 'exact_prompt', prompt: run.submittedScenario }
       : run.marker;
   const bindingDeadline = chatgptBindingDeadline(
-    isLinuxChatgpt(config),
+    config,
     Date.now(),
     run.startedAtMs + run.timeoutMs
   );
-  const computerUse = state.data
-    .chatgptComputerUse as ExternalHostMetadata['computerUse'];
   const metadataOptions = {
     config,
     context: run,
     driver: state.driver,
     displayName: state.displayName,
     capabilitiesUsed: state.capabilitiesUsed,
-    computerUse,
-    nativeController: state.data
-      .chatgptNativeController as ExternalHostMetadata['nativeController'],
+    computerUse: runState.computerUse,
+    nativeController: runState.nativeController,
   };
   try {
-    const baseline = state.data.chatgptSessionBaseline as
-      | ChatgptSessionSnapshot
-      | undefined;
-    if (!baseline || state.data.chatgptPromptSubmitted !== true)
+    const baseline = runState.baseline;
+    if (!baseline || !runState.promptSubmitted)
       throw new Error(
         'Native telemetry requires a session baseline and a submitted prompt.'
       );
     const mcpServers = [
       ...(config.codexSetup
-        ? resolveCodexSetup(
-            config.codexSetup,
-            state.data.chatgptConfigName as string | undefined
-          ).servers.map((server) => server.label)
+        ? resolveCodexSetup(config.codexSetup, runState.configName).servers.map(
+            (server) => server.label
+          )
         : []),
       ...hostPluginMcpServers(config.plugins ?? []).map(
         (target) => target.server
@@ -356,14 +437,14 @@ async function captureChatgptComputerUseResult({
       (matched || Date.now() < bindingDeadline)
     ) {
       const found = await findChatgptTrace(
-        state.data.chatgptSessionsRoot as string,
+        runState.sessionsRoot as string,
         baseline,
         selector,
         run.startedAtMs,
         {
           surface: chatgptSurface(config),
           mcpServers,
-          nativeMarkdownEscapes: isLinuxChatgpt(config),
+          nativeMarkdownEscapes: platform.nativeMarkdownEscapes,
           requireFreshSession: true,
           observedBeforeMs: Math.min(
             Date.now(),
@@ -387,7 +468,7 @@ async function captureChatgptComputerUseResult({
                 trace.error
               ),
               run,
-              state,
+              runState,
               boundEvidence(bound)
             );
           if (config.model && trace.model !== config.model)
@@ -472,7 +553,7 @@ async function captureChatgptComputerUseResult({
               },
             },
             run,
-            state,
+            runState,
             { path, summary: `Matched turn ${trace.turnId}` }
           );
         }
@@ -502,7 +583,7 @@ async function captureChatgptComputerUseResult({
             limitations: [],
           }),
       run,
-      state,
+      runState,
       boundEvidence(bound)
     );
   } catch (error) {
@@ -522,7 +603,7 @@ async function captureChatgptComputerUseResult({
         limitations: [],
       }),
       run,
-      state,
+      runState,
       boundEvidence(bound)
     );
   }
@@ -607,11 +688,10 @@ function boundEvidence(
 async function withEvidence(
   result: ExternalHostRunResult,
   run: ExternalHostCapabilityContext['run'],
-  state: ExternalHostCapabilityContext['state'],
+  runState: ChatgptRunState,
   matched?: { path: string; summary: string }
 ): Promise<ExternalHostRunResult> {
-  const evidenceDir = state.data.chatgptEvidenceDir;
-  const sessionsRoot = state.data.chatgptSessionsRoot;
+  const { evidenceDir, sessionsRoot } = runState;
   if (typeof evidenceDir !== 'string' || typeof sessionsRoot !== 'string')
     return result;
   const copy = await copyChatgptEvidence({
