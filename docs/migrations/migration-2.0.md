@@ -14,6 +14,7 @@ Other 2.0 changes have their own guides: [dataset sources](./dataset-sources.md)
 - [`MCP_PROTOCOL_VERSION` is deprecated](#mcp_protocol_version-is-deprecated)
 - [`executeCase` returns a typed `CaseExecution`](#executecase-returns-a-typed-caseexecution)
 - [`external_host` results keep tool precision and recall](#external_host-results-keep-tool-precision-and-recall)
+- [`.not` works on `toSatisfyToolPredicate` and `toMatchToolSnapshot`](#not-works-on-tosatisfytoolpredicate-and-tomatchtoolsnapshot)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
 ---
@@ -160,6 +161,14 @@ When an `external_host` trace is structured enough to grade tool calls, the resu
 Cases whose trace can't support tool assertions (a low-confidence or screenshot trace, or host evidence other than `structured`) still report no metrics.
 
 The reported tool trace now comes from the same match as the metrics. A required call made with the wrong arguments is listed in `mcpHostTrace.missed`, as `toolRecall` already counted it. It used to appear only as an `expected` call.
+
+## `.not` works on `toSatisfyToolPredicate` and `toMatchToolSnapshot`
+
+**Affects:** tests that use `.not.toSatisfyToolPredicate()` or `.not.toMatchToolSnapshot()`.
+
+Both matchers negated their own result and then Playwright negated it again, so `.not` asserted the opposite of what it says. `expect(r).not.toSatisfyToolPredicate(p)` passed when `p` was satisfied, and `.not.toMatchToolSnapshot(name)` passed when the response matched the snapshot. `.not` now means "not", as it does for every other matcher. Assertions without `.not` are unchanged.
+
+A test that relied on the old behaviour now fails. Remove its `.not`. A predicate that throws still fails the assertion, with or without `.not`.
 
 ## New in 2.0 (non-breaking)
 

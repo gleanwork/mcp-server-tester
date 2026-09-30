@@ -926,6 +926,42 @@ const result = await validateJudge(response, {
 });
 ```
 
+### `validateSnapshot(response, name, options)` (async)
+
+Compares a response's text, after sanitizing, with a named snapshot in a `SnapshotStore`. `toMatchToolSnapshot` and eval `snapshot` expectations both use it. Throws when a sanitizer is invalid, which is a configuration error, not a mismatch.
+
+**Parameters:**
+
+- `response: unknown` — The response to compare
+- `name: string` — Snapshot name
+- `options.store: SnapshotStore` — Where snapshots live: `playwrightSnapshotStore(expect)` inside a Playwright test, or your own `{ match(name, content, { negated }) }` that resolves to `{ pass, message }`
+- `options.sanitizers?: SnapshotSanitizer[]` — Applied before comparison (see `toMatchToolSnapshot`)
+- `options.negated?: boolean` — Compare for a `.not` assertion: `pass` is still "matches", but the store must not write snapshots, and a missing snapshot counts as a match. `playwrightSnapshotStore` uses Playwright's own `.not.toMatchSnapshot`.
+
+```typescript
+import {
+  validateSnapshot,
+  playwrightSnapshotStore,
+} from '@gleanwork/mcp-server-tester';
+
+const result = await validateSnapshot(response, 'weather', {
+  store: playwrightSnapshotStore(expect),
+  sanitizers: ['uuid', 'iso-date'],
+});
+```
+
+### `validatePredicate(response, predicate, description?)` (async)
+
+Runs a custom predicate, which receives the response and its extracted text. `description` names the predicate in default messages (default `'custom predicate'`). A predicate that throws fails with `details.error` set, so you can tell a crash from a `false`.
+
+```typescript
+const result = await validatePredicate(
+  response,
+  (_raw, text) => text.includes('temperature'),
+  'mentions temperature'
+);
+```
+
 ## Playwright Matchers
 
 Custom Playwright matchers for writing inline assertions against MCP tool responses. Import `expect` from the package or its fixtures:

@@ -11,6 +11,7 @@ import type {
   SchemaValidatorOptions,
   PatternValidatorOptions,
   SnapshotSanitizer,
+  ToolPredicate,
 } from '../validators/types.js';
 import type { ProviderKind } from '../../judge/judgeTypes.js';
 import type { RubricSpec } from '../../judge/rubrics.js';
@@ -253,23 +254,7 @@ declare global {
   }
 }
 
-/**
- * Predicate result returned by the user's predicate function
- */
-export interface PredicateResult {
-  /** Whether the predicate passed */
-  pass: boolean;
-  /** Message explaining the result (shown on failure) */
-  message?: string;
-}
-
-/**
- * A predicate function that validates a response
- */
-export type ToolPredicate = (
-  response: unknown,
-  text: string
-) => boolean | PredicateResult | Promise<boolean | PredicateResult>;
+export type { PredicateResult, ToolPredicate } from '../validators/types.js';
 
 // Export for TypeScript module augmentation
 export {};

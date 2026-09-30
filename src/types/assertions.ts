@@ -10,6 +10,8 @@ export {
   type RegexSanitizer,
   type FieldRemovalSanitizer,
   type SchemaRegistry,
+  type ToolPredicate,
+  type PredicateResult,
 } from '../assertions/validators/types.js';
 
 export type {
@@ -20,7 +22,9 @@ export type {
 export type { JudgeValidatorConfig } from '../assertions/validators/judge.js';
 
 export type {
-  JudgeMatcherOptions,
-  ToolPredicate,
-  PredicateResult,
-} from '../assertions/matchers/types.js';
+  SnapshotMatchOptions,
+  SnapshotStore,
+  SnapshotValidatorOptions,
+} from '../assertions/validators/snapshot.js';
+
+export type { JudgeMatcherOptions } from '../assertions/matchers/types.js';

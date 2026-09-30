@@ -42,6 +42,10 @@ import {
   matchesIdentity,
   matchToolCalls,
 } from '../assertions/validators/toolCalls.js';
+import {
+  playwrightSnapshotStore,
+  validateSnapshot,
+} from '../assertions/validators/snapshot.js';
 
 /** What a case produced, in the form the evaluator grades. */
 export interface GradedExecution {
@@ -225,18 +229,18 @@ async function evaluateSnapshot(
       details: 'Snapshot testing requires expect in context',
     };
   try {
-    // toMatchToolSnapshot extracts text, applies sanitizers and uses
-    // Playwright's snapshot store.
-    // eslint-disable-next-line @typescript-eslint/await-thenable, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-    await (playwrightExpect(response) as any).toMatchToolSnapshot(
-      expectBlock.snapshot,
-      expectBlock.snapshotSanitizers ?? []
-    );
+    const validation = await validateSnapshot(response, expectBlock.snapshot, {
+      sanitizers: expectBlock.snapshotSanitizers,
+      store: playwrightSnapshotStore(playwrightExpect),
+    });
     return {
-      pass: true,
-      details: `Matches snapshot "${expectBlock.snapshot}"`,
+      pass: validation.pass,
+      details: validation.pass
+        ? `Matches snapshot "${expectBlock.snapshot}"`
+        : validation.message,
     };
   } catch (err) {
+    // An invalid sanitizer is reported on the expectation, not thrown.
     return {
       pass: false,
       details: err instanceof Error ? err.message : String(err),

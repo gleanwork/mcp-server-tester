@@ -129,3 +129,21 @@ export type SnapshotSanitizer =
  * Schema registry for named schemas in datasets
  */
 export type SchemaRegistry = Record<string, ZodType>;
+
+/**
+ * Predicate result returned by the user's predicate function
+ */
+export interface PredicateResult {
+  /** Whether the predicate passed */
+  pass: boolean;
+  /** Message explaining the result (shown on failure) */
+  message?: string;
+}
+
+/**
+ * A predicate function that validates a response
+ */
+export type ToolPredicate = (
+  response: unknown,
+  text: string
+) => boolean | PredicateResult | Promise<boolean | PredicateResult>;
