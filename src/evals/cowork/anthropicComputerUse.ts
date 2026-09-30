@@ -102,6 +102,9 @@ async function runComputerUseDriver(
     ...process.env,
     ...options.env,
     ...(options.model ? { MST_COWORK_CUA_MODEL: options.model } : {}),
+    ...(options.appPath ? { MST_COWORK_APP_PATH: options.appPath } : {}),
+    MST_COWORK_APPROVE_WRITE_TOOLS:
+      options.approveWriteTools === true ? '1' : '0',
   };
   if (options.deadlineAt <= Date.now())
     throw new Error(`Computer Use ${label} deadline exceeded; not retrying.`);

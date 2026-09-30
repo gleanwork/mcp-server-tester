@@ -4,9 +4,21 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EvalManifest } from '../evalManifest.js';
 import { getMacCoworkController } from './macController.js';
+import {
+  acquireMacCoworkApp,
+  removeMacCoworkApp,
+  verifyMacCoworkAppVersion,
+} from './macApp.js';
+import type * as MacApp from './macApp.js';
 import { prepareMacCoworkSession } from './macSession.js';
 
 vi.mock('./macController.js', () => ({ getMacCoworkController: vi.fn() }));
+vi.mock('./macApp.js', async (original) => ({
+  ...(await original<typeof MacApp>()),
+  acquireMacCoworkApp: vi.fn(),
+  removeMacCoworkApp: vi.fn(),
+  verifyMacCoworkAppVersion: vi.fn(),
+}));
 vi.mock('node:fs/promises', async (original) => {
   const actual = await original<typeof fs>();
   return {
@@ -29,6 +41,7 @@ vi.mock('node:os', async (original) => ({
 }));
 const actualOs = await vi.importActual<typeof os>('node:os');
 const actualFs = await vi.importActual<typeof fs>('node:fs/promises');
+const actualMacApp = await vi.importActual<typeof MacApp>('./macApp.js');
 const SOURCE = '11111111-2222-3333-4444-555555555555';
 const ORIGINAL =
   JSON.stringify({
@@ -132,6 +145,17 @@ beforeEach(async () => {
     shell: '/bin/sh',
   });
   vi.mocked(fs.rename).mockReset().mockImplementation(actualFs.rename);
+  vi.mocked(acquireMacCoworkApp)
+    .mockReset()
+    .mockImplementation(async (directory) => {
+      await fs.mkdir(directory, { mode: 0o700 });
+      await fs.writeFile(join(directory, 'synthetic-app'), 'test bundle');
+      return '/synthetic/Claude.app';
+    });
+  vi.mocked(removeMacCoworkApp)
+    .mockReset()
+    .mockImplementation(actualMacApp.removeMacCoworkApp);
+  vi.mocked(verifyMacCoworkAppVersion).mockReset().mockResolvedValue();
   running = true;
   events = [];
   controller.state.mockReset().mockImplementation(async () => ({ running }));
@@ -152,6 +176,66 @@ afterEach(async () => {
 });
 
 describe('automatic Mac Cowork session (no native execution)', () => {
+  it('journals the pin before acquisition and restores the installed app before removing it', async () => {
+    vi.mocked(acquireMacCoworkApp).mockImplementationOnce(
+      async (directory, version) => {
+        expect(version).toBe('1.52386.6');
+        const receipt = await json(join(lease, 'session.json'));
+        expect(receipt.pinnedApp).toBe(true);
+        expect(directory).toBe(`${String(receipt.stagingDirectory)}-app`);
+        expect(events).toEqual([]);
+        return '/synthetic/Claude.app';
+      }
+    );
+    vi.mocked(removeMacCoworkApp).mockImplementationOnce(async () => {
+      expect(events).toEqual(['stop', 'start', 'stop', 'start']);
+    });
+    const session = await prepare();
+    expect(getMacCoworkController).toHaveBeenCalledWith(
+      '/synthetic/Claude.app'
+    );
+    await session.dispose();
+    expect(removeMacCoworkApp).toHaveBeenCalledTimes(1);
+    await clean();
+  });
+  it('cleans a failed acquisition without touching the running installed app', async () => {
+    vi.mocked(acquireMacCoworkApp).mockImplementationOnce(async (directory) => {
+      await fs.mkdir(directory, { mode: 0o700 });
+      await fs.writeFile(join(directory, 'Claude.zip'), 'partial download');
+      throw new Error(
+        'Unable to acquire Claude Desktop 1.52386.6: checksum verification failed.'
+      );
+    });
+    await expect(prepare()).rejects.toThrow('checksum verification failed');
+    expect(events).toEqual([]);
+    expect(removeMacCoworkApp).toHaveBeenCalledTimes(1);
+    await clean();
+  });
+  it('still restores and removes the app when the pin changes during evaluation', async () => {
+    const session = await prepare();
+    vi.mocked(verifyMacCoworkAppVersion).mockRejectedValueOnce(
+      new Error('changed bundle')
+    );
+    await expect(session.dispose()).rejects.toThrow('changed bundle');
+    expect(events).toEqual(['stop', 'start', 'stop', 'start']);
+    expect(removeMacCoworkApp).toHaveBeenCalledTimes(1);
+    await clean();
+  });
+  it('retains the receipt when temporary app removal fails', async () => {
+    const session = await prepare();
+    vi.mocked(removeMacCoworkApp).mockRejectedValueOnce(new Error('busy'));
+    await expect(session.dispose()).rejects.toThrow('Recovery state retained');
+    expect((await fs.stat(join(lease, 'session.json'))).isFile()).toBe(true);
+  });
+  it('does not download or remove a caller-owned override', async () => {
+    const session = await prepare({
+      env: { ...env, MST_COWORK_APP_PATH: '/custom/Claude.app' },
+    });
+    expect(getMacCoworkController).toHaveBeenCalledWith('/custom/Claude.app');
+    await session.dispose();
+    expect(acquireMacCoworkApp).not.toHaveBeenCalled();
+    expect(removeMacCoworkApp).not.toHaveBeenCalled();
+  });
   it('rejects alternate profile directories before a lease or native action', async () => {
     const alternate = join(root, 'unused-profile');
     await fs.mkdir(alternate, { mode: 0o700 });
@@ -178,9 +262,7 @@ describe('automatic Mac Cowork session (no native execution)', () => {
           expect(
             await json(join(profileDirectory, `${String(meta.appliedId)}.json`))
           ).toMatchObject({
-            managedMcpServers: [
-              { name: 'Search', toolPolicy: { '*': 'allow' } },
-            ],
+            managedMcpServers: [],
           });
         } else expect(meta.appliedId).toBe(SOURCE);
         events.push('start');
@@ -190,13 +272,13 @@ describe('automatic Mac Cowork session (no native execution)', () => {
       expect(running).toBe(true);
       const directory = await stage();
       expect((await fs.stat(directory)).mode & 0o777).toBe(0o700);
-      for (const file of [
-        'credentials/inference.json',
-        'credentials/Search.json',
-      ]) {
+      expect(
+        (await fs.stat(join(`${directory}-mcp`, 'Search.json'))).mode & 0o777
+      ).toBe(0o600);
+      for (const file of ['credentials/inference.json']) {
         expect((await fs.stat(join(directory, file))).mode & 0o777).toBe(0o600);
       }
-      for (const file of ['inference-helper.sh', 'mcp-Search-headers.sh']) {
+      for (const file of ['inference-helper.sh']) {
         expect((await fs.stat(join(directory, file))).mode & 0o777).toBe(0o700);
         expect(await fs.readFile(join(directory, file), 'utf8')).not.toContain(
           'synthetic-'

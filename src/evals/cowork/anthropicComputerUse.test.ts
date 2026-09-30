@@ -38,6 +38,31 @@ it('passes ChatGPT target selection to the shared packaged driver separately fro
   expect(result.model).toBe('claude-sonnet-4-6');
 });
 
+it('passes the session bundle path over a caller environment override', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'cu-app-'));
+  onTestFinished(() => rm(directory, { recursive: true, force: true }));
+  await mkdir(join(directory, 'scripts'));
+  await writeFile(join(directory, 'package.json'), '{"type":"commonjs"}');
+  await writeFile(
+    join(directory, 'scripts/cowork_computer_use.py'),
+    `
+    if (process.env.MST_COWORK_APP_PATH !== '/private/tmp/pinned/Claude.app') process.exit(1);
+    console.log(JSON.stringify({status:'submitted',action_count:2,submission_action:{action:'key',text:'enter'},model:'test'}));
+  `
+  );
+  await expect(
+    runAnthropicComputerUseSubmission('query', {
+      deadlineAt: Date.now() + 10000,
+      appPath: '/private/tmp/pinned/Claude.app',
+      env: {
+        MST_COWORK_DRIVER_ROOT: directory,
+        MST_COWORK_PYTHON: process.execPath,
+        MST_COWORK_APP_PATH: '/wrong/Claude.app',
+      },
+    })
+  ).resolves.toMatchObject({ status: 'submitted' });
+});
+
 it('passes an explicit planner model over the legacy environment default', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'cu-model-'));
   onTestFinished(() => rm(directory, { recursive: true, force: true }));

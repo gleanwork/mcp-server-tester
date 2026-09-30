@@ -290,7 +290,10 @@ async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemet
     client = anthropic.Anthropic(api_key=api_key)
     model = os.environ.get("MST_COWORK_CUA_MODEL", DEFAULT_MODEL)
     log(f"starting driver with model={model}, max_actions={max_actions}, app={application}")
-    subprocess.run(["open", "-a", app_name], check=False, capture_output=True)
+    app_path = os.environ.get("MST_COWORK_APP_PATH") if application == "cowork" else None
+    if app_path and (not os.path.isabs(app_path) or any(c in app_path for c in "\x00\r\n")):
+        raise DesktopBlockedError('app_unavailable')
+    subprocess.run(["open", "-a", app_path or app_name], check=bool(app_path), capture_output=True)
     log(f"requested {app_name} Desktop launch/focus")
     time.sleep(float(os.environ.get("MST_COWORK_CUA_START_DELAY", "3")))
 
@@ -301,20 +304,28 @@ async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemet
         "display_height_px": DISPLAY_HEIGHT,
     }]
     if mode == "hitl":
+        approval_policy = (
+            "This evaluation explicitly permits tool writes. "
+            if os.environ.get('MST_COWORK_APPROVE_WRITE_TOOLS') == '1'
+            else "Approve only clearly read-only tools. Never approve writes or tools with unknown effects. "
+        )
         messages: list[dict[str, Any]] = [{
             "role": "user",
             "content": (
-                "Inspect the currently visible Claude Desktop Cowork task. If a human-in-the-loop "
-                "approval or choice prompt is blocking progress, choose the first visible option. "
-                "Do not submit a new query, do not change account settings, and do not approve a "
-                "prompt unless it is the visible task's first option. If no such prompt is visible, "
-                "stop without taking an action.\n\nTask to locate (do not type or submit this text):\n" + query
+                "Inspect only the currently visible Claude Desktop Cowork task's tool approval. "
+                + approval_policy +
+                "Use Allow once or the current-task approval only. Never choose Always allow, "
+                "Allow for all tasks, an account permission, or a sign-in prompt. Do not change "
+                "settings or submit a query. If no eligible approval is visible, stop without "
+                "an action.\n\nTask to locate (do not type or submit this text):\n" + query
             ),
         }]
         system = (
             "You are a bounded HITL resolver. Use screenshots and Computer Use actions only. "
-            "Choose the first visible option when a task approval/choice prompt is present. "
-            "Never submit a query or change account settings. If no HITL prompt is visible, stop."
+            + approval_policy +
+            "Approve at most the visible task's eligible tool call, once or for this task only. "
+            "Never grant persistent access, authenticate, submit a query, or change settings. "
+            "If the task or tool effects are ambiguous, stop without an action."
         )
     else:
         tools.append({

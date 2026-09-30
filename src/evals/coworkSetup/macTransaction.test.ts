@@ -282,6 +282,7 @@ describe('Mac Cowork settings transaction', () => {
     expect(result.id).toMatch(/^[a-f0-9-]{36}$/);
     expect(result.id).not.toBe(SOURCE);
     expect(await readJson(profile(result.id))).toEqual({
+      disableAutoUpdates: true,
       managedMcpServers: [
         {
           name: 'Search',

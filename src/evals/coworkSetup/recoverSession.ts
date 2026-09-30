@@ -12,6 +12,8 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { getMacCoworkController } from './macController.js';
+import { removeMacCoworkApp } from './macApp.js';
+import { restoreMacLocalMcp } from './macLocalMcp.js';
 import { restoreMacCoworkSettings } from './macTransaction.js';
 
 const Receipt = z
@@ -22,6 +24,9 @@ const Receipt = z
     profileDirectory: z.string(),
     stagingDirectory: z.string(),
     wasRunning: z.boolean(),
+    pinnedApp: z.literal(true).optional(),
+    localMcp: z.literal(true).optional(),
+    restoreAppPath: z.string().startsWith('/').optional(),
   })
   .strict();
 async function exists(file: string): Promise<boolean> {
@@ -122,11 +127,15 @@ export async function recoverMacCoworkSession(): Promise<void> {
       throw new Error(
         'Staging exists without its transaction; recovery refused.'
       );
-    const controller = await getMacCoworkController();
+    const controller = await getMacCoworkController(
+      receipt.restoreAppPath ?? '/Applications/Claude.app'
+    );
     if ((await controller.state()).running) await controller.stop();
     if ((await controller.state()).running)
       throw new Error('Claude did not stop; recovery refused.');
     await verifyLease();
+    if (receipt.localMcp)
+      await restoreMacLocalMcp(`${receipt.stagingDirectory}-mcp`);
     if (hasTransaction) await restoreMacCoworkSettings(profile);
     if ((await exists(transaction)) || (await exists(receipt.stagingDirectory)))
       throw new Error('Recovery state remains; lease retained.');
@@ -136,6 +145,8 @@ export async function recoverMacCoworkSession(): Promise<void> {
         'Could not restore prior Claude running state; lease retained.'
       );
     await verifyLease();
+    if (receipt.pinnedApp)
+      await removeMacCoworkApp(`${receipt.stagingDirectory}-app`);
     await unlink(receiptPath);
     try {
       await rmdir(lease);

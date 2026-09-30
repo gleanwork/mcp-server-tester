@@ -51,6 +51,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   await fs.rm(root, { recursive: true, force: true });
 });
 
@@ -63,6 +64,16 @@ describe('bundled Mac native controller (all execution mocked)', () => {
     );
     expect(execute).not.toHaveBeenCalled();
     expect(await fs.readdir(root)).toEqual([]);
+  });
+  it('uses a validated local app bundle override when configured', async () => {
+    const appPath = join(root, 'Claude-MST.app');
+    vi.stubEnv('MST_COWORK_APP_PATH', appPath);
+    const { getMacCoworkController } = await import('./macController.js');
+    await getMacCoworkController();
+    const sourcePath = execute.mock.calls[0]![1]![1] as string;
+    expect(await fs.readFile(sourcePath, 'utf8')).toContain(
+      `let appPath = ${JSON.stringify(appPath)}`
+    );
   });
   it('compiles embedded source once per process and bounds output/time with no credential environment', async () => {
     const { getMacCoworkController } = await import('./macController.js');

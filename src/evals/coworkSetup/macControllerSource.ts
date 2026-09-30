@@ -1,5 +1,8 @@
 // Native controller source is embedded so installed packages need no helper scripts.
-export const MAC_COWORK_CONTROLLER_SOURCE = String.raw`import AppKit
+export function macCoworkControllerSource(
+  appPath = '/Applications/Claude.app'
+): string {
+  return String.raw`import AppKit
 import ApplicationServices
 import Foundation
 
@@ -8,6 +11,7 @@ let application = NSApplication.shared
 application.setActivationPolicy(.prohibited)
 RunLoop.current.run(until: Date().addingTimeInterval(0.5))
 let bundleID = "com.anthropic.claudefordesktop"
+let appPath = ${JSON.stringify(appPath)}
 func apps() -> [NSRunningApplication] {
     return NSWorkspace.shared.runningApplications.filter { $0.bundleIdentifier == bundleID }
 }
@@ -20,7 +24,8 @@ switch action {
 case "state":
     emit(["running": !apps().isEmpty, "instances": apps().count,
           "workspaceApplicationCount": NSWorkspace.shared.runningApplications.count,
-          "claudeBundleReadable": Bundle(url: URL(fileURLWithPath: "/Applications/Claude.app"))?.bundleIdentifier == bundleID,
+          "runningAppPath": apps().first?.bundleURL?.path ?? "",
+          "claudeBundleReadable": Bundle(url: URL(fileURLWithPath: appPath))?.bundleIdentifier == bundleID,
           "accessibilityTrusted": AXIsProcessTrusted()])
 case "stop":
     let current = apps()
@@ -43,8 +48,9 @@ case "start":
     var failureCode: Int? = nil
     var failureDomain: String? = nil
     var reason = "launch-timeout"
-    NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: "/Applications/Claude.app"), configuration: options) { app, error in
-        succeeded = app?.bundleIdentifier == bundleID && error == nil
+    NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: appPath), configuration: options) { app, error in
+        succeeded = app?.bundleIdentifier == bundleID && error == nil &&
+            app?.bundleURL?.resolvingSymlinksInPath() == URL(fileURLWithPath: appPath).resolvingSymlinksInPath()
         failureCode = (error as NSError?)?.code
         let domain = (error as NSError?)?.domain
         if ["NSCocoaErrorDomain", "NSOSStatusErrorDomain", "NSPOSIXErrorDomain"].contains(domain ?? "") { failureDomain = domain }
@@ -68,3 +74,6 @@ default:
     exit(1)
 }
 `;
+}
+
+export const MAC_COWORK_CONTROLLER_SOURCE = macCoworkControllerSource();

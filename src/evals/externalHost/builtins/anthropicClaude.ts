@@ -496,6 +496,8 @@ interface ClaudeSessionMatchOptions {
   /** Fresh-session correlation: exact initial user text, never raw-text substring matching. */
   exactPrompt?: string;
   sessionPath?: string;
+  /** Bound pending trace inspection; never submits or changes session identity. */
+  onPending?: (trace: ClaudeTrace) => Promise<void>;
 }
 
 export async function waitForClaudeSession(
@@ -541,6 +543,8 @@ async function waitForClaudeMatch(
         completeTraceFirstSeenAtMs = Date.now();
       }
       lastPending = trace;
+      if (requireCompletion && !trace.isComplete && options.onPending)
+        await options.onPending(trace);
     }
 
     await delay(POLL_INTERVAL_MS);

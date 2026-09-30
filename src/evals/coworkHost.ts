@@ -8,6 +8,8 @@ import type {
 import { getCoworkPlatform, type CoworkPlatform } from './cowork/platform.js';
 import { verifyCoworkMcpServers } from './cowork/mcpReadiness.js';
 import { hostSecretValues, redactHostError } from './hostSecrets.js';
+import { usesHostResolvedFields } from '../config/mcpConfig.js';
+import { validateMacLocalServers } from './coworkSetup/macLocalMcp.js';
 import {
   findMatchingClaudeSessions,
   snapshotClaudeSessions,
@@ -120,7 +122,11 @@ async function runBatch(
   const servers = requests[0]!.input.servers;
   // Stdio servers are host-resolved eval servers: validate and resolve them
   // (labels, placeholders, plugin roots, data root) before any desktop action.
-  const stdioServers = hostStdioServers(servers, plugins);
+  const mac = config.options.computerUseProvider === 'anthropic-computer-use';
+  const stdioServers = hostStdioServers(
+    mac ? servers.filter(usesHostResolvedFields) : servers,
+    plugins
+  );
   const stdioPaths = {
     ...(config.options.pluginRoots
       ? { pluginRoots: config.options.pluginRoots }
@@ -146,7 +152,14 @@ async function runBatch(
     (config.options.mcpDataRoot && !stdioServers.some((s) => s.usesDataDir))
   )
     throw new HostPluginError('mcp_server_invalid', unknownRoot ?? 'dataRoot');
-  coworkManagedPluginSettings({ servers, plugins, paths: stdioPaths });
+  if (mac) validateMacLocalServers(servers);
+  coworkManagedPluginSettings({
+    servers: mac
+      ? servers.filter((server) => server.transport === 'http')
+      : servers,
+    plugins,
+    paths: stdioPaths,
+  });
   const env = { ...process.env, ...context.env, ...config.env };
   if (
     config.options.computerUseProvider === 'anthropic-computer-use' &&
@@ -179,19 +192,13 @@ async function runBatch(
   active = true;
   try {
     if (env.MST_COWORK_RECOVER === '1') await platform.recover();
-    if (
-      config.options.computerUseProvider === 'linux-desktop' ||
-      servers.length ||
-      plugins.length ||
-      config.model
-    )
-      session = await platform.prepare({
-        manifest: managedManifest,
-        env,
-        model: config.model,
-        ...(plugins.length ? { plugins } : {}),
-        ...(stdioServers.length ? { stdioPaths } : {}),
-      });
+    session = await platform.prepare({
+      manifest: managedManifest,
+      env,
+      model: config.model,
+      ...(plugins.length ? { plugins } : {}),
+      ...(stdioServers.length ? { stdioPaths } : {}),
+    });
     if (servers.length) {
       const readiness = await verifyCoworkMcpServers(servers, env, {
         plugins,
@@ -224,6 +231,7 @@ async function runBatch(
               deadlineAt: Date.now() + 60_000,
               maxActions: 1,
               env,
+              ...(session?.appPath ? { appPath: session.appPath } : {}),
             });
           } catch (error) {
             resetError = safeError(error);
@@ -244,11 +252,22 @@ async function runBatch(
         submission: { status: 'not-attempted' },
         hitl: { status: 'not-attempted' },
       };
+      let hitlActions = 0;
+      const hitlFollowups: Array<{
+        status: string;
+        telemetry?: CoworkDriverTelemetry;
+      }> = [];
       const finishCase = () => {
         results[index] = {
           ...results[index]!,
           durationMs: Date.now() - caseStartedAt,
-          telemetry: { ...results[index]!.telemetry, computerUse },
+          telemetry: {
+            ...results[index]!.telemetry,
+            computerUse: {
+              ...computerUse,
+              ...(hitlFollowups.length ? { hitlFollowups } : {}),
+            },
+          },
         };
       };
       // Bind each fresh task before another submission can create an identical prompt.
@@ -273,6 +292,7 @@ async function runBatch(
           maxActions: config.options.computerUseMaxActions,
           model: config.options.computerUseModel,
           env,
+          ...(session?.appPath ? { appPath: session.appPath } : {}),
         });
         computerUse.submission = {
           status: 'completed',
@@ -329,6 +349,7 @@ async function runBatch(
             maxActions: config.options.hitlMaxActions,
             model: config.options.computerUseModel,
             env,
+            ...(session?.appPath ? { appPath: session.appPath } : {}),
             approveWriteTools:
               context.manifest.coworkSetup?.approveWriteTools === true,
             isComplete: async () => {
@@ -344,6 +365,7 @@ async function runBatch(
             },
             task: `Handle only the currently open Cowork task just submitted with this exact query: ${request.input.scenario}. Do not switch tasks. Never create, type, or resubmit a task. If the current task cannot be identified uniquely, stop without an action.`,
           });
+          hitlActions += hitl.action_count;
           computerUse.hitl = {
             status: 'completed',
             ...(hitl.telemetry ? { telemetry: hitl.telemetry } : {}),
@@ -379,10 +401,63 @@ async function runBatch(
         process.stderr.write(
           `[mst:cowork] collecting case ${index + 1}/${requests.length}\n`
         );
+        let inspections = 0;
+        let nextInspection = 0;
         const trace = await waitForClaudeTrace({
           ...match,
           sessionPath,
           timeoutMs: remaining,
+          ...(mac
+            ? {
+                onPending: async (pending) => {
+                  // A tool request can arrive after the initial visual check. Revisit
+                  // only a bound trace with an outstanding native tool call, within
+                  // the same per-case action budget. Never resubmit the prompt.
+                  if (
+                    hitlError ||
+                    inspections >= 3 ||
+                    hitlActions >= config.options.hitlMaxActions ||
+                    Date.now() < nextInspection ||
+                    !pending.toolCalls.some((call) => call.output === undefined)
+                  )
+                    return;
+                  if (pending.candidate.metadataPath !== sessionPath)
+                    throw new Error(
+                      'Native session identity changed before HITL.'
+                    );
+                  inspections++;
+                  nextInspection = Date.now() + 5_000;
+                  try {
+                    const followup = await platform.handleHitl({
+                      deadlineAt: Math.min(deadlineAt, Date.now() + 60_000),
+                      maxActions: config.options.hitlMaxActions - hitlActions,
+                      model: config.options.computerUseModel,
+                      env,
+                      ...(session?.appPath ? { appPath: session.appPath } : {}),
+                      approveWriteTools:
+                        context.manifest.coworkSetup?.approveWriteTools ===
+                        true,
+                      task: `Handle only the pending tool approval in the current Cowork task for this exact query: ${request.input.scenario}. Approve read-only calls only. Do not switch tasks, change settings, type, or resubmit a query.`,
+                    });
+                    hitlActions += followup.action_count;
+                    hitlFollowups.push({
+                      status: 'completed',
+                      ...(followup.telemetry
+                        ? { telemetry: followup.telemetry }
+                        : {}),
+                    });
+                  } catch (error) {
+                    hitlFollowups.push({
+                      status: 'failed',
+                      ...(error instanceof CoworkDriverError && error.telemetry
+                        ? { telemetry: error.telemetry }
+                        : {}),
+                    });
+                    throw error;
+                  }
+                },
+              }
+            : {}),
         });
         if (trace.candidate.metadataPath !== sessionPath)
           throw new Error(

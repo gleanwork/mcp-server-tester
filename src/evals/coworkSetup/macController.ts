@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
-import { MAC_COWORK_CONTROLLER_SOURCE } from './macControllerSource.js';
+import { macCoworkControllerSource } from './macControllerSource.js';
 
 const ERROR = 'Unable to control the Mac Cowork application safely.';
 const exec = promisify(execFile);
@@ -14,18 +14,32 @@ const StateSchema = z.object({
   instances: z.number().int().min(0).max(1),
   workspaceApplicationCount: z.number().int().positive(),
   claudeBundleReadable: z.literal(true),
+  runningAppPath: z.string().optional(),
 });
 
 /** Application lifecycle only: no native MCP inventory or query interface. */
 export interface MacCoworkController {
-  state(): Promise<{ running: boolean }>;
+  state(): Promise<{ running: boolean; runningAppPath?: string }>;
   stop(): Promise<void>;
   start(): Promise<void>;
 }
 
-let compiled: Promise<MacCoworkController> | undefined;
+const compiled = new Map<string, Promise<MacCoworkController>>();
 
-async function compile(): Promise<MacCoworkController> {
+function configuredAppPath(
+  value = process.env.MST_COWORK_APP_PATH ?? '/Applications/Claude.app'
+): string {
+  if (
+    !value.startsWith('/') ||
+    value.includes('\0') ||
+    value.includes('\n') ||
+    value.includes('\r')
+  )
+    throw new Error(ERROR);
+  return value;
+}
+
+async function compile(appPath: string): Promise<MacCoworkController> {
   let directory: string | undefined;
   try {
     directory = await realpath(
@@ -34,7 +48,7 @@ async function compile(): Promise<MacCoworkController> {
     await chmod(directory, 0o700);
     const source = join(directory, 'controller.swift');
     const binary = join(directory, 'controller');
-    await writeFile(source, MAC_COWORK_CONTROLLER_SOURCE, {
+    await writeFile(source, macCoworkControllerSource(appPath), {
       mode: 0o600,
       flag: 'wx',
     });
@@ -84,7 +98,12 @@ async function compile(): Promise<MacCoworkController> {
         try {
           const state = StateSchema.parse(await invoke('state'));
           if (state.running !== (state.instances === 1)) throw new Error();
-          return { running: state.running };
+          return {
+            running: state.running,
+            ...(state.runningAppPath
+              ? { runningAppPath: configuredAppPath(state.runningAppPath) }
+              : {}),
+          };
         } catch (error) {
           throw new Error(
             `${ERROR} State check failed: ${error instanceof Error ? error.message : 'unknown'}`
@@ -120,11 +139,18 @@ async function compile(): Promise<MacCoworkController> {
 }
 
 /** Small module seam for lifecycle tests; never invoke native tools off macOS. */
-export async function getMacCoworkController(): Promise<MacCoworkController> {
+export async function getMacCoworkController(
+  appPath?: string
+): Promise<MacCoworkController> {
   if (process.platform !== 'darwin') throw new Error(ERROR);
-  compiled ??= compile().catch(() => {
-    compiled = undefined;
-    throw new Error(ERROR);
-  });
-  return compiled;
+  const path = configuredAppPath(appPath);
+  let controller = compiled.get(path);
+  if (!controller) {
+    controller = compile(path).catch(() => {
+      compiled.delete(path);
+      throw new Error(ERROR);
+    });
+    compiled.set(path, controller);
+  }
+  return controller;
 }

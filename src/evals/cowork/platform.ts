@@ -19,7 +19,7 @@ export interface CoworkPlatform {
     plugins?: readonly HostPlugin[];
     /** Runtime paths for stdio eval servers (Linux only). */
     stdioPaths?: HostStdioPaths;
-  }): Promise<{ dispose(): Promise<void> }>;
+  }): Promise<{ appPath?: string; dispose(): Promise<void> }>;
   recover(): Promise<unknown>;
   /**
    * After a failed case, return the app to a fresh task so the next case is
