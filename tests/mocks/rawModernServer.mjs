@@ -1,15 +1,20 @@
-// Scripted, SDK-free 2026-07-28 (modern-only) MCP server over Streamable HTTP,
-// with switchable spec violations for conformance-check tests.
+// Scripted, SDK-free 2026-07-28 (modern-only) MCP server over Streamable HTTP
+// or stdio, with switchable spec violations for conformance-check tests.
 //
 //   node tests/mocks/rawModernServer.mjs <port>   (0 = any free port)
+//   node tests/mocks/rawModernServer.mjs --stdio
 //
 // FAULTS (comma-separated) turns on violations:
 //   no-ttl, no-result-type, no-server-info, accept-bad-version,
 //   accept-missing-meta, ignore-header-mismatch, unknown-method-200,
-//   mint-session, not-found-32002, empty-not-found, unknown-tool-iserror,
-//   reserved-code, shuffle-tools
+//   mint-session, echo-session, not-found-32002, empty-not-found,
+//   unknown-tool-iserror, reserved-code, shuffle-tools, varying-tools,
+//   mixed-scope-pages
+// and FAULTS=paginate serves tools/list in two pages (not a violation).
 import { createServer } from 'node:http';
+import readline from 'node:readline';
 
+const stdio = process.argv.includes('--stdio');
 const port = Number(process.argv[2] ?? '3950');
 const faults = new Set(
   (process.env.FAULTS ?? '')
@@ -39,12 +44,13 @@ function complete(result, { cacheable = false } = {}) {
   return out;
 }
 
+/** Handles one request. `headers` is null on stdio (no header rules). */
 function handle(message, headers) {
   const meta = message.params?._meta;
   const requested = meta?.['io.modelcontextprotocol/protocolVersion'];
-  const headerVersion = headers['mcp-protocol-version'];
+  const headerVersion = headers?.['mcp-protocol-version'];
 
-  if (!faults.has('ignore-header-mismatch')) {
+  if (headers && !faults.has('ignore-header-mismatch')) {
     if (headers['mcp-method'] !== message.method) {
       return {
         status: 400,
@@ -116,10 +122,25 @@ function handle(message, headers) {
       };
     case 'tools/list': {
       calls += 1;
-      const tools =
+      let tools =
         faults.has('shuffle-tools') && calls % 2 === 0
           ? [...TOOLS].reverse()
           : TOOLS;
+      // A different set on every request (so on every connection).
+      if (faults.has('varying-tools')) {
+        tools = [...TOOLS.slice(0, 2), { ...TOOLS[2], name: `gamma_${calls}` }];
+      }
+      if (faults.has('paginate') || faults.has('mixed-scope-pages')) {
+        const second = message.params?.cursor === 'page-2';
+        const page = complete(
+          second ? { tools: tools.slice(2) } : { tools: tools.slice(0, 2), nextCursor: 'page-2' },
+          { cacheable: true }
+        );
+        if (second && faults.has('mixed-scope-pages') && page.cacheScope) {
+          page.cacheScope = 'public';
+        }
+        return { result: page };
+      }
       return { result: complete({ tools }, { cacheable: true }) };
     }
     case 'tools/call': {
@@ -189,6 +210,23 @@ function handle(message, headers) {
   }
 }
 
+if (stdio) {
+  const lines = readline.createInterface({ input: process.stdin });
+  lines.on('line', (line) => {
+    if (!line.trim()) return;
+    const message = JSON.parse(line);
+    if (message.id === undefined) return;
+    const outcome = handle(message, null);
+    process.stdout.write(
+      `${JSON.stringify(
+        outcome.error
+          ? { jsonrpc: '2.0', id: message.id, error: outcome.error }
+          : { jsonrpc: '2.0', id: message.id, result: outcome.result }
+      )}\n`
+    );
+  });
+}
+
 const server = createServer((req, res) => {
   if (req.method !== 'POST') {
     res.writeHead(405).end();
@@ -218,6 +256,9 @@ const server = createServer((req, res) => {
     const outcome = handle(message, req.headers);
     const headers = { 'content-type': 'application/json' };
     if (faults.has('mint-session')) headers['mcp-session-id'] = 'session-123';
+    if (faults.has('echo-session') && req.headers['mcp-session-id']) {
+      headers['mcp-session-id'] = req.headers['mcp-session-id'];
+    }
     res.writeHead(outcome.status ?? 200, headers);
     res.end(
       JSON.stringify(
@@ -230,7 +271,7 @@ const server = createServer((req, res) => {
 });
 
 // Port 0 picks a free port; the actual URL is printed for the caller.
-server.listen(port, '127.0.0.1', () => {
+if (!stdio) server.listen(port, '127.0.0.1', () => {
   const { port: bound } = server.address();
   console.error(
     `raw modern server on http://127.0.0.1:${bound}/mcp faults=${[...faults].join(',')}`

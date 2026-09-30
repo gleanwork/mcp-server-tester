@@ -7,6 +7,7 @@ import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import type { ConnectionTarget } from '../mcp/connectionTarget.js';
 import type { WireTap } from '../mcp/wireTap.js';
 import type { ProtocolEra } from '../types/index.js';
+import { errorMessage } from '../utils/errorMessage.js';
 import type {
   ConformanceSeverity,
   MCPConformanceCheck,
@@ -80,7 +81,7 @@ export async function runCheckDefinitions(
     } catch (error) {
       outcome = {
         pass: false,
-        message: `Check threw: ${error instanceof Error ? error.message : String(error)}`,
+        message: `Check threw: ${errorMessage(error)}`,
       };
     }
     if (outcome === null) continue;

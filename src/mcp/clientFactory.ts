@@ -503,13 +503,12 @@ export async function createMCPClientForConfig(
         debugHttp('Connection established via sse');
       }
     }, retryAttempts);
+    const dispatcher = agentRegistry.get(client);
     setConnectionTarget(client, {
       transport: 'http',
       url: url.toString(),
       headers,
-      ...(agentRegistry.get(client)
-        ? { dispatcher: agentRegistry.get(client) }
-        : {}),
+      ...(dispatcher ? { dispatcher } : {}),
       ...(options?.authProvider ? { authProvider: options.authProvider } : {}),
     });
   }

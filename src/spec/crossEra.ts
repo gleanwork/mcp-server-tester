@@ -19,6 +19,7 @@ import {
 import type { MCPProtocolInfo, ProtocolSetting } from '../types/index.js';
 import type { MCPConformanceCheck } from '../types/reporter.js';
 import { conformancePasses } from './registry.js';
+import { errorMessage } from '../utils/errorMessage.js';
 
 /** Options for {@link runCrossEraChecks}. */
 export interface CrossEraOptions {
@@ -40,7 +41,10 @@ export interface CrossEraOptions {
 export interface CrossEraConnection {
   protocol: ProtocolSetting;
   connected: boolean;
+  /** Why the connection failed (when `connected` is false). */
   error?: string;
+  /** Why listing tools, resources, or prompts failed after connecting. */
+  listError?: string;
   info?: MCPProtocolInfo;
   capabilities?: ServerCapabilities | null;
   tools?: Tool[];
@@ -56,8 +60,8 @@ export interface MCPCrossEraResult {
   connections: CrossEraConnection[];
 }
 
-const SPEC_VERSIONING =
-  'https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning#backward-compatibility-with-initialization-based-versions';
+// The spec allows modern-only servers and defines no rule that eras serve
+// the same surface, so these are MST parity checks without a specRef.
 
 /** The parts of a tool that must not differ between eras. */
 function toolShape(tool: Tool): unknown {
@@ -71,7 +75,7 @@ function toolShape(tool: Tool): unknown {
   };
 }
 
-function stable(value: unknown): string {
+function stableStringify(value: unknown): string {
   return JSON.stringify(value, (_key, inner: unknown) =>
     inner && typeof inner === 'object' && !Array.isArray(inner)
       ? Object.fromEntries(
@@ -83,7 +87,7 @@ function stable(value: unknown): string {
   );
 }
 
-function names(
+function identifiers(
   items: ReadonlyArray<{ name?: string; uri?: string }>
 ): string[] {
   return items.map((item) => item.uri ?? item.name ?? '').sort();
@@ -106,38 +110,36 @@ async function connect(
   protocol: ProtocolSetting,
   clientOptions: CrossEraOptions['clientOptions']
 ): Promise<CrossEraConnection> {
-  let client: Client | undefined;
+  let client: Client;
   try {
     client = await createMCPClientForConfig(config, {
       ...clientOptions,
       protocol,
     });
-    const capabilities = client.getServerCapabilities() ?? null;
-    const tools = (await client.listTools()).tools;
-    const resources = capabilities?.resources
+  } catch (error) {
+    return { protocol, connected: false, error: errorMessage(error) };
+  }
+  const capabilities = client.getServerCapabilities() ?? null;
+  const connection: CrossEraConnection = {
+    protocol,
+    connected: true,
+    info: getProtocolInfo(client),
+    capabilities,
+  };
+  try {
+    connection.tools = (await client.listTools()).tools;
+    connection.resources = capabilities?.resources
       ? (await client.listResources()).resources
       : null;
-    const prompts = capabilities?.prompts
+    connection.prompts = capabilities?.prompts
       ? (await client.listPrompts()).prompts
       : null;
-    return {
-      protocol,
-      connected: true,
-      info: getProtocolInfo(client),
-      capabilities,
-      tools,
-      resources,
-      prompts,
-    };
   } catch (error) {
-    return {
-      protocol,
-      connected: false,
-      error: error instanceof Error ? error.message : String(error),
-    };
+    connection.listError = errorMessage(error);
   } finally {
-    if (client) await closeMCPClient(client).catch(() => undefined);
+    await closeMCPClient(client).catch(() => undefined);
   }
+  return connection;
 }
 
 function compareLists(
@@ -150,12 +152,11 @@ function compareLists(
   if (lists.every(({ list }) => list === null)) return null;
   const [first, ...rest] = lists;
   const differing = rest.filter(
-    ({ list }) => stable(list) !== stable(first!.list)
+    ({ list }) => stableStringify(list) !== stableStringify(first!.list)
   );
   return {
     name,
     severity: 'must',
-    specRef: SPEC_VERSIONING,
     pass: differing.length === 0,
     message:
       differing.length === 0
@@ -199,14 +200,12 @@ export async function runCrossEraChecks(
   for (const protocol of protocols) {
     connections.push(await connect(config, protocol, options.clientOptions));
   }
-  const connected = connections.filter((c) => c.connected);
   const checks: MCPConformanceCheck[] = [];
 
   const failed = connections.filter((c) => !c.connected);
   checks.push({
     name: 'cross_era_connect',
     severity: 'must',
-    specRef: SPEC_VERSIONING,
     pass: failed.length === 0,
     message:
       failed.length === 0
@@ -214,12 +213,28 @@ export async function runCrossEraChecks(
         : failed.map((c) => `${c.protocol}: ${c.error}`).join('; '),
   });
 
+  const listFailed = connections.filter((c) => c.listError !== undefined);
+  if (listFailed.length > 0) {
+    checks.push({
+      name: 'cross_era_listing_succeeds',
+      severity: 'must',
+      pass: false,
+      message: listFailed
+        .map((c) => `${c.protocol}: ${c.listError}`)
+        .join('; '),
+    });
+  }
+  // Only connections that listed successfully can be compared.
+  const connected = connections.filter(
+    (c) => c.connected && c.listError === undefined
+  );
+
   if (connected.length >= 2) {
     const toolNames = compareLists(
       'cross_era_tools_match',
       'tools',
       connected,
-      (c) => names(c.tools ?? [])
+      (c) => identifiers(c.tools ?? [])
     );
     if (toolNames) checks.push(toolNames);
 
@@ -232,7 +247,8 @@ export async function runCrossEraChecks(
         const baseline = firstTools.get(tool.name);
         if (
           baseline &&
-          stable(toolShape(baseline)) !== stable(toolShape(tool))
+          stableStringify(toolShape(baseline)) !==
+            stableStringify(toolShape(tool))
         ) {
           schemaDiffs.push(`${tool.name} (${other.protocol})`);
         }
@@ -241,7 +257,6 @@ export async function runCrossEraChecks(
     checks.push({
       name: 'cross_era_tool_definitions_match',
       severity: 'must',
-      specRef: SPEC_VERSIONING,
       pass: schemaDiffs.length === 0,
       message:
         schemaDiffs.length === 0
@@ -253,7 +268,7 @@ export async function runCrossEraChecks(
       'cross_era_resources_match',
       'resources',
       connected,
-      (c) => (c.resources ? names(c.resources) : null)
+      (c) => (c.resources ? identifiers(c.resources) : null)
     );
     if (resources) checks.push(resources);
 
@@ -261,7 +276,7 @@ export async function runCrossEraChecks(
       'cross_era_prompts_match',
       'prompts',
       connected,
-      (c) => (c.prompts ? names(c.prompts) : null)
+      (c) => (c.prompts ? identifiers(c.prompts) : null)
     );
     if (prompts) checks.push(prompts);
 
@@ -280,7 +295,6 @@ export async function runCrossEraChecks(
     checks.push({
       name: 'auto_selects_modern',
       severity: 'should',
-      specRef: SPEC_VERSIONING,
       pass: auto.connected && auto.info?.era === 'modern',
       message: auto.connected
         ? `protocol 'auto' negotiated ${auto.info?.negotiated} (${auto.info?.era})`

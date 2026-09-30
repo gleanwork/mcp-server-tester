@@ -3,6 +3,7 @@ import type { ServerCapabilities, Tool } from '@modelcontextprotocol/client';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/client/validators/ajv';
 import type { ConformanceCheckDefinition } from '../registry.js';
 import type { MCPConformanceRaw } from '../conformanceChecks.js';
+import { errorMessage } from '../../utils/errorMessage.js';
 
 /** Options the core checks read. */
 export interface CoreCheckOptions {
@@ -41,13 +42,10 @@ function outputSchemaProblem(tool: Tool): string | null {
   }
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 /**
- * Checks that apply to every protocol era. Names and behavior are unchanged
- * from MST 1.x, so legacy-era results stay comparable across releases.
+ * Checks that apply to every protocol era. Check names and pass/fail logic
+ * match MST 1.x, so legacy-era results stay comparable across releases;
+ * results now also carry `severity` and `specVersion`.
  */
 export function coreChecks(
   options: CoreCheckOptions,

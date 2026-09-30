@@ -71,20 +71,21 @@ export async function probeHttp(
   target: Extract<ConnectionTarget, { transport: 'http' }>,
   options: HttpProbeOptions
 ): Promise<ProbeResponse> {
-  const headers: Record<string, string> = {
-    ...target.headers,
-    accept: 'application/json, text/event-stream',
-    ...(options.body !== undefined
-      ? { 'content-type': 'application/json' }
-      : {}),
-  };
-  if (target.authProvider && !headers.Authorization) {
+  // Headers merge case-insensitively, so a configured `authorization` or
+  // `Accept` is replaced rather than sent twice.
+  const headers = new Headers(target.headers);
+  headers.set('accept', 'application/json, text/event-stream');
+  if (options.body !== undefined)
+    headers.set('content-type', 'application/json');
+  if (target.authProvider && !headers.has('authorization')) {
     const tokens = await target.authProvider.tokens();
     if (tokens?.access_token) {
-      headers.Authorization = `Bearer ${tokens.access_token}`;
+      headers.set('authorization', `Bearer ${tokens.access_token}`);
     }
   }
-  Object.assign(headers, options.headers);
+  for (const [name, value] of Object.entries(options.headers ?? {})) {
+    headers.set(name, value);
+  }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
@@ -115,7 +116,7 @@ export async function probeHttp(
 
 /**
  * Starts a fresh copy of the target's stdio server, writes one message, and
- * returns the first JSON-RPC line it prints (or `null` on timeout/exit).
+ * returns the JSON-RPC response with the same id (or `null` on timeout/exit).
  *
  * Uses a separate process so the connection under test is never affected.
  */
@@ -145,7 +146,11 @@ export async function probeStdio(
         lines.on('line', (line) => {
           try {
             const parsed = JSON.parse(line) as Record<string, unknown>;
-            if (parsed.jsonrpc === '2.0') {
+            // Match the response by id; servers may print notifications first.
+            if (
+              parsed.jsonrpc === '2.0' &&
+              parsed.id === (message as { id?: unknown }).id
+            ) {
               clearTimeout(timer);
               resolve(parsed);
             }
@@ -154,6 +159,8 @@ export async function probeStdio(
             // that is not what this probe checks.
           }
         });
+        // A server that exits early would otherwise raise EPIPE unhandled.
+        child.stdin.on('error', () => undefined);
         child.stdin.write(`${JSON.stringify(message)}\n`);
       }
     );

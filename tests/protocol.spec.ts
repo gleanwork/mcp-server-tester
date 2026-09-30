@@ -8,8 +8,10 @@ const MODERN_CHECKS = [
   'discover_succeeds',
   'discover_server_info',
   'tools_list_deterministic',
+  'tools_list_stable_across_connections',
   'unknown_tool_protocol_error',
   'unsupported_version_rejected',
+  'missing_meta_rejected',
   'result_type_present',
   'cache_hints_present',
   'result_server_info',
@@ -18,7 +20,6 @@ const MODERN_CHECKS = [
 
 /** Modern checks that only run over Streamable HTTP. */
 const MODERN_HTTP_CHECKS = [
-  'missing_meta_rejected',
   'header_mismatch_rejected',
   'unknown_method_not_found',
   'no_session_id',

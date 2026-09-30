@@ -25,6 +25,7 @@ import {
   StdioServerTransport,
 } from '@modelcontextprotocol/server/stdio';
 import { createMockMcpServer } from './mockServerDefinition.js';
+import type { ProtocolEra } from '../../src/types/index.js';
 
 type MockEra = 'dual' | 'modern' | 'legacy';
 
@@ -34,7 +35,7 @@ if (!['dual', 'modern', 'legacy'].includes(era)) {
 }
 
 /** Builds the server for one connection/request of the given era. */
-function buildServer(requestEra: 'legacy' | 'modern') {
+function buildServer(requestEra: ProtocolEra) {
   const server = createMockMcpServer();
   if (process.env.MOCK_DIVERGE && requestEra === 'modern') {
     server.registerTool(

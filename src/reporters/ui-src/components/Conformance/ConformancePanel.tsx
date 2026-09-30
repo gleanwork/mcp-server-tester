@@ -154,7 +154,7 @@ export function ConformancePanel({
             {ran - failed - warnings}/{ran} passed
             {warnings > 0 &&
               ` · ${warnings} warning${warnings === 1 ? '' : 's'}`}
-            {skipped > 0 && ` · ${skipped} skipped`}
+            {skipped > 0 ? ` · ${skipped} skipped` : null}
           </span>
         </div>
       </div>
@@ -187,12 +187,12 @@ export function ConformancePanel({
                           >
                             {check.name}
                           </code>
-                          {check.severity === 'should' && (
+                          {check.severity === 'should' ? (
                             <span className="text-xs text-muted-foreground">
                               SHOULD
                             </span>
-                          )}
-                          {check.specRef && (
+                          ) : null}
+                          {check.specRef ? (
                             <a
                               href={check.specRef}
                               target="_blank"
@@ -201,7 +201,7 @@ export function ConformancePanel({
                             >
                               spec
                             </a>
-                          )}
+                          ) : null}
                         </div>
                         <p className="text-sm text-muted-foreground mt-1">
                           {check.message}

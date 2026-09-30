@@ -7,14 +7,19 @@ import {
   createMCPClientForConfig,
 } from '../mcp/clientFactory.js';
 import { createMCPFixture } from '../mcp/fixtures/mcpFixture.js';
+import type { MCPConfig } from '../config/mcpConfig.js';
 import { runConformanceChecks } from './conformanceChecks.js';
-import type { MCPConformanceResult } from './conformanceChecks.js';
+import type {
+  MCPConformanceOptions,
+  MCPConformanceResult,
+} from './conformanceChecks.js';
 
 /**
  * Integration tests for the 2026-07-28 conformance checks against a scripted
- * HTTP server (tests/mocks/rawModernServer.mjs). Each fault switches on one
- * spec violation; the matching check must catch it, and a clean server must
- * pass every check with no warnings.
+ * server (tests/mocks/rawModernServer.mjs) over HTTP and stdio. Each fault
+ * switches on one spec violation; the checks it fails must be exactly the
+ * expected set, and a conformant server must pass every check with no
+ * warnings.
  */
 const serverScript = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -23,8 +28,8 @@ const serverScript = path.resolve(
 
 const running: ChildProcess[] = [];
 
-/** Starts the scripted server on a free port and returns its URL. */
-async function startServer(faults: string[]): Promise<string> {
+/** Starts the scripted HTTP server on a free port and returns its URL. */
+async function startHttpServer(faults: string[]): Promise<string> {
   const child = spawn(process.execPath, [serverScript, '0'], {
     env: { ...process.env, FAULTS: faults.join(',') },
     stdio: ['ignore', 'ignore', 'pipe'],
@@ -45,20 +50,45 @@ async function startServer(faults: string[]): Promise<string> {
   });
 }
 
+async function configFor(
+  transport: 'http' | 'stdio',
+  faults: string[]
+): Promise<MCPConfig> {
+  return transport === 'http'
+    ? {
+        transport: 'http',
+        serverUrl: await startHttpServer(faults),
+        protocol: '2026-07-28',
+      }
+    : {
+        transport: 'stdio',
+        command: process.execPath,
+        args: [serverScript, '--stdio'],
+        env: { FAULTS: faults.join(',') },
+        protocol: '2026-07-28',
+      };
+}
+
 async function checkServer(
-  faults: string[] = []
+  transport: 'http' | 'stdio',
+  faults: string[] = [],
+  options: MCPConformanceOptions = {}
 ): Promise<MCPConformanceResult> {
-  const serverUrl = await startServer(faults);
-  const client = await createMCPClientForConfig({
-    transport: 'http',
-    serverUrl,
-    protocol: '2026-07-28',
-  });
+  const client = await createMCPClientForConfig(
+    await configFor(transport, faults)
+  );
   try {
-    return await runConformanceChecks(createMCPFixture(client));
+    return await runConformanceChecks(createMCPFixture(client), options);
   } finally {
     await closeMCPClient(client);
   }
+}
+
+function failing(result: MCPConformanceResult): string[] {
+  return result.checks
+    .filter((c) => !c.pass && !c.skipped)
+    .map((c) => c.name)
+    .sort();
 }
 
 function check(result: MCPConformanceResult, name: string) {
@@ -71,71 +101,115 @@ afterEach(() => {
   for (const child of running.splice(0)) child.kill();
 });
 
-describe('modern-era conformance checks', () => {
+/** Checks that are 'should' (warnings); everything else here is 'must'. */
+const SHOULD = new Set([
+  'server_info_present',
+  'discover_server_info',
+  'result_server_info',
+  'no_session_id',
+  'unknown_tool_protocol_error',
+  'tools_list_deterministic',
+]);
+
+/**
+ * fault → checks it must fail. The SDK itself rejects results without
+ * cache hints or resultType, so those faults also fail list_tools_succeeds
+ * (and discover_succeeds); a retired error code also fails
+ * reserved_error_codes.
+ */
+const HTTP_FAULTS: Array<[string, string[]]> = [
+  ['no-ttl', ['cache_hints_present', 'list_tools_succeeds']],
+  [
+    'no-result-type',
+    ['discover_succeeds', 'list_tools_succeeds', 'result_type_present'],
+  ],
+  [
+    'no-server-info',
+    ['discover_server_info', 'result_server_info', 'server_info_present'],
+  ],
+  ['accept-bad-version', ['unsupported_version_rejected']],
+  ['accept-missing-meta', ['missing_meta_rejected']],
+  ['ignore-header-mismatch', ['header_mismatch_rejected']],
+  ['unknown-method-200', ['unknown_method_not_found']],
+  ['mint-session', ['no_session_id']],
+  ['echo-session', ['no_session_id']],
+  ['not-found-32002', ['reserved_error_codes', 'resource_not_found_error']],
+  ['empty-not-found', ['resource_not_found_error']],
+  ['unknown-tool-iserror', ['unknown_tool_protocol_error']],
+  ['reserved-code', ['reserved_error_codes']],
+  ['shuffle-tools', ['tools_list_deterministic']],
+  [
+    'varying-tools',
+    ['tools_list_deterministic', 'tools_list_stable_across_connections'],
+  ],
+  ['mixed-scope-pages', ['cache_scope_consistent_across_pages']],
+];
+
+/** Faults whose rules apply over stdio (HTTP-only rules are skipped). */
+const STDIO_FAULTS: Array<[string, string[]]> = [
+  ['no-ttl', ['cache_hints_present', 'list_tools_succeeds']],
+  ['accept-bad-version', ['unsupported_version_rejected']],
+  ['accept-missing-meta', ['missing_meta_rejected']],
+  ['not-found-32002', ['reserved_error_codes', 'resource_not_found_error']],
+  ['mixed-scope-pages', ['cache_scope_consistent_across_pages']],
+];
+
+describe.each([
+  ['http', HTTP_FAULTS],
+  ['stdio', STDIO_FAULTS],
+] as const)('modern-era conformance checks over %s', (transport, faults) => {
   it('a conformant server passes every check with no warnings', async () => {
-    const result = await checkServer();
-    const notPassing = result.checks.filter((c) => !c.pass);
-    expect(notPassing).toEqual([]);
+    const result = await checkServer(transport);
+    expect(failing(result)).toEqual([]);
     expect(result.pass).toBe(true);
     expect(result.protocol.era).toBe('modern');
     expect(check(result, 'unsupported_version_rejected').skipped).toBeFalsy();
     expect(check(result, 'missing_meta_rejected').skipped).toBeFalsy();
+    expect(
+      check(result, 'tools_list_stable_across_connections').skipped
+    ).toBeFalsy();
   }, 30_000);
 
-  it.each([
-    ['no-ttl', 'cache_hints_present', 'must'],
-    ['no-result-type', 'result_type_present', 'must'],
-    ['no-server-info', 'result_server_info', 'should'],
-    ['no-server-info', 'discover_server_info', 'should'],
-    ['accept-bad-version', 'unsupported_version_rejected', 'must'],
-    ['accept-missing-meta', 'missing_meta_rejected', 'must'],
-    ['ignore-header-mismatch', 'header_mismatch_rejected', 'must'],
-    ['unknown-method-200', 'unknown_method_not_found', 'must'],
-    ['mint-session', 'no_session_id', 'should'],
-    ['not-found-32002', 'resource_not_found_error', 'must'],
-    ['not-found-32002', 'reserved_error_codes', 'must'],
-    ['empty-not-found', 'resource_not_found_error', 'must'],
-    ['unknown-tool-iserror', 'unknown_tool_protocol_error', 'should'],
-    ['reserved-code', 'reserved_error_codes', 'must'],
-    ['shuffle-tools', 'tools_list_deterministic', 'should'],
-  ] as const)(
-    'fault %s fails %s (%s)',
-    async (fault, name, severity) => {
-      const result = await checkServer([fault]);
-      const failed = check(result, name);
-      expect(failed.pass).toBe(false);
-      expect(failed.skipped).toBeFalsy();
-      expect(failed.severity).toBe(severity);
-      expect(failed.specVersion).toBe('2026-07-28');
+  it('a conformant paginated server passes, including cacheScope across pages', async () => {
+    const result = await checkServer(transport, ['paginate']);
+    expect(failing(result)).toEqual([]);
+    expect(
+      check(result, 'cache_scope_consistent_across_pages').skipped
+    ).toBeFalsy();
+  }, 30_000);
+
+  it.each(faults)(
+    'fault %s fails exactly %j',
+    async (fault, expected) => {
+      const result = await checkServer(transport, [fault]);
+      expect(failing(result)).toEqual([...expected].sort());
+      for (const name of expected) {
+        const failed = check(result, name);
+        expect(failed.severity, name).toBe(
+          SHOULD.has(name) ? 'should' : 'must'
+        );
+        expect(failed.specVersion, name).toBe('2026-07-28');
+      }
       // Only 'must' failures fail the overall result.
-      expect(result.pass).toBe(severity === 'should');
+      expect(result.pass).toBe(expected.every((name) => SHOULD.has(name)));
     },
     30_000
   );
+});
 
+describe('probe option', () => {
   it('skips probe checks when probes are disabled', async () => {
-    const serverUrl = await startServer([]);
-    const client = await createMCPClientForConfig({
-      transport: 'http',
-      serverUrl,
-      protocol: '2026-07-28',
-    });
-    try {
-      const result = await runConformanceChecks(createMCPFixture(client), {
-        probe: false,
-      });
-      for (const name of [
-        'unsupported_version_rejected',
-        'missing_meta_rejected',
-        'header_mismatch_rejected',
-        'unknown_method_not_found',
-        'no_session_id',
-      ]) {
-        expect(check(result, name).skipped, name).toBe(true);
-      }
-      expect(result.pass).toBe(true);
-    } finally {
-      await closeMCPClient(client);
+    const result = await checkServer('http', [], { probe: false });
+    for (const name of [
+      'tools_list_stable_across_connections',
+      'unsupported_version_rejected',
+      'missing_meta_rejected',
+      'header_mismatch_rejected',
+      'unknown_method_not_found',
+      'no_session_id',
+    ]) {
+      expect(check(result, name).skipped, name).toBe(true);
     }
+    expect(result.pass).toBe(true);
   }, 30_000);
 });

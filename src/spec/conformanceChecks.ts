@@ -10,6 +10,7 @@ import type {
 import type { MCPConformanceCheck } from '../types/reporter.js';
 import type { MCPProtocolInfo } from '../types/index.js';
 import { getWireTap } from '../mcp/wireTap.js';
+import { errorMessage } from '../utils/errorMessage.js';
 import { getConnectionTarget } from '../mcp/connectionTarget.js';
 import {
   conformancePasses,
@@ -190,7 +191,7 @@ export async function runConformanceChecks(
   try {
     raw.tools = await mcp.listTools();
   } catch (error) {
-    toolsError = error instanceof Error ? error.message : String(error);
+    toolsError = errorMessage(error);
   }
 
   const protocol = mcp.protocol;

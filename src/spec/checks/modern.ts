@@ -2,6 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { ProtocolError } from '@modelcontextprotocol/client';
 import type { DiscoverResult } from '@modelcontextprotocol/client';
 import { getToolProtocolError } from '../../mcp/callTool.js';
+import { FIRST_MODERN_PROTOCOL_VERSION } from '../../mcp/protocol.js';
+import type { WireExchange } from '../../mcp/wireTap.js';
+import { errorMessage } from '../../utils/errorMessage.js';
 import type {
   CheckOutcome,
   ConformanceCheckDefinition,
@@ -32,6 +35,14 @@ const CACHEABLE_METHODS = new Set([
   'resources/read',
 ]);
 
+/** Paginated list methods (a walk shares one `cacheScope`). */
+const LIST_METHODS = new Set([
+  'tools/list',
+  'prompts/list',
+  'resources/list',
+  'resources/templates/list',
+]);
+
 /** Error codes the 2026-07-28 spec defines in its reserved range. */
 const DEFINED_RESERVED_CODES = new Set([-32020, -32021, -32022]);
 /** Codes earlier revisions defined that modern servers must not emit. */
@@ -40,11 +51,18 @@ const RETIRED_CODES = new Set([-32002, -32042]);
 const SERVER_INFO_KEY = 'io.modelcontextprotocol/serverInfo';
 const DISCOVER_KEY = 'discover';
 
-function describe(value: unknown): string {
+/** Compact JSON for check messages. */
+function json(value: unknown): string {
   return JSON.stringify(value) ?? String(value);
 }
 
-function results(context: ConformanceContext) {
+/** The protocol version probes claim: the negotiated one. */
+function probeVersion(context: ConformanceContext): string {
+  return context.negotiated ?? FIRST_MODERN_PROTOCOL_VERSION;
+}
+
+/** Tapped exchanges that returned a result (not an error). */
+function observedResults(context: ConformanceContext): WireExchange[] {
   return (context.tap?.exchanges() ?? []).filter(
     (exchange) =>
       typeof exchange.response.result === 'object' &&
@@ -60,29 +78,29 @@ function needsTap(context: ConformanceContext): CheckOutcome | undefined {
       };
 }
 
+/**
+ * Returns a skip when raw probes cannot run, or when `httpOnly` and the
+ * connection is not Streamable HTTP.
+ */
 function needsProbe(
   context: ConformanceContext,
-  transport?: 'http'
+  httpOnly = false
 ): CheckOutcome | undefined {
-  if (!context.probe)
+  if (!context.probe) {
     return { skip: 'Probe requests disabled (probe: false).' };
+  }
   if (!context.target) {
     return {
       skip: 'Needs the connection target; only available for clients created by MST.',
     };
   }
-  if (transport && context.target.transport !== transport) {
-    return {
-      skip:
-        transport === 'http'
-          ? 'Streamable HTTP rule; not applicable to stdio.'
-          : 'Not applicable to this transport.',
-    };
+  if (httpOnly && context.target.transport !== 'http') {
+    return { skip: 'Streamable HTTP rule; not applicable to stdio.' };
   }
   return undefined;
 }
 
-/** Sends a raw modern request with optional header/meta overrides. */
+/** Sends a raw modern request with optional header overrides. */
 async function probeRequest(
   context: ConformanceContext,
   request: {
@@ -103,7 +121,7 @@ async function probeRequest(
       ? await probeHttp(target, {
           body: message,
           headers: {
-            'MCP-Protocol-Version': context.negotiated ?? '2026-07-28',
+            'MCP-Protocol-Version': probeVersion(context),
             'Mcp-Method': request.method,
             ...request.headers,
           },
@@ -117,7 +135,28 @@ async function probeRequest(
 function formatProbe(response: ProbeResponse): string {
   const status =
     response.status !== undefined ? `HTTP ${response.status}, ` : '';
-  return `${status}${response.message ? describe(response.message.error ?? response.message.result ?? response.message) : 'no response'}`;
+  return `${status}${response.message ? json(response.message.error ?? response.message.result ?? response.message) : 'no response'}`;
+}
+
+/**
+ * Groups tapped list exchanges into walks: a request without a cursor starts
+ * a walk, and requests with a cursor continue the walk for that method.
+ */
+function paginationWalks(context: ConformanceContext): WireExchange[][] {
+  const walks: WireExchange[][] = [];
+  const open = new Map<string, WireExchange[]>();
+  for (const exchange of observedResults(context)) {
+    if (!LIST_METHODS.has(exchange.method)) continue;
+    const params = exchange.request.params as { cursor?: unknown } | undefined;
+    if (params?.cursor === undefined) {
+      const walk = [exchange];
+      walks.push(walk);
+      open.set(exchange.method, walk);
+    } else {
+      open.get(exchange.method)?.push(exchange);
+    }
+  }
+  return walks.filter((walk) => walk.length > 1);
 }
 
 export const modernChecks: readonly ConformanceCheckDefinition[] = [
@@ -135,7 +174,7 @@ export const modernChecks: readonly ConformanceCheckDefinition[] = [
       } catch (error) {
         return {
           pass: false,
-          message: `server/discover failed: ${error instanceof Error ? error.message : String(error)}`,
+          message: `server/discover failed: ${errorMessage(error)}`,
         };
       }
       context.shared.set(DISCOVER_KEY, discover);
@@ -149,7 +188,7 @@ export const modernChecks: readonly ConformanceCheckDefinition[] = [
       if (context.negotiated && !versions.includes(context.negotiated)) {
         return {
           pass: false,
-          message: `supportedVersions ${describe(versions)} does not include the negotiated ${context.negotiated}`,
+          message: `supportedVersions ${json(versions)} does not include the negotiated ${context.negotiated}`,
         };
       }
       if (typeof discover.capabilities !== 'object' || !discover.capabilities) {
@@ -195,13 +234,89 @@ export const modernChecks: readonly ConformanceCheckDefinition[] = [
       const second = (await context.mcp.client.listTools()).tools.map(
         (tool) => tool.name
       );
-      const same = describe(first) === describe(second);
+      const same = json(first) === json(second);
       return {
         pass: same,
         message: same
           ? `tools/list returned the same order twice (${first.length} tools)`
-          : `tools/list order changed between calls: ${describe(first)} vs ${describe(second)}`,
+          : `tools/list order changed between calls: ${json(first)} vs ${json(second)}`,
       };
+    },
+  },
+  {
+    name: 'tools_list_stable_across_connections',
+    eras: ['modern'],
+    severity: 'must',
+    requiresTools: true,
+    specRef: `${SPEC}/server/tools#listing-tools`,
+    async run(context) {
+      if (!context.capabilities?.tools) return null;
+      const skip = needsProbe(context);
+      if (skip) return skip;
+      // The probe is a separate connection (a new HTTP request or a new stdio
+      // process) with the same credentials, so the set may not differ.
+      const response = await probeRequest(context, {
+        method: 'tools/list',
+        params: { _meta: modernMeta(probeVersion(context)) },
+      });
+      const result = response.message?.result as
+        | { tools?: Array<{ name?: unknown }>; nextCursor?: unknown }
+        | undefined;
+      if (!Array.isArray(result?.tools)) {
+        return {
+          pass: false,
+          message: `tools/list on a second connection failed. Got ${formatProbe(response)}`,
+        };
+      }
+      const known = new Set(context.tools.map((tool) => tool.name));
+      const probed = result.tools.map((tool) => String(tool.name));
+      const unexpected = probed.filter((name) => !known.has(name));
+      // Only the first page is probed; compare the whole set when it is all.
+      const missing =
+        result.nextCursor === undefined
+          ? [...known].filter((name) => !probed.includes(name))
+          : [];
+      return unexpected.length === 0 && missing.length === 0
+        ? {
+            pass: true,
+            message: `A second connection saw the same tools (${probed.length})`,
+          }
+        : {
+            pass: false,
+            message: `tools/list varied per connection: only on the second connection ${json(unexpected)}, missing there ${json(missing)}`,
+          };
+    },
+  },
+  {
+    name: 'cache_scope_consistent_across_pages',
+    eras: ['modern'],
+    severity: 'must',
+    specRef: `${SPEC}/server/utilities/caching#interaction-with-pagination`,
+    async run(context) {
+      const skip = needsTap(context);
+      if (skip) return skip;
+      const walks = paginationWalks(context);
+      if (walks.length === 0) {
+        return { skip: 'No paginated list results observed.' };
+      }
+      const problems = walks.flatMap((walk) => {
+        const scopes = walk.map(
+          (exchange) =>
+            (exchange.response.result as { cacheScope?: unknown }).cacheScope
+        );
+        return new Set(scopes).size > 1
+          ? [`${walk[0]!.method}: ${json(scopes)}`]
+          : [];
+      });
+      return problems.length === 0
+        ? {
+            pass: true,
+            message: `Every page of ${walks.length} paginated list(s) had the same cacheScope`,
+          }
+        : {
+            pass: false,
+            message: `cacheScope changed between pages: ${problems.join('; ')}`,
+          };
     },
   },
   {
@@ -300,7 +415,7 @@ export const modernChecks: readonly ConformanceCheckDefinition[] = [
       return problems.length === 0
         ? {
             pass: true,
-            message: `Unsupported version rejected with -32022 (supports ${describe(error?.data?.supported)})`,
+            message: `Unsupported version rejected with -32022 (supports ${json(error?.data?.supported)})`,
           }
         : {
             pass: false,
@@ -314,24 +429,30 @@ export const modernChecks: readonly ConformanceCheckDefinition[] = [
     severity: 'must',
     specRef: `${SPEC}/basic/index#_meta`,
     async run(context) {
-      if (context.target?.transport === 'stdio') {
-        return {
-          skip: 'Ambiguous on stdio: a dual-era server may serve a request without _meta as legacy traffic. Checked over HTTP only.',
-        };
-      }
-      const skip = needsProbe(context, 'http');
+      const skip = needsProbe(context);
       if (skip) return skip;
+      // `_meta` names the (supported) version, so the request is unambiguously
+      // modern and consistent with the version header; only the required
+      // clientCapabilities field is missing, which must be -32602.
       const response = await probeRequest(context, {
         method: 'tools/list',
-        params: {},
+        params: {
+          _meta: {
+            'io.modelcontextprotocol/protocolVersion': probeVersion(context),
+          },
+        },
       });
       const code = errorCodeOf(response.message);
-      const pass = code === -32602 && response.status === 400;
+      const statusOk = response.status === undefined || response.status === 400;
+      const pass = code === -32602 && statusOk;
       return pass
-        ? { pass, message: 'Request without _meta rejected with 400 / -32602' }
+        ? {
+            pass,
+            message: `Request without the required clientCapabilities rejected with ${response.status !== undefined ? '400 / ' : ''}-32602`,
+          }
         : {
             pass,
-            message: `Expected HTTP 400 with -32602. Got ${formatProbe(response)}`,
+            message: `Expected ${response.status !== undefined ? 'HTTP 400 with ' : ''}-32602 for a request missing _meta clientCapabilities. Got ${formatProbe(response)}`,
           };
     },
   },
@@ -341,23 +462,57 @@ export const modernChecks: readonly ConformanceCheckDefinition[] = [
     severity: 'must',
     specRef: `${SPEC}/basic/transports/streamable-http#server-validation`,
     async run(context) {
-      const skip = needsProbe(context, 'http');
+      const skip = needsProbe(context, true);
       if (skip) return skip;
-      const response = await probeRequest(context, {
-        method: 'tools/list',
-        params: { _meta: modernMeta(context.negotiated ?? '2026-07-28') },
-        headers: { 'Mcp-Method': 'prompts/list' },
-      });
-      const code = errorCodeOf(response.message);
-      const pass = code === -32020 && response.status === 400;
-      return pass
+      const meta = modernMeta(probeVersion(context));
+      const cases: Array<{
+        label: string;
+        request: {
+          method: string;
+          params: Record<string, unknown>;
+          headers: Record<string, string>;
+        };
+      }> = [
+        {
+          label: 'Mcp-Method',
+          request: {
+            method: 'tools/list',
+            params: { _meta: meta },
+            headers: { 'Mcp-Method': 'prompts/list' },
+          },
+        },
+        {
+          label: 'Mcp-Name',
+          request: {
+            method: 'tools/call',
+            params: {
+              name: `mst_probe_${randomUUID().slice(0, 8)}`,
+              arguments: {},
+              _meta: meta,
+            },
+            headers: { 'Mcp-Name': 'mst_other_tool' },
+          },
+        },
+      ];
+      const problems: string[] = [];
+      for (const { label, request } of cases) {
+        const response = await probeRequest(context, request);
+        if (
+          errorCodeOf(response.message) !== -32020 ||
+          response.status !== 400
+        ) {
+          problems.push(`${label}: ${formatProbe(response)}`);
+        }
+      }
+      return problems.length === 0
         ? {
-            pass,
-            message: 'Mcp-Method/body mismatch rejected with 400 / -32020',
+            pass: true,
+            message:
+              'Mcp-Method and Mcp-Name mismatches rejected with 400 / -32020',
           }
         : {
-            pass,
-            message: `Expected HTTP 400 with -32020 (HeaderMismatch). Got ${formatProbe(response)}`,
+            pass: false,
+            message: `Expected HTTP 400 with -32020 (HeaderMismatch). Got ${problems.join('; ')}`,
           };
     },
   },
@@ -367,12 +522,11 @@ export const modernChecks: readonly ConformanceCheckDefinition[] = [
     severity: 'must',
     specRef: `${SPEC}/basic/transports/streamable-http#protocol-version-header`,
     async run(context) {
-      const skip = needsProbe(context, 'http');
+      const skip = needsProbe(context, true);
       if (skip) return skip;
-      const method = 'mst/nonexistent';
       const response = await probeRequest(context, {
-        method,
-        params: { _meta: modernMeta(context.negotiated ?? '2026-07-28') },
+        method: 'mst/nonexistent',
+        params: { _meta: modernMeta(probeVersion(context)) },
       });
       const code = errorCodeOf(response.message);
       const pass = code === -32601 && response.status === 404;
@@ -390,11 +544,14 @@ export const modernChecks: readonly ConformanceCheckDefinition[] = [
     severity: 'should',
     specRef: `${SPEC}/basic/transports/streamable-http#earlier-streamable-http-revisions`,
     async run(context) {
-      const skip = needsProbe(context, 'http');
+      const skip = needsProbe(context, true);
       if (skip) return skip;
+      // Sends a session id, as an older client would: it must be ignored,
+      // neither echoed nor replaced by a minted one.
       const response = await probeRequest(context, {
         method: 'server/discover',
-        params: { _meta: modernMeta(context.negotiated ?? '2026-07-28') },
+        params: { _meta: modernMeta(probeVersion(context)) },
+        headers: { 'Mcp-Session-Id': 'mst-probe-session' },
       });
       const session = response.headers?.['mcp-session-id'];
       return session
@@ -402,7 +559,7 @@ export const modernChecks: readonly ConformanceCheckDefinition[] = [
             pass: false,
             message: `Modern response carried Mcp-Session-Id (${session}); 2026-07-28 has no sessions`,
           }
-        : { pass: true, message: 'No Mcp-Session-Id minted' };
+        : { pass: true, message: 'No Mcp-Session-Id minted or echoed' };
     },
   },
   {
@@ -413,7 +570,7 @@ export const modernChecks: readonly ConformanceCheckDefinition[] = [
     async run(context) {
       const skip = needsTap(context);
       if (skip) return skip;
-      const seen = results(context);
+      const seen = observedResults(context);
       if (seen.length === 0) return { skip: 'No results observed.' };
       const missing = seen
         .filter(
@@ -441,7 +598,7 @@ export const modernChecks: readonly ConformanceCheckDefinition[] = [
     async run(context) {
       const skip = needsTap(context);
       if (skip) return skip;
-      const cacheable = results(context).filter((exchange) => {
+      const cacheable = observedResults(context).filter((exchange) => {
         const result = exchange.response.result as { resultType?: unknown };
         return (
           CACHEABLE_METHODS.has(exchange.method) &&
@@ -457,11 +614,12 @@ export const modernChecks: readonly ConformanceCheckDefinition[] = [
           ttlMs?: unknown;
           cacheScope?: unknown;
         };
+        // The spec types ttlMs as a number with a minimum of 0.
         if (typeof ttlMs !== 'number' || ttlMs < 0) {
-          problems.push(`${method}: ttlMs ${describe(ttlMs)}`);
+          problems.push(`${method}: ttlMs ${json(ttlMs)}`);
         }
         if (cacheScope !== 'public' && cacheScope !== 'private') {
-          problems.push(`${method}: cacheScope ${describe(cacheScope)}`);
+          problems.push(`${method}: cacheScope ${json(cacheScope)}`);
         }
       }
       const methods = [
@@ -486,7 +644,7 @@ export const modernChecks: readonly ConformanceCheckDefinition[] = [
     async run(context) {
       const skip = needsTap(context);
       if (skip) return skip;
-      const seen = results(context);
+      const seen = observedResults(context);
       if (seen.length === 0) return { skip: 'No results observed.' };
       const missing = seen
         .filter((exchange) => {
