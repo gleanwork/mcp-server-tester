@@ -310,7 +310,7 @@ export function InitApp({ options }: InitAppProps) {
           <Text dimColor> npm test</Text>
           <Text> </Text>
           <Text color="cyan">To generate a dataset:</Text>
-          <Text dimColor> npx mcp-server-tester generate</Text>
+          <Text dimColor> npx mst generate</Text>
         </Box>
       )}
 

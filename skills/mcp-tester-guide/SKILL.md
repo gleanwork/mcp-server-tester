@@ -275,10 +275,10 @@ The reporter generates an interactive HTML report with eval results, conformance
 
 ```bash
 # Initialize a new test project
-npx mcp-server-tester init
+npx @gleanwork/mcp-server-tester init
 
 # Generate eval dataset from tool schemas
-npx mcp-server-tester generate
+npx mst generate
 ```
 
 ## Auth Patterns

@@ -101,13 +101,13 @@ more than one entry so traces and metrics can attribute MCP calls correctly.
 ## CLI
 
 ```bash
-mcp-server-tester run \
+mst run \
   --manifest ./eval-manifest.json \
   --plugins ./plugins \
   --arm variant \
   --dry-run
 
-mcp-server-tester batch \
+mst batch \
   --manifest-dir ./manifests \
   --workers 4 \
   --skip-existing \

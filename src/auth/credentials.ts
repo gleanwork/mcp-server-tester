@@ -7,7 +7,7 @@
  * 3. `auth.accessToken`: a static bearer token.
  * 4. `auth.clientCredentials`: a token from the client-credentials grant,
  *    fetched again as it expires.
- * 5. (Fixtures only) a `mcp-server-tester login` for the server, or tokens
+ * 5. (Fixtures only) an `mst login` for the server, or tokens
  *    in `MCP_ACCESS_TOKEN`, refreshed as they expire.
  *
  * `configuredCredentials` answers 2-4 from the config alone (the client
@@ -100,7 +100,7 @@ export abstract class BearerTokenAuthProvider implements OAuthClientProvider {
 }
 
 /**
- * A stored `mcp-server-tester login` (or `MCP_ACCESS_TOKEN` tokens). The token
+ * A stored `mst login` (or `MCP_ACCESS_TOKEN` tokens). The token
  * is refreshed from the stored refresh token as it nears expiry, so a token
  * that expires during a long run doesn't fail it.
  */
@@ -132,7 +132,7 @@ export class StoredLoginAuthProvider extends BearerTokenAuthProvider {
   protected rejectedMessage(): string {
     return this.current.fromEnv
       ? `The server rejected the token in MCP_ACCESS_TOKEN for ${this.serverUrl}. Update it (and MCP_REFRESH_TOKEN) or unset them.`
-      : `The server rejected the stored login for ${this.serverUrl}. Run \`mcp-server-tester login ${this.serverUrl}\` again.`;
+      : `The server rejected the stored login for ${this.serverUrl}. Run \`mst login ${this.serverUrl}\` again.`;
   }
 }
 

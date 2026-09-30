@@ -140,7 +140,7 @@ local HTML reports.
 ### Auth Flow
 
 ```
-CLI user runs: mcp-server-tester login <server-url>
+CLI user runs: mst login <server-url>
    ↓
 auth/cli.ts: CLIOAuthClient.login()
    ↓
