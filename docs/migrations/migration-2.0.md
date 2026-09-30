@@ -193,7 +193,8 @@ The MCP reporter reads test data through one typed channel (`src/reporters/chann
 - **Auto-tracked calls keep their arguments and the real failure.** A test's `mcp.callTool()` results now carry `request.args`. A failing test reports Playwright's error message (for example the failed assertion) instead of `'Test failed'`.
 - **Every `runEvalDataset()` in a test is reported.** The reporter used to keep only the first eval-results attachment of each test.
 - **`getServerInfo()` no longer attaches `mcp-server-info`.** Nothing read it. The other attachment names are unchanged.
-- **A malformed MCP attachment is reported, not skipped silently.** It's logged, and the rest of the test's attachments are still read.
+- **A malformed MCP attachment is reported, not skipped silently.** It's logged, and the rest of the test's attachments are still read. The reporter checks the fields it and its UI read (for example each eval case's `expectations`).
+- **`mcp-conformance-checks` omits `serverInfo` when the server reports none.** It used to write `"serverInfo": null`.
 
 ## New in 2.0 (non-breaking)
 

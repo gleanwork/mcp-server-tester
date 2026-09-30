@@ -132,11 +132,16 @@ export default class MCPReporter implements Reporter {
     await mkdir(this.config.outputDir, { recursive: true });
   }
 
-  async onTestEnd(test: TestCase, result: TestResult): Promise<void> {
+  /** Reads a test's channel attachments of the given kinds, logging bad ones. */
+  private async readAttachments(
+    test: TestCase,
+    result: TestResult,
+    wanted: (kind: ReporterAttachment['kind']) => boolean
+  ): Promise<ReporterAttachment[]> {
     const received: ReporterAttachment[] = [];
     for (const attachment of result.attachments) {
       const kind = reporterAttachmentKind(attachment);
-      if (kind === undefined) continue;
+      if (kind === undefined || !wanted(kind)) continue;
       const content = await this.getAttachmentContent(attachment);
       if (!content) continue;
       try {
@@ -148,11 +153,29 @@ export default class MCPReporter implements Reporter {
         );
       }
     }
+    return received;
+  }
 
-    // Auto-tracked calls would duplicate a test's eval results.
-    const hasEvalResults = received.some(
-      (attachment) => attachment.kind === 'evalResults'
+  async onTestEnd(test: TestCase, result: TestResult): Promise<void> {
+    const received = await this.readAttachments(
+      test,
+      result,
+      (kind) => kind !== 'toolCall'
     );
+    // Auto-tracked calls would duplicate a test's eval results, so they're
+    // only read for tests without any.
+    if (
+      this.config.includeAutoTracking &&
+      !received.some((attachment) => attachment.kind === 'evalResults')
+    )
+      received.push(
+        ...(await this.readAttachments(
+          test,
+          result,
+          (kind) => kind === 'toolCall'
+        ))
+      );
+
     let sawExperiment = false;
     let sawToolList = false;
 
@@ -192,10 +215,9 @@ export default class MCPReporter implements Reporter {
           sawToolList = true;
           break;
         case 'toolCall':
-          if (!hasEvalResults && this.config.includeAutoTracking)
-            this.allResults.push(
-              autoTrackedResult(test, result, attachment.data)
-            );
+          this.allResults.push(
+            autoTrackedResult(test, result, attachment.data)
+          );
           break;
       }
     }
@@ -491,8 +513,9 @@ export default class MCPReporter implements Reporter {
 }
 
 /** Why a test didn't pass, from Playwright's error, without terminal colours. */
-function testFailure(result: TestResult): string {
-  const message = result.error?.message ?? result.errors[0]?.message;
+function failureMessage(result: TestResult): string {
+  // `value` is set when something other than an Error was thrown.
+  const message = result.error?.message ?? result.error?.value;
   return message ? stripVTControlCharacters(message) : `Test ${result.status}`;
 }
 
@@ -511,7 +534,7 @@ function autoTrackedResult(
     pass: passed,
     request: { args: call.args },
     response: call.result,
-    error: passed ? undefined : testFailure(result),
+    error: passed ? undefined : failureMessage(result),
     expectations: {},
     authType: call.authType,
     project: call.project,

@@ -9,12 +9,13 @@
  */
 import { z } from 'zod';
 import type { TestInfo } from '@playwright/test';
-import type { AuthType, MCPProtocolInfo } from '../types/index.js';
 import type {
   EvalCaseResult,
-  MCPConformanceCheck,
+  MCPConformanceResultData,
+  MCPServerCapabilitiesData,
   MCPVariantExperimentData,
 } from '../types/reporter.js';
+import type { AuthType } from '../types/index.js';
 
 /** Attachment names the reporter reads. Tool calls append the tool name. */
 export const REPORTER_ATTACHMENT_NAMES = {
@@ -32,28 +33,22 @@ export interface EvalResultsPayload {
   caseResults: EvalCaseResult[];
 }
 
-/** Results from runConformanceChecks() or runCrossEraChecks(). */
-export interface ConformancePayload {
+/**
+ * Results from runConformanceChecks() or runCrossEraChecks(): the report's
+ * conformance entry (minus the test title, which the reporter adds) plus
+ * what only the attachment carries.
+ */
+export type ConformancePayload = Omit<MCPConformanceResultData, 'testTitle'> & {
   operation: 'conformanceChecks' | 'crossEraChecks';
-  pass: boolean;
-  checks: MCPConformanceCheck[];
-  toolCount: number;
-  serverInfo?: { name?: string; version?: string };
   capabilities?: unknown;
-  protocol?: MCPProtocolInfo;
-  /** Groups checks in the report, e.g. "Cross-era: legacy ↔ 2026-07-28". */
-  scope?: string;
   connections?: unknown[];
-  authType?: AuthType;
-  project?: string;
-}
+};
 
 /** A fixture listTools() call. */
-export interface ListToolsPayload {
-  operation: 'listTools';
-  toolCount: number;
-  tools: Array<{ name: string; description?: string }>;
-}
+export type ListToolsPayload = Pick<
+  MCPServerCapabilitiesData,
+  'tools' | 'toolCount'
+> & { operation: 'listTools' };
 
 /** A fixture callTool() call, auto-tracked for tests without eval results. */
 export interface ToolCallPayload {
@@ -78,14 +73,26 @@ export type ReporterAttachment =
 type Kind = ReporterAttachment['kind'];
 
 /**
- * Read-side schemas: the fields the reporter relies on. Payloads stay open
- * (`looseObject`) so producers can add fields without breaking readers.
+ * Read-side schemas: what the reporter and its UI dereference. They are
+ * partial by design. Payloads stay open (`looseObject`) so producers can add
+ * fields, and the static payload types are trusted beyond what is checked.
  */
-const PAYLOAD_SCHEMAS: Record<Kind, z.ZodType> = {
+const PAYLOAD_SCHEMAS = {
   evalResults: z.looseObject({
-    caseResults: z.array(z.looseObject({ id: z.string(), pass: z.boolean() })),
+    caseResults: z.array(
+      z.looseObject({
+        id: z.string(),
+        pass: z.boolean(),
+        expectations: z.looseObject({}),
+      })
+    ),
   }),
-  variantExperiment: z.looseObject({}),
+  variantExperiment: z.looseObject({
+    metric: z.string(),
+    baselineValue: z.number(),
+    bestValue: z.number(),
+    rounds: z.array(z.looseObject({})),
+  }),
   conformance: z.looseObject({
     pass: z.boolean(),
     checks: z.array(z.looseObject({ name: z.string(), pass: z.boolean() })),
@@ -100,9 +107,12 @@ const PAYLOAD_SCHEMAS: Record<Kind, z.ZodType> = {
     durationMs: z.number(),
     isError: z.boolean(),
   }),
-};
+} satisfies Record<Kind, z.ZodType>;
 
-/** Payloads the eval runner can be large; everything else is pretty-printed for the HTML report. */
+/**
+ * Eval results and experiments can be large, so they're written compact;
+ * everything else is pretty-printed for Playwright's HTML report.
+ */
 const COMPACT_KINDS: ReadonlySet<Kind> = new Set([
   'evalResults',
   'variantExperiment',
@@ -114,7 +124,10 @@ function attachmentName(attachment: ReporterAttachment): string {
     : REPORTER_ATTACHMENT_NAMES[attachment.kind];
 }
 
-/** Records data on a test for the MCP reporter. */
+/**
+ * Records data on a test for the MCP reporter. Internal: the attachment
+ * format is a contract between this package's producers and its reporter.
+ */
 export async function attachReporterData(
   testInfo: Pick<TestInfo, 'attach'>,
   attachment: ReporterAttachment
@@ -148,10 +161,10 @@ export function reporterAttachmentKind(attachment: {
  *
  * @throws When the content isn't JSON or doesn't match the kind's schema.
  */
-export function parseReporterAttachment(
-  kind: Kind,
+export function parseReporterAttachment<K extends Kind>(
+  kind: K,
   content: string
-): ReporterAttachment {
+): Extract<ReporterAttachment, { kind: K }> {
   const data: unknown = JSON.parse(content);
   const result = PAYLOAD_SCHEMAS[kind].safeParse(data);
   if (!result.success)
@@ -160,5 +173,6 @@ export function parseReporterAttachment(
         .map((issue) => `${issue.path.join('.') || '(root)'} ${issue.message}`)
         .join('; ')}`
     );
-  return { kind, data } as ReporterAttachment;
+  // Checked above as far as the schema goes; trusted beyond it.
+  return { kind, data } as Extract<ReporterAttachment, { kind: K }>;
 }

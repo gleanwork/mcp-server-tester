@@ -54,7 +54,13 @@ const samples: ReporterAttachment[] = [
   { kind: 'evalResults', data: { caseResults: [caseResult] } },
   {
     kind: 'variantExperiment',
-    data: { converged: true } as unknown as Extract<
+    data: {
+      metric: 'passRate',
+      baselineValue: 0.5,
+      bestValue: 0.75,
+      rounds: [],
+      reason: 'improved',
+    } as unknown as Extract<
       ReporterAttachment,
       { kind: 'variantExperiment' }
     >['data'],
@@ -106,6 +112,34 @@ describe('reporter channel', () => {
     const test = recorder();
     await attachReporterData(test, samples[4]!);
     expect(test.attachments[0]?.name).toBe('mcp-call-get_weather');
+  });
+
+  it('writes the same bytes as before the channel', async () => {
+    const test = recorder();
+    for (const sample of samples) await attachReporterData(test, sample);
+    expect(
+      test.attachments.map(({ name, contentType, body }) => ({
+        name,
+        contentType,
+        body: body!.toString('utf-8'),
+      }))
+    ).toEqual(
+      samples.map((sample, index) => ({
+        name: [
+          'mcp-test-results',
+          'mcp-variant-experiment',
+          'mcp-conformance-checks',
+          'mcp-list-tools',
+          'mcp-call-get_weather',
+        ][index],
+        contentType: 'application/json',
+        // Eval results and experiments are compact; the rest pretty-printed.
+        body:
+          index < 2
+            ? JSON.stringify(sample.data)
+            : JSON.stringify(sample.data, null, 2),
+      }))
+    );
   });
 
   it('ignores attachments that are not MCP JSON', () => {
@@ -264,6 +298,67 @@ describe('MCPReporter reading the channel', () => {
       { includeAutoTracking: false }
     );
     expect(disabled.results).toEqual([]);
+  });
+
+  it('reads attachments Playwright wrote to disk', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-attachment-'));
+    const file = path.join(dir, 'results.json');
+    await fs.writeFile(
+      file,
+      JSON.stringify({ caseResults: [caseResult] }),
+      'utf-8'
+    );
+    const run = await report([
+      {
+        title: 'on disk',
+        attachments: [
+          {
+            name: 'mcp-test-results',
+            contentType: 'application/json',
+            path: file,
+          },
+        ],
+      },
+    ]);
+    await fs.rm(dir, { recursive: true, force: true });
+    expect(run.results.map((result) => result.id)).toEqual(['weather']);
+  });
+
+  it('uses the first valid tool list when an earlier one is malformed', async () => {
+    const run = await report([
+      {
+        title: 'tools',
+        attachments: [
+          {
+            name: 'mcp-list-tools',
+            contentType: 'application/json',
+            body: Buffer.from('{"tools": "not a list"}'),
+          },
+          ...(await attachments(samples[3]!)),
+        ],
+      },
+    ]);
+    expect(run.serverCapabilities).toEqual([
+      expect.objectContaining({ testTitle: 'tools', toolCount: 1 }),
+    ]);
+  });
+
+  it('rejects eval results the report would fail to aggregate', async () => {
+    const run = await report([
+      {
+        title: 'no expectations',
+        attachments: [
+          {
+            name: 'mcp-test-results',
+            contentType: 'application/json',
+            body: Buffer.from(
+              JSON.stringify({ caseResults: [{ id: 'x', pass: true }] })
+            ),
+          },
+        ],
+      },
+    ]);
+    expect(run.results).toEqual([]);
   });
 
   it('logs a malformed attachment and keeps reading the rest', async () => {

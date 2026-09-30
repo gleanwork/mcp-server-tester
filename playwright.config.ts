@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from '@playwright/test';
 import { protocolMatrix } from './src/config/protocolMatrix.js';
 
@@ -28,7 +29,9 @@ export default defineConfig({
   // fixtures, conformance checks and eval runner attach. Its UI is a build
   // artifact, so it is enabled once `npm run build` has produced it (CI
   // always builds first).
-  reporter: existsSync('src/reporters/ui-dist')
+  reporter: existsSync(
+    fileURLToPath(new URL('./src/reporters/ui-dist', import.meta.url))
+  )
     ? [
         // Playwright drops its terminal summary once a custom reporter is
         // configured; keep it for CI logs.
