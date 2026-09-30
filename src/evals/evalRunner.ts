@@ -1,5 +1,5 @@
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
-import type { EvalDataset, EvalCase, EvalExpectBlock } from './datasetTypes.js';
+import type { EvalDataset, EvalCase } from './datasetTypes.js';
 import {
   checkedExecution,
   executeEvalCase,
@@ -12,7 +12,10 @@ import type { HostEvent } from './evalFrameworkTypes.js';
 import type { TestInfo, Expect } from '@playwright/test';
 import type { Tool } from '@modelcontextprotocol/client';
 import type { ZodType } from 'zod';
-import { BUILTIN_RESULT_SCHEMAS } from './builtinResultSchemas.js';
+import {
+  evaluateExpectations,
+  type ExpectationOutcome,
+} from './expectations.js';
 import type {
   ExternalHostCapabilitiesConfig,
   ExternalHostCorrelationConfig,
@@ -24,7 +27,6 @@ import {
 } from './externalHost/driverIdentity.js';
 import { getRegisteredExternalHostConfig } from './externalHost/hostRegistry.js';
 import type {
-  EvalExpectationResult,
   MCPProtocolInfo,
   SkillLoad,
   UsageMetrics,
@@ -46,21 +48,9 @@ import {
   type EvalResultStoreLike,
   type StoredEvalArtifactMetadata,
 } from './resultStore.js';
-import {
-  validateResponse,
-  validateSchema,
-  validateText,
-  validatePattern,
-  validateError,
-  validateSize,
-  validateToolCalls,
-  validateToolCallCount,
-  validateJudge,
-} from '../assertions/validators/index.js';
 import { execFileNoThrow } from '../utils/execFileNoThrow.js';
 import { debugEval } from '../debug.js';
 import { sumUsage } from '../utils/usageUtils.js';
-import { matchesIdentity } from '../assertions/validators/toolCalls.js';
 import packageJson from '../../package.json' with { type: 'json' };
 
 /**
@@ -546,217 +536,6 @@ function didCasePass(
 }
 
 /**
- * Configuration for processing expect blocks
- */
-interface ExpectBlockConfig {
-  schemas?: Record<string, ZodType>;
-  playwrightExpect?: Expect;
-  judgeReps?: number;
-  canonicalAnswer?: string;
-}
-
-/**
- * Return type for runExpectBlockValidations, including optional precision/recall metrics
- */
-interface ExpectBlockResults {
-  expectations: EvalCaseResult['expectations'];
-  toolPrecision?: number;
-  toolRecall?: number;
-}
-
-/**
- * Processes the new unified expect block using validators
- *
- * This function translates the expect block into validation results,
- * calling the appropriate validators for each field.
- */
-async function runExpectBlockValidations(
-  expectBlock: EvalExpectBlock,
-  response: unknown,
-  config: ExpectBlockConfig
-): Promise<ExpectBlockResults> {
-  const results: EvalCaseResult['expectations'] = {};
-  let toolPrecision: number | undefined;
-  let toolRecall: number | undefined;
-
-  // response (toMatchToolResponse)
-  if (expectBlock.response !== undefined) {
-    const validation = validateResponse(response, expectBlock.response);
-    results.exact = {
-      pass: validation.pass,
-      details: validation.message,
-    };
-  }
-
-  // schema (toMatchToolSchema)
-  if (expectBlock.schema !== undefined) {
-    const schema =
-      config.schemas?.[expectBlock.schema] ??
-      BUILTIN_RESULT_SCHEMAS[expectBlock.schema];
-    if (!schema) {
-      results.schema = {
-        pass: false,
-        details: `Schema "${expectBlock.schema}" not found in schemas registry`,
-      };
-    } else {
-      const validation = validateSchema(response, schema);
-      results.schema = {
-        pass: validation.pass,
-        details: validation.message,
-      };
-    }
-  }
-
-  // containsText (toContainToolText)
-  if (expectBlock.containsText !== undefined) {
-    const validation = validateText(response, expectBlock.containsText);
-    results.textContains = {
-      pass: validation.pass,
-      details: validation.message,
-    };
-  }
-
-  // matchesPattern (toMatchToolPattern)
-  if (expectBlock.matchesPattern !== undefined) {
-    const validation = validatePattern(response, expectBlock.matchesPattern);
-    results.regex = {
-      pass: validation.pass,
-      details: validation.message,
-    };
-  }
-
-  // isError (toBeToolError)
-  if (expectBlock.isError !== undefined) {
-    const validation = validateError(response, expectBlock.isError);
-    results.error = {
-      pass: validation.pass,
-      details: validation.message,
-    };
-  }
-
-  // responseSize (toHaveToolResponseSize)
-  if (expectBlock.responseSize !== undefined) {
-    const validation = validateSize(response, expectBlock.responseSize);
-    results.size = {
-      pass: validation.pass,
-      details: validation.message,
-    };
-  }
-
-  // toolsTriggered (toHaveToolCalls)
-  if (expectBlock.toolsTriggered !== undefined) {
-    const validation = validateToolCalls(response, expectBlock.toolsTriggered);
-    results.toolsTriggered = {
-      pass: validation.pass,
-      details: validation.message,
-    };
-    toolPrecision = validation.metrics?.precision;
-    toolRecall = validation.metrics?.recall;
-  }
-
-  // toolCallCount (toHaveToolCallCount)
-  if (expectBlock.toolCallCount !== undefined) {
-    const validation = validateToolCallCount(
-      response,
-      expectBlock.toolCallCount
-    );
-    results.toolCallCount = {
-      pass: validation.pass,
-      details: validation.message,
-    };
-  }
-
-  // passesJudge (toPassToolJudge) — single or multi-judge
-  if (expectBlock.passesJudge !== undefined) {
-    const judgeConfigs = Array.isArray(expectBlock.passesJudge)
-      ? expectBlock.passesJudge
-      : [expectBlock.passesJudge];
-
-    const judgeResultEntries = await Promise.all(
-      judgeConfigs.map(async (judgeConfig) => {
-        const effectiveReps = judgeConfig.reps ?? config.judgeReps ?? 1;
-        const effectiveReference =
-          judgeConfig.reference !== undefined
-            ? judgeConfig.reference
-            : config.canonicalAnswer;
-        const validation = await validateJudge(response, {
-          ...judgeConfig,
-          reference: effectiveReference,
-          reps: effectiveReps,
-        });
-
-        const judgeName =
-          judgeConfig.judge ??
-          (typeof judgeConfig.rubric === 'string'
-            ? judgeConfig.rubric
-            : undefined);
-
-        return {
-          pass: validation.pass,
-          details: validation.message,
-          score: validation.details?.score as number | undefined,
-          reasoning: validation.details?.reasoning as string | undefined,
-          judgeName,
-          judgeProvider: validation.details?.judgeProvider as
-            | string
-            | undefined,
-          judgeModel: validation.details?.judgeModel as string | undefined,
-        } satisfies EvalExpectationResult;
-      })
-    );
-
-    if (judgeResultEntries.length === 1) {
-      // Single judge — flat result, same as before
-      results.judge = judgeResultEntries[0]!;
-    } else {
-      // Multi-judge — aggregate with AND semantics
-      const allPassed = judgeResultEntries.every((r) => r.pass);
-      const passCount = judgeResultEntries.filter((r) => r.pass).length;
-
-      results.judge = {
-        pass: allPassed,
-        details: `${passCount}/${judgeResultEntries.length} judges passed`,
-        judgeResults: judgeResultEntries,
-      };
-    }
-  }
-
-  // snapshot (toMatchToolSnapshot) - requires Playwright expect with custom matcher
-  if (expectBlock.snapshot !== undefined) {
-    if (!config.playwrightExpect) {
-      results.snapshot = {
-        pass: false,
-        details: 'Snapshot testing requires expect in context',
-      };
-    } else {
-      try {
-        // Use custom toMatchToolSnapshot matcher which:
-        // 1. Extracts text from the response
-        // 2. Applies sanitizers
-        // 3. Uses Playwright's native snapshot testing
-        const sanitizers = expectBlock.snapshotSanitizers ?? [];
-        // eslint-disable-next-line @typescript-eslint/await-thenable, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-        await (config.playwrightExpect(response) as any).toMatchToolSnapshot(
-          expectBlock.snapshot,
-          sanitizers
-        );
-        results.snapshot = {
-          pass: true,
-          details: `Matches snapshot "${expectBlock.snapshot}"`,
-        };
-      } catch (err) {
-        results.snapshot = {
-          pass: false,
-          details: err instanceof Error ? err.message : String(err),
-        };
-      }
-    }
-  }
-
-  return { expectations: results, toolPrecision, toolRecall };
-}
-
-/**
  * Builds the request metadata from an eval case for inclusion in results.
  */
 function buildRequest(
@@ -1016,87 +795,20 @@ async function runSingleIteration(
       : undefined);
   const externalHost = host?.externalHost ?? hostResponse?.externalHost;
 
-  // Collect expectation results from expect block
-  let expectationResults: EvalCaseResult['expectations'] = {};
-  let toolPrecision: number | undefined;
-  let toolRecall: number | undefined;
-
-  let mcpHostTrace: EvalCaseResult['mcpHostTrace'];
-
+  let outcome: ExpectationOutcome = { expectations: {} };
   if (!error && evalCase.expect) {
-    const validationResponse = hostResponse
-      ? mapToolNames(hostResponse, options.toolMap)
-      : response;
-    const {
-      expectations,
-      toolPrecision: tp,
-      toolRecall: tr,
-    } = await runExpectBlockValidations(evalCase.expect, validationResponse, {
-      schemas: options.schemas,
-      playwrightExpect: context.expect,
-      judgeReps: evalCase.judgeReps,
-      canonicalAnswer: evalCase.canonicalAnswer,
-    });
-    expectationResults = expectations;
-    if (evidence && evidence !== 'structured') {
-      for (const key of ['toolsTriggered', 'toolCallCount'] as const) {
-        if (evalCase.expect[key] !== undefined)
-          expectationResults[key] = {
-            pass: false,
-            details: `Host evidence is ${evidence}; structured tool evidence is required.`,
-          };
-      }
-    }
-    const verified = evidence === undefined || evidence === 'structured';
-    toolPrecision = verified ? tp : undefined;
-    toolRecall = verified ? tr : undefined;
-
-    if (evalCase.mode === 'external_host' && externalHost) {
-      applyExternalHostEvidenceGating(
-        evalCase.expect,
+    outcome = await evaluateExpectations(
+      { ...evalCase, expect: evalCase.expect },
+      {
+        response: hostResponse
+          ? mapToolNames(hostResponse, options.toolMap)
+          : response,
+        hostResponse,
+        evidence,
         externalHost,
-        expectationResults
-      );
-      if (expectationResults.toolsTriggered?.pass === false) {
-        toolPrecision = undefined;
-        toolRecall = undefined;
-      }
-    }
-
-    // Build mcpHostTrace when toolsTriggered expectation is present
-    if (
-      evalCase.expect.toolsTriggered !== undefined &&
-      (evidence === undefined || evidence === 'structured') &&
-      hostResponse &&
-      (evalCase.mode !== 'external_host' ||
-        (externalHost !== undefined && hasStructuredToolEvidence(externalHost)))
-    ) {
-      const mapped = validationResponse as HostResponse;
-      const expected = evalCase.expect.toolsTriggered.calls.filter(
-        (call) => (call.kind ?? 'tool_call') === 'tool_call'
-      );
-      const canonicalCalls = Array.isArray(mapped.events)
-        ? mapped.events.filter((event) => event.kind === 'tool_call')
-        : mapped.toolCalls;
-      mcpHostTrace = {
-        calls: hostResponse.toolCalls.map((call, index) => ({
-          name: call.name,
-          arguments: call.arguments,
-          status: expected.some((item) =>
-            matchesIdentity(canonicalCalls[index] ?? call, item)
-          )
-            ? 'expected'
-            : 'unexpected',
-        })),
-        missed: expected
-          .filter(
-            (item) =>
-              item.required !== false &&
-              !canonicalCalls.some((call) => matchesIdentity(call, item))
-          )
-          .map(({ name }) => ({ name })),
-      };
-    }
+      },
+      { schemas: options.schemas, playwrightExpect: context.expect }
+    );
   }
 
   const hostUsage = host?.usage ?? hostResponse?.usage;
@@ -1113,11 +825,11 @@ async function runSingleIteration(
           ? 'mcp_host'
           : (evalCase.toolName ?? evalCase.request?.method ?? 'unknown'),
     source: 'eval',
-    pass: didCasePass(error, expectationResults),
+    pass: didCasePass(error, outcome.expectations),
     request: buildRequest(evalCase, options.toolOverrideVariantId),
     response,
     error,
-    expectations: expectationResults,
+    expectations: outcome.expectations,
     authType: context.mcp?.authType,
     project: context.mcp?.project,
     // Only pre-executed traces need extra time. Live execution is already
@@ -1125,65 +837,15 @@ async function runSingleIteration(
     durationMs:
       Date.now() - startTime + (execution.preExecutionDurationMs ?? 0),
     tags: evalCase.tags,
-    toolPrecision,
-    toolRecall,
-    mcpHostTrace,
+    toolPrecision: outcome.toolPrecision,
+    toolRecall: outcome.toolRecall,
+    mcpHostTrace: outcome.mcpHostTrace,
     hostEvidence: evidence,
     ...(hostDiagnostics ? { hostDiagnostics } : {}),
     hostUsage,
     hostTelemetry: host?.telemetry,
     externalHost,
   };
-}
-
-function applyExternalHostEvidenceGating(
-  expectBlock: EvalExpectBlock,
-  externalHost: ExternalHostMetadata,
-  expectationResults: EvalCaseResult['expectations']
-): void {
-  const needsToolEvidence =
-    expectBlock.toolsTriggered !== undefined ||
-    expectBlock.toolCallCount !== undefined;
-
-  if (!needsToolEvidence || hasStructuredToolEvidence(externalHost)) {
-    return;
-  }
-
-  const details = `External host trace source ${
-    externalHost.sources?.toolCalls ?? externalHost.traceSource
-  } (${externalHost.traceConfidence} confidence) cannot support tool-call assertions. Use protocol traces or host-native structured traces for toolsTriggered/toolCallCount.`;
-
-  if (expectBlock.toolsTriggered !== undefined) {
-    expectationResults.toolsTriggered = { pass: false, details };
-  }
-  if (expectBlock.toolCallCount !== undefined) {
-    expectationResults.toolCallCount = { pass: false, details };
-  }
-}
-
-function hasStructuredToolEvidence(
-  externalHost: ExternalHostMetadata
-): boolean {
-  const structuredSources = [
-    'mcp-proxy',
-    'mcp-server-logs',
-    'host-local-transcript',
-    'host-native-export',
-  ];
-  const evidence = externalHost.evidence?.toolCalls;
-
-  if (evidence) {
-    return (
-      evidence.confidence === 'high' &&
-      structuredSources.includes(evidence.source)
-    );
-  }
-
-  const source = externalHost.sources?.toolCalls ?? externalHost.traceSource;
-  return (
-    externalHost.traceConfidence === 'high' &&
-    structuredSources.includes(source)
-  );
 }
 
 /**

@@ -112,14 +112,26 @@ export function matchesIdentity(
   );
 }
 
+/**
+ * Why host evidence can't support tool-call assertions, or undefined when it
+ * can. Hosts that don't report evidence are treated as structured.
+ */
+export function hostEvidenceProblem(
+  evidence: HostEvidence | undefined
+): string | undefined {
+  return evidence === undefined || evidence === 'structured'
+    ? undefined
+    : `Host evidence is ${evidence}; structured tool evidence is required.`;
+}
+
 function unverifiedEvidence(
   response: TraceResponse
 ): ValidationResult | undefined {
-  if (response.evidence === undefined || response.evidence === 'structured')
-    return undefined;
+  const problem = hostEvidenceProblem(response.evidence);
+  if (problem === undefined) return undefined;
   return {
     pass: false,
-    message: `Host evidence is ${response.evidence}; structured tool evidence is required.`,
+    message: problem,
     details: { evidence: response.evidence },
   };
 }

@@ -38,7 +38,7 @@ npm run format:check        # Check formatting
 - **`skills/`** - Agent Skills over MCP (SEP-2640): wire schemas, entry validation, and a skills client (the SDK has no skills API yet)
 - **`auth/`** - OAuth 2.1 with PKCE (`PlaywrightOAuthClientProvider`) and static token utilities
 - **`assertions/`** - Unified assertion architecture (see below)
-- **`evals/`** - Dataset types, loader, and runner (uses validators internally). `evals/caseExecution.ts` is the only place a case runs: every path (direct tool/request, simulated `mcp_host`, `external_host`, suite hosts) returns a typed `CaseExecution`, and the runner reads its fields instead of inspecting `response`. `caseExecution.golden.test.ts` pins the resulting `EvalCaseResult` for every path
+- **`evals/`** - Dataset types, loader, and runner (uses validators internally). `evals/caseExecution.ts` is the only place a case runs: every path (direct tool/request, simulated `mcp_host`, `external_host`, suite hosts) returns a typed `CaseExecution`, and the runner reads its fields instead of inspecting `response`. `caseExecution.golden.test.ts` pins the resulting `EvalCaseResult` for every path. `evals/expectations.ts` grades a case's `expect` block: it decides once whether the evidence can support tool-call assertions (`toolEvidenceGap`), builds the `mcpHostTrace` view, resolves judge settings (including suite manifest judges), then calls the validators
 - **`judge/`** - LLM-as-a-judge via Claude Agent SDK
 - **`spec/`** - Conformance check registry (`checks/core.ts`, `checks/modern.ts`, `checks/skills.ts`), raw probe channel, and cross-era checks
 - **`reporters/`** - Custom Playwright reporter with React-based UI
@@ -293,6 +293,12 @@ Use conventional commits: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore
 1. Create `src/assertions/validators/myValidator.ts` returning `ValidationResult`
 2. Export from `src/assertions/validators/index.ts`
 3. Add unit tests in `src/assertions/validators/validators.test.ts`
+
+### New Expectation Type (eval datasets)
+
+1. Write the validator (see above)
+2. Add the field to `EvalExpectBlockSchema` in `src/evals/datasetTypes.ts`, and its result key to `ExpectationType` in `src/types/index.ts`
+3. Add one branch to `evaluateExpectations()` in `src/evals/expectations.ts`, and a case to `src/evals/expectations.test.ts`
 
 ### New Matcher
 

@@ -539,6 +539,8 @@ exports[`golden: external_host > high-confidence native trace 1`] = `
   },
   "source": "eval",
   "toolName": "external_host",
+  "toolPrecision": 0.5,
+  "toolRecall": 0.5,
 }
 `;
 
