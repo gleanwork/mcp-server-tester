@@ -6,6 +6,8 @@ import {
   type EvalResultStoreLike,
   type StoredEvalArtifact,
   type StoredEvalArtifactMetadata,
+  REDACT_STORED_RESPONSES_BY_DEFAULT,
+  redactStoredResponses,
 } from './resultStore.js';
 
 /** Labels used when presenting an eval run comparison. */
@@ -127,6 +129,7 @@ export interface SaveEvalRunComparisonOptions {
   comparison: EvalRunComparisonResult;
   id?: string;
   metadata?: StoredEvalArtifactMetadata;
+  /** Omit raw responses from the stored comparison. @default true */
   redactStoredResponses?: boolean;
 }
 
@@ -242,9 +245,10 @@ export async function saveEvalRunComparison(
   options: SaveEvalRunComparisonOptions
 ): Promise<StoredEvalArtifact<EvalRunComparisonResult>> {
   const store = resolveEvalResultStore(options.store);
-  const data = options.redactStoredResponses
-    ? redactResponses(options.comparison)
-    : options.comparison;
+  const data =
+    (options.redactStoredResponses ?? REDACT_STORED_RESPONSES_BY_DEFAULT)
+      ? redactStoredResponses(options.comparison)
+      : options.comparison;
   const artifact = createStoredEvalArtifact({
     kind: 'eval-run-comparison',
     id: options.id,
@@ -271,8 +275,9 @@ function compareCaseOutcome(
   return baselinePass ? 'UNCHANGED_PASS' : 'UNCHANGED_FAIL';
 }
 
-function passRate(result: EvalRunnerResult): number {
-  return result.total > 0 ? result.passed / result.total : 0;
+/** Fraction of cases that passed; 0 for a run without cases. Every run-level pass rate uses this. */
+export function passRate(run: { passed: number; total: number }): number {
+  return run.total > 0 ? run.passed / run.total : 0;
 }
 
 function metricDelta(
@@ -291,12 +296,4 @@ function metricDelta(
     result[`delta${name}`] = candidateValue - baselineValue;
   }
   return result;
-}
-
-function redactResponses<T>(value: T): T {
-  return JSON.parse(
-    JSON.stringify(value, (key, currentValue: unknown) =>
-      key === 'response' ? undefined : currentValue
-    )
-  ) as T;
 }

@@ -37,22 +37,21 @@ import type {
   IterationResult,
   EvalRunMetadata,
 } from '../types/reporter.js';
-import {
-  saveBaseline,
-  loadBaseline,
-  buildBaselinePassMap,
-} from './baseline.js';
+import { saveBaseline, loadBaseline } from './baseline.js';
 import {
   createStoredEvalArtifact,
   resolveEvalResultStore,
   type EvalResultStoreLike,
   type StoredEvalArtifactMetadata,
+  REDACT_STORED_RESPONSES_BY_DEFAULT,
+  redactStoredResponses,
 } from './resultStore.js';
 import { execFileNoThrow } from '../utils/execFileNoThrow.js';
 import { debugEval } from '../debug.js';
 import { sumUsage } from '../utils/usageUtils.js';
 import packageJson from '../../package.json' with { type: 'json' };
 import { attachReporterData } from '../reporters/channel.js';
+import { compareEvalRuns } from './evalRunComparison.js';
 
 /**
  * Context passed to the eval runner
@@ -335,10 +334,9 @@ export interface EvalRunnerOptions {
    * for regression detection or history comparison. Set to false when you
    * specifically need stored artifacts to retain complete responses.
    *
-   * Defaults to `true` to match the reporter's `redactStoredResponses` default
-   * (see `MCPReporter`). Both write paths produce the same redaction shape, so
-   * users with both configured don't end up with a mix of redacted and
-   * non-redacted artifacts depending on which code path wrote them.
+   * Every API that stores results uses the same policy and default
+   * (`redactStoredResponses` in the result store), so artifacts written by the
+   * runner, suite, reporter and comparisons are redacted the same way.
    *
    * @default true
    */
@@ -1135,8 +1133,8 @@ export async function runEvalDataset(
     onCaseComplete,
     filterTags,
     saveResultsTo,
-    omitResponsesFromBaseline = true,
-    redactStoredResponses,
+    omitResponsesFromBaseline = REDACT_STORED_RESPONSES_BY_DEFAULT,
+    redactStoredResponses: redactStored,
     resultStore,
     baselineResultsFrom,
     toolOverrides,
@@ -1291,39 +1289,42 @@ export async function runEvalDataset(
         typeof baselineResultsFrom === 'string'
           ? await loadBaseline(baselineResultsFrom)
           : await loadStoredBaseline(baselineResultsFrom, resultStore);
-      const baselinePassRate =
-        baseline.total > 0 ? baseline.passed / baseline.total : 0;
-      const baselineMap = buildBaselinePassMap(baseline);
-
-      const currentCaseIds = result.caseResults.map((cr) => cr.id);
-      const unmatchedCount = currentCaseIds.filter(
-        (id) => !baselineMap.has(id)
-      ).length;
+      const comparison = compareEvalRuns({ baseline, candidate: result });
+      const currentCount = result.caseResults.length;
+      const unmatchedCount = comparison.missingFromBaseline.length;
       const unmatchedRatio =
-        currentCaseIds.length > 0 ? unmatchedCount / currentCaseIds.length : 0;
+        currentCount > 0 ? unmatchedCount / currentCount : 0;
       if (unmatchedRatio > 0.2) {
         console.warn(
-          `[mcp-server-tester] Baseline comparison: ${unmatchedCount} of ${currentCaseIds.length} cases ` +
+          `[mcp-server-tester] Baseline comparison: ${unmatchedCount} of ${currentCount} cases ` +
             `(${Math.round(unmatchedRatio * 100)}%) have no baseline entry. ` +
             `This may indicate the dataset structure has changed. Results for unmatched cases cannot be compared.`
         );
       }
 
+      // Annotate the current results, which the comparison holds by reference.
+      const baselinePassById = new Map(
+        comparison.cases.flatMap((entry) =>
+          entry.baseline && entry.candidate
+            ? [[entry.id, entry.baseline.pass] as const]
+            : []
+        )
+      );
       for (const cr of result.caseResults) {
-        const baselinePass = baselineMap.get(cr.id);
-        if (baselinePass !== undefined) {
-          cr.baselinePass = baselinePass;
-        }
+        const baselinePass = baselinePassById.get(cr.id);
+        if (baselinePass !== undefined) cr.baselinePass = baselinePass;
       }
 
+      // Count from the annotation, so the counts always agree with each
+      // case's baselinePass (also when a dataset repeats a case ID).
       result.regressions = result.caseResults.filter(
         (cr) => cr.baselinePass === true && !cr.pass
       ).length;
       result.improvements = result.caseResults.filter(
         (cr) => cr.baselinePass === false && cr.pass
       ).length;
-      result.deltaPassRate =
-        result.total > 0 ? result.passed / result.total - baselinePassRate : 0;
+      // An empty run has nothing to compare, so no delta.
+      result.deltaPassRate = result.total > 0 ? comparison.deltaPassRate : 0;
     } catch (err) {
       console.warn(
         `[mcp-server-tester] Could not load baseline from ${formatBaselineRef(baselineResultsFrom)}: ` +
@@ -1360,7 +1361,7 @@ export async function runEvalDataset(
     } else {
       await saveStoredEvalResult(result, saveResultsTo, {
         resultStore,
-        omitResponses: redactStoredResponses ?? true,
+        omitResponses: redactStored ?? REDACT_STORED_RESPONSES_BY_DEFAULT,
         metadata: {
           datasetName: dataset.name,
           ...(toolOverrides?.id !== undefined && {
@@ -1432,7 +1433,7 @@ async function saveStoredEvalResult(
   }
 
   const store = resolveEvalResultStore(options.resultStore);
-  const data = options.omitResponses ? omitResponsesFromResult(result) : result;
+  const data = options.omitResponses ? redactStoredResponses(result) : result;
   const id =
     saveResultsTo.ref && saveResultsTo.ref !== 'latest'
       ? saveResultsTo.ref.id
@@ -1448,15 +1449,14 @@ async function saveStoredEvalResult(
   );
 }
 
+/**
+ * A copy of the result without raw responses, under the same policy as every
+ * stored artifact (`redactStoredResponses`).
+ */
 export function omitResponsesFromResult(
   result: EvalRunnerResult
 ): EvalRunnerResult {
-  return {
-    ...result,
-    caseResults: result.caseResults.map(
-      ({ response: _response, ...rest }) => rest
-    ),
-  };
+  return redactStoredResponses(result);
 }
 
 function formatBaselineRef(

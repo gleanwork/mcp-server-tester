@@ -113,6 +113,56 @@ export function isEvalResultStore(value: unknown): value is EvalResultStore {
   );
 }
 
+/**
+ * Stored results omit raw responses unless a caller opts out. Every API that
+ * persists results (eval runner, suite, reporter, run and server
+ * comparisons) uses this default.
+ */
+export const REDACT_STORED_RESPONSES_BY_DEFAULT = true;
+
+type JsonObject = Record<string, unknown>;
+
+function isJsonObject(value: unknown): value is JsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** An eval case result, recognised by shape wherever it is nested. */
+function isCaseResult(value: JsonObject): boolean {
+  return (
+    typeof value.id === 'string' &&
+    typeof value.pass === 'boolean' &&
+    isJsonObject(value.expectations)
+  );
+}
+
+function stripResponses(value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const item of value) stripResponses(item);
+    return;
+  }
+  if (!isJsonObject(value)) return;
+  if (isCaseResult(value)) {
+    delete value.response;
+    const request = value.request;
+    if (isJsonObject(request) && isJsonObject(request.expect))
+      delete request.expect.response;
+  }
+  for (const nested of Object.values(value)) stripResponses(nested);
+}
+
+/**
+ * The one redaction policy for stored results: returns a JSON copy in which
+ * every eval case result, wherever it is nested (runs, suite arms, reports,
+ * comparisons), has no raw `response` and no echoed exact-match
+ * `expect.response`. Both may hold data from the server under test. Other
+ * fields, such as a tool argument named `response`, are kept.
+ */
+export function redactStoredResponses<T>(value: T): T {
+  const copy = JSON.parse(JSON.stringify(value)) as T;
+  stripResponses(copy);
+  return copy;
+}
+
 export function createStoredEvalArtifact<T>(options: {
   kind: StoredArtifactKind;
   data: T;

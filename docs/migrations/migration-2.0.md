@@ -17,6 +17,7 @@ Other 2.0 changes have their own guides: [dataset sources](./dataset-sources.md)
 - [`.not` works on `toSatisfyToolPredicate` and `toMatchToolSnapshot`](#not-works-on-tosatisfytoolpredicate-and-tomatchtoolsnapshot)
 - [LLM judges share one prompt, parser and size limit](#llm-judges-share-one-prompt-parser-and-size-limit)
 - [MCP reporter attachments](#mcp-reporter-attachments)
+- [Stored results are redacted the same way everywhere](#stored-results-are-redacted-the-same-way-everywhere)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
 ---
@@ -195,6 +196,18 @@ The MCP reporter reads test data through one typed channel (`src/reporters/chann
 - **`getServerInfo()` no longer attaches `mcp-server-info`.** Nothing read it. The other attachment names are unchanged.
 - **A malformed MCP attachment is reported, not skipped silently.** It's logged, and the rest of the test's attachments are still read. The reporter checks the fields it and its UI read (for example each eval case's `expectations`).
 - **`mcp-conformance-checks` omits `serverInfo` when the server reports none.** It used to write `"serverInfo": null`.
+
+## Stored results are redacted the same way everywhere
+
+**Affects:** code that stores comparisons and reads raw responses back from them, and anything that reads stored eval-runner artifacts, suite summaries or baseline files.
+
+Every API that persists results now uses one policy (`redactStoredResponses` in the result store) with one default. Before, there were six implementations that disagreed.
+
+- **Comparisons redact by default.** `saveEvalRunComparison()`, `saveServerComparison()` and `runServerComparison({ comparisonStore })` used to store every raw tool and host response unless you passed `redactStoredResponses: true`. They now omit them, as the runner, suites and reporter already did. Pass `redactStoredResponses: false` to keep them.
+- **What is redacted is the same everywhere.** Every eval case result, wherever it is nested, loses its raw `response` and the exact-match `expect.response` echoed in `request.expect`. The runner's store path, `omitResponsesFromResult()`, suite summaries and baseline files used to keep `request.expect.response`. The reporter and comparisons used to drop any key named `response` at any depth, including tool arguments; they now keep those.
+- **One pass rate.** Every run-level pass rate is `passed / total`, and 0 for a run without cases. The reporter's `metrics.passRate` was `NaN` for an empty run, which was stored as `null`.
+
+The reporter's local report (`index.html`, `data.js` and `run-*.json` in its `outputDir`) keeps responses so the report can show them. Its result-store artifacts follow the policy above.
 
 ## New in 2.0 (non-breaking)
 
