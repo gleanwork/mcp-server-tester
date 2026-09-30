@@ -23,7 +23,7 @@ import {
   snapshotClaudeSessions,
   waitForClaudeTrace,
   waitForClaudeSession,
-} from './externalHost/builtins/anthropicClaude.js';
+} from './externalHost/builtins/claudeSessions.js';
 import { simulationToHostTrace } from './hostTrace.js';
 import {
   HostPluginError,

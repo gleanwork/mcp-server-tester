@@ -14,7 +14,7 @@ import {
   auditCoworkNativeRun,
   type CoworkNativeAuditIssue,
 } from './auditCoworkNativeRun.js';
-import { parseClaudeTrace } from './externalHost/builtins/anthropicClaude.js';
+import { parseClaudeTrace } from './externalHost/builtins/claudeTrace.js';
 import { hostTraceToExecution, simulationToHostTrace } from './hostTrace.js';
 
 const sessionId = 'local_11111111-1111-4111-8111-111111111111';

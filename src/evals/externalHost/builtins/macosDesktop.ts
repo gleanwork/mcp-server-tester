@@ -7,6 +7,11 @@ import type {
   ExternalHostRunResult,
 } from '../types.js';
 import { driverToSlug, hostTypeFromDriver } from '../driverIdentity.js';
+import {
+  configStringOption,
+  runStringOption,
+  stringOption,
+} from './bindingOptions.js';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_SETTLE_DELAY_MS = 500;
@@ -275,14 +280,6 @@ function desktopFailureResult({
   };
 }
 
-function runStringOption(
-  config: { options?: Record<string, unknown> },
-  binding: { with?: Record<string, unknown> },
-  key: string
-): string | undefined {
-  return stringOption(binding.with, key) ?? configStringOption(config, key);
-}
-
 function runNumberOption(
   config: { options?: Record<string, unknown> },
   binding: { with?: Record<string, unknown> },
@@ -292,27 +289,12 @@ function runNumberOption(
   return typeof value === 'number' ? value : configNumberOption(config, key);
 }
 
-function configStringOption(
-  config: { options?: Record<string, unknown> },
-  key: string
-): string | undefined {
-  return stringOption(config.options, key);
-}
-
 function configNumberOption(
   config: { options?: Record<string, unknown> },
   key: string
 ): number | undefined {
   const value = config.options?.[key];
   return typeof value === 'number' ? value : undefined;
-}
-
-function stringOption(
-  options: Record<string, unknown> | undefined,
-  key: string
-): string | undefined {
-  const value = options?.[key];
-  return typeof value === 'string' ? value : undefined;
 }
 
 function stringArrayOption(

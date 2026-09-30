@@ -7,8 +7,8 @@ import { COWORK_HOST, createCoworkHost } from './coworkHost.js';
 import { prepareHostBatch } from './prepareHostBatch.js';
 import { toCoworkServers } from './coworkSetup/config.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
-import type { ClaudeTrace } from './externalHost/builtins/anthropicClaude.js';
-import type * as ClaudeNative from './externalHost/builtins/anthropicClaude.js';
+import type { ClaudeTrace } from './externalHost/builtins/claudeTrace.js';
+import type * as ClaudeNative from './externalHost/builtins/claudeSessions.js';
 import {
   ComputerUseDriverError,
   ComputerUseHitlBudgetError,
@@ -54,7 +54,7 @@ vi.mock('./cowork/anthropicComputerUse.js', async (original) => ({
   runAnthropicComputerUseHitl: mocks.hitl,
 }));
 vi.mock(
-  './externalHost/builtins/anthropicClaude.js',
+  './externalHost/builtins/claudeSessions.js',
   async (importOriginal) => ({
     ...(await importOriginal<typeof ClaudeNative>()),
     snapshotClaudeSessions: mocks.snapshot,

@@ -3,16 +3,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import {
-  buildClaudeTraceMetadata,
-  findMatchingClaudeSessions,
   extractAccessibilityResponse,
-  getClaudeDataDir,
   looksLikeClaudeChatSurface,
-  parseClaudeTrace,
+} from './claudeAccessibility.js';
+import {
+  findMatchingClaudeSessions,
+  getClaudeDataDir,
   snapshotClaudeSessions,
   waitForClaudeTrace,
-  type SessionCandidate,
-} from './anthropicClaude.js';
+} from './claudeSessions.js';
+import { parseClaudeTrace, type SessionCandidate } from './claudeTrace.js';
+import { buildClaudeTraceMetadata } from './claudeTraceMetadata.js';
 
 const COWORK_DRIVER = {
   provider: 'anthropic',
