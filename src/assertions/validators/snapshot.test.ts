@@ -1,13 +1,88 @@
 /**
- * Unit tests for toMatchToolSnapshot sanitizer logic.
- *
- * Tests cover BUILT_IN_PATTERNS and applySanitizers directly.
- * The toMatchToolSnapshot Playwright matcher is NOT tested here
- * because it requires a Playwright test context.
+ * Unit tests for the snapshot validator: sanitizers, and comparison through
+ * a snapshot store. The Playwright store is exercised end to end in
+ * tests/snapshot.spec.ts, which needs a Playwright test context.
  */
 
 import { describe, it, expect } from 'vitest';
-import { BUILT_IN_PATTERNS, applySanitizers } from './toMatchToolSnapshot.js';
+import {
+  BUILT_IN_PATTERNS,
+  applySanitizers,
+  validateSnapshot,
+  type SnapshotStore,
+} from './snapshot.js';
+
+/** A snapshot store backed by a map; a missing snapshot fails. */
+function memoryStore(snapshots: Record<string, string>): SnapshotStore & {
+  seen: Array<{ name: string; content: string }>;
+} {
+  const seen: Array<{ name: string; content: string }> = [];
+  return {
+    seen,
+    async match(name, content) {
+      seen.push({ name, content });
+      const saved = snapshots[name];
+      if (saved === undefined)
+        return { pass: false, message: `No snapshot "${name}"` };
+      return saved === content
+        ? { pass: true, message: `Matches "${name}"` }
+        : { pass: false, message: `"${name}" differs` };
+    },
+  };
+}
+
+describe('validateSnapshot', () => {
+  const response = {
+    content: [
+      {
+        type: 'text',
+        text: 'id 123e4567-e89b-12d3-a456-426614174000 at 1700000000',
+      },
+    ],
+  };
+
+  it('compares the sanitized response text with the named snapshot', async () => {
+    const store = memoryStore({ weather: 'id [UUID] at [TIMESTAMP]' });
+    const result = await validateSnapshot(response, 'weather', {
+      store,
+      sanitizers: ['uuid', 'timestamp'],
+    });
+    expect(result).toEqual({
+      pass: true,
+      message: 'Matches "weather"',
+      details: { snapshot: 'weather' },
+    });
+    expect(store.seen).toEqual([
+      { name: 'weather', content: 'id [UUID] at [TIMESTAMP]' },
+    ]);
+  });
+
+  it('compares raw text when there are no sanitizers', async () => {
+    const store = memoryStore({ weather: 'id [UUID] at [TIMESTAMP]' });
+    const result = await validateSnapshot(response, 'weather', { store });
+    expect(result.pass).toBe(false);
+    expect(result.message).toBe('"weather" differs');
+  });
+
+  it('reports what the store says about a missing snapshot', async () => {
+    const result = await validateSnapshot(response, 'absent', {
+      store: memoryStore({}),
+    });
+    expect(result).toMatchObject({
+      pass: false,
+      message: 'No snapshot "absent"',
+    });
+  });
+
+  it('throws on an invalid sanitizer instead of reporting a mismatch', async () => {
+    await expect(
+      validateSnapshot(response, 'weather', {
+        store: memoryStore({}),
+        sanitizers: [{ pattern: '(' }],
+      })
+    ).rejects.toThrow('invalid regex pattern "("');
+  });
+});
 
 describe('BUILT_IN_PATTERNS', () => {
   describe('timestamp', () => {

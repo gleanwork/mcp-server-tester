@@ -6,27 +6,15 @@
  * matchers don't cover the use case.
  */
 
-import { extractText } from '../validators/utils.js';
-import type { PredicateResult, ToolPredicate } from './types.js';
-
-/**
- * Normalizes predicate result to PredicateResult object
- */
-function normalizeResult(result: boolean | PredicateResult): PredicateResult {
-  if (typeof result === 'boolean') {
-    return {
-      pass: result,
-      message: result ? 'Predicate passed' : 'Predicate returned false',
-    };
-  }
-  return result;
-}
+import { validatePredicate } from '../validators/predicate.js';
+import type { ToolPredicate } from '../validators/types.js';
 
 /**
  * Creates the toSatisfyToolPredicate matcher function
  *
  * This matcher allows custom validation logic via a predicate function.
- * The predicate receives both the raw response and extracted text.
+ * The predicate receives both the raw response and extracted text. A
+ * predicate that throws fails the assertion with or without `.not`.
  *
  * @example
  * ```typescript
@@ -60,41 +48,18 @@ export async function toSatisfyToolPredicate(
   description?: string
 ): Promise<{ pass: boolean; message: () => string }> {
   const predicateDescription = description ?? 'custom predicate';
-
-  try {
-    // Extract text for convenience
-    const text = extractText(received);
-
-    // Run the predicate
-    const rawResult = await predicate(received, text);
-    const result = normalizeResult(rawResult);
-
-    // Handle .not
-    if (this.isNot) {
-      return {
-        pass: !result.pass,
-        message: () =>
-          result.pass
-            ? `Expected response NOT to satisfy ${predicateDescription}`
-            : `Response does not satisfy ${predicateDescription} as expected`,
-      };
-    }
-
-    return {
-      pass: result.pass,
-      message: () =>
-        result.pass
-          ? (result.message ?? `Response satisfies ${predicateDescription}`)
-          : (result.message ??
-            `Expected response to satisfy ${predicateDescription}`),
-    };
-  } catch (error) {
-    // Predicate threw an error
-    const errorMessage = error instanceof Error ? error.message : String(error);
-
-    return {
-      pass: this.isNot, // If using .not, an error means the predicate didn't pass
-      message: () => `Predicate threw error: ${errorMessage}`,
-    };
-  }
+  const result = await validatePredicate(
+    received,
+    predicate,
+    predicateDescription
+  );
+  // A crash is not a "false": fail in both directions.
+  if (result.details?.error !== undefined) throw new Error(result.message);
+  return {
+    pass: result.pass,
+    message: () =>
+      this.isNot
+        ? `Expected response NOT to satisfy ${predicateDescription}`
+        : result.message,
+  };
 }

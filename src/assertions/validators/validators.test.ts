@@ -13,8 +13,56 @@ import {
   validatePattern,
   validateError,
   validateSize,
+  validatePredicate,
   getResponseSizeBytes,
 } from './index.js';
+
+describe('validatePredicate', () => {
+  const response = [{ type: 'text', text: 'value: 42' }];
+
+  it('passes the response and its text to the predicate', async () => {
+    const seen: unknown[] = [];
+    await validatePredicate(response, (raw, text) => {
+      seen.push(raw, text);
+      return true;
+    });
+    expect(seen).toEqual([response, 'value: 42']);
+  });
+
+  it('normalizes boolean results', async () => {
+    expect(await validatePredicate(response, () => true)).toEqual({
+      pass: true,
+      message: 'Predicate passed',
+    });
+    expect(await validatePredicate(response, () => false)).toEqual({
+      pass: false,
+      message: 'Predicate returned false',
+    });
+  });
+
+  it('keeps an object result message, or names the predicate', async () => {
+    expect(
+      await validatePredicate(response, () => ({ pass: false, message: 'no' }))
+    ).toEqual({ pass: false, message: 'no' });
+    expect(
+      await validatePredicate(response, async () => ({ pass: false }), 'has 99')
+    ).toEqual({ pass: false, message: 'Expected response to satisfy has 99' });
+    expect(
+      await validatePredicate(response, () => ({ pass: true }), 'has 42')
+    ).toEqual({ pass: true, message: 'Response satisfies has 42' });
+  });
+
+  it('marks a predicate that throws, so callers can tell it from false', async () => {
+    const result = await validatePredicate(response, () => {
+      throw new Error('boom');
+    });
+    expect(result).toEqual({
+      pass: false,
+      message: 'Predicate threw error: boom',
+      details: { error: 'boom' },
+    });
+  });
+});
 
 describe('validateResponse', () => {
   it('should pass when responses match exactly', () => {

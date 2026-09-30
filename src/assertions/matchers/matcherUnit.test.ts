@@ -379,25 +379,33 @@ describe('toSatisfyToolPredicate', () => {
     ).rejects.toThrow();
   });
 
-  // toSatisfyToolPredicate's .not behaviour: the matcher internally inverts
-  // pass (returns pass: !result.pass). Playwright then re-inverts for .not,
-  // meaning when the predicate returns false the matcher returns pass: true,
-  // which Playwright's .not throws on. Conversely, a true-returning predicate
-  // with .not results in pass: false, which Playwright's .not accepts.
-  it('passes on negation when the predicate returns true', async () => {
+  // .not negates the predicate, as for every other matcher.
+  it('fails on negation when the predicate returns true', async () => {
     await vitestExpect(
       mcpExpect(valueResponse).not.toSatisfyToolPredicate((_resp, text) =>
         text.includes('42')
       )
-    ).resolves.not.toThrow();
+    ).rejects.toThrow('Expected response NOT to satisfy custom predicate');
   });
 
-  it('fails on negation when the predicate returns false', async () => {
+  it('passes on negation when the predicate returns false', async () => {
     await vitestExpect(
       mcpExpect(valueResponse).not.toSatisfyToolPredicate((_resp, text) =>
         text.includes('99')
       )
-    ).rejects.toThrow();
+    ).resolves.not.toThrow();
+  });
+
+  it('fails with or without .not when the predicate throws', async () => {
+    function crash(): boolean {
+      throw new Error('boom');
+    }
+    await vitestExpect(
+      mcpExpect(valueResponse).toSatisfyToolPredicate(crash)
+    ).rejects.toThrow('Predicate threw error: boom');
+    await vitestExpect(
+      mcpExpect(valueResponse).not.toSatisfyToolPredicate(crash)
+    ).rejects.toThrow('Predicate threw error: boom');
   });
 
   it('passes with an async predicate that resolves to true', async () => {

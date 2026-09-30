@@ -17,6 +17,8 @@ export type {
   FieldRemovalSanitizer,
   SnapshotSanitizer,
   SchemaRegistry,
+  ToolPredicate,
+  PredicateResult,
 } from './types.js';
 
 // Export validators
@@ -30,6 +32,9 @@ export { validateToolCalls, validateToolCallCount } from './toolCalls.js';
 export type { ToolCallExpectation, ToolCallCountOptions } from './toolCalls.js';
 export { validateJudge } from './judge.js';
 export type { JudgeValidatorConfig } from './judge.js';
+export { validateSnapshot, playwrightSnapshotStore } from './snapshot.js';
+export type { SnapshotStore, SnapshotValidatorOptions } from './snapshot.js';
+export { validatePredicate } from './predicate.js';
 
 // Export utilities
 export {

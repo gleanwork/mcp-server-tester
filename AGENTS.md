@@ -48,8 +48,8 @@ npm run format:check        # Check formatting
 
 The assertion architecture provides a single API for both inline tests and data-driven evals:
 
-- **`validators/`** - Pure validation functions: `validateText`, `validateSchema`, `validatePattern`, `validateError`, `validateSize`, `validateResponse`, `validateToolCalls`, `validateToolCallCount`
-- **`matchers/`** - Playwright custom matchers (see table below)
+- **`validators/`** - Pure validation functions: `validateText`, `validateSchema`, `validatePattern`, `validateError`, `validateSize`, `validateResponse`, `validateToolCalls`, `validateToolCallCount`, `validateJudge`, `validateSnapshot`, `validatePredicate`
+- **`matchers/`** - Playwright custom matchers (see table below). Each is a thin adapter over a validator: it returns the validator's `pass` and lets Playwright apply `.not` (never negate inside a matcher)
 
 ```typescript
 // Inline test usage
@@ -166,7 +166,7 @@ Direct mode uses `toolName` + `args`, or `request: { method, params }` for any M
 
 ### Snapshot Testing
 
-`toMatchToolSnapshot(name, sanitizers?)` compares tool responses against saved baselines. Requires Playwright `testInfo` (destructure from second arg: `async ({ mcp }, testInfo)`).
+`toMatchToolSnapshot(name, sanitizers?)` compares tool responses against saved baselines. Requires Playwright `testInfo` (destructure from second arg: `async ({ mcp }, testInfo)`). The matcher and eval `snapshot` expectations both run `validateSnapshot` against `playwrightSnapshotStore(expect)`; unit tests pass their own `SnapshotStore`. This repo's own snapshots live in `tests/__snapshots__/` (platform-free `snapshotPathTemplate`), exercised by `tests/snapshot.spec.ts`.
 
 Built-in sanitizers: `'uuid'`, `'iso-date'`, `'timestamp'`, `'jwt'`, `'objectId'`
 

@@ -16,6 +16,9 @@ const dualEraSpecs = /(mcp-tests|protocol|skills)\.spec\.ts/;
  */
 export default defineConfig({
   testDir: './tests',
+  // One snapshot per name, shared by every project and platform, so
+  // snapshots committed on macOS match on Linux CI.
+  snapshotPathTemplate: '{testDir}/__snapshots__/{testFilePath}/{arg}{ext}',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: 0,

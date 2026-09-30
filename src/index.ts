@@ -270,8 +270,15 @@ export {
   validateToolCalls,
   validateToolCallCount,
   validateJudge,
+  validateSnapshot,
+  playwrightSnapshotStore,
+  validatePredicate,
   getResponseSizeBytes,
   normalizeWhitespace,
+} from './assertions/validators/index.js';
+export type {
+  SnapshotStore,
+  SnapshotValidatorOptions,
 } from './assertions/validators/index.js';
 
 // Fixtures
