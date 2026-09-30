@@ -1,21 +1,22 @@
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import type { EvalDataset, EvalCase, EvalExpectBlock } from './datasetTypes.js';
-import type { EvalExecutionResult } from './hostTrace.js';
+import {
+  checkedExecution,
+  executeEvalCase,
+  failedExecution,
+  type CaseExecution,
+  type HostExecution,
+  type HostResponse,
+} from './caseExecution.js';
 import type { HostEvent } from './evalFrameworkTypes.js';
 import type { TestInfo, Expect } from '@playwright/test';
 import type { Tool } from '@modelcontextprotocol/client';
-import { ProtocolError } from '@modelcontextprotocol/client';
-import { z, type ZodType } from 'zod';
-import { protocolErrorToToolResult } from '../mcp/callTool.js';
+import type { ZodType } from 'zod';
 import { BUILTIN_RESULT_SCHEMAS } from './builtinResultSchemas.js';
-import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
-import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
-import { runExternalHostScenario } from './externalHost/runtime.js';
 import type {
   ExternalHostCapabilitiesConfig,
   ExternalHostCorrelationConfig,
   ExternalHostMetadata,
-  ExternalHostSimulationResult,
 } from './externalHost/types.js';
 import {
   driverToSlug,
@@ -61,9 +62,6 @@ import { debugEval } from '../debug.js';
 import { sumUsage } from '../utils/usageUtils.js';
 import { matchesIdentity } from '../assertions/validators/toolCalls.js';
 import packageJson from '../../package.json' with { type: 'json' };
-
-/** Accepts any JSON-RPC result object (validated later by expectations). */
-const AnyResultSchema = z.looseObject({});
 
 /**
  * Context passed to the eval runner
@@ -245,8 +243,11 @@ export interface EvalRunnerOptions {
   /** Canonical tool name to accepted native tool names. */
   toolMap?: Record<string, string[]>;
 
-  /** Optional host trace producer. The runner still owns all verdicts. */
-  executeCase?: (evalCase: EvalCase) => Promise<EvalExecutionResult>;
+  /**
+   * Optional case executor, replacing the fixture for all but `external_host`
+   * cases. Returns how the case ran; the runner still owns all verdicts.
+   */
+  executeCase?: (evalCase: EvalCase) => Promise<CaseExecution>;
 
   /**
    * Schema registry for schema validation by name
@@ -395,8 +396,8 @@ export interface EvalRunnerOptions {
  */
 export interface EvalCaseOptions {
   toolMap?: Record<string, string[]>;
-  /** Trace producer called once per iteration; assertions remain runner-owned. */
-  executeCase?: (evalCase: EvalCase) => Promise<EvalExecutionResult>;
+  /** Case executor called once per iteration; assertions remain runner-owned. */
+  executeCase?: (evalCase: EvalCase) => Promise<CaseExecution>;
   /**
    * Dataset name for the result (defaults to 'single-case')
    */
@@ -462,10 +463,10 @@ export function createToolOverrideMCP(
 }
 
 function mapToolNames(
-  response: unknown,
+  response: HostResponse,
   toolMap?: Record<string, string[]>
-): unknown {
-  if (!toolMap || !isMCPHostSimulationResult(response)) return response;
+): HostResponse {
+  if (!toolMap) return response;
   const aliases = new Map<string, string>();
   for (const [canonical, names] of Object.entries(toolMap)) {
     for (const name of names) {
@@ -494,123 +495,6 @@ function mapToolNames(
     toolCalls: response.toolCalls.map(mapCall),
     ...(events !== undefined ? { events: events.map(mapCall) } : {}),
   };
-}
-
-export async function executeToolCall(
-  evalCase: EvalCase,
-  mcp: MCPFixtureApi | undefined
-): Promise<{ response: unknown; error?: string }> {
-  const mode = evalCase.mode || 'direct';
-
-  try {
-    if (mode === 'mcp_host' || mode === 'host') {
-      if (!mcp) throw new Error('This host requires an MCP connection.');
-      // MCP host simulation mode
-      if (!evalCase.scenario) {
-        throw new Error(
-          `Eval case ${evalCase.id}: scenario is required for mcp_host mode`
-        );
-      }
-
-      if (!evalCase.mcpHostConfig) {
-        throw new Error(
-          `Eval case ${evalCase.id}: mcpHostConfig is required for mcp_host mode`
-        );
-      }
-
-      const simulationResult = await simulateMCPHost(
-        mcp,
-        evalCase.scenario,
-        evalCase.mcpHostConfig
-      );
-
-      if (!simulationResult.success) {
-        if (evalCase.mcpHostConfig.cli?.claudeMcpServers !== undefined) {
-          return {
-            response: simulationResult,
-            error: simulationResult.error || 'MCP host simulation failed',
-          };
-        }
-        throw new Error(simulationResult.error || 'MCP host simulation failed');
-      }
-
-      return { response: simulationResult };
-    } else if (mode === 'external_host') {
-      if (!evalCase.scenario) {
-        throw new Error(
-          `Eval case ${evalCase.id}: scenario is required for external_host mode`
-        );
-      }
-
-      if (!evalCase.externalHost) {
-        throw new Error(
-          `Eval case ${evalCase.id}: externalHost is required for external_host mode`
-        );
-      }
-
-      const simulationResult = await runExternalHostScenario(
-        evalCase.scenario,
-        evalCase.externalHost,
-        { caseId: evalCase.id }
-      );
-
-      if (!simulationResult.success) {
-        return {
-          response: simulationResult,
-          error: simulationResult.error || 'External host simulation failed',
-        };
-      }
-
-      return { response: simulationResult };
-    } else if (evalCase.request) {
-      // Direct mode - send an arbitrary MCP request (e.g. skills/get)
-      if (evalCase.toolName) {
-        throw new Error(
-          `Eval case ${evalCase.id}: request and toolName are mutually exclusive`
-        );
-      }
-      if (!mcp) throw new Error('Direct requests require an MCP connection.');
-      try {
-        const result = await mcp.request(
-          evalCase.request.method,
-          evalCase.request.params,
-          AnyResultSchema
-        );
-        return { response: result };
-      } catch (error) {
-        // A JSON-RPC error is a result to assert on (expect.isError), exactly
-        // as protocol errors from tools/call are.
-        if (error instanceof ProtocolError) {
-          return { response: protocolErrorToToolResult(error) };
-        }
-        throw error;
-      }
-    } else {
-      // Direct mode - call tool directly
-      if (!evalCase.toolName) {
-        throw new Error(
-          `Eval case ${evalCase.id}: toolName or request is required for direct mode`
-        );
-      }
-      if (!evalCase.args) {
-        throw new Error(
-          `Eval case ${evalCase.id}: args is required for direct mode`
-        );
-      }
-
-      if (!mcp) throw new Error('Direct tool calls require an MCP connection.');
-      const result = await mcp.callTool(evalCase.toolName, evalCase.args);
-      return { response: result };
-    }
-  } catch (err) {
-    // Note: errors originating from mcp_host simulation are already enriched
-    // with actionable context by enrichErrorMessage() in the vercel adapter.
-    // Pass the message through unchanged so that hint text reaches the caller.
-    return {
-      response: undefined,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
 }
 
 /** Skill loads to keep per iteration (responses are not kept). */
@@ -1083,22 +967,14 @@ function isSecretLikeKey(key: string): boolean {
   );
 }
 
-function isMCPHostSimulationResult(
-  value: unknown
-): value is MCPHostSimulationResult {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'success' in value &&
-    'toolCalls' in value &&
-    Array.isArray((value as MCPHostSimulationResult).toolCalls)
-  );
-}
-
-function isExternalHostSimulationResult(
-  value: unknown
-): value is ExternalHostSimulationResult {
-  return isMCPHostSimulationResult(value) && 'externalHost' in value;
+/** Normalize declared evidence; anything but structured or observed is none. */
+function normalizeEvidence(
+  evidence: HostExecution['evidence']
+): HostExecution['evidence'] {
+  if (evidence === undefined) return undefined;
+  return evidence === 'structured' || evidence === 'observed'
+    ? evidence
+    : 'none';
 }
 
 /**
@@ -1112,48 +988,33 @@ async function runSingleIteration(
 ): Promise<EvalCaseResult> {
   const startTime = Date.now();
 
-  // Execute through a custom host trace producer when provided; otherwise use
-  // the canonical MCP/SDK execution path.
-  let execution: EvalExecutionResult;
+  // A custom executor (e.g. a suite host) replaces the fixture path, except
+  // for legacy external_host cases.
+  let execution: CaseExecution;
   try {
     execution =
       options.executeCase && evalCase.mode !== 'external_host'
-        ? await options.executeCase(evalCase)
-        : await executeToolCall(evalCase, context.mcp);
+        ? checkedExecution(await options.executeCase(evalCase))
+        : await executeEvalCase(evalCase, context.mcp);
   } catch (error) {
-    execution = {
-      response: undefined,
-      error: error instanceof Error ? error.message : String(error),
-    };
+    execution = failedExecution(error);
   }
-  const { response: rawResponse, hostUsage: producedHostUsage } = execution;
-  const declaredEvidence =
-    execution.evidence ??
-    (isMCPHostSimulationResult(rawResponse) && 'evidence' in rawResponse
-      ? rawResponse.evidence
-      : undefined);
-  const evidence =
-    declaredEvidence === undefined
-      ? undefined
-      : declaredEvidence === 'structured'
-        ? 'structured'
-        : declaredEvidence === 'observed'
-          ? 'observed'
-          : 'none';
+  const host = execution.kind === 'host' ? execution : undefined;
+  const evidence = normalizeEvidence(
+    host ? (host.evidence ?? host.response.evidence) : undefined
+  );
   // Keep evidence consistent in assertions, metrics, reports and redacted artifacts.
-  const response =
-    evidence !== undefined && isMCPHostSimulationResult(rawResponse)
-      ? { ...rawResponse, evidence }
-      : rawResponse;
+  const hostResponse =
+    host && evidence !== undefined
+      ? { ...host.response, evidence }
+      : host?.response;
+  const response = hostResponse ?? execution.response;
   const error =
     execution.error ??
-    (isMCPHostSimulationResult(response) && !response.success
-      ? (response.error ?? 'Host execution failed.')
+    (hostResponse && !hostResponse.success
+      ? (hostResponse.error ?? 'Host execution failed.')
       : undefined);
-  const externalHost =
-    isExternalHostSimulationResult(response) && response.externalHost
-      ? response.externalHost
-      : undefined;
+  const externalHost = host?.externalHost ?? hostResponse?.externalHost;
 
   // Collect expectation results from expect block
   let expectationResults: EvalCaseResult['expectations'] = {};
@@ -1163,7 +1024,9 @@ async function runSingleIteration(
   let mcpHostTrace: EvalCaseResult['mcpHostTrace'];
 
   if (!error && evalCase.expect) {
-    const validationResponse = mapToolNames(response, options.toolMap);
+    const validationResponse = hostResponse
+      ? mapToolNames(hostResponse, options.toolMap)
+      : response;
     const {
       expectations,
       toolPrecision: tp,
@@ -1204,23 +1067,19 @@ async function runSingleIteration(
     if (
       evalCase.expect.toolsTriggered !== undefined &&
       (evidence === undefined || evidence === 'structured') &&
-      isMCPHostSimulationResult(response) &&
-      isMCPHostSimulationResult(validationResponse) &&
+      hostResponse &&
       (evalCase.mode !== 'external_host' ||
         (externalHost !== undefined && hasStructuredToolEvidence(externalHost)))
     ) {
+      const mapped = validationResponse as HostResponse;
       const expected = evalCase.expect.toolsTriggered.calls.filter(
         (call) => (call.kind ?? 'tool_call') === 'tool_call'
       );
-      const canonicalCalls =
-        'events' in validationResponse &&
-        Array.isArray(validationResponse.events)
-          ? validationResponse.events.filter(
-              (event) => event.kind === 'tool_call'
-            )
-          : validationResponse.toolCalls;
+      const canonicalCalls = Array.isArray(mapped.events)
+        ? mapped.events.filter((event) => event.kind === 'tool_call')
+        : mapped.toolCalls;
       mcpHostTrace = {
-        calls: response.toolCalls.map((call, index) => ({
+        calls: hostResponse.toolCalls.map((call, index) => ({
           name: call.name,
           arguments: call.arguments,
           status: expected.some((item) =>
@@ -1240,12 +1099,8 @@ async function runSingleIteration(
     }
   }
 
-  // Extract host usage from simulation result
-  const hostUsage =
-    producedHostUsage ??
-    (isMCPHostSimulationResult(response) && response.usage
-      ? response.usage
-      : undefined);
+  const hostUsage = host?.usage ?? hostResponse?.usage;
+  const hostDiagnostics = host?.diagnostics ?? hostResponse?.diagnostics;
 
   // Build result - use test context for authType and project (Playwright is source of truth)
   return {
@@ -1274,11 +1129,9 @@ async function runSingleIteration(
     toolRecall,
     mcpHostTrace,
     hostEvidence: evidence,
-    ...(isMCPHostSimulationResult(response) && response.diagnostics
-      ? { hostDiagnostics: response.diagnostics }
-      : {}),
+    ...(hostDiagnostics ? { hostDiagnostics } : {}),
     hostUsage,
-    hostTelemetry: execution.hostTelemetry,
+    hostTelemetry: host?.telemetry,
     externalHost,
   };
 }
@@ -1429,7 +1282,7 @@ export async function runEvalCase(
       const result = await runSingleIteration(evalCase, context, options);
       lastResult = result;
       // Check whether the tool call itself failed due to infrastructure (the
-      // error is surfaced as result.error since executeToolCall swallows throws)
+      // error is surfaced as result.error since executeEvalCase swallows throws)
       const infraError =
         isExternalHostInfrastructureFailure(result.externalHost) ||
         (result.error != null &&

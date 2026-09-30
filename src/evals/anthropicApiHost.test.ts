@@ -304,7 +304,7 @@ describe('Anthropic trace execution', () => {
       toolCalls: [{ name: 'search', arguments: { query: 'test' } }],
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(result.hostUsage?.inputTokens).toBe(4);
+    expect(result.usage?.inputTokens).toBe(4);
   });
   it('times out a never-settling fetch, aborts the request and closes the client', async () => {
     vi.useFakeTimers();
