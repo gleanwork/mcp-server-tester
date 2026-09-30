@@ -316,7 +316,7 @@ Supported `LLMProvider` values for `mcpHostConfig.provider` (defined in `src/eva
 To add a new provider:
 
 1. Add to `LLMProvider` union in `src/evals/mcpHost/mcpHostTypes.ts`
-2. Add to the `provider` enum in `MCPHostConfigSchema` in `src/evals/datasetTypes.ts`
+2. Add to `ProviderSchema` in `src/evals/mcpHost/hostOptions.ts` (the dataset schema and the simulator's supported set derive from it)
 3. Create an adapter in `src/evals/mcpHost/adapters/`
 4. Register in `src/evals/mcpHost/adapter.ts`
 

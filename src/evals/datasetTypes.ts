@@ -4,6 +4,7 @@ import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
 import {
   GenerationOptions,
   HostSkillsModeSchema,
+  ProviderSchema,
 } from './mcpHost/hostOptions.js';
 import type { ExternalHostConfig } from './externalHost/types.js';
 import { ExternalHostConfigSchema } from './externalHost/schema.js';
@@ -359,19 +360,7 @@ export interface EvalDataset {
  */
 const MCPHostConfigSchema = z.object({
   hostType: z.enum(['sdk', 'cli', 'browser', 'desktop']).optional(),
-  provider: z
-    .enum([
-      'openai',
-      'anthropic',
-      'azure',
-      'google',
-      'mistral',
-      'deepseek',
-      'openrouter',
-      'xai',
-      'vertex-anthropic',
-    ])
-    .optional(),
+  provider: ProviderSchema.optional(),
   apiKeyEnvVar: z.string().optional(),
   model: z.string().optional(),
   timeout: GenerationOptions.timeout,
