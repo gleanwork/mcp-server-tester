@@ -4,8 +4,10 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import {
+  APP_SERVER_LIMITS,
   AppServerFailureError,
   appServerServerReady,
+  appServerTimeoutMs,
   exchangeAppServerStatus,
   probeAppServerStatus,
   StreamJsonlChannel,
@@ -48,6 +50,27 @@ function status(
 }
 
 describe('app-server MCP status exchange', () => {
+  it('follows every status page, so the server count is never capped', async () => {
+    const rows = Array.from({ length: 150 }, (_, i) => ({
+      name: `s${i}`,
+      tools: [{ name: 'search' }],
+      authStatus: 'bearerToken',
+    }));
+    const channel = new FakeChannel([
+      initialized,
+      list(rows.slice(0, 100), { nextCursor: 'page-2' }),
+      { id: 2, result: { data: rows.slice(100), nextCursor: null } },
+    ]);
+    const servers = await exchangeAppServerStatus(channel, ['s0', 's149']);
+    expect(servers).toEqual([status('s0', 1), status('s149', 1)]);
+    const lists = channel.sent.filter(
+      (message) => message.method === 'mcpServerStatus/list'
+    );
+    expect(
+      lists.map((message) => (message.params as { cursor: unknown }).cursor)
+    ).toEqual([null, 'page-2']);
+  });
+
   it('sends only the allowlisted methods and parses configured servers', async () => {
     const channel = new FakeChannel([
       initialized,
@@ -91,17 +114,20 @@ describe('app-server MCP status exchange', () => {
     [rpcError('private detail'), 'rpc-error'],
     [['not json'], 'invalid-response'],
     [[{ id: '0', result: {} }], 'invalid-response'],
-    [[initialized, list([], { nextCursor: 'more' })], 'invalid-response'],
+    [[initialized, list([], { nextCursor: 'more' })], 'unexpected-eof'],
+    [[initialized, list([], { nextCursor: 7 })], 'invalid-response'],
+    [
+      [
+        initialized,
+        list([], { nextCursor: 'a' }),
+        { id: 2, result: { data: [], nextCursor: 'a' } },
+      ],
+      'invalid-response',
+    ],
     [[initialized, list([], { data: {} })], 'invalid-response'],
     [listed([glean, glean]), 'invalid-response'],
     [listed([{ name: 'glean', tools: [1] }]), 'invalid-response'],
     [listed([{ name: 'glean' }]), 'invalid-response'],
-    [
-      listed(
-        Array.from({ length: 101 }, (_, i) => ({ ...glean, name: `${i}` }))
-      ),
-      'invalid-response',
-    ],
     [[initialized], 'unexpected-eof'],
   ])('fails closed on %j with %s', async (lines, reason) => {
     const channel = new FakeChannel(lines);
@@ -116,8 +142,7 @@ describe('bounded JSONL stream channel', () => {
   function channel(timeoutMs = 1000) {
     const input = new PassThrough();
     const output = new PassThrough();
-    const limits = { timeoutMs, lineBytes: 16, totalBytes: 64, rows: 100 };
-    const jsonl = new StreamJsonlChannel(input, output, limits);
+    const jsonl = new StreamJsonlChannel(input, output, timeoutMs);
     const failure = (reason: string) =>
       expect(jsonl.readLine()).rejects.toMatchObject({ reason });
     return { input, output, jsonl, failure };
@@ -131,16 +156,36 @@ describe('bounded JSONL stream channel', () => {
     expect(input.read()).toBeNull();
   });
 
-  it('reads split lines and enforces limits, deadline, and EOF', async () => {
+  it('reads one status line as large as many connectors report', async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const jsonl = new StreamJsonlChannel(input, output);
+    // Seven real native connectors list ~600 KB of tool schemas in one line.
+    const row = `{"data":"${'x'.repeat(1024 * 1024)}"}`;
+    output.write(`${row}\n`);
+    expect((await jsonl.readLine()).length).toBe(row.length);
+  });
+
+  it('reads large output past any fixed byte budget', async () => {
+    const { output, jsonl } = channel();
+    const line = 'y'.repeat(64 * 1024);
+    for (let i = 0; i < 128; i++) output.write(`${line}\n`); // 8 MB total
+    for (let i = 0; i < 128; i++)
+      expect((await jsonl.readLine()).length).toBe(line.length);
+  });
+
+  it('scales the deadline with the configured servers', () => {
+    expect(appServerTimeoutMs(8)).toBeGreaterThan(appServerTimeoutMs(1));
+    expect(appServerTimeoutMs(8) - appServerTimeoutMs(1)).toBe(
+      7 * APP_SERVER_LIMITS.perServerTimeoutMs
+    );
+  });
+
+  it('reads split lines and enforces the deadline and EOF', async () => {
     const line = channel();
     line.output.write('{"a"');
     line.output.write(':1}\n');
     expect((await line.jsonl.readLine()).toString()).toBe('{"a":1}');
-    line.output.write('x'.repeat(17));
-    await line.failure('output-limit');
-    const total = channel();
-    total.output.write('0123456789012\n'.repeat(6));
-    await total.failure('output-limit');
     await channel(50).failure('timeout');
     const closed = channel();
     closed.output.end();
