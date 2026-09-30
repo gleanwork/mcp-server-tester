@@ -28,6 +28,7 @@ import {
   toCoworkServers,
 } from './config.js';
 import { resolveCoworkSetupConfig } from './options.js';
+import { checkManagedInferencePreferences } from './macManagedPreferences.js';
 
 const ERROR = 'Unable to change Cowork configuration safely.';
 const LOCK = '.mst-setup-lock';
@@ -220,7 +221,8 @@ function validateStaging(directory: string, profileDirectory: string): void {
 }
 
 async function checkManaged(paths: string[]): Promise<void> {
-  for (const file of paths) if (await exists(file)) fail();
+  for (const file of paths)
+    if (await exists(file)) await checkManagedInferencePreferences(file);
 }
 
 async function atomicWrite(
@@ -790,6 +792,8 @@ export async function installMacCoworkSettings(
     const entries = managed as unknown[];
     const profile = jsonBytes({
       ...settings,
+      // Keep the evaluated application version fixed during this temporary profile.
+      disableAutoUpdates: true,
       // The plugin's own servers would bypass the eval endpoint; block them.
       ...(validated.blocked.length
         ? { managedMcpServers: [...entries, ...validated.blocked] }

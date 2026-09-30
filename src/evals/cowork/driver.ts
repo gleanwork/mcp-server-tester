@@ -6,6 +6,8 @@ export interface CoworkDriverOptions {
   maxActions?: number;
   model?: string;
   env?: NodeJS.ProcessEnv;
+  /** Exact macOS bundle selected by the session; never resolve by app name. */
+  appPath?: string;
   /** Linux semantic approvals must not broaden the caller's write policy. */
   approveWriteTools?: boolean;
   /** Bound native session completion, never GUI text or another task. */

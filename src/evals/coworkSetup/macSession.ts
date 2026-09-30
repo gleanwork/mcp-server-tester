@@ -16,6 +16,17 @@ import type { EvalManifest } from '../evalManifest.js';
 import type { HostPlugin } from '../hostPlugins.js';
 import { getMacCoworkController } from './macController.js';
 import {
+  installMacLocalMcp,
+  preflightMacLocalMcp,
+  restoreMacLocalMcp,
+} from './macLocalMcp.js';
+import {
+  acquireMacCoworkApp,
+  macCoworkVersion,
+  removeMacCoworkApp,
+  verifyMacCoworkAppVersion,
+} from './macApp.js';
+import {
   installMacCoworkSettings,
   preflightMacCoworkSettings,
   restoreMacCoworkSettings,
@@ -95,6 +106,7 @@ export async function prepareMacCoworkSession(options: {
 }): Promise<{
   setupStatus: 'applied-not-verified';
   serverCount: number;
+  appPath: string;
   dispose(): Promise<void>;
 }> {
   try {
@@ -103,6 +115,8 @@ export async function prepareMacCoworkSession(options: {
     const manifest = structuredClone(options.manifest);
     if (manifest.arms !== undefined || !options.env) throw new Error(ERROR);
     const env = { ...options.env };
+    const version = macCoworkVersion(env);
+    const pinnedApp = !env.MST_COWORK_APP_PATH;
     const profileDirectory = resolve(
       join(homedir(), 'Library/Application Support/Claude-3p/configLibrary')
     );
@@ -124,8 +138,13 @@ export async function prepareMacCoworkSession(options: {
       await realpath(tmpdir()),
       `mst-cowork-session-${randomUUID()}`
     );
+    const localMcpDirectory = `${stagingDirectory}-mcp`;
+    if (!manifest.servers) throw new Error(ERROR);
+    await preflightMacLocalMcp(manifest.servers, env);
     const installOptions = {
-      manifest,
+      // MCP is installed through the supported local developer surface, not the
+      // profile list (which managed inference settings can take precedence over).
+      manifest: { ...manifest, servers: [] },
       model: options.model,
       ...(options.plugins?.length ? { plugins: options.plugins } : {}),
       env,
@@ -137,8 +156,11 @@ export async function prepareMacCoworkSession(options: {
       ],
     };
     await preflightMacCoworkSettings(installOptions);
-    const controller = await getMacCoworkController();
-    const { running: wasRunning } = await controller.state();
+    let controller = await getMacCoworkController('/Applications/Claude.app');
+    const { running: wasRunning, runningAppPath } = await controller.state();
+    const restoreAppPath = runningAppPath ?? '/Applications/Claude.app';
+    const originalController = await getMacCoworkController(restoreAppPath);
+    const appDirectory = `${stagingDirectory}-app`;
     // Atomic cross-process ownership precedes ANY stop/start. In particular, a
     // competing invocation must not stop the first invocation's running app.
     await mkdir(lease, { mode: 0o700 });
@@ -151,6 +173,9 @@ export async function prepareMacCoworkSession(options: {
         profileDirectory,
         stagingDirectory,
         wasRunning,
+        localMcp: true,
+        ...(pinnedApp ? { pinnedApp: true } : {}),
+        restoreAppPath,
       }) + '\n'
     );
     let leaseInfo: Stats;
@@ -223,7 +248,13 @@ export async function prepareMacCoworkSession(options: {
     const cleanup = async (): Promise<void> => {
       try {
         await ownsLease();
-        if (await ownsTransaction()) {
+        const hasTransaction = await ownsTransaction();
+        if (await exists(localMcpDirectory)) {
+          await stop();
+          await ownsLease();
+          await restoreMacLocalMcp(localMcpDirectory);
+        }
+        if (hasTransaction) {
           await stop();
           await ownsLease();
           await ownsTransaction();
@@ -232,7 +263,7 @@ export async function prepareMacCoworkSession(options: {
           transaction = undefined;
         }
         if ((await controller.state()).running !== wasRunning) {
-          if (wasRunning) await controller.start();
+          if (wasRunning) await originalController.start();
           else await stop();
         }
         if ((await controller.state()).running !== wasRunning)
@@ -240,6 +271,7 @@ export async function prepareMacCoworkSession(options: {
         if ((await exists(lock)) || (await exists(stagingDirectory)))
           throw new Error(ERROR);
         await ownsLease();
+        if (pinnedApp) await removeMacCoworkApp(appDirectory);
         await unlink(receiptPath);
         try {
           await rmdir(lease);
@@ -258,32 +290,64 @@ export async function prepareMacCoworkSession(options: {
       }
     };
 
+    let appPath: string;
     try {
       await ownsLease();
       await preflightMacCoworkSettings(installOptions);
+      appPath = pinnedApp
+        ? await acquireMacCoworkApp(appDirectory, version)
+        : env.MST_COWORK_APP_PATH!;
+      controller = await getMacCoworkController(appPath);
+      await ownsLease();
       await stop();
       installAttempted = true;
       transaction = await installMacCoworkSettings(installOptions);
+      await installMacLocalMcp(localMcpDirectory, manifest.servers, env);
       await controller.start();
       if (!(await controller.state()).running) throw new Error(ERROR);
-    } catch {
+    } catch (error) {
       await cleanup();
+      if (
+        error instanceof Error &&
+        error.message.startsWith('Unable to acquire Claude Desktop ')
+      )
+        throw error;
       throw new Error(ERROR);
     }
     let disposal: Promise<void> | undefined;
     return {
       setupStatus: transaction.status,
+      appPath,
       serverCount: manifest.servers?.length ?? 0,
       dispose() {
         // Concurrent/repeated callers share one cleanup, including its failure.
-        disposal ??= cleanup();
+        disposal ??= (async () => {
+          try {
+            if (pinnedApp) {
+              await verifyMacCoworkAppVersion(appPath, version);
+              const state = await controller.state();
+              if (
+                state.runningAppPath &&
+                (await realpath(state.runningAppPath)) !==
+                  (await realpath(appPath))
+              )
+                throw new Error(
+                  'The running Claude Desktop bundle changed during evaluation; refusing results.'
+                );
+            }
+          } finally {
+            await cleanup();
+          }
+        })();
         return disposal;
       },
     };
   } catch (error) {
     throw new Error(
-      error instanceof Error && error.message === CLEANUP_ERROR
-        ? CLEANUP_ERROR
+      error instanceof Error &&
+        (error.message === CLEANUP_ERROR ||
+          error.message.startsWith('Unable to acquire Claude Desktop '))
+        ? error.message
         : ERROR
     );
   }

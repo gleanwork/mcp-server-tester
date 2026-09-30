@@ -32,6 +32,66 @@ manually edit `configLibrary` files.
 The batch preflight reports this setup command immediately when the profile is
 missing. It does not wait for a case timeout.
 
+### Automatic pinned Claude Desktop bundle
+
+On macOS, MST downloads Claude Desktop **1.52386.6** for each managed session.
+No app bundle or administrator password is required. It resolves the exact pin
+through Anthropic's release service, downloads into a private temporary directory,
+and checks the advertised size and SHA-256, Anthropic code signature, bundle ID,
+and embedded version before launch. An unavailable pin or failed check stops the
+run; MST never silently falls back to the installed app or latest release.
+
+```bash
+# Optional exact-version override; the default needs no environment variable.
+MST_COWORK_APP_VERSION=1.52386.6 \
+COWORK_ENV_FILE=/absolute/path/to/private.env \
+  ./scripts/run-cowork.sh \
+  --manifests /absolute/path/to/manifest.json \
+  --root-dir /absolute/path/to/eval-root
+```
+
+MST does not replace `/Applications/Claude.app` or write managed preferences.
+It uses the existing signed-in `Claude-3p` profile, requests disabled app updates
+in its evaluation profile, and rechecks the bundle version before accepting run
+completion. A managed configuration can override profile settings; a changed
+bundle fails the run. MST stops the downloaded app, restores the original profile
+and running app, and removes its download directory.
+Cleanup failures retain the session receipt for `cowork recover`; recovery also
+removes the temporary app. A hard process crash during acquisition can leave the
+journaled download until recovery. Do not run two Claude bundles simultaneously.
+
+Claude's workspace disk-space check is separate from MCP authentication. Leave
+headroom for both the temporary app download and Claude's VM/workspace setup. A
+successful connector preflight does not bypass a "Not enough disk space" error.
+MST removes its own temporary bundle, bridge credentials, and settings on normal
+teardown; it does not delete Claude's VM bundles, user workspaces, or caches to
+free space. After an interrupted process, use explicit recovery before retrying.
+
+Root-owned, non-writable managed preferences are accepted only when every key is
+on the inference-only allowlist. Managed MCP, plugin, updater, unknown settings,
+and unsafe files still block setup. The plist is read, never modified.
+
+`MST_COWORK_APP_PATH=/absolute/path/to/Claude.app` remains a development escape
+hatch. MST neither downloads nor deletes caller-owned bundles. Do not combine it
+with `MST_COWORK_APP_VERSION`. Linux provisioning is unchanged.
+
+Pinning alone does not prove MCP availability. Managed inference configuration
+can take precedence over a profile's MCP list. On macOS, MST now exposes declared
+servers through Claude's supported local Developer MCP surface instead:
+
+- HTTP declarations use a local stdio-to-HTTP bridge with the declared headers.
+- Plain stdio declarations run the caller's command, including vendor dry-run
+  proxies. Host-resolved plugin placeholders remain Linux-only.
+- The temporary `claude_desktop_config.json` contains launcher paths, not tokens.
+  Runtime credentials stay in private per-session files. Existing developer
+  servers are replaced for isolation, then restored with the original file bytes.
+- Cleanup tolerates Claude's JSON whitespace rewrite, but rejects semantic edits
+  made concurrently. `cowork recover` also restores the developer configuration.
+
+Use actual tool-call assertions: successful endpoint preflight alone is not proof
+that the native session received a connector. A live pinned run has passed with
+Glean `enterprise_search` and a login-backed GitHub `get_me` call.
+
 ## Run on macOS from a source checkout
 
 ```bash
@@ -58,11 +118,25 @@ MST applies a fixed inference model list with discovery disabled. Native telemet
 must report the requested exact model ID; a mismatch or missing model evidence
 fails the case. Omitting `host.model` preserves the existing application default.
 Configure `servers` with HTTP endpoints and literal or environment-backed bearer
-credentials. A nonempty server set or explicit inference model invokes the managed
-setup transaction once per batch. An empty server set with an explicit model still
-replaces the MCP configuration with an empty set. `coworkSetup.approveWriteTools` defaults to false; setting
-it to true explicitly applies #271's server-scoped wildcard allow policy, including
-write tools. Do not enable it for servers/tasks you have not authorized.
+credentials, or plain stdio commands with their runtime environment. Every macOS
+batch owns one setup transaction, including an empty server set, which exposes no
+user-added MCP servers. `inheritEnv: false` limits a stdio command to its declared
+`env`; otherwise it receives the caller's runtime environment plus its declared
+values. Credentials are not inferred from arbitrary environment variable names.
+
+`coworkSetup.approveWriteTools` defaults to false. Mac Computer Use approves only
+clearly read-only tools by default; explicit opt-in permits tool writes for the
+current task, never persistent account-wide approval. This local path does not
+claim to install a managed wildcard policy. Keep vendor servers behind the
+caller's dry-run proxy. Delayed native tool requests trigger at most three further
+approval inspections within the original per-case action budget; prompts are
+never resubmitted. Follow-up usage is recorded under
+`hostTelemetry.computerUse.hitlFollowups`.
+
+For Scio's login-backed OOTB connectors, use its `nativeConnectors` selector and
+existing dry-run proxy entries alongside the Glean `/eval` endpoint. The registry,
+OAuth login, and vendor write classification remain in Scio, not MST. Missing or
+expired credentials fail preflight rather than silently dropping a connector.
 
 ## Run an installed release
 

@@ -48,6 +48,31 @@ class DriverTests(unittest.TestCase):
             self.launches = launched.call_args_list
             return result, performed.call_count
 
+    def test_cowork_hitl_defaults_to_read_only_and_never_persistent_approval(self):
+        with patch.dict(driver.os.environ, {'MST_COWORK_APPROVE_WRITE_TOOLS': '0'}):
+            self.run_actions([], mode='hitl')
+        self.assertIn('Never approve writes or tools with unknown effects', self.planner_request['system'])
+        self.assertIn('Never grant persistent access', self.planner_request['system'])
+
+    def test_cowork_write_opt_in_does_not_allow_persistent_approval(self):
+        with patch.dict(driver.os.environ, {'MST_COWORK_APPROVE_WRITE_TOOLS': '1'}):
+            self.run_actions([], mode='hitl')
+        self.assertIn('explicitly permits tool writes', self.planner_request['system'])
+        self.assertIn('Never grant persistent access', self.planner_request['system'])
+
+    def test_cowork_focuses_exact_pinned_bundle_for_submission_and_hitl(self):
+        path = '/private/tmp/mst-test/unpacked/Claude.app'
+        with patch.dict(driver.os.environ, {'MST_COWORK_APP_PATH': path}):
+            for mode in ('submit', 'hitl'):
+                self.run_actions([FILL, ENTER], mode=mode)
+                self.assertEqual(self.launches[0].args[0], ['open', '-a', path])
+                self.assertTrue(self.launches[0].kwargs['check'])
+
+    def test_chatgpt_ignores_cowork_bundle_override(self):
+        with patch.dict(driver.os.environ, {'MST_COWORK_APP_PATH': '/private/tmp/Claude.app'}):
+            self.run_actions([FILL, ENTER], application='chatgpt')
+            self.assertEqual(self.launches[0].args[0], ['open', '-a', 'ChatGPT'])
+
     def test_chatgpt_codex_surface_is_consumed_by_planner_not_added_to_query(self):
         query = '  original query\n'
         result, count = self.run_actions([FILL, ENTER], application='chatgpt',

@@ -1,4 +1,8 @@
-import { isHttpConfig, type MCPConfig } from '../../config/mcpConfig.js';
+import {
+  isHttpConfig,
+  usesHostResolvedFields,
+  type MCPConfig,
+} from '../../config/mcpConfig.js';
 import { checkMcpServers, type McpServerReadiness } from '../mcpReadiness.js';
 import {
   resolveCoworkMcpHeaders,
@@ -36,6 +40,23 @@ function resolveServer(
   stdio: { plugins: readonly HostPlugin[]; paths: HostStdioPaths }
 ): MCPConfig {
   if (!isHttpConfig(server)) {
+    if (!usesHostResolvedFields(server))
+      return {
+        ...server,
+        env: {
+          ...(server.inheritEnv === false
+            ? {}
+            : Object.fromEntries(
+                Object.entries(env).filter(
+                  (entry): entry is [string, string] =>
+                    typeof entry[1] === 'string'
+                )
+              )),
+          ...server.env,
+        },
+        inheritEnv: false,
+        quiet: true,
+      };
     // The same resolved launch Desktop runs, with only its declared env and
     // the caller's data dir. Readiness fails closed below `minTools`.
     const [parsed] = hostStdioServers([server], stdio.plugins);

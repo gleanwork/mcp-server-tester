@@ -109,7 +109,7 @@ beforeEach(() => {
   });
   mocks.hitl.mockImplementation(async () => {
     mocks.order.push('hitl');
-    return { status: 'hitl_checked' };
+    return { status: 'hitl_checked', action_count: 0 };
   });
   let index = 0;
   mocks.bind.mockReset().mockImplementation(async () => ({
@@ -152,6 +152,47 @@ afterEach(async () => {
 });
 
 describe('V2 Cowork host', () => {
+  it('rechecks a late native tool approval without resubmitting the task', async () => {
+    const original = mocks.trace.getMockImplementation()!;
+    mocks.trace.mockImplementationOnce(
+      async (options: {
+        sessionPath: string;
+        onPending?: (trace: ClaudeTrace) => Promise<void>;
+      }) => {
+        await options.onPending?.({
+          candidate: { metadataPath: options.sessionPath },
+          toolCalls: [{ name: 'enterprise_search', arguments: {} }],
+          isComplete: false,
+        } as ClaudeTrace);
+        return (await original(options)) as ClaudeTrace;
+      }
+    );
+    const results = await COWORK_HOST.runBatch!([requests()[0]!], context);
+    expect(mocks.submit).toHaveBeenCalledOnce();
+    expect(mocks.hitl).toHaveBeenCalledTimes(2);
+    expect(mocks.hitl.mock.calls[1]![0]).toMatchObject({
+      maxActions: 12,
+      task: expect.stringContaining('Approve read-only calls only'),
+    });
+    expect(results[0]!.telemetry).toMatchObject({
+      computerUse: { hitlFollowups: [{ status: 'completed' }] },
+    });
+  });
+
+  it('uses the selected session bundle for both submission and HITL', async () => {
+    mocks.setup.mockResolvedValueOnce({
+      appPath: '/private/tmp/pinned/Claude.app',
+      dispose: mocks.dispose,
+    });
+    await COWORK_HOST.runBatch!([requests()[0]!], context);
+    expect(mocks.submit).toHaveBeenCalledWith(
+      'query one',
+      expect.objectContaining({ appPath: '/private/tmp/pinned/Claude.app' })
+    );
+    expect(mocks.hitl).toHaveBeenCalledWith(
+      expect.objectContaining({ appPath: '/private/tmp/pinned/Claude.app' })
+    );
+  });
   it('selects the semantic Linux driver without requiring a planner API key', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
     expect(COWORK_HOST.schema.parse({ type: 'cowork' })).toMatchObject({
@@ -295,7 +336,7 @@ describe('V2 Cowork host', () => {
     ) as PromiseRejectedResult;
     expect(String(rejected.reason)).toContain('already in use');
     expect(mocks.submit).toHaveBeenCalledOnce();
-    expect(mocks.setup).not.toHaveBeenCalled();
+    expect(mocks.setup).toHaveBeenCalledOnce();
   });
   it('binds inference and planner models separately and verifies native evidence', async () => {
     const batch = requests().map((r) => ({
@@ -687,6 +728,16 @@ describe('V2 Cowork host', () => {
     expect(mocks.hitl).not.toHaveBeenCalled();
     expect(result[0]!.error).toContain('[REDACTED]');
     expect(result[1]!.error).toContain('Not submitted');
+    expect(mocks.dispose).toHaveBeenCalledOnce();
+  });
+  it('disposes the session when workspace setup fails after MCP preflight', async () => {
+    mocks.submit.mockRejectedValueOnce(new Error('Not enough disk space'));
+    const result = await COWORK_HOST.runBatch!(requests().slice(0, 1), context);
+    expect(mocks.readiness).toHaveBeenCalledOnce();
+    expect(result[0]!.error).toBe('Not enough disk space');
+    expect(mocks.submit).toHaveBeenCalledOnce();
+    expect(mocks.hitl).not.toHaveBeenCalled();
+    expect(mocks.trace).not.toHaveBeenCalled();
     expect(mocks.dispose).toHaveBeenCalledOnce();
   });
   it('restores on native trace errors and retains per-case failure', async () => {
