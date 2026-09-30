@@ -19,6 +19,10 @@ interface Call {
   pid: number;
 }
 
+// Polls wait on freshly spawned Node children; the 1s default is too tight
+// under full-suite load. They return as soon as the condition holds.
+const SPAWN = { timeout: 10_000 };
+
 async function fakeApp(handoffExit = 0, mainExitsImmediately = false) {
   const path = join(root, 'chatgpt');
   const script = `#!${process.execPath}
@@ -96,7 +100,7 @@ describe('in-process Linux ChatGPT app controller', () => {
     });
     expect(await controller.state()).toEqual({ running: true });
     await controller.openPrompt('  α 😀\nline  ');
-    await expect.poll(async () => (await calls()).length).toBe(2);
+    await expect.poll(async () => (await calls()).length, SPAWN).toBe(2);
     const [main, handoff] = (await calls()).sort(
       (a, b) => a.args.length - b.args.length
     );
@@ -117,7 +121,7 @@ describe('in-process Linux ChatGPT app controller', () => {
     // The hand-off process never receives MCP credentials.
     expect(handoff!.env.MST_CHATGPT_MCP_TOKEN_0).toBeUndefined();
     const helperPid = () => readFile(join(root, 'helper.pid'), 'utf8');
-    await expect.poll(() => helperPid().catch(() => '')).not.toBe('');
+    await expect.poll(() => helperPid().catch(() => ''), SPAWN).not.toBe('');
     const group = [main!.pid, Number(await helperPid())];
     expect(group.map(alive)).toEqual([true, true]);
     await controller.stop();
@@ -145,7 +149,7 @@ describe('in-process Linux ChatGPT app controller', () => {
     const started = await controller.start().catch((error: unknown) => error);
     if (started) expect(started).toMatchObject({ code: 'app_exited' });
     await expect
-      .poll(async () => (await controller.state()).running)
+      .poll(async () => (await controller.state()).running, SPAWN)
       .toBe(false);
     await expect(controller.openPrompt('query')).rejects.toMatchObject({
       code: 'app_not_running',
@@ -159,8 +163,8 @@ describe('in-process Linux ChatGPT app controller', () => {
   ])('hand-off exit %s fails with %s', async (exit, prompt, code, count) => {
     const controller = await fakeApp(exit);
     await controller.start();
-    await expect.poll(async () => (await calls()).length).toBe(1);
+    await expect.poll(async () => (await calls()).length, SPAWN).toBe(1);
     await expect(controller.openPrompt(prompt)).rejects.toMatchObject({ code });
-    await expect.poll(async () => (await calls()).length).toBe(count);
+    await expect.poll(async () => (await calls()).length, SPAWN).toBe(count);
   });
 });
