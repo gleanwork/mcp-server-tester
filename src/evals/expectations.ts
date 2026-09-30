@@ -19,7 +19,10 @@ import type {
 } from './datasetTypes.js';
 import type { HostResponse } from './caseExecution.js';
 import type { HostEvidence } from './evalFrameworkTypes.js';
-import type { ExternalHostMetadata } from './externalHost/types.js';
+import type {
+  ExternalHostMetadata,
+  TraceSource,
+} from './externalHost/types.js';
 import type { EvalExpectationResult } from '../types/index.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import { BUILTIN_RESULT_SCHEMAS } from './builtinResultSchemas.js';
@@ -37,6 +40,7 @@ import {
 import {
   hostEvidenceProblem,
   matchesIdentity,
+  matchToolCalls,
 } from '../assertions/validators/toolCalls.js';
 
 /** What a case produced, in the form the evaluator grades. */
@@ -63,31 +67,39 @@ export interface ExpectationOutcome {
   /** Present when `toolsTriggered` was graded on sufficient evidence. */
   toolPrecision?: number;
   toolRecall?: number;
-  /** Expected, unexpected and missed calls, when `toolsTriggered` was graded on sufficient evidence. */
+  /**
+   * Expected, unexpected and missed calls, when `toolsTriggered` was graded
+   * on sufficient evidence and the case ran on a host.
+   */
   mcpHostTrace?: EvalCaseResult['mcpHostTrace'];
 }
 
-const STRUCTURED_EXTERNAL_SOURCES = [
+/** Trace sources that record tool calls as data rather than inferring them. */
+const STRUCTURED_EXTERNAL_SOURCES: ReadonlySet<TraceSource> = new Set([
   'mcp-proxy',
   'mcp-server-logs',
   'host-local-transcript',
   'host-native-export',
-];
+]);
+
+/** Where an external host's tool calls came from, when it has no per-field evidence. */
+function toolCallTraceSource(externalHost: ExternalHostMetadata): TraceSource {
+  return externalHost.sources?.toolCalls ?? externalHost.traceSource;
+}
 
 /** Whether an external host's trace is good enough to grade tool calls. */
-export function hasStructuredToolEvidence(
+function hasStructuredToolEvidence(
   externalHost: ExternalHostMetadata
 ): boolean {
   const evidence = externalHost.evidence?.toolCalls;
   if (evidence)
     return (
       evidence.confidence === 'high' &&
-      STRUCTURED_EXTERNAL_SOURCES.includes(evidence.source)
+      STRUCTURED_EXTERNAL_SOURCES.has(evidence.source)
     );
-  const source = externalHost.sources?.toolCalls ?? externalHost.traceSource;
   return (
     externalHost.traceConfidence === 'high' &&
-    STRUCTURED_EXTERNAL_SOURCES.includes(source)
+    STRUCTURED_EXTERNAL_SOURCES.has(toolCallTraceSource(externalHost))
   );
 }
 
@@ -103,9 +115,9 @@ export function toolEvidenceGap(
   const externalHost =
     evalCase.mode === 'external_host' ? graded.externalHost : undefined;
   if (externalHost && !hasStructuredToolEvidence(externalHost))
-    return `External host trace source ${
-      externalHost.sources?.toolCalls ?? externalHost.traceSource
-    } (${externalHost.traceConfidence} confidence) cannot support tool-call assertions. Use protocol traces or host-native structured traces for toolsTriggered/toolCallCount.`;
+    return `External host trace source ${toolCallTraceSource(
+      externalHost
+    )} (${externalHost.traceConfidence} confidence) cannot support tool-call assertions. Use protocol traces or host-native structured traces for toolsTriggered/toolCallCount.`;
   return hostEvidenceProblem(graded.evidence);
 }
 
@@ -137,7 +149,7 @@ export function mergeSuiteJudges(
   evalCase: Pick<EvalCase, 'expect' | 'canonicalAnswer'>,
   judges: Array<Record<string, unknown>>,
   rawJudges: Array<Record<string, unknown>>
-) {
+): Array<Record<string, unknown>> {
   const existing = Array.isArray(evalCase.expect?.passesJudge)
     ? evalCase.expect.passesJudge
     : evalCase.expect?.passesJudge
@@ -232,36 +244,38 @@ async function evaluateSnapshot(
   }
 }
 
-/** Expected, unexpected and missed tool calls, with names as the host reported them. */
+function isToolCall(entry: { kind?: string }): boolean {
+  return (entry.kind ?? 'tool_call') === 'tool_call';
+}
+
+/**
+ * Expected, unexpected and missed tool calls, from the same match the
+ * validator grades (statuses agree with precision, `missed` with recall).
+ * Calls are shown with the host's own names; skills and other events are
+ * left out of the view.
+ */
 function toolTraceView(
   expectation: NonNullable<EvalExpectBlock['toolsTriggered']>,
   graded: GradedExecution & { hostResponse: HostResponse }
 ): NonNullable<EvalCaseResult['mcpHostTrace']> {
-  // Match against the mapped response, show the host's own names.
+  // Match on the mapped response the validator graded.
   const mapped = graded.response as HostResponse;
-  const expected = expectation.calls.filter(
-    (call) => (call.kind ?? 'tool_call') === 'tool_call'
+  const match = matchToolCalls(mapped.events ?? mapped.toolCalls, expectation);
+  const matchedToolCalls = match.observed.filter((entry) =>
+    isToolCall(entry.call)
   );
-  const canonicalCalls = Array.isArray(mapped.events)
-    ? mapped.events.filter((event) => event.kind === 'tool_call')
-    : mapped.toolCalls;
+  const expectedToolCalls = expectation.calls.filter(isToolCall);
   return {
     calls: graded.hostResponse.toolCalls.map((call, index) => ({
       name: call.name,
       arguments: call.arguments,
-      status: expected.some((item) =>
-        matchesIdentity(canonicalCalls[index] ?? call, item)
-      )
-        ? 'expected'
-        : 'unexpected',
+      status:
+        (matchedToolCalls[index]?.expected ??
+        expectedToolCalls.some((item) => matchesIdentity(call, item)))
+          ? 'expected'
+          : 'unexpected',
     })),
-    missed: expected
-      .filter(
-        (item) =>
-          item.required !== false &&
-          !canonicalCalls.some((call) => matchesIdentity(call, item))
-      )
-      .map(({ name }) => ({ name })),
+    missed: match.missed.filter(isToolCall).map(({ name }) => ({ name })),
   };
 }
 

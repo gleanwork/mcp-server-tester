@@ -159,6 +159,8 @@ When an `external_host` trace is structured enough to grade tool calls, the resu
 
 Cases whose trace can't support tool assertions (a low-confidence or screenshot trace, or host evidence other than `structured`) still report no metrics.
 
+The reported tool trace now comes from the same match as the metrics. A required call made with the wrong arguments is listed in `mcpHostTrace.missed`, as `toolRecall` already counted it. It used to appear only as an `expected` call.
+
 ## New in 2.0 (non-breaking)
 
 - `protocol` on `mcpConfig` (`'legacy'`, `'auto'`, or a revision like `'2026-07-28'`), the `mcpProtocol` fixture option, and `protocolMatrix()`. See [Protocol Versions](../protocol-versions.md). To run an existing project against both eras:

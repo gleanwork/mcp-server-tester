@@ -164,6 +164,109 @@ describe('evaluateExpectations', () => {
     expect(outcome.mcpHostTrace).toBeUndefined();
   });
 
+  it('lists a required call made with the wrong arguments as missed', async () => {
+    const outcome = await evaluateExpectations(
+      {
+        mode: 'mcp_host',
+        expect: {
+          toolsTriggered: {
+            calls: [
+              {
+                name: 'get_weather',
+                arguments: { city: 'Paris' },
+                required: true,
+              },
+            ],
+          },
+        },
+      },
+      graded
+    );
+    expect(outcome.expectations.toolsTriggered?.pass).toBe(false);
+    expect(outcome.toolRecall).toBe(0);
+    // Precision counts the call by identity; recall misses it on arguments.
+    expect(outcome.toolPrecision).toBe(0.5);
+    expect(outcome.mcpHostTrace).toEqual({
+      calls: [
+        {
+          name: 'native_weather',
+          arguments: { city: 'London' },
+          status: 'expected',
+        },
+        { name: 'search', arguments: {}, status: 'unexpected' },
+      ],
+      missed: [{ name: 'get_weather' }],
+    });
+  });
+
+  it('applies the external trace explanation to both tool expectations', async () => {
+    const outcome = await evaluateExpectations(
+      { mode: 'external_host', expect: toolExpect },
+      {
+        ...graded,
+        evidence: 'observed',
+        externalHost: external({
+          traceSource: 'screenshot',
+          traceConfidence: 'low',
+        }),
+      }
+    );
+    for (const key of ['toolsTriggered', 'toolCallCount'] as const) {
+      expect(outcome.expectations[key]?.pass).toBe(false);
+      expect(outcome.expectations[key]?.details).toMatch(
+        /^External host trace source screenshot \(low confidence\)/
+      );
+    }
+    expect(outcome.toolPrecision).toBeUndefined();
+    expect(outcome.toolRecall).toBeUndefined();
+    expect(outcome.mcpHostTrace).toBeUndefined();
+  });
+
+  it('applies host evidence when the external trace is structured', async () => {
+    const outcome = await evaluateExpectations(
+      { mode: 'external_host', expect: toolExpect },
+      { ...graded, evidence: 'none', externalHost: external() }
+    );
+    expect(outcome.expectations.toolsTriggered?.details).toBe(
+      'Host evidence is none; structured tool evidence is required.'
+    );
+    expect(outcome.mcpHostTrace).toBeUndefined();
+  });
+
+  it('fails a lone toolCallCount expectation on an evidence gap', async () => {
+    const outcome = await evaluateExpectations(
+      { mode: 'host', expect: { toolCallCount: { max: 5 } } },
+      { ...graded, evidence: 'observed' }
+    );
+    expect(outcome.expectations).toEqual({
+      toolCallCount: {
+        pass: false,
+        details:
+          'Host evidence is observed; structured tool evidence is required.',
+      },
+    });
+  });
+
+  it('ignores external trace quality outside external_host mode', async () => {
+    const outcome = await evaluateExpectations(
+      { mode: 'mcp_host', expect: toolExpect },
+      { ...graded, externalHost: external({ traceConfidence: 'low' }) }
+    );
+    expect(outcome.expectations.toolCallCount?.pass).toBe(true);
+    expect(outcome.toolPrecision).toBe(0.5);
+  });
+
+  it('grades an external_host case without trace metadata on host evidence alone', async () => {
+    // Not produced by the runtime (metadata is required); pinned so the
+    // behaviour can't change silently.
+    const outcome = await evaluateExpectations(
+      { mode: 'external_host', expect: toolExpect },
+      graded
+    );
+    expect(outcome.toolPrecision).toBe(0.5);
+    expect(outcome.mcpHostTrace).toBeDefined();
+  });
+
   it('builds no trace view for direct responses', async () => {
     const outcome = await evaluateExpectations(
       { mode: 'direct', expect: { toolsTriggered: toolExpect.toolsTriggered } },

@@ -156,6 +156,42 @@ function findMatchingCall(
 }
 
 /**
+ * How an observed trace lines up with a tool-call expectation. This is the
+ * one matcher behind precision, recall and the reported trace.
+ */
+export interface ToolCallMatch {
+  /**
+   * Every observed event, in order, and whether the expectation names it
+   * (identity only). The fraction marked expected is the precision.
+   */
+  observed: Array<{ call: TraceCall; expected: boolean }>;
+  /**
+   * Required calls with no observed call matching their identity and
+   * arguments. Their share of the required calls is what recall misses.
+   */
+  missed: ToolCallExpectation['calls'];
+}
+
+/** Matches an observed trace (all event kinds, in order) against an expectation. */
+export function matchToolCalls(
+  actual: TraceCall[],
+  expectation: ToolCallExpectation
+): ToolCallMatch {
+  return {
+    observed: actual.map((call) => ({
+      call,
+      expected: expectation.calls.some((expected) =>
+        matchesIdentity(call, expected)
+      ),
+    })),
+    missed: expectation.calls.filter(
+      (expected) =>
+        expected.required !== false && findMatchingCall(actual, expected) === -1
+    ),
+  };
+}
+
+/**
  * Validates tool calls made during a host simulation.
  *
  * @param response - Must be an MCPHostSimulationResult-compatible response
@@ -179,24 +215,24 @@ export function validateToolCalls(
   // Selectors constrain matching, not the observed trace. Retain every event so
   // exclusive expectations and precision also account for unexpected kinds.
   const actual = response.events ?? response.toolCalls;
+  const match = matchToolCalls(actual, expectation);
 
-  // Compute recall: fraction of required calls that were made
-  const requiredCalls = expectation.calls.filter((c) => c.required !== false);
-  const calledRequiredCount = requiredCalls.filter(
-    (expected) => findMatchingCall(actual, expected) !== -1
+  // Recall: fraction of required calls that were made.
+  const requiredCount = expectation.calls.filter(
+    (c) => c.required !== false
   ).length;
   const recall =
-    requiredCalls.length > 0 ? calledRequiredCount / requiredCalls.length : 1.0;
+    requiredCount > 0
+      ? (requiredCount - match.missed.length) / requiredCount
+      : 1.0;
 
-  // Compute precision: fraction of actual calls that were expected.
-  // Always computed so the metric reflects actual tool call efficiency.
-  // Whether unexpected calls cause a FAILURE is controlled separately by exclusive=true (lines below).
+  // Precision: fraction of actual calls that were expected. Always computed
+  // so the metric reflects tool call efficiency; whether unexpected calls
+  // FAIL is controlled separately by exclusive=true (below).
   const allowedNames = new Set(expectation.calls.map((c) => c.name));
   const precision =
     actual.length > 0
-      ? actual.filter((call) =>
-          expectation.calls.some((expected) => matchesIdentity(call, expected))
-        ).length / actual.length
+      ? match.observed.filter((entry) => entry.expected).length / actual.length
       : 1.0;
 
   const metrics = { precision, recall };
@@ -248,10 +284,9 @@ export function validateToolCalls(
   }
 
   if (expectation.exclusive === true) {
-    const unexpected = actual.filter(
-      (call) =>
-        !expectation.calls.some((expected) => matchesIdentity(call, expected))
-    );
+    const unexpected = match.observed
+      .filter((entry) => !entry.expected)
+      .map((entry) => entry.call);
     if (unexpected.length > 0) {
       const names = unexpected.map((c) => `'${c.name}'`).join(', ');
       return {
