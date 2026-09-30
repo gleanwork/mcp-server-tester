@@ -590,5 +590,59 @@ describe('MCPReporter.buildRunData()', () => {
 
       expect(data.serverCapabilities).toBeUndefined();
     });
+
+    it('collects every conformance attachment with its protocol and scope', async () => {
+      const attach = (body: unknown) => ({
+        name: 'mcp-conformance-checks',
+        contentType: 'application/json',
+        body: Buffer.from(JSON.stringify(body)),
+      });
+      const protocol = {
+        requested: '2026-07-28',
+        negotiated: '2026-07-28',
+        era: 'modern',
+      };
+      const test = { title: 'conformance' } as Parameters<
+        MCPReporter['onTestEnd']
+      >[0];
+      const result = {
+        attachments: [
+          attach({
+            operation: 'conformanceChecks',
+            pass: true,
+            checks: [
+              {
+                name: 'discover_succeeds',
+                pass: true,
+                message: 'ok',
+                severity: 'must',
+              },
+            ],
+            toolCount: 4,
+            protocol,
+          }),
+          attach({
+            operation: 'crossEraChecks',
+            pass: false,
+            checks: [
+              { name: 'cross_era_tools_match', pass: false, message: 'x' },
+            ],
+            toolCount: 4,
+            scope: 'Cross-era: legacy ↔ 2026-07-28',
+          }),
+        ],
+      } as unknown as Parameters<MCPReporter['onTestEnd']>[1];
+
+      await reporter.onTestEnd(test, result);
+      const data = callBuildRunData(reporter, 100);
+
+      expect(data.conformanceChecks).toEqual([
+        expect.objectContaining({ pass: true, protocol }),
+        expect.objectContaining({
+          pass: false,
+          scope: 'Cross-era: legacy ↔ 2026-07-28',
+        }),
+      ]);
+    });
   });
 });
