@@ -10,6 +10,7 @@
 
 import { createBintastic, type BintasticProject } from 'bintastic';
 import { fileURLToPath } from 'node:url';
+import packageJson from '../../../package.json' with { type: 'json' };
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { StoredTokens } from '../../auth/types.js';
 import { generateServerKey } from '../../auth/storage.js';
@@ -57,12 +58,20 @@ describe('mcp-server-tester CLI', () => {
 
       expect(result.exitCode).toBe(0);
       expect(result.stderr).toBe('');
+      expect(result.stdout).toContain('Usage: mst');
       expect(result.stdout).toContain('mcp-server-tester');
       expect(result.stdout).toContain('init');
       expect(result.stdout).toContain('generate');
       expect(result.stdout).toContain('login');
       expect(result.stdout).toContain('token');
       expect(result.stdout).toContain('cowork');
+    });
+
+    it('ships `mst` and `mcp-server-tester` as the same binary', () => {
+      expect(packageJson.bin).toEqual({
+        'mcp-server-tester': './dist/cli/index.js',
+        mst: './dist/cli/index.js',
+      });
     });
 
     it('shows version', async () => {

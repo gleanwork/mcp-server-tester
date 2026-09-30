@@ -458,13 +458,10 @@ export function GenerateApp({ options }: GenerateAppProps) {
           {'serverUrl' in mcpConfig && (
             <>
               <Text>
-                Run:{' '}
-                <Text color="cyan">
-                  mcp-server-tester login {mcpConfig.serverUrl}
-                </Text>
+                Run: <Text color="cyan">mst login {mcpConfig.serverUrl}</Text>
               </Text>
               <Text> </Text>
-              <Text dimColor>Then retry: mcp-server-tester generate</Text>
+              <Text dimColor>Then retry: mst generate</Text>
             </>
           )}
           {'command' in mcpConfig && (

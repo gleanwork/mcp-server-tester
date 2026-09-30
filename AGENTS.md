@@ -42,7 +42,7 @@ npm run format:check        # Check formatting
 - **`judge/`** - LLM-as-a-judge via Claude Agent SDK
 - **`spec/`** - Conformance check registry (`checks/core.ts`, `checks/modern.ts`, `checks/skills.ts`), raw probe channel, and cross-era checks
 - **`reporters/`** - Custom Playwright reporter with React-based UI. `reporters/channel.ts` owns every attachment the reporter reads (names, payload types, read-side Zod schemas). Write with `attachReporterData(testInfo, { kind, data })`, never `testInfo.attach('mcp-...')` directly
-- **`cli/`** - `mcp-server-tester init` and `mcp-server-tester generate` commands
+- **`cli/`** - `mst init` and `mst generate` commands
 
 ### Assertions Module (`src/assertions/`)
 

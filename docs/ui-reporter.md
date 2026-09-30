@@ -32,7 +32,7 @@ npm test
 To open a previous report:
 
 ```bash
-npx mcp-server-tester open
+npx mst open
 ```
 
 ---
@@ -231,7 +231,7 @@ export default defineConfig({
 
 GCS storage uses Application Default Credentials. Set
 `GOOGLE_APPLICATION_CREDENTIALS` locally or in CI before running Playwright.
-`mcp-server-tester open` opens the local `.mcp-test-results/latest/` report only
+`mst open` opens the local `.mcp-test-results/latest/` report only
 in v1; externally stored JSON is intended for history, baselines, dashboards, and
 AI analysis.
 
@@ -250,7 +250,7 @@ AI analysis.
 Set `PLAYWRIGHT_SKIP_BROWSER_OPEN=1` to suppress auto-open, or open manually:
 
 ```bash
-npx mcp-server-tester open
+npx mst open
 ```
 
 ### Missing data

@@ -36,11 +36,11 @@ For an HTTP server, MST uses the first of these that applies:
 1. `auth.oauth.authStatePath`: the Playwright OAuth state file written by `performOAuthSetup()`.
 2. `auth.accessToken`: a static bearer token.
 3. `auth.clientCredentials`: a token from the client-credentials grant, requested when connecting and again as it nears expiry.
-4. (The `mcp` fixture only.) A `mcp-server-tester login` for the server, or tokens in `MCP_ACCESS_TOKEN`. A stored login is refreshed from its refresh token as the access token nears expiry, so long runs keep working; environment tokens are used as given.
+4. (The `mcp` fixture only.) An `mst login` for the server, or tokens in `MCP_ACCESS_TOKEN`. A stored login is refreshed from its refresh token as the access token nears expiry, so long runs keep working; environment tokens are used as given.
 
 `createMCPClientForConfig()` applies 1–3 from the config; the fixture adds 4. With none of them, requests carry no credentials. Stdio servers take none. The auth fixture (`mcpAuthProvider`) reads the same sources from environment variables in the same order.
 
-When the server rejects a token that can't be recovered (for example, a revoked login), requests fail with a message that says what to do, such as running `mcp-server-tester login` again. A failure discovering the server's OAuth metadata can surface first.
+When the server rejects a token that can't be recovered (for example, a revoked login), requests fail with a message that says what to do, such as running `mst login` again. A failure discovering the server's OAuth metadata can surface first.
 
 ## Static Token Authentication
 

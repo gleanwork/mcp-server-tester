@@ -637,7 +637,7 @@ export default defineConfig({
 ```
 
 The reporter still writes `.mcp-test-results/latest/` locally. The
-`mcp-server-tester open` command opens local reports only in v1.
+`mst open` command opens local reports only in v1.
 
 ### Stored Baselines
 

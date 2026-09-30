@@ -58,7 +58,7 @@ If you call the raw client, note these SDK v2 behavior changes:
 
 The SDK ships a codemod for the mechanical parts: `npx @modelcontextprotocol/codemod@latest v1-to-v2 .`. See the SDK's [upgrade guide](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/migration/upgrade-to-v2.md).
 
-Projects created with `mcp-server-tester init` now depend on `@modelcontextprotocol/client` instead of `@modelcontextprotocol/sdk`.
+Projects created with `mst init` now depend on `@modelcontextprotocol/client` instead of `@modelcontextprotocol/sdk`.
 
 ## Imports moved to subpaths
 
@@ -259,7 +259,7 @@ The reporter's local report (`index.html`, `data.js` and `run-*.json` in its `ou
 
 ## Which credentials are used
 
-**Affects:** HTTP servers that authenticate with a `mcp-server-tester login`, `auth.clientCredentials`, or more than one auth setting, and users of the `mcpAuthProvider` fixture.
+**Affects:** HTTP servers that authenticate with an `mst login`, `auth.clientCredentials`, or more than one auth setting, and users of the `mcpAuthProvider` fixture.
 
 The fixtures and `createMCPClientForConfig()` now share one precedence, decided in `src/auth/credentials.ts`: the OAuth state file, then a static token, then client credentials, then (in the fixture) a stored login. See [Which credentials are used](../authentication.md#which-credentials-are-used).
 

@@ -16,8 +16,11 @@ import packageJson from '../../package.json' with { type: 'json' };
 const program = new Command();
 
 program
-  .name('mcp-server-tester')
-  .description('CLI tools for MCP server evaluation and testing')
+  .name('mst')
+  .description(
+    'MST (MCP Server Tester): CLI tools for MCP server evaluation and testing.\n' +
+      'Also available as `mcp-server-tester`.'
+  )
   .version(packageJson.version);
 
 // Init command
