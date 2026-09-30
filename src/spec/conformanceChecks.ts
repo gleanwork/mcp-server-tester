@@ -203,6 +203,7 @@ export async function runConformanceChecks(
   }
 
   const protocol = mcp.protocol;
+  const connection = connectionOf(mcp.client);
   const context: ConformanceContext = {
     mcp,
     era: protocol.era ?? 'legacy',
@@ -211,8 +212,8 @@ export async function runConformanceChecks(
     capabilities,
     tools: raw.tools,
     ...(toolsError !== undefined ? { toolsError } : {}),
-    tap: connectionOf(mcp.client)?.wire,
-    target: connectionOf(mcp.client)?.target,
+    tap: connection?.wire,
+    target: connection?.target,
     probe: options.probe ?? true,
     observedErrorCodes: [],
     shared: new Map(),

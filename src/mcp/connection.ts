@@ -8,6 +8,7 @@
  * unknown (for example, conformance probes skip).
  */
 import type { Client, OAuthClientProvider } from '@modelcontextprotocol/client';
+import { debugClient } from '../debug.js';
 import type { ProtocolSetting } from '../types/index.js';
 import type { WireTap } from './wireTap.js';
 
@@ -21,7 +22,10 @@ export type ConnectionTarget =
       url: string;
       /** Headers MST sent, including a static bearer token if configured. */
       headers: Record<string, string>;
-      /** undici dispatcher for proxy/TLS settings, if configured. */
+      /**
+       * The connection's undici dispatcher (proxy/TLS), if configured: the same
+       * agent as `MCPConnection.dispatcher`, valid until the client closes.
+       */
       dispatcher?: unknown;
       authProvider?: OAuthClientProvider;
     }
@@ -30,11 +34,12 @@ export type ConnectionTarget =
       command: string;
       args: string[];
       cwd?: string;
+      /** The environment the SDK spawned the server with (its safe defaults plus the config's env). */
       env?: Record<string, string>;
     };
 
 /** Something the connection owns and must close with it. */
-export interface Closable {
+interface Closable {
   close(): Promise<void>;
 }
 
@@ -66,11 +71,11 @@ export function connectionOf(client: Client): MCPConnection | undefined {
   return connections.get(client);
 }
 
-/** Closes and forgets what the connection owns, after the client closed. */
-export async function releaseConnection(
-  client: Client,
-  onError: (error: unknown) => void
-): Promise<void> {
+/**
+ * Closes what the connection owns (its undici dispatcher), once. Best effort:
+ * a failure is logged, never thrown, so it can't mask the caller's error.
+ */
+export async function releaseConnection(client: Client): Promise<void> {
   const connection = connections.get(client);
   const dispatcher = connection?.dispatcher;
   if (!connection || !dispatcher) return;
@@ -78,6 +83,9 @@ export async function releaseConnection(
   try {
     await dispatcher.close();
   } catch (error) {
-    onError(error);
+    debugClient(
+      'Error closing undici agent: %s',
+      error instanceof Error ? error.message : String(error)
+    );
   }
 }
