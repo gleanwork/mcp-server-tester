@@ -32,6 +32,7 @@ import type {
 import { hostTraceToExecution } from './hostTrace.js';
 import type { HostRunResult } from './evalFrameworkTypes.js';
 import { registerDatasetSource, registerHost } from './frameworkRegistries.js';
+import { registerJudge } from '../judge/judgeRegistry.js';
 import { runEvalSuite } from './runEvalSuite.js';
 
 vi.mock('./mcpHost/mcpHostSimulation.js', async (original) => ({
@@ -162,7 +163,19 @@ const trace: HostRunResult = {
   durationMs: 40,
 };
 
+/** Every call to the fake judges below, in order. */
+const calls: unknown[][] = [];
+registerJudge('golden-case-judge', async (candidate, reference, options) => {
+  calls.push(['golden-case-judge', candidate, reference, options]);
+  return { score: 0.9, reasoning: 'looks right' };
+});
+registerJudge('golden-strict-judge', async (candidate, reference) => {
+  calls.push(['golden-strict-judge', candidate, reference]);
+  return { score: 0.2, reasoning: 'too vague' };
+});
+
 beforeEach(() => {
+  calls.length = 0;
   vi.mocked(simulateMCPHost).mockReset().mockResolvedValue(simulation);
   vi.mocked(runExternalHostScenario).mockReset();
 });
@@ -402,12 +415,11 @@ describe('golden: runEvalSuite hosts', () => {
     );
   });
 
-  async function suite(kind: 'run' | 'runBatch') {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'golden-suite-'));
-    dirs.push(dir);
-    const type = `golden-${kind}-host`;
-    const source = `golden-${kind}-source`;
-    const cases: EvalCase[] = [
+  async function suite(
+    kind: 'run' | 'runBatch',
+    variant = '',
+    manifestExtra: Record<string, unknown> = {},
+    cases: EvalCase[] = [
       {
         id: 'suite-host',
         mode: 'mcp_host',
@@ -419,7 +431,12 @@ describe('golden: runEvalSuite hosts', () => {
           },
         },
       },
-    ];
+    ]
+  ) {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'golden-suite-'));
+    dirs.push(dir);
+    const type = `golden-${kind}${variant}-host`;
+    const source = `golden-${kind}${variant}-source`;
     registerHost({
       name: type,
       schema: z.object({ type: z.string() }).passthrough(),
@@ -443,6 +460,7 @@ describe('golden: runEvalSuite hosts', () => {
         datasets: [{ type: source }],
         host: { type },
         servers: [],
+        ...manifestExtra,
       })
     );
     return runEvalSuite({ manifestPath, outputDir: dir });
@@ -451,5 +469,104 @@ describe('golden: runEvalSuite hosts', () => {
   it.each(['run', 'runBatch'] as const)('%s host', async (kind) => {
     const result = await suite(kind);
     expect(stable(result.summary.results)).toMatchSnapshot();
+  });
+
+  it('manifest judges merge with case judges', async () => {
+    const evaluate = vi.fn(async (candidate: unknown) => ({
+      score: String(candidate).includes('sunny') ? 1 : 0,
+      reasoning: 'manifest judge',
+    }));
+    registerJudge({
+      name: 'golden-manifest-judge',
+      schema: z.object({}).passthrough(),
+      evaluate,
+    });
+    const result = await suite(
+      'run',
+      '-judged',
+      {
+        judges: [
+          { type: 'golden-manifest-judge', reference: 'suite ref', count: 2 },
+        ],
+      },
+      [
+        {
+          id: 'suite-judged',
+          mode: 'mcp_host',
+          scenario: 'Weather in London?',
+          canonicalAnswer: 'canonical',
+          expect: {
+            passesJudge: [
+              {
+                judge: 'golden-manifest-judge',
+                reference: 'case ref',
+                options: { count: 3 },
+              },
+              { judge: 'golden-case-judge', threshold: 0.5 },
+            ],
+          },
+        },
+      ]
+    );
+    expect(
+      stable({
+        results: result.summary.results,
+        manifestJudgeCalls: evaluate.mock.calls,
+        caseJudgeCalls: calls,
+      })
+    ).toMatchSnapshot();
+  });
+});
+
+describe('golden: judges', () => {
+  beforeEach(() => {
+    calls.length = 0;
+  });
+
+  it('one judge with case reps and the canonical answer as reference', async () => {
+    const result = await runEvalCase(
+      {
+        id: 'judged',
+        toolName: 'get_weather',
+        args: { city: 'London' },
+        judgeReps: 2,
+        canonicalAnswer: 'sunny',
+        expect: { passesJudge: { judge: 'golden-case-judge' } },
+      },
+      context()
+    );
+    expect(stable({ result, calls })).toMatchSnapshot();
+  });
+
+  it('several judges, one failing, with an explicit reference and reps', async () => {
+    const result = await runEvalCase(
+      {
+        id: 'multi-judged',
+        toolName: 'get_weather',
+        args: { city: 'London' },
+        judgeReps: 3,
+        canonicalAnswer: 'unused',
+        expect: {
+          passesJudge: [
+            { judge: 'golden-case-judge', reference: 'explicit', reps: 1 },
+            { judge: 'golden-strict-judge', threshold: 0.5 },
+          ],
+        },
+      },
+      context()
+    );
+    expect(stable({ result, calls })).toMatchSnapshot();
+  });
+
+  it('judges a host response', async () => {
+    const result = await runEvalCase(
+      {
+        ...hostCase,
+        id: 'host-judged',
+        expect: { passesJudge: { judge: 'golden-case-judge' } },
+      },
+      context()
+    );
+    expect(stable({ result, calls })).toMatchSnapshot();
   });
 });

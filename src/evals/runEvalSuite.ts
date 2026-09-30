@@ -31,13 +31,10 @@ import {
 } from './mcpHost/hostOptions.js';
 import { runEvalDataset, omitResponsesFromResult } from './evalRunner.js';
 import { createSuiteCaseExecutor } from './caseExecution.js';
+import { mergeSuiteJudges } from './expectations.js';
 import { prepareHostBatch } from './prepareHostBatch.js';
 import type { EvalRunnerResult } from './evalRunner.js';
-import {
-  EvalExpectBlockSchema,
-  type EvalDataset,
-  type EvalCase,
-} from './datasetTypes.js';
+import { EvalExpectBlockSchema, type EvalDataset } from './datasetTypes.js';
 import { selectEvalCases } from './buildEvalDataset.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { MCPProtocolInfo, UsageMetrics } from '../types/index.js';
@@ -266,45 +263,6 @@ function summarizeArm(
   };
 }
 
-function configuredJudges(
-  evalCase: EvalCase,
-  judges: Array<Record<string, unknown>>,
-  rawJudges: Array<Record<string, unknown>>
-) {
-  const existing = Array.isArray(evalCase.expect?.passesJudge)
-    ? evalCase.expect.passesJudge
-    : evalCase.expect?.passesJudge
-      ? [evalCase.expect.passesJudge]
-      : [];
-  return [
-    ...existing.filter(
-      (item) => !judges.some((judge) => judge.type === item.judge)
-    ),
-    ...judges.map((judge) => {
-      const caseJudge = existing.find((item) => item.judge === judge.type);
-      const raw =
-        rawJudges.find(
-          (item) => item.type === judge.type && item.name === judge.name
-        ) ?? judge;
-      const { options: caseOptions, ...caseSettings } = caseJudge ?? {};
-      return {
-        ...judge,
-        ...caseSettings,
-        judge: judge.type,
-        // Merge raw policy inputs so the shared evaluator transforms them once.
-        // Explicit case settings, including flat policy fields, win over defaults.
-        options: { ...raw, ...caseSettings, ...caseOptions },
-        reference:
-          caseJudge?.reference !== undefined
-            ? caseJudge.reference
-            : judge.reference !== undefined
-              ? judge.reference
-              : evalCase.canonicalAnswer,
-      };
-    }),
-  ];
-}
-
 export async function runEvalSuite(
   options: RunEvalSuiteOptions
 ): Promise<RunEvalSuiteResult> {
@@ -465,7 +423,7 @@ export async function runEvalSuite(
               ? {
                   expect: EvalExpectBlockSchema.parse({
                     ...evalCase.expect,
-                    passesJudge: configuredJudges(
+                    passesJudge: mergeSuiteJudges(
                       evalCase,
                       effectiveManifest.judges,
                       (rawArm.judges ?? rawManifest.judges ?? []) as Array<

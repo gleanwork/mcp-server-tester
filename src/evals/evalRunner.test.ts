@@ -1601,6 +1601,12 @@ describe('saveResultsTo and baselineResultsFrom', () => {
 });
 
 describe('evals guide iteration count guardrail warnings', () => {
+  // The warning is emitted before any case runs; don't run the real
+  // simulator (and its provider import) for every iteration.
+  async function notExecuted() {
+    return { kind: 'failed' as const, response: undefined, error: 'not run' };
+  }
+
   function createDataset(cases: EvalCase[]): EvalDataset {
     return { name: 'test-dataset', cases };
   }
@@ -1620,7 +1626,10 @@ describe('evals guide iteration count guardrail warnings', () => {
       }),
     ]);
 
-    await runEvalDataset({ dataset }, createContext());
+    await runEvalDataset(
+      { dataset, executeCase: notExecuted },
+      createContext()
+    );
 
     expect(consoleSpy).toHaveBeenCalledWith(
       expect.stringContaining('running 3 iterations in mcp_host mode')
@@ -1649,7 +1658,10 @@ describe('evals guide iteration count guardrail warnings', () => {
       }),
     ]);
 
-    await runEvalDataset({ dataset }, createContext());
+    await runEvalDataset(
+      { dataset, executeCase: notExecuted },
+      createContext()
+    );
 
     expect(consoleSpy).not.toHaveBeenCalledWith(
       expect.stringContaining('may not be statistically reliable')
@@ -1673,7 +1685,10 @@ describe('evals guide iteration count guardrail warnings', () => {
       }),
     ]);
 
-    await runEvalDataset({ dataset }, createContext());
+    await runEvalDataset(
+      { dataset, executeCase: notExecuted },
+      createContext()
+    );
 
     expect(consoleSpy).not.toHaveBeenCalledWith(
       expect.stringContaining('may not be statistically reliable')
@@ -1722,7 +1737,7 @@ describe('evals guide iteration count guardrail warnings', () => {
     ]);
 
     await runEvalDataset(
-      { dataset, defaultLlmIterations: 10 },
+      { dataset, defaultLlmIterations: 10, executeCase: notExecuted },
       createContext()
     );
 

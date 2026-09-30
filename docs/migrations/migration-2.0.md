@@ -13,6 +13,7 @@ Other 2.0 changes have their own guides: [dataset sources](./dataset-sources.md)
 - [`compareEvalRuns()` returns `warnings`](#compareevalruns-returns-warnings)
 - [`MCP_PROTOCOL_VERSION` is deprecated](#mcp_protocol_version-is-deprecated)
 - [`executeCase` returns a typed `CaseExecution`](#executecase-returns-a-typed-caseexecution)
+- [`external_host` results keep tool precision and recall](#external_host-results-keep-tool-precision-and-recall)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
 ---
@@ -149,6 +150,16 @@ const failed: CaseExecution = {
 To migrate, add `kind` to what you return. On host executions, rename `hostUsage` to `usage` and `hostTelemetry` to `telemetry`.
 
 `EvalCaseResult` is unchanged. One edge case changes: a `direct` result that happens to look like a host simulation (`success` plus `toolCalls`) no longer gets host-only fields such as `hostUsage` and `mcpHostTrace`. Its expectations are evaluated the same way.
+
+## `external_host` results keep tool precision and recall
+
+**Affects:** reports, baselines or dashboards that average `toolPrecision` / `toolRecall` over `external_host` cases.
+
+When an `external_host` trace is structured enough to grade tool calls, the result now reports `toolPrecision` and `toolRecall` even if `toolsTriggered` fails, as `mcp_host` and suite host results already did. Previously a failing `toolsTriggered` on an `external_host` case dropped both metrics, so dataset averages silently left out exactly the cases that missed tools. Verdicts are unchanged.
+
+Cases whose trace can't support tool assertions (a low-confidence or screenshot trace, or host evidence other than `structured`) still report no metrics.
+
+The reported tool trace now comes from the same match as the metrics. A required call made with the wrong arguments is listed in `mcpHostTrace.missed`, as `toolRecall` already counted it. It used to appear only as an `expected` call.
 
 ## New in 2.0 (non-breaking)
 
