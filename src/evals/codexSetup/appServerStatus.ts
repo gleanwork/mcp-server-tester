@@ -2,12 +2,25 @@ import { spawn } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
 import { signalGroup, stopGroup } from './native.js';
 
+/**
+ * Status responses grow with the configured servers: one `mcpServerStatus/list`
+ * line carries every server's tool schemas (seven real connectors are ~600 KB),
+ * and app-server initializes each server before answering. So the output is
+ * never capped by size or row count, and the deadline scales with the servers.
+ * The probe stays read-only and its process group is always stopped.
+ */
 export const APP_SERVER_LIMITS = {
-  timeoutMs: 30_000,
-  lineBytes: 256 * 1024,
-  totalBytes: 4 * 1024 * 1024,
-  rows: 100,
+  baseTimeoutMs: 30_000,
+  perServerTimeoutMs: 15_000,
+  pageRows: 100,
 };
+
+export function appServerTimeoutMs(serverCount: number): number {
+  return (
+    APP_SERVER_LIMITS.baseTimeoutMs +
+    Math.max(0, serverCount) * APP_SERVER_LIMITS.perServerTimeoutMs
+  );
+}
 
 /** The only outgoing methods. The probe never answers server requests. */
 const METHODS = new Set(['initialize', 'initialized', 'mcpServerStatus/list']);
@@ -20,7 +33,6 @@ const AUTH_STATUSES = new Set([
 
 export type AppServerFailure =
   | 'timeout'
-  | 'output-limit'
   | 'unexpected-eof'
   | 'io-error'
   | 'invalid-response'
@@ -62,10 +74,9 @@ export interface JsonlChannel {
   readLine(): Promise<Buffer>;
 }
 
-/** Memory-only JSONL over process pipes with one deadline and byte budget. */
+/** Memory-only JSONL over process pipes with one deadline. */
 export class StreamJsonlChannel implements JsonlChannel {
   #pending = Buffer.alloc(0);
-  #total = 0;
   #closed = false;
   #failure?: AppServerFailure;
   #wake?: () => void;
@@ -74,17 +85,11 @@ export class StreamJsonlChannel implements JsonlChannel {
   constructor(
     private readonly input: Writable,
     output: Readable,
-    private readonly limits = APP_SERVER_LIMITS
+    timeoutMs = appServerTimeoutMs(1)
   ) {
-    this.#deadline = Date.now() + limits.timeoutMs;
+    this.#deadline = Date.now() + timeoutMs;
     output.on('data', (chunk: Buffer) => {
-      this.#total += chunk.length;
-      if (this.#total > limits.totalBytes) {
-        this.#failure ??= 'output-limit';
-        output.destroy();
-      } else {
-        this.#pending = Buffer.concat([this.#pending, chunk]);
-      }
+      this.#pending = Buffer.concat([this.#pending, chunk]);
       this.#wake?.();
     });
     const close = () => {
@@ -121,14 +126,10 @@ export class StreamJsonlChannel implements JsonlChannel {
       if (this.#failure) throw new AppServerFailureError(this.#failure);
       const newline = this.#pending.indexOf(0x0a);
       if (newline >= 0) {
-        if (newline > this.limits.lineBytes)
-          throw new AppServerFailureError('output-limit');
         const line = Buffer.from(this.#pending.subarray(0, newline));
         this.#pending = this.#pending.subarray(newline + 1);
         return line;
       }
-      if (this.#pending.length > this.limits.lineBytes)
-        throw new AppServerFailureError('output-limit');
       if (this.#closed) throw new AppServerFailureError('unexpected-eof');
       await this.#until((done) => {
         this.#wake = () => {
@@ -209,7 +210,7 @@ async function response(
   }
 }
 
-/** initialize, initialized, one bounded mcpServerStatus/list page. Nothing else. */
+/** initialize, initialized, then every mcpServerStatus/list page. Nothing else. */
 export async function exchangeAppServerStatus(
   channel: JsonlChannel,
   labels: readonly string[]
@@ -227,30 +228,37 @@ export async function exchangeAppServerStatus(
   });
   await response(channel, 0);
   await channel.send({ method: 'initialized' });
-  await channel.send({
-    id: 1,
-    method: 'mcpServerStatus/list',
-    params: {
-      detail: 'toolsAndAuthOnly',
-      cursor: null,
-      limit: APP_SERVER_LIMITS.rows,
-    },
-  });
-  const result = await response(channel, 1);
-  // One bounded page suffices for an MST-owned profile. Never read a partial
-  // page, an unknown shape, or a missing field as zero.
-  const rows = result.data;
-  if (
-    !Array.isArray(rows) ||
-    result.nextCursor !== null ||
-    rows.length > APP_SERVER_LIMITS.rows ||
-    rows.some((row) => !isObject(row) || typeof row.name !== 'string')
-  )
-    throw new AppServerFailureError('invalid-response');
+  // Follow every page, so the number of configured servers is never capped.
+  // Never read an unknown shape, a repeated cursor, or a missing field as zero.
+  const rows: Array<Record<string, unknown>> = [];
+  const cursors = new Set<string>();
+  let cursor: string | null = null;
+  for (let id = 1; ; id++) {
+    await channel.send({
+      id,
+      method: 'mcpServerStatus/list',
+      params: {
+        detail: 'toolsAndAuthOnly',
+        cursor,
+        limit: APP_SERVER_LIMITS.pageRows,
+      },
+    });
+    const result = await response(channel, id);
+    const page = result.data;
+    const next = result.nextCursor;
+    if (
+      !Array.isArray(page) ||
+      page.some((row) => !isObject(row) || typeof row.name !== 'string') ||
+      (next !== null && (typeof next !== 'string' || cursors.has(next)))
+    )
+      throw new AppServerFailureError('invalid-response');
+    rows.push(...(page as Array<Record<string, unknown>>));
+    if (next === null) break;
+    cursors.add(next);
+    cursor = next;
+  }
   return labels.map((label) => {
-    const matches = (rows as Array<Record<string, unknown>>).filter(
-      (row) => row.name === label
-    );
+    const matches = rows.filter((row) => row.name === label);
     if (matches.length > 1) throw new AppServerFailureError('invalid-response');
     const row = matches[0];
     if (!row)
@@ -307,7 +315,11 @@ export async function probeAppServerStatus(
     if (!(await spawned) || !child.stdin || !child.stdout)
       return { status: 'unavailable', reason: 'io-error' };
     const servers = await exchangeAppServerStatus(
-      new StreamJsonlChannel(child.stdin, child.stdout),
+      new StreamJsonlChannel(
+        child.stdin,
+        child.stdout,
+        appServerTimeoutMs(labels.length)
+      ),
       labels
     );
     return { status: 'available', servers };
