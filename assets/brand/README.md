@@ -4,21 +4,26 @@ MST is short for MCP Server Tester. The mark is a check between square brackets,
 
 ## Files
 
-| File                | Use                                                                                          |
-| ------------------- | -------------------------------------------------------------------------------------------- |
-| `mst-mark.svg`      | Light backgrounds. The default.                                                              |
-| `mst-mark-dark.svg` | Dark backgrounds.                                                                            |
-| `mst-mark-mono.svg` | One color. Uses `currentColor`: inlined, it takes the text color; as an `<img>`, it's black. |
-| `favicon.svg`       | 24px and smaller. A separate drawing aligned to the pixel grid; follows the OS color mode.   |
+| File                                                | Use                                                                                          |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `mst-mark.svg`                                      | Light backgrounds. The default.                                                              |
+| `mst-mark-dark.svg`                                 | Dark backgrounds.                                                                            |
+| `mst-mark-mono.svg`                                 | One color. Uses `currentColor`: inlined, it takes the text color; as an `<img>`, it's black. |
+| `favicon.svg`                                       | 24px and smaller. A separate drawing aligned to the pixel grid; follows the OS color mode.   |
+| `mst-mark-heading.svg`, `mst-mark-heading-dark.svg` | Inline in a Markdown heading only (see below).                                               |
 
 The mark files are cropped to the artwork, with no built-in padding, so they line up with the text beside them.
 
-For a GitHub Markdown heading, put the mark inline and let the viewer's color mode pick the file. It must stay on one line. `height="28"` with `align="absmiddle"` makes the brackets the same height as parentheses in a 2em heading. GitHub strips `style` attributes, so `align` is the only way to position it.
+### In a GitHub Markdown heading
+
+Put the mark inline and let the viewer's color mode pick the file. The whole heading must stay on one line:
 
 <!-- prettier-ignore -->
 ```markdown
-# <picture><source media="(prefers-color-scheme: dark)" srcset="assets/brand/mst-mark-dark.svg"><img src="assets/brand/mst-mark.svg" alt="MST logo" height="28" align="absmiddle"></picture> MST (MCP Server Tester)
+# <picture><source media="(prefers-color-scheme: dark)" srcset="assets/brand/mst-mark-heading-dark.svg"><img src="assets/brand/mst-mark-heading.svg" alt="MST logo" height="34" align="absmiddle"></picture>&nbsp; MST (MCP Server Tester)
 ```
+
+GitHub strips `style` attributes, so `align` is the only way to position the image, and `align="absmiddle"` centers it on lowercase-letter height. That leaves the regular mark about 3px low next to capitals in a 2em heading. The heading files fix this by adding empty space below the artwork (a `viewBox` height of 39.5 instead of 32.5), which lifts the mark to center on the capital letters. At `height="34"` the visible mark is 28px tall and extends about 2.7px above the capitals and below the baseline. `&nbsp;` plus a space gives about 14px between the mark and the title.
 
 ## Colors
 
