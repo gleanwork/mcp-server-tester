@@ -8,6 +8,21 @@ import type {
   Implementation,
 } from '@modelcontextprotocol/client';
 import type { MCPConformanceCheck } from '../types/reporter.js';
+import { ProtocolError } from '@modelcontextprotocol/client';
+import { AjvJsonSchemaValidator } from '@modelcontextprotocol/client/validators/ajv';
+
+const schemaValidator = new AjvJsonSchemaValidator();
+
+/** Why a tool's outputSchema does not compile, or null when it does. */
+function outputSchemaProblem(tool: Tool): string | null {
+  if (tool.outputSchema === undefined) return null;
+  try {
+    schemaValidator.getValidator(tool.outputSchema);
+    return null;
+  } catch (error) {
+    return `outputSchema does not compile: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
 
 export type { MCPConformanceCheck };
 
@@ -251,6 +266,13 @@ export async function runConformanceChecks(
           `${tool.name}: inputSchema.type must be "object", got "${String(tool.inputSchema.type)}"`
         );
       }
+
+      // An outputSchema must compile: the SDK compiles it before every
+      // callTool and rejects the call otherwise (v1 failed listTools).
+      const outputProblem = outputSchemaProblem(tool);
+      if (outputProblem !== null) {
+        invalidTools.push(`${tool.name}: ${outputProblem}`);
+      }
     }
 
     checks.push({
@@ -313,12 +335,16 @@ export async function runConformanceChecks(
         ? 'Nonexistent tool correctly returned an error'
         : 'Calling nonexistent tool should have returned an error',
     });
-  } catch {
-    // Or it may throw - both are acceptable
+  } catch (error) {
+    // A custom fixture may let the protocol error throw; that counts. Local
+    // failures (timeouts, closed connections) are not an answer.
+    const isProtocolError = error instanceof ProtocolError;
     checks.push({
       name: 'invalid_tool_returns_error',
-      pass: true,
-      message: 'Nonexistent tool correctly threw an error',
+      pass: isProtocolError,
+      message: isProtocolError
+        ? 'Nonexistent tool correctly threw an error'
+        : `Calling nonexistent tool failed locally: ${error instanceof Error ? error.message : String(error)}`,
     });
   }
 

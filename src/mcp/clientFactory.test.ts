@@ -463,5 +463,37 @@ describe('clientFactory', () => {
         )
       ).rejects.toThrow('Close failed');
     });
+
+    function httpClient(era: 'legacy' | 'modern') {
+      const transport = Object.assign(
+        Object.create(
+          mocks.MockStreamableHTTPClientTransport.prototype as object
+        ) as object,
+        { terminateSession: vi.fn().mockResolvedValue(undefined) }
+      );
+      return {
+        transport,
+        close: vi.fn().mockResolvedValue(undefined),
+        getProtocolEra: () => era,
+      };
+    }
+
+    it('terminates the HTTP session on legacy connections', async () => {
+      const client = httpClient('legacy');
+      await closeMCPClient(
+        client as unknown as Parameters<typeof closeMCPClient>[0]
+      );
+      expect(client.transport.terminateSession).toHaveBeenCalled();
+      expect(client.close).toHaveBeenCalled();
+    });
+
+    it('does not terminate a session on 2026-07-28 connections (there is none)', async () => {
+      const client = httpClient('modern');
+      await closeMCPClient(
+        client as unknown as Parameters<typeof closeMCPClient>[0]
+      );
+      expect(client.transport.terminateSession).not.toHaveBeenCalled();
+      expect(client.close).toHaveBeenCalled();
+    });
   });
 });

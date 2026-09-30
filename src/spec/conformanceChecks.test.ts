@@ -2,6 +2,11 @@ import { describe, it, expect, vi } from 'vitest';
 import { runConformanceChecks } from './conformanceChecks.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import type { Client } from '@modelcontextprotocol/client';
+import {
+  ProtocolError,
+  SdkError,
+  SdkErrorCode,
+} from '@modelcontextprotocol/client';
 import type { Tool, ServerCapabilities } from '@modelcontextprotocol/client';
 
 function createMockTool(name: string, description?: string): Tool {
@@ -21,6 +26,7 @@ function createMockMCP(options: {
   tools?: Tool[];
   listToolsError?: Error;
   callToolError?: boolean;
+  callToolThrows?: Error;
   resources?: Array<{ uri: string; name: string }>;
   prompts?: Array<{ name: string }>;
   listResourcesError?: Error;
@@ -44,10 +50,12 @@ function createMockMCP(options: {
     listTools: options.listToolsError
       ? vi.fn().mockRejectedValue(options.listToolsError)
       : vi.fn().mockResolvedValue(options.tools ?? []),
-    callTool: vi.fn().mockResolvedValue({
-      isError: options.callToolError ?? true,
-      content: [{ type: 'text', text: 'Error: Tool not found' }],
-    }),
+    callTool: options.callToolThrows
+      ? vi.fn().mockRejectedValue(options.callToolThrows)
+      : vi.fn().mockResolvedValue({
+          isError: options.callToolError ?? true,
+          content: [{ type: 'text', text: 'Error: Tool not found' }],
+        }),
   };
 }
 
@@ -213,6 +221,39 @@ describe('runConformanceChecks', () => {
       expect(schemaCheck?.message).toContain('invalid-tool');
       expect(schemaCheck?.message).toContain('must be "object"');
     });
+
+    it('checks that output schemas compile', async () => {
+      const mcp = createMockMCP({
+        capabilities: { tools: {} },
+        tools: [
+          {
+            ...createMockTool('typed'),
+            outputSchema: {
+              type: 'object',
+              properties: { count: { type: 'number' } },
+            },
+          },
+          {
+            ...createMockTool('broken'),
+            outputSchema: {
+              type: 'object',
+              properties: { id: { type: 'string', pattern: '([' } },
+            },
+          },
+        ],
+      });
+
+      const result = await runConformanceChecks(mcp);
+
+      const schemaCheck = result.checks.find(
+        (c) => c.name === 'tool_schemas_valid'
+      );
+      expect(schemaCheck?.pass).toBe(false);
+      expect(schemaCheck?.message).toContain(
+        'broken: outputSchema does not compile'
+      );
+      expect(schemaCheck?.message).not.toContain('typed:');
+    });
   });
 
   describe('capability-aware resource checks', () => {
@@ -352,6 +393,34 @@ describe('runConformanceChecks', () => {
         (c) => c.name === 'invalid_tool_returns_error'
       );
       expect(errorCheck?.pass).toBe(true);
+    });
+
+    it('passes when the invalid tool call throws a protocol error', async () => {
+      const mcp = createMockMCP({
+        capabilities: { tools: {} },
+        callToolThrows: new ProtocolError(-32602, 'Unknown tool'),
+      });
+
+      const result = await runConformanceChecks(mcp);
+
+      expect(
+        result.checks.find((c) => c.name === 'invalid_tool_returns_error')?.pass
+      ).toBe(true);
+    });
+
+    it('fails when the invalid tool call fails locally (e.g. a timeout)', async () => {
+      const mcp = createMockMCP({
+        capabilities: { tools: {} },
+        callToolThrows: new SdkError(SdkErrorCode.RequestTimeout, 'timed out'),
+      });
+
+      const result = await runConformanceChecks(mcp);
+
+      const check = result.checks.find(
+        (c) => c.name === 'invalid_tool_returns_error'
+      );
+      expect(check?.pass).toBe(false);
+      expect(check?.message).toContain('failed locally');
     });
 
     it('should fail when invalid tool does not return error', async () => {

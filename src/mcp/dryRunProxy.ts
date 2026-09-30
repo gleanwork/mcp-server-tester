@@ -1,5 +1,4 @@
 import readline from 'node:readline';
-import { LATEST_PROTOCOL_VERSION } from '@modelcontextprotocol/client';
 
 export const DEFAULT_PLANNED_WRITE_KEY = '_mcp_eval_planned_write';
 
@@ -207,7 +206,7 @@ export async function preflightMcpServer(
   const initialized = await client.rpc(
     'initialize',
     {
-      protocolVersion: LATEST_PROTOCOL_VERSION,
+      protocolVersion: '2024-11-05',
       capabilities: {},
       clientInfo: { name: 'mcp-server-tester-preflight', version: '1.0' },
     },
