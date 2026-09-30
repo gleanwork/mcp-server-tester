@@ -1215,6 +1215,506 @@ exports[`golden: host traces through executeCase > structured evidence 1`] = `
 }
 `;
 
+exports[`golden: judges > judges a host response 1`] = `
+{
+  "calls": [
+    [
+      "golden-case-judge",
+      {
+        "response": "It is sunny in London.",
+        "success": true,
+        "toolCalls": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "name": "get_weather",
+            "output": "sunny",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "name": "search",
+          },
+        ],
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 100,
+          "outputTokens": 20,
+        },
+      },
+      null,
+      {},
+    ],
+  ],
+  "result": {
+    "authType": "none",
+    "datasetName": "single-case",
+    "durationMs": "<time>",
+    "expectations": {
+      "judge": {
+        "details": "Custom judge "golden-case-judge" passed with score 0.90",
+        "judgeName": "golden-case-judge",
+        "pass": true,
+        "reasoning": "looks right",
+        "score": 0.9,
+      },
+    },
+    "hostUsage": {
+      "durationMs": "<time>",
+      "inputTokens": 100,
+      "outputTokens": 20,
+    },
+    "id": "host-judged",
+    "pass": true,
+    "project": "golden",
+    "request": {
+      "expect": {
+        "passesJudge": {
+          "judge": "golden-case-judge",
+        },
+      },
+      "mcpHostConfig": {
+        "provider": "anthropic",
+      },
+      "mode": "mcp_host",
+      "scenario": "Weather in London?",
+    },
+    "response": {
+      "response": "It is sunny in London.",
+      "success": true,
+      "toolCalls": [
+        {
+          "arguments": {
+            "city": "London",
+          },
+          "name": "get_weather",
+          "output": "sunny",
+        },
+        {
+          "arguments": {
+            "q": "London",
+          },
+          "name": "search",
+        },
+      ],
+      "usage": {
+        "durationMs": "<time>",
+        "inputTokens": 100,
+        "outputTokens": 20,
+      },
+    },
+    "source": "eval",
+    "toolName": "mcp_host",
+  },
+}
+`;
+
+exports[`golden: judges > one judge with case reps and the canonical answer as reference 1`] = `
+{
+  "calls": [
+    [
+      "golden-case-judge",
+      {
+        "content": [
+          {
+            "text": "sunny, 21C",
+            "type": "text",
+          },
+        ],
+        "isError": false,
+      },
+      "sunny",
+      {},
+    ],
+  ],
+  "result": {
+    "authType": "none",
+    "datasetName": "single-case",
+    "durationMs": "<time>",
+    "expectations": {
+      "judge": {
+        "details": "Custom judge "golden-case-judge" passed with score 0.90",
+        "judgeName": "golden-case-judge",
+        "pass": true,
+        "reasoning": "looks right",
+        "score": 0.9,
+      },
+    },
+    "id": "judged",
+    "pass": true,
+    "project": "golden",
+    "request": {
+      "args": {
+        "city": "London",
+      },
+      "expect": {
+        "passesJudge": {
+          "judge": "golden-case-judge",
+        },
+      },
+      "judgeReps": 2,
+      "mode": "direct",
+    },
+    "response": {
+      "content": [
+        {
+          "text": "sunny, 21C",
+          "type": "text",
+        },
+      ],
+      "isError": false,
+    },
+    "source": "eval",
+    "toolName": "get_weather",
+  },
+}
+`;
+
+exports[`golden: judges > several judges, one failing, with an explicit reference and reps 1`] = `
+{
+  "calls": [
+    [
+      "golden-case-judge",
+      {
+        "content": [
+          {
+            "text": "sunny, 21C",
+            "type": "text",
+          },
+        ],
+        "isError": false,
+      },
+      "explicit",
+      {},
+    ],
+    [
+      "golden-strict-judge",
+      {
+        "content": [
+          {
+            "text": "sunny, 21C",
+            "type": "text",
+          },
+        ],
+        "isError": false,
+      },
+      "unused",
+    ],
+  ],
+  "result": {
+    "authType": "none",
+    "datasetName": "single-case",
+    "durationMs": "<time>",
+    "expectations": {
+      "judge": {
+        "details": "1/2 judges passed",
+        "judgeResults": [
+          {
+            "details": "Custom judge "golden-case-judge" passed with score 0.90",
+            "judgeName": "golden-case-judge",
+            "pass": true,
+            "reasoning": "looks right",
+            "score": 0.9,
+          },
+          {
+            "details": "Custom judge "golden-strict-judge" failed with score 0.20 (threshold: 0.5). too vague",
+            "judgeName": "golden-strict-judge",
+            "pass": false,
+            "reasoning": "too vague",
+            "score": 0.2,
+          },
+        ],
+        "pass": false,
+      },
+    },
+    "id": "multi-judged",
+    "pass": false,
+    "project": "golden",
+    "request": {
+      "args": {
+        "city": "London",
+      },
+      "expect": {
+        "passesJudge": [
+          {
+            "judge": "golden-case-judge",
+            "reference": "explicit",
+            "reps": 1,
+          },
+          {
+            "judge": "golden-strict-judge",
+            "threshold": 0.5,
+          },
+        ],
+      },
+      "judgeReps": 3,
+      "mode": "direct",
+    },
+    "response": {
+      "content": [
+        {
+          "text": "sunny, 21C",
+          "type": "text",
+        },
+      ],
+      "isError": false,
+    },
+    "source": "eval",
+    "toolName": "get_weather",
+  },
+}
+`;
+
+exports[`golden: runEvalSuite hosts > manifest judges merge with case judges 1`] = `
+{
+  "caseJudgeCalls": [
+    [
+      "golden-case-judge",
+      {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "server": "weather",
+            "source": "mcp",
+          },
+          {
+            "kind": "skill",
+            "name": "forecasting",
+            "source": "host",
+          },
+          {
+            "kind": "tool_call",
+            "name": "web_search",
+            "source": "host",
+          },
+        ],
+        "evidence": "structured",
+        "response": "It is sunny in London.",
+        "success": true,
+        "telemetry": {
+          "native": "kept",
+        },
+        "toolCalls": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "server": "weather",
+            "source": "mcp",
+          },
+          {
+            "arguments": {},
+            "kind": "tool_call",
+            "name": "web_search",
+            "source": "host",
+          },
+        ],
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 50,
+          "outputTokens": 10,
+        },
+      },
+      "canonical",
+      {},
+    ],
+  ],
+  "manifestJudgeCalls": [
+    [
+      {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "server": "weather",
+            "source": "mcp",
+          },
+          {
+            "kind": "skill",
+            "name": "forecasting",
+            "source": "host",
+          },
+          {
+            "kind": "tool_call",
+            "name": "web_search",
+            "source": "host",
+          },
+        ],
+        "evidence": "structured",
+        "response": "It is sunny in London.",
+        "success": true,
+        "telemetry": {
+          "native": "kept",
+        },
+        "toolCalls": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "server": "weather",
+            "source": "mcp",
+          },
+          {
+            "arguments": {},
+            "kind": "tool_call",
+            "name": "web_search",
+            "source": "host",
+          },
+        ],
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 50,
+          "outputTokens": 10,
+        },
+      },
+      "case ref",
+      {
+        "count": 3,
+        "judge": "golden-manifest-judge",
+        "reference": "case ref",
+        "type": "golden-manifest-judge",
+      },
+    ],
+  ],
+  "results": [
+    {
+      "datasetName": "golden",
+      "durationMs": "<time>",
+      "expectations": {
+        "judge": {
+          "details": "1/2 judges passed",
+          "judgeResults": [
+            {
+              "details": "Custom judge "golden-case-judge" passed with score 0.90",
+              "judgeName": "golden-case-judge",
+              "pass": true,
+              "reasoning": "looks right",
+              "score": 0.9,
+            },
+            {
+              "details": "Custom judge "golden-manifest-judge" failed with score 0.00 (threshold: 0.7). manifest judge",
+              "judgeName": "golden-manifest-judge",
+              "pass": false,
+              "reasoning": "manifest judge",
+              "score": 0,
+            },
+          ],
+          "pass": false,
+        },
+      },
+      "hostEvidence": "structured",
+      "hostTelemetry": {
+        "native": "kept",
+      },
+      "hostUsage": {
+        "durationMs": "<time>",
+        "inputTokens": 50,
+        "outputTokens": 10,
+      },
+      "id": "suite-judged",
+      "pass": false,
+      "request": {
+        "expect": {
+          "passesJudge": [
+            {
+              "judge": "golden-case-judge",
+              "threshold": 0.5,
+            },
+            {
+              "count": 2,
+              "judge": "golden-manifest-judge",
+              "options": {
+                "count": 3,
+                "judge": "golden-manifest-judge",
+                "reference": "case ref",
+                "type": "golden-manifest-judge",
+              },
+              "reference": "case ref",
+              "type": "golden-manifest-judge",
+            },
+          ],
+        },
+        "mode": "mcp_host",
+        "reference": "canonical",
+        "scenario": "Weather in London?",
+      },
+      "response": {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "server": "weather",
+            "source": "mcp",
+          },
+          {
+            "kind": "skill",
+            "name": "forecasting",
+            "source": "host",
+          },
+          {
+            "kind": "tool_call",
+            "name": "web_search",
+            "source": "host",
+          },
+        ],
+        "evidence": "structured",
+        "response": "It is sunny in London.",
+        "success": true,
+        "telemetry": {
+          "native": "kept",
+        },
+        "toolCalls": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "server": "weather",
+            "source": "mcp",
+          },
+          {
+            "arguments": {},
+            "kind": "tool_call",
+            "name": "web_search",
+            "source": "host",
+          },
+        ],
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 50,
+          "outputTokens": 10,
+        },
+      },
+      "source": "eval",
+      "toolName": "mcp_host",
+    },
+  ],
+}
+`;
+
 exports[`golden: runEvalSuite hosts > run host 1`] = `
 [
   {
