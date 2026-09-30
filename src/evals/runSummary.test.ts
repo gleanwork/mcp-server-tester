@@ -105,6 +105,36 @@ describe('redactStoredResponses', () => {
     expect(redacted.caseResults[0]?.id).toBe('weather');
   });
 
+  it('keeps fields that only happen to be called response', () => {
+    const value = run({
+      caseResults: [
+        {
+          ...caseResult,
+          request: {
+            args: { response: 'tool argument' },
+            expect: { response: { content: [] } },
+          },
+          mcpHostTrace: {
+            calls: [
+              {
+                name: 'reply',
+                arguments: { response: 'host argument' },
+                status: 'expected',
+              },
+            ],
+            missed: [],
+          },
+        },
+      ],
+    });
+    expect(responsePaths(redactStoredResponses(value))).toEqual([
+      'caseResults.0.request.args.response',
+      'caseResults.0.mcpHostTrace.calls.0.arguments.response',
+    ]);
+    // Outside a case result, nothing is stripped.
+    expect(redactStoredResponses({ response: 'x' })).toEqual({ response: 'x' });
+  });
+
   it('is what omitResponsesFromResult applies', () => {
     expect(omitResponsesFromResult(run())).toEqual(
       redactStoredResponses(run())
@@ -184,8 +214,118 @@ describe('baseline files', () => {
   });
 });
 
-describe('the runner baseline uses the shared comparison', () => {
-  it('matches compareEvalRuns for regressions, improvements and delta', () => {
+describe('the runner baseline', () => {
+  function textMCP(): MCPFixtureApi {
+    return {
+      client: {} as MCPFixtureApi['client'],
+      authType: 'none',
+      ...createFixtureExtensions({} as MCPFixtureApi['client']),
+      listTools: vi.fn().mockResolvedValue([]),
+      callTool: vi.fn().mockResolvedValue({
+        content: [{ type: 'text', text: 'ok' }],
+      }),
+    } as unknown as MCPFixtureApi;
+  }
+
+  /** Cases that pass when `expected` is 'ok' and fail otherwise. */
+  function cases(entries: Array<[id: string, expected: string]>) {
+    return entries.map(([id, expected]) => ({
+      id,
+      toolName: 'echo',
+      args: {},
+      expect: { containsText: expected },
+    }));
+  }
+
+  async function withBaseline(
+    baselineCases: Array<[id: string, pass: boolean]>,
+    current: Array<[id: string, expected: string]>
+  ): Promise<EvalRunnerResult> {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'runner-baseline-'));
+    const file = path.join(dir, 'baseline.json');
+    const baselineResults = baselineCases.map(([id, pass]) => ({
+      ...caseResult,
+      id,
+      pass,
+    }));
+    await saveBaseline(
+      run({
+        caseResults: baselineResults,
+        total: baselineResults.length,
+        passed: baselineResults.filter((r) => r.pass).length,
+        failed: baselineResults.filter((r) => !r.pass).length,
+      }),
+      file
+    );
+    const result = await runEvalDataset(
+      {
+        dataset: { name: 'dataset', cases: cases(current) },
+        baselineResultsFrom: file,
+      },
+      { mcp: textMCP() } as EvalContext
+    );
+    await fs.rm(dir, { recursive: true, force: true });
+    return result;
+  }
+
+  it('annotates cases and counts regressions and improvements', async () => {
+    const result = await withBaseline(
+      [
+        ['a', true],
+        ['b', false],
+        ['c', true],
+      ],
+      [
+        ['a', 'nope'],
+        ['b', 'ok'],
+        ['c', 'ok'],
+      ]
+    );
+    expect(result.caseResults.map((r) => [r.id, r.baselinePass])).toEqual([
+      ['a', true],
+      ['b', false],
+      ['c', true],
+    ]);
+    expect(result.regressions).toBe(1);
+    expect(result.improvements).toBe(1);
+    expect(result.deltaPassRate).toBeCloseTo(2 / 3 - 2 / 3);
+  });
+
+  it('counts from each case annotation when a baseline repeats an ID', async () => {
+    // The last baseline entry wins, so the current failure is no regression.
+    const result = await withBaseline(
+      [
+        ['a', true],
+        ['a', false],
+      ],
+      [['a', 'nope']]
+    );
+    expect(result.caseResults[0]?.baselinePass).toBe(false);
+    expect(result.regressions).toBe(0);
+  });
+
+  it('reports no delta for a run without cases', async () => {
+    const result = await withBaseline([['a', true]], []);
+    expect(result.deltaPassRate).toBe(0);
+  });
+
+  it('warns when most cases have no baseline entry', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await withBaseline(
+      [['a', true]],
+      [
+        ['a', 'ok'],
+        ['new-1', 'ok'],
+        ['new-2', 'ok'],
+      ]
+    );
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('2 of 3 cases (67%) have no baseline entry')
+    );
+    warn.mockRestore();
+  });
+
+  it('matches compareEvalRuns for the same runs', () => {
     const baseline = run({
       total: 3,
       passed: 2,

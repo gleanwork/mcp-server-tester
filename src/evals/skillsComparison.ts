@@ -8,10 +8,10 @@ import {
 import {
   compareEvalRuns,
   type EvalRunComparisonResult,
+  passRate,
 } from './evalRunComparison.js';
 import { computeMetrics } from './metrics.js';
 import type { HostSkillsMode } from './mcpHost/mcpHostTypes.js';
-import { passRate } from './evalRunComparison.js';
 
 /** Options for {@link runSkillsComparison}. */
 export interface SkillsComparisonOptions extends EvalRunnerOptions {

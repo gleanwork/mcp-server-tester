@@ -6,8 +6,6 @@ import {
   type EvalResultStoreLike,
   type StoredEvalArtifact,
   type StoredEvalArtifactMetadata,
-} from './resultStore.js';
-import {
   REDACT_STORED_RESPONSES_BY_DEFAULT,
   redactStoredResponses,
 } from './resultStore.js';

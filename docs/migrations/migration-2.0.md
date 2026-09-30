@@ -203,10 +203,11 @@ The MCP reporter reads test data through one typed channel (`src/reporters/chann
 
 Every API that persists results now uses one policy (`redactStoredResponses` in the result store) with one default. Before, there were six implementations that disagreed.
 
-- **Comparisons redact by default.** `saveEvalRunComparison()`, `saveServerComparison()` and `runServerComparison({ comparisonStore })` used to store every raw tool and host response unless you opted out. They now omit them, as the runner, suites and reporter already did. Pass `redactStoredResponses: false` to keep them.
-- **Redaction removes every `response` value.** The eval runner's store path, `omitResponsesFromResult()`, suite summaries and baseline files used to remove only each case's top-level `response`. They now also remove nested ones, such as an exact-match `expect.response` echoed in `request.expect`. The reporter and comparisons already worked this way.
+- **Comparisons redact by default.** `saveEvalRunComparison()`, `saveServerComparison()` and `runServerComparison({ comparisonStore })` used to store every raw tool and host response unless you passed `redactStoredResponses: true`. They now omit them, as the runner, suites and reporter already did. Pass `redactStoredResponses: false` to keep them.
+- **What is redacted is the same everywhere.** Every eval case result, wherever it is nested, loses its raw `response` and the exact-match `expect.response` echoed in `request.expect`. The runner's store path, `omitResponsesFromResult()`, suite summaries and baseline files used to keep `request.expect.response`. The reporter and comparisons used to drop any key named `response` at any depth, including tool arguments; they now keep those.
 - **One pass rate.** Every run-level pass rate is `passed / total`, and 0 for a run without cases. The reporter's `metrics.passRate` was `NaN` for an empty run, which was stored as `null`.
-- **Baselines use `compareEvalRuns()`.** `baselineResultsFrom` now derives `regressions`, `improvements` and `deltaPassRate` from the same comparison as `compareEvalRuns()`, so the numbers agree with stored comparisons. They're unchanged unless a dataset repeats a case ID.
+
+The reporter's local report (`index.html`, `data.js` and `run-*.json` in its `outputDir`) keeps responses so the report can show them. Its result-store artifacts follow the policy above.
 
 ## New in 2.0 (non-breaking)
 

@@ -689,8 +689,9 @@ When `saveResultsTo` targets the store, saved results still omit responses by
 default. Set `redactStoredResponses: false` when the stored results should
 include full responses (`omitResponsesFromBaseline` controls baseline files
 written to a path). Every API that stores results (the runner, suites, the
-reporter, run and server comparisons, baseline files) removes every `response`
-value by default, the same way.
+reporter's result store, run and server comparisons, baseline files) removes
+each case's raw `response` and echoed `expect.response` by default, the same
+way.
 
 ### Stored Variant Comparisons
 

@@ -43,16 +43,14 @@ import {
   resolveEvalResultStore,
   type EvalResultStoreLike,
   type StoredEvalArtifactMetadata,
+  REDACT_STORED_RESPONSES_BY_DEFAULT,
+  redactStoredResponses,
 } from './resultStore.js';
 import { execFileNoThrow } from '../utils/execFileNoThrow.js';
 import { debugEval } from '../debug.js';
 import { sumUsage } from '../utils/usageUtils.js';
 import packageJson from '../../package.json' with { type: 'json' };
 import { attachReporterData } from '../reporters/channel.js';
-import {
-  REDACT_STORED_RESPONSES_BY_DEFAULT,
-  redactStoredResponses,
-} from './resultStore.js';
 import { compareEvalRuns } from './evalRunComparison.js';
 
 /**
@@ -1135,8 +1133,8 @@ export async function runEvalDataset(
     onCaseComplete,
     filterTags,
     saveResultsTo,
-    omitResponsesFromBaseline = true,
-    redactStoredResponses,
+    omitResponsesFromBaseline = REDACT_STORED_RESPONSES_BY_DEFAULT,
+    redactStoredResponses: redactStored,
     resultStore,
     baselineResultsFrom,
     toolOverrides,
@@ -1317,8 +1315,14 @@ export async function runEvalDataset(
         if (baselinePass !== undefined) cr.baselinePass = baselinePass;
       }
 
-      result.regressions = comparison.regressedCases.length;
-      result.improvements = comparison.improvedCases.length;
+      // Count from the annotation, so the counts always agree with each
+      // case's baselinePass (also when a dataset repeats a case ID).
+      result.regressions = result.caseResults.filter(
+        (cr) => cr.baselinePass === true && !cr.pass
+      ).length;
+      result.improvements = result.caseResults.filter(
+        (cr) => cr.baselinePass === false && cr.pass
+      ).length;
       // An empty run has nothing to compare, so no delta.
       result.deltaPassRate = result.total > 0 ? comparison.deltaPassRate : 0;
     } catch (err) {
@@ -1357,8 +1361,7 @@ export async function runEvalDataset(
     } else {
       await saveStoredEvalResult(result, saveResultsTo, {
         resultStore,
-        omitResponses:
-          redactStoredResponses ?? REDACT_STORED_RESPONSES_BY_DEFAULT,
+        omitResponses: redactStored ?? REDACT_STORED_RESPONSES_BY_DEFAULT,
         metadata: {
           datasetName: dataset.name,
           ...(toolOverrides?.id !== undefined && {

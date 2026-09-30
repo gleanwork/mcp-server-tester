@@ -30,8 +30,6 @@ import {
 import {
   createStoredEvalArtifact,
   resolveEvalResultStore,
-} from '../evals/resultStore.js';
-import {
   REDACT_STORED_RESPONSES_BY_DEFAULT,
   redactStoredResponses,
 } from '../evals/resultStore.js';

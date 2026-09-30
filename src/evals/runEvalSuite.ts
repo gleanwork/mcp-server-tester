@@ -53,7 +53,7 @@ import { registerBuiltinResultStores } from './builtinResultStores.js';
 import {
   createStoredEvalArtifact,
   REDACT_STORED_RESPONSES_BY_DEFAULT,
-  redactStoredResponses as redactStoredResponsePolicy,
+  redactStoredResponses,
 } from './resultStore.js';
 
 export interface RunEvalSuiteOptions {
@@ -540,11 +540,10 @@ export async function runEvalSuite(
       total: allResults.length,
       passed: allResults.filter((result) => result.pass).length,
       failed: allResults.filter((result) => !result.pass).length,
-      passRate:
-        allResults.length > 0
-          ? allResults.filter((result) => result.pass).length /
-            allResults.length
-          : 0,
+      passRate: passRate({
+        passed: allResults.filter((result) => result.pass).length,
+        total: allResults.length,
+      }),
       ...computedMetrics,
     },
     telemetry,
@@ -552,12 +551,12 @@ export async function runEvalSuite(
     results: allResults,
   };
 
-  const redactStoredResponses =
+  const redact =
     options.redactStoredResponses ??
     (manifest.redactStoredResponses as boolean | undefined) ??
     REDACT_STORED_RESPONSES_BY_DEFAULT;
-  const storedSummary = redactStoredResponses
-    ? redactStoredResponsePolicy(summary)
+  const storedSummary = redact
+    ? redactStoredResponses(summary)
     : structuredClone(summary);
   await fs.mkdir(outputDir, { recursive: true });
   if (manifest.results?.store) {
