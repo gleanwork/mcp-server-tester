@@ -58,13 +58,17 @@ export interface UsageMetrics {
   cacheCreationInputTokens?: number;
 }
 
+/** Every LLM judge provider. The type, the dataset schema and the provider table derive from this list. */
+export const JUDGE_PROVIDER_KINDS = [
+  'anthropic',
+  'vertex-anthropic',
+  'anthropic-agent-sdk',
+  'openai',
+  'google',
+] as const;
+
 /** Valid LLM judge provider kinds. */
-export type ProviderKind =
-  | 'anthropic'
-  | 'vertex-anthropic'
-  | 'anthropic-agent-sdk'
-  | 'openai'
-  | 'google';
+export type ProviderKind = (typeof JUDGE_PROVIDER_KINDS)[number];
 
 /**
  * Configuration for an LLM judge

@@ -12,7 +12,13 @@ vi.mock('@anthropic-ai/sdk', () => {
   };
 });
 
-import { createAnthropicJudge } from './anthropicJudge.js';
+import { createJudge } from './judgeClient.js';
+import type { JudgeConfig } from './judgeTypes.js';
+
+/** The anthropic judge, through the public createJudge. */
+function createAnthropicJudge(config: JudgeConfig = {}) {
+  return createJudge({ ...config, provider: 'anthropic' });
+}
 
 async function getMockCreate() {
   const mod = await import('@anthropic-ai/sdk' as any);

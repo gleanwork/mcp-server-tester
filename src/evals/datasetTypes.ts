@@ -9,7 +9,11 @@ import {
 import type { ExternalHostConfig } from './externalHost/types.js';
 import { ExternalHostConfigSchema } from './externalHost/schema.js';
 import type { SnapshotSanitizer } from '../assertions/validators/types.js';
-import type { BuiltInRubric } from '../judge/judgeTypes.js';
+import {
+  JUDGE_PROVIDER_KINDS,
+  type BuiltInRubric,
+  type ProviderKind,
+} from '../judge/judgeTypes.js';
 import type { HostEvent } from './evalFrameworkTypes.js';
 
 // Re-export sanitizer types from canonical source (validators/types.ts)
@@ -202,12 +206,7 @@ export interface JudgeExpectConfig {
   /** Number of judge evaluations for this assertion. Overrides EvalCase.judgeReps. */
   reps?: number;
   /** Judge provider. @default 'anthropic' */
-  provider?:
-    | 'anthropic'
-    | 'vertex-anthropic'
-    | 'anthropic-agent-sdk'
-    | 'openai'
-    | 'google';
+  provider?: ProviderKind;
   /** Model override (e.g., 'claude-opus-4-20250514') */
   model?: string;
   /** Environment variable name for API key */
@@ -444,15 +443,7 @@ const JudgeExpectConfigFieldsSchema = z.object({
   reference: z.unknown().optional(),
   threshold: z.number().min(0).max(1).optional(),
   reps: z.number().int().min(1).optional(),
-  provider: z
-    .enum([
-      'anthropic',
-      'vertex-anthropic',
-      'anthropic-agent-sdk',
-      'openai',
-      'google',
-    ])
-    .optional(),
+  provider: z.enum(JUDGE_PROVIDER_KINDS).optional(),
   model: z.string().optional(),
   apiKeyEnvVar: z.string().optional(),
   maxTokens: z.number().int().positive().optional(),

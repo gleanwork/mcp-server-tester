@@ -1,5 +1,16 @@
 import { defineConfig } from 'tsup';
 
+/**
+ * Optional judge SDKs, loaded with import() only when a judge runs. They are
+ * never bundled, and a build must not fail because they aren't installed.
+ */
+const OPTIONAL_JUDGE_SDKS = [
+  '@anthropic-ai/sdk',
+  '@anthropic-ai/vertex-sdk',
+  '@google/generative-ai',
+  'openai',
+];
+
 export default defineConfig([
   // Library build
   {
@@ -22,6 +33,7 @@ export default defineConfig([
       '@openrouter/ai-sdk-provider',
       '@ai-sdk/xai',
       '@google-cloud/storage',
+      ...OPTIONAL_JUDGE_SDKS,
     ],
   },
   // CLI build
@@ -36,7 +48,7 @@ export default defineConfig([
     outDir: 'dist/cli',
     tsconfig: './tsconfig.build.json',
     shims: true,
-    external: ['@google-cloud/storage'],
+    external: ['@google-cloud/storage', ...OPTIONAL_JUDGE_SDKS],
     banner: {
       js: '#!/usr/bin/env node',
     },
@@ -52,6 +64,7 @@ export default defineConfig([
     minify: false,
     outDir: 'dist/reporters',
     tsconfig: './tsconfig.build.json',
+    external: OPTIONAL_JUDGE_SDKS,
     shims: true, // Enable shims for __dirname/__filename in ESM
   },
   // Fixtures build
@@ -65,5 +78,6 @@ export default defineConfig([
     minify: false,
     outDir: 'dist/fixtures',
     tsconfig: './tsconfig.build.json',
+    external: OPTIONAL_JUDGE_SDKS,
   },
 ]);

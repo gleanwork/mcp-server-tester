@@ -12,7 +12,14 @@ vi.mock('@anthropic-ai/vertex-sdk', () => {
   };
 });
 
-import { createVertexAnthropicJudge } from './vertexAnthropicJudge.js';
+import { createJudge } from './judgeClient.js';
+import type { JudgeConfig } from './judgeTypes.js';
+import { JUDGE_SYSTEM_PROMPT } from './llmJudge.js';
+
+/** The vertex-anthropic judge, through the public createJudge. */
+function createVertexAnthropicJudge(config: JudgeConfig = {}) {
+  return createJudge({ ...config, provider: 'vertex-anthropic' });
+}
 
 async function getMockCreate() {
   const mod = await import('@anthropic-ai/vertex-sdk' as any);
@@ -122,5 +129,50 @@ describe('vertexAnthropicJudge', () => {
     await expect(judge.evaluate('candidate', null, 'rubric')).rejects.toThrow(
       'Vertex auth failed'
     );
+  });
+
+  it('sends the shared Messages request to the configured project and region', async () => {
+    const mockCreate = await getMockCreate();
+    mockCreate.mockResolvedValue(
+      makeResponse('{"pass": true, "score": 1, "reasoning": "ok"}')
+    );
+    const mod = (await import('@anthropic-ai/vertex-sdk' as any)) as any;
+
+    await createVertexAnthropicJudge({
+      model: 'claude-x',
+      maxTokens: 50,
+    }).evaluate('candidate', null, 'rubric');
+
+    expect(mod.AnthropicVertex).toHaveBeenCalledWith({
+      projectId: 'test-project',
+      region: 'us-east5',
+    });
+    expect(mockCreate).toHaveBeenCalledWith({
+      model: 'claude-x',
+      max_tokens: 50,
+      temperature: 0,
+      system: JUDGE_SYSTEM_PROMPT,
+      messages: [
+        { role: 'user', content: expect.stringContaining('candidate') },
+      ],
+    });
+  });
+
+  it('falls back to CLOUD_ML_PROJECT_ID and the us-east5 region', async () => {
+    delete process.env.GOOGLE_VERTEX_PROJECT;
+    delete process.env.GOOGLE_VERTEX_LOCATION;
+    process.env.CLOUD_ML_PROJECT_ID = 'ml-project';
+    const mockCreate = await getMockCreate();
+    mockCreate.mockResolvedValue(
+      makeResponse('{"pass": true, "score": 1, "reasoning": "ok"}')
+    );
+    const mod = (await import('@anthropic-ai/vertex-sdk' as any)) as any;
+
+    await createVertexAnthropicJudge({}).evaluate('candidate', null, 'rubric');
+
+    expect(mod.AnthropicVertex).toHaveBeenCalledWith({
+      projectId: 'ml-project',
+      region: 'us-east5',
+    });
   });
 });

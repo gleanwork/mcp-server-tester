@@ -1,21 +1,38 @@
 import type { Judge, JudgeConfig, ProviderKind } from './judgeTypes.js';
-import { createAnthropicJudge } from './anthropicJudge.js';
-import { createVertexAnthropicJudge } from './vertexAnthropicJudge.js';
-import { createClaudeAgentJudge } from './claudeAgentJudge.js';
-import { createOpenAIJudge } from './openaiJudge.js';
-import { createGoogleJudge } from './googleJudge.js';
+import { createLLMJudge, type JudgeCompletionAdapter } from './llmJudge.js';
+import { anthropicCompletion } from './anthropicJudge.js';
+import { vertexAnthropicCompletion } from './vertexAnthropicJudge.js';
+import { claudeAgentCompletion } from './claudeAgentJudge.js';
+import { openaiCompletion } from './openaiJudge.js';
+import { googleCompletion } from './googleJudge.js';
 
 /**
- * Creates an LLM judge for evaluating tool responses
+ * Every judge provider's completion adapter. Typing this as a full record
+ * makes a new `ProviderKind` a compile error until its adapter is added.
+ */
+const JUDGE_PROVIDERS: Record<
+  ProviderKind,
+  (config: JudgeConfig) => JudgeCompletionAdapter
+> = {
+  anthropic: anthropicCompletion,
+  'vertex-anthropic': vertexAnthropicCompletion,
+  'anthropic-agent-sdk': claudeAgentCompletion,
+  openai: openaiCompletion,
+  google: googleCompletion,
+};
+
+/**
+ * Creates an LLM judge for evaluating tool responses.
  *
- * Uses Claude Agent SDK for evaluation with usage metrics tracking.
+ * Every provider shares one prompt, one response parser and the
+ * `maxToolOutputSize` guard; the provider only supplies the completion.
  *
  * @param config - Judge configuration
  * @returns Judge instance
- * @throws {Error} If provider is unsupported or configuration is invalid
+ * @throws {Error} If the provider is unsupported or its API key is missing
  *
  * @example
- * // Default Claude judge
+ * // Default Anthropic judge
  * const judge = createJudge();
  *
  * @example
@@ -23,7 +40,6 @@ import { createGoogleJudge } from './googleJudge.js';
  * const judge = createJudge({
  *   model: 'claude-sonnet-4-20250514',
  *   maxToolOutputSize: 50000, // Fail if response > 50KB
- *   maxBudgetUsd: 0.05,
  * });
  *
  * // Evaluate a response
@@ -34,31 +50,22 @@ import { createGoogleJudge } from './googleJudge.js';
  * );
  *
  * // Access usage metrics
- * console.log('Cost:', result.usage?.totalCostUsd);
  * console.log('Tokens:', result.usage?.inputTokens, result.usage?.outputTokens);
  */
 export function createJudge(config: JudgeConfig = {}): Judge {
   const provider: ProviderKind = config.provider ?? 'anthropic';
-
-  switch (provider) {
-    case 'anthropic':
-      return createAnthropicJudge(config);
-
-    case 'vertex-anthropic':
-      return createVertexAnthropicJudge(config);
-
-    case 'anthropic-agent-sdk':
-      return createClaudeAgentJudge(config);
-
-    case 'openai':
-      return createOpenAIJudge(config);
-
-    case 'google':
-      return createGoogleJudge(config);
-
-    default:
-      throw new Error(
-        `Unsupported LLM provider: ${String(provider)}. Valid providers: 'anthropic', 'vertex-anthropic', 'anthropic-agent-sdk', 'openai', 'google'`
-      );
-  }
+  const completion = Object.hasOwn(JUDGE_PROVIDERS, provider)
+    ? JUDGE_PROVIDERS[provider]
+    : undefined;
+  if (!completion)
+    throw new Error(
+      `Unsupported LLM provider: ${String(provider)}. Valid providers: ${Object.keys(
+        JUDGE_PROVIDERS
+      )
+        .map((kind) => `'${kind}'`)
+        .join(', ')}`
+    );
+  return createLLMJudge(completion(config), {
+    maxToolOutputSize: config.maxToolOutputSize,
+  });
 }
