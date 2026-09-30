@@ -11,12 +11,9 @@
  *   - toPassToolJudge([...judges])             — multi-judge (all must pass)
  */
 
-import { validateJudge } from '../validators/judge.js';
+import { DEFAULT_JUDGE_THRESHOLD, validateJudge } from '../validators/judge.js';
 import type { RubricSpec } from '../../judge/rubrics.js';
 import type { JudgeMatcherOptions } from './types.js';
-
-// Default passing threshold
-const DEFAULT_PASSING_THRESHOLD = 0.7;
 
 /**
  * Runs a single judge evaluation and returns the result.
@@ -28,7 +25,7 @@ async function runSingleJudge(
 ): Promise<{ pass: boolean; message: string }> {
   const {
     reference = null,
-    passingThreshold = DEFAULT_PASSING_THRESHOLD,
+    passingThreshold = DEFAULT_JUDGE_THRESHOLD,
     reps,
     provider,
     model,

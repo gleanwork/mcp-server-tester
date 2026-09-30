@@ -9,7 +9,7 @@ import type {
 import { mkdir, writeFile, readdir, readFile, unlink, cp } from 'fs/promises';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import type { MCPEvalReporterConfig } from './types.js';
+import type { MCPEvalReporterConfig } from '../types/reporter.js';
 import type { AuthType, MCPProtocolInfo } from '../types/index.js';
 import type {
   MCPEvalRunData,

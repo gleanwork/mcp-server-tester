@@ -111,6 +111,9 @@ function computeStdDev(scores: number[], mean: number): number {
   return Math.sqrt(variance);
 }
 
+/** Minimum judge score that passes when no threshold is given. */
+export const DEFAULT_JUDGE_THRESHOLD = 0.7;
+
 export async function validateJudge(
   response: unknown,
   config: JudgeValidatorConfig
@@ -119,7 +122,7 @@ export async function validateJudge(
     judge: judgeName,
     rubric,
     reference,
-    threshold = 0.7,
+    threshold = DEFAULT_JUDGE_THRESHOLD,
     reps = 1,
     provider,
     model,

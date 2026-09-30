@@ -29,12 +29,8 @@ import {
   hostEnvironment,
   type HostEnvironment,
 } from './mcpHost/hostOptions.js';
-import {
-  runEvalDataset,
-  executeToolCall,
-  omitResponsesFromResult,
-} from './evalRunner.js';
-import { hostTraceToExecution } from './hostTrace.js';
+import { runEvalDataset, omitResponsesFromResult } from './evalRunner.js';
+import { createSuiteCaseExecutor } from './caseExecution.js';
 import { prepareHostBatch } from './prepareHostBatch.js';
 import type { EvalRunnerResult } from './evalRunner.js';
 import {
@@ -44,7 +40,8 @@ import {
 } from './datasetTypes.js';
 import { selectEvalCases } from './buildEvalDataset.js';
 import type { EvalCaseResult } from '../types/reporter.js';
-import type { UsageMetrics } from '../types/index.js';
+import type { MCPProtocolInfo, UsageMetrics } from '../types/index.js';
+import { getProtocolInfo } from '../mcp/protocol.js';
 import { loadPlugins } from '../plugins/loadPlugins.js';
 import {
   getDatasetSource,
@@ -503,88 +500,30 @@ export async function runEvalSuite(
         // Batch execution (including shared setup/cleanup) precedes the runner's
         // wall clock. Count its elapsed time once, not the sum of request times.
         const batchDurationMs = batchTraces ? Date.now() - batchStartTime : 0;
+        // Direct cases connect per case; record what those connections
+        // negotiated so the run's metadata carries its protocol.
+        let directProtocol: MCPProtocolInfo | undefined;
         const result = await runEvalDataset(
           {
             dataset: effectiveDataset,
+            protocol: () => directProtocol,
             concurrency: manifest.concurrency ?? 1,
             defaultLlmIterations: manifest.iterations,
             toolOverrides: arm.toolOverrides ?? manifest.toolOverrides,
             toolMap: arm.toolMap ?? manifest.toolMap,
             ...(runHost
               ? {
-                  executeCase: async (evalCase) => {
-                    const declaration = evalCase.host ?? host.declaration;
-                    if ((evalCase.mode ?? 'direct') === 'direct') {
-                      const selected =
-                        resolvedServers.length === 1
-                          ? resolvedServers[0]
-                          : resolvedServers.find(
-                              (server) =>
-                                server.label &&
-                                evalCase.toolName?.startsWith(
-                                  `${server.label}.`
-                                )
-                            );
-                      if (!selected)
-                        throw new Error(
-                          'Direct cases require one server or a label-qualified tool name.'
-                        );
-                      const directClient =
-                        await createMCPClientForConfig(selected);
-                      try {
-                        const toolName =
-                          selected.label &&
-                          evalCase.toolName?.startsWith(`${selected.label}.`)
-                            ? evalCase.toolName.slice(selected.label.length + 1)
-                            : evalCase.toolName;
-                        return await executeToolCall(
-                          { ...evalCase, toolName },
-                          createMCPFixture(directClient)
-                        );
-                      } finally {
-                        await closeMCPClient(directClient);
-                      }
-                    }
-                    const definition = getHost(declaration.type);
-                    if (batchTraces) {
-                      const trace = batchTraces.get(evalCase.id)?.shift();
-                      if (!trace)
-                        throw new Error(
-                          'Batch trace already consumed or missing; refusing to resubmit.'
-                        );
-                      return {
-                        ...hostTraceToExecution(
-                          trace,
-                          definition.evidence ?? 'none',
-                          resolvedServers
-                        ),
-                        preExecutionDurationMs: trace.durationMs,
-                      };
-                    }
-                    if (!definition.run)
-                      throw new Error(
-                        `Host ${declaration.type} must expose run() for per-case dispatch.`
-                      );
-                    const trace = await definition.run(
-                      {
-                        scenario: evalCase.scenario ?? '',
-                        servers: resolvedServers,
-                        env,
-                      },
-                      declaration,
-                      {
-                        manifest: effectiveManifest,
-                        arm,
-                        env,
-                        mcpHostConfig: evalCase.mcpHostConfig,
-                      }
-                    );
-                    return hostTraceToExecution(
-                      trace,
-                      definition.evidence ?? 'none',
-                      resolvedServers
-                    );
-                  },
+                  executeCase: createSuiteCaseExecutor({
+                    servers: resolvedServers,
+                    host: host.declaration,
+                    manifest: effectiveManifest,
+                    arm,
+                    env,
+                    batchTraces,
+                    onDirectConnection: (client) => {
+                      directProtocol ??= getProtocolInfo(client);
+                    },
+                  }),
                 }
               : {}),
           },

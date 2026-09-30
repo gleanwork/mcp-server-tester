@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
-import type { EvalCaseResult } from '../../types';
+import type { EvalCaseResult, SkillLoad } from '../../types';
 import { CollapsibleSection } from '../CollapsibleSection';
 
 /**
@@ -78,6 +78,35 @@ function resultToolCalls(
       typeof call.name === 'string' &&
       isRecord(call.arguments)
   );
+}
+
+/**
+ * Skill loads recorded by the simulated host (skills enabled): from the
+ * response, or the last iteration when responses were omitted.
+ */
+function resultSkillLoads(result: EvalCaseResult): SkillLoad[] {
+  const fromResponse = responseRecord(result).skillLoads;
+  const loads = Array.isArray(fromResponse)
+    ? fromResponse
+    : (result.iterationResults?.at(-1)?.skillLoads ?? []);
+  return loads.filter(
+    (load): load is SkillLoad =>
+      isRecord(load) &&
+      typeof load.name === 'string' &&
+      typeof load.uri === 'string'
+  );
+}
+
+function skillVerificationStyle(verified: boolean | null): string {
+  if (verified === null) return 'text-muted-foreground';
+  return verified
+    ? 'text-green-600 dark:text-green-400'
+    : 'text-red-600 dark:text-red-400';
+}
+
+function skillVerificationLabel(verified: boolean | null): string {
+  if (verified === null) return 'unverified';
+  return verified ? 'verified' : 'verification failed';
 }
 
 function finalAnswer(result: EvalCaseResult): string | undefined {
@@ -300,6 +329,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
     ? getExternalHostEvidenceRows(result.externalHost)
     : [];
   const hostToolCalls = resultToolCalls(result);
+  const skillLoads = resultSkillLoads(result);
   const hostUsage = usageForResult(result);
   const answer = finalAnswer(result);
   const llmDurationMs = numberField(responseRecord(result), 'llmDurationMs');
@@ -989,6 +1019,46 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                               )}
                             </div>
                             <JsonBlock value={call.arguments} />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {skillLoads.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+                        Skill Loads
+                      </h4>
+                      <div className="space-y-2">
+                        {skillLoads.map((load, i) => (
+                          <div
+                            key={`${load.uri}-${i}`}
+                            className="rounded-md border bg-muted/50 p-3 text-xs"
+                          >
+                            <div className="flex flex-wrap items-center gap-2">
+                              <code className="font-semibold">{load.name}</code>
+                              <span className="text-muted-foreground">
+                                {load.kind === 'file' ? 'file' : 'skill'} via{' '}
+                                {load.via} · after {load.afterToolCalls} tool
+                                call{load.afterToolCalls === 1 ? '' : 's'}
+                              </span>
+                              <span
+                                className={skillVerificationStyle(
+                                  load.verified
+                                )}
+                              >
+                                {skillVerificationLabel(load.verified)}
+                              </span>
+                            </div>
+                            <div className="font-mono text-muted-foreground mt-1 break-all">
+                              {load.uri}
+                            </div>
+                            {load.problems && load.problems.length > 0 && (
+                              <div className="mt-1 text-red-700 dark:text-red-300">
+                                {load.problems.join('; ')}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>

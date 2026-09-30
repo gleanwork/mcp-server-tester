@@ -258,6 +258,16 @@ describe('fresh MST-owned Linux profile', () => {
     await profile.dispose();
   });
 
+  it('fails before app start without connecting when a bearer token is missing', async () => {
+    const profile = await createProfile();
+    await expect(profile.beforeStart(setup, {})).rejects.toMatchObject({
+      code: 'mcp_preflight_failed',
+    });
+    expect(checkMcpServers).not.toHaveBeenCalled();
+    expect(profile.readiness.error).toBe('mcp_preflight_failed');
+    await profile.dispose();
+  });
+
   const plugin = {
     name: 'acme',
     marketplace: { source: '/opt/plugins' },

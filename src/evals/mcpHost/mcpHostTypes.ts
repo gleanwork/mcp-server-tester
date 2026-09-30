@@ -6,7 +6,13 @@
  */
 
 import type { MCPFixtureApi } from '../../mcp/fixtures/mcpFixture.js';
-import type { HostDiagnostics, UsageMetrics } from '../../types/index.js';
+import type {
+  HostDiagnostics,
+  HostSkillsMode,
+  SkillLoad,
+  UsageMetrics,
+} from '../../types/index.js';
+import type { HostEvent } from '../evalFrameworkTypes.js';
 
 /**
  * Host type for MCP host simulation.
@@ -172,6 +178,8 @@ export interface BrowserConfig {
   cookies?: BrowserCookie[];
 }
 
+export type { HostSkillsMode, SkillLoad } from '../../types/index.js';
+
 /**
  * Configuration for MCP host simulation
  */
@@ -223,6 +231,25 @@ export interface MCPHostConfig {
    * @default 10
    */
   maxToolCalls?: number;
+
+  /**
+   * How the simulated host uses Agent Skills the server serves over MCP
+   * (SEP-2640). SDK host only.
+   *
+   * - 'off' (default): skills are not offered to the model.
+   * - 'catalog': like a SEP-2640 host, the system prompt lists each skill's
+   *   name, description, server, and URI, and the model loads skills with a
+   *   `read_skill` tool and supporting files with `read_resource`. Reads are
+   *   verified against the skill's entry (digest, size, frontmatter).
+   * - 'preload': every SKILL.md is placed in the system prompt up front.
+   *
+   * Loads are reported in `skillLoads`. Each SKILL.md the model loads (and
+   * that passes verification) is also a `skill` event (`toolsTriggered` with
+   * `kind: 'skill'`); preloads are not. Loads do not count as MCP tool calls.
+   *
+   * @default 'off'
+   */
+  skills?: HostSkillsMode;
 
   /**
    * CLI host configuration (required for 'cli' host type).
@@ -317,6 +344,16 @@ export interface MCPHostSimulationResult {
    * Populated by SDK-based hosts from the AI SDK response.
    */
   usage?: UsageMetrics;
+
+  /** Skills the host loaded for the model (when `skills` is enabled). */
+  skillLoads?: SkillLoad[];
+
+  /**
+   * Ordered trace of MCP tool calls and skill loads. Present when skills are
+   * enabled; tool-call expectations read it so `kind: 'skill'` entries and
+   * strict ordering work.
+   */
+  events?: HostEvent[];
 }
 
 /**

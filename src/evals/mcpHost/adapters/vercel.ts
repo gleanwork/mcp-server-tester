@@ -18,11 +18,19 @@ import type {
 import type { UsageMetrics } from '../../../types/index.js';
 import type { MCPFixtureApi } from '../../../mcp/fixtures/mcpFixture.js';
 import { extractText } from '../../../mcp/response.js';
+import type { HostEvent } from '../../evalFrameworkTypes.js';
+import {
+  createHostSkillsSession,
+  HOST_SKILL_TOOL_NAMES,
+  withSkillEvents,
+  type HostSkillsSession,
+} from '../hostSkills.js';
 import { z } from 'zod';
 import {
   GenerationOptions,
   ProviderSchema,
   type HostEnvironment,
+  HostSkillsModeSchema,
 } from '../hostOptions.js';
 
 const SdkConfigSchema = z
@@ -32,6 +40,7 @@ const SdkConfigSchema = z
     ...GenerationOptions,
     apiKeyEnvVar: z.string().min(1).optional(),
     env: z.record(z.string(), z.string().optional()).optional(),
+    skills: HostSkillsModeSchema.optional(),
   })
   .strict();
 
@@ -216,6 +225,27 @@ function defaultModel(provider: LLMProvider): string {
   }
 }
 
+/** Skill loads and the ordered tool/skill event trace, when skills ran. */
+function skillsTrace(
+  toolCalls: LLMToolCall[],
+  skills: HostSkillsSession | null
+): Pick<MCPHostSimulationResult, 'skillLoads' | 'events'> {
+  if (!skills) return {};
+  const toolEvents: HostEvent[] = toolCalls.map((call) => ({
+    kind: 'tool_call',
+    source: 'mcp',
+    name: call.name,
+    arguments: call.arguments,
+    ...(call.output !== undefined ? { output: call.output } : {}),
+    ...(call.rawName !== undefined ? { rawName: call.rawName } : {}),
+    ...(call.id !== undefined ? { id: call.id } : {}),
+  }));
+  return {
+    skillLoads: skills.loads,
+    events: withSkillEvents(toolEvents, skills.loads),
+  };
+}
+
 /**
  * Creates a Vercel AI SDK-based MCP host simulator.
  *
@@ -234,6 +264,7 @@ export function createVercelOrchestrator(): MCPHostSimulator {
       let timer: ReturnType<typeof setTimeout> | undefined;
       let abortFromHost: (() => void) | undefined;
       const allToolCalls: LLMToolCall[] = [];
+      let skills: HostSkillsSession | null = null;
       let expired: Promise<never>;
       function withinDeadline<T>(promise: Promise<T>): Promise<T> {
         return Promise.race([promise, expired]);
@@ -340,12 +371,38 @@ export function createVercelOrchestrator(): MCPHostSimulator {
           };
         }
 
+        // Agent Skills (SEP-2640): host tools and system prompt, when enabled.
+        skills = await withinDeadline(
+          createHostSkillsSession(mcp, config.skills, {
+            countToolCalls: () => allToolCalls.length,
+          })
+        );
+        for (const [name, hostTool] of Object.entries(skills?.tools ?? {})) {
+          if (tools[name]) {
+            throw new Error(
+              `MCP tool "${name}" collides with the host skills tool of the same name; set skills: 'off' for this server.`
+            );
+          }
+          tools[name] = {
+            description: hostTool.description,
+            inputSchema: jsonSchema(hostTool.inputSchema),
+            execute: async (args: Record<string, unknown>) => {
+              if (controller.signal.aborted) throw controller.signal.reason;
+              const mcpStart = Date.now();
+              const output = await withinDeadline(hostTool.execute(args));
+              mcpDurationMs += Date.now() - mcpStart;
+              return output;
+            },
+          };
+        }
+
         const maxSteps = config.maxToolCalls ?? 10;
         const llmStart = Date.now();
 
         const result = await withinDeadline(
           generateText({
             model,
+            ...(skills ? { system: skills.system } : {}),
             prompt: scenario,
             tools,
             stopWhen: stepCountIs(Math.max(1, maxSteps)),
@@ -380,11 +437,20 @@ export function createVercelOrchestrator(): MCPHostSimulator {
         }>((step) => {
           if (step.toolCalls?.length > 0) {
             // Reference each call by id; the payload lives once on allToolCalls.
-            return (step.toolCalls as Array<{ toolCallId?: string }>).map(
-              (tc) => ({
-                role: 'tool' as const,
-                toolCallId: tc.toolCallId,
-              })
+            // Host skills tools are not MCP tool calls, so describe them inline.
+            return (
+              step.toolCalls as Array<{
+                toolCallId?: string;
+                toolName?: string;
+                input?: unknown;
+              }>
+            ).map((tc) =>
+              tc.toolName && HOST_SKILL_TOOL_NAMES.has(tc.toolName)
+                ? {
+                    role: 'tool' as const,
+                    content: `[host] ${tc.toolName} ${JSON.stringify(tc.input ?? {})}`,
+                  }
+                : { role: 'tool' as const, toolCallId: tc.toolCallId }
             );
           }
           return step.text
@@ -401,12 +467,14 @@ export function createVercelOrchestrator(): MCPHostSimulator {
           mcpDurationMs,
           conversationHistory,
           usage: hostUsage,
+          ...skillsTrace(allToolCalls, skills),
         };
       } catch (err) {
         return {
           success: false,
           toolCalls: allToolCalls,
           error: enrichErrorMessage(err, config.provider ?? 'unknown'),
+          ...skillsTrace(allToolCalls, skills),
         };
       } finally {
         clearTimeout(timer);

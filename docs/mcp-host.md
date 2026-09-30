@@ -128,6 +128,7 @@ interface MCPHostConfig {
   temperature?: number; // LLM temperature (default: 0)
   maxTokens?: number; // Max response tokens
   apiKeyEnvVar?: string; // Override default env var name
+  skills?: 'off' | 'catalog' | 'preload'; // Offer the server's Agent Skills (SDK host; default 'off')
   cli?: CLIConfig; // Required for 'cli' host type
 }
 
@@ -154,6 +155,10 @@ interface CLIConfig {
 
 - **`sdk`** (default) — Programmatic via Vercel AI SDK. Reuses the framework's MCP connection. Requires `provider`.
 - **`cli`** — CLI-based hosts (e.g., Claude Code, Codex). Spawns a process with its own MCP connection. Requires `cli`.
+
+**Skills:** with `skills: 'catalog'` the SDK host lists the server's [Agent Skills](./skills.md) in the system prompt and gives the model `read_skill` and `read_resource` tools; `'preload'` puts every `SKILL.md` in the prompt. Skills the model loads (and that pass verification) appear as `kind: 'skill'` entries for `toolsTriggered`, not as tool calls; preloaded skills do not. Use `runSkillsComparison()` to measure whether skills help.
+
+**Protocol:** the SDK host uses the test's MCP connection, so it follows `mcpConfig.protocol`. CLI and external hosts open their own connections. See [Protocol Versions](./protocol-versions.md).
 
 ## Claude Code startup and failure evidence
 
@@ -202,6 +207,8 @@ interface MCPHostSimulationResult {
   llmDurationMs?: number; // Time in LLM calls (excludes tool execution)
   mcpDurationMs?: number; // Time in MCP tool execution
   conversationHistory?: Array<{ role: string; content: string }>;
+  skillLoads?: SkillLoad[]; // Skills the host loaded (when skills are enabled)
+  events?: HostEvent[]; // Ordered tool calls and skill loads (when skills are enabled)
 }
 ```
 

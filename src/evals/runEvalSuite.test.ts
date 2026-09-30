@@ -1,4 +1,3 @@
-import type { EvalExecutionResult } from './hostTrace.js';
 import { simulationToHostTrace } from './hostTrace.js';
 import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -38,7 +37,8 @@ afterEach(async () => {
 async function fixture(
   cases: EvalCase[],
   extra: Record<string, unknown> = {},
-  run = vi.fn<(options: HostRunOptions) => Promise<EvalExecutionResult>>(
+  // The fixture host's simulation-shaped result, adapted to a trace below.
+  run = vi.fn<(options: HostRunOptions) => Promise<{ response: unknown }>>(
     async () => ({
       response: { success: true, response: 'WRONG', toolCalls: [] },
     })
@@ -947,4 +947,48 @@ describe('suite review regressions', () => {
       compareEvalRuns({ baseline: result.data, candidate: result.data })
     ).not.toThrow();
   });
+});
+
+describe('direct request cases in multi-server suites', () => {
+  const mock = path.resolve(
+    path.dirname(new URL(import.meta.url).pathname),
+    '../../tests/mocks/dualEraServer.ts'
+  );
+  const server = (label: string) => ({
+    transport: 'stdio' as const,
+    label,
+    command: process.execPath,
+    args: ['--import', 'tsx', mock],
+    quiet: true,
+  });
+
+  it('routes request cases by request.server and rejects unknown labels', async () => {
+    const f = await fixture(
+      [
+        {
+          id: 'routed',
+          request: { method: 'skills/list', params: {}, server: 'b' },
+          expect: {
+            schema: 'SkillsListResult',
+            containsText: 'weather-report',
+          },
+        },
+        {
+          id: 'unknown-label',
+          request: { method: 'skills/list', server: 'nope' },
+          expect: { schema: 'SkillsListResult' },
+        },
+      ],
+      { servers: [server('a'), server('b')] }
+    );
+    const result = await runEvalSuite({
+      manifestPath: f.manifestPath,
+      rootDir: f.dir,
+    });
+    const byId = Object.fromEntries(
+      result.summary.results.map((entry) => [entry.id, entry])
+    );
+    expect(byId.routed?.pass).toBe(true);
+    expect(byId['unknown-label']?.pass).toBe(false);
+  }, 60_000);
 });

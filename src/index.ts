@@ -110,6 +110,7 @@ export type {
   JudgeExpectConfig,
   SerializedEvalDataset,
   EvalMode,
+  EvalDirectRequest,
   LoadDatasetOptions,
   EvalCaseRequest,
   EvalContext,
@@ -289,6 +290,7 @@ export {
   validateEvalCase,
   validateEvalDataset,
 } from './evals/datasetTypes.js';
+export { BUILTIN_RESULT_SCHEMAS } from './evals/builtinResultSchemas.js';
 
 // Eval Loader
 export {
@@ -396,6 +398,13 @@ export type {
 
 // Eval Runner
 export { runEvalDataset, runEvalCase } from './evals/evalRunner.js';
+export type {
+  CaseExecution,
+  DirectExecution,
+  HostExecution,
+  FailedExecution,
+  HostResponse,
+} from './evals/caseExecution.js';
 
 export type {
   EvalResultStore,
@@ -428,6 +437,19 @@ export {
   runServerComparison,
   saveServerComparison,
 } from './evals/serverComparison.js';
+
+// Agent Skills A/B comparison (mcp_host)
+export { runSkillsComparison } from './evals/skillsComparison.js';
+export type {
+  SkillsComparisonOptions,
+  SkillsComparisonResult,
+  SkillsComparisonVariant,
+  SkillsVariantSummary,
+} from './evals/skillsComparison.js';
+export type {
+  HostSkillsMode,
+  SkillLoad,
+} from './evals/mcpHost/mcpHostTypes.js';
 
 // Completed eval run comparison
 export {
