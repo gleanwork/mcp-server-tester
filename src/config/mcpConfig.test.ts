@@ -267,3 +267,34 @@ describe('MCPConfig', () => {
     });
   });
 });
+
+describe('protocol setting', () => {
+  const base = { transport: 'stdio' as const, command: 'node' };
+
+  it.each(['legacy', 'auto', '2025-06-18', '2026-07-28'])(
+    'accepts %s',
+    (protocol) => {
+      expect(validateMCPConfig({ ...base, protocol }).protocol).toBe(protocol);
+    }
+  );
+
+  it.each(['latest', '2026-7-28', ''])('rejects %j', (protocol) => {
+    expect(() => validateMCPConfig({ ...base, protocol })).toThrow(ZodError);
+  });
+
+  it('accepts protocolProbe on http configs', () => {
+    const config = validateMCPConfig({
+      transport: 'http',
+      serverUrl: 'https://example.com/mcp',
+      protocol: 'auto',
+      protocolProbe: { timeoutMs: 2000 },
+    });
+    expect(config.protocolProbe).toEqual({ timeoutMs: 2000 });
+  });
+
+  it('rejects unknown protocolProbe keys', () => {
+    expect(() =>
+      validateMCPConfig({ ...base, protocolProbe: { retries: 3 } })
+    ).toThrow(ZodError);
+  });
+});

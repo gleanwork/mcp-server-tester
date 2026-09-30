@@ -1,7 +1,10 @@
 import {
   Client,
+  SdkError,
+  SdkErrorCode,
   SSEClientTransport,
   StreamableHTTPClientTransport,
+  UnsupportedProtocolVersionError,
 } from '@modelcontextprotocol/client';
 import type { OAuthClientProvider } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
@@ -13,6 +16,14 @@ import {
   usesHostResolvedFields,
 } from '../config/mcpConfig.js';
 import { debugClient, debugHttp } from '../debug.js';
+import type { ProtocolSetting } from '../types/index.js';
+import {
+  DEFAULT_PROTOCOL_SETTING,
+  isProtocolRevision,
+  createTesterResponseCache,
+  resolveProtocolClientOptions,
+  setRequestedProtocol,
+} from './protocol.js';
 import { ProxyAgent, Agent as UndiciAgent } from 'undici';
 import { readFileSync } from 'node:fs';
 import packageJson from '../../package.json' with { type: 'json' };
@@ -144,6 +155,54 @@ export interface CreateMCPClientOptions {
    * does not falsely advertise support it cannot fulfill.
    */
   samplingHandler?: (...args: unknown[]) => unknown;
+
+  /**
+   * Overrides `config.protocol` (used by the `mcpProtocol` fixture option).
+   */
+  protocol?: ProtocolSetting;
+}
+
+/**
+ * Rewrites the SDK's era-negotiation failure into an actionable message.
+ */
+function describeProtocolFailure(
+  error: unknown,
+  protocol: ProtocolSetting
+): unknown {
+  if (
+    error instanceof SdkError &&
+    error.code === SdkErrorCode.EraNegotiationFailed
+  ) {
+    return new Error(
+      `MCP server did not accept protocol "${protocol}": ${error.message}. ` +
+        `Use protocol: 'legacy' (initialize handshake) or 'auto' (probe and fall back) for servers that do not support it.`,
+      { cause: error }
+    );
+  }
+  // A pinned legacy revision the server answered with a different one.
+  if (
+    error instanceof Error &&
+    error.message.startsWith("Server's protocol version is not supported")
+  ) {
+    return new Error(
+      `MCP server answered initialize with a different protocol revision than the pinned "${protocol}" (${error.message}). ` +
+        `Pin the revision the server supports, or use 'legacy' to accept its choice.`,
+      { cause: error }
+    );
+  }
+  if (error instanceof UnsupportedProtocolVersionError) {
+    const data = error.data as
+      | { supported?: string[]; requested?: string }
+      | undefined;
+    const supported = data?.supported ?? [];
+    return new Error(
+      `MCP server does not support protocol "${data?.requested ?? protocol}" ` +
+        `(it supports: ${supported.length > 0 ? supported.join(', ') : 'unknown'}). ` +
+        `Set protocol to one of those revisions, or use 'auto'.`,
+      { cause: error }
+    );
+  }
+  return error;
 }
 
 /**
@@ -183,6 +242,12 @@ export async function createMCPClientForConfig(
 ): Promise<Client> {
   // Validate config
   const validatedConfig = validateMCPConfig(config);
+  const protocol =
+    options?.protocol ?? validatedConfig.protocol ?? DEFAULT_PROTOCOL_SETTING;
+  // The HTTP+SSE transport only speaks 2024-11-05, so a pin to any other
+  // revision has nothing to fall back to.
+  const pinsRevisionWithoutSse =
+    isProtocolRevision(protocol) && protocol !== '2024-11-05';
 
   // Create client with info
   const client = new Client(
@@ -199,8 +264,13 @@ export async function createMCPClientForConfig(
           ? (validatedConfig.capabilities?.sampling ?? {})
           : undefined,
       },
+      ...resolveProtocolClientOptions(protocol, validatedConfig.protocolProbe),
+      // A tester wants every call on the wire, so cached 2026-07-28
+      // list/read results are never served (see createTesterResponseCache).
+      responseCacheStore: createTesterResponseCache(),
     }
   );
+  setRequestedProtocol(client, protocol);
 
   // Create appropriate transport and connect
   if (isStdioConfig(validatedConfig)) {
@@ -234,12 +304,16 @@ export async function createMCPClientForConfig(
       cwd: validatedConfig.cwd,
     });
 
-    await client.connect(
-      transport,
-      validatedConfig.connectTimeoutMs !== undefined
-        ? { timeout: validatedConfig.connectTimeoutMs }
-        : undefined
-    );
+    try {
+      await client.connect(
+        transport,
+        validatedConfig.connectTimeoutMs !== undefined
+          ? { timeout: validatedConfig.connectTimeoutMs }
+          : undefined
+      );
+    } catch (error) {
+      throw describeProtocolFailure(error, protocol);
+    }
   } else if (isHttpConfig(validatedConfig)) {
     // Build headers, including static token auth if configured and no authProvider.
     // User-provided headers take precedence over defaults (spread order).
@@ -383,6 +457,16 @@ export async function createMCPClientForConfig(
         debugClient('Connected via Streamable HTTP');
         debugHttp('Connection established via streamableHttp');
       } catch (err) {
+        // HTTP+SSE is a legacy-only transport, so a pinned modern revision
+        // (or a failed era negotiation) has nothing to fall back to.
+        if (
+          pinsRevisionWithoutSse ||
+          err instanceof UnsupportedProtocolVersionError ||
+          (err instanceof SdkError &&
+            err.code === SdkErrorCode.EraNegotiationFailed)
+        ) {
+          throw describeProtocolFailure(err, protocol);
+        }
         debugHttp(
           'streamableHttp failed (%s), falling back to SSE',
           formatMCPConnectionFailure(err)

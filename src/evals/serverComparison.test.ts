@@ -16,6 +16,7 @@ function createMockMCP(callToolResponse?: {
   return {
     client: {} as MCPFixtureApi['client'],
     authType: 'none',
+    protocol: { requested: 'legacy', negotiated: '2025-11-25', era: 'legacy' },
     project: 'test-project',
     getServerInfo: vi.fn().mockReturnValue({ name: 'test', version: '1.0.0' }),
     listTools: vi.fn().mockResolvedValue([]),
