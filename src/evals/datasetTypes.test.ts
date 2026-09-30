@@ -692,6 +692,19 @@ describe('request cases', () => {
     );
   });
 
+  it('rejects request outside direct mode', () => {
+    const result = EvalCaseSchema.safeParse({
+      id: 'host-request',
+      mode: 'mcp_host',
+      scenario: 'x',
+      request: { method: 'skills/list' },
+    });
+    expect(result.success).toBe(false);
+    expect(JSON.stringify(result.error?.issues)).toContain(
+      'only valid for direct-mode cases'
+    );
+  });
+
   it('rejects unknown request keys', () => {
     expect(
       EvalCaseSchema.safeParse({

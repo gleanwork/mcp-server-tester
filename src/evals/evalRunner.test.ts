@@ -425,6 +425,48 @@ describe('runEvalCase', () => {
         expect(result.pass).toBe(true);
       });
 
+      it('records the request method as the case tool name', async () => {
+        const result = await runEvalCase(
+          createEvalCase({
+            toolName: undefined,
+            args: undefined,
+            request: { method: 'skills/list' },
+          }),
+          withRequest(vi.fn().mockResolvedValue({ skills: [] }))
+        );
+        expect(result.toolName).toBe('skills/list');
+      });
+
+      it('lets a user schema override a built-in schema of the same name', async () => {
+        const result = await runEvalCase(
+          createEvalCase({
+            toolName: undefined,
+            args: undefined,
+            request: { method: 'custom/list' },
+            expect: { schema: 'SkillsListResult' },
+          }),
+          withRequest(vi.fn().mockResolvedValue({ anything: true })),
+          { schemas: { SkillsListResult: z.object({ anything: z.boolean() }) } }
+        );
+        expect(result.pass).toBe(true);
+      });
+
+      it.each([
+        [{ supportedVersions: ['2026-07-28'], capabilities: {} }, true],
+        [{ supportedVersions: [], capabilities: {} }, false],
+      ])('validates DiscoverResult %j', async (discover, pass) => {
+        const result = await runEvalCase(
+          createEvalCase({
+            toolName: undefined,
+            args: undefined,
+            request: { method: 'server/discover' },
+            expect: { schema: 'DiscoverResult' },
+          }),
+          withRequest(vi.fn().mockResolvedValue(discover))
+        );
+        expect(result.pass).toBe(pass);
+      });
+
       it('rejects cases that set both request and toolName', async () => {
         const result = await runEvalCase(
           createEvalCase({ request: { method: 'skills/list' } }),
@@ -932,6 +974,23 @@ describe('runEvalDataset', () => {
     };
   }
 
+  it('records a protocol passed as an option when there is no mcp', async () => {
+    const protocol = {
+      requested: '2026-07-28',
+      negotiated: '2026-07-28',
+      era: 'modern' as const,
+    };
+    const result = await runEvalDataset(
+      {
+        dataset: createDataset([createEvalCase({ id: 'case-1' })]),
+        protocol: () => protocol,
+        executeCase: async () => ({ response: { content: [] } }),
+      },
+      { ...createContext(), mcp: undefined }
+    );
+    expect(result.metadata?.protocol).toEqual(protocol);
+  });
+
   it('records the protocol the run negotiated in its metadata', async () => {
     const context = createContext();
     const result = await runEvalDataset(
@@ -1277,6 +1336,8 @@ describe('saveResultsTo and baselineResultsFrom', () => {
       'stored-run'
     );
     expect(artifact.metadata.datasetName).toBe('baseline-test-dataset');
+    expect(artifact.metadata.protocolVersion).toBe('2025-11-25');
+    expect(artifact.metadata.protocolEra).toBe('legacy');
     expect(artifact.data.caseResults[0]).not.toHaveProperty('response');
   });
 

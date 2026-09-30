@@ -110,7 +110,7 @@ export type {
   JudgeExpectConfig,
   SerializedEvalDataset,
   EvalMode,
-  EvalCaseRequestTarget,
+  EvalDirectRequest,
   LoadDatasetOptions,
   EvalCaseRequest,
   EvalContext,

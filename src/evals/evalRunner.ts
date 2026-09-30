@@ -8,9 +8,6 @@ import { ProtocolError } from '@modelcontextprotocol/client';
 import { z, type ZodType } from 'zod';
 import { protocolErrorToToolResult } from '../mcp/callTool.js';
 import { BUILTIN_RESULT_SCHEMAS } from './builtinResultSchemas.js';
-
-/** Accepts any JSON-RPC result object (validated later by expectations). */
-const AnyResultSchema = z.looseObject({});
 import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
 import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
 import { runExternalHostScenario } from './externalHost/runtime.js';
@@ -25,7 +22,11 @@ import {
   normalizeHostDriver,
 } from './externalHost/driverIdentity.js';
 import { getRegisteredExternalHostConfig } from './externalHost/hostRegistry.js';
-import type { EvalExpectationResult, UsageMetrics } from '../types/index.js';
+import type {
+  EvalExpectationResult,
+  MCPProtocolInfo,
+  UsageMetrics,
+} from '../types/index.js';
 import type {
   EvalCaseResult,
   EvalCaseRequest,
@@ -59,6 +60,9 @@ import { debugEval } from '../debug.js';
 import { sumUsage } from '../utils/usageUtils.js';
 import { matchesIdentity } from '../assertions/validators/toolCalls.js';
 import packageJson from '../../package.json' with { type: 'json' };
+
+/** Accepts any JSON-RPC result object (validated later by expectations). */
+const AnyResultSchema = z.looseObject({});
 
 /**
  * Context passed to the eval runner
@@ -229,6 +233,13 @@ export interface EvalRunnerOptions {
    * The dataset to run
    */
   dataset: EvalDataset;
+
+  /**
+   * Protocol to record in run metadata when `context.mcp` is absent (for
+   * example manifest suites that connect per case). A function is read when
+   * the run finishes.
+   */
+  protocol?: MCPProtocolInfo | (() => MCPProtocolInfo | undefined);
 
   /** Canonical tool name to accepted native tool names. */
   toolMap?: Record<string, string[]>;
@@ -566,7 +577,7 @@ export async function executeToolCall(
         );
         return { response: result };
       } catch (error) {
-        // A JSON-RPC error is a result to assert on (expect.error), exactly
+        // A JSON-RPC error is a result to assert on (expect.isError), exactly
         // as protocol errors from tools/call are.
         if (error instanceof ProtocolError) {
           return { response: protocolErrorToToolResult(error) };
@@ -599,6 +610,30 @@ export async function executeToolCall(
       error: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+/** The protocol a run used, from its connection or the runner options. */
+function protocolMetadata(
+  context: EvalContext,
+  option: EvalRunnerOptions['protocol']
+): { protocol?: MCPProtocolInfo } {
+  const protocol = context.mcp?.protocol?.negotiated
+    ? context.mcp.protocol
+    : typeof option === 'function'
+      ? option()
+      : option;
+  return protocol?.negotiated ? { protocol } : {};
+}
+
+/** Flat protocol fields for stored artifacts (filterable metadata). */
+function storedProtocolMetadata(
+  protocol: MCPProtocolInfo | undefined
+): Pick<StoredEvalArtifactMetadata, 'protocolVersion' | 'protocolEra'> {
+  if (!protocol?.negotiated) return {};
+  return {
+    protocolVersion: protocol.negotiated,
+    ...(protocol.era ? { protocolEra: protocol.era } : {}),
+  };
 }
 
 /**
@@ -1211,7 +1246,7 @@ async function runSingleIteration(
         ? 'external_host'
         : evalCase.scenario != null
           ? 'mcp_host'
-          : (evalCase.toolName ?? 'unknown'),
+          : (evalCase.toolName ?? evalCase.request?.method ?? 'unknown'),
     source: 'eval',
     pass: didCasePass(error, expectationResults),
     request: buildRequest(evalCase, options.toolOverrideVariantId),
@@ -1435,7 +1470,7 @@ export async function runEvalCase(
         ? 'external_host'
         : evalCase.scenario != null
           ? 'mcp_host'
-          : (evalCase.toolName ?? 'unknown'),
+          : (evalCase.toolName ?? evalCase.request?.method ?? 'unknown'),
     source: 'eval',
     pass: false,
     error: iterationResults[0]?.error,
@@ -1704,9 +1739,7 @@ export async function runEvalDataset(
     }),
     ...(mcpHostModel !== undefined && { mcpHostModel }),
     ...(judgeModel !== undefined && { judgeModel }),
-    ...(context.mcp?.protocol?.negotiated
-      ? { protocol: context.mcp.protocol }
-      : {}),
+    ...protocolMetadata(context, options.protocol),
   };
 
   const runHostUsage = caseResults.reduce(
@@ -1809,14 +1842,7 @@ export async function runEvalDataset(
           ...(mcpHostModel !== undefined && { mcpHostModel }),
           ...(judgeModel !== undefined && { judgeModel }),
           ...(gitHash !== undefined && { gitHash }),
-          ...(metadata.protocol?.negotiated
-            ? {
-                protocolVersion: metadata.protocol.negotiated,
-                ...(metadata.protocol.era
-                  ? { protocolEra: metadata.protocol.era }
-                  : {}),
-              }
-            : {}),
+          ...storedProtocolMetadata(metadata.protocol),
           packageVersion: packageJson.version,
         },
       });

@@ -1,3 +1,4 @@
+import type { ProtocolEra } from '../types/index.js';
 import { mkdir, readFile, readdir, writeFile } from 'fs/promises';
 import { join } from 'path';
 
@@ -21,7 +22,7 @@ export interface StoredEvalArtifactMetadata {
   /** Negotiated MCP protocol revision of the run, e.g. '2026-07-28'. */
   protocolVersion?: string;
   /** Protocol era of the run ('legacy' or 'modern'). */
-  protocolEra?: string;
+  protocolEra?: ProtocolEra;
   labels?: Record<string, string>;
   [key: string]: unknown;
 }

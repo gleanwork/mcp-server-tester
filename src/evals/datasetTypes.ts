@@ -26,7 +26,7 @@ export type EvalMode = 'direct' | 'host' | 'mcp_host' | 'external_host';
 /**
  * A direct-mode MCP request, used instead of `toolName` + `args`.
  */
-export interface EvalCaseRequestTarget {
+export interface EvalDirectRequest {
   /** JSON-RPC method, e.g. 'skills/list', 'skills/get', 'resources/read'. */
   method: string;
   /** Request params (without `_meta`; MST adds the protocol envelope). */
@@ -78,12 +78,12 @@ export interface EvalCase {
   /**
    * Direct mode alternative to `toolName`: send any MCP request (for example
    * `skills/get` or `resources/read`) and run the expectations against its
-   * JSON result. A JSON-RPC error becomes an error result, so `expect.error`
+   * JSON result. A JSON-RPC error becomes an error result, so `expect.isError`
    * works as it does for tools. Mutually exclusive with `toolName`.
    *
    * @example { "method": "skills/get", "params": { "uri": "skill://docs/SKILL.md" } }
    */
-  request?: EvalCaseRequestTarget;
+  request?: EvalDirectRequest;
 
   /**
    * Natural language scenario for LLM to execute (required for 'mcp_host' and 'external_host' modes)
@@ -526,6 +526,17 @@ export const EvalExpectBlockSchema = z.object({
 });
 
 /**
+ * Zod schema for EvalDirectRequest
+ */
+export const EvalDirectRequestSchema = z
+  .object({
+    method: z.string().min(1, 'request.method must not be empty'),
+    params: z.record(z.string(), z.unknown()).optional(),
+    server: z.string().min(1).optional(),
+  })
+  .strict() satisfies z.ZodType<EvalDirectRequest>;
+
+/**
  * Zod schema for EvalCase
  *
  * toolName and args are optional for mcp_host mode (which uses scenario instead)
@@ -538,14 +549,7 @@ export const EvalCaseSchema = z
     host: TaggedConfigSchema.optional(),
     toolName: z.string().min(1, 'toolName must not be empty').optional(),
     args: z.record(z.string(), z.unknown()).optional(),
-    request: z
-      .object({
-        method: z.string().min(1, 'request.method must not be empty'),
-        params: z.record(z.string(), z.unknown()).optional(),
-        server: z.string().min(1).optional(),
-      })
-      .strict()
-      .optional(),
+    request: EvalDirectRequestSchema.optional(),
     scenario: z.string().optional(),
     mcpHostConfig: MCPHostConfigSchema.optional(),
     externalHost: ExternalHostConfigSchema.optional(),
@@ -563,6 +567,13 @@ export const EvalCaseSchema = z
         code: 'custom',
         path: ['request'],
         message: 'request and toolName are mutually exclusive',
+      });
+    }
+    if (evalCase.request && (evalCase.mode ?? 'direct') !== 'direct') {
+      context.addIssue({
+        code: 'custom',
+        path: ['request'],
+        message: 'request is only valid for direct-mode cases',
       });
     }
   });

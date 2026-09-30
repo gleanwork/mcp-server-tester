@@ -30,7 +30,12 @@ test('use raw client', async ({ mcpClient }) => {
 
 High-level test API with helper methods.
 
-```typescript snippet=src/mcp/fixtures/mcpFixture.ts#L87-L137
+```typescript snippet=src/mcp/fixtures/mcpFixture.ts#L82-L137
+/**
+ * High-level API for interacting with MCP servers in tests
+ *
+ * This interface wraps the raw MCP Client with test-friendly methods
+ */
 export interface MCPFixtureApi extends MCPFixtureExtensions {
   /**
    * The underlying MCP client (for advanced usage)
@@ -517,7 +522,7 @@ await saveEvalRunComparison({ store, comparison, id: 'candidate-comparison' });
 
 **Result Structure:**
 
-```typescript snippet=src/evals/evalRunner.ts#L133-L210
+```typescript snippet=src/evals/evalRunner.ts#L137-L214
 /**
  * Overall result of running an eval dataset
  */
@@ -1323,12 +1328,12 @@ export interface EvalCase {
   /**
    * Direct mode alternative to `toolName`: send any MCP request (for example
    * `skills/get` or `resources/read`) and run the expectations against its
-   * JSON result. A JSON-RPC error becomes an error result, so `expect.error`
+   * JSON result. A JSON-RPC error becomes an error result, so `expect.isError`
    * works as it does for tools. Mutually exclusive with `toolName`.
    *
    * @example { "method": "skills/get", "params": { "uri": "skill://docs/SKILL.md" } }
    */
-  request?: EvalCaseRequestTarget;
+  request?: EvalDirectRequest;
 
   /**
    * Natural language scenario for LLM to execute (required for 'mcp_host' and 'external_host' modes)

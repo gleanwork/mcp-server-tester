@@ -39,7 +39,8 @@
       "type": "object",
       "required": ["id"],
       "additionalProperties": false,
-      "description": "A single eval test case. Use 'direct' mode to call a tool explicitly; use 'mcp_host' mode to drive tool selection via natural language.",
+      "not": { "required": ["toolName", "request"] },
+      "description": "A single eval test case. Use 'direct' mode to call a tool (toolName + args) or send any MCP request (request); use 'mcp_host' mode to drive tool selection via natural language.",
       "properties": {
         "id": {
           "type": "string",
@@ -59,11 +60,11 @@
         "toolName": {
           "type": "string",
           "minLength": 1,
-          "description": "Name of the MCP tool to invoke. Required in 'direct' mode; optional in 'mcp_host' mode."
+          "description": "Name of the MCP tool to invoke. In 'direct' mode, set either toolName (with args) or request; optional in 'mcp_host' mode."
         },
         "args": {
           "type": "object",
-          "description": "Arguments to pass to the tool. Required in 'direct' mode; optional in 'mcp_host' mode.",
+          "description": "Arguments to pass to the tool. Required with toolName in 'direct' mode; optional in 'mcp_host' mode.",
           "additionalProperties": true
         },
         "request": {
