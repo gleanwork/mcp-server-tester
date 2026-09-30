@@ -30,8 +30,8 @@ test('use raw client', async ({ mcpClient }) => {
 
 High-level test API with helper methods.
 
-```typescript snippet=src/mcp/fixtures/mcpFixture.ts#L83-L133
-export interface MCPFixtureApi {
+```typescript snippet=src/mcp/fixtures/mcpFixture.ts#L87-L137
+export interface MCPFixtureApi extends MCPFixtureExtensions {
   /**
    * The underlying MCP client (for advanced usage)
    */

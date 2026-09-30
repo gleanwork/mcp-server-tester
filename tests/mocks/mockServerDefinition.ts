@@ -8,6 +8,7 @@
 
 import { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
+import { registerMockSkills } from './mockSkills.js';
 
 /** Creates the mock server with its tools registered. */
 export function createMockMcpServer(): McpServer {
@@ -162,6 +163,9 @@ export function createMockMcpServer(): McpServer {
       };
     }
   );
+
+  // Agent Skills over MCP (SEP-2640), served in every era.
+  registerMockSkills(server);
 
   return server;
 }

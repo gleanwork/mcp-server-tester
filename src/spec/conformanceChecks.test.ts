@@ -8,6 +8,7 @@ import {
   SdkErrorCode,
 } from '@modelcontextprotocol/client';
 import type { Tool, ServerCapabilities } from '@modelcontextprotocol/client';
+import { createFixtureExtensions } from '../mcp/fixtures/fixtureExtensions.js';
 
 function createMockTool(name: string, description?: string): Tool {
   return {
@@ -46,6 +47,7 @@ function createMockMCP(options: {
     client: mockClient,
     authType: 'none',
     protocol: { requested: 'legacy', negotiated: '2025-11-25', era: 'legacy' },
+    ...createFixtureExtensions(mockClient),
     project: 'test-project',
     getServerInfo: vi.fn().mockReturnValue(options.serverInfo ?? null),
     listTools: options.listToolsError

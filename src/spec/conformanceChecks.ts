@@ -19,6 +19,7 @@ import {
 } from './registry.js';
 import { coreChecks } from './checks/core.js';
 import { modernChecks } from './checks/modern.js';
+import { skillsChecks, type SkillsCheckOptions } from './checks/skills.js';
 
 export type { MCPConformanceCheck };
 
@@ -63,6 +64,13 @@ export interface MCPConformanceOptions {
    * @default true
    */
   probe?: boolean;
+
+  /**
+   * Agent Skills (SEP-2640) checks. They run in every era when the server
+   * declares `io.modelcontextprotocol/skills`. Pass options to tune them, or
+   * false to turn them off.
+   */
+  skills?: SkillsCheckOptions | false;
 }
 
 /**
@@ -223,8 +231,13 @@ export async function runConformanceChecks(
   // When tools/list fails, the core checks stop at list_tools_succeeds, but
   // modern wire-level checks still run: the SDK can reject a malformed
   // result (e.g. missing cache hints) whose raw frame is what they inspect.
+  // Skills checks don't depend on tools/list, so they run even when it fails.
+  const skills = options.skills === false ? [] : skillsChecks(options.skills);
   const checks = [
     ...(await runCheckDefinitions(core, context)),
+    ...(await runCheckDefinitions(skills, context)),
+    // Modern checks run last so reserved_error_codes sees every error the
+    // other checks provoked.
     ...(await runCheckDefinitions(
       toolsError === undefined
         ? modernChecks

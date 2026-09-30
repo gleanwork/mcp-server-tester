@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createVercelOrchestrator } from './vercel.js';
 import type { MCPFixtureApi } from '../../../mcp/fixtures/mcpFixture.js';
+import { createFixtureExtensions } from '../../../mcp/fixtures/fixtureExtensions.js';
 
 // jsonSchema mock function — captured here so tests can inspect calls
 const jsonSchemaMock = vi.fn((schema: Record<string, unknown>) => ({
@@ -58,6 +59,7 @@ function createMockMCP(
     client: {} as MCPFixtureApi['client'],
     authType: 'none',
     protocol: { requested: 'legacy', negotiated: '2025-11-25', era: 'legacy' },
+    ...createFixtureExtensions({} as MCPFixtureApi['client']),
     project: undefined,
     getServerInfo: vi.fn().mockReturnValue(null),
     listTools: vi.fn().mockResolvedValue(tools),
