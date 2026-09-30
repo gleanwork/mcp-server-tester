@@ -21,6 +21,8 @@ import {
   type StoredEvalArtifact,
 } from './resultStore.js';
 import { createFixtureExtensions } from '../mcp/fixtures/fixtureExtensions.js';
+import type { CaseExecution } from './caseExecution.js';
+import { hostTraceToExecution } from './hostTrace.js';
 
 function createMockMCP(callToolResponse?: {
   content?: unknown;
@@ -846,17 +848,18 @@ describe('runEvalDataset defaultLlmIterations', () => {
       }),
     ]);
 
-    // We can't actually run mcp_host mode in unit tests, so spy on the
-    // executeToolCall path to verify the effective case has iterations set.
-    // Instead we test via the result: if defaultLlmIterations=2 is applied,
-    // the case would run twice, but since mcp_host fails without a real LLM
-    // we just check the option is read without error and the case runs.
+    // An in-memory host at the case-execution seam stands in for the LLM.
+    const executeCase = vi.fn(
+      async (): Promise<CaseExecution> =>
+        hostTraceToExecution({ finalText: 'ok', events: [] }, 'structured')
+    );
     const result = await runEvalDataset(
-      { dataset, defaultLlmIterations: 1 },
+      { dataset, defaultLlmIterations: 3, executeCase },
       createContext(mcp)
     );
-    // mcp_host without scenario/mcpHostConfig fields fails gracefully
-    expect(result.total).toBe(1);
+    expect(executeCase).toHaveBeenCalledTimes(3);
+    expect(result.caseResults[0]!.iterationResults).toHaveLength(3);
+    expect(result.caseResults[0]!.assertionPassRate).toBe(1);
   });
 
   it('does not apply defaultLlmIterations to direct mode cases', async () => {
@@ -984,7 +987,10 @@ describe('runEvalDataset', () => {
       {
         dataset: createDataset([createEvalCase({ id: 'case-1' })]),
         protocol: () => protocol,
-        executeCase: async () => ({ response: { content: [] } }),
+        executeCase: async () => ({
+          kind: 'direct',
+          response: { content: [] },
+        }),
       },
       { ...createContext(), mcp: undefined }
     );

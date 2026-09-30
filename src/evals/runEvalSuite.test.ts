@@ -1,4 +1,3 @@
-import type { EvalExecutionResult } from './hostTrace.js';
 import { simulationToHostTrace } from './hostTrace.js';
 import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -38,7 +37,8 @@ afterEach(async () => {
 async function fixture(
   cases: EvalCase[],
   extra: Record<string, unknown> = {},
-  run = vi.fn<(options: HostRunOptions) => Promise<EvalExecutionResult>>(
+  // The fixture host's simulation-shaped result, adapted to a trace below.
+  run = vi.fn<(options: HostRunOptions) => Promise<{ response: unknown }>>(
     async () => ({
       response: { success: true, response: 'WRONG', toolCalls: [] },
     })

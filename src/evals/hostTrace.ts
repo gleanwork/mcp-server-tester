@@ -6,26 +6,16 @@ import type {
 import { withSkillEvents } from './mcpHost/hostSkills.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
-import type { UsageMetrics } from '../types/index.js';
+import type { HostExecution } from './caseExecution.js';
 
-/** Internal runner execution envelope, also used for direct MCP calls. */
-export interface EvalExecutionResult {
-  response: unknown;
-  error?: string;
-  hostUsage?: UsageMetrics;
-  hostTelemetry?: Record<string, unknown>;
-  /** Host time already spent outside the current evaluation timer. */
-  preExecutionDurationMs?: number;
-  evidence?: HostEvidence;
-}
-
-/** Adapt once at the runner boundary, retaining original events for reporting. */
+/** Adapt a host trace once at the runner boundary, retaining original events for reporting. */
 export function hostTraceToExecution(
   trace: HostRunResult,
   evidence: HostEvidence,
   servers: MCPConfig[] = []
-): EvalExecutionResult {
+): HostExecution {
   return {
+    kind: 'host',
     response: {
       success: !trace.error,
       response: trace.finalText,
@@ -60,8 +50,9 @@ export function hostTraceToExecution(
       ...(trace.diagnostics ? { diagnostics: trace.diagnostics } : {}),
     },
     error: trace.error,
-    hostUsage: trace.usage,
-    hostTelemetry: trace.telemetry,
+    usage: trace.usage,
+    telemetry: trace.telemetry,
+    ...(trace.diagnostics ? { diagnostics: trace.diagnostics } : {}),
     evidence,
   };
 }

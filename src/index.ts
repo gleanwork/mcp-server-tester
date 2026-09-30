@@ -398,6 +398,13 @@ export type {
 
 // Eval Runner
 export { runEvalDataset, runEvalCase } from './evals/evalRunner.js';
+export type {
+  CaseExecution,
+  DirectExecution,
+  HostExecution,
+  FailedExecution,
+  HostResponse,
+} from './evals/caseExecution.js';
 
 export type {
   EvalResultStore,

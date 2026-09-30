@@ -12,6 +12,7 @@ Other 2.0 changes have their own guides: [dataset sources](./dataset-sources.md)
 - [Conformance results: severity, skips, and new checks](#conformance-results-severity-skips-and-new-checks)
 - [`compareEvalRuns()` returns `warnings`](#compareevalruns-returns-warnings)
 - [`MCP_PROTOCOL_VERSION` is deprecated](#mcp_protocol_version-is-deprecated)
+- [`executeCase` returns a typed `CaseExecution`](#executecase-returns-a-typed-caseexecution)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
 ---
@@ -116,6 +117,38 @@ The result has a new `warnings: string[]` field. It flags comparisons between ru
 ## `MCP_PROTOCOL_VERSION` is deprecated
 
 The exported `MCP_PROTOCOL_VERSION` constant is the header MST sends on OAuth discovery requests, not the protocol connections speak. It is deprecated and will be removed in a future major. Use `mcpConfig.protocol` to choose a connection's protocol.
+
+## `executeCase` returns a typed `CaseExecution`
+
+**Affects:** code that passes a custom `executeCase` to `runEvalDataset()` or `runEvalCase()`.
+
+`executeCase` now returns a `CaseExecution` that says how the case ran. The runner used to guess this from the shape of `response`.
+
+```typescript
+import type { CaseExecution } from '@gleanwork/mcp-server-tester';
+
+// A direct tool result or MCP request result
+const direct: CaseExecution = { kind: 'direct', response: toolResult };
+
+// A host run, with the simulation-shaped response validators read
+const host: CaseExecution = {
+  kind: 'host',
+  response: { success: true, response: 'answer', toolCalls: [] },
+  evidence: 'structured',
+  usage,
+};
+
+// Execution that failed before producing a result
+const failed: CaseExecution = {
+  kind: 'failed',
+  response: undefined,
+  error: 'host crashed',
+};
+```
+
+To migrate, add `kind` to what you return. On host executions, rename `hostUsage` to `usage` and `hostTelemetry` to `telemetry`.
+
+`EvalCaseResult` is unchanged. One edge case changes: a `direct` result that happens to look like a host simulation (`success` plus `toolCalls`) no longer gets host-only fields such as `hostUsage` and `mcpHostTrace`. Its expectations are evaluated the same way.
 
 ## New in 2.0 (non-breaking)
 

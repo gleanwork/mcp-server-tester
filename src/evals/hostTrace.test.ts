@@ -54,9 +54,11 @@ describe('per-scenario host traces', () => {
       'structured'
     );
     expect(execution).toMatchObject({
+      kind: 'host',
       error: 'Host timed out',
-      hostUsage: usage,
-      hostTelemetry: telemetry,
+      usage,
+      telemetry,
+      diagnostics,
       response: {
         success: false,
         diagnostics,
@@ -193,7 +195,11 @@ describe('per-scenario host traces', () => {
           ],
         },
         executeCase: async () => ({
-          response: { success: true, toolCalls: [{ name: 'search' }] },
+          kind: 'host',
+          response: {
+            success: true,
+            toolCalls: [{ name: 'search', arguments: {} }],
+          },
           evidence: 'observed',
         }),
       },

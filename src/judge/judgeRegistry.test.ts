@@ -71,7 +71,10 @@ describe('registerJudge', () => {
         ],
       });
       const result = await runEvalDataset(
-        { dataset, executeCase: async () => ({ response: 'answer' }) },
+        {
+          dataset,
+          executeCase: async () => ({ kind: 'direct', response: 'answer' }),
+        },
         {}
       );
       expect(result.passed).toBe(1);

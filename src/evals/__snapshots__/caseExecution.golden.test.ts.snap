@@ -306,31 +306,7 @@ exports[`golden: direct execution > tool result shaped like a host simulation 1`
       "pass": true,
     },
   },
-  "hostUsage": {
-    "durationMs": "<time>",
-    "inputTokens": 100,
-    "outputTokens": 20,
-  },
   "id": "simulation-shaped",
-  "mcpHostTrace": {
-    "calls": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "name": "get_weather",
-        "status": "expected",
-      },
-      {
-        "arguments": {
-          "q": "London",
-        },
-        "name": "search",
-        "status": "unexpected",
-      },
-    ],
-    "missed": [],
-  },
   "pass": true,
   "project": "golden",
   "request": {
