@@ -1,6 +1,10 @@
 import type { MCPConfig } from '../../config/mcpConfig.js';
 import type { CodexMcpServerConfig } from '../codexSetup/config.js';
-import { checkMcpServers, type McpServerReadiness } from '../mcpReadiness.js';
+import {
+  checkMcpServers,
+  isMcpServerReady,
+  type McpServerReadiness,
+} from '../mcpReadiness.js';
 
 /** Sanitized direct-preflight outcome. `tokens` must never reach telemetry. */
 export interface ChatgptMcpPreflight {
@@ -49,22 +53,6 @@ export async function preflightChatgptMcpServers(
   return {
     servers: results,
     tokens,
-    passed: results.every(
-      (server) => server.status === 'connected' && !!server.toolCount
-    ),
+    passed: results.every(isMcpServerReady),
   };
-}
-
-/** One-line, credential-free summary for errors. */
-export function describeChatgptMcpPreflight(
-  servers: readonly McpServerReadiness[]
-): string {
-  return servers
-    .map((server) => {
-      const detail =
-        server.error ??
-        (server.status === 'connected' ? `${server.toolCount ?? 0} tools` : '');
-      return `${server.label}=${server.status}${detail ? `(${detail})` : ''}`;
-    })
-    .join(', ');
 }

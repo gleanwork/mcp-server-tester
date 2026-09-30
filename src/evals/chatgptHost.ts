@@ -1,4 +1,3 @@
-import { mkdir, open, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
@@ -18,12 +17,11 @@ import {
 } from './hostPlugins.js';
 import type { ExternalHostConfig } from './externalHost/types.js';
 import { simulationToHostTrace } from './hostTrace.js';
+import { hostSecretValues, redactHostSecrets } from './hostSecrets.js';
 import {
-  hostSecretValues,
-  redactHostError,
-  redactHostSecrets,
-  redactedHostError,
-} from './hostSecrets.js';
+  requireIdenticalHostSettings,
+  runDesktopBatch,
+} from './desktopBatch.js';
 import { NATIVE_MAX_ACTIONS } from './chatgpt/linuxContract.js';
 import {
   LINUX_CHATGPT_PLATFORM,
@@ -90,12 +88,7 @@ async function runBatch(
   const configs = requests.map((request) => Schema.parse(request.config));
   if (requests.some((request) => !request.input.scenario.trim()))
     throw new Error('ChatGPT requires non-empty scenarios.');
-  if (
-    configs.some(
-      (config) => JSON.stringify(config) !== JSON.stringify(configs[0])
-    )
-  )
-    throw new Error('ChatGPT batch requires identical host settings.');
+  requireIdenticalHostSettings('ChatGPT', configs);
   const credentialEnv = requests.map((request, index) => ({
     ...process.env,
     ...context.env,
@@ -169,212 +162,141 @@ async function runBatch(
     throw new Error(
       'ChatGPT batch requires identical MCP servers, credentials, and environment.'
     );
-  // Claim before any lifecycle operation: another process must not stop the active app.
-  const directory = join(
-    platform.lockHome(externalConfigs[0]!),
-    '.mcp-server-tester'
-  );
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  const path = join(directory, 'chatgpt-desktop.lock');
-  const lease = await open(path, 'wx', 0o600).catch(() => {
-    throw new Error(
-      'ChatGPT desktop is locked by another run or an interrupted run. Use one worker; inspect stale locks before removing them.'
-    );
-  });
-  const results: HostRunResult[] = [];
-  const session = new ChatgptAppSession('batch');
-  const usedSessions = new Set<string>();
-  let restartBeforeCase = false;
-  let recoveryError: string | undefined;
-  let executionError: unknown;
-  let executionFailed = false;
-  let cleanupError: Error | undefined;
-  try {
-    await lease.writeFile(
-      JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() })
-    );
-    await session.prepare(externalConfigs[0]!);
-    for (const [index, request] of requests.entries()) {
-      // Each case is self-contained: a failed case restarts the app for the next
-      // one and is never retried or resent itself.
-      if (restartBeforeCase && !recoveryError) {
-        restartBeforeCase = false;
-        try {
-          await session.restart();
-        } catch (error) {
-          recoveryError = redactHostError(error, secrets, 'restart failed');
-        }
-      }
-      if (recoveryError) {
-        // Without a verified app, nothing can be sent safely.
-        results.push({
-          finalText: '',
-          events: [],
-          error: `Not submitted because the ChatGPT app could not be restarted after an earlier failed case: ${recoveryError}`,
-          telemetry: {
-            caseExecution: { status: 'not-submitted', continuation: 'blocked' },
-          },
-        });
-        continue;
-      }
-      const config = configs[index]!;
-      const serverConfig = prepared[index]!;
-      const started = Date.now();
-      // Plugin MCP servers are eval servers under their own names.
-      const serverLabels = new Set([
-        ...serverConfig.servers.map((server) => server.label),
-        ...hostPluginMcpServers(config.plugins ?? []).map(
-          (target) => target.server
+  // One desktop per run: claimed before any lifecycle operation, because
+  // another process must not stop the active app.
+  const appSession = new ChatgptAppSession('batch');
+  return runDesktopBatch<ChatgptAppSession>(
+    {
+      name: 'ChatGPT',
+      lease: {
+        directory: join(
+          platform.lockHome(externalConfigs[0]!),
+          '.mcp-server-tester'
         ),
-      ]);
-      // Eval prompts stay unchanged. Server selection is verified from native calls,
-      // not enforced by adding evaluator instructions to the model's context.
-      const result = await runExternalHostScenario(
-        request.input.scenario,
-        {
-          ...externalConfigs[index]!,
-          options: {
-            ...externalConfigs[index]!.options,
-            managedChatgptSession: session,
-          },
-        },
-        { caseId: request.caseId }
-      );
-      const trace = simulationToHostTrace(result, request.input.servers);
-      if (trace.error) trace.error = redactHostSecrets(trace.error, secrets);
-      if (result.success) {
-        const id = result.externalHost.session.id;
-        if (!id || !result.externalHost.session.turnId || usedSessions.has(id))
-          trace.error =
-            'ChatGPT requires a distinct native session and turn for each fresh query; refusing duplicate attribution.';
-        else usedSessions.add(id);
-      }
-      if (trace.usage) {
-        // Native OpenAI input totals include cache reads; V2 counts cache separately.
-        const uncached =
-          trace.usage.inputTokens -
-          (trace.usage.cacheReadInputTokens ?? 0) -
-          (trace.usage.cacheCreationInputTokens ?? 0);
-        if (uncached < 0)
-          trace.error = 'Native cached input exceeds total input tokens.';
-        else trace.usage = { ...trace.usage, inputTokens: uncached };
-      }
-      // Native/controller/evidence failures restart the app before the next case.
-      // A completed, attributed turn can fail the MCP measurement without a restart.
-      const executionTrusted = result.success && !trace.error;
-      restartBeforeCase = !executionTrusted;
-      const mcpCalls = result.toolCalls.filter(
-        (call) => call.source !== 'host'
-      );
-      const selectedCalls = mcpCalls.filter(
-        (call) => call.server && serverLabels.has(call.server)
-      );
-      const unexpectedServers = [
-        ...new Set(
-          mcpCalls
-            .filter((call) => !call.server || !serverLabels.has(call.server))
-            .map((call) => call.server ?? '(unattributed)')
-        ),
-      ];
-      let measurementError: string | undefined;
-      if (executionTrusted && unexpectedServers.length)
-        measurementError =
-          'ChatGPT called an MCP server outside the configured evaluation server selection.';
-      else if (
-        executionTrusted &&
-        config.options.requireMcpCalls &&
-        !selectedCalls.length
-      )
-        measurementError =
-          'ChatGPT completed without calling a required evaluation MCP tool on the configured server selection.';
-      if (measurementError) trace.error = measurementError;
-      results.push({
-        ...trace,
-        durationMs: Date.now() - started,
-        ...(result.success ? { llmDurationMs: result.llmDurationMs } : {}),
-        telemetry: {
-          caseExecution: {
-            status: executionTrusted ? 'completed' : 'failed',
-            continuation: executionTrusted ? 'allowed' : 'restart',
-          },
-          mcpSelection: {
-            status: !executionTrusted
-              ? 'not-evaluated'
-              : measurementError
-                ? 'failed'
-                : 'passed',
-            required: config.options.requireMcpCalls === true,
-            selectedServers: [...serverLabels],
-            configuredMcpCallCount: selectedCalls.length,
-            externalMcpCallCount: mcpCalls.length,
-            hostToolCallCount: result.toolCalls.filter(
-              (call) => call.source === 'host'
-            ).length,
-            unexpectedServers,
-            ...(measurementError ? { error: measurementError } : {}),
-          },
-          externalHost: result.externalHost,
-          computerUse: result.externalHost.computerUse,
-          nativeController: result.externalHost.nativeController,
-          // Failed bound turns keep their partial native history.
-          ...(result.conversationHistory
-            ? { conversationHistory: result.conversationHistory }
-            : {}),
-          ...(result.success ? { mcpDurationMs: result.mcpDurationMs } : {}),
-        },
-      });
-    }
-  } catch (error) {
-    executionFailed = true;
-    executionError = error;
-  } finally {
-    let cleanupFailed = false;
-    try {
-      await session.dispose();
-    } catch (error) {
-      cleanupFailed = true;
-      const message = `ChatGPT batch cleanup failed; desktop lock retained for inspection: ${redactHostError(error, secrets, redactHostSecrets(String(error), secrets))}`;
-      for (const result of results) {
-        result.error = [result.error, message].filter(Boolean).join(' ');
-        result.telemetry = {
-          ...result.telemetry,
-          batchFailure: { kind: 'cleanup_failed', error: message },
-        };
-      }
-      cleanupError = new Error(message);
-    } finally {
-      for (const [index, result] of results.entries()) {
-        result.telemetry = {
-          ...result.telemetry,
-          batchLifecycle: session.telemetry,
-          batchCase: {
-            index,
-            caseId: requests[index]!.caseId,
-            count: requests.length,
-          },
-        };
-      }
-      await lease.close();
-      if (!cleanupFailed) await unlink(path);
-    }
-  }
-  if (executionFailed) {
-    const safeExecutionError = redactedHostError(
-      executionError,
+        file: 'chatgpt-desktop.lock',
+      },
       secrets,
-      typeof executionError === 'string'
-        ? executionError
-        : 'ChatGPT batch execution failed.'
-    );
-    if (cleanupError)
-      throw new AggregateError(
-        [safeExecutionError, cleanupError],
-        'ChatGPT execution and batch cleanup failed.'
-      );
-    throw safeExecutionError;
-  }
-  if (cleanupError && !results.length) throw cleanupError;
-  return results;
+      resetVerb: 'restarted',
+      async prepare() {
+        await appSession.prepare(externalConfigs[0]!);
+        return appSession;
+      },
+      reset: () => appSession.restart(),
+      dispose: () => appSession.dispose(),
+      batchTelemetry: () => appSession.telemetry,
+      async runCase(_session, request, index, ledger) {
+        const config = configs[index]!;
+        const serverConfig = prepared[index]!;
+        const started = Date.now();
+        // Plugin MCP servers are eval servers under their own names.
+        const serverLabels = new Set([
+          ...serverConfig.servers.map((server) => server.label),
+          ...hostPluginMcpServers(config.plugins ?? []).map(
+            (target) => target.server
+          ),
+        ]);
+        // Eval prompts stay unchanged. Server selection is verified from native calls,
+        // not enforced by adding evaluator instructions to the model's context.
+        const result = await runExternalHostScenario(
+          request.input.scenario,
+          {
+            ...externalConfigs[index]!,
+            options: {
+              ...externalConfigs[index]!.options,
+              managedChatgptSession: appSession,
+            },
+          },
+          { caseId: request.caseId }
+        );
+        const trace = simulationToHostTrace(result, request.input.servers);
+        if (trace.error) trace.error = redactHostSecrets(trace.error, secrets);
+        if (result.success) {
+          const id = result.externalHost.session.id;
+          if (!id || !result.externalHost.session.turnId || !ledger.claim(id))
+            trace.error =
+              'ChatGPT requires a distinct native session and turn for each fresh query; refusing duplicate attribution.';
+        }
+        if (trace.usage) {
+          // Native OpenAI input totals include cache reads; V2 counts cache separately.
+          const uncached =
+            trace.usage.inputTokens -
+            (trace.usage.cacheReadInputTokens ?? 0) -
+            (trace.usage.cacheCreationInputTokens ?? 0);
+          if (uncached < 0)
+            trace.error = 'Native cached input exceeds total input tokens.';
+          else trace.usage = { ...trace.usage, inputTokens: uncached };
+        }
+        // Native/controller/evidence failures restart the app before the next case.
+        // A completed, attributed turn can fail the MCP measurement without a restart.
+        const executionTrusted = result.success && !trace.error;
+        const mcpCalls = result.toolCalls.filter(
+          (call) => call.source !== 'host'
+        );
+        const selectedCalls = mcpCalls.filter(
+          (call) => call.server && serverLabels.has(call.server)
+        );
+        const unexpectedServers = [
+          ...new Set(
+            mcpCalls
+              .filter((call) => !call.server || !serverLabels.has(call.server))
+              .map((call) => call.server ?? '(unattributed)')
+          ),
+        ];
+        let measurementError: string | undefined;
+        if (executionTrusted && unexpectedServers.length)
+          measurementError =
+            'ChatGPT called an MCP server outside the configured evaluation server selection.';
+        else if (
+          executionTrusted &&
+          config.options.requireMcpCalls &&
+          !selectedCalls.length
+        )
+          measurementError =
+            'ChatGPT completed without calling a required evaluation MCP tool on the configured server selection.';
+        if (measurementError) trace.error = measurementError;
+        const caseResult: HostRunResult = {
+          ...trace,
+          durationMs: Date.now() - started,
+          ...(result.success ? { llmDurationMs: result.llmDurationMs } : {}),
+          telemetry: {
+            caseExecution: {
+              status: executionTrusted ? 'completed' : 'failed',
+              continuation: executionTrusted ? 'allowed' : 'restart',
+            },
+            mcpSelection: {
+              status: !executionTrusted
+                ? 'not-evaluated'
+                : measurementError
+                  ? 'failed'
+                  : 'passed',
+              required: config.options.requireMcpCalls === true,
+              selectedServers: [...serverLabels],
+              configuredMcpCallCount: selectedCalls.length,
+              externalMcpCallCount: mcpCalls.length,
+              hostToolCallCount: result.toolCalls.filter(
+                (call) => call.source === 'host'
+              ).length,
+              unexpectedServers,
+              ...(measurementError ? { error: measurementError } : {}),
+            },
+            externalHost: result.externalHost,
+            computerUse: result.externalHost.computerUse,
+            nativeController: result.externalHost.nativeController,
+            // Failed bound turns keep their partial native history.
+            ...(result.conversationHistory
+              ? { conversationHistory: result.conversationHistory }
+              : {}),
+            ...(result.success ? { mcpDurationMs: result.mcpDurationMs } : {}),
+          },
+        };
+        return {
+          result: caseResult,
+          continuation: executionTrusted ? 'allowed' : 'reset',
+        };
+      },
+    },
+    requests
+  );
 }
 
 function chatgptHost(platform: ChatgptPlatform): HostDefinition {

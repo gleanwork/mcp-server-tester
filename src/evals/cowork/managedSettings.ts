@@ -8,6 +8,7 @@ import {
   type HostPlugin,
   type HostStdioPaths,
 } from '../hostPlugins.js';
+import { mcpServerLabel } from '../../config/mcpConfig.js';
 
 /**
  * The Cowork managed-settings contract for plugins and plain or eval stdio servers
@@ -65,7 +66,7 @@ export function coworkManagedPluginSettings(options: {
   // A blocked name must never shadow an eval server.
   const labels = new Set(
     (options.declaredServers ?? options.servers).map((server, index) =>
-      (server.label ?? `server-${index + 1}`).toLowerCase()
+      mcpServerLabel(server, index).toLowerCase()
     )
   );
   const clash = blocked.find((entry) => labels.has(entry.name.toLowerCase()));
@@ -234,7 +235,7 @@ export function coworkMcpSettingsMatch(
   for (const [index, server] of options.servers.entries()) {
     if (server.transport !== 'http') continue;
     const observed = actual.find(
-      (s) => s.name === (server.label ?? `server-${index + 1}`)
+      (s) => s.name === mcpServerLabel(server, index)
     );
     if (
       !observed ||

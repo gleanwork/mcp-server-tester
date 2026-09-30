@@ -1,5 +1,10 @@
 import { isHttpConfig, type MCPConfig } from '../../config/mcpConfig.js';
-import { checkMcpServers, type McpServerReadiness } from '../mcpReadiness.js';
+import {
+  checkMcpServers,
+  isMcpServerReady,
+  McpReadinessError,
+  type McpServerReadiness,
+} from '../mcpReadiness.js';
 import {
   resolveCoworkMcpHeaders,
   toCoworkServers,
@@ -10,23 +15,14 @@ import {
   type HostPlugin,
   type HostStdioPaths,
 } from '../hostPlugins.js';
+import { mcpServerLabel } from '../../config/mcpConfig.js';
 
 export type CoworkMcpServerReadiness = McpServerReadiness;
 
-export class CoworkMcpReadinessError extends Error {
-  readonly servers: CoworkMcpServerReadiness[];
-
+export class CoworkMcpReadinessError extends McpReadinessError {
   constructor(servers: CoworkMcpServerReadiness[]) {
-    super(
-      `Cowork MCP preflight failed; no task was submitted. ${servers
-        .map(
-          (server) =>
-            `${server.label}=${server.status}${server.error ? `(${server.error})` : ''}(${server.elapsedMs}ms)`
-        )
-        .join(', ')}`
-    );
+    super('Cowork', servers, 'task');
     this.name = 'CoworkMcpReadinessError';
-    this.servers = servers;
   }
 }
 
@@ -68,12 +64,13 @@ export async function verifyCoworkMcpServers(
   // Desktop settings use the same original (HTTP + stdio) server index.
   const labeledServers = servers.map((server, index) => ({
     ...server,
-    label: server.label ?? `server-${index + 1}`,
+    label: mcpServerLabel(server, index),
   }));
   const results = await checkMcpServers(labeledServers, (server) =>
     resolveServer(server, env, context)
   );
-  if (results.some((result) => result.status !== 'connected'))
+  // The shared readiness rule (connected, with tools), Cowork's error.
+  if (!results.every(isMcpServerReady))
     throw new CoworkMcpReadinessError(results);
   return results;
 }

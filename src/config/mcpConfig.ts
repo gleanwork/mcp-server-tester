@@ -524,6 +524,11 @@ export function isStdioConfig(config: MCPConfig): config is StdioMCPConfig {
 /**
  * Type guard to check if a config is for HTTP transport
  */
+/** A server's label, or its default: `server-<n>` by its 1-based position. */
+export function mcpServerLabel(server: MCPConfig, index: number): string {
+  return server.label ?? `server-${index + 1}`;
+}
+
 export function isHttpConfig(config: MCPConfig): config is HttpMCPConfig {
   return config.transport === 'http';
 }

@@ -19,6 +19,7 @@ Other 2.0 changes have their own guides: [dataset sources](./dataset-sources.md)
 - [MCP reporter attachments](#mcp-reporter-attachments)
 - [Stored results are redacted the same way everywhere](#stored-results-are-redacted-the-same-way-everywhere)
 - [Which credentials are used](#which-credentials-are-used)
+- [Desktop hosts share one batch lifecycle](#desktop-hosts-share-one-batch-lifecycle)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
 ---
@@ -224,6 +225,17 @@ The fixtures and `createMCPClientForConfig()` now share one precedence, decided 
 - **`createMCPClientForConfig()` honours `auth.oauth.authStatePath`.** Only the fixture used it before. The state file also wins over `auth.accessToken`, as it did in the fixture.
 - **The `mcpAuthProvider` fixture prefers `MCP_AUTH_STATE_PATH` over `MCP_ACCESS_TOKEN`**, the same order as above. It used to prefer the token.
 - **Reported `authType`.** A client-credentials connection reports `oauth` (it reported `none`), and a config with both an OAuth state file and a token reports `oauth` (it reported `api-token`, though the state file's token was the one sent).
+
+## Desktop hosts share one batch lifecycle
+
+**Affects:** Cowork and ChatGPT desktop runs, and tooling that reads their case telemetry.
+
+Both hosts now run through one batch lifecycle (`src/evals/desktopBatch.ts`) and one MCP readiness rule, instead of two loops that had drifted. ChatGPT's behaviour is unchanged. For Cowork:
+
+- **The desktop lease works across processes.** Cowork used an in-process flag, so a second process could drive the same desktop. It now claims `~/.mcp-server-tester/cowork-desktop-<id>.lock` (one per desktop, identified by its native data directory), as ChatGPT does with its own lock. A run that was interrupted, or whose cleanup failed, leaves the file behind: inspect the desktop, then remove it. The error names the file.
+- **A failed cleanup no longer discards the results.** If restoring the desktop fails, every case result carries the cleanup error (and `telemetry.batchFailure`), and the lease is kept. Cowork used to throw and lose the results.
+- **Readiness requires at least one tool.** A server that connects but lists no tools now fails the preflight, as it already did for ChatGPT. The failure message lists each server as `label=status(detail)`, where detail is the error or the tool count (Cowork's used to end each entry with the elapsed time). Setup and readiness errors keep their class (for example `CoworkMcpReadinessError` with `.servers`) unless they contained a secret that had to be redacted.
+- **Cases not submitted after a failed reset** carry `telemetry.caseExecution: { status: 'not-submitted', continuation: 'blocked' }`, and every result has `telemetry.batchCase` (`index`, `caseId`, `count`), as ChatGPT's already did.
 
 ## New in 2.0 (non-breaking)
 

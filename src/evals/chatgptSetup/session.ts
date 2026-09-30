@@ -26,10 +26,8 @@ import type {
 } from './linuxProfile.js';
 import { hostPluginMcpServers } from '../hostPlugins.js';
 import type { McpServerReadiness } from '../mcpReadiness.js';
-import {
-  describeChatgptMcpPreflight,
-  preflightChatgptMcpServers,
-} from './mcpPreflight.js';
+import { preflightChatgptMcpServers } from './mcpPreflight.js';
+import { McpReadinessError } from '../mcpReadiness.js';
 
 const activeApplications = new Set<string>();
 
@@ -165,9 +163,7 @@ export class ChatgptAppSession {
         this.telemetry.mcpPreflight = preflight.servers;
         this.record('setup', 'verify_mcp');
         if (!preflight.passed)
-          throw new Error(
-            `ChatGPT MCP preflight failed; no prompt was submitted. ${describeChatgptMcpPreflight(preflight.servers)}`
-          );
+          throw new McpReadinessError('ChatGPT', preflight.servers);
       }
       if (platform.permissionNotice)
         process.stderr.write(platform.permissionNotice);

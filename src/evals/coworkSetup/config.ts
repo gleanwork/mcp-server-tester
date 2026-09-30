@@ -1,5 +1,6 @@
 import type { HttpMCPConfig, MCPConfig } from '../../config/mcpConfig.js';
 import { resolveCoworkSetupConfig, type CoworkSetupConfig } from './options.js';
+import { mcpServerLabel } from '../../config/mcpConfig.js';
 
 export type CoworkMcpSettings = {
   managedMcpServers: Array<{
@@ -38,7 +39,7 @@ export function toCoworkServers(servers: MCPConfig[]): CoworkMcpServerConfig[] {
     }
     return {
       transport: 'http',
-      label: server.label ?? `server-${index + 1}`,
+      label: mcpServerLabel(server, index),
       serverUrl: server.serverUrl,
       ...(server.headers ? { headers: server.headers } : {}),
       ...(server.auth ? { auth: server.auth } : {}),

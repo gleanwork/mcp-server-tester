@@ -309,7 +309,8 @@ the bytes present at audit time; notices contain no original digest to authentic
 
 ## Structure and behavior
 
-- `coworkHost.ts`: batching, correlation, native collection, and trace conversion.
+- `desktopBatch.ts`: the batch lifecycle shared with the ChatGPT host: the desktop lease, per-case reset policy, native-session de-duplication, redaction, and cleanup.
+- `coworkHost.ts`: Cowork's setup, one case (submit, bind, HITL, native collection), reset, and trace conversion.
 - `cowork/platform.ts`: small injectable platform interface and OS selection.
 - `cowork/macos.ts`: wiring to the existing setup, recovery, and desktop functions.
 - `coworkSetup/`: profile/MCP settings, private header helpers, and guarded restore.
@@ -361,6 +362,14 @@ node --import tsx scripts/recover-cowork.ts --confirm
 
 Never delete managed locks to force a retry. This is the existing managed desktop
 workflow, not a sandbox or a transactional guarantee over arbitrary UI actions.
+
+One run drives a desktop at a time. MST claims it with a lease file,
+`~/.mcp-server-tester/cowork-desktop-<id>.lock`, where `<id>` identifies the
+desktop by its native data directory. A second run on the same desktop, even in
+another process, refuses to share it; runs on separate desktops (for example,
+several Linux displays) don't block each other. If cleanup or restoration fails, every case result says
+so and the lease is kept, so the next run stops until you have inspected the
+desktop and removed the file. An interrupted run leaves it behind in the same way.
 
 ## Host plugins
 
@@ -583,9 +592,10 @@ callers.
 Before the first prompt, MST launches each stdio eval server itself, with the
 same resolved command, args, env, and data dir (when used), but without the parent
 environment. On macOS it uses the paths returned by the setup transaction; on
-Linux it uses the caller-owned paths checked during prepare. It fails closed
-with `too few tools (<n> < <minTools>)` when the server lists fewer than
-`minTools` tools. For example, a Glean adapter with a
+Linux it uses the caller-owned paths checked during prepare. Every server, stdio
+or HTTP, must connect and list at least one tool (the same rule as the ChatGPT
+host). It fails closed with `too few tools (<n> < <minTools>)` when the server
+lists fewer than `minTools` tools. For example, a Glean adapter with a
 bad token lists only its static tools. Desktop-side readiness (for example, a
 caller's own log check) should also compare each server's `toolCount` with
 `minTools`.

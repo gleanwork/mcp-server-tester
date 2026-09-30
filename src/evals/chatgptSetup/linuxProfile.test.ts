@@ -1,3 +1,4 @@
+import type * as ReadinessModule from '../mcpReadiness.js';
 import {
   chmod,
   mkdir,
@@ -31,7 +32,10 @@ vi.mock('../codexSetup/appServerStatus.js', async (original) => ({
   ...(await original<typeof AppServerModule>()),
   probeAppServerStatus: vi.fn(),
 }));
-vi.mock('../mcpReadiness.js', () => ({ checkMcpServers: vi.fn() }));
+vi.mock('../mcpReadiness.js', async (original) => ({
+  ...(await original<typeof ReadinessModule>()),
+  checkMcpServers: vi.fn(),
+}));
 vi.mock('../codexSetup/plugins.js', async (original) => ({
   ...(await original<typeof PluginsModule>()),
   installCodexPlugins: vi.fn(),
