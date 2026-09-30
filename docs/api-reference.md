@@ -1215,7 +1215,7 @@ Run MCP protocol conformance checks.
   - `validateSchemas?: boolean` - Validate tool input schemas (default: `true`)
   - `checkServerInfo?`, `checkResources?`, `checkPrompts?: boolean` - Toggle those checks (default: `true`)
   - `probe?: boolean` - Allow raw probe requests for 2026-07-28 rejection rules (default: `true`)
-  - `skills?: { maxSkills?: number; verifyFiles?: 'skill-md' | 'all' } | false` - Tune or disable the skills checks
+  - `skills?: { maxSkills?: number; verifyFiles?: 'skill-md' | 'all'; maxPages?: number } | false` - Tune or disable the skills checks (defaults: 25 skills, `'skill-md'`, 64 pages)
 - `testInfo?: TestInfo` - Attach results to the MCP reporter
 
 Checks are selected by the negotiated era: legacy connections run the core checks; 2026-07-28 connections also run the [modern checks](./protocol-versions.md#conformance-by-era); servers that declare the skills extension get the [skills checks](./skills.md#conformance) in every era.
@@ -1257,7 +1257,7 @@ Connect to the same server once per protocol and check it serves the same tools,
 **Parameters:**
 
 - `config: MCPConfig`
-- `options?: { protocols?: ProtocolSetting[]; checkAuto?: boolean; clientOptions?: CreateMCPClientOptions }` - `protocols` defaults to `['legacy', '2026-07-28']`
+- `options?: { protocols?: ProtocolSetting[]; checkAuto?: boolean; clientOptions?: Omit<CreateMCPClientOptions, 'protocol'> }` - `protocols` defaults to `['legacy', '2026-07-28']`
 - `testInfo?: TestInfo`
 
 **Returns:** `Promise<MCPCrossEraResult>` with `pass`, `checks`, and `connections`.
@@ -1284,6 +1284,35 @@ projects: [
 ### `eraOfRevision(revision)` / `isProtocolRevision(value)`
 
 Classify a dated revision as `'legacy'` or `'modern'`, and check a string is a `YYYY-MM-DD` revision.
+
+### `DEFAULT_PROTOCOL_SETTING` / `ProtocolMatrixEntry<T>`
+
+`DEFAULT_PROTOCOL_SETTING` is `'legacy'`, the `protocol` used when none is set. `ProtocolMatrixEntry<T>` is the type of each project `protocolMatrix()` returns.
+
+## Tool Call Helpers
+
+### `callToolNormalized(client, params, options?)`
+
+What `mcp.callTool()` uses: calls a tool on a raw SDK `Client` and turns a JSON-RPC error sent by the server (such as `-32602` for an unknown tool) into an `isError: true` result whose text is `MCP error <code>: <message>`. Local SDK errors (timeouts, closed connections, auth) still reject.
+
+### `getToolProtocolError(result)`
+
+The `{ code, message, data? }` of the protocol error a result was made from, or `null` for results the server returned.
+
+## Skills Functions
+
+`mcp.skills` wraps these; use them directly with a raw SDK `Client`. See [Agent Skills](./skills.md).
+
+| Export                              | Purpose                                                                                                 |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `getSkillsExtension(client)`        | The server's `io.modelcontextprotocol/skills` settings, or `null` when it doesn't declare the extension |
+| `listSkills(client, { maxPages? })` | All `skills/list` entries, following `nextCursor` (default 64 pages)                                    |
+| `getSkill(client, uri)`             | One entry from `skills/get`                                                                             |
+| `readSkillFile(client, uri)`        | Read a skill file with `resources/read`: `{ uri, text?, bytes, mimeType? }`                             |
+| `verifySkillFile(entry, file)`      | Problems (digest, size, `SKILL.md` frontmatter) found checking a read file against its entry            |
+| `validateSkillEntry(entry)`         | SEP-2640 entry problems, each with `severity: 'must' \| 'should'`                                       |
+| `parseSkillFrontmatter(markdown)`   | The YAML frontmatter of a `SKILL.md` as an object, or `null` without one                                |
+| `SkillEntrySchema`                  | Zod schema for the wire shape of an entry (use `validateSkillEntry()` for the SEP rules)                |
 
 ## Type Definitions
 

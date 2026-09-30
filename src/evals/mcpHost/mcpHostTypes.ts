@@ -243,9 +243,9 @@ export interface MCPHostConfig {
    *   verified against the skill's entry (digest, size, frontmatter).
    * - 'preload': every SKILL.md is placed in the system prompt up front.
    *
-   * Loads are reported as `skill` events (`toolsTriggered` with
-   * `kind: 'skill'`) and in `skillLoads`; they do not count as MCP tool
-   * calls.
+   * Loads are reported in `skillLoads`. Each SKILL.md the model loads (and
+   * that passes verification) is also a `skill` event (`toolsTriggered` with
+   * `kind: 'skill'`); preloads are not. Loads do not count as MCP tool calls.
    *
    * @default 'off'
    */

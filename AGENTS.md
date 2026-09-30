@@ -162,7 +162,7 @@ The framework supports two evaluation modes:
 - **Direct mode** (`mode: 'direct'`, default): Call a specific tool with known arguments and assert on the response. Fast, deterministic, free. Use for regression testing.
 - **mcp_host mode** (`mode: 'mcp_host'`): An LLM receives a natural language `scenario` and discovers which tools to call. Non-deterministic, costs money, measures tool description quality. Use selectively for tool discoverability validation.
 
-Direct mode uses `toolName` + `args`, or `request: { method, params }` for any MCP request (e.g. `skills/get`). mcp_host mode uses `scenario` + `mcpHostConfig`; `mcpHostConfig.skills: 'catalog' | 'preload'` lets the SDK host offer the server's Agent Skills (loads are `kind: 'skill'` events for `toolsTriggered`). Tool call assertions (`toolsTriggered`, `toolCallCount`) only work in mcp_host mode.
+Direct mode uses `toolName` + `args`, or `request: { method, params }` for any MCP request (e.g. `skills/get`). mcp_host mode uses `scenario` + `mcpHostConfig`; `mcpHostConfig.skills: 'catalog' | 'preload'` lets the SDK host offer the server's Agent Skills (skills the model loads are `kind: 'skill'` events for `toolsTriggered`; preloads are not). Tool call assertions (`toolsTriggered`, `toolCallCount`) only work in mcp_host mode.
 
 ### Snapshot Testing
 

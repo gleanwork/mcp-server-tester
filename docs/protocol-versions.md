@@ -31,12 +31,12 @@ mcpConfig: {
 }
 ```
 
-| `protocol`           | Behavior                                                                                                               |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `'legacy'` (default) | The `initialize` handshake, byte-for-byte what MST 1.x sent. Negotiates the newest legacy revision the server accepts. |
-| `'2025-06-18'` etc.  | A pre-2026 revision is pinned: MST offers only that revision in `initialize`.                                          |
-| `'2026-07-28'`       | Pinned modern revision. Connecting fails if the server does not offer it (no fallback).                                |
-| `'auto'`             | Probes with `server/discover` and falls back to legacy if the server is not modern.                                    |
+| `protocol`           | Behavior                                                                                                                      |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `'legacy'` (default) | The `initialize` handshake, byte-for-byte what MST 1.x sent. The server accepts the offered revision or answers with its own. |
+| `'2025-06-18'` etc.  | A pre-2026 revision is pinned: MST offers only that revision and fails if the server answers with another.                    |
+| `'2026-07-28'`       | Pinned modern revision. Connecting fails if the server does not offer it (no fallback).                                       |
+| `'auto'`             | Probes with `server/discover` and falls back to legacy if the server is not modern.                                           |
 
 Pin revisions in tests. `'auto'` falls back silently, so a server whose 2026-07-28 support is broken would still pass on the legacy path. On stdio, `'auto'` also starts an extra short-lived copy of the server for the probe (`protocolProbe: { timeoutMs }` bounds it).
 
@@ -90,25 +90,27 @@ test('modern-only behavior', async ({ mcp }) => {
 
 `runConformanceChecks(mcp)` picks checks by the negotiated era:
 
-- **Legacy connections** run exactly the checks MST 1.x ran (`server_info_present`, `list_tools_succeeds`, `invalid_tool_returns_error`, …).
+- **Legacy connections** run the checks MST 1.x ran (`server_info_present`, `list_tools_succeeds`, `invalid_tool_returns_error`, …), with two that are stricter in 2.0 (see the [migration guide](./migrations/migration-2.0.md#conformance-results-severity-skips-and-new-checks)).
 - **Modern connections** also run the rules of the 2026-07-28 spec that hold for any server:
 
-| Check                          | Level  | Rule                                                                   |
-| ------------------------------ | ------ | ---------------------------------------------------------------------- |
-| `discover_succeeds`            | MUST   | `server/discover` works and lists the negotiated version               |
-| `discover_server_info`         | SHOULD | `DiscoverResult` carries `_meta["io.modelcontextprotocol/serverInfo"]` |
-| `result_type_present`          | MUST   | Every result has `resultType`                                          |
-| `cache_hints_present`          | MUST   | `ttlMs` ≥ 0 and `cacheScope` on discover, list, and read results       |
-| `result_server_info`           | SHOULD | Results carry `serverInfo` in `_meta`                                  |
-| `tools_list_deterministic`     | SHOULD | `tools/list` returns the same order each time                          |
-| `resource_not_found_error`     | MUST   | A missing resource is `-32602`, not `-32002` or empty `contents`       |
-| `unknown_tool_protocol_error`  | SHOULD | An unknown tool is a JSON-RPC protocol error rather than `isError`     |
-| `unsupported_version_rejected` | MUST   | An unknown version gets `-32022` with `data.supported` (and HTTP 400)  |
-| `missing_meta_rejected`        | MUST   | HTTP: a request without `_meta` gets 400 / `-32602`                    |
-| `header_mismatch_rejected`     | MUST   | HTTP: `Mcp-Method` that disagrees with the body gets 400 / `-32020`    |
-| `unknown_method_not_found`     | MUST   | HTTP: an unknown method gets 404 / `-32601`                            |
-| `no_session_id`                | SHOULD | HTTP: no `Mcp-Session-Id` is minted                                    |
-| `reserved_error_codes`         | MUST   | No undefined codes in `-32020..-32099`; no retired `-32002` / `-32042` |
+| Check                                  | Level  | Rule                                                                              |
+| -------------------------------------- | ------ | --------------------------------------------------------------------------------- |
+| `discover_succeeds`                    | MUST   | `server/discover` works and lists the negotiated version                          |
+| `discover_server_info`                 | SHOULD | `DiscoverResult` carries `_meta["io.modelcontextprotocol/serverInfo"]`            |
+| `result_type_present`                  | MUST   | Every result has `resultType`                                                     |
+| `cache_hints_present`                  | MUST   | `ttlMs` ≥ 0 and `cacheScope` on discover, list, and read results                  |
+| `result_server_info`                   | SHOULD | Results carry `serverInfo` in `_meta`                                             |
+| `tools_list_deterministic`             | SHOULD | `tools/list` returns the same order each time                                     |
+| `tools_list_stable_across_connections` | MUST   | A second connection sees the same tool set                                        |
+| `cache_scope_consistent_across_pages`  | MUST   | Every page of a paginated list has the same `cacheScope`                          |
+| `resource_not_found_error`             | MUST   | A missing resource is `-32602`, not `-32002` or empty `contents`                  |
+| `unknown_tool_protocol_error`          | SHOULD | An unknown tool is a JSON-RPC protocol error rather than `isError`                |
+| `unsupported_version_rejected`         | MUST   | An unknown version gets `-32022` with `data.supported` (and HTTP 400)             |
+| `missing_meta_rejected`                | MUST   | A request whose `_meta` lacks `clientCapabilities` gets `-32602` (HTTP 400)       |
+| `header_mismatch_rejected`             | MUST   | HTTP: `Mcp-Method` or `Mcp-Name` that disagrees with the body gets 400 / `-32020` |
+| `unknown_method_not_found`             | MUST   | HTTP: an unknown method gets 404 / `-32601`                                       |
+| `no_session_id`                        | SHOULD | HTTP: no `Mcp-Session-Id` is minted or echoed back                                |
+| `reserved_error_codes`                 | MUST   | No undefined codes in `-32020..-32099`; no retired `-32002` / `-32042`            |
 
 Failing SHOULD checks are **warnings**: they appear in `result.checks` and the report but do not fail `result.pass`. Checks that cannot run (for example HTTP-only rules on stdio) are reported as **skipped**.
 
@@ -150,8 +152,9 @@ Eval runs record the protocol they used in `result.metadata.protocol`, and store
 
 ## Errors you may see
 
-| Message                                                                | Meaning                                                                                     |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `MCP server did not accept protocol "2026-07-28": ...`                 | You pinned a modern revision and the server only speaks legacy. Use `'legacy'` or `'auto'`. |
-| `MCP server does not support protocol "2025-11-25" (it supports: ...)` | The server is modern-only. Pin one of the listed revisions.                                 |
-| `MCP connection failed: streamableHttp=http_400; sse=http_405`         | A legacy client against a modern-only HTTP server. Pin `'2026-07-28'`.                      |
+| Message                                                                                          | Meaning                                                                                       |
+| ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| `MCP server did not accept protocol "2026-07-28": ...`                                           | You pinned a modern revision and the server only speaks legacy. Use `'legacy'` or `'auto'`.   |
+| `MCP server does not support protocol "2025-11-25" (it supports: ...)`                           | The server is modern-only. Pin one of the listed revisions.                                   |
+| `MCP connection failed: streamableHttp=http_400; sse=http_405`                                   | A legacy client against a modern-only HTTP server. Pin `'2026-07-28'`.                        |
+| `MCP server answered initialize with a different protocol revision than the pinned "2025-06-18"` | The server counter-offered another legacy revision. Pin the one it speaks, or use `'legacy'`. |
