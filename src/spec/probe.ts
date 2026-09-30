@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import readline from 'node:readline';
-import type { ConnectionTarget } from '../mcp/connectionTarget.js';
+import type { ConnectionTarget } from '../mcp/connection.js';
 
 /**
  * Raw request channel for conformance checks.

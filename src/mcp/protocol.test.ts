@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { beginConnection } from './connection.js';
 import {
   Client,
   InMemoryTransport,
@@ -10,7 +11,6 @@ import {
   isProtocolRevision,
   createTesterResponseCache,
   resolveProtocolClientOptions,
-  setRequestedProtocol,
 } from './protocol.js';
 
 describe('resolveProtocolClientOptions', () => {
@@ -151,7 +151,7 @@ describe('getProtocolInfo', () => {
 
   it('reports the recorded request', () => {
     const client = fakeClient('2026-07-28', 'modern');
-    setRequestedProtocol(client, 'auto');
+    beginConnection(client, 'auto');
     expect(getProtocolInfo(client)).toEqual({
       requested: 'auto',
       negotiated: '2026-07-28',

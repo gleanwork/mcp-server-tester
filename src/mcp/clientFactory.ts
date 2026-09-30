@@ -22,9 +22,12 @@ import {
   isProtocolRevision,
   createTesterResponseCache,
   resolveProtocolClientOptions,
-  setRequestedProtocol,
 } from './protocol.js';
-import { setConnectionTarget } from './connectionTarget.js';
+import {
+  beginConnection,
+  releaseConnection,
+  type MCPConnection,
+} from './connection.js';
 import { attachWireTap } from './wireTap.js';
 import { ProxyAgent, Agent as UndiciAgent } from 'undici';
 import { readFileSync } from 'node:fs';
@@ -122,12 +125,6 @@ async function retryWithBackoff<T>(
   }
   throw lastErr;
 }
-
-/**
- * Tracks undici agents that need to be closed when their associated client is closed.
- * Keyed by Client instance identity.
- */
-const agentRegistry = new WeakMap<object, UndiciAgent | ProxyAgent>();
 
 /**
  * Options for creating an MCP client
@@ -246,10 +243,6 @@ export async function createMCPClientForConfig(
   const validatedConfig = validateMCPConfig(config);
   const protocol =
     options?.protocol ?? validatedConfig.protocol ?? DEFAULT_PROTOCOL_SETTING;
-  // The HTTP+SSE transport only speaks 2024-11-05, so a pin to any other
-  // revision has nothing to fall back to.
-  const pinsRevisionWithoutSse =
-    isProtocolRevision(protocol) && protocol !== '2024-11-05';
 
   // Create client with info
   const client = new Client(
@@ -272,8 +265,37 @@ export async function createMCPClientForConfig(
       responseCacheStore: createTesterResponseCache(),
     }
   );
-  setRequestedProtocol(client, protocol);
+  const connection = beginConnection(client, protocol);
+  try {
+    await connect(client, connection, validatedConfig, protocol, options);
+  } catch (error) {
+    // A failed connect never returns the client, so close what it opened.
+    await releaseConnection(client, (closeError) =>
+      debugClient('Error closing undici agent: %O', closeError)
+    );
+    throw error;
+  }
+  debugClient('Connected successfully');
+  const serverInfo = client.getServerVersion();
+  if (serverInfo) {
+    debugClient('Server info: %O', serverInfo);
+  }
 
+  return client;
+}
+
+/** Opens the transport for a config and connects the client over it. */
+async function connect(
+  client: Client,
+  connection: MCPConnection,
+  validatedConfig: MCPConfig,
+  protocol: ProtocolSetting,
+  options: CreateMCPClientOptions | undefined
+): Promise<void> {
+  // The HTTP+SSE transport only speaks 2024-11-05, so a pin to any other
+  // revision has nothing to fall back to.
+  const pinsRevisionWithoutSse =
+    isProtocolRevision(protocol) && protocol !== '2024-11-05';
   // Create appropriate transport and connect
   if (isStdioConfig(validatedConfig)) {
     // Unresolved `${...}` placeholders, `files`, or `auth` belong to a host.
@@ -317,13 +339,13 @@ export async function createMCPClientForConfig(
     } catch (error) {
       throw describeProtocolFailure(error, protocol);
     }
-    setConnectionTarget(client, {
+    connection.target = {
       transport: 'stdio',
       command: validatedConfig.command,
       args: validatedConfig.args ?? [],
       ...(validatedConfig.cwd ? { cwd: validatedConfig.cwd } : {}),
       ...(env ? { env } : {}),
-    });
+    };
   } else if (isHttpConfig(validatedConfig)) {
     // Build headers, including static token auth if configured and no authProvider.
     // User-provided headers take precedence over defaults (spread order).
@@ -407,7 +429,7 @@ export async function createMCPClientForConfig(
             rejectUnauthorized: tlsCfg.rejectUnauthorized ?? true,
           },
         });
-        agentRegistry.set(client, dispatcher);
+        connection.dispatcher = dispatcher;
         requestInit = {
           ...requestInit,
           dispatcher,
@@ -431,7 +453,7 @@ export async function createMCPClientForConfig(
         requestInit as unknown as { dispatcher?: ProxyAgent }
       )?.dispatcher;
       if (existingDispatcher) {
-        agentRegistry.set(client, existingDispatcher);
+        connection.dispatcher = existingDispatcher;
       }
     }
 
@@ -503,24 +525,17 @@ export async function createMCPClientForConfig(
         debugHttp('Connection established via sse');
       }
     }, retryAttempts);
-    const dispatcher = agentRegistry.get(client);
-    setConnectionTarget(client, {
+    const dispatcher = connection.dispatcher;
+    connection.target = {
       transport: 'http',
       url: url.toString(),
       headers,
       ...(dispatcher ? { dispatcher } : {}),
       ...(options?.authProvider ? { authProvider: options.authProvider } : {}),
-    });
+    };
   }
 
-  attachWireTap(client);
-  debugClient('Connected successfully');
-  const serverInfo = client.getServerVersion();
-  if (serverInfo) {
-    debugClient('Server info: %O', serverInfo);
-  }
-
-  return client;
+  connection.wire = attachWireTap(client);
 }
 
 /**
@@ -562,18 +577,12 @@ export async function closeMCPClient(client: Client): Promise<void> {
     );
     throw error;
   } finally {
-    // Close any pooled undici agent associated with this client
-    const agent = agentRegistry.get(client);
-    if (agent) {
-      agentRegistry.delete(client);
-      try {
-        await agent.close();
-      } catch (agentError) {
-        debugClient(
-          'Error closing undici agent: %s',
-          (agentError as Error).message
-        );
-      }
-    }
+    // Close the pooled undici agent (TLS or proxy) the connection opened.
+    await releaseConnection(client, (agentError) =>
+      debugClient(
+        'Error closing undici agent: %s',
+        agentError instanceof Error ? agentError.message : String(agentError)
+      )
+    );
   }
 }

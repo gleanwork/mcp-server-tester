@@ -24,6 +24,8 @@ vi.mock('@modelcontextprotocol/client/stdio', () => ({
 }));
 
 import { createMCPClientForConfig, closeMCPClient } from './clientFactory.js';
+import { connectionOf } from './connection.js';
+import { ProxyAgent } from 'undici';
 import { MCPHttpConnectionError } from './connectionDiagnostics.js';
 import { UnsupportedProtocolVersionError } from '@modelcontextprotocol/client';
 import type * as SDKClientModule from '@modelcontextprotocol/client';
@@ -604,6 +606,38 @@ describe('clientFactory', () => {
       );
       expect(client.transport.terminateSession).not.toHaveBeenCalled();
       expect(client.close).toHaveBeenCalled();
+    });
+  });
+
+  describe('the connection record', () => {
+    const proxied = {
+      transport: 'http' as const,
+      serverUrl: 'http://mcp.example.test/mcp',
+      proxy: { url: 'http://proxy.example.test:8080' },
+    };
+
+    it('records the target and closes the proxy agent with the client', async () => {
+      const agentClose = vi
+        .spyOn(ProxyAgent.prototype, 'close')
+        .mockResolvedValue(undefined);
+      const client = await createMCPClientForConfig(proxied);
+      expect(connectionOf(client)).toMatchObject({
+        requestedProtocol: 'legacy',
+        target: { transport: 'http', url: 'http://mcp.example.test/mcp' },
+      });
+      expect(connectionOf(client)?.dispatcher).toBeInstanceOf(ProxyAgent);
+      await closeMCPClient(client);
+      expect(agentClose).toHaveBeenCalledTimes(1);
+      expect(connectionOf(client)?.dispatcher).toBeUndefined();
+    });
+
+    it('closes the proxy agent when connecting fails', async () => {
+      const agentClose = vi
+        .spyOn(ProxyAgent.prototype, 'close')
+        .mockResolvedValue(undefined);
+      mocks.mockConnect.mockRejectedValue(new Error('handshake refused'));
+      await expect(createMCPClientForConfig(proxied)).rejects.toThrow();
+      expect(agentClose).toHaveBeenCalledTimes(1);
     });
   });
 });

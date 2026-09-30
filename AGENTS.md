@@ -34,7 +34,7 @@ npm run format:check        # Check formatting
 ### Core Modules (`src/`)
 
 - **`config/`** - `MCPConfig` types and Zod validation for stdio/HTTP transports, `protocolMatrix()`
-- **`mcp/`** - Client factory (`createMCPClientForConfig`), fixtures (`MCPFixtureApi`), protocol selection (`protocol.ts`), wire tap, and response normalization. Built on the MCP TypeScript SDK v2 (`@modelcontextprotocol/client`)
+- **`mcp/`** - Client factory (`createMCPClientForConfig`), fixtures (`MCPFixtureApi`), protocol selection (`protocol.ts`), wire tap, and response normalization. Built on the MCP TypeScript SDK v2 (`@modelcontextprotocol/client`). `mcp/connection.ts` is the one record of what MST knows about a client it created (requested protocol, connection target for raw probes, wire tap, owned undici agent); read it with `connectionOf(client)`, and add new per-connection facts there rather than in a new side table
 - **`skills/`** - Agent Skills over MCP (SEP-2640): wire schemas, entry validation, and a skills client (the SDK has no skills API yet)
 - **`auth/`** - OAuth 2.1 with PKCE (`PlaywrightOAuthClientProvider`) and static token utilities
 - **`assertions/`** - Unified assertion architecture (see below)
