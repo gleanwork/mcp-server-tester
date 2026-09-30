@@ -48,6 +48,29 @@ export type ProtocolRevision =
  */
 export type ProtocolSetting = 'legacy' | 'auto' | ProtocolRevision;
 
+/** How the simulated (SDK) host offers Agent Skills to the model. */
+export type HostSkillsMode = 'off' | 'catalog' | 'preload';
+
+/** One skill (or skill file) the simulated host loaded for the model. */
+export interface SkillLoad {
+  /** Skill name (frontmatter `name`). */
+  name: string;
+  /** URI that was read: the skill's SKILL.md or a supporting file. */
+  uri: string;
+  /** Host label of the server that served it. */
+  server: string;
+  /** 'skill' for SKILL.md loads, 'file' for supporting files. */
+  kind: 'skill' | 'file';
+  /** How it reached the model. */
+  via: 'read_skill' | 'read_resource' | 'preload';
+  /** Result of verifying the read against the skill's entry. */
+  verified: boolean | null;
+  /** Verification problems or read errors; the model got an error instead. */
+  problems?: string[];
+  /** Number of MCP tool calls made before this load. */
+  afterToolCalls: number;
+}
+
 /** Probe options for `protocol: 'auto'`. */
 export interface ProtocolProbeOptions {
   /** Probe timeout in milliseconds (defaults to the connect timeout). */

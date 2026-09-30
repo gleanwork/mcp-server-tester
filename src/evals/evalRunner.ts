@@ -25,6 +25,7 @@ import { getRegisteredExternalHostConfig } from './externalHost/hostRegistry.js'
 import type {
   EvalExpectationResult,
   MCPProtocolInfo,
+  SkillLoad,
   UsageMetrics,
 } from '../types/index.js';
 import type {
@@ -486,7 +487,7 @@ function mapToolNames(
   }
   const events =
     'events' in response && Array.isArray(response.events)
-      ? (response.events as HostEvent[])
+      ? response.events
       : undefined;
   return {
     ...response,
@@ -610,6 +611,15 @@ export async function executeToolCall(
       error: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+/** Skill loads to keep per iteration (responses are not kept). */
+function iterationSkillLoads(
+  response: unknown
+): Pick<IterationResult, 'skillLoads'> {
+  const loads = (response as { skillLoads?: unknown } | null | undefined)
+    ?.skillLoads;
+  return Array.isArray(loads) ? { skillLoads: loads as SkillLoad[] } : {};
 }
 
 /** The protocol a run used, from its connection or the runner options. */
@@ -1205,7 +1215,7 @@ async function runSingleIteration(
       const canonicalCalls =
         'events' in validationResponse &&
         Array.isArray(validationResponse.events)
-          ? (validationResponse.events as HostEvent[]).filter(
+          ? validationResponse.events.filter(
               (event) => event.kind === 'tool_call'
             )
           : validationResponse.toolCalls;
@@ -1438,6 +1448,7 @@ export async function runEvalCase(
         hostUsage: result.hostUsage,
         hostTelemetry: result.hostTelemetry,
         externalHost: result.externalHost,
+        ...iterationSkillLoads(result.response),
       });
     } catch (err) {
       // runSingleIteration should not throw, but guard defensively

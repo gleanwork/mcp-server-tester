@@ -11,6 +11,7 @@ export type {
   ExpectationType,
   EvalExpectationResult,
   ExpectationBreakdown,
+  SkillLoad,
 } from '../../types/index.js';
 
 export type {

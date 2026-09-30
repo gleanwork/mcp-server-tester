@@ -431,6 +431,19 @@ export {
   saveServerComparison,
 } from './evals/serverComparison.js';
 
+// Agent Skills A/B comparison (mcp_host)
+export { runSkillsComparison } from './evals/skillsComparison.js';
+export type {
+  SkillsComparisonOptions,
+  SkillsComparisonResult,
+  SkillsComparisonVariant,
+  SkillsVariantSummary,
+} from './evals/skillsComparison.js';
+export type {
+  HostSkillsMode,
+  SkillLoad,
+} from './evals/mcpHost/mcpHostTypes.js';
+
 // Completed eval run comparison
 export {
   compareEvalRuns,
