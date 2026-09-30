@@ -7,7 +7,12 @@ import { MAC_COWORK_CONTROLLER_SOURCE } from './macControllerSource.js';
 const { execute } = vi.hoisted(() => ({ execute: vi.fn() }));
 vi.mock('node:child_process', async () => {
   const { promisify } = await import('node:util');
-  return { execFile: Object.assign(vi.fn(), { [promisify.custom]: execute }) };
+  // Like Node, the promisified form carries its child process.
+  const promised = (...args: unknown[]) =>
+    Object.assign(Promise.resolve(execute(...args)), {
+      child: { stdin: { on: vi.fn(), end: vi.fn() } },
+    });
+  return { execFile: Object.assign(vi.fn(), { [promisify.custom]: promised }) };
 });
 vi.mock('node:os', async (original) => ({
   ...(await original<typeof os>()),

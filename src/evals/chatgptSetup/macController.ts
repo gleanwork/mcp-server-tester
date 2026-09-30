@@ -1,14 +1,10 @@
 import type { ChatgptApplicationController } from '../chatgpt/driver.js';
-import { execFile } from 'node:child_process';
-import { rmSync } from 'node:fs';
-import { chmod, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { promisify } from 'node:util';
 import { z } from 'zod';
+import { compileSwiftHelper, type NativeHelper } from '../nativeHelper.js';
 import { CHATGPT_CONTROLLER_SOURCE } from './macControllerSource.js';
 
-const exec = promisify(execFile);
 const ERROR = 'Unable to control the ChatGPT desktop application safely.';
 const StateSchema = z.object({
   running: z.boolean(),
@@ -44,84 +40,48 @@ async function compile(
   bundleId: string,
   appPath: string
 ): Promise<ChatgptApplicationController> {
-  let directory: string | undefined;
+  let helper: NativeHelper;
   try {
-    directory = await realpath(await mkdtemp(join(tmpdir(), 'mst-chatgpt-')));
-    await chmod(directory, 0o700);
-    const source = join(directory, 'controller.swift');
-    const binary = join(directory, 'controller');
-    await writeFile(source, CHATGPT_CONTROLLER_SOURCE, {
-      mode: 0o600,
-      flag: 'wx',
+    helper = await compileSwiftHelper({
+      name: 'chatgpt',
+      source: CHATGPT_CONTROLLER_SOURCE,
     });
-    const env = { PATH: '/usr/bin:/bin:/usr/sbin:/sbin', TMPDIR: directory };
-    await exec(
-      '/usr/bin/xcrun',
-      [
-        'swiftc',
-        source,
-        '-o',
-        binary,
-        '-module-cache-path',
-        join(directory, 'module-cache'),
-      ],
-      { env, cwd: directory, timeout: 120_000, maxBuffer: 64 * 1024 }
-    );
-    await chmod(binary, 0o700);
-    const ownedDirectory = directory;
-    process.once('exit', () => {
-      rmSync(ownedDirectory, { recursive: true, force: true });
-    });
-
-    const invoke = async (
-      action: 'state' | 'stop' | 'start',
-      environment: Record<string, string> = {}
-    ) => {
-      try {
-        // Launch credentials travel over a pipe, never in process-list arguments.
-        const stdout = await new Promise<string>((resolve, reject) => {
-          const child = execFile(
-            binary,
-            [action, bundleId, appPath],
-            {
-              env: process.env,
-              cwd: ownedDirectory,
-              timeout: 45_000,
-              maxBuffer: 16 * 1024,
-            },
-            (error, output) =>
-              error
-                ? reject(error instanceof Error ? error : new Error(ERROR))
-                : resolve(output)
-          );
-          child.stdin?.on('error', reject);
-          child.stdin?.end(JSON.stringify(environment));
-        });
-        return JSON.parse(stdout) as unknown;
-      } catch (error) {
-        throw controllerError(action, error);
-      }
-    };
-
-    return {
-      async state() {
-        const state = StateSchema.parse(await invoke('state'));
-        if (state.running !== (state.instances === 1)) throw new Error(ERROR);
-        return { running: state.running };
-      },
-      async stop() {
-        z.object({ stopped: z.literal(true) }).parse(await invoke('stop'));
-      },
-      async start(environment) {
-        z.object({ launched: z.literal(true) }).parse(
-          await invoke('start', environment)
-        );
-      },
-    };
   } catch (error) {
-    if (directory) await rm(directory, { recursive: true, force: true });
     throw controllerError('compile', error);
   }
+  const invoke = async (
+    action: 'state' | 'stop' | 'start',
+    environment: Record<string, string> = {}
+  ): Promise<unknown> => {
+    try {
+      return await helper.run([action, bundleId, appPath], {
+        // The helper launches ChatGPT from this environment, so the app sees the
+        // test process's variables. Narrowing it to an allowlist needs a check
+        // on a real Mac that ChatGPT still launches and signs in.
+        environment: 'inherit',
+        timeoutMs: 45_000,
+        // Launch credentials travel over a pipe, never in process-list arguments.
+        stdin: JSON.stringify(environment),
+      });
+    } catch (error) {
+      throw controllerError(action, error);
+    }
+  };
+  return {
+    async state() {
+      const state = StateSchema.parse(await invoke('state'));
+      if (state.running !== (state.instances === 1)) throw new Error(ERROR);
+      return { running: state.running };
+    },
+    async stop() {
+      z.object({ stopped: z.literal(true) }).parse(await invoke('stop'));
+    },
+    async start(environment) {
+      z.object({ launched: z.literal(true) }).parse(
+        await invoke('start', environment)
+      );
+    },
+  };
 }
 
 function controllerError(stage: string, error: unknown): Error {
