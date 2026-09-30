@@ -3,6 +3,7 @@ import { runEvalDataset, type EvalContext } from './evalRunner.js';
 import type { EvalDataset } from './datasetTypes.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import type { Tool } from '@modelcontextprotocol/client';
+import { createFixtureExtensions } from '../mcp/fixtures/fixtureExtensions.js';
 
 const mocks = vi.hoisted(() => ({
   simulateMCPHost: vi.fn(),
@@ -16,6 +17,8 @@ function createMockMCP(tools: Tool[]): MCPFixtureApi {
   return {
     client: {} as MCPFixtureApi['client'],
     authType: 'none',
+    protocol: { requested: 'legacy', negotiated: '2025-11-25', era: 'legacy' },
+    ...createFixtureExtensions({} as MCPFixtureApi['client']),
     project: 'test-project',
     getServerInfo: vi.fn().mockReturnValue({ name: 'test', version: '1.0.0' }),
     listTools: vi.fn().mockResolvedValue(tools),

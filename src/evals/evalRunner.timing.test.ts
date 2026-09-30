@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runEvalCase, runEvalDataset } from './evalRunner.js';
-import type { EvalExecutionResult } from './hostTrace.js';
+import type { CaseExecution } from './caseExecution.js';
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -15,9 +15,10 @@ function advance(ms: number): void {
 describe('pre-executed iteration timing', () => {
   it('adds known pre-execution time once per iteration without changing dataset wall time', async () => {
     const durations = [10, 20, undefined, 40];
-    const executeCase = vi.fn(async (): Promise<EvalExecutionResult> => {
+    const executeCase = vi.fn(async (): Promise<CaseExecution> => {
       advance(3);
       return {
+        kind: 'direct',
         response: 'OK',
         preExecutionDurationMs: durations.shift(),
       };
@@ -59,6 +60,7 @@ describe('pre-executed iteration timing', () => {
           async executeCase() {
             advance(5);
             return {
+              kind: 'failed',
               response: undefined,
               error: 'Failed',
               preExecutionDurationMs: duration,
@@ -79,7 +81,7 @@ describe('pre-executed iteration timing', () => {
       {
         async executeCase() {
           advance(25);
-          return { response: 'OK' };
+          return { kind: 'direct', response: 'OK' };
         },
       }
     );

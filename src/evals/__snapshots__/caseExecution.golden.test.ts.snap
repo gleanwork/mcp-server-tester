@@ -1,0 +1,1895 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`golden: dataset aggregation > mixed direct and host cases 1`] = `
+{
+  "caseResults": [
+    {
+      "authType": "none",
+      "datasetName": "mixed",
+      "durationMs": "<time>",
+      "expectations": {
+        "textContains": {
+          "details": "Response contains expected text",
+          "pass": true,
+        },
+      },
+      "id": "d",
+      "pass": true,
+      "project": "golden",
+      "request": {
+        "args": {
+          "city": "London",
+        },
+        "expect": {
+          "containsText": "sunny",
+        },
+        "mode": "direct",
+      },
+      "response": {
+        "content": [
+          {
+            "text": "sunny, 21C",
+            "type": "text",
+          },
+        ],
+        "isError": false,
+      },
+      "source": "eval",
+      "toolName": "get_weather",
+    },
+    {
+      "authType": "none",
+      "datasetName": "mixed",
+      "durationMs": "<time>",
+      "expectations": {
+        "textContains": {
+          "details": "Response contains expected text",
+          "pass": true,
+        },
+        "toolCallCount": {
+          "details": "Tool call count (2) is within expected range",
+          "pass": true,
+        },
+        "toolsTriggered": {
+          "details": "Expected tool 'forecast' to be called, but it was not",
+          "pass": false,
+        },
+      },
+      "hostUsage": {
+        "durationMs": "<time>",
+        "inputTokens": 100,
+        "outputTokens": 20,
+      },
+      "id": "host",
+      "mcpHostTrace": {
+        "calls": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "name": "get_weather",
+            "status": "expected",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "name": "search",
+            "status": "unexpected",
+          },
+        ],
+        "missed": [
+          {
+            "name": "forecast",
+          },
+        ],
+      },
+      "pass": false,
+      "project": "golden",
+      "request": {
+        "expect": {
+          "containsText": "sunny",
+          "toolCallCount": {
+            "max": 3,
+            "min": 1,
+          },
+          "toolsTriggered": {
+            "calls": [
+              {
+                "name": "get_weather",
+                "required": true,
+              },
+              {
+                "name": "forecast",
+                "required": true,
+              },
+            ],
+          },
+        },
+        "mcpHostConfig": {
+          "provider": "anthropic",
+        },
+        "mode": "mcp_host",
+        "scenario": "Weather in London?",
+      },
+      "response": {
+        "response": "It is sunny in London.",
+        "success": true,
+        "toolCalls": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "name": "get_weather",
+            "output": "sunny",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "name": "search",
+          },
+        ],
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 100,
+          "outputTokens": 20,
+        },
+      },
+      "source": "eval",
+      "toolName": "mcp_host",
+      "toolPrecision": 0.5,
+      "toolRecall": 0.5,
+    },
+  ],
+  "summary": {
+    "datasetToolF1": 0.5,
+    "datasetToolPrecision": 0.5,
+    "datasetToolRecall": 0.5,
+    "durationMs": "<time>",
+    "failed": 1,
+    "metadata": {
+      "gitHash": "<build>",
+      "packageVersion": "<build>",
+      "protocol": {
+        "era": "legacy",
+        "negotiated": "2025-11-25",
+        "requested": "legacy",
+      },
+      "timestamp": "<time>",
+    },
+    "passed": 1,
+    "total": 2,
+    "totalHostUsage": {
+      "durationMs": "<time>",
+      "inputTokens": 100,
+      "outputTokens": 20,
+    },
+  },
+}
+`;
+
+exports[`golden: direct execution > request 1`] = `
+{
+  "authType": "none",
+  "datasetName": "single-case",
+  "durationMs": "<time>",
+  "expectations": {
+    "textContains": {
+      "details": "Response contains expected text",
+      "pass": true,
+    },
+  },
+  "id": "request",
+  "pass": true,
+  "project": "golden",
+  "request": {
+    "expect": {
+      "containsText": "weather",
+    },
+    "mode": "direct",
+  },
+  "response": {
+    "skill": {
+      "name": "weather",
+    },
+  },
+  "source": "eval",
+  "toolName": "skills/get",
+}
+`;
+
+exports[`golden: direct execution > tool call 1`] = `
+{
+  "authType": "none",
+  "datasetName": "single-case",
+  "durationMs": "<time>",
+  "expectations": {
+    "error": {
+      "details": "Response is not an error as expected",
+      "pass": true,
+    },
+    "textContains": {
+      "details": "Response contains expected text",
+      "pass": true,
+    },
+  },
+  "id": "tool",
+  "pass": true,
+  "project": "golden",
+  "request": {
+    "args": {
+      "city": "London",
+    },
+    "expect": {
+      "containsText": "sunny",
+      "isError": false,
+    },
+    "mode": "direct",
+  },
+  "response": {
+    "content": [
+      {
+        "text": "sunny, 21C",
+        "type": "text",
+      },
+    ],
+    "isError": false,
+  },
+  "source": "eval",
+  "toolName": "get_weather",
+}
+`;
+
+exports[`golden: direct execution > tool call that throws 1`] = `
+{
+  "authType": "none",
+  "datasetName": "single-case",
+  "durationMs": "<time>",
+  "error": "socket closed",
+  "expectations": {},
+  "id": "tool-throws",
+  "pass": false,
+  "project": "golden",
+  "request": {
+    "args": {},
+    "mode": "direct",
+  },
+  "source": "eval",
+  "toolName": "get_weather",
+}
+`;
+
+exports[`golden: direct execution > tool error result 1`] = `
+{
+  "authType": "none",
+  "datasetName": "single-case",
+  "durationMs": "<time>",
+  "expectations": {
+    "error": {
+      "details": "Error message contains expected text",
+      "pass": true,
+    },
+  },
+  "id": "tool-error",
+  "pass": true,
+  "project": "golden",
+  "request": {
+    "args": {},
+    "expect": {
+      "isError": "city",
+    },
+    "mode": "direct",
+  },
+  "response": {
+    "content": [
+      {
+        "text": "city is required",
+        "type": "text",
+      },
+    ],
+    "isError": true,
+  },
+  "source": "eval",
+  "toolName": "get_weather",
+}
+`;
+
+exports[`golden: direct execution > tool result shaped like a host simulation 1`] = `
+{
+  "authType": "none",
+  "datasetName": "single-case",
+  "durationMs": "<time>",
+  "expectations": {
+    "toolsTriggered": {
+      "details": "All tool call expectations met",
+      "pass": true,
+    },
+  },
+  "id": "simulation-shaped",
+  "pass": true,
+  "project": "golden",
+  "request": {
+    "args": {},
+    "expect": {
+      "toolsTriggered": {
+        "calls": [
+          {
+            "name": "get_weather",
+            "required": true,
+          },
+        ],
+      },
+    },
+    "mode": "direct",
+  },
+  "response": {
+    "response": "It is sunny in London.",
+    "success": true,
+    "toolCalls": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "name": "get_weather",
+        "output": "sunny",
+      },
+      {
+        "arguments": {
+          "q": "London",
+        },
+        "name": "search",
+      },
+    ],
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 100,
+      "outputTokens": 20,
+    },
+  },
+  "source": "eval",
+  "toolName": "fake_host",
+  "toolPrecision": 0.5,
+  "toolRecall": 1,
+}
+`;
+
+exports[`golden: external_host > high-confidence native trace 1`] = `
+{
+  "authType": "none",
+  "datasetName": "single-case",
+  "durationMs": "<time>",
+  "expectations": {
+    "textContains": {
+      "details": "Response contains expected text",
+      "pass": true,
+    },
+    "toolCallCount": {
+      "details": "Tool call count (2) is within expected range",
+      "pass": true,
+    },
+    "toolsTriggered": {
+      "details": "Expected tool 'forecast' to be called, but it was not",
+      "pass": false,
+    },
+  },
+  "externalHost": {
+    "artifacts": [],
+    "capabilitiesUsed": [],
+    "correlation": {
+      "includedInPrompt": false,
+      "strategy": "exact_prompt",
+    },
+    "displayName": "ChatGPT",
+    "driver": {
+      "platform": "macos",
+      "product": "chatgpt",
+      "provider": "openai",
+      "runtime": "desktop-app",
+      "surface": "agent",
+    },
+    "driverSlug": "openai.chatgpt.agent.desktop-app.macos",
+    "hostName": "ChatGPT",
+    "hostType": "desktop",
+    "session": {
+      "id": "session",
+      "turnId": "turn",
+    },
+    "traceConfidence": "high",
+    "traceSource": "host-local-transcript",
+  },
+  "hostUsage": {
+    "durationMs": "<time>",
+    "inputTokens": 100,
+    "outputTokens": 20,
+  },
+  "id": "external",
+  "mcpHostTrace": {
+    "calls": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "name": "get_weather",
+        "status": "expected",
+      },
+      {
+        "arguments": {
+          "q": "London",
+        },
+        "name": "search",
+        "status": "unexpected",
+      },
+    ],
+    "missed": [
+      {
+        "name": "forecast",
+      },
+    ],
+  },
+  "pass": false,
+  "project": "golden",
+  "request": {
+    "expect": {
+      "containsText": "sunny",
+      "toolCallCount": {
+        "max": 3,
+        "min": 1,
+      },
+      "toolsTriggered": {
+        "calls": [
+          {
+            "name": "get_weather",
+            "required": true,
+          },
+          {
+            "name": "forecast",
+            "required": true,
+          },
+        ],
+      },
+    },
+    "externalHost": {
+      "capabilities": {
+        "completion": [
+          {
+            "provides": [
+              "trace",
+              "normalize",
+            ],
+            "uses": "builtin:openai.chatgpt.computerUseTrace",
+          },
+        ],
+        "control": [
+          {
+            "uses": "builtin:openai.chatgpt.configLifecycle",
+          },
+          {
+            "uses": "builtin:openai.chatgpt.appLifecycle",
+          },
+          {
+            "uses": "builtin:openai.chatgpt.computerUseSurface",
+          },
+        ],
+        "input": [
+          {
+            "uses": "builtin:openai.chatgpt.computerUseSubmit",
+          },
+        ],
+      },
+      "correlation": {
+        "strategy": "exact_prompt",
+      },
+      "driver": "openai.chatgpt.agent.desktop-app.macos",
+      "driverSlug": "openai.chatgpt.agent.desktop-app.macos",
+      "name": "ChatGPT Agent Desktop",
+      "usesBuiltInDefaults": true,
+    },
+    "mode": "external_host",
+    "scenario": "Weather in London?",
+  },
+  "response": {
+    "externalHost": {
+      "artifacts": [],
+      "capabilitiesUsed": [],
+      "correlation": {
+        "includedInPrompt": false,
+        "strategy": "exact_prompt",
+      },
+      "displayName": "ChatGPT",
+      "driver": {
+        "platform": "macos",
+        "product": "chatgpt",
+        "provider": "openai",
+        "runtime": "desktop-app",
+        "surface": "agent",
+      },
+      "driverSlug": "openai.chatgpt.agent.desktop-app.macos",
+      "hostName": "ChatGPT",
+      "hostType": "desktop",
+      "session": {
+        "id": "session",
+        "turnId": "turn",
+      },
+      "traceConfidence": "high",
+      "traceSource": "host-local-transcript",
+    },
+    "response": "It is sunny in London.",
+    "success": true,
+    "toolCalls": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "name": "get_weather",
+        "output": "sunny",
+      },
+      {
+        "arguments": {
+          "q": "London",
+        },
+        "name": "search",
+      },
+    ],
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 100,
+      "outputTokens": 20,
+    },
+  },
+  "source": "eval",
+  "toolName": "external_host",
+}
+`;
+
+exports[`golden: external_host > low-confidence trace cannot support tool assertions 1`] = `
+{
+  "authType": "none",
+  "datasetName": "single-case",
+  "durationMs": "<time>",
+  "expectations": {
+    "textContains": {
+      "details": "Response contains expected text",
+      "pass": true,
+    },
+    "toolCallCount": {
+      "details": "External host trace source screenshot (low confidence) cannot support tool-call assertions. Use protocol traces or host-native structured traces for toolsTriggered/toolCallCount.",
+      "pass": false,
+    },
+    "toolsTriggered": {
+      "details": "External host trace source screenshot (low confidence) cannot support tool-call assertions. Use protocol traces or host-native structured traces for toolsTriggered/toolCallCount.",
+      "pass": false,
+    },
+  },
+  "externalHost": {
+    "artifacts": [],
+    "capabilitiesUsed": [],
+    "correlation": {
+      "includedInPrompt": false,
+      "strategy": "exact_prompt",
+    },
+    "displayName": "ChatGPT",
+    "driver": {
+      "platform": "macos",
+      "product": "chatgpt",
+      "provider": "openai",
+      "runtime": "desktop-app",
+      "surface": "agent",
+    },
+    "driverSlug": "openai.chatgpt.agent.desktop-app.macos",
+    "hostName": "ChatGPT",
+    "hostType": "desktop",
+    "session": {
+      "id": "session",
+      "turnId": "turn",
+    },
+    "traceConfidence": "low",
+    "traceSource": "screenshot",
+  },
+  "hostUsage": {
+    "durationMs": "<time>",
+    "inputTokens": 100,
+    "outputTokens": 20,
+  },
+  "id": "external-low",
+  "pass": false,
+  "project": "golden",
+  "request": {
+    "expect": {
+      "containsText": "sunny",
+      "toolCallCount": {
+        "max": 3,
+        "min": 1,
+      },
+      "toolsTriggered": {
+        "calls": [
+          {
+            "name": "get_weather",
+            "required": true,
+          },
+          {
+            "name": "forecast",
+            "required": true,
+          },
+        ],
+      },
+    },
+    "externalHost": {
+      "capabilities": {
+        "completion": [
+          {
+            "provides": [
+              "trace",
+              "normalize",
+            ],
+            "uses": "builtin:openai.chatgpt.computerUseTrace",
+          },
+        ],
+        "control": [
+          {
+            "uses": "builtin:openai.chatgpt.configLifecycle",
+          },
+          {
+            "uses": "builtin:openai.chatgpt.appLifecycle",
+          },
+          {
+            "uses": "builtin:openai.chatgpt.computerUseSurface",
+          },
+        ],
+        "input": [
+          {
+            "uses": "builtin:openai.chatgpt.computerUseSubmit",
+          },
+        ],
+      },
+      "correlation": {
+        "strategy": "exact_prompt",
+      },
+      "driver": "openai.chatgpt.agent.desktop-app.macos",
+      "driverSlug": "openai.chatgpt.agent.desktop-app.macos",
+      "name": "ChatGPT Agent Desktop",
+      "usesBuiltInDefaults": true,
+    },
+    "mode": "external_host",
+    "scenario": "Weather in London?",
+  },
+  "response": {
+    "externalHost": {
+      "artifacts": [],
+      "capabilitiesUsed": [],
+      "correlation": {
+        "includedInPrompt": false,
+        "strategy": "exact_prompt",
+      },
+      "displayName": "ChatGPT",
+      "driver": {
+        "platform": "macos",
+        "product": "chatgpt",
+        "provider": "openai",
+        "runtime": "desktop-app",
+        "surface": "agent",
+      },
+      "driverSlug": "openai.chatgpt.agent.desktop-app.macos",
+      "hostName": "ChatGPT",
+      "hostType": "desktop",
+      "session": {
+        "id": "session",
+        "turnId": "turn",
+      },
+      "traceConfidence": "low",
+      "traceSource": "screenshot",
+    },
+    "response": "It is sunny in London.",
+    "success": true,
+    "toolCalls": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "name": "get_weather",
+        "output": "sunny",
+      },
+      {
+        "arguments": {
+          "q": "London",
+        },
+        "name": "search",
+      },
+    ],
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 100,
+      "outputTokens": 20,
+    },
+  },
+  "source": "eval",
+  "toolName": "external_host",
+}
+`;
+
+exports[`golden: host traces through executeCase > executeCase that throws 1`] = `
+{
+  "authType": "none",
+  "datasetName": "single-case",
+  "durationMs": "<time>",
+  "error": "host crashed",
+  "expectations": {},
+  "id": "trace",
+  "pass": false,
+  "project": "golden",
+  "request": {
+    "expect": {
+      "containsText": "sunny",
+      "toolCallCount": {
+        "max": 1,
+      },
+      "toolsTriggered": {
+        "calls": [
+          {
+            "name": "weather.get_weather",
+            "required": true,
+          },
+          {
+            "kind": "skill",
+            "name": "forecasting",
+            "required": true,
+          },
+        ],
+      },
+    },
+    "mcpHostConfig": {
+      "provider": "anthropic",
+    },
+    "mode": "mcp_host",
+    "scenario": "Weather in London?",
+  },
+  "source": "eval",
+  "toolName": "mcp_host",
+}
+`;
+
+exports[`golden: host traces through executeCase > host trace error 1`] = `
+{
+  "authType": "none",
+  "datasetName": "single-case",
+  "durationMs": "<time>",
+  "error": "native session missing",
+  "expectations": {},
+  "hostEvidence": "structured",
+  "hostTelemetry": {
+    "native": "kept",
+  },
+  "hostUsage": {
+    "durationMs": "<time>",
+    "inputTokens": 50,
+    "outputTokens": 10,
+  },
+  "id": "trace",
+  "pass": false,
+  "project": "golden",
+  "request": {
+    "expect": {
+      "containsText": "sunny",
+      "toolCallCount": {
+        "max": 1,
+      },
+      "toolsTriggered": {
+        "calls": [
+          {
+            "name": "weather.get_weather",
+            "required": true,
+          },
+          {
+            "kind": "skill",
+            "name": "forecasting",
+            "required": true,
+          },
+        ],
+      },
+    },
+    "mcpHostConfig": {
+      "provider": "anthropic",
+    },
+    "mode": "mcp_host",
+    "scenario": "Weather in London?",
+  },
+  "response": {
+    "events": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "server": "weather",
+        "source": "mcp",
+      },
+      {
+        "kind": "skill",
+        "name": "forecasting",
+        "source": "host",
+      },
+      {
+        "kind": "tool_call",
+        "name": "web_search",
+        "source": "host",
+      },
+    ],
+    "evidence": "structured",
+    "response": "It is sunny in London.",
+    "success": false,
+    "telemetry": {
+      "native": "kept",
+    },
+    "toolCalls": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "server": "weather",
+        "source": "mcp",
+      },
+      {
+        "arguments": {},
+        "kind": "tool_call",
+        "name": "web_search",
+        "source": "host",
+      },
+    ],
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 50,
+      "outputTokens": 10,
+    },
+  },
+  "source": "eval",
+  "toolName": "mcp_host",
+}
+`;
+
+exports[`golden: host traces through executeCase > none evidence 1`] = `
+{
+  "authType": "none",
+  "datasetName": "single-case",
+  "durationMs": "<time>",
+  "expectations": {
+    "textContains": {
+      "details": "Response contains expected text",
+      "pass": true,
+    },
+    "toolCallCount": {
+      "details": "Host evidence is none; structured tool evidence is required.",
+      "pass": false,
+    },
+    "toolsTriggered": {
+      "details": "Host evidence is none; structured tool evidence is required.",
+      "pass": false,
+    },
+  },
+  "hostEvidence": "none",
+  "hostTelemetry": {
+    "native": "kept",
+  },
+  "hostUsage": {
+    "durationMs": "<time>",
+    "inputTokens": 50,
+    "outputTokens": 10,
+  },
+  "id": "trace",
+  "pass": false,
+  "project": "golden",
+  "request": {
+    "expect": {
+      "containsText": "sunny",
+      "toolCallCount": {
+        "max": 1,
+      },
+      "toolsTriggered": {
+        "calls": [
+          {
+            "name": "weather.get_weather",
+            "required": true,
+          },
+          {
+            "kind": "skill",
+            "name": "forecasting",
+            "required": true,
+          },
+        ],
+      },
+    },
+    "mcpHostConfig": {
+      "provider": "anthropic",
+    },
+    "mode": "mcp_host",
+    "scenario": "Weather in London?",
+  },
+  "response": {
+    "events": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "server": "weather",
+        "source": "mcp",
+      },
+      {
+        "kind": "skill",
+        "name": "forecasting",
+        "source": "host",
+      },
+      {
+        "kind": "tool_call",
+        "name": "web_search",
+        "source": "host",
+      },
+    ],
+    "evidence": "none",
+    "response": "It is sunny in London.",
+    "success": true,
+    "telemetry": {
+      "native": "kept",
+    },
+    "toolCalls": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "weather.get_weather",
+        "output": "sunny",
+        "server": "weather",
+        "source": "mcp",
+      },
+      {
+        "arguments": {},
+        "kind": "tool_call",
+        "name": "web_search",
+        "source": "host",
+      },
+    ],
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 50,
+      "outputTokens": 10,
+    },
+  },
+  "source": "eval",
+  "toolName": "mcp_host",
+}
+`;
+
+exports[`golden: host traces through executeCase > observed evidence 1`] = `
+{
+  "authType": "none",
+  "datasetName": "single-case",
+  "durationMs": "<time>",
+  "expectations": {
+    "textContains": {
+      "details": "Response contains expected text",
+      "pass": true,
+    },
+    "toolCallCount": {
+      "details": "Host evidence is observed; structured tool evidence is required.",
+      "pass": false,
+    },
+    "toolsTriggered": {
+      "details": "Host evidence is observed; structured tool evidence is required.",
+      "pass": false,
+    },
+  },
+  "hostEvidence": "observed",
+  "hostTelemetry": {
+    "native": "kept",
+  },
+  "hostUsage": {
+    "durationMs": "<time>",
+    "inputTokens": 50,
+    "outputTokens": 10,
+  },
+  "id": "trace",
+  "pass": false,
+  "project": "golden",
+  "request": {
+    "expect": {
+      "containsText": "sunny",
+      "toolCallCount": {
+        "max": 1,
+      },
+      "toolsTriggered": {
+        "calls": [
+          {
+            "name": "weather.get_weather",
+            "required": true,
+          },
+          {
+            "kind": "skill",
+            "name": "forecasting",
+            "required": true,
+          },
+        ],
+      },
+    },
+    "mcpHostConfig": {
+      "provider": "anthropic",
+    },
+    "mode": "mcp_host",
+    "scenario": "Weather in London?",
+  },
+  "response": {
+    "events": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "server": "weather",
+        "source": "mcp",
+      },
+      {
+        "kind": "skill",
+        "name": "forecasting",
+        "source": "host",
+      },
+      {
+        "kind": "tool_call",
+        "name": "web_search",
+        "source": "host",
+      },
+    ],
+    "evidence": "observed",
+    "response": "It is sunny in London.",
+    "success": true,
+    "telemetry": {
+      "native": "kept",
+    },
+    "toolCalls": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "weather.get_weather",
+        "output": "sunny",
+        "server": "weather",
+        "source": "mcp",
+      },
+      {
+        "arguments": {},
+        "kind": "tool_call",
+        "name": "web_search",
+        "source": "host",
+      },
+    ],
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 50,
+      "outputTokens": 10,
+    },
+  },
+  "source": "eval",
+  "toolName": "mcp_host",
+}
+`;
+
+exports[`golden: host traces through executeCase > structured evidence 1`] = `
+{
+  "authType": "none",
+  "datasetName": "single-case",
+  "durationMs": "<time>",
+  "expectations": {
+    "textContains": {
+      "details": "Response contains expected text",
+      "pass": true,
+    },
+    "toolCallCount": {
+      "details": "Expected at most 1 tool call(s), but got 2",
+      "pass": false,
+    },
+    "toolsTriggered": {
+      "details": "All tool call expectations met",
+      "pass": true,
+    },
+  },
+  "hostEvidence": "structured",
+  "hostTelemetry": {
+    "native": "kept",
+  },
+  "hostUsage": {
+    "durationMs": "<time>",
+    "inputTokens": 50,
+    "outputTokens": 10,
+  },
+  "id": "trace",
+  "mcpHostTrace": {
+    "calls": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "name": "weather.get_weather",
+        "status": "expected",
+      },
+      {
+        "arguments": {},
+        "name": "web_search",
+        "status": "unexpected",
+      },
+    ],
+    "missed": [],
+  },
+  "pass": false,
+  "project": "golden",
+  "request": {
+    "expect": {
+      "containsText": "sunny",
+      "toolCallCount": {
+        "max": 1,
+      },
+      "toolsTriggered": {
+        "calls": [
+          {
+            "name": "weather.get_weather",
+            "required": true,
+          },
+          {
+            "kind": "skill",
+            "name": "forecasting",
+            "required": true,
+          },
+        ],
+      },
+    },
+    "mcpHostConfig": {
+      "provider": "anthropic",
+    },
+    "mode": "mcp_host",
+    "scenario": "Weather in London?",
+  },
+  "response": {
+    "events": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "server": "weather",
+        "source": "mcp",
+      },
+      {
+        "kind": "skill",
+        "name": "forecasting",
+        "source": "host",
+      },
+      {
+        "kind": "tool_call",
+        "name": "web_search",
+        "source": "host",
+      },
+    ],
+    "evidence": "structured",
+    "response": "It is sunny in London.",
+    "success": true,
+    "telemetry": {
+      "native": "kept",
+    },
+    "toolCalls": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "weather.get_weather",
+        "output": "sunny",
+        "server": "weather",
+        "source": "mcp",
+      },
+      {
+        "arguments": {},
+        "kind": "tool_call",
+        "name": "web_search",
+        "source": "host",
+      },
+    ],
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 50,
+      "outputTokens": 10,
+    },
+  },
+  "source": "eval",
+  "toolName": "mcp_host",
+  "toolPrecision": 0.6666666666666666,
+  "toolRecall": 1,
+}
+`;
+
+exports[`golden: runEvalSuite hosts > run host 1`] = `
+[
+  {
+    "datasetName": "golden",
+    "durationMs": "<time>",
+    "expectations": {
+      "textContains": {
+        "details": "Response contains expected text",
+        "pass": true,
+      },
+      "toolsTriggered": {
+        "details": "All tool call expectations met",
+        "pass": true,
+      },
+    },
+    "hostEvidence": "structured",
+    "hostTelemetry": {
+      "native": "kept",
+    },
+    "hostUsage": {
+      "durationMs": "<time>",
+      "inputTokens": 50,
+      "outputTokens": 10,
+    },
+    "id": "suite-host",
+    "mcpHostTrace": {
+      "calls": [
+        {
+          "arguments": {
+            "city": "London",
+          },
+          "name": "get_weather",
+          "status": "expected",
+        },
+        {
+          "arguments": {},
+          "name": "web_search",
+          "status": "unexpected",
+        },
+      ],
+      "missed": [],
+    },
+    "pass": true,
+    "request": {
+      "expect": {
+        "containsText": "sunny",
+        "toolsTriggered": {
+          "calls": [
+            {
+              "name": "get_weather",
+              "required": true,
+            },
+          ],
+        },
+      },
+      "mode": "mcp_host",
+      "scenario": "Weather in London?",
+    },
+    "response": {
+      "events": [
+        {
+          "arguments": {
+            "city": "London",
+          },
+          "kind": "tool_call",
+          "name": "get_weather",
+          "output": "sunny",
+          "server": "weather",
+          "source": "mcp",
+        },
+        {
+          "kind": "skill",
+          "name": "forecasting",
+          "source": "host",
+        },
+        {
+          "kind": "tool_call",
+          "name": "web_search",
+          "source": "host",
+        },
+      ],
+      "evidence": "structured",
+      "response": "It is sunny in London.",
+      "success": true,
+      "telemetry": {
+        "native": "kept",
+      },
+      "toolCalls": [
+        {
+          "arguments": {
+            "city": "London",
+          },
+          "kind": "tool_call",
+          "name": "get_weather",
+          "output": "sunny",
+          "server": "weather",
+          "source": "mcp",
+        },
+        {
+          "arguments": {},
+          "kind": "tool_call",
+          "name": "web_search",
+          "source": "host",
+        },
+      ],
+      "usage": {
+        "durationMs": "<time>",
+        "inputTokens": 50,
+        "outputTokens": 10,
+      },
+    },
+    "source": "eval",
+    "toolName": "mcp_host",
+    "toolPrecision": 0.3333333333333333,
+    "toolRecall": 1,
+  },
+]
+`;
+
+exports[`golden: runEvalSuite hosts > runBatch host 1`] = `
+[
+  {
+    "datasetName": "golden",
+    "durationMs": "<time>",
+    "expectations": {
+      "textContains": {
+        "details": "Response contains expected text",
+        "pass": true,
+      },
+      "toolsTriggered": {
+        "details": "All tool call expectations met",
+        "pass": true,
+      },
+    },
+    "hostEvidence": "structured",
+    "hostTelemetry": {
+      "native": "kept",
+    },
+    "hostUsage": {
+      "durationMs": "<time>",
+      "inputTokens": 50,
+      "outputTokens": 10,
+    },
+    "id": "suite-host",
+    "mcpHostTrace": {
+      "calls": [
+        {
+          "arguments": {
+            "city": "London",
+          },
+          "name": "get_weather",
+          "status": "expected",
+        },
+        {
+          "arguments": {},
+          "name": "web_search",
+          "status": "unexpected",
+        },
+      ],
+      "missed": [],
+    },
+    "pass": true,
+    "request": {
+      "expect": {
+        "containsText": "sunny",
+        "toolsTriggered": {
+          "calls": [
+            {
+              "name": "get_weather",
+              "required": true,
+            },
+          ],
+        },
+      },
+      "mode": "mcp_host",
+      "scenario": "Weather in London?",
+    },
+    "response": {
+      "events": [
+        {
+          "arguments": {
+            "city": "London",
+          },
+          "kind": "tool_call",
+          "name": "get_weather",
+          "output": "sunny",
+          "server": "weather",
+          "source": "mcp",
+        },
+        {
+          "kind": "skill",
+          "name": "forecasting",
+          "source": "host",
+        },
+        {
+          "kind": "tool_call",
+          "name": "web_search",
+          "source": "host",
+        },
+      ],
+      "evidence": "structured",
+      "response": "It is sunny in London.",
+      "success": true,
+      "telemetry": {
+        "native": "kept",
+      },
+      "toolCalls": [
+        {
+          "arguments": {
+            "city": "London",
+          },
+          "kind": "tool_call",
+          "name": "get_weather",
+          "output": "sunny",
+          "server": "weather",
+          "source": "mcp",
+        },
+        {
+          "arguments": {},
+          "kind": "tool_call",
+          "name": "web_search",
+          "source": "host",
+        },
+      ],
+      "usage": {
+        "durationMs": "<time>",
+        "inputTokens": 50,
+        "outputTokens": 10,
+      },
+    },
+    "source": "eval",
+    "toolName": "mcp_host",
+    "toolPrecision": 0.3333333333333333,
+    "toolRecall": 1,
+  },
+]
+`;
+
+exports[`golden: simulated mcp_host (dataset API) > iterations exclude infrastructure errors from accuracy 1`] = `
+{
+  "assertionPassRate": 0,
+  "assertionPassRateCI": {
+    "lower": 0,
+    "upper": 0.7097805044546776,
+  },
+  "authType": "none",
+  "datasetName": "single-case",
+  "durationMs": "<time>",
+  "expectations": {
+    "textContains": {
+      "details": "Response does not contain expected text: "sunny"",
+      "pass": false,
+    },
+    "toolCallCount": {
+      "details": "Tool call count (2) is within expected range",
+      "pass": true,
+    },
+    "toolsTriggered": {
+      "details": "Expected tool 'forecast' to be called, but it was not",
+      "pass": false,
+    },
+  },
+  "hostUsage": {
+    "durationMs": "<time>",
+    "inputTokens": 200,
+    "outputTokens": 40,
+  },
+  "id": "host",
+  "infrastructureErrorCount": 1,
+  "infrastructureErrorRate": 0.3333333333333333,
+  "iterationResults": [
+    {
+      "durationMs": "<time>",
+      "hostUsage": {
+        "durationMs": "<time>",
+        "inputTokens": 100,
+        "outputTokens": 20,
+      },
+      "isInfrastructureError": false,
+      "mcpHostTrace": {
+        "calls": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "name": "get_weather",
+            "status": "expected",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "name": "search",
+            "status": "unexpected",
+          },
+        ],
+        "missed": [
+          {
+            "name": "forecast",
+          },
+        ],
+      },
+      "pass": false,
+    },
+    {
+      "durationMs": "<time>",
+      "error": "read ECONNRESET",
+      "isInfrastructureError": true,
+      "pass": false,
+    },
+    {
+      "durationMs": "<time>",
+      "hostUsage": {
+        "durationMs": "<time>",
+        "inputTokens": 100,
+        "outputTokens": 20,
+      },
+      "isInfrastructureError": false,
+      "mcpHostTrace": {
+        "calls": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "name": "get_weather",
+            "status": "expected",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "name": "search",
+            "status": "unexpected",
+          },
+        ],
+        "missed": [
+          {
+            "name": "forecast",
+          },
+        ],
+      },
+      "pass": false,
+    },
+  ],
+  "mcpHostTrace": {
+    "calls": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "name": "get_weather",
+        "status": "expected",
+      },
+      {
+        "arguments": {
+          "q": "London",
+        },
+        "name": "search",
+        "status": "unexpected",
+      },
+    ],
+    "missed": [
+      {
+        "name": "forecast",
+      },
+    ],
+  },
+  "pass": false,
+  "project": "golden",
+  "request": {
+    "accuracyThreshold": 0.5,
+    "expect": {
+      "containsText": "sunny",
+      "toolCallCount": {
+        "max": 3,
+        "min": 1,
+      },
+      "toolsTriggered": {
+        "calls": [
+          {
+            "name": "get_weather",
+            "required": true,
+          },
+          {
+            "name": "forecast",
+            "required": true,
+          },
+        ],
+      },
+    },
+    "iterations": 3,
+    "mcpHostConfig": {
+      "provider": "anthropic",
+    },
+    "mode": "mcp_host",
+    "scenario": "Weather in London?",
+  },
+  "response": {
+    "response": "cloudy",
+    "success": true,
+    "toolCalls": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "name": "get_weather",
+        "output": "sunny",
+      },
+      {
+        "arguments": {
+          "q": "London",
+        },
+        "name": "search",
+      },
+    ],
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 100,
+      "outputTokens": 20,
+    },
+  },
+  "source": "eval",
+  "toolName": "mcp_host",
+  "toolPrecision": 0.5,
+  "toolRecall": 0.5,
+}
+`;
+
+exports[`golden: simulated mcp_host (dataset API) > maps native tool names through toolMap 1`] = `
+{
+  "authType": "none",
+  "datasetName": "single-case",
+  "durationMs": "<time>",
+  "expectations": {
+    "textContains": {
+      "details": "Response contains expected text",
+      "pass": true,
+    },
+    "toolCallCount": {
+      "details": "Tool call count (2) is within expected range",
+      "pass": true,
+    },
+    "toolsTriggered": {
+      "details": "All tool call expectations met",
+      "pass": true,
+    },
+  },
+  "hostUsage": {
+    "durationMs": "<time>",
+    "inputTokens": 100,
+    "outputTokens": 20,
+  },
+  "id": "host",
+  "mcpHostTrace": {
+    "calls": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "name": "get_weather",
+        "status": "expected",
+      },
+      {
+        "arguments": {
+          "q": "London",
+        },
+        "name": "search",
+        "status": "expected",
+      },
+    ],
+    "missed": [],
+  },
+  "pass": true,
+  "project": "golden",
+  "request": {
+    "expect": {
+      "containsText": "sunny",
+      "toolCallCount": {
+        "max": 3,
+        "min": 1,
+      },
+      "toolsTriggered": {
+        "calls": [
+          {
+            "name": "get_weather",
+            "required": true,
+          },
+          {
+            "name": "forecast",
+            "required": true,
+          },
+        ],
+      },
+    },
+    "mcpHostConfig": {
+      "provider": "anthropic",
+    },
+    "mode": "mcp_host",
+    "scenario": "Weather in London?",
+  },
+  "response": {
+    "response": "It is sunny in London.",
+    "success": true,
+    "toolCalls": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "name": "get_weather",
+        "output": "sunny",
+      },
+      {
+        "arguments": {
+          "q": "London",
+        },
+        "name": "search",
+      },
+    ],
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 100,
+      "outputTokens": 20,
+    },
+  },
+  "source": "eval",
+  "toolName": "mcp_host",
+  "toolPrecision": 1,
+  "toolRecall": 1,
+}
+`;
+
+exports[`golden: simulated mcp_host (dataset API) > simulation failure 1`] = `
+{
+  "authType": "none",
+  "datasetName": "single-case",
+  "durationMs": "<time>",
+  "error": "provider rejected the request",
+  "expectations": {},
+  "id": "host",
+  "pass": false,
+  "project": "golden",
+  "request": {
+    "expect": {
+      "containsText": "sunny",
+      "toolCallCount": {
+        "max": 3,
+        "min": 1,
+      },
+      "toolsTriggered": {
+        "calls": [
+          {
+            "name": "get_weather",
+            "required": true,
+          },
+          {
+            "name": "forecast",
+            "required": true,
+          },
+        ],
+      },
+    },
+    "mcpHostConfig": {
+      "provider": "anthropic",
+    },
+    "mode": "mcp_host",
+    "scenario": "Weather in London?",
+  },
+  "source": "eval",
+  "toolName": "mcp_host",
+}
+`;
+
+exports[`golden: simulated mcp_host (dataset API) > succeeds with tool evidence and a missed required tool 1`] = `
+{
+  "authType": "none",
+  "datasetName": "single-case",
+  "durationMs": "<time>",
+  "expectations": {
+    "textContains": {
+      "details": "Response contains expected text",
+      "pass": true,
+    },
+    "toolCallCount": {
+      "details": "Tool call count (2) is within expected range",
+      "pass": true,
+    },
+    "toolsTriggered": {
+      "details": "Expected tool 'forecast' to be called, but it was not",
+      "pass": false,
+    },
+  },
+  "hostUsage": {
+    "durationMs": "<time>",
+    "inputTokens": 100,
+    "outputTokens": 20,
+  },
+  "id": "host",
+  "mcpHostTrace": {
+    "calls": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "name": "get_weather",
+        "status": "expected",
+      },
+      {
+        "arguments": {
+          "q": "London",
+        },
+        "name": "search",
+        "status": "unexpected",
+      },
+    ],
+    "missed": [
+      {
+        "name": "forecast",
+      },
+    ],
+  },
+  "pass": false,
+  "project": "golden",
+  "request": {
+    "expect": {
+      "containsText": "sunny",
+      "toolCallCount": {
+        "max": 3,
+        "min": 1,
+      },
+      "toolsTriggered": {
+        "calls": [
+          {
+            "name": "get_weather",
+            "required": true,
+          },
+          {
+            "name": "forecast",
+            "required": true,
+          },
+        ],
+      },
+    },
+    "mcpHostConfig": {
+      "provider": "anthropic",
+    },
+    "mode": "mcp_host",
+    "scenario": "Weather in London?",
+  },
+  "response": {
+    "response": "It is sunny in London.",
+    "success": true,
+    "toolCalls": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "name": "get_weather",
+        "output": "sunny",
+      },
+      {
+        "arguments": {
+          "q": "London",
+        },
+        "name": "search",
+      },
+    ],
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 100,
+      "outputTokens": 20,
+    },
+  },
+  "source": "eval",
+  "toolName": "mcp_host",
+  "toolPrecision": 0.5,
+  "toolRecall": 0.5,
+}
+`;

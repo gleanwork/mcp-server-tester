@@ -5,6 +5,7 @@ export type {
   JudgeExpectConfig,
   SerializedEvalDataset,
   EvalMode,
+  EvalDirectRequest,
 } from '../evals/datasetTypes.js';
 
 export type { LoadDatasetOptions } from '../evals/datasetLoader.js';

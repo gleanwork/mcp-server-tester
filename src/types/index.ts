@@ -18,6 +18,78 @@ export type AuthType = 'oauth' | 'api-token' | 'none';
 export type { HostDiagnostics } from './hostDiagnostics.js';
 
 /**
+ * MCP protocol era.
+ *
+ * - 'legacy': revisions that open with the `initialize` handshake
+ *   (`2024-10-07` through `2025-11-25`)
+ * - 'modern': revisions with per-request `_meta` and `server/discover`
+ *   (`2026-07-28` and later)
+ */
+export type ProtocolEra = 'legacy' | 'modern';
+
+/**
+ * A dated MCP protocol revision, e.g. `'2025-06-18'` or `'2026-07-28'`.
+ */
+export type ProtocolRevision =
+  | '2024-11-05'
+  | '2025-03-26'
+  | '2025-06-18'
+  | '2025-11-25'
+  | '2026-07-28'
+  | (string & {});
+
+/**
+ * Which protocol a connection should speak.
+ *
+ * - 'legacy' (default): the `initialize` handshake, byte-identical to MST 1.x
+ * - 'auto': probe with `server/discover` and fall back to legacy
+ * - a revision: pin exactly that revision; connecting fails if the server
+ *   does not offer it
+ */
+export type ProtocolSetting = 'legacy' | 'auto' | ProtocolRevision;
+
+/** How the simulated (SDK) host offers Agent Skills to the model. */
+export type HostSkillsMode = 'off' | 'catalog' | 'preload';
+
+/** One skill (or skill file) the simulated host loaded for the model. */
+export interface SkillLoad {
+  /** Skill name (frontmatter `name`). */
+  name: string;
+  /** URI that was read: the skill's SKILL.md or a supporting file. */
+  uri: string;
+  /** Host label of the server that served it. */
+  server: string;
+  /** 'skill' for SKILL.md loads, 'file' for supporting files. */
+  kind: 'skill' | 'file';
+  /** How it reached the model. */
+  via: 'read_skill' | 'read_resource' | 'preload';
+  /** Result of verifying the read against the skill's entry. */
+  verified: boolean | null;
+  /** Verification problems or read errors; the model got an error instead. */
+  problems?: string[];
+  /** Number of MCP tool calls made before this load. */
+  afterToolCalls: number;
+}
+
+/** Probe options for `protocol: 'auto'`. */
+export interface ProtocolProbeOptions {
+  /** Probe timeout in milliseconds (defaults to the connect timeout). */
+  timeoutMs?: number;
+}
+
+/**
+ * The protocol a connection requested and the one it actually negotiated.
+ */
+export interface MCPProtocolInfo {
+  /** The `protocol` setting the connection was created with. */
+  requested: ProtocolSetting;
+  /** The revision negotiated with the server (e.g. `'2025-11-25'`). */
+  negotiated: string | null;
+  /** The era the connection landed on. */
+  era: ProtocolEra | null;
+}
+
+/**
  * Source of test results
  *
  * - 'eval': From runEvalDataset() using JSON eval datasets
@@ -161,6 +233,7 @@ export type {
   JudgeExpectConfig,
   SerializedEvalDataset,
   EvalMode,
+  EvalDirectRequest,
   LoadDatasetOptions,
   EvalContext,
   EvalRunnerResult,

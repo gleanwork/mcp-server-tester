@@ -65,6 +65,21 @@ You call a tool yourself with explicit arguments. The result is checked against 
 
 **What you're testing:** The tool itself, not how well it's described.
 
+Direct cases can also send any MCP request instead of calling a tool, which is useful for resources and extensions such as [Agent Skills](./skills.md):
+
+```json
+{
+  "id": "skill-entry-valid",
+  "request": {
+    "method": "skills/get",
+    "params": { "uri": "skill://docs/SKILL.md" }
+  },
+  "expect": { "schema": "SkillsGetResult" }
+}
+```
+
+`request` replaces `toolName` and `args`: set one or the other, and only on direct-mode cases. In a manifest suite with several servers, add `"server": "<label>"` to `request` to pick one. A JSON-RPC error becomes an error result, so `isError` works the same way it does for tools. The schemas `SkillEntry`, `SkillsListResult`, `SkillsGetResult`, and `DiscoverResult` are built in.
+
 ---
 
 ### LLM Host Mode
@@ -423,8 +438,8 @@ Run both and compare accuracy per tool. The reporter groups results by project, 
       "description": "Human-readable description",
 
       "mode": "direct", // or "mcp_host"
-      "toolName": "search", // required for direct mode
-      "args": { "query": "hello" }, // required for direct mode
+      "toolName": "search", // direct mode: toolName + args, or request
+      "args": { "query": "hello" }, // required with toolName
 
       // For mcp_host mode instead:
       "scenario": "Find recent documents about X",

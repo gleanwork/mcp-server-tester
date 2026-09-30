@@ -230,4 +230,66 @@ describe('compareEvalRuns', () => {
     });
     expect(loaded.data.improvedCases).toHaveLength(1);
   });
+  describe('protocol warnings', () => {
+    const meta = (negotiated: string, era: 'legacy' | 'modern') => ({
+      metadata: {
+        timestamp: '2026-09-28T00:00:00.000Z',
+        packageVersion: '2.0.0',
+        protocol: { requested: negotiated, negotiated, era },
+      },
+    });
+
+    it('warns when runs used different protocol eras', () => {
+      const result = compareEvalRuns({
+        baseline: createRun(
+          [createCase('a', true)],
+          meta('2025-11-25', 'legacy')
+        ),
+        candidate: createRun(
+          [createCase('a', true)],
+          meta('2026-07-28', 'modern')
+        ),
+      });
+      expect(result.warnings).toEqual([
+        expect.stringContaining('different MCP protocol eras'),
+      ]);
+    });
+
+    it('warns when runs negotiated different revisions in one era', () => {
+      const result = compareEvalRuns({
+        baseline: createRun(
+          [createCase('a', true)],
+          meta('2025-06-18', 'legacy')
+        ),
+        candidate: createRun(
+          [createCase('a', true)],
+          meta('2025-11-25', 'legacy')
+        ),
+      });
+      expect(result.warnings).toEqual([
+        expect.stringContaining('different MCP protocol revisions'),
+      ]);
+    });
+
+    it('has no warnings for the same protocol or unknown protocols', () => {
+      expect(
+        compareEvalRuns({
+          baseline: createRun(
+            [createCase('a', true)],
+            meta('2026-07-28', 'modern')
+          ),
+          candidate: createRun(
+            [createCase('a', true)],
+            meta('2026-07-28', 'modern')
+          ),
+        }).warnings
+      ).toEqual([]);
+      expect(
+        compareEvalRuns({
+          baseline: createRun([createCase('a', true)]),
+          candidate: createRun([createCase('a', true)]),
+        }).warnings
+      ).toEqual([]);
+    });
+  });
 });

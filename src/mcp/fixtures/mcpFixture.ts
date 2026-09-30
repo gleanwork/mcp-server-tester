@@ -4,8 +4,13 @@ import type {
   Client,
   Tool,
 } from '@modelcontextprotocol/client';
-import type { AuthType } from '../../types/index.js';
+import type { AuthType, MCPProtocolInfo } from '../../types/index.js';
 import { callToolNormalized } from '../callTool.js';
+import { getProtocolInfo } from '../protocol.js';
+import {
+  createFixtureExtensions,
+  type MCPFixtureExtensions,
+} from './fixtureExtensions.js';
 
 // Re-export AuthType for backwards compatibility
 export type { AuthType } from '../../types/index.js';
@@ -79,7 +84,7 @@ export interface MCPFixtureOptions {
  *
  * This interface wraps the raw MCP Client with test-friendly methods
  */
-export interface MCPFixtureApi {
+export interface MCPFixtureApi extends MCPFixtureExtensions {
   /**
    * The underlying MCP client (for advanced usage)
    */
@@ -94,6 +99,14 @@ export interface MCPFixtureApi {
    * Playwright project name for this test session
    */
   project?: string;
+
+  /**
+   * The protocol this connection requested and negotiated, e.g.
+   * `{ requested: '2026-07-28', negotiated: '2026-07-28', era: 'modern' }`.
+   * Use it to skip era-specific tests:
+   * `test.skip(mcp.protocol.era !== 'modern')`.
+   */
+  readonly protocol: MCPProtocolInfo;
 
   /**
    * Lists all available tools from the MCP server
@@ -177,6 +190,10 @@ export function createMCPFixture(
       client,
       authType,
       project,
+      get protocol() {
+        return getProtocolInfo(client);
+      },
+      ...createFixtureExtensions(client),
 
       async listTools(): Promise<Array<Tool>> {
         const result = await withCallTimeout(
@@ -217,6 +234,10 @@ export function createMCPFixture(
     client,
     authType,
     project,
+    get protocol() {
+      return getProtocolInfo(client);
+    },
+    ...createFixtureExtensions(client),
 
     async listTools(): Promise<Array<Tool>> {
       const execute = async () => {

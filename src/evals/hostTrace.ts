@@ -1,26 +1,21 @@
-import type { HostEvidence, HostRunResult } from './evalFrameworkTypes.js';
+import type {
+  HostEvent,
+  HostEvidence,
+  HostRunResult,
+} from './evalFrameworkTypes.js';
+import { withSkillEvents } from './mcpHost/hostSkills.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
-import type { UsageMetrics } from '../types/index.js';
+import type { HostExecution } from './caseExecution.js';
 
-/** Internal runner execution envelope, also used for direct MCP calls. */
-export interface EvalExecutionResult {
-  response: unknown;
-  error?: string;
-  hostUsage?: UsageMetrics;
-  hostTelemetry?: Record<string, unknown>;
-  /** Host time already spent outside the current evaluation timer. */
-  preExecutionDurationMs?: number;
-  evidence?: HostEvidence;
-}
-
-/** Adapt once at the runner boundary, retaining original events for reporting. */
+/** Adapt a host trace once at the runner boundary, retaining original events for reporting. */
 export function hostTraceToExecution(
   trace: HostRunResult,
   evidence: HostEvidence,
   servers: MCPConfig[] = []
-): EvalExecutionResult {
+): HostExecution {
   return {
+    kind: 'host',
     response: {
       success: !trace.error,
       response: trace.finalText,
@@ -55,8 +50,9 @@ export function hostTraceToExecution(
       ...(trace.diagnostics ? { diagnostics: trace.diagnostics } : {}),
     },
     error: trace.error,
-    hostUsage: trace.usage,
-    hostTelemetry: trace.telemetry,
+    usage: trace.usage,
+    telemetry: trace.telemetry,
+    ...(trace.diagnostics ? { diagnostics: trace.diagnostics } : {}),
     evidence,
   };
 }
@@ -66,6 +62,36 @@ export function simulationToHostTrace(
   result: MCPHostSimulationResult,
   servers: MCPConfig[]
 ): HostRunResult {
+  const toolEvents: HostEvent[] = result.toolCalls.map((call) => {
+    const server = servers.find(
+      (server) => server.label && call.name.startsWith(`${server.label}.`)
+    );
+    const source =
+      call.source ?? (server || servers.length === 1 ? 'mcp' : 'host');
+    return {
+      kind: 'tool_call',
+      source,
+      name:
+        server && call.source !== 'host'
+          ? call.name.slice(server.label!.length + 1)
+          : call.name,
+      // Explicit parser provenance wins over the legacy server-count fallback.
+      server:
+        source === 'host'
+          ? undefined
+          : (call.server ??
+            server?.label ??
+            (servers.length === 1 ? servers[0]?.label : undefined)),
+      arguments: call.arguments,
+      output: call.output,
+      ...(call.isError !== undefined ? { isError: call.isError } : {}),
+      ...(call.rawName !== undefined ? { rawName: call.rawName } : {}),
+      id: call.id,
+      ...(call.durationMs !== undefined ? { durationMs: call.durationMs } : {}),
+      ...(call.startedAt ? { startedAt: call.startedAt } : {}),
+      ...(call.completedAt ? { completedAt: call.completedAt } : {}),
+    };
+  });
   return {
     finalText: result.response ?? '',
     error: result.success
@@ -73,37 +99,9 @@ export function simulationToHostTrace(
       : (result.error ?? 'Host execution failed.'),
     usage: result.usage,
     ...(result.diagnostics ? { diagnostics: result.diagnostics } : {}),
-    events: result.toolCalls.map((call) => {
-      const server = servers.find(
-        (server) => server.label && call.name.startsWith(`${server.label}.`)
-      );
-      const source =
-        call.source ?? (server || servers.length === 1 ? 'mcp' : 'host');
-      return {
-        kind: 'tool_call',
-        source,
-        name:
-          server && call.source !== 'host'
-            ? call.name.slice(server.label!.length + 1)
-            : call.name,
-        // Explicit parser provenance wins over the legacy server-count fallback.
-        server:
-          source === 'host'
-            ? undefined
-            : (call.server ??
-              server?.label ??
-              (servers.length === 1 ? servers[0]?.label : undefined)),
-        arguments: call.arguments,
-        output: call.output,
-        ...(call.isError !== undefined ? { isError: call.isError } : {}),
-        ...(call.rawName !== undefined ? { rawName: call.rawName } : {}),
-        id: call.id,
-        ...(call.durationMs !== undefined
-          ? { durationMs: call.durationMs }
-          : {}),
-        ...(call.startedAt ? { startedAt: call.startedAt } : {}),
-        ...(call.completedAt ? { completedAt: call.completedAt } : {}),
-      };
-    }),
+    // Skill loads by the simulated host become ordered `skill` events.
+    events: result.skillLoads
+      ? withSkillEvents(toolEvents, result.skillLoads)
+      : toolEvents,
   };
 }

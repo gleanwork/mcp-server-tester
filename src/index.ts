@@ -92,6 +92,11 @@ export type {
 
   // Core
   AuthType,
+  ProtocolEra,
+  ProtocolRevision,
+  ProtocolSetting,
+  ProtocolProbeOptions,
+  MCPProtocolInfo,
   ResultSource,
   ExpectationType,
   EvalExpectationResult,
@@ -105,6 +110,7 @@ export type {
   JudgeExpectConfig,
   SerializedEvalDataset,
   EvalMode,
+  EvalDirectRequest,
   LoadDatasetOptions,
   EvalCaseRequest,
   EvalContext,
@@ -228,6 +234,22 @@ export {
   closeMCPClient,
 } from './mcp/clientFactory.js';
 
+// Protocol versions
+export {
+  DEFAULT_PROTOCOL_SETTING,
+  FIRST_MODERN_PROTOCOL_VERSION,
+  LEGACY_PROTOCOL_VERSIONS,
+  MODERN_PROTOCOL_VERSIONS,
+  eraOfRevision,
+  getProtocolInfo,
+  isProtocolRevision,
+} from './mcp/protocol.js';
+export { protocolMatrix } from './config/protocolMatrix.js';
+export type {
+  ProtocolMatrixEntry,
+  ProtocolMatrixProject,
+} from './config/protocolMatrix.js';
+
 // Response Normalization
 export { normalizeToolResponse, extractText } from './mcp/response.js';
 export { callToolNormalized, getToolProtocolError } from './mcp/callTool.js';
@@ -268,6 +290,7 @@ export {
   validateEvalCase,
   validateEvalDataset,
 } from './evals/datasetTypes.js';
+export { BUILTIN_RESULT_SCHEMAS } from './evals/builtinResultSchemas.js';
 
 // Eval Loader
 export {
@@ -375,6 +398,13 @@ export type {
 
 // Eval Runner
 export { runEvalDataset, runEvalCase } from './evals/evalRunner.js';
+export type {
+  CaseExecution,
+  DirectExecution,
+  HostExecution,
+  FailedExecution,
+  HostResponse,
+} from './evals/caseExecution.js';
 
 export type {
   EvalResultStore,
@@ -407,6 +437,19 @@ export {
   runServerComparison,
   saveServerComparison,
 } from './evals/serverComparison.js';
+
+// Agent Skills A/B comparison (mcp_host)
+export { runSkillsComparison } from './evals/skillsComparison.js';
+export type {
+  SkillsComparisonOptions,
+  SkillsComparisonResult,
+  SkillsComparisonVariant,
+  SkillsVariantSummary,
+} from './evals/skillsComparison.js';
+export type {
+  HostSkillsMode,
+  SkillLoad,
+} from './evals/mcpHost/mcpHostTypes.js';
 
 // Completed eval run comparison
 export {
@@ -469,3 +512,45 @@ export {
 
 // Conformance
 export { runConformanceChecks } from './spec/conformanceChecks.js';
+export { runCrossEraChecks } from './spec/crossEra.js';
+export type {
+  CrossEraOptions,
+  CrossEraConnection,
+  MCPCrossEraResult,
+} from './spec/crossEra.js';
+export type { ConformanceSeverity } from './types/reporter.js';
+export type { SkillsCheckOptions } from './spec/checks/skills.js';
+
+// Agent Skills over MCP (SEP-2640)
+export {
+  SKILLS_EXTENSION_ID,
+  SKILL_LIMITS,
+  SkillEntrySchema,
+} from './skills/skillsTypes.js';
+export type {
+  SkillEntry,
+  SkillResourceEntry,
+  SkillsExtensionSettings,
+} from './skills/skillsTypes.js';
+export {
+  validateSkillEntry,
+  parseSkillFrontmatter,
+  skillDigest,
+} from './skills/skillEntry.js';
+export type { SkillEntryProblem } from './skills/skillEntry.js';
+export {
+  getSkillsExtension,
+  listSkills,
+  getSkill,
+  readSkillFile,
+  verifySkillFile,
+} from './skills/skillsClient.js';
+export type { SkillFileContent } from './skills/skillsClient.js';
+
+// Fixture extensions (resources, discovery, extension requests, skills)
+export { createFixtureExtensions } from './mcp/fixtures/fixtureExtensions.js';
+export type {
+  MCPFixtureExtensions,
+  MCPSkillsApi,
+  MCPSkillFileRead,
+} from './mcp/fixtures/fixtureExtensions.js';

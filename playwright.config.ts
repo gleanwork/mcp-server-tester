@@ -1,4 +1,10 @@
 import { defineConfig } from '@playwright/test';
+import { protocolMatrix } from './src/config/protocolMatrix.js';
+
+/** Port for the dual-era HTTP mock started by `webServer` below. */
+const DUAL_ERA_HTTP_PORT = 3917;
+
+const dualEraSpecs = /(mcp-tests|protocol|skills)\.spec\.ts/;
 
 /**
  * Playwright configuration for MCP eval tests
@@ -18,6 +24,13 @@ export default defineConfig({
   use: {
     trace: 'on-first-retry',
   },
+  webServer: {
+    command: `node --import tsx tests/mocks/dualEraServer.ts --http ${DUAL_ERA_HTTP_PORT}`,
+    port: DUAL_ERA_HTTP_PORT,
+    reuseExistingServer: !process.env.CI,
+    stdout: 'ignore',
+    stderr: 'pipe',
+  },
   projects: [
     {
       name: 'mcp-stdio-mock',
@@ -34,6 +47,36 @@ export default defineConfig({
         },
       },
     },
+    // The same specs against a server that speaks both protocol eras, once
+    // per protocol setting (projects are named e.g. "dual-stdio@2026-07-28").
+    ...protocolMatrix(
+      {
+        name: 'dual-stdio',
+        testMatch: dualEraSpecs,
+        use: {
+          mcpConfig: {
+            transport: 'stdio' as const,
+            command: process.execPath,
+            args: ['--import', 'tsx', 'tests/mocks/dualEraServer.ts'],
+            quiet: true,
+          },
+        },
+      },
+      ['legacy', '2025-06-18', '2026-07-28', 'auto']
+    ),
+    ...protocolMatrix(
+      {
+        name: 'dual-http',
+        testMatch: dualEraSpecs,
+        use: {
+          mcpConfig: {
+            transport: 'http' as const,
+            serverUrl: `http://127.0.0.1:${DUAL_ERA_HTTP_PORT}/mcp`,
+          },
+        },
+      },
+      ['legacy', '2026-07-28']
+    ),
     // Uncomment to add HTTP transport testing:
     // {
     //   name: 'mcp-http-example',

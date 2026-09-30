@@ -12,7 +12,8 @@ const mocks = vi.hoisted(() => ({
   MockSSEClientTransport: vi.fn(),
 }));
 
-vi.mock('@modelcontextprotocol/client', () => ({
+vi.mock('@modelcontextprotocol/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof SDKClientModule>()),
   Client: mocks.MockClient,
   StreamableHTTPClientTransport: mocks.MockStreamableHTTPClientTransport,
   SSEClientTransport: mocks.MockSSEClientTransport,
@@ -24,6 +25,8 @@ vi.mock('@modelcontextprotocol/client/stdio', () => ({
 
 import { createMCPClientForConfig, closeMCPClient } from './clientFactory.js';
 import { MCPHttpConnectionError } from './connectionDiagnostics.js';
+import { UnsupportedProtocolVersionError } from '@modelcontextprotocol/client';
+import type * as SDKClientModule from '@modelcontextprotocol/client';
 import type { OAuthClientProvider } from '@modelcontextprotocol/client';
 
 describe('clientFactory', () => {
@@ -69,6 +72,8 @@ describe('clientFactory', () => {
           },
           {
             capabilities: {},
+            versionNegotiation: { mode: 'legacy' },
+            responseCacheStore: expect.any(Object),
           }
         );
         expect(mocks.MockStdioClientTransport).toHaveBeenCalledWith({
@@ -394,11 +399,116 @@ describe('clientFactory', () => {
           },
         });
 
-        expect(mocks.MockClient).toHaveBeenCalledWith(expect.anything(), {
-          capabilities: {
-            roots: { listChanged: true },
-          },
+        expect(mocks.MockClient).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({
+            capabilities: {
+              roots: { listChanged: true },
+            },
+          })
+        );
+      });
+    });
+
+    describe('protocol selection', () => {
+      const stdioConfig = {
+        transport: 'stdio' as const,
+        command: 'node',
+        args: ['server.js'],
+      };
+
+      it('pins a legacy revision via supportedProtocolVersions', async () => {
+        await createMCPClientForConfig({
+          ...stdioConfig,
+          protocol: '2025-06-18',
         });
+
+        expect(mocks.MockClient).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({
+            versionNegotiation: { mode: 'legacy' },
+            supportedProtocolVersions: ['2025-06-18'],
+          })
+        );
+      });
+
+      it('pins a modern revision via versionNegotiation', async () => {
+        await createMCPClientForConfig({
+          ...stdioConfig,
+          protocol: '2026-07-28',
+        });
+
+        expect(mocks.MockClient).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({
+            versionNegotiation: { mode: { pin: '2026-07-28' } },
+          })
+        );
+      });
+
+      it('lets the protocol option override config.protocol', async () => {
+        await createMCPClientForConfig(
+          { ...stdioConfig, protocol: '2026-07-28' },
+          { protocol: 'auto' }
+        );
+
+        expect(mocks.MockClient).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({ versionNegotiation: { mode: 'auto' } })
+        );
+      });
+
+      it('rejects an invalid protocol setting', async () => {
+        await expect(
+          createMCPClientForConfig({ ...stdioConfig, protocol: 'latest' })
+        ).rejects.toThrow(/protocol must be/);
+      });
+
+      it('does not fall back to SSE when a modern revision is pinned', async () => {
+        mocks.mockConnect.mockRejectedValueOnce(new Error('http_400'));
+
+        await expect(
+          createMCPClientForConfig({
+            transport: 'http',
+            serverUrl: 'http://localhost:3000/mcp',
+            protocol: '2026-07-28',
+          })
+        ).rejects.toThrow('http_400');
+        expect(mocks.MockSSEClientTransport).not.toHaveBeenCalled();
+      });
+
+      it('does not fall back to SSE when a legacy revision other than 2024-11-05 is pinned', async () => {
+        mocks.mockConnect.mockRejectedValueOnce(
+          new Error("Server's protocol version is not supported: 2024-11-05")
+        );
+
+        await expect(
+          createMCPClientForConfig({
+            transport: 'http',
+            serverUrl: 'http://localhost:3000/mcp',
+            protocol: '2025-06-18',
+          })
+        ).rejects.toThrow(
+          /different protocol revision than the pinned "2025-06-18"/
+        );
+        expect(mocks.MockSSEClientTransport).not.toHaveBeenCalled();
+      });
+
+      it('reports the supported versions when the server rejects the protocol over HTTP', async () => {
+        mocks.mockConnect.mockRejectedValueOnce(
+          new UnsupportedProtocolVersionError({
+            supported: ['2026-07-28'],
+            requested: '2025-11-25',
+          })
+        );
+
+        await expect(
+          createMCPClientForConfig({
+            transport: 'http',
+            serverUrl: 'http://localhost:3000/mcp',
+          })
+        ).rejects.toThrow(/it supports: 2026-07-28/);
+        expect(mocks.MockSSEClientTransport).not.toHaveBeenCalled();
       });
     });
 

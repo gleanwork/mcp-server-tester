@@ -13,6 +13,21 @@ describe('buildEvalDataset canonical ingestion', () => {
     expect(buildEvalDataset(raw, undefined, manifest).cases).toEqual(raw.cases);
   });
 
+  it('accepts direct request cases, and rejects direct cases with neither target', () => {
+    const raw = {
+      name: 'canonical',
+      cases: [{ id: 'a', request: { method: 'skills/list' } }],
+    };
+    expect(buildEvalDataset(raw, undefined, manifest).cases).toEqual(raw.cases);
+    expect(() =>
+      buildEvalDataset(
+        { name: 'canonical', cases: [{ id: 'b' }] },
+        undefined,
+        manifest
+      )
+    ).toThrow(/toolName or request/);
+  });
+
   it.each([
     { id: 'a', toolName: 'search', args: { query: 'policy' } },
     { id: 'a', mode: 'direct', toolName: 'search', args: {} },

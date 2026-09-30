@@ -8,21 +8,18 @@ import type {
   Implementation,
 } from '@modelcontextprotocol/client';
 import type { MCPConformanceCheck } from '../types/reporter.js';
-import { ProtocolError } from '@modelcontextprotocol/client';
-import { AjvJsonSchemaValidator } from '@modelcontextprotocol/client/validators/ajv';
-
-const schemaValidator = new AjvJsonSchemaValidator();
-
-/** Why a tool's outputSchema does not compile, or null when it does. */
-function outputSchemaProblem(tool: Tool): string | null {
-  if (tool.outputSchema === undefined) return null;
-  try {
-    schemaValidator.getValidator(tool.outputSchema);
-    return null;
-  } catch (error) {
-    return `outputSchema does not compile: ${error instanceof Error ? error.message : String(error)}`;
-  }
-}
+import type { MCPProtocolInfo } from '../types/index.js';
+import { getWireTap } from '../mcp/wireTap.js';
+import { errorMessage } from '../utils/errorMessage.js';
+import { getConnectionTarget } from '../mcp/connectionTarget.js';
+import {
+  conformancePasses,
+  runCheckDefinitions,
+  type ConformanceContext,
+} from './registry.js';
+import { coreChecks } from './checks/core.js';
+import { modernChecks } from './checks/modern.js';
+import { skillsChecks, type SkillsCheckOptions } from './checks/skills.js';
 
 export type { MCPConformanceCheck };
 
@@ -58,6 +55,22 @@ export interface MCPConformanceOptions {
    * @default true
    */
   checkPrompts?: boolean;
+
+  /**
+   * Whether modern-era checks may send raw probe requests (malformed or
+   * mismatched requests) to the server. Over stdio a probe starts a separate,
+   * short-lived copy of the server. Set to false for servers where that is
+   * expensive or has side effects; those checks are then reported as skipped.
+   * @default true
+   */
+  probe?: boolean;
+
+  /**
+   * Agent Skills (SEP-2640) checks. They run in every era when the server
+   * declares `io.modelcontextprotocol/skills`. Pass options to tune them, or
+   * false to turn them off.
+   */
+  skills?: SkillsCheckOptions | false;
 }
 
 /**
@@ -99,7 +112,8 @@ export interface MCPConformanceRaw {
  */
 export interface MCPConformanceResult {
   /**
-   * Whether all checks passed
+   * Whether every 'must' check passed. Failing 'should' checks are warnings
+   * and skipped checks never fail the result.
    */
   pass: boolean;
 
@@ -107,6 +121,13 @@ export interface MCPConformanceResult {
    * List of check results
    */
   checks: MCPConformanceCheck[];
+
+  /**
+   * Protocol the checked connection requested and negotiated. Checks are
+   * selected by its era: legacy connections run the core checks, modern
+   * (2026-07-28+) connections also run the modern-era checks.
+   */
+  protocol: MCPProtocolInfo;
 
   /**
    * Raw MCP responses for snapshotting
@@ -124,8 +145,9 @@ export interface MCPConformanceResult {
 /**
  * Runs MCP protocol conformance checks
  *
- * Validates that the MCP server conforms to expected protocol behavior.
- * Returns both assertion results and raw MCP responses for snapshotting.
+ * Validates that the MCP server conforms to expected protocol behavior for
+ * the protocol the connection negotiated (see `mcp.protocol`). Returns both
+ * assertion results and raw MCP responses for snapshotting.
  *
  * When testInfo is provided, results are automatically attached for the MCP reporter.
  *
@@ -160,15 +182,6 @@ export async function runConformanceChecks(
   options: MCPConformanceOptions = {},
   testInfo?: TestInfo
 ): Promise<MCPConformanceResult> {
-  const {
-    requiredTools = [],
-    validateSchemas = true,
-    checkServerInfo = true,
-    checkResources = true,
-    checkPrompts = true,
-  } = options;
-
-  const checks: MCPConformanceCheck[] = [];
   const raw: MCPConformanceRaw = {
     serverInfo: null,
     capabilities: null,
@@ -177,180 +190,63 @@ export async function runConformanceChecks(
     prompts: null,
   };
 
-  // Get server info
   const serverInfo = mcp.getServerInfo();
-  if (serverInfo) {
-    raw.serverInfo = serverInfo as Implementation;
-  }
+  if (serverInfo) raw.serverInfo = serverInfo as Implementation;
+  const capabilities = mcp.client.getServerCapabilities() ?? null;
+  raw.capabilities = capabilities;
 
-  // Check 1: Server info is present
-  if (checkServerInfo) {
-    checks.push({
-      name: 'server_info_present',
-      pass: serverInfo !== null,
-      message: serverInfo
-        ? `Server info: ${serverInfo.name ?? 'unknown'} v${serverInfo.version ?? 'unknown'}`
-        : 'Server info is missing',
-    });
-  }
-
-  // Get capabilities from client
-  const capabilities = mcp.client.getServerCapabilities();
-  if (capabilities) {
-    raw.capabilities = capabilities;
-  }
-
-  // Check 2: Capabilities are valid
-  checks.push({
-    name: 'capabilities_valid',
-    pass: capabilities !== undefined,
-    message: capabilities
-      ? `Server capabilities: ${formatCapabilities(capabilities)}`
-      : 'Server capabilities not available',
-  });
-
-  // Check 3: List tools returns valid response
-  let tools: Tool[] = [];
+  let toolsError: string | undefined;
   try {
-    tools = await mcp.listTools();
-    raw.tools = tools;
-    checks.push({
-      name: 'list_tools_succeeds',
-      pass: true,
-      message: `listTools returned ${tools.length} tools`,
-    });
+    raw.tools = await mcp.listTools();
   } catch (error) {
-    checks.push({
-      name: 'list_tools_succeeds',
-      pass: false,
-      message: `listTools failed: ${error instanceof Error ? error.message : String(error)}`,
-    });
-    const pass = checks.every((check) => check.pass);
-    return { pass, checks, raw };
+    toolsError = errorMessage(error);
   }
 
-  // Check 4: Required tools are present
-  if (requiredTools.length > 0) {
-    const toolNames = new Set(tools.map((t) => t.name));
-    const missingTools = requiredTools.filter((name) => !toolNames.has(name));
+  const protocol = mcp.protocol;
+  const context: ConformanceContext = {
+    mcp,
+    era: protocol.era ?? 'legacy',
+    negotiated: protocol.negotiated,
+    serverInfo: raw.serverInfo,
+    capabilities,
+    tools: raw.tools,
+    ...(toolsError !== undefined ? { toolsError } : {}),
+    tap: getWireTap(mcp.client),
+    target: getConnectionTarget(mcp.client),
+    probe: options.probe ?? true,
+    observedErrorCodes: [],
+    shared: new Map(),
+  };
 
-    checks.push({
-      name: 'required_tools_present',
-      pass: missingTools.length === 0,
-      message:
-        missingTools.length === 0
-          ? `All ${requiredTools.length} required tools are present`
-          : `Missing required tools: ${missingTools.join(', ')}`,
-    });
-  }
-
-  // Check 5: Tool schemas are valid
-  if (validateSchemas && tools.length > 0) {
-    const invalidTools: Array<string> = [];
-
-    for (const tool of tools) {
-      // Check that tool has required fields
-      if (!tool.name) {
-        invalidTools.push(`(unnamed tool): missing name`);
-        continue;
-      }
-
-      if (!tool.inputSchema) {
-        invalidTools.push(`${tool.name}: missing inputSchema`);
-        continue;
-      }
-
-      // Check that inputSchema is an object schema
-      if (tool.inputSchema.type !== 'object') {
-        invalidTools.push(
-          `${tool.name}: inputSchema.type must be "object", got "${String(tool.inputSchema.type)}"`
-        );
-      }
-
-      // An outputSchema must compile: the SDK compiles it before every
-      // callTool and rejects the call otherwise (v1 failed listTools).
-      const outputProblem = outputSchemaProblem(tool);
-      if (outputProblem !== null) {
-        invalidTools.push(`${tool.name}: ${outputProblem}`);
-      }
-    }
-
-    checks.push({
-      name: 'tool_schemas_valid',
-      pass: invalidTools.length === 0,
-      message:
-        invalidTools.length === 0
-          ? `All ${tools.length} tools have valid schemas`
-          : `Invalid tool schemas:\n  ${invalidTools.join('\n  ')}`,
-    });
-  }
-
-  // Check 6: List resources (only if server declares resources capability)
-  if (checkResources && capabilities?.resources) {
-    try {
-      const resourcesResult = await mcp.client.listResources();
-      raw.resources = resourcesResult.resources;
-      checks.push({
-        name: 'list_resources_succeeds',
-        pass: true,
-        message: `listResources returned ${resourcesResult.resources.length} resources`,
-      });
-    } catch (error) {
-      checks.push({
-        name: 'list_resources_succeeds',
-        pass: false,
-        message: `listResources failed: ${error instanceof Error ? error.message : String(error)}`,
-      });
-    }
-  }
-
-  // Check 7: List prompts (only if server declares prompts capability)
-  if (checkPrompts && capabilities?.prompts) {
-    try {
-      const promptsResult = await mcp.client.listPrompts();
-      raw.prompts = promptsResult.prompts;
-      checks.push({
-        name: 'list_prompts_succeeds',
-        pass: true,
-        message: `listPrompts returned ${promptsResult.prompts.length} prompts`,
-      });
-    } catch (error) {
-      checks.push({
-        name: 'list_prompts_succeeds',
-        pass: false,
-        message: `listPrompts failed: ${error instanceof Error ? error.message : String(error)}`,
-      });
-    }
-  }
-
-  // Check 8: Calling invalid tool returns error
-  try {
-    const result = await mcp.callTool('__nonexistent_tool__', {});
-    // MCP SDK may return isError: true instead of throwing
-    const hasError = result.isError === true;
-    checks.push({
-      name: 'invalid_tool_returns_error',
-      pass: hasError,
-      message: hasError
-        ? 'Nonexistent tool correctly returned an error'
-        : 'Calling nonexistent tool should have returned an error',
-    });
-  } catch (error) {
-    // A custom fixture may let the protocol error throw; that counts. Local
-    // failures (timeouts, closed connections) are not an answer.
-    const isProtocolError = error instanceof ProtocolError;
-    checks.push({
-      name: 'invalid_tool_returns_error',
-      pass: isProtocolError,
-      message: isProtocolError
-        ? 'Nonexistent tool correctly threw an error'
-        : `Calling nonexistent tool failed locally: ${error instanceof Error ? error.message : String(error)}`,
-    });
-  }
-
-  const pass = checks.every((check) => check.pass);
-
-  const result: MCPConformanceResult = { pass, checks, raw };
+  const core = coreChecks(
+    {
+      requiredTools: options.requiredTools ?? [],
+      validateSchemas: options.validateSchemas ?? true,
+      checkServerInfo: options.checkServerInfo ?? true,
+      checkResources: options.checkResources ?? true,
+      checkPrompts: options.checkPrompts ?? true,
+    },
+    raw
+  );
+  // When tools/list fails, the core checks stop at list_tools_succeeds, but
+  // modern wire-level checks still run: the SDK can reject a malformed
+  // result (e.g. missing cache hints) whose raw frame is what they inspect.
+  // Skills checks don't depend on tools/list, so they run even when it fails.
+  const skills = options.skills === false ? [] : skillsChecks(options.skills);
+  const checks = [
+    ...(await runCheckDefinitions(core, context)),
+    ...(await runCheckDefinitions(skills, context)),
+    // Modern checks run last so reserved_error_codes sees every error the
+    // other checks provoked.
+    ...(await runCheckDefinitions(
+      toolsError === undefined
+        ? modernChecks
+        : modernChecks.filter((definition) => !definition.requiresTools),
+      context
+    )),
+  ];
+  const pass = conformancePasses(checks);
+  const result: MCPConformanceResult = { pass, checks, protocol, raw };
 
   // Attach results for MCP reporter if testInfo is provided
   if (testInfo) {
@@ -364,6 +260,7 @@ export async function runConformanceChecks(
           serverInfo: raw.serverInfo,
           capabilities: raw.capabilities,
           toolCount: raw.tools.length,
+          protocol,
           authType: mcp.authType,
           project: mcp.project,
         },
@@ -374,18 +271,4 @@ export async function runConformanceChecks(
   }
 
   return result;
-}
-
-/**
- * Formats server capabilities for display
- */
-function formatCapabilities(capabilities: ServerCapabilities): string {
-  const parts: string[] = [];
-  if (capabilities.tools) parts.push('tools');
-  if (capabilities.resources) parts.push('resources');
-  if (capabilities.prompts) parts.push('prompts');
-  if (capabilities.logging) parts.push('logging');
-  if (capabilities.completions) parts.push('completions');
-  if (capabilities.experimental) parts.push('experimental');
-  return parts.length > 0 ? parts.join(', ') : 'none declared';
 }

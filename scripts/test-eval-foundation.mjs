@@ -55,6 +55,7 @@ async function execute(
           }
         : {}),
       executeCase: async () => ({
+        kind: 'host',
         evidence,
         response: {
           success: true,
@@ -153,7 +154,10 @@ try {
       ],
     });
     const result = await runEvalDataset(
-      { dataset, executeCase: async () => ({ response: 'candidate' }) },
+      {
+        dataset,
+        executeCase: async () => ({ kind: 'direct', response: 'candidate' }),
+      },
       {}
     );
     assert.equal(result.passed, passed);

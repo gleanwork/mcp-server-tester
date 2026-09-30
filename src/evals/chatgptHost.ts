@@ -18,6 +18,12 @@ import {
 } from './hostPlugins.js';
 import type { ExternalHostConfig } from './externalHost/types.js';
 import { simulationToHostTrace } from './hostTrace.js';
+import {
+  hostSecretValues,
+  redactHostError,
+  redactHostSecrets,
+  redactedHostError,
+} from './hostSecrets.js';
 import { NATIVE_MAX_ACTIONS } from './chatgpt/linuxContract.js';
 import {
   LINUX_CHATGPT_PLATFORM,
@@ -103,6 +109,17 @@ async function runBatch(
   const pluginCredentials = configs.map((config, index) =>
     resolveHostPluginCredentials(config.plugins ?? [], credentialEnv[index]!)
   );
+  // Every error this batch surfaces is redacted against these values.
+  const secrets = [
+    ...new Set(
+      requests.flatMap((request, index) =>
+        hostSecretValues(credentialEnv[index]!, request.input.servers, [
+          ...Object.values(prepared[index]!.environment),
+          ...Object.values(pluginCredentials[index]!),
+        ])
+      )
+    ),
+  ];
   const externalConfigs: ExternalHostConfig[] = requests.map(
     (request, index) => {
       const config = configs[index]!;
@@ -185,8 +202,7 @@ async function runBatch(
         try {
           await session.restart();
         } catch (error) {
-          recoveryError =
-            error instanceof Error ? error.message : 'restart failed';
+          recoveryError = redactHostError(error, secrets, 'restart failed');
         }
       }
       if (recoveryError) {
@@ -225,6 +241,7 @@ async function runBatch(
         { caseId: request.caseId }
       );
       const trace = simulationToHostTrace(result, request.input.servers);
+      if (trace.error) trace.error = redactHostSecrets(trace.error, secrets);
       if (result.success) {
         const id = result.externalHost.session.id;
         if (!id || !result.externalHost.session.turnId || usedSessions.has(id))
@@ -316,7 +333,7 @@ async function runBatch(
       await session.dispose();
     } catch (error) {
       cleanupFailed = true;
-      const message = `ChatGPT batch cleanup failed; desktop lock retained for inspection: ${error instanceof Error ? error.message : String(error)}`;
+      const message = `ChatGPT batch cleanup failed; desktop lock retained for inspection: ${redactHostError(error, secrets, redactHostSecrets(String(error), secrets))}`;
       for (const result of results) {
         result.error = [result.error, message].filter(Boolean).join(' ');
         result.telemetry = {
@@ -342,18 +359,19 @@ async function runBatch(
     }
   }
   if (executionFailed) {
+    const safeExecutionError = redactedHostError(
+      executionError,
+      secrets,
+      typeof executionError === 'string'
+        ? executionError
+        : 'ChatGPT batch execution failed.'
+    );
     if (cleanupError)
       throw new AggregateError(
-        [executionError, cleanupError],
+        [safeExecutionError, cleanupError],
         'ChatGPT execution and batch cleanup failed.'
       );
-    throw executionError instanceof Error
-      ? executionError
-      : new Error(
-          typeof executionError === 'string'
-            ? executionError
-            : 'ChatGPT batch execution failed.'
-        );
+    throw safeExecutionError;
   }
   if (cleanupError && !results.length) throw cleanupError;
   return results;

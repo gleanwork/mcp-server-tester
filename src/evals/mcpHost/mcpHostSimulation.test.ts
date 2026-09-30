@@ -19,11 +19,14 @@ import {
   isProviderAvailable,
   getMissingDependencyMessage,
 } from './mcpHostSimulation.js';
+import { createFixtureExtensions } from '../../mcp/fixtures/fixtureExtensions.js';
 
 function createMockMCP(): MCPFixtureApi {
   return {
     client: {} as MCPFixtureApi['client'],
     authType: 'none',
+    protocol: { requested: 'legacy', negotiated: '2025-11-25', era: 'legacy' },
+    ...createFixtureExtensions({} as MCPFixtureApi['client']),
     project: 'test-project',
     getServerInfo: vi.fn().mockReturnValue(null),
     listTools: vi.fn().mockResolvedValue([]),
