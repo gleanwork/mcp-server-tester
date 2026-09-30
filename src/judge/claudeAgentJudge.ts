@@ -1,6 +1,7 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { JudgeConfig } from './judgeTypes.js';
 import type { JudgeCompletionAdapter } from './llmJudge.js';
+import { DEFAULT_CLAUDE_JUDGE_MODEL } from './adapterSupport.js';
 
 /** The SDK's final result message, as far as the judge reads it. */
 interface AgentResultMessage {
@@ -32,7 +33,7 @@ export function claudeAgentCompletion(
       for await (const message of query({
         prompt,
         options: {
-          model: config.model ?? 'claude-sonnet-4-20250514',
+          model: config.model ?? DEFAULT_CLAUDE_JUDGE_MODEL,
           maxBudgetUsd: config.maxBudgetUsd ?? 0.1,
           // No tools, so nothing needs permission.
           tools: [],

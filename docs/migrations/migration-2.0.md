@@ -181,6 +181,7 @@ Every provider now sends the same system prompt and user prompt and reads the ve
 - **`anthropic-agent-sdk` uses the shared prompts.** Its system prompt and the end of its user prompt differed from the other providers, so its scores may shift slightly.
 - **All providers accept a verdict wrapped in prose.** Only `anthropic-agent-sdk` did; the others failed with "Failed to parse judge response as JSON".
 - **`provider: 'google'` honours `temperature`.** It was fixed at 0; the default is still 0.
+- **Judge usage always has a duration.** When a provider doesn't report one, `usage.durationMs` is the wall-clock time of the call. The `anthropic-agent-sdk` judge used to report 0.
 
 ## New in 2.0 (non-breaking)
 

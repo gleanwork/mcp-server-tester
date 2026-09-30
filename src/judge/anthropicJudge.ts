@@ -1,7 +1,63 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any */
 import type { JudgeConfig } from './judgeTypes.js';
-import type { JudgeCompletionAdapter } from './llmJudge.js';
-import { missingJudgePackage, requireJudgeApiKey } from './optionalPackage.js';
+import type { JudgeCompletion, JudgeCompletionAdapter } from './llmJudge.js';
+import {
+  DEFAULT_CLAUDE_JUDGE_MODEL,
+  DEFAULT_JUDGE_MAX_TOKENS,
+  DEFAULT_JUDGE_TEMPERATURE,
+  loadJudgeSdk,
+  requireJudgeApiKey,
+} from './adapterSupport.js';
+
+/** The part of an Anthropic Messages API response a judge reads. */
+export interface AnthropicMessage {
+  content: Array<{ type: string; text?: string }>;
+  usage?: { input_tokens?: number; output_tokens?: number };
+}
+
+/** The Messages API request a judge sends (Anthropic and Vertex). */
+export interface AnthropicMessageRequest {
+  model: string;
+  max_tokens: number;
+  temperature: number;
+  system: string;
+  messages: Array<{ role: 'user'; content: string }>;
+}
+
+interface AnthropicSdk {
+  default: new (options: { apiKey: string }) => {
+    messages: {
+      create(request: AnthropicMessageRequest): Promise<AnthropicMessage>;
+    };
+  };
+}
+
+/** The Messages API request for a judge prompt. */
+export function anthropicMessageRequest(
+  config: JudgeConfig,
+  system: string,
+  prompt: string
+): AnthropicMessageRequest {
+  return {
+    model: config.model ?? DEFAULT_CLAUDE_JUDGE_MODEL,
+    max_tokens: config.maxTokens ?? DEFAULT_JUDGE_MAX_TOKENS,
+    temperature: config.temperature ?? DEFAULT_JUDGE_TEMPERATURE,
+    system,
+    messages: [{ role: 'user', content: prompt }],
+  };
+}
+
+/** Text and usage from a Messages API response. */
+export function anthropicMessageCompletion(
+  response: AnthropicMessage
+): JudgeCompletion {
+  return {
+    text: response.content.find((block) => block.type === 'text')?.text ?? '',
+    usage: {
+      inputTokens: response.usage?.input_tokens,
+      outputTokens: response.usage?.output_tokens,
+    },
+  };
+}
 
 /**
  * Anthropic Messages API completion adapter.
@@ -15,37 +71,15 @@ export function anthropicCompletion(
     config.apiKeyEnvVar ?? 'ANTHROPIC_API_KEY'
   );
   return async ({ system, prompt }) => {
-    let sdk: any;
-    try {
+    const sdk = await loadJudgeSdk<AnthropicSdk>(
       // @ts-expect-error - optional: npm install @anthropic-ai/sdk
-      sdk = await import('@anthropic-ai/sdk');
-    } catch (err) {
-      throw missingJudgePackage('Anthropic', '@anthropic-ai/sdk', err);
-    }
-    const response = await new sdk.default({ apiKey }).messages.create({
-      model: config.model ?? 'claude-sonnet-4-20250514',
-      max_tokens: config.maxTokens ?? 1000,
-      temperature: config.temperature ?? 0.0,
-      system,
-      messages: [{ role: 'user', content: prompt }],
-    });
+      () => import('@anthropic-ai/sdk'),
+      'Anthropic',
+      '@anthropic-ai/sdk'
+    );
+    const response = await new sdk.default({ apiKey }).messages.create(
+      anthropicMessageRequest(config, system, prompt)
+    );
     return anthropicMessageCompletion(response);
-  };
-}
-
-/** Text and usage from an Anthropic Messages API response (also used by Vertex). */
-export function anthropicMessageCompletion(response: any): {
-  text: string;
-  usage: { inputTokens?: number; outputTokens?: number };
-} {
-  const textBlock = (response.content as any[]).find(
-    (block: any) => block.type === 'text'
-  );
-  return {
-    text: (textBlock?.text as string | undefined) ?? '',
-    usage: {
-      inputTokens: response.usage?.input_tokens as number | undefined,
-      outputTokens: response.usage?.output_tokens as number | undefined,
-    },
   };
 }

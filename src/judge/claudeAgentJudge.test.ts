@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { createJudge } from './judgeClient.js';
 import type { JudgeConfig } from './judgeTypes.js';
+import { JUDGE_SYSTEM_PROMPT } from './llmJudge.js';
 
 // Mock the Claude Agent SDK
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
@@ -57,6 +58,49 @@ function mockQueryResponse(
 describe('claudeAgentJudge', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  describe('SDK call', () => {
+    it('runs one response-only turn with the shared system prompt', async () => {
+      mockQueryResponse('{"pass": true, "score": 1, "reasoning": "ok"}');
+      await createClaudeAgentJudge({}).evaluate('candidate', null, 'rubric');
+      expect(query).toHaveBeenCalledWith({
+        prompt: expect.stringContaining('candidate'),
+        options: {
+          model: 'claude-sonnet-4-20250514',
+          maxBudgetUsd: 0.1,
+          tools: [],
+          permissionMode: 'bypassPermissions',
+          allowDangerouslySkipPermissions: true,
+          systemPrompt: JUDGE_SYSTEM_PROMPT,
+          maxTurns: 1,
+        },
+      });
+    });
+
+    it('reports wall-clock duration when the SDK omits it', async () => {
+      async function* withoutDuration() {
+        yield {
+          type: 'result' as const,
+          subtype: 'success',
+          result: '{"pass": true, "score": 1, "reasoning": "ok"}',
+          usage: { input_tokens: 1, output_tokens: 2 },
+        };
+      }
+      (query as Mock).mockReturnValue(withoutDuration());
+      const result = await createClaudeAgentJudge({}).evaluate(
+        'candidate',
+        null,
+        'rubric'
+      );
+      expect(result.usage).toMatchObject({
+        inputTokens: 1,
+        outputTokens: 2,
+        totalCostUsd: 0,
+      });
+      expect(result.usage?.durationMs).toBeGreaterThanOrEqual(0);
+      expect(result.usage).not.toHaveProperty('durationApiMs');
+    });
   });
 
   describe('createClaudeAgentJudge', () => {

@@ -1,7 +1,29 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any */
 import type { JudgeConfig } from './judgeTypes.js';
 import type { JudgeCompletionAdapter } from './llmJudge.js';
-import { missingJudgePackage, requireJudgeApiKey } from './optionalPackage.js';
+import {
+  DEFAULT_JUDGE_MAX_TOKENS,
+  DEFAULT_JUDGE_TEMPERATURE,
+  loadJudgeSdk,
+  requireJudgeApiKey,
+} from './adapterSupport.js';
+
+interface OpenAISdk {
+  default: new (options: { apiKey: string }) => {
+    chat: {
+      completions: {
+        create(request: {
+          model: string;
+          max_tokens: number;
+          temperature: number;
+          messages: Array<{ role: 'system' | 'user'; content: string }>;
+        }): Promise<{
+          choices: Array<{ message: { content?: string | null } }>;
+          usage?: { prompt_tokens?: number; completion_tokens?: number };
+        }>;
+      };
+    };
+  };
+}
 
 /**
  * OpenAI Chat Completions adapter.
@@ -15,31 +37,28 @@ export function openaiCompletion(
     config.apiKeyEnvVar ?? 'OPENAI_API_KEY'
   );
   return async ({ system, prompt }) => {
-    let sdk: any;
-    try {
+    const sdk = await loadJudgeSdk<OpenAISdk>(
       // @ts-expect-error - optional: npm install openai
-      sdk = await import('openai');
-    } catch (err) {
-      throw missingJudgePackage('OpenAI', 'openai', err);
-    }
+      () => import('openai'),
+      'OpenAI',
+      'openai'
+    );
     const completion = await new sdk.default({
       apiKey,
     }).chat.completions.create({
       model: config.model ?? 'gpt-4o',
-      max_tokens: config.maxTokens ?? 1000,
-      temperature: config.temperature ?? 0.0,
+      max_tokens: config.maxTokens ?? DEFAULT_JUDGE_MAX_TOKENS,
+      temperature: config.temperature ?? DEFAULT_JUDGE_TEMPERATURE,
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: prompt },
       ],
     });
     return {
-      text:
-        (completion.choices[0]?.message.content as string | null | undefined) ??
-        '',
+      text: completion.choices[0]?.message.content ?? '',
       usage: {
-        inputTokens: completion.usage?.prompt_tokens as number | undefined,
-        outputTokens: completion.usage?.completion_tokens as number | undefined,
+        inputTokens: completion.usage?.prompt_tokens,
+        outputTokens: completion.usage?.completion_tokens,
       },
     };
   };

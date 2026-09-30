@@ -9,6 +9,7 @@ import {
   type JudgeCompletionRequest,
 } from './llmJudge.js';
 import { createJudge } from './judgeClient.js';
+import { loadJudgeSdk } from './adapterSupport.js';
 import type { ProviderKind } from './judgeTypes.js';
 
 /** A completion adapter that records requests and answers with fixed text. */
@@ -100,6 +101,17 @@ describe('createLLMJudge', () => {
     });
   });
 
+  it('judges an undefined candidate as the text "undefined"', async () => {
+    const complete = fakeCompletion(verdict);
+    const result = await createLLMJudge(complete, {
+      maxToolOutputSize: 100,
+    }).evaluate(undefined, null, 'rubric');
+    expect(result.candidateSizeBytes).toBe(9);
+    expect(complete.requests[0]?.prompt).toContain(
+      '<candidate_response>\nundefined\n</candidate_response>'
+    );
+  });
+
   it('propagates provider errors', async () => {
     const judge = createLLMJudge(async () => {
       throw new Error('rate limited');
@@ -137,6 +149,25 @@ describe('parseJudgeResponse', () => {
     expect(parseJudgeResponse('```\n' + verdict + '\n```').score).toBe(0.8);
   });
 
+  it('keeps fences inside the reasoning', () => {
+    const fenced = JSON.stringify({
+      pass: true,
+      score: 1,
+      reasoning: 'use ```json blocks```',
+    });
+    expect(parseJudgeResponse(fenced).reasoning).toBe('use ```json blocks```');
+    expect(parseJudgeResponse('```json\n' + fenced + '\n```').reasoning).toBe(
+      'use ```json blocks```'
+    );
+  });
+
+  it('reads a fenced verdict followed by prose', () => {
+    expect(
+      parseJudgeResponse('```json\n' + verdict + '\n```\nHope that helps.')
+        .score
+    ).toBe(0.8);
+  });
+
   it('reads JSON embedded in prose', () => {
     expect(parseJudgeResponse(`Here you go: ${verdict} Thanks.`).pass).toBe(
       true
@@ -158,6 +189,20 @@ describe('parseJudgeResponse', () => {
   it('rejects JSON without the verdict fields', () => {
     expect(() => parseJudgeResponse('{"pass": true}')).toThrow(
       'Judge returned invalid response'
+    );
+  });
+});
+
+describe('loadJudgeSdk', () => {
+  it('names the package to install when the SDK is missing', async () => {
+    await expect(
+      loadJudgeSdk(
+        () => Promise.reject(new Error('Cannot find module')),
+        'OpenAI',
+        'openai'
+      )
+    ).rejects.toThrow(
+      'OpenAI judge requires the `openai` package. Install it with: npm install openai\nOriginal error: Cannot find module'
     );
   });
 });

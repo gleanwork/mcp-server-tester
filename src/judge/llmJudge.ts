@@ -57,13 +57,15 @@ export function buildJudgePrompt(
 }
 
 /**
- * Reads a judge's answer: strips Markdown code fences, falls back to the
- * JSON object embedded in surrounding prose, and validates the shape.
+ * Reads a judge's answer: strips a surrounding Markdown code fence, falls
+ * back to the JSON object embedded in surrounding prose, and validates the
+ * shape. Fences inside the JSON (e.g. in `reasoning`) are left alone.
  */
 export function parseJudgeResponse(text: string): JudgeResponse {
   const cleaned = text
-    .replace(/```json\n?/g, '')
-    .replace(/```\n?/g, '')
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/, '')
     .trim();
 
   let parsed: unknown;
