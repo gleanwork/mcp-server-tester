@@ -179,7 +179,7 @@ For the standard Playwright use case, prefer importing `test` and `mcp` from `@g
 
 **Parameters:**
 
-- `client: Client` — MCP client created via `createMCPClientForConfig()`
+- `client: Client` — MCP client created via `createMCPClientForConfig()`. A client created another way works for calls, but `mcp.protocol` reports the default requested setting, and conformance probes and wire-level checks skip, because MST didn't record how it connected.
 - `testInfo?: TestInfo` — Optional Playwright `TestInfo`. When provided, operations are wrapped in `test.step()` and attachments are created for the MCP reporter
 - `options?: MCPFixtureOptions` — Optional configuration
 

@@ -6,7 +6,7 @@ import {
   createMCPClientForConfig,
 } from '../../mcp/clientFactory.js';
 import { createMCPFixture } from '../../mcp/fixtures/mcpFixture.js';
-import { getWireTap } from '../../mcp/wireTap.js';
+import { connectionOf } from '../../mcp/connection.js';
 import type { MCPFixtureApi } from '../../mcp/fixtures/mcpFixture.js';
 import type { ProtocolSetting } from '../../types/index.js';
 import { createHostSkillsSession, withSkillEvents } from './hostSkills.js';
@@ -39,7 +39,7 @@ async function withFixture<T>(
 }
 
 function resourceReads(mcp: MCPFixtureApi): string[] {
-  return (getWireTap(mcp.client)?.exchanges() ?? [])
+  return (connectionOf(mcp.client)?.wire?.exchanges() ?? [])
     .filter((exchange) => exchange.method === 'resources/read')
     .map((exchange) =>
       String((exchange.request.params as { uri: string }).uri)

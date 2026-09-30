@@ -111,6 +111,7 @@ const api: MCPFixtureApi = {
   - `tool_schemas_valid` fails if a tool's `outputSchema` does not compile.
 - **Servers that declare the skills extension** (`io.modelcontextprotocol/skills`) now also get the [skills checks](../skills.md#conformance) in every era. Pass `skills: false` to turn them off.
 - On 2026-07-28 connections, the [modern checks](../protocol-versions.md#conformance-by-era) run as well, including raw probe requests. Over stdio a probe starts a short-lived copy of your server; pass `probe: false` if that is a problem.
+- Probes present what the session's transport presents. A stdio probe starts the server with the same environment the SDK used (its safe defaults plus your `env`), not the test process's whole environment. An HTTP probe sends the auth provider's token even when an `Authorization` header is also configured, as the SDK does. Probes and wire-level checks need a client created by `createMCPClientForConfig()` (or the fixtures); for other clients they are skipped.
 - The HTML report groups checks by protocol and shows warnings and skips separately.
 
 ## `compareEvalRuns()` returns `warnings`

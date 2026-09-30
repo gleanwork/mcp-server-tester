@@ -72,17 +72,14 @@ export class WireTap {
   }
 }
 
-const taps = new WeakMap<Client, WireTap>();
-
 /**
- * Starts recording a connected client's transport frames. Call after
- * `connect()`; frames exchanged during the handshake are not recorded.
+ * Starts recording a connected client's transport frames. Call once, after
+ * `connect()`; frames exchanged during the handshake are not recorded. The
+ * tap is kept on the client's connection record (`connectionOf(client).wire`).
  */
 export function attachWireTap(client: Client): WireTap | undefined {
   const transport = client.transport;
   if (!transport) return undefined;
-  const existing = taps.get(client);
-  if (existing) return existing;
 
   const tap = new WireTap();
   const onmessage = transport.onmessage;
@@ -95,11 +92,5 @@ export function attachWireTap(client: Client): WireTap | undefined {
     tap.record('out', message);
     return send(message, options);
   };
-  taps.set(client, tap);
   return tap;
-}
-
-/** Returns the wire tap for a client created by MST, if any. */
-export function getWireTap(client: Client): WireTap | undefined {
-  return taps.get(client);
 }

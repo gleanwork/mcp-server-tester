@@ -7,8 +7,11 @@ import {
   UnsupportedProtocolVersionError,
 } from '@modelcontextprotocol/client';
 import type { OAuthClientProvider } from '@modelcontextprotocol/client';
-import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
-import type { MCPConfig } from '../config/mcpConfig.js';
+import {
+  StdioClientTransport,
+  getDefaultEnvironment,
+} from '@modelcontextprotocol/client/stdio';
+import type { HttpMCPConfig, MCPConfig } from '../config/mcpConfig.js';
 import {
   validateMCPConfig,
   isStdioConfig,
@@ -22,9 +25,12 @@ import {
   isProtocolRevision,
   createTesterResponseCache,
   resolveProtocolClientOptions,
-  setRequestedProtocol,
 } from './protocol.js';
-import { setConnectionTarget } from './connectionTarget.js';
+import {
+  beginConnection,
+  releaseConnection,
+  type MCPConnection,
+} from './connection.js';
 import { attachWireTap } from './wireTap.js';
 import { ProxyAgent, Agent as UndiciAgent } from 'undici';
 import { readFileSync } from 'node:fs';
@@ -124,10 +130,54 @@ async function retryWithBackoff<T>(
 }
 
 /**
- * Tracks undici agents that need to be closed when their associated client is closed.
- * Keyed by Client instance identity.
+ * The undici dispatcher an HTTP connection needs: a TLS agent when TLS is
+ * configured (it takes precedence over a proxy, as it always has), otherwise
+ * a proxy agent. Only the dispatcher that is used gets created.
  */
-const agentRegistry = new WeakMap<object, UndiciAgent | ProxyAgent>();
+function createHttpDispatcher(
+  tls: HttpMCPConfig['tls'],
+  proxyUrl: string | undefined
+): UndiciAgent | ProxyAgent | undefined {
+  if (tls) {
+    if (proxyUrl)
+      debugClient('Proxy ignored: TLS configuration takes precedence');
+    try {
+      const agent = new UndiciAgent({
+        connect: {
+          ...(tls.ca && { ca: readFileSync(tls.ca) }),
+          ...(tls.cert && { cert: readFileSync(tls.cert) }),
+          ...(tls.key && { key: readFileSync(tls.key) }),
+          rejectUnauthorized: tls.rejectUnauthorized ?? true,
+        },
+      });
+      debugClient('TLS configuration applied');
+      return agent;
+    } catch (error) {
+      const filePath = tls.ca ?? tls.cert ?? tls.key;
+      const fileType = tls.ca
+        ? 'CA certificate'
+        : tls.cert
+          ? 'client certificate'
+          : 'client key';
+      throw new Error(
+        `Failed to load TLS ${fileType} from ${filePath}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+  if (!proxyUrl) return undefined;
+  try {
+    const sanitized = new URL(proxyUrl);
+    debugClient(
+      'Using proxy: %s://%s:%s',
+      sanitized.protocol.slice(0, -1),
+      sanitized.hostname,
+      sanitized.port
+    );
+  } catch {
+    debugClient('Using proxy (unparseable URL)');
+  }
+  return new ProxyAgent(proxyUrl);
+}
 
 /**
  * Options for creating an MCP client
@@ -246,10 +296,6 @@ export async function createMCPClientForConfig(
   const validatedConfig = validateMCPConfig(config);
   const protocol =
     options?.protocol ?? validatedConfig.protocol ?? DEFAULT_PROTOCOL_SETTING;
-  // The HTTP+SSE transport only speaks 2024-11-05, so a pin to any other
-  // revision has nothing to fall back to.
-  const pinsRevisionWithoutSse =
-    isProtocolRevision(protocol) && protocol !== '2024-11-05';
 
   // Create client with info
   const client = new Client(
@@ -272,8 +318,35 @@ export async function createMCPClientForConfig(
       responseCacheStore: createTesterResponseCache(),
     }
   );
-  setRequestedProtocol(client, protocol);
+  const connection = beginConnection(client, protocol);
+  try {
+    await connect(client, connection, validatedConfig, options);
+  } catch (error) {
+    // A failed connect never returns the client, so close what it opened.
+    await releaseConnection(client);
+    throw error;
+  }
+  debugClient('Connected successfully');
+  const serverInfo = client.getServerVersion();
+  if (serverInfo) {
+    debugClient('Server info: %O', serverInfo);
+  }
 
+  return client;
+}
+
+/** Opens the transport for a config and connects the client over it. */
+async function connect(
+  client: Client,
+  connection: MCPConnection,
+  validatedConfig: MCPConfig,
+  options: CreateMCPClientOptions | undefined
+): Promise<void> {
+  const protocol = connection.requestedProtocol;
+  // The HTTP+SSE transport only speaks 2024-11-05, so a pin to any other
+  // revision has nothing to fall back to.
+  const pinsRevisionWithoutSse =
+    isProtocolRevision(protocol) && protocol !== '2024-11-05';
   // Create appropriate transport and connect
   if (isStdioConfig(validatedConfig)) {
     // Unresolved `${...}` placeholders, `files`, or `auth` belong to a host.
@@ -317,13 +390,14 @@ export async function createMCPClientForConfig(
     } catch (error) {
       throw describeProtocolFailure(error, protocol);
     }
-    setConnectionTarget(client, {
+    connection.target = {
       transport: 'stdio',
       command: validatedConfig.command,
       args: validatedConfig.args ?? [],
       ...(validatedConfig.cwd ? { cwd: validatedConfig.cwd } : {}),
-      ...(env ? { env } : {}),
-    });
+      // What StdioClientTransport spawns with, so probes start the same server.
+      env: { ...getDefaultEnvironment(), ...env },
+    };
   } else if (isHttpConfig(validatedConfig)) {
     // Build headers, including static token auth if configured and no authProvider.
     // User-provided headers take precedence over defaults (spread order).
@@ -370,69 +444,16 @@ export async function createMCPClientForConfig(
     let requestInit: RequestInit | undefined =
       Object.keys(headers).length > 0 ? { headers } : undefined;
 
-    // Apply proxy if configured or available from environment
+    // Proxy (configured or from the environment) or TLS settings need an
+    // undici dispatcher, which the connection owns and closes.
     const proxyUrl =
       validatedConfig.proxy?.url ??
       process.env['HTTPS_PROXY'] ??
       process.env['HTTP_PROXY'];
-
-    if (proxyUrl) {
-      const proxyAgent = new ProxyAgent(proxyUrl);
-      try {
-        const sanitized = new URL(proxyUrl);
-        debugClient(
-          'Using proxy: %s://%s:%s',
-          sanitized.protocol.slice(0, -1),
-          sanitized.hostname,
-          sanitized.port
-        );
-      } catch {
-        debugClient('Using proxy (unparseable URL)');
-      }
-      requestInit = {
-        ...requestInit,
-        dispatcher: proxyAgent,
-      } as unknown as RequestInit;
-    }
-
-    // Apply TLS configuration if present
-    if (validatedConfig.tls) {
-      const tlsCfg = validatedConfig.tls;
-      try {
-        const dispatcher = new UndiciAgent({
-          connect: {
-            ...(tlsCfg.ca && { ca: readFileSync(tlsCfg.ca) }),
-            ...(tlsCfg.cert && { cert: readFileSync(tlsCfg.cert) }),
-            ...(tlsCfg.key && { key: readFileSync(tlsCfg.key) }),
-            rejectUnauthorized: tlsCfg.rejectUnauthorized ?? true,
-          },
-        });
-        agentRegistry.set(client, dispatcher);
-        requestInit = {
-          ...requestInit,
-          dispatcher,
-        } as unknown as RequestInit;
-        debugClient('TLS configuration applied');
-      } catch (error) {
-        const filePath = tlsCfg.ca ?? tlsCfg.cert ?? tlsCfg.key;
-        const fileType = tlsCfg.ca
-          ? 'CA certificate'
-          : tlsCfg.cert
-            ? 'client certificate'
-            : 'client key';
-        throw new Error(
-          `Failed to load TLS ${fileType} from ${filePath}: ${error instanceof Error ? error.message : String(error)}`
-        );
-      }
-    } else if (proxyUrl) {
-      // Track ProxyAgent for cleanup (already created above in the proxy branch)
-      // Re-extract if already set via requestInit
-      const existingDispatcher = (
-        requestInit as unknown as { dispatcher?: ProxyAgent }
-      )?.dispatcher;
-      if (existingDispatcher) {
-        agentRegistry.set(client, existingDispatcher);
-      }
+    const dispatcher = createHttpDispatcher(validatedConfig.tls, proxyUrl);
+    if (dispatcher) {
+      connection.dispatcher = dispatcher;
+      requestInit = { ...requestInit, dispatcher } as unknown as RequestInit;
     }
 
     debugClient('Connecting via HTTP: %O', {
@@ -503,24 +524,16 @@ export async function createMCPClientForConfig(
         debugHttp('Connection established via sse');
       }
     }, retryAttempts);
-    const dispatcher = agentRegistry.get(client);
-    setConnectionTarget(client, {
+    connection.target = {
       transport: 'http',
       url: url.toString(),
       headers,
       ...(dispatcher ? { dispatcher } : {}),
       ...(options?.authProvider ? { authProvider: options.authProvider } : {}),
-    });
+    };
   }
 
-  attachWireTap(client);
-  debugClient('Connected successfully');
-  const serverInfo = client.getServerVersion();
-  if (serverInfo) {
-    debugClient('Server info: %O', serverInfo);
-  }
-
-  return client;
+  connection.wire = attachWireTap(client);
 }
 
 /**
@@ -562,18 +575,7 @@ export async function closeMCPClient(client: Client): Promise<void> {
     );
     throw error;
   } finally {
-    // Close any pooled undici agent associated with this client
-    const agent = agentRegistry.get(client);
-    if (agent) {
-      agentRegistry.delete(client);
-      try {
-        await agent.close();
-      } catch (agentError) {
-        debugClient(
-          'Error closing undici agent: %s',
-          (agentError as Error).message
-        );
-      }
-    }
+    // Close the pooled undici agent (TLS or proxy) the connection opened.
+    await releaseConnection(client);
   }
 }

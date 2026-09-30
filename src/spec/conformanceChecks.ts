@@ -9,9 +9,8 @@ import type {
 } from '@modelcontextprotocol/client';
 import type { MCPConformanceCheck } from '../types/reporter.js';
 import type { MCPProtocolInfo } from '../types/index.js';
-import { getWireTap } from '../mcp/wireTap.js';
 import { errorMessage } from '../utils/errorMessage.js';
-import { getConnectionTarget } from '../mcp/connectionTarget.js';
+import { connectionOf } from '../mcp/connection.js';
 import {
   conformancePasses,
   runCheckDefinitions,
@@ -204,6 +203,7 @@ export async function runConformanceChecks(
   }
 
   const protocol = mcp.protocol;
+  const connection = connectionOf(mcp.client);
   const context: ConformanceContext = {
     mcp,
     era: protocol.era ?? 'legacy',
@@ -212,8 +212,8 @@ export async function runConformanceChecks(
     capabilities,
     tools: raw.tools,
     ...(toolsError !== undefined ? { toolsError } : {}),
-    tap: getWireTap(mcp.client),
-    target: getConnectionTarget(mcp.client),
+    tap: connection?.wire,
+    target: connection?.target,
     probe: options.probe ?? true,
     observedErrorCodes: [],
     shared: new Map(),

@@ -4,7 +4,7 @@ import type {
   Tool,
 } from '@modelcontextprotocol/client';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
-import type { ConnectionTarget } from '../mcp/connectionTarget.js';
+import type { ConnectionTarget } from '../mcp/connection.js';
 import type { WireTap } from '../mcp/wireTap.js';
 import type { ProtocolEra } from '../types/index.js';
 import { errorMessage } from '../utils/errorMessage.js';

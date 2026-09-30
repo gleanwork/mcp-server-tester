@@ -13,6 +13,7 @@ import type {
   ProtocolProbeOptions,
   ProtocolSetting,
 } from '../types/index.js';
+import { connectionOf } from './connection.js';
 
 /** The first protocol revision of the modern (stateless) era. */
 export const FIRST_MODERN_PROTOCOL_VERSION = '2026-07-28';
@@ -117,22 +118,13 @@ export function createTesterResponseCache(): ResponseCacheStore {
   };
 }
 
-const requestedProtocols = new WeakMap<Client, ProtocolSetting>();
-
-/** Records the protocol setting a client was created with. */
-export function setRequestedProtocol(
-  client: Client,
-  setting: ProtocolSetting
-): void {
-  requestedProtocols.set(client, setting);
-}
-
 /**
  * Returns what a connected client requested and negotiated.
  */
 export function getProtocolInfo(client: Client): MCPProtocolInfo {
   return {
-    requested: requestedProtocols.get(client) ?? DEFAULT_PROTOCOL_SETTING,
+    requested:
+      connectionOf(client)?.requestedProtocol ?? DEFAULT_PROTOCOL_SETTING,
     negotiated: client.getNegotiatedProtocolVersion() ?? null,
     era: client.getProtocolEra() ?? null,
   };

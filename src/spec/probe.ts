@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import readline from 'node:readline';
-import type { ConnectionTarget } from '../mcp/connectionTarget.js';
+import { getDefaultEnvironment } from '@modelcontextprotocol/client/stdio';
+import type { ConnectionTarget } from '../mcp/connection.js';
 
 /**
  * Raw request channel for conformance checks.
@@ -77,7 +78,9 @@ export async function probeHttp(
   headers.set('accept', 'application/json, text/event-stream');
   if (options.body !== undefined)
     headers.set('content-type', 'application/json');
-  if (target.authProvider && !headers.has('authorization')) {
+  // As in the SDK transport, an auth provider's token replaces a configured
+  // Authorization header, so probes present the session's credentials.
+  if (target.authProvider) {
     const tokens = await target.authProvider.tokens();
     if (tokens?.access_token) {
       headers.set('authorization', `Bearer ${tokens.access_token}`);
@@ -127,7 +130,8 @@ export async function probeStdio(
 ): Promise<ProbeResponse> {
   const child = spawn(target.command, target.args, {
     cwd: target.cwd,
-    env: target.env ?? process.env,
+    // The SDK's defaults when no environment was recorded, as it would spawn.
+    env: target.env ?? getDefaultEnvironment(),
     stdio: ['pipe', 'pipe', 'ignore'],
   });
   const lines = readline.createInterface({ input: child.stdout });

@@ -19,14 +19,18 @@ vi.mock('@modelcontextprotocol/client', async (importOriginal) => ({
   SSEClientTransport: mocks.MockSSEClientTransport,
 }));
 
-vi.mock('@modelcontextprotocol/client/stdio', () => ({
+vi.mock('@modelcontextprotocol/client/stdio', async (importOriginal) => ({
+  ...(await importOriginal<typeof SDKStdioModule>()),
   StdioClientTransport: mocks.MockStdioClientTransport,
 }));
 
 import { createMCPClientForConfig, closeMCPClient } from './clientFactory.js';
+import { connectionOf } from './connection.js';
+import { Agent, ProxyAgent } from 'undici';
 import { MCPHttpConnectionError } from './connectionDiagnostics.js';
 import { UnsupportedProtocolVersionError } from '@modelcontextprotocol/client';
 import type * as SDKClientModule from '@modelcontextprotocol/client';
+import type * as SDKStdioModule from '@modelcontextprotocol/client/stdio';
 import type { OAuthClientProvider } from '@modelcontextprotocol/client';
 
 describe('clientFactory', () => {
@@ -604,6 +608,76 @@ describe('clientFactory', () => {
       );
       expect(client.transport.terminateSession).not.toHaveBeenCalled();
       expect(client.close).toHaveBeenCalled();
+    });
+  });
+
+  describe('the connection record', () => {
+    const proxied = {
+      transport: 'http' as const,
+      serverUrl: 'http://mcp.example.test/mcp',
+      proxy: { url: 'http://proxy.example.test:8080' },
+    };
+
+    it('records the target and closes the proxy agent with the client', async () => {
+      const agentClose = vi
+        .spyOn(ProxyAgent.prototype, 'close')
+        .mockResolvedValue(undefined);
+      const client = await createMCPClientForConfig(proxied);
+      expect(connectionOf(client)).toMatchObject({
+        requestedProtocol: 'legacy',
+        target: { transport: 'http', url: 'http://mcp.example.test/mcp' },
+      });
+      expect(connectionOf(client)?.dispatcher).toBeInstanceOf(ProxyAgent);
+      await closeMCPClient(client);
+      expect(agentClose).toHaveBeenCalledTimes(1);
+      expect(connectionOf(client)?.dispatcher).toBeUndefined();
+    });
+
+    it('closes the proxy agent when connecting fails', async () => {
+      const agentClose = vi
+        .spyOn(ProxyAgent.prototype, 'close')
+        .mockResolvedValue(undefined);
+      mocks.mockConnect.mockRejectedValue(new Error('handshake refused'));
+      await expect(createMCPClientForConfig(proxied)).rejects.toThrow();
+      expect(agentClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('surfaces the connect error even when closing the agent fails', async () => {
+      vi.spyOn(ProxyAgent.prototype, 'close').mockRejectedValue(
+        new Error('agent close failed')
+      );
+      mocks.mockConnect.mockRejectedValue(new Error('handshake refused'));
+      const failure = await createMCPClientForConfig(proxied).catch(
+        (error: unknown) => error
+      );
+      expect(failure).toBeInstanceOf(MCPHttpConnectionError);
+      expect(String(failure)).not.toContain('agent close failed');
+    });
+
+    it('closes a TLS agent once, even when the client is closed twice', async () => {
+      const agentClose = vi
+        .spyOn(Agent.prototype, 'close')
+        .mockResolvedValue(undefined);
+      const client = await createMCPClientForConfig({
+        transport: 'http',
+        serverUrl: 'https://mcp.example.test/mcp',
+        tls: { rejectUnauthorized: false },
+      });
+      await closeMCPClient(client);
+      await closeMCPClient(client);
+      expect(agentClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('creates only the TLS agent when a proxy is also configured', async () => {
+      const client = await createMCPClientForConfig({
+        ...proxied,
+        tls: { rejectUnauthorized: false },
+      });
+      const dispatcher = connectionOf(client)?.dispatcher;
+      expect(dispatcher).toBeInstanceOf(Agent);
+      expect(dispatcher).not.toBeInstanceOf(ProxyAgent);
+      expect(connectionOf(client)?.target).toMatchObject({ dispatcher });
+      await closeMCPClient(client);
     });
   });
 });
