@@ -3,6 +3,10 @@ import * as os from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EvalManifest } from '../evalManifest.js';
+import {
+  COWORK_SETTINGS_MAX_BYTES as LIMIT,
+  createCoworkBundlePlan,
+} from './bundle.js';
 import { getMacCoworkController } from './macController.js';
 import {
   acquireMacCoworkApp,
@@ -103,9 +107,9 @@ async function json(file: string): Promise<Record<string, unknown>> {
 async function stage(): Promise<string> {
   return (await json(join(lease, 'session.json'))).stagingDirectory as string;
 }
-async function clean() {
+async function clean(original = ORIGINAL) {
   expect(await fs.readFile(join(profileDirectory, '_meta.json'), 'utf8')).toBe(
-    ORIGINAL
+    original
   );
   expect((await fs.readdir(profileDirectory)).sort()).toEqual(
     [`${SOURCE}.json`, '_meta.json'].sort()
@@ -175,7 +179,192 @@ afterEach(async () => {
   await fs.rm(root, { recursive: true, force: true });
 });
 
+function nativeManifest(): EvalManifest {
+  return {
+    name: 'native',
+    datasets: [],
+    servers: [
+      {
+        transport: 'stdio',
+        label: 'Native',
+        command: '/synthetic/proxy',
+        url: 'https://native.example.test/mcp',
+        args: ['${url}', '${dataDir}/headers.json'],
+        auth: { accessTokenEnv: 'MCP_KEY' },
+        files: { 'headers.json': { Authorization: 'Bearer ${bearerToken}' } },
+      },
+    ],
+  };
+}
+
+// Four individually valid stdio declarations can exceed the aggregate read cap.
+function sizedNativeManifest(bytes: number): EvalManifest {
+  const servers = Array.from({ length: 4 }, (_, index) => ({
+    transport: 'stdio' as const,
+    label: `Native${index}`,
+    command: '/synthetic/proxy',
+    args: Array.from({ length: 64 }, () => 'é'),
+  }));
+  const input = { name: 'bounded', datasets: [], servers };
+  const { settingsBytes } = createCoworkBundlePlan({
+    manifest: input,
+    runtimeDirectory: join(root, 'unused'),
+  });
+  let remaining = bytes - settingsBytes.length;
+  for (const server of servers) {
+    server.args = server.args.map((arg) => {
+      const count = Math.min(4095, remaining);
+      remaining -= count;
+      return arg + 'x'.repeat(count);
+    });
+  }
+  expect(remaining).toBe(0);
+  return input;
+}
+
+async function expectNoSessionMutation(original = ORIGINAL): Promise<void> {
+  expect(getMacCoworkController).not.toHaveBeenCalled();
+  expect(events).toEqual([]);
+  await expect(fs.lstat(lease)).rejects.toMatchObject({ code: 'ENOENT' });
+  await expect(fs.lstat(lock)).rejects.toMatchObject({ code: 'ENOENT' });
+  await clean(original);
+}
+
 describe('automatic Mac Cowork session (no native execution)', () => {
+  it('rejects oversized stdio journal inventory before controller, lease, or writes', async () => {
+    const input: EvalManifest = {
+      name: 'large-inventory',
+      datasets: [],
+      servers: Array.from({ length: 750 }, (_, index) => ({
+        transport: 'stdio',
+        label: `Native${index}`,
+        command: '/synthetic/proxy',
+        files: Object.fromEntries(
+          Array.from({ length: 8 }, (_, file) => [
+            `${file}${'x'.repeat(122)}.json`,
+            {},
+          ])
+        ),
+      })),
+    };
+    const plan = createCoworkBundlePlan({
+      manifest: input,
+      runtimeDirectory: join(root, `mst-cowork-session-${SOURCE}`),
+    });
+    expect(plan.privateFiles).toHaveLength(6000);
+    expect(plan.settingsBytes.length).toBeLessThan(LIMIT);
+    const mkdir = vi.spyOn(fs, 'mkdir');
+    const writeFile = vi.spyOn(fs, 'writeFile');
+    const open = vi.spyOn(fs, 'open');
+    await expect(prepare({ manifest: input })).rejects.toThrow(ERROR);
+    expect(mkdir).not.toHaveBeenCalled();
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(
+      open.mock.calls.every(([, flags]) => typeof flags === 'number')
+    ).toBe(true);
+    expect(fs.rename).not.toHaveBeenCalled();
+    await expectNoSessionMutation();
+  });
+
+  it('rejects metadata whose installed serialization exceeds the read bound', async () => {
+    const meta = JSON.parse(ORIGINAL) as Record<string, unknown>;
+    const original =
+      JSON.stringify({
+        ...meta,
+        extra: Array.from({ length: 150_000 }, () => 0),
+      }) + '\n';
+    expect(Buffer.byteLength(original)).toBeLessThan(LIMIT / 2);
+    expect(
+      Buffer.byteLength(JSON.stringify(JSON.parse(original), null, 2))
+    ).toBeGreaterThan(LIMIT);
+    await fs.writeFile(join(profileDirectory, '_meta.json'), original);
+    const mkdir = vi.spyOn(fs, 'mkdir');
+    const writeFile = vi.spyOn(fs, 'writeFile');
+    const open = vi.spyOn(fs, 'open');
+    await expect(prepare()).rejects.toThrow(ERROR);
+    expect(mkdir).not.toHaveBeenCalled();
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(
+      open.mock.calls.every(([, flags]) => typeof flags === 'number')
+    ).toBe(true);
+    expect(fs.rename).not.toHaveBeenCalled();
+    await expectNoSessionMutation(original);
+  });
+  it('rejects oversized managed settings before controller or lease acquisition', async () => {
+    const input = sizedNativeManifest(LIMIT + 1);
+    const mkdir = vi.spyOn(fs, 'mkdir');
+    const writeFile = vi.spyOn(fs, 'writeFile');
+    await expect(prepare({ manifest: input })).rejects.toThrow(ERROR);
+    expect(mkdir).not.toHaveBeenCalled();
+    expect(writeFile).not.toHaveBeenCalled();
+    await expectNoSessionMutation();
+  });
+
+  it('bounds the final profile including model, marketplace, and helper fields before ownership', async () => {
+    const model = 'synthetic-model';
+    const plugins = [
+      {
+        name: 'acme',
+        marketplace: { source: 'acme/plugins', ref: 'e'.repeat(40) },
+        blockMcpServers: ['PluginNative'],
+      },
+    ];
+    const small = sizedNativeManifest(10_000);
+    const session = await prepare({ manifest: small, model, plugins });
+    const meta = await json(join(profileDirectory, '_meta.json'));
+    const profile = await fs.readFile(
+      join(profileDirectory, `${String(meta.appliedId)}.json`)
+    );
+    const overhead = profile.length - 10_000;
+    expect(overhead).toBeGreaterThan(0);
+    await session.dispose();
+    await clean();
+    vi.clearAllMocks();
+    events = [];
+    const input = sizedNativeManifest(LIMIT - overhead + 1);
+    const mkdir = vi.spyOn(fs, 'mkdir');
+    const writeFile = vi.spyOn(fs, 'writeFile');
+    await expect(prepare({ manifest: input, model, plugins })).rejects.toThrow(
+      ERROR
+    );
+    expect(mkdir).not.toHaveBeenCalled();
+    expect(writeFile).not.toHaveBeenCalled();
+    await expectNoSessionMutation();
+  });
+
+  it('returns session-owned stdio paths and removes private files on disposal', async () => {
+    const session = await prepare({ manifest: nativeManifest() });
+    const directory = await stage();
+    expect(session.stdioPaths).toEqual({ dataRoot: join(directory, 'stdio') });
+    expect(await json(join(directory, 'stdio/Native/headers.json'))).toEqual({
+      Authorization: `Bearer ${env.MCP_KEY}`,
+    });
+    await session.dispose();
+    await clean();
+  });
+
+  it('rejects a missing stdio credential before controller or lease acquisition', async () => {
+    vi.stubEnv('MCP_KEY', env.MCP_KEY);
+    await expect(
+      prepare({
+        manifest: nativeManifest(),
+        env: { ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY },
+      })
+    ).rejects.toThrow(ERROR);
+    await expectNoSessionMutation();
+  });
+
+  it('retains the lease and journal if private stdio files changed', async () => {
+    const session = await prepare({ manifest: nativeManifest() });
+    const file = join(await stage(), 'stdio/Native/headers.json');
+    await fs.writeFile(file, 'changed');
+    await expect(session.dispose()).rejects.toThrow(CLEANUP_ERROR);
+    expect(events).toEqual(['stop', 'start', 'stop']);
+    expect(await fs.readFile(file, 'utf8')).toBe('changed');
+    await fs.access(join(lock, 'journal.json'));
+    await fs.access(join(lease, 'session.json'));
+  });
+
   it('journals the pin before acquisition and restores the installed app before removing it', async () => {
     vi.mocked(acquireMacCoworkApp).mockImplementationOnce(
       async (directory, version) => {
@@ -357,7 +546,7 @@ describe('automatic Mac Cowork session (no native execution)', () => {
     if (kind === 'invalid-token')
       explicitEnv = { ...env, ANTHROPIC_API_KEY: 'synthetic invalid' };
     if (kind === 'invalid-server')
-      input.servers = [{ transport: 'stdio', command: 'unsafe' }];
+      input.servers = [{ transport: 'stdio', command: '' }];
     if (kind === 'oversize-header')
       input.servers = [
         {

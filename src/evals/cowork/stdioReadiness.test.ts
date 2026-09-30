@@ -1,10 +1,11 @@
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { verifyCoworkMcpServers } from './mcpReadiness.js';
 import {
+  hostStdioReadinessConfig,
   hostStdioServers,
   materializeHostStdioFiles,
   type HostPlugin,
@@ -99,7 +100,6 @@ describe('Cowork stdio eval server readiness', () => {
       paths,
       token: 'good-token',
     });
-    const { hostStdioReadinessConfig } = await import('../hostPlugins.js');
     const client = await createMCPClientForConfig(
       hostStdioReadinessConfig(parsed!, paths)
     );
@@ -113,6 +113,87 @@ describe('Cowork stdio eval server readiness', () => {
       await client.close();
     }
   }, 20_000);
+
+  it('connects plain stdio from a quoted cwd with no invented URL', async () => {
+    const cwd = join(dataRoot, "cwd ' ; $(false)");
+    await mkdir(cwd);
+    await symlink(join(pluginRoot, 'mcp/start.mjs'), join(cwd, 'start.mjs'));
+    const config: MCPConfig = {
+      transport: 'stdio',
+      command: process.execPath,
+      args: ['./start.mjs', 'a; exit 1', '$(false)'],
+      cwd,
+      env: { DECLARED: 'only-this' },
+    };
+    await expect(verifyCoworkMcpServers([config], {})).resolves.toMatchObject([
+      { label: 'server-1', status: 'connected', toolCount: 1 },
+    ]);
+  }, 20_000);
+
+  it('keeps unnamed private paths aligned with the global server index', async () => {
+    const configs: MCPConfig[] = [
+      {
+        transport: 'stdio',
+        command: process.execPath,
+        args: [join(pluginRoot, 'mcp/start.mjs')],
+      },
+      {
+        transport: 'stdio',
+        command: process.execPath,
+        args: [join(pluginRoot, 'mcp/start.mjs')],
+        env: {
+          FAKE_MCP_URL: 'https://example.test/eval',
+          FAKE_PLUGIN_DATA: '${dataDir}',
+        },
+        auth: { accessTokenEnv: 'FAKE_TOKEN' },
+        minTools: 4,
+        files: { 'creds.json': { tokens: { access_token: '${bearerToken}' } } },
+      },
+    ];
+    const parsed = hostStdioServers(configs);
+    await materializeHostStdioFiles({
+      server: parsed[1]!,
+      paths: { dataRoot },
+      token: 'good-token',
+    });
+    const results = await verifyCoworkMcpServers(
+      configs,
+      { FAKE_TOKEN: 'good-token' },
+      {
+        paths: { dataRoot },
+      }
+    );
+    expect(results).toMatchObject([
+      { label: 'server-1', status: 'connected', toolCount: 1 },
+      { label: 'server-2', status: 'connected', toolCount: 4 },
+    ]);
+    expect(JSON.stringify(results)).not.toContain('good-token');
+    expect(JSON.stringify(results)).not.toContain(dataRoot);
+  }, 20_000);
+
+  it('reports sanitized failure metadata for an invalid plain launch', async () => {
+    await expect(
+      verifyCoworkMcpServers(
+        [
+          {
+            transport: 'stdio',
+            command: join(dataRoot, 'secret-command'),
+            env: { PRIVATE_VALUE: 'metadata-secret' },
+          },
+        ],
+        {}
+      )
+    ).rejects.toSatisfy((error: unknown) => {
+      const serialized = JSON.stringify(error);
+      expect(serialized).not.toContain('secret-command');
+      expect(serialized).not.toContain('metadata-secret');
+      expect(serialized).not.toContain(dataRoot);
+      return (
+        (error as { servers: Array<{ status: string }> }).servers[0]?.status ===
+        'failed'
+      );
+    });
+  });
 
   it('refuses to launch an unresolved host-only stdio server directly', async () => {
     await expect(createMCPClientForConfig(server())).rejects.toThrow(

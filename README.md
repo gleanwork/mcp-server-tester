@@ -170,6 +170,12 @@ export default defineConfig({
 
 For HTTP servers, set `transport: 'http'` and `serverUrl`. For servers that require OAuth, see the [Transports Guide](./docs/transports.md) and [CLI Guide](./docs/cli.md) for authentication setup, including CI/CD token management.
 
+Plain stdio is supported by Claude CLI, Vercel AI SDK, ChatGPT Work/Codex, and
+Cowork evaluation hosts, including Cowork on macOS and Linux. Cowork also
+supports private file-backed native proxies and mixed HTTP/stdio server sets.
+See [evaluation host transport support](./docs/transports.md#evaluation-host-support)
+for host-specific fields, environment rules, and setup ownership.
+
 ## Documentation
 
 - [Quick Start](./docs/quickstart.md) — detailed setup and configuration

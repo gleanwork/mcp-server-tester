@@ -17,9 +17,15 @@ export interface CoworkPlatform {
     model?: string;
     /** Validated host plugins; Cowork installs them via allowedPluginMarketplaces. */
     plugins?: readonly HostPlugin[];
-    /** Runtime paths for stdio eval servers (Linux only). */
+    /** Caller-owned runtime paths for a prepared Linux desktop. */
     stdioPaths?: HostStdioPaths;
-  }): Promise<{ appPath?: string; dispose(): Promise<void> }>;
+  }): Promise<{
+    /** macOS returns the pinned or caller-owned application path. */
+    appPath?: string;
+    /** macOS returns transaction-owned paths after installing its private profile. */
+    stdioPaths?: HostStdioPaths;
+    dispose(): Promise<void>;
+  }>;
   recover(): Promise<unknown>;
   /**
    * After a failed case, return the app to a fresh task so the next case is

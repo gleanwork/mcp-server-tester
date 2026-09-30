@@ -3,7 +3,7 @@ import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { HttpMCPConfig } from '../../config/mcpConfig.js';
+import type { HttpMCPConfig, StdioMCPConfig } from '../../config/mcpConfig.js';
 import type { EvalManifest } from '../evalManifest.js';
 import { prepareCoworkMcpBundle } from './bundle.js';
 
@@ -95,6 +95,108 @@ afterEach(async () => {
 });
 
 describe('prepareCoworkMcpBundle', () => {
+  function native(overrides: Partial<StdioMCPConfig> = {}): StdioMCPConfig {
+    return {
+      transport: 'stdio',
+      label: 'Native',
+      command: '/synthetic/proxy',
+      args: ['--url', '${url}', '--headers', '${dataDir}/headers.json'],
+      url: 'https://native.example.test/mcp',
+      auth: { accessTokenEnv: 'SYNTHETIC_COWORK_TOKEN' },
+      files: { 'headers.json': { Authorization: 'Bearer ${bearerToken}' } },
+      ...overrides,
+    };
+  }
+
+  it.each([false, true])(
+    'stages native proxy files with mixed HTTP=%s and preserves global labels',
+    async (mixed) => {
+      const servers = [
+        native(),
+        ...(mixed ? [http({ label: undefined })] : []),
+      ];
+      const runtimeDirectory = join(root, 'runtime');
+      const result = await prepareCoworkMcpBundle(
+        options({
+          manifest: manifest({
+            servers,
+            coworkSetup: { approveWriteTools: true },
+          }),
+          runtimeDirectory,
+        })
+      );
+      const settings = (await readJson(result.settingsPath)) as {
+        managedMcpServers: Array<Record<string, unknown>>;
+        allowedMcpServers: unknown[];
+      };
+      expect(result.serverCount).toBe(mixed ? 2 : 1);
+      expect(settings.managedMcpServers).toContainEqual({
+        name: 'Native',
+        transport: 'stdio',
+        command: '/synthetic/proxy',
+        args: [
+          '--url',
+          'https://native.example.test/mcp',
+          '--headers',
+          join(runtimeDirectory, 'stdio/Native/headers.json'),
+        ],
+        env: {},
+        toolPolicy: { '*': 'allow' },
+      });
+      if (mixed)
+        expect(settings.managedMcpServers).toContainEqual(
+          expect.objectContaining({ name: 'server-2', transport: 'http' })
+        );
+      expect(settings.allowedMcpServers).toContainEqual({
+        serverName: 'Native',
+      });
+      expect(await readJson(path('stdio/Native/headers.json'))).toEqual({
+        Authorization: `Bearer ${TOKEN}`,
+      });
+      for (const name of ['stdio', 'stdio/Native'])
+        await expectPrivate(path(name), 0o700);
+      await expectPrivate(path('stdio/Native/headers.json'), 0o600);
+      expect(await fs.readFile(result.settingsPath, 'utf8')).not.toContain(
+        TOKEN
+      );
+      expect(await fs.readFile(path('status.json'), 'utf8')).not.toContain(
+        TOKEN
+      );
+      await expect(fs.lstat(runtimeDirectory)).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+    }
+  );
+
+  it.each([
+    'missing-token',
+    'large-file',
+    'file-case',
+    'label-case',
+    'http-label-case',
+    'plugin-root',
+  ])('rejects stdio %s before any write', async (kind) => {
+    const server = native();
+    const servers: Array<StdioMCPConfig | HttpMCPConfig> = [server];
+    if (kind === 'large-file')
+      server.files = { 'large.json': { value: 'x'.repeat(65536) } };
+    if (kind === 'file-case') server.files = { 'A.json': {}, 'a.json': {} };
+    if (kind === 'label-case') servers.push(native({ label: 'native' }));
+    if (kind === 'http-label-case') servers.push(http({ label: 'native' }));
+    if (kind === 'plugin-root') server.command = '${pluginRoot:acme}/proxy';
+    await expectRejected({
+      manifest: manifest({ servers }),
+      env: kind === 'missing-token' ? {} : options().env,
+      plugins: [
+        {
+          name: 'acme',
+          marketplace: { source: 'acme/plugins', ref: 'e'.repeat(40) },
+        },
+      ],
+    });
+    expect(await fs.readdir(root)).toEqual([]);
+  });
+
   it.each([
     [undefined, undefined, false],
     [false, undefined, false],

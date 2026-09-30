@@ -15,6 +15,10 @@ import {
   type HostPlugin,
 } from './hostPlugins.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
+import {
+  coworkManagedPluginSettings,
+  coworkMcpSettingsMatch,
+} from './cowork/managedSettings.js';
 
 const SHA = 'a'.repeat(40);
 const plugin: HostPlugin = {
@@ -104,12 +108,18 @@ describe('host-resolved stdio eval servers', () => {
   });
 
   it.each([
-    ['no url (a plain stdio server)', { url: undefined }],
+    ['url placeholder without a url', { url: undefined }],
     ['a token in env', { env: { X: '${bearerToken}', U: '${url}' } }],
     ['a token in args', { args: ['${bearerToken}', '${url}'] }],
     ['an unknown placeholder', { args: ['${HOME}', '${url}'] }],
     ['a malformed placeholder', { args: ['${url', '${url}'] }],
-    ['cwd', { cwd: '/tmp' }],
+    ['a token in cwd', { cwd: '${bearerToken}' }],
+    ['an unknown cwd placeholder', { cwd: '${HOME}' }],
+    ['unknown declarations', { unsupported: true }],
+    ['ambient environment inheritance', { inheritEnv: true }],
+    ['unsupported capabilities', { capabilities: {} }],
+    ['NUL in args', { args: ['bad\0arg'] }],
+    ['a placeholder inside url', { url: 'https://e.test/${unknown}' }],
     ['url not used in the launch', { env: {}, args: [] }],
     ['a token without auth', { auth: undefined }],
     ['a nested file path', { files: { '../x': {} } }],
@@ -121,6 +131,143 @@ describe('host-resolved stdio eval servers', () => {
     expect(() =>
       hostStdioServers([{ ...server, ...change } as MCPConfig], [plugin])
     ).toThrow(expect.objectContaining({ code: 'mcp_server_invalid' }));
+  });
+
+  it('accepts plain stdio with global default labels and declared env only', () => {
+    const configs: MCPConfig[] = [
+      { transport: 'http', serverUrl: 'https://e.test/mcp' },
+      {
+        transport: 'stdio',
+        command: '/bin/tool',
+        args: ['--name', 'two words'],
+        env: { DECLARED: 'value' },
+        inheritEnv: false,
+        connectTimeoutMs: 1234,
+        requestTimeoutMs: 2345,
+        callTimeoutMs: 3456,
+        quiet: false,
+      },
+      { transport: 'stdio', command: '/bin/other' },
+    ];
+    const parsed = hostStdioServers(configs);
+    expect(parsed.map((entry) => entry.label)).toEqual([
+      'server-2',
+      'server-3',
+    ]);
+    expect(parsed[0]).toMatchObject({
+      minTools: 1,
+      pluginRoots: [],
+      usesDataDir: false,
+    });
+    expect(parsed[0]).not.toHaveProperty('url');
+    expect(hostStdioReadinessConfig(parsed[0]!, {})).toEqual({
+      transport: 'stdio',
+      label: 'server-2',
+      command: '/bin/tool',
+      args: ['--name', 'two words'],
+      env: { DECLARED: 'value' },
+      inheritEnv: false,
+      minTools: 1,
+      connectTimeoutMs: 1234,
+      requestTimeoutMs: 2345,
+      callTimeoutMs: 3456,
+      quiet: false,
+    });
+    expect(resolveHostStdioServer(parsed[1]!, {})).toEqual({
+      command: '/bin/other',
+      args: [],
+      env: {},
+    });
+    expect(() =>
+      hostStdioServers([
+        ...configs,
+        { transport: 'stdio', label: 'server-2', command: '/bin/duplicate' },
+      ])
+    ).toThrow(expect.objectContaining({ code: 'mcp_server_invalid' }));
+    expect(() =>
+      hostStdioServers([
+        {
+          transport: 'http',
+          label: 'server-2',
+          serverUrl: 'https://e.test/mcp',
+        },
+        configs[1]!,
+      ])
+    ).toThrow(expect.objectContaining({ code: 'mcp_server_invalid' }));
+  });
+
+  it('uses identical positional cwd launches for managed settings and readiness', () => {
+    const configs: MCPConfig[] = [
+      {
+        transport: 'stdio',
+        command: '/opt/tool with spaces',
+        args: ['a; echo unsafe', '$(false)', 'quote\'"'],
+        cwd: "/opt/work ' $(false)",
+        env: { EXPLICIT: 'value' },
+      },
+    ];
+    const [parsed] = hostStdioServers(configs);
+    const launch = resolveHostStdioServer(parsed!, {});
+    expect(launch).toEqual({
+      command: '/bin/sh',
+      args: [
+        '-c',
+        'cd -- "$1" && shift && exec "$@"',
+        'mst-cowork',
+        "/opt/work ' $(false)",
+        '/opt/tool with spaces',
+        'a; echo unsafe',
+        '$(false)',
+        'quote\'"',
+      ],
+      env: { EXPLICIT: 'value' },
+    });
+    const settings = coworkManagedPluginSettings({ servers: configs });
+    expect(settings.managedMcpServers).toEqual([
+      { name: 'server-1', transport: 'stdio', ...launch },
+    ]);
+    expect(hostStdioReadinessConfig(parsed!, {})).toMatchObject(launch);
+    expect(
+      coworkMcpSettingsMatch(
+        {
+          ...settings,
+          allowManagedMcpServersOnly: true,
+        },
+        { servers: configs }
+      )
+    ).toBe(true);
+    expect(
+      coworkMcpSettingsMatch(
+        {
+          ...settings,
+          allowManagedMcpServersOnly: true,
+          managedMcpServers: [
+            { ...settings.managedMcpServers[0], cwd: '/ignored' },
+          ],
+        },
+        { servers: configs }
+      )
+    ).toBe(false);
+  });
+
+  it('resolves cwd placeholders and rejects unsafe or relative cwd paths', () => {
+    for (const cwd of ['${pluginRoot:fake}', '${dataDir}']) {
+      const [parsed] = hostStdioServers(
+        [{ ...server, cwd } as MCPConfig],
+        [plugin]
+      );
+      expect(resolveHostStdioServer(parsed!, paths).args[3]).toBe(
+        cwd === '${dataDir}' ? '/d/fake-eval' : '/opt/plugins/fake'
+      );
+    }
+    for (const cwd of ['relative', '/opt/../tmp', '/tmp\npath']) {
+      const [parsed] = hostStdioServers([
+        { transport: 'stdio', command: 'node', cwd },
+      ]);
+      expect(() => resolveHostStdioServer(parsed!, {})).toThrow(
+        expect.objectContaining({ code: 'mcp_server_invalid' })
+      );
+    }
   });
 
   it('rejects an undeclared plugin root, duplicate labels, and missing paths', () => {

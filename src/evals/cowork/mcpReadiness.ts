@@ -85,7 +85,13 @@ export async function verifyCoworkMcpServers(
   stdio: { plugins?: readonly HostPlugin[]; paths?: HostStdioPaths } = {}
 ): Promise<CoworkMcpServerReadiness[]> {
   const context = { plugins: stdio.plugins ?? [], paths: stdio.paths ?? {} };
-  const results = await checkMcpServers(servers, (server) =>
+  // Resolve labels before checking servers individually so private paths and
+  // Desktop settings use the same original (HTTP + stdio) server index.
+  const labeledServers = servers.map((server, index) => ({
+    ...server,
+    label: server.label ?? `server-${index + 1}`,
+  }));
+  const results = await checkMcpServers(labeledServers, (server) =>
     resolveServer(server, env, context)
   );
   if (results.some((result) => result.status !== 'connected'))

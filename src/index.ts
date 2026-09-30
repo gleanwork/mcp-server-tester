@@ -7,6 +7,7 @@
  */
 
 export { auditCoworkNativeRun } from './evals/auditCoworkNativeRun.js';
+export { COWORK_STDIO_PLATFORMS } from './evals/coworkHost.js';
 export type {
   AuditCoworkNativeRunOptions,
   CoworkNativeAuditReport,

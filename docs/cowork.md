@@ -351,8 +351,10 @@ The config has two independent parts:
 
 - `host.plugins[]` installs plugins (their skills). On Cowork, a plugin can
   also block its own MCP servers with `blockMcpServers`.
-- `servers[]` is the MCP server set under test. A stdio entry with `url` is a
-  host-resolved eval server. It can launch a file from a plugin.
+- `servers[]` is the MCP server set under test. Both plain stdio and
+  host-resolved stdio entries are supported on macOS and Linux, alongside HTTP.
+  A host-resolved entry can launch a native proxy with private credential files
+  or, on Linux, resolve a file from a declared plugin.
 
 ```json
 {
@@ -400,28 +402,85 @@ The config has two independent parts:
 
 ### Stdio eval servers
 
-A stdio `servers[]` entry with `url` has these fields: `label`, `command`,
-`args`, `env`, `url`, `auth.accessTokenEnv`, `minTools` (default 1), and
-`files`. Unknown keys, including `cwd`, fail. Placeholders:
+Cowork accepts plain stdio `servers[]` entries without a URL, plugin, or proxy:
 
-| Placeholder              | Allowed in                | Linux Cowork value                 |
-| ------------------------ | ------------------------- | ---------------------------------- |
-| `${url}`                 | command, args, env, files | `url`                              |
-| `${dataDir}`             | command, args, env, files | `<options.mcpDataRoot>/<label>`    |
-| `${pluginRoot:<plugin>}` | command, args, env, files | `options.pluginRoots[<plugin>]`    |
-| `${bearerToken}`         | `files` only              | the value of `auth.accessTokenEnv` |
+```json
+{
+  "transport": "stdio",
+  "label": "local-tools",
+  "command": "/usr/local/bin/node",
+  "args": ["server.mjs"],
+  "cwd": "/opt/mcp/local-tools",
+  "env": { "NODE_ENV": "test" },
+  "inheritEnv": false
+}
+```
 
-Any other `${...}` fails. `${url}` must appear in `args` or `env`, so the
-checked launch proves the endpoint. `<plugin>` must be a declared plugin. A
-token never appears in settings, env, args, logs, or receipts; it is only in
-`files`. `url` is the eval endpoint: `requireEvalEndpoint` checks it, and it is
-recorded in the manifest. Tool calls appear as `mcp__<label>__<tool>` and are
-attributed to `label` (for example, `mcp__glean-eval__search`).
+Use paths that exist on the desktop host. `command` is required; `label`,
+`args`, `env`, and `cwd` are optional. A missing label becomes `server-<index>`
+using the one-based position in `servers[]`. `cwd` must resolve to an absolute
+path. Desktop has no `cwd` field, so MST converts it to a fixed `/bin/sh` wrapper
+with cwd, command, and arguments passed as separate argv values, never
+interpolated into shell source. `inheritEnv: true` is unsupported: declare all
+required server environment variables in `env`. Omitting `inheritEnv` has the
+same Cowork behavior as `false`.
 
-Only Linux Cowork (`linux-desktop`) supports stdio eval servers. The macOS
-driver, ChatGPT, and direct MCP clients reject them before any UI action or
-process launch. On ChatGPT, use `plugins[].mcp` instead. A stdio server without
-`url` is still rejected on Cowork.
+Host-resolved entries can also set `url`, `auth.accessTokenEnv`, `files`, and
+`minTools` (default 1). The readiness client accepts `connectTimeoutMs`,
+`requestTimeoutMs`, `callTimeoutMs`, and `quiet`; these are not Desktop settings.
+Unknown keys fail. Supported placeholders are:
+
+- `${url}`: the declared `url`; allowed in command, args, env, cwd, and files.
+- `${dataDir}`: the private per-server directory; allowed in command, args,
+  env, cwd, and files. On Linux it is `<options.mcpDataRoot>/<label>`; on macOS
+  it is `<transaction staging directory>/stdio/<label>`.
+- `${pluginRoot:<plugin>}`: `options.pluginRoots[<plugin>]` on Linux; allowed
+  in command, args, env, cwd, and files. `<plugin>` must be a declared plugin.
+- `${bearerToken}`: the value of `auth.accessTokenEnv`; allowed only in files.
+
+Any other `${...}` fails. If `url` is declared, include `${url}` in the launch
+command, args, or env, not only in files or cwd. `requireEvalEndpoint` checks
+that declared endpoint; MST does not invent an endpoint for plain stdio.
+Resolved bearer tokens stay in private files, not settings, env, args, logs, or
+receipts. Tool calls appear as `mcp__<label>__<tool>` and are attributed to
+`label` (for example, `mcp__glean-eval__search`).
+
+Both macOS (`anthropic-computer-use`) and Linux (`linux-desktop`) support these
+stdio forms. The package-root export `COWORK_STDIO_PLATFORMS` is
+`['darwin', 'linux']`. On macOS, `${pluginRoot:...}` is rejected because
+marketplace installation paths are unknown before Desktop starts. This is not
+a native-proxy requirement: use a known local command or adapter path instead.
+For the Linux example above, a Mac config must omit `pluginRoots` and
+`mcpDataRoot`, select the Mac provider, and replace the plugin-root argument
+with a known local adapter path. The private files and URL/env substitutions
+remain supported, including in mixed HTTP/stdio server sets.
+
+ChatGPT Work/Codex and direct MCP clients support plain stdio, but not Cowork's
+host-resolved fields. For ChatGPT plugin overrides, use `plugins[].mcp` as
+described in [chatgpt-desktop.md](chatgpt-desktop.md#linux-runtime-contract).
+
+MST's transport does not make a server read-only. Native-proxy write
+interception is a Scio/catalog policy responsibility, not a stdio guarantee.
+
+### macOS managed-settings contract
+
+MST validates the full server set before changing the app or profile. The Mac
+setup transaction stages plain stdio, private file-backed native proxies, and
+HTTP entries in one managed profile. Stdio directories are created with mode
+0700 and private JSON files with mode 0600. Credentials are resolved from the
+supplied runtime environment, not embedded in the manifest.
+
+Setup returns transaction-owned `stdioPaths`, which the shared readiness check
+uses after installation. Do not supply Linux-only `pluginRoots` or
+`mcpDataRoot` options on macOS. Setup status remains `applied-not-verified`:
+installing settings or starting the app does not prove Desktop adopted the MCP
+inventory or tool policy.
+
+Cleanup and explicit recovery validate the staged file inventory, ownership,
+permissions, and content hashes before removal. They remove only recorded
+files and empty directories, not an arbitrary tree. Unexpected or changed
+state fails closed and retains recovery state. Do not delete locks or modify
+staged credential files to force cleanup.
 
 ### Linux managed-settings contract
 
@@ -501,9 +560,11 @@ callers.
 ### Readiness
 
 Before the first prompt, MST launches each stdio eval server itself, with the
-same resolved command, args, env, and data dir, but without the parent
-environment. It fails closed with `too few tools (<n> < <minTools>)` when the
-server lists fewer than `minTools` tools. For example, a Glean adapter with a
+same resolved command, args, env, and data dir (when used), but without the parent
+environment. On macOS it uses the paths returned by the setup transaction; on
+Linux it uses the caller-owned paths checked during prepare. It fails closed
+with `too few tools (<n> < <minTools>)` when the server lists fewer than
+`minTools` tools. For example, a Glean adapter with a
 bad token lists only its static tools. Desktop-side readiness (for example, a
 caller's own log check) should also compare each server's `toolCount` with
 `minTools`.

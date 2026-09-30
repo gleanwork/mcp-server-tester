@@ -10,7 +10,7 @@ import {
 } from '../hostPlugins.js';
 
 /**
- * The Cowork managed-settings contract for plugins and stdio eval servers
+ * The Cowork managed-settings contract for plugins and plain or eval stdio servers
  * (docs/cowork.md, "Host plugins"). Pure and token-free: exported so callers
  * that write `/etc/claude-desktop/managed-settings.json` can build the same
  * entries MST checks.
@@ -44,6 +44,8 @@ export function coworkManagedPluginSettings(options: {
   const plugins = options.plugins ?? [];
   const stdio = hostStdioServers(options.servers, plugins).map(
     (server): CoworkManagedStdioServer => {
+      // Readiness uses this same launch, including the positional cwd wrapper.
+      // Desktop has no managed cwd field; never add an ignored native key.
       const launch = resolveHostStdioServer(server, options.paths ?? {});
       return {
         name: server.label,

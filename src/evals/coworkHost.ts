@@ -94,6 +94,9 @@ const CoworkSchema = z
     plugins: HostPluginsSchema.optional(),
   })
   .strict();
+/** Platforms with managed stdio setup, readiness, and cleanup support. */
+export const COWORK_STDIO_PLATFORMS = ['darwin', 'linux'] as const;
+
 let active = false;
 const failure = (error: string): HostRunResult => ({
   finalText: '',
@@ -120,14 +123,14 @@ async function runBatch(
   // Fail before any desktop action if Cowork cannot apply a plugin as declared.
   assertCoworkHostPlugins(plugins);
   const servers = requests[0]!.input.servers;
-  // Stdio servers are host-resolved eval servers: validate and resolve them
-  // (labels, placeholders, plugin roots, data root) before any desktop action.
+  // Validate declarations before desktop actions. macOS resolves host-resolved
+  // paths inside its leased setup transaction; Linux uses prepared runtime paths.
   const mac = config.options.computerUseProvider === 'anthropic-computer-use';
   const stdioServers = hostStdioServers(
     mac ? servers.filter(usesHostResolvedFields) : servers,
     plugins
   );
-  const stdioPaths = {
+  let stdioPaths = {
     ...(config.options.pluginRoots
       ? { pluginRoots: config.options.pluginRoots }
       : {}),
@@ -135,14 +138,14 @@ async function runBatch(
       ? { dataRoot: config.options.mcpDataRoot }
       : {}),
   };
-  if (stdioServers.length) {
-    // MST writes macOS settings but cannot stage a plugin root there.
-    if (config.options.computerUseProvider !== 'linux-desktop')
-      throw new HostPluginError(
-        'mcp_server_unsupported',
-        stdioServers[0]!.label
-      );
-  }
+  if (
+    config.options.computerUseProvider !== 'linux-desktop' &&
+    stdioServers.some((server) => server.pluginRoots.length)
+  )
+    throw new HostPluginError(
+      'mcp_server_unsupported',
+      stdioServers.find((server) => server.pluginRoots.length)!.label
+    );
   const referenced = new Set(stdioServers.flatMap((s) => s.pluginRoots));
   const unknownRoot = Object.keys(config.options.pluginRoots ?? {}).find(
     (name) => !referenced.has(name)
@@ -152,7 +155,14 @@ async function runBatch(
     (config.options.mcpDataRoot && !stdioServers.some((s) => s.usesDataDir))
   )
     throw new HostPluginError('mcp_server_invalid', unknownRoot ?? 'dataRoot');
-  if (mac) validateMacLocalServers(servers);
+  if (mac) {
+    const labeledServers = servers.map((server, index) =>
+      server.label ? server : { ...server, label: `server-${index + 1}` }
+    );
+    validateMacLocalServers(
+      labeledServers.filter((server) => server.transport === 'http')
+    );
+  }
   coworkManagedPluginSettings({
     servers: mac
       ? servers.filter((server) => server.transport === 'http')
@@ -197,8 +207,12 @@ async function runBatch(
       env,
       model: config.model,
       ...(plugins.length ? { plugins } : {}),
-      ...(stdioServers.length ? { stdioPaths } : {}),
+      ...(stdioServers.length &&
+      config.options.computerUseProvider === 'linux-desktop'
+        ? { stdioPaths }
+        : {}),
     });
+    if (session?.stdioPaths) stdioPaths = session.stdioPaths;
     if (servers.length) {
       const readiness = await verifyCoworkMcpServers(servers, env, {
         plugins,

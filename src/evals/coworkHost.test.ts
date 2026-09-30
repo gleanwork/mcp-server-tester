@@ -6,6 +6,7 @@ import { runEvalBatch } from './runEvalBatch.js';
 import { COWORK_HOST, createCoworkHost } from './coworkHost.js';
 import { prepareHostBatch } from './prepareHostBatch.js';
 import { toCoworkServers } from './coworkSetup/config.js';
+import type { MCPConfig } from '../config/mcpConfig.js';
 import type { ClaudeTrace } from './externalHost/builtins/anthropicClaude.js';
 import type * as ClaudeNative from './externalHost/builtins/anthropicClaude.js';
 import {
@@ -147,6 +148,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   for (const dir of dirs.splice(0))
     await fs.rm(dir, { recursive: true, force: true });
 });
@@ -588,21 +590,133 @@ describe('V2 Cowork host', () => {
       expect(mocks.submit).not.toHaveBeenCalled();
     });
 
-    it('rejects plain stdio servers without a url, as before', async () => {
-      vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
-      const selected = platform();
-      const plain = requests().map((r) => ({
-        ...r,
-        config: { ...host, options: { computerUseProvider: 'linux-desktop' } },
-        input: {
-          ...r.input,
-          servers: [{ transport: 'stdio' as const, command: 'x' }],
-        },
+    it.each(['darwin', 'linux'] as const)(
+      'accepts plain stdio without a URL on %s',
+      async (platformName) => {
+        vi.spyOn(process, 'platform', 'get').mockReturnValue(platformName);
+        const selected = platform();
+        const servers: MCPConfig[] = [
+          {
+            transport: 'stdio',
+            command: process.execPath,
+            args: ['peer.mjs', 'literal; $(false)'],
+            cwd: '/synthetic/work dir',
+            env: { DECLARED: 'value' },
+          },
+        ];
+        const plain = requests().map((r) => ({
+          ...r,
+          config: {
+            ...host,
+            options: {
+              computerUseProvider:
+                platformName === 'linux'
+                  ? 'linux-desktop'
+                  : 'anthropic-computer-use',
+            },
+          },
+          input: { ...r.input, servers },
+        }));
+        const results = await createCoworkHost(selected).runBatch!(
+          plain,
+          context
+        );
+        expect(results.every((result) => !result.error)).toBe(true);
+        expect(selected.prepare).toHaveBeenCalledWith(
+          expect.objectContaining({
+            manifest: expect.objectContaining({ servers }),
+          })
+        );
+        expect(mocks.readiness).toHaveBeenCalledWith(
+          servers,
+          expect.any(Object),
+          { plugins: [], paths: {} }
+        );
+        expect(mocks.submit).toHaveBeenCalledTimes(2);
+        expect(mocks.dispose).toHaveBeenCalledOnce();
+      }
+    );
+  });
+  describe('Mac native stdio lifecycle', () => {
+    const servers: MCPConfig[] = [
+      {
+        transport: 'stdio',
+        command: '/synthetic/proxy',
+        args: ['${dataDir}/creds.json'],
+        auth: { accessTokenEnv: 'MST_STDIO_CREDENTIAL' },
+        files: { 'creds.json': { token: '${bearerToken}' } },
+      },
+    ];
+    const stdioContext = {
+      ...context,
+      env: { ...context.env, MST_STDIO_CREDENTIAL: 'good-token' },
+    };
+    const batch = () =>
+      requests().map((request) => ({
+        ...request,
+        input: { ...request.input, servers },
       }));
+    beforeEach(() => {
+      mocks.setup.mockImplementation(async () => {
+        mocks.order.push('prepare');
+        return {
+          stdioPaths: { dataRoot: '/synthetic/session/stdio' },
+          dispose: mocks.dispose,
+        };
+      });
+      mocks.readiness.mockImplementation(async () => {
+        mocks.order.push('readiness');
+        return [{ label: 'server-1', status: 'connected', toolCount: 1 }];
+      });
+    });
+
+    it('uses session-owned paths for readiness before submitting any prompt', async () => {
+      const results = await COWORK_HOST.runBatch!(batch(), stdioContext);
+      expect(results.every((result) => !result.error)).toBe(true);
+      expect(mocks.setup.mock.calls[0]![0]).not.toHaveProperty('stdioPaths');
+      expect(mocks.readiness).toHaveBeenCalledWith(
+        servers,
+        expect.any(Object),
+        {
+          plugins: [],
+          paths: { dataRoot: '/synthetic/session/stdio' },
+        }
+      );
+      expect(mocks.order).toEqual([
+        'prepare',
+        'readiness',
+        'submit',
+        'hitl',
+        'trace',
+        'submit',
+        'hitl',
+        'trace',
+        'dispose',
+      ]);
+    });
+
+    it('disposes the session and releases the desktop claim when readiness fails', async () => {
+      mocks.readiness.mockRejectedValueOnce(new Error('too few tools'));
       await expect(
-        createCoworkHost(selected).runBatch!(plain, context)
-      ).rejects.toMatchObject({ code: 'mcp_server_invalid' });
-      expect(selected.prepare).not.toHaveBeenCalled();
+        COWORK_HOST.runBatch!(batch(), stdioContext)
+      ).rejects.toThrow('too few tools');
+      expect(mocks.submit).not.toHaveBeenCalled();
+      expect(mocks.snapshot).not.toHaveBeenCalled();
+      expect(mocks.dispose).toHaveBeenCalledOnce();
+      await COWORK_HOST.runBatch!(batch(), stdioContext);
+      expect(mocks.submit).toHaveBeenCalledTimes(2);
+      expect(mocks.dispose).toHaveBeenCalledTimes(2);
+    });
+
+    it('redacts a referenced stdio credential in submission failures', async () => {
+      mocks.submit.mockRejectedValueOnce(
+        new Error('adapter rejected good-token')
+      );
+      const results = await COWORK_HOST.runBatch!(batch(), stdioContext);
+      expect(results[0]!.error).toBe('adapter rejected [REDACTED]');
+      expect(results[1]!.error).toContain('Not submitted');
+      expect(JSON.stringify(results)).not.toContain('good-token');
+      expect(mocks.dispose).toHaveBeenCalledOnce();
     });
   });
   it('skips GUI HITL for already completed native tasks without hiding actual failures', async () => {

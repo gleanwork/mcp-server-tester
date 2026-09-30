@@ -2,7 +2,7 @@ import { constants } from 'node:fs';
 import { lstat, mkdir, open } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { z } from 'zod';
-import type { MCPConfig } from '../config/mcpConfig.js';
+import type { MCPConfig, StdioMCPConfig } from '../config/mcpConfig.js';
 
 /**
  * Host plugins and host-resolved stdio eval servers: caller-supplied,
@@ -396,7 +396,7 @@ export async function materializeHostPluginMcp(options: {
 }
 
 // ---------------------------------------------------------------------------
-// Host-resolved stdio eval servers (`servers[]` entries with `url`).
+// Plain and host-resolved stdio servers.
 // ---------------------------------------------------------------------------
 
 const stdioKnown = (name: string) =>
@@ -404,7 +404,7 @@ const stdioKnown = (name: string) =>
   name === 'dataDir' ||
   (pluginRootName(name) !== undefined && NAME.test(pluginRootName(name)!));
 
-/** Strict shape of a stdio eval server. Unknown keys (including `cwd`) fail. */
+/** Strict normalized stdio shape. Unsupported declarations fail closed. */
 const HostStdioServerSchema = z
   .object({
     transport: z.literal('stdio'),
@@ -412,8 +412,12 @@ const HostStdioServerSchema = z
     command: z.string().min(1).max(4096),
     args: z.array(z.string().max(4096)).max(64).optional(),
     env: z.record(z.string().regex(ENV_NAME), z.string().max(4096)).optional(),
-    /** The eval endpoint; substituted as `${url}` and recorded for receipts. */
-    url: EvalUrlSchema,
+    /** Desktop has no cwd field; the resolved launch uses a fixed shell wrapper. */
+    cwd: z.string().min(1).max(4096).optional(),
+    /** Parent environment inheritance cannot be reproduced by Desktop. */
+    inheritEnv: z.literal(false).optional(),
+    /** Optional eval endpoint; never invented for plain stdio servers. */
+    url: EvalUrlSchema.optional(),
     auth: z
       .object({ accessTokenEnv: z.string().regex(ENV_NAME) })
       .strict()
@@ -430,11 +434,16 @@ const HostStdioServerSchema = z
   .superRefine((server, context) => {
     const launch = [server.command, ...(server.args ?? [])];
     const env = Object.values(server.env ?? {});
-    if (![...launch, ...env].every((value) => onlyKnown(value, stdioKnown)))
+    const runtime = [...launch, ...env, ...(server.cwd ? [server.cwd] : [])];
+    if (
+      !runtime.every(
+        (value) => onlyKnown(value, stdioKnown) && !value.includes('\0')
+      )
+    )
       context.addIssue({
         code: 'custom',
         message:
-          'command, args, and env support only ${url}, ${dataDir}, and ${pluginRoot:<plugin>}.',
+          'command, args, env, and cwd support only ${url}, ${dataDir}, and ${pluginRoot:<plugin>}, without NUL bytes.',
       });
     const fileStrings = strings(server.files ?? {});
     if (
@@ -457,8 +466,26 @@ const HostStdioServerSchema = z
         path: ['auth'],
         message: '${bearerToken} requires auth.accessTokenEnv.',
       });
-    // The host verifies the endpoint it launches; it must appear in the launch.
     if (
+      server.url === undefined &&
+      [...runtime, ...fileStrings].some((value) =>
+        placeholders(value).includes('url')
+      )
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['url'],
+        message: '${url} requires a declared url.',
+      });
+    if (server.url?.includes('${'))
+      context.addIssue({
+        code: 'custom',
+        path: ['url'],
+        message: 'url must not contain placeholders.',
+      });
+    // A declared endpoint must still appear in the launch, not only in files/cwd.
+    if (
+      server.url !== undefined &&
       ![...launch, ...env].some((value) => placeholders(value).includes('url'))
     )
       context.addIssue({
@@ -485,8 +512,8 @@ export interface HostStdioPaths {
 }
 
 /**
- * Parse every stdio `servers[]` entry as a host-resolved eval server. Each must
- * declare `url` and reference only declared plugins. Fails closed.
+ * Normalize every stdio `servers[]` entry, preserving the original global
+ * index for default labels. Host placeholders reference only declared values.
  */
 export function hostStdioServers(
   servers: readonly MCPConfig[],
@@ -494,15 +521,24 @@ export function hostStdioServers(
 ): HostStdioServer[] {
   const names = new Set(plugins.map((plugin) => plugin.name));
   const labels = new Set<string>();
-  return servers.flatMap((server): HostStdioServer[] => {
+  for (const [index, server] of servers.entries()) {
+    const label = server.label ?? `server-${index + 1}`;
+    if (labels.has(label))
+      throw new HostPluginError('mcp_server_invalid', label);
+    labels.add(label);
+  }
+  return servers.flatMap((server, index): HostStdioServer[] => {
     if (server.transport !== 'stdio') return [];
-    const parsed = HostStdioServerSchema.safeParse(server);
-    if (!parsed.success || labels.has(parsed.data.label))
+    const parsed = HostStdioServerSchema.safeParse({
+      ...server,
+      label: server.label ?? `server-${index + 1}`,
+    });
+    if (!parsed.success)
       throw new HostPluginError('mcp_server_invalid', server.label ?? 'stdio');
-    labels.add(parsed.data.label);
     const all = strings([
       parsed.data.command,
       parsed.data.args ?? [],
+      parsed.data.cwd ?? [],
       parsed.data.env ?? {},
       parsed.data.files ?? {},
     ]).flatMap(placeholders);
@@ -539,7 +575,8 @@ function stdioValues(
   server: HostStdioServer,
   paths: HostStdioPaths
 ): Record<string, string> {
-  const values: Record<string, string> = { url: server.url };
+  const values: Record<string, string> =
+    server.url !== undefined ? { url: server.url } : {};
   if (server.usesDataDir) {
     if (!safeAbsolute(paths.dataRoot))
       throw new HostPluginError('mcp_server_invalid', server.label);
@@ -565,9 +602,26 @@ export function resolveHostStdioServer(
   dataDir?: string;
 } {
   const values = stdioValues(server, paths);
+  let command = substitute(server.command, values);
+  let args = (server.args ?? []).map((arg) => substitute(arg, values));
+  if (server.cwd !== undefined) {
+    const cwd = substitute(server.cwd, values);
+    if (cwd !== '/' && !safeAbsolute(cwd))
+      throw new HostPluginError('mcp_server_invalid', server.label);
+    // Pass all caller values as positional arguments, never shell source.
+    args = [
+      '-c',
+      'cd -- "$1" && shift && exec "$@"',
+      'mst-cowork',
+      cwd,
+      command,
+      ...args,
+    ];
+    command = '/bin/sh';
+  }
   return {
-    command: substitute(server.command, values),
-    args: (server.args ?? []).map((arg) => substitute(arg, values)),
+    command,
+    args,
     env: Object.fromEntries(
       Object.entries(server.env ?? {}).map(([k, v]) => [
         k,
@@ -650,7 +704,7 @@ export async function materializeHostStdioFiles(options: {
 export function hostStdioReadinessConfig(
   server: HostStdioServer,
   paths: HostStdioPaths
-): MCPConfig {
+): StdioMCPConfig {
   const launch = resolveHostStdioServer(server, paths);
   return {
     transport: 'stdio',

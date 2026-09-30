@@ -145,7 +145,168 @@ afterEach(async () => {
   await actual.rm(root, { recursive: true, force: true });
 });
 
+function stdioManifest(): EvalManifest {
+  return {
+    name: 'native',
+    datasets: [],
+    servers: [
+      {
+        transport: 'stdio',
+        label: 'Native',
+        command: '/synthetic/proxy',
+        url: 'https://native.example.test/mcp',
+        args: ['${url}', '${dataDir}/headers.json'],
+        auth: { accessTokenEnv: 'TOKEN_Search' },
+        files: { 'headers.json': { Authorization: 'Bearer ${bearerToken}' } },
+      },
+    ],
+  };
+}
+
 describe('Mac Cowork settings transaction', () => {
+  it.each([false, true])(
+    'recovers native stdio with mixed HTTP=%s and restores exact source bytes',
+    async (mixed) => {
+      const input = stdioManifest();
+      if (mixed) input.servers!.push(...manifest().servers!);
+      const installed = await installMacCoworkSettings(
+        options({ manifest: input })
+      );
+      expect(await text(profile(installed.id))).not.toContain(MCP_TOKEN);
+      expect(await readJson(stage('stdio/Native/headers.json'))).toEqual({
+        Authorization: `Bearer ${MCP_TOKEN}`,
+      });
+      expect(await readJson(journal)).toMatchObject({
+        stdioDirectories: ['stdio/Native'],
+        files: {
+          'stdio/Native/headers.json': expect.stringMatching(/^[a-f0-9]{64}$/),
+        },
+      });
+      await restoreMacCoworkSettings(profileDirectory);
+      await expectClean();
+    }
+  );
+
+  it('tracks and removes an empty private stdio working directory', async () => {
+    const input: EvalManifest = {
+      name: 'plain',
+      datasets: [],
+      servers: [
+        { transport: 'stdio', command: '/synthetic/plain', cwd: '${dataDir}' },
+      ],
+    };
+    const installed = await installMacCoworkSettings(
+      options({ manifest: input })
+    );
+    expect(await fs.readdir(stage('stdio/server-1'))).toEqual([]);
+    await installed.restore();
+    await expectClean();
+  });
+
+  it.each([
+    'file',
+    'file-symlink',
+    'directory-symlink',
+    'root-symlink',
+    'public-file',
+    'public-directory',
+    'extra-file',
+    'extra-directory',
+    'foreign-journal-path',
+    'foreign-journal-directory',
+  ])('fails closed on stdio %s tampering', async (kind) => {
+    const installed = await installMacCoworkSettings(
+      options({ manifest: stdioManifest() })
+    );
+    const before = await text(meta);
+    const file = stage('stdio/Native/headers.json');
+    const sentinel = join(root, 'sentinel');
+    await fs.mkdir(sentinel, { mode: 0o700 });
+    await fs.writeFile(join(sentinel, 'keep'), 'untouched', { mode: 0o600 });
+    if (kind === 'file') await fs.writeFile(file, 'changed');
+    if (kind === 'file-symlink') {
+      await fs.unlink(file);
+      await fs.symlink(join(sentinel, 'keep'), file);
+    }
+    if (kind === 'directory-symlink') {
+      await fs.rename(stage('stdio/Native'), join(root, 'moved'));
+      await fs.symlink(sentinel, stage('stdio/Native'));
+    }
+    if (kind === 'root-symlink') {
+      await fs.rename(stage('stdio'), join(root, 'moved'));
+      await fs.symlink(sentinel, stage('stdio'));
+    }
+    if (kind === 'public-file') await fs.chmod(file, 0o644);
+    if (kind === 'public-directory')
+      await fs.chmod(stage('stdio/Native'), 0o755);
+    if (kind === 'extra-file')
+      await fs.writeFile(stage('stdio/Native/unknown.json'), '{}', {
+        mode: 0o600,
+      });
+    if (kind === 'extra-directory')
+      await fs.mkdir(stage('stdio/Foreign'), { mode: 0o700 });
+    if (
+      kind === 'foreign-journal-path' ||
+      kind === 'foreign-journal-directory'
+    ) {
+      const value = await readJson(journal);
+      if (kind === 'foreign-journal-path')
+        value.files = {
+          ...(value.files as object),
+          'stdio/Native/../../../sentinel/keep': '0'.repeat(64),
+        };
+      else value.stdioDirectories = ['stdio/Native', '../sentinel'];
+      await fs.writeFile(journal, JSON.stringify(value));
+    }
+    await expect(installed.restore()).rejects.toThrow(ERROR);
+    expect(await text(meta)).toBe(before);
+    expect(await text(source)).toBe(' { } \n');
+    expect(await text(join(sentinel, 'keep'))).toBe('untouched');
+    await fs.access(journal);
+    await fs.access(profile(installed.id));
+  });
+
+  it.each(['unlink', 'directory'])(
+    'retains and recovers the journal after stdio %s cleanup failure',
+    async (kind) => {
+      const installed = await installMacCoworkSettings(
+        options({ manifest: stdioManifest() })
+      );
+      if (kind === 'unlink')
+        vi.mocked(fs.unlink).mockImplementation(async (file) => {
+          if (file === stage('stdio/Native/headers.json'))
+            throw new Error(MCP_TOKEN);
+          await actual.unlink(file);
+        });
+      else
+        vi.mocked(fs.rmdir).mockImplementation(
+          async (...args: Parameters<typeof fs.rmdir>) => {
+            if (args[0] === stage('stdio/Native')) throw new Error(MCP_TOKEN);
+            await actual.rmdir(...args);
+          }
+        );
+      await expect(installed.restore()).rejects.toThrow(ERROR);
+      await expectOriginal();
+      await fs.access(journal);
+      vi.mocked(fs.unlink).mockImplementation(actual.unlink);
+      vi.mocked(fs.rmdir).mockImplementation(actual.rmdir);
+      await restoreMacCoworkSettings(profileDirectory);
+      await expectClean();
+    }
+  );
+
+  it('rolls back private stdio write failure without touching the source', async () => {
+    vi.mocked(fs.writeFile).mockImplementation(
+      async (...args: Parameters<typeof fs.writeFile>) => {
+        if (args[0] === stage('stdio/Native/headers.json'))
+          throw new Error(MCP_TOKEN);
+        await actual.writeFile(...args);
+      }
+    );
+    await rejectInstall({ manifest: stdioManifest() });
+    await expectClean();
+  });
+
   it('pins the requested inference model in the owned profile and restores it', async () => {
     const installed = await installMacCoworkSettings(
       options({ model: 'claude-opus-4-6' })

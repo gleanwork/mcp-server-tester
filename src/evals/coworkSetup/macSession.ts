@@ -13,7 +13,7 @@ import {
 import { homedir, tmpdir, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { EvalManifest } from '../evalManifest.js';
-import type { HostPlugin } from '../hostPlugins.js';
+import type { HostPlugin, HostStdioPaths } from '../hostPlugins.js';
 import { getMacCoworkController } from './macController.js';
 import {
   installMacLocalMcp,
@@ -106,6 +106,9 @@ export async function prepareMacCoworkSession(options: {
 }): Promise<{
   setupStatus: 'applied-not-verified';
   serverCount: number;
+  /** Paths owned by the session for private stdio files. */
+  stdioPaths: HostStdioPaths;
+  /** The pinned or caller-owned Claude application path. */
   appPath: string;
   dispose(): Promise<void>;
 }> {
@@ -140,13 +143,26 @@ export async function prepareMacCoworkSession(options: {
     );
     const localMcpDirectory = `${stagingDirectory}-mcp`;
     if (!manifest.servers) throw new Error(ERROR);
-    await preflightMacLocalMcp(manifest.servers, env);
+    // All stdio entries are staged by the managed profile transaction. HTTP
+    // entries use Cowork's local developer MCP surface.
+    const labeledServers = manifest.servers.map((server, index) =>
+      server.label ? server : { ...server, label: `server-${index + 1}` }
+    );
+    const localServers = labeledServers.filter(
+      (server) => server.transport === 'http'
+    );
+    const managedServers = labeledServers.filter(
+      (server) => server.transport === 'stdio'
+    );
+    await preflightMacLocalMcp(localServers, env);
     const installOptions = {
-      // MCP is installed through the supported local developer surface, not the
-      // profile list (which managed inference settings can take precedence over).
-      manifest: { ...manifest, servers: [] },
+      // Stdio entries are installed in the managed profile. The local developer
+      // surface handles HTTP entries.
+      manifest: { ...manifest, servers: managedServers },
       model: options.model,
-      ...(options.plugins?.length ? { plugins: options.plugins } : {}),
+      ...(options.plugins?.length
+        ? { plugins: structuredClone(options.plugins) }
+        : {}),
       env,
       profileDirectory,
       stagingDirectory,
@@ -302,7 +318,8 @@ export async function prepareMacCoworkSession(options: {
       await stop();
       installAttempted = true;
       transaction = await installMacCoworkSettings(installOptions);
-      await installMacLocalMcp(localMcpDirectory, manifest.servers, env);
+      if (localServers.length)
+        await installMacLocalMcp(localMcpDirectory, localServers, env);
       await controller.start();
       if (!(await controller.state()).running) throw new Error(ERROR);
     } catch (error) {
@@ -319,6 +336,7 @@ export async function prepareMacCoworkSession(options: {
       setupStatus: transaction.status,
       appPath,
       serverCount: manifest.servers?.length ?? 0,
+      stdioPaths: { dataRoot: join(stagingDirectory, 'stdio') },
       dispose() {
         // Concurrent/repeated callers share one cleanup, including its failure.
         disposal ??= (async () => {
