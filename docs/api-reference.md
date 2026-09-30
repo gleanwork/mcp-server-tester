@@ -31,7 +31,7 @@ test('use raw client', async ({ mcpClient }) => {
 
 High-level test API with helper methods.
 
-```typescript snippet=src/mcp/fixtures/mcpFixture.ts#L82-L137
+```typescript snippet=src/mcp/fixtures/mcpFixture.ts#L83-L138
 /**
  * High-level API for interacting with MCP servers in tests
  *
@@ -587,7 +587,7 @@ await saveEvalRunComparison({ store, comparison, id: 'candidate-comparison' });
 
 **Result Structure:**
 
-```typescript snippet=src/evals/evalRunner.ts#L126-L203
+```typescript snippet=src/evals/evalRunner.ts#L127-L204
 /**
  * Overall result of running an eval dataset
  */

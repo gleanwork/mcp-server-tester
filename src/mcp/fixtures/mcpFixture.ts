@@ -11,6 +11,7 @@ import {
   createFixtureExtensions,
   type MCPFixtureExtensions,
 } from './fixtureExtensions.js';
+import { attachReporterData } from '../../reporters/channel.js';
 
 // Re-export AuthType for backwards compatibility
 export type { AuthType } from '../../types/index.js';
@@ -248,21 +249,16 @@ export function createMCPFixture(
         );
         const tools = result.tools;
 
-        // Auto-attach for reporter
-        await testInfo.attach('mcp-list-tools', {
-          contentType: 'application/json',
-          body: JSON.stringify(
-            {
-              operation: 'listTools',
-              toolCount: tools.length,
-              tools: tools.map((t) => ({
-                name: t.name,
-                description: t.description,
-              })),
-            },
-            null,
-            2
-          ),
+        await attachReporterData(testInfo, {
+          kind: 'listTools',
+          data: {
+            operation: 'listTools',
+            toolCount: tools.length,
+            tools: tools.map((t) => ({
+              name: t.name,
+              description: t.description,
+            })),
+          },
         });
 
         return tools;
@@ -287,23 +283,18 @@ export function createMCPFixture(
         );
         const durationMs = Date.now() - startTime;
 
-        // Auto-attach for reporter
-        await testInfo.attach(`mcp-call-${name}`, {
-          contentType: 'application/json',
-          body: JSON.stringify(
-            {
-              operation: 'callTool',
-              toolName: name,
-              args,
-              result,
-              durationMs,
-              isError: result.isError || false,
-              authType,
-              project,
-            },
-            null,
-            2
-          ),
+        await attachReporterData(testInfo, {
+          kind: 'toolCall',
+          data: {
+            operation: 'callTool',
+            toolName: name,
+            args,
+            result,
+            durationMs,
+            isError: result.isError || false,
+            authType,
+            project,
+          },
         });
 
         return result;
@@ -317,31 +308,12 @@ export function createMCPFixture(
 
     getServerInfo() {
       const serverVersion = client.getServerVersion();
-      const result = serverVersion
+      return serverVersion
         ? {
             name: serverVersion.name,
             version: serverVersion.version,
           }
         : null;
-
-      // Fire-and-forget attachment (don't block synchronous call)
-      testInfo
-        .attach('mcp-server-info', {
-          contentType: 'application/json',
-          body: JSON.stringify(
-            {
-              operation: 'getServerInfo',
-              serverInfo: result,
-            },
-            null,
-            2
-          ),
-        })
-        .catch((err) => {
-          console.error('[MCPFixture] Failed to attach server info:', err);
-        });
-
-      return result;
     },
   };
 }
