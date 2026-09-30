@@ -2,6 +2,7 @@ import {
   closeMCPClient,
   createMCPClientForConfig,
 } from '../mcp/clientFactory.js';
+import { callToolNormalized } from '../mcp/callTool.js';
 import { z } from 'zod';
 import type {
   HostRunInput,
@@ -212,9 +213,9 @@ async function runAnthropicApiHost(
             ? (call.input as Record<string, unknown>)
             : {};
         const result = await withinDeadline(
-          route.client.callTool(
+          callToolNormalized(
+            route.client,
             { name: route.name, arguments: args },
-            undefined,
             { signal: controller.signal }
           )
         );

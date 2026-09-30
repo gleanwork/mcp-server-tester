@@ -10,7 +10,7 @@ import {
   discoverAuthorizationServerMetadata,
   startAuthorization,
   exchangeAuthorization,
-} from '@modelcontextprotocol/sdk/client/auth.js';
+} from '@modelcontextprotocol/client';
 import type {
   OAuthSetupConfig,
   OAuthLoginSelectors,

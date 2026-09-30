@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import { Select, TextInput, ConfirmInput } from '@inkjs/ui';
-import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import type { Tool } from '@modelcontextprotocol/sdk/types.js';
+import type { Client, Tool } from '@modelcontextprotocol/client';
+import { callToolNormalized } from '../../../mcp/callTool.js';
 import { Spinner, StatusMessage, JsonPreview } from '../../components/index.js';
 import {
   createMCPClientForConfig,
@@ -250,7 +250,7 @@ export function GenerateApp({ options }: GenerateAppProps) {
     if (!client || !selectedTool) return;
 
     try {
-      const result = await client.callTool({
+      const result = await callToolNormalized(client, {
         name: selectedTool.name,
         arguments: finalArgs,
       });

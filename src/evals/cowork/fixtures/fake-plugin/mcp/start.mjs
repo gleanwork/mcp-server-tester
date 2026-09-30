@@ -3,8 +3,9 @@
 // a valid credential it exposes four tools; otherwise only one static tool.
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { McpServer } from '@modelcontextprotocol/server';
+import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
+import { z } from 'zod';
 
 const url = process.env.FAKE_MCP_URL ?? '';
 let token = '';
@@ -27,7 +28,7 @@ const names =
 for (const name of names)
   server.registerTool(
     name,
-    { description: name, inputSchema: {} },
+    { description: name, inputSchema: z.object({}) },
     async () => ({
       content: [
         {

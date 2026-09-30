@@ -316,6 +316,6 @@ To add a new provider:
 
 ### New Auth Provider
 
-1. Implement `OAuthClientProvider` interface from `@modelcontextprotocol/sdk/client/auth.js`
+1. Implement the `OAuthClientProvider` interface from `@modelcontextprotocol/client`
 2. Add utilities to `src/auth/` module
 3. Export from `src/index.ts`

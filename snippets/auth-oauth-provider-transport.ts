@@ -1,5 +1,5 @@
 import { PlaywrightOAuthClientProvider } from '@gleanwork/mcp-server-tester';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 
 // Create provider for MCP SDK
 const provider = new PlaywrightOAuthClientProvider({

@@ -224,11 +224,13 @@ describe('CLI template generators', () => {
       expect(parsed.dependencies).toHaveProperty('@playwright/test');
     });
 
-    it('includes @modelcontextprotocol/sdk as a dependency', () => {
+    it('includes @modelcontextprotocol/client as a dependency', () => {
       const pkg = getPackageJsonTemplate('my-tests');
       const parsed = JSON.parse(pkg);
 
-      expect(parsed.dependencies).toHaveProperty('@modelcontextprotocol/sdk');
+      expect(parsed.dependencies).toHaveProperty(
+        '@modelcontextprotocol/client'
+      );
     });
 
     it('sets the project name correctly', () => {

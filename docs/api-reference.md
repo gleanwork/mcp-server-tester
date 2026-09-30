@@ -17,7 +17,7 @@ Complete API documentation for `@gleanwork/mcp-server-tester`.
 
 ### `mcpClient: Client`
 
-Raw MCP SDK client from `@modelcontextprotocol/sdk`.
+Raw MCP SDK client from `@modelcontextprotocol/client` (MCP TypeScript SDK v2).
 
 ```typescript
 test('use raw client', async ({ mcpClient }) => {

@@ -7,12 +7,12 @@
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
+import type { OAuthClientProvider } from '@modelcontextprotocol/client';
 import type {
   OAuthClientMetadata,
   OAuthClientInformationFull,
   OAuthTokens,
-} from '@modelcontextprotocol/sdk/shared/auth.js';
+} from '@modelcontextprotocol/client';
 import type { StoredOAuthState } from './types.js';
 
 /**

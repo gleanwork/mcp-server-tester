@@ -12,25 +12,19 @@ const mocks = vi.hoisted(() => ({
   MockSSEClientTransport: vi.fn(),
 }));
 
-vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
+vi.mock('@modelcontextprotocol/client', () => ({
   Client: mocks.MockClient,
-}));
-
-vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => ({
-  StdioClientTransport: mocks.MockStdioClientTransport,
-}));
-
-vi.mock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({
   StreamableHTTPClientTransport: mocks.MockStreamableHTTPClientTransport,
+  SSEClientTransport: mocks.MockSSEClientTransport,
 }));
 
-vi.mock('@modelcontextprotocol/sdk/client/sse.js', () => ({
-  SSEClientTransport: mocks.MockSSEClientTransport,
+vi.mock('@modelcontextprotocol/client/stdio', () => ({
+  StdioClientTransport: mocks.MockStdioClientTransport,
 }));
 
 import { createMCPClientForConfig, closeMCPClient } from './clientFactory.js';
 import { MCPHttpConnectionError } from './connectionDiagnostics.js';
-import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
+import type { OAuthClientProvider } from '@modelcontextprotocol/client';
 
 describe('clientFactory', () => {
   beforeEach(() => {
@@ -48,6 +42,7 @@ describe('clientFactory', () => {
         connect: mocks.mockConnect,
         close: mocks.mockClose,
         getServerVersion: mocks.mockGetServerVersion,
+        getProtocolEra: () => 'legacy',
       };
     });
   });
@@ -467,6 +462,38 @@ describe('clientFactory', () => {
           mockClient as unknown as Parameters<typeof closeMCPClient>[0]
         )
       ).rejects.toThrow('Close failed');
+    });
+
+    function httpClient(era: 'legacy' | 'modern') {
+      const transport = Object.assign(
+        Object.create(
+          mocks.MockStreamableHTTPClientTransport.prototype as object
+        ) as object,
+        { terminateSession: vi.fn().mockResolvedValue(undefined) }
+      );
+      return {
+        transport,
+        close: vi.fn().mockResolvedValue(undefined),
+        getProtocolEra: () => era,
+      };
+    }
+
+    it('terminates the HTTP session on legacy connections', async () => {
+      const client = httpClient('legacy');
+      await closeMCPClient(
+        client as unknown as Parameters<typeof closeMCPClient>[0]
+      );
+      expect(client.transport.terminateSession).toHaveBeenCalled();
+      expect(client.close).toHaveBeenCalled();
+    });
+
+    it('does not terminate a session on 2026-07-28 connections (there is none)', async () => {
+      const client = httpClient('modern');
+      await closeMCPClient(
+        client as unknown as Parameters<typeof closeMCPClient>[0]
+      );
+      expect(client.transport.terminateSession).not.toHaveBeenCalled();
+      expect(client.close).toHaveBeenCalled();
     });
   });
 });

@@ -1,6 +1,7 @@
 import { appendFile } from 'node:fs/promises';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { McpServer } from '@modelcontextprotocol/server';
+import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
+import { z } from 'zod';
 
 const [label, token, logPath] = process.argv.slice(2);
 if (!label || !token || !logPath)
@@ -10,7 +11,7 @@ server.registerTool(
   `${label}_token`,
   {
     description: `Return the read-only smoke-test token for ${label}.`,
-    inputSchema: {},
+    inputSchema: z.object({}),
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,

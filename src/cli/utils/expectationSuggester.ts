@@ -2,7 +2,7 @@
  * Expectation suggester - analyzes MCP tool responses and suggests appropriate expectations
  */
 
-import type { Tool } from '@modelcontextprotocol/sdk/types.js';
+import type { Tool } from '@modelcontextprotocol/client';
 import { extractText } from '../../mcp/response.js';
 
 export interface ExpectationSuggestions {
