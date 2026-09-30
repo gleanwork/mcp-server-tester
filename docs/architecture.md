@@ -158,12 +158,12 @@ auth/oauthFlow.ts: exchangeCodeForTokens()        [PKCE code_verifier cleared af
 auth/storage.ts: saveTokens()                     [written to ~/.local/state/mcp-tests/<key>/ with 0600 perms]
    ↓
 At test time:
-auth/oauthClientProvider.ts: PlaywrightOAuthClientProvider
-   ↓  implements OAuthClientProvider (MCP SDK interface)
-   ↓  getTokens() → reads from storage
-   ↓  refreshToken() → auth/oauthFlow.ts: refreshAccessToken()
+auth/credentials.ts: resolveCredentials(config)   [the one place credential precedence is decided]
+   ↓  auth.oauth.authStatePath → PlaywrightOAuthClientProvider (Playwright OAuth state file)
+   ↓  auth.accessToken → a static header; auth.clientCredentials → ClientCredentialsAuthProvider (re-runs the grant as tokens expire)
+   ↓  otherwise (fixtures) a stored login → StoredLoginAuthProvider (refreshes via CLIOAuthClient.tryGetAccessToken() as tokens expire)
 mcp/clientFactory.ts: createMCPClientForConfig(config, { authProvider })
-   ↓  MCP SDK Client uses authProvider to inject Bearer token into transport headers
+   ↓  MCP SDK Client asks the authProvider for a token before each request
 ```
 
 ---

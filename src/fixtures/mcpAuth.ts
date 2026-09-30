@@ -7,11 +7,12 @@
 
 import { test as base } from '@playwright/test';
 import type { OAuthClientProvider } from '@modelcontextprotocol/client';
-import type { MCPAuthConfig, MCPOAuthConfig } from '../config/mcpConfig.js';
+import type { MCPAuthConfig } from '../config/mcpConfig.js';
 import {
-  PlaywrightOAuthClientProvider,
-  type PlaywrightOAuthClientProviderConfig,
-} from '../auth/oauthClientProvider.js';
+  BearerTokenAuthProvider,
+  oauthStateProvider,
+} from '../auth/credentials.js';
+import { ENV_VAR_NAMES } from '../auth/storage.js';
 
 /**
  * Static token auth provider that wraps a pre-acquired token
@@ -19,52 +20,17 @@ import {
  * This is a minimal implementation that provides tokens directly
  * without OAuth flow support.
  */
-class StaticTokenAuthProvider implements OAuthClientProvider {
-  private readonly accessToken: string;
-
-  constructor(accessToken: string) {
-    this.accessToken = accessToken;
+class StaticTokenAuthProvider extends BearerTokenAuthProvider {
+  constructor(private readonly token: string) {
+    super();
   }
 
-  get redirectUrl(): string {
-    throw new Error('StaticTokenAuthProvider does not support OAuth redirects');
+  protected async accessToken(): Promise<string> {
+    return this.token;
   }
 
-  get clientMetadata() {
-    return {
-      redirect_uris: [],
-      token_endpoint_auth_method: 'none' as const,
-      grant_types: [],
-      response_types: [],
-      client_name: '@gleanwork/mcp-server-tester',
-    };
-  }
-
-  async clientInformation() {
-    return undefined;
-  }
-
-  async tokens() {
-    return {
-      access_token: this.accessToken,
-      token_type: 'Bearer',
-    };
-  }
-
-  async saveTokens(): Promise<void> {
-    // Static tokens don't need to be saved
-  }
-
-  async redirectToAuthorization(): Promise<void> {
-    throw new Error('StaticTokenAuthProvider does not support OAuth redirects');
-  }
-
-  async saveCodeVerifier(): Promise<void> {
-    throw new Error('StaticTokenAuthProvider does not support PKCE');
-  }
-
-  async codeVerifier(): Promise<string> {
-    throw new Error('StaticTokenAuthProvider does not support PKCE');
+  protected rejectedMessage(): string {
+    return `The server rejected the token in ${ENV_VAR_NAMES.accessToken}. Update or unset it.`;
   }
 }
 
@@ -106,16 +72,16 @@ export const test = base.extend<MCPAuthFixtures>({
       return;
     }
 
-    // Static token mode
-    if (authConfig.accessToken) {
-      const provider = new StaticTokenAuthProvider(authConfig.accessToken);
+    // OAuth mode (a state file wins over a token, as in resolveCredentials)
+    if (authConfig.oauth) {
+      const provider = oauthStateProvider(authConfig.oauth);
       await use(provider);
       return;
     }
 
-    // OAuth mode
-    if (authConfig.oauth) {
-      const provider = createOAuthProvider(authConfig.oauth);
+    // Static token mode
+    if (authConfig.accessToken) {
+      const provider = new StaticTokenAuthProvider(authConfig.accessToken);
       await use(provider);
       return;
     }
@@ -125,45 +91,14 @@ export const test = base.extend<MCPAuthFixtures>({
 });
 
 /**
- * Creates an OAuth provider from configuration
- */
-function createOAuthProvider(
-  oauthConfig: MCPOAuthConfig
-): PlaywrightOAuthClientProvider {
-  if (!oauthConfig.authStatePath) {
-    throw new Error(
-      'OAuth configuration requires authStatePath. ' +
-        'Use performOAuthSetup() in globalSetup to create auth state first.'
-    );
-  }
-
-  const providerConfig: PlaywrightOAuthClientProviderConfig = {
-    storagePath: oauthConfig.authStatePath,
-    redirectUri:
-      oauthConfig.redirectUri ?? 'http://localhost:3000/oauth/callback',
-    clientId: oauthConfig.clientId,
-    clientSecret: oauthConfig.clientSecret,
-  };
-
-  return new PlaywrightOAuthClientProvider(providerConfig);
-}
-
-/**
  * Gets auth config from environment variables
  *
  * This is a fallback for fixtures that can't access testInfo.project directly.
+ * Same precedence as resolveCredentials: an OAuth state file before a token.
  */
 function getAuthConfigFromEnv(): MCPAuthConfig | undefined {
-  // Check for static token
-  const accessToken = process.env.MCP_ACCESS_TOKEN;
-  if (accessToken) {
-    return { accessToken };
-  }
-
-  // Check for OAuth config
   const oauthServerUrl = process.env.MCP_OAUTH_SERVER_URL;
   const authStatePath = process.env.MCP_AUTH_STATE_PATH;
-
   if (oauthServerUrl || authStatePath) {
     return {
       oauth: {
@@ -175,6 +110,11 @@ function getAuthConfigFromEnv(): MCPAuthConfig | undefined {
         resource: process.env.MCP_OAUTH_RESOURCE,
       },
     };
+  }
+
+  const accessToken = process.env[ENV_VAR_NAMES.accessToken];
+  if (accessToken) {
+    return { accessToken };
   }
 
   return undefined;

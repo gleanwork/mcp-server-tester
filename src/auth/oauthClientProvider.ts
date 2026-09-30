@@ -14,6 +14,7 @@ import type {
   OAuthTokens,
 } from '@modelcontextprotocol/client';
 import type { StoredOAuthState } from './types.js';
+import { testerClientMetadata } from './oauthFlow.js';
 
 /**
  * Configuration for the Playwright OAuth client provider
@@ -84,13 +85,10 @@ export class PlaywrightOAuthClientProvider implements OAuthClientProvider {
    */
   get clientMetadata(): OAuthClientMetadata {
     return {
-      redirect_uris: [this.config.redirectUri],
-      token_endpoint_auth_method: this.config.clientSecret
-        ? 'client_secret_basic'
-        : 'none',
-      grant_types: ['authorization_code', 'refresh_token'],
-      response_types: ['code'],
-      client_name: '@gleanwork/mcp-server-tester',
+      ...testerClientMetadata({
+        redirectUri: this.config.redirectUri,
+        confidential: Boolean(this.config.clientSecret),
+      }),
       ...this.config.clientMetadata,
     };
   }
