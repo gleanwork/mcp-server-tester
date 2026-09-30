@@ -210,6 +210,7 @@ export type {
   JudgeExpectConfig,
   SerializedEvalDataset,
   EvalMode,
+  EvalDirectRequest,
   LoadDatasetOptions,
   EvalContext,
   EvalRunnerResult,

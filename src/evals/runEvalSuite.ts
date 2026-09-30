@@ -44,7 +44,8 @@ import {
 } from './datasetTypes.js';
 import { selectEvalCases } from './buildEvalDataset.js';
 import type { EvalCaseResult } from '../types/reporter.js';
-import type { UsageMetrics } from '../types/index.js';
+import type { MCPProtocolInfo, UsageMetrics } from '../types/index.js';
+import { getProtocolInfo } from '../mcp/protocol.js';
 import { loadPlugins } from '../plugins/loadPlugins.js';
 import {
   getDatasetSource,
@@ -503,9 +504,13 @@ export async function runEvalSuite(
         // Batch execution (including shared setup/cleanup) precedes the runner's
         // wall clock. Count its elapsed time once, not the sum of request times.
         const batchDurationMs = batchTraces ? Date.now() - batchStartTime : 0;
+        // Direct cases connect per case; record what those connections
+        // negotiated so the run's metadata carries its protocol.
+        let directProtocol: MCPProtocolInfo | undefined;
         const result = await runEvalDataset(
           {
             dataset: effectiveDataset,
+            protocol: () => directProtocol,
             concurrency: manifest.concurrency ?? 1,
             defaultLlmIterations: manifest.iterations,
             toolOverrides: arm.toolOverrides ?? manifest.toolOverrides,
@@ -521,16 +526,27 @@ export async function runEvalSuite(
                           : resolvedServers.find(
                               (server) =>
                                 server.label &&
-                                evalCase.toolName?.startsWith(
-                                  `${server.label}.`
-                                )
+                                (evalCase.request
+                                  ? evalCase.request.server === server.label
+                                  : evalCase.toolName?.startsWith(
+                                      `${server.label}.`
+                                    ))
                             );
                       if (!selected)
                         throw new Error(
-                          'Direct cases require one server or a label-qualified tool name.'
+                          'Direct cases require one server, a label-qualified tool name, or request.server.'
                         );
+                      if (
+                        evalCase.request?.server !== undefined &&
+                        evalCase.request.server !== selected.label
+                      ) {
+                        throw new Error(
+                          `request.server "${evalCase.request.server}" does not match the manifest's server${selected.label ? ` "${selected.label}"` : ''}.`
+                        );
+                      }
                       const directClient =
                         await createMCPClientForConfig(selected);
+                      directProtocol ??= getProtocolInfo(directClient);
                       try {
                         const toolName =
                           selected.label &&

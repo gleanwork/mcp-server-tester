@@ -91,6 +91,33 @@ export interface EvalRunComparisonResult {
   missingFromBaseline: EvalCaseComparison[];
   /** Cases present only in baseline */
   missingFromCandidate: EvalCaseComparison[];
+  /**
+   * Caveats about the comparison, e.g. the runs negotiated different MCP
+   * protocol eras, so pass-rate changes may come from the protocol rather
+   * than the change under test.
+   */
+  warnings: string[];
+}
+
+/** Explains why two runs' protocols make a comparison less meaningful. */
+function protocolWarnings(
+  baseline: EvalRunnerResult,
+  candidate: EvalRunnerResult
+): string[] {
+  const a = baseline.metadata?.protocol;
+  const b = candidate.metadata?.protocol;
+  if (!a?.negotiated || !b?.negotiated) return [];
+  if (a.era && b.era && a.era !== b.era) {
+    return [
+      `Runs used different MCP protocol eras (baseline ${a.negotiated}/${a.era}, candidate ${b.negotiated}/${b.era}); differences may come from the protocol, not the change under test.`,
+    ];
+  }
+  if (a.negotiated !== b.negotiated) {
+    return [
+      `Runs negotiated different MCP protocol revisions (baseline ${a.negotiated}, candidate ${b.negotiated}).`,
+    ];
+  }
+  return [];
 }
 
 export type StoredEvalRunRef = 'latest' | { id: string };
@@ -187,6 +214,7 @@ export function compareEvalRuns(
     missingFromCandidate: cases.filter(
       (c) => c.outcome === 'MISSING_FROM_CANDIDATE'
     ),
+    warnings: protocolWarnings(baseline, candidate),
   };
 }
 

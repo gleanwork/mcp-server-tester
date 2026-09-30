@@ -107,6 +107,11 @@ export interface EvalRunMetadata {
   mcpHostModel?: string;
   /** Judge model identifier (if judge was used) */
   judgeModel?: string;
+  /**
+   * Protocol the run's MCP connection requested and negotiated. Results from
+   * different eras are not directly comparable.
+   */
+  protocol?: MCPProtocolInfo;
 }
 
 /**

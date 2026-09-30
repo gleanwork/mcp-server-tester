@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { test, expect } from '../src/fixtures/mcp.js';
+import { runEvalDataset } from '../src/evals/evalRunner.js';
 
 /**
  * The fixture's resources, extension-request, and skills helpers, in every
@@ -57,6 +58,57 @@ test.describe('Fixture: discovery, resources, and skills', () => {
       'skill://weather-report/references/STYLE.md'
     );
     expect(style.verified).toBe(true);
+  });
+
+  test('eval datasets can target skills methods directly', async ({
+    mcp,
+  }, testInfo) => {
+    const result = await runEvalDataset(
+      {
+        dataset: {
+          name: 'skills-requests',
+          cases: [
+            {
+              id: 'skills-list-valid',
+              request: { method: 'skills/list', params: {} },
+              expect: {
+                schema: 'SkillsListResult',
+                containsText: 'weather-report',
+              },
+            },
+            {
+              id: 'skills-get-valid',
+              request: {
+                method: 'skills/get',
+                params: { uri: 'skill://weather-report/SKILL.md' },
+              },
+              expect: { schema: 'SkillsGetResult' },
+            },
+            {
+              id: 'skills-get-unknown',
+              request: {
+                method: 'skills/get',
+                params: { uri: 'skill://nope/SKILL.md' },
+              },
+              expect: { isError: 'MCP error -32602' },
+            },
+            {
+              id: 'skill-md-readable',
+              request: {
+                method: 'resources/read',
+                params: { uri: 'skill://weather-report/SKILL.md' },
+              },
+              expect: { containsText: '# Weather report' },
+            },
+          ],
+        },
+      },
+      { mcp, testInfo }
+    );
+
+    const failures = result.caseResults.filter((c) => !c.pass);
+    expect(failures, JSON.stringify(failures, null, 2)).toEqual([]);
+    expect(result.metadata?.protocol).toEqual(mcp.protocol);
   });
 
   test('skills.read() reports a mismatch against a stale entry', async ({
