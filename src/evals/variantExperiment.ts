@@ -11,6 +11,7 @@ import type { EvalRunComparisonResult } from './evalRunComparison.js';
 import type { MCPVariantExperimentData } from '../types/reporter.js';
 import type { ZodType } from 'zod';
 import { attachReporterData } from '../reporters/channel.js';
+import { passRate } from './evalRunComparison.js';
 
 /**
  * Metric used to rank variant candidates and decide improvement.
@@ -446,7 +447,7 @@ function readMetric(
 ): number | undefined {
   switch (metric) {
     case 'passRate':
-      return result.total > 0 ? result.passed / result.total : 0;
+      return passRate(result);
     case 'toolF1':
       return result.datasetToolF1;
     case 'toolPrecision':

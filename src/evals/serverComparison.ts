@@ -12,6 +12,10 @@ import {
   type StoredEvalArtifact,
   type StoredEvalArtifactMetadata,
 } from './resultStore.js';
+import {
+  REDACT_STORED_RESPONSES_BY_DEFAULT,
+  redactStoredResponses,
+} from './resultStore.js';
 
 /** Outcome of comparing two servers on a single eval case. */
 export type ComparisonOutcome = 'A_WINS' | 'B_WINS' | 'TIE' | 'BOTH_FAIL';
@@ -200,9 +204,10 @@ export async function saveServerComparison(
   options: SaveServerComparisonOptions
 ): Promise<StoredEvalArtifact<ServerComparisonResult>> {
   const store = resolveEvalResultStore(options.store);
-  const data = options.redactStoredResponses
-    ? redactResponses(options.comparison)
-    : options.comparison;
+  const data =
+    (options.redactStoredResponses ?? REDACT_STORED_RESPONSES_BY_DEFAULT)
+      ? redactStoredResponses(options.comparison)
+      : options.comparison;
   const artifact = createStoredEvalArtifact({
     kind: 'server-comparison',
     id: options.id,
@@ -215,12 +220,4 @@ export async function saveServerComparison(
 
   await store.saveArtifact(artifact);
   return artifact;
-}
-
-function redactResponses<T>(value: T): T {
-  return JSON.parse(
-    JSON.stringify(value, (key, currentValue: unknown) =>
-      key === 'response' ? undefined : currentValue
-    )
-  ) as T;
 }

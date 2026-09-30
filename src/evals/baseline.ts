@@ -1,15 +1,20 @@
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { dirname } from 'path';
 import type { EvalRunnerResult } from './evalRunner.js';
+import {
+  REDACT_STORED_RESPONSES_BY_DEFAULT,
+  redactStoredResponses,
+} from './resultStore.js';
 
 /**
  * Options for saveBaseline
  */
 export interface SaveBaselineOptions {
   /**
-   * When true (default), strips the `response` field from each case result
-   * before saving. Keeps baseline files small and git-friendly — the baseline
-   * is a pass/fail record and the full response is not needed for comparison.
+   * When true (default), strips responses before saving, under the same
+   * policy as every stored result (`redactStoredResponses`). Keeps baseline
+   * files small and git-friendly: the baseline is a pass/fail record and the
+   * full response is not needed for comparison.
    *
    * Set to false to preserve the complete response in the saved file.
    *
@@ -30,16 +35,8 @@ export async function saveBaseline(
   filePath: string,
   options: SaveBaselineOptions = {}
 ): Promise<void> {
-  const { omitResponses = true } = options;
-
-  const toSave = omitResponses
-    ? {
-        ...result,
-        caseResults: result.caseResults.map(
-          ({ response: _response, ...rest }) => rest
-        ),
-      }
-    : result;
+  const { omitResponses = REDACT_STORED_RESPONSES_BY_DEFAULT } = options;
+  const toSave = omitResponses ? redactStoredResponses(result) : result;
 
   await mkdir(dirname(filePath), { recursive: true });
   await writeFile(filePath, JSON.stringify(toSave, null, 2), 'utf8');
@@ -57,18 +54,4 @@ export async function loadBaseline(
 ): Promise<EvalRunnerResult> {
   const raw = await readFile(filePath, 'utf8');
   return JSON.parse(raw) as EvalRunnerResult;
-}
-
-/**
- * Builds a map of case ID → pass status from a baseline result.
- * Used internally by runEvalDataset to tag current results with baseline status.
- */
-export function buildBaselinePassMap(
-  baseline: EvalRunnerResult
-): Map<string, boolean> {
-  const map = new Map<string, boolean>();
-  for (const result of baseline.caseResults) {
-    map.set(result.id, result.pass);
-  }
-  return map;
 }

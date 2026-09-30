@@ -191,6 +191,8 @@ describe('MCPReporter.buildRunData()', () => {
       expect(data.metrics.total).toBe(0);
       expect(data.metrics.passed).toBe(0);
       expect(data.metrics.failed).toBe(0);
+      // Not NaN, which serialized as null in stored reports.
+      expect(data.metrics.passRate).toBe(0);
     });
   });
 

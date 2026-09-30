@@ -31,6 +31,11 @@ import {
   createStoredEvalArtifact,
   resolveEvalResultStore,
 } from '../evals/resultStore.js';
+import {
+  REDACT_STORED_RESPONSES_BY_DEFAULT,
+  redactStoredResponses,
+} from '../evals/resultStore.js';
+import { passRate } from '../evals/evalRunComparison.js';
 
 type ResolvedReporterConfig = Required<
   Omit<
@@ -86,7 +91,8 @@ export default class MCPReporter implements Reporter {
       // both write paths prevents users from getting a mix of
       // redacted/non-redacted artifacts depending on which code path wrote
       // them.
-      redactStoredResponses: options.redactStoredResponses ?? true,
+      redactStoredResponses:
+        options.redactStoredResponses ?? REDACT_STORED_RESPONSES_BY_DEFAULT,
     };
   }
 
@@ -357,7 +363,7 @@ export default class MCPReporter implements Reporter {
         total,
         passed,
         failed,
-        passRate: passed / total,
+        passRate: passRate({ passed, total }),
         datasetBreakdown,
         expectationBreakdown,
         totalHostUsage,
@@ -434,7 +440,7 @@ export default class MCPReporter implements Reporter {
           kind: 'reporter-run',
           id: this.config.runId,
           data: this.config.redactStoredResponses
-            ? redactResponses(runData)
+            ? redactStoredResponses(runData)
             : runData,
           metadata: {
             ...(this.config.runMetadata ?? {}),
@@ -553,12 +559,4 @@ function toHistoricalSummary(
     passRate: runData.metrics.passRate,
     durationMs: runData.durationMs,
   };
-}
-
-function redactResponses<T>(value: T): T {
-  return JSON.parse(
-    JSON.stringify(value, (key, currentValue: unknown) =>
-      key === 'response' ? undefined : currentValue
-    )
-  ) as T;
 }

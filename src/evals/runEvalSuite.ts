@@ -29,7 +29,8 @@ import {
   hostEnvironment,
   type HostEnvironment,
 } from './mcpHost/hostOptions.js';
-import { runEvalDataset, omitResponsesFromResult } from './evalRunner.js';
+import { runEvalDataset } from './evalRunner.js';
+import { passRate } from './evalRunComparison.js';
 import { createSuiteCaseExecutor } from './caseExecution.js';
 import { mergeSuiteJudges } from './expectations.js';
 import { prepareHostBatch } from './prepareHostBatch.js';
@@ -49,7 +50,11 @@ import {
 } from './frameworkRegistries.js';
 import { computeMetrics, type MetricSpec } from './metrics.js';
 import { registerBuiltinResultStores } from './builtinResultStores.js';
-import { createStoredEvalArtifact } from './resultStore.js';
+import {
+  createStoredEvalArtifact,
+  REDACT_STORED_RESPONSES_BY_DEFAULT,
+  redactStoredResponses as redactStoredResponsePolicy,
+} from './resultStore.js';
 
 export interface RunEvalSuiteOptions {
   manifestPath: string;
@@ -194,17 +199,15 @@ function buildArmDeltas(
 ): Record<string, Record<string, unknown>> {
   const baseline = arms[0]?.result;
   if (!baseline || baseline.total === 0) return {};
-  const baselineRate = baseline.passed / baseline.total;
+  const baselineRate = passRate(baseline);
   return Object.fromEntries(
     arms.slice(1).map((arm) => {
-      const result = arm.result;
-      const passRate =
-        result && result.total > 0 ? result.passed / result.total : 0;
+      const rate = arm.result ? passRate(arm.result) : 0;
       return [
         arm.name,
         {
-          passRate,
-          passRateDelta: passRate - baselineRate,
+          passRate: rate,
+          passRateDelta: rate - baselineRate,
           baseline: arms[0]?.name,
         },
       ];
@@ -552,20 +555,9 @@ export async function runEvalSuite(
   const redactStoredResponses =
     options.redactStoredResponses ??
     (manifest.redactStoredResponses as boolean | undefined) ??
-    true;
+    REDACT_STORED_RESPONSES_BY_DEFAULT;
   const storedSummary = redactStoredResponses
-    ? {
-        ...summary,
-        results: summary.results.map(
-          ({ response: _response, ...result }) => result
-        ),
-        arms: summary.arms.map((arm) => ({
-          ...arm,
-          ...(arm.result
-            ? { result: omitResponsesFromResult(arm.result) }
-            : {}),
-        })),
-      }
+    ? redactStoredResponsePolicy(summary)
     : structuredClone(summary);
   await fs.mkdir(outputDir, { recursive: true });
   if (manifest.results?.store) {

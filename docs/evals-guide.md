@@ -685,9 +685,12 @@ test('compare against latest baseline', async ({ mcp }, testInfo) => {
 });
 ```
 
-When `saveResultsTo` targets the store, baseline saves still omit responses by
-default. Set `omitResponsesFromBaseline: false` when the stored baseline should
-include full responses.
+When `saveResultsTo` targets the store, saved results still omit responses by
+default. Set `redactStoredResponses: false` when the stored results should
+include full responses (`omitResponsesFromBaseline` controls baseline files
+written to a path). Every API that stores results (the runner, suites, the
+reporter, run and server comparisons, baseline files) removes every `response`
+value by default, the same way.
 
 ### Stored Variant Comparisons
 
@@ -728,9 +731,14 @@ await saveEvalRunComparison({
 });
 ```
 
+Stored comparisons omit raw responses unless you pass
+`redactStoredResponses: false` to `saveEvalRunComparison()`.
+
 ### Stored Server Comparisons
 
-`runServerComparison()` can persist side-by-side results directly:
+`runServerComparison()` can persist side-by-side results directly. As with
+every stored result, responses are omitted unless you pass
+`redactStoredResponses: false`:
 
 ```typescript snippet=snippets/result-store-server-comparison.ts
 import { test } from '@gleanwork/mcp-server-tester/fixtures/mcp';

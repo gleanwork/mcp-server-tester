@@ -11,6 +11,7 @@ import {
 } from './evalRunComparison.js';
 import { computeMetrics } from './metrics.js';
 import type { HostSkillsMode } from './mcpHost/mcpHostTypes.js';
+import { passRate } from './evalRunComparison.js';
 
 /** Options for {@link runSkillsComparison}. */
 export interface SkillsComparisonOptions extends EvalRunnerOptions {
@@ -81,7 +82,7 @@ function summarize(result: EvalRunnerResult): SkillsVariantSummary {
   const skillBeforeToolRate = rate('skill_before_tool_rate');
   const skillVerificationFailureRate = rate('skill_verification_failed_rate');
   return {
-    passRate: result.total > 0 ? result.passed / result.total : 0,
+    passRate: passRate(result),
     ...(skillLoadRate !== undefined ? { skillLoadRate } : {}),
     ...(skillBeforeToolRate !== undefined ? { skillBeforeToolRate } : {}),
     ...(skillVerificationFailureRate !== undefined

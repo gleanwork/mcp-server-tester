@@ -1,9 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import {
-  saveBaseline,
-  loadBaseline,
-  buildBaselinePassMap,
-} from './baseline.js';
+import { saveBaseline, loadBaseline } from './baseline.js';
 import type { EvalRunnerResult } from './evalRunner.js';
 import { mkdtemp, rm } from 'fs/promises';
 import { join } from 'path';
@@ -70,27 +66,5 @@ describe('saveBaseline / loadBaseline', () => {
 
   it('throws when baseline file does not exist', async () => {
     await expect(loadBaseline(join(tmpDir, 'missing.json'))).rejects.toThrow();
-  });
-});
-
-describe('buildBaselinePassMap', () => {
-  it('maps case IDs to pass status', () => {
-    const map = buildBaselinePassMap(makeResult());
-    expect(map.get('a')).toBe(true);
-    expect(map.get('b')).toBe(false);
-    expect(map.size).toBe(2);
-  });
-
-  it('returns empty map for empty results', () => {
-    const map = buildBaselinePassMap(
-      makeResult({
-        total: 0,
-        passed: 0,
-        failed: 0,
-        caseResults: [],
-        durationMs: 0,
-      })
-    );
-    expect(map.size).toBe(0);
   });
 });
