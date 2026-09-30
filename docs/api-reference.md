@@ -1318,7 +1318,7 @@ The `{ code, message, data? }` of the protocol error a result was made from, or 
 
 ### `EvalExpectBlock`
 
-```typescript snippet=src/evals/datasetTypes.ts#L224-L325
+```typescript snippet=src/evals/datasetTypes.ts#L225-L326
 /**
  * Unified expectation block for eval cases
  *
@@ -1425,7 +1425,7 @@ export interface EvalExpectBlock {
 
 ### `EvalCase`
 
-````typescript snippet=src/evals/datasetTypes.ts#L41-L178
+````typescript snippet=src/evals/datasetTypes.ts#L42-L179
 /**
  * A single eval test case
  *

@@ -34,7 +34,15 @@ function script(body: string): string {
   return file;
 }
 
-function host(body: string, timeout = 1500) {
+// Deadline tests hang on purpose, so they wait the full deadline: it must leave
+// room for Node startup plus the first output line under full-suite load.
+const DEADLINE_MS = 4000;
+const DEADLINE_TEST_MS = 15_000;
+
+// Scripts that finish return when the child exits; the default only bounds a
+// hang. Keep it well above Node startup under full-suite load (a 1.5s default
+// timed out before `init`, reading as `missing`). Deadline tests pass their own.
+function host(body: string, timeout = 10_000) {
   script(body);
   return getHost('claude-cli').run!(
     {
@@ -87,7 +95,7 @@ describe('Claude Code MCP startup', () => {
       try {
         const result = await host(
           `console.log(${JSON.stringify(line(init))}); require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(descendant)}], { stdio: 'inherit' }); setInterval(() => {}, 1000);`,
-          2000
+          DEADLINE_MS
         );
         expect(result.error).toContain('timed out');
         const before = fs.readFileSync(marker, 'utf8');
@@ -102,7 +110,8 @@ describe('Claude Code MCP startup', () => {
           }
         }
       }
-    }
+    },
+    DEADLINE_TEST_MS
   );
 
   it('retains failed startup evidence through the legacy dataset runner', async () => {
@@ -248,24 +257,28 @@ setTimeout(() => { console.log(${JSON.stringify(line(init))}); console.log(JSON.
     expect(result.diagnostics?.claudeStartup?.status).toBe('ready');
   });
 
-  it('retains the partial trace and startup evidence at the enclosing host deadline', async () => {
-    const result = await host(
-      `
+  it(
+    'retains the partial trace and startup evidence at the enclosing host deadline',
+    async () => {
+      const result = await host(
+        `
 console.log(${JSON.stringify(line(init))});
 console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'call1', name: 'mcp__glean__search', input: { query: 'sample' } }] } }));
 setInterval(() => {}, 1000);
 `,
-      // Allow process startup under parallel CI load; test the enclosing deadline,
-      // not whether the OS schedules a new Node process within 350ms.
-      1500
-    );
-    expect(result.error).toContain('timed out');
-    expect(result.events).toMatchObject([
-      { name: 'search', source: 'mcp', server: 'glean' },
-    ]);
-    expect(result.diagnostics?.claudeStartup?.status).toBe('ready');
-    expect(result.usage).toBeUndefined();
-  });
+        // Allow process startup under parallel CI load; test the enclosing deadline,
+        // not whether the OS schedules a new Node process quickly.
+        DEADLINE_MS
+      );
+      expect(result.error).toContain('timed out');
+      expect(result.events).toMatchObject([
+        { name: 'search', source: 'mcp', server: 'glean' },
+      ]);
+      expect(result.diagnostics?.claudeStartup?.status).toBe('ready');
+      expect(result.usage).toBeUndefined();
+    },
+    DEADLINE_TEST_MS
+  );
 
   it('retains evidence on nonzero exit without persisting raw stderr', async () => {
     const result = await host(

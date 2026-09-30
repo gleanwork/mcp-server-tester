@@ -25,6 +25,11 @@ import type {
   LinuxChatgptReadiness,
 } from './linuxProfile.js';
 import { hostPluginMcpServers } from '../hostPlugins.js';
+import type { McpServerReadiness } from '../mcpReadiness.js';
+import {
+  describeChatgptMcpPreflight,
+  preflightChatgptMcpServers,
+} from './mcpPreflight.js';
 
 const activeApplications = new Set<string>();
 
@@ -118,6 +123,8 @@ export class ChatgptAppSession {
     nativeSetup: undefined as SemanticDesktopTelemetry | undefined,
     /** Linux login and MCP readiness, sanitized. */
     nativeReadiness: undefined as LinuxChatgptReadiness | undefined,
+    /** macOS direct MCP preflight, sanitized. Linux records it in nativeReadiness. */
+    mcpPreflight: undefined as McpServerReadiness[] | undefined,
     events: [] as Array<{
       phase: 'setup' | 'recovery' | 'cleanup';
       operation: string;
@@ -148,6 +155,20 @@ export class ChatgptAppSession {
         );
       activeApplications.add(lease);
       this.#lease = lease;
+      if (!platform.createProfile && settings.setup?.servers.length) {
+        // Before stopping the user's app: a dead server must not look like a
+        // model failure. Linux runs the same gate inside its fresh profile.
+        const preflight = await preflightChatgptMcpServers(
+          settings.setup.servers,
+          settings.environment
+        );
+        this.telemetry.mcpPreflight = preflight.servers;
+        this.record('setup', 'verify_mcp');
+        if (!preflight.passed)
+          throw new Error(
+            `ChatGPT MCP preflight failed; no prompt was submitted. ${describeChatgptMcpPreflight(preflight.servers)}`
+          );
+      }
       if (platform.permissionNotice)
         process.stderr.write(platform.permissionNotice);
       if (platform.createProfile) {

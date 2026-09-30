@@ -11,7 +11,6 @@ import {
   stat,
 } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import type { MCPConfig } from '../../config/mcpConfig.js';
 import {
   chatgptDesktopEnvironment,
   readLaunchEnvironment,
@@ -35,7 +34,8 @@ import {
   type CodexSetupErrorCode,
 } from '../codexSetup/native.js';
 import type { ExternalHostConfig } from '../externalHost/types.js';
-import { checkMcpServers, type McpServerReadiness } from '../mcpReadiness.js';
+import type { McpServerReadiness } from '../mcpReadiness.js';
+import { preflightChatgptMcpServers } from './mcpPreflight.js';
 import {
   codexPluginReadinessTargets,
   installCodexPlugins,
@@ -308,30 +308,10 @@ export async function createLinuxChatgptProfile(
           error instanceof CodexSetupError ? error.code : 'login_failed';
         throw error;
       }
-      const tokens: Record<string, string> = {};
-      const servers = setup.servers.map((server): MCPConfig => {
-        if (server.transport === 'stdio') return server;
-        const token = server.bearerTokenEnvVar
-          ? launch[server.bearerTokenEnvVar]
-          : undefined;
-        if (server.bearerTokenEnvVar) {
-          if (!token) throw fail('mcp_preflight_failed');
-          tokens[server.bearerTokenEnvVar] = token;
-        }
-        return {
-          transport: 'http',
-          label: server.label,
-          serverUrl: server.url,
-          ...(token ? { auth: { accessToken: token } } : {}),
-        };
-      });
-      readiness.mcpPreflight = await checkMcpServers(servers);
-      if (
-        readiness.mcpPreflight.some(
-          (server) => server.status !== 'connected' || !server.toolCount
-        )
-      )
-        throw fail('mcp_preflight_failed');
+      const preflight = await preflightChatgptMcpServers(setup.servers, launch);
+      readiness.mcpPreflight = preflight.servers;
+      if (!preflight.passed) throw fail('mcp_preflight_failed');
+      const { tokens } = preflight;
       // Plugin MCP servers run under their own names and are eval servers too.
       if (plugins.length) {
         try {

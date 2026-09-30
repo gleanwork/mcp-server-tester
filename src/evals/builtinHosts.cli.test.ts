@@ -115,6 +115,10 @@ console.log(JSON.stringify({ type: 'result', result: JSON.stringify({ env, stric
   );
 
   it('bounds the CLI lifecycle, removes its config and stops only its owned child', async () => {
+    // The fake CLI must boot Node and write its marker before the host deadline.
+    // Under full-suite load that can take most of a second, so leave headroom;
+    // both sleepers outlive the deadline so only the host can end the child.
+    const deadlineMs = 3000;
     const marker = path.join(directory, 'child.json');
     fs.writeFileSync(
       path.join(directory, 'claude'),
@@ -123,23 +127,25 @@ const fs = require('node:fs');
 const config = process.argv[process.argv.indexOf('--mcp-config') + 1];
 fs.writeFileSync(${JSON.stringify(marker)}, JSON.stringify({ pid: process.pid, config, configExists: fs.existsSync(config) }));
 process.on('SIGTERM', () => {});
-setTimeout(() => process.exit(0), 5000);
+setTimeout(() => process.exit(0), 30000);
 `,
       { mode: 0o700 }
     );
     const unrelated = spawn(
       process.execPath,
-      ['-e', 'setTimeout(() => {}, 5000)'],
+      ['-e', 'setTimeout(() => {}, 30000)'],
       { stdio: 'ignore' }
     );
     let ownedPid: number | undefined;
     try {
       const pending = getHost('claude-cli').run!(
         { scenario: 'hello', servers: [], env: { PATH: directory } },
-        { type: 'claude-cli', timeout: 1000 },
+        { type: 'claude-cli', timeout: deadlineMs },
         { manifest: { name: 'offline', datasets: [] } }
       );
-      await vi.waitFor(() => expect(fs.existsSync(marker)).toBe(true));
+      await vi.waitFor(() => expect(fs.existsSync(marker)).toBe(true), {
+        timeout: deadlineMs,
+      });
       const child = JSON.parse(fs.readFileSync(marker, 'utf8')) as {
         pid: number;
         config: string;
@@ -151,7 +157,7 @@ setTimeout(() => process.exit(0), 5000);
       expect(result.error).toContain('timed out');
       expect(fs.existsSync(child.config)).toBe(false);
       await vi.waitFor(() => expect(isProcessAlive(child.pid)).toBe(false), {
-        timeout: 500,
+        timeout: 2000,
       });
       expect(unrelated.pid).toBeDefined();
       expect(isProcessAlive(unrelated.pid!)).toBe(true);
@@ -160,7 +166,7 @@ setTimeout(() => process.exit(0), 5000);
       if (ownedPid && isProcessAlive(ownedPid))
         process.kill(ownedPid, 'SIGKILL');
     }
-  });
+  }, 15_000);
 
   it('keeps the supplied host deadline when legacy CLI arguments replace the generated config', async () => {
     const pending = getHost('claude-cli').run!(

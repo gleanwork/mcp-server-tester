@@ -27,26 +27,13 @@ import type {
 import { createVercelOrchestrator } from './adapters/vercel.js';
 import { runCLIHost } from './adapters/cli/index.js';
 import { runBrowserHost } from './adapters/browser/runner.js';
+import { ProviderSchema } from './hostOptions.js';
 
 // Single orchestrator instance shared across all providers.
 // Each provider is dynamically imported inside the orchestrator on first use.
 const vercelOrchestrator: MCPHostSimulator = createVercelOrchestrator();
 
-const allProviders: LLMProvider[] = [
-  'openai',
-  'anthropic',
-  'azure',
-  'google',
-  'mistral',
-  'deepseek',
-  'openrouter',
-  'xai',
-  'vertex-anthropic',
-];
-
-const simulatorRegistry = new Map<LLMProvider, MCPHostSimulator>(
-  allProviders.map((p) => [p, vercelOrchestrator])
-);
+const allProviders: readonly LLMProvider[] = ProviderSchema.options;
 
 /**
  * Simulates an MCP host interacting with an MCP server.
@@ -140,14 +127,13 @@ export async function simulateMCPHost(
     );
   }
 
-  const simulator = simulatorRegistry.get(config.provider);
-  if (!simulator) {
+  if (!isProviderAvailable(config.provider)) {
     throw new Error(
       `Unsupported provider: ${String(config.provider)}. ` +
         `Supported: ${allProviders.join(', ')}`
     );
   }
-  return simulator.simulate(mcp, scenario, config, signal);
+  return vercelOrchestrator.simulate(mcp, scenario, config, signal);
 }
 
 /**
@@ -157,7 +143,7 @@ export async function simulateMCPHost(
  * installed — that is validated at simulation time with a helpful error.
  */
 export function isProviderAvailable(provider: LLMProvider): boolean {
-  return simulatorRegistry.has(provider);
+  return allProviders.includes(provider);
 }
 
 /**
