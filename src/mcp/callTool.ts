@@ -133,7 +133,7 @@ export async function callToolNormalized(
       options === undefined
         ? client.callTool(params)
         : client.callTool(params, options);
-    return (await pending) as CallToolResult;
+    return await pending;
   } catch (error) {
     if (isServerProtocolError(error)) {
       return protocolErrorToToolResult(error);
