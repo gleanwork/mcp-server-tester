@@ -19,6 +19,14 @@ Linux uses native draft deep links and deterministic AT-SPI actions. It requires
 no Anthropic key and rejects Computer Use planner configuration. It does not fall
 back to macOS CUA.
 
+On macOS, MST starts and stops ChatGPT through a small Swift helper that it
+compiles with no caller credentials. The helper launches the app with the test
+process's environment, so ChatGPT can read every variable the test run has,
+including API keys. Launch credentials that MST adds travel on stdin, never in
+process arguments. Run ChatGPT evaluations from an environment that holds only
+the credentials the run needs. Narrowing the helper to an allowlist is planned,
+once it is confirmed on a real Mac that ChatGPT still launches and signs in.
+
 Example Linux host settings (inside a V2 evaluation manifest):
 
 ```json

@@ -315,6 +315,10 @@ the bytes present at audit time; notices contain no original digest to authentic
 - `cowork/macos.ts`: wiring to the existing setup, recovery, and desktop functions.
 - `coworkSetup/`: profile/MCP settings, private header helpers, and guarded restore.
   Its `macController.ts` handles only application start/stop, not UI automation.
+- `nativeHelper.ts`: builds and runs the macOS Swift controllers for Cowork and
+  ChatGPT with one environment policy. The Cowork controller runs with only the
+  system `PATH` and a private `TMPDIR`. The ChatGPT controller launches the app
+  with the test environment; see [ChatGPT desktop](./chatgpt-desktop.md).
 - `cowork/driver.ts`: shared receipts, error classifications, and scoped telemetry.
 - `cowork/linux.ts`: readiness checks and execution against a caller-owned desktop.
 - `scripts/cowork_linux.py`: bounded semantic UI actions; no lifecycle or answer parsing.
