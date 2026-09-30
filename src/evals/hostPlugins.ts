@@ -3,6 +3,7 @@ import { lstat, mkdir, open } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { z } from 'zod';
 import type { MCPConfig, StdioMCPConfig } from '../config/mcpConfig.js';
+import { mcpServerLabel } from '../config/mcpConfig.js';
 
 /**
  * Host plugins and host-resolved stdio eval servers: caller-supplied,
@@ -522,7 +523,7 @@ export function hostStdioServers(
   const names = new Set(plugins.map((plugin) => plugin.name));
   const labels = new Set<string>();
   for (const [index, server] of servers.entries()) {
-    const label = server.label ?? `server-${index + 1}`;
+    const label = mcpServerLabel(server, index);
     if (labels.has(label))
       throw new HostPluginError('mcp_server_invalid', label);
     labels.add(label);
@@ -531,7 +532,7 @@ export function hostStdioServers(
     if (server.transport !== 'stdio') return [];
     const parsed = HostStdioServerSchema.safeParse({
       ...server,
-      label: server.label ?? `server-${index + 1}`,
+      label: mcpServerLabel(server, index),
     });
     if (!parsed.success)
       throw new HostPluginError('mcp_server_invalid', server.label ?? 'stdio');

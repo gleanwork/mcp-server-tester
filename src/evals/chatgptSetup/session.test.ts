@@ -1,3 +1,4 @@
+import type * as ReadinessModule from '../mcpReadiness.js';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -38,7 +39,10 @@ vi.mock('../cowork/anthropicComputerUse.js', async (original) => ({
   runAnthropicComputerUseSubmission: vi.fn(),
 }));
 vi.mock('node:timers/promises', () => ({ setTimeout: async () => undefined }));
-vi.mock('../mcpReadiness.js', () => ({ checkMcpServers: vi.fn() }));
+vi.mock('../mcpReadiness.js', async (original) => ({
+  ...(await original<typeof ReadinessModule>()),
+  checkMcpServers: vi.fn(),
+}));
 vi.mock('../externalHost/builtins/chatgptTrace.js', async (original) => ({
   ...(await original<typeof TraceModule>()),
   findChatgptTrace: vi.fn(),

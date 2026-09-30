@@ -1,6 +1,6 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join, posix, resolve } from 'node:path';
-import type { MCPConfig } from '../../config/mcpConfig.js';
+import { mcpServerLabel, type MCPConfig } from '../../config/mcpConfig.js';
 import {
   hostStdioFileContents,
   hostStdioServers,
@@ -142,7 +142,7 @@ export function createCoworkBundlePlan(options: BundlePlanOptions) {
   );
   const labeled = declarations.map((server, index) => ({
     ...server,
-    label: server.label ?? `server-${index + 1}`,
+    label: mcpServerLabel(server, index),
   }));
   const labels = labeled.map((server) => server.label.toLowerCase());
   if (new Set(labels).size !== labels.length) throw new Error(ERROR_MESSAGE);

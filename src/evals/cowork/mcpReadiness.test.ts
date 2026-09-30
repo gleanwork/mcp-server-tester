@@ -43,6 +43,27 @@ describe('Cowork MCP preflight', () => {
     expect(createMCPClientForConfig).toHaveBeenCalledOnce();
   });
 
+  it('fails a server that connects but lists no tools (the shared rule)', async () => {
+    vi.mocked(createMCPClientForConfig).mockResolvedValue({
+      listTools: vi.fn().mockResolvedValue({ tools: [] }),
+    } as never);
+    const failure = await verifyCoworkMcpServers(
+      [
+        {
+          transport: 'http',
+          label: 'glean',
+          serverUrl: 'https://example.test/mcp',
+          auth: { accessTokenEnv: 'TOKEN' },
+        },
+      ],
+      { TOKEN: 'secret' }
+    ).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(CoworkMcpReadinessError);
+    expect(String(failure)).toContain(
+      'Cowork MCP preflight failed; no task was submitted. glean=connected(0 tools)'
+    );
+  });
+
   it('connects and lists tools for every configured server', async () => {
     vi.mocked(createMCPClientForConfig).mockResolvedValue({
       listTools: vi.fn().mockResolvedValue({ tools: [{ name: 'search' }] }),

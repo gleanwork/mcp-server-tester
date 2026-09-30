@@ -78,11 +78,14 @@ MST then owns, in order:
    that workspace, `approval_policy = "never"`, and
    `sandbox_mode = "danger-full-access"`.
 3. `codex login --with-api-key` with the key on stdin only, then `codex login status`.
-4. Direct MCP preflight (connect and list tools for each configured server) and a
+4. Direct MCP preflight (connect and list tools for each configured server; the
+   same readiness rule as the Cowork host), then a
    read-only `codex app-server` probe (`initialize`, `initialized`,
    `mcpServerStatus/list` only; server requests abort; 30 s, 256 KiB/line, 4 MiB
    total). Every configured server must be initialized with at least one tool and
-   `bearerToken` auth (or `unsupported` for servers without a bearer).
+   `bearerToken` auth (or `unsupported` for servers without a bearer). The probe
+   is a native diagnostic on top of the preflight: it checks what the app itself
+   loaded, which the direct connection can't see.
 5. Spawn the app with fixed flags (`--no-sandbox --ozone-platform=x11
 --force-renderer-accessibility --disable-gpu --disable-dev-shm-usage`) and fixed
    accessibility variables, in its own process group. The app receives only the

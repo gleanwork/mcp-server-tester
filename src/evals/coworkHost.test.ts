@@ -15,6 +15,7 @@ import {
 } from './cowork/anthropicComputerUse.js';
 import type * as ComputerUse from './cowork/anthropicComputerUse.js';
 import type { HostBatchRequest, HostRunContext } from './evalFrameworkTypes.js';
+import type * as OsModule from 'node:os';
 
 const mocks = vi.hoisted(() => ({
   setup: vi.fn(),
@@ -28,6 +29,13 @@ const mocks = vi.hoisted(() => ({
   order: [] as string[],
   readiness: vi.fn(),
 }));
+// The desktop lease lives under the home directory; keep it in a temp dir.
+const lockHome = vi.hoisted(() => ({ value: '' }));
+vi.mock('node:os', async (original) => {
+  const actual = await original<typeof OsModule>();
+  return { ...actual, homedir: () => lockHome.value || actual.homedir() };
+});
+
 vi.mock('./cowork/pythonRuntime.js', () => ({
   ensureCoworkPython: vi.fn().mockResolvedValue('/fake/python'),
 }));
@@ -95,7 +103,9 @@ function requests(): HostBatchRequest[] {
     input: { scenario, servers: [server] },
   }));
 }
-beforeEach(() => {
+beforeEach(async () => {
+  lockHome.value = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-cowork-home-'));
+  dirs.push(lockHome.value);
   vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin');
   vi.clearAllMocks();
   mocks.order.length = 0;
@@ -376,8 +386,12 @@ describe('V2 Cowork host', () => {
         },
       });
       if (stage === 'submission') {
+        // The next case was never submitted: the shared "not submitted" shape.
         expect(result[1]?.durationMs).toBeUndefined();
-        expect(result[1]?.telemetry).toBeUndefined();
+        expect(result[1]?.telemetry).toMatchObject({
+          caseExecution: { status: 'not-submitted', continuation: 'blocked' },
+        });
+        expect(result[1]?.telemetry?.computerUse).toBeUndefined();
         expect(mocks.submit).toHaveBeenCalledOnce();
       }
     }
@@ -401,9 +415,34 @@ describe('V2 Cowork host', () => {
     const rejected = results.find(
       (r) => r.status === 'rejected'
     ) as PromiseRejectedResult;
-    expect(String(rejected.reason)).toContain('already in use');
+    expect(String(rejected.reason)).toContain(
+      'Cowork desktop is locked by another run'
+    );
     expect(mocks.submit).toHaveBeenCalledOnce();
     expect(mocks.setup).toHaveBeenCalledOnce();
+  });
+  it('lets batches on different desktops run at the same time', async () => {
+    mocks.submit.mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return { status: 'submitted' };
+    });
+    const batch = requests()
+      .slice(0, 1)
+      .map((r) => ({ ...r, input: { ...r.input, servers: [] } }));
+    // The lease is per native data directory, i.e. per desktop.
+    const desktop = (dataDir: string) =>
+      createCoworkHost({
+        dataDirectory: () => dataDir,
+        prepare: vi.fn().mockResolvedValue({ dispose: mocks.dispose }),
+        recover: vi.fn(),
+        submit: mocks.submit,
+        handleHitl: mocks.hitl,
+      });
+    const results = await Promise.allSettled([
+      desktop('/desktop/one').runBatch!(batch, context),
+      desktop('/desktop/two').runBatch!(batch, context),
+    ]);
+    expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled']);
   });
   it('binds inference and planner models separately and verifies native evidence', async () => {
     const batch = requests().map((r) => ({
@@ -1011,11 +1050,29 @@ describe('V2 Cowork host', () => {
     expect(result[1]!.finalText).toBe('answer');
     expect(mocks.dispose).toHaveBeenCalledOnce();
   });
-  it('fails closed when restoration fails and releases in-process guard', async () => {
+  it('fails every case and keeps the desktop lock when restoration fails', async () => {
     mocks.dispose.mockRejectedValueOnce(new Error('restore failed'));
+    const results = await COWORK_HOST.runBatch!(requests(), context);
+    expect(results).toHaveLength(2);
+    for (const result of results) {
+      expect(result.error).toContain(
+        'Cowork batch cleanup failed; desktop lock retained for inspection: restore failed'
+      );
+      expect(result.telemetry?.batchFailure).toMatchObject({
+        kind: 'cleanup_failed',
+      });
+    }
+    // The desktop may be in an unknown state, so the next run is refused
+    // until the lock is inspected and removed.
     await expect(COWORK_HOST.runBatch!(requests(), context)).rejects.toThrow(
-      'restore failed'
+      'Cowork desktop is locked by another run'
     );
+    const leases = path.join(lockHome.value, '.mcp-server-tester');
+    const [lock] = (await fs.readdir(leases)).filter((name) =>
+      /^cowork-desktop-[0-9a-f]{12}\.lock$/.test(name)
+    );
+    expect(lock).toBeDefined();
+    await fs.rm(path.join(leases, lock!));
     await expect(
       COWORK_HOST.runBatch!(requests(), context)
     ).resolves.toHaveLength(2);

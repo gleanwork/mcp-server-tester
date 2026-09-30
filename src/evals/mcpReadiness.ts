@@ -4,6 +4,7 @@ import {
 } from '../mcp/clientFactory.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import { formatMCPConnectionFailure } from '../mcp/connectionDiagnostics.js';
+import { mcpServerLabel } from '../config/mcpConfig.js';
 
 /** Sanitized direct-connection readiness. Never raw errors, bodies, or headers. */
 export interface McpServerReadiness {
@@ -47,7 +48,7 @@ export async function checkMcpServers(
 ): Promise<McpServerReadiness[]> {
   return Promise.all(
     servers.map(async (server, index): Promise<McpServerReadiness> => {
-      const label = server.label ?? `server-${index + 1}`;
+      const label = mcpServerLabel(server, index);
       const started = Date.now();
       let client:
         | Awaited<ReturnType<typeof createMCPClientForConfig>>
@@ -89,4 +90,45 @@ export async function checkMcpServers(
       }
     })
   );
+}
+
+/**
+ * The one readiness rule for every desktop host: the server connects and
+ * lists at least one tool (and at least its declared `minTools`, which
+ * `checkMcpServers` already enforces). A server with no tools can't be
+ * evaluated, so it fails before any prompt is sent.
+ */
+export function isMcpServerReady(server: McpServerReadiness): boolean {
+  return server.status === 'connected' && (server.toolCount ?? 0) > 0;
+}
+
+/** One-line, credential-free summary, e.g. `glean=connected(12 tools)`. */
+export function describeMcpReadiness(
+  servers: readonly McpServerReadiness[]
+): string {
+  return servers
+    .map((server) => {
+      const detail =
+        server.error ??
+        (server.status === 'connected' ? `${server.toolCount ?? 0} tools` : '');
+      return `${server.label}=${server.status}${detail ? `(${detail})` : ''}`;
+    })
+    .join(', ');
+}
+
+/** Some configured MCP server isn't ready, so nothing was sent to the host. */
+export class McpReadinessError extends Error {
+  readonly servers: McpServerReadiness[];
+
+  constructor(
+    host: string,
+    servers: McpServerReadiness[],
+    submission: 'prompt' | 'task' = 'prompt'
+  ) {
+    super(
+      `${host} MCP preflight failed; no ${submission} was submitted. ${describeMcpReadiness(servers)}`
+    );
+    this.name = 'McpReadinessError';
+    this.servers = servers;
+  }
 }

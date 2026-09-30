@@ -39,6 +39,7 @@ import {
   preflightMacCoworkSettings,
   restoreMacCoworkSettings,
 } from './macTransaction.js';
+import { mcpServerLabel } from '../../config/mcpConfig.js';
 
 const ERROR = 'Unable to prepare the Mac Cowork session safely.';
 const CLEANUP_ERROR =
@@ -161,7 +162,7 @@ export async function prepareMacCoworkSession(options: {
     const stdioPaths = { dataRoot: join(stagingDirectory, 'stdio') };
     const labeledServers = manifest.servers.map((server, index) => ({
       ...server,
-      label: server.label ?? `server-${index + 1}`,
+      label: mcpServerLabel(server, index),
     }));
     // Check plugin shadowing against the complete set before splitting transports.
     coworkManagedPluginSettings({
