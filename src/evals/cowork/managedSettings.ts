@@ -10,7 +10,7 @@ import {
 } from '../hostPlugins.js';
 
 /**
- * The Cowork managed-settings contract for plugins and stdio eval servers
+ * The Cowork managed-settings contract for plugins and plain or eval stdio servers
  * (docs/cowork.md, "Host plugins"). Pure and token-free: exported so callers
  * that write `/etc/claude-desktop/managed-settings.json` can build the same
  * entries MST checks.
@@ -37,6 +37,8 @@ export interface CoworkManagedPluginSettings {
 
 export function coworkManagedPluginSettings(options: {
   servers: readonly MCPConfig[];
+  /** Full, globally labeled declarations when setup handles transports separately. */
+  declaredServers?: readonly MCPConfig[];
   plugins?: readonly HostPlugin[];
   paths?: HostStdioPaths;
   approveWriteTools?: boolean;
@@ -44,6 +46,8 @@ export function coworkManagedPluginSettings(options: {
   const plugins = options.plugins ?? [];
   const stdio = hostStdioServers(options.servers, plugins).map(
     (server): CoworkManagedStdioServer => {
+      // Readiness uses this same launch, including the positional cwd wrapper.
+      // Desktop has no managed cwd field; never add an ignored native key.
       const launch = resolveHostStdioServer(server, options.paths ?? {});
       return {
         name: server.label,
@@ -60,11 +64,11 @@ export function coworkManagedPluginSettings(options: {
   const blocked = coworkBlockedMcpEntries(plugins);
   // A blocked name must never shadow an eval server.
   const labels = new Set(
-    options.servers.map(
-      (server, index) => server.label ?? `server-${index + 1}`
+    (options.declaredServers ?? options.servers).map((server, index) =>
+      (server.label ?? `server-${index + 1}`).toLowerCase()
     )
   );
-  const clash = blocked.find((entry) => labels.has(entry.name));
+  const clash = blocked.find((entry) => labels.has(entry.name.toLowerCase()));
   if (clash) throw new HostPluginError('mcp_server_invalid', clash.name);
   return {
     managedMcpServers: [...stdio, ...blocked],
@@ -170,6 +174,7 @@ export function coworkMcpSettingsMatch(
   settings: Record<string, unknown>,
   options: {
     servers: readonly MCPConfig[];
+    declaredServers?: readonly MCPConfig[];
     plugins?: readonly HostPlugin[];
     paths?: HostStdioPaths;
     approveWriteTools?: boolean;

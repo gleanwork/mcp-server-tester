@@ -1,4 +1,5 @@
 import { manifestIdentity } from './manifestIdentity.js';
+import { resolveCoworkSetupConfig } from './coworkSetup/options.js';
 import { sumUsage } from '../utils/usageUtils.js';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
@@ -381,6 +382,10 @@ export async function runEvalSuite(
       ...manifest,
       ...arm,
       host: host.declaration,
+      coworkSetup: resolveCoworkSetupConfig(
+        manifest.coworkSetup,
+        arm.coworkSetup
+      ),
       name: manifest.name,
       datasets: manifest.datasets,
     };

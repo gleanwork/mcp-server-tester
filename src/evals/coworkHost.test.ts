@@ -6,6 +6,7 @@ import { runEvalBatch } from './runEvalBatch.js';
 import { COWORK_HOST, createCoworkHost } from './coworkHost.js';
 import { prepareHostBatch } from './prepareHostBatch.js';
 import { toCoworkServers } from './coworkSetup/config.js';
+import type { MCPConfig } from '../config/mcpConfig.js';
 import type { ClaudeTrace } from './externalHost/builtins/anthropicClaude.js';
 import type * as ClaudeNative from './externalHost/builtins/anthropicClaude.js';
 import {
@@ -79,6 +80,13 @@ const context: HostRunContext = {
     GLEAN_API_TOKEN: 'test-secret-token',
   },
 };
+const readOnlyContext: HostRunContext = {
+  ...context,
+  manifest: {
+    ...context.manifest,
+    coworkSetup: { approveWriteTools: false },
+  },
+};
 function requests(): HostBatchRequest[] {
   return ['query one', 'query two'].map((scenario, i) => ({
     caseId: `case-${i}`,
@@ -147,36 +155,92 @@ beforeEach(() => {
 });
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   for (const dir of dirs.splice(0))
     await fs.rm(dir, { recursive: true, force: true });
 });
 
 describe('V2 Cowork host', () => {
-  it('rechecks a late native tool approval without resubmitting the task', async () => {
-    const original = mocks.trace.getMockImplementation()!;
-    mocks.trace.mockImplementationOnce(
-      async (options: {
-        sessionPath: string;
-        onPending?: (trace: ClaudeTrace) => Promise<void>;
-      }) => {
-        await options.onPending?.({
-          candidate: { metadataPath: options.sessionPath },
-          toolCalls: [{ name: 'enterprise_search', arguments: {} }],
-          isComplete: false,
-        } as ClaudeTrace);
-        return (await original(options)) as ClaudeTrace;
+  it.each([false, undefined])(
+    'uses policy %s for initial and late task-scoped approval without resubmitting',
+    async (approveWriteTools) => {
+      const original = mocks.trace.getMockImplementation()!;
+      mocks.trace.mockImplementationOnce(
+        async (options: {
+          sessionPath: string;
+          onPending?: (trace: ClaudeTrace) => Promise<void>;
+        }) => {
+          await options.onPending?.({
+            candidate: { metadataPath: options.sessionPath },
+            toolCalls: [{ name: 'enterprise_search', arguments: {} }],
+            isComplete: false,
+          } as ClaudeTrace);
+          return (await original(options)) as ClaudeTrace;
+        }
+      );
+      const results = await COWORK_HOST.runBatch!([requests()[0]!], {
+        ...context,
+        manifest: {
+          ...context.manifest,
+          coworkSetup:
+            approveWriteTools === undefined ? undefined : { approveWriteTools },
+        },
+      });
+      expect(mocks.submit).toHaveBeenCalledOnce();
+      expect(mocks.hitl).toHaveBeenCalledTimes(2);
+      for (const [options] of mocks.hitl.mock.calls) {
+        expect(options).toMatchObject({
+          approveWriteTools: false,
+          maxActions: 12,
+          task: expect.stringContaining('Approve read-only calls only'),
+        });
+        expect(options.task).toContain('one-time or current-task approval');
+        expect(options.task).toContain(
+          'Never select persistent or always-allow approval'
+        );
+        expect(options.task).toContain('query one');
       }
+      expect(mocks.setup.mock.calls[0]![0].manifest.coworkSetup).toEqual({
+        approveWriteTools: false,
+      });
+      expect(results[0]!.telemetry).toMatchObject({
+        computerUse: { hitlFollowups: [{ status: 'completed' }] },
+      });
+    }
+  );
+
+  it('uses staged macOS write approval without initial or followup clicks', async () => {
+    const results = await COWORK_HOST.runBatch!(requests(), context);
+    expect(mocks.setup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        manifest: expect.objectContaining({
+          coworkSetup: { approveWriteTools: true },
+        }),
+      })
     );
-    const results = await COWORK_HOST.runBatch!([requests()[0]!], context);
-    expect(mocks.submit).toHaveBeenCalledOnce();
-    expect(mocks.hitl).toHaveBeenCalledTimes(2);
-    expect(mocks.hitl.mock.calls[1]![0]).toMatchObject({
-      maxActions: 12,
-      task: expect.stringContaining('Approve read-only calls only'),
-    });
-    expect(results[0]!.telemetry).toMatchObject({
-      computerUse: { hitlFollowups: [{ status: 'completed' }] },
-    });
+    expect(mocks.submit).toHaveBeenCalledTimes(2);
+    expect(mocks.hitl).not.toHaveBeenCalled();
+    expect(mocks.trace).toHaveBeenCalledTimes(2);
+    for (const [options] of mocks.trace.mock.calls) {
+      expect(options).not.toHaveProperty('onPending');
+    }
+    for (const result of results) {
+      expect(result.error).toBeUndefined();
+      expect(result).toMatchObject({
+        finalText: 'answer',
+        usage: { inputTokens: 10, totalCostUsd: 0.01 },
+        telemetry: {
+          source: 'claude-native',
+          toolCallCount: 1,
+          computerUse: {
+            submission: { status: 'completed' },
+            hitl: { status: 'not-attempted' },
+          },
+        },
+      });
+      expect(result.telemetry?.computerUse).not.toHaveProperty('hitlFollowups');
+    }
+    expect(mocks.dispose).toHaveBeenCalledOnce();
   });
 
   it('uses the selected session bundle for both submission and HITL', async () => {
@@ -184,7 +248,7 @@ describe('V2 Cowork host', () => {
       appPath: '/private/tmp/pinned/Claude.app',
       dispose: mocks.dispose,
     });
-    await COWORK_HOST.runBatch!([requests()[0]!], context);
+    await COWORK_HOST.runBatch!([requests()[0]!], readOnlyContext);
     expect(mocks.submit).toHaveBeenCalledWith(
       'query one',
       expect.objectContaining({ appPath: '/private/tmp/pinned/Claude.app' })
@@ -277,7 +341,10 @@ describe('V2 Cowork host', () => {
       now += 300;
       return { status: 'hitl_checked', telemetry: driverTelemetry };
     });
-    const result = await COWORK_HOST.runBatch!(requests().slice(0, 1), context);
+    const result = await COWORK_HOST.runBatch!(
+      requests().slice(0, 1),
+      readOnlyContext
+    );
     expect(result[0]).toMatchObject({
       durationMs: 500,
       usage: { inputTokens: 10, totalCostUsd: 0.01 },
@@ -301,7 +368,7 @@ describe('V2 Cowork host', () => {
       ).mockRejectedValueOnce(
         new ComputerUseDriverError('driver failed', partial)
       );
-      const result = await COWORK_HOST.runBatch!(requests(), context);
+      const result = await COWORK_HOST.runBatch!(requests(), readOnlyContext);
       expect(result[0]).toMatchObject({
         error: 'driver failed',
         telemetry: {
@@ -347,14 +414,17 @@ describe('V2 Cowork host', () => {
         options: { ...host.options, computerUseModel: 'planner-model' },
       },
     }));
-    const result = await COWORK_HOST.runBatch!(batch, context);
+    const result = await COWORK_HOST.runBatch!(batch, readOnlyContext);
     expect(result.every((r) => !r.error)).toBe(true);
     expect(mocks.setup).toHaveBeenCalledWith(
       expect.objectContaining({ model: 'native-model' })
     );
     expect(mocks.submit).toHaveBeenCalledWith(
       expect.any(String),
-      expect.objectContaining({ model: 'planner-model' })
+      expect.objectContaining({
+        model: 'planner-model',
+        targetModel: 'native-model',
+      })
     );
     expect(mocks.hitl).toHaveBeenCalledWith(
       expect.objectContaining({ model: 'planner-model' })
@@ -368,7 +438,7 @@ describe('V2 Cowork host', () => {
     expect(mocks.dispose).toHaveBeenCalledTimes(2);
   });
   it('serializes marker-free cases, collects native telemetry, then restores', async () => {
-    const result = await COWORK_HOST.runBatch!(requests(), context);
+    const result = await COWORK_HOST.runBatch!(requests(), readOnlyContext);
     expect(mocks.order).toEqual([
       'setup',
       'submit',
@@ -588,26 +658,220 @@ describe('V2 Cowork host', () => {
       expect(mocks.submit).not.toHaveBeenCalled();
     });
 
-    it('rejects plain stdio servers without a url, as before', async () => {
-      vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
-      const selected = platform();
-      const plain = requests().map((r) => ({
-        ...r,
-        config: { ...host, options: { computerUseProvider: 'linux-desktop' } },
+    it.each(['darwin', 'linux'] as const)(
+      'accepts plain stdio without a URL on %s',
+      async (platformName) => {
+        vi.spyOn(process, 'platform', 'get').mockReturnValue(platformName);
+        const selected = platform();
+        const servers: MCPConfig[] = [
+          {
+            transport: 'stdio',
+            command: process.execPath,
+            args: ['peer.mjs', 'literal; $(false)'],
+            cwd: '/synthetic/work dir',
+            env: { DECLARED: 'value' },
+          },
+        ];
+        const plain = requests().map((r) => ({
+          ...r,
+          config: {
+            ...host,
+            options: {
+              computerUseProvider:
+                platformName === 'linux'
+                  ? 'linux-desktop'
+                  : 'anthropic-computer-use',
+            },
+          },
+          input: { ...r.input, servers },
+        }));
+        const results = await createCoworkHost(selected).runBatch!(
+          plain,
+          context
+        );
+        expect(results.every((result) => !result.error)).toBe(true);
+        expect(selected.prepare).toHaveBeenCalledWith(
+          expect.objectContaining({
+            manifest: expect.objectContaining({ servers }),
+          })
+        );
+        expect(mocks.readiness).toHaveBeenCalledWith(
+          servers,
+          expect.any(Object),
+          { plugins: [], paths: {} }
+        );
+        expect(mocks.submit).toHaveBeenCalledTimes(2);
+        expect(mocks.dispose).toHaveBeenCalledOnce();
+      }
+    );
+  });
+  describe('Mac native stdio lifecycle', () => {
+    const servers: MCPConfig[] = [
+      {
+        transport: 'stdio',
+        command: '/synthetic/proxy',
+        args: ['${dataDir}/creds.json'],
+        auth: { accessTokenEnv: 'MST_STDIO_CREDENTIAL' },
+        files: { 'creds.json': { token: '${bearerToken}' } },
+      },
+    ];
+    const stdioContext = {
+      ...context,
+      env: { ...context.env, MST_STDIO_CREDENTIAL: 'good-token' },
+    };
+    const batch = () =>
+      requests().map((request) => ({
+        ...request,
+        input: { ...request.input, servers },
+      }));
+    beforeEach(() => {
+      mocks.setup.mockImplementation(async () => {
+        mocks.order.push('prepare');
+        return {
+          stdioPaths: { dataRoot: '/synthetic/session/stdio' },
+          dispose: mocks.dispose,
+        };
+      });
+      mocks.readiness.mockImplementation(async () => {
+        mocks.order.push('readiness');
+        return [{ label: 'server-1', status: 'connected', toolCount: 1 }];
+      });
+    });
+
+    it.each([
+      [
+        server,
+        { transport: 'stdio', command: '/synthetic/plain' },
+        servers[0]!,
+        { ...servers[0]!, label: 'server-1' },
+      ],
+      [
+        { transport: 'stdio', label: 'plain', command: '/synthetic/plain' },
+        { ...server, label: undefined },
+        { ...server, label: 'server-1' },
+      ],
+    ] as MCPConfig[][])(
+      'preserves global default labels before filtering mixed transports %#',
+      async (...mixedServers) => {
+        const mixedBatch = batch().map((request) => ({
+          ...request,
+          input: { ...request.input, servers: mixedServers },
+        }));
+        const results = await COWORK_HOST.runBatch!(mixedBatch, stdioContext);
+        expect(results.every((result) => !result.error)).toBe(true);
+        expect(mocks.setup).toHaveBeenCalledOnce();
+        expect(mocks.readiness).toHaveBeenCalledWith(
+          mixedServers,
+          expect.any(Object),
+          expect.objectContaining({
+            paths: { dataRoot: '/synthetic/session/stdio' },
+          })
+        );
+      }
+    );
+
+    it('rejects an actual global default-label collision before setup', async () => {
+      const mixedBatch = batch().map((request) => ({
+        ...request,
         input: {
-          ...r.input,
-          servers: [{ transport: 'stdio' as const, command: 'x' }],
+          ...request.input,
+          servers: [
+            { ...server, label: 'server-2' },
+            { transport: 'stdio' as const, command: '/synthetic/plain' },
+          ],
         },
       }));
       await expect(
-        createCoworkHost(selected).runBatch!(plain, context)
-      ).rejects.toMatchObject({ code: 'mcp_server_invalid' });
-      expect(selected.prepare).not.toHaveBeenCalled();
+        COWORK_HOST.runBatch!(mixedBatch, stdioContext)
+      ).rejects.toMatchObject({
+        code: 'mcp_server_invalid',
+        plugin: 'server-2',
+      });
+      expect(mocks.setup).not.toHaveBeenCalled();
+      expect(mocks.readiness).not.toHaveBeenCalled();
+      expect(mocks.submit).not.toHaveBeenCalled();
+    });
+
+    it.each([{ inheritEnv: true }, { protocol: 'legacy' }, { probe: false }])(
+      'rejects unsupported plain stdio declarations %j before setup',
+      async (unsupported) => {
+        const invalidBatch = batch().map((request) => ({
+          ...request,
+          input: {
+            ...request.input,
+            servers: [
+              {
+                transport: 'stdio' as const,
+                command: '/synthetic/plain',
+                ...unsupported,
+              } as MCPConfig,
+            ],
+          },
+        }));
+        await expect(
+          COWORK_HOST.runBatch!(invalidBatch, stdioContext)
+        ).rejects.toMatchObject({ code: 'mcp_server_invalid' });
+        expect(mocks.setup).not.toHaveBeenCalled();
+        expect(mocks.readiness).not.toHaveBeenCalled();
+        expect(mocks.submit).not.toHaveBeenCalled();
+      }
+    );
+
+    it('uses session-owned paths for readiness before submitting any prompt', async () => {
+      const results = await COWORK_HOST.runBatch!(batch(), {
+        ...stdioContext,
+        manifest: readOnlyContext.manifest,
+      });
+      expect(results.every((result) => !result.error)).toBe(true);
+      expect(mocks.setup.mock.calls[0]![0]).not.toHaveProperty('stdioPaths');
+      expect(mocks.readiness).toHaveBeenCalledWith(
+        servers,
+        expect.any(Object),
+        {
+          plugins: [],
+          paths: { dataRoot: '/synthetic/session/stdio' },
+        }
+      );
+      expect(mocks.order).toEqual([
+        'prepare',
+        'readiness',
+        'submit',
+        'hitl',
+        'trace',
+        'submit',
+        'hitl',
+        'trace',
+        'dispose',
+      ]);
+    });
+
+    it('disposes the session and releases the desktop claim when readiness fails', async () => {
+      mocks.readiness.mockRejectedValueOnce(new Error('too few tools'));
+      await expect(
+        COWORK_HOST.runBatch!(batch(), stdioContext)
+      ).rejects.toThrow('too few tools');
+      expect(mocks.submit).not.toHaveBeenCalled();
+      expect(mocks.snapshot).not.toHaveBeenCalled();
+      expect(mocks.dispose).toHaveBeenCalledOnce();
+      await COWORK_HOST.runBatch!(batch(), stdioContext);
+      expect(mocks.submit).toHaveBeenCalledTimes(2);
+      expect(mocks.dispose).toHaveBeenCalledTimes(2);
+    });
+
+    it('redacts a referenced stdio credential in submission failures', async () => {
+      mocks.submit.mockRejectedValueOnce(
+        new Error('adapter rejected good-token')
+      );
+      const results = await COWORK_HOST.runBatch!(batch(), stdioContext);
+      expect(results[0]!.error).toBe('adapter rejected [REDACTED]');
+      expect(results[1]!.error).toContain('Not submitted');
+      expect(JSON.stringify(results)).not.toContain('good-token');
+      expect(mocks.dispose).toHaveBeenCalledOnce();
     });
   });
   it('skips GUI HITL for already completed native tasks without hiding actual failures', async () => {
     mocks.matches.mockResolvedValue([{ isComplete: true }]);
-    const result = await COWORK_HOST.runBatch!(requests(), context);
+    const result = await COWORK_HOST.runBatch!(requests(), readOnlyContext);
     expect(mocks.hitl).not.toHaveBeenCalled();
     expect(result.every((r) => r.finalText === 'answer' && !r.error)).toBe(
       true
@@ -627,19 +891,19 @@ describe('V2 Cowork host', () => {
     mocks.hitl.mockRejectedValue(
       new ComputerUseHitlBudgetError('inspection budget exhausted')
     );
-    const result = await COWORK_HOST.runBatch!(requests(), context);
+    const result = await COWORK_HOST.runBatch!(requests(), readOnlyContext);
     expect(result[0]).toMatchObject({
       finalText: 'answer',
       telemetry: { hitlWarning: 'inspection budget exhausted' },
     });
     expect(result[0]!.error).toBeUndefined();
     mocks.trace.mockRejectedValueOnce(new Error('native task never completed'));
-    const missing = await COWORK_HOST.runBatch!(requests(), context);
+    const missing = await COWORK_HOST.runBatch!(requests(), readOnlyContext);
     expect(missing[0]!.error).toBe('native task never completed');
   });
   it('does not hide a HITL failure when native response collection succeeds', async () => {
     mocks.hitl.mockRejectedValueOnce(new Error('HITL timed out'));
-    const result = await COWORK_HOST.runBatch!(requests(), context);
+    const result = await COWORK_HOST.runBatch!(requests(), readOnlyContext);
     expect(result[0]).toMatchObject({
       error: 'HITL timed out',
       finalText: 'answer',

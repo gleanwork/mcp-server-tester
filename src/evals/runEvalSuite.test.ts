@@ -345,6 +345,25 @@ describe('suite review regressions', () => {
     }
   );
 
+  it('inherits Cowork write policy for empty arm settings and honors explicit false', async () => {
+    const f = await fixture([scenario], {
+      coworkSetup: { approveWriteTools: true },
+      arms: [
+        { name: 'inherited' },
+        { name: 'empty', coworkSetup: {} },
+        { name: 'read-only', coworkSetup: { approveWriteTools: false } },
+      ],
+    });
+    await runEvalSuite({ manifestPath: f.manifestPath, rootDir: f.dir });
+    expect(
+      f.observe.mock.calls.map(([, context]) => context.manifest.coworkSetup)
+    ).toEqual([
+      { approveWriteTools: true },
+      { approveWriteTools: true },
+      { approveWriteTools: false },
+    ]);
+  });
+
   it('loads canonical datasets once and isolates arm prompts', async () => {
     const original = { ...scenario, args: { nested: { untouched: true } } };
     const f = await fixture([original], {

@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
-import { constants } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { constants, type Stats } from 'node:fs';
 import {
   chmod,
   lstat,
@@ -21,6 +21,7 @@ import {
   type MCPConfig,
 } from '../../config/mcpConfig.js';
 import { resolveCoworkMcpHeaders, toCoworkServers } from './config.js';
+import { restoreMacToolPermissions } from './macToolPermissionStore.js';
 
 const ERROR = 'Unable to manage local Cowork MCP servers safely.';
 const LABEL = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
@@ -37,6 +38,10 @@ const Journal = z
       .refine((mode) => (mode & 0o022) === 0),
     originalHash: z.string(),
     installedHash: z.string(),
+    installedMcpServersHash: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
   })
   .strict();
 
@@ -64,10 +69,34 @@ function object(bytes: Buffer): Record<string, unknown> {
     throw new Error(ERROR);
   return value as Record<string, unknown>;
 }
+function mcpHash(value: Record<string, unknown>): string {
+  return hash(
+    Buffer.from(
+      canonical(
+        Object.hasOwn(value, 'mcpServers')
+          ? { mcpServers: value.mcpServers }
+          : {}
+      )
+    )
+  );
+}
+type Snapshot = { data: Buffer; mode: number; info: Stats };
+function sameFile(a: Stats, b: Stats): boolean {
+  return (
+    a.dev === b.dev &&
+    a.ino === b.ino &&
+    a.mode === b.mode &&
+    a.uid === b.uid &&
+    a.nlink === b.nlink &&
+    a.size === b.size &&
+    a.mtimeMs === b.mtimeMs &&
+    a.ctimeMs === b.ctimeMs
+  );
+}
 async function bytes(
   path: string,
   privateOnly = false
-): Promise<{ data: Buffer; mode: number } | undefined> {
+): Promise<Snapshot | undefined> {
   let fd;
   try {
     fd = await open(
@@ -84,7 +113,8 @@ async function bytes(
       !before.isFile() ||
       before.uid !== process.getuid?.() ||
       before.size > LIMIT ||
-      before.mode & (privateOnly ? 0o077 : 0o022)
+      before.nlink !== 1 ||
+      before.mode & (privateOnly ? 0o7077 : 0o7022)
     )
       throw new Error(ERROR);
     const buffer = Buffer.alloc(before.size + 1);
@@ -102,11 +132,15 @@ async function bytes(
     const after = await fd.stat();
     if (
       count !== before.size ||
-      after.mtimeMs !== before.mtimeMs ||
-      after.ctimeMs !== before.ctimeMs
+      !sameFile(before, after) ||
+      !sameFile(before, await lstat(path))
     )
       throw new Error(ERROR);
-    return { data: buffer.subarray(0, count), mode: before.mode & 0o777 };
+    return {
+      data: buffer.subarray(0, count),
+      mode: before.mode & 0o777,
+      info: before,
+    };
   } finally {
     await fd.close();
   }
@@ -141,7 +175,9 @@ export function validateMacLocalServers(servers: MCPConfig[]): void {
     if (
       !server.label ||
       !LABEL.test(server.label) ||
-      ['journal', 'inference'].includes(server.label.toLowerCase()) ||
+      ['journal', 'inference', 'permissions'].includes(
+        server.label.toLowerCase()
+      ) ||
       names.has(server.label.toLowerCase()) ||
       (server.transport === 'stdio' && usesHostResolvedFields(server))
     )
@@ -181,8 +217,26 @@ const ResultSchema = z.looseObject({});
   await client.connect(new StreamableHTTPClientTransport(new URL(config.url),{requestInit:{headers:config.headers}}));
   const caps=client.getServerCapabilities() || {};
   const capabilities=Object.fromEntries(['tools','resources','prompts','logging','completions'].filter(k=>k in caps).map(k=>[k,caps[k]]));
+  let inventory;
+  const loadTools=async()=>{
+    const listed=await client.listTools(undefined,{timeout:20000,cacheMode:'refresh'});
+    // HTTP cache scope belongs to the upstream session, not Desktop's local cache.
+    inventory={tools:listed.tools,...(listed._meta ? {_meta:listed._meta} : {})};
+  };
+  if ('tools' in caps) await loadTools();
   const server=new Server({name:config.name,version:'1.0'},{capabilities});
-  server.fallbackRequestHandler=async request=>{try{return await client.request({method:request.method,params:request.params},ResultSchema,{timeout:120000});}catch{throw new ProtocolError(ProtocolErrorCode.InternalError,'Upstream MCP request failed.');}};
+  if ('tools' in caps) {
+    server.setRequestHandler('tools/list',async()=>{
+      if (!inventory) throw new ProtocolError(ProtocolErrorCode.InternalError,'Upstream MCP inventory unavailable.');
+      return inventory;
+    });
+    client.setNotificationHandler('notifications/tools/list_changed',async notice=>{
+      inventory=undefined;
+      try {await loadTools();} catch {}
+      try {await server.notification(notice);} catch {}
+    });
+  }
+  server.fallbackRequestHandler=async (request,context)=>{try{return await client.request({method:request.method,params:request.params},ResultSchema,{timeout:120000,signal:context.mcpReq.signal});}catch{throw new ProtocolError(ProtocolErrorCode.InternalError,'Upstream MCP request failed.');}};
   server.fallbackNotificationHandler=async notice=>{try{await client.notification(notice);}catch{}};
   client.fallbackNotificationHandler=async notice=>{try{await server.notification(notice);}catch{}};
   const close=()=>{Promise.allSettled([server.close(),client.close()]).finally(()=>process.exit(0));};
@@ -279,6 +333,7 @@ export async function installMacLocalMcp(
     mode: original?.mode ?? 0o600,
     originalHash: original ? hash(original.data) : '',
     installedHash: hash(Buffer.from(canonical(installed))),
+    installedMcpServersHash: mcpHash(installed),
   };
   await writeFile(join(directory, 'journal.json'), JSON.stringify(journal), {
     mode: 0o600,
@@ -295,8 +350,59 @@ export async function installMacLocalMcp(
   await rename(staged, target());
 }
 
-/** Claude must be stopped. Semantic equality tolerates its whitespace rewrite,
- * but any actual concurrent change retains the journal rather than clobbering it.
+async function assertSnapshot(
+  path: string,
+  expected: Snapshot | undefined,
+  privateOnly = false
+): Promise<void> {
+  const current = await bytes(path, privateOnly);
+  if (
+    expected
+      ? !current ||
+        !sameFile(expected.info, current.info) ||
+        !current.data.equals(expected.data)
+      : current !== undefined
+  )
+    throw new Error(ERROR);
+}
+async function configDirectories(
+  directory: string
+): Promise<Map<string, Stats>> {
+  const guards = new Map<string, Stats>();
+  for (const path of [
+    homedir(),
+    join(homedir(), 'Library'),
+    join(homedir(), 'Library/Application Support'),
+    dirname(target()),
+    directory,
+  ]) {
+    const info = await lstat(path);
+    if (
+      !info.isDirectory() ||
+      info.isSymbolicLink() ||
+      info.uid !== process.getuid?.() ||
+      info.mode & (path === directory ? 0o7077 : 0o7022) ||
+      (await realpath(path)) !== path
+    )
+      throw new Error(ERROR);
+    guards.set(path, info);
+  }
+  return guards;
+}
+async function checkDirectories(
+  directory: string,
+  guards: Map<string, Stats>
+): Promise<void> {
+  const current = await configDirectories(directory);
+  for (const [path, info] of guards) {
+    const now = current.get(path)!;
+    if (info.dev !== now.dev || info.ino !== now.ino) throw new Error(ERROR);
+  }
+}
+
+/** Caller holds the session lease and has stopped Claude. New journals own only
+ * mcpServers; legacy journals retain the strict whole-config comparison.
+ * Node has no rename CAS: recheck identity and bytes immediately before writing.
  */
 export async function restoreMacLocalMcp(directory: string): Promise<void> {
   try {
@@ -306,33 +412,83 @@ export async function restoreMacLocalMcp(directory: string): Promise<void> {
     throw error;
   }
   await validateDirectory(directory, true);
-  const receipt = await bytes(join(directory, 'journal.json'), true);
+  const guards = await configDirectories(directory);
+  const receiptPath = join(directory, 'journal.json');
+  const receipt = await bytes(receiptPath, true);
+  let restored: Snapshot | undefined;
   if (receipt) {
     const journal = Journal.parse(JSON.parse(receipt.data.toString('utf8')));
     const original =
       journal.original === null
         ? undefined
         : Buffer.from(journal.original, 'base64');
-    if (original && hash(original) !== journal.originalHash)
+    if (
+      original
+        ? original.length > LIMIT ||
+          original.toString('base64') !== journal.original ||
+          hash(original) !== journal.originalHash
+        : journal.originalHash !== ''
+    )
       throw new Error(ERROR);
+    const originalValue = original ? object(original) : {};
     const current = await bytes(target());
-    const unchanged = original
-      ? current?.data.equals(original)
-      : current === undefined;
-    if (!unchanged) {
-      if (
-        !current ||
-        hash(Buffer.from(canonical(object(current.data)))) !==
-          journal.installedHash
-      )
+    let output = original;
+    if (!(original ? current?.data.equals(original) : current === undefined)) {
+      if (!current) throw new Error(ERROR);
+      const value = object(current.data);
+      if (journal.installedMcpServersHash) {
+        const currentMcpHash = mcpHash(value);
+        // Original MCP values also cover a crash after config restoration but
+        // before permission restoration or session-directory removal.
+        if (
+          currentMcpHash !== journal.installedMcpServersHash &&
+          currentMcpHash !== mcpHash(originalValue)
+        )
+          throw new Error(ERROR);
+        if (Object.hasOwn(originalValue, 'mcpServers'))
+          value.mcpServers = originalValue.mcpServers;
+        else delete value.mcpServers;
+        if (canonical(value) !== canonical(originalValue))
+          output = Buffer.from(JSON.stringify(value, null, 2) + '\n');
+      } else if (hash(Buffer.from(canonical(value))) !== journal.installedHash)
         throw new Error(ERROR);
-      if (original) {
-        const staged = join(directory, 'config.restore');
-        await writeFile(staged, original, { mode: 0o600, flag: 'wx' });
-        await chmod(staged, journal.mode & 0o777);
-        await rename(staged, target());
-      } else await unlink(target());
     }
+    if (output && output.length > LIMIT) throw new Error(ERROR);
+    await checkDirectories(directory, guards);
+    await assertSnapshot(receiptPath, receipt, true);
+    if (
+      output &&
+      (!current?.data.equals(output) || current.mode !== journal.mode)
+    ) {
+      const staged = join(directory, `config.restore-${randomUUID()}`);
+      try {
+        await writeFile(staged, output, { mode: 0o600, flag: 'wx' });
+        await chmod(staged, journal.mode);
+        await checkDirectories(directory, guards);
+        await assertSnapshot(receiptPath, receipt, true);
+        await assertSnapshot(target(), current);
+        await rename(staged, target());
+      } finally {
+        await checkDirectories(directory, guards);
+        await rm(staged, { force: true });
+      }
+    } else {
+      await assertSnapshot(target(), current);
+      if (!output && current) await unlink(target());
+    }
+    restored = await bytes(target());
+    if (
+      output
+        ? !restored?.data.equals(output) || restored.mode !== journal.mode
+        : restored !== undefined
+    )
+      throw new Error(ERROR);
   }
+  if (await bytes(join(directory, 'permissions.json'), true)) {
+    await restoreMacToolPermissions(directory);
+  }
+  await checkDirectories(directory, guards);
+  await assertSnapshot(receiptPath, receipt, true);
+  if (receipt) await assertSnapshot(target(), restored);
   await rm(directory, { recursive: true });
 }

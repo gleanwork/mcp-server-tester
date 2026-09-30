@@ -1,8 +1,4 @@
-import {
-  isHttpConfig,
-  usesHostResolvedFields,
-  type MCPConfig,
-} from '../../config/mcpConfig.js';
+import { isHttpConfig, type MCPConfig } from '../../config/mcpConfig.js';
 import { checkMcpServers, type McpServerReadiness } from '../mcpReadiness.js';
 import {
   resolveCoworkMcpHeaders,
@@ -40,23 +36,6 @@ function resolveServer(
   stdio: { plugins: readonly HostPlugin[]; paths: HostStdioPaths }
 ): MCPConfig {
   if (!isHttpConfig(server)) {
-    if (!usesHostResolvedFields(server))
-      return {
-        ...server,
-        env: {
-          ...(server.inheritEnv === false
-            ? {}
-            : Object.fromEntries(
-                Object.entries(env).filter(
-                  (entry): entry is [string, string] =>
-                    typeof entry[1] === 'string'
-                )
-              )),
-          ...server.env,
-        },
-        inheritEnv: false,
-        quiet: true,
-      };
     // The same resolved launch Desktop runs, with only its declared env and
     // the caller's data dir. Readiness fails closed below `minTools`.
     const [parsed] = hostStdioServers([server], stdio.plugins);
@@ -85,7 +64,13 @@ export async function verifyCoworkMcpServers(
   stdio: { plugins?: readonly HostPlugin[]; paths?: HostStdioPaths } = {}
 ): Promise<CoworkMcpServerReadiness[]> {
   const context = { plugins: stdio.plugins ?? [], paths: stdio.paths ?? {} };
-  const results = await checkMcpServers(servers, (server) =>
+  // Resolve labels before checking servers individually so private paths and
+  // Desktop settings use the same original (HTTP + stdio) server index.
+  const labeledServers = servers.map((server, index) => ({
+    ...server,
+    label: server.label ?? `server-${index + 1}`,
+  }));
+  const results = await checkMcpServers(labeledServers, (server) =>
     resolveServer(server, env, context)
   );
   if (results.some((result) => result.status !== 'connected'))

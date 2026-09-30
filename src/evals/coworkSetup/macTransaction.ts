@@ -21,20 +21,18 @@ import {
   coworkPluginMarketplace,
   type HostPlugin,
 } from '../hostPlugins.js';
-import { prepareCoworkMcpBundle } from './bundle.js';
 import {
-  createCoworkMcpPlan,
-  resolveCoworkMcpHeaders,
-  toCoworkServers,
-} from './config.js';
-import { resolveCoworkSetupConfig } from './options.js';
+  COWORK_SETTINGS_MAX_BYTES as LIMIT,
+  createCoworkBundlePlan,
+  prepareCoworkMcpBundle,
+} from './bundle.js';
+import { createCoworkMcpPlan } from './config.js';
 import { checkManagedInferencePreferences } from './macManagedPreferences.js';
 
 const ERROR = 'Unable to change Cowork configuration safely.';
 const LOCK = '.mst-setup-lock';
 const MARKER = '.mst-setup-marker';
 const HELPER = 'inference-helper.sh';
-const LIMIT = 1024 * 1024;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 export function macCoworkProfileDirectory(): string {
   return join(homedir(), 'Library/Application Support/Claude-3p/configLibrary');
@@ -59,6 +57,7 @@ const JournalSchema = z
     installedHash: z.string().regex(HASH),
     profileHash: z.string().regex(HASH).nullable(),
     files: z.record(z.string(), z.string().regex(HASH)).nullable(),
+    stdioDirectories: z.array(z.string()).optional(),
     phase: z.enum(['preparing', 'ready', 'applied', 'restoring']),
   })
   .strict();
@@ -200,11 +199,13 @@ function installedMeta(journal: Journal): Buffer {
     )
   )
     fail();
-  return jsonBytes({
+  const installed = jsonBytes({
     ...meta,
     appliedId: journal.id,
     entries: [...meta.entries, { id: journal.id, name: 'MST test' }],
   });
+  if (installed.length > LIMIT) fail();
+  return installed;
 }
 
 function validateStaging(directory: string, profileDirectory: string): void {
@@ -249,7 +250,9 @@ async function atomicWrite(
 }
 
 async function saveJournal(lock: string, journal: Journal): Promise<void> {
-  await atomicWrite(join(lock, 'journal.json'), jsonBytes(journal), lock);
+  const bytes = jsonBytes(journal);
+  if (bytes.length > LIMIT) fail();
+  await atomicWrite(join(lock, 'journal.json'), bytes, lock);
 }
 
 async function replaceMeta(
@@ -351,15 +354,42 @@ function allowedFile(name: string): boolean {
       'credentials/inference.json',
     ].includes(name) ||
     /^mcp-[A-Za-z][A-Za-z0-9_-]{0,63}-headers\.sh$/.test(name) ||
-    /^credentials\/[A-Za-z][A-Za-z0-9_-]{0,63}\.json$/.test(name)
+    /^credentials\/[A-Za-z][A-Za-z0-9_-]{0,63}\.json$/.test(name) ||
+    /^stdio\/[A-Za-z][A-Za-z0-9_-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(
+      name
+    )
   );
 }
 
-async function stageNames(directory: string): Promise<string[]> {
+async function stageNames(
+  directory: string,
+  stdioDirectories: string[] = [],
+  allowMissing = false
+): Promise<string[]> {
+  const folded = stdioDirectories.map((name) => name.toLowerCase());
+  if (
+    new Set(folded).size !== folded.length ||
+    stdioDirectories.some(
+      (name) => !/^stdio\/[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(name)
+    )
+  )
+    fail();
   await checkDirectory(directory, true);
   const names: string[] = [];
+  const observed = new Set<string>();
   for (const entry of await readdir(directory)) {
-    if (entry === 'credentials') {
+    if (entry === 'stdio') {
+      if (!stdioDirectories.length) fail();
+      await checkDirectory(join(directory, entry), true);
+      for (const label of await readdir(join(directory, entry))) {
+        const name = `stdio/${label}`;
+        if (!stdioDirectories.includes(name)) fail();
+        await checkDirectory(join(directory, name), true);
+        observed.add(name);
+        for (const child of await readdir(join(directory, name)))
+          names.push(`${name}/${child}`);
+      }
+    } else if (entry === 'credentials') {
       await checkDirectory(join(directory, entry), true);
       for (const child of await readdir(join(directory, entry)))
         names.push(`${entry}/${child}`);
@@ -367,13 +397,26 @@ async function stageNames(directory: string): Promise<string[]> {
       names.push(entry);
     }
   }
-  if (names.some((name) => !allowedFile(name))) fail();
+  if (
+    names.some((name) => !allowedFile(name)) ||
+    new Set(names.map((name) => name.toLowerCase())).size !== names.length ||
+    (!allowMissing && stdioDirectories.some((name) => !observed.has(name)))
+  )
+    fail();
   return names.sort();
 }
 
-async function stageHashes(directory: string): Promise<Record<string, string>> {
+async function stageHashes(
+  directory: string,
+  stdioDirectories: string[] = [],
+  allowMissing = false
+): Promise<Record<string, string>> {
   const entries: Array<[string, string]> = [];
-  for (const name of await stageNames(directory)) {
+  for (const name of await stageNames(
+    directory,
+    stdioDirectories,
+    allowMissing
+  )) {
     entries.push([name, hash(await readBytes(join(directory, name), true))]);
   }
   return Object.fromEntries(entries);
@@ -391,7 +434,14 @@ async function validateStage(
   const files = journal.files;
   if (
     !files ||
-    Object.keys(files).some((name) => !allowedFile(name)) ||
+    Object.keys(files).some(
+      (name) =>
+        !allowedFile(name) ||
+        (name.startsWith('stdio/') &&
+          !journal.stdioDirectories?.includes(
+            name.slice(0, name.lastIndexOf('/'))
+          ))
+    ) ||
     files[MARKER] !== hash(Buffer.from(journal.nonce))
   )
     fail();
@@ -401,7 +451,11 @@ async function validateStage(
     )
   )
     fail();
-  const current = await stageHashes(journal.directory);
+  const current = await stageHashes(
+    journal.directory,
+    journal.stdioDirectories,
+    allowMissing
+  );
   for (const [name, digest] of Object.entries(current))
     if (files[name] !== digest) fail();
   if (
@@ -477,11 +531,24 @@ async function restore(
     )) {
       const file = join(journal.directory, name);
       if (!(await exists(file))) continue;
+      await checkDirectory(journal.directory, true);
+      if (name.includes('/')) await checkDirectory(dirname(file), true);
+      if (name.startsWith('stdio/'))
+        await checkDirectory(join(journal.directory, 'stdio'), true);
       if (hash(await readBytes(file, true)) !== journal.files[name]) fail();
       await unlink(file);
     }
-    if (await exists(join(journal.directory, 'credentials')))
-      await rmdir(join(journal.directory, 'credentials'));
+    for (const name of [
+      ...(journal.stdioDirectories ?? []),
+      'stdio',
+      'credentials',
+    ]) {
+      const directory = join(journal.directory, name);
+      if (await exists(directory)) {
+        await checkDirectory(directory, true);
+        await rmdir(directory);
+      }
+    }
     const stageInfo = await lstat(journal.directory);
     await unlink(join(journal.directory, MARKER));
     try {
@@ -550,6 +617,47 @@ type InstallOptions = {
   env?: Record<string, string | undefined>;
 };
 
+function profileBytes(
+  settings: unknown,
+  options: {
+    directory: string;
+    model?: string;
+    marketplaces: ReturnType<typeof coworkPluginMarketplace>[];
+    blocked: ReturnType<typeof coworkBlockedMcpEntries>;
+  }
+): Buffer {
+  if (
+    typeof settings !== 'object' ||
+    settings === null ||
+    Array.isArray(settings)
+  )
+    fail();
+  const managed: unknown = (settings as { managedMcpServers?: unknown })
+    .managedMcpServers;
+  if (!Array.isArray(managed)) fail();
+  const entries = managed as unknown[];
+  const profile = jsonBytes({
+    ...settings,
+    // Keep the evaluated application version fixed during this temporary profile.
+    disableAutoUpdates: true,
+    // The plugin's own servers would bypass the eval endpoint; block them.
+    ...(options.blocked.length
+      ? { managedMcpServers: [...entries, ...options.blocked] }
+      : {}),
+    ...(options.model
+      ? { inferenceModels: [options.model], modelDiscoveryEnabled: false }
+      : {}),
+    ...(options.marketplaces.length
+      ? { allowedPluginMarketplaces: options.marketplaces }
+      : {}),
+    inferenceProvider: 'anthropic',
+    inferenceCredentialKind: 'helper-script',
+    inferenceCredentialHelper: join(options.directory, HELPER),
+  });
+  if (profile.length > LIMIT) fail();
+  return profile;
+}
+
 async function validateInstall(options: InstallOptions) {
   const model = options.model;
   if (
@@ -576,24 +684,18 @@ async function validateInstall(options: InstallOptions) {
   if (typeof key !== 'string' || !/^[A-Za-z0-9._~+/-]+=*$/.test(key)) fail();
   const inference = jsonBytes({ ANTHROPIC_API_KEY: key });
   if (inference.length > 64 * 1024) fail();
-  const arms = options.manifest.arms ?? [];
-  const arm = arms.find((candidate) => candidate.name === options.arm);
-  if (
-    new Set(arms.map((candidate) => candidate.name)).size !== arms.length ||
-    (options.arm !== undefined && !arm)
-  )
-    fail();
-  const declarations = arm?.servers ?? options.manifest.servers;
-  if (!declarations) fail();
-  const servers = toCoworkServers(declarations);
-  const plan = createCoworkMcpPlan(
-    servers,
-    directory,
-    resolveCoworkSetupConfig(options.manifest.coworkSetup, arm?.coworkSetup)
-  );
-  const headers = resolveCoworkMcpHeaders(servers, env);
+  const { plan, settings, privateFiles, stdioDirectories, serverLabels } =
+    createCoworkBundlePlan({
+      manifest: options.manifest,
+      arm: options.arm,
+      runtimeDirectory: directory,
+      plugins,
+      env,
+    });
+  // Include every profile-only field before a session takes ownership or stops Desktop.
+  profileBytes(settings, { directory, model, marketplaces, blocked });
   // A blocked plugin server must never shadow an eval server (any case).
-  const labels = new Set(plan.servers.map((s) => s.label.toLowerCase()));
+  const labels = new Set(serverLabels);
   if (blocked.some((entry) => labels.has(entry.name.toLowerCase()))) fail();
   // macOS volumes are commonly case-insensitive. Reject helper/credential
   // collisions before a session stops the app, not during exclusive writes.
@@ -603,12 +705,7 @@ async function validateInstall(options: InstallOptions) {
   if (new Set(helperLabels).size !== helperLabels.length) fail();
   for (const server of plan.servers) {
     if (!server.helperName) continue;
-    if (
-      server.label.toLowerCase() === 'inference' ||
-      Buffer.byteLength(JSON.stringify(headers[server.label]) + '\n') >
-        64 * 1024
-    )
-      fail();
+    if (server.label.toLowerCase() === 'inference') fail();
   }
   const original = await readBytes(join(profileDirectory, '_meta.json'));
   const meta = metadata(original);
@@ -622,7 +719,46 @@ async function validateInstall(options: InstallOptions) {
     Object.keys(sourceValue).length !== 0
   )
     fail();
+  const journal: Journal = {
+    version: 1,
+    id: randomUUID(),
+    nonce: randomUUID(),
+    directory,
+    originalMeta: original.toString('base64'),
+    originalHash: hash(original),
+    installedHash: '0'.repeat(64),
+    profileHash: null,
+    files: null,
+    stdioDirectories,
+    phase: 'preparing',
+  };
+  journal.installedHash = hash(installedMeta(journal));
+  const names = [
+    MARKER,
+    HELPER,
+    'managed-mcp.json',
+    'status.json',
+    'credentials/inference.json',
+    ...privateFiles.map((file) => file.name),
+    ...plan.servers.flatMap((server) =>
+      server.helperName
+        ? [server.helperName, `credentials/${server.label}.json`]
+        : []
+    ),
+  ];
+  // Reserve the largest phase and complete inventory before taking ownership.
+  // Digests and UUIDs have fixed widths; original metadata keeps its exact bytes.
+  if (
+    jsonBytes({
+      ...journal,
+      profileHash: '0'.repeat(64),
+      files: Object.fromEntries(names.map((name) => [name, '0'.repeat(64)])),
+      phase: 'restoring',
+    }).length > LIMIT
+  )
+    fail();
   return {
+    journal,
     model,
     marketplaces,
     blocked,
@@ -633,6 +769,7 @@ async function validateInstall(options: InstallOptions) {
     original,
     sourcePath,
     source,
+    stdioDirectories,
   };
 }
 
@@ -745,25 +882,13 @@ export async function installMacCoworkSettings(
     profileDirectory = validated.profileDirectory;
     const { directory, env, inference, original, sourcePath, source } =
       validated;
-    const id = randomUUID();
+    const id = validated.journal.id;
     if (!UUID.test(id) || (await exists(join(profileDirectory, `${id}.json`))))
       fail();
     const nextLock = join(profileDirectory, LOCK);
     await mkdir(nextLock, { mode: 0o700 });
     lock = nextLock;
-    journal = {
-      version: 1,
-      id,
-      nonce: randomUUID(),
-      directory,
-      originalMeta: original.toString('base64'),
-      originalHash: hash(original),
-      installedHash: '0'.repeat(64),
-      profileHash: null,
-      files: null,
-      phase: 'preparing',
-    };
-    journal.installedHash = hash(installedMeta(journal));
+    journal = validated.journal;
     await saveJournal(lock, journal);
     journalSaved = true;
     const bundle = await prepareCoworkMcpBundle({
@@ -771,6 +896,7 @@ export async function installMacCoworkSettings(
       arm: options.arm,
       directory,
       runtimeDirectory: directory,
+      plugins: options.plugins,
       env,
     });
     await writeFile(join(directory, MARKER), journal.nonce, {
@@ -780,36 +906,9 @@ export async function installMacCoworkSettings(
     const settings: unknown = JSON.parse(
       (await readBytes(bundle.settingsPath, true)).toString('utf8')
     );
-    if (
-      typeof settings !== 'object' ||
-      settings === null ||
-      Array.isArray(settings)
-    )
-      fail();
-    const managed: unknown = (settings as { managedMcpServers?: unknown })
-      .managedMcpServers;
-    if (!Array.isArray(managed)) fail();
-    const entries = managed as unknown[];
-    const profile = jsonBytes({
-      ...settings,
-      // Keep the evaluated application version fixed during this temporary profile.
-      disableAutoUpdates: true,
-      // The plugin's own servers would bypass the eval endpoint; block them.
-      ...(validated.blocked.length
-        ? { managedMcpServers: [...entries, ...validated.blocked] }
-        : {}),
-      ...(validated.model
-        ? { inferenceModels: [validated.model], modelDiscoveryEnabled: false }
-        : {}),
-      ...(validated.marketplaces.length
-        ? { allowedPluginMarketplaces: validated.marketplaces }
-        : {}),
-      inferenceProvider: 'anthropic',
-      inferenceCredentialKind: 'helper-script',
-      inferenceCredentialHelper: join(directory, HELPER),
-    });
+    const profile = profileBytes(settings, validated);
     journal.profileHash = hash(profile);
-    journal.files = await stageHashes(directory);
+    journal.files = await stageHashes(directory, journal.stdioDirectories);
     journal.phase = 'ready';
     await saveJournal(lock, journal);
     // Reserve inference.json; a conflicting MCP label fails without overwriting.

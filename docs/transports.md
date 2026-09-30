@@ -23,6 +23,33 @@ Choose based on your server deployment:
 - Use **stdio** for local development and testing
 - Use **HTTP** for remote servers or production environments
 
+### Evaluation host support
+
+Plain stdio is supported by these built-in evaluation host families:
+
+- Claude CLI (`claude-cli`) and Vercel AI SDK (`vercel-sdk`).
+- ChatGPT Work and Codex surfaces of the `chatgpt` host on macOS and Linux.
+- Cowork (`cowork`, alias `cowork_cu`) on macOS and Linux. The package exports
+  `COWORK_STDIO_PLATFORMS` as `['darwin', 'linux']`.
+
+Plain stdio uses `command`, optional `args`, `cwd`, and declared `env`; it does
+not require a URL or plugin. Cowork also supports private file-backed native
+proxies and mixed HTTP/stdio sets. Its host-resolved fields (`url`, `auth`,
+`files`, `minTools`, and placeholders) are not portable to ChatGPT or direct
+MCP clients. ChatGPT plugin-specific overrides use `plugins[].mcp` instead.
+
+Cowork rejects `inheritEnv: true`; declare the server environment explicitly.
+It implements `cwd` with a fixed argv wrapper, not shell-interpolated values.
+Mac setup owns the private files and runtime paths; Linux setup checks
+caller-staged paths. On Mac, only `${pluginRoot:...}` resolution is unavailable
+because marketplace installation paths are unknown before startup; native
+proxies with known local paths remain supported. See the
+[Cowork contract](./cowork.md#stdio-eval-servers) and
+[ChatGPT guide](./chatgpt-desktop.md).
+
+Transport support does not enforce read-only tools. Scio/catalog proxy policy
+must intercept writes where required; MST stdio transport alone does not.
+
 ## Stdio (Local Server)
 
 The stdio transport starts a local MCP server as a child process and communicates via standard input/output.
