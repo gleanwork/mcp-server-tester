@@ -710,6 +710,46 @@ describe('ChatGPT V2 batch host', () => {
       ).rejects.toThrow();
     }
   );
+  it('redacts MCP and environment secrets from case and recovery errors', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'env-api-key-value');
+    vi.mocked(runExternalHostScenario).mockResolvedValueOnce({
+      success: false,
+      error: 'upstream 401 for fixture-secret using env-api-key-value',
+      toolCalls: [],
+      externalHost: metadata,
+    });
+    lifecycle.restart.mockRejectedValueOnce(
+      new Error('restart saw fixture-secret')
+    );
+    const traces = await CHATGPT_HOST.runBatch!(requests(), context);
+    expect(traces[0]!.error).toBe(
+      'upstream 401 for [REDACTED] using [REDACTED]'
+    );
+    expect(traces[1]!.error).toContain(
+      'could not be restarted after an earlier failed case: restart saw [REDACTED]'
+    );
+    expect(JSON.stringify(traces)).not.toMatch(
+      /fixture-secret|env-api-key-value/
+    );
+  });
+  it('redacts secrets from cleanup and unexpected execution errors', async () => {
+    vi.mocked(runExternalHostScenario).mockRejectedValueOnce(
+      new Error('crash with fixture-secret')
+    );
+    lifecycle.dispose.mockRejectedValueOnce(
+      new Error('dispose saw fixture-secret')
+    );
+    const error = await CHATGPT_HOST.runBatch!(requests(), context).catch(
+      (caught: unknown) => caught
+    );
+    expect(error).toBeInstanceOf(AggregateError);
+    const messages = (error as AggregateError).errors.map(
+      (inner: Error) => `${inner.message}\n${inner.stack ?? ''}`
+    );
+    expect(messages.join('\n')).not.toContain('fixture-secret');
+    expect(messages[0]).toContain('crash with [REDACTED]');
+    expect(messages[1]).toContain('dispose saw [REDACTED]');
+  });
   it('releases its lease after unexpected execution errors', async () => {
     vi.mocked(runExternalHostScenario).mockRejectedValueOnce(
       new Error('crash')

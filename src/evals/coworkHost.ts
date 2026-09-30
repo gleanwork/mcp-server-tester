@@ -7,6 +7,7 @@ import type {
 } from './evalFrameworkTypes.js';
 import { getCoworkPlatform, type CoworkPlatform } from './cowork/platform.js';
 import { verifyCoworkMcpServers } from './cowork/mcpReadiness.js';
+import { hostSecretValues, redactHostError } from './hostSecrets.js';
 import {
   findMatchingClaudeSessions,
   snapshotClaudeSessions,
@@ -164,26 +165,12 @@ async function runBatch(
     failure('Cowork submission was not attempted.')
   );
   const usedSessions = new Set<string>();
-  const safeError = (error: unknown): string => {
-    let text =
-      error instanceof Error ? error.message : 'Cowork operation failed.';
-    const secrets = Object.entries(env)
-      .filter(
-        ([k, v]) => /token|key|secret|password|authorization/i.test(k) && v
-      )
-      .map(([, v]) => v!);
-    for (const server of servers)
-      if (server.transport !== 'stdio') {
-        if (server.auth?.accessToken) secrets.push(server.auth.accessToken);
-        for (const value of Object.values(server.headers ?? {}))
-          secrets.push(value);
-      } else if (server.auth?.accessTokenEnv) {
-        const token = env[server.auth.accessTokenEnv];
-        if (token) secrets.push(token);
-      }
-    for (const secret of secrets) text = text.split(secret).join('[REDACTED]');
-    return text;
-  };
+  const safeError = (error: unknown): string =>
+    redactHostError(
+      error,
+      hostSecretValues(env, servers),
+      'Cowork operation failed.'
+    );
   // Platform loading above is asynchronous. Claim the desktop atomically after it.
   if (active)
     throw new Error(
