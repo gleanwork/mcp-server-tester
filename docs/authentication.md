@@ -31,14 +31,16 @@ Choose based on your server's authentication requirements:
 
 ### Which credentials are used
 
-For an HTTP server, the `mcp` fixture picks the first of these that applies:
+For an HTTP server, MST uses the first of these that applies:
 
 1. `auth.oauth.authStatePath`: the Playwright OAuth state file written by `performOAuthSetup()`.
 2. `auth.accessToken`: a static bearer token.
-3. `auth.clientCredentials`: a token fetched from the token endpoint at connect.
-4. A `mcp-server-tester login` for the server, or tokens in `MCP_ACCESS_TOKEN`. A stored login is refreshed from its refresh token as the access token nears expiry, so long runs keep working. If the server rejects it, requests fail with a message to log in again.
+3. `auth.clientCredentials`: a token from the client-credentials grant, requested when connecting and again as it nears expiry.
+4. (The `mcp` fixture only.) A `mcp-server-tester login` for the server, or tokens in `MCP_ACCESS_TOKEN`. A stored login is refreshed from its refresh token as the access token nears expiry, so long runs keep working; environment tokens are used as given.
 
-No match means no credentials. Stdio servers take none.
+`createMCPClientForConfig()` applies 1–3 from the config; the fixture adds 4. With none of them, requests carry no credentials. Stdio servers take none. The auth fixture (`mcpAuthProvider`) reads the same sources from environment variables in the same order.
+
+When the server rejects a token that can't be recovered (for example, a revoked login), requests fail with a message that says what to do, such as running `mcp-server-tester login` again. A failure discovering the server's OAuth metadata can surface first.
 
 ## Static Token Authentication
 
@@ -224,7 +226,7 @@ interface MCPOAuthConfig {
 
 ## Client Credentials Grant
 
-The client credentials grant (OAuth 2.1, RFC 6749 §4.4) is designed for machine-to-machine communication. The library fetches a token from the authorization server's token endpoint before connecting to the MCP server, then attaches it as a `Bearer` token on every request. There is no browser, no redirect, and no user interaction.
+The client credentials grant (OAuth 2.1, RFC 6749 §4.4) is designed for machine-to-machine communication. The library fetches a token from the authorization server's token endpoint before connecting to the MCP server, attaches it as a `Bearer` token on every request, and requests a new one as it nears expiry. There is no browser, no redirect, and no user interaction.
 
 ### When to use it
 

@@ -119,10 +119,6 @@ export interface CLIOAuthResult {
 const DEFAULT_TIMEOUT_MS = 300_000;
 
 /**
- * Default client name for DCR
- */
-
-/**
  * Default TTL for cached server metadata (24 hours)
  * After this time, metadata will be re-discovered
  */

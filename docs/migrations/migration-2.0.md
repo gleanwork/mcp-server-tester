@@ -18,7 +18,7 @@ Other 2.0 changes have their own guides: [dataset sources](./dataset-sources.md)
 - [LLM judges share one prompt, parser and size limit](#llm-judges-share-one-prompt-parser-and-size-limit)
 - [MCP reporter attachments](#mcp-reporter-attachments)
 - [Stored results are redacted the same way everywhere](#stored-results-are-redacted-the-same-way-everywhere)
-- [Which credentials the `mcp` fixture uses](#which-credentials-the-mcp-fixture-uses)
+- [Which credentials are used](#which-credentials-are-used)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
 ---
@@ -211,14 +211,19 @@ Every API that persists results now uses one policy (`redactStoredResponses` in 
 
 The reporter's local report (`index.html`, `data.js` and `run-*.json` in its `outputDir`) keeps responses so the report can show them. Its result-store artifacts follow the policy above.
 
-## Which credentials the `mcp` fixture uses
+## Which credentials are used
 
-**Affects:** HTTP servers tested with a `mcp-server-tester login`, and configs with `auth.clientCredentials`.
+**Affects:** HTTP servers that authenticate with a `mcp-server-tester login`, `auth.clientCredentials`, or more than one auth setting, and users of the `mcpAuthProvider` fixture.
 
-One function (`resolveCredentials`) now decides which credentials a server config uses. See [Which credentials are used](../authentication.md#which-credentials-are-used).
+The fixtures and `createMCPClientForConfig()` now share one precedence, decided in `src/auth/credentials.ts`: the OAuth state file, then a static token, then client credentials, then (in the fixture) a stored login. See [Which credentials are used](../authentication.md#which-credentials-are-used).
 
 - **Stored logins refresh during a run.** The fixture used to read a stored login's token once and send it as a fixed header, so a test that outlived the token failed with 401. The token now comes from a provider that refreshes it from the stored refresh token before it expires.
+- **Client-credentials tokens refresh too.** The token was fetched once at connect; it's now requested again as it nears expiry.
 - **Configured client credentials win over a stored login.** With `auth.clientCredentials` set and a stored login for the same server, the stored login's token replaced the client-credentials token. The configured grant is now used, and the stored login isn't read.
+- **A static token skips the client-credentials grant.** With both `auth.accessToken` and `auth.clientCredentials`, the grant used to run (and could fail the connection) before its token was discarded. Now it doesn't run.
+- **`createMCPClientForConfig()` honours `auth.oauth.authStatePath`.** Only the fixture used it before. The state file also wins over `auth.accessToken`, as it did in the fixture.
+- **The `mcpAuthProvider` fixture prefers `MCP_AUTH_STATE_PATH` over `MCP_ACCESS_TOKEN`**, the same order as above. It used to prefer the token.
+- **Reported `authType`.** A client-credentials connection reports `oauth` (it reported `none`), and a config with both an OAuth state file and a token reports `oauth` (it reported `api-token`, though the state file's token was the one sent).
 
 ## New in 2.0 (non-breaking)
 

@@ -6,6 +6,7 @@
 
 import * as oauth from 'oauth4webapi';
 import createDebug from 'debug';
+import type { OAuthClientMetadata } from '@modelcontextprotocol/client';
 import type { TokenResult } from './types.js';
 
 const debug = createDebug('mcp-server-tester:oauth-flow');
@@ -23,13 +24,7 @@ export function testerClientMetadata(options: {
   redirectUri: string;
   clientName?: string;
   confidential?: boolean;
-}): {
-  redirect_uris: string[];
-  token_endpoint_auth_method: 'none' | 'client_secret_basic';
-  grant_types: string[];
-  response_types: string[];
-  client_name: string;
-} {
+}): OAuthClientMetadata {
   return {
     redirect_uris: [options.redirectUri],
     token_endpoint_auth_method: options.confidential

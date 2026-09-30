@@ -35,7 +35,7 @@ import { attachWireTap } from './wireTap.js';
 import { ProxyAgent, Agent as UndiciAgent } from 'undici';
 import { readFileSync } from 'node:fs';
 import packageJson from '../../package.json' with { type: 'json' };
-import { performClientCredentialsFlow } from '../auth/oauthFlow.js';
+import { configuredCredentials } from '../auth/credentials.js';
 import {
   MCPHttpConnectionError,
   formatMCPConnectionFailure,
@@ -406,37 +406,12 @@ async function connect(
       ...validatedConfig.headers,
     };
 
-    // If using client credentials grant, fetch a token first
-    if (validatedConfig.auth?.clientCredentials && !options?.authProvider) {
-      const ccConfig = validatedConfig.auth.clientCredentials;
-      const clientId = ccConfig.clientId ?? process.env['MCP_CLIENT_ID'];
-      const clientSecret =
-        ccConfig.clientSecret ?? process.env['MCP_CLIENT_SECRET'];
-
-      if (!clientId || !clientSecret) {
-        throw new Error(
-          'Client credentials require clientId/clientSecret in config or MCP_CLIENT_ID/MCP_CLIENT_SECRET env vars'
-        );
-      }
-
-      if (!ccConfig.tokenEndpoint) {
-        throw new Error(
-          'Client credentials require tokenEndpoint in auth.clientCredentials config'
-        );
-      }
-
-      debugClient('Fetching token via client credentials grant');
-      const tokenResult = await performClientCredentialsFlow({
-        tokenEndpoint: ccConfig.tokenEndpoint,
-        clientId,
-        clientSecret,
-        scopes: ccConfig.scopes,
-      });
-      headers.Authorization = `Bearer ${tokenResult.accessToken}`;
-    }
-
-    // If using static token auth (no authProvider), add Authorization header
-    if (validatedConfig.auth?.accessToken && !options?.authProvider) {
+    // The credentials the config declares, unless the caller supplies a
+    // provider (precedence: see configuredCredentials).
+    const authProvider =
+      options?.authProvider ??
+      (await configuredCredentials(validatedConfig)).authProvider;
+    if (!authProvider && validatedConfig.auth?.accessToken) {
       headers.Authorization = `Bearer ${validatedConfig.auth.accessToken}`;
     }
 
@@ -460,7 +435,7 @@ async function connect(
       serverUrl: validatedConfig.serverUrl,
       headers:
         Object.keys(headers).length > 0 ? Object.keys(headers) : undefined,
-      hasAuthProvider: !!options?.authProvider,
+      hasAuthProvider: !!authProvider,
     });
 
     debugHttp('Connecting to %s', validatedConfig.serverUrl);
@@ -480,9 +455,7 @@ async function connect(
         debugHttp('Attempting transport: streamableHttp');
         const streamableTransport = new StreamableHTTPClientTransport(url, {
           requestInit,
-          ...(options?.authProvider
-            ? { authProvider: options.authProvider }
-            : {}),
+          ...(authProvider ? { authProvider } : {}),
         });
         await client.connect(streamableTransport, connectOptions);
         debugClient('Connected via Streamable HTTP');
@@ -507,9 +480,7 @@ async function connect(
         try {
           const sseTransport = new SSEClientTransport(url, {
             requestInit,
-            ...(options?.authProvider
-              ? { authProvider: options.authProvider }
-              : {}),
+            ...(authProvider ? { authProvider } : {}),
           });
           await client.connect(sseTransport, connectOptions);
         } catch (sseError) {
@@ -529,7 +500,7 @@ async function connect(
       url: url.toString(),
       headers,
       ...(dispatcher ? { dispatcher } : {}),
-      ...(options?.authProvider ? { authProvider: options.authProvider } : {}),
+      ...(authProvider ? { authProvider } : {}),
     };
   }
 

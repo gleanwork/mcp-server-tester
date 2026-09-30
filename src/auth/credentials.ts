@@ -5,11 +5,14 @@
  * 1. An auth provider the caller passes in.
  * 2. `auth.oauth.authStatePath`: the Playwright OAuth state file.
  * 3. `auth.accessToken`: a static bearer token.
- * 4. `auth.clientCredentials`: a token fetched at connect.
- * 5. Otherwise, a `mcp-server-tester login` for the server (or tokens in
- *    `MCP_ACCESS_TOKEN`), through a provider that refreshes as tokens expire.
+ * 4. `auth.clientCredentials`: a token from the client-credentials grant,
+ *    fetched again as it expires.
+ * 5. (Fixtures only) a `mcp-server-tester login` for the server, or tokens
+ *    in `MCP_ACCESS_TOKEN`, refreshed as they expire.
  *
- * Stdio servers take no credentials here.
+ * `configuredCredentials` answers 2-4 from the config alone (the client
+ * factory uses it); `resolveCredentials` adds 1 and 5 (the fixtures use it).
+ * Stdio servers take no credentials.
  */
 import type {
   OAuthClientMetadata,
@@ -24,7 +27,12 @@ import {
 import type { AuthType } from '../types/index.js';
 import { PlaywrightOAuthClientProvider } from './oauthClientProvider.js';
 import { CLIOAuthClient, type CLIOAuthResult } from './cli.js';
-import { TESTER_CLIENT_NAME } from './oauthFlow.js';
+import {
+  performClientCredentialsFlow,
+  TESTER_CLIENT_NAME,
+  type ClientCredentialsConfig,
+} from './oauthFlow.js';
+import type { TokenResult } from './types.js';
 
 export interface ResolvedCredentials {
   /** How the connection authenticates, for reports. */
@@ -33,17 +41,70 @@ export interface ResolvedCredentials {
   authProvider?: OAuthClientProvider;
 }
 
-/** Refresh this long before a stored login's token expires. */
+/** Refresh this long before a token expires. */
 const EXPIRY_BUFFER_MS = 60_000;
 
+function isFresh(expiresAt: number | undefined): boolean {
+  return expiresAt === undefined || expiresAt - EXPIRY_BUFFER_MS > Date.now();
+}
+
 /**
- * A stored `mcp-server-tester login` as an auth provider. The SDK asks for
- * `tokens()` before each request, so a token that expires during a long run
- * is refreshed from the stored refresh token instead of failing mid-run.
- * It can't start an interactive login: when refreshing fails, requests fail
- * with a message to log in again.
+ * A provider that only supplies bearer tokens; it can't run an OAuth flow.
+ * The SDK asks for `tokens()` before each request. It only reaches the other
+ * methods when the server rejects a token, and they can't help then, so they
+ * explain what to do instead.
  */
-export class StoredLoginAuthProvider implements OAuthClientProvider {
+export abstract class BearerTokenAuthProvider implements OAuthClientProvider {
+  /** The token to send now, refreshed if the provider can. */
+  protected abstract accessToken(): Promise<string>;
+  /** Why a rejected token can't be recovered here, and what to do. */
+  protected abstract rejectedMessage(): string;
+
+  get redirectUrl(): string {
+    return 'http://localhost/bearer-token';
+  }
+
+  get clientMetadata(): OAuthClientMetadata {
+    return {
+      redirect_uris: [],
+      token_endpoint_auth_method: 'none',
+      grant_types: [],
+      response_types: [],
+      client_name: TESTER_CLIENT_NAME,
+    };
+  }
+
+  async tokens(): Promise<OAuthTokens> {
+    return { access_token: await this.accessToken(), token_type: 'Bearer' };
+  }
+
+  async clientInformation(): Promise<undefined> {
+    throw new Error(this.rejectedMessage());
+  }
+
+  async saveTokens(): Promise<void> {
+    // Nothing to persist: the token's source keeps its own state.
+  }
+
+  async redirectToAuthorization(): Promise<void> {
+    throw new Error(this.rejectedMessage());
+  }
+
+  async saveCodeVerifier(): Promise<void> {
+    // No authorization flow, so no verifier.
+  }
+
+  async codeVerifier(): Promise<string> {
+    throw new Error(this.rejectedMessage());
+  }
+}
+
+/**
+ * A stored `mcp-server-tester login` (or `MCP_ACCESS_TOKEN` tokens). The token
+ * is refreshed from the stored refresh token as it nears expiry, so a token
+ * that expires during a long run doesn't fail it.
+ */
+export class StoredLoginAuthProvider extends BearerTokenAuthProvider {
   private current: CLIOAuthResult;
   private pending: Promise<CLIOAuthResult | null> | undefined;
 
@@ -52,43 +113,12 @@ export class StoredLoginAuthProvider implements OAuthClientProvider {
     initial: CLIOAuthResult,
     private readonly serverUrl: string
   ) {
+    super();
     this.current = initial;
   }
 
-  get redirectUrl(): string {
-    return 'http://localhost/stored-login';
-  }
-
-  get clientMetadata(): OAuthClientMetadata {
-    return {
-      redirect_uris: [this.redirectUrl],
-      token_endpoint_auth_method: 'none',
-      grant_types: ['refresh_token'],
-      response_types: [],
-      client_name: TESTER_CLIENT_NAME,
-    };
-  }
-
-  /**
-   * Only reached when the server rejects a token this provider considered
-   * fresh (the SDK then starts its own OAuth recovery). A stored login can't
-   * recover interactively, so say how to fix it.
-   */
-  async clientInformation(): Promise<undefined> {
-    throw new Error(
-      `The server rejected the stored login for ${this.serverUrl}. Run \`mcp-server-tester login ${this.serverUrl}\` again.`
-    );
-  }
-
-  private isFresh(result: CLIOAuthResult): boolean {
-    return (
-      result.expiresAt === undefined ||
-      result.expiresAt - EXPIRY_BUFFER_MS > Date.now()
-    );
-  }
-
-  async tokens(): Promise<OAuthTokens | undefined> {
-    if (!this.isFresh(this.current)) {
+  protected async accessToken(): Promise<string> {
+    if (!isFresh(this.current.expiresAt)) {
       // Concurrent requests share one refresh.
       this.pending ??= this.login.tryGetAccessToken().finally(() => {
         this.pending = undefined;
@@ -96,25 +126,51 @@ export class StoredLoginAuthProvider implements OAuthClientProvider {
       const refreshed = await this.pending;
       if (refreshed) this.current = refreshed;
     }
-    return { access_token: this.current.accessToken, token_type: 'Bearer' };
+    return this.current.accessToken;
   }
 
-  async saveTokens(): Promise<void> {
-    // The stored login persists its own refreshed tokens.
+  protected rejectedMessage(): string {
+    return this.current.fromEnv
+      ? `The server rejected the token in MCP_ACCESS_TOKEN for ${this.serverUrl}. Update it (and MCP_REFRESH_TOKEN) or unset them.`
+      : `The server rejected the stored login for ${this.serverUrl}. Run \`mcp-server-tester login ${this.serverUrl}\` again.`;
+  }
+}
+
+/**
+ * Tokens from the client-credentials grant, requested again as they near
+ * expiry, so long runs outlive the first token.
+ */
+export class ClientCredentialsAuthProvider extends BearerTokenAuthProvider {
+  private current: { accessToken: string; expiresAt?: number } | undefined;
+  private pending: Promise<TokenResult> | undefined;
+
+  constructor(
+    private readonly grant: ClientCredentialsConfig,
+    private readonly requestToken: (
+      config: ClientCredentialsConfig
+    ) => Promise<TokenResult> = performClientCredentialsFlow
+  ) {
+    super();
   }
 
-  async redirectToAuthorization(): Promise<void> {
-    throw new Error(
-      `The stored login for ${this.serverUrl} expired and could not be refreshed. Run \`mcp-server-tester login ${this.serverUrl}\` again.`
-    );
+  protected async accessToken(): Promise<string> {
+    if (!this.current || !isFresh(this.current.expiresAt)) {
+      this.pending ??= this.requestToken(this.grant).finally(() => {
+        this.pending = undefined;
+      });
+      const result = await this.pending;
+      this.current = {
+        accessToken: result.accessToken,
+        ...(result.expiresIn !== undefined
+          ? { expiresAt: Date.now() + result.expiresIn * 1000 }
+          : {}),
+      };
+    }
+    return this.current.accessToken;
   }
 
-  async saveCodeVerifier(): Promise<void> {
-    // Interactive login is the CLI's job; nothing to store here.
-  }
-
-  async codeVerifier(): Promise<string> {
-    throw new Error('A stored login cannot start an authorization flow.');
+  protected rejectedMessage(): string {
+    return `The server rejected the client-credentials token from ${this.grant.tokenEndpoint}. Check the client's grants and scopes.`;
   }
 }
 
@@ -139,8 +195,45 @@ export function oauthStateProvider(
 }
 
 /**
- * Decides which credentials a server config uses (see the module comment for
- * the precedence). Looking up a stored login reads and may refresh its tokens.
+ * The credentials a config declares (precedence 2-4 above), without looking
+ * for a stored login. A client-credentials token is requested here, so a
+ * misconfigured or failing grant fails before connecting.
+ */
+export async function configuredCredentials(
+  config: MCPConfig
+): Promise<ResolvedCredentials> {
+  if (!isHttpConfig(config)) return { authType: 'none' };
+  const auth = config.auth;
+  if (auth?.oauth?.authStatePath)
+    return { authType: 'oauth', authProvider: oauthStateProvider(auth.oauth) };
+  if (auth?.accessToken) return { authType: 'api-token' };
+  if (auth?.clientCredentials) {
+    const grant = auth.clientCredentials;
+    const clientId = grant.clientId ?? process.env['MCP_CLIENT_ID'];
+    const clientSecret = grant.clientSecret ?? process.env['MCP_CLIENT_SECRET'];
+    if (!clientId || !clientSecret)
+      throw new Error(
+        'Client credentials require clientId/clientSecret in config or MCP_CLIENT_ID/MCP_CLIENT_SECRET env vars'
+      );
+    if (!grant.tokenEndpoint)
+      throw new Error(
+        'Client credentials require tokenEndpoint in auth.clientCredentials config'
+      );
+    const authProvider = new ClientCredentialsAuthProvider({
+      tokenEndpoint: grant.tokenEndpoint,
+      clientId,
+      clientSecret,
+      scopes: grant.scopes,
+    });
+    await authProvider.tokens();
+    return { authType: 'oauth', authProvider };
+  }
+  return { authType: 'none' };
+}
+
+/**
+ * Decides which credentials a server config uses in a test (all of the
+ * precedence above). Looking up a stored login reads and may refresh it.
  */
 export async function resolveCredentials(
   config: MCPConfig,
@@ -148,13 +241,9 @@ export async function resolveCredentials(
 ): Promise<ResolvedCredentials> {
   if (options.authProvider)
     return { authType: 'oauth', authProvider: options.authProvider };
-  if (!isHttpConfig(config)) return { authType: 'none' };
-
-  const auth = config.auth;
-  if (auth?.oauth?.authStatePath)
-    return { authType: 'oauth', authProvider: oauthStateProvider(auth.oauth) };
-  if (auth?.accessToken) return { authType: 'api-token' };
-  if (auth?.clientCredentials) return { authType: 'oauth' };
+  const configured = await configuredCredentials(config);
+  if (configured.authType !== 'none' || !isHttpConfig(config))
+    return configured;
 
   const login = new CLIOAuthClient({ mcpServerUrl: config.serverUrl });
   const initial = await login.tryGetAccessToken();

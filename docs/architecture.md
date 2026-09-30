@@ -160,8 +160,8 @@ auth/storage.ts: saveTokens()                     [written to ~/.local/state/mcp
 At test time:
 auth/credentials.ts: resolveCredentials(config)   [the one place credential precedence is decided]
    ↓  auth.oauth.authStatePath → PlaywrightOAuthClientProvider (Playwright OAuth state file)
-   ↓  auth.accessToken / auth.clientCredentials → applied by the client factory
-   ↓  otherwise a stored login → StoredLoginAuthProvider (refreshes via refreshAccessToken() as tokens expire)
+   ↓  auth.accessToken → a static header; auth.clientCredentials → ClientCredentialsAuthProvider (re-runs the grant as tokens expire)
+   ↓  otherwise (fixtures) a stored login → StoredLoginAuthProvider (refreshes via CLIOAuthClient.tryGetAccessToken() as tokens expire)
 mcp/clientFactory.ts: createMCPClientForConfig(config, { authProvider })
    ↓  MCP SDK Client asks the authProvider for a token before each request
 ```
