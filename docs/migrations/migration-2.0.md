@@ -1,0 +1,136 @@
+# Migration Guide: v1.x to v2.0 (MCP SDK v2 and protocol versions)
+
+MST 2.0 moves to the [MCP TypeScript SDK v2](https://github.com/modelcontextprotocol/typescript-sdk) and adds support for the 2026-07-28 protocol alongside the legacy one. **By default, connections behave exactly as in 1.x**: `protocol` defaults to `'legacy'`, and a golden wire transcript test guards that the default sends the same messages as before.
+
+Other 2.0 changes have their own guides: [dataset sources](./dataset-sources.md), [host traces](./host-traces.md), and [LLM host unification](./llm-host-vercel-unification.md).
+
+## Table of Contents
+
+- [SDK types and imports](#sdk-types-and-imports)
+- [`mcp.callTool()` returns protocol errors as error results](#mcpcalltool-returns-protocol-errors-as-error-results)
+- [Custom `MCPFixtureApi` objects need new members](#custom-mcpfixtureapi-objects-need-new-members)
+- [Conformance results: severity, skips, and new checks](#conformance-results-severity-skips-and-new-checks)
+- [`compareEvalRuns()` returns `warnings`](#compareevalruns-returns-warnings)
+- [`MCP_PROTOCOL_VERSION` is deprecated](#mcp_protocol_version-is-deprecated)
+- [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
+
+---
+
+## SDK types and imports
+
+**Affects:** code that imports from `@modelcontextprotocol/sdk` or uses `mcp.client` / the `mcpClient` fixture directly.
+
+`mcp.client` and `mcpClient` are now a v2 SDK `Client` from `@modelcontextprotocol/client`. Types, transports, and auth helpers all come from that package's root:
+
+```typescript
+// Before (1.x)
+import type { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
+
+// After (2.0)
+import type {
+  Tool,
+  CallToolResult,
+  OAuthClientProvider,
+} from '@modelcontextprotocol/client';
+```
+
+If you call the raw client, note these SDK v2 behavior changes:
+
+- `McpError` is now `ProtocolError`, and `ErrorCode` is split into `ProtocolErrorCode` (from the server) and `SdkErrorCode` (local, e.g. timeouts).
+- `StreamableHTTPError` is now `SdkHttpError`, with the HTTP status on `.status`. Custom auth or transport code that catches HTTP errors needs updating.
+- Error messages from the server are no longer prefixed with `MCP error <code>:`. Match on `error.code` instead.
+- `client.listTools()`, `listResources()`, and `listPrompts()` fetch every page when called without a cursor (up to 64 pages), and return an empty list (instead of sending the request) when the server did not declare the capability.
+- `client.callTool(params, options)` no longer takes a result schema argument, and a tool's `outputSchema` is compiled when the tool is called rather than when it is listed.
+- On 2026-07-28 connections a v2 client caches list and read results for their `ttlMs`. MST's clients use a response cache that never serves stale entries, so every fixture call reaches the server; a v2 `Client` you build yourself caches unless you pass a cache of your own.
+- Over stdio, stdout lines that are not JSON are skipped instead of failing the connection.
+- Closing a client aborts request handlers that are still running.
+- OAuth discovery (`discoverOAuthMetadata()`, `auth()`) rejects on network failures such as DNS errors or `ECONNREFUSED` in Node, instead of returning `undefined` as if the server had no metadata.
+
+The SDK ships a codemod for the mechanical parts: `npx @modelcontextprotocol/codemod@latest v1-to-v2 .`. See the SDK's [upgrade guide](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/migration/upgrade-to-v2.md).
+
+Projects created with `mcp-server-tester init` now depend on `@modelcontextprotocol/client` instead of `@modelcontextprotocol/sdk`.
+
+## `mcp.callTool()` returns protocol errors as error results
+
+**Affects:** tests that expect `mcp.callTool()` to reject for an unknown tool or invalid arguments.
+
+MCP reports tool failures two ways: tool execution errors (`isError: true`) and JSON-RPC protocol errors (e.g. `-32602` for an unknown tool). v2 SDK servers and the 2026-07-28 spec use protocol errors for unknown tools, which would otherwise make `mcp.callTool()` reject. MST now folds protocol errors into an error-shaped result, so one assertion style works for both:
+
+```typescript
+import { getToolProtocolError } from '@gleanwork/mcp-server-tester';
+
+const result = await mcp.callTool('nonexistent_tool', {});
+expect(result).toBeToolError(); // works for both kinds
+expect(result).toContainToolText('MCP error -32602');
+getToolProtocolError(result); // { code: -32602, message: '...', data?: ... } or null
+```
+
+Local failures (timeouts, closed connections, auth) still reject. If you asserted `await expect(mcp.callTool(...)).rejects...` for a protocol error, switch to `toBeToolError()` or `getToolProtocolError()`. The raw `mcp.client.callTool()` still rejects.
+
+## Custom `MCPFixtureApi` objects need new members
+
+**Affects:** code that builds an `MCPFixtureApi` by hand (custom fixtures, test doubles). Code that uses the `mcp` fixture or `createMCPFixture()` is not affected.
+
+`MCPFixtureApi` gained `protocol`, `discover()`, `listResources()`, `readResource()`, `request()`, and `skills`. Add them with the exported helpers:
+
+```typescript
+import {
+  createFixtureExtensions,
+  getProtocolInfo,
+  type MCPFixtureApi,
+} from '@gleanwork/mcp-server-tester';
+
+const api: MCPFixtureApi = {
+  client,
+  authType: 'none',
+  get protocol() {
+    return getProtocolInfo(client);
+  },
+  ...createFixtureExtensions(client),
+  listTools: ...,
+  callTool: ...,
+  getServerInfo: ...,
+};
+```
+
+## Conformance results: severity, skips, and new checks
+
+**Affects:** code that inspects `runConformanceChecks()` results in detail.
+
+- Each check can carry `severity` (`'must'` or `'should'`), `skipped`, `specVersion`, and `specRef`. `result.pass` is true when every non-skipped `must` check passes; failing `should` checks are warnings.
+- The result has a `protocol` field with the connection's requested and negotiated protocol.
+- On legacy connections, the core checks are the 1.x checks, with two that are stricter:
+  - `invalid_tool_returns_error` fails if calling an unknown tool times out or closes the connection. 1.x counted any rejection as a pass.
+  - `tool_schemas_valid` fails if a tool's `outputSchema` does not compile.
+- **Servers that declare the skills extension** (`io.modelcontextprotocol/skills`) now also get the [skills checks](../skills.md#conformance) in every era. Pass `skills: false` to turn them off.
+- On 2026-07-28 connections, the [modern checks](../protocol-versions.md#conformance-by-era) run as well, including raw probe requests. Over stdio a probe starts a short-lived copy of your server; pass `probe: false` if that is a problem.
+- The HTML report groups checks by protocol and shows warnings and skips separately.
+
+## `compareEvalRuns()` returns `warnings`
+
+**Affects:** code that asserts on the exact shape of `compareEvalRuns()` output.
+
+The result has a new `warnings: string[]` field. It flags comparisons between runs that negotiated different protocol eras or revisions.
+
+## `MCP_PROTOCOL_VERSION` is deprecated
+
+The exported `MCP_PROTOCOL_VERSION` constant is the header MST sends on OAuth discovery requests, not the protocol connections speak. It is deprecated and will be removed in a future major. Use `mcpConfig.protocol` to choose a connection's protocol.
+
+## New in 2.0 (non-breaking)
+
+- `protocol` on `mcpConfig` (`'legacy'`, `'auto'`, or a revision like `'2026-07-28'`), the `mcpProtocol` fixture option, and `protocolMatrix()`. See [Protocol Versions](../protocol-versions.md). To run an existing project against both eras:
+
+  ```typescript
+  import { protocolMatrix } from '@gleanwork/mcp-server-tester';
+
+  projects: protocolMatrix(
+    { name: 'my-server', use: { mcpConfig } },
+    ['legacy', '2026-07-28']
+  ), // my-server@legacy, my-server@2026-07-28
+  ```
+
+- `runCrossEraChecks()` to check a server serves every era the same.
+- `mcp.skills`, skills conformance checks, and `mcpHostConfig.skills` / `runSkillsComparison()`. See [Agent Skills](../skills.md).
+- Direct eval cases with `request` instead of `toolName`, and built-in schemas for skills and discover results.
+- Eval run metadata records the protocol (`metadata.protocol`, stored `protocolVersion` / `protocolEra`).

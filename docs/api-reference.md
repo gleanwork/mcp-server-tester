@@ -12,6 +12,7 @@ Complete API documentation for `@gleanwork/mcp-server-tester`.
 - [Text Utilities](#text-utilities)
 - [Judge Functions](#judge-functions)
 - [Conformance Functions](#conformance-functions)
+- [Protocol Helpers](#protocol-helpers)
 
 ## Fixtures
 
@@ -127,6 +128,48 @@ Get server information (name, version).
 const info = mcp.getServerInfo();
 console.log(info?.name, info?.version);
 ```
+
+##### `protocol`
+
+The protocol the connection requested and negotiated: `{ requested, negotiated, era }`, e.g. `{ requested: '2026-07-28', negotiated: '2026-07-28', era: 'modern' }`. See [Protocol Versions](./protocol-versions.md).
+
+##### `discover()`
+
+The `server/discover` result on 2026-07-28 connections, `null` on legacy connections.
+
+**Returns:** `Promise<DiscoverResult | null>`
+
+##### `listResources()` / `readResource(uri)`
+
+`resources/list` (all pages) and `resources/read`.
+
+**Returns:** `Promise<Resource[]>` / `Promise<ReadResourceResult>`
+
+##### `request(method, params, resultSchema)`
+
+Send any request, such as an extension method, and validate the result against a Standard Schema (for example a Zod schema).
+
+```typescript
+const result = await mcp.request(
+  'skills/list',
+  {},
+  z.object({ skills: z.array(z.object({ uri: z.string() })) })
+);
+```
+
+##### `skills`
+
+Agent Skills (SEP-2640) helpers: `supported()`, `settings()`, `list()`, `get(uri)`, and `read(uri, { entry?, verify? })`, which verifies digest, size, and frontmatter against the skill's entry. See [Agent Skills](./skills.md).
+
+```typescript
+const [entry] = await mcp.skills.list();
+const skill = await mcp.skills.read(entry!.uri);
+expect(skill.verified).toBe(true);
+```
+
+### `createFixtureExtensions(client)`
+
+Builds `discover`, `listResources`, `readResource`, `request`, and `skills` for a client. Use it (with `getProtocolInfo(client)` for `protocol`) when you implement `MCPFixtureApi` yourself.
 
 ### `createMCPFixture(client, testInfo?, options?)`
 
@@ -445,6 +488,28 @@ The result includes pass-rate deltas, optional tool precision/recall/F1 deltas, 
 - `unchangedFailures` - failed in both runs
 - `missingFromBaseline` - case exists only in candidate
 - `missingFromCandidate` - case exists only in baseline
+
+It also has `warnings: string[]`, which flags runs that negotiated different MCP protocol eras or revisions (from `metadata.protocol`).
+
+### `runSkillsComparison(options, context)`
+
+Run a dataset once per `mcpHostConfig.skills` mode and compare each mode against the first. Only `mcp_host` cases change between variants.
+
+**Parameters:**
+
+- `options: SkillsComparisonOptions` - `EvalRunnerOptions` plus `variants?: ('off' | 'catalog' | 'preload')[]` (default `['off', 'catalog']`)
+- `context: EvalContext`
+
+**Returns:** `Promise<SkillsComparisonResult>` with `variants[]` (`mode`, `result`, `summary: { passRate, skillLoadRate?, skillBeforeToolRate?, skillVerificationFailureRate? }`) and `comparisons[]` (`EvalRunComparisonResult` per candidate mode).
+
+```typescript
+const result = await runSkillsComparison(
+  { dataset, variants: ['off', 'catalog', 'preload'] },
+  { mcp, testInfo }
+);
+```
+
+See [Agent Skills](./skills.md#measuring-whether-skills-help).
 
 ### External Result Storage
 
@@ -1147,7 +1212,13 @@ Run MCP protocol conformance checks.
 - `mcp: MCPFixtureApi` - MCP fixture API
 - `options?: object`
   - `requiredTools?: string[]` - Tools that must be present
-  - `validateSchemas?: boolean` - Validate tool input schemas (default: `false`)
+  - `validateSchemas?: boolean` - Validate tool input schemas (default: `true`)
+  - `checkServerInfo?`, `checkResources?`, `checkPrompts?: boolean` - Toggle those checks (default: `true`)
+  - `probe?: boolean` - Allow raw probe requests for 2026-07-28 rejection rules (default: `true`)
+  - `skills?: { maxSkills?: number; verifyFiles?: 'skill-md' | 'all'; maxPages?: number } | false` - Tune or disable the skills checks (defaults: 25 skills, `'skill-md'`, 64 pages)
+- `testInfo?: TestInfo` - Attach results to the MCP reporter
+
+Checks are selected by the negotiated era: legacy connections run the core checks; 2026-07-28 connections also run the [modern checks](./protocol-versions.md#conformance-by-era); servers that declare the skills extension get the [skills checks](./skills.md#conformance) in every era.
 
 **Returns:** `Promise<MCPConformanceResult>`
 
@@ -1164,14 +1235,84 @@ expect(result.pass).toBe(true);
 
 ```typescript
 interface MCPConformanceResult {
-  pass: boolean;
+  pass: boolean; // every non-skipped 'must' check passed
   checks: Array<{
     name: string;
     pass: boolean;
     message: string;
+    severity?: 'must' | 'should'; // failing 'should' checks are warnings
+    skipped?: boolean; // not applicable here; message says why
+    specVersion?: string; // e.g. '2026-07-28'
+    specRef?: string; // spec section the check enforces
   }>;
+  protocol: MCPProtocolInfo; // { requested, negotiated, era }
+  raw: MCPConformanceRaw; // serverInfo, capabilities, tools, resources, prompts
 }
 ```
+
+### `runCrossEraChecks(config, options?, testInfo?)`
+
+Connect to the same server once per protocol and check it serves the same tools, tool definitions, resources, prompts, skills, and capabilities in each, and that `protocol: 'auto'` picks the modern era.
+
+**Parameters:**
+
+- `config: MCPConfig`
+- `options?: { protocols?: ProtocolSetting[]; checkAuto?: boolean; clientOptions?: Omit<CreateMCPClientOptions, 'protocol'> }` - `protocols` defaults to `['legacy', '2026-07-28']`
+- `testInfo?: TestInfo`
+
+**Returns:** `Promise<MCPCrossEraResult>` with `pass`, `checks`, and `connections`.
+
+## Protocol Helpers
+
+### `protocolMatrix(project, protocols)`
+
+Expand one Playwright project into one project per protocol, named `<name>@<protocol>`, with `mcpProtocol` and `mcpConfig.protocol` set.
+
+```typescript
+projects: [
+  ...protocolMatrix({ name: 'docs', use: { mcpConfig } }, [
+    'legacy',
+    '2026-07-28',
+  ]),
+];
+```
+
+### `getProtocolInfo(client)`
+
+`{ requested, negotiated, era }` for a client created by MST.
+
+### `eraOfRevision(revision)` / `isProtocolRevision(value)`
+
+Classify a dated revision as `'legacy'` or `'modern'`, and check a string is a `YYYY-MM-DD` revision.
+
+### `DEFAULT_PROTOCOL_SETTING` / `ProtocolMatrixEntry<T>`
+
+`DEFAULT_PROTOCOL_SETTING` is `'legacy'`, the `protocol` used when none is set. `ProtocolMatrixEntry<T>` is the type of each project `protocolMatrix()` returns.
+
+## Tool Call Helpers
+
+### `callToolNormalized(client, params, options?)`
+
+What `mcp.callTool()` uses: calls a tool on a raw SDK `Client` and turns a JSON-RPC error sent by the server (such as `-32602` for an unknown tool) into an `isError: true` result whose text is `MCP error <code>: <message>`. Local SDK errors (timeouts, closed connections, auth) still reject.
+
+### `getToolProtocolError(result)`
+
+The `{ code, message, data? }` of the protocol error a result was made from, or `null` for results the server returned.
+
+## Skills Functions
+
+`mcp.skills` wraps these; use them directly with a raw SDK `Client`. See [Agent Skills](./skills.md).
+
+| Export                              | Purpose                                                                                                 |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `getSkillsExtension(client)`        | The server's `io.modelcontextprotocol/skills` settings, or `null` when it doesn't declare the extension |
+| `listSkills(client, { maxPages? })` | All `skills/list` entries, following `nextCursor` (default 64 pages)                                    |
+| `getSkill(client, uri)`             | One entry from `skills/get`                                                                             |
+| `readSkillFile(client, uri)`        | Read a skill file with `resources/read`: `{ uri, text?, bytes, mimeType? }`                             |
+| `verifySkillFile(entry, file)`      | Problems (digest, size, `SKILL.md` frontmatter) found checking a read file against its entry            |
+| `validateSkillEntry(entry)`         | SEP-2640 entry problems, each with `severity: 'must' \| 'should'`                                       |
+| `parseSkillFrontmatter(markdown)`   | The YAML frontmatter of a `SKILL.md` as an object, or `null` without one                                |
+| `SkillEntrySchema`                  | Zod schema for the wire shape of an entry (use `validateSkillEntry()` for the SEP rules)                |
 
 ## Type Definitions
 
