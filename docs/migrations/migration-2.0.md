@@ -15,6 +15,7 @@ Other 2.0 changes have their own guides: [dataset sources](./dataset-sources.md)
 - [`executeCase` returns a typed `CaseExecution`](#executecase-returns-a-typed-caseexecution)
 - [`external_host` results keep tool precision and recall](#external_host-results-keep-tool-precision-and-recall)
 - [`.not` works on `toSatisfyToolPredicate` and `toMatchToolSnapshot`](#not-works-on-tosatisfytoolpredicate-and-tomatchtoolsnapshot)
+- [LLM judges share one prompt, parser and size limit](#llm-judges-share-one-prompt-parser-and-size-limit)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
 ---
@@ -169,6 +170,17 @@ The reported tool trace now comes from the same match as the metrics. A required
 Both matchers negated their own result and then Playwright negated it again, so `.not` asserted the opposite of what it says. `expect(r).not.toSatisfyToolPredicate(p)` passed when `p` was satisfied, and `.not.toMatchToolSnapshot(name)` passed when the response matched the snapshot. `.not` now means "not", as it does for every other matcher. Assertions without `.not` are unchanged.
 
 A test that relied on the old behaviour now fails. Remove its `.not`. A predicate that throws still fails the assertion, with or without `.not`.
+
+## LLM judges share one prompt, parser and size limit
+
+**Affects:** built-in LLM judges (`rubric` judges, not custom `judge` executors). Mainly `provider: 'anthropic-agent-sdk'` and `maxToolOutputSize` users.
+
+Every provider now sends the same system prompt and user prompt and reads the verdict with the same parser. Before, each provider carried its own copy, and they had drifted:
+
+- **`maxToolOutputSize` applies to every provider.** Only `anthropic-agent-sdk` enforced it; the others ignored it. A judge configured with it now fails, without calling the model, when the response is larger.
+- **`anthropic-agent-sdk` uses the shared prompts.** Its system prompt and the end of its user prompt differed from the other providers, so its scores may shift slightly.
+- **All providers accept a verdict wrapped in prose.** Only `anthropic-agent-sdk` did; the others failed with "Failed to parse judge response as JSON".
+- **`provider: 'google'` honours `temperature`.** It was fixed at 0; the default is still 0.
 
 ## New in 2.0 (non-breaking)
 

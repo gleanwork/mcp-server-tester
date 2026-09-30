@@ -12,7 +12,13 @@ vi.mock('@anthropic-ai/vertex-sdk', () => {
   };
 });
 
-import { createVertexAnthropicJudge } from './vertexAnthropicJudge.js';
+import { createJudge } from './judgeClient.js';
+import type { JudgeConfig } from './judgeTypes.js';
+
+/** The vertex-anthropic judge, through the public createJudge. */
+function createVertexAnthropicJudge(config: JudgeConfig = {}) {
+  return createJudge({ ...config, provider: 'vertex-anthropic' });
+}
 
 async function getMockCreate() {
   const mod = await import('@anthropic-ai/vertex-sdk' as any);

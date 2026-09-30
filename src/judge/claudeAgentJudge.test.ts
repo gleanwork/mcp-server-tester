@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
-import { createClaudeAgentJudge } from './claudeAgentJudge.js';
+import { createJudge } from './judgeClient.js';
 import type { JudgeConfig } from './judgeTypes.js';
 
 // Mock the Claude Agent SDK
@@ -9,6 +9,11 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
 
 // Import the mocked query function
 import { query } from '@anthropic-ai/claude-agent-sdk';
+
+/** The anthropic-agent-sdk judge, through the public createJudge. */
+function createClaudeAgentJudge(config: JudgeConfig = {}) {
+  return createJudge({ ...config, provider: 'anthropic-agent-sdk' });
+}
 
 // Helper to create a mock async generator from query
 function mockQueryResponse(

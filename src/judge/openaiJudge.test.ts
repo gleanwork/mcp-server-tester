@@ -21,7 +21,13 @@ vi.mock('openai', () => {
   };
 });
 
-import { createOpenAIJudge } from './openaiJudge.js';
+import { createJudge } from './judgeClient.js';
+import type { JudgeConfig } from './judgeTypes.js';
+
+/** The openai judge, through the public createJudge. */
+function createOpenAIJudge(config: JudgeConfig = {}) {
+  return createJudge({ ...config, provider: 'openai' });
+}
 
 // Retrieve the mocked create function for configuring in tests
 async function getMockCreate() {

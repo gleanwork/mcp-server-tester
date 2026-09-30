@@ -310,8 +310,8 @@ Use conventional commits: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore
 ### New LLM Judge Provider
 
 1. Add to `ProviderKind` in `src/judge/judgeTypes.ts`
-2. Implement `Judge` interface in `src/judge/myProviderJudge.ts`
-3. Add to switch in `src/judge/judgeClient.ts`
+2. Write a completion adapter in `src/judge/myProviderJudge.ts`: `(config: JudgeConfig) => JudgeCompletionAdapter`, which sends `{ system, prompt }` and returns `{ text, usage }`. Don't build prompts or parse verdicts there: `src/judge/llmJudge.ts` owns the prompt, the parser, the `maxToolOutputSize` guard and usage defaults for every provider
+3. Add it to `JUDGE_PROVIDERS` in `src/judge/judgeClient.ts` (the record is typed by `ProviderKind`, so a missing entry is a compile error)
 
 ### New LLM Host Provider (mcp_host mode)
 

@@ -13,7 +13,13 @@ vi.mock('@google/generative-ai', () => ({
   GoogleGenerativeAI: MockGoogleGenerativeAI,
 }));
 
-import { createGoogleJudge } from './googleJudge.js';
+import { createJudge } from './judgeClient.js';
+import type { JudgeConfig } from './judgeTypes.js';
+
+/** The google judge, through the public createJudge. */
+function createGoogleJudge(config: JudgeConfig = {}) {
+  return createJudge({ ...config, provider: 'google' });
+}
 
 function makeGenerateResponse(
   text: string,
@@ -196,6 +202,29 @@ describe('googleJudge', () => {
       expect(mockGetGenerativeModel).toHaveBeenCalledWith(
         expect.objectContaining({ model: 'gemini-2.0-flash' })
       );
+    });
+
+    it('uses the configured temperature, defaulting to 0', async () => {
+      mockGenerateContent.mockResolvedValue(
+        makeGenerateResponse(
+          JSON.stringify({ pass: true, score: 1.0, reasoning: 'Perfect' })
+        )
+      );
+
+      await createGoogleJudge({}).evaluate('candidate', null, 'rubric');
+      await createGoogleJudge({ temperature: 0.4 }).evaluate(
+        'candidate',
+        null,
+        'rubric'
+      );
+
+      expect(
+        mockGetGenerativeModel.mock.calls.map(
+          ([options]) =>
+            (options as { generationConfig: { temperature: number } })
+              .generationConfig.temperature
+        )
+      ).toEqual([0, 0.4]);
     });
 
     it('uses the specified model override', async () => {
