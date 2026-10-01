@@ -32,6 +32,18 @@
     "./cowork-linux-runtime": "./scripts/cowork_linux.py",
     "./chatgpt-linux-runtime": "./scripts/chatgpt_linux.py",
     "./cowork-requirements": "./scripts/cowork-requirements.txt",
+    "./evals": {
+      "types": "./dist/evals.d.ts",
+      "import": "./dist/evals.js"
+    },
+    "./auth": {
+      "types": "./dist/auth.d.ts",
+      "import": "./dist/auth.js"
+    },
+    "./experimental/hosts": {
+      "types": "./dist/experimental/hosts.d.ts",
+      "import": "./dist/experimental/hosts.js"
+    },
     "./types": {
       "types": "./dist/types/index.d.ts",
       "import": "./dist/types/index.js",

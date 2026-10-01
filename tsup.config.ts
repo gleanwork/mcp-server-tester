@@ -11,13 +11,31 @@ const OPTIONAL_JUDGE_SDKS = [
   'openai',
 ];
 
+const LIBRARY_EXTERNAL = [
+  '@ai-sdk/google',
+  '@ai-sdk/mistral',
+  '@ai-sdk/azure',
+  '@ai-sdk/deepseek',
+  '@openrouter/ai-sdk-provider',
+  '@ai-sdk/xai',
+  '@google-cloud/storage',
+  ...OPTIONAL_JUDGE_SDKS,
+];
+
 export default defineConfig([
-  // Library build
+  // Library build (ESM). The root and public subpaths share chunks, so registries and
+  // classes are one instance whichever subpath a caller imports them from.
   {
-    entry: ['src/index.ts', 'src/types/index.ts'],
-    format: ['esm', 'cjs'],
+    entry: {
+      index: 'src/index.ts',
+      'types/index': 'src/types/index.ts',
+      evals: 'src/entries/evals.ts',
+      auth: 'src/entries/auth.ts',
+      'experimental/hosts': 'src/entries/experimentalHosts.ts',
+    },
+    format: ['esm'],
     dts: true,
-    splitting: false,
+    splitting: true,
     sourcemap: true,
     clean: true,
     treeshake: true,
@@ -25,16 +43,23 @@ export default defineConfig([
     outDir: 'dist',
     tsconfig: './tsconfig.build.json',
     // shims: false - main library doesn't use __dirname/__filename
-    external: [
-      '@ai-sdk/google',
-      '@ai-sdk/mistral',
-      '@ai-sdk/azure',
-      '@ai-sdk/deepseek',
-      '@openrouter/ai-sdk-provider',
-      '@ai-sdk/xai',
-      '@google-cloud/storage',
-      ...OPTIONAL_JUDGE_SDKS,
-    ],
+    external: LIBRARY_EXTERNAL,
+  },
+  // Library build (CommonJS): the root and types only. The subpaths are ESM.
+  {
+    entry: {
+      index: 'src/index.ts',
+      'types/index': 'src/types/index.ts',
+    },
+    format: ['cjs'],
+    dts: true,
+    splitting: false,
+    sourcemap: true,
+    treeshake: true,
+    minify: false,
+    outDir: 'dist',
+    tsconfig: './tsconfig.build.json',
+    external: LIBRARY_EXTERNAL,
   },
   // CLI build
   {

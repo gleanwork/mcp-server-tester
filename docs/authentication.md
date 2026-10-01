@@ -593,9 +593,9 @@ export default defineConfig({
 import type {
   MCPAuthConfig,
   MCPOAuthConfig,
-  StoredOAuthState,
   OAuthSetupConfig,
 } from '@gleanwork/mcp-server-tester';
+import type { StoredOAuthState } from '@gleanwork/mcp-server-tester/auth';
 ```
 
 ### OAuth Client Provider

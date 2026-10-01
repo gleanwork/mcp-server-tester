@@ -226,7 +226,7 @@ LLM host simulation calls a real LLM API. Approximate costs:
 Use `toolOverrides` to compare tool metadata variants without changing your eval dataset or MCP server source. The dataset remains the behavioral contract; the override is runtime-only data passed to `runEvalDataset`.
 
 ```typescript
-import { compareEvalRuns } from '@gleanwork/mcp-server-tester';
+import { compareEvalRuns } from '@gleanwork/mcp-server-tester/evals';
 
 const variant = {
   id: 'search-description-v2',
@@ -296,9 +296,9 @@ The library owns the experiment mechanics; your `proposeVariants` callback owns 
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
 import {
   loadEvalDataset,
-  runVariantExperiment,
   type ToolOverrideVariant,
 } from '@gleanwork/mcp-server-tester';
+import { runVariantExperiment } from '@gleanwork/mcp-server-tester/evals';
 
 // Static A/B: try a fixed set of tool-description variants and keep the winner.
 test('optimize search description (static variants)', async ({

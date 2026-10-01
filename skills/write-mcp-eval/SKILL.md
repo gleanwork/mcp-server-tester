@@ -366,12 +366,8 @@ test('inline dataset', async ({ mcp }, testInfo) => {
 Save eval results as a baseline and compare future runs:
 
 ```typescript
-import {
-  loadEvalDataset,
-  runEvalDataset,
-  saveBaseline,
-  loadBaseline,
-} from '@gleanwork/mcp-server-tester';
+import { loadEvalDataset, runEvalDataset } from '@gleanwork/mcp-server-tester';
+import { saveBaseline, loadBaseline } from '@gleanwork/mcp-server-tester/evals';
 
 test('search evals match baseline', async ({ mcp }, testInfo) => {
   const dataset = await loadEvalDataset('./data/evals.json');

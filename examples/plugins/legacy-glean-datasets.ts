@@ -3,13 +3,15 @@ import path from 'node:path';
 import { z } from 'zod';
 import {
   loadEvalDatasetFromObject,
-  registerDatasetSource,
-  type DatasetSourceContext,
   type EvalDataset,
-  type EvalManifest,
-  type ExtensionConfig,
   type MCPHostConfig,
 } from '@gleanwork/mcp-server-tester';
+import {
+  registerDatasetSource,
+  type DatasetSourceContext,
+  type EvalManifest,
+  type ExtensionConfig,
+} from '@gleanwork/mcp-server-tester/evals';
 
 const LegacyCaseSchema = z
   .object({

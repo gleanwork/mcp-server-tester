@@ -6,18 +6,20 @@ import path from 'node:path';
 import { z } from 'zod';
 import {
   registerJudge,
-  registerHost,
-  registerDatasetSource,
   validateJudge,
   validateToolCalls,
-  validateManifestRegistrations,
-  loadEvalManifestFromObject,
   loadEvalDatasetFromObject,
   validateMCPConfig,
   runEvalDataset,
-  FileEvalResultStore,
   expect as playwrightExpect,
 } from '../dist/index.js';
+import {
+  registerHost,
+  registerDatasetSource,
+  validateManifestRegistrations,
+  loadEvalManifestFromObject,
+  FileEvalResultStore,
+} from '../dist/evals.js';
 
 const root = await fs.mkdtemp(path.join(os.tmpdir(), 'eval-foundation-'));
 const captured = [];

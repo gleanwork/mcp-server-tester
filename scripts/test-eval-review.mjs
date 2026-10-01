@@ -22,7 +22,7 @@ await server.connect(new StdioServerTransport());`
   const pluginPath = path.join(dir, 'plugin.mjs');
   await fs.writeFile(
     pluginPath,
-    `import {registerMetric} from ${JSON.stringify(pathToFileURL(path.resolve('dist/index.js')).href)};
+    `import {registerMetric} from ${JSON.stringify(pathToFileURL(path.resolve('dist/evals.js')).href)};
 import {z} from ${JSON.stringify(import.meta.resolve('zod'))};
 export function register() {registerMetric({name:'local-plugin-metric',schema:z.object({}).passthrough(),kind:'binary',compute(result){return result.pass;}});}`
   );
@@ -119,9 +119,18 @@ export function register() {registerMetric({name:'local-plugin-metric',schema:z.
       {
         name: 'built-public-api',
         setup(builder) {
+          // The package root and its public subpaths, as built.
           builder.onResolve(
-            { filter: /^@gleanwork\/mcp-server-tester$/ },
-            () => ({ path: path.resolve('dist/index.js'), external: true })
+            { filter: /^@gleanwork\/mcp-server-tester(\/.+)?$/ },
+            (args) => {
+              const subpath = args.path.slice(
+                '@gleanwork/mcp-server-tester'.length + 1
+              );
+              return {
+                path: path.resolve(`dist/${subpath || 'index'}.js`),
+                external: true,
+              };
+            }
           );
         },
       },

@@ -261,8 +261,9 @@ servers, host options, tool maps, scenario templates, metrics, and judges.
 The canonical execution primitives remain `EvalDataset`, `EvalCase`,
 `EvalMode`, `MCPConfig`, and `runEvalDataset`.
 
-Applications can register extensions with `registerDatasetSource`,
-`registerHost`, `registerJudge`, `registerMetric`, and `registerResultStore`.
+Applications can register extensions with `registerJudge` (from the package
+root) and `registerDatasetSource`, `registerHost`, `registerMetric`, and
+`registerResultStore` (from `@gleanwork/mcp-server-tester/evals`).
 Secrets remain environment-variable or plugin-owned runtime inputs and do not
 belong in committed manifests.
 

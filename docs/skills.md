@@ -157,7 +157,7 @@ Metrics: `skill_loaded`, `skill_before_tool`, and `skill_verification_failed`. E
 Models often skip skills they could use, and a matching tool can win over the skill written for it. `runSkillsComparison()` runs the same dataset with different `skills` modes and compares them:
 
 ```typescript
-import { runSkillsComparison } from '@gleanwork/mcp-server-tester';
+import { runSkillsComparison } from '@gleanwork/mcp-server-tester/evals';
 
 test('skills improve weather reports', async ({ mcp }, testInfo) => {
   const result = await runSkillsComparison(

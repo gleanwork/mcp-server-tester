@@ -7,6 +7,7 @@ Other 2.0 changes have their own guides: [dataset sources](./dataset-sources.md)
 ## Table of Contents
 
 - [SDK types and imports](#sdk-types-and-imports)
+- [Imports moved to subpaths](#imports-moved-to-subpaths)
 - [`mcp.callTool()` returns protocol errors as error results](#mcpcalltool-returns-protocol-errors-as-error-results)
 - [Custom `MCPFixtureApi` objects need new members](#custom-mcpfixtureapi-objects-need-new-members)
 - [Conformance results: severity, skips, and new checks](#conformance-results-severity-skips-and-new-checks)
@@ -58,6 +59,50 @@ If you call the raw client, note these SDK v2 behavior changes:
 The SDK ships a codemod for the mechanical parts: `npx @modelcontextprotocol/codemod@latest v1-to-v2 .`. See the SDK's [upgrade guide](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/migration/upgrade-to-v2.md).
 
 Projects created with `mcp-server-tester init` now depend on `@modelcontextprotocol/client` instead of `@modelcontextprotocol/sdk`.
+
+## Imports moved to subpaths
+
+**Affects:** code that imports the evaluation framework, low-level OAuth, or desktop and external hosts from the package root.
+
+The root now holds the core testing interface: fixtures, matchers and validators, the MCP client, config, datasets with `runEvalDataset` and `runEvalCase`, judges, conformance, and Agent Skills, with the types those use. Everything else moved to one of three subpaths. Nothing was renamed or removed; only the import path changed.
+
+| Subpath                                           | What it holds                                                                                                                                                                       |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@gleanwork/mcp-server-tester/evals`              | The evaluation framework: manifests, suites and batches, registries, metrics, plugins, result stores, baselines and comparisons, variant experiments, and MCP host simulation.      |
+| `@gleanwork/mcp-server-tester/auth`               | Low-level OAuth: discovery, token storage, and the client-credentials flow.                                                                                                         |
+| `@gleanwork/mcp-server-tester/experimental/hosts` | Desktop and external hosts: the external-host runtime and capability types, Cowork settings and native-run audit, and host plugins. Expect breaking changes between minor versions. |
+
+```typescript
+// Before
+import {
+  loadEvalDataset,
+  runEvalSuite,
+  computeMetrics,
+} from '@gleanwork/mcp-server-tester';
+
+// After
+import { loadEvalDataset } from '@gleanwork/mcp-server-tester';
+import {
+  runEvalSuite,
+  computeMetrics,
+} from '@gleanwork/mcp-server-tester/evals';
+```
+
+The subpaths are ESM only (no `require` condition, and no `typesVersions`, so TypeScript needs `moduleResolution` `node16`, `nodenext` or `bundler`); the root still ships CommonJS as well. CommonJS code can no longer `require` a moved name, so code that uses one must move to ESM. Don't mix `require` of the root with `import()` of a subpath: the CommonJS root is a separate copy of the library, so a capability registered through one would not be visible to a run started from the other. The ESM root, `./evals`, `./auth` and `./experimental/hosts` share one copy, so a judge, host, metric or capability registered through one of them is visible through the others.
+
+Some root APIs take options typed from a subpath: `runEvalDataset`'s result-store options (`EvalResultStoreLike`, `StoredEvalResult*Options`) are in `./evals`, and the OAuth providers' stored-state types are in `./auth`. Import those types from the subpath when you name them.
+
+A few root result types carry desktop-host data in optional fields typed by `@gleanwork/mcp-server-tester/experimental/hosts` (for example `EvalCase.externalHost` and `EvalCaseResult.externalHost`). Those fields follow that subpath's experimental stability.
+
+Before 2.0 GA, exports that are neither documented nor used may still be removed; any removal will be listed in this guide.
+
+If TypeScript reports that the package has no exported member, find the name below.
+
+These names moved:
+
+- **`@gleanwork/mcp-server-tester/evals`:** `buildEvalDataset`, `BUILT_IN_METRICS`, `CaseComparisonResult`, `clearDatasetSources`, `clearHosts`, `clearJudges`, `clearMetrics`, `clearResultStores`, `compareEvalRuns`, `CompareEvalRunsOptions`, `ComparisonOutcome`, `computeMetrics`, `createDefaultArtifactId`, `createEvalResultStore`, `createStoredEvalArtifact`, `DatasetConfig`, `DatasetSource`, `DatasetSourceContext`, `defaultEnvironmentMetadata`, `EvalArm`, `EvalBatchItem`, `EvalCaseComparison`, `EvalCaseComparisonOutcome`, `EvalManifest`, `EvalManifestInput`, `EvalManifestSchema`, `EvalPluginModule`, `EvalResultStore`, `EvalResultStoreConfig`, `EvalResultStoreLike`, `EvalRunComparisonLabels`, `EvalRunComparisonResult`, `EvalSummaryGenerator`, `EvaluationArmResult`, `EvaluationBatchItem`, `EvaluationBatchOptions`, `EvaluationBatchResult`, `EvaluationHostRunContext`, `EvaluationSuiteOptions`, `EvaluationSuiteResult`, `EvaluationSummary`, `ExperimentMetric`, `ExtensionConfig`, `FileEvalResultStore`, `FileEvalResultStoreConfig`, `GCSEvalResultStore`, `GCSEvalResultStoreConfig`, `getBuiltinHostConfig`, `getDatasetSource`, `getHost`, `getJudge`, `getMetric`, `getMissingDependencyMessage`, `getResultStore`, `HostBatchRequest`, `HostConfig`, `HostConfigPatch`, `HostDefinition`, `HostRunInput`, `HostRunOptions`, `HostRunResult`, `isEvalResultStore`, `isProviderAvailable`, `listDatasetSources`, `listHosts`, `listJudges`, `listMetrics`, `listResultStores`, `ListStoredArtifactsOptions`, `loadBaseline`, `loadEvalManifest`, `loadEvalManifestFromObject`, `loadPluginModule`, `loadPlugins`, `LoadPluginsOptions`, `loadStoredEvalRunnerResult`, `METRIC_REGISTRY`, `MetricDefinition`, `MetricKind`, `MetricValue`, `ProposeVariantsContext`, `registerDatasetSource`, `registerHost`, `registerMetric`, `registerResultStore`, `resolveDatasetPaths`, `resolveEvalResultStore`, `resolveMetric`, `resolveResultStoreConfig`, `ResultStoreDefinition`, `runEvalBatch`, `RunEvalBatchOptions`, `RunEvalBatchResult`, `runEvalSuite`, `RunEvalSuiteOptions`, `RunEvalSuiteResult`, `runServerComparison`, `runSkillsComparison`, `RunSummary`, `RunTelemetry`, `runVariantExperiment`, `saveBaseline`, `SaveBaselineOptions`, `saveEvalRunComparison`, `SaveEvalRunComparisonOptions`, `saveServerComparison`, `SaveServerComparisonOptions`, `ServerComparisonOptions`, `ServerComparisonResult`, `simulateMCPHost`, `SkillsComparisonOptions`, `SkillsComparisonResult`, `SkillsComparisonVariant`, `SkillsVariantSummary`, `StoredArtifactKind`, `StoredArtifactSummary`, `StoredEvalArtifact`, `StoredEvalArtifactMetadata`, `StoredEvalResultLoadOptions`, `StoredEvalResultRef`, `StoredEvalResultSaveOptions`, `StoredEvalRunRef`, `TaggedConfig`, `validateManifestRegistrations`, `VariantCandidateResult`, `VariantExperimentOptions`, `VariantExperimentReason`, `VariantExperimentResult`, `VariantExperimentRound`, `VariantImprovementProposal`, `VariantRecommendation`
+- **`@gleanwork/mcp-server-tester/auth`:** `ClientCredentialsConfig`, `discoverAuthorizationServer`, `discoverProtectedResource`, `DiscoveryError`, `ENV_VAR_NAMES`, `hasValidTokens`, `loadTokens`, `loadTokensFromEnv`, `MCP_PROTOCOL_VERSION`, `performClientCredentialsFlow`, `ProtectedResourceDiscoveryResult`, `ProtectedResourceMetadata`, `StoredClientInfo`, `StoredOAuthState`, `StoredServerMetadata`
+- **`@gleanwork/mcp-server-tester/experimental/hosts`:** `auditCoworkNativeRun`, `AuditCoworkNativeRunOptions`, `COWORK_STDIO_PLATFORMS`, `coworkManagedPluginSettings`, `CoworkManagedPluginSettings`, `CoworkManagedStdioServer`, `coworkMcpSettingsMatch`, `CoworkNativeAuditAttachment`, `CoworkNativeAuditCase`, `CoworkNativeAuditIssue`, `CoworkNativeAuditReport`, `CoworkNativeAuditTiming`, `CoworkNativeAuditUsage`, `coworkPluginMarketplace`, `coworkPluginSettingsMatch`, `driverToSlug`, `EvidenceSource`, `ExternalHostCapabilitiesConfig`, `ExternalHostCapabilityBinding`, `ExternalHostCapabilityContext`, `ExternalHostCapabilityImplementation`, `ExternalHostConfig`, `ExternalHostDriverReference`, `ExternalHostFailureKind`, `ExternalHostMetadata`, `ExternalHostRunResult`, `ExternalHostSession`, `ExternalHostSimulationResult`, `ExternalHostType`, `getExternalHostConfigJsonSchema`, `getExternalHostReference`, `HostArtifact`, `HostCapability`, `HostDriverConfig`, `HostDriverId`, `HostPlugin`, `HostRunContext`, `HostStdioPaths`, `HostStdioServer`, `hostStdioServers`, `listExternalHostDriverReferences`, `materializeHostStdioFiles`, `normalizeHostDriver`, `ObservationConfidence`, `parseDriverSlug`, `registerExternalHostCapability`, `resolveHostStdioServer`, `runExternalHostScenario`, `TraceSource`
 
 ## `mcp.callTool()` returns protocol errors as error results
 
@@ -124,7 +169,7 @@ The result has a new `warnings: string[]` field. It flags comparisons between ru
 
 ## `MCP_PROTOCOL_VERSION` is deprecated
 
-The exported `MCP_PROTOCOL_VERSION` constant is the header MST sends on OAuth discovery requests, not the protocol connections speak. It is deprecated and will be removed in a future major. Use `mcpConfig.protocol` to choose a connection's protocol.
+The exported `MCP_PROTOCOL_VERSION` constant is the header MST sends on OAuth discovery requests, not the protocol connections speak. It is deprecated and will be removed in a future major. Use `mcpConfig.protocol` to choose a connection's protocol. It is now exported from `@gleanwork/mcp-server-tester/auth`.
 
 ## `executeCase` returns a typed `CaseExecution`
 
