@@ -9,6 +9,7 @@ import {
   parseChatgptTrace,
   snapshotChatgptSessions,
 } from './chatgptTrace.js';
+import { NativeTraceError } from '../nativeTraceError.js';
 
 const marker = 'MCP_SERVER_TESTER_test';
 function event(type: string, payload: Record<string, unknown>, ms = 1000) {
@@ -410,7 +411,10 @@ describe('marker-free native correlation', () => {
       ).toBe('second');
       await expect(
         findChatgptTrace(root, before, exact('Same query'), 0)
-      ).rejects.toThrow('Ambiguous');
+      ).rejects.toMatchObject({
+        failureKind: 'ambiguous_matching_sessions',
+        message: expect.stringContaining('Ambiguous'),
+      });
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -448,7 +452,10 @@ describe('marker-free native correlation', () => {
       );
       await expect(
         findChatgptTrace(root, baseline, exact('Same query'), 0, { bound })
-      ).rejects.toThrow('Ambiguous');
+      ).rejects.toMatchObject({
+        failureKind: 'ambiguous_matching_sessions',
+        message: expect.stringContaining('Ambiguous'),
+      });
       await rm(duplicate);
       await writeFile(
         path,
@@ -456,11 +463,17 @@ describe('marker-free native correlation', () => {
       );
       await expect(
         findChatgptTrace(root, baseline, exact('Same query'), 0, { bound })
-      ).rejects.toThrow('Bound ChatGPT');
+      ).rejects.toMatchObject({
+        failureKind: 'host_run_failed',
+        message: expect.stringContaining('Bound ChatGPT'),
+      });
       await rm(path);
       await expect(
         findChatgptTrace(root, baseline, exact('Same query'), 0, { bound })
-      ).rejects.toThrow('Bound ChatGPT');
+      ).rejects.toMatchObject({
+        failureKind: 'host_run_failed',
+        message: expect.stringContaining('Bound ChatGPT'),
+      });
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -903,9 +916,13 @@ it('rejects a matching marker submitted into a pre-existing chat when freshness 
     expect(
       (await findChatgptTrace(root, baseline, marker, 0))?.trace.turnId
     ).toBe('turn');
-    await expect(
-      findChatgptTrace(root, baseline, marker, 0, { requireFreshSession: true })
-    ).rejects.toThrow('instead of a fresh chat');
+    const existing = await findChatgptTrace(root, baseline, marker, 0, {
+      requireFreshSession: true,
+    }).catch((error: unknown) => error);
+    expect(existing).toBeInstanceOf(Error);
+    expect((existing as Error).message).toContain('instead of a fresh chat');
+    // Unclassified, so reported as a parse failure (see openaiChatgpt tests).
+    expect(existing).not.toBeInstanceOf(NativeTraceError);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -1212,5 +1229,50 @@ describe('ChatGPT native response_item tool calls', () => {
         'Some native tool calls have no recorded output and are pending.',
       ])
     );
+  });
+});
+
+function thrown(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  throw new Error('expected the parser to throw');
+}
+
+describe('ChatGPT trace failures carry their kind', () => {
+  it('marks ambiguous turns and a non-initial exact prompt where they are detected', () => {
+    expect(
+      thrown(() =>
+        parseChatgptTrace(serialize([...turn(), ...turn('duplicate')]), marker)
+      )
+    ).toMatchObject({ failureKind: 'ambiguous_matching_sessions' });
+    expect(
+      thrown(() =>
+        parseChatgptTrace(
+          serialize([
+            ...exactTurn('Find docs', 'one'),
+            ...exactTurn('Find docs', 'two'),
+          ]),
+          exact('Find docs')
+        )
+      )
+    ).toMatchObject({ failureKind: 'ambiguous_matching_sessions' });
+    expect(
+      thrown(() =>
+        parseChatgptTrace(
+          serialize([
+            ...exactTurn('Prior question', 'one'),
+            ...exactTurn('Find docs', 'two'),
+          ]),
+          exact('Find docs')
+        )
+      )
+    ).toMatchObject({ failureKind: 'host_run_failed' });
+    // A malformed transcript is left unclassified: the caller reports a parse failure.
+    expect(
+      thrown(() => parseChatgptTrace(serialize() + '{bad}\n', marker))
+    ).not.toBeInstanceOf(NativeTraceError);
   });
 });

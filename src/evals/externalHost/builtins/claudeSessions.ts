@@ -3,6 +3,16 @@ import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import type { ExternalHostConfig, HostRunContext } from '../types.js';
 import { POLL_INTERVAL_MS, delay } from './claudeCommon.js';
+import { NativeTraceError } from '../nativeTraceError.js';
+
+/**
+ * Message prefixes the eval runner counts as infrastructure failures. Cowork
+ * reports a binding failure as text, so the runner matches these exact
+ * prefixes; keep the wording here and nowhere else.
+ */
+export const CLAUDE_SESSION_TIMEOUT_MESSAGE =
+  'Timed out waiting for Claude session';
+export const CLAUDE_NO_MATCHING_SESSION_MESSAGE = 'No matching Claude session';
 import {
   type ClaudeSessionMetadata,
   type ClaudeTrace,
@@ -88,7 +98,8 @@ async function waitForClaudeMatch(
     const matches = await findMatchingClaudeSessions(options);
 
     if (matches.length > 1) {
-      throw new Error(
+      throw new NativeTraceError(
+        'ambiguous_matching_sessions',
         `Ambiguous Claude sessions for ${describeCorrelation(options)}: ${matches
           .map((m) => m.candidate.id)
           .join(', ')}`
@@ -115,13 +126,15 @@ async function waitForClaudeMatch(
   }
 
   if (lastPending) {
-    throw new Error(
-      `Timed out waiting for Claude session ${lastPending.candidate.id} to complete`
+    throw new NativeTraceError(
+      'timeout',
+      `${CLAUDE_SESSION_TIMEOUT_MESSAGE} ${lastPending.candidate.id} to complete`
     );
   }
 
-  throw new Error(
-    `No matching Claude session found for ${describeCorrelation(options)}`
+  throw new NativeTraceError(
+    'no_matching_session',
+    `${CLAUDE_NO_MATCHING_SESSION_MESSAGE} found for ${describeCorrelation(options)}`
   );
 }
 

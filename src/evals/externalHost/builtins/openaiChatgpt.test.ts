@@ -2,7 +2,10 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ExternalHostCapabilityContext } from '../types.js';
+import type {
+  ExternalHostCapabilityContext,
+  ExternalHostFailureKind,
+} from '../types.js';
 import { normalizeHostDriver } from '../driverIdentity.js';
 import { findChatgptTrace } from './chatgptTrace.js';
 import type * as TraceModule from './chatgptTrace.js';
@@ -18,6 +21,7 @@ import type * as DriverModule from '../../chatgpt/driver.js';
 import { runLinuxChatgptDesktop } from '../../chatgpt/linux.js';
 import type * as LinuxModule from '../../chatgpt/linux.js';
 import { ChatgptAppSession } from '../../chatgptSetup/session.js';
+import { NativeTraceError } from '../nativeTraceError.js';
 import { NativeChatgptDriverError } from '../../chatgpt/linux.js';
 import { validateLinuxChatgptConfig } from '../../chatgptSetup/linuxProfile.js';
 import type * as LinuxProfileModule from '../../chatgptSetup/linuxProfile.js';
@@ -381,24 +385,46 @@ describe('bounded native binding wait and failure classification', () => {
     }
   });
 
-  it.each([
-    [
-      'Ambiguous matching ChatGPT sessions for this query.',
-      'ambiguous_matching_sessions',
-    ],
-    [
-      'ChatGPT submitted into an existing native session instead of a fresh chat.',
-      'parse_failure',
-    ],
-    [
-      'Bound ChatGPT session/turn changed or no longer matches the query.',
-      'host_run_failed',
-    ],
-    ['Malformed complete JSONL record in ChatGPT transcript.', 'parse_failure'],
-  ])('preserves failure classifier: %s', async (message, failureKind) => {
+  // Each rejection is what the trace reader throws for that condition; the
+  // kind is carried by the error, never read from its wording.
+  it.each(
+    (
+      [
+        [
+          new NativeTraceError(
+            'ambiguous_matching_sessions',
+            'Ambiguous matching ChatGPT sessions for this query.'
+          ),
+          'ambiguous_matching_sessions',
+        ],
+        [
+          new Error(
+            'ChatGPT submitted into an existing native session instead of a fresh chat.'
+          ),
+          'parse_failure',
+        ],
+        [
+          new NativeTraceError(
+            'host_run_failed',
+            'Bound ChatGPT session/turn changed or no longer matches the query.'
+          ),
+          'host_run_failed',
+        ],
+        [
+          new Error('Malformed complete JSONL record in ChatGPT transcript.'),
+          'parse_failure',
+        ],
+        // An unclassified error is a parse failure whatever its message says.
+        [
+          new Error('Ambiguous: a model mismatch, fresh ChatGPT'),
+          'parse_failure',
+        ],
+      ] satisfies Array<[Error, ExternalHostFailureKind]>
+    ).map(([error, kind]) => [error.message, error, kind] as const)
+  )('preserves failure classifier: %s', async (message, error, failureKind) => {
     const home = await mkdtemp(join(tmpdir(), 'chatgpt-classifier-'));
     try {
-      vi.mocked(findChatgptTrace).mockRejectedValue(new Error(message));
+      vi.mocked(findChatgptTrace).mockRejectedValue(error);
       const result = await capture(context(home, true));
       expect(result).toMatchObject({
         success: false,

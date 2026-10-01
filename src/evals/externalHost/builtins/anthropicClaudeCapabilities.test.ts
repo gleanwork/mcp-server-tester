@@ -11,6 +11,10 @@ import {
   ANTHROPIC_CLAUDE_CAPABILITIES,
   claudeRunState,
 } from './anthropicClaude.js';
+import {
+  CLAUDE_NO_MATCHING_SESSION_MESSAGE,
+  CLAUDE_SESSION_TIMEOUT_MESSAGE,
+} from './claudeSessions.js';
 
 const MARKER = 'MCP_SERVER_TESTER_CAPABILITIES';
 
@@ -63,9 +67,13 @@ async function writeJsonl(path: string, events: unknown[]): Promise<void> {
 }
 
 /** One completed local-agent session in the current native layout. */
-async function writeSession(root: string): Promise<void> {
-  const id = 'local_12345678-1234-1234-1234-123456789abc';
-  const native = join(root, '12345678');
+async function writeSession(
+  root: string,
+  prefix = '12345678',
+  complete = true
+): Promise<void> {
+  const id = `local_${prefix}-1234-1234-1234-123456789abc`;
+  const native = join(root, prefix);
   const transcript = join(native, '.claude', 'projects', 'fixture');
   await mkdir(transcript, { recursive: true });
   const events = [
@@ -84,11 +92,15 @@ async function writeSession(root: string): Promise<void> {
         ],
       },
     },
-    {
-      type: 'result',
-      result: 'READY',
-      usage: { input_tokens: 5, output_tokens: 2 },
-    },
+    ...(complete
+      ? [
+          {
+            type: 'result',
+            result: 'READY',
+            usage: { input_tokens: 5, output_tokens: 2 },
+          },
+        ]
+      : []),
   ];
   await writeFile(
     join(root, `${id}.json`),
@@ -97,7 +109,7 @@ async function writeSession(root: string): Promise<void> {
       cliSessionId: 'native-cli',
       initialMessage: `query [${MARKER}]`,
       createdAt: Date.now(),
-      cwd: join(root, '12345678', 'outputs'),
+      cwd: join(root, prefix, 'outputs'),
     })
   );
   await writeJsonl(join(native, 'audit.jsonl'), events);
@@ -130,6 +142,50 @@ describe('Claude local-agent capabilities share one typed run state', () => {
     // Normalization strips the native MCP prefix (mcp__<server>__).
     expect(result!.toolCalls.map((call) => call.name)).toEqual(['search']);
   });
+
+  it.each([
+    [
+      'no fresh session appears',
+      0,
+      true,
+      'no_matching_session',
+      CLAUDE_NO_MATCHING_SESSION_MESSAGE,
+    ],
+    [
+      'two fresh sessions match',
+      2,
+      true,
+      'ambiguous_matching_sessions',
+      'Ambiguous Claude sessions',
+    ],
+    [
+      'the bound session never completes',
+      1,
+      false,
+      'timeout',
+      CLAUDE_SESSION_TIMEOUT_MESSAGE,
+    ],
+  ] as const)(
+    'reports %s with the kind the session store detected',
+    async (_name, sessions, complete, failureKind, prefix) => {
+      const root = await mkdtemp(join(tmpdir(), 'claude-capabilities-'));
+      onTestFinished(() => rm(root, { recursive: true, force: true }));
+      const trace = capability('builtin:anthropic.claude.localAgentTrace');
+      const ctx = context(root);
+      ctx.run.timeoutMs = 1_000;
+      await trace.setup!(ctx);
+      for (const id of ['12345678', '87654321'].slice(0, sessions))
+        await writeSession(root, id, complete);
+      const result = await trace.run!(ctx);
+      expect(result).toMatchObject({
+        success: false,
+        // The eval runner counts the no-match and timeout wording as
+        // infrastructure failures; it matches these same shared prefixes.
+        error: expect.stringMatching(new RegExp(`^${prefix}`)),
+        externalHost: { failureKind },
+      });
+    }
+  );
 
   it('refuses to capture without a snapshot and to normalize without a trace', async () => {
     const ctx = context('/nonexistent/claude-data');
