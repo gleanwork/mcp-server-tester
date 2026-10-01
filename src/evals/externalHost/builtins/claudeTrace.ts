@@ -679,3 +679,21 @@ export function metadataTimestampString(
   }
   return undefined;
 }
+
+/**
+ * The bound native task's latest host tool call is an unanswered
+ * AskUserQuestion: Claude is waiting for a person. A headless run cannot
+ * answer, so the case fails now instead of waiting for the trace deadline.
+ */
+export function awaitingUserAnswer(trace: {
+  isComplete: boolean;
+  toolCalls: readonly { name: string; source?: string; output?: unknown }[];
+}): boolean {
+  if (trace.isComplete) return false;
+  const last = trace.toolCalls.at(-1);
+  return (
+    last?.source === 'host' &&
+    last.name === 'AskUserQuestion' &&
+    last.output === undefined
+  );
+}

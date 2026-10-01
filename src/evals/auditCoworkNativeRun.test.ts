@@ -397,6 +397,65 @@ describe('auditCoworkNativeRun', () => {
     expect((await f.audit()).evidencePassed).toBe(true);
   });
 
+  async function awaitingFixture() {
+    const f = await fixture();
+    const pending = [
+      {
+        type: 'user',
+        message: { role: 'user', content: 'prompt' },
+      },
+      {
+        type: 'assistant',
+        message: {
+          id: 'message-ask',
+          model,
+          content: [
+            {
+              type: 'tool_use',
+              id: 'tool-ask',
+              name: 'AskUserQuestion',
+              input: { questions: [] },
+            },
+          ],
+        },
+      },
+    ];
+    const jsonl =
+      pending.map((event) => JSON.stringify(event)).join('\n') + '\n';
+    await writeFile(f.auditPath, jsonl);
+    await writeFile(f.transcriptPath, jsonl);
+    f.saved.pass = false;
+    f.saved.hostTelemetry.awaitingUser = 'AskUserQuestion';
+    return f;
+  }
+
+  it('verifies a task that stopped on an unanswered AskUserQuestion as a failed case', async () => {
+    const f = await awaitingFixture();
+    const report = await f.audit();
+    expect(report.cases[0]).toMatchObject({
+      awaitingUser: true,
+      evidencePassed: true,
+      pass: false,
+      issues: [],
+    });
+    expect(report.qualityPassed).toBe(false);
+    expect(report.evidencePassed).toBe(true);
+  });
+
+  it('rejects an awaiting-user claim the native transcript does not show', async () => {
+    const f = await fixture();
+    f.saved.pass = false;
+    f.saved.hostTelemetry.awaitingUser = 'AskUserQuestion';
+    const report = await f.audit();
+    expect(report.cases[0]?.issues).toContain('AWAITING_USER_UNVERIFIED');
+    expect(report.evidencePassed).toBe(false);
+    const passing = await awaitingFixture();
+    passing.saved.pass = true;
+    expect((await passing.audit()).cases[0]?.issues).toContain(
+      'AWAITING_USER_UNVERIFIED'
+    );
+  });
+
   it('excludes desktop batch-runner telemetry from replay equality', async () => {
     // runDesktopBatch adds batchCase/batchLifecycle after the native trace is read.
     const f = await fixture();

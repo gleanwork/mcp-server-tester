@@ -17,6 +17,7 @@ import type { UsageMetrics } from '../types/index.js';
 import {
   parseClaudeTrace,
   type ClaudeTrace,
+  awaitingUserAnswer,
 } from './externalHost/builtins/claudeTrace.js';
 import { hostTraceToExecution, simulationToHostTrace } from './hostTrace.js';
 
@@ -59,6 +60,7 @@ export type CoworkNativeAuditIssue =
   | 'USAGE_MISMATCH'
   | 'TIMING_MISMATCH'
   | 'TELEMETRY_MISMATCH'
+  | 'AWAITING_USER_UNVERIFIED'
   | 'EVIDENCE_FLAGS_MISMATCH'
   | 'ARM_RESULTS_MISMATCH'
   | 'TOOL_OUTPUT_UNAVAILABLE'
@@ -111,6 +113,8 @@ export interface CoworkNativeAuditCase {
   };
   attachments: CoworkNativeAuditAttachment[];
   evidencePassed: boolean;
+  /** Verified: the task stopped on an unanswered AskUserQuestion (failed, unjudged). */
+  awaitingUser?: boolean;
   issues: CoworkNativeAuditIssue[];
 }
 export interface CoworkNativeAuditReport {
@@ -456,6 +460,25 @@ async function auditCase(
   }
   result.sessionId = sessionId;
   const trace = await nativeTrace(resolve(options.nativeRoot), sessionId);
+  if (object(saved.hostTelemetry).awaitingUser !== undefined) {
+    // A headless run stopped on an unanswered AskUserQuestion. Verified only when
+    // the native transcript itself ends on that pending host call and the case
+    // failed: a model outcome (quality failure), never a passing case.
+    result.awaitingUser = true;
+    const models = trace.telemetry.models;
+    if (models.length === 1 && MODEL.test(models[0]!))
+      result.model = models[0]!;
+    if (
+      object(saved.hostTelemetry).awaitingUser !== 'AskUserQuestion' ||
+      !awaitingUserAnswer(trace) ||
+      saved.pass !== false ||
+      !trace.transcriptParsed ||
+      (options.expectedModel &&
+        (models.length !== 1 || models[0] !== options.expectedModel))
+    )
+      result.issues.push('AWAITING_USER_UNVERIFIED');
+    return;
+  }
   result.validity = {
     auditParsed: trace.auditParsed,
     transcriptParsed: trace.transcriptParsed,

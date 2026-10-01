@@ -24,6 +24,7 @@ import {
   waitForClaudeTrace,
   waitForClaudeSession,
 } from './externalHost/builtins/claudeSessions.js';
+import { awaitingUserAnswer } from './externalHost/builtins/claudeTrace.js';
 import { simulationToHostTrace } from './hostTrace.js';
 import {
   HostPluginError,
@@ -422,9 +423,35 @@ async function runBatch(
           )
             awaitingUser = true;
         }
-        try {
+        if (awaitingUser) {
           // Waiting on a question nobody can answer: fail now, not at the deadline.
-          if (awaitingUser) throw new Error(hitlError);
+          // Keep the bound session so the auditor can verify the unanswered
+          // AskUserQuestion from the native transcript (a model outcome, not a
+          // missing-evidence failure).
+          const [pending] = await findMatchingClaudeSessions({
+            ...match,
+            sessionPath,
+          }).catch(() => []);
+          result = {
+            ...failure(hitlError ?? 'Cowork is waiting for an answer.'),
+            ...(pending
+              ? {
+                  toolCalls: pending.toolCalls,
+                  telemetry: {
+                    source: 'claude-native',
+                    costScope: 'native-inference-only',
+                    ...pending.telemetry,
+                    nativeSessionId: pending.candidate.id,
+                    correlation: 'exact-initial-prompt',
+                    awaitingUser: 'AskUserQuestion',
+                  },
+                }
+              : {}),
+          };
+          if (platform.reset) continuation = 'reset';
+          return finishCase();
+        }
+        try {
           const remaining = deadlineAt - Date.now();
           if (remaining <= 0)
             throw new Error(
@@ -564,21 +591,3 @@ export function createCoworkHost(platform?: CoworkPlatform): HostDefinition {
   };
 }
 export const COWORK_HOST = createCoworkHost();
-
-/**
- * The bound native task's latest host tool call is an unanswered
- * AskUserQuestion: Claude is waiting for a person. A headless run cannot
- * answer, so the case fails now instead of waiting for the trace deadline.
- */
-export function awaitingUserAnswer(trace: {
-  isComplete: boolean;
-  toolCalls: readonly { name: string; source?: string; output?: unknown }[];
-}): boolean {
-  if (trace.isComplete) return false;
-  const last = trace.toolCalls.at(-1);
-  return (
-    last?.source === 'host' &&
-    last.name === 'AskUserQuestion' &&
-    last.output === undefined
-  );
-}
