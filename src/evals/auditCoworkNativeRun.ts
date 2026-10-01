@@ -17,7 +17,7 @@ import type { UsageMetrics } from '../types/index.js';
 import {
   parseClaudeTrace,
   type ClaudeTrace,
-} from './externalHost/builtins/anthropicClaude.js';
+} from './externalHost/builtins/claudeTrace.js';
 import { hostTraceToExecution, simulationToHostTrace } from './hostTrace.js';
 
 export interface AuditCoworkNativeRunOptions {
