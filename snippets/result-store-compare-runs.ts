@@ -3,7 +3,7 @@ import {
   createEvalResultStore,
   loadStoredEvalRunnerResult,
   saveEvalRunComparison,
-} from '@gleanwork/mcp-server-tester';
+} from '@gleanwork/mcp-server-tester/evals';
 
 const store = createEvalResultStore({
   provider: 'gcs',

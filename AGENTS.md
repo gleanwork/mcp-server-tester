@@ -102,12 +102,15 @@ Configuration is read from `project.use.mcpConfig` in playwright.config.ts. The 
 
 ### Exports
 
-Public API is defined in `src/index.ts`. The package has multiple export paths:
+The public API is tiered. Each name is exported from exactly one of these entry points (`./types` additionally re-exports the root's shared types without runtime code):
 
-- `.` - Main library exports
-- `./fixtures/mcp` - Playwright test fixtures
-- `./fixtures/mcpAuth` - Auth-specific fixtures for OAuth/token auth
-- `./reporters/mcpReporter` - Custom reporter
+- `.` (`src/index.ts`) - The core testing interface: fixtures, matchers and validators, MCP client, config, datasets with `runEvalDataset`/`runEvalCase`, judges, conformance, skills, and their types
+- `./evals` (`src/entries/evals.ts`) - The evaluation framework: manifests, suites/batches, registries, metrics, plugins, result stores, comparisons, variant experiments, `simulateMCPHost`
+- `./auth` (`src/entries/auth.ts`) - Low-level OAuth: discovery, token storage, client credentials
+- `./experimental/hosts` (`src/entries/experimentalHosts.ts`) - Desktop/external hosts, Cowork settings and audit, host plugins (may change between minors)
+- `./fixtures/mcp`, `./fixtures/mcpAuth`, `./reporters/mcpReporter` - Playwright fixtures and the reporter
+
+The subpaths are ESM only and share chunks with the ESM root (tsup `splitting`), so module state (registries, classes) is one instance across them. The CommonJS root and the fixtures/reporter bundles are separate copies; only the `Symbol.for` framework registries are shared with those. New public names go in the narrowest tier that fits.
 
 ### Multi-Iteration Accuracy
 
@@ -305,7 +308,7 @@ Use conventional commits: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore
 1. Create `src/assertions/matchers/toMyMatcher.ts` using a validator
 2. Import and add to the single `expect.extend({})` call in `src/assertions/matchers/index.ts`
 3. Add TypeScript declaration in `src/assertions/matchers/types.ts` (inside the `PlaywrightTest.Matchers` interface)
-4. Export from `src/index.ts`
+4. Export from `src/index.ts` (the root tier)
 
 ### New LLM Judge Provider
 
@@ -335,4 +338,4 @@ To add a new provider:
 
 1. Implement the `OAuthClientProvider` interface from `@modelcontextprotocol/client`
 2. Add utilities to `src/auth/` module
-3. Export from `src/index.ts`
+3. Export documented helpers from `src/index.ts` (root); export low-level OAuth from `src/entries/auth.ts` (`./auth`)

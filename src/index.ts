@@ -1,48 +1,15 @@
 /**
  * @gleanwork/mcp-server-tester
  *
- * Playwright-based testing framework for MCP servers
+ * The core testing interface: fixtures, matchers and validators, the MCP
+ * client, config, datasets and runEvalDataset, judges, conformance, and Agent
+ * Skills.
  *
  * @packageDocumentation
  */
 
-export { auditCoworkNativeRun } from './evals/auditCoworkNativeRun.js';
-export { COWORK_STDIO_PLATFORMS } from './evals/coworkHost.js';
+export { SnapshotSanitizers } from './types/index.js';
 export type {
-  AuditCoworkNativeRunOptions,
-  CoworkNativeAuditReport,
-  CoworkNativeAuditCase,
-  CoworkNativeAuditIssue,
-  CoworkNativeAuditUsage,
-  CoworkNativeAuditTiming,
-  CoworkNativeAuditAttachment,
-} from './evals/auditCoworkNativeRun.js';
-
-// Cowork managed-settings contract for plugins and stdio eval servers
-export {
-  coworkManagedPluginSettings,
-  coworkMcpSettingsMatch,
-  coworkPluginSettingsMatch,
-} from './evals/cowork/managedSettings.js';
-export type {
-  CoworkManagedPluginSettings,
-  CoworkManagedStdioServer,
-} from './evals/cowork/managedSettings.js';
-export {
-  coworkPluginMarketplace,
-  hostStdioServers,
-  materializeHostStdioFiles,
-  resolveHostStdioServer,
-} from './evals/hostPlugins.js';
-export type {
-  HostPlugin,
-  HostStdioPaths,
-  HostStdioServer,
-} from './evals/hostPlugins.js';
-
-// Types
-export type {
-  // Config
   MCPConfig,
   StdioMCPConfig,
   HttpMCPConfig,
@@ -50,30 +17,18 @@ export type {
   MCPAuthConfig,
   MCPOAuthConfig,
   MCPClientCredentialsConfig,
-
-  // Auth
   StoredTokens,
-  StoredClientInfo,
-  StoredOAuthState,
   OAuthSetupConfig,
   TokenResult,
   PlaywrightOAuthClientProviderConfig,
-  ClientCredentialsConfig,
-  ProtectedResourceMetadata,
-  ProtectedResourceDiscoveryResult,
-  StoredServerMetadata,
   CLIOAuthClientConfig,
   CLIOAuthResult,
-
-  // MCP
   CreateMCPClientOptions,
   ContentBlock,
   NormalizedToolResponse,
   MCPFixtureApi,
   MCPFixtureOptions,
   MCPAuthFixtures,
-
-  // Assertions
   ValidationResult,
   TextValidatorOptions,
   SizeValidatorOptions,
@@ -93,8 +48,6 @@ export type {
   JudgeMatcherOptions,
   ToolPredicate,
   PredicateResult,
-
-  // Core
   AuthType,
   ProtocolEra,
   ProtocolRevision,
@@ -106,8 +59,6 @@ export type {
   EvalExpectationResult,
   ExpectationBreakdown,
   ExpectationResultMap,
-
-  // Evals
   EvalCase,
   EvalDataset,
   EvalExpectBlock,
@@ -125,31 +76,6 @@ export type {
   EvalRunnerOptions,
   ToolMetadataOverride,
   ToolOverrideVariant,
-  StoredEvalResultLoadOptions,
-  StoredEvalResultRef,
-  StoredEvalResultSaveOptions,
-  SaveBaselineOptions,
-  ComparisonOutcome,
-  CaseComparisonResult,
-  ServerComparisonResult,
-  ServerComparisonOptions,
-  SaveServerComparisonOptions,
-  CompareEvalRunsOptions,
-  EvalCaseComparison,
-  EvalCaseComparisonOutcome,
-  EvalRunComparisonLabels,
-  EvalRunComparisonResult,
-  SaveEvalRunComparisonOptions,
-  StoredEvalRunRef,
-  ExperimentMetric,
-  VariantExperimentReason,
-  VariantRecommendation,
-  VariantCandidateResult,
-  VariantExperimentRound,
-  ProposeVariantsContext,
-  VariantImprovementProposal,
-  VariantExperimentOptions,
-  VariantExperimentResult,
   HostType,
   CLIOutputFormat,
   CLIConfig,
@@ -158,8 +84,6 @@ export type {
   LLMToolCall,
   MCPHostSimulationResult,
   MCPHostSimulator,
-
-  // Judge
   JudgeConfig,
   Judge,
   JudgeResult,
@@ -169,14 +93,10 @@ export type {
   RubricSpec,
   CustomJudgeExecutor,
   CustomJudgeResult,
-
-  // Conformance
   MCPConformanceOptions,
   MCPConformanceResult,
   MCPConformanceCheck,
   MCPConformanceRaw,
-
-  // Reporter
   MCPEvalReporterConfig,
   MCPEvalRunData,
   MCPEvalHistoricalSummary,
@@ -185,17 +105,12 @@ export type {
   MCPEvalData,
   HostDiagnostics,
 } from './types/index.js';
-export { SnapshotSanitizers } from './types/index.js';
-
-// Config
 export {
   MCPConfigSchema,
   validateMCPConfig,
   isStdioConfig,
   isHttpConfig,
 } from './config/mcpConfig.js';
-
-// Auth
 export { PlaywrightOAuthClientProvider } from './auth/oauthClientProvider.js';
 export {
   createTokenAuthHeaders,
@@ -207,38 +122,13 @@ export {
   performOAuthSetup,
   performOAuthSetupIfNeeded,
 } from './auth/setupOAuth.js';
-export {
-  performClientCredentialsFlow,
-  refreshAccessToken,
-} from './auth/oauthFlow.js';
-
-// Discovery (RFC 9728)
-export {
-  discoverProtectedResource,
-  discoverAuthorizationServer,
-  DiscoveryError,
-  MCP_PROTOCOL_VERSION,
-} from './auth/discovery.js';
-
-// Token Storage
-export {
-  loadTokens,
-  hasValidTokens,
-  injectTokens,
-  loadTokensFromEnv,
-  ENV_VAR_NAMES,
-} from './auth/storage.js';
-
-// CLI OAuth
+export { refreshAccessToken } from './auth/oauthFlow.js';
+export { injectTokens } from './auth/storage.js';
 export { CLIOAuthClient } from './auth/cli.js';
-
-// MCP Client
 export {
   createMCPClientForConfig,
   closeMCPClient,
 } from './mcp/clientFactory.js';
-
-// Protocol versions
 export {
   DEFAULT_PROTOCOL_SETTING,
   FIRST_MODERN_PROTOCOL_VERSION,
@@ -253,17 +143,9 @@ export type {
   ProtocolMatrixEntry,
   ProtocolMatrixProject,
 } from './config/protocolMatrix.js';
-
-// Response Normalization
 export { normalizeToolResponse, extractText } from './mcp/response.js';
 export { callToolNormalized, getToolProtocolError } from './mcp/callTool.js';
 export type { ToolProtocolError } from './mcp/callTool.js';
-
-// Assertions - Matchers (primary API)
-// The extended expect with MCP tool matchers is exported via fixtures
-// Use: import { expect } from '@gleanwork/mcp-server-tester'
-
-// Assertions - Validators (for programmatic use)
 export {
   validateResponse,
   validateSchema,
@@ -280,17 +162,11 @@ export {
   getResponseSizeBytes,
   normalizeWhitespace,
 } from './assertions/validators/index.js';
-
-// Fixtures
 export { createMCPFixture } from './mcp/fixtures/mcpFixture.js';
 export { test, expect } from './fixtures/mcp.js';
-
-// Auth fixtures — re-exported from main path for convenience.
-// The auth `test` is aliased to avoid a name collision with the MCP `test` above.
-// Use `mcpAuthTest` when you need to extend auth fixtures (e.g., base.extend<MCPAuthFixtures>).
+// The auth `test` is aliased to avoid colliding with the MCP `test` above. Use
+// `mcpAuthTest` to extend auth fixtures (base.extend<MCPAuthFixtures>).
 export { test as mcpAuthTest } from './fixtures/mcpAuth.js';
-
-// Eval Dataset
 export {
   EvalCaseSchema,
   EvalDatasetSchema,
@@ -298,112 +174,19 @@ export {
   validateEvalDataset,
 } from './evals/datasetTypes.js';
 export { BUILTIN_RESULT_SCHEMAS } from './evals/builtinResultSchemas.js';
-
-// Eval Loader
 export {
   loadEvalDataset,
   loadEvalDatasetFromObject,
 } from './evals/datasetLoader.js';
-
-// Evaluation manifest and framework contracts
-export {
-  EvalManifestSchema,
-  loadEvalManifest,
-  loadEvalManifestFromObject,
-  resolveDatasetPaths,
-} from './evals/evalManifest.js';
+// Accepts both the legacy name/executor form and a schema-bearing definition.
+export { registerJudge } from './judge/judgeRegistry.js';
+// Types root APIs take or return: registerJudge's definition, and the host
+// trace in tool-call expectations and case results.
 export type {
-  DatasetConfig,
-  EvalArm,
-  EvalManifest,
-  EvalManifestInput,
-  ExtensionConfig,
-  HostConfig,
-  HostConfigPatch,
-  TaggedConfig,
-} from './evals/evalManifest.js';
-export type {
-  DatasetSource,
-  DatasetSourceContext,
-  EvaluationArmResult,
-  EvaluationBatchOptions,
-  EvaluationBatchItem,
-  EvaluationBatchResult,
-  EvaluationSuiteOptions,
-  EvaluationSuiteResult,
-  EvaluationSummary,
-  HostDefinition,
-  HostRunOptions,
-  HostBatchRequest,
-  HostRunResult,
-  HostRunInput,
-  HostRunContext as EvaluationHostRunContext,
   HostEvent,
   HostEvidence,
   JudgeDefinition,
-  MetricDefinition,
-  MetricKind,
-  MetricValue,
-  ResultStoreDefinition,
-  RunSummary,
-  RunTelemetry,
-  EvalSummaryGenerator,
 } from './evals/evalFrameworkTypes.js';
-export {
-  clearDatasetSources,
-  clearHosts,
-  clearJudges,
-  clearMetrics,
-  clearResultStores,
-  getDatasetSource,
-  getHost,
-  getJudge,
-  getMetric,
-  getResultStore,
-  listDatasetSources,
-  listHosts,
-  listJudges,
-  listMetrics,
-  listResultStores,
-  registerDatasetSource,
-  registerHost,
-  registerMetric,
-  registerResultStore,
-  resolveResultStoreConfig,
-  validateManifestRegistrations,
-} from './evals/frameworkRegistries.js';
-// Preserve both legacy name/executor and schema-bearing object registration.
-export { registerJudge } from './judge/judgeRegistry.js';
-export {
-  BUILT_IN_METRICS,
-  METRIC_REGISTRY,
-  computeMetrics,
-  resolveMetric,
-} from './evals/metrics.js';
-
-// Eval dataset building and suite runner
-export { buildEvalDataset } from './evals/buildEvalDataset.js';
-export { getBuiltinHostConfig } from './evals/builtinHosts.js';
-export { runEvalSuite } from './evals/runEvalSuite.js';
-export type {
-  RunEvalSuiteOptions,
-  RunEvalSuiteResult,
-} from './evals/runEvalSuite.js';
-export { runEvalBatch } from './evals/runEvalBatch.js';
-export type {
-  EvalBatchItem,
-  RunEvalBatchOptions,
-  RunEvalBatchResult,
-} from './evals/runEvalBatch.js';
-
-// Plugin loading
-export { loadPluginModule, loadPlugins } from './plugins/loadPlugins.js';
-export type {
-  EvalPluginModule,
-  LoadPluginsOptions,
-} from './plugins/loadPlugins.js';
-
-// Eval Runner
 export { runEvalDataset, runEvalCase } from './evals/evalRunner.js';
 export type {
   CaseExecution,
@@ -412,112 +195,16 @@ export type {
   FailedExecution,
   HostResponse,
 } from './evals/caseExecution.js';
-
-export type {
-  EvalResultStore,
-  EvalResultStoreConfig,
-  EvalResultStoreLike,
-  FileEvalResultStoreConfig,
-  GCSEvalResultStoreConfig,
-  ListStoredArtifactsOptions,
-  StoredArtifactKind,
-  StoredArtifactSummary,
-  StoredEvalArtifact,
-  StoredEvalArtifactMetadata,
-} from './evals/resultStore.js';
-export {
-  FileEvalResultStore,
-  GCSEvalResultStore,
-  createDefaultArtifactId,
-  createEvalResultStore,
-  createStoredEvalArtifact,
-  defaultEnvironmentMetadata,
-  isEvalResultStore,
-  resolveEvalResultStore,
-} from './evals/resultStore.js';
-
-// Baseline eval comparison
-export { saveBaseline, loadBaseline } from './evals/baseline.js';
-
-// Multi-server A/B comparison
-export {
-  runServerComparison,
-  saveServerComparison,
-} from './evals/serverComparison.js';
-
-// Agent Skills A/B comparison (mcp_host)
-export { runSkillsComparison } from './evals/skillsComparison.js';
-export type {
-  SkillsComparisonOptions,
-  SkillsComparisonResult,
-  SkillsComparisonVariant,
-  SkillsVariantSummary,
-} from './evals/skillsComparison.js';
 export type {
   HostSkillsMode,
   SkillLoad,
 } from './evals/mcpHost/mcpHostTypes.js';
-
-// Completed eval run comparison
-export {
-  compareEvalRuns,
-  loadStoredEvalRunnerResult,
-  saveEvalRunComparison,
-} from './evals/evalRunComparison.js';
-
-// AI-driven variant optimization experiments
-export { runVariantExperiment } from './evals/variantExperiment.js';
-
-// MCP Host Simulation
-export {
-  simulateMCPHost,
-  isProviderAvailable,
-  getMissingDependencyMessage,
-} from './evals/mcpHost/index.js';
-
-// External Host Evals (experimental)
-export type {
-  EvidenceSource,
-  ExternalHostCapabilityBinding,
-  ExternalHostCapabilityContext,
-  ExternalHostCapabilityImplementation,
-  ExternalHostCapabilitiesConfig,
-  ExternalHostConfig,
-  ExternalHostDriverReference,
-  ExternalHostFailureKind,
-  ExternalHostMetadata,
-  ExternalHostRunResult,
-  ExternalHostSession,
-  ExternalHostSimulationResult,
-  ExternalHostType,
-  HostArtifact,
-  HostCapability,
-  HostDriverConfig,
-  HostDriverId,
-  HostRunContext,
-  ObservationConfidence,
-  TraceSource,
-} from './evals/externalHost/index.js';
-export {
-  driverToSlug,
-  normalizeHostDriver,
-  parseDriverSlug,
-  getExternalHostConfigJsonSchema,
-  getExternalHostReference,
-  listExternalHostDriverReferences,
-  registerExternalHostCapability,
-  runExternalHostScenario,
-} from './evals/externalHost/index.js';
-
-// Judge
 export { createJudge } from './judge/judgeClient.js';
 export {
   BUILT_IN_RUBRICS,
   resolveRubric,
   isBuiltInRubric,
 } from './judge/judgeTypes.js';
-
-// Conformance
 export { runConformanceChecks } from './spec/conformanceChecks.js';
 export { runCrossEraChecks } from './spec/crossEra.js';
 export type {
@@ -527,8 +214,6 @@ export type {
 } from './spec/crossEra.js';
 export type { ConformanceSeverity } from './types/reporter.js';
 export type { SkillsCheckOptions } from './spec/checks/skills.js';
-
-// Agent Skills over MCP (SEP-2640)
 export {
   SKILLS_EXTENSION_ID,
   SKILL_LIMITS,
@@ -553,8 +238,6 @@ export {
   verifySkillFile,
 } from './skills/skillsClient.js';
 export type { SkillFileContent } from './skills/skillsClient.js';
-
-// Fixture extensions (resources, discovery, extension requests, skills)
 export { createFixtureExtensions } from './mcp/fixtures/fixtureExtensions.js';
 export type {
   MCPFixtureExtensions,

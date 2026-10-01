@@ -18,12 +18,12 @@ import {
   runEvalCase,
   type EvalCase,
   runConformanceChecks,
-  simulateMCPHost,
   extractText,
   normalizeWhitespace,
   // Extended expect with MCP tool matchers
   expect,
 } from '@gleanwork/mcp-server-tester';
+import { simulateMCPHost } from '@gleanwork/mcp-server-tester/evals';
 import { ConfigFileSchema } from '../schemas/fileContentSchema.js';
 import path from 'path';
 

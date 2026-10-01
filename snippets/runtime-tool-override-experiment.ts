@@ -1,9 +1,11 @@
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
 import {
   compareEvalRuns,
+  type EvalRunComparisonResult,
+} from '@gleanwork/mcp-server-tester/evals';
+import {
   loadEvalDataset,
   runEvalDataset,
-  type EvalRunComparisonResult,
   type ToolOverrideVariant,
 } from '@gleanwork/mcp-server-tester';
 

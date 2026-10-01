@@ -307,7 +307,7 @@ When comparing tool description or input schema variants, do not mutate the eval
 **Primary path:** `runVariantExperiment` wraps the whole loop — baseline, variant injection, comparison, metric ranking, regression guarding, and a structured `apply`/`reject`/`inconclusive` proposal — in one call, with a `proposeVariants` callback for iterative agent-driven rounds. Use the `optimize-mcp-tool-metadata` skill for the full workflow:
 
 ```typescript
-import { runVariantExperiment } from '@gleanwork/mcp-server-tester';
+import { runVariantExperiment } from '@gleanwork/mcp-server-tester/evals';
 
 const result = await runVariantExperiment(
   {
@@ -324,7 +324,7 @@ console.log(JSON.stringify(result.proposal, null, 2));
 The manual two-run path below remains available when you need full control over each run:
 
 ```typescript
-import { compareEvalRuns } from '@gleanwork/mcp-server-tester';
+import { compareEvalRuns } from '@gleanwork/mcp-server-tester/evals';
 
 const baseline = await runEvalDataset(
   { dataset, defaultLlmIterations: 10 },

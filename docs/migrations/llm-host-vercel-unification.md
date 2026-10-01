@@ -66,12 +66,13 @@ import type {
 The stable public API remains:
 
 ```typescript
-// These still work — no change needed
+// These still work. Since 2.0 they are imported from the ./evals subpath
+// (see migration-2.0.md, "Imports moved to subpaths").
 import {
   simulateMCPHost,
   isProviderAvailable,
   getMissingDependencyMessage,
-} from '@gleanwork/mcp-server-tester';
+} from '@gleanwork/mcp-server-tester/evals';
 
 import type {
   LLMProvider,

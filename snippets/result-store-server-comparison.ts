@@ -1,8 +1,6 @@
 import { test } from '@gleanwork/mcp-server-tester/fixtures/mcp';
-import {
-  loadEvalDataset,
-  runServerComparison,
-} from '@gleanwork/mcp-server-tester';
+import { loadEvalDataset } from '@gleanwork/mcp-server-tester';
+import { runServerComparison } from '@gleanwork/mcp-server-tester/evals';
 
 test('compare two MCP servers and persist the result', async ({
   mcp,

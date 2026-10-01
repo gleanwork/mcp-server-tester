@@ -62,7 +62,9 @@ The framework exposes registries for:
 
 - `registerDatasetSource` — built-in `file` and future `dir`, `gcs`, or HTTP sources
 - `registerHost` — built-in SDK, CLI, and external host drivers
-- `registerJudge` — built-in and organization-specific judges
+- `registerJudge` — built-in and organization-specific judges (exported from the
+  package root; the other registries and `getJudge`/`listJudges` come from
+  `@gleanwork/mcp-server-tester/evals`)
 - `registerMetric` — built-in metrics and custom measurements
 - `registerResultStore` — local file, GCS, and other result destinations
 

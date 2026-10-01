@@ -1,11 +1,11 @@
 import { test } from '@gleanwork/mcp-server-tester/fixtures/mcp';
 import {
   loadEvalDataset,
-  runServerComparison,
   createMCPClientForConfig,
   createMCPFixture,
   closeMCPClient,
 } from '@gleanwork/mcp-server-tester';
+import { runServerComparison } from '@gleanwork/mcp-server-tester/evals';
 
 test('compare two server versions', async ({ mcp: mcpA }, testInfo) => {
   const dataset = await loadEvalDataset('./data/evals.json');

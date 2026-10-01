@@ -1,9 +1,9 @@
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
 import {
   loadEvalDataset,
-  runVariantExperiment,
   type ToolOverrideVariant,
 } from '@gleanwork/mcp-server-tester';
+import { runVariantExperiment } from '@gleanwork/mcp-server-tester/evals';
 
 // Static A/B: try a fixed set of tool-description variants and keep the winner.
 test('optimize search description (static variants)', async ({

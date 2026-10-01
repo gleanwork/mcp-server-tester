@@ -8,7 +8,7 @@ metadata:
 
 # Optimize MCP Tool Metadata
 
-Drive `runVariantExperiment` from `@gleanwork/mcp-server-tester` to find tool-metadata changes — tool descriptions, input-schema documentation, parameter descriptions — that measurably improve LLM tool triggering. You (the agent) supply the judgment — which rewrite to try next — and the library supplies the mechanism: baseline runs, variant injection, comparison, ranking, regression guarding, and a structured proposal.
+Drive `runVariantExperiment` from `@gleanwork/mcp-server-tester/evals` to find tool-metadata changes — tool descriptions, input-schema documentation, parameter descriptions — that measurably improve LLM tool triggering. You (the agent) supply the judgment — which rewrite to try next — and the library supplies the mechanism: baseline runs, variant injection, comparison, ranking, regression guarding, and a structured proposal.
 
 ## Scope: what variants can and cannot change
 
@@ -59,10 +59,8 @@ Static A/B (one round, fixed candidates):
 
 ```typescript
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
-import {
-  loadEvalDataset,
-  runVariantExperiment,
-} from '@gleanwork/mcp-server-tester';
+import { loadEvalDataset } from '@gleanwork/mcp-server-tester';
+import { runVariantExperiment } from '@gleanwork/mcp-server-tester/evals';
 
 test('optimize search description', async ({ mcp }, testInfo) => {
   const dataset = await loadEvalDataset('./data/host-evals.json');

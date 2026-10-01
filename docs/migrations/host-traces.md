@@ -5,7 +5,7 @@ run judges, or return `pass`/`passed`/`caseResults`. Those remain owned by
 `runEvalDataset` for every host.
 
 ```typescript
-import { registerHost } from '@gleanwork/mcp-server-tester';
+import { registerHost } from '@gleanwork/mcp-server-tester/evals';
 import { z } from 'zod';
 
 registerHost({

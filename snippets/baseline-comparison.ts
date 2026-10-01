@@ -1,10 +1,6 @@
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
-import {
-  loadEvalDataset,
-  runEvalDataset,
-  saveBaseline,
-  loadBaseline,
-} from '@gleanwork/mcp-server-tester';
+import { loadEvalDataset, runEvalDataset } from '@gleanwork/mcp-server-tester';
+import { saveBaseline, loadBaseline } from '@gleanwork/mcp-server-tester/evals';
 
 // Capture a baseline after a known-good run.
 // Run this once on your main branch before making changes.

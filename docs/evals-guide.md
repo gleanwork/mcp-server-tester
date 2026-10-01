@@ -534,7 +534,7 @@ If more than 20% of current case IDs have no matching baseline entry, the runner
 These are the low-level functions underlying the `saveResultsTo` / `baselineResultsFrom` options. Export them when you need to manage baselines programmatically — for example, in a CI script that only promotes the baseline after a full suite passes.
 
 ```typescript
-import { saveBaseline, loadBaseline } from '@gleanwork/mcp-server-tester';
+import { saveBaseline, loadBaseline } from '@gleanwork/mcp-server-tester/evals';
 
 // Write a result to disk.
 await saveBaseline(result, '.mcp-test-results/baseline.json');
@@ -705,7 +705,7 @@ import {
   createEvalResultStore,
   loadStoredEvalRunnerResult,
   saveEvalRunComparison,
-} from '@gleanwork/mcp-server-tester';
+} from '@gleanwork/mcp-server-tester/evals';
 
 const store = createEvalResultStore({
   provider: 'gcs',
@@ -743,10 +743,8 @@ every stored result, responses are omitted unless you pass
 
 ```typescript snippet=snippets/result-store-server-comparison.ts
 import { test } from '@gleanwork/mcp-server-tester/fixtures/mcp';
-import {
-  loadEvalDataset,
-  runServerComparison,
-} from '@gleanwork/mcp-server-tester';
+import { loadEvalDataset } from '@gleanwork/mcp-server-tester';
+import { runServerComparison } from '@gleanwork/mcp-server-tester/evals';
 
 test('compare two MCP servers and persist the result', async ({
   mcp,
@@ -801,12 +799,8 @@ historical run indefinitely.
 
 ```typescript
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
-import {
-  loadEvalDataset,
-  runEvalDataset,
-  saveBaseline,
-  loadBaseline,
-} from '@gleanwork/mcp-server-tester';
+import { loadEvalDataset, runEvalDataset } from '@gleanwork/mcp-server-tester';
+import { saveBaseline, loadBaseline } from '@gleanwork/mcp-server-tester/evals';
 
 // Capture a baseline after a known-good run.
 // Run this once on your main branch before making changes.
@@ -930,11 +924,11 @@ Remember to close the second client in a `finally` block.
 import { test } from '@gleanwork/mcp-server-tester/fixtures/mcp';
 import {
   loadEvalDataset,
-  runServerComparison,
   createMCPClientForConfig,
   createMCPFixture,
   closeMCPClient,
 } from '@gleanwork/mcp-server-tester';
+import { runServerComparison } from '@gleanwork/mcp-server-tester/evals';
 
 test('compare two server versions', async ({ mcp: mcpA }, testInfo) => {
   const dataset = await loadEvalDataset('./data/evals.json');

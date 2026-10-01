@@ -2,8 +2,24 @@
 
 Complete API documentation for `@gleanwork/mcp-server-tester`.
 
+## Entry points
+
+| Import from                                          | Contents                                                                                                                                                    | Stability                                       |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `@gleanwork/mcp-server-tester`                       | Fixtures, matchers and validators, the MCP client, config, datasets with `runEvalDataset` and `runEvalCase`, judges, conformance, Agent Skills              | Stable                                          |
+| `@gleanwork/mcp-server-tester/fixtures/mcp`          | `test` and `expect` with the MCP fixtures and matchers                                                                                                      | Stable                                          |
+| `@gleanwork/mcp-server-tester/fixtures/mcpAuth`      | Auth fixtures                                                                                                                                               | Stable                                          |
+| `@gleanwork/mcp-server-tester/reporters/mcpReporter` | The MCP reporter                                                                                                                                            | Stable                                          |
+| `@gleanwork/mcp-server-tester/evals`                 | The evaluation framework: manifests, suites and batches, registries, metrics, plugins, result stores, comparisons, variant experiments, MCP host simulation | Stable                                          |
+| `@gleanwork/mcp-server-tester/auth`                  | Low-level OAuth: discovery, token storage, client credentials                                                                                               | Stable                                          |
+| `@gleanwork/mcp-server-tester/experimental/hosts`    | Desktop and external hosts, Cowork settings and audit, host plugins                                                                                         | Experimental: may change between minor versions |
+| `@gleanwork/mcp-server-tester/types`                 | The root's shared types on their own, without runtime code                                                                                                  | Stable                                          |
+
+The `./evals`, `./auth` and `./experimental/hosts` subpaths are ESM only, and CommonJS code cannot `require` them. The ESM root and those three subpaths share one copy of the library, so anything registered through one is visible through the others. The CommonJS root is a separate copy; don't mix it with ESM imports of the subpaths. Optional desktop-host fields on root result types (such as `EvalCaseResult.externalHost`) are typed from `./experimental/hosts` and share its stability.
+
 ## Table of Contents
 
+- [Entry points](#entry-points)
 - [Fixtures](#fixtures)
 - [Authentication](#authentication)
 - [Eval Functions](#eval-functions)
@@ -430,7 +446,7 @@ console.log(candidate.metadata?.toolOverrideVariantId);
 Use `compareEvalRuns()` to summarize the completed baseline and candidate runs:
 
 ```typescript
-import { compareEvalRuns } from '@gleanwork/mcp-server-tester';
+import { compareEvalRuns } from '@gleanwork/mcp-server-tester/evals';
 
 const comparison = compareEvalRuns({
   baseline,
@@ -542,7 +558,7 @@ interface EvalResultStore {
 Create a store from config:
 
 ```typescript
-import { createEvalResultStore } from '@gleanwork/mcp-server-tester';
+import { createEvalResultStore } from '@gleanwork/mcp-server-tester/evals';
 
 const store = createEvalResultStore({
   provider: 'gcs',
@@ -573,7 +589,7 @@ import {
   compareEvalRuns,
   loadStoredEvalRunnerResult,
   saveEvalRunComparison,
-} from '@gleanwork/mcp-server-tester';
+} from '@gleanwork/mcp-server-tester/evals';
 
 const baseline = await loadStoredEvalRunnerResult(store, { id: 'baseline' });
 const candidate = await loadStoredEvalRunnerResult(store, { id: 'candidate' });
@@ -694,7 +710,7 @@ Run a tool-metadata variant experiment: establish a baseline, inject each candid
 - `reason` - Why the experiment stopped: `'no-variants' | 'no-improvement' | 'max-rounds' | 'threshold-met'`
 
 ```typescript
-import { runVariantExperiment } from '@gleanwork/mcp-server-tester';
+import { runVariantExperiment } from '@gleanwork/mcp-server-tester/evals';
 
 const result = await runVariantExperiment(
   {
@@ -1217,7 +1233,7 @@ The following utilities are available for checking whether optional LLM provider
 Check whether the npm package required for a given `mcp_host` provider is installed in the current environment.
 
 ```typescript
-import { isProviderAvailable } from '@gleanwork/mcp-server-tester';
+import { isProviderAvailable } from '@gleanwork/mcp-server-tester/evals';
 
 if (!isProviderAvailable('anthropic')) {
   console.warn('Install @anthropic-ai/sdk to use the anthropic provider');
@@ -1229,7 +1245,7 @@ if (!isProviderAvailable('anthropic')) {
 Return a human-readable message describing the missing dependency for a provider, suitable for displaying in error output or test skip conditions.
 
 ```typescript
-import { getMissingDependencyMessage } from '@gleanwork/mcp-server-tester';
+import { getMissingDependencyMessage } from '@gleanwork/mcp-server-tester/evals';
 
 const message = getMissingDependencyMessage('openai');
 // e.g. "Provider 'openai' requires the 'openai' package. Run: npm install openai"

@@ -227,11 +227,12 @@ native evidence.
 
 ## Audit a saved Linux native run
 
-Use the supported package-root API. It is offline: it does not invoke the desktop,
-MCP servers, or judges. No CLI or private parser import is required.
+Use `auditCoworkNativeRun` from the experimental hosts subpath, which may change
+between minor versions. It is offline: it does not invoke the desktop, MCP servers,
+or judges. No CLI or private parser import is required.
 
 ```typescript
-import { auditCoworkNativeRun } from '@gleanwork/mcp-server-tester';
+import { auditCoworkNativeRun } from '@gleanwork/mcp-server-tester/experimental/hosts';
 
 const report = await auditCoworkNativeRun({
   rawResultsPath: '/archive/results/raw-results.json',

@@ -14,7 +14,7 @@ import {
   type EvalManifest,
   type EvaluationSummary,
   type HostDefinition,
-} from '../index.js';
+} from '../entries/evals.js';
 
 const dirs: string[] = [];
 let sequence = 0;
