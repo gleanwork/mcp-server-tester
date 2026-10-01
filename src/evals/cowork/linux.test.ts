@@ -17,7 +17,11 @@ import {
   linuxCoworkPlatform,
 } from './linux.js';
 import type { HostPlugin } from '../hostPlugins.js';
-import { CoworkDriverError, CoworkHitlBudgetError } from './driver.js';
+import {
+  CoworkDriverError,
+  CoworkHitlBudgetError,
+  CoworkUserQuestionError,
+} from './driver.js';
 import type { EvalManifest } from '../evalManifest.js';
 import type { MCPConfig } from '../../config/mcpConfig.js';
 
@@ -372,6 +376,17 @@ describe('caller-owned Linux Cowork desktop', () => {
         isComplete: async () => false,
       })
     ).rejects.toBeInstanceOf(CoworkHitlBudgetError);
+  });
+  it('fails fast when the bound task waits on an AskUserQuestion answer', async () => {
+    const pending = linuxCoworkPlatform.handleHitl({
+      ...options(),
+      isComplete: async () => false,
+      awaitingUser: async () => true,
+    });
+    await expect(pending).rejects.toBeInstanceOf(CoworkUserQuestionError);
+    await expect(pending).rejects.toMatchObject({ kind: 'awaiting-user' });
+    // No approval click is attempted for a question.
+    expect(child.exec).not.toHaveBeenCalled();
   });
   it('refuses unbound HITL', async () => {
     await expect(linuxCoworkPlatform.handleHitl(options())).rejects.toThrow(

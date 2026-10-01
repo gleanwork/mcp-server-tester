@@ -290,6 +290,7 @@ async function runBatch(
         const deadlineAt = startedAtMs + config.timeout;
         let hitlError: string | undefined;
         let hitlWarning: string | undefined;
+        let awaitingUser = false;
         let sessionPath: string;
         const match = {
           dataDir,
@@ -380,6 +381,13 @@ async function runBatch(
                   );
                 return current[0]!.isComplete;
               },
+              awaitingUser: async () => {
+                const current = await findMatchingClaudeSessions({
+                  ...match,
+                  sessionPath,
+                });
+                return current.length === 1 && awaitingUserAnswer(current[0]!);
+              },
               task: `Handle only the currently open Cowork task just submitted with this exact query: ${request.input.scenario}. ${approvalTask} Do not switch tasks. Never create, type, or resubmit a task. If the current task cannot be identified uniquely, stop without an action.`,
             });
             hitlActions += hitl.action_count;
@@ -408,8 +416,15 @@ async function runBatch(
           } else {
             hitlError = message;
           }
+          if (
+            error instanceof CoworkDriverError &&
+            error.kind === 'awaiting-user'
+          )
+            awaitingUser = true;
         }
         try {
+          // Waiting on a question nobody can answer: fail now, not at the deadline.
+          if (awaitingUser) throw new Error(hitlError);
           const remaining = deadlineAt - Date.now();
           if (remaining <= 0)
             throw new Error(
@@ -549,3 +564,21 @@ export function createCoworkHost(platform?: CoworkPlatform): HostDefinition {
   };
 }
 export const COWORK_HOST = createCoworkHost();
+
+/**
+ * The bound native task's latest host tool call is an unanswered
+ * AskUserQuestion: Claude is waiting for a person. A headless run cannot
+ * answer, so the case fails now instead of waiting for the trace deadline.
+ */
+export function awaitingUserAnswer(trace: {
+  isComplete: boolean;
+  toolCalls: readonly { name: string; source?: string; output?: unknown }[];
+}): boolean {
+  if (trace.isComplete) return false;
+  const last = trace.toolCalls.at(-1);
+  return (
+    last?.source === 'host' &&
+    last.name === 'AskUserQuestion' &&
+    last.output === undefined
+  );
+}
