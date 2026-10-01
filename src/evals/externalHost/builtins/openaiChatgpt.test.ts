@@ -126,7 +126,9 @@ beforeEach(() => {
   vi.spyOn(Date, 'now').mockImplementation(() => clock.now);
   vi.mocked(findChatgptTrace).mockReset();
   vi.mocked(findChatgptTrace).mockResolvedValue(undefined);
-  screenshots.saveStallScreenshot.mockReset();
+  screenshots.saveStallScreenshot
+    .mockReset()
+    .mockResolvedValue({ error: 'no display in unit tests' });
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -826,6 +828,12 @@ describe('what the platform decides', () => {
         },
       },
     });
+    expect(screenshots.saveStallScreenshot).toHaveBeenCalledWith(
+      expect.objectContaining({ label: 'submit' })
+    );
+    expect(result!.externalHost.traceLimitations).toContain(
+      'ChatGPT display at submission failure screenshot unavailable: no display in unit tests'
+    );
     expect(result!.externalHost.traceLimitations).toContain(
       'Native evidence directory is unavailable.'
     );

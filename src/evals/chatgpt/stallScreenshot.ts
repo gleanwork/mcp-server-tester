@@ -5,9 +5,9 @@ import { deflateSync } from 'node:zlib';
 
 /** A turn whose transcript has not grown for this long is treated as stalled. */
 export const CHATGPT_STALL_MS = 120_000;
-const CAPTURE_TIMEOUT_MS = 10_000;
+const STALL_CAPTURE_TIMEOUT_MS = 10_000;
 // A 4K 32bpp root window is ~33 MB; anything larger is not a screen dump.
-const MAX_XWD_BYTES = 64 * 1024 * 1024;
+const STALL_MAX_XWD_BYTES = 64 * 1024 * 1024;
 
 export interface StallScreenshot {
   path?: string;
@@ -15,7 +15,10 @@ export interface StallScreenshot {
 }
 
 /** Run `xwd -root` on the eval display and return the raw XWD dump. */
-function captureXwd(display: string, xauthority?: string): Promise<Buffer> {
+function captureStallXwd(
+  display: string,
+  xauthority?: string
+): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const env: Record<string, string> = {
       PATH: process.env.PATH ?? '/usr/bin:/bin',
@@ -27,19 +30,19 @@ function captureXwd(display: string, xauthority?: string): Promise<Buffer> {
       stdio: ['ignore', 'pipe', 'ignore'],
       shell: false,
     });
-    const chunks: Buffer[] = [];
+    const xwdParts: Buffer[] = [];
     let size = 0;
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
       reject(new Error('xwd timed out'));
-    }, CAPTURE_TIMEOUT_MS);
-    child.stdout.on('data', (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > MAX_XWD_BYTES) {
+    }, STALL_CAPTURE_TIMEOUT_MS);
+    child.stdout.on('data', (part: Buffer) => {
+      size += part.length;
+      if (size > STALL_MAX_XWD_BYTES) {
         child.kill('SIGKILL');
         return;
       }
-      chunks.push(chunk);
+      xwdParts.push(part);
     });
     child.once('error', (error) => {
       clearTimeout(timer);
@@ -47,14 +50,14 @@ function captureXwd(display: string, xauthority?: string): Promise<Buffer> {
     });
     child.once('close', (code) => {
       clearTimeout(timer);
-      if (size > MAX_XWD_BYTES) reject(new Error('xwd output too large'));
+      if (size > STALL_MAX_XWD_BYTES) reject(new Error('xwd output too large'));
       else if (code !== 0) reject(new Error(`xwd exited ${code}`));
-      else resolve(Buffer.concat(chunks));
+      else resolve(Buffer.concat(xwdParts));
     });
   });
 }
 
-const CRC_TABLE = (() => {
+const STALL_PNG_CRC_TABLE = (() => {
   const table = new Uint32Array(256);
   for (let n = 0; n < 256; n++) {
     let c = n;
@@ -64,18 +67,19 @@ const CRC_TABLE = (() => {
   return table;
 })();
 
-function crc32(data: Buffer): number {
+function stallPngCrc32(data: Buffer): number {
   let c = 0xffffffff;
-  for (const byte of data) c = CRC_TABLE[(c ^ byte) & 0xff]! ^ (c >>> 8);
+  for (const byte of data)
+    c = STALL_PNG_CRC_TABLE[(c ^ byte) & 0xff]! ^ (c >>> 8);
   return (c ^ 0xffffffff) >>> 0;
 }
 
-function chunk(type: string, data: Buffer): Buffer {
+function stallPngChunk(type: string, data: Buffer): Buffer {
   const length = Buffer.alloc(4);
   length.writeUInt32BE(data.length);
   const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
   const crc = Buffer.alloc(4);
-  crc.writeUInt32BE(crc32(body));
+  crc.writeUInt32BE(stallPngCrc32(body));
   return Buffer.concat([length, body, crc]);
 }
 
@@ -90,7 +94,9 @@ export function xwdToPng(xwd: Buffer): Buffer {
   const byteOrder = header(7); // 0 = LSBFirst
   const bitsPerPixel = header(11);
   const bytesPerLine = header(12);
-  const [redMask, greenMask, blueMask] = [header(15), header(16), header(17)];
+  // XWDFileHeader: visual_class(13), red/green/blue_mask(14-16), bits_per_rgb(17),
+  // colormap_entries(18), ncolors(19). ncolors XWDColor records follow the name.
+  const [redMask, greenMask, blueMask] = [header(14), header(15), header(16)];
   const colormapEntries = header(19);
   if (format !== 2) throw new Error('XWD is not ZPixmap');
   if (bitsPerPixel !== 32 && bitsPerPixel !== 24)
@@ -133,9 +139,9 @@ export function xwdToPng(xwd: Buffer): Buffer {
   ihdr[9] = 2; // RGB
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk('IHDR', ihdr),
-    chunk('IDAT', deflateSync(raw)),
-    chunk('IEND', Buffer.alloc(0)),
+    stallPngChunk('IHDR', ihdr),
+    stallPngChunk('IDAT', deflateSync(raw)),
+    stallPngChunk('IEND', Buffer.alloc(0)),
   ]);
 }
 
@@ -148,19 +154,22 @@ export async function saveStallScreenshot(options: {
   caseId: string;
   display?: string;
   xauthority?: string;
+  /** File/directory label: `stall` (silent turn) or `submit` (failed send). */
+  label?: 'stall' | 'submit';
   capture?: (display: string, xauthority?: string) => Promise<Buffer>;
 }): Promise<StallScreenshot> {
+  const label = options.label ?? 'stall';
   if (!options.display) return { error: 'DISPLAY is unavailable' };
   try {
-    const xwd = await (options.capture ?? captureXwd)(
+    const xwd = await (options.capture ?? captureStallXwd)(
       options.display,
       options.xauthority
     );
     const slug = options.caseId.replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 64);
     const directory = await mkdtemp(
-      join(options.evidenceDir, `${slug || 'case'}-stall-`)
+      join(options.evidenceDir, `${slug || 'case'}-${label}-`)
     );
-    const path = join(directory, 'stall-screenshot.png');
+    const path = join(directory, `${label}-screenshot.png`);
     await writeFile(path, xwdToPng(xwd), { mode: 0o600 });
     return { path };
   } catch (error) {

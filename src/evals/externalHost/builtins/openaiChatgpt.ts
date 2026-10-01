@@ -334,7 +334,18 @@ async function submitNatively(
           : {}),
       },
     };
-    return withEvidence(
+    // Show what covered the composer; capture never changes the outcome.
+    const screenshot =
+      typeof runState.evidenceDir === 'string'
+        ? await saveStallScreenshot({
+            evidenceDir: runState.evidenceDir,
+            caseId: run.caseId,
+            display: process.env.DISPLAY,
+            xauthority: process.env.XAUTHORITY,
+            label: 'submit',
+          })
+        : { error: 'No MST-owned evidence directory.' };
+    const result = await withEvidence(
       failureResult({
         config,
         context: run,
@@ -351,6 +362,12 @@ async function submitNatively(
       run,
       runState
     );
+    attachScreenshot(
+      result,
+      screenshot,
+      'ChatGPT display at submission failure'
+    );
+    return result;
   }
 }
 
@@ -428,29 +445,42 @@ async function stalledResult(
       `ChatGPT turn stalled: its transcript was silent for ${silentSeconds}s (limit ${CHATGPT_STALL_MS / 1000}s).`
     ),
     run,
-    state,
+    chatgptRunState(state),
     boundEvidence(bound)
   );
-  const external = result.externalHost;
-  if (external) {
-    if (screenshot.path)
-      external.artifacts = [
-        ...external.artifacts,
-        {
-          kind: 'screenshot',
-          name: 'ChatGPT display at stall',
-          path: screenshot.path,
-          contentType: 'image/png',
-          summary: `Captured after ${silentSeconds}s of transcript silence`,
-        },
-      ];
-    else
-      external.traceLimitations = [
-        ...(external.traceLimitations ?? []),
-        `Stall screenshot unavailable: ${screenshot.error}`,
-      ];
-  }
+  attachScreenshot(
+    result,
+    screenshot,
+    'ChatGPT display at stall',
+    `Captured after ${silentSeconds}s of transcript silence`
+  );
   return result;
+}
+
+function attachScreenshot(
+  result: ExternalHostRunResult,
+  screenshot: { path?: string; error?: string },
+  name: string,
+  summary?: string
+): void {
+  const external = result.externalHost;
+  if (!external) return;
+  if (screenshot.path)
+    external.artifacts = [
+      ...external.artifacts,
+      {
+        kind: 'screenshot',
+        name,
+        path: screenshot.path,
+        contentType: 'image/png',
+        ...(summary ? { summary } : {}),
+      },
+    ];
+  else
+    external.traceLimitations = [
+      ...(external.traceLimitations ?? []),
+      `${name} screenshot unavailable: ${screenshot.error}`,
+    ];
 }
 
 async function captureChatgptComputerUseResult({

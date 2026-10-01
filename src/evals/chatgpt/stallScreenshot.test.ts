@@ -23,14 +23,13 @@ function xwd(width: number, height: number, pixels: number[]): Buffer {
     32,
     32,
     width * 4,
-    4,
-    0x00ff0000,
-    0x00ff0000,
-    0x0000ff00,
-    0x000000ff,
-    8,
-    0,
-    0,
+    4, // visual_class: TrueColor
+    0x00ff0000, // red_mask
+    0x0000ff00, // green_mask
+    0x000000ff, // blue_mask
+    8, // bits_per_rgb
+    256, // colormap_entries
+    0, // ncolors
     width,
     height,
     0,
@@ -47,14 +46,19 @@ function xwd(width: number, height: number, pixels: number[]): Buffer {
 
 describe('stall screenshot', () => {
   it('converts a 32bpp XWD dump into an RGB PNG', () => {
-    const png = xwdToPng(xwd(2, 1, [0x00ff0000, 0x000000ff]));
+    const png = xwdToPng(
+      xwd(4, 1, [0x00ff0000, 0x0000ff00, 0x000000ff, 0x00ffffff])
+    );
     expect(png.subarray(1, 4).toString()).toBe('PNG');
-    expect(png.readUInt32BE(16)).toBe(2);
+    expect(png.readUInt32BE(16)).toBe(4);
     expect(png.readUInt32BE(20)).toBe(1);
     const idat = png.indexOf('IDAT');
     const length = png.readUInt32BE(idat - 4);
     const raw = inflateSync(png.subarray(idat + 4, idat + 4 + length));
-    expect([...raw]).toEqual([0, 255, 0, 0, 0, 0, 255]);
+    // Red, green, blue, white: every channel reads its own mask (white stays white).
+    expect([...raw]).toEqual([
+      0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255,
+    ]);
   });
 
   it('rejects truncated or unsupported dumps', () => {
