@@ -19,7 +19,7 @@ import type { HostEvent } from '../evalFrameworkTypes.js';
  */
 
 /** A host-provided tool, independent of the LLM SDK. */
-export interface HostSkillTool {
+interface HostSkillTool {
   description: string;
   inputSchema: Record<string, unknown>;
   execute(args: Record<string, unknown>): Promise<string>;

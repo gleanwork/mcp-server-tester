@@ -110,7 +110,7 @@ The public API is tiered. Each name is exported from exactly one of these entry 
 - `./experimental/hosts` (`src/entries/experimentalHosts.ts`) - Desktop/external hosts, Cowork settings and audit, host plugins (may change between minors)
 - `./fixtures/mcp`, `./fixtures/mcpAuth`, `./reporters/mcpReporter` - Playwright fixtures and the reporter
 
-The subpaths are ESM only and share chunks with the ESM root (tsup `splitting`), so module state (registries, classes) is one instance across them. The CommonJS root and the fixtures/reporter bundles are separate copies; only the `Symbol.for` framework registries are shared with those. New public names go in the narrowest tier that fits.
+The subpaths are ESM only and share chunks with the ESM root (tsup `splitting`), so module state (registries, classes) is one instance across them. The CommonJS root and the fixtures/reporter bundles are separate copies; only the `Symbol.for` framework registries are shared with those. New public names go in the narrowest tier that fits. `npm run knip` (in CI) fails on files, exports or dependencies nothing uses, so delete dead code rather than leaving it exported. Tests count as users, so an export only a test imports is not flagged.
 
 ### Multi-Iteration Accuracy
 
@@ -255,7 +255,7 @@ authType?: 'oauth' | 'api-token' | 'none';  // Don't do this!
 
 ### UI Type Synchronization
 
-`src/reporters/ui-src/types.ts` re-exports all types directly from the canonical backend sources (`src/types/index.ts` and `src/types/reporter.ts`). No manual sync is required — update `src/types/reporter.ts` and the UI automatically picks up the changes.
+`src/reporters/ui-src/types.ts` re-exports the types the UI uses directly from the canonical backend sources (`src/types/index.ts` and `src/types/reporter.ts`), so shapes never drift. When a component needs another type, add its re-export there; knip flags re-exports the UI doesn't use.
 
 ## Code Style
 
@@ -274,6 +274,7 @@ npm run format:check        # Prettier (run `npm run format` to auto-fix)
 npm run build               # Full build including UI reporter
 npm run typecheck           # TypeScript validation
 npm run lint                # ESLint (run `npm run lint:fix` to auto-fix)
+npm run knip                # Unused files, exports and dependencies
 npm run docs:check          # Docs snippet sync
 npm run test:eval-foundation # Public evaluation foundation contracts
 npm test                    # Unit tests (Vitest)

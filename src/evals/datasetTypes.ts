@@ -19,13 +19,6 @@ import type { HostEvent } from './evalFrameworkTypes.js';
 // Re-export sanitizer types from canonical source (validators/types.ts)
 // Note: For JSON datasets, the Zod schema below validates that patterns are strings.
 // The TypeScript types allow RegExp for runtime usage with Playwright matchers.
-export type {
-  BuiltInSanitizer,
-  SnapshotSanitizer,
-  RegexSanitizer,
-  FieldRemovalSanitizer,
-} from '../assertions/validators/types.js';
-
 /**
  * Evaluation mode
  */
@@ -512,7 +505,7 @@ export const EvalExpectBlockSchema = z.object({
 /**
  * Zod schema for EvalDirectRequest
  */
-export const EvalDirectRequestSchema = z
+const EvalDirectRequestSchema = z
   .object({
     method: z.string().min(1, 'request.method must not be empty'),
     params: z.record(z.string(), z.unknown()).optional(),

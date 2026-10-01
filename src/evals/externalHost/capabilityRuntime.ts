@@ -6,10 +6,7 @@ import {
   getRegisteredExternalHostConfig,
   getRegisteredExternalHostDisplayName,
 } from './hostRegistry.js';
-import {
-  listBuiltinExternalHostCapabilities,
-  resolveBuiltinExternalHostCapability,
-} from './builtinCapabilities.js';
+import { resolveBuiltinExternalHostCapability } from './builtinCapabilities.js';
 import {
   driverToSlug,
   hostTypeFromDriver,
@@ -31,7 +28,7 @@ import type {
 
 const CAPABILITIES = new Map<string, ExternalHostCapabilityImplementation>();
 
-export interface LoadedExternalHostCapability {
+interface LoadedExternalHostCapability {
   capability: HostCapability;
   binding: ExternalHostCapabilityBinding;
   implementation: ExternalHostCapabilityImplementation;
@@ -52,17 +49,7 @@ export function registerExternalHostCapability(
   CAPABILITIES.set(implementation.id, implementation);
 }
 
-export function listExternalHostCapabilities(): ExternalHostCapabilityImplementation[] {
-  return Array.from(
-    new Map(
-      [...listBuiltinExternalHostCapabilities(), ...CAPABILITIES.values()].map(
-        (implementation) => [implementation.id, implementation]
-      )
-    ).values()
-  );
-}
-
-export async function resolveExternalHostCapability(
+async function resolveExternalHostCapability(
   uses: string
 ): Promise<ExternalHostCapabilityImplementation | undefined> {
   const registered = CAPABILITIES.get(uses);

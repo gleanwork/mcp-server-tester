@@ -32,9 +32,9 @@ const RUN_OUTPUT_LIMIT = 16 * 1024;
  * - `'inherit'`: the test process's environment. The helper, and any application
  *   it launches, can read every variable the test run has, credentials included.
  */
-export type NativeHelperEnvironment = 'minimal' | 'inherit';
+type NativeHelperEnvironment = 'minimal' | 'inherit';
 
-export interface NativeHelperRunOptions {
+interface NativeHelperRunOptions {
   environment: NativeHelperEnvironment;
   timeoutMs: number;
   /**

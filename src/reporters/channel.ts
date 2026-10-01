@@ -18,7 +18,7 @@ import type {
 import type { AuthType } from '../types/index.js';
 
 /** Attachment names the reporter reads. Tool calls append the tool name. */
-export const REPORTER_ATTACHMENT_NAMES = {
+const REPORTER_ATTACHMENT_NAMES = {
   evalResults: 'mcp-test-results',
   variantExperiment: 'mcp-variant-experiment',
   conformance: 'mcp-conformance-checks',
@@ -29,7 +29,7 @@ export const REPORTER_ATTACHMENT_NAMES = {
 const JSON_CONTENT_TYPE = 'application/json';
 
 /** Case results from runEvalDataset() or a variant experiment's surfaced run. */
-export interface EvalResultsPayload {
+interface EvalResultsPayload {
   caseResults: EvalCaseResult[];
 }
 
@@ -38,14 +38,14 @@ export interface EvalResultsPayload {
  * conformance entry (minus the test title, which the reporter adds) plus
  * what only the attachment carries.
  */
-export type ConformancePayload = Omit<MCPConformanceResultData, 'testTitle'> & {
+type ConformancePayload = Omit<MCPConformanceResultData, 'testTitle'> & {
   operation: 'conformanceChecks' | 'crossEraChecks';
   capabilities?: unknown;
   connections?: unknown[];
 };
 
 /** A fixture listTools() call. */
-export type ListToolsPayload = Pick<
+type ListToolsPayload = Pick<
   MCPServerCapabilitiesData,
   'tools' | 'toolCount'
 > & { operation: 'listTools' };

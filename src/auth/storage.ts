@@ -184,7 +184,7 @@ export function getStateDir(serverUrl: string, customDir?: string): string {
 /**
  * Get the base directory for all MCP token storage
  */
-export function getBaseStateDir(): string {
+function getBaseStateDir(): string {
   if (process.platform === 'win32') {
     const localAppData = process.env.LOCALAPPDATA;
     if (localAppData) {

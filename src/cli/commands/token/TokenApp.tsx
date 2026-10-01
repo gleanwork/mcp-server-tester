@@ -7,7 +7,7 @@ import {
   getStateDir,
 } from '../../../auth/storage.js';
 
-export type TokenFormat = 'env' | 'json' | 'gh';
+type TokenFormat = 'env' | 'json' | 'gh';
 
 export interface TokenOptions {
   format?: TokenFormat;

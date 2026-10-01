@@ -34,7 +34,7 @@ export type TraceSource =
 
 export type ObservationConfidence = 'high' | 'medium' | 'low' | 'unknown';
 
-export type ExternalHostCorrelationStrategy =
+type ExternalHostCorrelationStrategy =
   | 'exact_prompt'
   | 'prompt_marker'
   | 'host_session_metadata'
@@ -289,7 +289,7 @@ export interface ExternalHostSimulationResult extends MCPHostSimulationResult {
   externalHost: ExternalHostMetadata;
 }
 
-export interface ExternalHostRunSuccess {
+interface ExternalHostRunSuccess {
   success: true;
   response?: string;
   toolCalls: LLMToolCall[];
@@ -300,7 +300,7 @@ export interface ExternalHostRunSuccess {
   externalHost: ExternalHostMetadata;
 }
 
-export interface ExternalHostRunFailure {
+interface ExternalHostRunFailure {
   success: false;
   error: string;
   toolCalls: LLMToolCall[];

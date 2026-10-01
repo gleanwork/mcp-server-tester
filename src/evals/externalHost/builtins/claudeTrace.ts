@@ -28,7 +28,7 @@ export interface SessionCandidate {
   metadata: ClaudeSessionMetadata;
 }
 
-export interface ClaudeNativeTelemetry {
+interface ClaudeNativeTelemetry {
   resultCount: number;
   /** Native logs do not establish an exact API request count. */
   apiCallCount?: number;

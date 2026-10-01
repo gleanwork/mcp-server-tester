@@ -22,7 +22,7 @@ export const COMPUTER_USE_TOKEN_FIELDS = [
   'cache_creation_input_tokens',
   'cache_read_input_tokens',
 ] as const;
-export type ComputerUseTokenField = (typeof COMPUTER_USE_TOKEN_FIELDS)[number];
+type ComputerUseTokenField = (typeof COMPUTER_USE_TOKEN_FIELDS)[number];
 
 /** Usage totals cover only observed fields on completed planner responses. */
 export interface ComputerUseTelemetry {

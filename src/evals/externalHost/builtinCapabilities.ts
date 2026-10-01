@@ -14,10 +14,6 @@ const BUILTIN_CAPABILITIES = new Map<
   ].map((implementation) => [implementation.id, implementation])
 );
 
-export function listBuiltinExternalHostCapabilities(): ExternalHostCapabilityImplementation[] {
-  return Array.from(BUILTIN_CAPABILITIES.values());
-}
-
 export function resolveBuiltinExternalHostCapability(
   uses: string
 ): ExternalHostCapabilityImplementation | undefined {

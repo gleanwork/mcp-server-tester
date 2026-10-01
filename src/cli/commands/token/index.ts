@@ -6,7 +6,7 @@
 
 import { render } from 'ink';
 import React from 'react';
-import { TokenApp, type TokenOptions, type TokenFormat } from './TokenApp.js';
+import { TokenApp, type TokenOptions } from './TokenApp.js';
 
 /**
  * Token command action handler using Ink
@@ -24,4 +24,4 @@ export async function token(
   await waitUntilExit();
 }
 
-export type { TokenOptions, TokenFormat };
+export type { TokenOptions };

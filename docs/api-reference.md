@@ -603,7 +603,7 @@ await saveEvalRunComparison({ store, comparison, id: 'candidate-comparison' });
 
 **Result Structure:**
 
-```typescript snippet=src/evals/evalRunner.ts#L130-L207
+```typescript snippet=src/evals/evalRunner.ts#L123-L200
 /**
  * Overall result of running an eval dataset
  */
@@ -1370,7 +1370,7 @@ The `{ code, message, data? }` of the protocol error a result was made from, or 
 
 ### `EvalExpectBlock`
 
-```typescript snippet=src/evals/datasetTypes.ts#L224-L325
+```typescript snippet=src/evals/datasetTypes.ts#L217-L318
 /**
  * Unified expectation block for eval cases
  *
@@ -1477,7 +1477,7 @@ export interface EvalExpectBlock {
 
 ### `EvalCase`
 
-````typescript snippet=src/evals/datasetTypes.ts#L46-L183
+````typescript snippet=src/evals/datasetTypes.ts#L39-L176
 /**
  * A single eval test case
  *

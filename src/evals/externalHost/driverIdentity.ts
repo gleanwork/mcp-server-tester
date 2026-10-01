@@ -20,14 +20,6 @@ export const CLAUDE_COWORK_DESKTOP_MACOS_DRIVER: HostDriverId = {
   platform: 'macos',
 };
 
-export const CLAUDE_CODE_CLI_MACOS_DRIVER: HostDriverId = {
-  provider: 'anthropic',
-  product: 'claude',
-  surface: 'code',
-  runtime: 'cli',
-  platform: 'macos',
-};
-
 export const OPENAI_CHATGPT_AGENT_DESKTOP_MACOS_DRIVER: HostDriverId = {
   provider: 'openai',
   product: 'chatgpt',

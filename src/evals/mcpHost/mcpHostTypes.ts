@@ -126,7 +126,7 @@ export interface CLIConfig {
  * A cookie to inject into the browser context before running the script.
  * Matches the shape expected by Playwright's `BrowserContext.addCookies()`.
  */
-export interface BrowserCookie {
+interface BrowserCookie {
   name: string;
   value: string;
   url?: string;

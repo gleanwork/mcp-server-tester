@@ -100,7 +100,8 @@
     "test:external-host:cowork": "vitest run --config vitest.external-host.config.mts -t \"Claude Cowork\"",
     "test:playwright": "playwright test",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "knip": "knip"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.71",
@@ -137,9 +138,9 @@
     "esbuild": "^0.28.0",
     "eslint": "^8.57.1",
     "ink-testing-library": "^4.0.0",
+    "knip": "^6.39.0",
     "lucide-react": "^0.460.0",
     "markdown-code": "^0.6.1",
-    "memfs": "^4.51.1",
     "nock": "^14.0.10",
     "playwright": "^1.57.0",
     "postcss": "^8.4.49",

@@ -5,14 +5,14 @@ import {
   getRegisteredExternalHostDescription,
   listRegisteredExternalHostSlugs,
 } from './hostRegistry.js';
-import { driverToSlug, normalizeHostDriver } from './driverIdentity.js';
+import { normalizeHostDriver } from './driverIdentity.js';
 import type {
   ExternalHostCapabilitiesConfig,
   ExternalHostConfig,
   HostDriverId,
 } from './types.js';
 
-export const HostDriverIdSchema = z.object({
+const HostDriverIdSchema = z.object({
   provider: z.string().min(1),
   product: z.string().min(1),
   surface: z.string().min(1),
@@ -21,7 +21,7 @@ export const HostDriverIdSchema = z.object({
   channel: z.string().optional(),
 });
 
-export const HostCapabilitySchema = z.enum([
+const HostCapabilitySchema = z.enum([
   'control',
   'input',
   'completion',
@@ -29,13 +29,13 @@ export const HostCapabilitySchema = z.enum([
   'normalize',
 ]);
 
-export const ExternalHostCapabilityBindingSchema = z.object({
+const ExternalHostCapabilityBindingSchema = z.object({
   uses: z.string().min(1),
   with: z.record(z.string(), z.unknown()).optional(),
   provides: z.array(HostCapabilitySchema).optional(),
 });
 
-export const ExternalHostCorrelationSchema = z.object({
+const ExternalHostCorrelationSchema = z.object({
   strategy: z
     .enum(['exact_prompt', 'prompt_marker', 'host_session_metadata', 'none'])
     .optional(),
@@ -346,10 +346,4 @@ function externalHostCapabilityBindingJsonSchema(): Record<string, unknown> {
       },
     },
   };
-}
-
-export function externalHostDriverSlugForConfig(
-  config: ExternalHostConfig
-): string {
-  return driverToSlug(normalizeHostDriver(config.driver));
 }

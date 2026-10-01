@@ -2,34 +2,31 @@ import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 
 /** Fixed, non-secret setup classifications. Native output is never attached. */
-export const CODEX_SETUP_ERROR_CODES = [
-  'linux_required',
-  'environment_invalid',
-  'home_not_fresh',
-  'home_unsafe',
-  'workspace_unsafe',
-  'evidence_dir_unsafe',
-  'app_path_invalid',
-  'codex_path_invalid',
-  'api_key_file_unsafe',
-  'api_key_invalid',
-  'login_failed',
-  'login_timeout',
-  'login_unverified',
-  'mcp_preflight_failed',
-  'mcp_status_unavailable',
-  'mcp_server_not_ready',
-  'app_start_failed',
-  'app_exited',
-  'app_stop_failed',
-  'app_not_running',
-  'prompt_invalid',
-  'prompt_too_large',
-  'url_handoff_failed',
-  'url_handoff_unverified',
-] as const;
-
-export type CodexSetupErrorCode = (typeof CODEX_SETUP_ERROR_CODES)[number];
+export type CodexSetupErrorCode =
+  | 'linux_required'
+  | 'environment_invalid'
+  | 'home_not_fresh'
+  | 'home_unsafe'
+  | 'workspace_unsafe'
+  | 'evidence_dir_unsafe'
+  | 'app_path_invalid'
+  | 'codex_path_invalid'
+  | 'api_key_file_unsafe'
+  | 'api_key_invalid'
+  | 'login_failed'
+  | 'login_timeout'
+  | 'login_unverified'
+  | 'mcp_preflight_failed'
+  | 'mcp_status_unavailable'
+  | 'mcp_server_not_ready'
+  | 'app_start_failed'
+  | 'app_exited'
+  | 'app_stop_failed'
+  | 'app_not_running'
+  | 'prompt_invalid'
+  | 'prompt_too_large'
+  | 'url_handoff_failed'
+  | 'url_handoff_unverified';
 
 export class CodexSetupError extends Error {
   constructor(

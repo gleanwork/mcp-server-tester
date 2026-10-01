@@ -53,10 +53,3 @@ export const expect = baseExpect.extend({
   toHaveToolCalls,
   toHaveToolCallCount,
 });
-
-// Re-export types
-export type {
-  JudgeMatcherOptions,
-  ToolPredicate,
-  PredicateResult,
-} from './types.js';

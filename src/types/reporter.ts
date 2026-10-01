@@ -25,7 +25,7 @@ import type {
   HostDriverId,
 } from '../evals/externalHost/types.js';
 
-export interface SerializedExternalHostCapabilityBinding {
+interface SerializedExternalHostCapabilityBinding {
   uses: string;
   provides?: string[];
   with?: Record<string, unknown>;
