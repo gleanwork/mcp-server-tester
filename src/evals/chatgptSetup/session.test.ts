@@ -13,6 +13,7 @@ import {
   snapshotChatgptSessions,
 } from '../externalHost/builtins/chatgptTrace.js';
 import { runExternalHostScenario } from '../externalHost/runtime.js';
+import { NativeTraceError } from '../externalHost/nativeTraceError.js';
 import { ChatgptAppSession } from './session.js';
 import type { ExternalHostConfig } from '../externalHost/types.js';
 import { getChatgptApplicationController } from './macController.js';
@@ -784,7 +785,10 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
   );
   it('fails ambiguous native evidence and restores config', async () => {
     vi.mocked(findChatgptTrace).mockRejectedValueOnce(
-      new Error('Ambiguous matching ChatGPT sessions')
+      new NativeTraceError(
+        'ambiguous_matching_sessions',
+        'Ambiguous matching ChatGPT sessions for this query.'
+      )
     );
     expect((await run()).externalHost.failureKind).toBe(
       'ambiguous_matching_sessions'

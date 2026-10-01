@@ -10,6 +10,10 @@ import {
   type ChatgptTraceSelector,
 } from './chatgptTrace.js';
 import { copyChatgptEvidence } from './chatgptEvidence.js';
+import {
+  NativeTraceError,
+  nativeTraceFailureKind,
+} from '../nativeTraceError.js';
 import { resolveCodexSetup } from '../../codexSetup/config.js';
 import { ChatgptAppSession } from '../../chatgptSetup/session.js';
 import {
@@ -472,14 +476,16 @@ async function captureChatgptComputerUseResult({
               boundEvidence(bound)
             );
           if (config.model && trace.model !== config.model)
-            throw new Error(
+            throw new NativeTraceError(
+              'host_run_failed',
               `ChatGPT model mismatch: requested ${config.model}, recorded ${trace.model ?? 'unknown'}.`
             );
           if (
             config.reasoningEffort &&
             trace.reasoningEffort !== config.reasoningEffort
           )
-            throw new Error(
+            throw new NativeTraceError(
+              'host_run_failed',
               `ChatGPT reasoning effort mismatch: requested ${config.reasoningEffort}, recorded ${trace.reasoningEffort ?? 'unknown'}.`
             );
           if (!trace.response)
@@ -591,14 +597,9 @@ async function captureChatgptComputerUseResult({
     return withEvidence(
       failureResult({
         ...metadataOptions,
-        failureKind: message.includes('Ambiguous')
-          ? 'ambiguous_matching_sessions'
-          : message.includes('mismatch') ||
-              message.includes('aborted') ||
-              message.includes('Bound ChatGPT') ||
-              message.includes('fresh ChatGPT')
-            ? 'host_run_failed'
-            : 'parse_failure',
+        // Anything not classified where it was detected is a transcript we
+        // could not read as expected.
+        failureKind: nativeTraceFailureKind(error, 'parse_failure'),
         error: message,
         limitations: [],
       }),

@@ -1,7 +1,6 @@
 import type {
   ExternalHostCapabilityContext,
   ExternalHostCapabilityImplementation,
-  ExternalHostFailureKind,
   ExternalHostRunResult,
 } from '../types.js';
 import { runAppleScript } from './macosDesktop.js';
@@ -23,6 +22,7 @@ import {
   failureResult,
 } from './claudeTraceMetadata.js';
 import { runStringOption } from './bindingOptions.js';
+import { nativeTraceFailureKind } from '../nativeTraceError.js';
 
 /**
  * The Claude Desktop capabilities. The work lives in the modules they call:
@@ -213,7 +213,7 @@ async function captureClaudeChatAccessibilityResultCapability({
       driver: state.driver,
       displayName: state.displayName,
       capabilitiesUsed: state.capabilitiesUsed,
-      failureKind: classifyTraceFailure(message),
+      failureKind: nativeTraceFailureKind(err, 'unknown'),
       error: message,
       artifacts: [],
       limitations: [
@@ -264,7 +264,7 @@ async function captureClaudeCoworkAgentTraceCapability({
       driver: state.driver,
       displayName: state.displayName,
       capabilitiesUsed: state.capabilitiesUsed,
-      failureKind: classifyTraceFailure(message),
+      failureKind: nativeTraceFailureKind(err, 'unknown'),
       error: message,
       artifacts: [],
       limitations: [`Claude data directory: ${dataDir}`],
@@ -341,13 +341,4 @@ async function normalizeClaudeCoworkAgentTraceCapability({
     llmDurationMs: trace.llmDurationMs,
     externalHost: metadata,
   };
-}
-
-function classifyTraceFailure(message: string): ExternalHostFailureKind {
-  const lower = message.toLowerCase();
-  if (lower.includes('ambiguous')) return 'ambiguous_matching_sessions';
-  if (lower.includes('timed out')) return 'timeout';
-  if (lower.includes('no matching')) return 'no_matching_session';
-  if (lower.includes('parse')) return 'parse_failure';
-  return 'unknown';
 }

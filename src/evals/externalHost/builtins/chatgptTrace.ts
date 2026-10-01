@@ -8,6 +8,7 @@ import type {
   MCPHostSimulationResult,
 } from '../../mcpHost/mcpHostTypes.js';
 import type { ExternalHostTelemetry } from '../types.js';
+import { NativeTraceError } from '../nativeTraceError.js';
 import type { ChatgptSurface } from '../../chatgpt/driver.js';
 
 const MAX_FILES = 10_000;
@@ -188,7 +189,10 @@ export async function findChatgptTrace(
     if (trace) matches.push({ path, trace });
   }
   if (matches.length > 1)
-    throw new Error('Ambiguous matching ChatGPT sessions for this query.');
+    throw new NativeTraceError(
+      'ambiguous_matching_sessions',
+      'Ambiguous matching ChatGPT sessions for this query.'
+    );
   const match = matches[0];
   if (
     options.bound &&
@@ -197,7 +201,8 @@ export async function findChatgptTrace(
       match.trace.sessionId !== options.bound.sessionId ||
       match.trace.turnId !== options.bound.turnId)
   )
-    throw new Error(
+    throw new NativeTraceError(
+      'host_run_failed',
       'Bound ChatGPT session/turn changed or no longer matches the query.'
     );
   return match;
@@ -315,13 +320,17 @@ export function parseChatgptTrace(
   if (!sessionId || originator !== expectedOriginator || matches.size === 0)
     return undefined;
   if (matches.size > 1)
-    throw new Error('Ambiguous matching ChatGPT turns for this query.');
+    throw new NativeTraceError(
+      'ambiguous_matching_sessions',
+      'Ambiguous matching ChatGPT turns for this query.'
+    );
   const turnId = [...matches][0]!;
   if (
     typeof selector !== 'string' &&
     (userTurns[0] !== turnId || userTexts.get(turnId)?.size !== 1)
   )
-    throw new Error(
+    throw new NativeTraceError(
+      'host_run_failed',
       'Exact-prompt match is not the unique initial user message of a fresh ChatGPT session.'
     );
   const nativePrompt = userTexts.get(turnId)?.values().next().value;

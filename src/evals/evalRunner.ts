@@ -52,6 +52,10 @@ import { sumUsage } from '../utils/usageUtils.js';
 import packageJson from '../../package.json' with { type: 'json' };
 import { attachReporterData } from '../reporters/channel.js';
 import { compareEvalRuns } from './evalRunComparison.js';
+import {
+  CLAUDE_NO_MATCHING_SESSION_MESSAGE,
+  CLAUDE_SESSION_TIMEOUT_MESSAGE,
+} from './externalHost/builtins/claudeSessions.js';
 
 /**
  * Context passed to the eval runner
@@ -881,8 +885,9 @@ function isInfrastructureError(err: unknown): boolean {
     msg.includes('network') ||
     msg.includes('automation permission') ||
     msg.includes('automation/accessibility') ||
-    msg.includes('no matching claude session') ||
-    msg.includes('timed out waiting for claude session') ||
+    // Cowork reports Claude binding failures as text; the wording is shared.
+    msg.includes(CLAUDE_NO_MATCHING_SESSION_MESSAGE.toLowerCase()) ||
+    msg.includes(CLAUDE_SESSION_TIMEOUT_MESSAGE.toLowerCase()) ||
     msg.includes('failed to submit prompt to claude') ||
     msg.includes('failed to submit prompt to desktop host') ||
     // Prompt/context overflow — LLM couldn't run, not a tool discoverability failure

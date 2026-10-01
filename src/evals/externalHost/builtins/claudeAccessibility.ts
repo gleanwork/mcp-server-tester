@@ -10,6 +10,7 @@ import {
   readMacosFrontWindowContents,
 } from './macosDesktop.js';
 import { buildHostIdentityMetadata } from './claudeTraceMetadata.js';
+import { NativeTraceError } from '../nativeTraceError.js';
 import {
   DEFAULT_APP_NAME,
   POLL_INTERVAL_MS,
@@ -151,7 +152,8 @@ export async function waitForAccessibilityTrace(options: {
     await delay(POLL_INTERVAL_MS);
   }
 
-  throw new Error(
+  throw new NativeTraceError(
+    'timeout',
     `Timed out waiting for Claude Chat Desktop visible response for marker ${options.context.marker}`
   );
 }
