@@ -61,7 +61,7 @@ Custom Playwright reporter. `channel.ts` is the contract between the code that r
 
 ### `src/cli/`
 
-The `mcp-server-tester` CLI. `index.ts` is the entry point; the `commands/` directory contains one subdirectory per command (`init`, `generate`, `login`, `token`). `components/` holds Ink-based React components for the interactive prompts. `templates/` stores scaffold files emitted by `init`.
+The CLI, installed as `mst` and as `mcp-server-tester` (the same binary). `index.ts` is the entry point; the `commands/` directory contains one subdirectory per command (`init`, `generate`, `login`, `token`, `run`, `batch`, `cowork`, `open`). `components/` holds Ink-based React components for the interactive prompts. `templates/` stores scaffold files emitted by `init`.
 
 ### `src/types/`
 
@@ -140,7 +140,7 @@ local HTML reports.
 ### Auth Flow
 
 ```
-CLI user runs: mcp-server-tester login <server-url>
+CLI user runs: mst login <server-url>
    ↓
 auth/cli.ts: CLIOAuthClient.login()
    ↓

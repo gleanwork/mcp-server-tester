@@ -2,6 +2,10 @@
 
 The `@gleanwork/mcp-server-tester` CLI provides interactive commands to help you get started quickly and generate eval datasets.
 
+The package installs the CLI under two names: `mst` (short for MCP Server Tester) and `mcp-server-tester`. They are the same binary. Once the package is installed in your project, use `npx mst <command>`.
+
+Before the package is installed (for example, running `init` in a new directory), use the scoped package name: `npx @gleanwork/mcp-server-tester init`. A bare `npx mst` or `npx mcp-server-tester` with nothing installed fetches unrelated, unscoped npm packages of those names.
+
 ## Table of Contents
 
 - [init - Initialize Project](#init---initialize-project)
@@ -16,7 +20,7 @@ Create a complete project structure with configuration, tests, and example datas
 ### Usage
 
 ```bash
-npx mcp-server-tester init [options]
+npx @gleanwork/mcp-server-tester init [options]
 ```
 
 ### Options
@@ -30,7 +34,7 @@ npx mcp-server-tester init [options]
 Running `init` without options starts an interactive setup:
 
 ```bash
-npx mcp-server-tester init
+npx @gleanwork/mcp-server-tester init
 
 ? Project name: my-mcp-tests
 ? MCP transport type: stdio (local server process)
@@ -116,7 +120,7 @@ Interactively create eval datasets by connecting to your MCP server and generati
 ### Usage
 
 ```bash
-npx mcp-server-tester generate [options]
+npx mst generate [options]
 ```
 
 ### Options
@@ -131,7 +135,7 @@ npx mcp-server-tester generate [options]
 Use `--snapshot` to create datasets that use Playwright's built-in snapshot testing:
 
 ```bash
-npx mcp-server-tester generate --snapshot -o data/snapshot-tests.json
+npx mst generate --snapshot -o data/snapshot-tests.json
 ```
 
 This sets `expect.snapshot: "<case-id>"` for each case. When you run tests:
@@ -147,7 +151,7 @@ This is ideal for regression testing - capture known-good responses once, then v
 The `generate` command guides you through creating test cases:
 
 ```bash
-npx mcp-server-tester generate
+npx mst generate
 
 # Step 1: Connect to MCP server
 ? MCP transport type: stdio
@@ -223,7 +227,7 @@ Response preview:
 The generator can append to existing dataset files:
 
 ```bash
-npx mcp-server-tester generate -o data/existing.json
+npx mst generate -o data/existing.json
 
 ✓ Found existing dataset with 5 cases
 ? Add new test cases? Yes
@@ -249,7 +253,7 @@ For complex MCP configurations, use a JSON config file:
 Then generate with:
 
 ```bash
-npx mcp-server-tester generate -c mcp-config.json
+npx mst generate -c mcp-config.json
 ```
 
 ### Output Format
@@ -285,7 +289,7 @@ The generated dataset is a JSON file:
 
 ```bash
 # Generate dataset for a weather service
-npx mcp-server-tester generate -o data/weather-tests.json
+npx mst generate -o data/weather-tests.json
 
 # Test case 1: Sunny day
 ? Tool: get_weather
@@ -351,7 +355,7 @@ Authenticate with MCP servers that require OAuth. Tokens are cached locally and 
 ### Usage
 
 ```bash
-npx mcp-server-tester login <server-url> [options]
+npx mst login <server-url> [options]
 ```
 
 ### Arguments
@@ -369,7 +373,7 @@ npx mcp-server-tester login <server-url> [options]
 
 ```bash
 # Authenticate with an MCP server (opens browser for OAuth flow)
-npx mcp-server-tester login https://api.example.com/mcp
+npx mst login https://api.example.com/mcp
 
 # Output:
 # Authenticating with https://api.example.com/mcp...
@@ -383,7 +387,7 @@ npx mcp-server-tester login https://api.example.com/mcp
 If you need fresh credentials or your tokens are corrupted:
 
 ```bash
-npx mcp-server-tester login https://api.example.com/mcp --force
+npx mst login https://api.example.com/mcp --force
 
 # Output:
 # Clearing existing credentials...
@@ -396,7 +400,7 @@ npx mcp-server-tester login https://api.example.com/mcp --force
 By default, the CLI requests all scopes advertised by the server's OAuth metadata. To request specific scopes:
 
 ```bash
-npx mcp-server-tester login https://api.example.com/mcp --scopes read,write
+npx mst login https://api.example.com/mcp --scopes read,write
 
 # Output:
 # Authenticating with https://api.example.com/mcp...
@@ -430,7 +434,7 @@ Tokens are stored locally in a secure directory:
 Use `--state-dir` to override the storage location:
 
 ```bash
-npx mcp-server-tester login https://api.example.com/mcp --state-dir ./my-tokens
+npx mst login https://api.example.com/mcp --state-dir ./my-tokens
 ```
 
 ### CI/CD Setup
@@ -441,7 +445,7 @@ For automated testing in CI, tokens can be provided via environment variables in
 
 ```bash
 # Run login locally
-npx mcp-server-tester login https://api.example.com/mcp
+npx mst login https://api.example.com/mcp
 
 # Find your tokens
 cat ~/.local/state/mcp-tests/<server-key>/tokens.json
@@ -514,7 +518,7 @@ If the OAuth browser window doesn't open automatically:
 
 ```bash
 # Clear and re-authenticate
-npx mcp-server-tester login https://api.example.com/mcp --force
+npx mst login https://api.example.com/mcp --force
 ```
 
 #### CI Environment Variables Not Working
@@ -531,7 +535,7 @@ Export stored OAuth tokens in formats suitable for CI/CD environments like GitHu
 ### Usage
 
 ```bash
-npx mcp-server-tester token <server-url> [options]
+npx mst token <server-url> [options]
 ```
 
 ### Arguments
@@ -551,7 +555,7 @@ npx mcp-server-tester token <server-url> [options]
 Outputs tokens as shell-compatible environment variable assignments:
 
 ```bash
-npx mcp-server-tester token https://api.example.com/mcp
+npx mst token https://api.example.com/mcp
 
 # Output:
 MCP_ACCESS_TOKEN=eyJhbGciOiJSUzI1NiIs...
@@ -563,7 +567,7 @@ MCP_TOKEN_EXPIRES_AT=1736956200000
 Use with `eval` to set environment variables:
 
 ```bash
-eval $(npx mcp-server-tester token https://api.example.com/mcp)
+eval $(npx mst token https://api.example.com/mcp)
 ```
 
 #### `json`
@@ -571,7 +575,7 @@ eval $(npx mcp-server-tester token https://api.example.com/mcp)
 Outputs tokens as a JSON object:
 
 ```bash
-npx mcp-server-tester token https://api.example.com/mcp --format json
+npx mst token https://api.example.com/mcp --format json
 
 # Output:
 {
@@ -587,7 +591,7 @@ npx mcp-server-tester token https://api.example.com/mcp --format json
 Outputs ready-to-paste GitHub CLI commands for setting repository secrets:
 
 ```bash
-npx mcp-server-tester token https://api.example.com/mcp --format gh
+npx mst token https://api.example.com/mcp --format gh
 
 # Output:
 # Run these commands to set GitHub Actions secrets:
@@ -602,13 +606,13 @@ gh secret set MCP_TOKEN_EXPIRES_AT --body "1736956200000"
 1. **Authenticate locally:**
 
    ```bash
-   npx mcp-server-tester login https://api.example.com/mcp
+   npx mst login https://api.example.com/mcp
    ```
 
 2. **Export tokens for GitHub:**
 
    ```bash
-   npx mcp-server-tester token https://api.example.com/mcp --format gh
+   npx mst token https://api.example.com/mcp --format gh
    ```
 
 3. **Run the output commands** (or copy/paste each secret manually):
@@ -643,14 +647,14 @@ gh secret set MCP_TOKEN_EXPIRES_AT --body "1736956200000"
 If no tokens are found for the specified server:
 
 ```bash
-npx mcp-server-tester token https://api.example.com/mcp
+npx mst token https://api.example.com/mcp
 
 # Output (to stderr):
 # No tokens found for https://api.example.com/mcp
 #
 # Expected location: ~/.local/state/mcp-tests/api.example.com_mcp/tokens.json
 #
-# Run 'mcp-server-tester login https://api.example.com/mcp' to authenticate first.
+# Run 'mst login https://api.example.com/mcp' to authenticate first.
 ```
 
 ## Next Steps

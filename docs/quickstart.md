@@ -26,7 +26,7 @@ Start with direct mode. Add LLM host mode when you need to validate that your to
 The fastest way to get started is using the CLI:
 
 ```bash
-npx mcp-server-tester init
+npx @gleanwork/mcp-server-tester init
 
 # Follow the interactive prompts:
 ? Project name: my-mcp-tests
@@ -119,7 +119,7 @@ See the [API Reference](./api-reference.md) for complete fixture documentation.
 The easiest way to create datasets is using the interactive generator:
 
 ```bash
-npx mcp-server-tester generate
+npx mst generate
 
 # Interactive workflow:
 ? MCP transport type: stdio

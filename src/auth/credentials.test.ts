@@ -238,7 +238,7 @@ describe('StoredLoginAuthProvider', () => {
       token('rejected'),
       serverUrl
     );
-    const relogin = `mcp-server-tester login ${serverUrl}`;
+    const relogin = `mst login ${serverUrl}`;
     await expect(provider.clientInformation()).rejects.toThrow(relogin);
     await expect(provider.redirectToAuthorization()).rejects.toThrow(relogin);
   });

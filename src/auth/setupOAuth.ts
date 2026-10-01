@@ -230,7 +230,7 @@ async function completeLoginForm(
  * This function checks Playwright's single-file auth state format,
  * typically created by `performOAuthSetup` in globalSetup.
  *
- * **Note:** This does NOT work with tokens stored by the CLI (`mcp-server-tester login`).
+ * **Note:** This does NOT work with tokens stored by the CLI (`mst login`).
  * For CLI-stored tokens, use `hasValidTokens(serverUrl)` instead.
  *
  * @param storagePath - Path to the auth state file (e.g., 'playwright/.auth/oauth-state.json')

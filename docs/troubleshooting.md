@@ -6,7 +6,7 @@ Common issues and how to fix them.
 
 ## "Raw mode is not supported"
 
-**Symptom:** Running `mcp-server-tester init` or `mcp-server-tester generate` fails immediately with an error like `Error: Raw mode is not supported on the current process.stdin`.
+**Symptom:** Running `npx @gleanwork/mcp-server-tester init` or `npx mst generate` fails immediately with an error like `Error: Raw mode is not supported on the current process.stdin`.
 
 **Cause:** The CLI uses [Ink](https://github.com/vadimdemedes/ink) for interactive prompts. Ink requires a real TTY (interactive terminal). CI environments, piped shells, and non-interactive shells do not provide a TTY.
 

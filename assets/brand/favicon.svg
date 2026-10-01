@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16" role="img" aria-labelledby="title">
+  <title id="title">MST (MCP Server Tester)</title>
+  <style>
+    .brackets { stroke: #11141A; }
+    .check { stroke: #343CED; }
+    @media (prefers-color-scheme: dark) {
+      .brackets { stroke: #FFFFFF; }
+      .check { stroke: #7C83FF; }
+    }
+  </style>
+  <g fill="none" stroke-width="2">
+    <path class="brackets" stroke-linecap="square" stroke-linejoin="miter" d="M4 2H2v12h2M12 2h2v12h-2"/>
+    <path class="check" stroke-linecap="round" stroke-linejoin="round" d="M5 8.5l2 2 4-4.5"/>
+  </g>
+</svg>
