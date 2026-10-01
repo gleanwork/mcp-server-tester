@@ -138,6 +138,7 @@ describe('Codex configuration lifecycle', () => {
         hostToolPolicy: {
           disabledPlugins: ['unified-computer-use@openai-bundled'],
           webSearch: 'disabled',
+          disabledFeatures: ['workspace_dependencies'],
         },
       }
     );
@@ -146,6 +147,7 @@ describe('Codex configuration lifecycle', () => {
       sandbox_mode: 'danger-full-access',
       cli_auth_credentials_store: 'keyring',
       web_search: 'disabled',
+      features: { workspace_dependencies: false },
       plugins: {
         'unified-computer-use@openai-bundled': { enabled: false },
         'visualize@openai-bundled': { enabled: true },
@@ -192,6 +194,15 @@ describe('Codex configuration lifecycle', () => {
     [
       'hostToolPolicy',
       { disabledPlugins: [], webSearch: 'live' },
+      'host tool policy',
+    ],
+    [
+      'hostToolPolicy',
+      {
+        disabledPlugins: [],
+        webSearch: 'disabled',
+        disabledFeatures: ['x]\nenabled = true'],
+      },
       'host tool policy',
     ],
     ['trustedProject', 'relative/workspace', 'trusted project'],

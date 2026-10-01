@@ -91,9 +91,12 @@ export interface CodexHostToolPolicy {
   /** Bundled plugin IDs, e.g. `unified-computer-use@openai-bundled`. */
   disabledPlugins: readonly string[];
   webSearch: 'disabled';
+  /** Codex feature flags rendered as `[features] <name> = false`. */
+  disabledFeatures?: readonly string[];
 }
 
 const PLUGIN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9._-]+$/;
+const FEATURE_PATTERN = /^[a-z][a-z0-9_]*$/;
 
 export interface ResolvedCodexSetup {
   configPath: string;
@@ -244,7 +247,12 @@ export async function installCodexConfig(
     tools !== undefined &&
     (tools.webSearch !== 'disabled' ||
       new Set(tools.disabledPlugins).size !== tools.disabledPlugins.length ||
-      !tools.disabledPlugins.every((id) => PLUGIN_ID_PATTERN.test(id)))
+      !tools.disabledPlugins.every((id) => PLUGIN_ID_PATTERN.test(id)) ||
+      new Set(tools.disabledFeatures ?? []).size !==
+        (tools.disabledFeatures ?? []).length ||
+      !(tools.disabledFeatures ?? []).every((name) =>
+        FEATURE_PATTERN.test(name)
+      ))
   )
     throw new Error('Invalid Codex host tool policy.');
   const resolved = resolveCodexSetup(setup, options.configName);
@@ -293,6 +301,11 @@ export async function installCodexConfig(
           enabled: false,
         };
       settings.plugins = plugins;
+      if (tools.disabledFeatures?.length) {
+        const features = isTable(settings.features) ? settings.features : {};
+        for (const name of tools.disabledFeatures) features[name] = false;
+        settings.features = features;
+      }
     }
     if (options.trustedProject !== undefined)
       settings.projects = {
