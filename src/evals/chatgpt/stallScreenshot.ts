@@ -154,8 +154,8 @@ export async function saveStallScreenshot(options: {
   caseId: string;
   display?: string;
   xauthority?: string;
-  /** File/directory label: `stall` (silent turn) or `submit` (failed send). */
-  label?: 'stall' | 'submit';
+  /** File/directory label: `stall` (silent turn), `submit` (failed send), or `prepare` (failed setup/recovery surface). */
+  label?: 'stall' | 'submit' | 'prepare';
   capture?: (display: string, xauthority?: string) => Promise<Buffer>;
 }): Promise<StallScreenshot> {
   const label = options.label ?? 'stall';

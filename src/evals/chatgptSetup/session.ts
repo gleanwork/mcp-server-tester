@@ -19,6 +19,7 @@ import {
   type ChatgptApplicationController,
 } from '../chatgpt/driver.js';
 import { NativeChatgptDriverError } from '../chatgpt/linux.js';
+import { saveStallScreenshot } from '../chatgpt/stallScreenshot.js';
 import { chatgptPlatform } from './platform.js';
 import type {
   ChatgptPlatformProfile,
@@ -119,6 +120,8 @@ export class ChatgptAppSession {
     recoveryCount: 0,
     recoveryDurationMs: 0,
     nativeSetup: undefined as SemanticDesktopTelemetry | undefined,
+    /** Linux: whether a display screenshot was saved after a failed surface check. */
+    prepareScreenshot: undefined as 'captured' | 'unavailable' | undefined,
     /** Linux login and MCP readiness, sanitized. */
     nativeReadiness: undefined as LinuxChatgptReadiness | undefined,
     /** macOS direct MCP preflight, sanitized. Linux records it in nativeReadiness. */
@@ -249,10 +252,27 @@ export class ChatgptAppSession {
     await this.#lifecycle!.controller.start(environment);
     this.record(phase, 'start');
     if (platform.verifyReady) {
-      this.telemetry.nativeSetup = await platform.verifyReady(
-        config,
-        (prompt) => this.openPrompt(prompt)
-      );
+      try {
+        this.telemetry.nativeSetup = await platform.verifyReady(
+          config,
+          (prompt) => this.openPrompt(prompt)
+        );
+      } catch (error) {
+        // Show what blocked the surface; capture never changes the failure.
+        if (this.evidenceDir) {
+          const screenshot = await saveStallScreenshot({
+            evidenceDir: this.evidenceDir,
+            caseId: phase,
+            display: environment.DISPLAY ?? process.env.DISPLAY,
+            xauthority: environment.XAUTHORITY ?? process.env.XAUTHORITY,
+            label: 'prepare',
+          });
+          this.telemetry.prepareScreenshot = screenshot.path
+            ? 'captured'
+            : 'unavailable';
+        }
+        throw error;
+      }
       this.record(phase, 'verify_surface');
     }
   }
