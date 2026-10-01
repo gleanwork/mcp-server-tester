@@ -42,6 +42,11 @@ import {
 } from '../../chatgpt/linux.js';
 import { validateLinuxChatgptConfig } from '../../chatgptSetup/linuxProfile.js';
 import { hostPluginMcpServers } from '../../hostPlugins.js';
+import { stat } from 'node:fs/promises';
+import {
+  CHATGPT_STALL_MS,
+  saveStallScreenshot,
+} from '../../chatgpt/stallScreenshot.js';
 
 const POLL_INTERVAL_MS = 750;
 
@@ -329,7 +334,18 @@ async function submitNatively(
           : {}),
       },
     };
-    return withEvidence(
+    // Show what covered the composer; capture never changes the outcome.
+    const screenshot =
+      typeof runState.evidenceDir === 'string'
+        ? await saveStallScreenshot({
+            evidenceDir: runState.evidenceDir,
+            caseId: run.caseId,
+            display: process.env.DISPLAY,
+            xauthority: process.env.XAUTHORITY,
+            label: 'submit',
+          })
+        : { error: 'No MST-owned evidence directory.' };
+    const result = await withEvidence(
       failureResult({
         config,
         context: run,
@@ -346,6 +362,12 @@ async function submitNatively(
       run,
       runState
     );
+    attachScreenshot(
+      result,
+      screenshot,
+      'ChatGPT display at submission failure'
+    );
+    return result;
   }
 }
 
@@ -392,6 +414,75 @@ async function submitWithComputerUse(
   }
 }
 
+/** Fail a silent Linux turn early and attach a display screenshot. */
+async function stalledResult(
+  {
+    config,
+    run,
+    state,
+  }: Pick<ExternalHostCapabilityContext, 'config' | 'run' | 'state'>,
+  metadataOptions: Parameters<typeof partialFailure>[0],
+  found: { path: string; trace: ChatgptTrace },
+  bound: ChatgptTraceBinding | undefined,
+  silentMs: number
+): Promise<ExternalHostRunResult> {
+  const silentSeconds = Math.round(silentMs / 1000);
+  const evidenceDir = chatgptRunState(state).evidenceDir;
+  const screenshot =
+    typeof evidenceDir === 'string' && isLinuxChatgpt(config)
+      ? await saveStallScreenshot({
+          evidenceDir,
+          caseId: run.caseId,
+          display: process.env.DISPLAY,
+          xauthority: process.env.XAUTHORITY,
+        })
+      : { error: 'Screenshots are captured only on Linux ChatGPT.' };
+  const result = await withEvidence(
+    partialFailure(
+      metadataOptions,
+      found,
+      'timeout',
+      `ChatGPT turn stalled: its transcript was silent for ${silentSeconds}s (limit ${CHATGPT_STALL_MS / 1000}s).`
+    ),
+    run,
+    chatgptRunState(state),
+    boundEvidence(bound)
+  );
+  attachScreenshot(
+    result,
+    screenshot,
+    'ChatGPT display at stall',
+    `Captured after ${silentSeconds}s of transcript silence`
+  );
+  return result;
+}
+
+function attachScreenshot(
+  result: ExternalHostRunResult,
+  screenshot: { path?: string; error?: string },
+  name: string,
+  summary?: string
+): void {
+  const external = result.externalHost;
+  if (!external) return;
+  if (screenshot.path)
+    external.artifacts = [
+      ...external.artifacts,
+      {
+        kind: 'screenshot',
+        name,
+        path: screenshot.path,
+        contentType: 'image/png',
+        ...(summary ? { summary } : {}),
+      },
+    ];
+  else
+    external.traceLimitations = [
+      ...(external.traceLimitations ?? []),
+      `${name} screenshot unavailable: ${screenshot.error}`,
+    ];
+}
+
 async function captureChatgptComputerUseResult({
   config,
   run,
@@ -402,6 +493,9 @@ async function captureChatgptComputerUseResult({
   let latest: { path: string; trace: ChatgptTrace } | undefined;
   const runState = chatgptRunState(state);
   const platform = chatgptPlatform(config);
+  // Transcript growth is the only progress signal; a silent turn is stalled.
+  let progressKey: string | undefined;
+  let progressAtMs = Date.now();
   const selector: ChatgptTraceSelector =
     run.correlation.strategy === 'exact_prompt'
       ? { strategy: 'exact_prompt', prompt: run.submittedScenario }
@@ -462,6 +556,22 @@ async function captureChatgptComputerUseResult({
         const { trace, path } = found;
         bound ??= { path, sessionId: trace.sessionId, turnId: trace.turnId };
         latest = found;
+        const size = await stat(path).then(
+          (info) => `${info.size}:${info.mtimeMs}`,
+          () => undefined
+        );
+        if (size !== progressKey) {
+          progressKey = size;
+          progressAtMs = Date.now();
+        }
+        if (!trace.complete && Date.now() - progressAtMs >= CHATGPT_STALL_MS)
+          return await stalledResult(
+            { config, run, state },
+            metadataOptions,
+            found,
+            bound,
+            Date.now() - progressAtMs
+          );
         if (trace.complete) {
           if (trace.error)
             return withEvidence(

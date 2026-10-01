@@ -36,6 +36,13 @@ vi.mock('node:timers/promises', () => ({
     clock.now += ms;
   }),
 }));
+const screenshots = vi.hoisted(() => ({
+  saveStallScreenshot: vi.fn(),
+}));
+vi.mock('../../chatgpt/stallScreenshot.js', async (original) => ({
+  ...(await original<object>()),
+  saveStallScreenshot: screenshots.saveStallScreenshot,
+}));
 vi.mock('./chatgptTrace.js', async (original) => ({
   ...(await original<typeof TraceModule>()),
   findChatgptTrace: vi.fn(),
@@ -119,6 +126,9 @@ beforeEach(() => {
   vi.spyOn(Date, 'now').mockImplementation(() => clock.now);
   vi.mocked(findChatgptTrace).mockReset();
   vi.mocked(findChatgptTrace).mockResolvedValue(undefined);
+  screenshots.saveStallScreenshot
+    .mockReset()
+    .mockResolvedValue({ error: 'no display in unit tests' });
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -380,6 +390,88 @@ describe('bounded native binding wait and failure classification', () => {
       });
       expect(clock.now).toBe(2500);
       expect(result).not.toHaveProperty('response');
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('fails a silent turn after 120s and saves a display screenshot', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'chatgpt-stall-'));
+    try {
+      const ctx = context(home, true, 900_000);
+      const sessions = join(home, '.codex', 'sessions');
+      await mkdir(sessions, { recursive: true });
+      const path = join(sessions, 'rollout-stall.jsonl');
+      await writeFile(path, '{"type":"session_meta"}\n');
+      screenshots.saveStallScreenshot.mockResolvedValue({
+        path: join(home, 'evidence', 'case-stall-x', 'stall-screenshot.png'),
+      });
+      vi.mocked(findChatgptTrace).mockResolvedValue({
+        path,
+        trace: {
+          sessionId: 'session',
+          turnId: 'turn',
+          complete: false,
+          toolCalls: [],
+          conversationHistory: [{ role: 'user', content: 'private prompt' }],
+          telemetry: { partial: true },
+          limitations: [],
+        },
+      });
+      const result = await capture(ctx);
+      expect(result).toMatchObject({
+        success: false,
+        error: expect.stringContaining('stalled'),
+        externalHost: {
+          failureKind: 'timeout',
+          artifacts: expect.arrayContaining([
+            expect.objectContaining({
+              kind: 'screenshot',
+              contentType: 'image/png',
+            }),
+          ]),
+        },
+      });
+      // Stops at the 120s silence limit, not the 900s case timeout.
+      expect(clock.now - 1000).toBeGreaterThanOrEqual(120_000);
+      expect(clock.now - 1000).toBeLessThan(125_000);
+      expect(screenshots.saveStallScreenshot).toHaveBeenCalledOnce();
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps waiting while the transcript keeps growing', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'chatgpt-progress-'));
+    try {
+      const ctx = context(home, true, 300_000);
+      const sessions = join(home, '.codex', 'sessions');
+      await mkdir(sessions, { recursive: true });
+      const path = join(sessions, 'rollout-progress.jsonl');
+      await writeFile(path, 'x');
+      let polls = 0;
+      vi.mocked(findChatgptTrace).mockImplementation(async () => {
+        polls += 1;
+        // Grow the file every ~60s of simulated time: never silent for 120s.
+        if (polls % 80 === 0) await writeFile(path, 'x'.repeat(polls));
+        return {
+          path,
+          trace: {
+            sessionId: 'session',
+            turnId: 'turn',
+            complete: false,
+            toolCalls: [],
+            conversationHistory: [],
+            telemetry: { partial: true },
+            limitations: [],
+          },
+        };
+      });
+      const result = await capture(ctx);
+      expect(result).toMatchObject({
+        error: 'Timed out waiting for the native ChatGPT turn to complete.',
+      });
+      expect(screenshots.saveStallScreenshot).not.toHaveBeenCalled();
     } finally {
       await rm(home, { recursive: true, force: true });
     }
@@ -736,6 +828,12 @@ describe('what the platform decides', () => {
         },
       },
     });
+    expect(screenshots.saveStallScreenshot).toHaveBeenCalledWith(
+      expect.objectContaining({ label: 'submit' })
+    );
+    expect(result!.externalHost.traceLimitations).toContain(
+      'ChatGPT display at submission failure screenshot unavailable: no display in unit tests'
+    );
     expect(result!.externalHost.traceLimitations).toContain(
       'Native evidence directory is unavailable.'
     );

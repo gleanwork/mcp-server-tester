@@ -28,6 +28,7 @@ export {
 import {
   CoworkDriverError,
   CoworkHitlBudgetError,
+  CoworkUserQuestionError,
   type CoworkDriverOptions,
   type SemanticDesktopTelemetry,
 } from './driver.js';
@@ -349,6 +350,11 @@ export const linuxCoworkPlatform: CoworkPlatform = {
             action_count: actions,
             telemetry: telemetry(started, actions, 'complete'),
           };
+        if (await options.awaitingUser?.())
+          throw new CoworkUserQuestionError(
+            'Cowork is waiting for an answer to a question (AskUserQuestion); a headless run cannot answer it. No resubmission attempted.',
+            telemetry(started, actions, 'partial')
+          );
         if (actions >= budget)
           throw new CoworkHitlBudgetError(
             'Linux HITL action budget exhausted.',
@@ -365,7 +371,11 @@ export const linuxCoworkPlatform: CoworkPlatform = {
         );
       }
     } catch (error) {
-      if (error instanceof CoworkHitlBudgetError) throw error;
+      if (
+        error instanceof CoworkHitlBudgetError ||
+        error instanceof CoworkUserQuestionError
+      )
+        throw error;
       const partialActions =
         error instanceof CoworkDriverError
           ? (error.telemetry?.action_count ?? 0)

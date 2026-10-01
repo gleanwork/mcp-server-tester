@@ -199,6 +199,10 @@ export const LINUX_CHATGPT_EXECUTION_POLICY: CodexExecutionPolicy = {
 export const LINUX_CHATGPT_HOST_TOOL_POLICY: CodexHostToolPolicy = {
   disabledPlugins: ['unified-computer-use@openai-bundled'],
   webSearch: 'disabled',
+  // workspace_dependencies makes the app download and unpack a ~1.6 GB office
+  // runtime at startup. On the disposable tmpfs profile that fills the disk and
+  // crashes the renderer (blank window, ENOSPC, renderer exit 133).
+  disabledFeatures: ['workspace_dependencies'],
 };
 
 /** Sanitized setup receipt. No prompts, URLs, tokens, or native output. */
@@ -266,6 +270,7 @@ export async function createLinuxChatgptProfile(
     hostToolPolicy: {
       disabledPlugins: [...LINUX_CHATGPT_HOST_TOOL_POLICY.disabledPlugins],
       webSearch: LINUX_CHATGPT_HOST_TOOL_POLICY.webSearch,
+      disabledFeatures: [...LINUX_CHATGPT_HOST_TOOL_POLICY.disabledFeatures!],
     },
     login: 'not-run',
     mcpPreflight: [],
@@ -286,6 +291,7 @@ export async function createLinuxChatgptProfile(
       appPath: environment.appPath,
       environment: environment.session,
       workspace,
+      logFile: join(environment.evidenceDir, 'chatgpt-app.log'),
     }),
     evidenceDir: environment.evidenceDir,
     readiness,

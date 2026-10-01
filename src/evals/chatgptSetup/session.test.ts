@@ -454,6 +454,34 @@ describe('ChatGPT Linux native lifecycle', () => {
     }
   });
 
+  it('saves a display screenshot when the Linux surface check fails, without changing the error', async () => {
+    const { NativeChatgptDriverError } = await import('../chatgpt/linux.js');
+    const failure = new NativeChatgptDriverError('intro screen did not change');
+    vi.mocked(runLinuxChatgptDesktop).mockRejectedValueOnce(failure);
+    const screenshots = await import('../chatgpt/stallScreenshot.js');
+    const save = vi
+      .spyOn(screenshots, 'saveStallScreenshot')
+      .mockResolvedValue({
+        path: join(home, 'evidence/setup-prepare-x/prepare-screenshot.png'),
+      });
+    const session = new ChatgptAppSession();
+    try {
+      await expect(session.prepare(linuxConfig())).rejects.toBe(failure);
+      expect(save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          evidenceDir: join(home, 'evidence'),
+          caseId: 'setup',
+          label: 'prepare',
+        })
+      );
+      expect(session.telemetry.prepareScreenshot).toBe('captured');
+      expect(session.telemetry.setupStatus).toBe('failed');
+    } finally {
+      save.mockRestore();
+      await session.dispose();
+    }
+  });
+
   it('prepares surface once per batch and keeps native controller separate from model accounting', async () => {
     const session = new ChatgptAppSession();
     const config = linuxConfig();

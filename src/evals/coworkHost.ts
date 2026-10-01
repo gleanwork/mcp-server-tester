@@ -24,6 +24,7 @@ import {
   waitForClaudeTrace,
   waitForClaudeSession,
 } from './externalHost/builtins/claudeSessions.js';
+import { awaitingUserAnswer } from './externalHost/builtins/claudeTrace.js';
 import { simulationToHostTrace } from './hostTrace.js';
 import {
   HostPluginError,
@@ -290,6 +291,7 @@ async function runBatch(
         const deadlineAt = startedAtMs + config.timeout;
         let hitlError: string | undefined;
         let hitlWarning: string | undefined;
+        let awaitingUser = false;
         let sessionPath: string;
         const match = {
           dataDir,
@@ -380,6 +382,13 @@ async function runBatch(
                   );
                 return current[0]!.isComplete;
               },
+              awaitingUser: async () => {
+                const current = await findMatchingClaudeSessions({
+                  ...match,
+                  sessionPath,
+                });
+                return current.length === 1 && awaitingUserAnswer(current[0]!);
+              },
               task: `Handle only the currently open Cowork task just submitted with this exact query: ${request.input.scenario}. ${approvalTask} Do not switch tasks. Never create, type, or resubmit a task. If the current task cannot be identified uniquely, stop without an action.`,
             });
             hitlActions += hitl.action_count;
@@ -408,6 +417,39 @@ async function runBatch(
           } else {
             hitlError = message;
           }
+          if (
+            error instanceof CoworkDriverError &&
+            error.kind === 'awaiting-user'
+          )
+            awaitingUser = true;
+        }
+        if (awaitingUser) {
+          // Waiting on a question nobody can answer: fail now, not at the deadline.
+          // Keep the bound session so the auditor can verify the unanswered
+          // AskUserQuestion from the native transcript (a model outcome, not a
+          // missing-evidence failure).
+          const [pending] = await findMatchingClaudeSessions({
+            ...match,
+            sessionPath,
+          }).catch(() => []);
+          result = {
+            ...failure(hitlError ?? 'Cowork is waiting for an answer.'),
+            ...(pending
+              ? {
+                  toolCalls: pending.toolCalls,
+                  telemetry: {
+                    source: 'claude-native',
+                    costScope: 'native-inference-only',
+                    ...pending.telemetry,
+                    nativeSessionId: pending.candidate.id,
+                    correlation: 'exact-initial-prompt',
+                    awaitingUser: 'AskUserQuestion',
+                  },
+                }
+              : {}),
+          };
+          if (platform.reset) continuation = 'reset';
+          return finishCase();
         }
         try {
           const remaining = deadlineAt - Date.now();

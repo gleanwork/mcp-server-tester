@@ -14,6 +14,11 @@ export interface CoworkDriverOptions {
   approveWriteTools?: boolean;
   /** Bound native session completion, never GUI text or another task. */
   isComplete?: () => Promise<boolean>;
+  /**
+   * Bound native session is waiting on a question only a person can answer
+   * (an unanswered AskUserQuestion). Headless runs fail fast instead of waiting.
+   */
+  awaitingUser?: () => Promise<boolean>;
 }
 
 export const COMPUTER_USE_TOKEN_FIELDS = [
@@ -65,7 +70,8 @@ export interface CoworkHitlReceipt {
 }
 
 export class CoworkDriverError extends Error {
-  readonly kind: 'failed' | 'hitl-budget-exhausted' = 'failed';
+  readonly kind: 'failed' | 'hitl-budget-exhausted' | 'awaiting-user' =
+    'failed';
   constructor(
     message: string,
     public readonly telemetry?: CoworkDriverTelemetry
@@ -76,4 +82,9 @@ export class CoworkDriverError extends Error {
 
 export class CoworkHitlBudgetError extends CoworkDriverError {
   override readonly kind = 'hitl-budget-exhausted';
+}
+
+/** The native task asked the user a question; nothing headless can answer it. */
+export class CoworkUserQuestionError extends CoworkDriverError {
+  override readonly kind = 'awaiting-user';
 }
