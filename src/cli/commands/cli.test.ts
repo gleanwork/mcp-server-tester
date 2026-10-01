@@ -41,7 +41,7 @@ async function writeTokens(
   });
 }
 
-describe('mcp-server-tester CLI', () => {
+describe('mst CLI', () => {
   let project: BintasticProject;
 
   beforeEach(async () => {
@@ -59,7 +59,7 @@ describe('mcp-server-tester CLI', () => {
       expect(result.exitCode).toBe(0);
       expect(result.stderr).toBe('');
       expect(result.stdout).toContain('Usage: mst');
-      expect(result.stdout).toContain('mcp-server-tester');
+      expect(result.stdout).toContain('Also available as `mcp-server-tester`.');
       expect(result.stdout).toContain('init');
       expect(result.stdout).toContain('generate');
       expect(result.stdout).toContain('login');

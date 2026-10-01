@@ -103,13 +103,13 @@ more than one entry so traces and metrics can attribute MCP calls correctly.
 ## CLI
 
 ```bash
-mst run \
+npx mst run \
   --manifest ./eval-manifest.json \
   --plugins ./plugins \
   --arm variant \
   --dry-run
 
-mst batch \
+npx mst batch \
   --manifest-dir ./manifests \
   --workers 4 \
   --skip-existing \

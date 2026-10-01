@@ -16,7 +16,7 @@ node --import tsx src/cli/index.ts cowork setup
 For an installed package, use the package binary instead:
 
 ```bash
-mst cowork setup
+npx mst cowork setup
 ```
 
 The command creates the minimal empty Claude 3P profile only when the profile

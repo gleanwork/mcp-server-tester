@@ -58,7 +58,7 @@ If you call the raw client, note these SDK v2 behavior changes:
 
 The SDK ships a codemod for the mechanical parts: `npx @modelcontextprotocol/codemod@latest v1-to-v2 .`. See the SDK's [upgrade guide](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/migration/upgrade-to-v2.md).
 
-Projects created with `mst init` now depend on `@modelcontextprotocol/client` instead of `@modelcontextprotocol/sdk`.
+Projects created with `npx @gleanwork/mcp-server-tester init` now depend on `@modelcontextprotocol/client` instead of `@modelcontextprotocol/sdk`.
 
 ## Imports moved to subpaths
 
@@ -284,6 +284,7 @@ Both hosts now run through one batch lifecycle (`src/evals/desktopBatch.ts`) and
 
 ## New in 2.0 (non-breaking)
 
+- The CLI is also installed as `mst`. In a project that depends on the package, `npx mst <command>` and `npx mcp-server-tester <command>` run the same binary. Before the package is installed, run `init` as `npx @gleanwork/mcp-server-tester init`: `npx mcp-server-tester` and `npx mst` would download unrelated npm packages with those names. See [CLI](../cli.md).
 - `protocol` on `mcpConfig` (`'legacy'`, `'auto'`, or a revision like `'2026-07-28'`), the `mcpProtocol` fixture option, and `protocolMatrix()`. See [Protocol Versions](../protocol-versions.md). To run an existing project against both eras:
 
   ```typescript
