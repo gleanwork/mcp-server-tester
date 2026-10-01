@@ -18,7 +18,7 @@ export const LINUX_CHATGPT_APP_FLAGS = [
 ] as const;
 
 /** Fixed variables that make the Electron UI visible on the AT-SPI bus. */
-export const LINUX_CHATGPT_FIXED_ENVIRONMENT = {
+const LINUX_CHATGPT_FIXED_ENVIRONMENT = {
   PATH: '/usr/bin:/bin',
   LANG: 'C.UTF-8',
   NO_AT_BRIDGE: '0',

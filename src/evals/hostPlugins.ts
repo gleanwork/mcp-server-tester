@@ -27,21 +27,7 @@ const FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 /** `${name}` or `${name:argument}`; the argument is a plugin name. */
 const PLACEHOLDER = /\$\{([A-Za-z]+(?::[A-Za-z0-9._-]{1,64})?)\}/g;
 /** Plugin MCP override placeholders. Any other `${...}` fails validation. */
-export const HOST_PLUGIN_PLACEHOLDERS = [
-  'url',
-  'dataDir',
-  'bearerToken',
-] as const;
-/**
- * Placeholders for a stdio eval server. `${pluginRoot:<plugin>}` resolves to
- * the root of a declared plugin. `${bearerToken}` is allowed only in `files`.
- */
-export const HOST_STDIO_PLACEHOLDERS = [
-  'url',
-  'dataDir',
-  'pluginRoot:<plugin>',
-  'bearerToken',
-] as const;
+const HOST_PLUGIN_PLACEHOLDERS = ['url', 'dataDir', 'bearerToken'] as const;
 const MAX_FILE_BYTES = 64 * 1024;
 
 function placeholders(value: string): string[] {
@@ -90,7 +76,7 @@ const EvalUrlSchema = z
   }, 'Eval MCP URLs must be HTTPS (or loopback HTTP) without credentials.');
 
 /** How MST points one of the plugin's own MCP servers at the eval endpoint. */
-export const HostPluginMcpOverrideSchema = z
+const HostPluginMcpOverrideSchema = z
   .object({
     /** Eval endpoint, substituted as `${url}`. */
     url: EvalUrlSchema,
@@ -204,9 +190,7 @@ export const HostPluginsSchema = z
 
 /** Caller input. Helpers parse it, so defaults such as `minTools` apply. */
 export type HostPlugin = z.input<typeof HostPluginSchema>;
-export type HostPluginMcpOverride = z.output<
-  typeof HostPluginMcpOverrideSchema
->;
+type HostPluginMcpOverride = z.output<typeof HostPluginMcpOverrideSchema>;
 
 /** A plugin MCP server that MST treats as an eval MCP server. */
 export interface HostPluginMcpServer {
@@ -233,7 +217,7 @@ export function hostPluginMcpServers(
 /** Resolved credentials, keyed `<plugin>/<server>`. Never logged or receipted. */
 export type HostPluginCredentials = Record<string, string>;
 
-export function hostPluginCredentialKey(plugin: string, server: string) {
+function hostPluginCredentialKey(plugin: string, server: string) {
   return `${plugin}/${server}`;
 }
 

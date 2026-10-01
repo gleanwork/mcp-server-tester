@@ -25,14 +25,14 @@ import {
 } from './macController.js';
 
 /** Host options that differ by OS. Values are copied into ExternalHostConfig.options. */
-export interface ChatgptHostOptions {
+interface ChatgptHostOptions {
   computerUseProvider?: string;
   computerUseMaxActions?: number;
   desktopEnvironment?: Record<string, string>;
 }
 
 /** Comparable application identity; `leaseKey` claims the app within this process. */
-export interface ChatgptApplication {
+interface ChatgptApplication {
   leaseKey: string;
   appPath?: string;
   bundleId?: string;

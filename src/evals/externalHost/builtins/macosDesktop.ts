@@ -44,7 +44,7 @@ export async function runAppleScript(
   return result.stdout;
 }
 
-export function writeMacosClipboard(value: string): Promise<void> {
+function writeMacosClipboard(value: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = execFile('pbcopy', (error) => {
       if (error) {
@@ -153,7 +153,7 @@ async function submitPromptCapability({
   }
 }
 
-export async function submitPromptToMacosDesktopApp(
+async function submitPromptToMacosDesktopApp(
   prompt: string,
   options: {
     appName: string;

@@ -22,7 +22,7 @@ const MAX_BUFFER = 10 * 1024 * 1024; // 10MB
 /**
  * Returns a parser function for the given output format.
  */
-export function getParser(
+function getParser(
   format: CLIConfig['outputFormat']
 ): (stdout: string) => MCPHostSimulationResult {
   switch (format ?? 'stream-json') {

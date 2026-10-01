@@ -27,12 +27,7 @@ import type {
   MetricDefinition,
   ResolvedMetric,
 } from './evalFrameworkTypes.js';
-export type {
-  MetricValue,
-  MetricKind,
-  MetricDefinition,
-  ResolvedMetric,
-} from './evalFrameworkTypes.js';
+export type { MetricDefinition, ResolvedMetric } from './evalFrameworkTypes.js';
 
 export interface MetricResult {
   perCase: Record<string, Record<string, MetricValue>>;

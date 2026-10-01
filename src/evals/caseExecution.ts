@@ -101,7 +101,7 @@ export function checkedExecution(value: unknown): CaseExecution {
   );
 }
 
-export function directExecution(response: unknown): DirectExecution {
+function directExecution(response: unknown): DirectExecution {
   return { kind: 'direct', response };
 }
 
@@ -114,7 +114,7 @@ export function failedExecution(error: unknown): FailedExecution {
 }
 
 /** Adapt a simulated (SDK/CLI/browser) or external host result. */
-export function simulationExecution(
+function simulationExecution(
   result: MCPHostSimulationResult | ExternalHostSimulationResult,
   error?: string
 ): HostExecution {

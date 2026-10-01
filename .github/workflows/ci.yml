@@ -25,6 +25,9 @@ jobs:
 
       - run: npm run lint
 
+      - name: Unused files, exports and dependencies
+        run: npm run knip
+
       - run: npm run docs:check
 
       - name: Public evaluation foundation contracts

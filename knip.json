@@ -1,0 +1,37 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": [
+        "src/entries/*.ts",
+        "src/fixtures/*.ts",
+        "src/reporters/ui-src/App.tsx",
+        "scripts/*.{mjs,ts}",
+        "tests/**/*.{ts,mjs}",
+        "examples/plugins/*.ts",
+        "examples/browser-scripts/**/*.{ts,mjs,js}",
+        "src/**/fixtures/**/*.mjs"
+      ],
+      "project": [
+        "src/**/*.{ts,tsx,mjs}",
+        "scripts/**/*.{mjs,ts}",
+        "tests/**/*.{ts,mjs}"
+      ],
+      "ignoreDependencies": [
+        "@anthropic-ai/sdk",
+        "@anthropic-ai/vertex-sdk",
+        "@google/generative-ai",
+        "openai"
+      ]
+    },
+    "examples/*": {
+      "entry": ["**/*.{ts,mjs}"],
+      "ignoreDependencies": ["@modelcontextprotocol/server-filesystem"]
+    }
+  },
+  "ignoreBinaries": ["pbcopy"],
+  "rules": {
+    "optionalPeerDependencies": "off"
+  },
+  "ignore": ["examples/**/.mcp-eval-results/**"]
+}

@@ -34,7 +34,7 @@ const LOCK = '.mst-setup-lock';
 const MARKER = '.mst-setup-marker';
 const HELPER = 'inference-helper.sh';
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
-export function macCoworkProfileDirectory(): string {
+function macCoworkProfileDirectory(): string {
   return join(homedir(), 'Library/Application Support/Claude-3p/configLibrary');
 }
 const HASH = /^[a-f0-9]{64}$/;

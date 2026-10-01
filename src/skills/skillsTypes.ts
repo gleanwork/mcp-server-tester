@@ -20,7 +20,7 @@ export const SKILL_LIMITS = {
 } as const;
 
 /** One file of a skill, as listed in its entry. */
-export const SkillResourceEntrySchema = z.looseObject({
+const SkillResourceEntrySchema = z.looseObject({
   uri: z.string(),
   digest: z.string(),
   size: z.number(),
@@ -40,7 +40,6 @@ export const SkillsListResultSchema = z.looseObject({
   skills: z.array(z.unknown()),
   nextCursor: z.string().optional(),
 });
-export type SkillsListResult = z.infer<typeof SkillsListResultSchema>;
 
 /** `skills/get` result. */
 export const SkillsGetResultSchema = z.looseObject({

@@ -11,10 +11,10 @@ export type {
 export type { LoadDatasetOptions } from '../evals/datasetLoader.js';
 
 export type {
+  EvalCaseOptions,
   EvalContext,
   EvalRunnerResult,
   EvalRunnerOptions,
-  EvalCaseOptions,
   StoredEvalResultLoadOptions,
   StoredEvalResultRef,
   StoredEvalResultSaveOptions,
@@ -59,8 +59,6 @@ export type {
   CLIOutputFormat,
   CLIConfig,
   LLMProvider,
-  BrowserCookie,
-  BrowserConfig,
   MCPHostConfig,
   LLMToolCall,
   MCPHostSimulationResult,

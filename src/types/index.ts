@@ -241,6 +241,7 @@ export type {
   EvalContext,
   EvalRunnerResult,
   EvalRunnerOptions,
+  EvalCaseOptions,
   ToolMetadataOverride,
   ToolOverrideVariant,
   StoredEvalResultLoadOptions,

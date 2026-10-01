@@ -254,7 +254,5 @@ declare global {
   }
 }
 
-export type { PredicateResult, ToolPredicate } from '../validators/types.js';
-
 // Export for TypeScript module augmentation
 export {};

@@ -74,6 +74,7 @@ export type {
   IterationResult,
   EvalRunnerResult,
   EvalRunnerOptions,
+  EvalCaseOptions,
   ToolMetadataOverride,
   ToolOverrideVariant,
   HostType,

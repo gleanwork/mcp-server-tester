@@ -1,5 +1,4 @@
 export type {
-  JudgeResponse,
   UsageMetrics,
   ProviderKind,
   JudgeConfig,

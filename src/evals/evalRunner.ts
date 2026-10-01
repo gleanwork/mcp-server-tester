@@ -79,14 +79,7 @@ export interface EvalContext {
   expect?: Expect;
 }
 
-export type { EvalExpectationResult } from '../types/index.js';
-
-export type {
-  EvalCaseRequest,
-  EvalCaseResult,
-  IterationResult,
-  EvalRunMetadata,
-} from '../types/reporter.js';
+export type { EvalCaseResult } from '../types/reporter.js';
 
 /**
  * Metadata overrides for a single existing MCP tool.
@@ -407,7 +400,7 @@ export interface EvalCaseOptions {
   toolOverrideVariantId?: string;
 }
 
-export function createToolOverrideMCP(
+function createToolOverrideMCP(
   mcp: MCPFixtureApi,
   variant: ToolOverrideVariant
 ): MCPFixtureApi {

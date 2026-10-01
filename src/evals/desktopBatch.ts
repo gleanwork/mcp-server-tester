@@ -35,7 +35,7 @@ export interface DesktopCaseOutcome {
 }
 
 /** Native sessions already attributed to a case in this batch. */
-export interface NativeSessionLedger {
+interface NativeSessionLedger {
   /**
    * Claims a native session for the current case. Returns false when an
    * earlier case already claimed it, so the case must not be attributed.
