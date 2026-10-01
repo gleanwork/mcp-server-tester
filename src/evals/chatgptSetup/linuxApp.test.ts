@@ -168,3 +168,18 @@ describe('in-process Linux ChatGPT app controller', () => {
     await expect.poll(async () => (await calls()).length, SPAWN).toBe(count);
   });
 });
+
+describe('redactAppLog', () => {
+  it('removes configured secrets and token-shaped text from app output', async () => {
+    const { redactAppLog } = await import('./linuxApp.js');
+    const jwt = `eyJ${'a'.repeat(20)}.${'b'.repeat(20)}.${'c'.repeat(20)}`;
+    const out = redactAppLog(
+      `renderer crashed token=supersecretvalue1234 auth=${jwt} glean_${'x'.repeat(30)}`,
+      ['supersecretvalue1234']
+    );
+    expect(out).toContain('renderer crashed');
+    expect(out).not.toContain('supersecretvalue1234');
+    expect(out).not.toContain(jwt);
+    expect(out).not.toMatch(/glean_x{10}/);
+  });
+});

@@ -286,6 +286,7 @@ export async function createLinuxChatgptProfile(
       appPath: environment.appPath,
       environment: environment.session,
       workspace,
+      logFile: join(environment.evidenceDir, 'chatgpt-app.log'),
     }),
     evidenceDir: environment.evidenceDir,
     readiness,
