@@ -397,6 +397,22 @@ describe('auditCoworkNativeRun', () => {
     expect((await f.audit()).evidencePassed).toBe(true);
   });
 
+  it('excludes desktop batch-runner telemetry from replay equality', async () => {
+    // runDesktopBatch adds batchCase/batchLifecycle after the native trace is read.
+    const f = await fixture();
+    for (const stored of [
+      f.saved.hostTelemetry,
+      f.saved.response.telemetry as RecordValue,
+    ]) {
+      stored.batchCase = { index: 0, caseId: 'case-1', count: 1 };
+      stored.batchLifecycle = { scope: 'batch', setupStatus: 'completed' };
+    }
+    expect((await f.audit()).evidencePassed).toBe(true);
+    // A native-derived field still has to match.
+    f.saved.hostTelemetry.totalCostUsd = 999;
+    expect((await f.audit()).cases[0]?.issues).toContain('TELEMETRY_MISMATCH');
+  });
+
   it('rejects missing cases and empty runs', async () => {
     const f = await fixture();
     expect(await f.audit(2)).toMatchObject({

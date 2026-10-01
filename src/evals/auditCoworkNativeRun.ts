@@ -561,10 +561,13 @@ async function auditCase(
     object(saved.hostTelemetry),
     object(response.telemetry),
   ]) {
-    // Only live controller observations are excluded; all native-derived fields must match.
+    // Only live controller and batch-runner observations are excluded; all
+    // native-derived fields must match the replayed transcript.
     const {
       computerUse: _computerUse,
       hitlWarning: _hitlWarning,
+      batchCase: _batchCase,
+      batchLifecycle: _batchLifecycle,
       ...native
     } = stored;
     if (!same(native, telemetry)) result.issues.push('TELEMETRY_MISMATCH');
