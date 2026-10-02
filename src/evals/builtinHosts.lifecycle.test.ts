@@ -5,8 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { MockLanguageModelV3 } from 'ai/test';
-import { registerBuiltinHosts } from './builtinHosts.js';
-import { getHost } from './frameworkRegistries.js';
+import { getHost } from './builtinHosts.js';
 
 // The model provider is fake; the AI SDK and host cancellation path are real.
 // A barrier before simulation models setup time without HTTP under fake timers.
@@ -128,7 +127,6 @@ async function startServer() {
 }
 
 beforeEach(() => {
-  registerBuiltinHosts();
   vi.stubEnv('HTTP_PROXY', undefined);
   vi.stubEnv('HTTPS_PROXY', undefined);
   holdInitialize = false;

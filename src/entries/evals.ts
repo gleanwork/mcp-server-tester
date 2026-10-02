@@ -76,31 +76,12 @@ export type {
   EvalSummaryGenerator,
 } from '../evals/evalFrameworkTypes.js';
 export {
-  clearDatasetSources,
-  clearHosts,
-  clearJudges,
-  clearMetrics,
-  clearResultStores,
-  getDatasetSource,
-  getHost,
-  getJudge,
-  getMetric,
-  getResultStore,
-  listDatasetSources,
-  listHosts,
-  listJudges,
-  listMetrics,
-  listResultStores,
-  registerDatasetSource,
-  registerHost,
-  registerMetric,
-  registerResultStore,
   resolveResultStoreConfig,
   validateManifestRegistrations,
-} from '../evals/frameworkRegistries.js';
+} from '../evals/manifestValidation.js';
+export type { ValidateManifestOptions } from '../evals/manifestValidation.js';
 export {
   BUILT_IN_METRICS,
-  METRIC_REGISTRY,
   computeMetrics,
   resolveMetric,
 } from '../evals/metrics.js';
@@ -117,11 +98,6 @@ export type {
   RunEvalBatchOptions,
   RunEvalBatchResult,
 } from '../evals/runEvalBatch.js';
-export { loadPluginModule, loadPlugins } from '../plugins/loadPlugins.js';
-export type {
-  EvalPluginModule,
-  LoadPluginsOptions,
-} from '../plugins/loadPlugins.js';
 export {
   FileEvalResultStore,
   GCSEvalResultStore,

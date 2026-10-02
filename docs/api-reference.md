@@ -4,16 +4,16 @@ Complete API documentation for `@gleanwork/mcp-server-tester`.
 
 ## Entry points
 
-| Import from                                          | Contents                                                                                                                                                    | Stability                                       |
-| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| `@gleanwork/mcp-server-tester`                       | Fixtures, matchers and validators, the MCP client, config, datasets with `runEvalDataset` and `runEvalCase`, judges, conformance, Agent Skills              | Stable                                          |
-| `@gleanwork/mcp-server-tester/fixtures/mcp`          | `test` and `expect` with the MCP fixtures and matchers                                                                                                      | Stable                                          |
-| `@gleanwork/mcp-server-tester/fixtures/mcpAuth`      | Auth fixtures                                                                                                                                               | Stable                                          |
-| `@gleanwork/mcp-server-tester/reporters/mcpReporter` | The MCP reporter                                                                                                                                            | Stable                                          |
-| `@gleanwork/mcp-server-tester/evals`                 | The evaluation framework: manifests, suites and batches, registries, metrics, plugins, result stores, comparisons, variant experiments, MCP host simulation | Stable                                          |
-| `@gleanwork/mcp-server-tester/auth`                  | Low-level OAuth: discovery, token storage, client credentials                                                                                               | Stable                                          |
-| `@gleanwork/mcp-server-tester/experimental/hosts`    | Desktop and external hosts, Cowork settings and audit, host plugins                                                                                         | Experimental: may change between minor versions |
-| `@gleanwork/mcp-server-tester/types`                 | The root's shared types on their own, without runtime code                                                                                                  | Stable                                          |
+| Import from                                          | Contents                                                                                                                                                           | Stability                                       |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------- |
+| `@gleanwork/mcp-server-tester`                       | Fixtures, matchers and validators, the MCP client, config, datasets with `runEvalDataset` and `runEvalCase`, judges, conformance, Agent Skills                     | Stable                                          |
+| `@gleanwork/mcp-server-tester/fixtures/mcp`          | `test` and `expect` with the MCP fixtures and matchers                                                                                                             | Stable                                          |
+| `@gleanwork/mcp-server-tester/fixtures/mcpAuth`      | Auth fixtures                                                                                                                                                      | Stable                                          |
+| `@gleanwork/mcp-server-tester/reporters/mcpReporter` | The MCP reporter                                                                                                                                                   | Stable                                          |
+| `@gleanwork/mcp-server-tester/evals`                 | The evaluation framework: manifests, suites and batches, extension definition types, metrics, result stores, comparisons, variant experiments, MCP host simulation | Stable                                          |
+| `@gleanwork/mcp-server-tester/auth`                  | Low-level OAuth: discovery, token storage, client credentials                                                                                                      | Stable                                          |
+| `@gleanwork/mcp-server-tester/experimental/hosts`    | Desktop and external hosts, Cowork settings and audit, host plugins                                                                                                | Experimental: may change between minor versions |
+| `@gleanwork/mcp-server-tester/types`                 | The root's shared types on their own, without runtime code                                                                                                         | Stable                                          |
 
 The `./evals`, `./auth` and `./experimental/hosts` subpaths are ESM only, and CommonJS code cannot `require` them. The ESM root and those three subpaths share one copy of the library, so anything registered through one is visible through the others. The CommonJS root is a separate copy; don't mix it with ESM imports of the subpaths. Optional desktop-host fields on root result types (such as `EvalCaseResult.externalHost`) are typed from `./experimental/hosts` and share its stability.
 
@@ -31,6 +31,14 @@ The `./evals`, `./auth` and `./experimental/hosts` subpaths are ESM only, and Co
 - [Protocol Helpers](#protocol-helpers)
 
 ## Fixtures
+
+### `mcpPlugins` option
+
+Plugins whose extensions this project's tests use, such as a judge referenced as `toPassToolJudge({ judge: 'acme/completeness' })`. Set it in a project's `use` block or with `test.use({ mcpPlugins: [acme] })`. The `mcp` and `mcpClient` fixtures install them. See [Plugins](evaluation-framework.md#plugins).
+
+### `installPlugins(plugins)`
+
+Install plugin objects for code that calls validators or matchers outside `runEvalDataset`, `runEvalCase`, a suite, or the `mcp` fixture (all of which install the plugins you pass them). Validates every plugin first; installing the same plugin again is a no-op, and a different plugin claiming a loaded namespace throws. Returns the validated plugins.
 
 ### `mcpClient: Client`
 
@@ -374,6 +382,7 @@ Run an eval dataset. Expectations are defined per-case in the dataset's `expect`
 
 - `options: EvalRunnerOptions`
   - `dataset: EvalDataset` - Dataset to run
+  - `plugins?: readonly Plugin[]` - Plugins whose extensions (for example `acme/completeness` judges) the cases use
   - `schemas?: Record<string, ZodType>` - Schema registry for `expect.schema` validation by name
   - `stopOnFailure?: boolean` - Stop on first failure (default: `false`)
   - `onCaseComplete?: (result: EvalCaseResult) => void` - Callback after each case completes
@@ -603,7 +612,7 @@ await saveEvalRunComparison({ store, comparison, id: 'candidate-comparison' });
 
 **Result Structure:**
 
-```typescript snippet=src/evals/evalRunner.ts#L123-L200
+```typescript snippet=src/evals/evalRunner.ts#L125-L202
 /**
  * Overall result of running an eval dataset
  */
@@ -741,6 +750,7 @@ Run a single eval case. Useful when you want fine-grained control over individua
   - `testInfo?: TestInfo` - Playwright test info (for reporter integration)
   - `expect?: Expect` - Playwright expect (for snapshot support)
 - `options?: EvalCaseOptions`
+  - `plugins?: readonly Plugin[]` - Plugins whose extensions the case uses
   - `datasetName?: string` - Dataset name for the result (default: `'single-case'`)
   - `schemas?: Record<string, ZodType>` - Schema registry for named schema validation
 
@@ -928,7 +938,7 @@ Evaluates a response using an LLM-as-a-judge. Returns a `Promise<ValidationResul
 | Field       | Type           | Default       | Description                                        |
 | ----------- | -------------- | ------------- | -------------------------------------------------- |
 | `rubric`    | `RubricSpec`   | —             | Evaluation rubric (required unless `judge` is set) |
-| `judge`     | `string`       | —             | Name of a registered custom judge                  |
+| `judge`     | `string`       | —             | A plugin judge, as `namespace/name`                |
 | `reference` | `unknown`      | —             | Reference response to compare against              |
 | `threshold` | `number`       | `0.7`         | Minimum score to pass (0–1)                        |
 | `reps`      | `number`       | `1`           | Number of evaluations to run (scores averaged)     |

@@ -24,8 +24,6 @@ import type {
   HostDefinition,
   RunTelemetry,
 } from './evalFrameworkTypes.js';
-import { registerBuiltinDatasetSources } from './builtinDatasetSources.js';
-import { registerBuiltinHosts } from './builtinHosts.js';
 import {
   hostEnvironment,
   type HostEnvironment,
@@ -41,16 +39,16 @@ import { selectEvalCases } from './buildEvalDataset.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { MCPProtocolInfo, UsageMetrics } from '../types/index.js';
 import { getProtocolInfo } from '../mcp/protocol.js';
-import { loadPlugins } from '../plugins/loadPlugins.js';
+import type { Plugin } from '../plugins/plugin.js';
+import { assertDatasetNamespaces, loadSuitePlugins } from './suitePlugins.js';
+import { getDatasetSource } from './builtinDatasetSources.js';
+import { getHost } from './builtinHosts.js';
+import { getResultStore } from './builtinResultStores.js';
 import {
-  getDatasetSource,
-  getHost,
-  getResultStore,
   parseHostConfig,
   validateManifestRegistrations,
-} from './frameworkRegistries.js';
+} from './manifestValidation.js';
 import { computeMetrics, type MetricSpec } from './metrics.js';
-import { registerBuiltinResultStores } from './builtinResultStores.js';
 import {
   createStoredEvalArtifact,
   REDACT_STORED_RESPONSES_BY_DEFAULT,
@@ -60,7 +58,10 @@ import {
 export interface RunEvalSuiteOptions {
   manifestPath: string;
   rootDir?: string;
+  /** Plugin specifiers from the CLI, added to the manifest's `plugins`. */
   pluginPaths?: string[];
+  /** Plugin objects, added to the manifest's `plugins`. */
+  plugins?: readonly Plugin[];
   outputDir?: string;
   secretsFile?: string;
   mcpConfig?: MCPConfig;
@@ -291,24 +292,21 @@ export async function runEvalSuite(
       : {}),
   };
 
-  registerBuiltinDatasetSources();
-  registerBuiltinHosts();
-  registerBuiltinResultStores();
-  const pluginPaths = options.pluginPaths ?? manifest.plugins ?? [];
-  if (pluginPaths.length > 0) {
-    await loadPlugins(
-      pluginPaths.map((pluginPath) =>
-        path.isAbsolute(pluginPath)
-          ? pluginPath
-          : path.resolve(rootDir, pluginPath)
-      )
-    );
-  }
-
-  manifest = validateManifestRegistrations({
-    ...manifest,
-    host: manifest.host ?? { type: 'claude-cli' },
+  const namespaces = await loadSuitePlugins({
+    manifestPath: options.manifestPath,
+    manifest,
+    rootDir,
+    pluginPaths: options.pluginPaths,
+    plugins: options.plugins,
   });
+
+  manifest = validateManifestRegistrations(
+    {
+      ...manifest,
+      host: manifest.host ?? { type: 'claude-cli' },
+    },
+    { namespaces }
+  );
   const executionId = randomUUID();
   const outputDir = path.join(
     options.outputDir ?? path.join(rootDir, '.mcp-test-results', manifest.name),
@@ -362,6 +360,8 @@ export async function runEvalSuite(
       }),
     }))
   );
+  for (const { dataset } of canonicalDatasets)
+    assertDatasetNamespaces(dataset, namespaces);
 
   for (const arm of arms) {
     const servers = options.mcpConfig

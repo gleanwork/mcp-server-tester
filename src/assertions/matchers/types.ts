@@ -165,8 +165,8 @@ declare global {
        *   passingThreshold: 0.8,
        * });
        *
-       * // Named custom judge (registered via registerJudge)
-       * expect(result).toPassToolJudge({ judge: 'my-completeness' });
+       * // A judge a plugin provides (see the mcpPlugins fixture option)
+       * expect(result).toPassToolJudge({ judge: 'acme/completeness' });
        * ```
        */
       toPassToolJudge(

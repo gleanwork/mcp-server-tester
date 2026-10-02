@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import {
-  registerJudge,
+  installPlugins,
   validateJudge,
   validateToolCalls,
   loadEvalDatasetFromObject,
@@ -14,8 +14,6 @@ import {
   expect as playwrightExpect,
 } from '../dist/index.js';
 import {
-  registerHost,
-  registerDatasetSource,
   validateManifestRegistrations,
   loadEvalManifestFromObject,
   FileEvalResultStore,
@@ -73,49 +71,78 @@ async function execute(
   return { dataset, result };
 }
 
-try {
-  registerJudge({
-    name: 'foundation-policy',
-    schema: z.object({
-      policy: z.string().transform((value) => value.toUpperCase()),
-      limit: z.number().default(5),
-    }),
-    evaluate: async (candidate, reference, options) => {
-      captured.push({ candidate, reference, options });
-      return { score: options.policy === 'ALLOW' ? 1 : 0 };
+// Validators and matchers called outside a runner or fixture see plugins installed here.
+installPlugins([
+  {
+    meta: {
+      name: 'foundation-plugin',
+      version: '1.0.0',
+      namespace: 'foundation',
     },
-  });
+    judges: {
+      policy: {
+        schema: z.object({
+          policy: z.string().transform((value) => value.toUpperCase()),
+          limit: z.number().default(5),
+        }),
+        evaluate: async (candidate, reference, options) => {
+          captured.push({ candidate, reference, options });
+          return { score: options.policy === 'ALLOW' ? 1 : 0 };
+        },
+      },
+      legacy: {
+        schema: z.object({}).passthrough(),
+        evaluate: async () => ({ score: 1 }),
+      },
+      'default-policy': {
+        schema: z.object({ policy: z.string().default('allow') }).strict(),
+        evaluate: async (_candidate, _reference, options) => ({
+          score: options?.policy === 'allow' ? 1 : 0,
+        }),
+      },
+    },
+    datasetSources: {
+      source: {
+        schema: z.object({}),
+        load: async () => ({ name: 'unused', cases: [] }),
+      },
+    },
+    hosts: {
+      host: {
+        schema: z.object({
+          model: z.string(),
+          count: z.number().transform((value) => value * 3),
+        }),
+        createConfig: () => ({ hostType: 'sdk' }),
+      },
+    },
+  },
+]);
+
+try {
   assert.equal(
     (
       await validateJudge('candidate', {
-        judge: 'foundation-policy',
+        judge: 'foundation/policy',
         options: { policy: 'allow' },
       })
     ).pass,
     true
   );
   assert.deepEqual(captured[0].options, { policy: 'ALLOW', limit: 5 });
-  registerJudge('foundation-legacy', async () => ({ score: 1 }));
   assert.equal(
-    (await validateJudge('candidate', { judge: 'foundation-legacy' })).pass,
+    (await validateJudge('candidate', { judge: 'foundation/legacy' })).pass,
     true
   );
-  registerJudge({
-    name: 'foundation-default-policy',
-    schema: z.object({ policy: z.string().default('allow') }).strict(),
-    evaluate: async (_candidate, _reference, options) => ({
-      score: options?.policy === 'allow' ? 1 : 0,
-    }),
-  });
   assert.equal(
-    (await validateJudge('candidate', { judge: 'foundation-default-policy' }))
+    (await validateJudge('candidate', { judge: 'foundation/default-policy' }))
       .pass,
     true
   );
   assert.equal(
     (
       await validateJudge('candidate', {
-        judge: 'foundation-default-policy',
+        judge: 'foundation/default-policy',
         options: {},
       })
     ).pass,
@@ -124,7 +151,7 @@ try {
   assert.equal(
     (
       await validateJudge('candidate', {
-        judge: 'foundation-default-policy',
+        judge: 'foundation/default-policy',
         options: undefined,
       })
     ).pass,
@@ -147,7 +174,7 @@ try {
           scenario: 'offline',
           expect: {
             passesJudge: {
-              judge: 'foundation-policy',
+              judge: 'foundation/policy',
               reference: 'golden',
               options: { policy },
             },
@@ -165,16 +192,16 @@ try {
     assert.equal(result.passed, passed);
   }
   await playwrightExpect('candidate').toPassToolJudge({
-    judge: 'foundation-policy',
+    judge: 'foundation/policy',
     options: { policy: 'allow' },
   });
   await playwrightExpect('candidate').toPassToolJudge({
-    judge: 'foundation-default-policy',
+    judge: 'foundation/default-policy',
   });
   assert.equal(
     (
       await validateJudge('candidate', {
-        judge: 'foundation-policy',
+        judge: 'foundation/policy',
         options: {},
       })
     ).pass,
@@ -261,31 +288,25 @@ try {
     'PASS: observed evidence contributes no verified precision/recall and remains labeled after redaction.'
   );
 
-  registerDatasetSource({
-    name: 'foundation-source',
-    schema: z.object({}),
-    load: async () => ({ name: 'unused', cases: [] }),
-  });
-  registerHost({
-    name: 'foundation-host',
-    schema: z.object({
-      model: z.string(),
-      count: z.number().transform((value) => value * 3),
-    }),
-  });
   const manifest = loadEvalManifestFromObject(
     {
       name: 'patch',
-      datasets: [{ type: 'foundation-source' }],
-      host: { type: 'foundation-host', model: 'base', count: 2 },
+      datasets: [{ type: 'foundation/source' }],
+      host: { type: 'foundation/host', model: 'base', count: 2 },
       arms: [{ name: 'variant', host: { model: 'variant' } }],
     },
     { skipDatasetValidation: true }
   );
-  const resolved = validateManifestRegistrations(manifest);
+  const resolved = validateManifestRegistrations(manifest, {
+    namespaces: ['foundation'],
+  });
+  assert.throws(
+    () => validateManifestRegistrations(manifest, { namespaces: [] }),
+    /doesn't load the "foundation" plugin/
+  );
   assert.equal(resolved.host.count, 6);
   assert.deepEqual(resolved.arms[0].host, {
-    type: 'foundation-host',
+    type: 'foundation/host',
     model: 'variant',
     count: 6,
   });
@@ -308,7 +329,7 @@ try {
   const suite = loadEvalManifestFromObject(
     {
       name: 'config',
-      datasets: [{ type: 'foundation-source' }],
+      datasets: [{ type: 'foundation/source' }],
       servers: [server],
     },
     { skipDatasetValidation: true }
@@ -319,7 +340,7 @@ try {
     loadEvalManifestFromObject(
       {
         name: 'invalid',
-        datasets: [{ type: 'foundation-source' }],
+        datasets: [{ type: 'foundation/source' }],
         servers: [{ ...server, serverUrl: 17 }],
       },
       { skipDatasetValidation: true }

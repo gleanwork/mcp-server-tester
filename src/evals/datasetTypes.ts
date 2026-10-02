@@ -183,7 +183,7 @@ export interface JudgeExpectConfig {
   /** Flat plugin policy fields are also accepted for manifest integration. */
   [key: string]: unknown;
   /**
-   * Name of a registered custom judge executor.
+   * A judge a plugin provides, as `namespace/name`.
    * When set, the named judge handles evaluation and returns a normalized score.
    * The `threshold` determines pass/fail. `reps` and LLM config fields
    * (provider, model, etc.) are ignored.

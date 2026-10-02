@@ -1,9 +1,12 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import { registerDatasetSource } from './frameworkRegistries.js';
 import type { DatasetConfig } from './evalManifest.js';
-import type { DatasetSourceContext } from './evalFrameworkTypes.js';
+import type {
+  DatasetSource,
+  DatasetSourceContext,
+} from './evalFrameworkTypes.js';
+import { extensionLookup } from '../plugins/extensions.js';
 import { buildEvalDataset } from './buildEvalDataset.js';
 import type { EvalDataset } from './datasetTypes.js';
 
@@ -123,23 +126,18 @@ async function loadDirectoryDataset(
   );
 }
 
-let registered = false;
-export function registerBuiltinDatasetSources(): void {
-  if (registered) return;
-  registerDatasetSource({
-    name: 'file',
-    schema: FileDatasetSchema,
-    load: loadFileDataset,
-  });
-  registerDatasetSource({
-    name: 'dir',
-    schema: FileDatasetSchema,
-    load: loadDirectoryDataset,
-  });
-  registerDatasetSource({
-    name: 'gcs',
-    schema: GCSDatasetSchema,
-    load: loadGCSDataset,
-  });
-  registered = true;
+/** Built-in dataset sources by name. */
+function builtinDatasetSources(): Readonly<Record<string, DatasetSource>> {
+  return {
+    file: { schema: FileDatasetSchema, load: loadFileDataset },
+    dir: { schema: FileDatasetSchema, load: loadDirectoryDataset },
+    gcs: { schema: GCSDatasetSchema, load: loadGCSDataset },
+  };
+}
+
+const datasetSources = extensionLookup('datasetSources', builtinDatasetSources);
+
+/** The dataset source `reference` names: a built-in, or `namespace/name` from a plugin. */
+export function getDatasetSource(reference: string): DatasetSource {
+  return datasetSources.get(reference);
 }

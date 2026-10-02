@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MockLanguageModelV3 } from 'ai/test';
-import { getBuiltinHostConfig, registerBuiltinHosts } from './builtinHosts.js';
-import { getHost } from './frameworkRegistries.js';
+import { getBuiltinHostConfig } from './builtinHosts.js';
+import { getHost } from './builtinHosts.js';
 import { createMCPClientForConfig } from '../mcp/clientFactory.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import type { HostRunInput } from './evalFrameworkTypes.js';
@@ -36,7 +36,6 @@ function run(
   },
   env?: Record<string, string | undefined>
 ) {
-  registerBuiltinHosts();
   const input: HostRunInput & { env?: Record<string, string | undefined> } = {
     scenario: 'search',
     servers,
@@ -117,7 +116,6 @@ describe('registered SDK host through the real AI SDK', () => {
     'uses explicit %s credentials ahead of suite environment at the SDK provider boundary',
     async (precedence) => {
       vi.stubEnv('OPENAI_API_KEY', 'ambient');
-      registerBuiltinHosts();
       const input = {
         scenario: 'hello',
         servers: [],

@@ -2,8 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { registerBuiltinDatasetSources } from './builtinDatasetSources.js';
-import { getDatasetSource } from './frameworkRegistries.js';
+import { getDatasetSource } from './builtinDatasetSources.js';
 import type { EvalManifest } from './evalManifest.js';
 
 const gcs = vi.hoisted(() => ({
@@ -24,7 +23,6 @@ vi.mock('@google-cloud/storage', () => ({
     }
   },
 }));
-registerBuiltinDatasetSources();
 
 describe('canonical built-in dataset sources', () => {
   let rootDir: string;

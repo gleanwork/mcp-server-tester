@@ -1,3 +1,4 @@
+import type { Plugin } from '../plugins/plugin.js';
 import type { ZodType } from 'zod';
 import type { EvalDataset, EvalCase } from './datasetTypes.js';
 import type { EvalCaseResult } from '../types/reporter.js';
@@ -24,7 +25,6 @@ export interface DatasetSourceContext {
 
 /** Public dataset-source extension point. */
 export interface DatasetSource {
-  readonly name: string;
   readonly schema: ZodType;
   load(
     config: DatasetConfig,
@@ -99,7 +99,6 @@ export interface HostBatchRequest {
 
 /** Public host extension point. */
 export interface HostDefinition {
-  readonly name: string;
   readonly schema: ZodType;
   createConfig?(options?: Record<string, unknown>): MCPHostConfig;
   /** Missing evidence declarations are treated as unverified. */
@@ -134,7 +133,6 @@ export interface ResolvedMetric {
 
 /** Public metric extension point. */
 export interface MetricDefinition {
-  readonly name: string;
   readonly schema: ZodType;
   readonly kind: MetricKind;
   readonly unit?: string;
@@ -150,7 +148,6 @@ export interface MetricDefinition {
 
 /** Public judge extension point. */
 export interface JudgeDefinition {
-  readonly name: string;
   readonly schema: ZodType;
   evaluate: (
     candidate: unknown,
@@ -165,7 +162,6 @@ export interface JudgeDefinition {
 
 /** Public result-store extension point. */
 export interface ResultStoreDefinition {
-  readonly name: string;
   readonly schema: ZodType;
   create(config: ExtensionConfig): EvalResultStore;
 }
@@ -174,7 +170,10 @@ export interface ResultStoreDefinition {
 export interface EvaluationSuiteOptions {
   manifestPath: string;
   rootDir?: string;
+  /** Plugin specifiers, added to the manifest's `plugins`. */
   pluginPaths?: string[];
+  /** Plugin objects, added to the manifest's `plugins`. */
+  plugins?: readonly Plugin[];
   outputDir?: string;
   secretsFile?: string;
   dryRun?: boolean;
@@ -237,7 +236,10 @@ export interface EvaluationBatchOptions {
   workers?: number;
   skipExisting?: boolean;
   secretsFile?: string;
+  /** Plugin specifiers, added to each manifest's `plugins`. */
   pluginPaths?: string[];
+  /** Plugin objects, added to each manifest's `plugins`. */
+  plugins?: readonly Plugin[];
   dryRun?: boolean;
 }
 

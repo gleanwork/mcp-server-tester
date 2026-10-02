@@ -1256,8 +1256,8 @@ exports[`golden: judges > judges a host response 1`] = `
     "durationMs": "<time>",
     "expectations": {
       "judge": {
-        "details": "Custom judge "golden-case-judge" passed with score 0.90",
-        "judgeName": "golden-case-judge",
+        "details": "Custom judge "test/golden-case-judge" passed with score 0.90",
+        "judgeName": "test/golden-case-judge",
         "pass": true,
         "reasoning": "looks right",
         "score": 0.9,
@@ -1274,7 +1274,7 @@ exports[`golden: judges > judges a host response 1`] = `
     "request": {
       "expect": {
         "passesJudge": {
-          "judge": "golden-case-judge",
+          "judge": "test/golden-case-judge",
         },
       },
       "mcpHostConfig": {
@@ -1337,8 +1337,8 @@ exports[`golden: judges > one judge with case reps and the canonical answer as r
     "durationMs": "<time>",
     "expectations": {
       "judge": {
-        "details": "Custom judge "golden-case-judge" passed with score 0.90",
-        "judgeName": "golden-case-judge",
+        "details": "Custom judge "test/golden-case-judge" passed with score 0.90",
+        "judgeName": "test/golden-case-judge",
         "pass": true,
         "reasoning": "looks right",
         "score": 0.9,
@@ -1353,7 +1353,7 @@ exports[`golden: judges > one judge with case reps and the canonical answer as r
       },
       "expect": {
         "passesJudge": {
-          "judge": "golden-case-judge",
+          "judge": "test/golden-case-judge",
         },
       },
       "judgeReps": 2,
@@ -1414,15 +1414,15 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
         "details": "1/2 judges passed",
         "judgeResults": [
           {
-            "details": "Custom judge "golden-case-judge" passed with score 0.90",
-            "judgeName": "golden-case-judge",
+            "details": "Custom judge "test/golden-case-judge" passed with score 0.90",
+            "judgeName": "test/golden-case-judge",
             "pass": true,
             "reasoning": "looks right",
             "score": 0.9,
           },
           {
-            "details": "Custom judge "golden-strict-judge" failed with score 0.20 (threshold: 0.5). too vague",
-            "judgeName": "golden-strict-judge",
+            "details": "Custom judge "test/golden-strict-judge" failed with score 0.20 (threshold: 0.5). too vague",
+            "judgeName": "test/golden-strict-judge",
             "pass": false,
             "reasoning": "too vague",
             "score": 0.2,
@@ -1441,12 +1441,12 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
       "expect": {
         "passesJudge": [
           {
-            "judge": "golden-case-judge",
+            "judge": "test/golden-case-judge",
             "reference": "explicit",
             "reps": 1,
           },
           {
-            "judge": "golden-strict-judge",
+            "judge": "test/golden-strict-judge",
             "threshold": 0.5,
           },
         ],
@@ -1589,9 +1589,9 @@ exports[`golden: runEvalSuite hosts > manifest judges merge with case judges 1`]
       "case ref",
       {
         "count": 3,
-        "judge": "golden-manifest-judge",
+        "judge": "test/golden-manifest-judge",
         "reference": "case ref",
-        "type": "golden-manifest-judge",
+        "type": "test/golden-manifest-judge",
       },
     ],
   ],
@@ -1604,15 +1604,15 @@ exports[`golden: runEvalSuite hosts > manifest judges merge with case judges 1`]
           "details": "1/2 judges passed",
           "judgeResults": [
             {
-              "details": "Custom judge "golden-case-judge" passed with score 0.90",
-              "judgeName": "golden-case-judge",
+              "details": "Custom judge "test/golden-case-judge" passed with score 0.90",
+              "judgeName": "test/golden-case-judge",
               "pass": true,
               "reasoning": "looks right",
               "score": 0.9,
             },
             {
-              "details": "Custom judge "golden-manifest-judge" failed with score 0.00 (threshold: 0.7). manifest judge",
-              "judgeName": "golden-manifest-judge",
+              "details": "Custom judge "test/golden-manifest-judge" failed with score 0.00 (threshold: 0.7). manifest judge",
+              "judgeName": "test/golden-manifest-judge",
               "pass": false,
               "reasoning": "manifest judge",
               "score": 0,
@@ -1636,20 +1636,20 @@ exports[`golden: runEvalSuite hosts > manifest judges merge with case judges 1`]
         "expect": {
           "passesJudge": [
             {
-              "judge": "golden-case-judge",
+              "judge": "test/golden-case-judge",
               "threshold": 0.5,
             },
             {
               "count": 2,
-              "judge": "golden-manifest-judge",
+              "judge": "test/golden-manifest-judge",
               "options": {
                 "count": 3,
-                "judge": "golden-manifest-judge",
+                "judge": "test/golden-manifest-judge",
                 "reference": "case ref",
-                "type": "golden-manifest-judge",
+                "type": "test/golden-manifest-judge",
               },
               "reference": "case ref",
-              "type": "golden-manifest-judge",
+              "type": "test/golden-manifest-judge",
             },
           ],
         },

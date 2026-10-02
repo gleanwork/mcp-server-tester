@@ -3,13 +3,11 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { registerBuiltinHosts } from './builtinHosts.js';
-import { getHost } from './frameworkRegistries.js';
+import { getHost } from './builtinHosts.js';
 import type { HostRunContext } from './evalFrameworkTypes.js';
 
 let directory: string;
 beforeEach(() => {
-  registerBuiltinHosts();
   directory = fs.mkdtempSync(path.join(os.tmpdir(), 'builtin-cli-test-'));
   fs.writeFileSync(
     path.join(directory, 'claude'),

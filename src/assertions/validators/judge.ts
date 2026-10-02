@@ -9,10 +9,18 @@ import type { ProviderKind } from '../../judge/judgeTypes.js';
 import type { RubricSpec } from '../../judge/rubrics.js';
 import { createJudge } from '../../judge/judgeClient.js';
 import { resolveRubric } from '../../judge/rubrics.js';
-import {
-  getRegisteredJudge,
-  getRegisteredJudgeOptions,
-} from '../../judge/judgeRegistry.js';
+import { getJudge } from '../../judge/builtinJudges.js';
+
+/** A judge's schema must produce an options object; it is passed to evaluate as-is. */
+function parseJudgeOptions(
+  name: string,
+  parsed: unknown
+): Record<string, unknown> {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`Judge "${name}" schema must return an options object.`);
+  }
+  return parsed as Record<string, unknown>;
+}
 
 /**
  * Configuration for the judge validator
@@ -64,10 +72,9 @@ export interface JudgeValidatorConfig {
   /** Fail if response exceeds this size in bytes before judging */
   maxToolOutputSize?: number;
   /**
-   * Name of a registered custom judge executor.
+   * A judge a plugin provides, as `namespace/name`.
    * When set, the named judge handles the entire evaluation pipeline
    * and returns a normalized score. The `threshold` determines pass/fail.
-   * Register judges with `registerJudge()` before tests run.
    */
   judge?: string;
 }
@@ -136,17 +143,19 @@ export async function validateJudge(
   // Named custom judge — executor returns a score, threshold determines pass/fail
   if (judgeName !== undefined) {
     try {
-      const executor = getRegisteredJudge(judgeName);
-      const options = getRegisteredJudgeOptions(
+      const judge = getJudge(judgeName);
+      const options = parseJudgeOptions(
         judgeName,
-        config.options ??
-          Object.fromEntries(
-            Object.entries(config).filter(
-              ([key]) => !judgeFrameworkOptionKeys.has(key)
+        judge.schema.parse(
+          config.options ??
+            Object.fromEntries(
+              Object.entries(config).filter(
+                ([key]) => !judgeFrameworkOptionKeys.has(key)
+              )
             )
-          )
+        )
       );
-      const judgeResult = await executor(
+      const judgeResult = await judge.evaluate(
         response,
         reference ?? undefined,
         options

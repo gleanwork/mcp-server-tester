@@ -7,7 +7,7 @@ import {
 import type { EvalManifest } from './evalManifest.js';
 import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
 import { loadEvalDatasetFromObject } from './datasetLoader.js';
-import { normalizeSuiteControls } from './frameworkRegistries.js';
+import { normalizeSuiteControls } from './manifestValidation.js';
 
 // Source ingestion must not silently discard noncanonical fields. In particular,
 // dropping an assertion field can turn an intended failure into a passing case.

@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import type { Expect } from '@playwright/test';
 import {
   evaluateExpectations,
@@ -9,7 +10,10 @@ import {
 } from './expectations.js';
 import type { HostResponse } from './caseExecution.js';
 import type { ExternalHostMetadata } from './externalHost/types.js';
-import { registerJudge } from '../judge/judgeRegistry.js';
+import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
+import type { Plugin } from '../plugins/plugin.js';
+
+afterEach(() => resetPluginsForTests());
 
 const hostResponse: HostResponse = {
   success: true,
@@ -302,21 +306,30 @@ describe('evaluateExpectations', () => {
 
   it('passes resolved judge settings to the judge', async () => {
     const seen: unknown[] = [];
-    registerJudge('expectations-test-judge', async (candidate, reference) => {
-      seen.push({ candidate, reference });
-      return { score: 1 };
-    });
+    const plugin: Plugin = {
+      meta: { name: 'test-plugin', namespace: 'test' },
+      judges: {
+        'expectations-test-judge': {
+          schema: z.object({}).passthrough(),
+          evaluate: async (candidate, reference) => {
+            seen.push({ candidate, reference });
+            return { score: 1 };
+          },
+        },
+      },
+    };
+    installPlugins([plugin]);
     const outcome = await evaluateExpectations(
       {
         mode: 'direct',
         canonicalAnswer: 'canonical',
-        expect: { passesJudge: { judge: 'expectations-test-judge' } },
+        expect: { passesJudge: { judge: 'test/expectations-test-judge' } },
       },
       { response: 'answer' }
     );
     expect(outcome.expectations.judge).toMatchObject({
       pass: true,
-      judgeName: 'expectations-test-judge',
+      judgeName: 'test/expectations-test-judge',
     });
     expect(seen).toEqual([{ candidate: 'answer', reference: 'canonical' }]);
   });

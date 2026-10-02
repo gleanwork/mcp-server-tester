@@ -30,10 +30,10 @@ import type {
   ExternalHostRunResult,
 } from './externalHost/types.js';
 import { hostTraceToExecution } from './hostTrace.js';
-import type { HostRunResult } from './evalFrameworkTypes.js';
-import { registerDatasetSource, registerHost } from './frameworkRegistries.js';
-import { registerJudge } from '../judge/judgeRegistry.js';
+import type { HostRunResult, JudgeDefinition } from './evalFrameworkTypes.js';
 import { runEvalSuite } from './runEvalSuite.js';
+import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
+import type { Plugin } from '../plugins/plugin.js';
 
 vi.mock('./mcpHost/mcpHostSimulation.js', async (original) => ({
   ...(await original<typeof SimulationModule>()),
@@ -165,16 +165,38 @@ const trace: HostRunResult = {
 
 /** Every call to the fake judges below, in order. */
 const calls: unknown[][] = [];
-registerJudge('golden-case-judge', async (candidate, reference, options) => {
-  calls.push(['golden-case-judge', candidate, reference, options]);
-  return { score: 0.9, reasoning: 'looks right' };
-});
-registerJudge('golden-strict-judge', async (candidate, reference) => {
-  calls.push(['golden-strict-judge', candidate, reference]);
-  return { score: 0.2, reasoning: 'too vague' };
-});
+const caseJudges: Record<string, JudgeDefinition> = {
+  'golden-case-judge': {
+    schema: z.object({}).passthrough(),
+    evaluate: async (candidate, reference, options) => {
+      calls.push(['golden-case-judge', candidate, reference, options]);
+      return { score: 0.9, reasoning: 'looks right' };
+    },
+  },
+  'golden-strict-judge': {
+    schema: z.object({}).passthrough(),
+    evaluate: async (candidate, reference) => {
+      calls.push(['golden-strict-judge', candidate, reference]);
+      return { score: 0.2, reasoning: 'too vague' };
+    },
+  },
+};
+
+/** The test plugin: the case judges plus any extra extensions, under `test/`. */
+function goldenPlugin(
+  extra: Pick<Plugin, 'datasetSources' | 'hosts' | 'judges'> = {}
+): Plugin {
+  return {
+    meta: { name: 'golden-test-plugin', namespace: 'test' },
+    ...extra,
+    judges: { ...caseJudges, ...extra.judges },
+  };
+}
+
+afterEach(() => resetPluginsForTests());
 
 beforeEach(() => {
+  installPlugins([goldenPlugin()]);
   calls.length = 0;
   vi.mocked(simulateMCPHost).mockReset().mockResolvedValue(simulation);
   vi.mocked(runExternalHostScenario).mockReset();
@@ -431,27 +453,38 @@ describe('golden: runEvalSuite hosts', () => {
           },
         },
       },
-    ]
+    ],
+    judges: Record<string, JudgeDefinition> = {}
   ) {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'golden-suite-'));
     dirs.push(dir);
-    const type = `golden-${kind}${variant}-host`;
-    const source = `golden-${kind}${variant}-source`;
-    registerHost({
-      name: type,
-      schema: z.object({ type: z.string() }).passthrough(),
-      evidence: 'structured',
-      ...(kind === 'run'
-        ? { run: async () => trace }
-        : {
-            runBatch: async (requests) => requests.map(() => ({ ...trace })),
-          }),
+    const hostName = `golden-${kind}${variant}-host`;
+    const sourceName = `golden-${kind}${variant}-source`;
+    const type = `test/${hostName}`;
+    const source = `test/${sourceName}`;
+    const plugin = goldenPlugin({
+      judges,
+      hosts: {
+        [hostName]: {
+          schema: z.object({ type: z.string() }).passthrough(),
+          evidence: 'structured',
+          ...(kind === 'run'
+            ? { run: async () => trace }
+            : {
+                runBatch: async (requests) =>
+                  requests.map(() => ({ ...trace })),
+              }),
+        },
+      },
+      datasetSources: {
+        [sourceName]: {
+          schema: z.object({ type: z.string() }),
+          load: async () => ({ name: 'golden', cases }),
+        },
+      },
     });
-    registerDatasetSource({
-      name: source,
-      schema: z.object({ type: z.string() }),
-      load: async () => ({ name: 'golden', cases }),
-    });
+    // The suite installs its own copy of the test plugin, with this host.
+    resetPluginsForTests();
     const manifestPath = path.join(dir, 'manifest.json');
     await fs.writeFile(
       manifestPath,
@@ -463,7 +496,7 @@ describe('golden: runEvalSuite hosts', () => {
         ...manifestExtra,
       })
     );
-    return runEvalSuite({ manifestPath, outputDir: dir });
+    return runEvalSuite({ manifestPath, outputDir: dir, plugins: [plugin] });
   }
 
   it.each(['run', 'runBatch'] as const)('%s host', async (kind) => {
@@ -476,17 +509,16 @@ describe('golden: runEvalSuite hosts', () => {
       score: String(candidate).includes('sunny') ? 1 : 0,
       reasoning: 'manifest judge',
     }));
-    registerJudge({
-      name: 'golden-manifest-judge',
-      schema: z.object({}).passthrough(),
-      evaluate,
-    });
     const result = await suite(
       'run',
       '-judged',
       {
         judges: [
-          { type: 'golden-manifest-judge', reference: 'suite ref', count: 2 },
+          {
+            type: 'test/golden-manifest-judge',
+            reference: 'suite ref',
+            count: 2,
+          },
         ],
       },
       [
@@ -498,15 +530,21 @@ describe('golden: runEvalSuite hosts', () => {
           expect: {
             passesJudge: [
               {
-                judge: 'golden-manifest-judge',
+                judge: 'test/golden-manifest-judge',
                 reference: 'case ref',
                 options: { count: 3 },
               },
-              { judge: 'golden-case-judge', threshold: 0.5 },
+              { judge: 'test/golden-case-judge', threshold: 0.5 },
             ],
           },
         },
-      ]
+      ],
+      {
+        'golden-manifest-judge': {
+          schema: z.object({}).passthrough(),
+          evaluate,
+        },
+      }
     );
     expect(
       stable({
@@ -531,7 +569,7 @@ describe('golden: judges', () => {
         args: { city: 'London' },
         judgeReps: 2,
         canonicalAnswer: 'sunny',
-        expect: { passesJudge: { judge: 'golden-case-judge' } },
+        expect: { passesJudge: { judge: 'test/golden-case-judge' } },
       },
       context()
     );
@@ -548,8 +586,8 @@ describe('golden: judges', () => {
         canonicalAnswer: 'unused',
         expect: {
           passesJudge: [
-            { judge: 'golden-case-judge', reference: 'explicit', reps: 1 },
-            { judge: 'golden-strict-judge', threshold: 0.5 },
+            { judge: 'test/golden-case-judge', reference: 'explicit', reps: 1 },
+            { judge: 'test/golden-strict-judge', threshold: 0.5 },
           ],
         },
       },
@@ -563,7 +601,7 @@ describe('golden: judges', () => {
       {
         ...hostCase,
         id: 'host-judged',
-        expect: { passesJudge: { judge: 'golden-case-judge' } },
+        expect: { passesJudge: { judge: 'test/golden-case-judge' } },
       },
       context()
     );

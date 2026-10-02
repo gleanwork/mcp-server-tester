@@ -1,24 +1,30 @@
-# Registered hosts return scenario traces
+# Plugin hosts return scenario traces
 
-A registered host executes one scenario. It does not build datasets, repeat cases,
+A host executes one scenario. It does not build datasets, repeat cases,
 run judges, or return `pass`/`passed`/`caseResults`. Those remain owned by
 `runEvalDataset` for every host.
 
 ```typescript
-import { registerHost } from '@gleanwork/mcp-server-tester/evals';
+import type { Plugin } from '@gleanwork/mcp-server-tester';
 import { z } from 'zod';
 
-registerHost({
-  name: 'my-assistant',
-  schema: z.object({ type: z.literal('my-assistant') }),
-  evidence: 'observed',
-  async run(input, config, context) {
-    // input.scenario and input.servers are the unit of execution.
-    // A driver may reject unsupported server sets itself.
-    return { finalText: 'Answer from the assistant', events: [] };
+export default {
+  meta: { name: 'my-mst-plugin', namespace: 'my' },
+  hosts: {
+    assistant: {
+      schema: z.object({ type: z.literal('my/assistant') }),
+      evidence: 'observed',
+      async run(input, config, context) {
+        // input.scenario and input.servers are the unit of execution.
+        // A driver may reject unsupported server sets itself.
+        return { finalText: 'Answer from the assistant', events: [] };
+      },
+    },
   },
-});
+} satisfies Plugin;
 ```
+
+A manifest that lists this plugin selects the host with `{ "type": "my/assistant" }`.
 
 `HostRunResult` contains `finalText`, `events`, optional `usage`, and optional
 `error`. Events record a `kind` (`tool_call`, `skill`, `command`, or `subagent`),

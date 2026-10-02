@@ -1,20 +1,35 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { z } from 'zod';
 import { toPassToolJudge } from './toPassToolJudge.js';
 import type { RubricSpec } from '../../judge/rubrics.js';
+import {
+  installPlugins,
+  resetPluginsForTests,
+} from '../../plugins/extensions.js';
+import type { JudgeDefinition } from '../../evals/evalFrameworkTypes.js';
 
-// Mock the judge client and registry so no real LLM calls are made
+// Mock the judge client so no real LLM calls are made
 vi.mock('../../judge/judgeClient.js', () => ({
   createJudge: vi.fn(),
 }));
-vi.mock('../../judge/judgeRegistry.js', () => ({
-  getRegisteredJudge: vi.fn(),
-  getRegisteredJudgeOptions: vi.fn(
-    (_name: string, options: Record<string, unknown>) => options
-  ),
-}));
 
 import { createJudge } from '../../judge/judgeClient.js';
-import { getRegisteredJudge } from '../../judge/judgeRegistry.js';
+
+/** Install `evaluate` as the `test/<name>` judge and return that reference. */
+function installJudge(
+  name: string,
+  evaluate: JudgeDefinition['evaluate']
+): string {
+  installPlugins([
+    {
+      meta: { name: 'test-plugin', namespace: 'test' },
+      judges: { [name]: { schema: z.object({}).passthrough(), evaluate } },
+    },
+  ]);
+  return `test/${name}`;
+}
+
+afterEach(() => resetPluginsForTests());
 
 const RUBRIC: RubricSpec = { text: 'Is the response accurate and complete?' };
 
@@ -423,15 +438,15 @@ describe('toPassToolJudge', () => {
       const executor = vi
         .fn()
         .mockResolvedValue({ score: 0.95, reasoning: 'Great' });
-      vi.mocked(getRegisteredJudge).mockReturnValue(executor);
+      const judge = installJudge('my-judge', executor);
 
       const context = { isNot: false };
       const result = await toPassToolJudge.call(context, 'response', {
-        judge: 'my-judge',
+        judge,
       });
 
       expect(result.pass).toBe(true);
-      expect(getRegisteredJudge).toHaveBeenCalledWith('my-judge');
+      expect(executor).toHaveBeenCalledTimes(1);
       expect(createJudge).not.toHaveBeenCalled();
     });
 
@@ -439,11 +454,11 @@ describe('toPassToolJudge', () => {
       const executor = vi
         .fn()
         .mockResolvedValue({ score: 0.2, reasoning: 'Bad' });
-      vi.mocked(getRegisteredJudge).mockReturnValue(executor);
+      const judge = installJudge('strict', executor);
 
       const context = { isNot: false };
       const result = await toPassToolJudge.call(context, 'response', {
-        judge: 'strict',
+        judge,
       });
 
       expect(result.pass).toBe(false);
@@ -453,11 +468,11 @@ describe('toPassToolJudge', () => {
       const executor = vi
         .fn()
         .mockResolvedValue({ score: 0.1, reasoning: 'Nope' });
-      vi.mocked(getRegisteredJudge).mockReturnValue(executor);
+      const judge = installJudge('strict', executor);
 
       const context = { isNot: true };
       const result = await toPassToolJudge.call(context, 'response', {
-        judge: 'strict',
+        judge,
       });
 
       expect(result.pass).toBe(true);
@@ -465,11 +480,11 @@ describe('toPassToolJudge', () => {
 
     it('passes reference through to the executor', async () => {
       const executor = vi.fn().mockResolvedValue({ score: 1.0 });
-      vi.mocked(getRegisteredJudge).mockReturnValue(executor);
+      const judge = installJudge('ref-judge', executor);
 
       const context = { isNot: false };
       await toPassToolJudge.call(context, 'candidate', {
-        judge: 'ref-judge',
+        judge,
         reference: 'expected answer',
       });
 
@@ -478,19 +493,19 @@ describe('toPassToolJudge', () => {
 
     it('respects passingThreshold with named judge', async () => {
       const executor = vi.fn().mockResolvedValue({ score: 0.6 });
-      vi.mocked(getRegisteredJudge).mockReturnValue(executor);
+      const judge = installJudge('my-judge', executor);
 
       const context = { isNot: false };
 
       // Fails at default threshold (0.7)
       const strict = await toPassToolJudge.call(context, 'response', {
-        judge: 'my-judge',
+        judge,
       });
       expect(strict.pass).toBe(false);
 
       // Passes at lower threshold
       const lenient = await toPassToolJudge.call(context, 'response', {
-        judge: 'my-judge',
+        judge,
         passingThreshold: 0.5,
       });
       expect(lenient.pass).toBe(true);
@@ -498,18 +513,18 @@ describe('toPassToolJudge', () => {
 
     it('still works with rubric + judge in options (judge takes precedence)', async () => {
       const executor = vi.fn().mockResolvedValue({ score: 0.9 });
-      vi.mocked(getRegisteredJudge).mockReturnValue(executor);
+      const judge = installJudge('my-judge', executor);
 
       const context = { isNot: false };
       const result = await toPassToolJudge.call(
         context,
         'response',
         'correctness',
-        { judge: 'my-judge' }
+        { judge }
       );
 
       expect(result.pass).toBe(true);
-      expect(getRegisteredJudge).toHaveBeenCalledWith('my-judge');
+      expect(executor).toHaveBeenCalledTimes(1);
       expect(createJudge).not.toHaveBeenCalled();
     });
   });

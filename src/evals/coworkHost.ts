@@ -576,7 +576,6 @@ async function runBatch(
 
 export function createCoworkHost(platform?: CoworkPlatform): HostDefinition {
   return {
-    name: 'cowork_cu',
     schema: CoworkSchema,
     evidence: 'structured',
     runBatch: (requests, context) => runBatch(requests, context, platform),

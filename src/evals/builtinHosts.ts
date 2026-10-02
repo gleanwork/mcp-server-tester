@@ -26,12 +26,17 @@ import type {
   HostRunResult,
 } from './evalFrameworkTypes.js';
 import type { HostConfig } from './evalManifest.js';
+import type { HostDefinition } from './evalFrameworkTypes.js';
+import { extensionLookup } from '../plugins/extensions.js';
 import { simulationToHostTrace } from './hostTrace.js';
-import { getHost, registerHost } from './frameworkRegistries.js';
 import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
 import { ANTHROPIC_API_HOST } from './anthropicApiHost.js';
 import { COWORK_HOST } from './coworkHost.js';
-import { CHATGPT_HOST, CHATGPT_LINUX_HOST } from './chatgptHost.js';
+import {
+  CHATGPT_HOST,
+  CHATGPT_HOSTS,
+  CHATGPT_LINUX_HOST,
+} from './chatgptHost.js';
 
 /** A stand-in client for hosts that manage their own connections. */
 function missingClient(): Client {
@@ -290,42 +295,50 @@ const CliHostSchema = z
     servers: z.array(MCPConfigSchema).optional(),
   })
   .strict();
-let builtinsRegistered = false;
+let builtinHosts: Record<string, HostDefinition> | undefined;
 
-export function registerBuiltinHosts(): void {
-  if (builtinsRegistered) return;
+/** Built-in hosts by name, including aliases. */
+function builtinHostDefinitions(): Readonly<Record<string, HostDefinition>> {
+  if (builtinHosts) return builtinHosts;
+  const hosts: Record<string, HostDefinition> = {};
   for (const [name, factory] of Object.entries(BUILTIN_HOSTS)) {
-    registerHost({
-      name,
+    hosts[name] = {
       schema: name === 'vercel-sdk' ? SdkHostSchema : CliHostSchema,
       createConfig: (options) => factory(options ?? {}),
       evidence: 'structured',
       run: (input, config, context) =>
         runBuiltinHost(input, config, context, factory),
-    });
+    };
   }
-  registerHost(ANTHROPIC_API_HOST);
-  registerHost(CHATGPT_HOST);
-  registerHost(CHATGPT_LINUX_HOST);
-  registerHost({
-    ...(process.platform === 'linux' ? CHATGPT_LINUX_HOST : CHATGPT_HOST),
-    name: 'chatgpt',
+  return (builtinHosts = {
+    ...hosts,
+    'anthropic-api': ANTHROPIC_API_HOST,
+    ...CHATGPT_HOSTS,
+    chatgpt: process.platform === 'linux' ? CHATGPT_LINUX_HOST : CHATGPT_HOST,
+    cowork_cu: COWORK_HOST,
+    cowork: COWORK_HOST,
+    'anthropic.claude.cowork.desktop-app.macos': COWORK_HOST,
   });
-  registerHost(COWORK_HOST);
-  registerHost({ ...COWORK_HOST, name: 'cowork' });
-  registerHost({
-    ...COWORK_HOST,
-    name: 'anthropic.claude.cowork.desktop-app.macos',
-  });
-  builtinsRegistered = true;
+}
+
+const hosts = extensionLookup('hosts', builtinHostDefinitions);
+
+/** The host `reference` names: a built-in, or `namespace/name` from a plugin. */
+export function getHost(reference: string): HostDefinition {
+  return hosts.get(reference);
 }
 
 export function getBuiltinHostConfig(
   name: string,
   options: BuiltinHostOptions = {}
 ): MCPHostConfig {
-  registerBuiltinHosts();
-  const definition = getHost(name);
+  const definition = builtinHostDefinitions()[name];
+  if (!definition) {
+    const available = Object.keys(builtinHostDefinitions()).sort().join(', ');
+    throw new Error(
+      `Host "${name}" is not available. Available: ${available}.`
+    );
+  }
   const createConfig = definition.createConfig?.bind(definition);
   if (!createConfig)
     throw new Error(`Host ${name} does not expose a legacy config factory.`);

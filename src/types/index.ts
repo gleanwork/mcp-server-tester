@@ -287,8 +287,6 @@ export type {
   ProviderKind,
   BuiltInRubric,
   RubricSpec,
-  CustomJudgeExecutor,
-  CustomJudgeResult,
 } from './judge.js';
 
 export type {

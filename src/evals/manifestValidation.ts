@@ -1,138 +1,17 @@
 import { z, type ZodType } from 'zod';
-import type {
-  DatasetSource,
-  MetricDefinition,
-  HostDefinition,
-  JudgeDefinition,
-  ResultStoreDefinition,
-} from './evalFrameworkTypes.js';
+import type { ResultStoreDefinition } from './evalFrameworkTypes.js';
+import { getDatasetSource } from './builtinDatasetSources.js';
+import { getHost } from './builtinHosts.js';
+import { getJudge } from '../judge/builtinJudges.js';
+import { getMetric } from './metrics.js';
+import { getResultStore } from './builtinResultStores.js';
+import { parseExtensionReference } from '../plugins/plugin.js';
 import type {
   EvalManifest,
   ExtensionConfig,
   HostConfig,
   TaggedConfig,
 } from './evalManifest.js';
-
-interface NamedImplementation {
-  readonly name: string;
-}
-
-interface Registry<T extends NamedImplementation> {
-  register(implementation: T): void;
-  get(name: string): T;
-  list(): T[];
-  clear(): void;
-}
-
-interface RegistryState {
-  datasets: Map<string, NamedImplementation>;
-  hosts: Map<string, NamedImplementation>;
-  judges: Map<string, NamedImplementation>;
-  metrics: Map<string, NamedImplementation>;
-  resultStores: Map<string, NamedImplementation>;
-}
-
-const REGISTRY_STATE_KEY = Symbol.for(
-  'mcp-server-tester.framework-registry-state'
-);
-const globalRegistry = globalThis as unknown as Record<symbol, unknown>;
-const existingRegistryState = globalRegistry[REGISTRY_STATE_KEY] as
-  | RegistryState
-  | undefined;
-const registryState: RegistryState = existingRegistryState ?? {
-  datasets: new Map<string, NamedImplementation>(),
-  hosts: new Map<string, NamedImplementation>(),
-  judges: new Map<string, NamedImplementation>(),
-  metrics: new Map<string, NamedImplementation>(),
-  resultStores: new Map<string, NamedImplementation>(),
-};
-if (!existingRegistryState) globalRegistry[REGISTRY_STATE_KEY] = registryState;
-
-function createRegistry<T extends NamedImplementation>(
-  kind: string,
-  implementations: Map<string, NamedImplementation>
-): Registry<T> {
-  const typedImplementations = implementations as Map<string, T>;
-  return {
-    register(implementation) {
-      const existing = typedImplementations.get(implementation.name);
-      if (existing && existing !== implementation) {
-        throw new Error(
-          `${kind} "${implementation.name}" is already registered.`
-        );
-      }
-      typedImplementations.set(implementation.name, implementation);
-    },
-    get(name) {
-      const implementation = typedImplementations.get(name);
-      if (!implementation) {
-        const available = [...typedImplementations.keys()].sort().join(', ');
-        throw new Error(
-          `${kind} "${name}" is not registered.${
-            available ? ` Available: ${available}.` : ''
-          }`
-        );
-      }
-      return implementation;
-    },
-    list() {
-      return [...typedImplementations.values()].sort((a, b) =>
-        a.name.localeCompare(b.name)
-      );
-    },
-    clear() {
-      typedImplementations.clear();
-    },
-  };
-}
-
-const datasetSources = createRegistry<DatasetSource>(
-  'Dataset source',
-  registryState.datasets
-);
-const hosts = createRegistry<HostDefinition>('Host', registryState.hosts);
-const judges = createRegistry<JudgeDefinition>('Judge', registryState.judges);
-const metrics = createRegistry<MetricDefinition>(
-  'Metric',
-  registryState.metrics
-);
-const resultStores = createRegistry<ResultStoreDefinition>(
-  'Result store',
-  registryState.resultStores
-);
-
-export const registerDatasetSource = (source: DatasetSource): void =>
-  datasetSources.register(source);
-export const getDatasetSource = (name: string): DatasetSource =>
-  datasetSources.get(name);
-export const listDatasetSources = (): DatasetSource[] => datasetSources.list();
-export const clearDatasetSources = (): void => datasetSources.clear();
-
-export const registerHost = (host: HostDefinition): void =>
-  hosts.register(host);
-export const getHost = (name: string): HostDefinition => hosts.get(name);
-export const listHosts = (): HostDefinition[] => hosts.list();
-export const clearHosts = (): void => hosts.clear();
-
-export const registerJudge = (judge: JudgeDefinition): void =>
-  judges.register(judge);
-export const getJudge = (name: string): JudgeDefinition => judges.get(name);
-export const listJudges = (): JudgeDefinition[] => judges.list();
-export const clearJudges = (): void => judges.clear();
-
-export const registerMetric = (metric: MetricDefinition): void =>
-  metrics.register(metric);
-export const getMetric = (name: string): MetricDefinition => metrics.get(name);
-export const listMetrics = (): MetricDefinition[] => metrics.list();
-export const clearMetrics = (): void => metrics.clear();
-
-export const registerResultStore = (store: ResultStoreDefinition): void =>
-  resultStores.register(store);
-export const getResultStore = (name: string): ResultStoreDefinition =>
-  resultStores.get(name);
-export const listResultStores = (): ResultStoreDefinition[] =>
-  resultStores.list();
-export const clearResultStores = (): void => resultStores.clear();
 
 /** Resolve by implementation type and retain parsed defaults/transforms for consumers. */
 export function resolveResultStoreConfig(config: ExtensionConfig): {
@@ -148,13 +27,13 @@ export function resolveResultStoreConfig(config: ExtensionConfig): {
 
 function parseConfig<T extends TaggedConfig>(
   config: T,
-  implementation: NamedImplementation & { schema: ZodType },
+  implementation: { schema: ZodType },
   context: string
 ): T {
   const result = implementation.schema.safeParse(config);
   if (!result.success) {
     throw new Error(
-      `Invalid ${context} "${implementation.name}": ${result.error.message}`
+      `Invalid ${context} "${config.type}": ${result.error.message}`
     );
   }
   if (
@@ -163,7 +42,7 @@ function parseConfig<T extends TaggedConfig>(
     Array.isArray(result.data)
   ) {
     throw new Error(
-      `Invalid ${context} "${implementation.name}": schema must return an options object.`
+      `Invalid ${context} "${config.type}": schema must return an options object.`
     );
   }
   // Keep routing metadata even when an options schema strips unknown keys.
@@ -219,8 +98,15 @@ export function normalizeSuiteControls(manifest: EvalManifest): EvalManifest {
 function parseMetrics(
   configs: ExtensionConfig[] | undefined
 ): ExtensionConfig[] | undefined {
+  // resolveMetric runs the spec's `metric` key when it has one, so validate that.
   return configs?.map((config) =>
-    parseConfig(config, getMetric(config.type), 'metric options')
+    parseConfig(
+      config,
+      getMetric(
+        typeof config.metric === 'string' ? config.metric : config.type
+      ),
+      'metric options'
+    )
   );
 }
 
@@ -272,15 +158,70 @@ function validateLabels(
   }
 }
 
+/** Every extension reference (`type`) a manifest declares. */
+function manifestReferences(manifest: EvalManifest): string[] {
+  const metrics = [
+    ...(manifest.metrics ?? []),
+    ...(manifest.arms ?? []).flatMap((arm) => arm.metrics ?? []),
+  ];
+  const blocks: Array<{ type?: unknown } | undefined> = [
+    ...manifest.datasets,
+    manifest.host,
+    ...metrics,
+    ...(manifest.judges ?? []),
+    manifest.results?.store,
+    ...(manifest.arms ?? []).flatMap((arm) => [
+      arm.host,
+      ...(arm.judges ?? []),
+    ]),
+  ];
+  // A metric spec's `metric` key wins over `type` when it is resolved.
+  return [
+    ...blocks.map((block) => block?.type),
+    ...metrics.map((metric) => metric.metric),
+  ].filter((reference): reference is string => typeof reference === 'string');
+}
+
+/**
+ * Reject references to plugin namespaces the suite didn't load. The extension
+ * table is shared by every suite in a process (a batch), so without this a
+ * suite could pass only because another one loaded the plugin (ADR-0001).
+ */
+export function assertListedNamespaces(
+  references: readonly string[],
+  namespaces: readonly string[],
+  context = 'The manifest'
+): void {
+  for (const reference of references) {
+    const { namespace } = parseExtensionReference(reference);
+    if (namespace !== undefined && !namespaces.includes(namespace)) {
+      throw new Error(
+        `${context} references "${reference}", but doesn't load the "${namespace}" plugin. Add the plugin to "plugins".`
+      );
+    }
+  }
+}
+
+export interface ValidateManifestOptions {
+  /**
+   * Namespaces of the plugins this suite loads. When given, references to any
+   * other namespace are rejected.
+   */
+  namespaces?: readonly string[];
+}
+
 /**
  * Validate registered schemas and return parsed options, including effective arm
  * inheritance. Callers must use the returned manifest to retain defaults and
  * transforms. The input is not mutated, and each effective config is parsed once.
  */
 export function validateManifestRegistrations(
-  manifest: EvalManifest
+  manifest: EvalManifest,
+  options: ValidateManifestOptions = {}
 ): EvalManifest {
   manifest = normalizeSuiteControls(manifest);
+  if (options.namespaces)
+    assertListedNamespaces(manifestReferences(manifest), options.namespaces);
   validateLabels(manifest.servers ?? [], 'the manifest');
   const datasets = manifest.datasets.map((config) =>
     parseConfig(config, getDatasetSource(config.type), 'dataset options')

@@ -372,18 +372,27 @@ await expect(result).toPassToolJudge({
 });
 ```
 
-### Custom judge executor
+### Custom judges (plugins)
 
 ```typescript
-import { registerJudge } from '@gleanwork/mcp-server-tester';
+import type { Plugin } from '@gleanwork/mcp-server-tester';
+import { z } from 'zod';
 
-registerJudge('my-judge', async (input) => {
-  const score = await myCustomEvaluation(input.response);
-  return { pass: score > 0.7, score, reason: 'Custom evaluation' };
-});
+export const myPlugin: Plugin = {
+  meta: { name: 'my-judges', namespace: 'my' },
+  judges: {
+    quality: {
+      schema: z.object({}).passthrough(),
+      evaluate: async (candidate) => ({
+        score: await myCustomEvaluation(candidate),
+        reasoning: 'Custom evaluation',
+      }),
+    },
+  },
+};
 
-// In test
-await expect(result).toPassToolJudge({ judge: 'my-judge' });
+// playwright.config.ts: use: { mcpPlugins: [myPlugin] }
+await expect(result).toPassToolJudge({ judge: 'my/quality', threshold: 0.7 });
 ```
 
 ## MCP Host Providers

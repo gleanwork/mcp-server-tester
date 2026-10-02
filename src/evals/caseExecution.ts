@@ -31,7 +31,7 @@ import type {
   ExternalHostMetadata,
   ExternalHostSimulationResult,
 } from './externalHost/types.js';
-import { getHost } from './frameworkRegistries.js';
+import { getHost } from './builtinHosts.js';
 import { hostTraceToExecution } from './hostTrace.js';
 import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
 import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';

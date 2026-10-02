@@ -217,7 +217,6 @@ describe('per-scenario host traces', () => {
     'gates tool assertions for %s evidence',
     async (evidence) => {
       const host: HostDefinition = {
-        name: 'scenario-only',
         schema: z.object({}),
         evidence,
         async run(input) {
@@ -257,7 +256,7 @@ describe('per-scenario host traces', () => {
             hostTraceToExecution(
               await host.run!(
                 { scenario: evalCase.scenario!, servers: [] },
-                { type: host.name },
+                { type: 'scenario-only' },
                 { manifest: { name: 'test', datasets: [] } }
               ),
               evidence
