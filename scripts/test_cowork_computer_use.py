@@ -340,7 +340,7 @@ class DriverTests(unittest.TestCase):
         gui.write.assert_not_called()
 
     def test_fill_inserts_original_unicode_query_and_marker_without_model_copy(self):
-        query = "From the ‘Tipalti & Glean Business Review’ document, what are MAU and WAU?\n\n[MCP_SERVER_TESTER_test-marker]"
+        query = "From the ‘Quarterly Product Metrics’ document, what are monthly and weekly active users?\n\n[MCP_SERVER_TESTER_test-marker]"
         result, count = self.run_actions([FILL, ENTER], query=query)
         self.assertEqual(result['status'], 'submitted')
         self.assertEqual(self.executed_actions[0], {'action': 'type', 'text': query})
