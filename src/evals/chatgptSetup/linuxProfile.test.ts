@@ -52,7 +52,7 @@ const setup: ResolvedCodexSetup = {
   servers: [
     {
       transport: 'http',
-      label: 'acme',
+      label: 'primary',
       url: 'https://example.test/mcp',
       bearerTokenEnvVar: 'MST_CHATGPT_MCP_TOKEN_0',
     },
@@ -61,7 +61,7 @@ const setup: ResolvedCodexSetup = {
 
 function preflight(status: 'connected' | 'failed', toolCount = 3) {
   vi.mocked(checkMcpServers).mockResolvedValue([
-    { label: 'acme', status, toolCount, elapsedMs: 1 },
+    { label: 'primary', status, toolCount, elapsedMs: 1 },
   ]);
 }
 function appServer(
@@ -72,7 +72,7 @@ function appServer(
     status: 'available',
     servers: [
       {
-        label: 'acme',
+        label: 'primary',
         initialized,
         toolCount: initialized ? 3 : null,
         authStatus,
@@ -217,14 +217,14 @@ describe('fresh MST-owned Linux profile', () => {
     expect(vi.mocked(checkMcpServers).mock.calls[0]![0]).toEqual([
       {
         transport: 'http',
-        label: 'acme',
+        label: 'primary',
         serverUrl: 'https://example.test/mcp',
         auth: { accessToken: TOKEN },
       },
     ]);
     const [, probeEnv, labels] = vi.mocked(probeAppServerStatus).mock.calls[0]!;
     expect(probeEnv.MST_CHATGPT_MCP_TOKEN_0).toBe(TOKEN);
-    expect(labels).toEqual(['acme']);
+    expect(labels).toEqual(['primary']);
     expect(profile.readiness).toMatchObject({
       executionPolicy: POLICY,
       login: 'verified',
@@ -282,7 +282,7 @@ describe('fresh MST-owned Linux profile', () => {
       status: 'available',
       servers: [
         {
-          label: 'acme',
+          label: 'primary',
           initialized: true,
           toolCount: 3,
           authStatus: 'bearerToken',
@@ -319,11 +319,11 @@ describe('fresh MST-owned Linux profile', () => {
       codexHome: join(home, '.codex'),
       plugins: [plugin],
       credentials,
-      reservedLabels: ['acme'],
+      reservedLabels: ['primary'],
     });
     expect(JSON.stringify(options.env)).not.toContain(TOKEN);
     expect(vi.mocked(probeAppServerStatus).mock.calls[0]![2]).toEqual([
-      'acme',
+      'primary',
       'acme_mcp',
     ]);
     expect(profile.readiness.plugins).toEqual([receipt]);

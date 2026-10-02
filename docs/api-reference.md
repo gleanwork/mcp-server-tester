@@ -1370,7 +1370,7 @@ The `{ code, message, data? }` of the protocol error a result was made from, or 
 
 ### `EvalExpectBlock`
 
-```typescript snippet=src/evals/datasetTypes.ts#L217-L318
+```typescript snippet=src/evals/datasetTypes.ts#L216-L317
 /**
  * Unified expectation block for eval cases
  *
@@ -1581,7 +1581,6 @@ export interface EvalCase {
    * Golden/expected answer for this case.
    * When set, automatically passed as `reference` to the LLM judge
    * (unless passesJudge.reference is explicitly provided).
-   * Mirrors EvalV2's `canonical_answer` field.
    */
   canonicalAnswer?: string;
 

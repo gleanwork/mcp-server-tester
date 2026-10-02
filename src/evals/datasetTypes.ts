@@ -139,7 +139,6 @@ export interface EvalCase {
    * Golden/expected answer for this case.
    * When set, automatically passed as `reference` to the LLM judge
    * (unless passesJudge.reference is explicitly provided).
-   * Mirrors EvalV2's `canonical_answer` field.
    */
   canonicalAnswer?: string;
 

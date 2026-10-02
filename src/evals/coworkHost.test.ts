@@ -71,7 +71,7 @@ const host = {
 };
 const server = {
   transport: 'http' as const,
-  label: 'acme',
+  label: 'primary',
   serverUrl: 'https://example.com/mcp/eval',
   auth: { accessTokenEnv: 'ACME_API_TOKEN' },
 };
@@ -110,7 +110,7 @@ beforeEach(async () => {
   vi.clearAllMocks();
   mocks.order.length = 0;
   mocks.readiness.mockResolvedValue([
-    { label: 'acme', status: 'connected', toolCount: 22, elapsedMs: 10 },
+    { label: 'primary', status: 'connected', toolCount: 22, elapsedMs: 10 },
   ]);
   mocks.setup.mockImplementation(async () => {
     mocks.order.push('setup');

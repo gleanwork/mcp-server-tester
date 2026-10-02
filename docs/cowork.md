@@ -151,8 +151,8 @@ never resubmitted. Follow-up usage is recorded under
 `hostTelemetry.computerUse.hitlFollowups`.
 
 For the host application's login-backed OOTB connectors, use its
-`nativeConnectors` selector and existing dry-run proxy entries alongside its
-`/eval` endpoint. The registry, OAuth login, and vendor write classification remain
+`nativeConnectors` selector and existing dry-run proxy entries alongside your
+MCP server's `/eval` endpoint. The registry, OAuth login, and vendor write classification remain
 in the host application, not MST. Missing or
 expired credentials fail preflight rather than silently dropping a connector.
 

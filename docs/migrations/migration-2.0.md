@@ -287,7 +287,7 @@ Both hosts now run through one batch lifecycle (`src/evals/desktopBatch.ts`) and
 
 **Affects:** plugins that rely on a `registerGleanJudges` export, and consumers of `examples/plugins/legacy-glean-datasets.ts`.
 
-- **The plugin loader no longer looks for `registerGleanJudges`.** It calls the first of `register`, `registerPlugins`, or a default-exported function, so a plugin that also has a default export now runs that instead. Rename the export to `register`. `manifest.plugins` and `--plugins` have no override; only programmatic callers can pass another name, with `loadPlugins(paths, { registerExportNames: ['registerGleanJudges'] })`.
+- **The plugin loader no longer looks for `registerGleanJudges`.** It calls the first of `register`, `registerPlugins`, or a default-exported function, so a plugin that also has a default export now runs that instead, and one that exports only `registerGleanJudges` fails with "does not export a register function". Rename the export to `register`. `manifest.plugins` and `--plugins` have no override; only programmatic callers can pass another name, with `loadPlugins(paths, { registerExportNames: ['registerGleanJudges'] })`.
 - **The `glean-legacy` dataset source example was removed.** It encoded one organization's legacy dataset schema and judge policy, which belongs in that organization's plugin, not in MST. If you copied it into your repository, your copy keeps working; otherwise copy it from the `v2.0.0-beta.7` tag (`examples/plugins/legacy-glean-datasets.ts`). [Migrating dataset sources](dataset-sources.md#other-dataset-schemas-register-a-dataset-source) shows how to write your own.
 
 ## New in 2.0 (non-breaking)

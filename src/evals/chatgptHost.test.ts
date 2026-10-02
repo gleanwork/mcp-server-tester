@@ -46,7 +46,7 @@ const requests = (): HostBatchRequest[] =>
       servers: [
         {
           transport: 'http',
-          label: 'acme',
+          label: 'primary',
           serverUrl: 'https://example.test/eval',
           auth: { accessToken: 'fixture-secret' },
         },
@@ -107,7 +107,7 @@ beforeEach(async () => {
         {
           name: 'search',
           source: 'mcp',
-          server: 'acme',
+          server: 'primary',
           arguments: { query: 'test' },
           output: 'evidence',
           durationMs: 20,
@@ -224,7 +224,7 @@ describe('ChatGPT V2 batch host', () => {
         batch[1]!.input.servers = [
           {
             transport: 'http',
-            label: 'acme',
+            label: 'primary',
             serverUrl: 'https://example.test/eval',
             auth: { accessToken: 'different' },
           },
@@ -323,7 +323,7 @@ describe('ChatGPT V2 batch host', () => {
         servers: [
           {
             transport: 'http',
-            label: 'acme',
+            label: 'primary',
             bearerTokenEnvVar: 'MST_CHATGPT_MCP_TOKEN_0',
           },
         ],
@@ -346,7 +346,7 @@ describe('ChatGPT V2 batch host', () => {
         {
           name: 'search',
           source: 'mcp',
-          server: 'acme',
+          server: 'primary',
           durationMs: 20,
           output: 'evidence',
         },
@@ -499,7 +499,7 @@ describe('ChatGPT V2 batch host', () => {
           server: 'cua_repl',
           arguments: {},
         },
-        { name: 'search', source: 'mcp', server: 'acme', arguments: {} },
+        { name: 'search', source: 'mcp', server: 'primary', arguments: {} },
       ],
     });
     const batch = requests().slice(0, 1);
@@ -778,9 +778,9 @@ describe('ChatGPT server translation', () => {
     ).toMatchObject({
       toolCalls: [
         {
-          name: 'acme.search',
+          name: 'primary.search',
           source: 'mcp',
-          server: 'acme',
+          server: 'primary',
           durationMs: 20,
         },
       ],

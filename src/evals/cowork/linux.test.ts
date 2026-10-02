@@ -49,7 +49,7 @@ const manifest: EvalManifest = {
   servers: [
     {
       transport: 'http',
-      label: 'acme',
+      label: 'primary',
       serverUrl: 'https://example.com/eval',
     },
   ],
@@ -57,7 +57,7 @@ const manifest: EvalManifest = {
 const settings = {
   inferenceModels: [{ name: 'test-model' }],
   managedMcpServers: [
-    { name: 'acme', transport: 'http', url: 'https://example.com/eval' },
+    { name: 'primary', transport: 'http', url: 'https://example.com/eval' },
   ],
   allowManagedMcpServersOnly: true,
 };
@@ -187,7 +187,11 @@ describe('caller-owned Linux Cowork desktop', () => {
     {
       ...settings,
       managedMcpServers: [
-        { name: 'acme', transport: 'http', url: 'https://wrong.example/eval' },
+        {
+          name: 'primary',
+          transport: 'http',
+          url: 'https://wrong.example/eval',
+        },
       ],
     },
     {
@@ -199,7 +203,7 @@ describe('caller-owned Linux Cowork desktop', () => {
     {
       ...settings,
       managedMcpServers: [
-        { name: 'acme', transport: 'stdio', command: '/usr/bin/node' },
+        { name: 'primary', transport: 'stdio', command: '/usr/bin/node' },
       ],
     },
     {
