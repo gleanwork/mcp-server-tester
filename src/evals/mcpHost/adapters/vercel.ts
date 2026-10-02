@@ -158,7 +158,7 @@ function errorText(err: unknown): string {
 
 /** A provider model plus the call-level options it needs. */
 interface LoadedModel {
-  model: any;
+  model: AI.LanguageModel;
   providerOptions?: ProviderOptions;
 }
 
@@ -219,7 +219,9 @@ async function loadModel(
           : undefined,
       });
       return {
-        model: (vertexAnthropic as unknown as (m: string) => unknown)(model),
+        model: (vertexAnthropic as unknown as (m: string) => AI.LanguageModel)(
+          model
+        ),
       };
     }
     case 'google': {
