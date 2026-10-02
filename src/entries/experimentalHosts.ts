@@ -46,14 +46,11 @@ export {
   getExternalHostConfigJsonSchema,
   getExternalHostReference,
   listExternalHostDriverReferences,
-  registerExternalHostCapability,
   runExternalHostScenario,
 } from '../evals/externalHost/index.js';
 export type {
   EvidenceSource,
   ExternalHostCapabilityBinding,
-  ExternalHostCapabilityContext,
-  ExternalHostCapabilityImplementation,
   ExternalHostCapabilitiesConfig,
   ExternalHostConfig,
   ExternalHostDriverReference,

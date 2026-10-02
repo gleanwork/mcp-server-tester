@@ -47,7 +47,7 @@ export async function runExternalHostScenario(
 
   let loaded;
   try {
-    loaded = await loadExternalHostConfig(config);
+    loaded = loadExternalHostConfig(config);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return unsupportedHostResult(config, marker, message);

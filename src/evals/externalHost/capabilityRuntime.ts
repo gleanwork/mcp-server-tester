@@ -3,9 +3,9 @@ import {
   validateHostCapabilities,
 } from './capabilities.js';
 import {
-  getRegisteredExternalHostConfig,
-  getRegisteredExternalHostDisplayName,
-} from './hostRegistry.js';
+  getBuiltinDriverConfig,
+  getBuiltinDriverDisplayName,
+} from './builtinDrivers.js';
 import { resolveBuiltinExternalHostCapability } from './builtinCapabilities.js';
 import {
   driverToSlug,
@@ -26,8 +26,6 @@ import type {
   HostRunContext,
 } from './types.js';
 
-const CAPABILITIES = new Map<string, ExternalHostCapabilityImplementation>();
-
 interface LoadedExternalHostCapability {
   capability: HostCapability;
   binding: ExternalHostCapabilityBinding;
@@ -43,39 +41,14 @@ export interface LoadedExternalHostConfig {
   capabilitiesUsed: HostCapability[];
 }
 
-export function registerExternalHostCapability(
-  implementation: ExternalHostCapabilityImplementation
-): void {
-  CAPABILITIES.set(implementation.id, implementation);
-}
-
-async function resolveExternalHostCapability(
+/**
+ * Finds the implementation a binding's `uses` names. Capabilities are built
+ * in; tests pass their own lookup. A custom host is a plugin host, not a
+ * capability.
+ */
+export type CapabilityLookup = (
   uses: string
-): Promise<ExternalHostCapabilityImplementation | undefined> {
-  const registered = CAPABILITIES.get(uses);
-  if (registered) {
-    return registered;
-  }
-
-  const configuredBuiltin = resolveBuiltinExternalHostCapability(uses);
-  if (configuredBuiltin) {
-    return configuredBuiltin;
-  }
-
-  if (uses.startsWith('module:')) {
-    return loadModuleCapability(uses);
-  }
-
-  return undefined;
-}
-
-export async function loadExternalHostRunner(
-  config: ExternalHostConfig
-): Promise<ExternalHostRunner> {
-  const loaded = await loadExternalHostConfig(config);
-
-  return createExternalHostRunner(loaded);
-}
+) => ExternalHostCapabilityImplementation | undefined;
 
 export function createExternalHostRunner(
   loaded: LoadedExternalHostConfig
@@ -87,13 +60,14 @@ export function createExternalHostRunner(
   };
 }
 
-export async function loadExternalHostConfig(
-  config: ExternalHostConfig
-): Promise<LoadedExternalHostConfig> {
+export function loadExternalHostConfig(
+  config: ExternalHostConfig,
+  lookup: CapabilityLookup = resolveBuiltinExternalHostCapability
+): LoadedExternalHostConfig {
   const driver = normalizeHostDriver(config.driver);
   const driverSlug = driverToSlug(driver);
-  const registeredConfig = getRegisteredExternalHostConfig(driverSlug);
-  const effectiveConfig = mergeExternalHostConfig(config, registeredConfig);
+  const builtinConfig = getBuiltinDriverConfig(driverSlug);
+  const effectiveConfig = mergeExternalHostConfig(config, builtinConfig);
   const capabilitiesConfig = effectiveConfig.capabilities;
 
   if (!capabilitiesConfig) {
@@ -110,12 +84,8 @@ export async function loadExternalHostConfig(
       capabilitiesConfig[capability]
     );
     for (const binding of bindings) {
-      const implementation = await resolveExternalHostCapability(binding.uses);
-      if (!implementation) {
-        throw new Error(
-          `External host capability implementation is not available: ${binding.uses}`
-        );
-      }
+      const implementation = lookup(binding.uses);
+      if (!implementation) throw unavailableCapability(binding.uses);
 
       loadedCapabilities.push({
         capability,
@@ -146,7 +116,7 @@ export async function loadExternalHostConfig(
     driverSlug,
     displayName:
       effectiveConfig.name ??
-      getRegisteredExternalHostDisplayName(driverSlug) ??
+      getBuiltinDriverDisplayName(driverSlug) ??
       driverSlug,
     loadedCapabilities,
     capabilitiesUsed,
@@ -318,33 +288,14 @@ function normalizeCapabilityBindings(
   return Array.isArray(binding) ? binding : [binding];
 }
 
-async function loadModuleCapability(
-  uses: string
-): Promise<ExternalHostCapabilityImplementation | undefined> {
-  const target = uses.slice('module:'.length);
-  const [specifier, exportName = 'default'] = target.split('#');
-  if (!specifier) {
-    throw new Error(`Invalid external host module capability id: ${uses}`);
-  }
+const CUSTOM_HOST_HINT =
+  "External-host capabilities are built in; to run a custom host, provide it from a plugin's hosts (docs/evaluation-framework.md#hosts).";
 
-  const module = (await import(specifier)) as Record<string, unknown>;
-  const implementation = module[exportName];
-  if (!isExternalHostCapabilityImplementation(implementation)) {
-    throw new Error(
-      `External host module capability ${uses} did not export a valid implementation.`
-    );
-  }
-  return implementation;
-}
-
-function isExternalHostCapabilityImplementation(
-  value: unknown
-): value is ExternalHostCapabilityImplementation {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    typeof (value as ExternalHostCapabilityImplementation).id === 'string' &&
-    Array.isArray((value as ExternalHostCapabilityImplementation).capabilities)
+function unavailableCapability(uses: string): Error {
+  return new Error(
+    uses.startsWith('module:')
+      ? `External host capability "${uses}": module: capabilities were removed. ${CUSTOM_HOST_HINT}`
+      : `External host capability implementation is not available: ${uses}. ${CUSTOM_HOST_HINT}`
   );
 }
 

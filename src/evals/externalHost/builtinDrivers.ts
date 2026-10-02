@@ -7,7 +7,7 @@ import {
   driverToSlug,
 } from './driverIdentity.js';
 
-const EXTERNAL_HOST_REGISTRY: Record<
+const BUILTIN_DRIVERS: Record<
   string,
   Partial<ExternalHostConfig> & { name: string; description: string }
 > = {
@@ -105,24 +105,24 @@ const EXTERNAL_HOST_REGISTRY: Record<
   },
 };
 
-export function getRegisteredExternalHostConfig(
+export function getBuiltinDriverConfig(
   driverSlug: string
 ): Partial<ExternalHostConfig> | undefined {
-  return EXTERNAL_HOST_REGISTRY[driverSlug];
+  return BUILTIN_DRIVERS[driverSlug];
 }
 
-export function getRegisteredExternalHostDisplayName(
+export function getBuiltinDriverDisplayName(
   driverSlug: string
 ): string | undefined {
-  return EXTERNAL_HOST_REGISTRY[driverSlug]?.name;
+  return BUILTIN_DRIVERS[driverSlug]?.name;
 }
 
-export function getRegisteredExternalHostDescription(
+export function getBuiltinDriverDescription(
   driverSlug: string
 ): string | undefined {
-  return EXTERNAL_HOST_REGISTRY[driverSlug]?.description;
+  return BUILTIN_DRIVERS[driverSlug]?.description;
 }
 
-export function listRegisteredExternalHostSlugs(): string[] {
-  return Object.keys(EXTERNAL_HOST_REGISTRY);
+export function listBuiltinDriverSlugs(): string[] {
+  return Object.keys(BUILTIN_DRIVERS);
 }

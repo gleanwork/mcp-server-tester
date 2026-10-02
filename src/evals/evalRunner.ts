@@ -27,7 +27,7 @@ import {
   driverToSlug,
   normalizeHostDriver,
 } from './externalHost/driverIdentity.js';
-import { getRegisteredExternalHostConfig } from './externalHost/hostRegistry.js';
+import { getBuiltinDriverConfig } from './externalHost/builtinDrivers.js';
 import type {
   MCPProtocolInfo,
   SkillLoad,
@@ -590,29 +590,29 @@ function buildRequest(
       } catch {
         driverSlug = undefined;
       }
-      const registeredConfig = driverSlug
-        ? getRegisteredExternalHostConfig(driverSlug)
+      const builtinConfig = driverSlug
+        ? getBuiltinDriverConfig(driverSlug)
         : undefined;
       const effectiveOptions = mergeReporterOptions(
-        registeredConfig?.options,
+        builtinConfig?.options,
         evalCase.externalHost.options
       );
       const effectiveCapabilities = mergeReporterCapabilities(
-        registeredConfig?.capabilities,
+        builtinConfig?.capabilities,
         evalCase.externalHost.capabilities
       );
       const effectiveCorrelation = mergeReporterCorrelation(
-        registeredConfig?.correlation,
+        builtinConfig?.correlation,
         evalCase.externalHost.correlation
       );
       request.externalHost = {
         driver: evalCase.externalHost.driver,
         driverSlug,
-        name: evalCase.externalHost.name ?? registeredConfig?.name,
+        name: evalCase.externalHost.name ?? builtinConfig?.name,
         hostType: evalCase.externalHost.hostType,
         variant: evalCase.externalHost.variant,
         timeoutMs: evalCase.externalHost.timeoutMs,
-        usesBuiltInDefaults: registeredConfig !== undefined,
+        usesBuiltInDefaults: builtinConfig !== undefined,
         correlation: effectiveCorrelation,
         options: sanitizeReporterRecord(effectiveOptions),
         capabilities: serializeExternalHostCapabilities(effectiveCapabilities),

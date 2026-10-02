@@ -127,7 +127,7 @@ A manifest that loads the plugin declares `{ "type": "my/format", "path": "..." 
 
 ### Hosts
 
-A host runs one scenario and returns its trace. It doesn't repeat cases, run judges or decide pass/fail; `runEvalDataset` does that for every host.
+A host runs one scenario and returns its trace. It doesn't repeat cases, run judges or decide pass/fail; `runEvalDataset` does that for every host. A plugin host is the way to add a host: the built-in desktop drivers are composed from internal capabilities, which plugins can't provide.
 
 ```typescript
 import type { Plugin } from '@gleanwork/mcp-server-tester';

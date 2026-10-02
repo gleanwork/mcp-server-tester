@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  createExternalHostRunner,
   loadExternalHostConfig,
-  loadExternalHostRunner,
-  registerExternalHostCapability,
+  type CapabilityLookup,
 } from './capabilityRuntime.js';
 import { runExternalHostScenario } from './runtime.js';
 import type {
@@ -26,141 +26,6 @@ const TEST_CORRELATION = {
   marker: 'MCP_SERVER_TESTER_CAPABILITY',
   includedInPrompt: true,
 } as const;
-
-describe('external host capability runtime', () => {
-  it('composes a runner from config-declared capability bindings', async () => {
-    const calls: string[] = [];
-
-    registerExternalHostCapability({
-      id: 'test.capability.success',
-      capabilities: ['control', 'input', 'completion', 'trace', 'normalize'],
-      async setup({ state }) {
-        calls.push('setup');
-        state.data.setupSeen = true;
-      },
-      async run({ run, state }) {
-        calls.push('run');
-        expect(state.driverSlug).toBe('test.host.chat.desktop-app.macos');
-        expect(state.data.setupSeen).toBe(true);
-        return {
-          success: true,
-          response: 'composed result',
-          toolCalls: [],
-          externalHost: {
-            driver: state.driver,
-            driverSlug: state.driverSlug,
-            displayName: state.displayName,
-            hostName: state.displayName,
-            hostType: 'custom',
-            capabilitiesUsed: state.capabilitiesUsed,
-            traceSource: 'manual-import',
-            traceConfidence: 'high',
-            artifacts: [],
-            session: { runMarker: run.marker },
-            correlation: run.correlation,
-          },
-        };
-      },
-    });
-
-    const runner = await loadExternalHostRunner({
-      driver: TEST_DRIVER,
-      capabilities: {
-        control: {
-          uses: 'test.capability.success',
-          provides: ['input', 'completion', 'trace', 'normalize'],
-        },
-      },
-    });
-
-    const result = await runner.run({
-      runId: 'run',
-      caseId: 'case',
-      scenario: 'scenario',
-      submittedScenario: 'scenario',
-      marker: 'MCP_SERVER_TESTER_CAPABILITY',
-      correlation: TEST_CORRELATION,
-      timeoutMs: 1000,
-      startedAtMs: Date.now(),
-    });
-
-    expect(calls).toEqual(['setup', 'run']);
-    expect(result).toMatchObject({
-      success: true,
-      response: 'composed result',
-      externalHost: {
-        driverSlug: 'test.host.chat.desktop-app.macos',
-        capabilitiesUsed: [
-          'control',
-          'input',
-          'completion',
-          'trace',
-          'normalize',
-        ],
-      },
-    });
-  });
-
-  it('treats binding provides as additional capabilities', async () => {
-    registerExternalHostCapability({
-      id: 'test.capability.extraControl',
-      capabilities: ['control'],
-    });
-    registerExternalHostCapability({
-      id: 'test.capability.inputTrace',
-      capabilities: ['input', 'trace'],
-    });
-
-    const loaded = await loadExternalHostConfig({
-      driver: TEST_DRIVER,
-      capabilities: {
-        control: { uses: 'test.capability.extraControl' },
-        input: {
-          uses: 'test.capability.inputTrace',
-          provides: ['completion', 'normalize'],
-        },
-      },
-    });
-
-    expect(loaded.capabilitiesUsed).toEqual([
-      'control',
-      'input',
-      'trace',
-      'completion',
-      'normalize',
-    ]);
-  });
-
-  it('fails config loading when required capabilities are missing', async () => {
-    registerExternalHostCapability({
-      id: 'test.capability.controlOnly',
-      capabilities: ['control'],
-    });
-
-    await expect(
-      loadExternalHostConfig({
-        driver: TEST_DRIVER,
-        capabilities: {
-          control: { uses: 'test.capability.controlOnly' },
-        },
-      })
-    ).rejects.toThrow('missing capabilities');
-  });
-
-  it('fails config loading for unavailable capability implementations', async () => {
-    await expect(
-      loadExternalHostConfig({
-        driver: TEST_DRIVER,
-        capabilities: {
-          control: {
-            uses: 'missing.capability',
-            provides: ['input', 'completion', 'trace', 'normalize'],
-          },
-        },
-      })
-    ).rejects.toThrow('not available');
-  });
-});
 
 const RUN_CONTEXT: HostRunContext = {
   runId: 'run',
@@ -199,14 +64,161 @@ async function runCapabilities(
   capabilities: ExternalHostCapabilitiesConfig,
   implementations: ExternalHostCapabilityImplementation[]
 ): Promise<ExternalHostRunResult> {
-  for (const implementation of implementations)
-    registerExternalHostCapability(implementation);
-  const runner = await loadExternalHostRunner({
-    driver: TEST_DRIVER,
-    capabilities,
-  });
-  return runner.run(RUN_CONTEXT);
+  const loaded = loadExternalHostConfig(
+    { driver: TEST_DRIVER, capabilities },
+    lookupOf(implementations)
+  );
+  return createExternalHostRunner(loaded).run(RUN_CONTEXT);
 }
+
+/** A lookup over the given implementations, in place of the built-ins. */
+function lookupOf(
+  implementations: ExternalHostCapabilityImplementation[]
+): CapabilityLookup {
+  const byId = new Map(implementations.map((i) => [i.id, i]));
+  return (uses) => byId.get(uses);
+}
+
+describe('external host capability runtime', () => {
+  it('composes a runner from config-declared capability bindings', async () => {
+    const calls: string[] = [];
+    const implementation: ExternalHostCapabilityImplementation = {
+      id: 'test.capability.success',
+      capabilities: ['control', 'input', 'completion', 'trace', 'normalize'],
+      async setup({ state }) {
+        calls.push('setup');
+        state.data.setupSeen = true;
+      },
+      async run({ state }) {
+        calls.push('run');
+        expect(state.driverSlug).toBe('test.host.chat.desktop-app.macos');
+        expect(state.data.setupSeen).toBe(true);
+        return { ...successFor(state), response: 'composed result' };
+      },
+    };
+
+    const loaded = loadExternalHostConfig(
+      {
+        driver: TEST_DRIVER,
+        capabilities: {
+          control: {
+            uses: 'test.capability.success',
+            provides: ['input', 'completion', 'trace', 'normalize'],
+          },
+        },
+      },
+      lookupOf([implementation])
+    );
+    const result = await createExternalHostRunner(loaded).run(RUN_CONTEXT);
+
+    expect(calls).toEqual(['setup', 'run']);
+    expect(result).toMatchObject({
+      success: true,
+      response: 'composed result',
+      externalHost: {
+        driverSlug: 'test.host.chat.desktop-app.macos',
+        capabilitiesUsed: [
+          'control',
+          'input',
+          'completion',
+          'trace',
+          'normalize',
+        ],
+      },
+    });
+  });
+
+  it('treats binding provides as additional capabilities', () => {
+    const loaded = loadExternalHostConfig(
+      {
+        driver: TEST_DRIVER,
+        capabilities: {
+          control: { uses: 'test.capability.extraControl' },
+          input: {
+            uses: 'test.capability.inputTrace',
+            provides: ['completion', 'normalize'],
+          },
+        },
+      },
+      lookupOf([
+        { id: 'test.capability.extraControl', capabilities: ['control'] },
+        { id: 'test.capability.inputTrace', capabilities: ['input', 'trace'] },
+      ])
+    );
+
+    expect(loaded.capabilitiesUsed).toEqual([
+      'control',
+      'input',
+      'trace',
+      'completion',
+      'normalize',
+    ]);
+  });
+
+  it('fails config loading when required capabilities are missing', () => {
+    expect(() =>
+      loadExternalHostConfig(
+        {
+          driver: TEST_DRIVER,
+          capabilities: { control: { uses: 'test.capability.controlOnly' } },
+        },
+        lookupOf([
+          { id: 'test.capability.controlOnly', capabilities: ['control'] },
+        ])
+      )
+    ).toThrow('missing capabilities');
+  });
+
+  it('fails config loading for unavailable capability implementations', () => {
+    expect(() =>
+      loadExternalHostConfig({
+        driver: TEST_DRIVER,
+        capabilities: {
+          control: {
+            uses: 'missing.capability',
+            provides: ['input', 'completion', 'trace', 'normalize'],
+          },
+        },
+      })
+    ).toThrow(
+      /not available: missing\.capability\. .*custom host, provide it from a plugin's hosts/
+    );
+  });
+
+  it('rejects module: capabilities, which were removed', () => {
+    expect(() =>
+      loadExternalHostConfig({
+        driver: TEST_DRIVER,
+        capabilities: {
+          control: {
+            uses: 'module:./my-capability.mjs#capability',
+            provides: ['input', 'completion', 'trace', 'normalize'],
+          },
+        },
+      })
+    ).toThrow(
+      'External host capability "module:./my-capability.mjs#capability": module: capabilities were removed.'
+    );
+  });
+
+  it('resolves the built-in capabilities by default', () => {
+    const loaded = loadExternalHostConfig({
+      driver: TEST_DRIVER,
+      capabilities: {
+        control: { uses: 'builtin:platform.macos' },
+        input: {
+          uses: 'builtin:desktop.macos.accessibilitySubmit',
+          provides: ['completion', 'trace', 'normalize'],
+        },
+      },
+    });
+
+    expect(loaded.loadedCapabilities.map((c) => c.implementation.id)).toEqual([
+      'builtin:platform.macos',
+      'builtin:desktop.macos.accessibilitySubmit',
+    ]);
+  });
+});
 
 type Step = 'setup' | 'run' | 'teardown';
 
@@ -289,6 +301,108 @@ describe('external host capability lifecycle', () => {
 
     expect(result).toMatchObject({ success: true });
     expect(calls).toEqual(['stop.a.setup', 'stop.a.teardown']);
+  });
+
+  it('stops at the first run that returns a result', async () => {
+    const calls: string[] = [];
+    const result = await runCapabilities(
+      {
+        control: { uses: 'mid.a' },
+        input: { uses: 'mid.b' },
+        trace: { uses: 'mid.c' },
+      },
+      [
+        recording('mid.a', ['control'], calls),
+        recording('mid.b', ['input', 'completion'], calls, { run: successFor }),
+        recording('mid.c', ['trace', 'normalize'], calls),
+      ]
+    );
+
+    expect(result).toMatchObject({ success: true });
+    expect(calls).toEqual([
+      'mid.a.setup',
+      'mid.b.setup',
+      'mid.c.setup',
+      'mid.a.run',
+      'mid.b.run',
+      'mid.c.teardown',
+      'mid.b.teardown',
+      'mid.a.teardown',
+    ]);
+  });
+
+  it('stops at a setup that returns a result', async () => {
+    const calls: string[] = [];
+    const result = await runCapabilities(
+      { control: { uses: 'ret.a' }, input: { uses: 'ret.b' } },
+      [
+        recording('ret.a', ['control'], calls, { setup: successFor }),
+        recording(
+          'ret.b',
+          ['input', 'completion', 'trace', 'normalize'],
+          calls
+        ),
+      ]
+    );
+
+    expect(result).toMatchObject({ success: true });
+    expect(calls).toEqual(['ret.a.setup', 'ret.a.teardown']);
+  });
+
+  it('tears down a capability whose setup threw', async () => {
+    const calls: string[] = [];
+    const result = await runCapabilities(
+      { control: { uses: 'bad.a' }, input: { uses: 'bad.b' } },
+      [
+        recording('bad.a', ['control'], calls),
+        recording(
+          'bad.b',
+          ['input', 'completion', 'trace', 'normalize'],
+          calls,
+          {
+            setup: () => {
+              throw new Error('no window');
+            },
+          }
+        ),
+      ]
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      error: 'External host capability failed: no window',
+    });
+    expect(calls).toEqual([
+      'bad.a.setup',
+      'bad.b.setup',
+      'bad.b.teardown',
+      'bad.a.teardown',
+    ]);
+  });
+
+  it('reports a run error and a cleanup error together', async () => {
+    const result = await runCapabilities({ control: { uses: 'both.a' } }, [
+      recording(
+        'both.a',
+        ['control', 'input', 'completion', 'trace', 'normalize'],
+        [],
+        {
+          run: () => {
+            throw new Error('boom');
+          },
+          teardown: () => {
+            throw new Error('stuck');
+          },
+        }
+      ),
+    ]);
+
+    expect(result).toMatchObject({
+      success: false,
+      error:
+        'External host capability failed: boom; External host cleanup failed: stuck',
+      externalHost: { failureKind: 'cleanup_failed' },
+    });
   });
 
   it('fails the run when a capability throws, after tearing everything down', async () => {
@@ -385,5 +499,25 @@ describe('external host capability lifecycle', () => {
       externalHost: { failureKind: 'unsupported_host' },
     });
     expect(!result.success && result.error).toContain('missing.capability');
+  });
+
+  it('reports a module: capability as an unsupported host run', async () => {
+    const result = await runExternalHostScenario('scenario', {
+      driver: TEST_DRIVER,
+      capabilities: {
+        control: {
+          uses: 'module:./my-capability.mjs#capability',
+          provides: ['input', 'completion', 'trace', 'normalize'],
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      externalHost: { failureKind: 'unsupported_host' },
+    });
+    expect(!result.success && result.error).toContain(
+      'module: capabilities were removed'
+    );
   });
 });
