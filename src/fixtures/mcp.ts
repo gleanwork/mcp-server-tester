@@ -13,6 +13,8 @@ import {
 } from '../mcp/fixtures/mcpFixture.js';
 import { resolveCredentials } from '../auth/credentials.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
+import { installPlugins } from '../plugins/extensions.js';
+import type { Plugin } from '../plugins/plugin.js';
 import packageJson from '../../package.json' with { type: 'json' };
 
 /**
@@ -37,6 +39,13 @@ type MCPFixtures = {
    * `protocolMatrix()` sets both. See {@link ProtocolSetting}.
    */
   mcpProtocol: ProtocolSetting | undefined;
+
+  /**
+   * Plugins whose extensions this project's tests use, for example a
+   * judge referenced as `toPassToolJudge({ judge: 'acme/completeness' })`.
+   * Set with `test.use({ mcpPlugins: [acme] })` or in a project's `use` block.
+   */
+  mcpPlugins: readonly Plugin[];
 
   /**
    * Raw MCP client instance (automatically connected and cleaned up)
@@ -67,13 +76,14 @@ type MCPFixtures = {
  */
 export const test = base.extend<MCPFixtures>({
   mcpProtocol: [undefined, { option: true }],
+  mcpPlugins: [[], { option: true }],
 
   /**
    * Internal fixture state - tracks resolved auth type between fixtures
    */
   _mcpFixtureState: [
-    // eslint-disable-next-line no-empty-pattern
-    async ({}, use) => {
+    async ({ mcpPlugins }, use) => {
+      installPlugins(mcpPlugins);
       // Initialize with 'none', will be updated by mcpClient fixture
       const state: MCPFixtureState = { resolvedAuthType: 'none' };
       await use(state);

@@ -2,7 +2,6 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 
@@ -21,9 +20,8 @@ await server.connect(new StdioServerTransport());`
   const pluginPath = path.join(dir, 'plugin.mjs');
   await fs.writeFile(
     pluginPath,
-    `import {registerMetric} from ${JSON.stringify(pathToFileURL(path.resolve('dist/evals.js')).href)};
-import {z} from ${JSON.stringify(import.meta.resolve('zod'))};
-export function register() {registerMetric({name:'local-plugin-metric',schema:z.object({}).passthrough(),kind:'binary',compute(result){return result.pass;}});}`
+    `import {z} from ${JSON.stringify(import.meta.resolve('zod'))};
+export default {meta:{name:'local-plugin',version:'1.0.0',namespace:'local'},metrics:{'plugin-metric':{schema:z.object({}).passthrough(),kind:'binary',compute(result){return result.pass;}}}};`
   );
   const datasetPath = path.join(dir, 'dataset.json');
   await fs.writeFile(
@@ -55,7 +53,7 @@ export function register() {registerMetric({name:'local-plugin-metric',schema:z.
         host: { type: 'vercel-sdk' },
         concurrency: 8,
         plugins: [pluginPath],
-        metrics: ['local-plugin-metric'],
+        metrics: ['local/plugin-metric'],
         results: { store: { type: 'file', dir: path.join(dir, `store-${i}`) } },
       })
     );
@@ -105,7 +103,7 @@ export function register() {registerMetric({name:'local-plugin-metric',schema:z.
   const summary = JSON.parse(await fs.readFile(summaryPath, 'utf8'));
   assert.equal(summary.metrics.failed, 1);
   assert.equal(summary.metrics.passed, 4);
-  assert.equal(summary.metrics['local-plugin-metric_rate'], 0.8);
+  assert.equal(summary.metrics['local/plugin-metric_rate'], 0.8);
   console.log('PASS: wrong assertion failed, plugin metric=0.8, CLI exit=1.');
 } finally {
   await fs.rm(dir, { recursive: true, force: true });

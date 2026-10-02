@@ -5,28 +5,41 @@
  * The judge calls external LLM APIs so createJudge is mocked.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { z, type ZodType } from 'zod';
 import { validateJudge } from './judge.js';
+import {
+  installPlugins,
+  resetPluginsForTests,
+} from '../../plugins/extensions.js';
+import type { JudgeDefinition } from '../../evals/evalFrameworkTypes.js';
 
 // Mock the judgeClient module so no real LLM calls are made
 vi.mock('../../judge/judgeClient.js', () => ({
   createJudge: vi.fn(),
 }));
 
-// Mock the judge registry
-vi.mock('../../judge/judgeRegistry.js', () => ({
-  getRegisteredJudge: vi.fn(),
-  getRegisteredJudgeOptions: vi.fn(
-    (_name: string, options: Record<string, unknown>) => options
-  ),
-}));
-
 // Import after mock so we get the mocked version
 import { createJudge } from '../../judge/judgeClient.js';
-import { getRegisteredJudge } from '../../judge/judgeRegistry.js';
 
 const mockCreateJudge = vi.mocked(createJudge);
-const mockGetRegisteredJudge = vi.mocked(getRegisteredJudge);
+
+/** Install `evaluate` as the `test/<name>` judge and return that reference. */
+function installJudge(
+  name: string,
+  evaluate: JudgeDefinition['evaluate'],
+  schema: ZodType = z.object({}).passthrough()
+): string {
+  installPlugins([
+    {
+      meta: { name: 'test-plugin', namespace: 'test' },
+      judges: { [name]: { schema, evaluate } },
+    },
+  ]);
+  return `test/${name}`;
+}
+
+afterEach(() => resetPluginsForTests());
 
 function makeMockJudge(
   results: Array<{ score?: number; pass: boolean; reasoning?: string }>
@@ -297,56 +310,52 @@ describe('validateJudge', () => {
   });
 
   describe('named custom judges', () => {
-    it('uses registered executor when judge name is provided', async () => {
-      const executor = vi
+    it('uses the plugin judge when a judge name is provided', async () => {
+      const evaluate = vi
         .fn()
         .mockResolvedValue({ score: 0.95, reasoning: 'Excellent' });
-      mockGetRegisteredJudge.mockReturnValue(executor);
+      const judge = installJudge('my-custom-judge', evaluate);
 
-      const result = await validateJudge('some response', {
-        judge: 'my-custom-judge',
-      });
+      const result = await validateJudge('some response', { judge });
 
-      expect(mockGetRegisteredJudge).toHaveBeenCalledWith('my-custom-judge');
-      expect(executor).toHaveBeenCalledWith('some response', undefined, {});
+      expect(evaluate).toHaveBeenCalledWith('some response', undefined, {});
       expect(result.pass).toBe(true);
-      expect(result.message).toContain('my-custom-judge');
+      expect(result.message).toContain('test/my-custom-judge');
       expect(result.message).toContain('0.95');
     });
 
-    it('passes reference to the executor', async () => {
-      const executor = vi.fn().mockResolvedValue({ score: 1.0 });
-      mockGetRegisteredJudge.mockReturnValue(executor);
+    it('passes reference to the judge', async () => {
+      const evaluate = vi.fn().mockResolvedValue({ score: 1.0 });
+      const judge = installJudge('ref-judge', evaluate);
 
       await validateJudge('candidate', {
-        judge: 'ref-judge',
+        judge,
         reference: 'expected answer',
       });
 
-      expect(executor).toHaveBeenCalledWith('candidate', 'expected answer', {});
+      expect(evaluate).toHaveBeenCalledWith('candidate', 'expected answer', {});
     });
 
     it('passes only explicit judge-owned options to strict schemas', async () => {
-      const executor = vi.fn().mockResolvedValue({ score: 1 });
-      mockGetRegisteredJudge.mockReturnValue(executor);
-      await validateJudge('candidate', {
-        judge: 'strict',
+      const evaluate = vi.fn().mockResolvedValue({ score: 1 });
+      const judge = installJudge('strict', evaluate, z.object({}).strict());
+      const result = await validateJudge('candidate', {
+        judge,
         threshold: 0.5,
         options: {},
       });
-      expect(executor).toHaveBeenCalledWith('candidate', undefined, {});
+      expect(result.pass).toBe(true);
+      expect(evaluate).toHaveBeenCalledWith('candidate', undefined, {});
     });
 
-    it('applies threshold to executor score', async () => {
+    it('applies threshold to the judge score', async () => {
       // Score 0.6 should fail the default 0.7 threshold
-      const executor = vi
+      const evaluate = vi
         .fn()
         .mockResolvedValue({ score: 0.6, reasoning: 'Incomplete' });
-      mockGetRegisteredJudge.mockReturnValue(executor);
+      const judge = installJudge('my-judge', evaluate);
 
-      const result = await validateJudge('response', {
-        judge: 'my-judge',
-      });
+      const result = await validateJudge('response', { judge });
 
       expect(result.pass).toBe(false);
       expect(result.message).toContain('0.60');
@@ -355,13 +364,13 @@ describe('validateJudge', () => {
 
     it('respects custom threshold', async () => {
       // Score 0.6 passes with threshold 0.5
-      const executor = vi
+      const evaluate = vi
         .fn()
         .mockResolvedValue({ score: 0.6, reasoning: 'Good enough' });
-      mockGetRegisteredJudge.mockReturnValue(executor);
+      const judge = installJudge('my-judge', evaluate);
 
       const result = await validateJudge('response', {
-        judge: 'my-judge',
+        judge,
         threshold: 0.5,
       });
 
@@ -369,15 +378,15 @@ describe('validateJudge', () => {
     });
 
     it('same judge reusable with different thresholds', async () => {
-      const executor = vi.fn().mockResolvedValue({ score: 0.75 });
-      mockGetRegisteredJudge.mockReturnValue(executor);
+      const evaluate = vi.fn().mockResolvedValue({ score: 0.75 });
+      const judge = installJudge('completeness', evaluate);
 
       const strict = await validateJudge('response', {
-        judge: 'completeness',
+        judge,
         threshold: 0.8,
       });
       const lenient = await validateJudge('response', {
-        judge: 'completeness',
+        judge,
         threshold: 0.5,
       });
 
@@ -386,30 +395,35 @@ describe('validateJudge', () => {
     });
 
     it('does not call createJudge when named judge is used', async () => {
-      const executor = vi.fn().mockResolvedValue({ score: 1.0 });
-      mockGetRegisteredJudge.mockReturnValue(executor);
+      const evaluate = vi.fn().mockResolvedValue({ score: 1.0 });
+      const judge = installJudge('custom', evaluate);
 
-      await validateJudge('response', { judge: 'custom' });
+      await validateJudge('response', { judge });
 
       expect(mockCreateJudge).not.toHaveBeenCalled();
     });
 
-    it('handles executor errors gracefully', async () => {
-      mockGetRegisteredJudge.mockImplementation(() => {
-        throw new Error('Judge "missing" is not registered.');
-      });
-
+    it('fails gracefully when the judge is not available', async () => {
       const result = await validateJudge('response', { judge: 'missing' });
 
       expect(result.pass).toBe(false);
       expect(result.message).toContain('Custom judge "missing" error');
+      expect(result.message).toContain('Judge "missing" is not available.');
     });
 
-    it('handles async executor rejection', async () => {
-      const executor = vi.fn().mockRejectedValue(new Error('LLM API timeout'));
-      mockGetRegisteredJudge.mockReturnValue(executor);
+    it('fails when a namespaced judge needs a plugin that is not loaded', async () => {
+      const result = await validateJudge('response', { judge: 'other/x' });
 
-      const result = await validateJudge('response', { judge: 'flaky' });
+      expect(result.pass).toBe(false);
+      expect(result.message).toContain('Custom judge "other/x" error');
+      expect(result.message).toContain('needs the "other" plugin');
+    });
+
+    it('handles async judge rejection', async () => {
+      const evaluate = vi.fn().mockRejectedValue(new Error('LLM API timeout'));
+      const judge = installJudge('flaky', evaluate);
+
+      const result = await validateJudge('response', { judge });
 
       expect(result.pass).toBe(false);
       expect(result.message).toContain('LLM API timeout');

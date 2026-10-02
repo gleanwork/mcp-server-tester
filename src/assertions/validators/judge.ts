@@ -9,10 +9,8 @@ import type { ProviderKind } from '../../judge/judgeTypes.js';
 import type { RubricSpec } from '../../judge/rubrics.js';
 import { createJudge } from '../../judge/judgeClient.js';
 import { resolveRubric } from '../../judge/rubrics.js';
-import {
-  getRegisteredJudge,
-  getRegisteredJudgeOptions,
-} from '../../judge/judgeRegistry.js';
+import { getJudge } from '../../judge/builtinJudges.js';
+import { parseExtensionOptions } from '../../plugins/plugin.js';
 
 /**
  * Configuration for the judge validator
@@ -34,7 +32,7 @@ const judgeFrameworkOptionKeys = new Set([
 ]);
 
 export interface JudgeValidatorConfig {
-  /** Plugin policy parsed by the registered judge's schema. */
+  /** Plugin policy parsed by the judge's schema. */
   options?: Record<string, unknown>;
   /** Also accept flat policy fields from manifest judge configurations. */
   [key: string]: unknown;
@@ -64,10 +62,9 @@ export interface JudgeValidatorConfig {
   /** Fail if response exceeds this size in bytes before judging */
   maxToolOutputSize?: number;
   /**
-   * Name of a registered custom judge executor.
+   * A judge a plugin provides, as `namespace/name`.
    * When set, the named judge handles the entire evaluation pipeline
    * and returns a normalized score. The `threshold` determines pass/fail.
-   * Register judges with `registerJudge()` before tests run.
    */
   judge?: string;
 }
@@ -136,17 +133,18 @@ export async function validateJudge(
   // Named custom judge — executor returns a score, threshold determines pass/fail
   if (judgeName !== undefined) {
     try {
-      const executor = getRegisteredJudge(judgeName);
-      const options = getRegisteredJudgeOptions(
-        judgeName,
+      const judge = getJudge(judgeName);
+      const options = parseExtensionOptions(
+        judge.schema,
         config.options ??
           Object.fromEntries(
             Object.entries(config).filter(
               ([key]) => !judgeFrameworkOptionKeys.has(key)
             )
-          )
+          ),
+        `judge options "${judgeName}"`
       );
-      const judgeResult = await executor(
+      const judgeResult = await judge.evaluate(
         response,
         reference ?? undefined,
         options

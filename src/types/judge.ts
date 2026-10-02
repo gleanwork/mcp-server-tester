@@ -7,8 +7,3 @@ export type {
   RubricSpec,
   Judge,
 } from '../judge/judgeTypes.js';
-
-export type {
-  CustomJudgeExecutor,
-  CustomJudgeResult,
-} from '../judge/judgeRegistry.js';

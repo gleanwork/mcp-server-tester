@@ -1,4 +1,6 @@
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
+import { installPlugins } from '../plugins/extensions.js';
+import type { Plugin } from '../plugins/plugin.js';
 import type { EvalDataset, EvalCase } from './datasetTypes.js';
 import {
   checkedExecution,
@@ -220,6 +222,9 @@ export interface EvalRunnerOptions {
    */
   dataset: EvalDataset;
 
+  /** Plugins whose extensions (for example `acme/completeness` judges) the cases use. */
+  plugins?: readonly Plugin[];
+
   /**
    * Protocol to record in run metadata when `context.mcp` is absent (for
    * example manifest suites that connect per case). A function is read when
@@ -381,6 +386,8 @@ export interface EvalRunnerOptions {
  * Options for running a single eval case
  */
 export interface EvalCaseOptions {
+  /** Plugins whose extensions (for example `acme/completeness` judges) the case uses. */
+  plugins?: readonly Plugin[];
   toolMap?: Record<string, string[]>;
   /** Case executor called once per iteration; assertions remain runner-owned. */
   executeCase?: (evalCase: EvalCase) => Promise<CaseExecution>;
@@ -926,6 +933,7 @@ export async function runEvalCase(
   context: EvalContext,
   options: EvalCaseOptions = {}
 ): Promise<EvalCaseResult> {
+  if (options.plugins) installPlugins(options.plugins);
   const iterations = evalCase.iterations ?? 1;
 
   if (iterations === 1) {
@@ -1139,6 +1147,7 @@ export async function runEvalDataset(
     mcpHostModel,
     judgeModel,
   } = options;
+  if (options.plugins) installPlugins(options.plugins);
 
   const startTime = Date.now();
   const effectiveContext: EvalContext =

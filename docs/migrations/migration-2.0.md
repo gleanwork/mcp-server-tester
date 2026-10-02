@@ -21,7 +21,7 @@ Other 2.0 changes have their own guides: [dataset sources](./dataset-sources.md)
 - [Stored results are redacted the same way everywhere](#stored-results-are-redacted-the-same-way-everywhere)
 - [Which credentials are used](#which-credentials-are-used)
 - [Desktop hosts share one batch lifecycle](#desktop-hosts-share-one-batch-lifecycle)
-- [Plugins export `register`, and the legacy dataset example is gone](#plugins-export-register-and-the-legacy-dataset-example-is-gone)
+- [Plugins are objects, and extensions are namespaced](#plugins-are-objects-and-extensions-are-namespaced)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
 ---
@@ -67,11 +67,11 @@ Projects created with `npx @gleanwork/mcp-server-tester init` now depend on `@mo
 
 The root now holds the core testing interface: fixtures, matchers and validators, the MCP client, config, datasets with `runEvalDataset` and `runEvalCase`, judges, conformance, and Agent Skills, with the types those use. Everything else moved to one of three subpaths. Nothing was renamed or removed; only the import path changed.
 
-| Subpath                                           | What it holds                                                                                                                                                                       |
-| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@gleanwork/mcp-server-tester/evals`              | The evaluation framework: manifests, suites and batches, registries, metrics, plugins, result stores, baselines and comparisons, variant experiments, and MCP host simulation.      |
-| `@gleanwork/mcp-server-tester/auth`               | Low-level OAuth: discovery, token storage, and the client-credentials flow.                                                                                                         |
-| `@gleanwork/mcp-server-tester/experimental/hosts` | Desktop and external hosts: the external-host runtime and capability types, Cowork settings and native-run audit, and host plugins. Expect breaking changes between minor versions. |
+| Subpath                                           | What it holds                                                                                                                                                                         |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@gleanwork/mcp-server-tester/evals`              | The evaluation framework: manifests, suites and batches, extension definition types, metrics, result stores, baselines and comparisons, variant experiments, and MCP host simulation. |
+| `@gleanwork/mcp-server-tester/auth`               | Low-level OAuth: discovery, token storage, and the client-credentials flow.                                                                                                           |
+| `@gleanwork/mcp-server-tester/experimental/hosts` | Desktop and external hosts: the external-host runtime and capability types, Cowork settings and native-run audit, and host plugins. Expect breaking changes between minor versions.   |
 
 ```typescript
 // Before
@@ -101,7 +101,7 @@ If TypeScript reports that the package has no exported member, find the name bel
 
 These names moved:
 
-- **`@gleanwork/mcp-server-tester/evals`:** `buildEvalDataset`, `BUILT_IN_METRICS`, `CaseComparisonResult`, `clearDatasetSources`, `clearHosts`, `clearJudges`, `clearMetrics`, `clearResultStores`, `compareEvalRuns`, `CompareEvalRunsOptions`, `ComparisonOutcome`, `computeMetrics`, `createDefaultArtifactId`, `createEvalResultStore`, `createStoredEvalArtifact`, `DatasetConfig`, `DatasetSource`, `DatasetSourceContext`, `defaultEnvironmentMetadata`, `EvalArm`, `EvalBatchItem`, `EvalCaseComparison`, `EvalCaseComparisonOutcome`, `EvalManifest`, `EvalManifestInput`, `EvalManifestSchema`, `EvalPluginModule`, `EvalResultStore`, `EvalResultStoreConfig`, `EvalResultStoreLike`, `EvalRunComparisonLabels`, `EvalRunComparisonResult`, `EvalSummaryGenerator`, `EvaluationArmResult`, `EvaluationBatchItem`, `EvaluationBatchOptions`, `EvaluationBatchResult`, `EvaluationHostRunContext`, `EvaluationSuiteOptions`, `EvaluationSuiteResult`, `EvaluationSummary`, `ExperimentMetric`, `ExtensionConfig`, `FileEvalResultStore`, `FileEvalResultStoreConfig`, `GCSEvalResultStore`, `GCSEvalResultStoreConfig`, `getBuiltinHostConfig`, `getDatasetSource`, `getHost`, `getJudge`, `getMetric`, `getMissingDependencyMessage`, `getResultStore`, `HostBatchRequest`, `HostConfig`, `HostConfigPatch`, `HostDefinition`, `HostRunInput`, `HostRunOptions`, `HostRunResult`, `isEvalResultStore`, `isProviderAvailable`, `listDatasetSources`, `listHosts`, `listJudges`, `listMetrics`, `listResultStores`, `ListStoredArtifactsOptions`, `loadBaseline`, `loadEvalManifest`, `loadEvalManifestFromObject`, `loadPluginModule`, `loadPlugins`, `LoadPluginsOptions`, `loadStoredEvalRunnerResult`, `METRIC_REGISTRY`, `MetricDefinition`, `MetricKind`, `MetricValue`, `ProposeVariantsContext`, `registerDatasetSource`, `registerHost`, `registerMetric`, `registerResultStore`, `resolveDatasetPaths`, `resolveEvalResultStore`, `resolveMetric`, `resolveResultStoreConfig`, `ResultStoreDefinition`, `runEvalBatch`, `RunEvalBatchOptions`, `RunEvalBatchResult`, `runEvalSuite`, `RunEvalSuiteOptions`, `RunEvalSuiteResult`, `runServerComparison`, `runSkillsComparison`, `RunSummary`, `RunTelemetry`, `runVariantExperiment`, `saveBaseline`, `SaveBaselineOptions`, `saveEvalRunComparison`, `SaveEvalRunComparisonOptions`, `saveServerComparison`, `SaveServerComparisonOptions`, `ServerComparisonOptions`, `ServerComparisonResult`, `simulateMCPHost`, `SkillsComparisonOptions`, `SkillsComparisonResult`, `SkillsComparisonVariant`, `SkillsVariantSummary`, `StoredArtifactKind`, `StoredArtifactSummary`, `StoredEvalArtifact`, `StoredEvalArtifactMetadata`, `StoredEvalResultLoadOptions`, `StoredEvalResultRef`, `StoredEvalResultSaveOptions`, `StoredEvalRunRef`, `TaggedConfig`, `validateManifestRegistrations`, `VariantCandidateResult`, `VariantExperimentOptions`, `VariantExperimentReason`, `VariantExperimentResult`, `VariantExperimentRound`, `VariantImprovementProposal`, `VariantRecommendation`
+- **`@gleanwork/mcp-server-tester/evals`:** `buildEvalDataset`, `BUILT_IN_METRICS`, `CaseComparisonResult`, `compareEvalRuns`, `CompareEvalRunsOptions`, `ComparisonOutcome`, `computeMetrics`, `createDefaultArtifactId`, `createEvalResultStore`, `createStoredEvalArtifact`, `DatasetConfig`, `DatasetSource`, `DatasetSourceContext`, `defaultEnvironmentMetadata`, `EvalArm`, `EvalBatchItem`, `EvalCaseComparison`, `EvalCaseComparisonOutcome`, `EvalManifest`, `EvalManifestInput`, `EvalManifestSchema`, `EvalResultStore`, `EvalResultStoreConfig`, `EvalResultStoreLike`, `EvalRunComparisonLabels`, `EvalRunComparisonResult`, `EvalSummaryGenerator`, `EvaluationArmResult`, `EvaluationBatchItem`, `EvaluationBatchOptions`, `EvaluationBatchResult`, `EvaluationHostRunContext`, `EvaluationSuiteOptions`, `EvaluationSuiteResult`, `EvaluationSummary`, `ExperimentMetric`, `ExtensionConfig`, `FileEvalResultStore`, `FileEvalResultStoreConfig`, `GCSEvalResultStore`, `GCSEvalResultStoreConfig`, `getBuiltinHostConfig`, `getMissingDependencyMessage`, `HostBatchRequest`, `HostConfig`, `HostConfigPatch`, `HostDefinition`, `HostRunInput`, `HostRunOptions`, `HostRunResult`, `isEvalResultStore`, `isProviderAvailable`, `ListStoredArtifactsOptions`, `loadBaseline`, `loadEvalManifest`, `loadEvalManifestFromObject`, `loadStoredEvalRunnerResult`, `MetricDefinition`, `MetricKind`, `MetricValue`, `ProposeVariantsContext`, `resolveDatasetPaths`, `resolveEvalResultStore`, `resolveMetric`, `resolveResultStoreConfig`, `ResultStoreDefinition`, `runEvalBatch`, `RunEvalBatchOptions`, `RunEvalBatchResult`, `runEvalSuite`, `RunEvalSuiteOptions`, `RunEvalSuiteResult`, `runServerComparison`, `runSkillsComparison`, `RunSummary`, `RunTelemetry`, `runVariantExperiment`, `saveBaseline`, `SaveBaselineOptions`, `saveEvalRunComparison`, `SaveEvalRunComparisonOptions`, `saveServerComparison`, `SaveServerComparisonOptions`, `ServerComparisonOptions`, `ServerComparisonResult`, `simulateMCPHost`, `SkillsComparisonOptions`, `SkillsComparisonResult`, `SkillsComparisonVariant`, `SkillsVariantSummary`, `StoredArtifactKind`, `StoredArtifactSummary`, `StoredEvalArtifact`, `StoredEvalArtifactMetadata`, `StoredEvalResultLoadOptions`, `StoredEvalResultRef`, `StoredEvalResultSaveOptions`, `StoredEvalRunRef`, `TaggedConfig`, `validateManifest`, `VariantCandidateResult`, `VariantExperimentOptions`, `VariantExperimentReason`, `VariantExperimentResult`, `VariantExperimentRound`, `VariantImprovementProposal`, `VariantRecommendation`
 - **`@gleanwork/mcp-server-tester/auth`:** `ClientCredentialsConfig`, `discoverAuthorizationServer`, `discoverProtectedResource`, `DiscoveryError`, `ENV_VAR_NAMES`, `hasValidTokens`, `loadTokens`, `loadTokensFromEnv`, `MCP_PROTOCOL_VERSION`, `performClientCredentialsFlow`, `ProtectedResourceDiscoveryResult`, `ProtectedResourceMetadata`, `StoredClientInfo`, `StoredOAuthState`, `StoredServerMetadata`
 - **`@gleanwork/mcp-server-tester/experimental/hosts`:** `auditCoworkNativeRun`, `AuditCoworkNativeRunOptions`, `COWORK_STDIO_PLATFORMS`, `coworkManagedPluginSettings`, `CoworkManagedPluginSettings`, `CoworkManagedStdioServer`, `coworkMcpSettingsMatch`, `CoworkNativeAuditAttachment`, `CoworkNativeAuditCase`, `CoworkNativeAuditIssue`, `CoworkNativeAuditReport`, `CoworkNativeAuditTiming`, `CoworkNativeAuditUsage`, `coworkPluginMarketplace`, `coworkPluginSettingsMatch`, `driverToSlug`, `EvidenceSource`, `ExternalHostCapabilitiesConfig`, `ExternalHostCapabilityBinding`, `ExternalHostCapabilityContext`, `ExternalHostCapabilityImplementation`, `ExternalHostConfig`, `ExternalHostDriverReference`, `ExternalHostFailureKind`, `ExternalHostMetadata`, `ExternalHostRunResult`, `ExternalHostSession`, `ExternalHostSimulationResult`, `ExternalHostType`, `getExternalHostConfigJsonSchema`, `getExternalHostReference`, `HostArtifact`, `HostCapability`, `HostDriverConfig`, `HostDriverId`, `HostPlugin`, `HostRunContext`, `HostStdioPaths`, `HostStdioServer`, `hostStdioServers`, `listExternalHostDriverReferences`, `materializeHostStdioFiles`, `normalizeHostDriver`, `ObservationConfidence`, `parseDriverSlug`, `registerExternalHostCapability`, `resolveHostStdioServer`, `runExternalHostScenario`, `TraceSource`
 
@@ -283,12 +283,48 @@ Both hosts now run through one batch lifecycle (`src/evals/desktopBatch.ts`) and
 - **Readiness requires at least one tool.** A server that connects but lists no tools now fails the preflight, as it already did for ChatGPT. The failure message lists each server as `label=status(detail)`, where detail is the error or the tool count (Cowork's used to end each entry with the elapsed time). Setup and readiness errors keep their class (for example `CoworkMcpReadinessError` with `.servers`) unless they contained a secret that had to be redacted.
 - **Cases not submitted after a failed reset** carry `telemetry.caseExecution: { status: 'not-submitted', continuation: 'blocked' }`, and every result has `telemetry.batchCase` (`index`, `caseId`, `count`), as ChatGPT's already did.
 
-## Plugins export `register`, and the legacy dataset example is gone
+## Plugins are objects, and extensions are namespaced
 
-**Affects:** plugins that rely on a `registerGleanJudges` export, and consumers of `examples/plugins/legacy-glean-datasets.ts`.
+**Affects:** every plugin; code that calls `registerJudge` or the `register*`, `get*`, `list*` and `clear*` registry functions; `METRIC_REGISTRY`; `loadPlugins`; and manifests that reference plugin extensions.
 
-- **The plugin loader no longer looks for `registerGleanJudges`.** It calls the first of `register`, `registerPlugins`, or a default-exported function, so a plugin that also has a default export now runs that instead, and one that exports only `registerGleanJudges` fails with "does not export a register function". Rename the export to `register`. `manifest.plugins` and `--plugins` have no override; only programmatic callers can pass another name, with `loadPlugins(paths, { registerExportNames: ['registerGleanJudges'] })`.
-- **The `glean-legacy` dataset source example was removed.** It encoded one organization's legacy dataset schema and judge policy, which belongs in that organization's plugin, not in MST. If you copied it into your repository, your copy keeps working; otherwise copy it from the `v2.0.0-beta.7` tag (`examples/plugins/legacy-glean-datasets.ts`). [Migrating dataset sources](dataset-sources.md#other-dataset-schemas-register-a-dataset-source) shows how to write your own.
+Plugins now use ESLint's model ([Plugins](../evaluation-framework.md#plugins), [ADR-0001](../adr/0001-eslint-style-declarative-plugins.md)). A plugin is a plain object that MST reads, instead of a module whose hook calls MST's register functions.
+
+```typescript
+// Before (1.x and earlier 2.0 betas)
+import { registerJudge } from '@gleanwork/mcp-server-tester';
+import { registerDatasetSource } from '@gleanwork/mcp-server-tester/evals';
+
+export function register() {
+  registerJudge({ name: 'completeness', schema, evaluate });
+  registerDatasetSource({ name: 'legacy', schema, load });
+}
+
+// After
+import type { Plugin } from '@gleanwork/mcp-server-tester';
+
+export default {
+  meta: { name: '@acme/mst-plugin', version: '1.0.0', namespace: 'acme' },
+  judges: { completeness: { schema, evaluate } },
+  datasetSources: { legacy: { schema, load } },
+} satisfies Plugin;
+```
+
+- **Default-export a plugin object.** The loader no longer calls `register`, `registerPlugins` or a default-exported function. A module that still exports one fails with a message pointing here.
+- **Extension definitions lose `name`.** The map key is the name.
+- **Reference plugin extensions as `namespace/name`:** `{ "type": "acme/legacy" }` in manifests, and `{ "judge": "acme/completeness" }` in datasets and `toPassToolJudge`. Bare names belong to built-ins, so a plugin can no longer register a bare `correctness` or replace `file`.
+- **A manifest must load the plugins it references.** Referencing `acme/...` without `acme` in that manifest's `plugins` (or `--plugins`, or the `plugins` option) is an error, even if another manifest in the same batch loaded it.
+- **`--plugins` and the `pluginPaths` option add to the manifest's `plugins`** instead of replacing them.
+- **Manifest plugin paths resolve relative to the manifest's directory,** then `rootDir` (`--root-dir`, the working directory by default), then as package names, resolved as `import` resolves them (exports conditions, including `module-sync`, and subpath patterns), so a package subpath must be a file or an `exports` entry. Before, they resolved against `rootDir` only.
+- **Plugins are validated when they load.** Unknown top-level keys are rejected, every extension needs a Zod `schema` and its kind's function (`load`, `run`/`runBatch`/`createConfig`, `evaluate`, `compute`, or `create`), and a different plugin claiming a loaded namespace throws. An old `registerJudge(name, executor)` judge becomes `{ schema: z.object({}).passthrough(), evaluate: executor }`.
+- **Datasets are checked too.** A case's `host.type` and `passesJudge.judge` must name a built-in or a namespace the suite loads.
+- **`getBuiltinHostConfig` resolves built-in hosts only.**
+- **`validateManifestRegistrations` is now `validateManifest`** (from `./evals`).
+- **Code passes plugin objects** where it used to call register functions: `runEvalSuite({ ..., plugins })`, `runEvalBatch({ ..., plugins })`, `runEvalDataset({ dataset, plugins }, ctx)`, `runEvalCase(evalCase, ctx, { plugins })`, or `test.use({ mcpPlugins: [plugin] })` in Playwright. Code that calls `validateJudge` or the matchers outside those uses `installPlugins([plugin])`, from the package root. For a one-off judge, wrap it in a small local plugin, such as `{ meta: { name: 'local', namespace: 'local' }, judges: { x } }`.
+- **Removed:**
+  - From the root: `registerJudge` (both forms) and the `CustomJudgeExecutor` and `CustomJudgeResult` types. A plugin judge's `evaluate` takes the same arguments as the old executor; it also needs a `schema`.
+  - From `./evals`: `registerDatasetSource`, `registerHost`, `registerMetric`, `registerResultStore`, and their `get*`, `list*` and `clear*` counterparts; `METRIC_REGISTRY`; and `loadPlugins`, `loadPluginModule`, `EvalPluginModule` and `LoadPluginsOptions`.
+  - The metric-record argument of `resolveMetric` and `computeMetrics`. Metrics resolve from built-ins and loaded plugins only, and `BUILT_IN_METRICS` is read-only.
+- **The `glean-legacy` dataset source example was removed.** It encoded one organization's legacy dataset schema and judge policy, which belongs in that organization's plugin, not in MST. Copy it from the `v2.0.0-beta.7` tag (`examples/plugins/legacy-glean-datasets.ts`) if you need it, and convert it to a plugin object as above. [Migrating dataset sources](dataset-sources.md#other-dataset-schemas-a-dataset-source-plugin) shows a dataset-source plugin.
 
 ## New in 2.0 (non-breaking)
 

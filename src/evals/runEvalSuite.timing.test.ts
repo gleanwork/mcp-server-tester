@@ -3,16 +3,33 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { runEvalSuite } from './runEvalSuite.js';
-import {
-  registerDatasetSource,
-  registerHost,
-  registerJudge,
-} from './frameworkRegistries.js';
+import { resetPluginsForTests } from '../plugins/extensions.js';
+import type { Plugin } from '../plugins/plugin.js';
 import type { EvalCase } from './datasetTypes.js';
-import type { HostDefinition } from './evalFrameworkTypes.js';
+import type {
+  DatasetSource,
+  HostDefinition,
+  JudgeDefinition,
+} from './evalFrameworkTypes.js';
 
 const dirs: string[] = [];
 let sequence = 0;
+
+interface TestPlugin extends Plugin {
+  hosts: Record<string, HostDefinition>;
+  datasetSources: Record<string, DatasetSource>;
+  judges: Record<string, JudgeDefinition>;
+}
+function newTestPlugin(): TestPlugin {
+  return {
+    meta: { name: 'timing-test-plugin', namespace: 'test' },
+    hosts: {},
+    datasetSources: {},
+    judges: {},
+  };
+}
+/** Extensions defined by the current test; suites load it as the `test` plugin. */
+let testPlugin = newTestPlugin();
 
 function advance(ms: number): void {
   vi.setSystemTime(Date.now() + ms);
@@ -24,6 +41,8 @@ beforeEach(() => {
 });
 afterEach(async () => {
   vi.useRealTimers();
+  resetPluginsForTests();
+  testPlugin = newTestPlugin();
   await Promise.all(
     dirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true }))
   );
@@ -34,22 +53,22 @@ async function fixture(
   cases: EvalCase[],
   extra: Record<string, unknown> = {}
 ) {
-  const type = `timing-host-${sequence++}`;
-  const source = `timing-source-${sequence++}`;
-  registerHost({
-    name: type,
+  const hostName = `timing-host-${sequence++}`;
+  const sourceName = `timing-source-${sequence++}`;
+  testPlugin.hosts[hostName] = {
     schema: z.object({ type: z.string() }),
     evidence: 'structured',
     ...host,
-  });
-  registerDatasetSource({
-    name: source,
+  };
+  testPlugin.datasetSources[sourceName] = {
     schema: z.object({ type: z.string() }),
     async load() {
       advance(7);
       return { name: 'timing', cases };
     },
-  });
+  };
+  const type = `test/${hostName}`;
+  const source = `test/${sourceName}`;
   const root = path.resolve('.mcp-test-results');
   await fs.mkdir(root, { recursive: true });
   const dir = await fs.mkdtemp(path.join(root, 'suite-timing-'));
@@ -65,20 +84,20 @@ async function fixture(
       ...extra,
     })
   );
-  return { manifestPath, rootDir: dir, source };
+  return { manifestPath, rootDir: dir, source, plugins: [testPlugin] };
 }
 
 describe('suite wall-clock timing', () => {
   it('counts batch setup and cleanup once across cases, iterations, datasets and arms', async () => {
-    const judgeName = `timing-judge-${sequence++}`;
-    registerJudge({
-      name: judgeName,
+    const judgeKey = `timing-judge-${sequence++}`;
+    testPlugin.judges[judgeKey] = {
       schema: z.object({}).passthrough(),
       async evaluate() {
         advance(2);
         return { score: 1 };
       },
-    });
+    };
+    const judgeName = `test/${judgeKey}`;
     const runBatch = vi.fn<NonNullable<HostDefinition['runBatch']>>(
       async (requests) => {
         advance(20); // Shared setup.

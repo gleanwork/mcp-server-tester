@@ -8,7 +8,7 @@ import {
   type CoworkSetupConfig,
 } from './coworkSetup/options.js';
 
-/** A tagged configuration block resolved by a public registry. */
+/** A tagged configuration block: `type` names a built-in or a plugin's `namespace/name` extension. */
 export interface TaggedConfig {
   type: string;
   [key: string]: unknown;

@@ -224,7 +224,8 @@ The `examples/` directory contains complete working examples:
 
 For projects with multiple datasets, use an evaluation manifest. Dataset
 paths are shorthand for tagged file sources, while hosts, metrics, judges,
-result stores, and other extensions resolve through public registries:
+result stores, and other extensions are built-ins or come from plugins
+(referenced as `namespace/name`):
 
 ```json
 {
@@ -263,9 +264,10 @@ servers, host options, tool maps, scenario templates, metrics, and judges.
 The canonical execution primitives remain `EvalDataset`, `EvalCase`,
 `EvalMode`, `MCPConfig`, and `runEvalDataset`.
 
-Applications can register extensions with `registerJudge` (from the package
-root) and `registerDatasetSource`, `registerHost`, `registerMetric`, and
-`registerResultStore` (from `@gleanwork/mcp-server-tester/evals`).
+Plugins add dataset sources, hosts, judges, metrics and result stores. A plugin
+is a plain default-exported object in ESLint's shape, and its extensions are
+referenced as `namespace/name`. See
+[Plugins](docs/evaluation-framework.md#plugins).
 Secrets remain environment-variable or plugin-owned runtime inputs and do not
 belong in committed manifests.
 

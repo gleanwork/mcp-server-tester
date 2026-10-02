@@ -3,13 +3,11 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { registerBuiltinHosts } from './builtinHosts.js';
-import { getHost } from './frameworkRegistries.js';
+import { getHost } from './builtinHosts.js';
 import type { HostRunContext } from './evalFrameworkTypes.js';
 
 let directory: string;
 beforeEach(() => {
-  registerBuiltinHosts();
   directory = fs.mkdtempSync(path.join(os.tmpdir(), 'builtin-cli-test-'));
   fs.writeFileSync(
     path.join(directory, 'claude'),
@@ -34,7 +32,7 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-describe('registered CLI host with a local process', () => {
+describe('CLI host with a local process', () => {
   it.each(['generated', 'legacy'] as const)(
     'preserves environment precedence in an actual %s CLI command without mutation',
     async (command) => {

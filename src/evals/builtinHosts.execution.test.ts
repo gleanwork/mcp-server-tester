@@ -6,8 +6,8 @@ import {
   closeMCPClient,
 } from '../mcp/clientFactory.js';
 import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
-import { registerBuiltinHosts, getBuiltinHostConfig } from './builtinHosts.js';
-import { getHost } from './frameworkRegistries.js';
+import { getBuiltinHostConfig } from './builtinHosts.js';
+import { getHost } from './builtinHosts.js';
 import type { HostRunOptions, HostDefinition } from './evalFrameworkTypes.js';
 import { hostTraceToExecution } from './hostTrace.js';
 async function run(host: HostDefinition, options: HostRunOptions) {
@@ -43,7 +43,6 @@ function options(): HostRunOptions {
 }
 beforeEach(() => {
   vi.clearAllMocks();
-  registerBuiltinHosts();
   vi.mocked(createMCPClientForConfig).mockResolvedValue({
     listTools: vi.fn(async () => ({
       tools: [

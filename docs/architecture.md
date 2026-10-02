@@ -38,7 +38,7 @@ The dataset-driven evaluation engine. Key files:
 
 ### `src/judge/`
 
-LLM-as-a-judge evaluation. `judgeTypes.ts` defines the `Judge` interface and `JUDGE_PROVIDER_KINDS`, from which `ProviderKind` and the dataset schema derive. `llmJudge.ts` is the one judge core: the prompts, the verdict parser, the `maxToolOutputSize` guard and usage defaults. Each provider file (`anthropicJudge.ts`, `vertexAnthropicJudge.ts`, `claudeAgentJudge.ts`, `openaiJudge.ts`, `googleJudge.ts`) is only a completion adapter: a prompt goes in, text and tokens come out. `judgeClient.ts` maps each provider kind to its adapter in `createJudge()`. `rubrics.ts` provides built-in rubric definitions and the `resolveRubric()` helper. Custom named judges (`registerJudge`) are a separate registry; they return a score and don't use the LLM core.
+LLM-as-a-judge evaluation. `judgeTypes.ts` defines the `Judge` interface and `JUDGE_PROVIDER_KINDS`, from which `ProviderKind` and the dataset schema derive. `llmJudge.ts` is the one judge core: the prompts, the verdict parser, the `maxToolOutputSize` guard and usage defaults. Each provider file (`anthropicJudge.ts`, `vertexAnthropicJudge.ts`, `claudeAgentJudge.ts`, `openaiJudge.ts`, `googleJudge.ts`) is only a completion adapter: a prompt goes in, text and tokens come out. `judgeClient.ts` maps each provider kind to its adapter in `createJudge()`. `rubrics.ts` provides built-in rubric definitions and the `resolveRubric()` helper. Custom named judges come from plugins (`judges` in a plugin object, referenced as `namespace/name`); they return a score and don't use the LLM core.
 
 ### `src/auth/`
 

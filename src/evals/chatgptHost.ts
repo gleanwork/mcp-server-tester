@@ -301,7 +301,6 @@ async function runBatch(
 
 function chatgptHost(platform: ChatgptPlatform): HostDefinition {
   return {
-    name: platform.driver,
     schema: Schema,
     evidence: 'structured',
     runBatch(requests, context) {
@@ -321,3 +320,8 @@ function chatgptHost(platform: ChatgptPlatform): HostDefinition {
 
 export const CHATGPT_LINUX_HOST = chatgptHost(LINUX_CHATGPT_PLATFORM);
 export const CHATGPT_HOST = chatgptHost(MAC_CHATGPT_PLATFORM);
+/** Both platform hosts, by their driver names. */
+export const CHATGPT_HOSTS: Readonly<Record<string, HostDefinition>> = {
+  [MAC_CHATGPT_PLATFORM.driver]: CHATGPT_HOST,
+  [LINUX_CHATGPT_PLATFORM.driver]: CHATGPT_LINUX_HOST,
+};

@@ -92,8 +92,6 @@ export type {
   ProviderKind,
   BuiltInRubric,
   RubricSpec,
-  CustomJudgeExecutor,
-  CustomJudgeResult,
   MCPConformanceOptions,
   MCPConformanceResult,
   MCPConformanceCheck,
@@ -179,10 +177,11 @@ export {
   loadEvalDataset,
   loadEvalDatasetFromObject,
 } from './evals/datasetLoader.js';
-// Accepts both the legacy name/executor form and a schema-bearing definition.
-export { registerJudge } from './judge/judgeRegistry.js';
-// Types root APIs take or return: registerJudge's definition, and the host
+// Types root APIs take or return: plugins and their judges, and the host
 // trace in tool-call expectations and case results.
+export type { Plugin, PluginMeta } from './plugins/plugin.js';
+// For code that calls validators or matchers outside a runner or the fixture.
+export { installPlugins } from './plugins/extensions.js';
 export type {
   HostEvent,
   HostEvidence,

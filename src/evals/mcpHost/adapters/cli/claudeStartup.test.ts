@@ -4,8 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { ClaudeStartup } from './claudeStartup.js';
 import { runCLIHost } from './runner.js';
-import { registerBuiltinHosts } from '../../../builtinHosts.js';
-import { getHost } from '../../../frameworkRegistries.js';
+import { getHost } from '../../../builtinHosts.js';
 import { hostTraceToExecution } from '../../../hostTrace.js';
 import { runEvalDataset } from '../../../evalRunner.js';
 import type { MCPFixtureApi } from '../../../../mcp/fixtures/mcpFixture.js';
@@ -24,7 +23,6 @@ function line(event: unknown): string {
 let directory: string;
 beforeEach(() => {
   directory = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-startup-'));
-  registerBuiltinHosts();
 });
 afterEach(() => fs.rmSync(directory, { recursive: true, force: true }));
 

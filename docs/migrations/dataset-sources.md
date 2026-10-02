@@ -22,13 +22,13 @@ Keep assertions explicit when they matter. For example, translate a legacy `tool
     {
       "id": "policy",
       "mode": "host",
-      "host": { "type": "my-host", "model": "case-model" },
+      "host": { "type": "my/host", "model": "case-model" },
       "scenario": "What is our leave policy?",
       "iterations": 3,
       "accuracyThreshold": 0.8,
       "expect": {
         "passesJudge": {
-          "judge": "my-quality-judge",
+          "judge": "my/quality",
           "reference": "The expected policy answer",
           "threshold": 0.75
         }
@@ -57,33 +57,39 @@ Directory declarations are expanded by the suite; each JSON entry undergoes the 
 
 Noncanonical fields are rejected instead of silently discarded, including on later cases and cases beyond `maxCases`. A scenario without a host mode is not implicitly a quality evaluation. Fix the JSON or select an explicit source adapter when the error says `Expected a canonical EvalDataset`.
 
-## Other dataset schemas: register a dataset source
+## Other dataset schemas: a dataset-source plugin
 
-If your datasets use another schema, convert them in a dataset source that your own plugin registers. Core readers stay canonical-only, and the conversion policy (default iterations, accuracy thresholds, which judges a case gets) belongs to your adapter, not to MST.
+If your datasets use another schema, convert them in a dataset source that your own plugin provides. Core readers stay canonical-only, and the conversion policy (default iterations, accuracy thresholds, which judges a case gets) belongs to your adapter, not to MST.
 
 ```typescript
-import { loadEvalDatasetFromObject } from '@gleanwork/mcp-server-tester';
-import { registerDatasetSource } from '@gleanwork/mcp-server-tester/evals';
+import {
+  loadEvalDatasetFromObject,
+  type Plugin,
+} from '@gleanwork/mcp-server-tester';
 import { z } from 'zod';
 
 const MySourceSchema = z
-  .object({ type: z.literal('my-format'), path: z.string().min(1) })
+  .object({ type: z.literal('my/format'), path: z.string().min(1) })
   .strict();
 
-export function register(): void {
-  registerDatasetSource({
-    name: 'my-format',
-    schema: MySourceSchema,
-    async load(config, context) {
-      const { path } = MySourceSchema.parse(config);
-      // readMyFormat and convertToCanonical are your own reader and converter.
-      const raw = await readMyFormat(path, context.rootDir);
-      return loadEvalDatasetFromObject(convertToCanonical(raw));
+const plugin: Plugin = {
+  meta: { name: 'my-mst-plugin', version: '1.0.0', namespace: 'my' },
+  datasetSources: {
+    format: {
+      schema: MySourceSchema,
+      async load(config, context) {
+        const { path } = MySourceSchema.parse(config);
+        // readMyFormat and convertToCanonical are your own reader and converter.
+        const raw = await readMyFormat(path, context.rootDir);
+        return loadEvalDatasetFromObject(convertToCanonical(raw));
+      },
     },
-  });
-}
+  },
+};
+
+export default plugin;
 ```
 
-Load the module with `manifest.plugins` or the CLI `--plugins` option, then declare `{ "type": "my-format", "path": "..." }` in `datasets`. The loader calls the exported `register()` hook; merely importing the module does not register it. Select the format explicitly in the declaration rather than inferring it from a first case, and fail on fields the adapter can't map instead of dropping them.
+List the module in `manifest.plugins` (or pass it with `--plugins`), then declare `{ "type": "my/format", "path": "..." }` in `datasets`. See [Plugins](../evaluation-framework.md#plugins). Select the format explicitly in the declaration rather than inferring it from a first case, and fail on fields the adapter can't map instead of dropping them.
 
 The focused tests in `src/evals/buildEvalDataset.test.ts` and `src/evals/builtinDatasetSources.test.ts` cover canonical loading and explicit rejection.

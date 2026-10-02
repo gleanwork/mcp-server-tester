@@ -1,11 +1,12 @@
 import { z } from 'zod';
-import { registerResultStore } from './frameworkRegistries.js';
 import {
   FileEvalResultStore,
   GCSEvalResultStore,
   type EvalResultStore,
 } from './resultStore.js';
 import type { ExtensionConfig } from './evalManifest.js';
+import type { ResultStoreDefinition } from './evalFrameworkTypes.js';
+import { extensionLookup } from '../plugins/extensions.js';
 
 const FileResultStoreSchema = z
   .object({ type: z.literal('file'), dir: z.string().min(1) })
@@ -34,20 +35,19 @@ function createGCSStore(config: ExtensionConfig): EvalResultStore {
   });
 }
 
-let registered = false;
+/** Provider-neutral local and GCS result stores, by name. */
+function builtinResultStores(): Readonly<
+  Record<string, ResultStoreDefinition>
+> {
+  return {
+    file: { schema: FileResultStoreSchema, create: createFileStore },
+    gcs: { schema: GCSResultStoreSchema, create: createGCSStore },
+  };
+}
 
-/** Register provider-neutral local and GCS result stores. */
-export function registerBuiltinResultStores(): void {
-  if (registered) return;
-  registerResultStore({
-    name: 'file',
-    schema: FileResultStoreSchema,
-    create: createFileStore,
-  });
-  registerResultStore({
-    name: 'gcs',
-    schema: GCSResultStoreSchema,
-    create: createGCSStore,
-  });
-  registered = true;
+const resultStores = extensionLookup('resultStores', builtinResultStores);
+
+/** The result store `reference` names: a built-in, or `namespace/name` from a plugin. */
+export function getResultStore(reference: string): ResultStoreDefinition {
+  return resultStores.get(reference);
 }

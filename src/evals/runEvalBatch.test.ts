@@ -4,13 +4,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { runEvalBatch } from './runEvalBatch.js';
-import { loadPlugins } from '../plugins/loadPlugins.js';
+import { runEvalBatch, type RunEvalBatchOptions } from './runEvalBatch.js';
+import {
+  installPlugins,
+  loadedNamespaces,
+  resetPluginsForTests,
+} from '../plugins/extensions.js';
+import type { Plugin } from '../plugins/plugin.js';
 import { runEvalSuite } from './runEvalSuite.js';
 import { loadEvalManifest, type EvalManifest } from './evalManifest.js';
 import type { EvaluationSummary } from './evalFrameworkTypes.js';
 import type { EvalCaseResult } from '../types/reporter.js';
-import { registerResultStore } from './frameworkRegistries.js';
 import {
   createStoredEvalArtifact,
   FileEvalResultStore,
@@ -18,7 +22,23 @@ import {
 } from './resultStore.js';
 
 vi.mock('./runEvalSuite.js', () => ({ runEvalSuite: vi.fn() }));
-vi.mock('../plugins/loadPlugins.js', () => ({ loadPlugins: vi.fn() }));
+
+// Temp plugin modules hand back the test's store through this global.
+const STORE_GLOBAL = '__mstBatchTestStore';
+const globals = globalThis as unknown as Record<string, unknown>;
+
+/** Source for a plugin module whose `store` result store returns the test's store. */
+function storePluginSource(namespace: string): string {
+  return `export default {
+    meta: { name: '${namespace}-plugin', namespace: '${namespace}' },
+    resultStores: {
+      store: {
+        schema: { safeParse: (value) => ({ success: true, data: value }) },
+        create: () => globalThis.${STORE_GLOBAL},
+      },
+    },
+  };`;
+}
 
 function completedSummary(manifest: EvalManifest): EvaluationSummary {
   const caseResults: EvalCaseResult[] = [
@@ -81,12 +101,12 @@ describe('runEvalBatch skipExisting', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    vi.mocked(loadPlugins).mockReset().mockResolvedValue(undefined);
     rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'batch-resume-'));
     manifestPath = path.join(rootDir, 'manifest.json');
     storeDir = path.join(rootDir, 'store');
     outputRoot = path.join(rootDir, 'output');
     store = new FileEvalResultStore({ provider: 'file', dir: storeDir });
+    globals[STORE_GLOBAL] = store;
     manifestInput = {
       name: 'resume-test',
       datasets: [{ type: 'test-source' }],
@@ -106,6 +126,8 @@ describe('runEvalBatch skipExisting', () => {
   });
 
   afterEach(async () => {
+    resetPluginsForTests();
+    delete globals[STORE_GLOBAL];
     await fs.rm(rootDir, { recursive: true, force: true });
   });
 
@@ -119,12 +141,13 @@ describe('runEvalBatch skipExisting', () => {
     return artifact;
   }
 
-  async function run() {
+  async function run(options: Partial<RunEvalBatchOptions> = {}) {
     return runEvalBatch({
       manifestPaths: [manifestPath],
       rootDir,
       outputRoot,
       skipExisting: true,
+      ...options,
     });
   }
 
@@ -204,64 +227,101 @@ describe('runEvalBatch skipExisting', () => {
     expect(runEvalSuite).not.toHaveBeenCalled();
   });
 
-  it('uses a registered custom result store by configured type', async () => {
+  it('uses a custom result store from a plugin object by configured type', async () => {
     const create = vi.fn(() => store);
-    registerResultStore({
-      name: 'custom',
-      schema: z.object({ type: z.string() }),
-      create,
-    });
-    manifestInput.results = { store: { type: 'custom' } };
+    const plugin: Plugin = {
+      meta: { name: 'batch-test-plugin', namespace: 'test' },
+      resultStores: {
+        custom: { schema: z.object({ type: z.string() }), create },
+      },
+    };
+    manifestInput.results = { store: { type: 'test/custom' } };
     await fs.writeFile(manifestPath, JSON.stringify(manifestInput));
     await saveValidSummary();
-    expect((await run()).skipped).toBe(1);
-    expect(create).toHaveBeenCalledWith({ type: 'custom' });
-  });
-
-  it('loads manifest plugins before checking the configured result store', async () => {
-    manifestInput.plugins = ['./plugin.ts'];
-    manifestInput.results = { store: { type: 'batch-loaded-plugin-store' } };
-    await fs.writeFile(manifestPath, JSON.stringify(manifestInput));
-    await saveValidSummary();
-    vi.mocked(loadPlugins).mockImplementation(async () => {
-      registerResultStore({
-        name: 'batch-loaded-plugin-store',
-        schema: z.object({ type: z.string() }),
-        create: () => store,
-      });
-    });
-    expect((await run()).skipped).toBe(1);
-    expect(loadPlugins).toHaveBeenCalledWith([path.join(rootDir, 'plugin.ts')]);
+    expect((await run({ plugins: [plugin] })).skipped).toBe(1);
+    expect(create).toHaveBeenCalledWith({ type: 'test/custom' });
     expect(runEvalSuite).not.toHaveBeenCalled();
   });
 
-  it('honors explicitly configured plugin paths instead of manifest plugins', async () => {
-    manifestInput.plugins = ['./manifest-plugin.ts'];
+  it('passes plugin objects through to the suite it runs', async () => {
+    const plugin: Plugin = { meta: { name: 'passed', namespace: 'passed' } };
+    await run({ plugins: [plugin], skipExisting: false });
+    expect(runEvalSuite).toHaveBeenCalledWith(
+      expect.objectContaining({ plugins: [plugin] })
+    );
+  });
+
+  it('loads manifest plugins before checking the configured result store', async () => {
+    await fs.writeFile(
+      path.join(rootDir, 'plugin.mjs'),
+      storePluginSource('batch')
+    );
+    manifestInput.plugins = ['./plugin.mjs'];
+    manifestInput.results = { store: { type: 'batch/store' } };
     await fs.writeFile(manifestPath, JSON.stringify(manifestInput));
     await saveValidSummary();
-    const result = await runEvalBatch({
-      manifestPaths: [manifestPath],
-      rootDir,
-      skipExisting: true,
-      pluginPaths: ['./override.ts'],
-    });
+    expect((await run()).skipped).toBe(1);
+    expect(loadedNamespaces()).toEqual(['batch']);
+    expect(runEvalSuite).not.toHaveBeenCalled();
+  });
+
+  it('adds configured plugin paths to the manifest plugins', async () => {
+    const manifestDir = path.join(rootDir, 'suite');
+    await fs.mkdir(manifestDir);
+    await fs.writeFile(
+      path.join(manifestDir, 'manifest-plugin.mjs'),
+      `export default { meta: { name: 'manifest-plugin', namespace: 'mp' } };`
+    );
+    // Resolves against rootDir, not the manifest's directory.
+    await fs.writeFile(
+      path.join(rootDir, 'cli-plugin.mjs'),
+      storePluginSource('cli')
+    );
+    manifestPath = path.join(manifestDir, 'manifest.json');
+    manifestInput.plugins = ['./manifest-plugin.mjs'];
+    manifestInput.results = { store: { type: 'cli/store' } };
+    await fs.writeFile(manifestPath, JSON.stringify(manifestInput));
+    await saveValidSummary();
+    const result = await run({ pluginPaths: ['./cli-plugin.mjs'] });
     expect(result.skipped).toBe(1);
-    expect(loadPlugins).toHaveBeenCalledWith([
-      path.join(rootDir, 'override.ts'),
+    expect(loadedNamespaces()).toEqual(['cli', 'mp']);
+    expect(runEvalSuite).not.toHaveBeenCalled();
+  });
+
+  it('does not resume through a store from a plugin the manifest does not load', async () => {
+    const create = vi.fn(() => store);
+    installPlugins([
+      {
+        meta: { name: 'elsewhere-plugin', namespace: 'elsewhere' },
+        resultStores: {
+          custom: { schema: z.object({ type: z.string() }), create },
+        },
+      },
     ]);
+    manifestInput.results = { store: { type: 'elsewhere/custom' } };
+    await fs.writeFile(manifestPath, JSON.stringify(manifestInput));
+    await saveValidSummary();
+    expect((await run()).skipped).toBe(0);
+    expect(create).not.toHaveBeenCalled();
+    expect(runEvalSuite).toHaveBeenCalledOnce();
   });
 
   it('reruns safely when plugin loading fails', async () => {
-    manifestInput.plugins = ['./broken-plugin.ts'];
+    await fs.writeFile(
+      path.join(rootDir, 'broken-plugin.mjs'),
+      `throw new Error('plugin load failed');`
+    );
+    manifestInput.plugins = ['./broken-plugin.mjs'];
     await fs.writeFile(manifestPath, JSON.stringify(manifestInput));
     await saveValidSummary();
-    vi.mocked(loadPlugins).mockRejectedValue(new Error('plugin load failed'));
     expect((await run()).skipped).toBe(0);
     expect(runEvalSuite).toHaveBeenCalledOnce();
   });
 
-  it('reruns safely when a plugin store is not registered', async () => {
-    manifestInput.results = { store: { type: 'unavailable-plugin-store' } };
+  it('reruns safely when a plugin store is not loaded', async () => {
+    manifestInput.results = {
+      store: { type: 'missing/unavailable-plugin-store' },
+    };
     await fs.writeFile(manifestPath, JSON.stringify(manifestInput));
     await saveValidSummary();
     expect((await run()).skipped).toBe(0);

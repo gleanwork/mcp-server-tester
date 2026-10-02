@@ -1,13 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { createSuiteCaseExecutor, executeEvalCase } from './caseExecution.js';
 import { runEvalCase } from './evalRunner.js';
 import type { EvalCase } from './datasetTypes.js';
-import type { HostRunResult } from './evalFrameworkTypes.js';
-import { registerHost } from './frameworkRegistries.js';
+import type { HostDefinition, HostRunResult } from './evalFrameworkTypes.js';
 import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
 import type * as SimulationModule from './mcpHost/mcpHostSimulation.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
+import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
 
 vi.mock('./mcpHost/mcpHostSimulation.js', async (original) => ({
   ...(await original<typeof SimulationModule>()),
@@ -117,10 +117,21 @@ describe('custom executeCase results', () => {
 describe('createSuiteCaseExecutor', () => {
   const trace: HostRunResult = { finalText: 'ok', events: [], durationMs: 7 };
 
+  /** Install `host` as `test/<name>` and return that reference. */
+  function installTestHost(name: string, host: HostDefinition): string {
+    installPlugins([
+      {
+        meta: { name: 'test-plugin', namespace: 'test' },
+        hosts: { [name]: host },
+      },
+    ]);
+    return `test/${name}`;
+  }
+
+  afterEach(() => resetPluginsForTests());
+
   it('consumes each batch trace once and never resubmits', async () => {
-    const type = 'case-execution-batch-host';
-    registerHost({
-      name: type,
+    const type = installTestHost('case-execution-batch-host', {
       schema: z.object({ type: z.string() }),
       evidence: 'structured',
       runBatch: async () => [],
@@ -142,10 +153,8 @@ describe('createSuiteCaseExecutor', () => {
   });
 
   it('dispatches per case to run() with the declared evidence', async () => {
-    const type = 'case-execution-run-host';
     const run = vi.fn(async () => trace);
-    registerHost({
-      name: type,
+    const type = installTestHost('case-execution-run-host', {
       schema: z.object({ type: z.string() }),
       evidence: 'observed',
       run,

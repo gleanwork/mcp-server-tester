@@ -7,19 +7,36 @@ import {
   FileEvalResultStore,
   compareEvalRuns,
   loadStoredEvalRunnerResult,
-  registerHost,
-  registerResultStore,
   runEvalBatch,
   runEvalSuite,
   type EvalManifest,
   type EvaluationSummary,
   type HostDefinition,
+  type ResultStoreDefinition,
 } from '../entries/evals.js';
+import type { Plugin } from '../index.js';
+import { resetPluginsForTests } from '../plugins/extensions.js';
 
 const dirs: string[] = [];
 let sequence = 0;
 
+interface TestPlugin extends Plugin {
+  hosts: Record<string, HostDefinition>;
+  resultStores: Record<string, ResultStoreDefinition>;
+}
+function newTestPlugin(): TestPlugin {
+  return {
+    meta: { name: 'storage-test-plugin', namespace: 'test' },
+    hosts: {},
+    resultStores: {},
+  };
+}
+/** Extensions defined by the current test; suites load it as the `test` plugin. */
+let testPlugin = newTestPlugin();
+
 afterEach(async () => {
+  resetPluginsForTests();
+  testPlugin = newTestPlugin();
   await Promise.all(
     dirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true }))
   );
@@ -44,12 +61,11 @@ async function fixture() {
       ),
     })
   );
-  registerHost({
-    name: hostName,
+  testPlugin.hosts[hostName] = {
     schema: z.object({}),
     evidence: 'structured',
     run,
-  });
+  };
   await fs.writeFile(
     path.join(rootDir, 'dataset.json'),
     JSON.stringify({
@@ -68,7 +84,7 @@ async function fixture() {
   const manifestPath = path.join(rootDir, 'manifest.json');
   const manifest: EvalManifest = {
     name: 'storage-suite',
-    host: { type: hostName },
+    host: { type: `test/${hostName}` },
     datasets: [{ type: 'file', path: './dataset.json' }],
     results: { store: { type: 'file', dir: storeDir } },
   };
@@ -81,10 +97,11 @@ describe('suite storage through public APIs', () => {
     'saves and resumes with a once-transformed %s store directory',
     async (directory) => {
       const f = await fixture();
-      const type = `transformed-store-${sequence++}`;
-      const alias = `decoy-store-${sequence++}`;
-      registerResultStore({
-        name: type,
+      const typeName = `transformed-store-${sequence++}`;
+      const aliasName = `decoy-store-${sequence++}`;
+      const type = `test/${typeName}`;
+      const alias = `test/${aliasName}`;
+      testPlugin.resultStores[typeName] = {
         schema: z.object({
           dir: z
             .string()
@@ -97,14 +114,13 @@ describe('suite storage through public APIs', () => {
             dir: String(config.dir),
           });
         },
-      });
-      registerResultStore({
-        name: alias,
+      };
+      testPlugin.resultStores[aliasName] = {
         schema: z.object({}),
         create() {
           throw new Error('Plugin-owned name must not route to another store');
         },
-      });
+      };
       f.manifest.results = {
         store: {
           type,
@@ -117,6 +133,7 @@ describe('suite storage through public APIs', () => {
       const first = await runEvalSuite({
         manifestPath: f.manifestPath,
         rootDir: f.rootDir,
+        plugins: [testPlugin],
       });
       expect(first.summary.metrics).toMatchObject({
         total: 1,
@@ -128,6 +145,7 @@ describe('suite storage through public APIs', () => {
         manifestPaths: [f.manifestPath],
         rootDir: f.rootDir,
         skipExisting: true,
+        plugins: [testPlugin],
       });
       expect(resumed).toMatchObject({ skipped: 1, passed: 0, failed: 0 });
       expect(resumed.items[0]?.result).toBeUndefined();
@@ -151,6 +169,7 @@ describe('suite storage through public APIs', () => {
         manifestPaths: [f.manifestPath],
         rootDir: f.rootDir,
         skipExisting: true,
+        plugins: [testPlugin],
       });
       expect(changed).toMatchObject({ skipped: 0, passed: 1, failed: 0 });
       expect(f.run).toHaveBeenCalledTimes(2);
@@ -197,6 +216,7 @@ describe('suite storage through public APIs', () => {
           runEvalSuite({
             manifestPath: f.manifestPath,
             rootDir: f.rootDir,
+            plugins: [testPlugin],
             redactStoredResponses: apiRedact,
           })
         )
@@ -286,6 +306,7 @@ describe('suite storage through public APIs', () => {
         manifestPaths: [f.manifestPath],
         rootDir: f.rootDir,
         skipExisting: true,
+        plugins: [testPlugin],
       });
       expect(resumed).toMatchObject({ skipped: 1, failed: 0, passed: 0 });
       expect(f.run).toHaveBeenCalledTimes(8);

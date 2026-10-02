@@ -44,7 +44,7 @@ export interface EvalDirectRequest {
  * For 'external_host' mode: scenario and externalHost are required
  */
 export interface EvalCase {
-  /** Optional per-case registered host override. */
+  /** Optional per-case host override: a built-in or a plugin host. */
   host?: HostConfig;
   /**
    * Unique identifier for this test case
@@ -178,12 +178,12 @@ export interface EvalCase {
  * Configuration for a single LLM-as-judge evaluation
  */
 export interface JudgeExpectConfig {
-  /** Plugin options, validated by the registered judge schema. */
+  /** Plugin options, validated by the judge's schema. */
   options?: Record<string, unknown>;
   /** Flat plugin policy fields are also accepted for manifest integration. */
   [key: string]: unknown;
   /**
-   * Name of a registered custom judge executor.
+   * A judge a plugin provides, as `namespace/name`.
    * When set, the named judge handles evaluation and returns a normalized score.
    * The `threshold` determines pass/fail. `reps` and LLM config fields
    * (provider, model, etc.) are ignored.

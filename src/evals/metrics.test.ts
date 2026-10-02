@@ -4,24 +4,22 @@ import type { SkillLoad } from '../types/index.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import {
   BUILT_IN_METRICS,
-  METRIC_REGISTRY,
   computeMetrics,
-  registerMetric,
   resolveMetric,
   type MetricDefinition,
 } from './metrics.js';
-import {
-  clearMetrics,
-  getMetric,
-  registerMetric as registerFrameworkMetric,
-  validateManifestRegistrations,
-} from './frameworkRegistries.js';
+import { validateManifest } from './manifestValidation.js';
+import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
+import { getMetric } from './metrics.js';
 
-afterEach(() => {
-  clearMetrics();
-  for (const definition of Object.values(BUILT_IN_METRICS))
-    registerFrameworkMetric(definition);
-});
+afterEach(() => resetPluginsForTests());
+
+/** Install a `test` plugin providing `metrics` (referenced as `test/<name>`). */
+function installMetrics(metrics: Record<string, MetricDefinition>): void {
+  installPlugins([
+    { meta: { name: 'test-plugin', namespace: 'test' }, metrics },
+  ]);
+}
 
 function result(
   id: string,
@@ -60,24 +58,27 @@ function result(
 
 describe('computeMetrics', () => {
   it('aggregates public plugin metrics by kind when no custom aggregate is provided', () => {
-    registerFrameworkMetric({
-      name: 'plugin-binary',
-      schema: z.object({}),
-      kind: 'binary',
-      compute: (row) => row.pass,
-    });
-    registerFrameworkMetric({
-      name: 'plugin-continuous',
-      schema: z.object({}),
-      kind: 'continuous',
-      compute: (row) => row.durationMs,
+    installMetrics({
+      'plugin-binary': {
+        schema: z.object({}),
+        kind: 'binary',
+        compute: (row) => row.pass,
+      },
+      'plugin-continuous': {
+        schema: z.object({}),
+        kind: 'continuous',
+        compute: (row) => row.durationMs,
+      },
     });
     const metrics = computeMetrics(
-      ['plugin-binary', 'plugin-continuous'],
+      ['test/plugin-binary', 'test/plugin-continuous'],
       [result('a', true), result('b', false)]
     );
-    expect(metrics.aggregated['plugin-binary_rate']).toBe(0.5);
-    expect(metrics.aggregated['plugin-continuous_mean']).toBe(1000);
+    expect(metrics.aggregated['test/plugin-binary_rate']).toBe(0.5);
+    expect(metrics.aggregated['test/plugin-continuous_mean']).toBe(1000);
+  });
+  it('keeps the built-in metrics read-only', () => {
+    expect(Object.isFrozen(BUILT_IN_METRICS)).toBe(true);
   });
   it('computes built-in metrics and aggregates nulls correctly', () => {
     const cases = [
@@ -166,14 +167,15 @@ describe('computeMetrics', () => {
       (_row: EvalCaseResult, options?: Record<string, unknown>) =>
         Number(options?.weight)
     );
-    registerMetric({
-      name: 'weighted',
-      schema: z.object({ weight: z.number() }),
-      kind: 'continuous',
-      compute,
+    installMetrics({
+      weighted: {
+        schema: z.object({ weight: z.number() }),
+        kind: 'continuous',
+        compute,
+      },
     });
     const metrics = computeMetrics(
-      [{ type: 'weighted', name: 'weighted_alias', weight: 7 }],
+      [{ type: 'test/weighted', name: 'weighted_alias', weight: 7 }],
       [result('one', true)]
     );
     expect(metrics.perCase.one?.weighted_alias).toBe(7);
@@ -181,21 +183,22 @@ describe('computeMetrics', () => {
   });
 
   it('retains parsed top-level defaults and transforms without reparsing', () => {
-    registerMetric({
-      name: 'weighted-parsed',
-      schema: z.object({
-        weight: z
-          .number()
-          .default(3)
-          .transform((value) => value * 2),
-      }),
-      kind: 'continuous',
-      compute: (_row, options) => Number(options?.weight),
+    installMetrics({
+      'weighted-parsed': {
+        schema: z.object({
+          weight: z
+            .number()
+            .default(3)
+            .transform((value) => value * 2),
+        }),
+        kind: 'continuous',
+        compute: (_row, options) => Number(options?.weight),
+      },
     });
-    const parsed = validateManifestRegistrations({
+    const parsed = validateManifest({
       name: 'metrics',
       datasets: [],
-      metrics: [{ type: 'weighted-parsed', name: 'alias' }],
+      metrics: [{ type: 'test/weighted-parsed', name: 'alias' }],
     });
     expect(
       computeMetrics(parsed.metrics ?? [], [result('one', true)]).perCase.one
@@ -218,7 +221,7 @@ describe('computeMetrics', () => {
   });
 
   it('accepts tagged top-level judge options with default output names', () => {
-    const manifest = validateManifestRegistrations({
+    const manifest = validateManifest({
       name: 'metrics',
       datasets: [],
       metrics: [{ type: 'judge_score_for', judge: 'quality' }],
@@ -279,9 +282,8 @@ describe('computeMetrics', () => {
     expect(metrics.aggregated.passed_rate).toBe(0.5);
   });
 
-  it('uses one registry for both registration APIs, validation, computation, and clearing', async () => {
+  it('uses one extension table for validation, computation, module copies, and reset', async () => {
     const definition: MetricDefinition = {
-      name: 'plugin-metric',
       schema: z.object({
         params: z
           .object({
@@ -295,40 +297,46 @@ describe('computeMetrics', () => {
       kind: 'continuous',
       compute: (_case, params) => Number(params?.factor),
     };
-    registerFrameworkMetric(definition);
-    expect(METRIC_REGISTRY['plugin-metric']).toBe(definition);
-    const parsed = validateManifestRegistrations({
+    installMetrics({ 'plugin-metric': definition });
+    const parsed = validateManifest({
       name: 'metrics',
       datasets: [],
-      metrics: [{ type: 'plugin-metric', name: 'alias', params: {} }],
+      metrics: [{ type: 'test/plugin-metric', name: 'alias', params: {} }],
     });
     expect(
       computeMetrics(parsed.metrics ?? [], [result('one', true)]).perCase.one
         ?.alias
     ).toBe(6);
-    const duplicate = { ...definition, compute: () => 99 };
-    expect(() => registerMetric(duplicate)).toThrow('already registered');
-    expect(() => {
-      METRIC_REGISTRY['plugin-metric'] = duplicate;
-    }).toThrow('already registered');
-    expect(getMetric('plugin-metric')).toBe(definition);
-    expect(resolveMetric('plugin-metric').metric).toBe(definition);
-    expect(() => registerMetric(definition)).not.toThrow();
+    expect(getMetric('test/plugin-metric')).toBe(definition);
+    expect(resolveMetric('test/plugin-metric').metric).toBe(definition);
+    // Installing the same plugin version again is a no-op.
+    const versioned = {
+      meta: {
+        name: 'versioned-plugin',
+        version: '1.0.0',
+        namespace: 'versioned',
+      },
+      metrics: { 'plugin-metric': definition },
+    };
+    installPlugins([versioned]);
+    expect(() =>
+      installPlugins([{ ...versioned, meta: { ...versioned.meta } }])
+    ).not.toThrow();
     vi.resetModules();
     const secondCopy = await import('./metrics.js');
-    expect(secondCopy.resolveMetric('plugin-metric').metric).toBe(definition);
-    const secondDefinition = { ...definition, name: 'second-copy' };
-    secondCopy.registerMetric(secondDefinition);
-    expect(getMetric('second-copy')).toBe(secondDefinition);
-    clearMetrics();
-    expect(Object.keys(METRIC_REGISTRY)).toEqual([]);
-    expect(() => secondCopy.resolveMetric('plugin-metric')).toThrow(
-      'Unknown metric'
+    expect(secondCopy.resolveMetric('test/plugin-metric').metric).toBe(
+      definition
     );
+    resetPluginsForTests();
+    expect(() => secondCopy.resolveMetric('test/plugin-metric')).toThrow(
+      'Metric "test/plugin-metric" needs the "test" plugin, which is not loaded.'
+    );
+    // Built-ins survive the reset.
+    expect(secondCopy.resolveMetric('passed').outName).toBe('passed');
   });
 
-  it('validates parameterized built-ins and output aliases through the same registry', () => {
-    const parsed = validateManifestRegistrations({
+  it('validates parameterized built-ins and output aliases through the same lookup', () => {
+    const parsed = validateManifest({
       name: 'metrics',
       datasets: [],
       metrics: [
@@ -347,7 +355,7 @@ describe('computeMetrics', () => {
       ]).perCase.one?.quality_score
     ).toBe(0.7);
     expect(() =>
-      validateManifestRegistrations({
+      validateManifest({
         name: 'metrics',
         datasets: [],
         metrics: [{ type: 'judge_score_for' }],
@@ -357,7 +365,7 @@ describe('computeMetrics', () => {
 
   it('rejects unknown metric names instead of silently dropping them', () => {
     expect(() => computeMetrics(['not-a-metric'], [])).toThrow(
-      'Unknown metric "not-a-metric"'
+      'Metric "not-a-metric" is not available. Available: '
     );
   });
 });

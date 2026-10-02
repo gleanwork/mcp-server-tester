@@ -270,7 +270,6 @@ async function runAnthropicApiHost(
 }
 
 export const ANTHROPIC_API_HOST: HostDefinition = {
-  name: 'anthropic-api',
   schema: HostSchema,
   evidence: 'structured',
   createConfig(options = {}): MCPHostConfig {

@@ -237,12 +237,12 @@ Multiple judges (all must pass):
 }
 ```
 
-Custom judge executor:
+Plugin judge (a judge your plugin provides, as `namespace/name`):
 
 ```json
 "expect": {
   "passesJudge": {
-    "judge": "my-custom-judge",
+    "judge": "my/quality",
     "threshold": 0.7
   }
 }

@@ -1,11 +1,7 @@
 import { z } from 'zod';
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { UsageMetrics } from '../types/index.js';
-import {
-  getMetric,
-  listMetrics,
-  registerMetric as registerFrameworkMetric,
-} from './frameworkRegistries.js';
+import { extensionLookup } from '../plugins/extensions.js';
 /**
  * Tagged options are passed to compute without routing keys (type/metric/name).
  * Legacy params are flattened for compatibility; keys may not also occur at the
@@ -229,14 +225,12 @@ function judgeScoreAggregation(
 }
 
 function metric(
-  name: string,
   kind: MetricKind,
   compute: MetricDefinition['compute'],
   aggregate?: MetricDefinition['aggregate'],
   unit?: string
 ): MetricDefinition {
   return {
-    name,
     schema: z.object({}).passthrough(),
     kind,
     compute,
@@ -251,7 +245,6 @@ function parameterizedJudgeMetric(
   const passMetric = name === 'judge_pass_for';
   return {
     ...metric(
-      name,
       passMetric ? 'binary' : 'continuous',
       (result, params) => {
         const entry = judgeEntries(result).find(
@@ -278,40 +271,32 @@ function parameterizedJudgeMetric(
 const BUILT_INS_KEY = Symbol.for('mcp-server-tester.built-in-metrics');
 const globalMetrics = globalThis as unknown as Record<symbol, unknown>;
 
-/** Built-in metrics. */
-export const BUILT_IN_METRICS: Record<string, MetricDefinition> =
+/** Built-in metrics, read-only: plugins add metrics under their namespace. */
+export const BUILT_IN_METRICS: Readonly<Record<string, MetricDefinition>> =
   (globalMetrics[BUILT_INS_KEY] as
-    | Record<string, MetricDefinition>
-    | undefined) ?? {
+    | Readonly<Record<string, MetricDefinition>>
+    | undefined) ??
+  Object.freeze({
     judge_pass_for: parameterizedJudgeMetric('judge_pass_for'),
     judge_score_for: parameterizedJudgeMetric('judge_score_for'),
-    passed: metric(
-      'passed',
-      'binary',
-      (result) => result.pass,
-      rateAggregation
-    ),
+    passed: metric('binary', (result) => result.pass, rateAggregation),
     response_success: metric(
-      'response_success',
       'binary',
       (result) => responseObject(result).success !== false,
       rateAggregation
     ),
     is_no_action: metric(
-      'is_no_action',
       'binary',
       (result) => toolCalls(result).length === 0,
       rateAggregation
     ),
     cost_usd: metric(
-      'cost_usd',
       'continuous',
       (result) => hostUsage(result)?.totalCostUsd ?? null,
       meanAggregation,
       'USD'
     ),
     input_tokens: metric(
-      'input_tokens',
       'continuous',
       (result) => {
         const usage = hostUsage(result);
@@ -325,42 +310,36 @@ export const BUILT_IN_METRICS: Record<string, MetricDefinition> =
       'tokens'
     ),
     input_tokens_uncached: metric(
-      'input_tokens_uncached',
       'continuous',
       (result) => hostUsage(result)?.inputTokens ?? null,
       meanAggregation,
       'tokens'
     ),
     cache_read_tokens: metric(
-      'cache_read_tokens',
       'continuous',
       (result) => hostUsage(result)?.cacheReadInputTokens ?? null,
       meanAggregation,
       'tokens'
     ),
     cache_creation_tokens: metric(
-      'cache_creation_tokens',
       'continuous',
       (result) => hostUsage(result)?.cacheCreationInputTokens ?? null,
       meanAggregation,
       'tokens'
     ),
     output_tokens: metric(
-      'output_tokens',
       'continuous',
       (result) => hostUsage(result)?.outputTokens ?? null,
       meanAggregation,
       'tokens'
     ),
     duration_s: metric(
-      'duration_s',
       'continuous',
       (result) => result.durationMs / 1000,
       meanAggregation,
       'seconds'
     ),
     duration_api_s: metric(
-      'duration_api_s',
       'continuous',
       (result) => {
         const durationMs = hostUsage(result)?.durationApiMs;
@@ -370,7 +349,6 @@ export const BUILT_IN_METRICS: Record<string, MetricDefinition> =
       'seconds'
     ),
     tool_count: metric(
-      'tool_count',
       'continuous',
       (result) => toolCalls(result).length,
       meanAggregation,
@@ -378,7 +356,6 @@ export const BUILT_IN_METRICS: Record<string, MetricDefinition> =
     ),
     // Per case: the fraction of attempts (iterations) where it held.
     skill_loaded: metric(
-      'skill_loaded',
       'continuous',
       (result) =>
         attemptFraction(result, (loads) => {
@@ -388,7 +365,6 @@ export const BUILT_IN_METRICS: Record<string, MetricDefinition> =
       fractionRateAggregation
     ),
     skill_before_tool: metric(
-      'skill_before_tool',
       'continuous',
       (result) =>
         attemptFraction(result, (loads) => {
@@ -400,7 +376,6 @@ export const BUILT_IN_METRICS: Record<string, MetricDefinition> =
       fractionRateAggregation
     ),
     skill_verification_failed: metric(
-      'skill_verification_failed',
       'continuous',
       (result) =>
         attemptFraction(result, (loads) =>
@@ -408,102 +383,44 @@ export const BUILT_IN_METRICS: Record<string, MetricDefinition> =
         ),
       fractionRateAggregation
     ),
-    first_tool: metric('first_tool', 'categorical', (result) => {
+    first_tool: metric('categorical', (result) => {
       const first = toolCalls(result)[0];
       return first && typeof first === 'object' && 'name' in first
         ? String(first.name)
         : null;
     }),
     response_len: metric(
-      'response_len',
       'continuous',
       (result) => responseText(result).length,
       meanAggregation,
       'chars'
     ),
     response_words: metric(
-      'response_words',
       'continuous',
       (result) =>
         responseText(result).trim().split(/\s+/).filter(Boolean).length,
       meanAggregation,
       'words'
     ),
-    judge_pass: metric('judge_pass', 'binary', judgePass, rateAggregation),
+    judge_pass: metric('binary', judgePass, rateAggregation),
     judge_score: metric(
-      'judge_score',
       'object',
       (result) => judgeScores(result),
       judgeScoreAggregation
     ),
-    judge_name: metric('judge_name', 'categorical', (result) => {
+    judge_name: metric('categorical', (result) => {
       const first = judgeEntries(result)[0];
       return first ? judgeName(first) : null;
     }),
-  };
+  });
 
 globalMetrics[BUILT_INS_KEY] = BUILT_IN_METRICS;
 
-/**
- * Live record-compatible view of the process-wide framework registry. Both
- * registration APIs, validation, and computation use the same backing map.
- */
-export const METRIC_REGISTRY: Record<string, MetricDefinition> = new Proxy(
-  Object.create(null) as Record<string, MetricDefinition>,
-  {
-    get(_target, key) {
-      return typeof key === 'string'
-        ? listMetrics().find((definition) => definition.name === key)
-        : undefined;
-    },
-    set(_target, key, definition: MetricDefinition) {
-      if (typeof key !== 'string' || key !== definition.name) {
-        throw new Error('Metric registry key must match the definition name.');
-      }
-      registerFrameworkMetric(definition);
-      return true;
-    },
-    has(_target, key) {
-      return (
-        typeof key === 'string' &&
-        listMetrics().some((definition) => definition.name === key)
-      );
-    },
-    ownKeys() {
-      return listMetrics().map((definition) => definition.name);
-    },
-    getOwnPropertyDescriptor(_target, key) {
-      if (
-        typeof key !== 'string' ||
-        !listMetrics().some((definition) => definition.name === key)
-      )
-        return undefined;
-      return {
-        configurable: true,
-        enumerable: true,
-        writable: true,
-        value: getMetric(key),
-      };
-    },
-    defineProperty() {
-      return false;
-    },
-    deleteProperty() {
-      return false;
-    },
-    preventExtensions() {
-      return false;
-    },
-  }
-);
+const metrics = extensionLookup('metrics', () => BUILT_IN_METRICS);
 
-for (const definition of Object.values(BUILT_IN_METRICS)) {
-  registerFrameworkMetric(definition);
-}
-
-/** Register a named metric; conflicting duplicates leave the registry unchanged. */
-export function registerMetric(definition: MetricDefinition): void {
-  registerFrameworkMetric(definition);
+/** The metric `reference` names: a built-in, or `namespace/name` from a plugin. */
+export function getMetric(reference: string): MetricDefinition {
+  return metrics.get(reference);
 }
 
 function slug(value: string): string {
@@ -534,42 +451,30 @@ function metricOptions(spec: MetricSpec): Record<string, unknown> {
 }
 
 /** Resolve one config metric, including parameterized judge metrics. */
-export function resolveMetric(
-  spec: MetricSpec,
-  registry: Record<string, MetricDefinition> = METRIC_REGISTRY
-): ResolvedMetric {
+export function resolveMetric(spec: MetricSpec): ResolvedMetric {
   const name =
     typeof spec === 'string' ? spec : (spec.metric ?? spec.type ?? spec.name);
   const params = metricOptions(spec);
   if (!name) throw new Error('Metric configuration requires a type or name.');
-  const base = registry[name];
-  if (base) {
-    const judge = typeof params.judge === 'string' ? params.judge : 'unknown';
-    const defaultName =
-      name === 'judge_pass_for' || name === 'judge_score_for'
-        ? `judge_${slug(judge)}_${name === 'judge_pass_for' ? 'pass' : 'score'}`
-        : name;
-    return {
-      metric: base,
-      outName:
-        typeof spec === 'string' ? defaultName : (spec.name ?? defaultName),
-      params,
-    };
-  }
-
-  throw new Error(
-    `Unknown metric "${name}". Available metrics: ${Object.keys(registry)
-      .sort()
-      .join(', ')}`
-  );
+  const metric = metrics.get(name);
+  const judge = typeof params.judge === 'string' ? params.judge : 'unknown';
+  const defaultName =
+    name === 'judge_pass_for' || name === 'judge_score_for'
+      ? `judge_${slug(judge)}_${name === 'judge_pass_for' ? 'pass' : 'score'}`
+      : name;
+  return {
+    metric,
+    outName:
+      typeof spec === 'string' ? defaultName : (spec.name ?? defaultName),
+    params,
+  };
 }
 
 export function computeMetrics(
   specs: MetricSpec[],
-  cases: EvalCaseResult[],
-  registry: Record<string, MetricDefinition> = METRIC_REGISTRY
+  cases: EvalCaseResult[]
 ): MetricResult {
-  const resolved = specs.map((spec) => resolveMetric(spec, registry));
+  const resolved = specs.map((spec) => resolveMetric(spec));
   const perCase: MetricResult['perCase'] = Object.create(
     null
   ) as MetricResult['perCase'];

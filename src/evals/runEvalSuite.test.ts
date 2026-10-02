@@ -5,20 +5,23 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
-import { runEvalSuite } from './runEvalSuite.js';
+import { runEvalSuite, type RunEvalSuiteOptions } from './runEvalSuite.js';
 import { getBuiltinHostConfig } from './builtinHosts.js';
 import {
-  registerHost,
-  registerDatasetSource,
-  registerJudge,
-} from './frameworkRegistries.js';
+  installPlugins,
+  loadedNamespaces,
+  resetPluginsForTests,
+} from '../plugins/extensions.js';
+import type { Plugin } from '../plugins/plugin.js';
 import type { EvalCase, EvalDataset } from './datasetTypes.js';
 import type {
+  DatasetSource,
   DatasetSourceContext,
   HostDefinition,
   HostRunOptions,
   HostRunInput,
   HostRunContext,
+  JudgeDefinition,
 } from './evalFrameworkTypes.js';
 import { FileEvalResultStore } from './resultStore.js';
 import {
@@ -28,8 +31,50 @@ import {
 
 const dirs: string[] = [];
 let sequence = 0;
+
+interface TestPlugin extends Plugin {
+  hosts: Record<string, HostDefinition>;
+  datasetSources: Record<string, DatasetSource>;
+  judges: Record<string, JudgeDefinition>;
+}
+function newTestPlugin(): TestPlugin {
+  return {
+    meta: { name: 'run-eval-suite-test-plugin', namespace: 'test' },
+    hosts: {},
+    datasetSources: {},
+    judges: {},
+  };
+}
+/** Every extension a test defines; suites load it as the `test` plugin. */
+let testPlugin = newTestPlugin();
+function addExtension<K extends 'hosts' | 'datasetSources' | 'judges'>(
+  kind: K,
+  name: string,
+  definition: TestPlugin[K][string]
+): string {
+  // Installing copies the plugin's extensions, so later additions would never resolve.
+  if (loadedNamespaces().includes('test'))
+    throw new Error('Define test extensions before the first suite run.');
+  (testPlugin[kind] as Record<string, unknown>)[name] = definition;
+  return `test/${name}`;
+}
+function addHost(name: string, definition: HostDefinition): string {
+  return addExtension('hosts', name, definition);
+}
+function addDatasetSource(name: string, definition: DatasetSource): string {
+  return addExtension('datasetSources', name, definition);
+}
+function addJudge(name: string, definition: JudgeDefinition): string {
+  return addExtension('judges', name, definition);
+}
+function runSuite(options: RunEvalSuiteOptions) {
+  return runEvalSuite({ plugins: [testPlugin], ...options });
+}
+
 afterEach(async () => {
   vi.unstubAllEnvs();
+  resetPluginsForTests();
+  testPlugin = newTestPlugin();
   await Promise.all(
     dirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true }))
   );
@@ -46,15 +91,12 @@ async function fixture(
 ) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'suite-review-'));
   dirs.push(dir);
-  const type = `review-host-${sequence++}`;
-  const source = `review-source-${sequence++}`;
   const observe =
     vi.fn<(input: HostRunInput, context: HostRunContext) => void>();
   const load = vi.fn(
     async (): Promise<EvalDataset> => ({ name: 'canonical', cases })
   );
-  registerHost({
-    name: type,
+  const type = addHost(`review-host-${sequence++}`, {
     schema: z
       .object({ type: z.string(), model: z.string().default('default-model') })
       .passthrough(),
@@ -75,8 +117,7 @@ async function fixture(
       );
     },
   });
-  registerDatasetSource({
-    name: source,
+  const source = addDatasetSource(`review-source-${sequence++}`, {
     schema: z.object({ type: z.string() }),
     load,
   });
@@ -123,30 +164,30 @@ describe('suite review regressions', () => {
         SUITE_DUMMY_HOST_KEY: 'second-host',
       })
     );
-    await runEvalSuite({
+    await runSuite({
       manifestPath: f.manifestPath,
       rootDir: f.dir,
       secretsFile: first,
       dryRun: true,
     });
     expect(process.env.SUITE_DUMMY_TOKEN).toBeUndefined();
-    await runEvalSuite({
+    await runSuite({
       manifestPath: f.manifestPath,
       rootDir: f.dir,
       secretsFile: first,
     });
-    await runEvalSuite({
+    await runSuite({
       manifestPath: f.manifestPath,
       rootDir: f.dir,
       secretsFile: second,
     });
     await Promise.all([
-      runEvalSuite({
+      runSuite({
         manifestPath: f.manifestPath,
         rootDir: f.dir,
         secretsFile: first,
       }),
-      runEvalSuite({
+      runSuite({
         manifestPath: f.manifestPath,
         rootDir: f.dir,
         secretsFile: second,
@@ -163,16 +204,13 @@ describe('suite review regressions', () => {
     ]);
     expect(process.env.SUITE_DUMMY_TOKEN).toBeUndefined();
     await expect(
-      runEvalSuite({ manifestPath: f.manifestPath, rootDir: f.dir })
+      runSuite({ manifestPath: f.manifestPath, rootDir: f.dir })
     ).rejects.toThrow('SUITE_DUMMY_TOKEN');
   });
 
   it('reuses the source host configuration for the first comparison arm', async () => {
-    const hostType = `arm-host-${sequence++}`;
-    const sourceType = `arm-source-${sequence++}`;
     const configurations: Record<string, unknown>[] = [];
-    registerHost({
-      name: hostType,
+    const hostType = addHost(`arm-host-${sequence++}`, {
       schema: z.object({ type: z.string(), model: z.string() }).passthrough(),
       createConfig(options = {}) {
         configurations.push(options);
@@ -183,8 +221,7 @@ describe('suite review regressions', () => {
       },
       run: async () => ({ finalText: 'OK', events: [] }),
     });
-    registerDatasetSource({
-      name: sourceType,
+    const sourceType = addDatasetSource(`arm-source-${sequence++}`, {
       schema: z.object({ type: z.string() }),
       load: async () => ({
         name: 'shared',
@@ -207,7 +244,7 @@ describe('suite review regressions', () => {
       })
     );
 
-    await runEvalSuite({ manifestPath, rootDir: dir });
+    await runSuite({ manifestPath, rootDir: dir });
 
     expect(configurations.map((options) => options.model)).toEqual([
       'base',
@@ -221,14 +258,11 @@ describe('suite review regressions', () => {
       vi.stubEnv('SUITE_DUMMY_TOKEN', undefined);
       vi.stubEnv('SUITE_DUMMY_HOST_KEY', undefined);
       vi.stubEnv('MCP_PLUGIN_DIR', undefined);
-      const name = `source-cli-${sequence++}`;
-      const source = `source-cli-data-${sequence++}`;
       const run = vi.fn<NonNullable<HostDefinition['run']>>(async () => ({
         finalText: 'OK',
         events: [],
       }));
-      registerHost({
-        name,
+      const name = addHost(`source-cli-${sequence++}`, {
         schema: z.object({}),
         createConfig(options) {
           const { type: _type, ...hostOptions } = options ?? {};
@@ -237,8 +271,7 @@ describe('suite review regressions', () => {
         run,
       });
       const sourceConfigs: DatasetSourceContext['hostConfig'][] = [];
-      registerDatasetSource({
-        name: source,
+      const source = addDatasetSource(`source-cli-data-${sequence++}`, {
         schema: z.object({}),
         async load(_config, context) {
           sourceConfigs.push(context.hostConfig);
@@ -264,7 +297,7 @@ describe('suite review regressions', () => {
         secretsFile,
         'SUITE_DUMMY_TOKEN=source-dummy\nSUITE_DUMMY_HOST_KEY=source-host'
       );
-      const result = await runEvalSuite({
+      const result = await runSuite({
         manifestPath: f.manifestPath,
         rootDir: f.dir,
         secretsFile,
@@ -300,10 +333,8 @@ describe('suite review regressions', () => {
       vi.stubEnv('HOST_ENV_SUITE_ONLY', undefined);
       vi.stubEnv('HOST_ENV_DECLARED_ONLY', undefined);
       vi.stubEnv('MCP_PLUGIN_DIR', undefined);
-      const source = `host-env-source-${sequence++}`;
       const sourceConfigs: DatasetSourceContext['hostConfig'][] = [];
-      registerDatasetSource({
-        name: source,
+      const source = addDatasetSource(`host-env-source-${sequence++}`, {
         schema: z.object({}),
         async load(_config, context) {
           sourceConfigs.push(context.hostConfig);
@@ -323,7 +354,7 @@ describe('suite review regressions', () => {
         secretsFile,
         'HOST_ENV_SHARED=suite\nHOST_ENV_SUITE_ONLY=suite-only'
       );
-      const result = await runEvalSuite({
+      const result = await runSuite({
         manifestPath: f.manifestPath,
         rootDir: f.dir,
         secretsFile,
@@ -354,7 +385,7 @@ describe('suite review regressions', () => {
         { name: 'read-only', coworkSetup: { approveWriteTools: false } },
       ],
     });
-    await runEvalSuite({ manifestPath: f.manifestPath, rootDir: f.dir });
+    await runSuite({ manifestPath: f.manifestPath, rootDir: f.dir });
     expect(
       f.observe.mock.calls.map(([, context]) => context.manifest.coworkSetup)
     ).toEqual([
@@ -372,7 +403,7 @@ describe('suite review regressions', () => {
         { name: 'b', scenarioTemplate: 'B {{scenario}}' },
       ],
     });
-    const result = await runEvalSuite({
+    const result = await runSuite({
       manifestPath: f.manifestPath,
       rootDir: f.dir,
     });
@@ -389,10 +420,8 @@ describe('suite review regressions', () => {
   });
 
   it('merges raw base, arm, and case host options before parsing transforms once', async () => {
-    const name = `transform-host-${sequence++}`;
     const run = vi.fn(async () => ({ finalText: 'OK', events: [] }));
-    registerHost({
-      name,
+    const name = addHost(`transform-host-${sequence++}`, {
       schema: z.object({
         count: z.number().transform((value) => value * 3),
         model: z.string(),
@@ -406,7 +435,7 @@ describe('suite review regressions', () => {
         arms: [{ name: 'a', host: { model: 'arm' } }],
       }
     );
-    await runEvalSuite({ manifestPath: f.manifestPath, rootDir: f.dir });
+    await runSuite({ manifestPath: f.manifestPath, rootDir: f.dir });
     expect(run).toHaveBeenCalledWith(
       expect.anything(),
       { type: name, count: 6, model: 'case' },
@@ -415,13 +444,11 @@ describe('suite review regressions', () => {
   });
 
   it('retains top-level host defaults when a case patches the model', async () => {
-    const name = `defaults-host-${sequence++}`;
     const run = vi.fn<NonNullable<HostDefinition['run']>>(async () => ({
       finalText: 'OK',
       events: [],
     }));
-    registerHost({
-      name,
+    const name = addHost(`defaults-host-${sequence++}`, {
       schema: z.object({
         count: z.number().transform((value) => value * 3),
         model: z.string().optional(),
@@ -448,7 +475,7 @@ describe('suite review regressions', () => {
         ],
       }
     );
-    const result = await runEvalSuite({
+    const result = await runSuite({
       manifestPath: f.manifestPath,
       rootDir: f.dir,
     });
@@ -498,7 +525,16 @@ describe('suite review regressions', () => {
       ],
       { filterTags: ['wanted'], run: { iterations: 2, maxCases: 1 } }
     );
-    const result = await runEvalSuite({
+    // Every host must exist before the first run installs the test plugin.
+    const invalidFixtures = [];
+    for (const extra of [
+      { profile: 'ignored' },
+      { run: { profile: 'ignored' } },
+      { run: { unknown: true } },
+      { iterations: 3, run: { iterations: 2 } },
+    ])
+      invalidFixtures.push(await fixture([scenario], extra));
+    const result = await runSuite({
       manifestPath: f.manifestPath,
       rootDir: f.dir,
     });
@@ -506,15 +542,9 @@ describe('suite review regressions', () => {
     expect(result.summary.results.map((entry) => entry.id)).toEqual([
       'selected',
     ]);
-    for (const extra of [
-      { profile: 'ignored' },
-      { run: { profile: 'ignored' } },
-      { run: { unknown: true } },
-      { iterations: 3, run: { iterations: 2 } },
-    ]) {
-      const invalid = await fixture([scenario], extra);
+    for (const invalid of invalidFixtures) {
       await expect(
-        runEvalSuite({
+        runSuite({
           manifestPath: invalid.manifestPath,
           rootDir: invalid.dir,
           dryRun: true,
@@ -543,7 +573,7 @@ describe('suite review regressions', () => {
         datasets: [{ type: 'dir', path: sourceDir, recursive: true }],
       })
     );
-    const result = await runEvalSuite({
+    const result = await runSuite({
       manifestPath: f.manifestPath,
       rootDir: f.dir,
     });
@@ -554,7 +584,7 @@ describe('suite review regressions', () => {
     vi.stubEnv('NODE_TLS_REJECT_UNAUTHORIZED', '1');
     vi.stubEnv('EVAL_ITERATIONS', 'untouched');
     const f = await fixture([scenario], { iterations: 9, model: 'chosen' });
-    await runEvalSuite({
+    await runSuite({
       manifestPath: f.manifestPath,
       rootDir: f.dir,
       dryRun: true,
@@ -563,11 +593,9 @@ describe('suite review regressions', () => {
     expect(process.env.EVAL_ITERATIONS).toBe('untouched');
     expect(f.run).not.toHaveBeenCalled();
   });
-  it('runs text, call-count and registered judge assertions for every custom-host iteration', async () => {
+  it('runs text, call-count and plugin judge assertions for every custom-host iteration', async () => {
     const judge = vi.fn(async () => ({ score: 0 }));
-    const judgeName = `review-judge-${sequence++}`;
-    registerJudge({
-      name: judgeName,
+    const judgeName = addJudge(`review-judge-${sequence++}`, {
       schema: z.object({}).passthrough(),
       evaluate: judge,
     });
@@ -582,7 +610,7 @@ describe('suite review regressions', () => {
         },
       },
     ]);
-    const result = await runEvalSuite({
+    const result = await runSuite({
       manifestPath: f.manifestPath,
       rootDir: f.dir,
     });
@@ -603,16 +631,14 @@ describe('suite review regressions', () => {
       ],
       { iterations: 2 }
     );
-    await runEvalSuite({ manifestPath: f.manifestPath, rootDir: f.dir });
+    await runSuite({ manifestPath: f.manifestPath, rootDir: f.dir });
     expect(f.run).not.toHaveBeenCalled();
     expect(alternate.run).toHaveBeenCalledTimes(2);
     expect(alternate.run.mock.calls[0]?.[0].host.model).toBe('case-model');
   });
   it('retains manifest and arm judge settings with a stripping policy schema', async () => {
-    const name = `options-judge-${sequence++}`;
     const evaluate = vi.fn(async () => ({ score: 0.8 }));
-    registerJudge({
-      name,
+    const name = addJudge(`options-judge-${sequence++}`, {
       schema: z.object({ count: z.number().transform((value) => value * 3) }),
       evaluate,
     });
@@ -630,7 +656,7 @@ describe('suite review regressions', () => {
         },
       ],
     });
-    const result = await runEvalSuite({
+    const result = await runSuite({
       manifestPath: f.manifestPath,
       rootDir: f.dir,
     });
@@ -659,14 +685,12 @@ describe('suite review regressions', () => {
   ] as const)(
     'lets case judge settings override manifest defaults with a %s schema and %s policy',
     async (policyMode, casePolicy) => {
-      const name = `precedence-judge-${sequence++}`;
       const policySchema = z.object({
         count: z.number().transform((value) => value * 3),
         retained: z.string(),
       });
       const evaluate = vi.fn(async () => ({ score: 0.8 }));
-      registerJudge({
-        name,
+      const name = addJudge(`precedence-judge-${sequence++}`, {
         schema:
           policyMode === 'passthrough'
             ? policySchema.passthrough()
@@ -707,7 +731,7 @@ describe('suite review regressions', () => {
           ],
         }
       );
-      const result = await runEvalSuite({
+      const result = await runSuite({
         manifestPath: f.manifestPath,
         rootDir: f.dir,
       });
@@ -732,14 +756,16 @@ describe('suite review regressions', () => {
   );
 
   it('applies manifest judges to canonical cases and respects arm judge overrides', async () => {
-    const name = `manifest-judge-${sequence++}`;
     const evaluate = vi.fn(async () => ({ score: 0 }));
-    registerJudge({ name, schema: z.object({}).passthrough(), evaluate });
+    const name = addJudge(`manifest-judge-${sequence++}`, {
+      schema: z.object({}).passthrough(),
+      evaluate,
+    });
     const f = await fixture([scenario], {
       judges: [{ type: name, reference: 'expected' }],
       arms: [{ name: 'judged' }, { name: 'unjudged', judges: [] }],
     });
-    const result = await runEvalSuite({
+    const result = await runSuite({
       manifestPath: f.manifestPath,
       rootDir: f.dir,
     });
@@ -775,7 +801,7 @@ describe('suite review regressions', () => {
         toolCalls: [],
       },
     }));
-    const result = await runEvalSuite({
+    const result = await runSuite({
       manifestPath: f.manifestPath,
       rootDir: f.dir,
     });
@@ -819,8 +845,8 @@ describe('suite review regressions', () => {
       },
     });
     expect(
-      (await runEvalSuite({ manifestPath: f.manifestPath, rootDir: f.dir }))
-        .summary.results[0]?.pass
+      (await runSuite({ manifestPath: f.manifestPath, rootDir: f.dir })).summary
+        .results[0]?.pass
     ).toBe(false);
     f.run.mockResolvedValue({
       response: {
@@ -830,8 +856,8 @@ describe('suite review regressions', () => {
       },
     });
     expect(
-      (await runEvalSuite({ manifestPath: f.manifestPath, rootDir: f.dir }))
-        .summary.results[0]?.pass
+      (await runSuite({ manifestPath: f.manifestPath, rootDir: f.dir })).summary
+        .results[0]?.pass
     ).toBe(true);
   });
   it('passes complete labeled server sets but only persists allowlisted unresolved descriptions', async () => {
@@ -854,7 +880,7 @@ describe('suite review regressions', () => {
         },
       ],
     });
-    const result = await runEvalSuite({
+    const result = await runSuite({
       manifestPath: f.manifestPath,
       rootDir: f.dir,
     });
@@ -887,16 +913,16 @@ describe('suite review regressions', () => {
       servers: [evalServer],
       requireEvalEndpoint: true,
     });
-    await runEvalSuite({ manifestPath: f.manifestPath, rootDir: f.dir });
-    const passed = f.run.mock.calls[0]?.[0].servers;
-    expect(passed).toEqual([evalServer]);
-    expect(JSON.stringify(passed)).not.toContain('dummy-token-do-not-merge');
     const bad = await fixture([scenario], {
       servers: [{ ...evalServer, url: 'https://example.com/mcp/default' }],
       requireEvalEndpoint: true,
     });
+    await runSuite({ manifestPath: f.manifestPath, rootDir: f.dir });
+    const passed = f.run.mock.calls[0]?.[0].servers;
+    expect(passed).toEqual([evalServer]);
+    expect(JSON.stringify(passed)).not.toContain('dummy-token-do-not-merge');
     await expect(
-      runEvalSuite({ manifestPath: bad.manifestPath, rootDir: bad.dir })
+      runSuite({ manifestPath: bad.manifestPath, rootDir: bad.dir })
     ).rejects.toThrow('/eval MCP endpoint');
   });
   it.each([true, false])(
@@ -919,7 +945,7 @@ describe('suite review regressions', () => {
           ...(redact ? {} : { redactStoredResponses: false }),
         })
       );
-      const result = await runEvalSuite({
+      const result = await runSuite({
         manifestPath: f.manifestPath,
         rootDir: f.dir,
       });
@@ -952,8 +978,8 @@ describe('suite review regressions', () => {
         results: { store: { type: 'file', dir: storeDir } },
       })
     );
-    await runEvalSuite({ manifestPath: f.manifestPath, rootDir: f.dir });
-    await runEvalSuite({ manifestPath: f.manifestPath, rootDir: f.dir });
+    await runSuite({ manifestPath: f.manifestPath, rootDir: f.dir });
+    await runSuite({ manifestPath: f.manifestPath, rootDir: f.dir });
     const store = new FileEvalResultStore({ provider: 'file', dir: storeDir });
     const entries = await store.listArtifacts('eval-runner-result');
     expect(entries).toHaveLength(2);
@@ -965,6 +991,97 @@ describe('suite review regressions', () => {
     expect(() =>
       compareEvalRuns({ baseline: result.data, candidate: result.data })
     ).not.toThrow();
+  });
+});
+
+describe('suite plugins', () => {
+  const acceptAll = `{ safeParse: (value) => ({ success: true, data: value }) }`;
+
+  it('rejects a manifest that references a plugin it does not load, even when another suite installed it', async () => {
+    const f = await fixture([scenario]);
+    // Another suite in this process has already installed the plugin.
+    installPlugins([testPlugin]);
+    expect(loadedNamespaces()).toContain('test');
+
+    await expect(
+      runEvalSuite({ manifestPath: f.manifestPath, rootDir: f.dir })
+    ).rejects.toThrow(`doesn't load the "test" plugin`);
+    expect(f.load).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+  });
+
+  it('adds CLI plugin paths to the manifest plugins', async () => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'suite-plugins-'));
+    dirs.push(rootDir);
+    const suiteDir = path.join(rootDir, 'suite');
+    await fs.mkdir(suiteDir);
+    await fs.writeFile(
+      path.join(suiteDir, 'manifest-plugin.mjs'),
+      `export default {
+        meta: { name: 'manifest-plugin', namespace: 'mp' },
+        datasetSources: {
+          cases: {
+            schema: ${acceptAll},
+            load: async () => ({
+              name: 'from-manifest-plugin',
+              cases: [{ id: 'case', mode: 'host', scenario: 'hello' }],
+            }),
+          },
+        },
+      };`
+    );
+    await fs.writeFile(
+      path.join(rootDir, 'cli-plugin.mjs'),
+      `export default {
+        meta: { name: 'cli-plugin', namespace: 'cli' },
+        hosts: {
+          echo: {
+            schema: ${acceptAll},
+            run: async () => ({ finalText: 'OK', events: [] }),
+          },
+        },
+      };`
+    );
+    const manifestPath = path.join(suiteDir, 'manifest.json');
+    await fs.writeFile(
+      manifestPath,
+      JSON.stringify({
+        name: 'cli-and-manifest-plugins',
+        plugins: ['./manifest-plugin.mjs'],
+        datasets: [{ type: 'mp/cases' }],
+        host: { type: 'cli/echo' },
+      })
+    );
+
+    const result = await runEvalSuite({
+      manifestPath,
+      rootDir,
+      pluginPaths: ['./cli-plugin.mjs'],
+    });
+
+    expect(loadedNamespaces()).toEqual(['cli', 'mp']);
+    expect(result.datasets[0]?.dataset?.name).toBe('from-manifest-plugin');
+    expect(result.summary.results.map((entry) => entry.pass)).toEqual([true]);
+  });
+
+  it('rejects a dataset judge from a plugin the suite does not load', async () => {
+    const evaluate = vi.fn(async () => ({ score: 1 }));
+    const other: Plugin = {
+      meta: { name: 'other-plugin', namespace: 'other' },
+      judges: { x: { schema: z.object({}).passthrough(), evaluate } },
+    };
+    installPlugins([other]);
+    const f = await fixture([
+      { ...scenario, expect: { passesJudge: { judge: 'other/x' } } },
+    ]);
+
+    await expect(
+      runSuite({ manifestPath: f.manifestPath, rootDir: f.dir })
+    ).rejects.toThrow(
+      `Dataset "canonical" references "other/x", but doesn't load the "other" plugin`
+    );
+    expect(f.run).not.toHaveBeenCalled();
+    expect(evaluate).not.toHaveBeenCalled();
   });
 });
 
@@ -1000,7 +1117,7 @@ describe('direct request cases in multi-server suites', () => {
       ],
       { servers: [server('a'), server('b')] }
     );
-    const result = await runEvalSuite({
+    const result = await runSuite({
       manifestPath: f.manifestPath,
       rootDir: f.dir,
     });

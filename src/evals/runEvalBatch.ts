@@ -3,10 +3,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { loadEvalManifest, type EvalManifest } from './evalManifest.js';
-import { registerBuiltinResultStores } from './builtinResultStores.js';
-import { resolveResultStoreConfig } from './frameworkRegistries.js';
+import { resolveResultStoreConfig } from './manifestValidation.js';
 import { manifestIdentity } from './manifestIdentity.js';
-import { loadPlugins } from '../plugins/loadPlugins.js';
+import type { Plugin } from '../plugins/plugin.js';
+import { loadSuitePlugins } from './suitePlugins.js';
 import { runEvalSuite, type RunEvalSuiteOptions } from './runEvalSuite.js';
 import type {
   EvaluationBatchItem,
@@ -122,23 +122,23 @@ function isMatchingCompletedSummary(
 async function hasMatchingSavedResult(
   manifestPath: string,
   rootDir: string,
-  pluginPaths?: string[]
+  pluginPaths?: string[],
+  plugins?: readonly Plugin[]
 ): Promise<boolean> {
   try {
     const manifest = loadEvalManifest(manifestPath, { rootDir });
     if (!manifest.results?.store) return false;
-    registerBuiltinResultStores();
-    const plugins = pluginPaths ?? manifest.plugins ?? [];
-    if (plugins.length > 0)
-      await loadPlugins(
-        plugins.map((pluginPath) =>
-          path.isAbsolute(pluginPath)
-            ? pluginPath
-            : path.resolve(rootDir, pluginPath)
-        )
-      );
+    const namespaces = await loadSuitePlugins({
+      manifestPath,
+      manifest,
+      rootDir,
+      pluginPaths,
+      plugins,
+    });
+    // Another manifest in this batch may have loaded a plugin this one doesn't list.
     const { definition, config } = resolveResultStoreConfig(
-      manifest.results.store
+      manifest.results.store,
+      { namespaces }
     );
     const store = definition.create(config);
     const identity = manifestIdentity(manifest);
@@ -227,7 +227,8 @@ export async function runEvalBatch(
           (await hasMatchingSavedResult(
             manifestPath,
             rootDir,
-            options.pluginPaths
+            options.pluginPaths,
+            options.plugins
           ))
         )
           return { manifestPath, outputDir, skipped: true };
@@ -235,6 +236,7 @@ export async function runEvalBatch(
           manifestPath,
           rootDir,
           pluginPaths: options.pluginPaths,
+          plugins: options.plugins,
           outputDir,
           secretsFile: options.secretsFile,
           dryRun: options.dryRun,
