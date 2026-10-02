@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { afterEach, describe, expect, it } from 'vitest';
-import { validateManifestRegistrations } from './manifestValidation.js';
+import { validateManifest } from './manifestValidation.js';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 import type {
@@ -82,7 +82,7 @@ describe('manifest validation', () => {
       arms: [{ name: 'baseline', servers: [] }],
     };
 
-    expect(() => validateManifestRegistrations(manifest)).not.toThrow();
+    expect(() => validateManifest(manifest)).not.toThrow();
   });
 
   it.each(['dataset', 'host', 'judge'] as const)(
@@ -104,16 +104,14 @@ describe('manifest validation', () => {
       if (kind === 'judge') manifest.judges = [{ type: 'test/x' }];
 
       // The plugin is installed process-wide, but this suite didn't list it.
-      expect(() =>
-        validateManifestRegistrations(manifest, { namespaces: [] })
-      ).toThrow(
+      expect(() => validateManifest(manifest, { namespaces: [] })).toThrow(
         /references "test\/[a-z]+", but doesn't load the "test" plugin/
       );
+      expect(() => validateManifest(manifest, { namespaces: [] })).toThrow(
+        `doesn't load the "test" plugin`
+      );
       expect(() =>
-        validateManifestRegistrations(manifest, { namespaces: [] })
-      ).toThrow(`doesn't load the "test" plugin`);
-      expect(() =>
-        validateManifestRegistrations(manifest, { namespaces: ['test'] })
+        validateManifest(manifest, { namespaces: ['test'] })
       ).not.toThrow();
     }
   );
@@ -126,9 +124,9 @@ describe('manifest validation', () => {
       metrics: [{ type: 'passed', metric: 'test/missing' }],
     };
 
-    expect(() =>
-      validateManifestRegistrations(manifest, { namespaces: ['test'] })
-    ).toThrow('Metric "test/missing" is not available.');
+    expect(() => validateManifest(manifest, { namespaces: ['test'] })).toThrow(
+      'Metric "test/missing" is not available.'
+    );
   });
 
   it('checks the metric a metric spec names, not only its type', () => {
@@ -139,9 +137,9 @@ describe('manifest validation', () => {
       metrics: [{ type: 'passed', metric: 'test/hits' }],
     };
 
-    expect(() =>
-      validateManifestRegistrations(manifest, { namespaces: [] })
-    ).toThrow(`references "test/hits", but doesn't load the "test" plugin`);
+    expect(() => validateManifest(manifest, { namespaces: [] })).toThrow(
+      `references "test/hits", but doesn't load the "test" plugin`
+    );
   });
 
   it('parses every extension schema and preserves defaults, transforms, and routing aliases', () => {
@@ -203,7 +201,7 @@ describe('manifest validation', () => {
         },
       ],
     };
-    const parsed = validateManifestRegistrations(manifest);
+    const parsed = validateManifest(manifest);
     expect(parsed.datasets).toEqual([{ type: 'test/custom', count: 6 }]);
     expect(parsed.host).toEqual({ type: 'test/custom', count: 6 });
     expect(parsed.metrics).toEqual([
@@ -258,7 +256,7 @@ describe('manifest validation', () => {
         },
       ],
     };
-    const parsed = validateManifestRegistrations(manifest);
+    const parsed = validateManifest(manifest);
     expect(parsed.judges).toEqual([
       { type: 'test/policy', count: 6, threshold: 0.9, reference: 'base-gold' },
     ]);
@@ -330,7 +328,7 @@ describe('manifest validation', () => {
       manifest.arms = [{ name: 'arm', metrics: [config] }];
     if (kind === 'armJudge')
       manifest.arms = [{ name: 'arm', judges: [config] }];
-    expect(() => validateManifestRegistrations(manifest)).toThrow(
+    expect(() => validateManifest(manifest)).toThrow(
       /Invalid .* options "test\/strict"/
     );
   });
@@ -353,10 +351,10 @@ describe('manifest validation', () => {
       maxToolCalls: 5,
       arms: [{ name: 'arm', host: { type: 'test/limited' } }],
     };
-    expect(() => validateManifestRegistrations(manifest)).toThrow(
+    expect(() => validateManifest(manifest)).toThrow(
       'Invalid host options "test/limited"'
     );
-    const parsed = validateManifestRegistrations({
+    const parsed = validateManifest({
       ...manifest,
       maxToolCalls: 2,
     });
@@ -366,7 +364,7 @@ describe('manifest validation', () => {
       model: 'default',
     });
     expect(
-      validateManifestRegistrations({
+      validateManifest({
         ...manifest,
         arms: [
           { name: 'arm', host: { type: 'test/limited', maxToolCalls: 1 } },
@@ -378,19 +376,19 @@ describe('manifest validation', () => {
   it('rejects an unknown extension or duplicate server label', () => {
     installTestPlugin();
     expect(() =>
-      validateManifestRegistrations({
+      validateManifest({
         name: 'invalid',
         datasets: [{ type: 'missing' }],
       })
     ).toThrow('Dataset source "missing" is not available');
     expect(() =>
-      validateManifestRegistrations({
+      validateManifest({
         name: 'invalid',
         datasets: [{ type: 'test/missing' }],
       })
     ).toThrow('Dataset source "test/missing" is not available');
     expect(() =>
-      validateManifestRegistrations({
+      validateManifest({
         name: 'unloaded',
         datasets: [{ type: 'other/file' }],
       })
@@ -399,7 +397,7 @@ describe('manifest validation', () => {
     );
 
     expect(() =>
-      validateManifestRegistrations({
+      validateManifest({
         name: 'duplicate-labels',
         datasets: [{ type: 'test/file' }],
         servers: [

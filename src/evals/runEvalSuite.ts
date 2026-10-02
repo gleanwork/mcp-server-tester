@@ -44,10 +44,7 @@ import { assertDatasetNamespaces, loadSuitePlugins } from './suitePlugins.js';
 import { getDatasetSource } from './builtinDatasetSources.js';
 import { getHost } from './builtinHosts.js';
 import { getResultStore } from './builtinResultStores.js';
-import {
-  parseHostConfig,
-  validateManifestRegistrations,
-} from './manifestValidation.js';
+import { parseHostConfig, validateManifest } from './manifestValidation.js';
 import { computeMetrics, type MetricSpec } from './metrics.js';
 import {
   createStoredEvalArtifact,
@@ -300,7 +297,7 @@ export async function runEvalSuite(
     plugins: options.plugins,
   });
 
-  manifest = validateManifestRegistrations(
+  manifest = validateManifest(
     {
       ...manifest,
       host: manifest.host ?? { type: 'claude-cli' },

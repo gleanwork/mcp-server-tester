@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { resolve } from 'import-meta-resolve';
 import { assertPlugin, type Plugin } from './plugin.js';
 
 export interface LoadPluginsOptions {
@@ -35,99 +36,27 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** Plugins are imported, so package exports resolve with ESM conditions. */
-const CONDITIONS = new Set(['import', 'module-sync', 'node', 'default']);
-
-function exportTarget(value: unknown): string | undefined {
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const target = exportTarget(item);
-      if (target) return target;
-    }
-    return undefined;
-  }
-  if (!isRecord(value)) return undefined;
-  // Condition order is the package's, as in Node.
-  for (const [condition, nested] of Object.entries(value)) {
-    if (!CONDITIONS.has(condition)) continue;
-    const target = exportTarget(nested);
-    if (target) return target;
-  }
-  return undefined;
-}
-
-function packageParts(
-  specifier: string
-): { name: string; subpath: string } | undefined {
-  const parts = specifier.split('/');
-  const nameLength = specifier.startsWith('@') ? 2 : 1;
-  if (
-    parts.length < nameLength ||
-    parts.some((part) => !part || part === '.' || part === '..')
-  )
-    return undefined;
-  const rest = parts.slice(nameLength);
-  return {
-    name: parts.slice(0, nameLength).join('/'),
-    subpath: rest.length ? `./${rest.join('/')}` : '.',
-  };
-}
-
-function findPackageDir(name: string, fromDir: string): string | undefined {
-  for (let dir = path.resolve(fromDir); ; dir = path.dirname(dir)) {
-    const candidate = path.join(dir, 'node_modules', name);
-    if (fs.existsSync(path.join(candidate, 'package.json'))) return candidate;
-    if (path.dirname(dir) === dir) return undefined;
-  }
-}
-
 /**
- * Resolve a package specifier the way `import` would: the `exports` map with
- * import/node/default conditions, or `main`. Subpath patterns aren't supported.
+ * Resolve a package specifier from `dir` exactly as `import` would (exports
+ * maps, conditions, subpath patterns, `main`), using Node's algorithm through
+ * import-meta-resolve, as Prettier does for its plugins. Returns undefined
+ * when no such package is installed there.
  */
 function resolvePackage(specifier: string, dir: string): string | undefined {
-  const parts = packageParts(specifier);
-  if (!parts) return undefined;
-  const packageDir = findPackageDir(parts.name, dir);
-  if (!packageDir) return undefined;
-  const manifest = JSON.parse(
-    fs.readFileSync(path.join(packageDir, 'package.json'), 'utf8')
-  ) as { exports?: unknown; main?: unknown };
-  if (manifest.exports !== undefined) {
-    const exportsMap =
-      isRecord(manifest.exports) &&
-      Object.keys(manifest.exports).some((key) => key.startsWith('.'))
-        ? manifest.exports
-        : { '.': manifest.exports };
-    const target = exportTarget(exportsMap[parts.subpath]);
-    if (!target) {
-      throw new Error(
-        `Plugin package "${parts.name}" doesn't export "${parts.subpath}" for import.`
-      );
-    }
-    // As in Node, targets stay inside the package.
-    if (!target.startsWith('./') || target.split('/').includes('..')) {
-      throw new Error(
-        `Plugin package "${parts.name}" exports "${parts.subpath}" to "${target}", which is not a "./" path inside the package.`
-      );
-    }
-    return path.join(packageDir, target);
+  // Resolution is relative to a file in `dir`; the file needn't exist.
+  const parent = pathToFileURL(path.join(dir, 'mst-plugins.js')).href;
+  try {
+    const url = resolve(specifier, parent);
+    // `fs` resolves to node:fs, which is not a plugin.
+    return url.startsWith('file:') ? fileURLToPath(url) : undefined;
+  } catch (error) {
+    const code = (error as { code?: unknown }).code;
+    if (code === 'ERR_MODULE_NOT_FOUND') return undefined;
+    throw new Error(
+      `Plugin "${specifier}" can't be imported: ${(error as Error).message}`,
+      { cause: error }
+    );
   }
-  if (parts.subpath !== '.')
-    return fileOrIndex(path.join(packageDir, parts.subpath));
-  const main = typeof manifest.main === 'string' ? manifest.main : '';
-  return withExtension(path.join(packageDir, main));
-}
-
-/** A CommonJS `main` may omit its extension. */
-function withExtension(candidate: string): string | undefined {
-  return (
-    fileOrIndex(candidate) ??
-    ['.js', '.cjs', '.mjs']
-      .map((extension) => candidate + extension)
-      .find((file) => fs.existsSync(file) && fs.statSync(file).isFile())
-  );
 }
 
 /** `.`, `..`, `./x` and `../x` name paths; anything else may be a package. */

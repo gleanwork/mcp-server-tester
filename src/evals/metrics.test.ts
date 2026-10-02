@@ -7,7 +7,7 @@ import {
   resolveMetric,
   type MetricDefinition,
 } from './metrics.js';
-import { validateManifestRegistrations } from './manifestValidation.js';
+import { validateManifest } from './manifestValidation.js';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
 import { getMetric } from './metrics.js';
 
@@ -191,7 +191,7 @@ describe('computeMetrics', () => {
         compute: (_row, options) => Number(options?.weight),
       },
     });
-    const parsed = validateManifestRegistrations({
+    const parsed = validateManifest({
       name: 'metrics',
       datasets: [],
       metrics: [{ type: 'test/weighted-parsed', name: 'alias' }],
@@ -217,7 +217,7 @@ describe('computeMetrics', () => {
   });
 
   it('accepts tagged top-level judge options with default output names', () => {
-    const manifest = validateManifestRegistrations({
+    const manifest = validateManifest({
       name: 'metrics',
       datasets: [],
       metrics: [{ type: 'judge_score_for', judge: 'quality' }],
@@ -294,7 +294,7 @@ describe('computeMetrics', () => {
       compute: (_case, params) => Number(params?.factor),
     };
     installMetrics({ 'plugin-metric': definition });
-    const parsed = validateManifestRegistrations({
+    const parsed = validateManifest({
       name: 'metrics',
       datasets: [],
       metrics: [{ type: 'test/plugin-metric', name: 'alias', params: {} }],
@@ -325,14 +325,14 @@ describe('computeMetrics', () => {
     );
     resetPluginsForTests();
     expect(() => secondCopy.resolveMetric('test/plugin-metric')).toThrow(
-      'Unknown metric'
+      'Metric "test/plugin-metric" needs the "test" plugin, which is not loaded.'
     );
     // Built-ins survive the reset.
     expect(secondCopy.resolveMetric('passed').outName).toBe('passed');
   });
 
   it('validates parameterized built-ins and output aliases through the same registry', () => {
-    const parsed = validateManifestRegistrations({
+    const parsed = validateManifest({
       name: 'metrics',
       datasets: [],
       metrics: [
@@ -351,7 +351,7 @@ describe('computeMetrics', () => {
       ]).perCase.one?.quality_score
     ).toBe(0.7);
     expect(() =>
-      validateManifestRegistrations({
+      validateManifest({
         name: 'metrics',
         datasets: [],
         metrics: [{ type: 'judge_score_for' }],
@@ -361,7 +361,7 @@ describe('computeMetrics', () => {
 
   it('rejects unknown metric names instead of silently dropping them', () => {
     expect(() => computeMetrics(['not-a-metric'], [])).toThrow(
-      'Unknown metric "not-a-metric"'
+      'Metric "not-a-metric" is not available. Available: '
     );
   });
 });

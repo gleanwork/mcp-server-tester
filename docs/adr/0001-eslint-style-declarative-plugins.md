@@ -13,3 +13,7 @@ Loaded extensions live in one process-wide table keyed by `namespace/name`. Mani
 - **`register(api)` with global register functions.** Plugin code would mutate core state, names would collide across plugins, and each plugin would need MST at runtime rather than only as a peer dependency.
 - **Per-run extension sets.** These are strictly isolated, but the set would have to be threaded through every lookup, including inline matchers. That costs more than the batch case justifies.
 - **Manifest-assigned namespace aliases.** These would break a plugin's shared configs. They can be added later without breaking anything if two plugins ever need the same namespace.
+
+## Known exception
+
+External hosts (`./experimental/hosts`) still have their own extension path. `registerExternalHostCapability` adds capability implementations to a module-level map, and a capability binding's `uses: "module:<specifier>#<export>"` imports one through a separate loader. Converting it means making capabilities a plugin extension kind, referenced as `namespace/name` with built-ins under bare ids, and then deleting both paths. That is the next change; until then, no other kind may add a register function or a loader of its own.

@@ -211,11 +211,11 @@ export interface ValidateManifestOptions {
 }
 
 /**
- * Validate registered schemas and return parsed options, including effective arm
- * inheritance. Callers must use the returned manifest to retain defaults and
+ * Validate a manifest against the schemas of the extensions it names and return
+ * parsed options, including effective arm inheritance. Callers must use the returned manifest to retain defaults and
  * transforms. The input is not mutated, and each effective config is parsed once.
  */
-export function validateManifestRegistrations(
+export function validateManifest(
   manifest: EvalManifest,
   options: ValidateManifestOptions = {}
 ): EvalManifest {

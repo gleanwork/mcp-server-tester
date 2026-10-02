@@ -2,7 +2,7 @@
  * Case execution: the one place an eval case runs.
  *
  * Every path (a direct tool call or MCP request, the simulated mcp_host, an
- * external host, or a registered suite host) produces a `CaseExecution`. The
+ * external host, or a suite host) produces a `CaseExecution`. The
  * runner reads its explicit fields and never inspects `response` to guess how
  * a case ran. Hosts and adapters produce traces; the runner owns every verdict.
  */

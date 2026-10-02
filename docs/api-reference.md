@@ -1496,7 +1496,7 @@ export interface EvalExpectBlock {
  * For 'external_host' mode: scenario and externalHost are required
  */
 export interface EvalCase {
-  /** Optional per-case registered host override. */
+  /** Optional per-case host override: a built-in or a plugin host. */
   host?: HostConfig;
   /**
    * Unique identifier for this test case

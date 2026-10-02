@@ -450,45 +450,30 @@ function metricOptions(spec: MetricSpec): Record<string, unknown> {
 }
 
 /** Resolve one config metric, including parameterized judge metrics. */
-export function resolveMetric(
-  spec: MetricSpec,
-  registry?: Readonly<Record<string, MetricDefinition>>
-): ResolvedMetric {
+export function resolveMetric(spec: MetricSpec): ResolvedMetric {
   const name =
     typeof spec === 'string' ? spec : (spec.metric ?? spec.type ?? spec.name);
   const params = metricOptions(spec);
   if (!name) throw new Error('Metric configuration requires a type or name.');
-  const base = registry
-    ? registry[name]
-    : metrics.has(name)
-      ? metrics.get(name)
-      : undefined;
-  if (base) {
-    const judge = typeof params.judge === 'string' ? params.judge : 'unknown';
-    const defaultName =
-      name === 'judge_pass_for' || name === 'judge_score_for'
-        ? `judge_${slug(judge)}_${name === 'judge_pass_for' ? 'pass' : 'score'}`
-        : name;
-    return {
-      metric: base,
-      outName:
-        typeof spec === 'string' ? defaultName : (spec.name ?? defaultName),
-      params,
-    };
-  }
-
-  const available = registry ? Object.keys(registry).sort() : metrics.names();
-  throw new Error(
-    `Unknown metric "${name}". Available metrics: ${available.join(', ')}`
-  );
+  const metric = metrics.get(name);
+  const judge = typeof params.judge === 'string' ? params.judge : 'unknown';
+  const defaultName =
+    name === 'judge_pass_for' || name === 'judge_score_for'
+      ? `judge_${slug(judge)}_${name === 'judge_pass_for' ? 'pass' : 'score'}`
+      : name;
+  return {
+    metric,
+    outName:
+      typeof spec === 'string' ? defaultName : (spec.name ?? defaultName),
+    params,
+  };
 }
 
 export function computeMetrics(
   specs: MetricSpec[],
-  cases: EvalCaseResult[],
-  registry?: Readonly<Record<string, MetricDefinition>>
+  cases: EvalCaseResult[]
 ): MetricResult {
-  const resolved = specs.map((spec) => resolveMetric(spec, registry));
+  const resolved = specs.map((spec) => resolveMetric(spec));
   const perCase: MetricResult['perCase'] = Object.create(
     null
   ) as MetricResult['perCase'];

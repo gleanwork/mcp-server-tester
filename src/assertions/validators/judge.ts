@@ -42,7 +42,7 @@ const judgeFrameworkOptionKeys = new Set([
 ]);
 
 export interface JudgeValidatorConfig {
-  /** Plugin policy parsed by the registered judge's schema. */
+  /** Plugin policy parsed by the judge's schema. */
   options?: Record<string, unknown>;
   /** Also accept flat policy fields from manifest judge configurations. */
   [key: string]: unknown;

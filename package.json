@@ -111,6 +111,7 @@
     "@modelcontextprotocol/server": "^2.2.0",
     "commander": "^14.0.2",
     "debug": "^4.4.3",
+    "import-meta-resolve": "^4.2.0",
     "ink": "^5.2.1",
     "ink-spinner": "^5.0.0",
     "ndjson": "^2.0.0",

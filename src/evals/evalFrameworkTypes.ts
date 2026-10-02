@@ -32,7 +32,7 @@ export interface DatasetSource {
   ): Promise<EvalDataset>;
 }
 
-/** Options supplied to a registered host implementation. */
+/** Options supplied to a host implementation. */
 export interface HostRunOptions {
   dataset: EvalDataset;
   cases: EvalCase[];

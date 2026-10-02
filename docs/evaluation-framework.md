@@ -89,9 +89,9 @@ EvalManifest
   -> validate tagged blocks, extension names and namespaces, schemas, and server labels
   -> resolve DatasetSource entries into EvalDataset values
   -> derive one or more arms from the manifest
-  -> run each arm through a registered Host with its MCPConfig[] server set
+  -> run each arm through its Host (built-in or plugin) with its MCPConfig[] server set
   -> compute metrics and judges
-  -> write per-arm results through a registered ResultStore
+  -> write per-arm results through the ResultStore
   -> save a RunSummary with manifest identity, content hash, arm aggregates,
      pairwise arm deltas, and per-case artifact pointers
 ```

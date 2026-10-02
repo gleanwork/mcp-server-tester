@@ -189,8 +189,24 @@ describe('loadPlugins', () => {
     );
 
     await expect(loadPlugins(['narrow'], { baseDir: dir })).rejects.toThrow(
-      'Plugin package "narrow" doesn\'t export "." for import.'
+      /^Plugin "narrow" can't be imported: No "exports" main defined in /
     );
+  });
+
+  it('resolves subpath patterns in a package exports map', async () => {
+    const dir = tempDir();
+    writePackage(
+      dir,
+      'many',
+      { type: 'module', exports: { './plugins/*': './dist/*.js' } },
+      { 'dist/search.js': pluginSource('search') }
+    );
+
+    const [plugin] = await loadPlugins(['many/plugins/search'], {
+      baseDir: dir,
+    });
+
+    expect(plugin?.meta.namespace).toBe('search');
   });
 
   it('never treats a missing relative path as a package', async () => {
@@ -219,7 +235,7 @@ describe('loadPlugins', () => {
     );
 
     await expect(loadPlugins(['escapes'], { baseDir: dir })).rejects.toThrow(
-      'Plugin package "escapes" exports "." to "../outside.js", which is not a "./" path inside the package.'
+      /^Plugin "escapes" can't be imported: Invalid "exports" main target "\.\.\/outside\.js"/
     );
   });
 

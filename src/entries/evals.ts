@@ -1,7 +1,7 @@
 /**
  * @gleanwork/mcp-server-tester/evals
  *
- * The evaluation framework: manifests, suites and batches, registries,
+ * The evaluation framework: manifests, suites and batches, extension definition types,
  * metrics, plugins, result stores, comparisons, variant experiments, and MCP
  * host simulation.
  *
@@ -77,7 +77,7 @@ export type {
 } from '../evals/evalFrameworkTypes.js';
 export {
   resolveResultStoreConfig,
-  validateManifestRegistrations,
+  validateManifest,
 } from '../evals/manifestValidation.js';
 export type { ValidateManifestOptions } from '../evals/manifestValidation.js';
 export {

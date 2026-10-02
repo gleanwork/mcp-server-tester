@@ -14,7 +14,7 @@ import {
   expect as playwrightExpect,
 } from '../dist/index.js';
 import {
-  validateManifestRegistrations,
+  validateManifest,
   loadEvalManifestFromObject,
   FileEvalResultStore,
 } from '../dist/evals.js';
@@ -297,11 +297,11 @@ try {
     },
     { skipDatasetValidation: true }
   );
-  const resolved = validateManifestRegistrations(manifest, {
+  const resolved = validateManifest(manifest, {
     namespaces: ['foundation'],
   });
   assert.throws(
-    () => validateManifestRegistrations(manifest, { namespaces: [] }),
+    () => validateManifest(manifest, { namespaces: [] }),
     /doesn't load the "foundation" plugin/
   );
   assert.equal(resolved.host.count, 6);
@@ -311,7 +311,7 @@ try {
     count: 6,
   });
   assert.throws(() =>
-    validateManifestRegistrations({
+    validateManifest({
       ...manifest,
       arms: [{ name: 'bad', host: { model: 17 } }],
     })

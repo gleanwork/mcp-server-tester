@@ -24,7 +24,7 @@ import type {
  * Options for the LLM judge matcher
  */
 export interface JudgeMatcherOptions {
-  /** Plugin options, parsed by the registered judge's schema. */
+  /** Plugin options, parsed by the judge's schema. */
   options?: Record<string, unknown>;
   /** Reference response to compare against */
   reference?: unknown;
