@@ -81,6 +81,81 @@ export default plugin;
 
 Plugins load before manifest validation, so validation can check every reference and schema.
 
+### Dataset sources
+
+The built-in `file`, `dir` and `gcs` sources read canonical `EvalDataset` JSON only. They don't infer expectations from a first case, attach hosts or add judges, and they reject fields they don't know, on every case. A minimal direct dataset needs a name, a case ID and a tool name:
+
+```json
+{
+  "name": "search-regression",
+  "cases": [{ "id": "search", "toolName": "search" }]
+}
+```
+
+`dir` reads every `.json` file in the directory (subdirectories too with `"recursive": true`), validates each the same way, and merges their cases into one dataset named after the directory. `gcs` needs the optional `@google-cloud/storage` package and Application Default Credentials that can read the object.
+
+Datasets in another schema need a dataset source in your own plugin that converts them. The conversion policy (default iterations, accuracy thresholds, which judges a case gets) belongs to that source, not to MST:
+
+```typescript
+import {
+  loadEvalDatasetFromObject,
+  type Plugin,
+} from '@gleanwork/mcp-server-tester';
+import { z } from 'zod';
+
+const MySourceSchema = z
+  .object({ type: z.literal('my/format'), path: z.string().min(1) })
+  .strict();
+
+export default {
+  meta: { name: 'my-mst-plugin', version: '1.0.0', namespace: 'my' },
+  datasetSources: {
+    format: {
+      schema: MySourceSchema,
+      async load(config, context) {
+        const { path } = MySourceSchema.parse(config);
+        // readMyFormat and convertToCanonical are your own reader and converter.
+        const raw = await readMyFormat(path, context.rootDir);
+        return loadEvalDatasetFromObject(convertToCanonical(raw));
+      },
+    },
+  },
+} satisfies Plugin;
+```
+
+A manifest that loads the plugin declares `{ "type": "my/format", "path": "..." }` in `datasets`. Select the format in the declaration rather than inferring it from a first case, and fail on fields the source can't map instead of dropping them.
+
+### Hosts
+
+A host runs one scenario and returns its trace. It doesn't repeat cases, run judges or decide pass/fail; `runEvalDataset` does that for every host.
+
+```typescript
+import type { Plugin } from '@gleanwork/mcp-server-tester';
+import { z } from 'zod';
+
+export default {
+  meta: { name: 'my-mst-plugin', namespace: 'my' },
+  hosts: {
+    assistant: {
+      schema: z.object({ type: z.literal('my/assistant') }),
+      evidence: 'observed',
+      async run(input, config, context) {
+        // input.scenario and input.servers are the unit of execution.
+        return { finalText: 'Answer from the assistant', events: [] };
+      },
+    },
+  },
+} satisfies Plugin;
+```
+
+A manifest that loads the plugin selects the host with `{ "type": "my/assistant" }`.
+
+- **The trace.** `run` returns a `HostRunResult`: `finalText`, `events`, and optional `usage`, `error` and timing fields. Each event has a `kind` (`tool_call`, `skill`, `command` or `subagent`), a `source` (`mcp` or `host`), a `name`, and optionally the MCP server label, arguments, output and ID. Record what the host did; don't reconstruct tool calls from the final text.
+- **Evidence.** Declare `evidence: 'structured'` only for authoritative protocol or host-native traces. With `observed`, `none` or no declaration, tool-call and argument assertions can't pass; text and judge assertions still run.
+- **Servers.** Events keep their MCP server labels. With more than one server, tool assertions use label-qualified names, or the manifest's `toolMap` from canonical to native names.
+- **Batches.** A host with `runBatch` gets one request per iteration of each host case in the dataset, and returns one trace per request, in order. A batch host can't mix host types, and its cases need unique IDs.
+- **Settings only.** `createConfig` returns settings for MST's own SDK or CLI host instead of running anything.
+
 ## Execution lifecycle
 
 ```text
@@ -126,9 +201,10 @@ npx mst batch \
   --dry-run
 ```
 
-The scaffold validates manifests, loads plugins, and prints an execution plan.
-The suite and batch implementation branches fill in execution behind this
-contract; the scaffold never pretends that an unimplemented run succeeded.
+`--dry-run` validates the manifests and loads their plugins without running
+anything; `run --dry-run` prints the manifest name, datasets and arms as JSON.
+Without it, `run` runs the manifest's arms and `batch` runs each listed
+manifest.
 
 ## Ownership boundary
 

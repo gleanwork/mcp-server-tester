@@ -2,7 +2,7 @@
 
 MST 2.0 moves to the [MCP TypeScript SDK v2](https://github.com/modelcontextprotocol/typescript-sdk) and adds support for the 2026-07-28 protocol alongside the legacy one. **By default, connections behave exactly as in 1.x**: `protocol` defaults to `'legacy'`, and a golden wire transcript test guards that the default sends the same messages as before.
 
-Other 2.0 changes have their own guides: [dataset sources](./dataset-sources.md), [host traces](./host-traces.md), and [LLM host unification](./llm-host-vercel-unification.md).
+This guide covers upgrading from 1.x (the last 1.x release is 1.1.1). Features first released in a 2.0 prerelease are listed under [New in 2.0](#new-in-20-non-breaking), in their final form. If you used a 2.0 prerelease, read [Upgrading from a 2.0 prerelease](./2.0-prereleases.md) as well.
 
 ## Table of Contents
 
@@ -13,15 +13,12 @@ Other 2.0 changes have their own guides: [dataset sources](./dataset-sources.md)
 - [Conformance results: severity, skips, and new checks](#conformance-results-severity-skips-and-new-checks)
 - [`compareEvalRuns()` returns `warnings`](#compareevalruns-returns-warnings)
 - [`MCP_PROTOCOL_VERSION` is deprecated](#mcp_protocol_version-is-deprecated)
-- [`executeCase` returns a typed `CaseExecution`](#executecase-returns-a-typed-caseexecution)
-- [`external_host` results keep tool precision and recall](#external_host-results-keep-tool-precision-and-recall)
 - [`.not` works on `toSatisfyToolPredicate` and `toMatchToolSnapshot`](#not-works-on-tosatisfytoolpredicate-and-tomatchtoolsnapshot)
 - [LLM judges share one prompt, parser and size limit](#llm-judges-share-one-prompt-parser-and-size-limit)
 - [MCP reporter attachments](#mcp-reporter-attachments)
 - [Stored results are redacted the same way everywhere](#stored-results-are-redacted-the-same-way-everywhere)
 - [Which credentials are used](#which-credentials-are-used)
-- [Desktop hosts share one batch lifecycle](#desktop-hosts-share-one-batch-lifecycle)
-- [Plugins are objects, and extensions are namespaced](#plugins-are-objects-and-extensions-are-namespaced)
+- [Custom judges are plugins](#custom-judges-are-plugins)
 - [LLM calls: bearer tokens and streaming](#llm-calls-bearer-tokens-and-streaming)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
@@ -64,37 +61,34 @@ Projects created with `npx @gleanwork/mcp-server-tester init` now depend on `@mo
 
 ## Imports moved to subpaths
 
-**Affects:** code that imports the evaluation framework, low-level OAuth, or desktop and external hosts from the package root.
+**Affects:** code that imports comparisons, baselines, result stores, variant experiments, `simulateMCPHost`, or low-level OAuth from the package root.
 
-The root now holds the core testing interface: fixtures, matchers and validators, the MCP client, config, datasets with `runEvalDataset` and `runEvalCase`, judges, conformance, and Agent Skills, with the types those use. Everything else moved to one of three subpaths. Nothing was renamed or removed; only the import path changed.
+The root now holds the core testing interface: fixtures, matchers and validators, the MCP client, config, datasets with `runEvalDataset` and `runEvalCase`, judges, conformance, and Agent Skills, with the types those use. Everything else moved to a subpath. Apart from the judge registry ([Custom judges are plugins](#custom-judges-are-plugins)), nothing was renamed or removed; only the import path changed.
 
-| Subpath                                           | What it holds                                                                                                                                                                         |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@gleanwork/mcp-server-tester/evals`              | The evaluation framework: manifests, suites and batches, extension definition types, metrics, result stores, baselines and comparisons, variant experiments, and MCP host simulation. |
-| `@gleanwork/mcp-server-tester/auth`               | Low-level OAuth: discovery, token storage, and the client-credentials flow.                                                                                                           |
-| `@gleanwork/mcp-server-tester/experimental/hosts` | Desktop and external hosts: the external-host runtime and capability types, Cowork settings and native-run audit, and host plugins. Expect breaking changes between minor versions.   |
+| Subpath                              | What it holds                                                                                                                                                                         |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@gleanwork/mcp-server-tester/evals` | The evaluation framework: manifests, suites and batches, extension definition types, metrics, result stores, baselines and comparisons, variant experiments, and MCP host simulation. |
+| `@gleanwork/mcp-server-tester/auth`  | Low-level OAuth: discovery, token storage, and the client-credentials flow.                                                                                                           |
 
 ```typescript
-// Before
+// Before (1.x)
 import {
   loadEvalDataset,
-  runEvalSuite,
-  computeMetrics,
+  compareEvalRuns,
+  runServerComparison,
 } from '@gleanwork/mcp-server-tester';
 
 // After
 import { loadEvalDataset } from '@gleanwork/mcp-server-tester';
 import {
-  runEvalSuite,
-  computeMetrics,
+  compareEvalRuns,
+  runServerComparison,
 } from '@gleanwork/mcp-server-tester/evals';
 ```
 
-The subpaths are ESM only (no `require` condition, and no `typesVersions`, so TypeScript needs `moduleResolution` `node16`, `nodenext` or `bundler`); the root still ships CommonJS as well. CommonJS code can no longer `require` a moved name, so code that uses one must move to ESM. Don't mix `require` of the root with `import()` of a subpath: the CommonJS root is a separate copy of the library, so a capability registered through one would not be visible to a run started from the other. The ESM root, `./evals`, `./auth` and `./experimental/hosts` share one copy, so a judge, host, metric or capability registered through one of them is visible through the others.
+The subpaths are ESM only (no `require` condition, and no `typesVersions`, so TypeScript needs `moduleResolution` `node16`, `nodenext` or `bundler`); the root still ships CommonJS as well. CommonJS code can no longer `require` a moved name, so code that uses one must move to ESM. Don't mix `require` of the root with `import()` of a subpath: the CommonJS root is a separate copy of the library, so its classes and module state are not the ESM copy's. Installed plugins are the exception: both copies share them. The ESM root and the subpaths share one copy.
 
 Some root APIs take options typed from a subpath: `runEvalDataset`'s result-store options (`EvalResultStoreLike`, `StoredEvalResult*Options`) are in `./evals`, and the OAuth providers' stored-state types are in `./auth`. Import those types from the subpath when you name them.
-
-A few root result types carry desktop-host data in optional fields typed by `@gleanwork/mcp-server-tester/experimental/hosts` (for example `EvalCase.externalHost` and `EvalCaseResult.externalHost`). Those fields follow that subpath's experimental stability.
 
 Before 2.0 GA, exports that are neither documented nor used may still be removed; any removal will be listed in this guide.
 
@@ -102,9 +96,8 @@ If TypeScript reports that the package has no exported member, find the name bel
 
 These names moved:
 
-- **`@gleanwork/mcp-server-tester/evals`:** `buildEvalDataset`, `BUILT_IN_METRICS`, `CaseComparisonResult`, `compareEvalRuns`, `CompareEvalRunsOptions`, `ComparisonOutcome`, `computeMetrics`, `createDefaultArtifactId`, `createEvalResultStore`, `createStoredEvalArtifact`, `DatasetConfig`, `DatasetSource`, `DatasetSourceContext`, `defaultEnvironmentMetadata`, `EvalArm`, `EvalBatchItem`, `EvalCaseComparison`, `EvalCaseComparisonOutcome`, `EvalManifest`, `EvalManifestInput`, `EvalManifestSchema`, `EvalResultStore`, `EvalResultStoreConfig`, `EvalResultStoreLike`, `EvalRunComparisonLabels`, `EvalRunComparisonResult`, `EvalSummaryGenerator`, `EvaluationArmResult`, `EvaluationBatchItem`, `EvaluationBatchOptions`, `EvaluationBatchResult`, `EvaluationHostRunContext`, `EvaluationSuiteOptions`, `EvaluationSuiteResult`, `EvaluationSummary`, `ExperimentMetric`, `ExtensionConfig`, `FileEvalResultStore`, `FileEvalResultStoreConfig`, `GCSEvalResultStore`, `GCSEvalResultStoreConfig`, `getBuiltinHostConfig`, `getMissingDependencyMessage`, `HostBatchRequest`, `HostConfig`, `HostConfigPatch`, `HostDefinition`, `HostRunInput`, `HostRunOptions`, `HostRunResult`, `isEvalResultStore`, `isProviderAvailable`, `ListStoredArtifactsOptions`, `loadBaseline`, `loadEvalManifest`, `loadEvalManifestFromObject`, `loadStoredEvalRunnerResult`, `MetricDefinition`, `MetricKind`, `MetricValue`, `ProposeVariantsContext`, `resolveDatasetPaths`, `resolveEvalResultStore`, `resolveMetric`, `resolveResultStoreConfig`, `ResultStoreDefinition`, `runEvalBatch`, `RunEvalBatchOptions`, `RunEvalBatchResult`, `runEvalSuite`, `RunEvalSuiteOptions`, `RunEvalSuiteResult`, `runServerComparison`, `runSkillsComparison`, `RunSummary`, `RunTelemetry`, `runVariantExperiment`, `saveBaseline`, `SaveBaselineOptions`, `saveEvalRunComparison`, `SaveEvalRunComparisonOptions`, `saveServerComparison`, `SaveServerComparisonOptions`, `ServerComparisonOptions`, `ServerComparisonResult`, `simulateMCPHost`, `SkillsComparisonOptions`, `SkillsComparisonResult`, `SkillsComparisonVariant`, `SkillsVariantSummary`, `StoredArtifactKind`, `StoredArtifactSummary`, `StoredEvalArtifact`, `StoredEvalArtifactMetadata`, `StoredEvalResultLoadOptions`, `StoredEvalResultRef`, `StoredEvalResultSaveOptions`, `StoredEvalRunRef`, `TaggedConfig`, `validateManifest`, `VariantCandidateResult`, `VariantExperimentOptions`, `VariantExperimentReason`, `VariantExperimentResult`, `VariantExperimentRound`, `VariantImprovementProposal`, `VariantRecommendation`
+- **`@gleanwork/mcp-server-tester/evals`:** `CaseComparisonResult`, `compareEvalRuns`, `CompareEvalRunsOptions`, `ComparisonOutcome`, `createDefaultArtifactId`, `createEvalResultStore`, `createStoredEvalArtifact`, `defaultEnvironmentMetadata`, `EvalCaseComparison`, `EvalCaseComparisonOutcome`, `EvalResultStore`, `EvalResultStoreConfig`, `EvalResultStoreLike`, `EvalRunComparisonLabels`, `EvalRunComparisonResult`, `ExperimentMetric`, `FileEvalResultStore`, `FileEvalResultStoreConfig`, `GCSEvalResultStore`, `GCSEvalResultStoreConfig`, `getMissingDependencyMessage`, `isEvalResultStore`, `isProviderAvailable`, `ListStoredArtifactsOptions`, `loadBaseline`, `loadStoredEvalRunnerResult`, `ProposeVariantsContext`, `resolveEvalResultStore`, `runServerComparison`, `runVariantExperiment`, `saveBaseline`, `SaveBaselineOptions`, `saveEvalRunComparison`, `SaveEvalRunComparisonOptions`, `saveServerComparison`, `SaveServerComparisonOptions`, `ServerComparisonOptions`, `ServerComparisonResult`, `simulateMCPHost`, `StoredArtifactKind`, `StoredArtifactSummary`, `StoredEvalArtifact`, `StoredEvalArtifactMetadata`, `StoredEvalResultLoadOptions`, `StoredEvalResultRef`, `StoredEvalResultSaveOptions`, `StoredEvalRunRef`, `VariantCandidateResult`, `VariantExperimentOptions`, `VariantExperimentReason`, `VariantExperimentResult`, `VariantExperimentRound`, `VariantImprovementProposal`, `VariantRecommendation`
 - **`@gleanwork/mcp-server-tester/auth`:** `ClientCredentialsConfig`, `discoverAuthorizationServer`, `discoverProtectedResource`, `DiscoveryError`, `ENV_VAR_NAMES`, `hasValidTokens`, `loadTokens`, `loadTokensFromEnv`, `MCP_PROTOCOL_VERSION`, `performClientCredentialsFlow`, `ProtectedResourceDiscoveryResult`, `ProtectedResourceMetadata`, `StoredClientInfo`, `StoredOAuthState`, `StoredServerMetadata`
-- **`@gleanwork/mcp-server-tester/experimental/hosts`:** `auditCoworkNativeRun`, `AuditCoworkNativeRunOptions`, `COWORK_STDIO_PLATFORMS`, `coworkManagedPluginSettings`, `CoworkManagedPluginSettings`, `CoworkManagedStdioServer`, `coworkMcpSettingsMatch`, `CoworkNativeAuditAttachment`, `CoworkNativeAuditCase`, `CoworkNativeAuditIssue`, `CoworkNativeAuditReport`, `CoworkNativeAuditTiming`, `CoworkNativeAuditUsage`, `coworkPluginMarketplace`, `coworkPluginSettingsMatch`, `driverToSlug`, `EvidenceSource`, `ExternalHostCapabilitiesConfig`, `ExternalHostCapabilityBinding`, `ExternalHostCapabilityContext`, `ExternalHostCapabilityImplementation`, `ExternalHostConfig`, `ExternalHostDriverReference`, `ExternalHostFailureKind`, `ExternalHostMetadata`, `ExternalHostRunResult`, `ExternalHostSession`, `ExternalHostSimulationResult`, `ExternalHostType`, `getExternalHostConfigJsonSchema`, `getExternalHostReference`, `HostArtifact`, `HostCapability`, `HostDriverConfig`, `HostDriverId`, `HostPlugin`, `HostRunContext`, `HostStdioPaths`, `HostStdioServer`, `hostStdioServers`, `listExternalHostDriverReferences`, `materializeHostStdioFiles`, `normalizeHostDriver`, `ObservationConfidence`, `parseDriverSlug`, `registerExternalHostCapability`, `resolveHostStdioServer`, `runExternalHostScenario`, `TraceSource`
 
 ## `mcp.callTool()` returns protocol errors as error results
 
@@ -173,48 +166,6 @@ The result has a new `warnings: string[]` field. It flags comparisons between ru
 
 The exported `MCP_PROTOCOL_VERSION` constant is the header MST sends on OAuth discovery requests, not the protocol connections speak. It is deprecated and will be removed in a future major. Use `mcpConfig.protocol` to choose a connection's protocol. It is now exported from `@gleanwork/mcp-server-tester/auth`.
 
-## `executeCase` returns a typed `CaseExecution`
-
-**Affects:** code that passes a custom `executeCase` to `runEvalDataset()` or `runEvalCase()`.
-
-`executeCase` now returns a `CaseExecution` that says how the case ran. The runner used to guess this from the shape of `response`.
-
-```typescript
-import type { CaseExecution } from '@gleanwork/mcp-server-tester';
-
-// A direct tool result or MCP request result
-const direct: CaseExecution = { kind: 'direct', response: toolResult };
-
-// A host run, with the simulation-shaped response validators read
-const host: CaseExecution = {
-  kind: 'host',
-  response: { success: true, response: 'answer', toolCalls: [] },
-  evidence: 'structured',
-  usage,
-};
-
-// Execution that failed before producing a result
-const failed: CaseExecution = {
-  kind: 'failed',
-  response: undefined,
-  error: 'host crashed',
-};
-```
-
-To migrate, add `kind` to what you return. On host executions, rename `hostUsage` to `usage` and `hostTelemetry` to `telemetry`.
-
-`EvalCaseResult` is unchanged. One edge case changes: a `direct` result that happens to look like a host simulation (`success` plus `toolCalls`) no longer gets host-only fields such as `hostUsage` and `mcpHostTrace`. Its expectations are evaluated the same way.
-
-## `external_host` results keep tool precision and recall
-
-**Affects:** reports, baselines or dashboards that average `toolPrecision` / `toolRecall` over `external_host` cases.
-
-When an `external_host` trace is structured enough to grade tool calls, the result now reports `toolPrecision` and `toolRecall` even if `toolsTriggered` fails, as `mcp_host` and suite host results already did. Previously a failing `toolsTriggered` on an `external_host` case dropped both metrics, so dataset averages silently left out exactly the cases that missed tools. Verdicts are unchanged.
-
-Cases whose trace can't support tool assertions (a low-confidence or screenshot trace, or host evidence other than `structured`) still report no metrics.
-
-The reported tool trace now comes from the same match as the metrics. A required call made with the wrong arguments is listed in `mcpHostTrace.missed`, as `toolRecall` already counted it. It used to appear only as an `expected` call.
-
 ## `.not` works on `toSatisfyToolPredicate` and `toMatchToolSnapshot`
 
 **Affects:** tests that use `.not.toSatisfyToolPredicate()` or `.not.toMatchToolSnapshot()`.
@@ -249,12 +200,12 @@ The MCP reporter reads test data through one typed channel (`src/reporters/chann
 
 ## Stored results are redacted the same way everywhere
 
-**Affects:** code that stores comparisons and reads raw responses back from them, and anything that reads stored eval-runner artifacts, suite summaries or baseline files.
+**Affects:** code that stores comparisons and reads raw responses back from them, and anything that reads stored eval-runner artifacts or baseline files.
 
 Every API that persists results now uses one policy (`redactStoredResponses` in the result store) with one default. Before, there were six implementations that disagreed.
 
-- **Comparisons redact by default.** `saveEvalRunComparison()`, `saveServerComparison()` and `runServerComparison({ comparisonStore })` used to store every raw tool and host response unless you passed `redactStoredResponses: true`. They now omit them, as the runner, suites and reporter already did. Pass `redactStoredResponses: false` to keep them.
-- **What is redacted is the same everywhere.** Every eval case result, wherever it is nested, loses its raw `response` and the exact-match `expect.response` echoed in `request.expect`. The runner's store path, `omitResponsesFromResult()`, suite summaries and baseline files used to keep `request.expect.response`. The reporter and comparisons used to drop any key named `response` at any depth, including tool arguments; they now keep those.
+- **Comparisons redact by default.** `saveEvalRunComparison()`, `saveServerComparison()` and `runServerComparison({ comparisonStore })` used to store every raw tool and host response unless you passed `redactStoredResponses: true`. They now omit them, as the runner and reporter already did. Pass `redactStoredResponses: false` to keep them.
+- **What is redacted is the same everywhere.** Every eval case result, wherever it is nested, loses its raw `response` and the exact-match `expect.response` echoed in `request.expect`. The runner's store path, `omitResponsesFromResult()` and baseline files used to keep `request.expect.response`. The reporter and comparisons used to drop any key named `response` at any depth, including tool arguments; they now keep those.
 - **One pass rate.** Every run-level pass rate is `passed / total`, and 0 for a run without cases. The reporter's `metrics.passRate` was `NaN` for an empty run, which was stored as `null`.
 
 The reporter's local report (`index.html`, `data.js` and `run-*.json` in its `outputDir`) keeps responses so the report can show them. Its result-store artifacts follow the policy above.
@@ -273,59 +224,40 @@ The fixtures and `createMCPClientForConfig()` now share one precedence, decided 
 - **The `mcpAuthProvider` fixture prefers `MCP_AUTH_STATE_PATH` over `MCP_ACCESS_TOKEN`**, the same order as above. It used to prefer the token.
 - **Reported `authType`.** A client-credentials connection reports `oauth` (it reported `none`), and a config with both an OAuth state file and a token reports `oauth` (it reported `api-token`, though the state file's token was the one sent).
 
-## Desktop hosts share one batch lifecycle
+## Custom judges are plugins
 
-**Affects:** Cowork and ChatGPT desktop runs, and tooling that reads their case telemetry.
+**Affects:** code that calls `registerJudge`, `getRegisteredJudge` or `clearJudgeRegistry`, and datasets or tests that name a custom judge.
 
-Both hosts now run through one batch lifecycle (`src/evals/desktopBatch.ts`) and one MCP readiness rule, instead of two loops that had drifted. ChatGPT's behaviour is unchanged. For Cowork:
-
-- **The desktop lease works across processes.** Cowork used an in-process flag, so a second process could drive the same desktop. It now claims `~/.mcp-server-tester/cowork-desktop-<id>.lock` (one per desktop, identified by its native data directory), as ChatGPT does with its own lock. A run that was interrupted, or whose cleanup failed, leaves the file behind: inspect the desktop, then remove it. The error names the file.
-- **A failed cleanup no longer discards the results.** If restoring the desktop fails, every case result carries the cleanup error (and `telemetry.batchFailure`), and the lease is kept. Cowork used to throw and lose the results.
-- **Readiness requires at least one tool.** A server that connects but lists no tools now fails the preflight, as it already did for ChatGPT. The failure message lists each server as `label=status(detail)`, where detail is the error or the tool count (Cowork's used to end each entry with the elapsed time). Setup and readiness errors keep their class (for example `CoworkMcpReadinessError` with `.servers`) unless they contained a secret that had to be redacted.
-- **Cases not submitted after a failed reset** carry `telemetry.caseExecution: { status: 'not-submitted', continuation: 'blocked' }`, and every result has `telemetry.batchCase` (`index`, `caseId`, `count`), as ChatGPT's already did.
-
-## Plugins are objects, and extensions are namespaced
-
-**Affects:** every plugin; code that calls `registerJudge` or the `register*`, `get*`, `list*` and `clear*` registry functions; `METRIC_REGISTRY`; `loadPlugins`; and manifests that reference plugin extensions.
-
-Plugins now use ESLint's model ([Plugins](../evaluation-framework.md#plugins), [ADR-0001](../adr/0001-eslint-style-declarative-plugins.md)). A plugin is a plain object that MST reads, instead of a module whose hook calls MST's register functions.
+A custom judge is now part of a plugin: a plain object that MST reads, in the shape [ESLint plugins](https://eslint.org/docs/latest/extend/plugins) use ([Plugins](../evaluation-framework.md#plugins), [ADR-0001](../adr/0001-eslint-style-declarative-plugins.md)). There is no global judge registry.
 
 ```typescript
-// Before (1.x and earlier 2.0 betas)
+// Before (1.x)
 import { registerJudge } from '@gleanwork/mcp-server-tester';
-import { registerDatasetSource } from '@gleanwork/mcp-server-tester/evals';
 
-export function register() {
-  registerJudge({ name: 'completeness', schema, evaluate });
-  registerDatasetSource({ name: 'legacy', schema, load });
-}
+registerJudge('completeness', async (candidate, reference) => ({ score: 1 }));
+// expect(result).toPassToolJudge({ judge: 'completeness' });
 
 // After
 import type { Plugin } from '@gleanwork/mcp-server-tester';
+import { z } from 'zod';
 
 export default {
   meta: { name: '@acme/mst-plugin', version: '1.0.0', namespace: 'acme' },
-  judges: { completeness: { schema, evaluate } },
-  datasetSources: { legacy: { schema, load } },
+  judges: {
+    completeness: {
+      schema: z.object({}).passthrough(),
+      evaluate: async (candidate, reference) => ({ score: 1 }),
+    },
+  },
 } satisfies Plugin;
+// expect(result).toPassToolJudge({ judge: 'acme/completeness' });
 ```
 
-- **Default-export a plugin object.** The loader no longer calls `register`, `registerPlugins` or a default-exported function. A module that still exports one fails with a message pointing here.
-- **Extension definitions lose `name`.** The map key is the name.
-- **Reference plugin extensions as `namespace/name`:** `{ "type": "acme/legacy" }` in manifests, and `{ "judge": "acme/completeness" }` in datasets and `toPassToolJudge`. Bare names belong to built-ins, so a plugin can no longer register a bare `correctness` or replace `file`.
-- **A manifest must load the plugins it references.** Referencing `acme/...` without `acme` in that manifest's `plugins` (or `--plugins`, or the `plugins` option) is an error, even if another manifest in the same batch loaded it.
-- **`--plugins` and the `pluginPaths` option add to the manifest's `plugins`** instead of replacing them.
-- **Manifest plugin paths resolve relative to the manifest's directory,** then `rootDir` (`--root-dir`, the working directory by default), then as package names, resolved as `import` resolves them (exports conditions, including `module-sync`, and subpath patterns), so a package subpath must be a file or an `exports` entry. Before, they resolved against `rootDir` only.
-- **Plugins are validated when they load.** Unknown top-level keys are rejected, every extension needs a Zod `schema` and its kind's function (`load`, `run`/`runBatch`/`createConfig`, `evaluate`, `compute`, or `create`), and a different plugin claiming a loaded namespace throws. An old `registerJudge(name, executor)` judge becomes `{ schema: z.object({}).passthrough(), evaluate: executor }`.
-- **Datasets are checked too.** A case's `host.type` and `passesJudge.judge` must name a built-in or a namespace the suite loads.
-- **`getBuiltinHostConfig` resolves built-in hosts only.**
-- **`validateManifestRegistrations` is now `validateManifest`** (from `./evals`).
-- **Code passes plugin objects** where it used to call register functions: `runEvalSuite({ ..., plugins })`, `runEvalBatch({ ..., plugins })`, `runEvalDataset({ dataset, plugins }, ctx)`, `runEvalCase(evalCase, ctx, { plugins })`, or `test.use({ mcpPlugins: [plugin] })` in Playwright. Code that calls `validateJudge` or the matchers outside those uses `installPlugins([plugin])`, from the package root. For a one-off judge, wrap it in a small local plugin, such as `{ meta: { name: 'local', namespace: 'local' }, judges: { x } }`.
-- **Removed:**
-  - From the root: `registerJudge` (both forms) and the `CustomJudgeExecutor` and `CustomJudgeResult` types. A plugin judge's `evaluate` takes the same arguments as the old executor; it also needs a `schema`.
-  - From `./evals`: `registerDatasetSource`, `registerHost`, `registerMetric`, `registerResultStore`, and their `get*`, `list*` and `clear*` counterparts; `METRIC_REGISTRY`; and `loadPlugins`, `loadPluginModule`, `EvalPluginModule` and `LoadPluginsOptions`.
-  - The metric-record argument of `resolveMetric` and `computeMetrics`. Metrics resolve from built-ins and loaded plugins only, and `BUILT_IN_METRICS` is read-only.
-- **The `glean-legacy` dataset source example was removed.** It encoded one organization's legacy dataset schema and judge policy, which belongs in that organization's plugin, not in MST. Copy it from the `v2.0.0-beta.7` tag (`examples/plugins/legacy-glean-datasets.ts`) if you need it, and convert it to a plugin object as above. [Migrating dataset sources](dataset-sources.md#other-dataset-schemas-a-dataset-source-plugin) shows a dataset-source plugin.
+- **A judge's `evaluate` takes the old executor's arguments and returns the same result.** It also receives the options its `schema` parsed, as a third argument. The `schema` is required; `z.object({}).passthrough()` accepts any options, as the old registry did.
+- **Reference it as `namespace/name`**, in `toPassToolJudge({ judge })` and in a dataset's `passesJudge.judge`. Bare names belong to built-ins, so a plugin can't take one. A 1.x bare name such as `judge: 'completeness'` now fails the assertion with `Judge "completeness" is not available`, followed by the names that are.
+- **Pass the plugin where the judge is used**, instead of registering it in global setup: `test.use({ mcpPlugins: [plugin] })` in Playwright, `runEvalDataset({ dataset, plugins: [plugin] }, ctx)`, or `runEvalCase(evalCase, ctx, { plugins: [plugin] })`. Code that calls `validateJudge` or the matchers outside those installs it with `installPlugins([plugin])`. For a one-off judge, a small local plugin is enough: `{ meta: { name: 'local', namespace: 'local' }, judges: { x } }`.
+- **Plugins are validated when installed.** A judge without a `schema` or `evaluate`, an unknown top-level key, or a different plugin claiming an installed namespace is an error that names the plugin.
+- **Removed from the root:** `registerJudge`, `getRegisteredJudge`, `clearJudgeRegistry`, and the `CustomJudgeExecutor` and `CustomJudgeResult` types.
 
 ## LLM calls: bearer tokens and streaming
 
@@ -334,7 +266,6 @@ export default {
 MST's LLM calls now resolve their endpoint and credential in one place (`src/llm/endpoint.ts`), so they can go through an LLM gateway. See [LLM Gateways](../llm-gateways.md).
 
 - **`ANTHROPIC_AUTH_TOKEN` is a gateway credential.** With `ANTHROPIC_BASE_URL` set, it is sent as `Authorization: Bearer`, ahead of `ANTHROPIC_API_KEY`; the SDK host used to send only `x-api-key`, and the judge sent both headers. Without a base URL override it is ignored, so a gateway token never reaches the public API; the judge's SDK used to send it there too. If it was your only Anthropic credential, set `ANTHROPIC_BASE_URL` (or `ANTHROPIC_API_KEY`): the `anthropic` judge now reports a missing key, and the SDK host's calls fail authentication.
-- **The Cowork Computer Use driver ignores `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`.** It always calls the public Anthropic API with `ANTHROPIC_API_KEY`. Before, the Python SDK picked both up from the environment, which could send the key to a gateway or a gateway token to the public API.
 - **An explicit `apiKeyEnvVar` reads only that variable.** This was already true for the SDK host; the judge used to pick up `ANTHROPIC_AUTH_TOKEN` from the environment as well.
 - **With a base URL override, `MST_LLM_AUTH_COMMAND` wins over `*_API_KEY` and `ANTHROPIC_AUTH_TOKEN`.** It is new, so this only matters once you set it.
 - **`ANTHROPIC_BASE_URL` takes either form.** The SDK host needed the AI SDK's form (ending in `/v1`) and the judge needed the API root (the official SDK's and Claude Code's form); each failed with 404 on the other. Both now accept both.
@@ -344,6 +275,9 @@ MST's LLM calls now resolve their endpoint and credential in one place (`src/llm
 
 ## New in 2.0 (non-breaking)
 
+- An evaluation framework over datasets: manifests, suites and batches (`mst run`, `mst batch`), arms, metrics, result stores, and plugins that add dataset sources, hosts, judges, metrics and result stores under their own namespace. It's in `@gleanwork/mcp-server-tester/evals`. See [Evaluation framework](../evaluation-framework.md).
+- Desktop hosts for suites: Claude Cowork (`cowork`) and the ChatGPT desktop app (`chatgpt`), driven through the desktop UI (Computer Use on macOS, AT-SPI on Linux). External-host cases (`mode: 'external_host'`) run a scenario through another host's driver. Their APIs are in `@gleanwork/mcp-server-tester/experimental/hosts`, which may change between minor versions. See [Cowork](../cowork.md) and [ChatGPT desktop](../chatgpt-desktop.md).
+- A custom `executeCase` for `runEvalDataset()` and `runEvalCase()`, which returns a typed `CaseExecution` (`direct`, `host` or `failed`).
 - LLM gateway support for the `mcp_host` SDK host and LLM judges: `ANTHROPIC_AUTH_TOKEN`, and `MST_LLM_AUTH_COMMAND` for short-lived tokens. See [LLM Gateways](../llm-gateways.md).
 - The CLI is also installed as `mst`. In a project that depends on the package, `npx mst <command>` and `npx mcp-server-tester <command>` run the same binary. Before the package is installed, run `init` as `npx @gleanwork/mcp-server-tester init`: `npx mcp-server-tester` and `npx mst` would download unrelated npm packages with those names. See [CLI](../cli.md).
 - `protocol` on `mcpConfig` (`'legacy'`, `'auto'`, or a revision like `'2026-07-28'`), the `mcpProtocol` fixture option, and `protocolMatrix()`. See [Protocol Versions](../protocol-versions.md). To run an existing project against both eras:

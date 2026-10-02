@@ -118,7 +118,7 @@ export function assertPlugin(value: unknown, source: string): Plugin {
     throw new Error(
       `Plugin at ${source} exports a function. MST 2.0 plugins are objects: ` +
         'export default { meta: { name, namespace }, judges: { ... } }. ' +
-        'See docs/migrations/migration-2.0.md.'
+        'See docs/migrations/2.0-prereleases.md#plugins-are-objects.'
     );
   }
   if (!isRecord(value) || !isRecord(value.meta)) {
