@@ -81,8 +81,9 @@ export interface JudgeConfig {
   provider?: ProviderKind;
 
   /**
-   * Environment variable name containing the API key
-   * @default 'ANTHROPIC_API_KEY'
+   * Read the API key from exactly this environment variable. Unset, the
+   * credential is resolved from the provider's usual variables and the LLM
+   * gateway settings (see docs/llm-gateways.md); set, those are not read.
    */
   apiKeyEnvVar?: string;
 

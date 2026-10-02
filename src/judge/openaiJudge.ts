@@ -4,11 +4,12 @@ import {
   DEFAULT_JUDGE_MAX_TOKENS,
   DEFAULT_JUDGE_TEMPERATURE,
   loadJudgeSdk,
-  requireJudgeApiKey,
+  requireJudgeCredential,
 } from './adapterSupport.js';
+import { resolveLLMEndpoint } from '../llm/endpoint.js';
 
 interface OpenAISdk {
-  default: new (options: { apiKey: string }) => {
+  default: new (options: { apiKey: string; baseURL: string }) => {
     chat: {
       completions: {
         create(request: {
@@ -27,15 +28,14 @@ interface OpenAISdk {
 
 /**
  * OpenAI Chat Completions adapter.
- * Requires the `openai` package and an OpenAI API key.
+ * Requires the `openai` package and an OpenAI API key (or the gateway auth
+ * command; see docs/llm-gateways.md).
  */
 export function openaiCompletion(
   config: JudgeConfig = {}
 ): JudgeCompletionAdapter {
-  const apiKey = requireJudgeApiKey(
-    'OpenAI',
-    config.apiKeyEnvVar ?? 'OPENAI_API_KEY'
-  );
+  const options = { apiKeyEnvVar: config.apiKeyEnvVar };
+  requireJudgeCredential('OpenAI', 'openai', options);
   return async ({ system, prompt }) => {
     const sdk = await loadJudgeSdk<OpenAISdk>(
       // @ts-expect-error - optional: npm install openai
@@ -43,8 +43,10 @@ export function openaiCompletion(
       'OpenAI',
       'openai'
     );
+    const endpoint = await resolveLLMEndpoint('openai', options);
     const completion = await new sdk.default({
-      apiKey,
+      apiKey: endpoint.apiKey ?? '',
+      baseURL: endpoint.baseURL,
     }).chat.completions.create({
       model: config.model ?? 'gpt-4o',
       max_tokens: config.maxTokens ?? DEFAULT_JUDGE_MAX_TOKENS,

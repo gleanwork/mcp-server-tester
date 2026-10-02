@@ -22,6 +22,7 @@ Other 2.0 changes have their own guides: [dataset sources](./dataset-sources.md)
 - [Which credentials are used](#which-credentials-are-used)
 - [Desktop hosts share one batch lifecycle](#desktop-hosts-share-one-batch-lifecycle)
 - [Plugins are objects, and extensions are namespaced](#plugins-are-objects-and-extensions-are-namespaced)
+- [LLM calls: bearer tokens and streaming](#llm-calls-bearer-tokens-and-streaming)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
 ---
@@ -326,8 +327,24 @@ export default {
   - The metric-record argument of `resolveMetric` and `computeMetrics`. Metrics resolve from built-ins and loaded plugins only, and `BUILT_IN_METRICS` is read-only.
 - **The `glean-legacy` dataset source example was removed.** It encoded one organization's legacy dataset schema and judge policy, which belongs in that organization's plugin, not in MST. Copy it from the `v2.0.0-beta.7` tag (`examples/plugins/legacy-glean-datasets.ts`) if you need it, and convert it to a plugin object as above. [Migrating dataset sources](dataset-sources.md#other-dataset-schemas-a-dataset-source-plugin) shows a dataset-source plugin.
 
+## LLM calls: bearer tokens and streaming
+
+**Affects:** `mcp_host` cases with `provider: 'anthropic'`, or `provider: 'openai'` with `OPENAI_BASE_URL` set, the `anthropic` judge, and code that matches on SDK host error messages.
+
+MST's LLM calls now resolve their endpoint and credential in one place (`src/llm/endpoint.ts`), so they can go through an LLM gateway. See [LLM Gateways](../llm-gateways.md).
+
+- **`ANTHROPIC_AUTH_TOKEN` is a gateway credential.** With `ANTHROPIC_BASE_URL` set, it is sent as `Authorization: Bearer`, ahead of `ANTHROPIC_API_KEY`; the SDK host used to send only `x-api-key`, and the judge sent both headers. Without a base URL override it is ignored, so a gateway token never reaches the public API; the judge's SDK used to send it there too. If it was your only Anthropic credential, set `ANTHROPIC_BASE_URL` (or `ANTHROPIC_API_KEY`): the `anthropic` judge now reports a missing key, and the SDK host's calls fail authentication.
+- **The Cowork Computer Use driver ignores `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`.** It always calls the public Anthropic API with `ANTHROPIC_API_KEY`. Before, the Python SDK picked both up from the environment, which could send the key to a gateway or a gateway token to the public API.
+- **An explicit `apiKeyEnvVar` reads only that variable.** This was already true for the SDK host; the judge used to pick up `ANTHROPIC_AUTH_TOKEN` from the environment as well.
+- **With a base URL override, `MST_LLM_AUTH_COMMAND` wins over `*_API_KEY` and `ANTHROPIC_AUTH_TOKEN`.** It is new, so this only matters once you set it.
+- **`ANTHROPIC_BASE_URL` takes either form.** The SDK host needed the AI SDK's form (ending in `/v1`) and the judge needed the API root (the official SDK's and Claude Code's form); each failed with 404 on the other. Both now accept both.
+- **The `anthropic` SDK host streams.** Its agent loop uses `streamText` instead of `generateText`. Tool calls, text, steps and usage are the same; an error part in the middle of a stream now fails the case.
+- **The `openai` SDK host sends `store: false` behind `OPENAI_BASE_URL`.** Multi-turn tool loops through a gateway failed with `Item with id 'rs_…' not found`, because the AI SDK refers to earlier Responses items by id. Calls to the public API are unchanged.
+- **Clearer SDK host errors.** Errors are classified by HTTP status as well as message text, so a 401 whose message doesn't say "401" still gets the authentication hint, and the hint now includes the provider's message: `authentication error (<provider message>)`. A plain-object stream error shows its `message` instead of `[object Object]`.
+
 ## New in 2.0 (non-breaking)
 
+- LLM gateway support for the `mcp_host` SDK host and LLM judges: `ANTHROPIC_AUTH_TOKEN`, and `MST_LLM_AUTH_COMMAND` for short-lived tokens. See [LLM Gateways](../llm-gateways.md).
 - The CLI is also installed as `mst`. In a project that depends on the package, `npx mst <command>` and `npx mcp-server-tester <command>` run the same binary. Before the package is installed, run `init` as `npx @gleanwork/mcp-server-tester init`: `npx mcp-server-tester` and `npx mst` would download unrelated npm packages with those names. See [CLI](../cli.md).
 - `protocol` on `mcpConfig` (`'legacy'`, `'auto'`, or a revision like `'2026-07-28'`), the `mcpProtocol` fixture option, and `protocolMatrix()`. See [Protocol Versions](../protocol-versions.md). To run an existing project against both eras:
 

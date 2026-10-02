@@ -1,4 +1,9 @@
 /** Shared plumbing for judge completion adapters. */
+import {
+  hasLLMCredential,
+  type LLMApiFamily,
+  type LLMEndpointOptions,
+} from '../llm/endpoint.js';
 
 /** Output token budget for a judge verdict, unless configured. */
 export const DEFAULT_JUDGE_MAX_TOKENS = 1000;
@@ -28,6 +33,35 @@ export async function loadJudgeSdk<Sdk>(
         `Original error: ${cause instanceof Error ? cause.message : String(cause)}`
     );
   }
+}
+
+/**
+ * Throws, naming what to set, unless a credential for `family` is configured
+ * (an API key, a bearer token, or the gateway auth command). The credential
+ * itself is resolved per call with resolveLLMEndpoint.
+ */
+export function requireJudgeCredential(
+  judge: string,
+  family: LLMApiFamily,
+  options: LLMEndpointOptions
+): void {
+  if (hasLLMCredential(family, options)) return;
+  if (options.apiKeyEnvVar !== undefined)
+    throw new Error(
+      `${judge} judge requires an API key. Set the ${options.apiKeyEnvVar} environment variable.`
+    );
+  const [apiKey, baseURL, gatewayCredentials] =
+    family === 'anthropic'
+      ? [
+          'ANTHROPIC_API_KEY',
+          'ANTHROPIC_BASE_URL',
+          'ANTHROPIC_AUTH_TOKEN or MST_LLM_AUTH_COMMAND',
+        ]
+      : ['OPENAI_API_KEY', 'OPENAI_BASE_URL', 'MST_LLM_AUTH_COMMAND'];
+  throw new Error(
+    `${judge} judge requires an API key. Set the ${apiKey} environment variable ` +
+      `(or, for a gateway, ${baseURL} with ${gatewayCredentials}; see docs/llm-gateways.md).`
+  );
 }
 
 /** Reads the API key a judge needs, or throws naming the variable to set. */

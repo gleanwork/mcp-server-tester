@@ -1220,7 +1220,8 @@ Create an LLM judge for semantic evaluation of tool responses.
 import { createJudge } from '@gleanwork/mcp-server-tester';
 
 const judge = createJudge();
-// Requires: ANTHROPIC_API_KEY environment variable
+// Requires: ANTHROPIC_API_KEY environment variable, or a gateway credential
+// (see LLM Gateways: ./llm-gateways.md)
 ```
 
 **With configuration:**
@@ -1231,7 +1232,7 @@ const judge = createJudge({
   model: 'gpt-4o',
   temperature: 0.0,
 });
-// Requires: OPENAI_API_KEY environment variable
+// Requires: OPENAI_API_KEY environment variable, or a gateway credential
 ```
 
 ### LLM Host Diagnostic Utilities

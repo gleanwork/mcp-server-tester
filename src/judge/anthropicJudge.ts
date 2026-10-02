@@ -5,8 +5,9 @@ import {
   DEFAULT_JUDGE_MAX_TOKENS,
   DEFAULT_JUDGE_TEMPERATURE,
   loadJudgeSdk,
-  requireJudgeApiKey,
+  requireJudgeCredential,
 } from './adapterSupport.js';
+import { resolveLLMEndpoint } from '../llm/endpoint.js';
 
 /** The part of an Anthropic Messages API response a judge reads. */
 export interface AnthropicMessage {
@@ -24,7 +25,11 @@ export interface AnthropicMessageRequest {
 }
 
 interface AnthropicSdk {
-  default: new (options: { apiKey: string }) => {
+  default: new (options: {
+    apiKey: string | null;
+    authToken: string | null;
+    baseURL: string;
+  }) => {
     messages: {
       create(request: AnthropicMessageRequest): Promise<AnthropicMessage>;
     };
@@ -61,15 +66,14 @@ export function anthropicMessageCompletion(
 
 /**
  * Anthropic Messages API completion adapter.
- * Requires the `@anthropic-ai/sdk` package and an Anthropic API key.
+ * Requires the `@anthropic-ai/sdk` package and an Anthropic credential:
+ * an API key, or a gateway bearer token (see docs/llm-gateways.md).
  */
 export function anthropicCompletion(
   config: JudgeConfig = {}
 ): JudgeCompletionAdapter {
-  const apiKey = requireJudgeApiKey(
-    'Anthropic',
-    config.apiKeyEnvVar ?? 'ANTHROPIC_API_KEY'
-  );
+  const options = { apiKeyEnvVar: config.apiKeyEnvVar };
+  requireJudgeCredential('Anthropic', 'anthropic', options);
   return async ({ system, prompt }) => {
     const sdk = await loadJudgeSdk<AnthropicSdk>(
       // @ts-expect-error - optional: npm install @anthropic-ai/sdk
@@ -77,7 +81,15 @@ export function anthropicCompletion(
       'Anthropic',
       '@anthropic-ai/sdk'
     );
-    const response = await new sdk.default({ apiKey }).messages.create(
+    const endpoint = await resolveLLMEndpoint('anthropic', options);
+    // Explicit nulls stop the SDK reading the other credential from the
+    // environment and sending both headers.
+    const client = new sdk.default({
+      apiKey: endpoint.apiKey ?? null,
+      authToken: endpoint.authToken ?? null,
+      baseURL: endpoint.baseURL,
+    });
+    const response = await client.messages.create(
       anthropicMessageRequest(config, system, prompt)
     );
     return anthropicMessageCompletion(response);

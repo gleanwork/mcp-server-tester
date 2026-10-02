@@ -33,6 +33,8 @@ All providers use the Vercel AI SDK. Install `ai` plus the provider-specific pac
 | `openrouter`       | `OPENROUTER_API_KEY`           | `npm install ai @openrouter/ai-sdk-provider` |
 | `xai`              | `XAI_API_KEY`                  | `npm install ai @ai-sdk/xai`                 |
 
+To send `anthropic` or `openai` calls through an LLM gateway, set `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` and a gateway credential (`MST_LLM_AUTH_COMMAND` for either, or a static `ANTHROPIC_AUTH_TOKEN` / `OPENAI_API_KEY`). See [LLM Gateways](./llm-gateways.md). The `anthropic` provider streams its responses.
+
 ## Basic Usage
 
 ```typescript snippet=snippets/mcp-host-basic-test.ts

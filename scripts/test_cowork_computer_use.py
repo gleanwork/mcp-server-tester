@@ -23,6 +23,11 @@ class DriverTests(unittest.TestCase):
                 for i, a in enumerate(plan)
             ])
 
+        def construct(**kwargs):
+            self.client_env = dict(driver.os.environ)
+            return unittest.mock.DEFAULT
+
+        api.Anthropic.side_effect = construct
         planner = api.Anthropic.return_value.beta.messages.create
         if planner_error is not None:
             planner.side_effect = [response(actions), planner_error]
@@ -49,7 +54,16 @@ class DriverTests(unittest.TestCase):
             self.requested_tools = planner.call_args.kwargs['tools'] if planner.call_args else []
             self.planner_request = planner.call_args.kwargs if planner.call_args else {}
             self.launches = launched.call_args_list
+            self.client_kwargs = api.Anthropic.call_args.kwargs if api.Anthropic.call_args else {}
             return result, performed.call_count
+
+    def test_planner_ignores_inherited_gateway_settings(self):
+        gateway = {'ANTHROPIC_BASE_URL': 'https://gateway.example/anthropic', 'ANTHROPIC_AUTH_TOKEN': 'gateway-token'}
+        with patch.dict(driver.os.environ, gateway):
+            self.run_actions([], mode='hitl')
+        # The API key goes only to the public API, and the gateway token never does.
+        self.assertEqual(self.client_kwargs, {'api_key': 'test-only', 'base_url': 'https://api.anthropic.com'})
+        self.assertNotIn('ANTHROPIC_AUTH_TOKEN', self.client_env)
 
     def test_cowork_hitl_defaults_to_read_only_and_never_persistent_approval(self):
         with patch.dict(driver.os.environ, {'MST_COWORK_APPROVE_WRITE_TOOLS': '0'}):

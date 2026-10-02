@@ -23,6 +23,7 @@ from typing import Any
 DISPLAY_WIDTH = 1280
 DISPLAY_HEIGHT = 800
 DEFAULT_MODEL = "claude-sonnet-4-6"
+PUBLIC_API_BASE_URL = "https://api.anthropic.com"
 DEFAULT_MAX_ACTIONS = 24
 
 
@@ -287,7 +288,12 @@ async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemet
     if chatgpt_surface not in {'chatgpt-work', 'codex'}:
         raise RuntimeError('Unsupported ChatGPT surface')
     surface = ('ChatGPT Work' if chatgpt_surface == 'chatgpt-work' else 'Codex') if application == 'chatgpt' else 'Cowork'
-    client = anthropic.Anthropic(api_key=api_key)
+    # This driver doesn't support LLM gateways yet: it always calls the public
+    # API with ANTHROPIC_API_KEY. Otherwise the SDK would pick up an inherited
+    # ANTHROPIC_BASE_URL (sending this key to a gateway) and ANTHROPIC_AUTH_TOKEN
+    # (sending a gateway token to the public API).
+    os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
+    client = anthropic.Anthropic(api_key=api_key, base_url=PUBLIC_API_BASE_URL)
     model = os.environ.get("MST_COWORK_CUA_MODEL", DEFAULT_MODEL)
     log(f"starting driver with model={model}, max_actions={max_actions}, app={application}")
     app_path = os.environ.get("MST_COWORK_APP_PATH") if application == "cowork" else None
