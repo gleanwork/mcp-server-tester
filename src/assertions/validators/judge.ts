@@ -151,6 +151,10 @@ export async function validateJudge(
       );
 
       const score = judgeResult.score;
+      if (!Number.isFinite(score))
+        return judgeError(
+          `Custom judge "${judgeName}" error: returned score ${String(score)}, not a number`
+        );
       const passed = score >= threshold;
 
       return {
@@ -161,20 +165,17 @@ export async function validateJudge(
         details: { score, reasoning: judgeResult.reasoning },
       };
     } catch (err) {
-      return {
-        pass: false,
-        message: `Custom judge "${judgeName}" error: ${err instanceof Error ? err.message : String(err)}`,
-      };
+      return judgeError(
+        `Custom judge "${judgeName}" error: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
   }
 
   // Built-in LLM judge — requires rubric
   if (rubric === undefined) {
-    return {
-      pass: false,
-      message:
-        'Judge evaluation failed: either "judge" or "rubric" must be provided',
-    };
+    return judgeError(
+      'Judge evaluation failed: either "judge" or "rubric" must be provided'
+    );
   }
 
   const resolvedRubric = resolveRubric(rubric);
@@ -206,10 +207,7 @@ export async function validateJudge(
     }
 
     if (scores.length === 0) {
-      return {
-        pass: false,
-        message: 'Judge evaluation failed: no scores collected',
-      };
+      return judgeError('Judge evaluation failed: no scores collected');
     }
 
     const meanScore = scores.reduce((a, b) => a + b, 0) / scores.length;
@@ -253,9 +251,16 @@ export async function validateJudge(
       },
     };
   } catch (err) {
-    return {
-      pass: false,
-      message: `Judge evaluation error: ${err instanceof Error ? err.message : String(err)}`,
-    };
+    return judgeError(
+      `Judge evaluation error: ${err instanceof Error ? err.message : String(err)}`
+    );
   }
+}
+
+/**
+ * A failure that is not a verdict: the judge couldn't score the response.
+ * `details.error` lets matchers fail it with or without `.not`.
+ */
+function judgeError(message: string): ValidationResult {
+  return { pass: false, message, details: { error: message } };
 }

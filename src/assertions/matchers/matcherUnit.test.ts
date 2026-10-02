@@ -1,6 +1,7 @@
 import { describe, it, expect as vitestExpect } from 'vitest';
 import { z } from 'zod';
 import { expect as mcpExpect } from './index.js';
+import { installPlugins } from '../../plugins/extensions.js';
 
 // ---------------------------------------------------------------------------
 // Shared test data
@@ -435,5 +436,78 @@ describe('toSatisfyToolPredicate', () => {
       thrownMessage = err instanceof Error ? err.message : String(err);
     }
     vitestExpect(thrownMessage).toContain('Custom failure: expected 99');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// toPassToolJudge (.not)
+// ---------------------------------------------------------------------------
+
+describe('toPassToolJudge', () => {
+  installPlugins([
+    {
+      meta: { name: 'matcher-unit-judges', namespace: 'unit' },
+      judges: {
+        high: { schema: z.object({}), evaluate: async () => ({ score: 0.9 }) },
+        low: { schema: z.object({}), evaluate: async () => ({ score: 0.1 }) },
+        crash: {
+          schema: z.object({}),
+          evaluate: async () => {
+            throw new Error('judge offline');
+          },
+        },
+      },
+    },
+  ]);
+
+  it('fails on negation when the judge passes', async () => {
+    await vitestExpect(
+      mcpExpect(textResponse).not.toPassToolJudge({ judge: 'unit/high' })
+    ).rejects.toThrow('Expected judge evaluation to fail, but it passed');
+  });
+
+  it('passes on negation when the judge fails', async () => {
+    await vitestExpect(
+      mcpExpect(textResponse).not.toPassToolJudge({ judge: 'unit/low' })
+    ).resolves.not.toThrow();
+  });
+
+  it('fails with or without .not when the judge throws', async () => {
+    await vitestExpect(
+      mcpExpect(textResponse).toPassToolJudge({ judge: 'unit/crash' })
+    ).rejects.toThrow('judge offline');
+    await vitestExpect(
+      mcpExpect(textResponse).not.toPassToolJudge({ judge: 'unit/crash' })
+    ).rejects.toThrow('judge offline');
+  });
+
+  it('negates a judge list as "not every judge passes"', async () => {
+    await vitestExpect(
+      mcpExpect(textResponse).not.toPassToolJudge([
+        { judge: 'unit/high' },
+        { judge: 'unit/low' },
+      ])
+    ).resolves.not.toThrow();
+    await vitestExpect(
+      mcpExpect(textResponse).not.toPassToolJudge([
+        { judge: 'unit/high' },
+        { judge: 'unit/high' },
+      ])
+    ).rejects.toThrow('Expected at least one judge to fail');
+  });
+
+  it('fails a judge list with a crashing judge, with or without .not', async () => {
+    await vitestExpect(
+      mcpExpect(textResponse).not.toPassToolJudge([
+        { judge: 'unit/low' },
+        { judge: 'unit/crash' },
+      ])
+    ).rejects.toThrow('judge offline');
+    await vitestExpect(
+      mcpExpect(textResponse).toPassToolJudge([
+        { judge: 'unit/high' },
+        { judge: 'unit/crash' },
+      ])
+    ).rejects.toThrow('judge offline');
   });
 });

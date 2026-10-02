@@ -13,7 +13,7 @@ This guide covers upgrading from 1.x (the last 1.x release is 1.1.1). Features f
 - [Conformance results: severity, skips, and new checks](#conformance-results-severity-skips-and-new-checks)
 - [`compareEvalRuns()` returns `warnings`](#compareevalruns-returns-warnings)
 - [`MCP_PROTOCOL_VERSION` is deprecated](#mcp_protocol_version-is-deprecated)
-- [`.not` works on `toSatisfyToolPredicate` and `toMatchToolSnapshot`](#not-works-on-tosatisfytoolpredicate-and-tomatchtoolsnapshot)
+- [`.not` works on `toSatisfyToolPredicate`, `toMatchToolSnapshot` and `toPassToolJudge`](#not-works-on-tosatisfytoolpredicate-tomatchtoolsnapshot-and-topasstooljudge)
 - [LLM judges share one prompt, parser and size limit](#llm-judges-share-one-prompt-parser-and-size-limit)
 - [MCP reporter attachments](#mcp-reporter-attachments)
 - [Stored results are redacted the same way everywhere](#stored-results-are-redacted-the-same-way-everywhere)
@@ -166,13 +166,13 @@ The result has a new `warnings: string[]` field. It flags comparisons between ru
 
 The exported `MCP_PROTOCOL_VERSION` constant is the header MST sends on OAuth discovery requests, not the protocol connections speak. It is deprecated and will be removed in a future major. Use `mcpConfig.protocol` to choose a connection's protocol. It is now exported from `@gleanwork/mcp-server-tester/auth`.
 
-## `.not` works on `toSatisfyToolPredicate` and `toMatchToolSnapshot`
+## `.not` works on `toSatisfyToolPredicate`, `toMatchToolSnapshot` and `toPassToolJudge`
 
-**Affects:** tests that use `.not.toSatisfyToolPredicate()` or `.not.toMatchToolSnapshot()`.
+**Affects:** tests that use `.not.toSatisfyToolPredicate()`, `.not.toMatchToolSnapshot()` or `.not.toPassToolJudge()`.
 
-Both matchers negated their own result and then Playwright negated it again, so `.not` asserted the opposite of what it says. `expect(r).not.toSatisfyToolPredicate(p)` passed when `p` was satisfied, and `.not.toMatchToolSnapshot(name)` passed when the response matched the snapshot. `.not` now means "not", as it does for every other matcher. Assertions without `.not` are unchanged.
+These matchers negated their own result and then Playwright negated it again, so `.not` asserted the opposite of what it says. `expect(r).not.toSatisfyToolPredicate(p)` passed when `p` was satisfied, `.not.toMatchToolSnapshot(name)` passed when the response matched the snapshot, and `.not.toPassToolJudge(rubric)` passed when the judge passed. `.not` now means "not", as it does for every other matcher; with a list of judges, it means at least one judge fails. Assertions without `.not` are unchanged.
 
-A test that relied on the old behaviour now fails. Remove its `.not`. A predicate that throws still fails the assertion, with or without `.not`.
+A test that relied on the old behaviour now fails. Remove its `.not`. A predicate that throws, or a judge that can't score the response (an API error, a missing key, an unknown judge), fails the assertion with or without `.not`.
 
 ## LLM judges share one prompt, parser and size limit
 
