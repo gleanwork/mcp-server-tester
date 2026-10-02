@@ -71,9 +71,9 @@ const host = {
 };
 const server = {
   transport: 'http' as const,
-  label: 'glean',
+  label: 'primary',
   serverUrl: 'https://example.com/mcp/eval',
-  auth: { accessTokenEnv: 'GLEAN_API_TOKEN' },
+  auth: { accessTokenEnv: 'ACME_API_TOKEN' },
 };
 const context: HostRunContext = {
   manifest: {
@@ -85,7 +85,7 @@ const context: HostRunContext = {
   },
   env: {
     ANTHROPIC_API_KEY: 'test-secret-key',
-    GLEAN_API_TOKEN: 'test-secret-token',
+    ACME_API_TOKEN: 'test-secret-token',
   },
 };
 const readOnlyContext: HostRunContext = {
@@ -110,7 +110,7 @@ beforeEach(async () => {
   vi.clearAllMocks();
   mocks.order.length = 0;
   mocks.readiness.mockResolvedValue([
-    { label: 'glean', status: 'connected', toolCount: 22, elapsedMs: 10 },
+    { label: 'primary', status: 'connected', toolCount: 22, elapsedMs: 10 },
   ]);
   mocks.setup.mockImplementation(async () => {
     mocks.order.push('setup');
@@ -182,7 +182,7 @@ describe('V2 Cowork host', () => {
         }) => {
           await options.onPending?.({
             candidate: { metadataPath: options.sessionPath },
-            toolCalls: [{ name: 'enterprise_search', arguments: {} }],
+            toolCalls: [{ name: 'search', arguments: {} }],
             isComplete: false,
           } as ClaudeTrace);
           return (await original(options)) as ClaudeTrace;

@@ -71,7 +71,7 @@ async function fixture(
           {
             type: 'tool_use',
             id: 'tool-1',
-            name: 'mcp__glean__search',
+            name: 'mcp__acme__search',
             input: { query: secret },
           },
           {

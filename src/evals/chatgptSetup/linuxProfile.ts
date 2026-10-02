@@ -44,7 +44,7 @@ import {
 import type { HostPlugin, HostPluginCredentials } from '../hostPlugins.js';
 import { createLinuxChatgptApp } from './linuxApp.js';
 
-/** The Scio -> MST process environment. All paths are absolute and normalized. */
+/** The caller -> MST process environment. All paths are absolute and normalized. */
 const REQUIRED_PATHS = [
   'HOME',
   'XDG_RUNTIME_DIR',
@@ -178,8 +178,8 @@ export function validateLinuxChatgptConfig(
 }
 
 /**
- * bwrap cannot run inside the Scio container, and nobody can answer an
- * approval request in a headless run. Scio runs the whole app in a disposable
+ * bwrap cannot run inside the caller's container, and nobody can answer an
+ * approval request in a headless run. The caller runs the whole app in a disposable
  * no-new-privileges container with a fresh tmpfs profile, so that container is
  * the isolation boundary; the native per-command sandbox is turned off.
  */
@@ -236,7 +236,7 @@ export interface ChatgptPlatformProfile {
   dispose(): Promise<void>;
 }
 
-/** Fresh MST-owned profile inside the Scio-provided HOME. Fails closed. */
+/** Fresh MST-owned profile inside the caller-provided HOME. Fails closed. */
 export async function createLinuxChatgptProfile(
   environment: LinuxChatgptEnvironment,
   platform: NodeJS.Platform = process.platform
@@ -368,7 +368,7 @@ export async function createLinuxChatgptProfile(
       }
     },
     async dispose() {
-      // Owner-checked: remove only the workspace MST created. Scio owns HOME.
+      // Owner-checked: remove only the workspace MST created. The caller owns HOME.
       const info = await lstat(workspace).catch(() => undefined);
       if (info?.isDirectory() && info.uid === process.getuid?.())
         await rm(workspace, { recursive: true, force: true });

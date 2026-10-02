@@ -166,7 +166,7 @@ declare global {
        * });
        *
        * // Named custom judge (registered via registerJudge)
-       * expect(result).toPassToolJudge({ judge: 'glean-completeness' });
+       * expect(result).toPassToolJudge({ judge: 'my-completeness' });
        * ```
        */
       toPassToolJudge(

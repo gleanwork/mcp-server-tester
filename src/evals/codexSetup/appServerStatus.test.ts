@@ -40,7 +40,7 @@ function rpcError(message: string, code = 1) {
 function listed(data: unknown[]) {
   return [initialized, list(data)];
 }
-const glean = { name: 'glean', tools: [] };
+const acme = { name: 'acme', tools: [] };
 function status(
   label: string,
   toolCount: number | null,
@@ -77,7 +77,7 @@ describe('app-server MCP status exchange', () => {
       { method: 'notification/progress', params: { private: 'x' } },
       list([
         {
-          name: 'glean',
+          name: 'acme',
           tools: [{ name: 'search' }, { name: 'read' }],
           authStatus: 'bearerToken',
           private: 'https://private.example/token',
@@ -87,13 +87,13 @@ describe('app-server MCP status exchange', () => {
       ]),
     ]);
     const servers = await exchangeAppServerStatus(channel, [
-      'glean',
+      'acme',
       'mapped',
       'absent',
     ]);
     expect(channel.sent.map((message) => message.method)).toEqual(METHODS);
     expect(servers).toEqual([
-      status('glean', 2),
+      status('acme', 2),
       // Unknown auth strings and object tool maps map safely.
       status('mapped', 1, 'unknown'),
       status('absent', null, 'unknown'),
@@ -125,14 +125,14 @@ describe('app-server MCP status exchange', () => {
       'invalid-response',
     ],
     [[initialized, list([], { data: {} })], 'invalid-response'],
-    [listed([glean, glean]), 'invalid-response'],
-    [listed([{ name: 'glean', tools: [1] }]), 'invalid-response'],
-    [listed([{ name: 'glean' }]), 'invalid-response'],
+    [listed([acme, acme]), 'invalid-response'],
+    [listed([{ name: 'acme', tools: [1] }]), 'invalid-response'],
+    [listed([{ name: 'acme' }]), 'invalid-response'],
     [[initialized], 'unexpected-eof'],
   ])('fails closed on %j with %s', async (lines, reason) => {
     const channel = new FakeChannel(lines);
     await expect(
-      exchangeAppServerStatus(channel, ['glean'])
+      exchangeAppServerStatus(channel, ['acme'])
     ).rejects.toMatchObject({ reason });
     for (const { method } of channel.sent) expect(METHODS).toContain(method);
   });
@@ -206,7 +206,7 @@ const rl = require('node:readline').createInterface({ input: process.stdin });
 rl.on('line', (line) => {
   const m = JSON.parse(line);
   if (m.method === 'initialize') console.log(JSON.stringify({ id: 0, result: { userAgent: 'private' } }));
-  if (m.method === 'mcpServerStatus/list') console.log(JSON.stringify({ id: 1, result: { data: [{ name: 'glean', tools: [{}], authStatus: 'bearerToken' }], nextCursor: null } }));
+  if (m.method === 'mcpServerStatus/list') console.log(JSON.stringify({ id: 1, result: { data: [{ name: 'acme', tools: [{}], authStatus: 'bearerToken' }], nextCursor: null } }));
 });
 setInterval(() => {}, 1000);
 `,
@@ -215,16 +215,16 @@ setInterval(() => {}, 1000);
       const result = await probeAppServerStatus(
         codex,
         { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: root },
-        ['glean']
+        ['acme']
       );
       expect(result).toEqual({
         status: 'available',
-        servers: [status('glean', 1)],
+        servers: [status('acme', 1)],
       });
       const missing = await probeAppServerStatus(
         join(root, 'missing'),
         { HOME: root },
-        ['glean']
+        ['acme']
       );
       expect(missing).toEqual({ status: 'unavailable', reason: 'io-error' });
     } finally {

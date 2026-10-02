@@ -357,7 +357,7 @@ describe('bounded native binding wait and failure classification', () => {
           toolCalls: [
             {
               source: 'mcp',
-              server: 'glean-eval',
+              server: 'acme-eval',
               name: 'search',
               arguments: {},
             },
@@ -384,7 +384,7 @@ describe('bounded native binding wait and failure classification', () => {
           ]),
           evidence: { usage: { confidence: 'low' } },
         },
-        toolCalls: [{ source: 'mcp', server: 'glean-eval' }],
+        toolCalls: [{ source: 'mcp', server: 'acme-eval' }],
         usage: { inputTokens: 100, outputTokens: 10 },
         conversationHistory: [{ role: 'user' }],
       });

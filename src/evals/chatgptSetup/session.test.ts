@@ -442,9 +442,7 @@ describe('ChatGPT Linux native lifecycle', () => {
   });
 
   it('passes host plugins to the Linux profile before start', async () => {
-    const plugins = [
-      { name: 'glean', marketplace: { source: '/opt/plugins' } },
-    ];
+    const plugins = [{ name: 'acme', marketplace: { source: '/opt/plugins' } }];
     const session = new ChatgptAppSession();
     try {
       await session.prepare({ ...linuxConfig(), plugins });

@@ -1,5 +1,5 @@
 /**
- * Built-in judge rubrics matching Glean EvalV2's named judge types.
+ * Built-in judge rubrics for common named judge types.
  * Use these for consistent, standardized evaluations across teams.
  *
  * All built-in rubrics use a 5-point scale: 0.0 / 0.25 / 0.5 / 0.75 / 1.0

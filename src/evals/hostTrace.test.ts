@@ -9,10 +9,10 @@ describe('per-scenario host traces', () => {
     const toolCalls = [
       {
         name: 'search',
-        rawName: 'mcp__glean__search',
+        rawName: 'mcp__acme__search',
         arguments: {},
         source: 'mcp' as const,
-        server: 'glean',
+        server: 'acme',
         id: 'call-1',
         output: '',
         isError: true,
@@ -288,7 +288,7 @@ describe('per-scenario host traces', () => {
       {
         transport: 'http' as const,
         serverUrl: 'https://example.com',
-        label: 'glean',
+        label: 'acme',
       },
     ];
     const trace = simulationToHostTrace(
@@ -301,14 +301,14 @@ describe('per-scenario host traces', () => {
     );
     expect(trace.events[0]).toMatchObject({
       source: 'mcp',
-      server: 'glean',
+      server: 'acme',
       name: 'search',
     });
     trace.events.push({ kind: 'skill', source: 'host', name: 'research' });
     const result = hostTraceToExecution(trace, 'structured', servers);
     expect(result.response).toMatchObject({
       toolCalls: [
-        { name: 'search', server: 'glean', source: 'mcp', kind: 'tool_call' },
+        { name: 'search', server: 'acme', source: 'mcp', kind: 'tool_call' },
       ],
       events: [{ name: 'search' }, { kind: 'skill', name: 'research' }],
     });

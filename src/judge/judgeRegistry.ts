@@ -76,7 +76,7 @@ export type CustomJudgeExecutor = (
  * ```typescript
  * import { registerJudge } from '@gleanwork/mcp-server-tester';
  *
- * registerJudge('glean-completeness', async (candidate, reference) => {
+ * registerJudge('my-completeness', async (candidate, reference) => {
  *   // Step 1: LLM call with your own prompt and schema
  *   const llmResult = await callLLM(COMPLETENESS_PROMPT, candidate);
  *   const { verdict, reasoning } = JSON.parse(llmResult);
@@ -88,8 +88,8 @@ export type CustomJudgeExecutor = (
  * });
  *
  * // Then in tests — same judge, different thresholds:
- * // expect(result).toPassToolJudge({ judge: 'glean-completeness', passingThreshold: 0.8 });
- * // expect(result).toPassToolJudge({ judge: 'glean-completeness', passingThreshold: 0.5 });
+ * // expect(result).toPassToolJudge({ judge: 'my-completeness', passingThreshold: 0.8 });
+ * // expect(result).toPassToolJudge({ judge: 'my-completeness', passingThreshold: 0.5 });
  * ```
  */
 export function registerJudge(judge: JudgeDefinition): void;

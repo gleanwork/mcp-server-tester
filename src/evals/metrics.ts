@@ -278,7 +278,7 @@ function parameterizedJudgeMetric(
 const BUILT_INS_KEY = Symbol.for('mcp-server-tester.built-in-metrics');
 const globalMetrics = globalThis as unknown as Record<symbol, unknown>;
 
-/** Built-in metrics, including the metrics used by Scio's evaluations. */
+/** Built-in metrics. */
 export const BUILT_IN_METRICS: Record<string, MetricDefinition> =
   (globalMetrics[BUILT_INS_KEY] as
     | Record<string, MetricDefinition>

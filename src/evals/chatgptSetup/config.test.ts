@@ -5,7 +5,7 @@ import { chatgptServers } from './config.js';
 const servers: MCPConfig[] = [
   {
     transport: 'http',
-    label: 'glean',
+    label: 'acme',
     serverUrl: 'https://example.test/eval',
     auth: { accessToken: 'fixture-secret' },
   },

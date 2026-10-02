@@ -93,7 +93,7 @@
           "type": "string",
           "description": "Natural language prompt that the LLM host will act on. Required in 'mcp_host' mode.",
           "examples": [
-            "Find recent docs about the Glean MCP server",
+            "Find recent docs about the example MCP server",
             "Who leads the developer platform team?"
           ]
         },
@@ -395,12 +395,7 @@
         "name": {
           "type": "string",
           "description": "Name of the tool the LLM must have called",
-          "examples": [
-            "search",
-            "employee_search",
-            "code_search",
-            "meeting_lookup"
-          ]
+          "examples": ["search", "get_weather", "create_issue", "list_files"]
         },
         "arguments": {
           "type": "object",

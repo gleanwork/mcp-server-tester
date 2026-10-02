@@ -17,10 +17,10 @@ vi.mock('node:os', async (original) => ({
   tmpdir: vi.fn(),
 }));
 const actualOs = await vi.importActual<typeof os>('node:os');
-const KEY = 'local:glean-eval:search';
+const KEY = 'local:acme-eval:search';
 const HASH_KEY = `${KEY}-0123456789abcdef0123456789abcdef`;
 const original = Buffer.from(
-  ' { "theme": "dark", "enabled_mcp_tools": {"existing":true,"local:glean-eval:search":false} }\n'
+  ' { "theme": "dark", "enabled_mcp_tools": {"existing":true,"local:acme-eval:search":false} }\n'
 );
 let root: string,
   directory: string,
@@ -97,7 +97,7 @@ describe('Mac tool permission transaction', () => {
     await restoreMacToolPermissions(directory);
   });
   it('restores both bare Cowork and local-prefixed grants without retaining approvals', async () => {
-    const bare = 'glean-eval:search';
+    const bare = 'acme-eval:search';
     const bareHash = `${bare}-0123456789abcdef0123456789abcdef`;
     const grants = {
       [KEY]: true,
@@ -254,15 +254,15 @@ describe('Mac tool permission transaction', () => {
   });
   it.each([
     { [KEY]: false },
-    { 'remote:glean:search': true },
+    { 'remote:acme:search': true },
     { 'local:bad.label:search': true },
-    { 'local:glean:__proto__': true },
+    { 'local:acme:__proto__': true },
     { 'local:constructor:search': true },
     { [HASH_KEY]: true },
     { [KEY]: true, [`${KEY}:${'a'.repeat(64)}`]: true },
-    { [`local:glean:__proto__-${'a'.repeat(32)}`]: true },
-    { 'local:glean:*': true },
-    { 'local:glean:search\n': true },
+    { [`local:acme:__proto__-${'a'.repeat(32)}`]: true },
+    { 'local:acme:*': true },
+    { 'local:acme:search\n': true },
     JSON.parse('{"__proto__":true}') as Record<string, boolean>,
   ])('rejects invalid grants without mutation: %j', async (grants) => {
     await expect(installMacToolPermissions(directory, grants)).rejects.toThrow(

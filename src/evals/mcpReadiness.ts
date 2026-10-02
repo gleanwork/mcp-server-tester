@@ -102,7 +102,7 @@ export function isMcpServerReady(server: McpServerReadiness): boolean {
   return server.status === 'connected' && (server.toolCount ?? 0) > 0;
 }
 
-/** One-line, credential-free summary, e.g. `glean=connected(12 tools)`. */
+/** One-line, credential-free summary, e.g. `search=connected(12 tools)`. */
 export function describeMcpReadiness(
   servers: readonly McpServerReadiness[]
 ): string {

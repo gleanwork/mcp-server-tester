@@ -246,7 +246,7 @@ describe('Linux ChatGPT runtime adapter', () => {
       expect(await calls()).toHaveLength(1);
     }
   );
-  it('validates the Scio environment contract and owns $HOME/.codex', () => {
+  it('validates the caller environment contract and owns $HOME/.codex', () => {
     expect(validateLinuxChatgptConfig(config)).toMatchObject({
       home: root,
       codexHome: join(root, '.codex'),
@@ -355,7 +355,7 @@ describe('Linux ChatGPT runtime adapter', () => {
     });
   });
   it.each([
-    ['an invalid Scio environment', 'q', 'AT_SPI_BUS_ADDRESS', 5000],
+    ['an invalid caller environment', 'q', 'AT_SPI_BUS_ADDRESS', 5000],
     [
       'oversized UTF-8 input',
       '😀'.repeat(600_000),

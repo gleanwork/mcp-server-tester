@@ -8,7 +8,6 @@
         "src/reporters/ui-src/App.tsx",
         "scripts/*.{mjs,ts}",
         "tests/**/*.{ts,mjs}",
-        "examples/plugins/*.ts",
         "examples/browser-scripts/**/*.{ts,mjs,js}",
         "src/**/fixtures/**/*.mjs"
       ],

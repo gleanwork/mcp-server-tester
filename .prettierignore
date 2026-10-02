@@ -2,7 +2,6 @@
 dist/
 .venv/
 .mcp-test-results/
-scio-adapter/
 
 # Changelog (auto-generated, has specific formatting)
 CHANGELOG.md

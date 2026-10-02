@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 
-/** A syntactically complete Scio -> MST Linux environment for offline tests. */
+/** A syntactically complete caller -> MST Linux environment for offline tests. */
 export function linuxEnvironment(home: string): Record<string, string> {
   return {
     HOME: home,

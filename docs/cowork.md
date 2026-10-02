@@ -90,7 +90,7 @@ servers through Claude's supported local Developer MCP surface instead:
 
 Use actual tool-call assertions: successful endpoint preflight alone is not proof
 that the native session received a connector. A live pinned run has passed with
-Glean `enterprise_search` and a login-backed GitHub `get_me` call.
+an eval-endpoint search tool and a login-backed GitHub `get_me` call.
 
 ## Run on macOS from a source checkout
 
@@ -151,8 +151,8 @@ never resubmitted. Follow-up usage is recorded under
 `hostTelemetry.computerUse.hitlFollowups`.
 
 For the host application's login-backed OOTB connectors, use its
-`nativeConnectors` selector and existing dry-run proxy entries alongside the Glean
-`/eval` endpoint. The registry, OAuth login, and vendor write classification remain
+`nativeConnectors` selector and existing dry-run proxy entries alongside your
+MCP server's `/eval` endpoint. The registry, OAuth login, and vendor write classification remain
 in the host application, not MST. Missing or
 expired credentials fail preflight rather than silently dropping a connector.
 
@@ -395,32 +395,32 @@ The config has two independent parts:
     "options": {
       "computerUseProvider": "linux-desktop",
       "pluginRoots": {
-        "glean": "/opt/example-app/plugins/glean/plugins/glean"
+        "acme": "/opt/example-app/plugins/acme"
       },
       "mcpDataRoot": "/config/mcp-data"
     },
     "plugins": [
       {
-        "name": "glean",
+        "name": "acme",
         "marketplace": {
-          "source": "gleanwork/claude-plugins",
+          "source": "acme/claude-plugins",
           "ref": "<40-character commit SHA>"
         },
-        "blockMcpServers": ["glean_plugin"]
+        "blockMcpServers": ["acme_plugin"]
       }
     ]
   },
   "servers": [
     {
       "transport": "stdio",
-      "label": "glean-eval",
+      "label": "acme-eval",
       "command": "/usr/bin/node",
-      "args": ["${pluginRoot:glean}/mcp/start.mjs"],
-      "url": "https://example.glean.com/mcp/default/eval",
-      "auth": { "accessTokenEnv": "GLEAN_API_TOKEN" },
+      "args": ["${pluginRoot:acme}/mcp/start.mjs"],
+      "url": "https://mcp.example.com/eval",
+      "auth": { "accessTokenEnv": "ACME_API_TOKEN" },
       "minTools": 4,
       "env": {
-        "GLEAN_MCP_SERVER_URL": "${url}",
+        "ACME_MCP_SERVER_URL": "${url}",
         "CLAUDE_PLUGIN_DATA": "${dataDir}",
         "ENABLE_HITL": "false"
       },
@@ -478,7 +478,7 @@ command, args, or env, not only in files or cwd. `requireEvalEndpoint` checks
 that declared endpoint; MST does not invent an endpoint for plain stdio.
 Resolved bearer tokens stay in private files, not settings, env, args, logs, or
 receipts. Tool calls appear as `mcp__<label>__<tool>` and are attributed to
-`label` (for example, `mcp__glean-eval__search`).
+`label` (for example, `mcp__acme-eval__search`).
 
 Both macOS (`anthropic-computer-use`) and Linux (`linux-desktop`) support these
 stdio forms. The package-root export `COWORK_STDIO_PLATFORMS` is
@@ -530,28 +530,28 @@ Desktop. MST only reads and checks them. For the example above:
 {
   "managedMcpServers": [
     {
-      "name": "glean-eval",
+      "name": "acme-eval",
       "transport": "stdio",
       "command": "/usr/bin/node",
-      "args": ["/opt/example-app/plugins/glean/plugins/glean/mcp/start.mjs"],
+      "args": ["/opt/example-app/plugins/acme/mcp/start.mjs"],
       "env": {
-        "GLEAN_MCP_SERVER_URL": "https://example.glean.com/mcp/default/eval",
-        "CLAUDE_PLUGIN_DATA": "/config/mcp-data/glean-eval",
+        "ACME_MCP_SERVER_URL": "https://mcp.example.com/eval",
+        "CLAUDE_PLUGIN_DATA": "/config/mcp-data/acme-eval",
         "ENABLE_HITL": "false"
       }
     },
     {
-      "name": "glean_plugin",
+      "name": "acme_plugin",
       "transport": "policy-only",
       "toolPolicy": { "*": "blocked" }
     }
   ],
-  "allowedMcpServers": [{ "serverName": "glean-eval" }],
+  "allowedMcpServers": [{ "serverName": "acme-eval" }],
   "allowManagedMcpServersOnly": true,
   "allowedPluginMarketplaces": [
     {
       "source": "github",
-      "repo": "gleanwork/claude-plugins",
+      "repo": "acme/claude-plugins",
       "ref": "<40-character commit SHA>",
       "installationPreference": "required"
     }
@@ -564,9 +564,9 @@ Claude Desktop:
 
 ```text
 /config/mcp-data/                                   0700
-/config/mcp-data/glean-eval/                        0700
-/config/mcp-data/glean-eval/mcp-credentials.json    0600
-  {"tokens":{"access_token":"<GLEAN_API_TOKEN>","token_type":"Bearer"}}
+/config/mcp-data/acme-eval/                        0700
+/config/mcp-data/acme-eval/mcp-credentials.json    0600
+  {"tokens":{"access_token":"<ACME_API_TOKEN>","token_type":"Bearer"}}
 ```
 
 `prepare` fails closed, before any UI action, unless all of these hold:
@@ -580,7 +580,7 @@ Claude Desktop:
 - Each `blockMcpServers` name is a `policy-only` entry with exactly
   `toolPolicy: {"*": "blocked"}`. Claude Desktop names plugin tools
   `mcp__plugin_<plugin>_<server>__<tool>`; the managed entry uses the plugin's
-  own server name from its `.mcp.json` (for example, `glean_plugin`).
+  own server name from its `.mcp.json` (for example, `acme_plugin`).
 - HTTP servers match as before, `allowManagedMcpServersOnly` is `true`, and the
   pinned marketplace entries match.
 - Each plugin root is an absolute, real (no symlink), non-world-writable
@@ -603,8 +603,8 @@ environment. On macOS it uses the paths returned by the setup transaction; on
 Linux it uses the caller-owned paths checked during prepare. Every server, stdio
 or HTTP, must connect and list at least one tool (the same rule as the ChatGPT
 host). It fails closed with `too few tools (<n> < <minTools>)` when the server
-lists fewer than `minTools` tools. For example, a Glean adapter with a
-bad token lists only its static tools. Desktop-side readiness (for example, a
+lists fewer than `minTools` tools. For example, an adapter with a bad
+token may list only its static tools. Desktop-side readiness (for example, a
 caller's own log check) should also compare each server's `toolCount` with
 `minTools`.
 
