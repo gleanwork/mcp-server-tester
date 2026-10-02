@@ -64,7 +64,7 @@ The auth command is MST's own setting, so it wins over keys that happen to be in
 | `anthropic` judge                            | Yes       |        |                                                                                                        |
 | `openai` judge                               |           | Yes    | Uses non-streaming Chat Completions, which some gateways don't serve. Use the `anthropic` judge there. |
 
-The `anthropic-agent-sdk` judge and CLI hosts run their own processes, which read their own configuration. These don't read the settings yet: the `anthropic-api` external host, Cowork's Computer Use driver and Cowork inference, and the ChatGPT desktop host's Computer Use planner.
+The `anthropic-agent-sdk` judge and CLI hosts run their own processes, which read their own configuration. These don't read the settings yet: the `anthropic-api` external host, Cowork's Computer Use driver and Cowork inference, and the ChatGPT desktop host's Computer Use planner. The Computer Use driver (used by both desktop hosts) always calls the public Anthropic API with `ANTHROPIC_API_KEY`, and ignores an exported `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`, so neither credential reaches the wrong endpoint.
 
 ## Why the Anthropic SDK host streams
 
