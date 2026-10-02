@@ -323,8 +323,8 @@ export type ExternalHostCapabilitiesConfig = Partial<
 
 export interface ExternalHostCapabilityBinding {
   /**
-   * Implementation identifier. Built-ins use `builtin:<id>`; callers may use
-   * `module:<specifier>#<export>` to load project-local integrations.
+   * The built-in capability implementation, such as `builtin:platform.macos`.
+   * Each driver's defaults (`builtinDrivers.ts`) name the ones it uses.
    */
   uses: string;
   /**
@@ -354,6 +354,7 @@ export interface ExternalHostCapabilityContext {
   state: ExternalHostRunState;
 }
 
+/** A built-in capability implementation. Not a public extension point. */
 export interface ExternalHostCapabilityImplementation {
   id: string;
   capabilities: HostCapability[];

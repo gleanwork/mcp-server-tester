@@ -44,7 +44,7 @@ export interface ClaudeRunState {
   trace?: ClaudeTrace;
 }
 
-/** Reserved in `state.data`; a user `module:` capability must not use it. */
+/** The Claude capabilities' shared slot in `state.data`. */
 const RUN_STATE_KEY = 'anthropic.claude';
 
 /** The typed Claude state for a run, created on first use. */

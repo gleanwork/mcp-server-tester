@@ -72,7 +72,7 @@ export interface ChatgptRunState {
   nativeController?: ExternalHostMetadata['nativeController'];
 }
 
-/** Reserved in `state.data`; a user `module:` capability must not use it. */
+/** The ChatGPT capabilities' shared slot in `state.data`. */
 const RUN_STATE_KEY = 'openai.chatgpt';
 
 /** The typed ChatGPT state for a run, created on first use. */

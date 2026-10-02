@@ -1,10 +1,10 @@
 import { z } from 'zod';
 import { CodexSetupConfigSchema } from '../codexSetup/config.js';
 import {
-  getRegisteredExternalHostConfig,
-  getRegisteredExternalHostDescription,
-  listRegisteredExternalHostSlugs,
-} from './hostRegistry.js';
+  getBuiltinDriverConfig,
+  getBuiltinDriverDescription,
+  listBuiltinDriverSlugs,
+} from './builtinDrivers.js';
 import { normalizeHostDriver } from './driverIdentity.js';
 import type {
   ExternalHostCapabilitiesConfig,
@@ -84,8 +84,8 @@ export interface ExternalHostDriverReference {
 }
 
 export function listExternalHostDriverReferences(): ExternalHostDriverReference[] {
-  return listRegisteredExternalHostSlugs().map((slug) => {
-    const config = getRegisteredExternalHostConfig(slug);
+  return listBuiltinDriverSlugs().map((slug) => {
+    const config = getBuiltinDriverConfig(slug);
     const driver = normalizeHostDriver(slug);
     const name = config?.name ?? slug;
 
@@ -93,7 +93,7 @@ export function listExternalHostDriverReferences(): ExternalHostDriverReference[
       slug,
       driver,
       name,
-      description: getRegisteredExternalHostDescription(slug),
+      description: getBuiltinDriverDescription(slug),
       builtIn: true,
       defaultConfig: {
         driver,
@@ -116,7 +116,7 @@ export function listExternalHostDriverReferences(): ExternalHostDriverReference[
 }
 
 export function getExternalHostConfigJsonSchema(): Record<string, unknown> {
-  const driverSlugs = listRegisteredExternalHostSlugs();
+  const driverSlugs = listBuiltinDriverSlugs();
 
   return {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
@@ -329,7 +329,7 @@ function externalHostCapabilityBindingJsonSchema(): Record<string, unknown> {
         type: 'string',
         minLength: 1,
         description:
-          'Capability implementation id. Built-ins use builtin:<id>; custom integrations may use module:<specifier>#<export>.',
+          'Built-in capability implementation id, such as builtin:platform.macos.',
       },
       with: {
         type: 'object',

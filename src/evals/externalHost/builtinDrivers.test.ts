@@ -2,27 +2,27 @@ import { describe, expect, it } from 'vitest';
 import {
   CLAUDE_COWORK_DESKTOP_MACOS_DRIVER,
   driverToSlug,
-  getRegisteredExternalHostConfig,
-  loadExternalHostConfig,
-  listRegisteredExternalHostSlugs,
+  getBuiltinDriverConfig,
+  listBuiltinDriverSlugs,
   normalizeHostDriver,
   parseDriverSlug,
 } from './index.js';
+import { loadExternalHostConfig } from './capabilityRuntime.js';
 
 describe('external host driver identity and built-in defaults', () => {
-  it('defaults ChatGPT to exact-prompt matching and allows explicit markers', async () => {
+  it('defaults ChatGPT to exact-prompt matching and allows explicit markers', () => {
     const driver = 'openai.chatgpt.agent.desktop-app.macos';
-    expect(getRegisteredExternalHostConfig(driver)?.correlation).toEqual({
+    expect(getBuiltinDriverConfig(driver)?.correlation).toEqual({
       strategy: 'exact_prompt',
     });
-    const loaded = await loadExternalHostConfig({
+    const loaded = loadExternalHostConfig({
       driver,
       correlation: { strategy: 'prompt_marker' },
     });
     expect(loaded.config.correlation).toEqual({ strategy: 'prompt_marker' });
   });
-  it('registers Linux native capabilities without a planner', async () => {
-    const loaded = await loadExternalHostConfig({
+  it('defaults Linux to native capabilities without a planner', () => {
+    const loaded = loadExternalHostConfig({
       driver: 'openai.chatgpt.agent.desktop-app.linux',
     });
     expect(loaded.loadedCapabilities.map((c) => c.binding.uses)).toEqual([
@@ -47,7 +47,7 @@ describe('external host driver identity and built-in defaults', () => {
   });
 
   it('declares Claude Cowork as capability bindings, not a concrete runner', () => {
-    const config = getRegisteredExternalHostConfig(
+    const config = getBuiltinDriverConfig(
       'anthropic.claude.cowork.desktop-app.macos'
     );
 
@@ -75,8 +75,8 @@ describe('external host driver identity and built-in defaults', () => {
     });
   });
 
-  it('loads Claude Cowork defaults into concrete capability providers at runtime', async () => {
-    const loaded = await loadExternalHostConfig({
+  it('loads Claude Cowork defaults into concrete capability providers at runtime', () => {
+    const loaded = loadExternalHostConfig({
       driver: 'anthropic.claude.cowork.desktop-app.macos',
     });
 
@@ -101,12 +101,12 @@ describe('external host driver identity and built-in defaults', () => {
 
   it('returns no built-in defaults for syntactically valid unsupported drivers', () => {
     expect(
-      getRegisteredExternalHostConfig('openai.chatgpt.chat.browser.web')
+      getBuiltinDriverConfig('openai.chatgpt.chat.browser.web')
     ).toBeUndefined();
   });
 
-  it('lists registered external hosts by structured driver slug', () => {
-    expect(listRegisteredExternalHostSlugs()).toEqual([
+  it('lists built-in drivers by structured driver slug', () => {
+    expect(listBuiltinDriverSlugs()).toEqual([
       'openai.chatgpt.agent.desktop-app.macos',
       'openai.chatgpt.agent.desktop-app.linux',
       'anthropic.claude.chat.desktop-app.macos',
