@@ -87,8 +87,7 @@ function enrichErrorMessage(err: unknown, provider: string): string {
   ) {
     return (
       `MCP host simulation failed: authentication error (${raw}).\n` +
-      `Hint: check your API key environment variable (e.g. ANTHROPIC_API_KEY, GOOGLE_APPLICATION_CREDENTIALS). ` +
-      `A gateway that wants a bearer token takes ANTHROPIC_AUTH_TOKEN or MST_LLM_AUTH_COMMAND; see docs/llm-gateways.md.`
+      `Hint: ${AUTH_HINTS[provider] ?? AUTH_HINTS.default}`
     );
   }
 
@@ -138,6 +137,16 @@ function enrichErrorMessage(err: unknown, provider: string): string {
   return `MCP host simulation failed: ${raw}`;
 }
 
+/** What to check after an authentication error, by provider. */
+const AUTH_HINTS: Record<string, string> = {
+  anthropic:
+    'check ANTHROPIC_API_KEY. Behind a gateway (ANTHROPIC_BASE_URL), use ANTHROPIC_AUTH_TOKEN or MST_LLM_AUTH_COMMAND; see docs/llm-gateways.md.',
+  openai:
+    'check OPENAI_API_KEY. Behind a gateway (OPENAI_BASE_URL), use MST_LLM_AUTH_COMMAND; see docs/llm-gateways.md.',
+  default:
+    'check your API key environment variable (e.g. ANTHROPIC_API_KEY, GOOGLE_APPLICATION_CREDENTIALS).',
+};
+
 /**
  * A readable message for anything thrown or streamed. Stream error parts are
  * often plain provider objects (`{ type: 'overloaded_error', message }`).
@@ -156,10 +165,12 @@ function errorText(err: unknown): string {
   return String(err);
 }
 
-/** A provider model plus the call-level options it needs. */
+/** A provider model plus how the agent loop must call it. */
 interface LoadedModel {
   model: AI.LanguageModel;
   providerOptions?: ProviderOptions;
+  /** Run the agent loop with streamText instead of generateText. */
+  streams?: boolean;
 }
 
 // Dynamic import helper bypasses TypeScript module resolution for optional peer deps.
@@ -170,6 +181,8 @@ async function loadModel(
   config: MCPHostConfig
 ): Promise<LoadedModel> {
   const env: HostEnvironment = { ...process.env, ...config.env };
+  // Providers without gateway support read their key directly; the
+  // anthropic and openai cases resolve theirs through resolveLLMEndpoint.
   function apiKey(defaultName: string): string {
     return env[config.apiKeyEnvVar ?? defaultName] ?? '';
   }
@@ -195,6 +208,10 @@ async function loadModel(
       const { createAnthropic } = await import('@ai-sdk/anthropic');
       const endpoint = await resolveLLMEndpoint('anthropic', endpointOptions);
       return {
+        // Gateways that proxy the Messages API pass streamed responses through
+        // untouched, while their rebuilt non-streaming responses can fail the
+        // AI SDK's response schema.
+        streams: true,
         model: createAnthropic({
           // The AI SDK's base URL includes the API version; the endpoint's is the root.
           baseURL: `${endpoint.baseURL}/v1`,
@@ -293,13 +310,6 @@ function defaultModel(provider: LLMProvider): string {
       return 'default';
   }
 }
-
-/**
- * Providers whose agent loop streams. Anthropic streams because gateways
- * that proxy the Messages API pass streamed responses through untouched,
- * while their rebuilt non-streaming responses can fail the AI SDK's schema.
- */
-const STREAMING_PROVIDERS: ReadonlySet<LLMProvider> = new Set(['anthropic']);
 
 /** The options the simulator passes to generateText/streamText. */
 interface AgentLoopOptions {
@@ -452,7 +462,7 @@ export function createVercelOrchestrator(): MCPHostSimulator {
         }
 
         const modelId = config.model ?? defaultModel(config.provider);
-        const { model, providerOptions } = await withinDeadline(
+        const { model, providerOptions, streams } = await withinDeadline(
           loadModel(config.provider, modelId, config)
         );
 
@@ -555,7 +565,7 @@ export function createVercelOrchestrator(): MCPHostSimulator {
               abortSignal: controller.signal,
               ...(providerOptions ? { providerOptions } : {}),
             },
-            STREAMING_PROVIDERS.has(config.provider)
+            streams === true
           )
         );
         if (budgetError) throw budgetError;

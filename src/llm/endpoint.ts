@@ -9,18 +9,22 @@
  *   Anthropic one is the API root, as the official SDKs and Claude Code read
  *   it (`https://gw/anthropic`, requests go to `/v1/messages`); a trailing
  *   `/v1`, the AI SDK's form, is accepted too.
- * - `ANTHROPIC_AUTH_TOKEN`: an Anthropic credential sent as
- *   `Authorization: Bearer` instead of `x-api-key` (gateways usually want this).
+ * - `ANTHROPIC_AUTH_TOKEN`: an Anthropic gateway credential sent as
+ *   `Authorization: Bearer` instead of `x-api-key`.
  * - `MST_LLM_AUTH_COMMAND`: a shell command that prints a short-lived token.
- *   Its output is cached for `MST_LLM_AUTH_COMMAND_TTL_MS` (default 5 minutes)
- *   and sent only when a base URL override is set, so a gateway token never
- *   reaches the provider's public API. Being MST's own setting, it wins over
- *   the ambient `*_API_KEY` / `ANTHROPIC_AUTH_TOKEN` variables.
+ *   Its output is cached for `MST_LLM_AUTH_COMMAND_TTL_MS` (default 5 minutes).
+ *   Being MST's own setting, it wins over `ANTHROPIC_AUTH_TOKEN` and the
+ *   ambient `*_API_KEY` variables.
+ *
+ * Gateway credentials (the command and `ANTHROPIC_AUTH_TOKEN`) are used only
+ * with a base URL override, so a gateway token never reaches the provider's
+ * public API.
  *
  * Base URLs are always resolved here (falling back to the public API), so an
  * SDK never reads a different `*_BASE_URL` from `process.env` on its own.
  */
 import { exec } from 'node:child_process';
+import { createHash } from 'node:crypto';
 
 /** The wire API a consumer speaks. */
 export type LLMApiFamily = 'anthropic' | 'openai';
@@ -86,7 +90,7 @@ const FAMILY_ENV: Record<
 /** Where a credential comes from, before any command runs. */
 type CredentialSource =
   | { kind: 'env'; envVar: string; field: 'apiKey' | 'authToken' }
-  | { kind: 'command'; command: string; ttlMs: number };
+  | { kind: 'command'; command: string };
 
 function nonEmpty(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
@@ -103,11 +107,13 @@ function credentialSource(
       ? { kind: 'env', envVar: apiKeyEnvVar, field: 'apiKey' }
       : undefined;
   const names = FAMILY_ENV[family];
-  const command = nonEmpty(env[AUTH_COMMAND_ENV]);
-  if (command && nonEmpty(env[names.baseURL]))
-    return { kind: 'command', command, ttlMs: authCommandTtl(env) };
-  if (names.authToken && nonEmpty(env[names.authToken]))
-    return { kind: 'env', envVar: names.authToken, field: 'authToken' };
+  // Gateway credentials go only to a base URL override.
+  if (nonEmpty(env[names.baseURL])) {
+    const command = nonEmpty(env[AUTH_COMMAND_ENV]);
+    if (command) return { kind: 'command', command };
+    if (names.authToken && nonEmpty(env[names.authToken]))
+      return { kind: 'env', envVar: names.authToken, field: 'authToken' };
+  }
   if (nonEmpty(env[names.apiKey]))
     return { kind: 'env', envVar: names.apiKey, field: 'apiKey' };
   return undefined;
@@ -156,7 +162,11 @@ export async function resolveLLMEndpoint(
   if (!source) return endpoint;
   if (source.kind === 'env')
     return { ...endpoint, [source.field]: nonEmpty(env[source.envVar]) };
-  const token = await authCommandToken(source.command, source.ttlMs, env);
+  const token = await authCommandToken(
+    source.command,
+    authCommandTtl(env),
+    env
+  );
   // OpenAI SDKs already send the API key as a bearer token.
   return family === 'anthropic'
     ? { ...endpoint, authToken: token }
@@ -176,22 +186,36 @@ interface CachedToken {
 const tokenCache = new Map<string, CachedToken>();
 const pendingTokens = new Map<string, Promise<string>>();
 
+/**
+ * A token belongs to the command and the environment it ran in: a case's
+ * `mcpHostConfig.env` can change what the command prints.
+ */
+function tokenKey(command: string, env: LLMEnvironment): string {
+  const entries = Object.entries(env)
+    .filter(([, value]) => value !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return createHash('sha256')
+    .update(JSON.stringify([command, entries]))
+    .digest('hex');
+}
+
 async function authCommandToken(
   command: string,
   ttlMs: number,
   env: LLMEnvironment
 ): Promise<string> {
-  const cached = tokenCache.get(command);
+  const key = tokenKey(command, env);
+  const cached = tokenCache.get(key);
   if (cached && Date.now() < cached.expiresAt) return cached.value;
-  const pending = pendingTokens.get(command);
+  const pending = pendingTokens.get(key);
   if (pending) return pending;
   const run = runAuthCommand(command, env)
     .then((value) => {
-      tokenCache.set(command, { value, expiresAt: Date.now() + ttlMs });
+      tokenCache.set(key, { value, expiresAt: Date.now() + ttlMs });
       return value;
     })
-    .finally(() => pendingTokens.delete(command));
-  pendingTokens.set(command, run);
+    .finally(() => pendingTokens.delete(key));
+  pendingTokens.set(key, run);
   return run;
 }
 

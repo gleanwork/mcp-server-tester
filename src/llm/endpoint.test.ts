@@ -106,18 +106,40 @@ describe('resolveLLMEndpoint', () => {
     });
   });
 
-  it('reads only the explicit apiKeyEnvVar when one is given', async () => {
-    const env = { MY_KEY: 'mine', ANTHROPIC_AUTH_TOKEN: 'bearer' };
+  it('never sends ANTHROPIC_AUTH_TOKEN to the public API', async () => {
+    const env = { ANTHROPIC_AUTH_TOKEN: 'gateway-token' };
+    expect(hasLLMCredential('anthropic', { env })).toBe(false);
+    await expect(resolveLLMEndpoint('anthropic', { env })).resolves.toEqual({
+      baseURL: ANTHROPIC_PUBLIC,
+      overridden: false,
+    });
     await expect(
-      resolveLLMEndpoint('anthropic', { env, apiKeyEnvVar: 'MY_KEY' })
+      resolveLLMEndpoint('anthropic', {
+        env: { ...env, ANTHROPIC_API_KEY: 'key' },
+      })
     ).resolves.toEqual({
       baseURL: ANTHROPIC_PUBLIC,
       overridden: false,
+      apiKey: 'key',
+    });
+  });
+
+  it('reads only the explicit apiKeyEnvVar when one is given', async () => {
+    const env = {
+      MY_KEY: 'mine',
+      ANTHROPIC_BASE_URL: GATEWAY,
+      ANTHROPIC_AUTH_TOKEN: 'bearer',
+    };
+    await expect(
+      resolveLLMEndpoint('anthropic', { env, apiKeyEnvVar: 'MY_KEY' })
+    ).resolves.toEqual({
+      baseURL: GATEWAY,
+      overridden: true,
       apiKey: 'mine',
     });
     await expect(
       resolveLLMEndpoint('anthropic', { env, apiKeyEnvVar: 'MISSING' })
-    ).resolves.toEqual({ baseURL: ANTHROPIC_PUBLIC, overridden: false });
+    ).resolves.toEqual({ baseURL: GATEWAY, overridden: true });
     expect(
       hasLLMCredential('anthropic', { env, apiKeyEnvVar: 'MISSING' })
     ).toBe(false);
@@ -239,6 +261,19 @@ describe('resolveLLMEndpoint', () => {
     expect(runs(counter)).toBe(2);
   });
 
+  it('keys the cached token by the environment the command ran in', async () => {
+    const counter = counterFile();
+    const base = {
+      ANTHROPIC_BASE_URL: GATEWAY,
+      MST_LLM_AUTH_COMMAND: countingCommand('tok-env', counter),
+    };
+    await resolveLLMEndpoint('anthropic', { env: { ...base, TENANT: 'a' } });
+    await resolveLLMEndpoint('anthropic', { env: { ...base, TENANT: 'a' } });
+    expect(runs(counter)).toBe(1);
+    await resolveLLMEndpoint('anthropic', { env: { ...base, TENANT: 'b' } });
+    expect(runs(counter)).toBe(2);
+  });
+
   it('reports a failing command without its stdout or stderr', async () => {
     const env = {
       ANTHROPIC_BASE_URL: GATEWAY,
@@ -266,15 +301,16 @@ describe('resolveLLMEndpoint', () => {
     );
   });
 
-  it('rejects an invalid TTL', async () => {
-    expect(() =>
-      hasLLMCredential('anthropic', {
-        env: {
-          ANTHROPIC_BASE_URL: GATEWAY,
-          MST_LLM_AUTH_COMMAND: 'true',
-          MST_LLM_AUTH_COMMAND_TTL_MS: 'soon',
-        },
-      })
-    ).toThrow('MST_LLM_AUTH_COMMAND_TTL_MS must be a non-negative integer');
+  it('rejects an invalid TTL when it resolves the token', async () => {
+    const env = {
+      ANTHROPIC_BASE_URL: GATEWAY,
+      MST_LLM_AUTH_COMMAND: 'true',
+      MST_LLM_AUTH_COMMAND_TTL_MS: 'soon',
+    };
+    // Asking whether a credential exists never throws.
+    expect(hasLLMCredential('anthropic', { env })).toBe(true);
+    await expect(resolveLLMEndpoint('anthropic', { env })).rejects.toThrow(
+      'MST_LLM_AUTH_COMMAND_TTL_MS must be a non-negative integer'
+    );
   });
 });

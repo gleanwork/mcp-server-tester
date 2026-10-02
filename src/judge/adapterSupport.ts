@@ -50,13 +50,17 @@ export function requireJudgeCredential(
     throw new Error(
       `${judge} judge requires an API key. Set the ${options.apiKeyEnvVar} environment variable.`
     );
-  const sources =
+  const [apiKey, baseURL, gatewayCredentials] =
     family === 'anthropic'
-      ? 'ANTHROPIC_API_KEY, or ANTHROPIC_AUTH_TOKEN for a gateway that wants a bearer token'
-      : 'OPENAI_API_KEY';
+      ? [
+          'ANTHROPIC_API_KEY',
+          'ANTHROPIC_BASE_URL',
+          'ANTHROPIC_AUTH_TOKEN or MST_LLM_AUTH_COMMAND',
+        ]
+      : ['OPENAI_API_KEY', 'OPENAI_BASE_URL', 'MST_LLM_AUTH_COMMAND'];
   throw new Error(
-    `${judge} judge requires an API key. Set the ${sources} environment variable ` +
-      `(or MST_LLM_AUTH_COMMAND with a base URL override; see docs/llm-gateways.md).`
+    `${judge} judge requires an API key. Set the ${apiKey} environment variable ` +
+      `(or, for a gateway, ${baseURL} with ${gatewayCredentials}; see docs/llm-gateways.md).`
   );
 }
 

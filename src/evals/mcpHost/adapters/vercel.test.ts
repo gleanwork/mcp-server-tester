@@ -28,6 +28,12 @@ vi.mock('ai', () => ({
     ],
     usage: { inputTokens: 100, outputTokens: 50 },
   }),
+  streamText: vi.fn(() => ({
+    consumeStream: () => Promise.resolve(),
+    steps: Promise.resolve([]),
+    text: Promise.resolve('Streamed answer'),
+    totalUsage: Promise.resolve({ inputTokens: 10, outputTokens: 5 }),
+  })),
   tool: vi.fn(
     (config: {
       description: string;
@@ -121,17 +127,29 @@ describe('createVercelOrchestrator', () => {
 
   it('points the anthropic provider at the public API with its /v1 base URL by default', async () => {
     const { createAnthropic } = await import('@ai-sdk/anthropic');
-    // streamText isn't mocked here; only the provider construction matters.
-    await createVercelOrchestrator().simulate(createMockMCP(), 'scenario', {
-      provider: 'anthropic',
-      model: 'claude',
-      env: { ANTHROPIC_API_KEY: 'key' },
-    });
+    const { generateText, streamText } = await import('ai');
+    vi.mocked(generateText).mockClear();
+    const result = await createVercelOrchestrator().simulate(
+      createMockMCP(),
+      'scenario',
+      {
+        provider: 'anthropic',
+        model: 'claude',
+        env: { ANTHROPIC_API_KEY: 'key' },
+      }
+    );
 
     expect(createAnthropic).toHaveBeenCalledWith({
       baseURL: 'https://api.anthropic.com/v1',
       apiKey: 'key',
     });
+    // The anthropic provider runs its agent loop with streamText.
+    expect(result).toMatchObject({
+      success: true,
+      response: 'Streamed answer',
+    });
+    expect(streamText).toHaveBeenCalledTimes(1);
+    expect(generateText).not.toHaveBeenCalled();
   });
 
   it('keeps OpenAI response storage on for the public API', async () => {
