@@ -25,7 +25,10 @@ import {
   withSkillEvents,
   type HostSkillsSession,
 } from '../hostSkills.js';
+import type * as AI from 'ai';
+import type { ProviderOptions } from '@ai-sdk/provider-utils';
 import { z } from 'zod';
+import { resolveLLMEndpoint } from '../../../llm/endpoint.js';
 import {
   GenerationOptions,
   ProviderSchema,
@@ -53,7 +56,16 @@ const SdkConfigSchema = z
  * hit.
  */
 function enrichErrorMessage(err: unknown, provider: string): string {
-  const raw = err instanceof Error ? err.message : String(err);
+  const raw = errorText(err);
+  // APICallError carries the HTTP status separately from its message, which
+  // is often the provider's own text ("Bearer token required").
+  const statusCode =
+    typeof err === 'object' &&
+    err !== null &&
+    typeof (err as { statusCode?: unknown }).statusCode === 'number'
+      ? (err as { statusCode: number }).statusCode
+      : null;
+  const probe = statusCode === null ? raw : `${statusCode} ${raw}`;
 
   // Missing optional peer dependency
   if (
@@ -68,14 +80,15 @@ function enrichErrorMessage(err: unknown, provider: string): string {
 
   // Authentication / API key problems
   if (
-    raw.includes('401') ||
-    raw.includes('Unauthorized') ||
-    raw.includes('API key') ||
-    raw.includes('api_key')
+    probe.includes('401') ||
+    probe.includes('Unauthorized') ||
+    probe.includes('API key') ||
+    probe.includes('api_key')
   ) {
     return (
-      `MCP host simulation failed: authentication error.\n` +
-      `Hint: check your API key environment variable (e.g. ANTHROPIC_API_KEY, GOOGLE_APPLICATION_CREDENTIALS).`
+      `MCP host simulation failed: authentication error (${raw}).\n` +
+      `Hint: check your API key environment variable (e.g. ANTHROPIC_API_KEY, GOOGLE_APPLICATION_CREDENTIALS). ` +
+      `A gateway that wants a bearer token takes ANTHROPIC_AUTH_TOKEN or MST_LLM_AUTH_COMMAND; see docs/llm-gateways.md.`
     );
   }
 
@@ -83,10 +96,10 @@ function enrichErrorMessage(err: unknown, provider: string): string {
   // or retired model id, or a base-URL override routing to a gateway that
   // doesn't serve the model. Preserve the raw error instead of guessing.
   if (
-    raw.includes('404') ||
-    raw.includes('Not Found') ||
-    (raw.toLowerCase().includes('model') &&
-      raw.toLowerCase().includes('not found'))
+    probe.includes('404') ||
+    probe.includes('Not Found') ||
+    (probe.toLowerCase().includes('model') &&
+      probe.toLowerCase().includes('not found'))
   ) {
     return (
       `MCP host simulation failed: ${raw}\n` +
@@ -99,9 +112,9 @@ function enrichErrorMessage(err: unknown, provider: string): string {
 
   // Network / DNS / connection errors
   if (
-    raw.includes('ENOTFOUND') ||
-    raw.includes('fetch failed') ||
-    raw.includes('ECONNREFUSED')
+    probe.includes('ENOTFOUND') ||
+    probe.includes('fetch failed') ||
+    probe.includes('ECONNREFUSED')
   ) {
     return (
       `MCP host simulation failed: network error.\n` +
@@ -111,9 +124,9 @@ function enrichErrorMessage(err: unknown, provider: string): string {
 
   // Rate limiting
   if (
-    raw.includes('429') ||
-    raw.toLowerCase().includes('rate limit') ||
-    raw.includes('Too Many Requests')
+    probe.includes('429') ||
+    probe.toLowerCase().includes('rate limit') ||
+    probe.includes('Too Many Requests')
   ) {
     return (
       `MCP host simulation failed: rate limited.\n` +
@@ -125,31 +138,71 @@ function enrichErrorMessage(err: unknown, provider: string): string {
   return `MCP host simulation failed: ${raw}`;
 }
 
+/**
+ * A readable message for anything thrown or streamed. Stream error parts are
+ * often plain provider objects (`{ type: 'overloaded_error', message }`).
+ */
+function errorText(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'object' && err !== null) {
+    const message = (err as { message?: unknown }).message;
+    if (typeof message === 'string') return message;
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return 'Unserializable error object';
+    }
+  }
+  return String(err);
+}
+
+/** A provider model plus the call-level options it needs. */
+interface LoadedModel {
+  model: any;
+  providerOptions?: ProviderOptions;
+}
+
 // Dynamic import helper bypasses TypeScript module resolution for optional peer deps.
 // Each @ai-sdk/* package is optional — install only the providers you need.
 async function loadModel(
   provider: LLMProvider,
   model: string,
   config: MCPHostConfig
-): Promise<any> {
+): Promise<LoadedModel> {
   const env: HostEnvironment = { ...process.env, ...config.env };
   function apiKey(defaultName: string): string {
     return env[config.apiKeyEnvVar ?? defaultName] ?? '';
   }
+  const endpointOptions = { env, apiKeyEnvVar: config.apiKeyEnvVar };
   switch (provider) {
     case 'openai': {
       const { createOpenAI } = await import('@ai-sdk/openai');
-      return createOpenAI({
-        apiKey: apiKey('OPENAI_API_KEY'),
-        baseURL: env.OPENAI_BASE_URL,
-      })(model);
+      const endpoint = await resolveLLMEndpoint('openai', endpointOptions);
+      return {
+        model: createOpenAI({
+          apiKey: endpoint.apiKey ?? '',
+          baseURL: endpoint.baseURL,
+        })(model),
+        // The AI SDK refers back to earlier Responses items by id, which
+        // needs them stored upstream; gateways and proxies usually don't
+        // persist them (store: false), so send the items inline instead.
+        ...(endpoint.overridden
+          ? { providerOptions: { openai: { store: false } } }
+          : {}),
+      };
     }
     case 'anthropic': {
       const { createAnthropic } = await import('@ai-sdk/anthropic');
-      return createAnthropic({
-        apiKey: apiKey('ANTHROPIC_API_KEY'),
-        baseURL: env.ANTHROPIC_BASE_URL,
-      })(model);
+      const endpoint = await resolveLLMEndpoint('anthropic', endpointOptions);
+      return {
+        model: createAnthropic({
+          // The AI SDK's base URL includes the API version; the endpoint's is the root.
+          baseURL: `${endpoint.baseURL}/v1`,
+          ...(endpoint.authToken
+            ? { authToken: endpoint.authToken }
+            : { apiKey: endpoint.apiKey ?? '' }),
+        })(model),
+      };
     }
     case 'vertex-anthropic': {
       // Anthropic via Google Vertex AI — uses Application Default Credentials.
@@ -165,43 +218,57 @@ async function loadModel(
           ? { keyFilename: env.GOOGLE_APPLICATION_CREDENTIALS }
           : undefined,
       });
-      return (vertexAnthropic as unknown as (m: string) => unknown)(model);
+      return {
+        model: (vertexAnthropic as unknown as (m: string) => unknown)(model),
+      };
     }
     case 'google': {
       // @ts-ignore - optional: npm install @ai-sdk/google
       const { createGoogleGenerativeAI } = await import('@ai-sdk/google');
-      return createGoogleGenerativeAI({
-        apiKey: apiKey('GOOGLE_GENERATIVE_AI_API_KEY'),
-      })(model);
+      return {
+        model: createGoogleGenerativeAI({
+          apiKey: apiKey('GOOGLE_GENERATIVE_AI_API_KEY'),
+        })(model),
+      };
     }
     case 'mistral': {
       // @ts-ignore - optional: npm install @ai-sdk/mistral
       const { createMistral } = await import('@ai-sdk/mistral');
-      return createMistral({ apiKey: apiKey('MISTRAL_API_KEY') })(model);
+      return {
+        model: createMistral({ apiKey: apiKey('MISTRAL_API_KEY') })(model),
+      };
     }
     case 'azure': {
       // @ts-ignore - optional: npm install @ai-sdk/azure
       const { createAzure } = await import('@ai-sdk/azure');
-      return createAzure({
-        apiKey: apiKey('AZURE_API_KEY'),
-        resourceName: env.AZURE_RESOURCE_NAME,
-        baseURL: env.AZURE_BASE_URL,
-      })(model);
+      return {
+        model: createAzure({
+          apiKey: apiKey('AZURE_API_KEY'),
+          resourceName: env.AZURE_RESOURCE_NAME,
+          baseURL: env.AZURE_BASE_URL,
+        })(model),
+      };
     }
     case 'deepseek': {
       // @ts-ignore - optional: npm install @ai-sdk/deepseek
       const { createDeepSeek } = await import('@ai-sdk/deepseek');
-      return createDeepSeek({ apiKey: apiKey('DEEPSEEK_API_KEY') })(model);
+      return {
+        model: createDeepSeek({ apiKey: apiKey('DEEPSEEK_API_KEY') })(model),
+      };
     }
     case 'openrouter': {
       // @ts-ignore - optional: npm install @openrouter/ai-sdk-provider
       const { createOpenRouter } = await import('@openrouter/ai-sdk-provider');
-      return createOpenRouter({ apiKey: apiKey('OPENROUTER_API_KEY') })(model);
+      return {
+        model: createOpenRouter({ apiKey: apiKey('OPENROUTER_API_KEY') })(
+          model
+        ),
+      };
     }
     case 'xai': {
       // @ts-ignore - optional: npm install @ai-sdk/xai
       const { createXai } = await import('@ai-sdk/xai');
-      return createXai({ apiKey: apiKey('XAI_API_KEY') })(model);
+      return { model: createXai({ apiKey: apiKey('XAI_API_KEY') })(model) };
     }
     default:
       throw new Error(
@@ -223,6 +290,79 @@ function defaultModel(provider: LLMProvider): string {
     default:
       return 'default';
   }
+}
+
+/**
+ * Providers whose agent loop streams. Anthropic streams because gateways
+ * that proxy the Messages API pass streamed responses through untouched,
+ * while their rebuilt non-streaming responses can fail the AI SDK's schema.
+ */
+const STREAMING_PROVIDERS: ReadonlySet<LLMProvider> = new Set(['anthropic']);
+
+/** The options the simulator passes to generateText/streamText. */
+interface AgentLoopOptions {
+  model: AI.LanguageModel;
+  system?: string;
+  prompt: string;
+  tools: AI.ToolSet;
+  stopWhen: AI.StopCondition<AI.ToolSet>;
+  temperature: number;
+  maxOutputTokens?: number;
+  abortSignal: AbortSignal;
+  providerOptions?: ProviderOptions;
+}
+
+/** The parts of a generateText/streamText result the simulator reads. */
+interface AgentLoopResult {
+  text: string;
+  steps: Array<AI.StepResult<AI.ToolSet>>;
+  /** Optional: SDK test doubles may omit it. */
+  usage?: AI.LanguageModelUsage;
+}
+
+/**
+ * Runs the agent loop with generateText, or with streamText when the
+ * provider streams. streamText reports errors through onError only (a
+ * mid-stream error otherwise resolves as an empty answer), so the first one
+ * is rethrown here.
+ */
+async function runAgentLoop(
+  ai: typeof AI,
+  options: AgentLoopOptions,
+  streaming: boolean
+): Promise<AgentLoopResult> {
+  if (!streaming) {
+    const generated = await ai.generateText(options);
+    return {
+      text: generated.text,
+      steps: generated.steps,
+      usage: generated.totalUsage ?? generated.usage,
+    };
+  }
+  let streamError: unknown;
+  const result = ai.streamText({
+    ...options,
+    onError({ error }) {
+      streamError ??= error;
+    },
+  });
+  try {
+    await result.consumeStream();
+    const steps = await result.steps;
+    if (streamError !== undefined) throw toError(streamError);
+    return {
+      text: await result.text,
+      steps,
+      usage: await result.totalUsage,
+    };
+  } catch (err) {
+    throw toError(streamError ?? err);
+  }
+}
+
+/** Errors thrown as-is; anything else (a streamed error part) wrapped. */
+function toError(value: unknown): Error {
+  return value instanceof Error ? value : new Error(errorText(value));
 }
 
 /** Skill loads and the ordered tool/skill event trace, when skills ran. */
@@ -249,8 +389,9 @@ function skillsTrace(
 /**
  * Creates a Vercel AI SDK-based MCP host simulator.
  *
- * Uses generateText with stopWhen (ai v6) to handle multi-turn tool calling.
- * Produces llmDurationMs and mcpDurationMs for latency decomposition.
+ * Uses generateText (streamText for streaming providers) with stopWhen (ai v6)
+ * to handle multi-turn tool calling. Produces llmDurationMs and mcpDurationMs
+ * for latency decomposition.
  */
 export function createVercelOrchestrator(): MCPHostSimulator {
   return {
@@ -295,9 +436,8 @@ export function createVercelOrchestrator(): MCPHostSimulator {
               reject(error);
             }, config.timeout);
         });
-        const { generateText, stepCountIs } = await withinDeadline(
-          import('ai')
-        );
+        const ai = await withinDeadline(import('ai'));
+        const { stepCountIs } = ai;
         // jsonSchema from @ai-sdk/provider-utils creates a proper Schema object
         // (with .jsonSchema property) that ai's prepareToolsAndToolChoice can read.
         // Do NOT use jsonSchema from 'ai' — in v6 it produces the wrong shape.
@@ -310,7 +450,7 @@ export function createVercelOrchestrator(): MCPHostSimulator {
         }
 
         const modelId = config.model ?? defaultModel(config.provider);
-        const model = await withinDeadline(
+        const { model, providerOptions } = await withinDeadline(
           loadModel(config.provider, modelId, config)
         );
 
@@ -400,23 +540,28 @@ export function createVercelOrchestrator(): MCPHostSimulator {
         const llmStart = Date.now();
 
         const result = await withinDeadline(
-          generateText({
-            model,
-            ...(skills ? { system: skills.system } : {}),
-            prompt: scenario,
-            tools,
-            stopWhen: stepCountIs(Math.max(1, maxSteps)),
-            temperature: config.temperature ?? 0,
-            maxOutputTokens: config.maxTokens,
-            abortSignal: controller.signal,
-          })
+          runAgentLoop(
+            ai,
+            {
+              model,
+              ...(skills ? { system: skills.system } : {}),
+              prompt: scenario,
+              tools,
+              stopWhen: stepCountIs(Math.max(1, maxSteps)),
+              temperature: config.temperature ?? 0,
+              maxOutputTokens: config.maxTokens,
+              abortSignal: controller.signal,
+              ...(providerOptions ? { providerOptions } : {}),
+            },
+            STREAMING_PROVIDERS.has(config.provider)
+          )
         );
         if (budgetError) throw budgetError;
 
         const totalDurationMs = Date.now() - llmStart;
         const llmDurationMs = totalDurationMs - mcpDurationMs;
 
-        const usage = result.totalUsage ?? result.usage;
+        const usage = result.usage;
         const hostUsage: UsageMetrics | undefined = usage
           ? {
               inputTokens: usage.inputTokens ?? 0,

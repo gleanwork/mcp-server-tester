@@ -183,6 +183,7 @@ for host-specific fields, environment rules, and setup ownership.
 - [Quick Start](./docs/quickstart.md) — detailed setup and configuration
 - [Expectations](./docs/expectations.md) — all assertion types including snapshot sanitizers
 - [LLM Host Simulation](docs/mcp-host.md) — tool discoverability testing
+- [LLM Gateways](./docs/llm-gateways.md) — routing MST's LLM calls through a gateway
 - [API Reference](./docs/api-reference.md)
 - [Transports](./docs/transports.md) — stdio and HTTP configuration, OAuth
 - [Protocol Versions](./docs/protocol-versions.md) — legacy and 2026-07-28, protocol matrices, era-aware conformance

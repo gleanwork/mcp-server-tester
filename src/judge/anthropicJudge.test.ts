@@ -25,6 +25,13 @@ async function getMockCreate() {
   return (mod as any).__mockCreate;
 }
 
+async function getMockClient() {
+  const mod = await import('@anthropic-ai/sdk' as any);
+  return (mod as any).default;
+}
+
+const VERDICT = JSON.stringify({ pass: true, score: 1.0, reasoning: 'OK' });
+
 function makeResponse(text: string, inputTokens = 100, outputTokens = 50) {
   return {
     content: [{ type: 'text', text }],
@@ -38,6 +45,9 @@ describe('anthropicJudge', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env = { ...originalEnv, ANTHROPIC_API_KEY: 'test-key' };
+    delete process.env.ANTHROPIC_AUTH_TOKEN;
+    delete process.env.ANTHROPIC_BASE_URL;
+    delete process.env.MST_LLM_AUTH_COMMAND;
   });
 
   afterEach(() => {
@@ -50,6 +60,48 @@ describe('anthropicJudge', () => {
     expect(() => createAnthropicJudge({})).toThrow(
       'Anthropic judge requires an API key'
     );
+    expect(() => createAnthropicJudge({})).toThrow('ANTHROPIC_AUTH_TOKEN');
+  });
+
+  it('sends the API key alone, so the SDK does not add a bearer header', async () => {
+    (await getMockCreate()).mockResolvedValue(makeResponse(VERDICT));
+
+    await createAnthropicJudge({}).evaluate('candidate', null, 'rubric');
+
+    expect(await getMockClient()).toHaveBeenCalledWith({
+      apiKey: 'test-key',
+      authToken: null,
+      baseURL: 'https://api.anthropic.com',
+    });
+  });
+
+  it('sends ANTHROPIC_AUTH_TOKEN as a bearer token to the base URL override', async () => {
+    process.env.ANTHROPIC_AUTH_TOKEN = 'gateway-token';
+    process.env.ANTHROPIC_BASE_URL = 'https://gateway.example/anthropic';
+    (await getMockCreate()).mockResolvedValue(makeResponse(VERDICT));
+
+    await createAnthropicJudge({}).evaluate('candidate', null, 'rubric');
+
+    expect(await getMockClient()).toHaveBeenCalledWith({
+      apiKey: null,
+      authToken: 'gateway-token',
+      baseURL: 'https://gateway.example/anthropic',
+    });
+  });
+
+  it('gets a bearer token from MST_LLM_AUTH_COMMAND when no key is set', async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_BASE_URL = 'https://gateway.example/anthropic';
+    process.env.MST_LLM_AUTH_COMMAND = `node -e "process.stdout.write('judge-command-token')"`;
+    (await getMockCreate()).mockResolvedValue(makeResponse(VERDICT));
+
+    await createAnthropicJudge({}).evaluate('candidate', null, 'rubric');
+
+    expect(await getMockClient()).toHaveBeenCalledWith({
+      apiKey: null,
+      authToken: 'judge-command-token',
+      baseURL: 'https://gateway.example/anthropic',
+    });
   });
 
   it('throws when custom apiKeyEnvVar is not set', () => {

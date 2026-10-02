@@ -206,7 +206,10 @@ export interface MCPHostConfig {
   provider?: LLMProvider;
 
   /**
-   * Environment variable name containing the API key
+   * Read the API key from exactly this environment variable. For the
+   * `anthropic` and `openai` providers this also turns off the LLM gateway
+   * credentials (`ANTHROPIC_AUTH_TOKEN`, `MST_LLM_AUTH_COMMAND`); see
+   * docs/llm-gateways.md.
    */
   apiKeyEnvVar?: string;
 

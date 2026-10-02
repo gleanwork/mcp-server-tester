@@ -38,6 +38,10 @@ vi.mock('ai', () => ({
   stepCountIs: vi.fn((n: number) => ({ type: 'stepCount', count: n })),
 }));
 
+vi.mock('@ai-sdk/anthropic', () => ({
+  createAnthropic: vi.fn(() => vi.fn(() => ({ id: 'claude' }))),
+}));
+
 vi.mock('@ai-sdk/openai', () => ({
   createOpenAI: vi.fn(() => vi.fn(() => ({ id: 'gpt-4o' }))),
 }));
@@ -113,6 +117,48 @@ describe('createVercelOrchestrator', () => {
     expect(result.response).toBe('Final answer');
     expect(result.llmDurationMs).toBeGreaterThanOrEqual(0);
     expect(result.mcpDurationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('points the anthropic provider at the public API with its /v1 base URL by default', async () => {
+    const { createAnthropic } = await import('@ai-sdk/anthropic');
+    // streamText isn't mocked here; only the provider construction matters.
+    await createVercelOrchestrator().simulate(createMockMCP(), 'scenario', {
+      provider: 'anthropic',
+      model: 'claude',
+      env: { ANTHROPIC_API_KEY: 'key' },
+    });
+
+    expect(createAnthropic).toHaveBeenCalledWith({
+      baseURL: 'https://api.anthropic.com/v1',
+      apiKey: 'key',
+    });
+  });
+
+  it('keeps OpenAI response storage on for the public API', async () => {
+    const { generateText } = await import('ai');
+    await createVercelOrchestrator().simulate(createMockMCP(), 'scenario', {
+      provider: 'openai',
+      model: 'gpt-4o',
+    });
+
+    const options = vi.mocked(generateText).mock.calls[0]?.[0] as {
+      providerOptions?: unknown;
+    };
+    expect(options.providerOptions).toBeUndefined();
+  });
+
+  it('turns OpenAI response storage off behind a base URL override', async () => {
+    const { generateText } = await import('ai');
+    await createVercelOrchestrator().simulate(createMockMCP(), 'scenario', {
+      provider: 'openai',
+      model: 'gpt-4o',
+      env: { OPENAI_BASE_URL: 'https://gateway.example/openai/v1' },
+    });
+
+    const options = vi.mocked(generateText).mock.calls[0]?.[0] as {
+      providerOptions?: unknown;
+    };
+    expect(options.providerOptions).toEqual({ openai: { store: false } });
   });
 
   it('should capture token usage from SDK response', async () => {

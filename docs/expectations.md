@@ -445,7 +445,7 @@ test('search relevance', async ({ mcp }) => {
 
 ### Supported Providers
 
-- **OpenAI** - Requires `OPENAI_API_KEY` environment variable
+- **OpenAI** - Requires `OPENAI_API_KEY` environment variable, or a gateway credential (see [LLM Gateways](./llm-gateways.md))
 
   ```typescript
   createJudge({
@@ -455,7 +455,7 @@ test('search relevance', async ({ mcp }) => {
   });
   ```
 
-- **Anthropic** - Requires `ANTHROPIC_API_KEY` environment variable
+- **Anthropic** - Requires `ANTHROPIC_API_KEY` environment variable, or a gateway credential (see [LLM Gateways](./llm-gateways.md))
   ```typescript
   createJudge({
     provider: 'anthropic',

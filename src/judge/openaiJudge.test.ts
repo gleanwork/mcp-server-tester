@@ -65,6 +65,8 @@ describe('openaiJudge', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     process.env = { ...originalEnv, OPENAI_API_KEY: 'test-api-key' };
+    delete process.env.OPENAI_BASE_URL;
+    delete process.env.MST_LLM_AUTH_COMMAND;
   });
 
   afterEach(() => {
@@ -88,6 +90,26 @@ describe('openaiJudge', () => {
       ).toThrow(
         'OpenAI judge requires an API key. Set the MY_OPENAI_KEY environment variable.'
       );
+    });
+
+    it('sends the base URL override and the key resolved for it', async () => {
+      delete process.env.OPENAI_API_KEY;
+      process.env.OPENAI_BASE_URL = 'https://gateway.example/openai/v1';
+      process.env.MST_LLM_AUTH_COMMAND = `node -e "process.stdout.write('openai-command-token')"`;
+      (await getMockCreate()).mockResolvedValue(
+        makeCompletionResponse(
+          JSON.stringify({ pass: true, score: 1, reasoning: 'OK' })
+        )
+      );
+
+      await createOpenAIJudge({}).evaluate('candidate', null, 'rubric');
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-unsafe-member-access
+      const MockOpenAI = (await import('openai' as any)).default;
+      expect(MockOpenAI).toHaveBeenCalledWith({
+        apiKey: 'openai-command-token',
+        baseURL: 'https://gateway.example/openai/v1',
+      });
     });
 
     it('creates a judge with evaluate method', () => {
