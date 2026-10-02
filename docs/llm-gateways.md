@@ -31,7 +31,7 @@ npx playwright test
 
 `ANTHROPIC_BASE_URL` means the same as it does for the official Anthropic SDKs and Claude Code, so a value set for those works here. The AI SDK on its own expects the `/v1` form; MST accepts either and sends each SDK the form it needs.
 
-The command runs through the shell with MST's environment, and must print only the token on stdout. Its token is cached per command string for the whole process. If it fails, the LLM call fails with its exit status; neither its stdout nor its stderr is included in the error (either could contain the token), so run it in a terminal to see what went wrong.
+The command runs through the shell with MST's environment, and must print only the token on stdout. Its token is cached per command and environment for `MST_LLM_AUTH_COMMAND_TTL_MS`, so a case with its own `mcpHostConfig.env` runs the command again. If it fails, the LLM call fails with its exit status; neither its stdout nor its stderr is included in the error (either could contain the token), so run it in a terminal to see what went wrong.
 
 ### Gateways configured for Claude Code
 
@@ -46,7 +46,7 @@ export MST_LLM_AUTH_COMMAND=<the apiKeyHelper value>
 
 For Anthropic-shaped calls, the first that applies wins:
 
-1. `apiKeyEnvVar` from `mcpHostConfig` or the judge config. When set, no other credential is read.
+1. `apiKeyEnvVar` from `mcpHostConfig` or the judge config. When set, no other credential is read; the key still goes to `ANTHROPIC_BASE_URL` if that is set.
 2. `MST_LLM_AUTH_COMMAND`, sent as `Authorization: Bearer`, **only when `ANTHROPIC_BASE_URL` is set**.
 3. `ANTHROPIC_AUTH_TOKEN`, sent as `Authorization: Bearer`, **only when `ANTHROPIC_BASE_URL` is set**.
 4. `ANTHROPIC_API_KEY`, sent as `x-api-key`.

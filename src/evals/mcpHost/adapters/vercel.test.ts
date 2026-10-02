@@ -152,6 +152,21 @@ describe('createVercelOrchestrator', () => {
     expect(generateText).not.toHaveBeenCalled();
   });
 
+  it('drops ANTHROPIC_AUTH_TOKEN without a base URL override', async () => {
+    const { createAnthropic } = await import('@ai-sdk/anthropic');
+    vi.mocked(createAnthropic).mockClear();
+    await createVercelOrchestrator().simulate(createMockMCP(), 'scenario', {
+      provider: 'anthropic',
+      model: 'claude',
+      env: { ANTHROPIC_AUTH_TOKEN: 'gateway-token', ANTHROPIC_API_KEY: 'key' },
+    });
+
+    expect(createAnthropic).toHaveBeenCalledWith({
+      baseURL: 'https://api.anthropic.com/v1',
+      apiKey: 'key',
+    });
+  });
+
   it('keeps OpenAI response storage on for the public API', async () => {
     const { generateText } = await import('ai');
     await createVercelOrchestrator().simulate(createMockMCP(), 'scenario', {

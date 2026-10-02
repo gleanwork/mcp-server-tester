@@ -333,7 +333,7 @@ export default {
 
 MST's LLM calls now resolve their endpoint and credential in one place (`src/llm/endpoint.ts`), so they can go through an LLM gateway. See [LLM Gateways](../llm-gateways.md).
 
-- **`ANTHROPIC_AUTH_TOKEN` is a gateway credential.** With `ANTHROPIC_BASE_URL` set, it is sent as `Authorization: Bearer`, ahead of `ANTHROPIC_API_KEY`; the SDK host used to send only `x-api-key`, and the judge sent both headers. Without a base URL override it is ignored, so a gateway token never reaches the public API; the judge's SDK used to send it there too.
+- **`ANTHROPIC_AUTH_TOKEN` is a gateway credential.** With `ANTHROPIC_BASE_URL` set, it is sent as `Authorization: Bearer`, ahead of `ANTHROPIC_API_KEY`; the SDK host used to send only `x-api-key`, and the judge sent both headers. Without a base URL override it is ignored, so a gateway token never reaches the public API; the judge's SDK used to send it there too. If it was your only Anthropic credential, set `ANTHROPIC_BASE_URL` (or `ANTHROPIC_API_KEY`): the `anthropic` judge now reports a missing key, and the SDK host's calls fail authentication.
 - **The Cowork Computer Use driver ignores `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`.** It always calls the public Anthropic API with `ANTHROPIC_API_KEY`. Before, the Python SDK picked both up from the environment, which could send the key to a gateway or a gateway token to the public API.
 - **An explicit `apiKeyEnvVar` reads only that variable.** This was already true for the SDK host; the judge used to pick up `ANTHROPIC_AUTH_TOKEN` from the environment as well.
 - **With a base URL override, `MST_LLM_AUTH_COMMAND` wins over `*_API_KEY` and `ANTHROPIC_AUTH_TOKEN`.** It is new, so this only matters once you set it.

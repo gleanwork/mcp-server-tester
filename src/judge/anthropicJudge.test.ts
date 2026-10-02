@@ -63,6 +63,18 @@ describe('anthropicJudge', () => {
     expect(() => createAnthropicJudge({})).toThrow('ANTHROPIC_AUTH_TOKEN');
   });
 
+  it('does not take ANTHROPIC_AUTH_TOKEN alone, without a base URL override', () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_AUTH_TOKEN = 'gateway-token';
+    try {
+      expect(() => createAnthropicJudge({})).toThrow(
+        'Anthropic judge requires an API key'
+      );
+    } finally {
+      delete process.env.ANTHROPIC_AUTH_TOKEN;
+    }
+  });
+
   it('sends the API key alone, so the SDK does not add a bearer header', async () => {
     (await getMockCreate()).mockResolvedValue(makeResponse(VERDICT));
 
