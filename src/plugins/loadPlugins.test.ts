@@ -189,7 +189,7 @@ describe('loadPlugins', () => {
     );
 
     await expect(loadPlugins(['narrow'], { baseDir: dir })).rejects.toThrow(
-      /^Plugin "narrow" can't be imported: No "exports" main defined in /
+      /^Plugin "narrow" can't be imported from .+: No "exports" main defined in /
     );
   });
 
@@ -235,7 +235,68 @@ describe('loadPlugins', () => {
     );
 
     await expect(loadPlugins(['escapes'], { baseDir: dir })).rejects.toThrow(
-      /^Plugin "escapes" can't be imported: Invalid "exports" main target "\.\.\/outside\.js"/
+      /^Plugin "escapes" can't be imported from .+: Invalid "exports" main target "\.\.\/outside\.js"/
+    );
+  });
+
+  it('applies the module-sync condition, as import() does', async () => {
+    const dir = tempDir();
+    writePackage(
+      dir,
+      'synced',
+      {
+        exports: { 'module-sync': './sync.mjs', default: './fallback.cjs' },
+      },
+      {
+        'sync.mjs': pluginSource('sync'),
+        'fallback.cjs':
+          'module.exports = { meta: { name: "fallback", namespace: "fallback" } };',
+      }
+    );
+
+    const [plugin] = await loadPlugins(['synced'], { baseDir: dir });
+
+    expect(plugin?.meta.namespace).toBe('sync');
+  });
+
+  it('reports an installed package it cannot import instead of looking elsewhere', async () => {
+    const dir = tempDir();
+    const fallback = tempDir();
+    writePackage(dir, 'broken', { type: 'module', exports: './gone.mjs' }, {});
+    writePackage(dir, 'no-main', { main: 'lib/gone.js' }, {});
+    writePackage(
+      dir,
+      'folders',
+      {},
+      {
+        'plugins/index.js': pluginSource('folders'),
+      }
+    );
+    for (const name of ['broken', 'no-main'])
+      writePackage(
+        fallback,
+        name,
+        { type: 'module', exports: './index.js' },
+        {
+          'index.js': pluginSource('fallback'),
+        }
+      );
+
+    await expect(
+      loadPlugins(['broken'], { baseDir: dir, fallbackDir: fallback })
+    ).rejects.toThrow(
+      /^Plugin "broken" can't be imported from .+: Cannot find module '.+gone\.mjs'$/
+    );
+    await expect(
+      loadPlugins(['no-main'], { baseDir: dir, fallbackDir: fallback })
+    ).rejects.toThrow(
+      /^Plugin "no-main" can't be imported from .+: Cannot find package '.+no-main/
+    );
+    // As with import(), a package subpath can't be a directory.
+    await expect(
+      loadPlugins(['folders/plugins'], { baseDir: dir })
+    ).rejects.toThrow(
+      /^Plugin "folders\/plugins" can't be imported from .+: Directory import/
     );
   });
 

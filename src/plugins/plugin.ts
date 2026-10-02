@@ -1,8 +1,10 @@
+import type { ZodType } from 'zod';
 import type {
   DatasetSource,
   HostDefinition,
   JudgeDefinition,
   MetricDefinition,
+  MetricKind,
   ResultStoreDefinition,
 } from '../evals/evalFrameworkTypes.js';
 
@@ -62,6 +64,14 @@ const REQUIRED_FUNCTIONS: Record<ExtensionKind, readonly string[]> = {
   resultStores: ['create'],
 };
 
+/** Every metric kind; a Record so a new MetricKind must be added here. */
+const METRIC_KINDS: Record<MetricKind, true> = {
+  binary: true,
+  continuous: true,
+  categorical: true,
+  object: true,
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -88,6 +98,11 @@ function extensionProblem(
   const required = REQUIRED_FUNCTIONS[kind];
   if (!required.some((fn) => typeof definition[fn] === 'function'))
     return `${label} needs ${describeFunctions(required)}`;
+  if (
+    kind === 'metrics' &&
+    !(typeof definition.kind === 'string' && definition.kind in METRIC_KINDS)
+  )
+    return `${label} needs a kind: ${Object.keys(METRIC_KINDS).join(', ')}`;
   return undefined;
 }
 
@@ -155,4 +170,23 @@ export function parseExtensionReference(reference: string): {
     namespace: reference.slice(0, slash),
     name: reference.slice(slash + 1),
   };
+}
+
+/**
+ * Parse an extension's options with its schema. The schema must produce an
+ * object: that object is what the extension receives. `label` names the
+ * options in errors, e.g. `judge options "acme/quality"`.
+ */
+export function parseExtensionOptions(
+  schema: ZodType,
+  raw: unknown,
+  label: string
+): Record<string, unknown> {
+  const result = schema.safeParse(raw);
+  if (!result.success)
+    throw new Error(`Invalid ${label}: ${result.error.message}`);
+  const data: unknown = result.data;
+  if (!isRecord(data))
+    throw new Error(`Invalid ${label}: schema must return an options object.`);
+  return data;
 }

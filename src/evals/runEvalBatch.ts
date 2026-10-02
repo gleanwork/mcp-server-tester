@@ -3,10 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { loadEvalManifest, type EvalManifest } from './evalManifest.js';
-import {
-  assertListedNamespaces,
-  resolveResultStoreConfig,
-} from './manifestValidation.js';
+import { resolveResultStoreConfig } from './manifestValidation.js';
 import { manifestIdentity } from './manifestIdentity.js';
 import type { Plugin } from '../plugins/plugin.js';
 import { loadSuitePlugins } from './suitePlugins.js';
@@ -139,9 +136,9 @@ async function hasMatchingSavedResult(
       plugins,
     });
     // Another manifest in this batch may have loaded a plugin this one doesn't list.
-    assertListedNamespaces([manifest.results.store.type], namespaces);
     const { definition, config } = resolveResultStoreConfig(
-      manifest.results.store
+      manifest.results.store,
+      { namespaces }
     );
     const store = definition.create(config);
     const identity = manifestIdentity(manifest);

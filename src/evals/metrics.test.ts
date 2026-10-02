@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SkillLoad } from '../types/index.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import {
+  BUILT_IN_METRICS,
   computeMetrics,
   resolveMetric,
   type MetricDefinition,
@@ -75,6 +76,9 @@ describe('computeMetrics', () => {
     );
     expect(metrics.aggregated['test/plugin-binary_rate']).toBe(0.5);
     expect(metrics.aggregated['test/plugin-continuous_mean']).toBe(1000);
+  });
+  it('keeps the built-in metrics read-only', () => {
+    expect(Object.isFrozen(BUILT_IN_METRICS)).toBe(true);
   });
   it('computes built-in metrics and aggregates nulls correctly', () => {
     const cases = [
@@ -331,7 +335,7 @@ describe('computeMetrics', () => {
     expect(secondCopy.resolveMetric('passed').outName).toBe('passed');
   });
 
-  it('validates parameterized built-ins and output aliases through the same registry', () => {
+  it('validates parameterized built-ins and output aliases through the same lookup', () => {
     const parsed = validateManifest({
       name: 'metrics',
       datasets: [],

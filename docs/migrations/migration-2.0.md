@@ -314,7 +314,7 @@ export default {
 - **Reference plugin extensions as `namespace/name`:** `{ "type": "acme/legacy" }` in manifests, and `{ "judge": "acme/completeness" }` in datasets and `toPassToolJudge`. Bare names belong to built-ins, so a plugin can no longer register a bare `correctness` or replace `file`.
 - **A manifest must load the plugins it references.** Referencing `acme/...` without `acme` in that manifest's `plugins` (or `--plugins`, or the `plugins` option) is an error, even if another manifest in the same batch loaded it.
 - **`--plugins` and the `pluginPaths` option add to the manifest's `plugins`** instead of replacing them.
-- **Manifest plugin paths resolve relative to the manifest's directory,** then `rootDir` (`--root-dir`, the working directory by default), then as package names, using the package's `import` export condition. Before, they resolved against `rootDir` only.
+- **Manifest plugin paths resolve relative to the manifest's directory,** then `rootDir` (`--root-dir`, the working directory by default), then as package names, resolved as `import` resolves them (exports conditions, including `module-sync`, and subpath patterns), so a package subpath must be a file or an `exports` entry. Before, they resolved against `rootDir` only.
 - **Plugins are validated when they load.** Unknown top-level keys are rejected, every extension needs a Zod `schema` and its kind's function (`load`, `run`/`runBatch`/`createConfig`, `evaluate`, `compute`, or `create`), and a different plugin claiming a loaded namespace throws. An old `registerJudge(name, executor)` judge becomes `{ schema: z.object({}).passthrough(), evaluate: executor }`.
 - **Datasets are checked too.** A case's `host.type` and `passesJudge.judge` must name a built-in or a namespace the suite loads.
 - **`getBuiltinHostConfig` resolves built-in hosts only.**
@@ -323,8 +323,8 @@ export default {
 - **Removed:**
   - From the root: `registerJudge` (both forms) and the `CustomJudgeExecutor` and `CustomJudgeResult` types. A plugin judge's `evaluate` takes the same arguments as the old executor; it also needs a `schema`.
   - From `./evals`: `registerDatasetSource`, `registerHost`, `registerMetric`, `registerResultStore`, and their `get*`, `list*` and `clear*` counterparts; `METRIC_REGISTRY`; and `loadPlugins`, `loadPluginModule`, `EvalPluginModule` and `LoadPluginsOptions`.
-  - `resolveMetric` and `computeMetrics` still accept an explicit metric record.
-- **The `glean-legacy` dataset source example was removed.** It encoded one organization's legacy dataset schema and judge policy, which belongs in that organization's plugin, not in MST. Copy it from the `v2.0.0-beta.7` tag (`examples/plugins/legacy-glean-datasets.ts`) if you need it, and convert it to a plugin object as above. [Migrating dataset sources](dataset-sources.md#other-dataset-schemas-register-a-dataset-source) shows a dataset-source plugin.
+  - The metric-record argument of `resolveMetric` and `computeMetrics`. Metrics resolve from built-ins and loaded plugins only, and `BUILT_IN_METRICS` is read-only.
+- **The `glean-legacy` dataset source example was removed.** It encoded one organization's legacy dataset schema and judge policy, which belongs in that organization's plugin, not in MST. Copy it from the `v2.0.0-beta.7` tag (`examples/plugins/legacy-glean-datasets.ts`) if you need it, and convert it to a plugin object as above. [Migrating dataset sources](dataset-sources.md#other-dataset-schemas-a-dataset-source-plugin) shows a dataset-source plugin.
 
 ## New in 2.0 (non-breaking)
 

@@ -57,7 +57,7 @@ Directory declarations are expanded by the suite; each JSON entry undergoes the 
 
 Noncanonical fields are rejected instead of silently discarded, including on later cases and cases beyond `maxCases`. A scenario without a host mode is not implicitly a quality evaluation. Fix the JSON or select an explicit source adapter when the error says `Expected a canonical EvalDataset`.
 
-## Other dataset schemas: register a dataset source
+## Other dataset schemas: a dataset-source plugin
 
 If your datasets use another schema, convert them in a dataset source that your own plugin provides. Core readers stay canonical-only, and the conversion policy (default iterations, accuracy thresholds, which judges a case gets) belongs to your adapter, not to MST.
 

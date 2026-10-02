@@ -318,7 +318,7 @@ describe('runEvalBatch skipExisting', () => {
     expect(runEvalSuite).toHaveBeenCalledOnce();
   });
 
-  it('reruns safely when a plugin store is not registered', async () => {
+  it('reruns safely when a plugin store is not loaded', async () => {
     manifestInput.results = {
       store: { type: 'missing/unavailable-plugin-store' },
     };

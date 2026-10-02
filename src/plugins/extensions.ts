@@ -113,9 +113,6 @@ export function installPlugins(plugins: readonly Plugin[]): Plugin[] {
 export interface ExtensionLookup<T> {
   /** The extension `reference` names. Throws a uniform error when there is none. */
   get(reference: string): T;
-  has(reference: string): boolean;
-  /** Every name this kind resolves right now, sorted. */
-  names(): string[];
 }
 
 /** Create the lookup for `kind`, whose built-ins `builtins` returns. */
@@ -149,12 +146,6 @@ export function extensionLookup<K extends ExtensionKind>(
       throw new Error(
         `${label} "${reference}" is not available.${available ? ` Available: ${available}.` : ''}`
       );
-    },
-    has(reference) {
-      return extensions().has(reference);
-    },
-    names() {
-      return [...extensions().keys()].sort();
     },
   };
 }

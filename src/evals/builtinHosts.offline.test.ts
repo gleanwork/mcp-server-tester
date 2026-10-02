@@ -70,7 +70,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe('registered SDK host through the real AI SDK', () => {
+describe('SDK host through the real AI SDK', () => {
   it('forwards model, temperature, output token budget and a live deadline signal', async () => {
     const result = await run({
       model: 'case-model',

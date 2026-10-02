@@ -158,7 +158,7 @@ try {
     true
   );
   console.log(
-    'PASS: public object and legacy judge registration reach the shared validator at this layer, including omitted/defaulted options.'
+    'PASS: plugin judges reach the shared validator at this layer, including omitted/defaulted options.'
   );
 
   for (const [policy, passed] of [

@@ -271,11 +271,12 @@ function parameterizedJudgeMetric(
 const BUILT_INS_KEY = Symbol.for('mcp-server-tester.built-in-metrics');
 const globalMetrics = globalThis as unknown as Record<symbol, unknown>;
 
-/** Built-in metrics. */
-export const BUILT_IN_METRICS: Record<string, MetricDefinition> =
+/** Built-in metrics, read-only: plugins add metrics under their namespace. */
+export const BUILT_IN_METRICS: Readonly<Record<string, MetricDefinition>> =
   (globalMetrics[BUILT_INS_KEY] as
-    | Record<string, MetricDefinition>
-    | undefined) ?? {
+    | Readonly<Record<string, MetricDefinition>>
+    | undefined) ??
+  Object.freeze({
     judge_pass_for: parameterizedJudgeMetric('judge_pass_for'),
     judge_score_for: parameterizedJudgeMetric('judge_score_for'),
     passed: metric('binary', (result) => result.pass, rateAggregation),
@@ -411,7 +412,7 @@ export const BUILT_IN_METRICS: Record<string, MetricDefinition> =
       const first = judgeEntries(result)[0];
       return first ? judgeName(first) : null;
     }),
-  };
+  });
 
 globalMetrics[BUILT_INS_KEY] = BUILT_IN_METRICS;
 

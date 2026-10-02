@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { resolve } from 'import-meta-resolve';
+import { moduleResolve } from 'import-meta-resolve';
 import { assertPlugin, type Plugin } from './plugin.js';
 
 export interface LoadPluginsOptions {
@@ -36,24 +36,41 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** The conditions Node (22.12+) applies to `import()`. */
+const IMPORT_CONDITIONS = new Set(['node', 'import', 'module-sync']);
+
+function packageName(specifier: string): string {
+  const parts = specifier.split('/');
+  return parts.slice(0, specifier.startsWith('@') ? 2 : 1).join('/');
+}
+
 /**
- * Resolve a package specifier from `dir` exactly as `import` would (exports
- * maps, conditions, subpath patterns, `main`), using Node's algorithm through
- * import-meta-resolve, as Prettier does for its plugins. Returns undefined
- * when no such package is installed there.
+ * Resolve a package specifier from `dir` as `import` would (exports maps,
+ * conditions, subpath patterns, `main`), with Node's own algorithm through
+ * import-meta-resolve, as Prettier loads its plugins. Returns undefined when
+ * the package isn't installed there; a package that is installed but can't
+ * be imported is an error.
  */
 function resolvePackage(specifier: string, dir: string): string | undefined {
   // Resolution is relative to a file in `dir`; the file needn't exist.
-  const parent = pathToFileURL(path.join(dir, 'mst-plugins.js')).href;
+  const parent = pathToFileURL(path.join(dir, 'mst-plugins.js'));
   try {
-    const url = resolve(specifier, parent);
+    const url = moduleResolve(specifier, parent, IMPORT_CONDITIONS);
     // `fs` resolves to node:fs, which is not a plugin.
-    return url.startsWith('file:') ? fileURLToPath(url) : undefined;
+    return url.protocol === 'file:' ? fileURLToPath(url) : undefined;
   } catch (error) {
-    const code = (error as { code?: unknown }).code;
-    if (code === 'ERR_MODULE_NOT_FOUND') return undefined;
+    const { code, message } = error as { code?: unknown; message: string };
+    if (
+      code === 'ERR_MODULE_NOT_FOUND' &&
+      message.startsWith(`Cannot find package '${packageName(specifier)}'`)
+    )
+      return undefined;
+    const reason = message.replace(
+      ` imported from ${fileURLToPath(parent)}`,
+      ''
+    );
     throw new Error(
-      `Plugin "${specifier}" can't be imported: ${(error as Error).message}`,
+      `Plugin "${specifier}" can't be imported from ${dir}: ${reason}`,
       { cause: error }
     );
   }

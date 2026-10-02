@@ -151,7 +151,7 @@ afterEach(async () => {
   vi.unstubAllEnvs();
 });
 
-describe('registered SDK owned lifecycle deadline', () => {
+describe('SDK host owned lifecycle deadline', () => {
   it('bounds delayed connection setup without starting model execution', async () => {
     await startServer();
     holdInitialize = true;

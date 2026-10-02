@@ -1,11 +1,20 @@
 import { z, type ZodType } from 'zod';
-import type { ResultStoreDefinition } from './evalFrameworkTypes.js';
+import type {
+  DatasetSource,
+  HostDefinition,
+  JudgeDefinition,
+  MetricDefinition,
+  ResultStoreDefinition,
+} from './evalFrameworkTypes.js';
 import { getDatasetSource } from './builtinDatasetSources.js';
 import { getHost } from './builtinHosts.js';
 import { getJudge } from '../judge/builtinJudges.js';
 import { getMetric } from './metrics.js';
 import { getResultStore } from './builtinResultStores.js';
-import { parseExtensionReference } from '../plugins/plugin.js';
+import {
+  parseExtensionOptions,
+  parseExtensionReference,
+} from '../plugins/plugin.js';
 import type {
   EvalManifest,
   ExtensionConfig,
@@ -13,12 +22,48 @@ import type {
   TaggedConfig,
 } from './evalManifest.js';
 
+/**
+ * The lookups validation resolves references through. With `namespaces`, each
+ * reference is checked against the suite's plugins where it is resolved: the
+ * extension table is shared by every suite in a process (a batch), so without
+ * this a suite could pass only because another one loaded the plugin
+ * (ADR-0001).
+ */
+interface ManifestLookups {
+  datasetSource(reference: string): DatasetSource;
+  host(reference: string): HostDefinition;
+  metric(reference: string): MetricDefinition;
+  judge(reference: string): JudgeDefinition;
+  resultStore(reference: string): ResultStoreDefinition;
+}
+
+function manifestLookups(namespaces?: readonly string[]): ManifestLookups {
+  function scoped<T>(get: (reference: string) => T) {
+    return (reference: string): T => {
+      if (namespaces) assertListedNamespaces([reference], namespaces);
+      return get(reference);
+    };
+  }
+  return {
+    datasetSource: scoped(getDatasetSource),
+    host: scoped(getHost),
+    metric: scoped(getMetric),
+    judge: scoped(getJudge),
+    resultStore: scoped(getResultStore),
+  };
+}
+
 /** Resolve by implementation type and retain parsed defaults/transforms for consumers. */
-export function resolveResultStoreConfig(config: ExtensionConfig): {
+export function resolveResultStoreConfig(
+  config: ExtensionConfig,
+  options: ValidateManifestOptions = {}
+): {
   definition: ResultStoreDefinition;
   config: ExtensionConfig;
 } {
-  const definition = getResultStore(config.type);
+  const definition = manifestLookups(options.namespaces).resultStore(
+    config.type
+  );
   return {
     definition,
     config: parseConfig(config, definition, 'result store options'),
@@ -30,25 +75,15 @@ function parseConfig<T extends TaggedConfig>(
   implementation: { schema: ZodType },
   context: string
 ): T {
-  const result = implementation.schema.safeParse(config);
-  if (!result.success) {
-    throw new Error(
-      `Invalid ${context} "${config.type}": ${result.error.message}`
-    );
-  }
-  if (
-    !result.data ||
-    typeof result.data !== 'object' ||
-    Array.isArray(result.data)
-  ) {
-    throw new Error(
-      `Invalid ${context} "${config.type}": schema must return an options object.`
-    );
-  }
+  const data = parseExtensionOptions(
+    implementation.schema,
+    config,
+    `${context} "${config.type}"`
+  );
   // Keep routing metadata even when an options schema strips unknown keys.
   // Do not merge raw options back in: that would undo stripping/transforms.
   return {
-    ...result.data,
+    ...data,
     type: config.type,
     ...(typeof config.name === 'string' ? { name: config.name } : {}),
   } as T;
@@ -96,13 +131,14 @@ export function normalizeSuiteControls(manifest: EvalManifest): EvalManifest {
 }
 
 function parseMetrics(
-  configs: ExtensionConfig[] | undefined
+  configs: ExtensionConfig[] | undefined,
+  lookups: ManifestLookups
 ): ExtensionConfig[] | undefined {
   // resolveMetric runs the spec's `metric` key when it has one, so validate that.
   return configs?.map((config) =>
     parseConfig(
       config,
-      getMetric(
+      lookups.metric(
         typeof config.metric === 'string' ? config.metric : config.type
       ),
       'metric options'
@@ -111,10 +147,15 @@ function parseMetrics(
 }
 
 function parseJudges(
-  configs: ExtensionConfig[] | undefined
+  configs: ExtensionConfig[] | undefined,
+  lookups: ManifestLookups
 ): ExtensionConfig[] | undefined {
   return configs?.map((config) => {
-    const parsed = parseConfig(config, getJudge(config.type), 'judge options');
+    const parsed = parseConfig(
+      config,
+      lookups.judge(config.type),
+      'judge options'
+    );
     // These belong to the framework assertion, not the judge's policy schema.
     // A stripping or transforming policy must not change the requested verdict.
     for (const key of ['threshold', 'reference'] as const) {
@@ -126,21 +167,23 @@ function parseJudges(
 
 export function parseHostConfig(
   config: HostConfig,
-  defaults?: EvalManifest
+  defaults?: EvalManifest,
+  lookups: ManifestLookups = manifestLookups()
 ): HostConfig {
   const options = { ...config };
   for (const key of ['model', 'provider', 'maxToolCalls', 'timeout'] as const) {
     if (options[key] === undefined && defaults?.[key] !== undefined)
       options[key] = defaults[key];
   }
-  return parseConfig(options, getHost(config.type), 'host options');
+  return parseConfig(options, lookups.host(config.type), 'host options');
 }
 
 function effectiveHost(
   manifest: EvalManifest,
-  host: HostConfig | undefined
+  host: HostConfig | undefined,
+  lookups: ManifestLookups
 ): HostConfig | undefined {
-  return host ? parseHostConfig(host, manifest) : undefined;
+  return host ? parseHostConfig(host, manifest, lookups) : undefined;
 }
 
 function validateLabels(
@@ -158,35 +201,7 @@ function validateLabels(
   }
 }
 
-/** Every extension reference (`type`) a manifest declares. */
-function manifestReferences(manifest: EvalManifest): string[] {
-  const metrics = [
-    ...(manifest.metrics ?? []),
-    ...(manifest.arms ?? []).flatMap((arm) => arm.metrics ?? []),
-  ];
-  const blocks: Array<{ type?: unknown } | undefined> = [
-    ...manifest.datasets,
-    manifest.host,
-    ...metrics,
-    ...(manifest.judges ?? []),
-    manifest.results?.store,
-    ...(manifest.arms ?? []).flatMap((arm) => [
-      arm.host,
-      ...(arm.judges ?? []),
-    ]),
-  ];
-  // A metric spec's `metric` key wins over `type` when it is resolved.
-  return [
-    ...blocks.map((block) => block?.type),
-    ...metrics.map((metric) => metric.metric),
-  ].filter((reference): reference is string => typeof reference === 'string');
-}
-
-/**
- * Reject references to plugin namespaces the suite didn't load. The extension
- * table is shared by every suite in a process (a batch), so without this a
- * suite could pass only because another one loaded the plugin (ADR-0001).
- */
+/** Reject references to plugin namespaces the suite didn't load (ADR-0001). */
 export function assertListedNamespaces(
   references: readonly string[],
   namespaces: readonly string[],
@@ -220,21 +235,20 @@ export function validateManifest(
   options: ValidateManifestOptions = {}
 ): EvalManifest {
   manifest = normalizeSuiteControls(manifest);
-  if (options.namespaces)
-    assertListedNamespaces(manifestReferences(manifest), options.namespaces);
+  const lookups = manifestLookups(options.namespaces);
   validateLabels(manifest.servers ?? [], 'the manifest');
   const datasets = manifest.datasets.map((config) =>
-    parseConfig(config, getDatasetSource(config.type), 'dataset options')
+    parseConfig(config, lookups.datasetSource(config.type), 'dataset options')
   );
-  const host = effectiveHost(manifest, manifest.host);
-  const metrics = parseMetrics(manifest.metrics);
-  const judges = parseJudges(manifest.judges);
+  const host = effectiveHost(manifest, manifest.host, lookups);
+  const metrics = parseMetrics(manifest.metrics, lookups);
+  const judges = parseJudges(manifest.judges, lookups);
   const results = manifest.results
     ? {
         ...manifest.results,
         store: parseConfig(
           manifest.results.store,
-          getResultStore(manifest.results.store.type),
+          lookups.resultStore(manifest.results.store.type),
           'result store options'
         ),
       }
@@ -246,14 +260,18 @@ export function validateManifest(
       ...arm,
       servers,
       host: arm.host
-        ? effectiveHost(manifest, {
-            ...manifest.host,
-            ...arm.host,
-            type: arm.host.type ?? manifest.host?.type ?? 'claude-cli',
-          })
+        ? effectiveHost(
+            manifest,
+            {
+              ...manifest.host,
+              ...arm.host,
+              type: arm.host.type ?? manifest.host?.type ?? 'claude-cli',
+            },
+            lookups
+          )
         : host,
-      metrics: arm.metrics ? parseMetrics(arm.metrics) : metrics,
-      judges: arm.judges ? parseJudges(arm.judges) : judges,
+      metrics: arm.metrics ? parseMetrics(arm.metrics, lookups) : metrics,
+      judges: arm.judges ? parseJudges(arm.judges, lookups) : judges,
     };
   });
   return { ...manifest, datasets, host, metrics, judges, results, arms };

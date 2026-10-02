@@ -37,7 +37,7 @@ function baseExtensions(): Required<TestExtensions> {
   const resultStore: ResultStoreDefinition = {
     schema,
     create: () => {
-      throw new Error('not used in registry validation');
+      throw new Error('not used in manifest validation');
     },
   };
   return {
@@ -276,7 +276,7 @@ describe('manifest validation', () => {
     'armHost',
     'armMetric',
     'armJudge',
-  ] as const)('rejects invalid registered %s options', (kind) => {
+  ] as const)('rejects invalid plugin %s options', (kind) => {
     const required = z.object({ required: z.number() });
     installTestPlugin({
       datasetSources: {

@@ -32,7 +32,7 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-describe('registered CLI host with a local process', () => {
+describe('CLI host with a local process', () => {
   it.each(['generated', 'legacy'] as const)(
     'preserves environment precedence in an actual %s CLI command without mutation',
     async (command) => {

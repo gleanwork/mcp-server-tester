@@ -593,7 +593,7 @@ describe('suite review regressions', () => {
     expect(process.env.EVAL_ITERATIONS).toBe('untouched');
     expect(f.run).not.toHaveBeenCalled();
   });
-  it('runs text, call-count and registered judge assertions for every custom-host iteration', async () => {
+  it('runs text, call-count and plugin judge assertions for every custom-host iteration', async () => {
     const judge = vi.fn(async () => ({ score: 0 }));
     const judgeName = addJudge(`review-judge-${sequence++}`, {
       schema: z.object({}).passthrough(),

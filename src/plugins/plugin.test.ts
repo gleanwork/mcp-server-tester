@@ -36,6 +36,22 @@ describe('assertPlugin', () => {
     expect(() => assertPlugin(value, './x.js')).toThrow(message);
   });
 
+  it('requires a metric kind', () => {
+    const metric = { schema: z.object({}), compute: () => 1 };
+
+    expect(() =>
+      assertPlugin(
+        {
+          meta: { name: 'acme', namespace: 'acme' },
+          metrics: { hits: metric },
+        },
+        'inline'
+      )
+    ).toThrow(
+      'Invalid plugin "acme": metrics.hits needs a kind: binary, continuous, categorical, object.'
+    );
+  });
+
   it('rejects a module that still exports a register function', () => {
     expect(() => assertPlugin(() => undefined, './old.js')).toThrow(
       'Plugin at ./old.js exports a function. MST 2.0 plugins are objects'

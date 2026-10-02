@@ -10,17 +10,7 @@ import type { RubricSpec } from '../../judge/rubrics.js';
 import { createJudge } from '../../judge/judgeClient.js';
 import { resolveRubric } from '../../judge/rubrics.js';
 import { getJudge } from '../../judge/builtinJudges.js';
-
-/** A judge's schema must produce an options object; it is passed to evaluate as-is. */
-function parseJudgeOptions(
-  name: string,
-  parsed: unknown
-): Record<string, unknown> {
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`Judge "${name}" schema must return an options object.`);
-  }
-  return parsed as Record<string, unknown>;
-}
+import { parseExtensionOptions } from '../../plugins/plugin.js';
 
 /**
  * Configuration for the judge validator
@@ -144,16 +134,15 @@ export async function validateJudge(
   if (judgeName !== undefined) {
     try {
       const judge = getJudge(judgeName);
-      const options = parseJudgeOptions(
-        judgeName,
-        judge.schema.parse(
-          config.options ??
-            Object.fromEntries(
-              Object.entries(config).filter(
-                ([key]) => !judgeFrameworkOptionKeys.has(key)
-              )
+      const options = parseExtensionOptions(
+        judge.schema,
+        config.options ??
+          Object.fromEntries(
+            Object.entries(config).filter(
+              ([key]) => !judgeFrameworkOptionKeys.has(key)
             )
-        )
+          ),
+        `judge options "${judgeName}"`
       );
       const judgeResult = await judge.evaluate(
         response,
