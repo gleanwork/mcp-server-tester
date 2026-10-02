@@ -242,8 +242,8 @@ it('keeps the observed Codex abort terminal but unsuccessful', async () => {
 describe('marker-free native correlation', () => {
   it('accepts the Linux native Markdown-escaped form of the exact prompt only', () => {
     // Observed on Linux ChatGPT Work 26.915.31945.
-    const prompt = 'run text(ALL_TOOLS.filter(t => /glean/i.test(t.name)))';
-    const stored = 'run text(ALL\\_TOOLS.filter(t => /glean/i.test(t.name)))\n';
+    const prompt = 'run text(ALL_TOOLS.filter(t => /acme/i.test(t.name)))';
+    const stored = 'run text(ALL\\_TOOLS.filter(t => /acme/i.test(t.name)))\n';
     const linux = (native: string, expected = prompt) =>
       parseChatgptTrace(
         serialize(exactTurn(native)),
@@ -261,9 +261,9 @@ describe('marker-free native correlation', () => {
       parseChatgptTrace(serialize(exactTurn(stored)), exact(prompt))
     ).toBeUndefined();
     for (const other of [
-      'run text(ALL\\_TOOLS.filter(t => /glean/i.test(t.names)))',
-      'run text(ALL\\TOOLS.filter(t => /glean/i.test(t.name)))',
-      'run text(ALL\\_TOOLS.filter(t => /glean/i.test(t.name)))\n\n',
+      'run text(ALL\\_TOOLS.filter(t => /acme/i.test(t.names)))',
+      'run text(ALL\\TOOLS.filter(t => /acme/i.test(t.name)))',
+      'run text(ALL\\_TOOLS.filter(t => /acme/i.test(t.name)))\n\n',
     ])
       expect(linux(other)).toBeUndefined();
     // A literal backslash in the prompt must be stored escaped, not bare.
@@ -982,7 +982,7 @@ describe('ChatGPT native response_item tool calls', () => {
       },
       at(to)
     );
-  const mcp = { type: 'McpToolCall', server: 'glean-eval', tool: 'search' };
+  const mcp = { type: 'McpToolCall', server: 'acme-eval', tool: 'search' };
   /** A native call and, when `out` is given, its output paired by call_id. */
   function call(
     callId: string,
@@ -1011,7 +1011,7 @@ describe('ChatGPT native response_item tool calls', () => {
     {
       done = true,
       surface = 'chatgpt-work' as 'chatgpt-work' | 'codex',
-      mcpServers = ['glean-eval'],
+      mcpServers = ['acme-eval'],
     } = {}
   ) =>
     parseChatgptTrace(
@@ -1074,7 +1074,7 @@ describe('ChatGPT native response_item tool calls', () => {
     const trace = parse(
       exec(
         'call_mcp',
-        'await tools.mcp__glean_eval__search({ query: "x" }); await tools.web__run({})',
+        'await tools.mcp__acme_eval__search({ query: "x" }); await tools.web__run({})',
         1,
         2
       )
@@ -1083,9 +1083,9 @@ describe('ChatGPT native response_item tool calls', () => {
       { source: 'host', arguments: { nestedTools: ['web__run'] } },
       {
         source: 'mcp',
-        server: 'glean-eval',
+        server: 'acme-eval',
         name: 'search',
-        rawName: 'exec:mcp__glean_eval__search',
+        rawName: 'exec:mcp__acme_eval__search',
         arguments: {},
       },
     ]);
@@ -1104,8 +1104,8 @@ describe('ChatGPT native response_item tool calls', () => {
     const confirmed = call('call_mcp', { name: 'exec', input: 'code' }, 1, {
       at: 2,
       meta: executed(
-        { name: 'mcp__glean_eval__search', arguments: { query: 'a' } },
-        { name: 'mcp__glean_eval__search', arguments: { query: 'b' } }
+        { name: 'mcp__acme_eval__search', arguments: { query: 'a' } },
+        { name: 'mcp__acme_eval__search', arguments: { query: 'b' } }
       ),
     });
     expect(
@@ -1120,7 +1120,7 @@ describe('ChatGPT native response_item tool calls', () => {
     // Observed on Linux ChatGPT Work 26.915.31945: exec references the tool and
     // the host also records a timed McpToolCall item for the same call.
     const viaExec = parse([
-      ...exec('call_mcp', 'await tools.mcp__glean_eval__search({})', 1, 3),
+      ...exec('call_mcp', 'await tools.mcp__acme_eval__search({})', 1, 3),
       item({ ...mcp, id: 'mcp-item-1', arguments: {} }, 1.5, 2.5),
     ]);
     expect(
@@ -1134,7 +1134,7 @@ describe('ChatGPT native response_item tool calls', () => {
       'code-mode exec runner'
     );
     const direct = parse([
-      ...call('shared', { name: 'search', namespace: 'mcp__glean_eval' }, 1),
+      ...call('shared', { name: 'search', namespace: 'mcp__acme_eval' }, 1),
       item({ ...mcp, id: 'shared', arguments: {} }),
     ]);
     expect(direct.toolCalls).toHaveLength(1);
@@ -1151,13 +1151,13 @@ describe('ChatGPT native response_item tool calls', () => {
         meta: executed(...runs),
       });
     const codex = { surface: 'codex' as const };
-    const confirmed = [{ name: 'mcp__glean_eval__search' }];
-    const trace = parse(direct('mcp__glean_eval', confirmed), codex);
+    const confirmed = [{ name: 'mcp__acme_eval__search' }];
+    const trace = parse(direct('mcp__acme_eval', confirmed), codex);
     expect(trace.toolCalls).toEqual([
       expect.objectContaining({
         source: 'mcp',
         id: 'call_fc',
-        server: 'glean-eval',
+        server: 'acme-eval',
         name: 'search',
         arguments: { query: 'x' },
         output: 'redacted',
@@ -1171,7 +1171,7 @@ describe('ChatGPT native response_item tool calls', () => {
       toolProvenance: [
         {
           source: 'mcp',
-          nativeServer: 'glean-eval',
+          nativeServer: 'acme-eval',
           nativeItemType: 'function_call',
         },
       ],
@@ -1199,7 +1199,7 @@ describe('ChatGPT native response_item tool calls', () => {
     const trace = parse(
       [
         ...exec('call_1', 'await tools.exec_command({})', 1, 2),
-        ...exec('call_2', 'await tools.mcp__glean_eval__search({})', 3),
+        ...exec('call_2', 'await tools.mcp__acme_eval__search({})', 3),
       ],
       { done: false }
     );

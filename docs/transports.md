@@ -47,7 +47,7 @@ proxies with known local paths remain supported. See the
 [Cowork contract](./cowork.md#stdio-eval-servers) and
 [ChatGPT guide](./chatgpt-desktop.md).
 
-Transport support does not enforce read-only tools. Scio/catalog proxy policy
+Transport support does not enforce read-only tools. The caller's proxy policy
 must intercept writes where required; MST stdio transport alone does not.
 
 ## Stdio (Local Server)

@@ -15,8 +15,8 @@ const init = {
   subtype: 'init',
   model: 'claude-sonnet-4-6',
   claude_code_version: '2.1.195',
-  mcp_servers: [{ name: 'glean', status: 'connected' }],
-  tools: ['Bash', 'ToolSearch', 'mcp__glean__search'],
+  mcp_servers: [{ name: 'acme', status: 'connected' }],
+  tools: ['Bash', 'ToolSearch', 'mcp__acme__search'],
 };
 function line(event: unknown): string {
   return `${JSON.stringify(event)}\n`;
@@ -49,7 +49,7 @@ function host(body: string, timeout = 10_000) {
       scenario: 'unchanged scenario',
       servers: [
         {
-          label: 'glean',
+          label: 'acme',
           transport: 'http',
           serverUrl: 'https://mcp.invalid',
           auth: { accessToken: 'credential-canary' },
@@ -68,18 +68,16 @@ function host(body: string, timeout = 10_000) {
 
 describe('Claude Code MCP startup', () => {
   it('keeps dotted tool names and rejects an unproven catalog shape', () => {
-    const valid = new ClaudeStartup(['glean']);
+    const valid = new ClaudeStartup(['acme']);
     expect(
       valid.push(
-        Buffer.from(
-          line({ ...init, tools: ['mcp__glean__github.search_code'] })
-        )
+        Buffer.from(line({ ...init, tools: ['mcp__acme__github.search_code'] }))
       )
     ).toBeUndefined();
     expect(valid.diagnostics.claudeStartup?.servers[0]?.tools).toEqual([
-      'mcp__glean__github.search_code',
+      'mcp__acme__github.search_code',
     ]);
-    const invalid = new ClaudeStartup(['glean']);
+    const invalid = new ClaudeStartup(['acme']);
     expect(invalid.push(Buffer.from(line({ ...init, tools: null })))).toContain(
       'MCP connection failed'
     );
@@ -129,7 +127,7 @@ describe('Claude Code MCP startup', () => {
               scenario: 'scenario',
               mcpHostConfig: {
                 hostType: 'cli',
-                cli: { command, args: [], claudeMcpServers: ['glean'] },
+                cli: { command, args: [], claudeMcpServers: ['acme'] },
               },
             },
           ],
@@ -178,7 +176,7 @@ describe('Claude Code MCP startup', () => {
   });
 
   it('retains only bounded metadata from a chunked init event', () => {
-    const observer = new ClaudeStartup(['glean']);
+    const observer = new ClaudeStartup(['acme']);
     const stream = Buffer.from(
       line({ ...init, token: 'credential-canary', message: 'private scenario' })
     );
@@ -189,7 +187,7 @@ describe('Claude Code MCP startup', () => {
       model: init.model,
       version: init.claude_code_version,
       servers: [
-        { name: 'glean', status: 'connected', tools: ['mcp__glean__search'] },
+        { name: 'acme', status: 'connected', tools: ['mcp__acme__search'] },
       ],
     });
     expect(JSON.stringify(observer.diagnostics)).not.toMatch(
@@ -201,7 +199,7 @@ describe('Claude Code MCP startup', () => {
     'rejects %s servers before evaluating the answer',
     async (status) => {
       const result = await host(
-        `console.log(${JSON.stringify(line({ ...init, mcp_servers: [{ name: 'glean', status }] }))}); setInterval(() => {}, 1000);`
+        `console.log(${JSON.stringify(line({ ...init, mcp_servers: [{ name: 'acme', status }] }))}); setInterval(() => {}, 1000);`
       );
       expect(result.error).toContain('MCP connection failed');
       expect(result.diagnostics?.claudeStartup?.status).toBe('failed');
@@ -213,7 +211,7 @@ describe('Claude Code MCP startup', () => {
   );
 
   it('reports an empty catalog without rejecting legitimate resource-only servers', () => {
-    const observer = new ClaudeStartup(['glean', 'jira']);
+    const observer = new ClaudeStartup(['acme', 'jira']);
     expect(
       observer.push(
         Buffer.from(
@@ -263,7 +261,7 @@ setTimeout(() => { console.log(${JSON.stringify(line(init))}); console.log(JSON.
       const result = await host(
         `
 console.log(${JSON.stringify(line(init))});
-console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'call1', name: 'mcp__glean__search', input: { query: 'sample' } }] } }));
+console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'call1', name: 'mcp__acme__search', input: { query: 'sample' } }] } }));
 setInterval(() => {}, 1000);
 `,
         // Allow process startup under parallel CI load; test the enclosing deadline,
@@ -272,7 +270,7 @@ setInterval(() => {}, 1000);
       );
       expect(result.error).toContain('timed out');
       expect(result.events).toMatchObject([
-        { name: 'search', source: 'mcp', server: 'glean' },
+        { name: 'search', source: 'mcp', server: 'acme' },
       ]);
       expect(result.diagnostics?.claudeStartup?.status).toBe('ready');
       expect(result.usage).toBeUndefined();

@@ -52,7 +52,7 @@ const setup: ResolvedCodexSetup = {
   servers: [
     {
       transport: 'http',
-      label: 'glean',
+      label: 'acme',
       url: 'https://example.test/mcp',
       bearerTokenEnvVar: 'MST_CHATGPT_MCP_TOKEN_0',
     },
@@ -61,7 +61,7 @@ const setup: ResolvedCodexSetup = {
 
 function preflight(status: 'connected' | 'failed', toolCount = 3) {
   vi.mocked(checkMcpServers).mockResolvedValue([
-    { label: 'glean', status, toolCount, elapsedMs: 1 },
+    { label: 'acme', status, toolCount, elapsedMs: 1 },
   ]);
 }
 function appServer(
@@ -72,7 +72,7 @@ function appServer(
     status: 'available',
     servers: [
       {
-        label: 'glean',
+        label: 'acme',
         initialized,
         toolCount: initialized ? 3 : null,
         authStatus,
@@ -108,7 +108,7 @@ afterEach(async () => {
 });
 
 describe('Linux ChatGPT environment contract', () => {
-  it('accepts the Scio contract and forwards only session variables', () => {
+  it('accepts the caller contract and forwards only session variables', () => {
     const parsed = readLinuxChatgptEnvironment({
       ...env,
       OPENAI_API_KEY: 'secret-sentinel',
@@ -217,14 +217,14 @@ describe('fresh MST-owned Linux profile', () => {
     expect(vi.mocked(checkMcpServers).mock.calls[0]![0]).toEqual([
       {
         transport: 'http',
-        label: 'glean',
+        label: 'acme',
         serverUrl: 'https://example.test/mcp',
         auth: { accessToken: TOKEN },
       },
     ]);
     const [, probeEnv, labels] = vi.mocked(probeAppServerStatus).mock.calls[0]!;
     expect(probeEnv.MST_CHATGPT_MCP_TOKEN_0).toBe(TOKEN);
-    expect(labels).toEqual(['glean']);
+    expect(labels).toEqual(['acme']);
     expect(profile.readiness).toMatchObject({
       executionPolicy: POLICY,
       login: 'verified',
@@ -282,7 +282,7 @@ describe('fresh MST-owned Linux profile', () => {
       status: 'available',
       servers: [
         {
-          label: 'glean',
+          label: 'acme',
           initialized: true,
           toolCount: 3,
           authStatus: 'bearerToken',
@@ -319,11 +319,11 @@ describe('fresh MST-owned Linux profile', () => {
       codexHome: join(home, '.codex'),
       plugins: [plugin],
       credentials,
-      reservedLabels: ['glean'],
+      reservedLabels: ['acme'],
     });
     expect(JSON.stringify(options.env)).not.toContain(TOKEN);
     expect(vi.mocked(probeAppServerStatus).mock.calls[0]![2]).toEqual([
-      'glean',
+      'acme',
       'acme_mcp',
     ]);
     expect(profile.readiness.plugins).toEqual([receipt]);

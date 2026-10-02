@@ -66,7 +66,7 @@ describe('executeEvalCase', () => {
         ...hostCase,
         mcpHostConfig: {
           hostType: 'cli',
-          cli: { command: 'claude', args: [], claudeMcpServers: ['glean'] },
+          cli: { command: 'claude', args: [], claudeMcpServers: ['acme'] },
         },
       },
       mcp

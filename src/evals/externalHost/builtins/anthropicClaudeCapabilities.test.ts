@@ -85,7 +85,7 @@ async function writeSession(
         content: [
           {
             type: 'tool_use',
-            name: 'mcp__glean__search',
+            name: 'mcp__acme__search',
             id: 'call-1',
             input: {},
           },

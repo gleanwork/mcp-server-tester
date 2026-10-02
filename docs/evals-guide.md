@@ -93,7 +93,7 @@ A real LLM receives your tools and a natural language scenario, then decides whi
     {
       "id": "llm-triggers-search",
       "mode": "mcp_host",
-      "scenario": "Find recent internal documents about the Glean MCP server",
+      "scenario": "Find recent internal documents about the MCP server rollout",
       "mcpHostConfig": {
         "provider": "vertex-anthropic",
         "model": "claude-3-5-haiku@20241022"
@@ -109,7 +109,7 @@ A real LLM receives your tools and a natural language scenario, then decides whi
 }
 ```
 
-**When to use it:** Testing whether your tool descriptions actually communicate intent to an LLM. A/B testing tool name or description changes. Validating that tool selectivity works (people questions → `employee_search`, not `search`).
+**When to use it:** Testing whether your tool descriptions actually communicate intent to an LLM. A/B testing tool name or description changes. Validating that tool selectivity works (people questions → `people_search`, not `search`).
 
 **How many iterations:** At least 10. LLMs are non-deterministic — the same scenario may trigger different tools on different runs. 3 iterations is almost meaningless statistically. 10 gives you a rough accuracy estimate. 20+ lets you make reliable decisions about whether a change helped.
 
@@ -166,13 +166,13 @@ This is where most eval efforts fall short. A single scenario phrasing tests whe
 
 ### The Diversity Problem
 
-If your only scenario for `employee_search` is "Who leads the developer platform team?", and the LLM gets it right 10/10 times, you've learned that _that exact phrasing_ works. You haven't learned whether it works for "find the VP of engineering" or "who should I talk to about API access?" Those might fail.
+If your only scenario for `people_search` is "Who leads the developer platform team?", and the LLM gets it right 10/10 times, you've learned that _that exact phrasing_ works. You haven't learned whether it works for "find the VP of engineering" or "who should I talk to about API access?" Those might fail.
 
 **Rule of thumb:** Write at least 2-3 scenario phrasings per tool. Vary the vocabulary, the level of directness, and the implied user goal.
 
 ```json
-{ "scenario": "Who leads the developer platform team at Glean?" },
-{ "scenario": "Find engineers who work on the MCP server at Glean" },
+{ "scenario": "Who leads the developer platform team?" },
+{ "scenario": "Find engineers who work on the MCP server" },
 { "scenario": "Who should I contact about developer API integrations?" }
 ```
 
@@ -182,7 +182,7 @@ If your only scenario for `employee_search` is "Who leads the developer platform
 
 2. **Test the _intent_, not the keyword** — Good tool descriptions work even when the user doesn't use the tool's name. "Find recent documents" should trigger `search` without the user saying "search".
 
-3. **Test selectivity** — For each tool, write a scenario that should trigger it and NOT other tools. This catches over-triggering (using `search` when `employee_search` would be better).
+3. **Test selectivity** — For each tool, write a scenario that should trigger it and NOT other tools. This catches over-triggering (using `search` when `people_search` would be better).
 
 4. **Include ambiguous cases** — Real users write ambiguous queries. "Tell me about the planning process" could be a search OR a chat question. Decide what the right behavior is and assert it.
 
@@ -223,7 +223,7 @@ Use this in direct mode to verify tool calls succeed.
 Does the response text include expected substrings?
 
 ```json
-{ "containsText": ["Steve", "Calvert"] }
+{ "containsText": ["temperature", "London"] }
 ```
 
 ### `responseSize`
@@ -360,7 +360,7 @@ When your eval runs, the reporter shows:
 
 ```
 PASS  llm-search-phrasing-a  (accuracy: 90%)  — 9/10 iterations passed
-PASS  llm-employee-search     (accuracy: 100%) — 10/10 iterations passed
+PASS  llm-people-search     (accuracy: 100%) — 10/10 iterations passed
 FAIL  llm-meeting-lookup       (accuracy: 60%)  — 6/10 iterations passed  ← needs work
 ```
 
@@ -372,7 +372,7 @@ FAIL  llm-meeting-lookup       (accuracy: 60%)  — 6/10 iterations passed  ← 
 
 **Below 60%:** The LLM is guessing. Something is fundamentally unclear about the tool's purpose, or a competing tool is attracting these queries.
 
-**How to debug low accuracy:** Look at the iteration-level breakdown in the detail view. If the LLM consistently picks `search` when you wanted `employee_search`, the distinction between the two tools isn't clear enough in their descriptions.
+**How to debug low accuracy:** Look at the iteration-level breakdown in the detail view. If the LLM consistently picks `search` when you wanted `people_search`, the distinction between the two tools isn't clear enough in their descriptions.
 
 ---
 
@@ -396,7 +396,7 @@ projects: [
       mcpConfig: {
         transport: 'http',
         serverUrl: '...',
-        // After adding a Glean skill to the LLM host config
+        // After adding a skill to the LLM host config
       },
       mcpHostConfig: {
         provider: 'anthropic',
@@ -416,7 +416,7 @@ Run both and compare accuracy per tool. The reporter groups results by project, 
 
 **Testing the scenario, not the description.** If you write the scenario after looking at the tool description, you're likely to use the same vocabulary the description uses. The LLM will get it right, but a real user might not. Write scenarios first.
 
-**Ignoring selectivity.** "Will `search` be called for this scenario?" is only half the question. "Will `employee_search` be called _instead of_ `search` when it should be?" is equally important.
+**Ignoring selectivity.** "Will `search` be called for this scenario?" is only half the question. "Will `people_search` be called _instead of_ `search` when it should be?" is equally important.
 
 **Setting threshold to 1.0 everywhere.** If your CI requires 100% accuracy, any LLM non-determinism will cause flaky failures. Reserve 1.0 for cases you're confident are genuinely always correct. Use 0.8–0.9 for most cases.
 

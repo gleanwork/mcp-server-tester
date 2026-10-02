@@ -242,7 +242,7 @@ describe('runDesktopBatch', () => {
 
   it('surfaces a secret-free error as is, keeping its class and fields', async () => {
     const readiness = new McpReadinessError('Fake', [
-      { label: 'glean', status: 'connected', toolCount: 0, elapsedMs: 1 },
+      { label: 'acme', status: 'connected', toolCount: 0, elapsedMs: 1 },
     ]);
     const failure = await runDesktopBatch(
       fakeHost({

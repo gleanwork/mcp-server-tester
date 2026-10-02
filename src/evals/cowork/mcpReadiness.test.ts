@@ -29,7 +29,7 @@ describe('Cowork MCP preflight', () => {
         [
           {
             transport: 'http',
-            label: 'glean',
+            label: 'acme',
             serverUrl: 'https://example.test/mcp',
             auth: { accessTokenEnv: 'TOKEN' },
           },
@@ -38,7 +38,7 @@ describe('Cowork MCP preflight', () => {
       )
     ).rejects.toMatchObject({
       name: 'CoworkMcpReadinessError',
-      servers: [{ label: 'glean', status: 'failed', error: 'network_error' }],
+      servers: [{ label: 'acme', status: 'failed', error: 'network_error' }],
     });
     expect(createMCPClientForConfig).toHaveBeenCalledOnce();
   });
@@ -51,7 +51,7 @@ describe('Cowork MCP preflight', () => {
       [
         {
           transport: 'http',
-          label: 'glean',
+          label: 'acme',
           serverUrl: 'https://example.test/mcp',
           auth: { accessTokenEnv: 'TOKEN' },
         },
@@ -60,7 +60,7 @@ describe('Cowork MCP preflight', () => {
     ).catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(CoworkMcpReadinessError);
     expect(String(failure)).toContain(
-      'Cowork MCP preflight failed; no task was submitted. glean=connected(0 tools)'
+      'Cowork MCP preflight failed; no task was submitted. acme=connected(0 tools)'
     );
   });
 
@@ -74,7 +74,7 @@ describe('Cowork MCP preflight', () => {
         [
           {
             transport: 'http',
-            label: 'glean',
+            label: 'acme',
             serverUrl: 'https://example.test/mcp',
             auth: { accessTokenEnv: 'TOKEN' },
             headers: { 'X-Custom-Header': 'custom-value' },
@@ -83,11 +83,11 @@ describe('Cowork MCP preflight', () => {
         { TOKEN: 'secret' }
       )
     ).resolves.toMatchObject([
-      { label: 'glean', status: 'connected', toolCount: 1 },
+      { label: 'acme', status: 'connected', toolCount: 1 },
     ]);
     expect(createMCPClientForConfig).toHaveBeenCalledWith({
       transport: 'http',
-      label: 'glean',
+      label: 'acme',
       serverUrl: 'https://example.test/mcp',
       auth: undefined,
       headers: {
@@ -111,7 +111,7 @@ describe('Cowork MCP preflight', () => {
         [
           {
             transport: 'http',
-            label: 'glean',
+            label: 'acme',
             serverUrl: 'https://example.test/mcp',
             auth: { accessTokenEnv: 'TOKEN' },
           },
@@ -121,7 +121,7 @@ describe('Cowork MCP preflight', () => {
     ).rejects.toMatchObject({
       name: 'CoworkMcpReadinessError',
       servers: [
-        { label: 'glean', status: 'failed', error: 'connection_failed' },
+        { label: 'acme', status: 'failed', error: 'connection_failed' },
       ],
     });
     expect(closeMCPClient).toHaveBeenCalledWith(client);
@@ -135,7 +135,7 @@ describe('Cowork MCP preflight', () => {
           [
             {
               transport: 'http',
-              label: 'glean',
+              label: 'acme',
               serverUrl: 'https://example.test/mcp',
               auth: { accessTokenEnv: 'TOKEN' },
             },
@@ -163,7 +163,7 @@ describe('Cowork MCP preflight', () => {
       [
         {
           transport: 'http',
-          label: 'glean',
+          label: 'acme',
           serverUrl: 'https://example.test/mcp',
         },
       ],
@@ -192,7 +192,7 @@ describe('Cowork MCP preflight', () => {
         [
           {
             transport: 'http',
-            label: 'glean',
+            label: 'acme',
             serverUrl: 'https://example.test/mcp',
           },
         ],

@@ -35,14 +35,14 @@ describe('Codex configuration rendering', () => {
         transport: 'http',
         label: 'remote',
         url: 'https://example.com/mcp',
-        bearerTokenEnvVar: 'GLEAN_API_TOKEN',
+        bearerTokenEnvVar: 'ACME_API_TOKEN',
       },
     ]);
 
     expect(output).toContain('[mcp_servers.local_tools]');
     expect(output).toContain('[mcp_servers.remote]');
     expect(output).toContain(String.raw`args = ["--name", "a\"b"]`);
-    expect(output).toContain('bearer_token_env_var = "GLEAN_API_TOKEN"');
+    expect(output).toContain('bearer_token_env_var = "ACME_API_TOKEN"');
   });
 
   it('requires a name when selecting among multiple configs', () => {
@@ -122,7 +122,7 @@ describe('Codex configuration lifecycle', () => {
         servers: [
           {
             transport: 'http',
-            label: 'glean',
+            label: 'acme',
             url: 'https://example.test/mcp',
             bearerTokenEnvVar: 'MST_CHATGPT_MCP_TOKEN_0',
           },
@@ -154,7 +154,7 @@ describe('Codex configuration lifecycle', () => {
       },
       projects: { [workspace]: { trust_level: 'trusted' } },
       mcp_servers: {
-        glean: {
+        acme: {
           url: 'https://example.test/mcp',
           bearer_token_env_var: 'MST_CHATGPT_MCP_TOKEN_0',
         },

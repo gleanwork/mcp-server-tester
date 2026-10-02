@@ -49,7 +49,7 @@ const manifest: EvalManifest = {
   servers: [
     {
       transport: 'http',
-      label: 'glean',
+      label: 'acme',
       serverUrl: 'https://example.com/eval',
     },
   ],
@@ -57,7 +57,7 @@ const manifest: EvalManifest = {
 const settings = {
   inferenceModels: [{ name: 'test-model' }],
   managedMcpServers: [
-    { name: 'glean', transport: 'http', url: 'https://example.com/eval' },
+    { name: 'acme', transport: 'http', url: 'https://example.com/eval' },
   ],
   allowManagedMcpServersOnly: true,
 };
@@ -187,7 +187,7 @@ describe('caller-owned Linux Cowork desktop', () => {
     {
       ...settings,
       managedMcpServers: [
-        { name: 'glean', transport: 'http', url: 'https://wrong.example/eval' },
+        { name: 'acme', transport: 'http', url: 'https://wrong.example/eval' },
       ],
     },
     {
@@ -199,7 +199,7 @@ describe('caller-owned Linux Cowork desktop', () => {
     {
       ...settings,
       managedMcpServers: [
-        { name: 'glean', transport: 'stdio', command: '/usr/bin/node' },
+        { name: 'acme', transport: 'stdio', command: '/usr/bin/node' },
       ],
     },
     {
@@ -207,7 +207,7 @@ describe('caller-owned Linux Cowork desktop', () => {
       managedMcpServers: [
         ...settings.managedMcpServers,
         {
-          name: 'glean_plugin',
+          name: 'acme_plugin',
           transport: 'policy-only',
           toolPolicy: { '*': 'allow' },
         },

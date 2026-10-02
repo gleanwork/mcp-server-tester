@@ -10,7 +10,7 @@ describe('hostSecretValues', () => {
     const secrets = hostSecretValues(
       {
         OPENAI_API_KEY: 'env-api-key',
-        GLEAN_TOKEN: 'stdio-token',
+        ACME_TOKEN: 'stdio-token',
         HOME: '/Users/someone',
       },
       [
@@ -23,7 +23,7 @@ describe('hostSecretValues', () => {
         {
           transport: 'stdio',
           command: 'server',
-          auth: { accessTokenEnv: 'GLEAN_TOKEN' },
+          auth: { accessTokenEnv: 'ACME_TOKEN' },
         },
       ],
       ['extra-secret']

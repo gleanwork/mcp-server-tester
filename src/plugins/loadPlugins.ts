@@ -21,11 +21,7 @@ const pluginLoads = (globalState[PLUGIN_LOADS_KEY] ??= new Map<
   Promise<void>
 >()) as Map<string, Promise<void>>;
 
-const DEFAULT_REGISTER_EXPORTS = [
-  'register',
-  'registerPlugins',
-  'registerGleanJudges',
-];
+const DEFAULT_REGISTER_EXPORTS = ['register', 'registerPlugins'];
 
 function resolvePluginEntry(pluginPath: string): string {
   const absPath = path.isAbsolute(pluginPath)
@@ -68,7 +64,8 @@ async function invokeRegisterExport(
  * Dynamically import a plugin module and invoke its registration hooks.
  *
  * Convention (first match wins):
- * 1. Named export `register`, `registerPlugins`, or `registerGleanJudges`
+ * 1. A name from `options.registerExportNames`, then `register` or
+ *    `registerPlugins`
  * 2. Default export function
  */
 export async function loadPluginModule(

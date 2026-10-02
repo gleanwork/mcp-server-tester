@@ -36,7 +36,7 @@ const original = Buffer.from(
 );
 const remote: MCPConfig = {
   transport: 'http',
-  label: 'glean-eval',
+  label: 'acme-eval',
   serverUrl: 'https://example.test/mcp',
   auth: { accessTokenEnv: 'TEST_TOKEN' },
 };
@@ -62,7 +62,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
   await fs.rm(root, { recursive: true, force: true });
 });
-async function entry(label = 'glean-eval'): Promise<StdioMCPConfig> {
+async function entry(label = 'acme-eval'): Promise<StdioMCPConfig> {
   const value = JSON.parse(await fs.readFile(config, 'utf8')) as {
     mcpServers: Record<string, { command: string; args: string[] }>;
   };
@@ -77,7 +77,7 @@ describe('Mac local MCP transaction', () => {
     expect(installed).not.toContain('existing');
     expect((await fs.stat(directory)).mode & 0o777).toBe(0o700);
     expect(
-      (await fs.stat(join(directory, 'glean-eval.json'))).mode & 0o777
+      (await fs.stat(join(directory, 'acme-eval.json'))).mode & 0o777
     ).toBe(0o600);
     await fs.writeFile(config, JSON.stringify(JSON.parse(installed)));
     await restoreMacLocalMcp(directory);
@@ -113,7 +113,7 @@ describe('Mac local MCP transaction', () => {
       >;
       const servers = data.mcpServers as Record<string, unknown>;
       if (kind === 'added') servers.newServer = { command: 'user' };
-      else if (kind === 'edited') servers['glean-eval'] = { command: 'user' };
+      else if (kind === 'edited') servers['acme-eval'] = { command: 'user' };
       else if (kind === 'removed') delete data.mcpServers;
       else data.mcpServers = null;
       await fs.writeFile(config, JSON.stringify(data));
@@ -237,10 +237,10 @@ describe('Mac local MCP transaction', () => {
     );
     await fs.mkdir(dirname(permissionConfig), { recursive: true, mode: 0o700 });
     const permissions =
-      ' {"enabled_mcp_tools":{"local:glean-eval:search":false}}\n';
+      ' {"enabled_mcp_tools":{"local:acme-eval:search":false}}\n';
     await fs.writeFile(permissionConfig, permissions, { mode: 0o644 });
     await installMacToolPermissions(directory, {
-      'local:glean-eval:search': true,
+      'local:acme-eval:search': true,
     });
     const data = JSON.parse(await fs.readFile(config, 'utf8')) as Record<
       string,

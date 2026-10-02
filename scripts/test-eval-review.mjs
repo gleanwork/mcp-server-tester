@@ -5,7 +5,6 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
-import { build } from 'esbuild';
 
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'eval-review-'));
 try {
@@ -95,76 +94,6 @@ export function register() {registerMetric({name:'local-plugin-metric',schema:z.
     'PASS: a changed manifest reran; three matching runs remained skipped.'
   );
   const dataset = JSON.parse(await fs.readFile(datasetPath, 'utf8'));
-  const legacyPath = path.join(dir, 'legacy.json');
-  await fs.writeFile(
-    legacyPath,
-    JSON.stringify({
-      ...dataset,
-      cases: dataset.cases.map(({ toolName, ...item }) => ({
-        ...item,
-        tool: toolName,
-      })),
-    })
-  );
-  // Keep the documented plain-Node smoke portable to Node 22 without a TS loader.
-  const legacyPlugin = path.join(dir, 'legacy-plugin.mjs');
-  await build({
-    entryPoints: ['examples/plugins/legacy-glean-datasets.ts'],
-    outfile: legacyPlugin,
-    bundle: true,
-    platform: 'node',
-    format: 'esm',
-    target: 'node22',
-    plugins: [
-      {
-        name: 'built-public-api',
-        setup(builder) {
-          // The package root and its public subpaths, as built.
-          builder.onResolve(
-            { filter: /^@gleanwork\/mcp-server-tester(\/.+)?$/ },
-            (args) => {
-              const subpath = args.path.slice(
-                '@gleanwork/mcp-server-tester'.length + 1
-              );
-              return {
-                path: path.resolve(`dist/${subpath || 'index'}.js`),
-                external: true,
-              };
-            }
-          );
-        },
-      },
-    ],
-  });
-  const legacyManifest = path.join(dir, 'legacy-manifest.json');
-  await fs.writeFile(
-    legacyManifest,
-    JSON.stringify({
-      ...manifest,
-      name: 'legacy-adapter',
-      plugins: [...manifest.plugins, legacyPlugin],
-      datasets: [
-        {
-          type: 'glean-legacy',
-          format: 'tool-call',
-          transport: { type: 'file', path: legacyPath },
-        },
-      ],
-    })
-  );
-  assert.match(
-    cli([
-      'run',
-      '--manifest',
-      legacyManifest,
-      '--output-dir',
-      path.join(dir, 'legacy-output'),
-    ]),
-    /5\/5 passed/
-  );
-  console.log(
-    'PASS: opt-in legacy source plugin converted five cases through the built CLI.'
-  );
   dataset.cases[0].expect.containsText = 'deliberately impossible';
   await fs.writeFile(datasetPath, JSON.stringify(dataset));
   const failedRun = cli(

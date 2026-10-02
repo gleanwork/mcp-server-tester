@@ -79,7 +79,7 @@ describe('computeMetrics', () => {
     expect(metrics.aggregated['plugin-binary_rate']).toBe(0.5);
     expect(metrics.aggregated['plugin-continuous_mean']).toBe(1000);
   });
-  it('computes Scio-compatible metrics and aggregates nulls correctly', () => {
+  it('computes built-in metrics and aggregates nulls correctly', () => {
     const cases = [
       result('one', true, {
         calls: ['search', 'read'],

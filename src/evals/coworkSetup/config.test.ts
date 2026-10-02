@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { HttpMCPConfig, MCPConfig } from '../../config/mcpConfig.js';
 import { createCoworkMcpPlan, resolveCoworkMcpHeaders } from './config.js';
 
-const DIRECTORY = '/opt/glean/mcp-helpers';
+const DIRECTORY = '/opt/acme/mcp-helpers';
 const CONFIG_ERROR = 'Invalid or unsupported Cowork MCP configuration.';
 const HEADERS_ERROR = 'Invalid or missing Cowork MCP runtime headers.';
 

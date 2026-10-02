@@ -39,12 +39,23 @@ describe('loadPluginModule', () => {
     expect(mod.wasCalled()).toBe(true);
   });
 
-  it('invokes registerGleanJudges export', async () => {
+  it('invokes a caller-named hook only when asked to', async () => {
     const pluginDir = makeTempPlugin(`
-      export const registerGleanJudges = () => {};
+      let called = false;
+      export const registerJudges = () => { called = true; };
+      export function wasCalled() { return called; }
     `);
 
-    await expect(loadPluginModule(pluginDir)).resolves.toBeUndefined();
+    await expect(loadPluginModule(pluginDir)).rejects.toThrow(
+      /does not export a register function/
+    );
+    await expect(
+      loadPluginModule(pluginDir, { registerExportNames: ['registerJudges'] })
+    ).resolves.toBeUndefined();
+    const mod = await import(
+      pathToFileURL(path.join(pluginDir, 'index.mjs')).href
+    );
+    expect(mod.wasCalled()).toBe(true);
   });
 
   it('shares concurrent registration and caches success across aliases and module copies', async () => {

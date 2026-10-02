@@ -47,7 +47,7 @@ export interface LinuxChatgptAppOptions {
 }
 
 const APP_LOG_LIMIT = 4 * 1024 * 1024;
-/** Token-shaped values never reach the diagnostic log. */
+/** Token-shaped values (JWTs, vendor token prefixes, long opaque strings) never reach the diagnostic log. */
 const TOKEN_TEXT =
   /\b(?:eyJ[\w-]{10,}\.[\w-]{10,}\.[\w-]{10,}|(?:sk|glean|ya29)[\w.-]{16,}|[A-Za-z0-9+/_-]{40,}={0,2})/g;
 

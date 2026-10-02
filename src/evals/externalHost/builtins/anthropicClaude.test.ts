@@ -494,7 +494,7 @@ describe('anthropicClaude trace parsing', () => {
             content: [
               {
                 type: 'tool_use',
-                name: 'mcp__glean__search',
+                name: 'mcp__acme__search',
                 id: 'call-1',
                 input: {},
               },
@@ -564,7 +564,7 @@ describe('anthropicClaude trace parsing', () => {
         expect(trace.toolCalls[0]).toMatchObject({
           name: 'search',
           source: 'mcp',
-          server: 'glean',
+          server: 'acme',
         });
         expect(trace.toolCalls[1]).toMatchObject({
           name: 'Grep',

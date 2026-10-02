@@ -9,7 +9,7 @@
  * Runs against the mock stdio server by default (see playwright.config.ts).
  *
  * To test mcp_host features (Phase 2), configure a real LLM provider
- * and target the Glean MCP server. See README for configuration.
+ * and target a real MCP server. See README for configuration.
  */
 import { test, expect } from '../src/fixtures/mcp.js';
 import { runEvalDataset, loadEvalDataset } from '../src/index.js';

@@ -86,7 +86,7 @@ export type ServerComparisonOptions = Omit<
  * simple pass/fail per case: A_WINS means A passed and B failed, etc.
  *
  * @param options - Eval dataset and runner options (shared between both servers)
- * @param contextA - MCP context for server A (e.g., Glean MCP)
+ * @param contextA - MCP context for server A (e.g., a candidate MCP server)
  * @param contextB - MCP context for server B (e.g., native MCP)
  * @returns Comparison result with per-case outcomes and aggregate win rates
  *
@@ -94,10 +94,10 @@ export type ServerComparisonOptions = Omit<
  * ```typescript
  * const comparison = await runServerComparison(
  *   { dataset },
- *   { mcp: gleanMcpFixture },
+ *   { mcp: candidateMcpFixture },
  *   { mcp: nativeMcpFixture }
  * );
- * console.log(`Glean MCP wins: ${(comparison.aWinRate * 100).toFixed(1)}%`);
+ * console.log(`Server A wins: ${(comparison.aWinRate * 100).toFixed(1)}%`);
  * console.log(`Native MCP wins: ${(comparison.bWinRate * 100).toFixed(1)}%`);
  * ```
  */

@@ -51,7 +51,7 @@ to display labels such as `5.6 Terra Medium`. Linux rejects `options.configPath`
 
 ## Linux runtime contract
 
-The caller (for example, Scio) owns the VM/container, display, D-Bus, keyring,
+The caller (your eval harness) owns the VM/container, display, D-Bus, keyring,
 AT-SPI bus, the fresh HOME and API-key file (creation and deletion), the package
 version check, the disposable no-new-privileges container, and uploading `MST_CHATGPT_EVIDENCE_DIR`. It runs MST as the
 unprivileged desktop user with this process environment. There is no controller
@@ -123,18 +123,18 @@ servers:
 ```json
 "plugins": [
   {
-    "name": "glean",
+    "name": "acme",
     "marketplace": {
-      "source": "gleanwork/codex-plugins",
+      "source": "acme/codex-plugins",
       "ref": "<40-character commit SHA>"
     },
     "mcp": {
-      "glean_plugin": {
-        "url": "https://example.glean.com/mcp/default/eval",
-        "auth": { "accessTokenEnv": "GLEAN_EVAL_TOKEN" },
+      "acme_plugin": {
+        "url": "https://mcp.example.com/eval",
+        "auth": { "accessTokenEnv": "ACME_EVAL_TOKEN" },
         "minTools": 3,
         "env": {
-          "GLEAN_MCP_SERVER_URL": "${url}",
+          "ACME_MCP_SERVER_URL": "${url}",
           "CLAUDE_PLUGIN_DATA": "${dataDir}",
           "ENABLE_HITL": "false"
         },
@@ -188,7 +188,7 @@ Execution policy: on Linux, MST writes `approval_policy = "never"` and
 `sandbox_mode = "danger-full-access"`. Native command execution needs
 bubblewrap, which cannot run inside the container, and nobody can answer an
 approval request in a headless run, so a sandboxed command would hang the turn.
-This relies on the caller's isolation: Scio must run the whole app in a
+This relies on your harness's isolation: run the whole app in a
 disposable no-new-privileges container with a fresh tmpfs profile. MST does not
 verify this. `nativeReadiness.executionPolicy` records the fixed values. macOS is
 unchanged.
@@ -412,8 +412,8 @@ The parser reads only native structure in the matched turn, never tool-result te
   `*_output` by `call_id`. Duration is the `create_time` difference. A call
   without output is marked `pending` in `toolProvenance`.
 - A `function_call` namespace `mcp__<label>` is an MCP call. Configured labels map
-  back with the app's namespace form (non-alphanumeric → `_`, so `glean-eval` is
-  `mcp__glean_eval`). `executed_tool_calls` must agree. `cua_repl.js` stays a host
+  back with the app's namespace form (non-alphanumeric → `_`, so `acme-eval` is
+  `mcp__acme_eval`). `executed_tool_calls` must agree. `cua_repl.js` stays a host
   tool. Unknown namespaces remain external MCP calls.
 - Work code mode: a `custom_tool_call` `exec` is one host call. MST keeps only the
   nested host tool names (for example `web__run`, `exec_command`), input length,

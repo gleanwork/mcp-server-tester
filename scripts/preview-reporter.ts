@@ -528,7 +528,10 @@ const mockData: MCPEvalData = {
         pass: true,
         response: {
           content: [
-            { type: 'text', text: '{"name": "Glean MCP", "version": "1.0.0"}' },
+            {
+              type: 'text',
+              text: '{"name": "Example MCP", "version": "1.0.0"}',
+            },
           ],
         },
         expectations: {
@@ -626,10 +629,10 @@ const mockData: MCPEvalData = {
           {
             name: 'server_info_present',
             pass: true,
-            message: 'Server info: Glean MCP v1.0.0',
+            message: 'Server info: Example MCP v1.0.0',
           },
         ],
-        serverInfo: { name: 'Glean MCP', version: '1.0.0' },
+        serverInfo: { name: 'Example MCP', version: '1.0.0' },
         toolCount: 4,
         authType: 'api-token',
       },
