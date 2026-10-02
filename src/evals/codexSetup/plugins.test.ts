@@ -253,12 +253,12 @@ describe('installCodexPlugins', () => {
     const [receipt] = await install(script, home, [
       {
         name: 'acme',
-        marketplace: { source: '/opt/scio/app/plugins/acme', ref: SHA },
+        marketplace: { source: '/opt/example-app/plugins/acme', ref: SHA },
       },
     ]);
     expect(receipt!.ref).toBe(SHA);
     expect(await readFile(join(home, 'calls.log'), 'utf8')).toContain(
-      'plugin marketplace add /opt/scio/app/plugins/acme --json\n'
+      'plugin marketplace add /opt/example-app/plugins/acme --json\n'
     );
   });
 

@@ -150,9 +150,10 @@ approval inspections within the original per-case action budget; prompts are
 never resubmitted. Follow-up usage is recorded under
 `hostTelemetry.computerUse.hitlFollowups`.
 
-For Scio's login-backed OOTB connectors, use its `nativeConnectors` selector and
-existing dry-run proxy entries alongside the Glean `/eval` endpoint. The registry,
-OAuth login, and vendor write classification remain in Scio, not MST. Missing or
+For the host application's login-backed OOTB connectors, use its
+`nativeConnectors` selector and existing dry-run proxy entries alongside the Glean
+`/eval` endpoint. The registry, OAuth login, and vendor write classification remain
+in the host application, not MST. Missing or
 expired credentials fail preflight rather than silently dropping a connector.
 
 ## Run an installed release
@@ -393,8 +394,10 @@ The config has two independent parts:
     "type": "cowork",
     "options": {
       "computerUseProvider": "linux-desktop",
-      "pluginRoots": { "glean": "/opt/scio/app/plugins/glean/plugins/glean" },
-      "mcpDataRoot": "/config/.scio-mcp-data"
+      "pluginRoots": {
+        "glean": "/opt/example-app/plugins/glean/plugins/glean"
+      },
+      "mcpDataRoot": "/config/mcp-data"
     },
     "plugins": [
       {
@@ -413,7 +416,7 @@ The config has two independent parts:
       "label": "glean-eval",
       "command": "/usr/bin/node",
       "args": ["${pluginRoot:glean}/mcp/start.mjs"],
-      "url": "https://scio-prod-be.glean.com/mcp/default/eval",
+      "url": "https://example.glean.com/mcp/default/eval",
       "auth": { "accessTokenEnv": "GLEAN_API_TOKEN" },
       "minTools": 4,
       "env": {
@@ -492,7 +495,7 @@ host-resolved fields. For ChatGPT plugin overrides, use `plugins[].mcp` as
 described in [chatgpt-desktop.md](chatgpt-desktop.md#linux-runtime-contract).
 
 MST's transport does not make a server read-only. Native-proxy write
-interception is a Scio/catalog policy responsibility, not a stdio guarantee.
+interception is a host/catalog policy responsibility, not a stdio guarantee.
 
 ### macOS setup contract
 
@@ -530,10 +533,10 @@ Desktop. MST only reads and checks them. For the example above:
       "name": "glean-eval",
       "transport": "stdio",
       "command": "/usr/bin/node",
-      "args": ["/opt/scio/app/plugins/glean/plugins/glean/mcp/start.mjs"],
+      "args": ["/opt/example-app/plugins/glean/plugins/glean/mcp/start.mjs"],
       "env": {
-        "GLEAN_MCP_SERVER_URL": "https://scio-prod-be.glean.com/mcp/default/eval",
-        "CLAUDE_PLUGIN_DATA": "/config/.scio-mcp-data/glean-eval",
+        "GLEAN_MCP_SERVER_URL": "https://example.glean.com/mcp/default/eval",
+        "CLAUDE_PLUGIN_DATA": "/config/mcp-data/glean-eval",
         "ENABLE_HITL": "false"
       }
     },
@@ -560,9 +563,9 @@ And one private file, owned by the desktop-session user that runs MST and
 Claude Desktop:
 
 ```text
-/config/.scio-mcp-data/                                   0700
-/config/.scio-mcp-data/glean-eval/                        0700
-/config/.scio-mcp-data/glean-eval/mcp-credentials.json    0600
+/config/mcp-data/                                   0700
+/config/mcp-data/glean-eval/                        0700
+/config/mcp-data/glean-eval/mcp-credentials.json    0600
   {"tokens":{"access_token":"<GLEAN_API_TOKEN>","token_type":"Bearer"}}
 ```
 
