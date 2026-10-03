@@ -232,7 +232,7 @@
     "@ai-sdk/mistral": "^3.0.0",
     "@ai-sdk/openai": "^3.0.31",
     "@ai-sdk/xai": "^3.0.0",
-    "@google-cloud/storage": "^7.17.1",
+    "@google-cloud/storage": "^8.2.0",
     "@openrouter/ai-sdk-provider": "^2.0.0",
     "ai": "^6.0.97"
   },
