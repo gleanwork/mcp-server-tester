@@ -461,13 +461,46 @@ describe('mergeSuiteJudges', () => {
         judge: 'manifest',
         count: 2,
         reference: 'case',
-        options: {
-          type: 'manifest',
-          reference: 'case',
-          count: 3,
-          raw: true,
-          judge: 'manifest',
+        // Only the judge's own options: no routing or assertion keys.
+        options: { count: 3, raw: true },
+      },
+    ]);
+  });
+
+  it('keeps two manifest rubric judges distinct and overrides only the one a case names', () => {
+    const raw = [
+      { type: 'rubric', rubric: 'correctness' },
+      { type: 'rubric', rubric: 'conciseness', threshold: 0.6 },
+    ];
+    const merged = mergeSuiteJudges(
+      {
+        expect: {
+          passesJudge: [
+            { rubric: 'correctness', threshold: 0.9 },
+            { judge: 'case-only' },
+          ],
         },
+      },
+      raw,
+      raw
+    );
+    expect(merged).toEqual([
+      { judge: 'case-only' },
+      {
+        type: 'rubric',
+        judge: 'rubric',
+        rubric: 'correctness',
+        threshold: 0.9,
+        options: { rubric: 'correctness' },
+        reference: undefined,
+      },
+      {
+        type: 'rubric',
+        judge: 'rubric',
+        rubric: 'conciseness',
+        threshold: 0.6,
+        options: { rubric: 'conciseness' },
+        reference: undefined,
       },
     ]);
   });

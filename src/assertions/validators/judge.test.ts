@@ -296,8 +296,7 @@ describe('validateJudge', () => {
       });
 
       expect(result.pass).toBe(false);
-      expect(result.message).toContain('Judge evaluation error');
-      expect(result.message).toContain('API error');
+      expect(result.message).toBe('Judge "rubric" error: API error');
       expect(result.details?.error).toBe(result.message);
     });
 
@@ -410,7 +409,7 @@ describe('validateJudge', () => {
       const result = await validateJudge('response', { judge: 'missing' });
 
       expect(result.pass).toBe(false);
-      expect(result.message).toContain('Custom judge "missing" error');
+      expect(result.message).toContain('Judge "missing" error');
       expect(result.message).toContain('Judge "missing" is not available.');
       expect(result.details?.error).toBe(result.message);
     });
@@ -427,7 +426,7 @@ describe('validateJudge', () => {
       const result = await validateJudge('response', { judge: 'other/x' });
 
       expect(result.pass).toBe(false);
-      expect(result.message).toContain('Custom judge "other/x" error');
+      expect(result.message).toContain('Judge "other/x" error');
       expect(result.message).toContain('needs the "other" plugin');
     });
 
@@ -439,6 +438,80 @@ describe('validateJudge', () => {
 
       expect(result.pass).toBe(false);
       expect(result.message).toContain('LLM API timeout');
+    });
+  });
+
+  describe('one judge contract', () => {
+    it('treats a rubric as shorthand for the built-in rubric judge', async () => {
+      const mockJudge = makeMockJudge([{ score: 0.8, pass: true }]);
+      mockCreateJudge.mockReturnValue(mockJudge);
+
+      const shorthand = await validateJudge('response', {
+        rubric: 'correctness',
+        model: 'm',
+      });
+      const explicit = await validateJudge('response', {
+        judge: 'rubric',
+        options: { rubric: 'correctness', model: 'm' },
+      });
+
+      expect(shorthand.pass).toBe(true);
+      expect(shorthand.details?.judgeName).toBe('correctness');
+      expect(explicit.details).toMatchObject({
+        judgeName: 'correctness',
+        score: 0.8,
+        judgeProvider: 'anthropic',
+        judgeModel: 'm',
+      });
+      expect(mockCreateJudge.mock.calls).toEqual([
+        [{ model: 'm' }],
+        [{ model: 'm' }],
+      ]);
+    });
+
+    it('rejects a rubric judge option it does not know', async () => {
+      const result = await validateJudge('response', {
+        rubric: 'correctness',
+        unknownSetting: true,
+      });
+
+      expect(result.pass).toBe(false);
+      expect(result.details?.error).toContain('judge options "rubric"');
+      expect(mockCreateJudge).not.toHaveBeenCalled();
+    });
+
+    it('scores a plugin judge once per rep and averages', async () => {
+      const scores = [0.4, 1];
+      const evaluate = vi.fn(async () => ({ score: scores.shift()! }));
+      const judge = installJudge('repeated', evaluate);
+
+      const result = await validateJudge('response', { judge, reps: 2 });
+
+      expect(evaluate).toHaveBeenCalledTimes(2);
+      expect(result.pass).toBe(true);
+      expect(result.details).toMatchObject({
+        score: 0.7,
+        scores: [0.4, 1],
+        scoreStdDev: 0.3,
+        highVariance: true,
+      });
+    });
+
+    it("passes a plugin judge's flat fields to its schema", async () => {
+      const evaluate = vi.fn(async () => ({ score: 1, model: 'their-model' }));
+      const judge = installJudge('flat', evaluate);
+
+      const result = await validateJudge('response', {
+        judge,
+        model: 'their-model',
+        threshold: 0.5,
+        reference: 'gold',
+      });
+
+      expect(evaluate).toHaveBeenCalledWith('response', 'gold', {
+        model: 'their-model',
+      });
+      expect(result.details?.judgeModel).toBe('their-model');
     });
   });
 });

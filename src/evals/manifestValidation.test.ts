@@ -219,6 +219,24 @@ describe('manifest validation', () => {
     });
   });
 
+  it('accepts the built-in rubric judge and checks its options', () => {
+    installTestPlugin();
+    const manifest: EvalManifest = {
+      name: 'rubric-judges',
+      datasets: [{ type: 'test/file' }],
+      judges: [{ type: 'rubric', rubric: 'correctness', threshold: 0.8 }],
+    };
+    expect(validateManifest(manifest).judges).toEqual([
+      { type: 'rubric', rubric: 'correctness', threshold: 0.8 },
+    ]);
+    expect(() =>
+      validateManifest({
+        ...manifest,
+        judges: [{ type: 'rubric', rubric: 'not-a-rubric' }],
+      })
+    ).toThrow(/Invalid judge options "rubric"/);
+  });
+
   it('preserves framework judge settings when policy schemas strip unknown fields', () => {
     installTestPlugin({
       judges: {

@@ -561,6 +561,36 @@ describe('golden: runEvalSuite hosts', () => {
       })
     ).toMatchSnapshot();
   });
+  it('a manifest declares two rubric judges and a case overrides one', async () => {
+    calls.length = 0;
+    vi.mocked(createJudge).mockReset();
+    // correctness scores 0.6 against the case's 0.9; conciseness 0.8 against 0.7.
+    scriptLLMJudge([
+      { score: 0.6, reasoning: 'Says sunny.' },
+      { score: 0.8, reasoning: 'Short.' },
+    ]);
+    const result = await suite(
+      'run',
+      '-rubric',
+      {
+        judges: [
+          { type: 'rubric', rubric: 'correctness', threshold: 0.5 },
+          { type: 'rubric', rubric: 'conciseness' },
+        ],
+      },
+      [
+        {
+          id: 'suite-rubric',
+          mode: 'mcp_host',
+          scenario: 'Weather in London?',
+          expect: { passesJudge: { rubric: 'correctness', threshold: 0.9 } },
+        },
+      ]
+    );
+    expect(
+      stable({ results: result.summary.results, calls })
+    ).toMatchSnapshot();
+  });
 });
 
 describe('golden: judges', () => {

@@ -9,12 +9,12 @@ import {
 import type { ExternalHostConfig } from './externalHost/types.js';
 import { ExternalHostConfigSchema } from './externalHost/schema.js';
 import type { SnapshotSanitizer } from '../assertions/validators/types.js';
-import {
-  JUDGE_PROVIDER_KINDS,
-  type BuiltInRubric,
-  type ProviderKind,
-} from '../judge/judgeTypes.js';
+import type { BuiltInRubric, ProviderKind } from '../judge/judgeTypes.js';
 import type { HostEvent } from './evalFrameworkTypes.js';
+import {
+  RubricJudgeLLMSchema,
+  RubricSpecSchema,
+} from '../judge/rubricJudge.js';
 
 // Re-export sanitizer types from canonical source (validators/types.ts)
 // Note: For JSON datasets, the Zod schema below validates that patterns are strings.
@@ -183,13 +183,13 @@ export interface JudgeExpectConfig {
   /** Flat plugin policy fields are also accepted for manifest integration. */
   [key: string]: unknown;
   /**
-   * A judge a plugin provides, as `namespace/name`.
-   * When set, the named judge handles evaluation and returns a normalized score.
-   * The `threshold` determines pass/fail. `reps` and LLM config fields
-   * (provider, model, etc.) are ignored.
+   * The judge to run: the built-in `rubric`, or `namespace/name` from a
+   * plugin. It returns a normalized score; `threshold` decides pass/fail and
+   * `reps` how many times it scores the response. Other flat fields are the
+   * judge's options.
    */
   judge?: string;
-  /** Built-in rubric name or custom rubric object. Required when no `judge` is specified. */
+  /** Built-in rubric name or custom rubric object: shorthand for the `rubric` judge. Required when no `judge` is specified. */
   rubric?: BuiltInRubric | { text: string };
   /** Reference response to compare against */
   reference?: unknown;
@@ -420,28 +420,12 @@ const SnapshotSanitizerSchema = z.union([
 const JudgeExpectConfigFieldsSchema = z.object({
   judge: z.string().min(1).optional(),
   options: z.record(z.string(), z.unknown()).optional(),
-  rubric: z
-    .union([
-      z.enum([
-        'correctness',
-        'completeness',
-        'groundedness',
-        'instruction-following',
-        'conciseness',
-      ]),
-      z.object({ text: z.string().min(1) }),
-    ])
-    .optional(),
+  rubric: RubricSpecSchema.optional(),
   reference: z.unknown().optional(),
   threshold: z.number().min(0).max(1).optional(),
   reps: z.number().int().min(1).optional(),
-  provider: z.enum(JUDGE_PROVIDER_KINDS).optional(),
-  model: z.string().optional(),
-  apiKeyEnvVar: z.string().optional(),
-  maxTokens: z.number().int().positive().optional(),
-  temperature: z.number().min(0).max(1).optional(),
-  maxBudgetUsd: z.number().positive().optional(),
-  maxToolOutputSize: z.number().int().positive().optional(),
+  // The rubric judge's LLM settings, which an assertion may set flat.
+  ...RubricJudgeLLMSchema.shape,
 });
 
 const JudgeExpectConfigSchema = JudgeExpectConfigFieldsSchema.passthrough()

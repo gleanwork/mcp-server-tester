@@ -63,7 +63,7 @@ describe('extension table', () => {
     installPlugins([acme()]);
 
     expect(() => getJudge('acme/missing')).toThrow(
-      'Judge "acme/missing" is not available. Available: acme/completeness.'
+      'Judge "acme/missing" is not available. Available: acme/completeness, rubric.'
     );
   });
 

@@ -384,11 +384,13 @@ Sanitizers are applied automatically by `toMatchToolSnapshot()`. The sanitizer n
 
 ## LLM-as-a-Judge
 
-Semantic evaluation using LLMs (OpenAI or Anthropic). Best for subjective criteria like relevance, quality, or tone.
+A judge scores a response from 0 to 1, and the assertion passes when the score reaches its `threshold` (default `0.7`). Use one for subjective criteria such as relevance, quality or tone.
+
+Every judge runs the same way. The built-in `rubric` judge asks an LLM to score the response against a rubric. A plugin can add judges of its own, referenced as `namespace/name` (see [Plugins](./evaluation-framework.md#plugins)).
 
 ### Dataset Format
 
-Use the `expect.passesJudge` field in the eval dataset JSON. Supply a `judge` to `runEvalDataset`:
+Use the `expect.passesJudge` field in the eval dataset JSON:
 
 ```json snippet=snippets/expectations-passes-judge.json
 {
@@ -406,23 +408,29 @@ Use the `expect.passesJudge` field in the eval dataset JSON. Supply a `judge` to
 }
 ```
 
+`rubric` is shorthand for the built-in `rubric` judge, and its LLM settings go next to it:
+
+```json
+{
+  "passesJudge": {
+    "rubric": "correctness",
+    "provider": "openai",
+    "model": "gpt-4o",
+    "threshold": 0.75
+  }
+}
+```
+
+To use a plugin's judge, name it: `{ "judge": "acme/completeness", "threshold": 0.8 }`. Its other fields, or `options`, are the judge's own options, checked by its schema. With a list of judges, every judge must pass.
+
 ```typescript snippet=snippets/judge-config.ts
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
-import {
-  createJudge,
-  loadEvalDataset,
-  runEvalDataset,
-} from '@gleanwork/mcp-server-tester';
+import { loadEvalDataset, runEvalDataset } from '@gleanwork/mcp-server-tester';
 
-const judge = createJudge({
-  provider: 'anthropic',
-  model: 'claude-sonnet-4-20250514',
-  temperature: 0.0,
-});
-
+// Each case's passesJudge chooses its judge and the judge's LLM settings.
 test('search relevance eval with judge', async ({ mcp }, testInfo) => {
   const dataset = await loadEvalDataset('./data/evals.json');
-  const result = await runEvalDataset({ dataset, judge }, { mcp, testInfo });
+  const result = await runEvalDataset({ dataset }, { mcp, testInfo });
   expect(result.passed).toBe(result.total);
 });
 ```
@@ -434,14 +442,16 @@ import { expect } from '@gleanwork/mcp-server-tester';
 
 test('search relevance', async ({ mcp }) => {
   const result = await mcp.callTool('search_docs', { query: 'authentication' });
-  expect(result).toPassToolJudge(
+  await expect(result).toPassToolJudge(
     {
       text: 'Evaluate if the search results are relevant to the query. Score 0-1.',
     },
-    { threshold: 0.7 }
+    { passingThreshold: 0.7 }
   );
 });
 ```
+
+The matcher takes `passingThreshold` where datasets use `threshold`, plus `reference`, `reps`, `provider`, `model`, `judge` and `options`. `toPassToolJudge({ judge: 'acme/completeness' })` runs a plugin judge, and a list of judges must all pass.
 
 ### Supported Providers
 
@@ -464,10 +474,21 @@ test('search relevance', async ({ mcp }) => {
   });
   ```
 
+`createJudge` is the LLM client the `rubric` judge uses; call it directly to score outside an assertion.
+
 ### Judge Configuration
 
-- `rubric` - Evaluation criteria for the LLM judge
-- `threshold` - Minimum score (0-1) to pass the evaluation (default: `1.0`)
+| Field        | Default                        | Description                                                                                                                   |
+| ------------ | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `judge`      | `rubric`                       | The judge: the built-in `rubric`, or `namespace/name` from a plugin.                                                          |
+| `rubric`     | —                              | A built-in rubric name or `{ "text": "..." }`. Shorthand for the `rubric` judge.                                              |
+| `threshold`  | `0.7`                          | Minimum mean score (0–1) to pass.                                                                                             |
+| `reference`  | the case's `canonicalAnswer`   | What the judge compares the response with.                                                                                    |
+| `reps`       | the case's `judgeReps`, or `1` | Times the judge scores the same response; the mean is compared with `threshold`.                                              |
+| `options`    | —                              | The judge's own options. Without `options`, a named judge gets its other flat fields.                                         |
+| LLM settings | `provider`: `anthropic`        | The `rubric` judge's `provider`, `model`, `apiKeyEnvVar`, `maxTokens`, `temperature`, `maxBudgetUsd` and `maxToolOutputSize`. |
+
+`reps` repeats only the judge, not the case: `iterations: 3` with `judgeReps: 2` is 6 calls per judge.
 
 ### Built-in Rubrics and Scoring Scale
 
@@ -503,7 +524,7 @@ For custom criteria, provide `{ "text": "..." }` with explicit score-level descr
 - When writing custom rubrics, include score-level descriptions (e.g., "Score 0.75 for...")
 - Test rubrics with known good/bad examples
 - Set appropriate passing thresholds based on your quality standards
-- Consider cost implications (LLM API calls per evaluation)
+- Consider cost implications (LLM API calls per evaluation, times `reps`)
 
 ## Response Size
 
@@ -633,7 +654,7 @@ The custom Playwright matchers follow standard Playwright/Jest prefix convention
 A single eval case can declare multiple expectation types at once. The runner evaluates each defined field independently and reports results per expectation:
 
 ```typescript
-const result = await runEvalDataset({ dataset, judge }, { mcp, testInfo });
+const result = await runEvalDataset({ dataset }, { mcp, testInfo });
 ```
 
 Each eval case uses whichever `expect` fields are defined:

@@ -926,7 +926,7 @@ const result = validateToolCallCount(simulationResult, { min: 1, max: 3 });
 
 ### `validateJudge(response, config)` (async)
 
-Evaluates a response using an LLM-as-a-judge. Returns a `Promise<ValidationResult>`.
+Evaluates a response with a judge: the built-in `rubric` LLM judge or a plugin judge. Returns a `Promise<ValidationResult>`. A judge that can't score the response (an unknown judge, invalid options, an API error) fails with `details.error` set.
 
 **Parameters:**
 
@@ -935,15 +935,15 @@ Evaluates a response using an LLM-as-a-judge. Returns a `Promise<ValidationResul
 
 **`JudgeValidatorConfig`:**
 
-| Field       | Type           | Default       | Description                                        |
-| ----------- | -------------- | ------------- | -------------------------------------------------- |
-| `rubric`    | `RubricSpec`   | —             | Evaluation rubric (required unless `judge` is set) |
-| `judge`     | `string`       | —             | A plugin judge, as `namespace/name`                |
-| `reference` | `unknown`      | —             | Reference response to compare against              |
-| `threshold` | `number`       | `0.7`         | Minimum score to pass (0–1)                        |
-| `reps`      | `number`       | `1`           | Number of evaluations to run (scores averaged)     |
-| `provider`  | `ProviderKind` | `'anthropic'` | Judge LLM provider                                 |
-| `model`     | `string`       | —             | Model override                                     |
+| Field       | Type                      | Default       | Description                                                                   |
+| ----------- | ------------------------- | ------------- | ----------------------------------------------------------------------------- |
+| `judge`     | `string`                  | `'rubric'`    | The built-in `rubric`, or a plugin judge as `namespace/name`                  |
+| `rubric`    | `RubricSpec`              | —             | Shorthand for the `rubric` judge (required unless `judge` is set)             |
+| `reference` | `unknown`                 | —             | Reference response to compare against                                         |
+| `threshold` | `number`                  | `0.7`         | Minimum mean score to pass (0–1)                                              |
+| `reps`      | `number`                  | `1`           | Times the judge scores the response, for every judge (scores averaged)        |
+| `options`   | `Record<string, unknown>` | —             | The judge's own options; without it, a named judge gets its other flat fields |
+| `provider`  | `ProviderKind`            | `'anthropic'` | The `rubric` judge's LLM provider (also `model`, `temperature`, and so on)    |
 
 ```typescript
 const result = await validateJudge(response, {
@@ -1099,16 +1099,16 @@ test('error handling', async ({ mcp }) => {
 
 ### `toPassToolJudge(rubric, options?)`
 
-Assert that the tool response passes an LLM-as-a-judge evaluation. Requires a judge client to be configured.
+Assert that the tool response passes a judge: the built-in `rubric` judge (an LLM call) or, with `{ judge: 'namespace/name' }`, a plugin judge. The matcher takes `passingThreshold` (default `0.7`), `reference`, `reps`, `provider`, `model`, `judge` and `options`.
 
 ```typescript
 test('semantic quality', async ({ mcp }) => {
   const result = await mcp.callTool('search_docs', { query: 'authentication' });
-  expect(result).toPassToolJudge(
+  await expect(result).toPassToolJudge(
     {
       text: 'The results should be relevant to the query about authentication. Score 0-1.',
     },
-    { threshold: 0.7 }
+    { passingThreshold: 0.7 }
   );
 });
 ```

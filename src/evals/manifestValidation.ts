@@ -21,6 +21,7 @@ import type {
   HostConfig,
   TaggedConfig,
 } from './evalManifest.js';
+import { judgeOwnOptions } from '../judge/evaluateJudge.js';
 
 /**
  * The lookups validation resolves references through. With `namespaces`, each
@@ -151,17 +152,18 @@ function parseJudges(
   lookups: ManifestLookups
 ): ExtensionConfig[] | undefined {
   return configs?.map((config) => {
-    const parsed = parseConfig(
-      config,
-      lookups.judge(config.type),
-      'judge options'
+    // The judge's schema sees only its own options; the assertion keys
+    // (threshold, reference, reps) and routing (type, name) are kept as given.
+    const own = judgeOwnOptions(config);
+    const options = parseExtensionOptions(
+      lookups.judge(config.type).schema,
+      own,
+      `judge options "${config.type}"`
     );
-    // These belong to the framework assertion, not the judge's policy schema.
-    // A stripping or transforming policy must not change the requested verdict.
-    for (const key of ['threshold', 'reference'] as const) {
-      if (config[key] !== undefined) parsed[key] = config[key];
-    }
-    return parsed;
+    const assertion = Object.fromEntries(
+      Object.entries(config).filter(([key]) => !Object.hasOwn(own, key))
+    );
+    return { ...options, ...assertion } as ExtensionConfig;
   });
 }
 

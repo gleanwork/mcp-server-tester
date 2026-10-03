@@ -19,6 +19,7 @@ This guide covers upgrading from 1.x (the last 1.x release is 1.1.1). Features f
 - [Stored results are redacted the same way everywhere](#stored-results-are-redacted-the-same-way-everywhere)
 - [Which credentials are used](#which-credentials-are-used)
 - [Custom judges are plugins](#custom-judges-are-plugins)
+- [Every judge runs the same way](#every-judge-runs-the-same-way)
 - [LLM calls: bearer tokens and streaming](#llm-calls-bearer-tokens-and-streaming)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
@@ -253,11 +254,23 @@ export default {
 // expect(result).toPassToolJudge({ judge: 'acme/completeness' });
 ```
 
-- **A judge's `evaluate` takes the old executor's arguments and returns the same result.** It also receives the options its `schema` parsed, as a third argument. The `schema` is required; `z.object({}).passthrough()` accepts any options, as the old registry did.
+- **A judge's `evaluate` takes the old executor's arguments and returns the same result.** It may also return the `provider` and `model` that scored. It receives the options its `schema` parsed, as a third argument, and runs once per `reps` ([Every judge runs the same way](#every-judge-runs-the-same-way)). The `schema` is required; `z.object({}).passthrough()` accepts any options, as the old registry did.
 - **Reference it as `namespace/name`**, in `toPassToolJudge({ judge })` and in a dataset's `passesJudge.judge`. Bare names belong to built-ins, so a plugin can't take one. A 1.x bare name such as `judge: 'completeness'` now fails the assertion with `Judge "completeness" is not available`, followed by the names that are.
 - **Pass the plugin where the judge is used**, instead of registering it in global setup: `test.use({ mcpPlugins: [plugin] })` in Playwright, `runEvalDataset({ dataset, plugins: [plugin] }, ctx)`, or `runEvalCase(evalCase, ctx, { plugins: [plugin] })`. Code that calls `validateJudge` or the matchers outside those installs it with `installPlugins([plugin])`. For a one-off judge, a small local plugin is enough: `{ meta: { name: 'local', namespace: 'local' }, judges: { x } }`.
 - **Plugins are validated when installed.** A judge without a `schema` or `evaluate`, an unknown top-level key, or a different plugin claiming an installed namespace is an error that names the plugin.
 - **Removed from the root:** `registerJudge`, `getRegisteredJudge`, `clearJudgeRegistry`, and the `CustomJudgeExecutor` and `CustomJudgeResult` types.
+
+## Every judge runs the same way
+
+**Affects:** custom judges used with `reps` or `judgeReps`, tests that match judge messages, and anything that reads `judgeName`.
+
+Rubric judges and custom judges now share one contract. A rubric is shorthand for the built-in `rubric` judge, and every judge goes through the same evaluation.
+
+- **`reps` and `judgeReps` apply to every judge.** In 1.x a custom judge scored each response once, whatever `reps` said. It now scores it `reps` times, and the mean is compared with the threshold, as for rubric judges. The message lists each score, and `validateJudge` details report `scores`, `scoreStdDev` and `highVariance`. If your judge is expensive or deterministic, set `reps: 1` on its assertion.
+- **A custom judge receives its own fields.** On an assertion that names a `judge`, fields other than `judge`, `options`, `reference`, `threshold` and `reps` go to the judge's schema, unless `options` is set. 1.x executors received no options, so `provider`, `model` and other fields next to `judge` were ignored; a strict schema now rejects them.
+- **One message format.** Results read `Judge "<name>" passed with score 0.80` or `Judge "<name>" failed with score 0.40 (threshold: 0.7)`, and errors read `Judge "<name>" error: ...`. 1.x used `Judge passed ...` for rubrics and `Custom judge "<name>" ...` for custom judges. The `score N` part is unchanged.
+- **A custom-text rubric is named `rubric`.** Its `judgeName` was unset.
+- **A score that isn't a number is an error.** A judge returning `NaN` used to fail as a low score.
 
 ## LLM calls: bearer tokens and streaming
 

@@ -1,4 +1,9 @@
-import type { Judge, JudgeConfig, ProviderKind } from './judgeTypes.js';
+import {
+  DEFAULT_JUDGE_PROVIDER,
+  type Judge,
+  type JudgeConfig,
+  type ProviderKind,
+} from './judgeTypes.js';
 import { createLLMJudge, type JudgeCompletionAdapter } from './llmJudge.js';
 import { anthropicCompletion } from './anthropicJudge.js';
 import { vertexAnthropicCompletion } from './vertexAnthropicJudge.js';
@@ -53,7 +58,7 @@ const JUDGE_PROVIDERS: Record<
  * console.log('Tokens:', result.usage?.inputTokens, result.usage?.outputTokens);
  */
 export function createJudge(config: JudgeConfig = {}): Judge {
-  const provider: ProviderKind = config.provider ?? 'anthropic';
+  const provider: ProviderKind = config.provider ?? DEFAULT_JUDGE_PROVIDER;
   const completion = Object.hasOwn(JUDGE_PROVIDERS, provider)
     ? JUDGE_PROVIDERS[provider]
     : undefined;

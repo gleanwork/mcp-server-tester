@@ -1,44 +1,35 @@
 /**
  * Judge Validator
  *
- * Validates a response using an LLM-as-a-judge evaluation.
+ * Validates a response with a judge: the built-in `rubric` LLM judge or a
+ * plugin judge. Both run through `evaluateJudge`.
  */
 
 import type { ValidationResult } from './types.js';
 import type { ProviderKind } from '../../judge/judgeTypes.js';
 import type { RubricSpec } from '../../judge/rubrics.js';
-import { createJudge } from '../../judge/judgeClient.js';
-import { resolveRubric } from '../../judge/rubrics.js';
-import { getJudge } from '../../judge/builtinJudges.js';
-import { parseExtensionOptions } from '../../plugins/plugin.js';
+import {
+  DEFAULT_JUDGE_THRESHOLD,
+  evaluateJudge,
+  judgeError,
+  judgeOwnOptions,
+  type JudgeRequest,
+} from '../../judge/evaluateJudge.js';
+
+export { DEFAULT_JUDGE_THRESHOLD };
 
 /**
  * Configuration for the judge validator
  */
-const judgeFrameworkOptionKeys = new Set([
-  'options',
-  'judge',
-  'rubric',
-  'reference',
-  'threshold',
-  'reps',
-  'provider',
-  'model',
-  'apiKeyEnvVar',
-  'maxTokens',
-  'temperature',
-  'maxBudgetUsd',
-  'maxToolOutputSize',
-]);
-
 export interface JudgeValidatorConfig {
-  /** Plugin policy parsed by the judge's schema. */
+  /** The judge's options, parsed by its schema. */
   options?: Record<string, unknown>;
-  /** Also accept flat policy fields from manifest judge configurations. */
+  /** Flat fields other than the assertion's own are the judge's options. */
   [key: string]: unknown;
   /**
    * The evaluation rubric: a built-in name or custom { text: string }.
-   * Required when no named `judge` is specified.
+   * Shorthand for the built-in `rubric` judge; required when no `judge` is
+   * specified.
    */
   rubric?: RubricSpec;
   /** Optional reference response to compare against */
@@ -47,7 +38,7 @@ export interface JudgeValidatorConfig {
   threshold?: number;
   /** Number of judge evaluations to run. Scores averaged. @default 1 */
   reps?: number;
-  /** Judge provider. @default 'claude' */
+  /** The rubric judge's provider. @default 'anthropic' */
   provider?: ProviderKind;
   /** Model override (e.g., 'claude-opus-4-20250514') */
   model?: string;
@@ -62,9 +53,9 @@ export interface JudgeValidatorConfig {
   /** Fail if response exceeds this size in bytes before judging */
   maxToolOutputSize?: number;
   /**
-   * A judge a plugin provides, as `namespace/name`.
-   * When set, the named judge handles the entire evaluation pipeline
-   * and returns a normalized score. The `threshold` determines pass/fail.
+   * The judge to run: the built-in `rubric`, or `namespace/name` from a
+   * plugin. It returns a normalized score; `threshold` decides pass/fail and
+   * `reps` how many times it scores the response.
    */
   judge?: string;
 }
@@ -97,170 +88,62 @@ export interface JudgeValidatorConfig {
  * );
  * ```
  */
-/**
- * Computes population standard deviation of an array of scores.
- * Returns 0 when there are fewer than 2 values.
- */
-function computeStdDev(scores: number[], mean: number): number {
-  if (scores.length <= 1) return 0;
-  const variance =
-    scores.reduce((sum, s) => sum + (s - mean) ** 2, 0) / scores.length;
-  return Math.sqrt(variance);
-}
-
-/** Minimum judge score that passes when no threshold is given. */
-export const DEFAULT_JUDGE_THRESHOLD = 0.7;
-
 export async function validateJudge(
   response: unknown,
   config: JudgeValidatorConfig
 ): Promise<ValidationResult> {
-  const {
-    judge: judgeName,
-    rubric,
-    reference,
-    threshold = DEFAULT_JUDGE_THRESHOLD,
-    reps = 1,
-    provider,
-    model,
-    apiKeyEnvVar,
-    maxTokens,
-    temperature,
-    maxBudgetUsd,
-    maxToolOutputSize,
-  } = config;
-
-  // Named custom judge — executor returns a score, threshold determines pass/fail
-  if (judgeName !== undefined) {
-    try {
-      const judge = getJudge(judgeName);
-      const options = parseExtensionOptions(
-        judge.schema,
-        config.options ??
-          Object.fromEntries(
-            Object.entries(config).filter(
-              ([key]) => !judgeFrameworkOptionKeys.has(key)
-            )
-          ),
-        `judge options "${judgeName}"`
-      );
-      const judgeResult = await judge.evaluate(
-        response,
-        reference ?? undefined,
-        options
-      );
-
-      const score = judgeResult.score;
-      if (!Number.isFinite(score))
-        return judgeError(
-          `Custom judge "${judgeName}" error: returned score ${String(score)}, not a number`
-        );
-      const passed = score >= threshold;
-
-      return {
-        pass: passed,
-        message: passed
-          ? `Custom judge "${judgeName}" passed with score ${score.toFixed(2)}`
-          : `Custom judge "${judgeName}" failed with score ${score.toFixed(2)} (threshold: ${threshold}). ${judgeResult.reasoning ?? ''}`,
-        details: { score, reasoning: judgeResult.reasoning },
-      };
-    } catch (err) {
-      return judgeError(
-        `Custom judge "${judgeName}" error: ${err instanceof Error ? err.message : String(err)}`
-      );
-    }
-  }
-
-  // Built-in LLM judge — requires rubric
-  if (rubric === undefined) {
-    return judgeError(
-      'Judge evaluation failed: either "judge" or "rubric" must be provided'
-    );
-  }
-
-  const resolvedRubric = resolveRubric(rubric);
-
-  const judgeConfig = {
-    ...(provider !== undefined && { provider }),
-    ...(model !== undefined && { model }),
-    ...(apiKeyEnvVar !== undefined && { apiKeyEnvVar }),
-    ...(maxTokens !== undefined && { maxTokens }),
-    ...(temperature !== undefined && { temperature }),
-    ...(maxBudgetUsd !== undefined && { maxBudgetUsd }),
-    ...(maxToolOutputSize !== undefined && { maxToolOutputSize }),
-  };
-
-  try {
-    const judge = createJudge(judgeConfig);
-
-    const scores: number[] = [];
-    let lastReasoning: string | undefined;
-
-    for (let i = 0; i < reps; i++) {
-      const judgeResult = await judge.evaluate(
-        response,
-        reference ?? null,
-        resolvedRubric
-      );
-      scores.push(judgeResult.score ?? (judgeResult.pass ? 1.0 : 0.0));
-      lastReasoning = judgeResult.reasoning;
-    }
-
-    if (scores.length === 0) {
-      return judgeError('Judge evaluation failed: no scores collected');
-    }
-
-    const meanScore = scores.reduce((a, b) => a + b, 0) / scores.length;
-    const passed = meanScore >= threshold;
-    const repNote =
-      reps > 1
-        ? ` (mean of ${reps} reps: [${scores.map((s) => s.toFixed(2)).join(', ')}])`
-        : '';
-
-    let stdDev: number | undefined;
-    let highVariance: boolean | undefined;
-
-    if (reps > 1) {
-      stdDev = computeStdDev(scores, meanScore);
-      highVariance = stdDev > 0.2;
-
-      if (highVariance) {
-        console.warn(
-          `[mcp-server-tester] Judge scores have high variance ` +
-            `(stdDev=${stdDev.toFixed(2)}, scores=[${scores.map((s) => s.toFixed(2)).join(', ')}]). ` +
-            `The rubric may be ambiguous.`
-        );
-      }
-    }
-
-    return {
-      pass: passed,
-      message: passed
-        ? `Judge passed with score ${meanScore.toFixed(2)}${repNote}`
-        : `Judge failed with score ${meanScore.toFixed(2)} (threshold: ${threshold})${repNote}. ${lastReasoning ?? ''}`,
-      details: {
-        score: meanScore,
-        reasoning: lastReasoning,
-        judgeProvider: provider ?? 'anthropic',
-        judgeModel: model,
-        ...(reps > 1 && {
-          scores,
-          scoreStdDev: stdDev,
-          highVariance,
-        }),
-      },
-    };
-  } catch (err) {
-    return judgeError(
-      `Judge evaluation error: ${err instanceof Error ? err.message : String(err)}`
-    );
-  }
+  const request = judgeRequest(config);
+  return typeof request === 'string'
+    ? judgeError(request)
+    : evaluateJudge(response, request);
 }
 
 /**
- * A failure that is not a verdict: the judge couldn't score the response.
- * `details.error` lets matchers fail it with or without `.not`.
+ * The name results give the judge an assertion runs (`correctness`,
+ * `acme/completeness`), or undefined when it names none. Suite manifests
+ * match case overrides on it.
  */
-function judgeError(message: string): ValidationResult {
-  return { pass: false, message, details: { error: message } };
+export function judgeNameOf(config: JudgeValidatorConfig): string | undefined {
+  const request = judgeRequest(config);
+  return typeof request === 'string' ? undefined : request.label;
+}
+
+/** The judge request an assertion means, or why it names no judge. */
+function judgeRequest(config: JudgeValidatorConfig): JudgeRequest | string {
+  const assertion = {
+    reference: config.reference ?? undefined,
+    threshold: config.threshold ?? DEFAULT_JUDGE_THRESHOLD,
+    reps: config.reps ?? 1,
+  };
+  if (config.judge !== undefined) {
+    // `options`, when given, is the judge's whole option set.
+    const options = config.options ?? judgeOwnOptions(config);
+    return {
+      ...assertion,
+      judge: config.judge,
+      label: judgeLabel(config.judge, options),
+      options,
+    };
+  }
+  if (config.rubric === undefined)
+    return 'Judge evaluation failed: either "judge" or "rubric" must be provided';
+  // `rubric` (with any LLM settings) is shorthand for the built-in judge.
+  // The shorthand keeps `rubric` flat, so flat fields and `options` merge.
+  const options = { ...judgeOwnOptions(config), ...config.options };
+  return {
+    ...assertion,
+    judge: 'rubric',
+    label: judgeLabel('rubric', options),
+    options,
+  };
+}
+
+/**
+ * What results call a judge. The rubric judge goes by its built-in rubric's
+ * name (`correctness`), however it was declared, so metrics key it once.
+ */
+function judgeLabel(judge: string, options: Record<string, unknown>): string {
+  return judge === 'rubric' && typeof options.rubric === 'string'
+    ? options.rubric
+    : judge;
 }
