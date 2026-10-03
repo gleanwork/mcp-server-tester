@@ -1,18 +1,9 @@
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
-import {
-  createJudge,
-  loadEvalDataset,
-  runEvalDataset,
-} from '@gleanwork/mcp-server-tester';
+import { loadEvalDataset, runEvalDataset } from '@gleanwork/mcp-server-tester';
 
-const judge = createJudge({
-  provider: 'anthropic',
-  model: 'claude-sonnet-4-20250514',
-  temperature: 0.0,
-});
-
+// Each case's passesJudge chooses its judge and the judge's LLM settings.
 test('search relevance eval with judge', async ({ mcp }, testInfo) => {
   const dataset = await loadEvalDataset('./data/evals.json');
-  const result = await runEvalDataset({ dataset, judge }, { mcp, testInfo });
+  const result = await runEvalDataset({ dataset }, { mcp, testInfo });
   expect(result.passed).toBe(result.total);
 });

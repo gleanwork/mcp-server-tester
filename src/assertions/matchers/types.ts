@@ -37,9 +37,8 @@ export interface JudgeMatcherOptions {
   /** Override the judge model */
   model?: string;
   /**
-   * Name of a registered custom judge executor.
-   * When set, the named judge handles the entire evaluation pipeline
-   * and its score is compared with passingThreshold.
+   * The judge to run: the built-in `rubric`, or `namespace/name` from a
+   * plugin. Its mean score over `reps` is compared with passingThreshold.
    */
   judge?: string;
 }

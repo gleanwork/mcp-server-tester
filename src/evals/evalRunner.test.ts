@@ -1972,14 +1972,20 @@ describe('multi-judge passesJudge', () => {
     vi.restoreAllMocks();
   });
 
-  it('populates judgeName from rubric name and custom judge name', async () => {
+  it('reports the judge name each evaluation gives', async () => {
     const { runEvalCase: runEvalCaseMocked } = await import('./evalRunner.js');
     const judgeModule = await import('../assertions/validators/judge.js');
-    vi.spyOn(judgeModule, 'validateJudge').mockResolvedValue({
-      pass: true,
-      message: 'Passed',
-      details: { score: 0.9, judgeProvider: 'anthropic' },
-    });
+    vi.spyOn(judgeModule, 'validateJudge')
+      .mockResolvedValueOnce({
+        pass: true,
+        message: 'Passed',
+        details: { score: 0.9, judgeName: 'correctness' },
+      })
+      .mockResolvedValueOnce({
+        pass: true,
+        message: 'Passed',
+        details: { score: 0.9, judgeName: 'domain-relevance' },
+      });
 
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const evalCase = createEvalCase({

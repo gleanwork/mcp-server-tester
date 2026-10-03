@@ -70,6 +70,9 @@ export const JUDGE_PROVIDER_KINDS = [
 /** Valid LLM judge provider kinds. */
 export type ProviderKind = (typeof JUDGE_PROVIDER_KINDS)[number];
 
+/** The provider a judge uses when its config names none. */
+export const DEFAULT_JUDGE_PROVIDER: ProviderKind = 'anthropic';
+
 /**
  * Configuration for an LLM judge
  */

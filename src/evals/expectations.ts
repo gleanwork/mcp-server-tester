@@ -46,6 +46,8 @@ import {
   playwrightSnapshotStore,
   validateSnapshot,
 } from '../assertions/validators/snapshot.js';
+import { judgeOwnOptions } from '../judge/evaluateJudge.js';
+import { judgeNameOf } from '../assertions/validators/judge.js';
 
 /** What a case produced, in the form the evaluator grades. */
 export interface GradedExecution {
@@ -159,16 +161,20 @@ export function mergeSuiteJudges(
     : evalCase.expect?.passesJudge
       ? [evalCase.expect.passesJudge]
       : [];
+  // `rawJudges[i]` is `judges[i]` before parsing. A case entry overrides a
+  // manifest judge when results would give both the same name, so two
+  // rubric judges (`correctness`, `conciseness`) stay distinct.
+  const names = judges.map((judge, i) =>
+    judgeNameOf({
+      ...(rawJudges[i] ?? judge),
+      judge: typeof judge.type === 'string' ? judge.type : undefined,
+    })
+  );
   return [
-    ...existing.filter(
-      (item) => !judges.some((judge) => judge.type === item.judge)
-    ),
-    ...judges.map((judge) => {
-      const caseJudge = existing.find((item) => item.judge === judge.type);
-      const raw =
-        rawJudges.find(
-          (item) => item.type === judge.type && item.name === judge.name
-        ) ?? judge;
+    ...existing.filter((item) => !names.includes(judgeNameOf(item))),
+    ...judges.map((judge, i) => {
+      const caseJudge = existing.find((item) => judgeNameOf(item) === names[i]);
+      const raw = rawJudges[i] ?? judge;
       const { options: caseOptions, ...caseSettings } = caseJudge ?? {};
       return {
         ...judge,
@@ -176,7 +182,7 @@ export function mergeSuiteJudges(
         judge: judge.type,
         // Merge raw policy inputs so the shared evaluator transforms them once.
         // Explicit case settings, including flat policy fields, win over defaults.
-        options: { ...raw, ...caseSettings, ...caseOptions },
+        options: judgeOwnOptions({ ...raw, ...caseSettings, ...caseOptions }),
         reference:
           caseJudge?.reference !== undefined
             ? caseJudge.reference
@@ -200,9 +206,7 @@ async function evaluateJudges(
         details: validation.message,
         score: validation.details?.score as number | undefined,
         reasoning: validation.details?.reasoning as string | undefined,
-        judgeName:
-          judge.judge ??
-          (typeof judge.rubric === 'string' ? judge.rubric : undefined),
+        judgeName: validation.details?.judgeName as string | undefined,
         judgeProvider: validation.details?.judgeProvider as string | undefined,
         judgeModel: validation.details?.judgeModel as string | undefined,
       } satisfies EvalExpectationResult;

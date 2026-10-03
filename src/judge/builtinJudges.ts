@@ -1,9 +1,10 @@
 import type { JudgeDefinition } from '../evals/evalFrameworkTypes.js';
 import { extensionLookup } from '../plugins/extensions.js';
+import { RUBRIC_JUDGE } from './rubricJudge.js';
 
-/** Built-in judges by name. None yet; rubric judges join in a later change. */
+/** Built-in judges by name. */
 function builtinJudges(): Readonly<Record<string, JudgeDefinition>> {
-  return {};
+  return { rubric: RUBRIC_JUDGE };
 }
 
 const judges = extensionLookup('judges', builtinJudges);

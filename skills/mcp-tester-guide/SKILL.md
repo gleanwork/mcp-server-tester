@@ -392,7 +392,10 @@ export const myPlugin: Plugin = {
 };
 
 // playwright.config.ts: use: { mcpPlugins: [myPlugin] }
-await expect(result).toPassToolJudge({ judge: 'my/quality', threshold: 0.7 });
+await expect(result).toPassToolJudge({
+  judge: 'my/quality',
+  passingThreshold: 0.7,
+});
 ```
 
 ## MCP Host Providers

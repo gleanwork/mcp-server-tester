@@ -198,7 +198,7 @@ test('response is accurate and complete', async ({ mcp }) => {
   // Multiple judges (all must pass)
   await expect(result).toPassToolJudge([
     { rubric: 'correctness' },
-    { rubric: 'completeness', threshold: 0.8 },
+    { rubric: 'completeness', passingThreshold: 0.8 },
   ]);
 });
 ```

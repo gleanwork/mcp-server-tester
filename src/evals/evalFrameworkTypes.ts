@@ -146,7 +146,22 @@ export interface MetricDefinition {
   ): { key: string; value: unknown } | undefined;
 }
 
-/** Public judge extension point. */
+/** What a judge returns for one evaluation of a response. */
+export interface JudgeVerdict {
+  /** Normalized score from 0 to 1; the assertion's threshold decides pass/fail. */
+  score: number;
+  reasoning?: string;
+  /** The LLM provider that scored, when the judge uses one. */
+  provider?: string;
+  /** The model that scored, when the judge uses one. */
+  model?: string;
+}
+
+/**
+ * Public judge extension point. Built-in judges (`rubric`) and plugin judges
+ * share it: the framework parses `options` with `schema`, calls `evaluate`
+ * once per rep, and applies the threshold to the mean score.
+ */
 export interface JudgeDefinition {
   readonly schema: ZodType;
   evaluate: (
@@ -154,10 +169,7 @@ export interface JudgeDefinition {
     reference?: unknown,
     /** Options parsed by this judge's schema, including defaults/transforms. */
     options?: Record<string, unknown>
-  ) => Promise<{
-    score: number;
-    reasoning?: string;
-  }>;
+  ) => Promise<JudgeVerdict>;
 }
 
 /** Public result-store extension point. */

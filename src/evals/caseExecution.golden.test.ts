@@ -23,6 +23,9 @@ import { createFixtureExtensions } from '../mcp/fixtures/fixtureExtensions.js';
 import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
 import type * as SimulationModule from './mcpHost/mcpHostSimulation.js';
 import type * as RuntimeModule from './externalHost/runtime.js';
+import type * as JudgeClientModule from '../judge/judgeClient.js';
+import { createJudge } from '../judge/judgeClient.js';
+import type { JudgeConfig, JudgeResult } from '../judge/judgeTypes.js';
 import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
 import { runExternalHostScenario } from './externalHost/runtime.js';
 import type {
@@ -42,6 +45,10 @@ vi.mock('./mcpHost/mcpHostSimulation.js', async (original) => ({
 vi.mock('./externalHost/runtime.js', async (original) => ({
   ...(await original<typeof RuntimeModule>()),
   runExternalHostScenario: vi.fn(),
+}));
+vi.mock('../judge/judgeClient.js', async (original) => ({
+  ...(await original<typeof JudgeClientModule>()),
+  createJudge: vi.fn(),
 }));
 
 /** Drop wall-clock and build-environment values; everything else is pinned. */
@@ -554,6 +561,36 @@ describe('golden: runEvalSuite hosts', () => {
       })
     ).toMatchSnapshot();
   });
+  it('a manifest declares two rubric judges and a case overrides one', async () => {
+    calls.length = 0;
+    vi.mocked(createJudge).mockReset();
+    // correctness scores 0.6 against the case's 0.9; conciseness 0.8 against 0.7.
+    scriptLLMJudge([
+      { score: 0.6, reasoning: 'Says sunny.' },
+      { score: 0.8, reasoning: 'Short.' },
+    ]);
+    const result = await suite(
+      'run',
+      '-rubric',
+      {
+        judges: [
+          { type: 'rubric', rubric: 'correctness', threshold: 0.5 },
+          { type: 'rubric', rubric: 'conciseness' },
+        ],
+      },
+      [
+        {
+          id: 'suite-rubric',
+          mode: 'mcp_host',
+          scenario: 'Weather in London?',
+          expect: { passesJudge: { rubric: 'correctness', threshold: 0.9 } },
+        },
+      ]
+    );
+    expect(
+      stable({ results: result.summary.results, calls })
+    ).toMatchSnapshot();
+  });
 });
 
 describe('golden: judges', () => {
@@ -602,6 +639,133 @@ describe('golden: judges', () => {
         ...hostCase,
         id: 'host-judged',
         expect: { passesJudge: { judge: 'test/golden-case-judge' } },
+      },
+      context()
+    );
+    expect(stable({ result, calls })).toMatchSnapshot();
+  });
+});
+
+/**
+ * A fake LLM judge client: each evaluate() returns the next scripted result
+ * (or throws it), and every createJudge config and evaluate call is recorded.
+ */
+function scriptLLMJudge(results: Array<Partial<JudgeResult> | Error>): void {
+  let next = 0;
+  vi.mocked(createJudge).mockImplementation((config?: JudgeConfig) => {
+    calls.push(['createJudge', config ?? {}]);
+    return {
+      async evaluate(candidate, reference, rubric) {
+        // The built-in rubric texts are long; their first line identifies them.
+        calls.push([
+          'llm.evaluate',
+          candidate,
+          reference,
+          rubric.split('\n')[0],
+        ]);
+        const scripted = results[next++] ?? new Error('no scripted result');
+        if (scripted instanceof Error) throw scripted;
+        return { pass: true, ...scripted };
+      },
+    };
+  });
+}
+
+describe('golden: rubric judges', () => {
+  beforeEach(() => {
+    calls.length = 0;
+    vi.mocked(createJudge).mockReset();
+  });
+
+  it('a built-in rubric with the default provider and the canonical answer', async () => {
+    scriptLLMJudge([{ score: 0.8, reasoning: 'Accurate.' }]);
+    const result = await runEvalCase(
+      {
+        id: 'rubric-judged',
+        toolName: 'get_weather',
+        args: { city: 'London' },
+        canonicalAnswer: 'sunny',
+        expect: { passesJudge: { rubric: 'correctness' } },
+      },
+      context()
+    );
+    expect(stable({ result, calls })).toMatchSnapshot();
+  });
+
+  it('reps average the scores and report their spread', async () => {
+    scriptLLMJudge([
+      { score: 0.2, reasoning: 'first' },
+      { score: 0.9, reasoning: 'second' },
+      { score: 0.5, reasoning: 'third' },
+    ]);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = await runEvalCase(
+      {
+        id: 'rubric-reps',
+        toolName: 'get_weather',
+        args: { city: 'London' },
+        expect: { passesJudge: { rubric: 'completeness', reps: 3 } },
+      },
+      context()
+    );
+    warn.mockRestore();
+    expect(stable({ result, calls })).toMatchSnapshot();
+  });
+
+  it('a custom-text rubric with provider, model, LLM options and a failing threshold', async () => {
+    scriptLLMJudge([{ score: 0.6, reasoning: 'Partly.' }]);
+    const result = await runEvalCase(
+      {
+        id: 'rubric-custom',
+        toolName: 'get_weather',
+        args: { city: 'London' },
+        expect: {
+          passesJudge: {
+            rubric: { text: 'Does it say it is sunny?\nAnswer carefully.' },
+            reference: 'It is sunny.',
+            threshold: 0.9,
+            provider: 'openai',
+            model: 'gpt-test',
+            apiKeyEnvVar: 'TEST_KEY',
+            maxTokens: 64,
+            temperature: 0.5,
+            maxToolOutputSize: 1000,
+          },
+        },
+      },
+      context()
+    );
+    expect(stable({ result, calls })).toMatchSnapshot();
+  });
+
+  it('a judge client error fails the expectation', async () => {
+    scriptLLMJudge([new Error('rate limited')]);
+    const result = await runEvalCase(
+      {
+        id: 'rubric-error',
+        toolName: 'get_weather',
+        args: { city: 'London' },
+        expect: { passesJudge: { rubric: 'correctness' } },
+      },
+      context()
+    );
+    expect(stable({ result, calls })).toMatchSnapshot();
+  });
+
+  it('a rubric judge and a plugin judge under case-level judgeReps', async () => {
+    scriptLLMJudge([{ score: 0.7 }, { score: 0.9 }]);
+    const result = await runEvalCase(
+      {
+        id: 'rubric-and-plugin',
+        toolName: 'get_weather',
+        args: { city: 'London' },
+        judgeReps: 2,
+        expect: {
+          passesJudge: [
+            { rubric: 'conciseness' },
+            { judge: 'test/golden-case-judge' },
+          ],
+        },
       },
       context()
     );
