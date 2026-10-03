@@ -91,6 +91,7 @@ describe('validateJudge', () => {
 
       expect(result.pass).toBe(true);
       expect(result.message).toContain('0.75');
+      expect(result.details?.error).toBeUndefined();
     });
 
     it('fails when score is below threshold', async () => {
@@ -297,6 +298,7 @@ describe('validateJudge', () => {
       expect(result.pass).toBe(false);
       expect(result.message).toContain('Judge evaluation error');
       expect(result.message).toContain('API error');
+      expect(result.details?.error).toBe(result.message);
     });
 
     it('returns failed result when neither judge nor rubric is provided', async () => {
@@ -306,6 +308,7 @@ describe('validateJudge', () => {
       expect(result.message).toContain(
         'either "judge" or "rubric" must be provided'
       );
+      expect(result.details?.error).toBe(result.message);
     });
   });
 
@@ -409,6 +412,15 @@ describe('validateJudge', () => {
       expect(result.pass).toBe(false);
       expect(result.message).toContain('Custom judge "missing" error');
       expect(result.message).toContain('Judge "missing" is not available.');
+      expect(result.details?.error).toBe(result.message);
+    });
+
+    it('treats a non-numeric score as an error, not a verdict', async () => {
+      const judge = installJudge('nan-judge', async () => ({ score: NaN }));
+      const result = await validateJudge('response', { judge });
+
+      expect(result.pass).toBe(false);
+      expect(result.details?.error).toContain('returned score NaN');
     });
 
     it('fails when a namespaced judge needs a plugin that is not loaded', async () => {

@@ -233,36 +233,60 @@ describe('toPassToolJudge', () => {
     });
   });
 
+  // The matcher reports the judge's verdict; Playwright applies `.not`.
   describe('isNot (negation)', () => {
-    it('inverts pass when used with .not and judge fails', async () => {
+    it('reports a failing verdict under .not, so the negated assertion passes', async () => {
       const mockJudge = makeMockJudge([
         { pass: false, score: 0.2, reasoning: 'Bad' },
       ]);
       vi.mocked(createJudge).mockReturnValue(mockJudge);
 
-      // When isNot=true and judge actually fails, we invert: validateJudge returns pass=false
-      // toPassToolJudge with isNot returns pass = !validation.pass = true
-      const context = { isNot: true };
-      const result = await toPassToolJudge.call(context, 'response', RUBRIC, {
-        passingThreshold: 0.7,
-      });
-
-      expect(result.pass).toBe(true);
-    });
-
-    it('inverts pass when used with .not and judge passes', async () => {
-      const mockJudge = makeMockJudge([
-        { pass: true, score: 0.9, reasoning: 'Great' },
-      ]);
-      vi.mocked(createJudge).mockReturnValue(mockJudge);
-
-      // isNot=true and judge passes => validation.pass=true => toPassToolJudge returns pass=false
       const context = { isNot: true };
       const result = await toPassToolJudge.call(context, 'response', RUBRIC, {
         passingThreshold: 0.7,
       });
 
       expect(result.pass).toBe(false);
+    });
+
+    it('reports a passing verdict under .not, so the negated assertion fails', async () => {
+      const mockJudge = makeMockJudge([
+        { pass: true, score: 0.9, reasoning: 'Great' },
+      ]);
+      vi.mocked(createJudge).mockReturnValue(mockJudge);
+
+      const context = { isNot: true };
+      const result = await toPassToolJudge.call(context, 'response', RUBRIC, {
+        passingThreshold: 0.7,
+      });
+
+      expect(result.pass).toBe(true);
+      expect(result.message()).toContain(
+        'Expected judge evaluation to fail, but it passed'
+      );
+    });
+
+    it('fails a judge error in both directions', async () => {
+      vi.mocked(createJudge).mockReturnValue({
+        evaluate: vi.fn().mockRejectedValue(new Error('rate limited')),
+      });
+
+      const negated = await toPassToolJudge.call(
+        { isNot: true },
+        'response',
+        RUBRIC,
+        {}
+      );
+      const plain = await toPassToolJudge.call(
+        { isNot: false },
+        'response',
+        RUBRIC,
+        {}
+      );
+
+      expect(negated.pass).toBe(true);
+      expect(plain.pass).toBe(false);
+      expect(negated.message()).toContain('rate limited');
     });
   });
 
@@ -470,12 +494,14 @@ describe('toPassToolJudge', () => {
         .mockResolvedValue({ score: 0.1, reasoning: 'Nope' });
       const judge = installJudge('strict', executor);
 
+      // The matcher reports the failing verdict; Playwright's `.not` turns
+      // it into a passing assertion.
       const context = { isNot: true };
       const result = await toPassToolJudge.call(context, 'response', {
         judge,
       });
 
-      expect(result.pass).toBe(true);
+      expect(result.pass).toBe(false);
     });
 
     it('passes reference through to the executor', async () => {

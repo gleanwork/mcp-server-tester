@@ -22,7 +22,7 @@ async function runSingleJudge(
   received: unknown,
   rubric: RubricSpec | undefined,
   options: JudgeMatcherOptions
-): Promise<{ pass: boolean; message: string }> {
+): Promise<{ pass: boolean; message: string; error: boolean }> {
   const {
     reference = null,
     passingThreshold = DEFAULT_JUDGE_THRESHOLD,
@@ -44,7 +44,11 @@ async function runSingleJudge(
     ...(judgeOptions !== undefined && { options: judgeOptions }),
   });
 
-  return { pass: validation.pass, message: validation.message };
+  return {
+    pass: validation.pass,
+    message: validation.message,
+    error: validation.details?.error !== undefined,
+  };
 }
 
 /**
@@ -78,19 +82,16 @@ export async function toPassToolJudge(
     const summary = `${passCount}/${results.length} judges passed`;
     const details = results.map((r) => r.message).join('\n');
 
-    if (this.isNot) {
-      return {
-        pass: !allPassed,
-        message: () =>
-          allPassed
-            ? `Expected all judges to fail, but ${summary}`
-            : `Judges failed as expected: ${summary}`,
-      };
-    }
+    // A judge that couldn't score is not a "fail": fail in both directions.
+    if (results.some((r) => r.error))
+      return { pass: this.isNot, message: () => `${summary}\n${details}` };
 
     return {
       pass: allPassed,
-      message: () => `${summary}\n${details}`,
+      message: () =>
+        this.isNot
+          ? `Expected at least one judge to fail, but ${summary}\n${details}`
+          : `${summary}\n${details}`,
     };
   }
 
@@ -112,18 +113,14 @@ export async function toPassToolJudge(
 
   const result = await runSingleJudge(received, rubric, options);
 
-  if (this.isNot) {
-    return {
-      pass: !result.pass,
-      message: () =>
-        result.pass
-          ? `Expected judge evaluation to fail, but it passed`
-          : `Judge evaluation failed as expected`,
-    };
-  }
+  // A judge that couldn't score is not a "fail": fail in both directions.
+  if (result.error) return { pass: this.isNot, message: () => result.message };
 
   return {
     pass: result.pass,
-    message: () => result.message,
+    message: () =>
+      this.isNot
+        ? `Expected judge evaluation to fail, but it passed: ${result.message}`
+        : result.message,
   };
 }
