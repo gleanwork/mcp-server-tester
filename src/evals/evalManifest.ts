@@ -61,6 +61,11 @@ export interface EvalManifest {
     store: ExtensionConfig;
   };
   plugins?: string[];
+  /**
+   * Shared configs (`namespace/name`) from listed plugins, applied in order
+   * under the manifest's own settings.
+   */
+  extends?: string[];
   model?: string;
   provider?: string;
   concurrency?: number;
@@ -133,6 +138,7 @@ export const EvalManifestSchema = z
     coworkSetup: CoworkSetupConfigSchema.optional(),
     results: z.object({ store: ExtensionConfigSchema }).strict().optional(),
     plugins: z.array(z.string().min(1)).optional(),
+    extends: z.array(z.string().min(1)).optional(),
     model: z.string().optional(),
     provider: z.string().optional(),
     concurrency: z.number().int().positive().optional(),
@@ -146,6 +152,80 @@ export const EvalManifestSchema = z
   .passthrough();
 
 export type EvalManifestInput = z.input<typeof EvalManifestSchema>;
+
+/** Keys that belong to the manifest itself; a shared config can't set them. */
+const MANIFEST_OWN_KEYS = [
+  'name',
+  'datasets',
+  'arms',
+  'plugins',
+  'extends',
+] as const;
+
+/**
+ * The manifest settings a plugin shares in `configs`. A manifest applies one
+ * with `extends: ["namespace/name"]`. Unknown keys are rejected.
+ */
+const PluginConfigSchema = EvalManifestSchema.pick({
+  servers: true,
+  host: true,
+  toolMap: true,
+  toolOverrides: true,
+  scenarioTemplate: true,
+  metrics: true,
+  judges: true,
+  coworkSetup: true,
+  results: true,
+  model: true,
+  provider: true,
+  concurrency: true,
+  iterations: true,
+  maxCases: true,
+  timeout: true,
+  maxToolCalls: true,
+  tools: true,
+  requireEvalEndpoint: true,
+}).strict();
+
+/** A plugin's shared config: any manifest setting but its name, datasets, arms, plugins and extends. */
+export type PluginConfig = z.input<typeof PluginConfigSchema>;
+
+/** A parsed shared config: judge, metric and store shorthands are tagged configs. */
+export type ParsedPluginConfig = Omit<
+  z.output<typeof PluginConfigSchema>,
+  'judges' | 'metrics' | 'results'
+> & {
+  judges?: ExtensionConfig[];
+  metrics?: ExtensionConfig[];
+  results?: { store: ExtensionConfig };
+};
+
+/** Parse a shared config; `label` names it in errors. */
+export function parsePluginConfig(
+  value: unknown,
+  label: string
+): ParsedPluginConfig {
+  if (value && typeof value === 'object') {
+    const own = MANIFEST_OWN_KEYS.filter((key) => key in value);
+    if (own.length > 0) {
+      throw new Error(
+        `${label} can't set ${own.map((key) => `"${key}"`).join(', ')}: a manifest's ${MANIFEST_OWN_KEYS.join(', ')} are its own.`
+      );
+    }
+  }
+  const result = PluginConfigSchema.safeParse(value);
+  if (!result.success)
+    throw new Error(`Invalid ${label}: ${result.error.message}`);
+  const { judges, metrics, results, ...settings } = result.data;
+  return {
+    ...settings,
+    ...(judges ? { judges: judges.map(normalizeExtension) } : {}),
+    ...(metrics ? { metrics: metrics.map(normalizeExtension) } : {}),
+    ...(results
+      ? { results: { store: normalizeExtension(results.store) } }
+      : {}),
+  };
+}
 
 function normalizeDataset(value: string | TaggedConfig): DatasetConfig {
   return typeof value === 'string' ? { type: 'file', path: value } : value;
@@ -161,6 +241,9 @@ function normalizeManifest(value: EvalManifestInput): EvalManifest {
     datasets: value.datasets.map(normalizeDataset),
     metrics: value.metrics?.map(normalizeExtension),
     judges: value.judges?.map(normalizeExtension),
+    results: value.results
+      ? { ...value.results, store: normalizeExtension(value.results.store) }
+      : undefined,
     arms: value.arms?.map((arm) => ({
       ...arm,
       metrics: arm.metrics?.map(normalizeExtension),

@@ -67,17 +67,37 @@ const plugin: Plugin = {
       evaluate: async (candidate, reference) => ({ score: 1 }),
     },
   },
-  // Also: hosts, metrics, resultStores. `configs` is reserved for shared configs.
+  // Also: hosts, metrics, resultStores.
+  configs: {
+    recommended: {
+      judges: ['acme/completeness'],
+      iterations: 3,
+    },
+  },
 };
 
 export default plugin;
 ```
 
 - **Names.** Each map key names an extension within the plugin's namespace. Manifests and datasets reference it as `namespace/name`, such as `{ "type": "acme/legacy" }` or `passesJudge: { "judge": "acme/completeness" }`. Built-ins (`file`, `claude-cli`, `rubric`, `passed`, ...) use bare names, which plugins can't take.
-- **Namespace.** `meta.namespace` is required: lowercase, optionally scoped as `@scope/name`. Two different plugins can't share a namespace. Loading the same plugin again is a no-op, including a rebuilt object with the same name, version and extension definitions. A plugin factory that builds differently configured copies needs a namespace per copy. A package's CommonJS and ESM builds are different objects too, so load a plugin one way; publishing plugins as ESM avoids the question.
+- **Namespace.** `meta.namespace` is required: lowercase, optionally scoped as `@scope/name`. Two different plugins can't share a namespace. Loading the same plugin again is a no-op, including a rebuilt object with the same name, version, extension definitions and configs. A plugin factory that builds differently configured copies needs a namespace per copy. A package's CommonJS and ESM builds are different objects too, so load a plugin one way; publishing plugins as ESM avoids the question.
 - **Loading.** A manifest lists plugin specifiers in `plugins`. Each one resolves relative to the manifest's directory, then `rootDir` (`--root-dir`, the working directory by default), then as a package name, resolved as `import` resolves it. `--plugins` and the `pluginPaths` / `plugins` options of `runEvalSuite` and `runEvalBatch` add to that list. Code that runs datasets directly passes plugin objects: `runEvalDataset({ dataset, plugins: [plugin] }, ctx)`, or `test.use({ mcpPlugins: [plugin] })` in Playwright. Code that calls validators or matchers on its own installs them with `installPlugins([plugin])`.
 - **Scope.** A manifest may only reference namespaces of plugins it loads, even if another suite in the same process (a batch) loaded more. The same check applies to the hosts and judges its datasets name. `runEvalDataset`, `runEvalCase` and the fixtures have no manifest, so they resolve against every plugin installed in the process.
 - **Contracts.** Each extension has a Zod `schema` for its options and the functions its kind needs: `load` (dataset sources), `run`, `runBatch` or `createConfig` (hosts), `evaluate` (judges), `kind` and `compute` (metrics), and `create` (result stores). MST validates the plugin when it loads, and names the plugin and extension in any error.
+- **Shared configs.** `configs` holds named manifest settings a suite can opt into. A suite that loads the plugin applies one with `"extends": ["acme/recommended"]`:
+
+  ```json
+  {
+    "name": "acme-suite",
+    "plugins": ["@acme/mst-plugin"],
+    "extends": ["acme/recommended"],
+    "datasets": ["./cases.json"],
+    "iterations": 5
+  }
+  ```
+
+  A config is typed `PluginConfig` and can set any documented manifest key except `name`, `datasets`, `arms`, `plugins` and `extends`. Other keys, including `run`, are rejected when a manifest extends the config; until then MST only checks that it's an object. Configs apply in order, then the manifest's own settings, including its `run` controls. Each top-level key is replaced, never merged: here the manifest's `iterations` replaces the config's, and a manifest `judges` list would replace the config's list rather than add to it. A config may use only its own plugin's extensions and built-ins, and can't extend other configs. MST has no built-in configs. A suite's `contentHash` is computed with its configs applied, so `runEvalBatch` doesn't resume a saved run after a config changes. Code that validates a manifest itself applies `extends` first with `resolveManifestExtends` (from `./evals`).
+
 - **Judges.** A judge's `evaluate(candidate, reference, options)` returns `{ score, reasoning?, provider?, model? }`, with `score` from 0 to 1. MST parses `options` with the judge's schema, calls `evaluate` once per `reps`, and compares the mean score with the assertion's `threshold`. The schema sees only the judge's own options, never `threshold`, `reference`, `reps` or a manifest entry's `type` and `name`. The built-in `rubric` judge has the same contract, and a manifest can list it: `judges: [{ "type": "rubric", "rubric": "correctness" }]`.
 
 Plugins load before manifest validation, so validation can check every reference and schema.

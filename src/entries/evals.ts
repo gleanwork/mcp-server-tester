@@ -79,6 +79,7 @@ export {
   resolveResultStoreConfig,
   validateManifest,
 } from '../evals/manifestValidation.js';
+export { resolveManifestExtends } from '../evals/manifestExtends.js';
 export type { ValidateManifestOptions } from '../evals/manifestValidation.js';
 export {
   BUILT_IN_METRICS,

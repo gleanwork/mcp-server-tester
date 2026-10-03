@@ -72,6 +72,9 @@ function samePlugin(a: Plugin, b: Plugin): boolean {
     return false;
   const names = extensionNames(a);
   if (names.join() !== extensionNames(b).join()) return false;
+  // Configs are data, so a rebuilt copy matches when they're equal.
+  if (JSON.stringify(a.configs ?? {}) !== JSON.stringify(b.configs ?? {}))
+    return false;
   return EXTENSION_KINDS.every((kind) =>
     Object.entries(a[kind] ?? {}).every(
       ([name, definition]) => b[kind]?.[name] === definition
@@ -148,6 +151,29 @@ export function extensionLookup<K extends ExtensionKind>(
       );
     },
   };
+}
+
+/**
+ * The shared config `namespace/name` names, from an installed plugin. Throws
+ * when the plugin isn't installed or has no such config.
+ */
+export function getSharedConfig(reference: string): unknown {
+  const { namespace, name } = parseExtensionReference(reference);
+  const plugin =
+    namespace === undefined ? undefined : state.plugins.get(namespace);
+  if (!plugin) {
+    throw new Error(
+      `Shared config "${reference}" needs the "${namespace ?? reference}" plugin, which is not loaded.`
+    );
+  }
+  const configs = plugin.configs ?? {};
+  if (!Object.hasOwn(configs, name)) {
+    const available = Object.keys(configs).sort().join(', ');
+    throw new Error(
+      `Plugin "${plugin.meta.name}" has no config "${name}".${available ? ` Available: ${available}.` : ''}`
+    );
+  }
+  return configs[name];
 }
 
 /** Namespaces of installed plugins, sorted. */

@@ -230,7 +230,8 @@ export interface ValidateManifestOptions {
 /**
  * Validate a manifest against the schemas of the extensions it names and return
  * parsed options, including effective arm inheritance. Callers must use the returned manifest to retain defaults and
- * transforms. The input is not mutated, and each effective config is parsed once.
+ * transforms. The input is not mutated, and each effective config is parsed once. Apply a manifest's `extends`
+ * first, with `resolveManifestExtends`; `runEvalSuite` does both.
  */
 export function validateManifest(
   manifest: EvalManifest,

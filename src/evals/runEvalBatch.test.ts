@@ -13,6 +13,7 @@ import {
 import type { Plugin } from '../plugins/plugin.js';
 import { runEvalSuite } from './runEvalSuite.js';
 import { loadEvalManifest, type EvalManifest } from './evalManifest.js';
+import { resolveManifestExtends } from './manifestExtends.js';
 import type { EvaluationSummary } from './evalFrameworkTypes.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import {
@@ -304,6 +305,51 @@ describe('runEvalBatch skipExisting', () => {
     expect((await run()).skipped).toBe(0);
     expect(create).not.toHaveBeenCalled();
     expect(runEvalSuite).toHaveBeenCalledOnce();
+  });
+
+  describe('with a shared config', () => {
+    function configPlugin(create: () => FileEvalResultStore): Plugin {
+      return {
+        meta: { name: 'config-plugin', namespace: 'test' },
+        resultStores: {
+          custom: { schema: z.object({ type: z.string() }), create },
+        },
+        configs: {
+          recommended: { results: { store: { type: 'test/custom' } } },
+        },
+      };
+    }
+
+    beforeEach(async () => {
+      delete manifestInput.results;
+      manifestInput.extends = ['test/recommended'];
+      await fs.writeFile(manifestPath, JSON.stringify(manifestInput));
+    });
+
+    it('resumes through the store the config supplies, identified with the config applied', async () => {
+      const create = vi.fn(() => store);
+      const plugin = configPlugin(create);
+      installPlugins([plugin]);
+      const resolved = resolveManifestExtends(
+        loadEvalManifest(manifestPath, { rootDir }),
+        ['test']
+      );
+      await store.saveArtifact(summaryArtifact(completedSummary(resolved)));
+
+      expect((await run({ plugins: [plugin] })).skipped).toBe(1);
+      expect(create).toHaveBeenCalledWith({ type: 'test/custom' });
+      expect(runEvalSuite).not.toHaveBeenCalled();
+    });
+
+    it('reruns when a saved run predates the config', async () => {
+      const create = vi.fn(() => store);
+      // Saved under the manifest without its config: a different identity.
+      await saveValidSummary();
+
+      expect((await run({ plugins: [configPlugin(create)] })).skipped).toBe(0);
+      expect(create).toHaveBeenCalled();
+      expect(runEvalSuite).toHaveBeenCalledOnce();
+    });
   });
 
   it('reruns safely when plugin loading fails', async () => {

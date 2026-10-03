@@ -288,7 +288,7 @@ MST's LLM calls now resolve their endpoint and credential in one place (`src/llm
 
 ## New in 2.0 (non-breaking)
 
-- An evaluation framework over datasets: manifests, suites and batches (`mst run`, `mst batch`), arms, metrics, result stores, and plugins that add dataset sources, hosts, judges, metrics and result stores under their own namespace. It's in `@gleanwork/mcp-server-tester/evals`. See [Evaluation framework](../evaluation-framework.md).
+- An evaluation framework over datasets: manifests, suites and batches (`mst run`, `mst batch`), arms, metrics, result stores, and plugins that add dataset sources, hosts, judges, metrics and result stores under their own namespace, and shared configs a manifest `extends`. It's in `@gleanwork/mcp-server-tester/evals`. See [Evaluation framework](../evaluation-framework.md).
 - Desktop hosts for suites: Claude Cowork (`cowork`) and the ChatGPT desktop app (`chatgpt`), driven through the desktop UI (Computer Use on macOS, AT-SPI on Linux). External-host cases (`mode: 'external_host'`) run a scenario through another host's driver. Their APIs are in `@gleanwork/mcp-server-tester/experimental/hosts`, which may change between minor versions. See [Cowork](../cowork.md) and [ChatGPT desktop](../chatgpt-desktop.md).
 - A custom `executeCase` for `runEvalDataset()` and `runEvalCase()`, which returns a typed `CaseExecution` (`direct`, `host` or `failed`).
 - LLM gateway support for the `mcp_host` SDK host and LLM judges: `ANTHROPIC_AUTH_TOKEN`, and `MST_LLM_AUTH_COMMAND` for short-lived tokens. See [LLM Gateways](../llm-gateways.md).

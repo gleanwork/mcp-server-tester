@@ -7,6 +7,7 @@ import type {
   MetricKind,
   ResultStoreDefinition,
 } from '../evals/evalFrameworkTypes.js';
+import type { PluginConfig } from '../evals/evalManifest.js';
 
 /** Identifies a plugin. `namespace` prefixes its extensions: `namespace/name`. */
 export interface PluginMeta {
@@ -29,8 +30,12 @@ export interface Plugin {
   readonly judges?: Readonly<Record<string, JudgeDefinition>>;
   readonly metrics?: Readonly<Record<string, MetricDefinition>>;
   readonly resultStores?: Readonly<Record<string, ResultStoreDefinition>>;
-  /** Reserved for shared configs (`extends`); not read yet. */
-  readonly configs?: Readonly<Record<string, unknown>>;
+  /**
+   * Shared manifest settings. A manifest that lists this plugin applies one
+   * with `extends: ["namespace/name"]`. A config may use only this plugin's
+   * extensions and built-ins.
+   */
+  readonly configs?: Readonly<Record<string, PluginConfig>>;
 }
 
 export const EXTENSION_KINDS = [
@@ -143,8 +148,19 @@ export function assertPlugin(value: unknown, source: string): Plugin {
   for (const key of Object.keys(value)) {
     if (!TOP_LEVEL_KEYS.has(key)) fail(`unknown key "${key}"`);
   }
-  if (value.configs !== undefined && !isRecord(value.configs))
-    fail('configs must be an object');
+  if (value.configs !== undefined) {
+    if (!isRecord(value.configs)) fail('configs must be an object');
+    for (const [name, config] of Object.entries(
+      value.configs as Record<string, unknown>
+    )) {
+      if (!EXTENSION_NAME.test(name))
+        fail(
+          `config name "${name}" must start with a letter or digit and use only letters, digits, ".", "_" or "-"`
+        );
+      // The manifest schema checks a config's settings when a manifest extends it.
+      if (!isRecord(config)) fail(`configs.${name} must be an object`);
+    }
+  }
   for (const kind of EXTENSION_KINDS) {
     const extensions = value[kind];
     if (extensions === undefined) continue;
