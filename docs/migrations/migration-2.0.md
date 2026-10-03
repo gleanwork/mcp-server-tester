@@ -247,14 +247,14 @@ export default {
   judges: {
     completeness: {
       schema: z.object({}).passthrough(),
-      evaluate: async (candidate, reference) => ({ score: 1 }),
+      evaluate: async ({ case: c, trial }, options) => ({ score: 1 }),
     },
   },
 } satisfies Plugin;
 // expect(result).toPassToolJudge({ judge: 'acme/completeness' });
 ```
 
-- **A judge's `evaluate` takes the old executor's arguments and returns the same result.** It may also return the `provider` and `model` that scored. It receives the options its `schema` parsed, as a third argument, and runs once per `reps` ([Every judge runs the same way](#every-judge-runs-the-same-way)). The `schema` is required; `z.object({}).passthrough()` accepts any options, as the old registry did.
+- **A judge's `evaluate` takes `({ case, trial }, options)`** instead of `(candidate, reference)`. `candidate` is `trial.response` (its text is `trial.text`) and `reference` is `case.expected.answer`. The case's input, criteria, tags and metadata, and the run's tool events, are in the input too. `options` is what the judge's `schema` parsed. A judge returns the old `{ score, reasoning }`, and may also return `provider`, `model`, `pass`, `skipped`, `subScores`, `usage` and `metadata`. It runs once per `reps` ([Every judge runs the same way](#every-judge-runs-the-same-way); [Judge contract](../evaluation-framework.md#judge-contract)). The `schema` is required; `z.object({}).passthrough()` accepts any options, as the old registry did.
 - **Reference it as `namespace/name`**, in `toPassToolJudge({ judge })` and in a dataset's `passesJudge.judge`. Bare names belong to built-ins, so a plugin can't take one. A 1.x bare name such as `judge: 'completeness'` now fails the assertion with `Judge "completeness" is not available`, followed by the names that are.
 - **Pass the plugin where the judge is used**, instead of registering it in global setup: `test.use({ mcpPlugins: [plugin] })` in Playwright, `runEvalDataset({ dataset, plugins: [plugin] }, ctx)`, or `runEvalCase(evalCase, ctx, { plugins: [plugin] })`. Code that calls `validateJudge` or the matchers outside those installs it with `installPlugins([plugin])`. For a one-off judge, a small local plugin is enough: `{ meta: { name: 'local', namespace: 'local' }, judges: { x } }`.
 - **Plugins are validated when installed.** A judge without a `schema` or `evaluate`, an unknown top-level key, or a different plugin claiming an installed namespace is an error that names the plugin.

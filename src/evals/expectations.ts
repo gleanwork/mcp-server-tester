@@ -19,6 +19,7 @@ import type {
 } from './datasetTypes.js';
 import type { HostResponse } from './caseExecution.js';
 import type { HostEvidence } from './evalFrameworkTypes.js';
+import type { JudgeCaseSource } from '../judge/judgeContract.js';
 import type {
   ExternalHostMetadata,
   TraceSource,
@@ -36,6 +37,7 @@ import {
   validateToolCalls,
   validateToolCallCount,
   validateJudge,
+  type JudgeRun,
 } from '../assertions/validators/index.js';
 import {
   hostEvidenceProblem,
@@ -127,9 +129,21 @@ export function toolEvidenceGap(
   return hostEvidenceProblem(graded.evidence);
 }
 
+/** The case's reference answer: `expected.answer`, else `canonicalAnswer`. */
+function caseAnswer(
+  evalCase: Pick<EvalCase, 'canonicalAnswer' | 'expected'>
+): unknown {
+  return evalCase.expected?.answer !== undefined
+    ? evalCase.expected.answer
+    : evalCase.canonicalAnswer;
+}
+
 /** Judge configurations with the case's defaults for reps and reference applied. */
 export function resolveJudges(
-  evalCase: Pick<EvalCase, 'expect' | 'judgeReps' | 'canonicalAnswer'>
+  evalCase: Pick<
+    EvalCase,
+    'expect' | 'judgeReps' | 'canonicalAnswer' | 'expected'
+  >
 ): JudgeExpectConfig[] {
   const configured = evalCase.expect?.passesJudge;
   if (configured === undefined) return [];
@@ -137,9 +151,7 @@ export function resolveJudges(
     (judge) => ({
       ...judge,
       reference:
-        judge.reference !== undefined
-          ? judge.reference
-          : evalCase.canonicalAnswer,
+        judge.reference !== undefined ? judge.reference : caseAnswer(evalCase),
       reps: judge.reps ?? evalCase.judgeReps ?? 1,
     })
   );
@@ -152,7 +164,7 @@ export function resolveJudges(
  * parsing, so the judge's own schema sees its inputs once.
  */
 export function mergeSuiteJudges(
-  evalCase: Pick<EvalCase, 'expect' | 'canonicalAnswer'>,
+  evalCase: Pick<EvalCase, 'expect' | 'canonicalAnswer' | 'expected'>,
   judges: Array<Record<string, unknown>>,
   rawJudges: Array<Record<string, unknown>>
 ): Array<Record<string, unknown>> {
@@ -188,7 +200,7 @@ export function mergeSuiteJudges(
             ? caseJudge.reference
             : judge.reference !== undefined
               ? judge.reference
-              : evalCase.canonicalAnswer,
+              : caseAnswer(evalCase),
       };
     }),
   ];
@@ -196,28 +208,47 @@ export function mergeSuiteJudges(
 
 async function evaluateJudges(
   response: unknown,
-  judges: JudgeExpectConfig[]
+  judges: JudgeExpectConfig[],
+  run: JudgeRun
 ): Promise<EvalExpectationResult> {
   const results = await Promise.all(
     judges.map(async (judge) => {
-      const validation = await validateJudge(response, judge);
+      const validation = await validateJudge(response, judge, run);
+      const details = validation.details ?? {};
       return {
         pass: validation.pass,
         details: validation.message,
-        score: validation.details?.score as number | undefined,
-        reasoning: validation.details?.reasoning as string | undefined,
-        judgeName: validation.details?.judgeName as string | undefined,
-        judgeProvider: validation.details?.judgeProvider as string | undefined,
-        judgeModel: validation.details?.judgeModel as string | undefined,
+        score: details.score as number | undefined,
+        reasoning: details.reasoning as string | undefined,
+        judgeName: details.judgeName as string | undefined,
+        judgeProvider: details.judgeProvider as string | undefined,
+        judgeModel: details.judgeModel as string | undefined,
+        ...(details.skipped === true ? { skipped: true } : {}),
+        ...(details.subScores !== undefined
+          ? {
+              subScores:
+                details.subScores as EvalExpectationResult['subScores'],
+            }
+          : {}),
+        ...(details.usage !== undefined
+          ? { usage: details.usage as EvalExpectationResult['usage'] }
+          : {}),
+        ...(details.metadata !== undefined
+          ? { metadata: details.metadata as Record<string, unknown> }
+          : {}),
       } satisfies EvalExpectationResult;
     })
   );
   if (results.length === 1) return results[0]!;
-  // Several judges must all pass.
-  const passCount = results.filter((result) => result.pass).length;
+  // Several judges must all pass. Skipped judges neither pass nor fail.
+  const graded = results.filter((result) => !result.skipped);
+  const passCount = graded.filter((result) => result.pass).length;
+  const skipped = results.length - graded.length;
   return {
-    pass: passCount === results.length,
-    details: `${passCount}/${results.length} judges passed`,
+    pass: passCount === graded.length,
+    details:
+      `${passCount}/${graded.length} judges passed` +
+      (skipped > 0 ? ` (${skipped} skipped)` : ''),
     judgeResults: results,
   };
 }
@@ -296,7 +327,8 @@ export async function evaluateExpectations(
   evalCase: Pick<
     EvalCase,
     'mode' | 'expect' | 'judgeReps' | 'canonicalAnswer'
-  > & { expect: EvalExpectBlock },
+  > &
+    JudgeCaseSource & { expect: EvalExpectBlock },
   graded: GradedExecution,
   options: ExpectationOptions = {}
 ): Promise<ExpectationOutcome> {
@@ -393,7 +425,11 @@ export async function evaluateExpectations(
 
   // An empty passesJudge list still reports (as 0/0 judges passed).
   if (expectBlock.passesJudge !== undefined)
-    results.judge = await evaluateJudges(response, resolveJudges(evalCase));
+    results.judge = await evaluateJudges(response, resolveJudges(evalCase), {
+      evalCase,
+      hostResponse: graded.hostResponse,
+      evidence: graded.evidence,
+    });
 
   if (expectBlock.snapshot !== undefined)
     results.snapshot = await evaluateSnapshot(

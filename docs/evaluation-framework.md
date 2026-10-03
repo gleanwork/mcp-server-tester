@@ -64,7 +64,7 @@ const plugin: Plugin = {
   judges: {
     completeness: {
       schema: z.object({}).passthrough(),
-      evaluate: async (candidate, reference) => ({ score: 1 }),
+      evaluate: async ({ case: c, trial }, options) => ({ score: 1 }),
     },
   },
   // Also: hosts, metrics, resultStores. `configs` is reserved for shared configs.
@@ -78,9 +78,68 @@ export default plugin;
 - **Loading.** A manifest lists plugin specifiers in `plugins`. Each one resolves relative to the manifest's directory, then `rootDir` (`--root-dir`, the working directory by default), then as a package name, resolved as `import` resolves it. `--plugins` and the `pluginPaths` / `plugins` options of `runEvalSuite` and `runEvalBatch` add to that list. Code that runs datasets directly passes plugin objects: `runEvalDataset({ dataset, plugins: [plugin] }, ctx)`, or `test.use({ mcpPlugins: [plugin] })` in Playwright. Code that calls validators or matchers on its own installs them with `installPlugins([plugin])`.
 - **Scope.** A manifest may only reference namespaces of plugins it loads, even if another suite in the same process (a batch) loaded more. The same check applies to the hosts and judges its datasets name. `runEvalDataset`, `runEvalCase` and the fixtures have no manifest, so they resolve against every plugin installed in the process.
 - **Contracts.** Each extension has a Zod `schema` for its options and the functions its kind needs: `load` (dataset sources), `run`, `runBatch` or `createConfig` (hosts), `evaluate` (judges), `kind` and `compute` (metrics), and `create` (result stores). MST validates the plugin when it loads, and names the plugin and extension in any error.
-- **Judges.** A judge's `evaluate(candidate, reference, options)` returns `{ score, reasoning?, provider?, model? }`, with `score` from 0 to 1. MST parses `options` with the judge's schema, calls `evaluate` once per `reps`, and compares the mean score with the assertion's `threshold`. The schema sees only the judge's own options, never `threshold`, `reference`, `reps` or a manifest entry's `type` and `name`. The built-in `rubric` judge has the same contract, and a manifest can list it: `judges: [{ "type": "rubric", "rubric": "correctness" }]`.
+- **Judges.** A judge's `evaluate({ case, trial }, options)` returns a verdict with `score` from 0 to 1 ([Judge contract](#judge-contract)). MST parses `options` with the judge's schema, calls `evaluate` once per `reps`, and compares the mean score with the assertion's `threshold`. The schema sees only the judge's own options, never `threshold`, `reference`, `reps` or a manifest entry's `type` and `name`. The built-in `rubric` judge has the same contract, and a manifest can list it: `judges: [{ "type": "rubric", "rubric": "correctness" }]`.
 
 Plugins load before manifest validation, so validation can check every reference and schema.
+
+### Judge contract
+
+A judge is called as `evaluate({ case, trial }, options)`, once per `reps`:
+
+- `case` (`JudgeCase`) is the case as written in the dataset, the same for every run:
+  `id`, `input` (`prompt`, or `tool` for a direct case), `expected`, `tags`, `metadata`.
+- `trial` (`JudgeTrial`) is one observed run: `response` (what validators grade),
+  `text`, `events` (tool calls and other host events), `messages` (when the host
+  reports them), `evidence`, and host `usage`.
+- `options` is the judge's own settings, parsed by its `schema`.
+
+The threshold is not in the input. MST compares the mean score with it,
+unless the judge returns its own `pass`; over several reps, the majority of
+those verdicts decides, and a tie fails.
+
+`case.expected` holds the case's ground truth:
+
+- `answer`: the assertion's `reference`, else the case's `expected.answer`,
+  else its `canonicalAnswer`.
+- `criteria`: rubric criteria keyed by name, from the case's `expected.criteria`.
+- Any other key a dataset puts under `expected`.
+
+Put data in `case.expected` when any judge could grade against it. Put it in
+`options` when it only changes how one judge grades.
+
+A judge can declare the inputs it needs:
+
+```ts
+judges: {
+  criteria: {
+    schema: z.object({}).passthrough(),
+    requires: ['case.expected.criteria'],
+    evaluate: async ({ case: c, trial }) => gradeCriteria(c.expected.criteria!, trial.text),
+  },
+}
+```
+
+When a required path is missing or empty, MST does not call the judge and
+records it as skipped.
+
+A judge returns a `JudgeVerdict`. Only `score` (0 to 1) is required:
+
+| Field               | Effect                                                                                                           |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `pass`              | The judge's own verdict. Without it, the case passes when the mean score meets the threshold.                    |
+| `skipped`           | The judge cannot grade this case. It doesn't count for pass/fail or judge metrics; the remaining reps don't run. |
+| `subScores`         | Named sub-scores, such as one per criterion: `{ [key]: { score, pass?, reasoning? } }`.                          |
+| `usage`             | The judge's own token usage and cost, summed over reps.                                                          |
+| `provider`, `model` | Reported as `judgeProvider` and `judgeModel`.                                                                    |
+| `metadata`          | Other JSON output, kept in the result.                                                                           |
+
+A score or sub-score outside 0 to 1 is an error, not a verdict. When every
+judge of a case skips, the judge expectation passes.
+
+Judge usage is kept apart from host usage: `judgeUsage` on each case and
+iteration, `totalJudgeUsage` on the run and suite telemetry, and the
+`judge_cost_usd`, `judge_input_tokens`, and `judge_output_tokens` metrics.
+The built-in `rubric` judge reports its usage the same way.
 
 ### Dataset sources
 
