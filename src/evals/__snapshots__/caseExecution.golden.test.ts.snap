@@ -1469,6 +1469,421 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
 }
 `;
 
+exports[`golden: rubric judges > a built-in rubric with the default provider and the canonical answer 1`] = `
+{
+  "calls": [
+    [
+      "createJudge",
+      {},
+    ],
+    [
+      "llm.evaluate",
+      {
+        "content": [
+          {
+            "text": "sunny, 21C",
+            "type": "text",
+          },
+        ],
+        "isError": false,
+      },
+      "sunny",
+      "Evaluate whether the response is factually correct and accurately answers the question. Compare against the reference answer if provided. Score 1.0 for fully correct with no errors; Score 0.75 for mostly correct with one minor inaccuracy or omission; Score 0.5 for partially correct — answers part of the question but misses key elements; Score 0.25 for minimally relevant but substantially incorrect or missing most key details; Score 0.0 for incorrect, irrelevant, or directly contradicting the reference.",
+    ],
+  ],
+  "result": {
+    "authType": "none",
+    "datasetName": "single-case",
+    "durationMs": "<time>",
+    "expectations": {
+      "judge": {
+        "details": "Judge passed with score 0.80",
+        "judgeName": "correctness",
+        "judgeProvider": "anthropic",
+        "pass": true,
+        "reasoning": "Accurate.",
+        "score": 0.8,
+      },
+    },
+    "id": "rubric-judged",
+    "pass": true,
+    "project": "golden",
+    "request": {
+      "args": {
+        "city": "London",
+      },
+      "expect": {
+        "passesJudge": {
+          "rubric": "correctness",
+        },
+      },
+      "mode": "direct",
+    },
+    "response": {
+      "content": [
+        {
+          "text": "sunny, 21C",
+          "type": "text",
+        },
+      ],
+      "isError": false,
+    },
+    "source": "eval",
+    "toolName": "get_weather",
+  },
+}
+`;
+
+exports[`golden: rubric judges > a custom-text rubric with provider, model, LLM options and a failing threshold 1`] = `
+{
+  "calls": [
+    [
+      "createJudge",
+      {
+        "apiKeyEnvVar": "TEST_KEY",
+        "maxTokens": 64,
+        "maxToolOutputSize": 1000,
+        "model": "gpt-test",
+        "provider": "openai",
+        "temperature": 0.5,
+      },
+    ],
+    [
+      "llm.evaluate",
+      {
+        "content": [
+          {
+            "text": "sunny, 21C",
+            "type": "text",
+          },
+        ],
+        "isError": false,
+      },
+      "It is sunny.",
+      "Does it say it is sunny?",
+    ],
+  ],
+  "result": {
+    "authType": "none",
+    "datasetName": "single-case",
+    "durationMs": "<time>",
+    "expectations": {
+      "judge": {
+        "details": "Judge failed with score 0.60 (threshold: 0.9). Partly.",
+        "judgeModel": "gpt-test",
+        "judgeProvider": "openai",
+        "pass": false,
+        "reasoning": "Partly.",
+        "score": 0.6,
+      },
+    },
+    "id": "rubric-custom",
+    "pass": false,
+    "project": "golden",
+    "request": {
+      "args": {
+        "city": "London",
+      },
+      "expect": {
+        "passesJudge": {
+          "apiKeyEnvVar": "[redacted]",
+          "maxTokens": "[redacted]",
+          "maxToolOutputSize": 1000,
+          "model": "gpt-test",
+          "provider": "openai",
+          "reference": "It is sunny.",
+          "rubric": {
+            "text": "Does it say it is sunny?
+Answer carefully.",
+          },
+          "temperature": 0.5,
+          "threshold": 0.9,
+        },
+      },
+      "mode": "direct",
+    },
+    "response": {
+      "content": [
+        {
+          "text": "sunny, 21C",
+          "type": "text",
+        },
+      ],
+      "isError": false,
+    },
+    "source": "eval",
+    "toolName": "get_weather",
+  },
+}
+`;
+
+exports[`golden: rubric judges > a judge client error fails the expectation 1`] = `
+{
+  "calls": [
+    [
+      "createJudge",
+      {},
+    ],
+    [
+      "llm.evaluate",
+      {
+        "content": [
+          {
+            "text": "sunny, 21C",
+            "type": "text",
+          },
+        ],
+        "isError": false,
+      },
+      null,
+      "Evaluate whether the response is factually correct and accurately answers the question. Compare against the reference answer if provided. Score 1.0 for fully correct with no errors; Score 0.75 for mostly correct with one minor inaccuracy or omission; Score 0.5 for partially correct — answers part of the question but misses key elements; Score 0.25 for minimally relevant but substantially incorrect or missing most key details; Score 0.0 for incorrect, irrelevant, or directly contradicting the reference.",
+    ],
+  ],
+  "result": {
+    "authType": "none",
+    "datasetName": "single-case",
+    "durationMs": "<time>",
+    "expectations": {
+      "judge": {
+        "details": "Judge evaluation error: rate limited",
+        "judgeName": "correctness",
+        "pass": false,
+      },
+    },
+    "id": "rubric-error",
+    "pass": false,
+    "project": "golden",
+    "request": {
+      "args": {
+        "city": "London",
+      },
+      "expect": {
+        "passesJudge": {
+          "rubric": "correctness",
+        },
+      },
+      "mode": "direct",
+    },
+    "response": {
+      "content": [
+        {
+          "text": "sunny, 21C",
+          "type": "text",
+        },
+      ],
+      "isError": false,
+    },
+    "source": "eval",
+    "toolName": "get_weather",
+  },
+}
+`;
+
+exports[`golden: rubric judges > a rubric judge and a plugin judge under case-level judgeReps 1`] = `
+{
+  "calls": [
+    [
+      "createJudge",
+      {},
+    ],
+    [
+      "llm.evaluate",
+      {
+        "content": [
+          {
+            "text": "sunny, 21C",
+            "type": "text",
+          },
+        ],
+        "isError": false,
+      },
+      null,
+      "Evaluate whether the response is appropriately concise without losing important information. Penalize unnecessary verbosity, padding, or repetition. Score 1.0 for well-sized — concise and complete with no unnecessary content; Score 0.75 for slightly verbose but no information is lost or repeated; Score 0.5 for moderately verbose — some padding or repetition that reduces clarity; Score 0.25 for excessively verbose — significantly overlong with substantial filler or repetition; Score 0.0 for extremely verbose — so padded or repetitive that the core answer is obscured.",
+    ],
+    [
+      "golden-case-judge",
+      {
+        "content": [
+          {
+            "text": "sunny, 21C",
+            "type": "text",
+          },
+        ],
+        "isError": false,
+      },
+      null,
+      {},
+    ],
+    [
+      "llm.evaluate",
+      {
+        "content": [
+          {
+            "text": "sunny, 21C",
+            "type": "text",
+          },
+        ],
+        "isError": false,
+      },
+      null,
+      "Evaluate whether the response is appropriately concise without losing important information. Penalize unnecessary verbosity, padding, or repetition. Score 1.0 for well-sized — concise and complete with no unnecessary content; Score 0.75 for slightly verbose but no information is lost or repeated; Score 0.5 for moderately verbose — some padding or repetition that reduces clarity; Score 0.25 for excessively verbose — significantly overlong with substantial filler or repetition; Score 0.0 for extremely verbose — so padded or repetitive that the core answer is obscured.",
+    ],
+  ],
+  "result": {
+    "authType": "none",
+    "datasetName": "single-case",
+    "durationMs": "<time>",
+    "expectations": {
+      "judge": {
+        "details": "2/2 judges passed",
+        "judgeResults": [
+          {
+            "details": "Judge passed with score 0.80 (mean of 2 reps: [0.70, 0.90])",
+            "judgeName": "conciseness",
+            "judgeProvider": "anthropic",
+            "pass": true,
+            "score": 0.8,
+          },
+          {
+            "details": "Custom judge "test/golden-case-judge" passed with score 0.90",
+            "judgeName": "test/golden-case-judge",
+            "pass": true,
+            "reasoning": "looks right",
+            "score": 0.9,
+          },
+        ],
+        "pass": true,
+      },
+    },
+    "id": "rubric-and-plugin",
+    "pass": true,
+    "project": "golden",
+    "request": {
+      "args": {
+        "city": "London",
+      },
+      "expect": {
+        "passesJudge": [
+          {
+            "rubric": "conciseness",
+          },
+          {
+            "judge": "test/golden-case-judge",
+          },
+        ],
+      },
+      "judgeReps": 2,
+      "mode": "direct",
+    },
+    "response": {
+      "content": [
+        {
+          "text": "sunny, 21C",
+          "type": "text",
+        },
+      ],
+      "isError": false,
+    },
+    "source": "eval",
+    "toolName": "get_weather",
+  },
+}
+`;
+
+exports[`golden: rubric judges > reps average the scores and report their spread 1`] = `
+{
+  "calls": [
+    [
+      "createJudge",
+      {},
+    ],
+    [
+      "llm.evaluate",
+      {
+        "content": [
+          {
+            "text": "sunny, 21C",
+            "type": "text",
+          },
+        ],
+        "isError": false,
+      },
+      null,
+      "Evaluate whether the response fully addresses all aspects of the question. Score 1.0 if the response covers all key points comprehensively; Score 0.75 if the response covers most key points with one minor gap; Score 0.5 if the response partially answers — covers some aspects but misses others; Score 0.25 if the response touches on the topic but misses most key aspects; Score 0.0 if major aspects of the question are entirely missing or the response is off-topic.",
+    ],
+    [
+      "llm.evaluate",
+      {
+        "content": [
+          {
+            "text": "sunny, 21C",
+            "type": "text",
+          },
+        ],
+        "isError": false,
+      },
+      null,
+      "Evaluate whether the response fully addresses all aspects of the question. Score 1.0 if the response covers all key points comprehensively; Score 0.75 if the response covers most key points with one minor gap; Score 0.5 if the response partially answers — covers some aspects but misses others; Score 0.25 if the response touches on the topic but misses most key aspects; Score 0.0 if major aspects of the question are entirely missing or the response is off-topic.",
+    ],
+    [
+      "llm.evaluate",
+      {
+        "content": [
+          {
+            "text": "sunny, 21C",
+            "type": "text",
+          },
+        ],
+        "isError": false,
+      },
+      null,
+      "Evaluate whether the response fully addresses all aspects of the question. Score 1.0 if the response covers all key points comprehensively; Score 0.75 if the response covers most key points with one minor gap; Score 0.5 if the response partially answers — covers some aspects but misses others; Score 0.25 if the response touches on the topic but misses most key aspects; Score 0.0 if major aspects of the question are entirely missing or the response is off-topic.",
+    ],
+  ],
+  "result": {
+    "authType": "none",
+    "datasetName": "single-case",
+    "durationMs": "<time>",
+    "expectations": {
+      "judge": {
+        "details": "Judge failed with score 0.53 (threshold: 0.7) (mean of 3 reps: [0.20, 0.90, 0.50]). third",
+        "judgeName": "completeness",
+        "judgeProvider": "anthropic",
+        "pass": false,
+        "reasoning": "third",
+        "score": 0.5333333333333333,
+      },
+    },
+    "id": "rubric-reps",
+    "pass": false,
+    "project": "golden",
+    "request": {
+      "args": {
+        "city": "London",
+      },
+      "expect": {
+        "passesJudge": {
+          "reps": 3,
+          "rubric": "completeness",
+        },
+      },
+      "mode": "direct",
+    },
+    "response": {
+      "content": [
+        {
+          "text": "sunny, 21C",
+          "type": "text",
+        },
+      ],
+      "isError": false,
+    },
+    "source": "eval",
+    "toolName": "get_weather",
+  },
+}
+`;
+
 exports[`golden: runEvalSuite hosts > manifest judges merge with case judges 1`] = `
 {
   "caseJudgeCalls": [
