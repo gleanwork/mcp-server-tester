@@ -13,7 +13,7 @@ export { validatePattern } from './pattern.js';
 export { validateError } from './error.js';
 export { validateSize } from './size.js';
 export { validateToolCalls, validateToolCallCount } from './toolCalls.js';
-export { validateJudge } from './judge.js';
+export { validateJudge, type JudgeRun } from './judge.js';
 export { validateSnapshot, playwrightSnapshotStore } from './snapshot.js';
 export { validatePredicate } from './predicate.js';
 

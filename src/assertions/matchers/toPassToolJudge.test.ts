@@ -15,6 +15,19 @@ vi.mock('../../judge/judgeClient.js', () => ({
 
 import { createJudge } from '../../judge/judgeClient.js';
 
+/** The input a matcher or `validateJudge` call gives a judge: no case, one trial. */
+function matcherInput(response: string, answer?: unknown) {
+  return {
+    case: {
+      input: {},
+      expected: answer === undefined ? {} : { answer },
+      tags: [],
+      metadata: {},
+    },
+    trial: { response, text: response, events: [] },
+  };
+}
+
 /** Install `evaluate` as the `test/<name>` judge and return that reference. */
 function installJudge(
   name: string,
@@ -514,7 +527,10 @@ describe('toPassToolJudge', () => {
         reference: 'expected answer',
       });
 
-      expect(executor).toHaveBeenCalledWith('candidate', 'expected answer', {});
+      expect(executor).toHaveBeenCalledWith(
+        matcherInput('candidate', 'expected answer'),
+        {}
+      );
     });
 
     it('respects passingThreshold with named judge', async () => {

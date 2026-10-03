@@ -42,11 +42,11 @@ const RubricJudgeOptionsSchema = RubricJudgeLLMSchema.extend({
 
 export const RUBRIC_JUDGE: JudgeDefinition = {
   schema: RubricJudgeOptionsSchema,
-  async evaluate(candidate, reference, options) {
+  async evaluate({ case: evalCase, trial }, options) {
     const { rubric, ...config } = RubricJudgeOptionsSchema.parse(options);
     const result = await createJudge(config).evaluate(
-      candidate,
-      reference ?? null,
+      trial.response,
+      evalCase.expected.answer ?? null,
       resolveRubric(rubric)
     );
     return {
@@ -54,6 +54,7 @@ export const RUBRIC_JUDGE: JudgeDefinition = {
       reasoning: result.reasoning,
       provider: config.provider ?? DEFAULT_JUDGE_PROVIDER,
       ...(config.model !== undefined ? { model: config.model } : {}),
+      ...(result.usage !== undefined ? { usage: result.usage } : {}),
     };
   },
 };

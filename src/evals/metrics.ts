@@ -125,7 +125,8 @@ function responseText(caseResult: EvalCaseResult): string {
     .join('\n');
 }
 
-function judgeEntries(
+/** Every judge result of a case, including skipped judges. */
+function allJudgeEntries(
   caseResult: EvalCaseResult
 ): Array<Record<string, unknown>> {
   const judge = caseResult.expectations?.judge as
@@ -140,6 +141,31 @@ function judgeEntries(
     );
   }
   return [judge];
+}
+
+/** Judge results that graded the case. Skipped judges have no verdict or score. */
+function judgeEntries(
+  caseResult: EvalCaseResult
+): Array<Record<string, unknown>> {
+  return allJudgeEntries(caseResult).filter((entry) => entry.skipped !== true);
+}
+
+type JudgeUsageField = 'totalCostUsd' | 'inputTokens' | 'outputTokens';
+
+/** Sum of one usage field over a case's judges, or null when none report it. */
+function judgeUsageTotal(
+  caseResult: EvalCaseResult,
+  field: JudgeUsageField
+): number | null {
+  let total: number | null = null;
+  for (const entry of allJudgeEntries(caseResult)) {
+    const usage = entry.usage as Record<string, unknown> | undefined;
+    const value = usage?.[field];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      total = (total ?? 0) + value;
+    }
+  }
+  return total;
 }
 
 function scoreFromJudge(entry: Record<string, unknown>): number | null {
@@ -295,6 +321,24 @@ export const BUILT_IN_METRICS: Readonly<Record<string, MetricDefinition>> =
       (result) => hostUsage(result)?.totalCostUsd ?? null,
       meanAggregation,
       'USD'
+    ),
+    judge_cost_usd: metric(
+      'continuous',
+      (result) => judgeUsageTotal(result, 'totalCostUsd'),
+      meanAggregation,
+      'USD'
+    ),
+    judge_input_tokens: metric(
+      'continuous',
+      (result) => judgeUsageTotal(result, 'inputTokens'),
+      meanAggregation,
+      'tokens'
+    ),
+    judge_output_tokens: metric(
+      'continuous',
+      (result) => judgeUsageTotal(result, 'outputTokens'),
+      meanAggregation,
+      'tokens'
     ),
     input_tokens: metric(
       'continuous',

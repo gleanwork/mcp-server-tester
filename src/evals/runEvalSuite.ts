@@ -1,6 +1,7 @@
 import { manifestIdentity } from './manifestIdentity.js';
 import { resolveCoworkSetupConfig } from './coworkSetup/options.js';
 import { sumUsage } from '../utils/usageUtils.js';
+import { sumJudgeUsage } from '../judge/judgeContract.js';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -248,6 +249,9 @@ function summarizeArm(
       totalHostUsage = sumUsage(totalHostUsage, result.totalHostUsage);
     }
   }
+  const totalJudgeUsage = sumJudgeUsage(
+    results.map(({ result }) => result.totalJudgeUsage)
+  );
   return {
     name: arm.name,
     servers: servers.map(redactServerForReport),
@@ -261,6 +265,7 @@ function summarizeArm(
         0
       ),
       totalHostUsage,
+      ...(totalJudgeUsage !== undefined && { totalJudgeUsage }),
     },
   };
 }
@@ -525,11 +530,15 @@ export async function runEvalSuite(
   for (const arm of armResults) {
     totalHostUsage = sumUsage(totalHostUsage, arm.result?.totalHostUsage);
   }
+  const totalJudgeUsage = sumJudgeUsage(
+    armResults.map((arm) => arm.result?.totalJudgeUsage)
+  );
   const telemetry: RunTelemetry = {
     cases: allResults.length,
     toolCalls: countToolCalls(allResults),
     failedCases: allResults.filter((result) => !result.pass).length,
     totalHostUsage,
+    ...(totalJudgeUsage !== undefined && { totalJudgeUsage }),
   };
   const summary: EvaluationSummary = {
     schemaVersion: 1,
