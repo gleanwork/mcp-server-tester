@@ -180,6 +180,7 @@ export {
 // Types root APIs take or return: plugins and their judges, and the host
 // trace in tool-call expectations and case results.
 export type { Plugin, PluginMeta } from './plugins/plugin.js';
+export type { PluginConfig } from './evals/evalManifest.js';
 // For code that calls validators or matchers outside a runner or the fixture.
 export { installPlugins } from './plugins/extensions.js';
 export type {

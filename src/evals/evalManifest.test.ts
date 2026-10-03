@@ -194,6 +194,17 @@ describe('EvalManifestSchema', () => {
       'tools',
     ]);
   });
+  it('normalizes a result store shorthand to a tagged store, and leaves a tagged one as is', () => {
+    const load = (store: unknown) =>
+      loadEvalManifestFromObject(
+        { name: 'm', datasets: ['x.json'], results: { store } },
+        { skipDatasetValidation: true }
+      ).results;
+    expect(load('file')).toEqual({ store: { type: 'file' } });
+    const tagged = { type: 'file', dir: '.results' };
+    expect(load(tagged)).toEqual({ store: tagged });
+  });
+
   it('normalizes file paths to tagged file dataset sources', () => {
     const manifest = loadEvalManifestFromObject(
       {

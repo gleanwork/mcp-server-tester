@@ -18,3 +18,14 @@ Loaded extensions live in one process-wide table keyed by `namespace/name`. Mani
 ## External-host capabilities are not an extension point
 
 The built-in desktop drivers are composed from capabilities (control, input, completion, trace, normalize), and a dataset's `externalHost.capabilities` can rebind a driver to other built-in implementations. Capabilities had their own way in: `registerExternalHostCapability` added implementations to a module-level map, and `uses: "module:<specifier>#<export>"` imported one from dataset JSON. Both are removed rather than converted into a plugin extension kind. Nothing outside MST used them, a plugin host already covers a custom host, and a capability kind would put experimental host types into the root `Plugin` type. Removing `module:` also means dataset JSON can no longer import code. Capabilities stay internal; plugin objects are the only way to extend MST.
+
+## Shared configs
+
+A plugin's `configs` are named manifest fragments, and a manifest opts into them with `extends: ["namespace/name"]`. They were reserved, unread, until their shape was settled. That couldn't wait past 2.0: `configs` accepted any object and manifests pass unknown keys through, so giving either a meaning later would have changed what existing plugins and manifests did.
+
+- **What a config holds.** Any manifest key except the manifest's own: `name`, `datasets`, `arms`, `plugins` and `extends`. Unknown keys are rejected, so adding keys later won't break anything.
+- **Merging.** Configs apply in order, then the manifest. Each top-level key is replaced, never merged, as arms already replace the manifest's settings. Replacing is predictable, and a manifest can always restate a list. Appending would make it impossible to drop a judge a config adds.
+- **Scope.** A config may use only its own plugin's extensions and built-ins, so extending a config never needs a second plugin the suite doesn't load. Configs can't extend other configs.
+- **Identity.** The suite is identified by the manifest with its configs applied, so a changed config never matches a stale saved run.
+
+ESLint's flat config started without `extends` because a JavaScript config can spread a plugin's configs. MST manifests are JSON, so they need the key. TypeScript callers can still build manifests in code.

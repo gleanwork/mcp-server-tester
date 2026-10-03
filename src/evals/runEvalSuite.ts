@@ -1,4 +1,5 @@
 import { manifestIdentity } from './manifestIdentity.js';
+import { resolveManifestExtends } from './manifestExtends.js';
 import { resolveCoworkSetupConfig } from './coworkSetup/options.js';
 import { sumUsage } from '../utils/usageUtils.js';
 import { randomUUID } from 'node:crypto';
@@ -270,9 +271,7 @@ export async function runEvalSuite(
 ): Promise<RunEvalSuiteResult> {
   const suiteStartTime = Date.now();
   const rootDir = options.rootDir ?? process.cwd();
-  const rawManifest = loadEvalManifest(options.manifestPath, { rootDir });
-  const identity = manifestIdentity(rawManifest);
-  let manifest = rawManifest;
+  const loadedManifest = loadEvalManifest(options.manifestPath, { rootDir });
   const ambientEnv = Object.fromEntries(
     Object.entries(process.env).filter(
       (entry): entry is [string, string] => typeof entry[1] === 'string'
@@ -291,11 +290,16 @@ export async function runEvalSuite(
 
   const namespaces = await loadSuitePlugins({
     manifestPath: options.manifestPath,
-    manifest,
+    manifest: loadedManifest,
     rootDir,
     pluginPaths: options.pluginPaths,
     plugins: options.plugins,
   });
+  // The manifest with its shared configs applied, before parsing: what the
+  // suite is identified by, and the raw settings arms and cases merge with.
+  const rawManifest = resolveManifestExtends(loadedManifest, namespaces);
+  const identity = manifestIdentity(rawManifest);
+  let manifest = rawManifest;
 
   manifest = validateManifest(
     {

@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { loadEvalManifest, type EvalManifest } from './evalManifest.js';
 import { resolveResultStoreConfig } from './manifestValidation.js';
 import { manifestIdentity } from './manifestIdentity.js';
+import { resolveManifestExtends } from './manifestExtends.js';
 import type { Plugin } from '../plugins/plugin.js';
 import { loadSuitePlugins } from './suitePlugins.js';
 import { runEvalSuite, type RunEvalSuiteOptions } from './runEvalSuite.js';
@@ -126,15 +127,19 @@ async function hasMatchingSavedResult(
   plugins?: readonly Plugin[]
 ): Promise<boolean> {
   try {
-    const manifest = loadEvalManifest(manifestPath, { rootDir });
-    if (!manifest.results?.store) return false;
+    const loaded = loadEvalManifest(manifestPath, { rootDir });
+    // A shared config may supply the store, so resolve before deciding.
+    if (!loaded.results?.store && !loaded.extends?.length) return false;
     const namespaces = await loadSuitePlugins({
       manifestPath,
-      manifest,
+      manifest: loaded,
       rootDir,
       pluginPaths,
       plugins,
     });
+    // Identified as runEvalSuite identifies it: with its shared configs applied.
+    const manifest = resolveManifestExtends(loaded, namespaces);
+    if (!manifest.results?.store) return false;
     // Another manifest in this batch may have loaded a plugin this one doesn't list.
     const { definition, config } = resolveResultStoreConfig(
       manifest.results.store,
