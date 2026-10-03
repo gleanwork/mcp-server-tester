@@ -61,6 +61,7 @@ import {
 import { execFileNoThrow } from '../utils/execFileNoThrow.js';
 import { debugEval } from '../debug.js';
 import { sumUsage } from '../utils/usageUtils.js';
+import { caseJudgeUsage, sumJudgeUsage } from '../judge/judgeContract.js';
 import packageJson from '../../package.json' with { type: 'json' };
 import { attachReporterData } from '../reporters/channel.js';
 import { compareEvalRuns } from './evalRunComparison.js';
@@ -214,6 +215,11 @@ export interface EvalRunnerResult {
    * Aggregate token usage from all mcp_host LLM simulations across all cases.
    */
   totalHostUsage?: UsageMetrics;
+
+  /**
+   * Aggregate token usage of judges across all cases, from judges that report it.
+   */
+  totalJudgeUsage?: Partial<UsageMetrics>;
 }
 
 export type StoredEvalResultRef = 'latest' | { id: string };
@@ -852,6 +858,7 @@ async function runSingleIteration(
   }
 
   const hostUsage = host?.usage ?? hostResponse?.usage;
+  const judgeUsage = caseJudgeUsage(outcome.expectations.judge);
   const hostDiagnostics = host?.diagnostics ?? hostResponse?.diagnostics;
 
   // Build result - use test context for authType and project (Playwright is source of truth)
@@ -884,6 +891,7 @@ async function runSingleIteration(
     ...(host ? { trace: caseTrace(host, evidence, error) } : {}),
     ...(hostDiagnostics ? { hostDiagnostics } : {}),
     hostUsage,
+    ...(judgeUsage !== undefined && { judgeUsage }),
     hostTelemetry: host?.telemetry,
     externalHost,
   };
@@ -944,6 +952,9 @@ export async function runEvalCase(
           ? { hostDiagnostics: result.hostDiagnostics }
           : {}),
         hostUsage: result.hostUsage,
+        ...(result.judgeUsage !== undefined && {
+          judgeUsage: result.judgeUsage,
+        }),
         hostTelemetry: result.hostTelemetry,
         externalHost: result.externalHost,
         ...iterationSkillLoads(result.response),
@@ -1010,6 +1021,7 @@ export async function runEvalCase(
     infrastructureErrorCount: infraErrors.length,
     durationMs: iterationResults.reduce((sum, r) => sum + r.durationMs, 0),
     hostUsage: totalHostUsage,
+    judgeUsage: sumJudgeUsage(iterationResults.map((r) => r.judgeUsage)),
     hostTelemetry: undefined,
   };
 }
@@ -1279,6 +1291,8 @@ export async function runEvalDataset(
     undefined as UsageMetrics | undefined
   );
 
+  const runJudgeUsage = sumJudgeUsage(caseResults.map((r) => r.judgeUsage));
+
   const result: EvalRunnerResult = {
     total,
     passed,
@@ -1287,6 +1301,7 @@ export async function runEvalDataset(
     durationMs: Date.now() - startTime,
     metadata,
     totalHostUsage: runHostUsage,
+    ...(runJudgeUsage !== undefined && { totalJudgeUsage: runJudgeUsage }),
   };
 
   // Load baseline and compute delta if requested

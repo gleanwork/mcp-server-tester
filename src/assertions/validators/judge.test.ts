@@ -22,6 +22,19 @@ vi.mock('../../judge/judgeClient.js', () => ({
 // Import after mock so we get the mocked version
 import { createJudge } from '../../judge/judgeClient.js';
 
+/** The input a matcher or `validateJudge` call gives a judge: no case, one trial. */
+function matcherInput(response: string, answer?: unknown) {
+  return {
+    case: {
+      input: {},
+      expected: answer === undefined ? {} : { answer },
+      tags: [],
+      metadata: {},
+    },
+    trial: { response, text: response, events: [] },
+  };
+}
+
 const mockCreateJudge = vi.mocked(createJudge);
 
 /** Install `evaluate` as the `test/<name>` judge and return that reference. */
@@ -320,7 +333,7 @@ describe('validateJudge', () => {
 
       const result = await validateJudge('some response', { judge });
 
-      expect(evaluate).toHaveBeenCalledWith('some response', undefined, {});
+      expect(evaluate).toHaveBeenCalledWith(matcherInput('some response'), {});
       expect(result.pass).toBe(true);
       expect(result.message).toContain('test/my-custom-judge');
       expect(result.message).toContain('0.95');
@@ -335,7 +348,10 @@ describe('validateJudge', () => {
         reference: 'expected answer',
       });
 
-      expect(evaluate).toHaveBeenCalledWith('candidate', 'expected answer', {});
+      expect(evaluate).toHaveBeenCalledWith(
+        matcherInput('candidate', 'expected answer'),
+        {}
+      );
     });
 
     it('passes only explicit judge-owned options to strict schemas', async () => {
@@ -347,7 +363,7 @@ describe('validateJudge', () => {
         options: {},
       });
       expect(result.pass).toBe(true);
-      expect(evaluate).toHaveBeenCalledWith('candidate', undefined, {});
+      expect(evaluate).toHaveBeenCalledWith(matcherInput('candidate'), {});
     });
 
     it('applies threshold to the judge score', async () => {
@@ -508,7 +524,7 @@ describe('validateJudge', () => {
         reference: 'gold',
       });
 
-      expect(evaluate).toHaveBeenCalledWith('response', 'gold', {
+      expect(evaluate).toHaveBeenCalledWith(matcherInput('response', 'gold'), {
         model: 'their-model',
       });
       expect(result.details?.judgeModel).toBe('their-model');

@@ -144,6 +144,17 @@ export interface EvalCase {
   canonicalAnswer?: string;
 
   /**
+   * What the case expects, for judges: `answer` (the reference answer, which
+   * overrides `canonicalAnswer`), `criteria` (rubric criteria keyed by name),
+   * and any other ground truth. Judges read it as `case.expected`.
+   */
+  expected?: {
+    answer?: unknown;
+    criteria?: Record<string, string>;
+    [key: string]: unknown;
+  };
+
+  /**
    * Arbitrary string labels for this case.
    * Use for filtering eval runs with `EvalRunnerOptions.filterTags`
    * and for slicing results by category.
@@ -548,6 +559,13 @@ export const EvalCaseSchema = z
     accuracyThreshold: z.number().min(0).max(1).optional(),
     judgeReps: z.number().int().min(1).optional(),
     canonicalAnswer: z.string().optional(),
+    expected: z
+      .object({
+        answer: z.unknown().optional(),
+        criteria: z.record(z.string(), z.string()).optional(),
+      })
+      .passthrough()
+      .optional(),
     tags: z.array(z.string()).optional(),
     expect: EvalExpectBlockSchema.optional(),
   })

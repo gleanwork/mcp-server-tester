@@ -334,11 +334,10 @@ export default {
   judges: {
     keywords: {
       schema: z.object({ keywords: z.array(z.string()).min(1) }).strict(),
-      async evaluate(candidate, _reference, options) {
+      async evaluate({ trial }, options) {
         // Judge the host's answer, never its trace.
-        const answer =
-          typeof candidate === 'string' ? candidate : candidate?.response;
-        if (typeof answer !== 'string')
+        const answer = trial.text;
+        if (!answer)
           throw new Error('usecase/keywords judges a text response.');
         const haystack = answer.toLowerCase();
         const missing = options.keywords.filter(

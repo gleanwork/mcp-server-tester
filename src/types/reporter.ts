@@ -284,6 +284,8 @@ export interface IterationResult {
   trace?: HostTrace;
   /** Token usage from mcp_host LLM simulation in this iteration */
   hostUsage?: UsageMetrics;
+  /** Token usage of this iteration's judges, from judges that report it. */
+  judgeUsage?: Partial<UsageMetrics>;
   /** Skills the simulated host loaded in this iteration (skills enabled). */
   skillLoads?: SkillLoad[];
   /** Native numeric host measurements, retained after response redaction. */
@@ -518,6 +520,11 @@ export interface EvalCaseResult {
    * Summed across all iterations. Only populated for mcp_host mode cases.
    */
   hostUsage?: UsageMetrics;
+  /**
+   * Token usage of the case's judges, from judges that report it.
+   * Summed across all iterations.
+   */
+  judgeUsage?: Partial<UsageMetrics>;
   /** Native single-iteration measurements; multi-iteration values live in iterationResults. */
   hostTelemetry?: Record<string, unknown>;
 

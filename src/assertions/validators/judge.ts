@@ -11,12 +11,13 @@ import type { RubricSpec } from '../../judge/rubrics.js';
 import {
   DEFAULT_JUDGE_THRESHOLD,
   evaluateJudge,
+  type JudgeRun,
   judgeError,
   judgeOwnOptions,
   type JudgeRequest,
 } from '../../judge/evaluateJudge.js';
 
-export { DEFAULT_JUDGE_THRESHOLD };
+export { DEFAULT_JUDGE_THRESHOLD, type JudgeRun };
 
 /**
  * Configuration for the judge validator
@@ -90,12 +91,14 @@ export interface JudgeValidatorConfig {
  */
 export async function validateJudge(
   response: unknown,
-  config: JudgeValidatorConfig
+  config: JudgeValidatorConfig,
+  /** The case and run, from which the judge's `{ case, trial }` input is built. */
+  run: JudgeRun = {}
 ): Promise<ValidationResult> {
   const request = judgeRequest(config);
   return typeof request === 'string'
     ? judgeError(request)
-    : evaluateJudge(response, request);
+    : evaluateJudge(response, request, run);
 }
 
 /**

@@ -34,7 +34,7 @@ const plugin: Plugin = {
   judges: {
     score: {
       schema: z.object({ value: z.number() }).strict(),
-      evaluate: async (_candidate, _reference, options) => ({
+      evaluate: async (_input, options) => ({
         score: (options as { value: number }).value,
       }),
     },

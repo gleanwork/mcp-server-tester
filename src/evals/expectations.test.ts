@@ -311,8 +311,11 @@ describe('evaluateExpectations', () => {
       judges: {
         'expectations-test-judge': {
           schema: z.object({}).passthrough(),
-          evaluate: async (candidate, reference) => {
-            seen.push({ candidate, reference });
+          evaluate: async ({ case: evalCase, trial }) => {
+            seen.push({
+              candidate: trial.response,
+              reference: evalCase.expected.answer,
+            });
             return { score: 1 };
           },
         },

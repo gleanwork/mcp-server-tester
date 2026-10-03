@@ -85,8 +85,12 @@ installPlugins([
           policy: z.string().transform((value) => value.toUpperCase()),
           limit: z.number().default(5),
         }),
-        evaluate: async (candidate, reference, options) => {
-          captured.push({ candidate, reference, options });
+        evaluate: async ({ case: evalCase, trial }, options) => {
+          captured.push({
+            candidate: trial.response,
+            reference: evalCase.expected.answer,
+            options,
+          });
           return { score: options.policy === 'ALLOW' ? 1 : 0 };
         },
       },
@@ -96,7 +100,7 @@ installPlugins([
       },
       'default-policy': {
         schema: z.object({ policy: z.string().default('allow') }).strict(),
-        evaluate: async (_candidate, _reference, options) => ({
+        evaluate: async (_input, options) => ({
           score: options?.policy === 'allow' ? 1 : 0,
         }),
       },

@@ -29,6 +29,15 @@ import {
   loadStoredEvalRunnerResult,
 } from './evalRunComparison.js';
 
+/** Matches a judge input whose reference answer is `answer`. */
+function expectedAnswer(answer: unknown): unknown {
+  return expect.objectContaining({
+    case: expect.objectContaining({
+      expected: expect.objectContaining({ answer }),
+    }),
+  });
+}
+
 const dirs: string[] = [];
 let sequence = 0;
 
@@ -666,13 +675,12 @@ describe('suite review regressions', () => {
     expect(evaluate).toHaveBeenCalledTimes(2);
     expect(evaluate).toHaveBeenNthCalledWith(
       1,
-      expect.anything(),
-      'manifest-gold',
+      expectedAnswer('manifest-gold'),
       {
         count: 6,
       }
     );
-    expect(evaluate).toHaveBeenNthCalledWith(2, expect.anything(), 'arm-gold', {
+    expect(evaluate).toHaveBeenNthCalledWith(2, expectedAnswer('arm-gold'), {
       count: 12,
     });
   });
@@ -742,14 +750,12 @@ describe('suite review regressions', () => {
       expect(evaluate).toHaveBeenCalledTimes(2);
       expect(evaluate).toHaveBeenNthCalledWith(
         1,
-        expect.anything(),
-        'manifest-gold',
+        expectedAnswer('manifest-gold'),
         expect.objectContaining({ count: 6, retained: 'manifest-policy' })
       );
       expect(evaluate).toHaveBeenNthCalledWith(
         2,
-        expect.anything(),
-        'case-gold',
+        expectedAnswer('case-gold'),
         expect.objectContaining({ count: 12, retained: 'manifest-policy' })
       );
     }
