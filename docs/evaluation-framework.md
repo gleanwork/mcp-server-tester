@@ -186,7 +186,20 @@ A manifest that loads the plugin selects the host with `{ "type": "my/assistant"
 - **In results.** Each host case result keeps the trace as `trace`, a `HostTrace`: the `HostRunResult` your host returned, without telemetry and diagnostics, plus its evidence. On a one-server arm, MCP events that name no server get that server's label. A case with several iterations has no `trace` of its own; each entry in `iterationResults` has the trace of that iteration. In a suite, every case result also names its `arm`. Stored results drop `finalText` and each event's `output`, the same way they drop `response`; events, servers, arguments and usage stay.
 - **Batches.** A host with `runBatch` gets one request per iteration of each host case in the dataset, and returns one trace per request, in order. A batch host can't mix host types, and its cases need unique IDs.
 - **Settings only.** `createConfig` returns settings for MST's own SDK or CLI host instead of running anything.
-- **What it honours.** Set `toolOverrides: true` if the host shows the model an arm's tool variants (from `context.arm`); without it, a manifest that gives the host `toolOverrides` fails validation. `buildToolSurface(listed, variant)` from `./evals` applies a variant with MST's rules (keys, renames, collisions); `resolve(name, server)` maps a presented name back to the original tool. Record a renamed tool's calls under `originalName`, with the model's name in `rawName`, as MST's hosts do, so expectations read the same in every arm. `maxConcurrency` caps the manifest's `concurrency`.
+- **Tool variants.** A host that connects to the servers in `input.servers` gets an arm's `toolOverrides` with no work of its own: the suite gives it `http` server configs for a local MCP proxy that applies the variant, so the host must speak Streamable HTTP (see [Tool variants on every host](#tool-variants-on-every-host)). A host that applies variants itself sets `toolOverrides: true` and reads them from `context.arm`. `buildToolSurface(listed, variant)` from `./evals` applies a variant with MST's rules (keys, renames, collisions), and `resolve(name, server)` maps a presented name back to the original tool. Record a renamed tool's calls under `originalName`, with the model's name in `rawName`, as MST's hosts do. A host that connects elsewhere (hosted connectors, say) sets `toolSurfaceProxy: false`; a manifest that gives it `toolOverrides` then fails validation.
+- **What it honours.** `maxConcurrency` caps the manifest's `concurrency`.
+
+### Tool variants on every host
+
+An arm's `toolOverrides` (descriptions, input schemas, renames) reach every host:
+
+- **SDK hosts** (`vercel-sdk`, `anthropic-api`) apply the variant in-process.
+- **Hosts that connect to their servers** (plugin hosts, `claude-cli`) get them through a local MCP proxy. The suite starts it on first use and gives each host request its own loopback Streamable HTTP endpoints, one per server, with the servers' labels and timeouts. The proxy presents the variant's tools and sends calls to a renamed tool to the original. Other requests (resources, prompts, skills) pass through; notifications, such as list changes and progress, don't.
+- **One connection per server for the arm.** The proxy connects to each server once and shares that connection across the arm's cases, where a host without a variant may connect per case. A server that keeps per-connection state sees one connection in a variant arm.
+- **A request whose host never lists the proxied tools fails.** Otherwise the run would report results for a variant the model never saw.
+- **Calls are recorded under the tools' original names**, so a dataset's expectations read the same in every arm, with the model's name in `rawName`.
+
+The Cowork and ChatGPT desktop hosts opt out until they are verified with the proxy, so a manifest that gives them `toolOverrides` fails validation.
 
 ## Execution lifecycle
 

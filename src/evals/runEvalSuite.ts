@@ -46,6 +46,10 @@ import type { Plugin } from '../plugins/plugin.js';
 import { assertDatasetNamespaces, loadSuitePlugins } from './suitePlugins.js';
 import { getDatasetSource } from './builtinDatasetSources.js';
 import { assertHostSupports, getHost } from './builtinHosts.js';
+import {
+  startToolSurfaceProxy,
+  type ToolSurfaceProxy,
+} from './toolSurfaceProxy.js';
 import { getResultStore, resolveStorePaths } from './builtinResultStores.js';
 import { compareWithPrevious, findPreviousRun } from './runBaseline.js';
 import { costSource, estimateCosts } from './pricing.js';
@@ -561,6 +565,16 @@ export async function runEvalSuite(
     const mcp = client
       ? createMCPFixture(client, undefined, { authType: 'api-token' })
       : undefined;
+    // Started on first use, for hosts that connect to their servers themselves.
+    const variant = arm.toolOverrides ?? manifest.toolOverrides;
+    let proxy: Promise<ToolSurfaceProxy> | undefined;
+    const toolVariant = variant
+      ? {
+          id: variant.id,
+          proxy: () =>
+            (proxy ??= startToolSurfaceProxy(resolvedServers, variant)),
+        }
+      : undefined;
 
     try {
       for (const { source, dataset } of canonicalDatasets) {
@@ -612,7 +626,8 @@ export async function runEvalSuite(
           effectiveDataset.cases,
           host.declaration,
           resolvedServers,
-          { manifest: effectiveManifest, arm, env }
+          { manifest: effectiveManifest, arm, env },
+          toolVariant
         );
         // Batch execution (including shared setup/cleanup) precedes the runner's
         // wall clock. Count its elapsed time once, not the sum of request times.
@@ -638,6 +653,7 @@ export async function runEvalSuite(
                     arm,
                     env,
                     batchTraces,
+                    toolVariant,
                     onDirectConnection: (client) => {
                       directProtocol ??= getProtocolInfo(client);
                     },
@@ -687,6 +703,7 @@ export async function runEvalSuite(
       }
     } finally {
       if (client) await closeMCPClient(client);
+      if (proxy) await (await proxy.catch(() => undefined))?.close();
     }
 
     const summary = summarizeArm(arm, servers, sourceResults);

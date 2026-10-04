@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { EvalCase } from './datasetTypes.js';
 import type { HostConfig } from './evalManifest.js';
 import type {
@@ -7,6 +8,12 @@ import type {
   HostRunResult,
 } from './evalFrameworkTypes.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
+import {
+  settleProxiedTrace,
+  usesToolSurfaceProxy,
+  withoutToolVariant,
+  type ToolSurfaceProxy,
+} from './toolSurfaceProxy.js';
 
 /** Pre-execute a batch host, retaining per-case iteration queues for the evaluator. */
 export async function prepareHostBatch(
@@ -14,9 +21,11 @@ export async function prepareHostBatch(
   cases: EvalCase[],
   config: HostConfig,
   servers: MCPConfig[],
-  context: HostRunContext
+  context: HostRunContext,
+  toolVariant?: { id: string; proxy: () => Promise<ToolSurfaceProxy> }
 ): Promise<Map<string, HostRunResult[]> | undefined> {
   if (!definition.runBatch) return undefined;
+  const scopes: string[] = [];
   const requests: HostBatchRequest[] = [];
   const queues = new Map<string, HostRunResult[]>();
   for (const c of cases) {
@@ -35,6 +44,8 @@ export async function prepareHostBatch(
     queues.set(c.id, []);
     const iterations = c.iterations ?? context.manifest.iterations ?? 1;
     for (let iteration = 0; iteration < iterations; iteration++) {
+      const scope = randomUUID();
+      scopes.push(scope);
       requests.push({
         caseId: c.id,
         iteration,
@@ -44,13 +55,41 @@ export async function prepareHostBatch(
     }
   }
   if (!requests.length) return queues;
-  const traces = await definition.runBatch(requests, context);
+  // Proxied hosts connect to the variant's servers, one scope per request.
+  const proxy =
+    toolVariant && usesToolSurfaceProxy(definition)
+      ? await toolVariant.proxy()
+      : undefined;
+  if (proxy) {
+    requests.forEach((request, index) => {
+      request.input = {
+        ...request.input,
+        servers: proxy.serversFor(scopes[index]!),
+      };
+    });
+  }
+  const traces = await definition.runBatch(
+    requests,
+    proxy ? withoutToolVariant(context) : context
+  );
   if (traces.length !== requests.length)
     throw new Error(
       'Batch host returned an incomplete trace set; refusing to resubmit.'
     );
   requests.forEach((request, index) =>
-    queues.get(request.caseId)!.push(traces[index]!)
+    queues
+      .get(request.caseId)!
+      .push(
+        proxy
+          ? settleProxiedTrace(
+              traces[index]!,
+              proxy,
+              scopes[index]!,
+              servers,
+              toolVariant!.id
+            )
+          : traces[index]!
+      )
   );
   return queues;
 }

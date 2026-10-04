@@ -578,6 +578,8 @@ export function createCoworkHost(platform?: CoworkPlatform): HostDefinition {
   return {
     schema: CoworkSchema,
     evidence: 'structured',
+    // Not verified against MST's local tool-variant proxy.
+    toolSurfaceProxy: false,
     runBatch: (requests, context) => runBatch(requests, context, platform),
     run: async (input, config, context) =>
       (

@@ -446,19 +446,41 @@ describe('settings a host would ignore', () => {
     ...extra,
   });
 
-  it.each(['claude-cli', 'cowork', 'test/runner'])(
+  function installHosts() {
+    installTestPlugin({
+      hosts: {
+        runner: { schema, run: async () => ({ finalText: '', events: [] }) },
+        elsewhere: {
+          schema,
+          toolSurfaceProxy: false,
+          run: async () => ({ finalText: '', events: [] }),
+        },
+      },
+    });
+  }
+
+  it.each(['cowork', 'chatgpt', 'test/elsewhere'])(
     'rejects toolOverrides for %s, which never shows them to the model',
     (type) => {
-      installTestPlugin({
-        hosts: {
-          runner: { schema, run: async () => ({ finalText: '', events: [] }) },
-        },
-      });
+      installHosts();
+      const host = type === 'chatgpt' ? { type, model: 'gpt-5' } : { type };
+      expect(() =>
+        validateManifest(base({ host, toolOverrides: overrides }), {
+          namespaces: ['test'],
+        })
+      ).toThrow(`The manifest: host "${type}" can't apply toolOverrides;`);
+    }
+  );
+
+  it.each(['claude-cli', 'test/runner'])(
+    'accepts toolOverrides for %s, served through the tool-variant proxy',
+    (type) => {
+      installHosts();
       expect(() =>
         validateManifest(base({ host: { type }, toolOverrides: overrides }), {
           namespaces: ['test'],
         })
-      ).toThrow(`The manifest: host "${type}" can't apply toolOverrides;`);
+      ).not.toThrow();
     }
   );
 
@@ -468,11 +490,11 @@ describe('settings a host would ignore', () => {
       host: { type: 'vercel-sdk', provider: 'anthropic' },
       arms: [
         { name: 'sdk', toolOverrides: overrides },
-        { name: 'cli', host: { type: 'claude-cli' }, toolOverrides: overrides },
+        { name: 'desktop', host: { type: 'cowork' }, toolOverrides: overrides },
       ],
     });
     expect(() => validateManifest(manifest, { namespaces: ['test'] })).toThrow(
-      `Arm "cli": host "claude-cli" can't apply toolOverrides;`
+      `Arm "desktop": host "cowork" can't apply toolOverrides;`
     );
     expect(() =>
       validateManifest(

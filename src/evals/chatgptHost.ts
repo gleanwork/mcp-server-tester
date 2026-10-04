@@ -303,6 +303,8 @@ function chatgptHost(platform: ChatgptPlatform): HostDefinition {
   return {
     schema: Schema,
     evidence: 'structured',
+    // Not verified against MST's local tool-variant proxy.
+    toolSurfaceProxy: false,
     // One ChatGPT app window drives one conversation at a time.
     maxConcurrency: 1,
     runBatch(requests, context) {

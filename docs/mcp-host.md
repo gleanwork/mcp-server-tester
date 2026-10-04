@@ -290,7 +290,7 @@ A renamed tool's calls reach the original tool and are recorded under its origin
 }
 ```
 
-Mocked responses and dataset rewriting are out of scope.
+In a suite, an arm's `toolOverrides` reach every host, including plugin hosts and `claude-cli`, through a local MCP proxy; see [Tool variants on every host](./evaluation-framework.md#tool-variants-on-every-host). Mocked responses and dataset rewriting are out of scope.
 
 For a complete runnable harness — including building a structured next-variant proposal from the comparison — see [`snippets/runtime-tool-override-experiment.ts`](../snippets/runtime-tool-override-experiment.ts).
 
