@@ -125,22 +125,26 @@ LLM host mode makes real API calls and produces non-deterministic results. Use `
 
 ## Installation
 
-Requires Node.js 22+.
+Requires Node.js 22+. These docs describe 2.0, which is in beta:
 
 ```bash
-npm install --save-dev @gleanwork/mcp-server-tester @playwright/test
+npm install --save-dev @gleanwork/mcp-server-tester@beta @playwright/test
 ```
 
-The Anthropic SDK is only needed for LLM-as-judge assertions or LLM host mode with the Anthropic provider:
+`npm install @gleanwork/mcp-server-tester` installs 1.x, whose docs are at [v1.1.1](https://github.com/gleanwork/mcp-server-tester/tree/v1.1.1). Upgrading: [Migration guide (v1.x → v2.0)](./docs/migrations/migration-2.0.md).
+
+LLM-as-judge with the default Anthropic judge needs the Anthropic SDK:
 
 ```bash
 npm install --save-dev @anthropic-ai/sdk
 ```
 
+The SDK host's packages (`ai` and the `@ai-sdk/*` providers) are optional dependencies, installed by default; add them yourself if you install with `--omit=optional`.
+
 ## Quick Start
 
 ```bash
-npx @gleanwork/mcp-server-tester init
+npx @gleanwork/mcp-server-tester@beta init
 ```
 
 The CLI wizard creates a `playwright.config.ts`, example tests, and a sample eval dataset configured for your server. See the [CLI Guide](./docs/cli.md) for all options.

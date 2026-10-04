@@ -1,6 +1,6 @@
 # Contributing to @gleanwork/mcp-server-tester
 
-Thank you for your interest in contributing! This project is experimental and community input is essential to its evolution. We welcome all types of contributions.
+Thank you for your interest in contributing! MST is in active development (2.0 is in beta), and community input shapes it. We welcome all types of contributions. For a security issue, see [SECURITY.md](./SECURITY.md) instead of opening an issue.
 
 ## Architecture
 

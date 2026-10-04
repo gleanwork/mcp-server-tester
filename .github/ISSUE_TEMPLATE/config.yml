@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://github.com/gleanwork/mcp-server-tester/tree/main/docs
+    about: Guides for fixtures, eval datasets, suites, hosts and the CLI.
+  - name: Report a security vulnerability
+    url: https://github.com/gleanwork/mcp-server-tester/blob/main/SECURITY.md
+    about: Please report security issues privately, not as an issue.
