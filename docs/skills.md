@@ -7,7 +7,7 @@ MST can:
 - read and verify skills from tests (`mcp.skills`)
 - check that a server follows SEP-2640 (`runConformanceChecks`)
 - assert on skills methods in eval datasets (`request` cases)
-- run `mcp_host` evals where the model can load skills, and measure whether skills help (`mcpHostConfig.skills`, `runSkillsComparison`)
+- run `mcp_host` evals where the model can load skills, and measure whether skills help (`mcpHostConfig.skills`, or suite arms with the `vercel-sdk` host's `skills`)
 
 The extension works in both protocol eras: servers declare it in `capabilities.extensions`, which MST reads from `initialize` (legacy) or `server/discover` (2026-07-28).
 
@@ -154,24 +154,23 @@ Metrics: `skill_loaded`, `skill_before_tool`, and `skill_verification_failed`. E
 
 ## Measuring whether skills help
 
-Models often skip skills they could use, and a matching tool can win over the skill written for it. `runSkillsComparison()` runs the same dataset with different `skills` modes and compares them:
+Models often skip skills they could use, and a matching tool can win over the skill written for it. To measure it, run the same dataset as suite arms that differ only in the `vercel-sdk` host's `skills` mode:
 
-```typescript
-import { runSkillsComparison } from '@gleanwork/mcp-server-tester/evals';
-
-test('skills improve weather reports', async ({ mcp }, testInfo) => {
-  const result = await runSkillsComparison(
-    { dataset, variants: ['off', 'catalog', 'preload'] },
-    { mcp, testInfo }
-  );
-  for (const variant of result.variants) {
-    // { passRate, skillLoadRate?, skillBeforeToolRate?, skillVerificationFailureRate? }
-    // 'off' has only passRate; 'preload' normally has no load rates.
-    console.log(variant.mode, variant.summary);
-  }
-  // Each mode vs the first, with improved/regressed cases:
-  console.log(result.comparisons.map((c) => c.comparison.deltaPassRate));
-});
+```json
+{
+  "name": "skills-help",
+  "datasets": ["./evals/weather.json"],
+  "servers": [
+    { "transport": "stdio", "command": "node", "args": ["server.js"] }
+  ],
+  "host": { "type": "vercel-sdk", "provider": "anthropic" },
+  "metrics": ["skill_loaded", "skill_before_tool", "skill_verification_failed"],
+  "arms": [
+    { "name": "off" },
+    { "name": "catalog", "host": { "skills": "catalog" } },
+    { "name": "preload", "host": { "skills": "preload" } }
+  ]
+}
 ```
 
-`variants` needs at least two different modes. Only `mcp_host` cases change between variants. Use `iterations` on cases for stable rates, and try more than one model: skill adherence varies a lot between models.
+`mst run` reports each arm's pass and trial pass rates and the skill metrics, and `armDeltas` compares each mode with `off`. Leave `mcpHostConfig.skills` off the cases: a case setting would override the arm's, so the suite rejects the combination. Skills come from the first of an arm's servers. Use `iterations` for stable rates, and try more than one model: skill adherence varies a lot between models.

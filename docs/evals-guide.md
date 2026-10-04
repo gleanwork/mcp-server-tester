@@ -736,39 +736,6 @@ await saveEvalRunComparison({
 Stored comparisons omit raw responses unless you pass
 `redactStoredResponses: false` to `saveEvalRunComparison()`.
 
-### Stored Server Comparisons
-
-`runServerComparison()` can persist side-by-side results directly. As with
-every stored result, responses are omitted unless you pass
-`redactStoredResponses: false`:
-
-```typescript snippet=snippets/result-store-server-comparison.ts
-import { test } from '@gleanwork/mcp-server-tester/fixtures/mcp';
-import { loadEvalDataset } from '@gleanwork/mcp-server-tester';
-import { runServerComparison } from '@gleanwork/mcp-server-tester/evals';
-
-test('compare two MCP servers and persist the result', async ({
-  mcp,
-}, testInfo) => {
-  const dataset = await loadEvalDataset('./data/evals.json');
-  const otherMcp = mcp;
-
-  await runServerComparison(
-    {
-      dataset,
-      comparisonStore: {
-        provider: 'gcs',
-        bucket: 'my-mcp-eval-results',
-        prefix: 'my-server/server-comparisons',
-      },
-      comparisonId: `server-comparison-${Date.now()}`,
-    },
-    { mcp, testInfo },
-    { mcp: otherMcp, testInfo }
-  );
-});
-```
-
 ### GCS Layout
 
 Given `bucket: "my-mcp-eval-results"` and `prefix: "my-server/main"`, artifacts are
@@ -860,118 +827,41 @@ test('manual baseline management', async ({ mcp }, testInfo) => {
 
 ---
 
-## Server Comparison (A/B Testing)
+## Comparing servers (A/B testing)
 
-`runServerComparison` runs the same eval dataset against two MCP server configurations in parallel and returns a detailed per-case breakdown of which server won, lost, or tied on each case. Use it when you want to compare two versions of a server, two different tool description sets, or any other pair of configurations.
+To compare two MCP servers, or two configurations of one, run the same dataset as two arms of a suite, each with its own `servers`:
 
-### How it works
-
-`runServerComparison` takes the same options as `runEvalDataset` (minus the baseline-specific fields) and two `EvalContext` objects — one for each server. It runs both servers concurrently with identical cases, then compares results case by case.
-
-For each case, the outcome is one of:
-
-| Outcome     | Meaning                          |
-| ----------- | -------------------------------- |
-| `A_WINS`    | Server A passed, server B failed |
-| `B_WINS`    | Server B passed, server A failed |
-| `TIE`       | Both passed                      |
-| `BOTH_FAIL` | Both failed                      |
-
-The aggregate `ServerComparisonResult` contains:
-
-| Field              | Type                     | Meaning                                                    |
-| ------------------ | ------------------------ | ---------------------------------------------------------- |
-| `aWins`            | `number`                 | Cases where server A passed and B failed                   |
-| `bWins`            | `number`                 | Cases where server B passed and A failed                   |
-| `ties`             | `number`                 | Cases where both passed                                    |
-| `bothFail`         | `number`                 | Cases where both failed                                    |
-| `decidedCases`     | `number`                 | `aWins + bWins + ties` (excludes `BOTH_FAIL`)              |
-| `aWinRate`         | `number`                 | `aWins / decidedCases`                                     |
-| `bWinRate`         | `number`                 | `bWins / decidedCases`                                     |
-| `tieRate`          | `number`                 | `ties / decidedCases`                                      |
-| `failureAlignment` | `number`                 | `bothFail / total` — fraction of cases both servers failed |
-| `cases`            | `CaseComparisonResult[]` | Per-case outcomes with full result objects                 |
-
-Win rates exclude `BOTH_FAIL` cases from the denominator. A high `failureAlignment` indicates that the failing cases are a dataset quality problem, not a difference between servers.
-
-### When to use it
-
-- **Comparing server versions before and after a refactor.** Run your eval suite with the old server as A and the new server as B. Cases where B wins are improvements; cases where A wins are regressions.
-- **A/B testing tool descriptions.** Point A at a server running with your current descriptions and B at a variant. Win rates quantify which description set performs better on real scenarios.
-- **Validating that a new transport or auth layer is equivalent.** Connect A via HTTP and B via stdio (or A with token auth and B with OAuth). A perfect result is all ties.
-
-### Configuration
-
-`runServerComparison` accepts `ServerComparisonOptions`, which is `EvalRunnerOptions` without `saveResultsTo` or `baselineResultsFrom` (baseline fields do not apply to comparisons). All other options — `concurrency`, `defaultLlmIterations`, `filterTags`, etc. — are shared between both server runs.
-
-To construct the second context, create a client with `createMCPClientForConfig` and wrap it with `createMCPFixture`:
-
-```typescript
-const clientB = await createMCPClientForConfig({
-  transport: 'stdio',
-  command: 'node',
-  args: ['server-v2.js'],
-});
-const mcpB = createMCPFixture(clientB);
-```
-
-Remember to close the second client in a `finally` block.
-
-### Full example
-
-<!-- snippet=snippets/server-comparison.ts -->
-
-```typescript
-import { test } from '@gleanwork/mcp-server-tester/fixtures/mcp';
-import {
-  loadEvalDataset,
-  createMCPClientForConfig,
-  createMCPFixture,
-  closeMCPClient,
-} from '@gleanwork/mcp-server-tester';
-import { runServerComparison } from '@gleanwork/mcp-server-tester/evals';
-
-test('compare two server versions', async ({ mcp: mcpA }, testInfo) => {
-  const dataset = await loadEvalDataset('./data/evals.json');
-
-  // Build a second MCP context for server B.
-  const clientB = await createMCPClientForConfig({
-    transport: 'stdio',
-    command: 'node',
-    args: ['server-v2.js'],
-  });
-  const mcpB = createMCPFixture(clientB);
-
-  try {
-    const comparison = await runServerComparison(
-      { dataset },
-      { mcp: mcpA, testInfo },
-      { mcp: mcpB }
-    );
-
-    console.log(`Total cases compared: ${comparison.total}`);
-    console.log(
-      `Server A win rate: ${(comparison.aWinRate * 100).toFixed(1)}%`
-    );
-    console.log(
-      `Server B win rate: ${(comparison.bWinRate * 100).toFixed(1)}%`
-    );
-    console.log(`Tie rate: ${(comparison.tieRate * 100).toFixed(1)}%`);
-    console.log(
-      `Both failed: ${comparison.bothFail} cases (${(comparison.failureAlignment * 100).toFixed(1)}% failure alignment)`
-    );
-
-    // Inspect decisive per-case outcomes.
-    for (const c of comparison.cases) {
-      if (c.outcome !== 'TIE' && c.outcome !== 'BOTH_FAIL') {
-        console.log(`  ${c.id}: ${c.outcome}`);
-      }
+```json
+{
+  "name": "server-ab",
+  "datasets": ["./evals/triggering.json"],
+  "host": { "type": "vercel-sdk", "provider": "anthropic" },
+  "arms": [
+    {
+      "name": "production",
+      "servers": [
+        {
+          "transport": "http",
+          "serverUrl": "https://mcp.example.com/mcp",
+          "label": "prod"
+        }
+      ]
+    },
+    {
+      "name": "candidate",
+      "servers": [
+        {
+          "transport": "http",
+          "serverUrl": "https://staging.example.com/mcp",
+          "label": "next"
+        }
+      ]
     }
-  } finally {
-    await closeMCPClient(clientB);
-  }
-});
+  ]
+}
 ```
+
+`mst run --manifest server-ab.json` runs both arms with the same host and prints a row per arm: cases passed, trial pass rate, MCP calls and host events, tokens, cost and time. The run summary's `armDeltas` holds each metric's change against the first arm, and with `iterations` set, `trial_pass_rate` shows differences that case pass/fail hides. An arm can also differ by host, tool variants (`toolOverrides`), scenario template or judges. See [Arms](./evaluation-framework.md#arms) and [Metrics](./evaluation-framework.md#metrics).
 
 ---
 

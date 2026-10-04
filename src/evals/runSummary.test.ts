@@ -14,7 +14,6 @@ import {
   passRate,
   saveEvalRunComparison,
 } from './evalRunComparison.js';
-import { saveServerComparison } from './serverComparison.js';
 import {
   omitResponsesFromResult,
   runEvalDataset,
@@ -152,19 +151,6 @@ describe('every storing API redacts by default', () => {
     await saveEvalRunComparison({
       store,
       comparison: compareEvalRuns({ baseline: run(), candidate: run() }),
-    });
-    expect(responsePaths(store.saved[0]?.data)).toEqual([]);
-  });
-
-  it('server comparisons', async () => {
-    const store = memoryStore();
-    await saveServerComparison({
-      store,
-      comparison: {
-        dataset: 'dataset',
-        serverAResult: run(),
-        serverBResult: run(),
-      } as unknown as Parameters<typeof saveServerComparison>[0]['comparison'],
     });
     expect(responsePaths(store.saved[0]?.data)).toEqual([]);
   });

@@ -517,26 +517,6 @@ The result includes pass-rate deltas, optional tool precision/recall/F1 deltas, 
 
 It also has `warnings: string[]`, which flags runs that negotiated different MCP protocol eras or revisions (from `metadata.protocol`).
 
-### `runSkillsComparison(options, context)`
-
-Run a dataset once per `mcpHostConfig.skills` mode and compare each mode against the first. Only `mcp_host` cases change between variants.
-
-**Parameters:**
-
-- `options: SkillsComparisonOptions` - `EvalRunnerOptions` plus `variants?: ('off' | 'catalog' | 'preload')[]` (default `['off', 'catalog']`)
-- `context: EvalContext`
-
-**Returns:** `Promise<SkillsComparisonResult>` with `variants[]` (`mode`, `result`, `summary: { passRate, skillLoadRate?, skillBeforeToolRate?, skillVerificationFailureRate? }`) and `comparisons[]` (`EvalRunComparisonResult` per candidate mode).
-
-```typescript
-const result = await runSkillsComparison(
-  { dataset, variants: ['off', 'catalog', 'preload'] },
-  { mcp, testInfo }
-);
-```
-
-See [Agent Skills](./skills.md#measuring-whether-skills-help).
-
 ### External Result Storage
 
 External result storage persists eval runs, reporter runs, and comparison artifacts
@@ -545,9 +525,9 @@ as JSON. GCS is the first built-in cloud provider.
 ```typescript
 type StoredArtifactKind =
   | 'eval-runner-result'
+  | 'eval-run-summary'
   | 'reporter-run'
-  | 'eval-run-comparison'
-  | 'server-comparison';
+  | 'eval-run-comparison';
 
 interface EvalResultStore {
   saveArtifact<T>(artifact: StoredEvalArtifact<T>): Promise<void>;

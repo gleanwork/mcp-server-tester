@@ -99,7 +99,7 @@ describe('FileEvalResultStore', () => {
 
   it('round-trips comparison artifacts', async () => {
     const artifact = createStoredEvalArtifact({
-      kind: 'server-comparison',
+      kind: 'eval-run-comparison',
       id: 'comparison-1',
       data: { aWins: 1, bWins: 0 },
     });
@@ -107,7 +107,7 @@ describe('FileEvalResultStore', () => {
     await store.saveArtifact(artifact);
 
     const loaded = await store.loadArtifact<{ aWins: number; bWins: number }>(
-      'server-comparison',
+      'eval-run-comparison',
       'comparison-1'
     );
     expect(loaded.data).toEqual({ aWins: 1, bWins: 0 });

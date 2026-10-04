@@ -9,7 +9,8 @@ import { createMCPFixture } from '../../../mcp/fixtures/mcpFixture.js';
 import type { MCPFixtureApi } from '../../../mcp/fixtures/mcpFixture.js';
 import { validateToolCalls } from '../../../assertions/validators/toolCalls.js';
 import { simulateMCPHost } from '../mcpHostSimulation.js';
-import { runSkillsComparison } from '../../skillsComparison.js';
+import { runEvalDataset } from '../../evalRunner.js';
+import { computeMetrics } from '../../metrics.js';
 import type { EvalDataset } from '../../datasetTypes.js';
 
 /**
@@ -161,46 +162,48 @@ describe('SDK host with skills', () => {
     });
   }, 30_000);
 
-  it('runSkillsComparison measures the difference skills make', async () => {
+  it('measures the difference skills make, mode by mode', async () => {
     await withFixture(async (mcp) => {
-      const dataset: EvalDataset = {
-        name: 'weather-skills',
-        cases: [
-          {
-            id: 'uses-skill',
-            mode: 'mcp_host',
-            scenario: 'What is the weather in London?',
-            mcpHostConfig: { provider: 'openai' },
-            expect: { toolsTriggered: SKILL_THEN_TOOL },
-          },
-        ],
+      const run = async (skills?: 'catalog' | 'preload') => {
+        const dataset: EvalDataset = {
+          name: 'weather-skills',
+          cases: [
+            {
+              id: 'uses-skill',
+              mode: 'mcp_host',
+              scenario: 'What is the weather in London?',
+              mcpHostConfig: {
+                provider: 'openai',
+                ...(skills ? { skills } : {}),
+              },
+              expect: { toolsTriggered: SKILL_THEN_TOOL },
+            },
+          ],
+        };
+        const result = await runEvalDataset({ dataset }, { mcp });
+        return computeMetrics(
+          [
+            'passed',
+            'skill_loaded',
+            'skill_before_tool',
+            'skill_verification_failed',
+          ],
+          result.caseResults
+        ).aggregated;
       };
 
-      const result = await runSkillsComparison(
-        { dataset, variants: ['off', 'catalog', 'preload'] },
-        { mcp }
-      );
-
-      const byMode = Object.fromEntries(
-        result.variants.map((v) => [v.mode, v.summary])
-      );
-      expect(byMode.off).toEqual({ passRate: 0 });
-      expect(byMode.catalog).toMatchObject({
-        passRate: 1,
-        skillLoadRate: 1,
-        skillBeforeToolRate: 1,
-        skillVerificationFailureRate: 0,
+      expect(await run()).toEqual({ passed_rate: 0 });
+      expect(await run('catalog')).toMatchObject({
+        passed_rate: 1,
+        skill_loaded_rate: 1,
+        skill_before_tool_rate: 1,
+        skill_verification_failed_rate: 0,
       });
       // preload puts the skill in context without the model choosing it:
       // no skill event, so skill-first can't pass and no load rate is kept.
-      expect(byMode.preload).toMatchObject({ passRate: 0 });
-      expect(byMode.preload?.skillLoadRate).toBeUndefined();
-
-      const catalog = result.comparisons.find((c) => c.candidate === 'catalog');
-      expect(catalog?.comparison.improvedCases.map((c) => c.id)).toEqual([
-        'uses-skill',
-      ]);
-      expect(catalog?.comparison.candidateLabel).toBe('skills:catalog');
+      const preload = await run('preload');
+      expect(preload).toMatchObject({ passed_rate: 0 });
+      expect(preload.skill_loaded_rate).toBeUndefined();
     });
   }, 60_000);
 });

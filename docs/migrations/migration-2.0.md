@@ -76,14 +76,14 @@ The root now holds the core testing interface: fixtures, matchers and validators
 import {
   loadEvalDataset,
   compareEvalRuns,
-  runServerComparison,
+  runVariantExperiment,
 } from '@gleanwork/mcp-server-tester';
 
 // After
 import { loadEvalDataset } from '@gleanwork/mcp-server-tester';
 import {
   compareEvalRuns,
-  runServerComparison,
+  runVariantExperiment,
 } from '@gleanwork/mcp-server-tester/evals';
 ```
 
@@ -97,7 +97,7 @@ If TypeScript reports that the package has no exported member, find the name bel
 
 These names moved:
 
-- **`@gleanwork/mcp-server-tester/evals`:** `CaseComparisonResult`, `compareEvalRuns`, `CompareEvalRunsOptions`, `ComparisonOutcome`, `createDefaultArtifactId`, `createEvalResultStore`, `createStoredEvalArtifact`, `defaultEnvironmentMetadata`, `EvalCaseComparison`, `EvalCaseComparisonOutcome`, `EvalResultStore`, `EvalResultStoreConfig`, `EvalResultStoreLike`, `EvalRunComparisonLabels`, `EvalRunComparisonResult`, `ExperimentMetric`, `FileEvalResultStore`, `FileEvalResultStoreConfig`, `GCSEvalResultStore`, `GCSEvalResultStoreConfig`, `getMissingDependencyMessage`, `isEvalResultStore`, `isProviderAvailable`, `ListStoredArtifactsOptions`, `loadBaseline`, `loadStoredEvalRunnerResult`, `ProposeVariantsContext`, `resolveEvalResultStore`, `runServerComparison`, `runVariantExperiment`, `saveBaseline`, `SaveBaselineOptions`, `saveEvalRunComparison`, `SaveEvalRunComparisonOptions`, `saveServerComparison`, `SaveServerComparisonOptions`, `ServerComparisonOptions`, `ServerComparisonResult`, `simulateMCPHost`, `StoredArtifactKind`, `StoredArtifactSummary`, `StoredEvalArtifact`, `StoredEvalArtifactMetadata`, `StoredEvalResultLoadOptions`, `StoredEvalResultRef`, `StoredEvalResultSaveOptions`, `StoredEvalRunRef`, `VariantCandidateResult`, `VariantExperimentOptions`, `VariantExperimentReason`, `VariantExperimentResult`, `VariantExperimentRound`, `VariantImprovementProposal`, `VariantRecommendation`
+- **`@gleanwork/mcp-server-tester/evals`:** `compareEvalRuns`, `CompareEvalRunsOptions`, `createDefaultArtifactId`, `createEvalResultStore`, `createStoredEvalArtifact`, `defaultEnvironmentMetadata`, `EvalCaseComparison`, `EvalCaseComparisonOutcome`, `EvalResultStore`, `EvalResultStoreConfig`, `EvalResultStoreLike`, `EvalRunComparisonLabels`, `EvalRunComparisonResult`, `ExperimentMetric`, `FileEvalResultStore`, `FileEvalResultStoreConfig`, `GCSEvalResultStore`, `GCSEvalResultStoreConfig`, `getMissingDependencyMessage`, `isEvalResultStore`, `isProviderAvailable`, `ListStoredArtifactsOptions`, `loadBaseline`, `loadStoredEvalRunnerResult`, `ProposeVariantsContext`, `resolveEvalResultStore`, `runVariantExperiment`, `saveBaseline`, `SaveBaselineOptions`, `saveEvalRunComparison`, `SaveEvalRunComparisonOptions`, `simulateMCPHost`, `StoredArtifactKind`, `StoredArtifactSummary`, `StoredEvalArtifact`, `StoredEvalArtifactMetadata`, `StoredEvalResultLoadOptions`, `StoredEvalResultRef`, `StoredEvalResultSaveOptions`, `StoredEvalRunRef`, `VariantCandidateResult`, `VariantExperimentOptions`, `VariantExperimentReason`, `VariantExperimentResult`, `VariantExperimentRound`, `VariantImprovementProposal`, `VariantRecommendation` (`runServerComparison` and `saveServerComparison` were removed instead; see [Server comparisons are suite arms](#server-comparisons-are-suite-arms).)
 - **`@gleanwork/mcp-server-tester/auth`:** `ClientCredentialsConfig`, `discoverAuthorizationServer`, `discoverProtectedResource`, `DiscoveryError`, `ENV_VAR_NAMES`, `hasValidTokens`, `loadTokens`, `loadTokensFromEnv`, `MCP_PROTOCOL_VERSION`, `performClientCredentialsFlow`, `ProtectedResourceDiscoveryResult`, `ProtectedResourceMetadata`, `StoredClientInfo`, `StoredOAuthState`, `StoredServerMetadata`
 
 ## `mcp.callTool()` returns protocol errors as error results
@@ -205,7 +205,7 @@ The MCP reporter reads test data through one typed channel (`src/reporters/chann
 
 Every API that persists results now uses one policy (`redactStoredResponses` in the result store) with one default. Before, there were six implementations that disagreed.
 
-- **Comparisons redact by default.** `saveEvalRunComparison()`, `saveServerComparison()` and `runServerComparison({ comparisonStore })` used to store every raw tool and host response unless you passed `redactStoredResponses: true`. They now omit them, as the runner and reporter already did. Pass `redactStoredResponses: false` to keep them.
+- **Comparisons redact by default.** `saveEvalRunComparison()` used to store every raw tool and host response unless you passed `redactStoredResponses: true`. It now omits them, as the runner and reporter already did. Pass `redactStoredResponses: false` to keep them.
 - **What is redacted is the same everywhere.** Every eval case result, wherever it is nested, loses its raw `response` and the exact-match `expect.response` echoed in `request.expect`. The runner's store path, `omitResponsesFromResult()` and baseline files used to keep `request.expect.response`. The reporter and comparisons used to drop any key named `response` at any depth, including tool arguments; they now keep those.
 - **One pass rate.** Every run-level pass rate is `passed / total`, and 0 for a run without cases. The reporter's `metrics.passRate` was `NaN` for an empty run, which was stored as `null`.
 
@@ -288,6 +288,62 @@ MST's LLM calls now resolve their endpoint and credential in one place (`src/llm
 - **SDK hosts don't report cost.** `usage.totalCostUsd` is undefined for the Vercel AI SDK host, which knows tokens but not prices; 1.x reported 0. The same holds for Claude CLI output without a cost. A suite can estimate cost with a manifest's `pricing`.
 - **Clearer SDK host errors.** Errors are classified by HTTP status as well as message text, so a 401 whose message doesn't say "401" still gets the authentication hint, and the hint now includes the provider's message: `authentication error (<provider message>)`. A plain-object stream error shows its `message` instead of `[object Object]`.
 
+## Server comparisons are suite arms
+
+**Affects:** code that calls `runServerComparison()` or `saveServerComparison()`, or reads `ServerComparisonResult`, `CaseComparisonResult` or `ComparisonOutcome`.
+
+`runServerComparison()` and `saveServerComparison()` are removed. A suite runs the same comparison as two arms, each with its own `servers`, and compares them on every metric, not only pass rate:
+
+```json
+{
+  "name": "server-ab",
+  "datasets": ["./evals/triggering.json"],
+  "host": { "type": "vercel-sdk", "provider": "anthropic" },
+  "arms": [
+    {
+      "name": "production",
+      "servers": [
+        {
+          "transport": "http",
+          "serverUrl": "https://mcp.example.com/mcp",
+          "label": "prod"
+        }
+      ]
+    },
+    {
+      "name": "candidate",
+      "servers": [
+        {
+          "transport": "http",
+          "serverUrl": "https://staging.example.com/mcp",
+          "label": "next"
+        }
+      ]
+    }
+  ]
+}
+```
+
+Run it with `mst run --manifest server-ab.json`, or `runEvalSuite({ manifestPath })` from code. The run summary's `arms` has each arm's metrics and results, and `armDeltas` their changes against the first arm. For per-case outcomes, compare the two arms' results:
+
+```typescript
+import {
+  compareEvalRuns,
+  runEvalSuite,
+} from '@gleanwork/mcp-server-tester/evals';
+
+const { summary } = await runEvalSuite({ manifestPath: 'server-ab.json' });
+const [serverA, serverB] = summary.arms;
+const comparison = compareEvalRuns({
+  baseline: serverA!.result!,
+  candidate: serverB!.result!,
+});
+```
+
+With the first arm as server A, `B_WINS` cases are `comparison.improvedCases`, `A_WINS` are `regressedCases`, `TIE` are `unchangedPasses` and `BOTH_FAIL` are `unchangedFailures`.
+
+What changes: arms run one after another, not in parallel; there is no `aWinRate`/`bWinRate` (count the buckets above); each arm connects from its own server config, so a server that needed a separate authenticated Playwright fixture needs its auth in the config (for example `auth.accessTokenEnv`); and `comparisonStore` is gone (`saveEvalRunComparison()` stores a comparison). See [Comparing servers](../evals-guide.md#comparing-servers-ab-testing).
+
 ## New in 2.0 (non-breaking)
 
 - An evaluation framework over datasets: manifests, suites and batches (`mst run`, `mst batch`), arms, metrics, result stores, and plugins that add dataset sources, hosts, judges, metrics and result stores under their own namespace, and shared configs a manifest `extends`. It's in `@gleanwork/mcp-server-tester/evals`. See [Evaluation framework](../evaluation-framework.md).
@@ -307,6 +363,6 @@ MST's LLM calls now resolve their endpoint and credential in one place (`src/llm
   ```
 
 - `runCrossEraChecks()` to check a server serves every era the same.
-- `mcp.skills`, skills conformance checks, and `mcpHostConfig.skills` / `runSkillsComparison()`. See [Agent Skills](../skills.md).
+- `mcp.skills`, skills conformance checks, and `mcpHostConfig.skills`, with a `skills` option on the `vercel-sdk` suite host for comparing modes as arms. See [Agent Skills](../skills.md).
 - Direct eval cases with `request` instead of `toolName`, and built-in schemas for skills and discover results.
 - Eval run metadata records the protocol (`metadata.protocol`, stored `protocolVersion` / `protocolEra`).
