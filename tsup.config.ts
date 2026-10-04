@@ -5,6 +5,7 @@ import { defineConfig } from 'tsup';
  * never bundled, and a build must not fail because they aren't installed.
  */
 const OPTIONAL_JUDGE_SDKS = [
+  '@anthropic-ai/claude-agent-sdk',
   '@anthropic-ai/sdk',
   '@anthropic-ai/vertex-sdk',
   '@google/generative-ai',

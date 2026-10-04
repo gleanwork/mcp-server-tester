@@ -1,7 +1,14 @@
-import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { JudgeConfig } from './judgeTypes.js';
 import type { JudgeCompletionAdapter } from './llmJudge.js';
-import { DEFAULT_CLAUDE_JUDGE_MODEL } from './adapterSupport.js';
+import { DEFAULT_CLAUDE_JUDGE_MODEL, loadJudgeSdk } from './adapterSupport.js';
+
+/** The part of the Claude Agent SDK the judge uses. */
+interface AgentSdk {
+  query: (params: {
+    prompt: string;
+    options: Record<string, unknown>;
+  }) => AsyncIterable<{ type?: string }>;
+}
 
 /** The SDK's final result message, as far as the judge reads it. */
 interface AgentResultMessage {
@@ -28,6 +35,12 @@ export function claudeAgentCompletion(
   config: JudgeConfig = {}
 ): JudgeCompletionAdapter {
   return async ({ system, prompt }) => {
+    // An optional peer dependency, loaded only when this judge runs.
+    const { query } = await loadJudgeSdk<AgentSdk>(
+      () => import('@anthropic-ai/claude-agent-sdk'),
+      'Claude Agent',
+      '@anthropic-ai/claude-agent-sdk'
+    );
     try {
       let result: AgentResultMessage | undefined;
       for await (const message of query({
