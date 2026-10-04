@@ -213,7 +213,7 @@ describe('runEvalDataset toolOverrides', () => {
 
     expect(result.failed).toBe(1);
     expect(result.caseResults[0]?.error).toContain(
-      'toolOverrides variant "bad-variant" references unknown tool(s): missing_tool'
+      'toolOverrides variant "bad-variant" overrides unknown tool "missing_tool".'
     );
   });
 
@@ -253,5 +253,53 @@ describe('runEvalDataset toolOverrides', () => {
     expect(result.caseResults[0]?.request?.toolOverrideVariantId).toBe(
       'search-description-v2'
     );
+  });
+});
+
+describe('runEvalDataset toolOverrides renames', () => {
+  beforeEach(() => {
+    mocks.simulateMCPHost.mockReset();
+  });
+
+  it('shows the host the new name and records calls under the original', async () => {
+    const mcp = createMockMCP([
+      {
+        name: 'search',
+        description: 'Search',
+        inputSchema: { type: 'object' },
+      },
+    ]);
+    let observed: string[] = [];
+    mocks.simulateMCPHost.mockImplementation(async (hostMcp: MCPFixtureApi) => {
+      observed = (await hostMcp.listTools()).map((tool) => tool.name);
+      await hostMcp.callTool('find_documents', { query: 'expense' });
+      return {
+        success: true,
+        toolCalls: [
+          { name: 'find_documents', arguments: { query: 'expense' } },
+        ],
+        response: 'Done',
+      };
+    });
+    // The dataset expects the original name: arms compare like for like.
+    const dataset = createHostDataset();
+
+    const result = await runEvalDataset(
+      {
+        dataset,
+        toolOverrides: {
+          id: 'renamed',
+          tools: { search: { name: 'find_documents' } },
+        },
+      },
+      createContext(mcp)
+    );
+
+    expect(observed).toEqual(['find_documents']);
+    expect(mcp.callTool).toHaveBeenCalledWith('search', { query: 'expense' });
+    expect(result.failed).toBe(0);
+    expect(result.caseResults[0]?.trace?.events).toMatchObject([
+      { kind: 'tool_call', name: 'search', rawName: 'find_documents' },
+    ]);
   });
 });

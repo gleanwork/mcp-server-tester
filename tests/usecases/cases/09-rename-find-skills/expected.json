@@ -1,8 +1,8 @@
 {
   "title": "Rename find_skills so the name reads as \"more tools here\"",
   "exitCode": 1,
-  "runGap": "step 7: toolOverrides can rename a tool",
-  "runGapError": "\"keys\": \\[\\s*\"name\"\\s*\\]",
+  "runGap": "step 7: tool variants reach plugin hosts through the tool surface",
+  "runGapError": "host \\\"usecase/model\\\" can't apply toolOverrides",
   "checks": [
     {
       "path": "arms[name=baseline].metrics.passed_rate",

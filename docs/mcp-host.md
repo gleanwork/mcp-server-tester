@@ -279,7 +279,18 @@ console.log(`Tool F1 delta: ${comparison.deltaToolF1 ?? 'n/a'}`);
 console.log(`Improved cases: ${comparison.improvedCases.length}`);
 ```
 
-`toolOverrides.tools` is keyed by canonical MCP tool name. v1 supports `description` and `inputSchema` replacements only; tool renames, mocked responses, and dataset rewriting are intentionally out of scope.
+`toolOverrides.tools` is keyed by a tool's name on its server; in a suite with several servers, `server.tool` picks one (a qualified key wins over a bare one). An override can replace a tool's `name`, `description` and `inputSchema`. A key that matches no tool or several is an error, and so is a rename that isn't a valid tool name or takes a name another tool on the same server has.
+
+A renamed tool's calls reach the original tool and are recorded under its original name, so a dataset's expectations read the same in every arm; the trace's `rawName` keeps the name the model used:
+
+```json
+{
+  "id": "renamed",
+  "tools": { "find_skills": { "name": "find_more_skills_and_tools" } }
+}
+```
+
+Mocked responses and dataset rewriting are out of scope.
 
 For a complete runnable harness — including building a structured next-variant proposal from the comparison — see [`snippets/runtime-tool-override-experiment.ts`](../snippets/runtime-tool-override-experiment.ts).
 

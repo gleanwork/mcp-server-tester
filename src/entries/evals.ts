@@ -128,3 +128,9 @@ export {
   isProviderAvailable,
   getMissingDependencyMessage,
 } from '../evals/mcpHost/index.js';
+export { buildToolSurface } from '../evals/toolSurface.js';
+export type {
+  ListedServerTools,
+  SurfaceTool,
+  ToolSurface,
+} from '../evals/toolSurface.js';

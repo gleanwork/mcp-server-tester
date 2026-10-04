@@ -4,10 +4,15 @@ import path from 'node:path';
 import { z } from 'zod';
 import { MCPConfigSchema, type MCPConfig } from '../config/mcpConfig.js';
 import {
+  buildToolSurface,
+  registerPresentedTools,
+  withOriginalToolNames,
+  type ListedServerTools,
+} from './toolSurface.js';
+import {
   GenerationOptions,
   ProviderSchema,
   hostEnvironment,
-  overrideHostTools,
   type HostEnvironment,
 } from './mcpHost/hostOptions.js';
 import {
@@ -145,7 +150,7 @@ async function runBuiltinHost(
       }
       const routes = new Map<
         string,
-        { client: (typeof clients)[number]; name: string }
+        { client: (typeof clients)[number]; name: string; original: string }
       >();
       const overrides =
         options.arm?.toolOverrides ?? options.manifest.toolOverrides;
@@ -168,24 +173,27 @@ async function runBuiltinHost(
         ...createFixtureExtensions(clients[0] ?? missingClient()),
         getServerInfo: () => null,
         async listTools() {
-          const tools = [];
+          const listed: ListedServerTools[] = [];
           for (const [index, client] of clients.entries()) {
             const result = await client.listTools();
-            for (const tool of result.tools) {
-              const name =
-                clients.length > 1
-                  ? `${options.servers[index]!.label}.${tool.name}`
-                  : tool.name;
-              routes.set(name, { client, name: tool.name });
-              tools.push({ ...tool, server: options.servers[index]!.label });
-            }
+            listed.push({
+              server: options.servers[index]!.label,
+              tools: result.tools,
+            });
           }
-          return overrideHostTools(tools, overrides).map(
-            ({ server, ...tool }) => ({
-              ...tool,
-              name: clients.length > 1 ? `${server}.${tool.name}` : tool.name,
-            })
-          );
+          const surface = buildToolSurface(listed, overrides);
+          routes.clear();
+          return surface.tools.map(({ server, originalName, tool }) => {
+            const qualify = (toolName: string) =>
+              clients.length > 1 ? `${server}.${toolName}` : toolName;
+            const index = listed.findIndex((item) => item.server === server);
+            routes.set(qualify(tool.name), {
+              client: clients[index]!,
+              name: originalName,
+              original: qualify(originalName),
+            });
+            return { ...tool, name: qualify(tool.name) };
+          });
         },
         async callTool(name, args) {
           if (!routes.size) await this.listTools();
@@ -214,11 +222,15 @@ async function runBuiltinHost(
           'CLI description overrides require a host plugin that exposes overridden tools.'
         );
       checkDeadline();
-      const response = await simulateMCPHost(
-        mcp,
-        case_.scenario,
-        config,
-        timeout === undefined ? undefined : controller.signal
+      registerPresentedTools(mcp, (name) => routes.get(name)?.original);
+      const response = withOriginalToolNames(
+        await simulateMCPHost(
+          mcp,
+          case_.scenario,
+          config,
+          timeout === undefined ? undefined : controller.signal
+        ),
+        mcp
       );
       return simulationToHostRun(response, input.servers);
     } finally {

@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import type { Tool } from '@modelcontextprotocol/client';
 
 export const ProviderSchema = z.enum([
   'openai',
@@ -31,40 +30,4 @@ export function hostEnvironment(
   context: { env?: HostEnvironment }
 ): HostEnvironment {
   return { ...process.env, ...context.env, ...input.env };
-}
-
-/** Overrides use canonical server.tool names, never provider-encoded names.
- * Bare names are allowed only when unambiguous; qualified overrides take priority.
- */
-export function overrideHostTools<T extends Tool & { server?: string }>(
-  tools: T[],
-  overrides?: {
-    tools: Record<
-      string,
-      { description?: string; inputSchema?: Record<string, unknown> }
-    >;
-  }
-): T[] {
-  for (const key of Object.keys(overrides?.tools ?? {})) {
-    const matches = tools.filter(
-      (tool) => key === tool.name || key === `${tool.server}.${tool.name}`
-    );
-    if (matches.length !== 1)
-      throw new Error(
-        `${matches.length ? 'Ambiguous' : 'Unknown'} tool override: ${key}`
-      );
-  }
-  return tools.map((tool) => {
-    const override =
-      overrides?.tools[`${tool.server}.${tool.name}`] ??
-      overrides?.tools[tool.name];
-    return override
-      ? {
-          ...tool,
-          ...override,
-          inputSchema: (override.inputSchema ??
-            tool.inputSchema) as Tool['inputSchema'],
-        }
-      : tool;
-  });
 }
