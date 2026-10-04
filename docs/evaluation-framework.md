@@ -22,9 +22,9 @@ runtime validation is provided by `EvalManifestSchema`.
       "label": "prod"
     }
   ],
-  "host": { "type": "sdk" },
-  "metrics": ["passed", { "type": "tool-count" }],
-  "results": { "store": { "type": "file", "directory": ".mcp-test-results" } },
+  "host": { "type": "vercel-sdk", "provider": "anthropic" },
+  "metrics": ["passed", "tool_count"],
+  "results": { "store": { "type": "file", "dir": ".mcp-test-results" } },
   "arms": [
     { "name": "baseline" },
     {

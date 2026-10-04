@@ -12,6 +12,10 @@ Before the package is installed (for example, running `init` in a new directory)
 - [generate - Generate Eval Dataset](#generate---generate-eval-dataset)
 - [login - OAuth Authentication](#login---oauth-authentication)
 - [token - Export Tokens for CI/CD](#token---export-tokens-for-cicd)
+- [run - Run an Evaluation Manifest](#run---run-an-evaluation-manifest)
+- [batch - Run Several Manifests](#batch---run-several-manifests)
+- [open - Open the Reporter](#open---open-the-reporter)
+- [cowork setup - Prepare Cowork](#cowork-setup---prepare-cowork)
 
 ## `init` - Initialize Project
 
@@ -656,6 +660,71 @@ npx mst token https://api.example.com/mcp
 #
 # Run 'mst login https://api.example.com/mcp' to authenticate first.
 ```
+
+## `run` - Run an Evaluation Manifest
+
+Runs a manifest's arms and writes the run summary. See [Evaluation framework](./evaluation-framework.md) for the manifest format.
+
+### Usage
+
+```bash
+npx mst run --manifest ./eval-manifest.json [options]
+```
+
+### Options
+
+| Option                  | Description                                                                                                                                                                                                                                  |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-m, --manifest <path>` | The manifest to run (required).                                                                                                                                                                                                              |
+| `--arm <name>`          | Run one arm.                                                                                                                                                                                                                                 |
+| `--plugins <paths...>`  | Plugin modules to load before the run, as well as the manifest's own `plugins`.                                                                                                                                                              |
+| `--output-dir <dir>`    | Where to write runs: each run goes in `<dir>/<run id>/`. Default: `.mcp-test-results/<manifest name>` under the root.                                                                                                                        |
+| `--root-dir <dir>`      | Fallback for relative manifest paths, and the default results location. Default: `.`.                                                                                                                                                        |
+| `--secrets-file <path>` | A JSON or dotenv-style file of environment values for the run (API keys, `auth.accessTokenEnv` tokens, stdio server environments), kept out of the manifest. A relative path resolves against the root; its values override the environment. |
+| `--dry-run`             | Validate the manifest, its plugins and datasets without running anything.                                                                                                                                                                    |
+
+`run` prints a row per arm (cases passed, trial pass rate, MCP calls, host events, tokens, cost, time) and, when there is one, the change since the previous run of the same manifest and arm. It writes `results.json` in the output directory and exits 1 when any case failed. `--dry-run` prints the manifest's name, output directory, datasets and arms as JSON.
+
+## `batch` - Run Several Manifests
+
+### Usage
+
+```bash
+npx mst batch --manifest-dir ./manifests [options]
+npx mst batch --manifests a.json b.json [options]
+```
+
+### Options
+
+| Option                   | Description                                                                                                                                         |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--manifests <paths...>` | Manifest files to run.                                                                                                                              |
+| `--manifest-dir <dir>`   | Run every top-level `.json` manifest in a directory, in name order. `--manifests` wins when both are given.                                         |
+| `--workers <number>`     | How many manifests run at once. Default: 1.                                                                                                         |
+| `--skip-existing`        | Skip a manifest whose result store (`results.store`) already has a completed run of the same resolved manifest. Without a store nothing is skipped. |
+| `--output-root <dir>`    | Put each manifest's runs under `<dir>/<file stem>-<hash>/`.                                                                                         |
+| `--plugins <paths...>`   | Plugin modules to load before the batch.                                                                                                            |
+| `--root-dir <dir>`       | Fallback for relative manifest paths, and the default results location.                                                                             |
+| `--secrets-file <path>`  | A JSON or dotenv-style file of environment values for the run, as for `run`.                                                                        |
+| `--dry-run`              | Validate every manifest without running anything.                                                                                                   |
+
+`batch` prints each manifest's outcome and a total, and exits 1 when any manifest failed.
+
+## `open` - Open the Reporter
+
+```bash
+npx mst open [--dir .mcp-test-results]
+```
+
+Opens the [UI reporter](./ui-reporter.md) the Playwright reporter wrote in a results directory (`-d, --dir`, default `.mcp-test-results`; it opens `latest/index.html`). `mst run` writes `results.json`, not a report.
+
+## `cowork setup` - Prepare Cowork
+
+```bash
+npx mst cowork setup
+```
+
+Initialises or validates the empty Claude third-party profile that the Cowork host runs in, on macOS. See [Cowork](./cowork.md).
 
 ## Next Steps
 
