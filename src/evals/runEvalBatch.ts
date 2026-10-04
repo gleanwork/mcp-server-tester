@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { describeError } from '../utils/describeError.js';
 import { resolveStorePaths } from './builtinResultStores.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -261,7 +262,7 @@ export async function runEvalBatch(
       } catch (error) {
         return {
           manifestPath,
-          error: error instanceof Error ? error.message : String(error),
+          error: describeError(error),
         };
       }
     }

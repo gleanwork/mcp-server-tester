@@ -12,6 +12,9 @@ import { run } from './commands/run/index.js';
 import { batch } from './commands/batch/index.js';
 import { setupCowork } from './commands/cowork/index.js';
 import packageJson from '../../package.json' with { type: 'json' };
+import { inspect } from 'node:util';
+import { debugCli } from '../debug.js';
+import { describeError } from '../utils/describeError.js';
 
 const program = new Command();
 
@@ -137,4 +140,14 @@ program
   )
   .action(open);
 
-program.parse();
+// An ordinary mistake (a missing file, a misspelt key) prints one message,
+// not a stack trace; DEBUG shows the stack.
+// DEBUG=mcp-server-tester:cli shows the stack and causes. Exit once stderr
+// is written, so a connection a failed command left open can't hold the
+// process.
+program.parseAsync().catch((error: unknown) => {
+  const detail = debugCli.enabled ? `${inspect(error, { depth: 6 })}\n` : '';
+  process.stderr.write(`mst: ${describeError(error)}\n${detail}`, () =>
+    process.exit(1)
+  );
+});
