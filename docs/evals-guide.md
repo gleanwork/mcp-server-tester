@@ -428,7 +428,7 @@ Run both and compare accuracy per tool. The reporter groups results by project, 
 
 ## Quick Reference: Eval Dataset Structure
 
-```json
+```jsonc
 {
   "name": "my-server-evals",
   "description": "Optional description",
@@ -446,7 +446,7 @@ Run both and compare accuracy per tool. The reporter groups results by project, 
       "mcpHostConfig": {
         "provider": "vertex-anthropic", // or "openai", "anthropic", etc.
         "model": "claude-3-5-haiku@20241022",
-        "maxToolCalls": 5
+        "maxToolCalls": 5,
       },
 
       // Multi-iteration (mainly for mcp_host):
@@ -460,16 +460,16 @@ Run both and compare accuracy per tool. The reporter groups results by project, 
         "toolsTriggered": {
           "calls": [{ "name": "search", "required": true }],
           "order": "any",
-          "exclusive": false
+          "exclusive": false,
         },
         "toolCallCount": { "min": 1, "max": 5 },
         "passesJudge": {
           "rubric": { "text": "Response must cite specific documents" },
-          "threshold": 0.7
-        }
-      }
-    }
-  ]
+          "threshold": 0.7,
+        },
+      },
+    },
+  ],
 }
 ```
 

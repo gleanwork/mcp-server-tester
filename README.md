@@ -239,9 +239,9 @@ result stores, and other extensions are built-ins or come from plugins
       "label": "prod"
     }
   ],
-  "host": { "type": "sdk" },
-  "metrics": ["passed"],
-  "results": { "store": { "type": "file", "directory": ".mcp-test-results" } }
+  "host": { "type": "vercel-sdk", "provider": "anthropic" },
+  "metrics": ["passed", "tool_count"],
+  "results": { "store": { "type": "file", "dir": ".mcp-test-results" } }
 }
 ```
 
