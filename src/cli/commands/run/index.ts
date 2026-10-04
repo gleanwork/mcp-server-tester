@@ -52,6 +52,27 @@ export async function run(options: RunOptions): Promise<void> {
   console.log(
     `Results: ${metrics.passed ?? 0}/${metrics.total ?? 0} passed (${((metrics.passRate ?? 0) * 100).toFixed(1)}%)`
   );
+  const previous = result.summary.previousRun;
+  if (previous) {
+    const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
+    console.log(
+      `Previous run ${previous.runId} (${previous.timestamp}): pass rate ${pct(previous.passRate)} -> ${pct(metrics.passRate ?? 0)}` +
+        (previous.sameManifest ? '' : ' (the manifest changed since)')
+    );
+    const list = (label: string, items: string[]) =>
+      items.length === 0
+        ? ''
+        : `${items.length} ${label} (${items.slice(0, 5).join(', ')}${items.length > 5 ? `, +${items.length - 5} more` : ''})`;
+    for (const [arm, change] of Object.entries(previous.arms)) {
+      const parts = [
+        list('regressed', change.regressed),
+        list('improved', change.improved),
+        list('added', change.added),
+        list('removed', change.removed),
+      ].filter(Boolean);
+      if (parts.length) console.log(`  ${arm}: ${parts.join('; ')}`);
+    }
+  }
   console.log(`Output: ${path.join(result.outputDir, 'results.json')}`);
   if ((metrics.failed ?? 0) > 0) process.exitCode = 1;
 }

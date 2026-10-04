@@ -47,7 +47,7 @@ A key the schema doesn't define is an error, in a manifest and in a dataset, so 
 - **Host defaults:** `model`, `provider`, `maxToolCalls`, `timeout`, `temperature` and `maxTokens` default each host option of that name, for the hosts that take it.
 - **Inheritance:** an arm or case host inherits the manifest host's options only when it's the same host type.
 
-A bare dataset path is shorthand for `{ "type": "file", "path": "..." }`.
+A bare dataset path is shorthand for `{ "type": "file", "path": "..." }`. Relative dataset and plugin paths in a manifest resolve against the manifest's directory, then `rootDir` (`--root-dir`, the working directory by default). A `file` result store's `dir` is always relative to the manifest, so where results are written doesn't depend on the working directory. Plugin result stores resolve their own options.
 Every other pluggable block is a tagged object. `servers` is the complete MCP
 server set under test; an empty set is valid for hosts that provide their own
 capabilities.
@@ -142,7 +142,10 @@ export default {
       async load(config, context) {
         const { path } = MySourceSchema.parse(config);
         // readMyFormat and convertToCanonical are your own reader and converter.
-        const raw = await readMyFormat(path, context.rootDir);
+        const raw = await readMyFormat(
+          path,
+          context.manifestDir ?? context.rootDir
+        );
         return loadEvalDatasetFromObject(convertToCanonical(raw));
       },
     },
@@ -241,6 +244,36 @@ A manifest's or arm's `metrics` list adds more. Built-in names:
 - **Evidence.** An arm's `evidence` is the weakest among its cases (`none`, then `observed`, then `structured`). With `observed`, tool metrics come from a best-effort trace; compare them only between arms with the same evidence.
 - **Deltas.** `armDeltas` compares each arm with the first: `passRate`, `trialPassRate`, and their deltas.
 - **Run totals.** The summary's top-level `total`, `passed`, `failed` and `passRate` count every arm; its other metrics are the first arm's.
+
+### Compared with the previous run
+
+Every run has a `runId`. Its summary's `previousRun` compares it with the previous run of the same manifest that ran the same arms, when there is one:
+
+- **Which run.** The manifest's `name` identifies it, so two manifests with the same name share a history. With a result store, the previous run is the store's newest summary for that manifest. Without one, it's the newest earlier `results.json` in the output directory (`--output-dir`, by default `.mcp-test-results/<name>/`).
+- **Output.** `mst run` prints the change and the regressed, improved, added and removed cases.
+- **Best effort.** A previous run that can't be read is skipped with a warning; it never fails the run.
+
+```json
+"previousRun": {
+  "runId": "4c1f…",
+  "timestamp": "2026-10-03T18:02:11.000Z",
+  "sameManifest": true,
+  "passRate": 1,
+  "passRateDelta": -0.5,
+  "arms": {
+    "default": {
+      "passRateDelta": -0.5,
+      "trialPassRateDelta": -0.1,
+      "regressed": ["billing-owner"],
+      "improved": [],
+      "added": [],
+      "removed": []
+    }
+  }
+}
+```
+
+`sameManifest` is false when the manifest changed between the runs, so a difference may come from the configuration rather than the server. Datasets aren't part of that hash.
 
 ## CLI
 

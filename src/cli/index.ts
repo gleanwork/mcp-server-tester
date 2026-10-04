@@ -81,7 +81,7 @@ program
   .option('--secrets-file <path>', 'JSON or dotenv-style runtime secrets file')
   .option(
     '--root-dir <dir>',
-    'Base directory for resolving relative paths',
+    'Fallback directory for relative manifest paths; default location for results',
     '.'
   )
   .option('--dry-run', 'Validate the manifest and plugins without executing')
@@ -96,7 +96,7 @@ program
   .option('--plugins <paths...>', 'Plugin modules to load before the batch')
   .option(
     '--root-dir <dir>',
-    'Base directory for resolving relative paths',
+    'Fallback directory for relative manifest paths; default location for results',
     '.'
   )
   .option('--output-root <dir>', 'Root directory for evaluation results')

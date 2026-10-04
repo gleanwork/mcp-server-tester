@@ -279,26 +279,53 @@ function normalizeManifest(value: EvalManifestInput): EvalManifest {
   } as EvalManifest;
 }
 
+/** Where a manifest's relative paths are looked up. */
+export interface ManifestDirs {
+  /** The manifest's own directory: relative paths resolve here first. */
+  manifestDir?: string;
+  /** The run's root (`--root-dir`): the fallback for paths not found by the manifest. */
+  rootDir?: string;
+}
+
+/**
+ * An input a manifest names (a dataset, a plugin): relative to the
+ * manifest's directory, then to `rootDir`, whichever has it; the manifest's
+ * directory when neither does, so the error names the expected place.
+ */
+export function resolveManifestPath(
+  target: string,
+  dirs: ManifestDirs
+): string {
+  if (path.isAbsolute(target)) return target;
+  const candidates = [dirs.manifestDir, dirs.rootDir]
+    .filter((dir): dir is string => dir !== undefined)
+    .map((dir) => path.resolve(dir, target));
+  return (
+    candidates.find((candidate) => fs.existsSync(candidate)) ??
+    candidates[0] ??
+    path.resolve(target)
+  );
+}
+
 /** Resolve paths for the built-in file and directory dataset sources. */
 export function resolveDatasetPaths(
   manifest: EvalManifest,
-  rootDir = process.cwd()
+  rootDir = process.cwd(),
+  manifestDir?: string
 ): string[] {
   return manifest.datasets.flatMap((dataset) => {
     if (dataset.type !== 'file' && dataset.type !== 'dir') return [];
     if (typeof dataset.path !== 'string') {
       throw new Error(`Dataset source "${dataset.type}" requires a path.`);
     }
-    return [
-      path.isAbsolute(dataset.path)
-        ? dataset.path
-        : path.resolve(rootDir, dataset.path),
-    ];
+    return [resolveManifestPath(dataset.path, { manifestDir, rootDir })];
   });
 }
 
 export interface LoadEvalManifestOptions {
   rootDir?: string;
+  /** The manifest's directory; `loadEvalManifest` sets it from the path. */
+  manifestDir?: string;
   skipDatasetValidation?: boolean;
 }
 
@@ -309,7 +336,11 @@ export function loadEvalManifestFromObject(
   const manifest = normalizeManifest(EvalManifestSchema.parse(value));
   if (options.skipDatasetValidation) return manifest;
 
-  for (const datasetPath of resolveDatasetPaths(manifest, options.rootDir)) {
+  for (const datasetPath of resolveDatasetPaths(
+    manifest,
+    options.rootDir,
+    options.manifestDir
+  )) {
     if (!fs.existsSync(datasetPath)) {
       throw new Error(`Dataset path not found: ${datasetPath}`);
     }
@@ -331,5 +362,6 @@ export function loadEvalManifest(
   return loadEvalManifestFromObject(raw, {
     ...options,
     rootDir: options.rootDir ?? path.dirname(absolutePath),
+    manifestDir: path.dirname(absolutePath),
   });
 }

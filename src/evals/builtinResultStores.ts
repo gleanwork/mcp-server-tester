@@ -1,3 +1,5 @@
+import path from 'node:path';
+import type { ManifestDirs } from './evalManifest.js';
 import { z } from 'zod';
 import {
   FileEvalResultStore,
@@ -50,4 +52,23 @@ const resultStores = extensionLookup('resultStores', builtinResultStores);
 /** The result store `reference` names: a built-in, or `namespace/name` from a plugin. */
 export function getResultStore(reference: string): ResultStoreDefinition {
   return resultStores.get(reference);
+}
+
+/**
+ * A result store config with a `file` store's relative `dir` resolved
+ * against the manifest's directory. Unlike an input, where a store writes
+ * mustn't depend on what happens to exist in the working directory.
+ */
+export function resolveStorePaths<T extends { type: string; dir?: unknown }>(
+  config: T,
+  dirs: ManifestDirs
+): T {
+  return config.type === 'file' &&
+    typeof config.dir === 'string' &&
+    !path.isAbsolute(config.dir)
+    ? {
+        ...config,
+        dir: path.resolve(dirs.manifestDir ?? dirs.rootDir ?? '.', config.dir),
+      }
+    : config;
 }
