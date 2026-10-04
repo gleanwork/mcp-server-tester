@@ -582,7 +582,7 @@ export function createVercelOrchestrator(): MCPHostSimulator {
           ? {
               inputTokens: usage.inputTokens ?? 0,
               outputTokens: usage.outputTokens ?? 0,
-              totalCostUsd: 0,
+              // The SDK reports tokens, not cost.
               durationMs: llmDurationMs,
             }
           : undefined;

@@ -20,18 +20,15 @@
     },
     {
       "path": "arms[name=assistant].evidence",
-      "equals": "none",
-      "gap": "step 2: surface each arm's evidence, and don't report trace metrics for evidence-none hosts"
+      "equals": "none"
     },
     {
       "path": "arms[name=assistant].metrics.tool_count_mean",
-      "exists": false,
-      "gap": "step 2: surface each arm's evidence, and don't report trace metrics for evidence-none hosts"
+      "exists": false
     },
     {
       "path": "arms[name=assistant].unavailableMetrics",
-      "exists": true,
-      "gap": "step 2: surface each arm's evidence, and don't report trace metrics for evidence-none hosts"
+      "exists": true
     }
   ]
 }

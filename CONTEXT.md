@@ -24,6 +24,10 @@ _Avoid_: core plugin, default
 A named, reusable manifest fragment a plugin offers (for example `recommended`), which a suite opts into; a plugin cannot impose it.
 _Avoid_: preset, profile
 
+**Trial**:
+One run of a case: one iteration, or the case itself when it runs once. Per-trial metrics average over a case's trials; runs that failed on infrastructure aren't trials.
+_Avoid_: attempt, sample
+
 **Endpoint source**:
 (Planned.) An extension that supplies the base URL and credentials MST's own LLM calls use. A run uses exactly one; the built-in `env` source reads environment variables.
 _Avoid_: gateway config, LLM provider

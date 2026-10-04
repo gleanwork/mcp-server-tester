@@ -15,19 +15,16 @@
       "equals": 1
     },
     {
-      "path": "arms[name=implicit].metrics.win_rate",
-      "equals": 0.6,
-      "gap": "step 2: report the iteration win rate per arm (case pass/fail hides it)"
+      "path": "arms[name=implicit].metrics.trial_pass_rate",
+      "equals": 0.6
     },
     {
-      "path": "arms[name=explicit].metrics.win_rate",
-      "equals": 1,
-      "gap": "step 2: report the iteration win rate per arm (case pass/fail hides it)"
+      "path": "arms[name=explicit].metrics.trial_pass_rate",
+      "equals": 1
     },
     {
-      "path": "armDeltas.explicit.winRateDelta",
-      "equals": 0.4,
-      "gap": "step 2: report the iteration win rate per arm (case pass/fail hides it)"
+      "path": "armDeltas.explicit.trialPassRateDelta",
+      "equals": 0.4
     }
   ],
   "ledger": {

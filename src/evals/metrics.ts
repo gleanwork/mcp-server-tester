@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { UsageMetrics } from '../types/index.js';
+import type { HostTrace } from './evalFrameworkTypes.js';
+import { isInfrastructureFailure } from './infrastructureFailure.js';
 import { extensionLookup } from '../plugins/extensions.js';
 /**
  * Tagged options are passed to compute without routing keys (type/metric/name).
@@ -28,10 +30,8 @@ export type { MetricDefinition, ResolvedMetric } from './evalFrameworkTypes.js';
 export interface MetricResult {
   perCase: Record<string, Record<string, MetricValue>>;
   aggregated: Record<string, unknown>;
-}
-
-function hostUsage(caseResult: EvalCaseResult): UsageMetrics | undefined {
-  return caseResult.hostUsage;
+  /** Metrics with no value for any case: unavailable, not zero. */
+  unavailable: string[];
 }
 
 function responseObject(caseResult: EvalCaseResult): Record<string, unknown> {
@@ -41,9 +41,117 @@ function responseObject(caseResult: EvalCaseResult): Record<string, unknown> {
     : {};
 }
 
-function toolCalls(caseResult: EvalCaseResult): unknown[] {
+/** One run of a case: an iteration, or the case itself when it runs once. */
+interface Trial {
+  pass: boolean;
+  trace?: HostTrace;
+  usage?: UsageMetrics;
+  durationMs: number;
+  error?: string;
+  /** The case ran once, so its own response is this trial's. */
+  isCase: boolean;
+}
+
+/**
+ * A case's trials: the runs that didn't fail on infrastructure (they are left
+ * out, as from accuracy).
+ */
+function caseTrials(caseResult: EvalCaseResult): Trial[] {
+  if (caseResult.iterationResults?.length) {
+    return caseResult.iterationResults
+      .filter((iteration) => !iteration.isInfrastructureError)
+      .map((iteration) => ({
+        pass: iteration.pass,
+        trace: iteration.trace,
+        usage: iteration.hostUsage,
+        durationMs: iteration.durationMs,
+        error: iteration.error,
+        isCase: false,
+      }));
+  }
+  if (isInfrastructureFailure(caseResult)) return [];
+  return [
+    {
+      pass: caseResult.pass,
+      trace: caseResult.trace,
+      usage: caseResult.hostUsage,
+      durationMs: caseResult.durationMs,
+      error: caseResult.error,
+      isCase: true,
+    },
+  ];
+}
+
+/**
+ * A case's value for a per-trial measurement: the mean over the trials that
+ * have one, or null when none does. With equal iterations per case, the mean
+ * over cases is the mean over all trials.
+ */
+function perTrial(
+  caseResult: EvalCaseResult,
+  value: (trial: Trial) => number | boolean | null
+): number | null {
+  const values = caseTrials(caseResult)
+    .map(value)
+    .filter((v): v is number | boolean => v !== null)
+    .map(Number);
+  return values.length === 0
+    ? null
+    : values.reduce((sum, v) => sum + v, 0) / values.length;
+}
+
+/**
+ * A trial's tool calls, each named `server.tool` when an MCP call names its
+ * server; null when the host declares no evidence of them or the trial has
+ * no record of them. A case without a trace (a direct case) falls back to
+ * its response.
+ */
+function trialToolCalls(
+  trial: Trial,
+  caseResult: EvalCaseResult
+): Array<{ name?: unknown }> | null {
+  if (trial.trace) {
+    if (trial.trace.evidence === 'none') return null;
+    return trial.trace.events
+      .filter((event) => event.kind === 'tool_call')
+      .map((event) => ({
+        name:
+          event.source === 'mcp' && event.server !== undefined
+            ? `${event.server}.${event.name}`
+            : event.name,
+      }));
+  }
+  if (!trial.isCase) return null;
   const calls = responseObject(caseResult).toolCalls;
-  return Array.isArray(calls) ? calls : [];
+  return Array.isArray(calls) ? (calls as Array<{ name?: unknown }>) : [];
+}
+
+/** The trial's answer: its trace's, or the case's response text. */
+function trialText(trial: Trial, caseResult: EvalCaseResult): string | null {
+  if (trial.trace) return trial.trace.finalText ?? '';
+  return trial.isCase ? responseText(caseResult) : null;
+}
+
+/** Tokens a trial read, including cache reads and writes. */
+function inputTokens(usage: UsageMetrics | undefined): number | null {
+  return usage
+    ? usage.inputTokens +
+        (usage.cacheReadInputTokens ?? 0) +
+        (usage.cacheCreationInputTokens ?? 0)
+    : null;
+}
+
+/** Tool calls across every trial of every result: what a run made. */
+export function countTrialToolCalls(results: EvalCaseResult[]): number {
+  return results.reduce(
+    (count, result) =>
+      count +
+      caseTrials(result).reduce(
+        (sum, trial) => sum + (trialToolCalls(trial, result)?.length ?? 0),
+        0
+      ),
+    0
+  );
 }
 
 type SkillLoadRecord = Record<string, unknown>;
@@ -280,77 +388,104 @@ export const BUILT_IN_METRICS: Readonly<Record<string, MetricDefinition>> =
     judge_pass_for: parameterizedJudgeMetric('judge_pass_for'),
     judge_score_for: parameterizedJudgeMetric('judge_score_for'),
     passed: metric('binary', (result) => result.pass, rateAggregation),
+    // Per case: the share of its trials that passed. The case passes when
+    // that share reaches its accuracy threshold; `trial_pass_rate` keeps it.
+    trial_pass: metric(
+      'continuous',
+      (result) => perTrial(result, (trial) => trial.pass),
+      fractionRateAggregation
+    ),
+    // Per case: the share of its trials that ran without a host error.
     response_success: metric(
-      'binary',
-      (result) => responseObject(result).success !== false,
-      rateAggregation
+      'continuous',
+      (result) =>
+        perTrial(result, (trial) =>
+          trial.trace
+            ? trial.trace.error === undefined
+            : trial.error === undefined &&
+              responseObject(result).success !== false
+        ),
+      fractionRateAggregation
     ),
+    // Per case: the share of its trials with no tool call.
     is_no_action: metric(
-      'binary',
-      (result) => toolCalls(result).length === 0,
-      rateAggregation
+      'continuous',
+      (result) =>
+        perTrial(result, (trial) => {
+          const calls = trialToolCalls(trial, result);
+          return calls === null ? null : calls.length === 0;
+        }),
+      fractionRateAggregation
     ),
+    // Usage, timing and tool counts are per trial: a case's value is the
+    // mean over its trials.
     cost_usd: metric(
       'continuous',
-      (result) => hostUsage(result)?.totalCostUsd ?? null,
+      (result) =>
+        perTrial(result, (trial) => trial.usage?.totalCostUsd ?? null),
       meanAggregation,
       'USD'
     ),
     input_tokens: metric(
       'continuous',
-      (result) => {
-        const usage = hostUsage(result);
-        return usage
-          ? usage.inputTokens +
-              (usage.cacheReadInputTokens ?? 0) +
-              (usage.cacheCreationInputTokens ?? 0)
-          : null;
-      },
+      (result) => perTrial(result, (trial) => inputTokens(trial.usage)),
       meanAggregation,
       'tokens'
     ),
     input_tokens_uncached: metric(
       'continuous',
-      (result) => hostUsage(result)?.inputTokens ?? null,
+      (result) => perTrial(result, (trial) => trial.usage?.inputTokens ?? null),
       meanAggregation,
       'tokens'
     ),
     cache_read_tokens: metric(
       'continuous',
-      (result) => hostUsage(result)?.cacheReadInputTokens ?? null,
+      (result) =>
+        perTrial(result, (trial) => trial.usage?.cacheReadInputTokens ?? null),
       meanAggregation,
       'tokens'
     ),
     cache_creation_tokens: metric(
       'continuous',
-      (result) => hostUsage(result)?.cacheCreationInputTokens ?? null,
+      (result) =>
+        perTrial(
+          result,
+          (trial) => trial.usage?.cacheCreationInputTokens ?? null
+        ),
       meanAggregation,
       'tokens'
     ),
     output_tokens: metric(
       'continuous',
-      (result) => hostUsage(result)?.outputTokens ?? null,
+      (result) =>
+        perTrial(result, (trial) => trial.usage?.outputTokens ?? null),
       meanAggregation,
       'tokens'
     ),
     duration_s: metric(
       'continuous',
-      (result) => result.durationMs / 1000,
+      (result) => perTrial(result, (trial) => trial.durationMs / 1000),
       meanAggregation,
       'seconds'
     ),
     duration_api_s: metric(
       'continuous',
-      (result) => {
-        const durationMs = hostUsage(result)?.durationApiMs;
-        return durationMs === undefined ? null : durationMs / 1000;
-      },
+      (result) =>
+        perTrial(result, (trial) =>
+          trial.usage?.durationApiMs === undefined
+            ? null
+            : trial.usage.durationApiMs / 1000
+        ),
       meanAggregation,
       'seconds'
     ),
     tool_count: metric(
       'continuous',
-      (result) => toolCalls(result).length,
+      (result) =>
+        perTrial(
+          result,
+          (trial) => trialToolCalls(trial, result)?.length ?? null
+        ),
       meanAggregation,
       'calls'
     ),
@@ -383,22 +518,28 @@ export const BUILT_IN_METRICS: Readonly<Record<string, MetricDefinition>> =
         ),
       fractionRateAggregation
     ),
+    // The first tool of the case's first trial.
     first_tool: metric('categorical', (result) => {
-      const first = toolCalls(result)[0];
-      return first && typeof first === 'object' && 'name' in first
-        ? String(first.name)
-        : null;
+      const trial = caseTrials(result)[0];
+      const first = trial ? trialToolCalls(trial, result)?.[0] : undefined;
+      return typeof first?.name === 'string' ? first.name : null;
     }),
     response_len: metric(
       'continuous',
-      (result) => responseText(result).length,
+      (result) =>
+        perTrial(result, (trial) => trialText(trial, result)?.length ?? null),
       meanAggregation,
       'chars'
     ),
     response_words: metric(
       'continuous',
       (result) =>
-        responseText(result).trim().split(/\s+/).filter(Boolean).length,
+        perTrial(result, (trial) => {
+          const text = trialText(trial, result);
+          return text === null
+            ? null
+            : text.trim().split(/\s+/).filter(Boolean).length;
+        }),
       meanAggregation,
       'words'
     ),
@@ -508,6 +649,7 @@ export function computeMetrics(
   });
 
   const aggregated: Record<string, unknown> = {};
+  const unavailable: string[] = [];
   for (const item of resolved) {
     // Aggregate rows directly, never via a potentially shared case ID.
     const values = rows.map((row) => row[item.outName] ?? null);
@@ -519,11 +661,14 @@ export function computeMetrics(
           ? meanAggregation(values, item)
           : item.metric.kind === 'object'
             ? judgeScoreAggregation(values, item)
-            : {
-                key: item.outName,
-                value: values.filter((value) => value !== null),
-              };
+            : values.some((value) => value !== null)
+              ? {
+                  key: item.outName,
+                  value: values.filter((value) => value !== null),
+                }
+              : undefined;
     if (aggregate) aggregated[aggregate.key] = aggregate.value;
+    else unavailable.push(item.outName);
   }
-  return { perCase, aggregated };
+  return { perCase, aggregated, unavailable };
 }

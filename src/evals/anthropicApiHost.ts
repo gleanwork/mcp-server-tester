@@ -256,7 +256,7 @@ async function runAnthropicApiHost(
   const usage = {
     inputTokens,
     outputTokens,
-    totalCostUsd: 0,
+    // The Messages API reports tokens, not cost.
     durationMs: Date.now() - started,
   };
   const response: MCPHostSimulationResult = {

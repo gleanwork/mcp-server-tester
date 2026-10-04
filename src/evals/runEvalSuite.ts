@@ -23,6 +23,7 @@ import type {
   EvaluationArmResult,
   EvaluationSummary,
   HostDefinition,
+  HostEvidence,
   RunTelemetry,
 } from './evalFrameworkTypes.js';
 import {
@@ -46,7 +47,12 @@ import { getDatasetSource } from './builtinDatasetSources.js';
 import { getHost } from './builtinHosts.js';
 import { getResultStore } from './builtinResultStores.js';
 import { parseHostConfig, validateManifest } from './manifestValidation.js';
-import { computeMetrics, type MetricSpec } from './metrics.js';
+import {
+  computeMetrics,
+  type MetricSpec,
+  countTrialToolCalls,
+  resolveMetric,
+} from './metrics.js';
 import {
   createStoredEvalArtifact,
   REDACT_STORED_RESPONSES_BY_DEFAULT,
@@ -185,14 +191,24 @@ function resolveHost(
   return { definition, declaration, config };
 }
 
-function countToolCalls(results: EvalCaseResult[]): number {
-  return results.reduce((count, result) => {
-    const response = result.response;
-    if (!response || typeof response !== 'object') return count;
-    const calls = (response as { toolCalls?: unknown }).toolCalls;
-    return count + (Array.isArray(calls) ? calls.length : 0);
-  }, 0);
+/** The arm's share of passing trials, averaged over its cases. */
+function trialPassRate(arm: EvaluationArmResult): number | undefined {
+  const value = arm.metrics?.trial_pass_rate;
+  return typeof value === 'number' ? value : undefined;
 }
+
+const EVIDENCE_STRENGTH: HostEvidence[] = ['none', 'observed', 'structured'];
+
+/** The weakest evidence among an arm's cases: what its trace metrics rest on. */
+function armEvidence(results: EvalCaseResult[]): HostEvidence | undefined {
+  const levels = results
+    .map((result) => result.hostEvidence)
+    .filter((level): level is HostEvidence => level !== undefined);
+  return EVIDENCE_STRENGTH.find((level) => levels.includes(level));
+}
+
+/** Outcome metrics every arm reports, whatever the manifest lists. */
+const CORE_METRICS = ['passed', 'trial_pass'] as const;
 
 function buildArmDeltas(
   arms: EvaluationArmResult[]
@@ -200,14 +216,22 @@ function buildArmDeltas(
   const baseline = arms[0]?.result;
   if (!baseline || baseline.total === 0) return {};
   const baselineRate = passRate(baseline);
+  const baselineTrialRate = trialPassRate(arms[0]!);
   return Object.fromEntries(
     arms.slice(1).map((arm) => {
       const rate = arm.result ? passRate(arm.result) : 0;
+      const trials = trialPassRate(arm);
       return [
         arm.name,
         {
           passRate: rate,
           passRateDelta: rate - baselineRate,
+          ...(trials !== undefined && baselineTrialRate !== undefined
+            ? {
+                trialPassRate: trials,
+                trialPassRateDelta: trials - baselineTrialRate,
+              }
+            : {}),
           baseline: arms[0]?.name,
         },
       ];
@@ -514,25 +538,36 @@ export async function runEvalSuite(
   }
 
   const armMetrics = armResults.map((arm, index) => {
-    const metricSpecs = (arms[index]?.metrics ??
+    const listed = (arms[index]?.metrics ??
       manifest.metrics ??
       []) as MetricSpec[];
-    return computeMetrics(metricSpecs, arm.result?.caseResults ?? [])
-      .aggregated;
+    const listedNames = new Set(
+      listed.map((spec) => resolveMetric(spec).outName)
+    );
+    const specs: MetricSpec[] = [
+      ...CORE_METRICS.filter((core) => !listedNames.has(core)),
+      ...listed,
+    ];
+    return computeMetrics(specs, arm.result?.caseResults ?? []);
   });
   armResults.forEach((arm, index) => {
-    arm.metrics = armMetrics[index];
+    const caseResults = arm.result?.caseResults ?? [];
+    arm.metrics = armMetrics[index]!.aggregated;
+    const evidence = armEvidence(caseResults);
+    if (evidence !== undefined) arm.evidence = evidence;
+    const unavailable = armMetrics[index]!.unavailable;
+    if (unavailable.length > 0) arm.unavailableMetrics = unavailable;
   });
   // Top-level metrics describe the baseline arm. Comparison-arm metrics remain
   // attached to their arm, avoiding case-id collisions across arms.
-  const computedMetrics = armMetrics[0] ?? {};
+  const computedMetrics = armMetrics[0]?.aggregated ?? {};
   let totalHostUsage: UsageMetrics | undefined;
   for (const arm of armResults) {
     totalHostUsage = sumUsage(totalHostUsage, arm.result?.totalHostUsage);
   }
   const telemetry: RunTelemetry = {
     cases: allResults.length,
-    toolCalls: countToolCalls(allResults),
+    toolCalls: countTrialToolCalls(allResults),
     failedCases: allResults.filter((result) => !result.pass).length,
     totalHostUsage,
   };

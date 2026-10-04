@@ -443,3 +443,181 @@ describe('skill metrics', () => {
     expect(perCase.preloaded!.skill_verification_failed).toBe(0);
   });
 });
+
+describe('per-trial metrics', () => {
+  const usage = (inputTokens: number) => ({
+    inputTokens,
+    outputTokens: 10,
+    durationMs: 1,
+  });
+  const event = (name: string) => ({
+    kind: 'tool_call' as const,
+    source: 'mcp' as const,
+    name,
+  });
+  const trace = (
+    calls: number,
+    evidence: 'structured' | 'none' = 'structured'
+  ) => ({
+    events: Array.from({ length: calls }, (_, i) => event(`tool${i}`)),
+    finalText: 'done',
+    evidence,
+  });
+  const iterated = (
+    overrides: Partial<EvalCaseResult> = {}
+  ): EvalCaseResult => ({
+    id: 'multi',
+    datasetName: 'd',
+    toolName: 'mcp_host',
+    source: 'eval',
+    pass: false,
+    expectations: {},
+    durationMs: 999,
+    // The case keeps the last iteration's response and the summed usage.
+    response: { toolCalls: [] },
+    hostUsage: usage(600),
+    assertionPassRate: 0.5,
+    iterationResults: [
+      { pass: true, durationMs: 100, trace: trace(2), hostUsage: usage(100) },
+      { pass: false, durationMs: 300, trace: trace(1), hostUsage: usage(300) },
+      // Infrastructure failures don't count, as for accuracy.
+      {
+        pass: false,
+        durationMs: 0,
+        isInfrastructureError: true,
+        hostUsage: usage(200),
+      },
+    ],
+    ...overrides,
+  });
+
+  it("averages usage, timing and tool counts over a case's trials", () => {
+    const { aggregated } = computeMetrics(
+      ['tool_count', 'input_tokens', 'duration_s', 'is_no_action'],
+      [iterated()]
+    );
+    expect(aggregated).toEqual({
+      tool_count_mean: 1.5,
+      input_tokens_mean: 200,
+      duration_s_mean: 0.2,
+      is_no_action_rate: 0,
+    });
+  });
+
+  it('reports the share of passing trials as trial_pass_rate', () => {
+    const single: EvalCaseResult = {
+      ...iterated(),
+      id: 'single',
+      iterationResults: undefined,
+      assertionPassRate: undefined,
+      pass: true,
+    };
+    const { aggregated } = computeMetrics(
+      ['passed', 'trial_pass'],
+      [iterated(), single]
+    );
+    expect(aggregated).toEqual({ passed_rate: 0.5, trial_pass_rate: 0.75 });
+  });
+
+  it('reports no trace metrics for a host with no evidence, and lists them as unavailable', () => {
+    const blind = iterated({
+      iterationResults: [
+        { pass: true, durationMs: 100, trace: trace(0, 'none') },
+      ],
+    });
+    const { aggregated, unavailable } = computeMetrics(
+      ['tool_count', 'first_tool', 'cost_usd', 'passed'],
+      [blind]
+    );
+    expect(aggregated.tool_count_mean).toBeUndefined();
+    expect(unavailable).toEqual(['tool_count', 'first_tool', 'cost_usd']);
+  });
+
+  it('falls back to the response for results without a trace', () => {
+    const direct: EvalCaseResult = {
+      id: 'direct',
+      datasetName: 'd',
+      toolName: 'search',
+      source: 'eval',
+      pass: true,
+      expectations: {},
+      durationMs: 5,
+      response: { toolCalls: [{ name: 'a' }, { name: 'b' }] },
+    };
+    expect(computeMetrics(['tool_count'], [direct]).aggregated).toEqual({
+      tool_count_mean: 2,
+    });
+  });
+
+  it('names MCP tools by server, and reads only the first trial for first_tool', () => {
+    const labelled = iterated({
+      iterationResults: [
+        {
+          pass: true,
+          durationMs: 1,
+          trace: {
+            events: [
+              {
+                kind: 'tool_call',
+                source: 'mcp',
+                name: 'search',
+                server: 'docs',
+              },
+              { kind: 'tool_call', source: 'host', name: 'ToolSearch' },
+            ],
+          },
+        },
+        { pass: true, durationMs: 1, trace: trace(1) },
+      ],
+    });
+    expect(computeMetrics(['first_tool'], [labelled]).aggregated).toEqual({
+      first_tool: ['docs.search'],
+    });
+  });
+
+  it('leaves out runs that failed on infrastructure, and counts host failures as unsuccessful', () => {
+    const base = {
+      datasetName: 'd',
+      toolName: 'mcp_host',
+      source: 'eval' as const,
+      pass: false,
+      expectations: {},
+      durationMs: 30_000,
+      response: undefined,
+    };
+    const outage: EvalCaseResult = {
+      ...base,
+      id: 'outage',
+      error: 'fetch failed: ECONNRESET',
+    };
+    const crash: EvalCaseResult = {
+      ...base,
+      id: 'crash',
+      error: 'Host execution failed.',
+      trace: { events: [], error: 'Host execution failed.' },
+    };
+    const { aggregated } = computeMetrics(
+      ['response_success', 'duration_s', 'trial_pass'],
+      [outage, crash]
+    );
+    // Only the crash is a trial: it ran, and failed.
+    expect(aggregated).toEqual({
+      response_success_rate: 0,
+      duration_s_mean: 30,
+      trial_pass_rate: 0,
+    });
+  });
+
+  it("doesn't borrow the case's response for an iteration without a trace", () => {
+    const partial = iterated({
+      response: { toolCalls: [{ name: 'a' }, { name: 'b' }, { name: 'c' }] },
+      iterationResults: [
+        { pass: true, durationMs: 1, trace: trace(1) },
+        { pass: false, durationMs: 1, error: 'assertion threw' },
+      ],
+    });
+    expect(computeMetrics(['tool_count'], [partial]).aggregated).toEqual({
+      tool_count_mean: 1,
+    });
+  });
+});
