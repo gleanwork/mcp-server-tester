@@ -158,7 +158,6 @@ export {
   validateSnapshot,
   playwrightSnapshotStore,
   validatePredicate,
-  getResponseSizeBytes,
   normalizeWhitespace,
 } from './assertions/validators/index.js';
 export { createMCPFixture } from './mcp/fixtures/mcpFixture.js';
@@ -172,7 +171,6 @@ export {
   validateEvalCase,
   validateEvalDataset,
 } from './evals/datasetTypes.js';
-export { BUILTIN_RESULT_SCHEMAS } from './evals/builtinResultSchemas.js';
 export {
   loadEvalDataset,
   loadEvalDatasetFromObject,
@@ -217,11 +215,7 @@ export type {
 } from './spec/crossEra.js';
 export type { ConformanceSeverity } from './types/reporter.js';
 export type { SkillsCheckOptions } from './spec/checks/skills.js';
-export {
-  SKILLS_EXTENSION_ID,
-  SKILL_LIMITS,
-  SkillEntrySchema,
-} from './skills/skillsTypes.js';
+export { SKILLS_EXTENSION_ID, SkillEntrySchema } from './skills/skillsTypes.js';
 export type {
   SkillEntry,
   SkillResourceEntry,
@@ -230,7 +224,6 @@ export type {
 export {
   validateSkillEntry,
   parseSkillFrontmatter,
-  skillDigest,
 } from './skills/skillEntry.js';
 export type { SkillEntryProblem } from './skills/skillEntry.js';
 export {

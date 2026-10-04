@@ -21,6 +21,9 @@ This guide covers upgrading from 1.x (the last 1.x release is 1.1.1). Features f
 - [Custom judges are plugins](#custom-judges-are-plugins)
 - [Every judge runs the same way](#every-judge-runs-the-same-way)
 - [LLM calls: bearer tokens and streaming](#llm-calls-bearer-tokens-and-streaming)
+- [Server comparisons are suite arms](#server-comparisons-are-suite-arms)
+- [The Claude Agent SDK is an optional peer dependency](#the-claude-agent-sdk-is-an-optional-peer-dependency)
+- [`getResponseSizeBytes` is no longer exported](#getresponsesizebytes-is-no-longer-exported)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
 ---
@@ -64,7 +67,7 @@ Projects created with `npx @gleanwork/mcp-server-tester init` now depend on `@mo
 
 **Affects:** code that imports comparisons, baselines, result stores, variant experiments, `simulateMCPHost`, or low-level OAuth from the package root.
 
-The root now holds the core testing interface: fixtures, matchers and validators, the MCP client, config, datasets with `runEvalDataset` and `runEvalCase`, judges, conformance, and Agent Skills, with the types those use. Everything else moved to a subpath. Apart from the judge registry ([Custom judges are plugins](#custom-judges-are-plugins)), nothing was renamed or removed; only the import path changed.
+The root now holds the core testing interface: fixtures, matchers and validators, the MCP client, config, datasets with `runEvalDataset` and `runEvalCase`, judges, conformance, and Agent Skills, with the types those use. Everything else moved to a subpath. Apart from the judge registry ([Custom judges are plugins](#custom-judges-are-plugins)) and [`getResponseSizeBytes`](#getresponsesizebytes-is-no-longer-exported), nothing was renamed or removed; only the import path changed.
 
 | Subpath                              | What it holds                                                                                                                                                                         |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -355,6 +358,12 @@ npm install --save-dev @anthropic-ai/claude-agent-sdk
 ```
 
 Without it, the judge fails with an error that names the package. The other judge providers (`anthropic`, `vertex-anthropic`, `openai`, `google`) already load their SDKs this way.
+
+## `getResponseSizeBytes` is no longer exported
+
+**Affects:** code that imports `getResponseSizeBytes`.
+
+It was the helper behind `validateSize`. Check a response's size with `validateSize(response, { maxBytes })` or `expect(response).toHaveToolResponseSize({ maxBytes })`.
 
 ## New in 2.0 (non-breaking)
 

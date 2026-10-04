@@ -1342,6 +1342,23 @@ Classify a dated revision as `'legacy'` or `'modern'`, and check a string is a `
 
 `DEFAULT_PROTOCOL_SETTING` is `'legacy'`, the `protocol` used when none is set. `ProtocolMatrixEntry<T>` is the type of each project `protocolMatrix()` returns.
 
+### `LEGACY_PROTOCOL_VERSIONS` / `MODERN_PROTOCOL_VERSIONS` / `FIRST_MODERN_PROTOCOL_VERSION`
+
+The dated revisions MST speaks, in each era, and the first modern one (`2026-07-28`). Pass them to `protocolMatrix()` to run a project across every revision:
+
+```typescript
+import {
+  LEGACY_PROTOCOL_VERSIONS,
+  MODERN_PROTOCOL_VERSIONS,
+  protocolMatrix,
+} from '@gleanwork/mcp-server-tester';
+
+const projects = protocolMatrix(project, [
+  ...LEGACY_PROTOCOL_VERSIONS,
+  ...MODERN_PROTOCOL_VERSIONS,
+]);
+```
+
 ## Tool Call Helpers
 
 ### `callToolNormalized(client, params, options?)`
@@ -1359,6 +1376,7 @@ The `{ code, message, data? }` of the protocol error a result was made from, or 
 | Export                              | Purpose                                                                                                 |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `getSkillsExtension(client)`        | The server's `io.modelcontextprotocol/skills` settings, or `null` when it doesn't declare the extension |
+| `SKILLS_EXTENSION_ID`               | `'io.modelcontextprotocol/skills'`, the extension's capability key                                      |
 | `listSkills(client, { maxPages? })` | All `skills/list` entries, following `nextCursor` (default 64 pages)                                    |
 | `getSkill(client, uri)`             | One entry from `skills/get`                                                                             |
 | `readSkillFile(client, uri)`        | Read a skill file with `resources/read`: `{ uri, text?, bytes, mimeType? }`                             |
