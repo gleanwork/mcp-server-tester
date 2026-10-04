@@ -28,7 +28,7 @@ import type {
 import type { HostConfig } from './evalManifest.js';
 import type { HostDefinition } from './evalFrameworkTypes.js';
 import { extensionLookup } from '../plugins/extensions.js';
-import { simulationToHostTrace } from './hostTrace.js';
+import { simulationToHostRun } from './hostTrace.js';
 import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
 import { ANTHROPIC_API_HOST } from './anthropicApiHost.js';
 import { COWORK_HOST } from './coworkHost.js';
@@ -220,7 +220,7 @@ async function runBuiltinHost(
         config,
         timeout === undefined ? undefined : controller.signal
       );
-      return simulationToHostTrace(response, input.servers);
+      return simulationToHostRun(response, input.servers);
     } finally {
       await Promise.allSettled(clients.map(closeOwnedClient));
     }

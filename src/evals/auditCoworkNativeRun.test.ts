@@ -15,7 +15,7 @@ import {
   type CoworkNativeAuditIssue,
 } from './auditCoworkNativeRun.js';
 import { parseClaudeTrace } from './externalHost/builtins/claudeTrace.js';
-import { hostTraceToExecution, simulationToHostTrace } from './hostTrace.js';
+import { hostRunToExecution, simulationToHostRun } from './hostTrace.js';
 
 const sessionId = 'local_11111111-1111-4111-8111-111111111111';
 const cliSessionId = '22222222-2222-4222-8222-222222222222';
@@ -129,9 +129,9 @@ async function fixture(
     correlation: 'exact-initial-prompt',
     computerUse: { durationMs: 999 },
   };
-  const replay = hostTraceToExecution(
+  const replay = hostRunToExecution(
     {
-      ...simulationToHostTrace(
+      ...simulationToHostRun(
         {
           success: true,
           response: trace.finalAnswer,

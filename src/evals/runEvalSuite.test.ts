@@ -1,4 +1,4 @@
-import { simulationToHostTrace } from './hostTrace.js';
+import { simulationToHostRun } from './hostTrace.js';
 import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
@@ -111,7 +111,7 @@ async function fixture(
         manifest: context.manifest,
         arm: context.arm,
       });
-      return simulationToHostTrace(
+      return simulationToHostRun(
         result.response as MCPHostSimulationResult,
         input.servers
       );

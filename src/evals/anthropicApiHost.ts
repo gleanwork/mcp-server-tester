@@ -17,7 +17,7 @@ import type {
 
 import type { HostConfig } from './evalManifest.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
-import { simulationToHostTrace } from './hostTrace.js';
+import { simulationToHostRun } from './hostTrace.js';
 import { GenerationOptions } from './mcpHost/hostOptions.js';
 
 interface ContentBlock {
@@ -266,7 +266,7 @@ async function runAnthropicApiHost(
     usage,
     ...(error ? { error } : {}),
   };
-  return simulationToHostTrace(response, input.servers);
+  return simulationToHostRun(response, input.servers);
 }
 
 export const ANTHROPIC_API_HOST: HostDefinition = {

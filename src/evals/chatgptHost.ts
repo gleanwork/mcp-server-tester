@@ -16,7 +16,7 @@ import {
   resolveHostPluginCredentials,
 } from './hostPlugins.js';
 import type { ExternalHostConfig } from './externalHost/types.js';
-import { simulationToHostTrace } from './hostTrace.js';
+import { simulationToHostRun } from './hostTrace.js';
 import { hostSecretValues, redactHostSecrets } from './hostSecrets.js';
 import {
   requireIdenticalHostSettings,
@@ -208,7 +208,7 @@ async function runBatch(
           },
           { caseId: request.caseId }
         );
-        const trace = simulationToHostTrace(result, request.input.servers);
+        const trace = simulationToHostRun(result, request.input.servers);
         if (trace.error) trace.error = redactHostSecrets(trace.error, secrets);
         if (result.success) {
           const id = result.externalHost.session.id;

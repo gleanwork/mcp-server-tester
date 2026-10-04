@@ -22,7 +22,7 @@ import {
 } from './resultStore.js';
 import { createFixtureExtensions } from '../mcp/fixtures/fixtureExtensions.js';
 import type { CaseExecution } from './caseExecution.js';
-import { hostTraceToExecution } from './hostTrace.js';
+import { hostRunToExecution } from './hostTrace.js';
 
 function createMockMCP(callToolResponse?: {
   content?: unknown;
@@ -851,7 +851,7 @@ describe('runEvalDataset defaultLlmIterations', () => {
     // An in-memory host at the case-execution seam stands in for the LLM.
     const executeCase = vi.fn(
       async (): Promise<CaseExecution> =>
-        hostTraceToExecution({ finalText: 'ok', events: [] }, 'structured')
+        hostRunToExecution({ finalText: 'ok', events: [] }, 'structured')
     );
     const result = await runEvalDataset(
       { dataset, defaultLlmIterations: 3, executeCase },

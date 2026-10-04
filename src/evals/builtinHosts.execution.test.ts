@@ -9,7 +9,7 @@ import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
 import { getBuiltinHostConfig } from './builtinHosts.js';
 import { getHost } from './builtinHosts.js';
 import type { HostRunOptions, HostDefinition } from './evalFrameworkTypes.js';
-import { hostTraceToExecution } from './hostTrace.js';
+import { hostRunToExecution } from './hostTrace.js';
 async function run(host: HostDefinition, options: HostRunOptions) {
   const trace = await host.run!(
     { scenario: options.cases[0]!.scenario!, servers: options.servers },
@@ -20,7 +20,7 @@ async function run(host: HostDefinition, options: HostRunOptions) {
       mcpHostConfig: options.cases[0]?.mcpHostConfig,
     }
   );
-  return hostTraceToExecution(trace, host.evidence ?? 'none', options.servers);
+  return hostRunToExecution(trace, host.evidence ?? 'none', options.servers);
 }
 vi.mock('../mcp/clientFactory.js', () => ({
   createMCPClientForConfig: vi.fn(),

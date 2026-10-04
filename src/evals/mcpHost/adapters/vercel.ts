@@ -389,8 +389,12 @@ function skillsTrace(
     name: call.name,
     arguments: call.arguments,
     ...(call.output !== undefined ? { output: call.output } : {}),
+    ...(call.isError !== undefined ? { isError: call.isError } : {}),
     ...(call.rawName !== undefined ? { rawName: call.rawName } : {}),
     ...(call.id !== undefined ? { id: call.id } : {}),
+    ...(call.durationMs !== undefined ? { durationMs: call.durationMs } : {}),
+    ...(call.startedAt ? { startedAt: call.startedAt } : {}),
+    ...(call.completedAt ? { completedAt: call.completedAt } : {}),
   }));
   return {
     skillLoads: skills.loads,

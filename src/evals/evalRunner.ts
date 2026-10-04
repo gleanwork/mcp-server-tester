@@ -1,4 +1,6 @@
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
+import { simulationTrace } from './hostTrace.js';
+import type { HostTrace } from './evalFrameworkTypes.js';
 import { installPlugins } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 import type { EvalDataset, EvalCase } from './datasetTypes.js';
@@ -763,6 +765,27 @@ function normalizeEvidence(
  * Runs a single iteration of an eval case (the atomic unit of work).
  * Extracted from runEvalCase to support multi-iteration accuracy loops.
  */
+/**
+ * The trace a host case result keeps: the execution's (or one derived from
+ * its response), with the case's evidence and error, so they always agree.
+ */
+function caseTrace(
+  host: HostExecution,
+  evidence: HostExecution['evidence'],
+  error: string | undefined
+): HostTrace {
+  const {
+    evidence: _evidence,
+    error: _error,
+    ...trace
+  } = host.trace ?? simulationTrace(host.response);
+  return {
+    ...trace,
+    ...(evidence !== undefined ? { evidence } : {}),
+    ...(error !== undefined ? { error } : {}),
+  };
+}
+
 async function runSingleIteration(
   evalCase: EvalCase,
   context: EvalContext,
@@ -844,6 +867,7 @@ async function runSingleIteration(
     toolRecall: outcome.toolRecall,
     mcpHostTrace: outcome.mcpHostTrace,
     hostEvidence: evidence,
+    ...(host ? { trace: caseTrace(host, evidence, error) } : {}),
     ...(hostDiagnostics ? { hostDiagnostics } : {}),
     hostUsage,
     hostTelemetry: host?.telemetry,
@@ -962,6 +986,7 @@ export async function runEvalCase(
         isInfrastructureError: infraError,
         mcpHostTrace: result.mcpHostTrace,
         hostEvidence: result.hostEvidence,
+        ...(result.trace ? { trace: result.trace } : {}),
         ...(result.hostDiagnostics
           ? { hostDiagnostics: result.hostDiagnostics }
           : {}),
@@ -992,26 +1017,30 @@ export async function runEvalCase(
   const infrastructureErrorRate = infraErrors.length / iterations;
   const threshold = evalCase.accuracyThreshold ?? 1.0;
 
-  // Fall back to a synthetic result if all iterations threw infrastructure errors
-  const baseResult: EvalCaseResult = lastResult ?? {
-    id: evalCase.id,
-    datasetName: options.datasetName ?? 'single-case',
-    toolName:
-      evalCase.mode === 'external_host'
-        ? 'external_host'
-        : evalCase.scenario != null
-          ? 'mcp_host'
-          : (evalCase.toolName ?? evalCase.request?.method ?? 'unknown'),
-    source: 'eval',
-    pass: false,
-    error: iterationResults[0]?.error,
-    expectations: {},
-    authType: context.mcp?.authType,
-    project: context.mcp?.project,
-    durationMs: 0,
-    tags: evalCase.tags,
-    request: buildRequest(evalCase, options.toolOverrideVariantId),
-  };
+  // Fall back to a synthetic result if all iterations threw infrastructure
+  // errors. Each iteration's trace is in iterationResults; none is the case's.
+  const { trace: _lastTrace, ...lastWithoutTrace } = lastResult ?? {};
+  const baseResult: EvalCaseResult = lastResult
+    ? (lastWithoutTrace as EvalCaseResult)
+    : {
+        id: evalCase.id,
+        datasetName: options.datasetName ?? 'single-case',
+        toolName:
+          evalCase.mode === 'external_host'
+            ? 'external_host'
+            : evalCase.scenario != null
+              ? 'mcp_host'
+              : (evalCase.toolName ?? evalCase.request?.method ?? 'unknown'),
+        source: 'eval',
+        pass: false,
+        error: iterationResults[0]?.error,
+        expectations: {},
+        authType: context.mcp?.authType,
+        project: context.mcp?.project,
+        durationMs: 0,
+        tags: evalCase.tags,
+        request: buildRequest(evalCase, options.toolOverrideVariantId),
+      };
 
   const totalHostUsage = iterationResults.reduce(
     (acc, r) => sumUsage(acc, r.hostUsage),
