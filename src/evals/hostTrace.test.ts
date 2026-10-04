@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hostTraceToExecution, simulationToHostTrace } from './hostTrace.js';
+import { hostRunToExecution, simulationToHostRun } from './hostTrace.js';
 import { runEvalDataset } from './evalRunner.js';
 import type { HostDefinition, HostEvidence } from './evalFrameworkTypes.js';
 import { z } from 'zod';
@@ -19,10 +19,10 @@ describe('per-scenario host traces', () => {
       },
       { name: 'Read', arguments: {}, source: 'host' as const, id: 'call-2' },
     ];
-    const trace = simulationToHostTrace({ success: true, toolCalls }, []);
+    const trace = simulationToHostRun({ success: true, toolCalls }, []);
     expect(trace.events[0]).toMatchObject(toolCalls[0]!);
     expect(trace.events[1]).not.toHaveProperty('isError');
-    const execution = hostTraceToExecution(trace, 'structured');
+    const execution = hostRunToExecution(trace, 'structured');
     expect(execution.response).toMatchObject({ toolCalls });
     expect(execution.preExecutionDurationMs).toBeUndefined();
   });
@@ -35,9 +35,9 @@ describe('per-scenario host traces', () => {
       durationMs: 200,
     };
     const telemetry = { source: 'claude-native', models: ['test-model'] };
-    const execution = hostTraceToExecution(
+    const execution = hostRunToExecution(
       {
-        ...simulationToHostTrace(
+        ...simulationToHostRun(
           {
             success: false,
             error: 'Host timed out',
@@ -86,7 +86,7 @@ describe('per-scenario host traces', () => {
     });
   });
   it('preserves explicit native and MCP provenance regardless of server count', () => {
-    const result = simulationToHostTrace(
+    const result = simulationToHostRun(
       {
         success: true,
         toolCalls: [
@@ -119,7 +119,7 @@ describe('per-scenario host traces', () => {
           label: 'agg',
         },
       ];
-      const trace = simulationToHostTrace(
+      const trace = simulationToHostRun(
         {
           success: true,
           response: 'OK',
@@ -158,7 +158,7 @@ describe('per-scenario host traces', () => {
           },
           toolMap: { search: [alias] },
           executeCase: async () =>
-            hostTraceToExecution(trace, 'structured', servers),
+            hostRunToExecution(trace, 'structured', servers),
         },
         {}
       );
@@ -212,6 +212,13 @@ describe('per-scenario host traces', () => {
       evidence: 'observed',
     });
     expect(result.caseResults[0]?.mcpHostTrace).toBeUndefined();
+    // An executor that returns only a response still gets a trace.
+    expect(result.caseResults[0]?.trace).toEqual({
+      events: [
+        { kind: 'tool_call', source: 'mcp', name: 'search', arguments: {} },
+      ],
+      evidence: 'observed',
+    });
   });
   it.each<HostEvidence>(['structured', 'observed', 'none'])(
     'gates tool assertions for %s evidence',
@@ -253,7 +260,7 @@ describe('per-scenario host traces', () => {
             ],
           },
           executeCase: async (evalCase) =>
-            hostTraceToExecution(
+            hostRunToExecution(
               await host.run!(
                 { scenario: evalCase.scenario!, servers: [] },
                 { type: 'scenario-only' },
@@ -290,7 +297,7 @@ describe('per-scenario host traces', () => {
         label: 'acme',
       },
     ];
-    const trace = simulationToHostTrace(
+    const trace = simulationToHostRun(
       {
         success: true,
         response: 'OK',
@@ -304,7 +311,7 @@ describe('per-scenario host traces', () => {
       name: 'search',
     });
     trace.events.push({ kind: 'skill', source: 'host', name: 'research' });
-    const result = hostTraceToExecution(trace, 'structured', servers);
+    const result = hostRunToExecution(trace, 'structured', servers);
     expect(result.response).toMatchObject({
       toolCalls: [
         { name: 'search', server: 'acme', source: 'mcp', kind: 'tool_call' },
@@ -314,9 +321,9 @@ describe('per-scenario host traces', () => {
   });
 });
 
-describe('simulationToHostTrace with skill loads', () => {
+describe('simulationToHostRun with skill loads', () => {
   it('emits skill events in order with tool calls', () => {
-    const trace = simulationToHostTrace(
+    const trace = simulationToHostRun(
       {
         success: true,
         response: 'done',
@@ -339,5 +346,45 @@ describe('simulationToHostTrace with skill loads', () => {
       'skill:weather-report',
       'tool_call:get_weather',
     ]);
+  });
+});
+
+describe('server attribution at the runner boundary', () => {
+  const events = [
+    { kind: 'tool_call' as const, source: 'mcp' as const, name: 'search' },
+    { kind: 'tool_call' as const, source: 'host' as const, name: 'Bash' },
+  ];
+  const stdio = (label?: string) => ({
+    transport: 'stdio' as const,
+    command: 'node',
+    ...(label ? { label } : {}),
+  });
+
+  it('names the server of MCP events on a one-server arm', () => {
+    const labeled = hostRunToExecution(
+      { finalText: '', events },
+      'structured',
+      [stdio('docs')]
+    );
+    expect(labeled.trace?.events).toEqual([
+      { ...events[0], server: 'docs' },
+      events[1],
+    ]);
+    // An unlabeled server gets its default label, as hosts configure it.
+    const unlabeled = hostRunToExecution(
+      { finalText: '', events },
+      'structured',
+      [stdio()]
+    );
+    expect(unlabeled.trace?.events[0]?.server).toBe('server-1');
+  });
+
+  it('does not guess the server when an arm has several', () => {
+    const execution = hostRunToExecution(
+      { finalText: '', events },
+      'structured',
+      [stdio('docs'), stdio('tickets')]
+    );
+    expect(execution.trace?.events).toEqual(events);
   });
 });

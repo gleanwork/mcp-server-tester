@@ -25,6 +25,7 @@ import type {
   HostEvent,
   HostEvidence,
   HostRunResult,
+  HostTrace,
 } from './evalFrameworkTypes.js';
 import { runExternalHostScenario } from './externalHost/runtime.js';
 import type {
@@ -32,7 +33,7 @@ import type {
   ExternalHostSimulationResult,
 } from './externalHost/types.js';
 import { getHost } from './builtinHosts.js';
-import { hostTraceToExecution } from './hostTrace.js';
+import { hostRunToExecution, simulationTrace } from './hostTrace.js';
 import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
 import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
 
@@ -63,6 +64,11 @@ export interface DirectExecution extends ExecutionBase {
 export interface HostExecution extends ExecutionBase {
   kind: 'host';
   response: HostResponse;
+  /**
+   * What the host did, as it reported it. A custom executor may omit it;
+   * the runner then derives it from `response`.
+   */
+  trace?: HostTrace;
   /** Declared trace evidence. Undefined for the legacy simulated host. */
   evidence?: HostEvidence;
   usage?: UsageMetrics;
@@ -121,6 +127,7 @@ function simulationExecution(
   return {
     kind: 'host',
     response: result,
+    trace: simulationTrace(result),
     ...(error !== undefined ? { error } : {}),
     usage: result.usage,
     ...(result.diagnostics ? { diagnostics: result.diagnostics } : {}),
@@ -292,7 +299,7 @@ export function createSuiteCaseExecutor(
           'Batch trace already consumed or missing; refusing to resubmit.'
         );
       return {
-        ...hostTraceToExecution(trace, definition.evidence ?? 'none', servers),
+        ...hostRunToExecution(trace, definition.evidence ?? 'none', servers),
         preExecutionDurationMs: trace.durationMs,
       };
     }
@@ -305,6 +312,6 @@ export function createSuiteCaseExecutor(
       declaration,
       { manifest, arm, env, mcpHostConfig: evalCase.mcpHostConfig }
     );
-    return hostTraceToExecution(trace, definition.evidence ?? 'none', servers);
+    return hostRunToExecution(trace, definition.evidence ?? 'none', servers);
   };
 }

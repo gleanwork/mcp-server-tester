@@ -5,7 +5,7 @@ import type * as OsModule from 'node:os';
 import { join } from 'node:path';
 import { CHATGPT_HOST, CHATGPT_LINUX_HOST } from './chatgptHost.js';
 import { runExternalHostScenario } from './externalHost/runtime.js';
-import { hostTraceToExecution } from './hostTrace.js';
+import { hostRunToExecution } from './hostTrace.js';
 import type { HostBatchRequest } from './evalFrameworkTypes.js';
 import { linuxEnvironment } from './chatgpt/linuxEnvironment.fixture.js';
 
@@ -339,19 +339,19 @@ describe('ChatGPT V2 batch host', () => {
     expect(traces[0]!.telemetry?.externalHost).toMatchObject({
       session: { id: 'session', turnId: 'turn' },
     });
-    expect(
-      hostTraceToExecution(traces[0]!, 'structured').response
-    ).toMatchObject({
-      toolCalls: [
-        {
-          name: 'search',
-          source: 'mcp',
-          server: 'primary',
-          durationMs: 20,
-          output: 'evidence',
-        },
-      ],
-    });
+    expect(hostRunToExecution(traces[0]!, 'structured').response).toMatchObject(
+      {
+        toolCalls: [
+          {
+            name: 'search',
+            source: 'mcp',
+            server: 'primary',
+            durationMs: 20,
+            output: 'evidence',
+          },
+        ],
+      }
+    );
     await expect(
       CHATGPT_HOST.runBatch!(requests().slice(0, 1), context)
     ).resolves.toHaveLength(1);
@@ -470,19 +470,19 @@ describe('ChatGPT V2 batch host', () => {
       status: 'passed',
       configuredMcpCallCount: 1,
     });
-    expect(
-      hostTraceToExecution(traces[0]!, 'structured').response
-    ).toMatchObject({
-      toolCalls: [
-        {
-          source: 'host',
-          name: 'js',
-          rawName: 'cua_repl.js',
-          server: undefined,
-          isError: true,
-        },
-      ],
-    });
+    expect(hostRunToExecution(traces[0]!, 'structured').response).toMatchObject(
+      {
+        toolCalls: [
+          {
+            source: 'host',
+            name: 'js',
+            rawName: 'cua_repl.js',
+            server: undefined,
+            isError: true,
+          },
+        ],
+      }
+    );
     expect(lifecycle.prepare).toHaveBeenCalledTimes(1);
     expect(lifecycle.dispose).toHaveBeenCalledTimes(1);
   });
@@ -773,7 +773,7 @@ describe('ChatGPT server translation', () => {
     });
     const traces = await CHATGPT_HOST.runBatch!(batch, context);
     expect(
-      hostTraceToExecution(traces[0]!, 'structured', batch[0]!.input.servers)
+      hostRunToExecution(traces[0]!, 'structured', batch[0]!.input.servers)
         .response
     ).toMatchObject({
       toolCalls: [

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { ClaudeStartup } from './claudeStartup.js';
 import { runCLIHost } from './runner.js';
 import { getHost } from '../../../builtinHosts.js';
-import { hostTraceToExecution } from '../../../hostTrace.js';
+import { hostRunToExecution } from '../../../hostTrace.js';
 import { runEvalDataset } from '../../../evalRunner.js';
 import type { MCPFixtureApi } from '../../../../mcp/fixtures/mcpFixture.js';
 
@@ -152,7 +152,7 @@ describe('Claude Code MCP startup', () => {
         },
         executeCase: async () => {
           const event = attempt++ === 0 ? { ...init, mcp_servers: [] } : init;
-          return hostTraceToExecution(
+          return hostRunToExecution(
             await host(
               `console.log(${JSON.stringify(line(event))}); console.log(JSON.stringify({type:'result',result:'answer'}));`
             ),
@@ -201,9 +201,10 @@ describe('Claude Code MCP startup', () => {
       );
       expect(result.error).toContain('MCP connection failed');
       expect(result.diagnostics?.claudeStartup?.status).toBe('failed');
-      expect(hostTraceToExecution(result, 'structured').response).toMatchObject(
-        { success: false, diagnostics: { claudeStartup: { status: 'failed' } } }
-      );
+      expect(hostRunToExecution(result, 'structured').response).toMatchObject({
+        success: false,
+        diagnostics: { claudeStartup: { status: 'failed' } },
+      });
       expect(JSON.stringify(result)).not.toContain('credential-canary');
     }
   );

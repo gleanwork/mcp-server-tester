@@ -90,6 +90,19 @@ export interface HostRunResult {
   llmDurationMs?: number;
 }
 
+/**
+ * What a host did in one trial: the `HostRunResult` it returned, without
+ * telemetry and diagnostics, plus the evidence it declared. Case results keep
+ * it for host cases (one per iteration). In a suite, every MCP event names its
+ * `server` label. Stored results drop `finalText` and event `output`, which
+ * can hold data from the server under test.
+ */
+export type HostTrace = Pick<HostRunResult, 'events' | 'usage' | 'error'> & {
+  finalText?: string;
+  /** Declared evidence; absent for the legacy simulated host. */
+  evidence?: HostEvidence;
+};
+
 export interface HostBatchRequest {
   caseId: string;
   iteration: number;

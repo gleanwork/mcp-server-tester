@@ -186,6 +186,7 @@ export { installPlugins } from './plugins/extensions.js';
 export type {
   HostEvent,
   HostEvidence,
+  HostTrace,
   JudgeDefinition,
   JudgeVerdict,
 } from './evals/evalFrameworkTypes.js';

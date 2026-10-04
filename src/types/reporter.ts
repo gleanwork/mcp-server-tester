@@ -18,7 +18,7 @@ import type {
   SkillLoad,
 } from './index.js';
 import type { EvalResultStoreLike } from '../evals/resultStore.js';
-import type { HostEvidence } from '../evals/evalFrameworkTypes.js';
+import type { HostEvidence, HostTrace } from '../evals/evalFrameworkTypes.js';
 import type {
   ExternalHostCorrelationConfig,
   ExternalHostMetadata,
@@ -280,6 +280,8 @@ export interface IterationResult {
   hostDiagnostics?: HostDiagnostics;
   /** Evidence level retained even when raw responses are redacted. */
   hostEvidence?: HostEvidence;
+  /** What the host did in this iteration (host cases). */
+  trace?: HostTrace;
   /** Token usage from mcp_host LLM simulation in this iteration */
   hostUsage?: UsageMetrics;
   /** Skills the simulated host loaded in this iteration (skills enabled). */
@@ -503,6 +505,13 @@ export interface EvalCaseResult {
   hostDiagnostics?: HostDiagnostics;
   /** Evidence level retained in persisted comparisons after response redaction. */
   hostEvidence?: HostEvidence;
+  /**
+   * What the host did (host cases with one iteration). With several
+   * iterations, each one's trace is in `iterationResults`.
+   */
+  trace?: HostTrace;
+  /** The suite arm that produced this result. */
+  arm?: string;
 
   /**
    * Aggregate token usage from mcp_host LLM simulation for this case.

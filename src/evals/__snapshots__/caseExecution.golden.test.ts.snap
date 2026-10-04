@@ -140,6 +140,33 @@ exports[`golden: dataset aggregation > mixed direct and host cases 1`] = `
       "toolName": "mcp_host",
       "toolPrecision": 0.5,
       "toolRecall": 0.5,
+      "trace": {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "source": "mcp",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "kind": "tool_call",
+            "name": "search",
+            "source": "mcp",
+          },
+        ],
+        "finalText": "It is sunny in London.",
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 100,
+          "outputTokens": 20,
+        },
+      },
     },
   ],
   "summary": {
@@ -541,6 +568,33 @@ exports[`golden: external_host > high-confidence native trace 1`] = `
   "toolName": "external_host",
   "toolPrecision": 0.5,
   "toolRecall": 0.5,
+  "trace": {
+    "events": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "source": "mcp",
+      },
+      {
+        "arguments": {
+          "q": "London",
+        },
+        "kind": "tool_call",
+        "name": "search",
+        "source": "mcp",
+      },
+    ],
+    "finalText": "It is sunny in London.",
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 100,
+      "outputTokens": 20,
+    },
+  },
 }
 `;
 
@@ -706,6 +760,33 @@ exports[`golden: external_host > low-confidence trace cannot support tool assert
   },
   "source": "eval",
   "toolName": "external_host",
+  "trace": {
+    "events": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "source": "mcp",
+      },
+      {
+        "arguments": {
+          "q": "London",
+        },
+        "kind": "tool_call",
+        "name": "search",
+        "source": "mcp",
+      },
+    ],
+    "finalText": "It is sunny in London.",
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 100,
+      "outputTokens": 20,
+    },
+  },
 }
 `;
 
@@ -850,6 +931,38 @@ exports[`golden: host traces through executeCase > host trace error 1`] = `
   },
   "source": "eval",
   "toolName": "mcp_host",
+  "trace": {
+    "error": "native session missing",
+    "events": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "server": "weather",
+        "source": "mcp",
+      },
+      {
+        "kind": "skill",
+        "name": "forecasting",
+        "source": "host",
+      },
+      {
+        "kind": "tool_call",
+        "name": "web_search",
+        "source": "host",
+      },
+    ],
+    "evidence": "structured",
+    "finalText": "It is sunny in London.",
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 50,
+      "outputTokens": 10,
+    },
+  },
 }
 `;
 
@@ -965,6 +1078,37 @@ exports[`golden: host traces through executeCase > none evidence 1`] = `
   },
   "source": "eval",
   "toolName": "mcp_host",
+  "trace": {
+    "events": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "server": "weather",
+        "source": "mcp",
+      },
+      {
+        "kind": "skill",
+        "name": "forecasting",
+        "source": "host",
+      },
+      {
+        "kind": "tool_call",
+        "name": "web_search",
+        "source": "host",
+      },
+    ],
+    "evidence": "none",
+    "finalText": "It is sunny in London.",
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 50,
+      "outputTokens": 10,
+    },
+  },
 }
 `;
 
@@ -1080,6 +1224,37 @@ exports[`golden: host traces through executeCase > observed evidence 1`] = `
   },
   "source": "eval",
   "toolName": "mcp_host",
+  "trace": {
+    "events": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "server": "weather",
+        "source": "mcp",
+      },
+      {
+        "kind": "skill",
+        "name": "forecasting",
+        "source": "host",
+      },
+      {
+        "kind": "tool_call",
+        "name": "web_search",
+        "source": "host",
+      },
+    ],
+    "evidence": "observed",
+    "finalText": "It is sunny in London.",
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 50,
+      "outputTokens": 10,
+    },
+  },
 }
 `;
 
@@ -1214,6 +1389,37 @@ exports[`golden: host traces through executeCase > structured evidence 1`] = `
   "toolName": "mcp_host",
   "toolPrecision": 0.6666666666666666,
   "toolRecall": 1,
+  "trace": {
+    "events": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "server": "weather",
+        "source": "mcp",
+      },
+      {
+        "kind": "skill",
+        "name": "forecasting",
+        "source": "host",
+      },
+      {
+        "kind": "tool_call",
+        "name": "web_search",
+        "source": "host",
+      },
+    ],
+    "evidence": "structured",
+    "finalText": "It is sunny in London.",
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 50,
+      "outputTokens": 10,
+    },
+  },
 }
 `;
 
@@ -1309,6 +1515,33 @@ exports[`golden: judges > judges a host response 1`] = `
     },
     "source": "eval",
     "toolName": "mcp_host",
+    "trace": {
+      "events": [
+        {
+          "arguments": {
+            "city": "London",
+          },
+          "kind": "tool_call",
+          "name": "get_weather",
+          "output": "sunny",
+          "source": "mcp",
+        },
+        {
+          "arguments": {
+            "q": "London",
+          },
+          "kind": "tool_call",
+          "name": "search",
+          "source": "mcp",
+        },
+      ],
+      "finalText": "It is sunny in London.",
+      "usage": {
+        "durationMs": "<time>",
+        "inputTokens": 100,
+        "outputTokens": 20,
+      },
+    },
   },
 }
 `;
@@ -2081,6 +2314,7 @@ exports[`golden: runEvalSuite hosts > a manifest declares two rubric judges and 
   ],
   "results": [
     {
+      "arm": "default",
       "datasetName": "golden",
       "durationMs": "<time>",
       "expectations": {
@@ -2198,6 +2432,37 @@ exports[`golden: runEvalSuite hosts > a manifest declares two rubric judges and 
       },
       "source": "eval",
       "toolName": "mcp_host",
+      "trace": {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "server": "weather",
+            "source": "mcp",
+          },
+          {
+            "kind": "skill",
+            "name": "forecasting",
+            "source": "host",
+          },
+          {
+            "kind": "tool_call",
+            "name": "web_search",
+            "source": "host",
+          },
+        ],
+        "evidence": "structured",
+        "finalText": "It is sunny in London.",
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 50,
+          "outputTokens": 10,
+        },
+      },
     },
   ],
 }
@@ -2328,6 +2593,7 @@ exports[`golden: runEvalSuite hosts > manifest judges merge with case judges 1`]
   ],
   "results": [
     {
+      "arm": "default",
       "datasetName": "golden",
       "durationMs": "<time>",
       "expectations": {
@@ -2440,6 +2706,37 @@ exports[`golden: runEvalSuite hosts > manifest judges merge with case judges 1`]
       },
       "source": "eval",
       "toolName": "mcp_host",
+      "trace": {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "server": "weather",
+            "source": "mcp",
+          },
+          {
+            "kind": "skill",
+            "name": "forecasting",
+            "source": "host",
+          },
+          {
+            "kind": "tool_call",
+            "name": "web_search",
+            "source": "host",
+          },
+        ],
+        "evidence": "structured",
+        "finalText": "It is sunny in London.",
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 50,
+          "outputTokens": 10,
+        },
+      },
     },
   ],
 }
@@ -2448,6 +2745,7 @@ exports[`golden: runEvalSuite hosts > manifest judges merge with case judges 1`]
 exports[`golden: runEvalSuite hosts > run host 1`] = `
 [
   {
+    "arm": "default",
     "datasetName": "golden",
     "durationMs": "<time>",
     "expectations": {
@@ -2560,6 +2858,37 @@ exports[`golden: runEvalSuite hosts > run host 1`] = `
     "toolName": "mcp_host",
     "toolPrecision": 0.3333333333333333,
     "toolRecall": 1,
+    "trace": {
+      "events": [
+        {
+          "arguments": {
+            "city": "London",
+          },
+          "kind": "tool_call",
+          "name": "get_weather",
+          "output": "sunny",
+          "server": "weather",
+          "source": "mcp",
+        },
+        {
+          "kind": "skill",
+          "name": "forecasting",
+          "source": "host",
+        },
+        {
+          "kind": "tool_call",
+          "name": "web_search",
+          "source": "host",
+        },
+      ],
+      "evidence": "structured",
+      "finalText": "It is sunny in London.",
+      "usage": {
+        "durationMs": "<time>",
+        "inputTokens": 50,
+        "outputTokens": 10,
+      },
+    },
   },
 ]
 `;
@@ -2567,6 +2896,7 @@ exports[`golden: runEvalSuite hosts > run host 1`] = `
 exports[`golden: runEvalSuite hosts > runBatch host 1`] = `
 [
   {
+    "arm": "default",
     "datasetName": "golden",
     "durationMs": "<time>",
     "expectations": {
@@ -2679,6 +3009,37 @@ exports[`golden: runEvalSuite hosts > runBatch host 1`] = `
     "toolName": "mcp_host",
     "toolPrecision": 0.3333333333333333,
     "toolRecall": 1,
+    "trace": {
+      "events": [
+        {
+          "arguments": {
+            "city": "London",
+          },
+          "kind": "tool_call",
+          "name": "get_weather",
+          "output": "sunny",
+          "server": "weather",
+          "source": "mcp",
+        },
+        {
+          "kind": "skill",
+          "name": "forecasting",
+          "source": "host",
+        },
+        {
+          "kind": "tool_call",
+          "name": "web_search",
+          "source": "host",
+        },
+      ],
+      "evidence": "structured",
+      "finalText": "It is sunny in London.",
+      "usage": {
+        "durationMs": "<time>",
+        "inputTokens": 50,
+        "outputTokens": 10,
+      },
+    },
   },
 ]
 `;
@@ -2748,6 +3109,33 @@ exports[`golden: simulated mcp_host (dataset API) > iterations exclude infrastru
         ],
       },
       "pass": false,
+      "trace": {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "source": "mcp",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "kind": "tool_call",
+            "name": "search",
+            "source": "mcp",
+          },
+        ],
+        "finalText": "It is sunny in London.",
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 100,
+          "outputTokens": 20,
+        },
+      },
     },
     {
       "durationMs": "<time>",
@@ -2787,6 +3175,33 @@ exports[`golden: simulated mcp_host (dataset API) > iterations exclude infrastru
         ],
       },
       "pass": false,
+      "trace": {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "source": "mcp",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "kind": "tool_call",
+            "name": "search",
+            "source": "mcp",
+          },
+        ],
+        "finalText": "cloudy",
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 100,
+          "outputTokens": 20,
+        },
+      },
     },
   ],
   "mcpHostTrace": {
@@ -2973,6 +3388,33 @@ exports[`golden: simulated mcp_host (dataset API) > maps native tool names throu
   "toolName": "mcp_host",
   "toolPrecision": 1,
   "toolRecall": 1,
+  "trace": {
+    "events": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "source": "mcp",
+      },
+      {
+        "arguments": {
+          "q": "London",
+        },
+        "kind": "tool_call",
+        "name": "search",
+        "source": "mcp",
+      },
+    ],
+    "finalText": "It is sunny in London.",
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 100,
+      "outputTokens": 20,
+    },
+  },
 }
 `;
 
@@ -3121,5 +3563,32 @@ exports[`golden: simulated mcp_host (dataset API) > succeeds with tool evidence 
   "toolName": "mcp_host",
   "toolPrecision": 0.5,
   "toolRecall": 0.5,
+  "trace": {
+    "events": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "source": "mcp",
+      },
+      {
+        "arguments": {
+          "q": "London",
+        },
+        "kind": "tool_call",
+        "name": "search",
+        "source": "mcp",
+      },
+    ],
+    "finalText": "It is sunny in London.",
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 100,
+      "outputTokens": 20,
+    },
+  },
 }
 `;

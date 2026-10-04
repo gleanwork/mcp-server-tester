@@ -502,6 +502,7 @@ export async function runEvalSuite(
           dataset: executionDataset,
           result,
         });
+        for (const caseResult of result.caseResults) caseResult.arm = arm.name;
         sourceResults.push({ name: executionDataset.name, result });
         allResults.push(...result.caseResults);
       }

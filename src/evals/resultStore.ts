@@ -135,6 +135,15 @@ function isCaseResult(value: JsonObject): boolean {
   );
 }
 
+/** A trace keeps its structure; its answer and tool outputs go. */
+function stripTrace(trace: unknown): void {
+  if (!isJsonObject(trace)) return;
+  delete trace.finalText;
+  if (Array.isArray(trace.events))
+    for (const event of trace.events)
+      if (isJsonObject(event)) delete event.output;
+}
+
 function stripResponses(value: unknown): void {
   if (Array.isArray(value)) {
     for (const item of value) stripResponses(item);
@@ -146,6 +155,10 @@ function stripResponses(value: unknown): void {
     const request = value.request;
     if (isJsonObject(request) && isJsonObject(request.expect))
       delete request.expect.response;
+    stripTrace(value.trace);
+    if (Array.isArray(value.iterationResults))
+      for (const iteration of value.iterationResults)
+        if (isJsonObject(iteration)) stripTrace(iteration.trace);
   }
   for (const nested of Object.values(value)) stripResponses(nested);
 }
@@ -153,9 +166,10 @@ function stripResponses(value: unknown): void {
 /**
  * The one redaction policy for stored results: returns a JSON copy in which
  * every eval case result, wherever it is nested (runs, suite arms, reports,
- * comparisons), has no raw `response` and no echoed exact-match
- * `expect.response`. Both may hold data from the server under test. Other
- * fields, such as a tool argument named `response`, are kept.
+ * comparisons), has no raw `response`, no echoed exact-match
+ * `expect.response`, and no `finalText` or event `output` in its traces.
+ * These may hold data from the server under test. Everything else is kept,
+ * including each trace's events, servers, arguments and usage.
  */
 export function redactStoredResponses<T>(value: T): T {
   const copy = JSON.parse(JSON.stringify(value)) as T;

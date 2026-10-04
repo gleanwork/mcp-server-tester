@@ -27,9 +27,28 @@
       "equals": "github.search_issues"
     },
     {
-      "path": "arms[name=aggregate].result.caseResults[0].mcpHostTrace.calls[1].name",
-      "equals": "agg.read_document",
-      "gap": "step 5: the trace names each call's server, even when an arm has one server"
+      "path": "arms[name=aggregate].result.caseResults[0].trace.events[1].server",
+      "equals": "agg"
+    },
+    {
+      "path": "arms[name=aggregate].result.caseResults[0].trace.events[1].name",
+      "equals": "read_document"
+    },
+    {
+      "path": "arms[name=native].result.caseResults[0].trace.events[0].server",
+      "equals": "github"
+    },
+    {
+      "path": "arms[name=native].result.caseResults[0].trace.events[0].output",
+      "exists": false
+    },
+    {
+      "path": "arms[name=native].result.caseResults[0].trace.finalText",
+      "exists": false
+    },
+    {
+      "path": "arms[name=native].result.caseResults[0].trace.usage.inputTokens",
+      "exists": true
     },
     {
       "path": "arms[name=native].metrics.cost_usd_mean",
@@ -38,8 +57,11 @@
     },
     {
       "path": "results[0].arm",
-      "exists": true,
-      "gap": "step 5: each case result records the arm that produced it"
+      "equals": "aggregate"
+    },
+    {
+      "path": "results[1].arm",
+      "equals": "native"
     }
   ],
   "ledger": {

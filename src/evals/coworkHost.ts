@@ -25,7 +25,7 @@ import {
   waitForClaudeSession,
 } from './externalHost/builtins/claudeSessions.js';
 import { awaitingUserAnswer } from './externalHost/builtins/claudeTrace.js';
-import { simulationToHostTrace } from './hostTrace.js';
+import { simulationToHostRun } from './hostTrace.js';
 import {
   HostPluginError,
   HostPluginsSchema,
@@ -533,7 +533,7 @@ async function runBatch(
               `Cowork model mismatch: requested ${config.model}, observed ${trace.telemetry.models.join(', ') || 'unavailable'}.`
             );
           }
-          const nativeResult = simulationToHostTrace(
+          const nativeResult = simulationToHostRun(
             {
               success: !trace.isError && trace.finalAnswer !== undefined,
               response: trace.finalAnswer,

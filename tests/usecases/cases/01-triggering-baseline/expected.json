@@ -26,6 +26,18 @@
       "path": "baseline.passRateDelta",
       "equals": -0.5,
       "gap": "step 4: `mst run` compares a run with the manifest's previous run"
+    },
+    {
+      "path": "arms[name=default].result.caseResults[0].iterationResults.length",
+      "equals": 10
+    },
+    {
+      "path": "arms[name=default].result.caseResults[0].iterationResults[0].trace.events[0].server",
+      "equals": "agg"
+    },
+    {
+      "path": "arms[name=default].result.caseResults[0].trace",
+      "exists": false
     }
   ],
   "ledger": {

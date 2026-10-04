@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { ANTHROPIC_API_HOST } from './anthropicApiHost.js';
-import { hostTraceToExecution } from './hostTrace.js';
+import { hostRunToExecution } from './hostTrace.js';
 import { runEvalSuite } from './runEvalSuite.js';
 async function run(
   options: HostRunOptions,
@@ -18,7 +18,7 @@ async function run(
     options.host,
     { manifest: options.manifest, arm: options.arm, ...extra }
   );
-  return hostTraceToExecution(trace, 'structured', options.servers);
+  return hostRunToExecution(trace, 'structured', options.servers);
 }
 import type { HostRunOptions, HostRunContext } from './evalFrameworkTypes.js';
 import {

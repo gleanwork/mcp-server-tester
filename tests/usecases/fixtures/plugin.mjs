@@ -218,7 +218,9 @@ async function runModel(request, config, connections) {
         kind: 'tool_call',
         source: 'mcp',
         name: tool.name,
-        server: connection.label,
+        // Like many hosts, name the server only when there is more than one;
+        // MST attributes single-server calls itself.
+        ...(connections.length > 1 ? { server: connection.label } : {}),
         arguments: step.args,
         output,
         isError: result.isError === true,

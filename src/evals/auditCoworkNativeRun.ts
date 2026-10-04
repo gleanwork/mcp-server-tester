@@ -19,7 +19,7 @@ import {
   type ClaudeTrace,
   awaitingUserAnswer,
 } from './externalHost/builtins/claudeTrace.js';
-import { hostTraceToExecution, simulationToHostTrace } from './hostTrace.js';
+import { hostRunToExecution, simulationToHostRun } from './hostTrace.js';
 
 export interface AuditCoworkNativeRunOptions {
   rawResultsPath: string;
@@ -535,8 +535,8 @@ async function auditCase(
     result.issues.push('TOOL_OUTPUT_UNAVAILABLE');
   const response = object(saved.response);
   const replay = object(
-    hostTraceToExecution(
-      simulationToHostTrace(
+    hostRunToExecution(
+      simulationToHostRun(
         {
           success: !trace.isError && trace.finalAnswer !== undefined,
           response: trace.finalAnswer,

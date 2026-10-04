@@ -32,7 +32,7 @@ import type {
   ExternalHostMetadata,
   ExternalHostRunResult,
 } from './externalHost/types.js';
-import { hostTraceToExecution } from './hostTrace.js';
+import { hostRunToExecution } from './hostTrace.js';
 import type { HostRunResult, JudgeDefinition } from './evalFrameworkTypes.js';
 import { runEvalSuite } from './runEvalSuite.js';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
@@ -380,7 +380,7 @@ describe('golden: host traces through executeCase', () => {
     async (evidence) => {
       const result = await runEvalCase(traceCase, context(), {
         executeCase: async () => ({
-          ...hostTraceToExecution(trace, evidence, [
+          ...hostRunToExecution(trace, evidence, [
             { transport: 'stdio', command: 'a', label: 'weather' },
             { transport: 'stdio', command: 'b', label: 'other' },
           ]),
@@ -394,7 +394,7 @@ describe('golden: host traces through executeCase', () => {
   it('host trace error', async () => {
     const result = await runEvalCase(traceCase, context(), {
       executeCase: async () =>
-        hostTraceToExecution(
+        hostRunToExecution(
           { ...trace, error: 'native session missing' },
           'structured'
         ),

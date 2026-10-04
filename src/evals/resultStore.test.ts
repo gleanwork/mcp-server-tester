@@ -4,6 +4,7 @@ import { tmpdir } from 'os';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import nock from 'nock';
 import {
+  redactStoredResponses,
   FileEvalResultStore,
   GCSEvalResultStore,
   createStoredEvalArtifact,
@@ -281,5 +282,59 @@ describe('GCSEvalResultStore', () => {
     });
 
     expect(summaries.map((s) => s.id)).toEqual(['newer', 'older']);
+  });
+});
+
+describe('redactStoredResponses', () => {
+  const trace = () => ({
+    events: [
+      {
+        kind: 'tool_call',
+        source: 'mcp',
+        name: 'search',
+        server: 'docs',
+        arguments: { query: 'outage' },
+        output: 'private result',
+      },
+      { kind: 'skill', source: 'host', name: 'summarize' },
+    ],
+    finalText: 'private answer',
+    evidence: 'structured',
+    usage: { inputTokens: 10, outputTokens: 2, durationMs: 5 },
+  });
+  const redactedTrace = {
+    events: [
+      {
+        kind: 'tool_call',
+        source: 'mcp',
+        name: 'search',
+        server: 'docs',
+        arguments: { query: 'outage' },
+      },
+      { kind: 'skill', source: 'host', name: 'summarize' },
+    ],
+    evidence: 'structured',
+    usage: { inputTokens: 10, outputTokens: 2, durationMs: 5 },
+  };
+
+  it("keeps a trace's events, servers, arguments and usage, without its answer or outputs", () => {
+    const result = {
+      id: 'one',
+      pass: true,
+      expectations: {},
+      response: { private: true },
+      trace: trace(),
+      iterationResults: [{ pass: true, durationMs: 1, trace: trace() }],
+    };
+    const redacted = redactStoredResponses({ results: [result] });
+    expect(redacted.results[0]).toEqual({
+      id: 'one',
+      pass: true,
+      expectations: {},
+      trace: redactedTrace,
+      iterationResults: [{ pass: true, durationMs: 1, trace: redactedTrace }],
+    });
+    // The input is not changed.
+    expect(result.trace.finalText).toBe('private answer');
   });
 });

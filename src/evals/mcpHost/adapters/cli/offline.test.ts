@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { simulateMCPHost } from '../../mcpHostSimulation.js';
-import {
-  simulationToHostTrace,
-  hostTraceToExecution,
-} from '../../../hostTrace.js';
+import { simulationToHostRun, hostRunToExecution } from '../../../hostTrace.js';
 import { runEvalDataset } from '../../../evalRunner.js';
 import type { MCPFixtureApi } from '../../../../mcp/fixtures/mcpFixture.js';
 
@@ -46,7 +43,7 @@ describe('offline CLI public execution path', () => {
       serverUrl: 'https://example.com',
       label,
     }));
-    const trace = simulationToHostTrace(result, servers);
+    const trace = simulationToHostRun(result, servers);
     const scored = await runEvalDataset(
       {
         dataset: {
@@ -69,7 +66,7 @@ describe('offline CLI public execution path', () => {
           ],
         },
         executeCase: async () =>
-          hostTraceToExecution(trace, 'structured', servers),
+          hostRunToExecution(trace, 'structured', servers),
       },
       {}
     );
