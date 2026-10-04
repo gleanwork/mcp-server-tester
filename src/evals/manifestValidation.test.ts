@@ -459,11 +459,11 @@ describe('settings a host would ignore', () => {
     });
   }
 
-  it.each(['cowork', 'chatgpt', 'test/elsewhere'])(
+  it.each(['cowork', 'chatgpt-mac', 'test/elsewhere'])(
     'rejects toolOverrides for %s, which never shows them to the model',
     (type) => {
       installHosts();
-      const host = type === 'chatgpt' ? { type, model: 'gpt-5' } : { type };
+      const host = type === 'chatgpt-mac' ? { type, model: 'gpt-5' } : { type };
       expect(() =>
         validateManifest(base({ host, toolOverrides: overrides }), {
           namespaces: ['test'],
@@ -547,7 +547,7 @@ describe('settings a host would ignore', () => {
 
   it.each([
     ['cowork', {}],
-    ['chatgpt', { model: 'gpt-5' }],
+    ['chatgpt-mac', { model: 'gpt-5' }],
   ])(
     'rejects a systemPrompt for %s, which has no way to apply it',
     (type, extra) => {

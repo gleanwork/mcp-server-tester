@@ -5,9 +5,10 @@ Codex CLI, Codex APIs, or an inference API to run the evaluated query.
 
 ## Surface and platform
 
-Use `type: 'openai.chatgpt.agent.desktop-app.macos'` for macOS or
-`type: 'openai.chatgpt.agent.desktop-app.linux'` for Linux. The `chatgpt` alias
-selects the local platform. Both accept `options.surface: 'chatgpt-work' | 'codex'`,
+Use `type: 'chatgpt-mac'` for macOS or `type: 'chatgpt-linux'` for Linux.
+(The earlier names `openai.chatgpt.agent.desktop-app.macos`,
+`openai.chatgpt.agent.desktop-app.linux` and the platform-dependent `chatgpt`
+still work, with a deprecation warning.) Both accept `options.surface: 'chatgpt-work' | 'codex'`,
 with `chatgpt-work` as the default. Surface selection controls UI setup and the
 expected native originator; MST does not add surface instructions to the evaluated
 prompt.
@@ -31,7 +32,7 @@ Example Linux host settings (inside a V2 evaluation manifest):
 
 ```json
 {
-  "type": "openai.chatgpt.agent.desktop-app.linux",
+  "type": "chatgpt-linux",
   "model": "your-native-model-id",
   "reasoningEffort": "medium",
   "timeout": 300000,

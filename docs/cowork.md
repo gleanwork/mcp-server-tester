@@ -109,7 +109,7 @@ bundled. Use the normal file/GCS dataset sources and plugins. Configure custom
 judges according to their plugin's requirements.
 `--dry-run` checks configuration, not GUI execution or model behavior.
 
-Use host `cowork` (`cowork_cu` remains an alias). `host.model` selects the Cowork
+Use host `cowork` (`cowork_cu` and `anthropic.claude.cowork.desktop-app.macos` still work, with a deprecation warning). `host.model` selects the Cowork
 inference model; `host.options.computerUseModel` independently selects the planner.
 The inference provider is `anthropic`. On macOS the desktop driver selector is
 `host.options.computerUseProvider: "anthropic-computer-use"`.

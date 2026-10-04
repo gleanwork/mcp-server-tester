@@ -7,7 +7,11 @@ import type {
   ResultStoreDefinition,
 } from './evalFrameworkTypes.js';
 import { getDatasetSource } from './builtinDatasetSources.js';
-import { assertHostSupports, getHost } from './builtinHosts.js';
+import {
+  assertHostSupports,
+  getHost,
+  resolveHostName,
+} from './builtinHosts.js';
 import { getJudge } from '../judge/builtinJudges.js';
 import { getMetric } from './metrics.js';
 import { getResultStore } from './builtinResultStores.js';
@@ -198,7 +202,11 @@ export function parseHostConfig(
   lookups: ManifestLookups = manifestLookups()
 ): HostConfig {
   const definition = lookups.host(config.type);
-  const options = { ...config };
+  // A deprecated name is recorded as the current one.
+  const options: HostConfig = {
+    ...config,
+    type: resolveHostName(config.type),
+  };
   for (const key of HOST_DEFAULTS) {
     if (
       options[key] === undefined &&
@@ -215,8 +223,11 @@ export function inheritHost(
   base: HostConfig | undefined,
   patch: Partial<HostConfig>
 ): HostConfig {
-  const type = patch.type ?? base?.type ?? 'claude-cli';
-  return { ...(base?.type === type ? base : {}), ...patch, type } as HostConfig;
+  // Deprecated names resolve first, so `cowork_cu` inherits from `cowork`.
+  const type = resolveHostName(patch.type ?? base?.type ?? 'claude-cli');
+  const inherited =
+    base !== undefined && resolveHostName(base.type) === type ? base : {};
+  return { ...inherited, ...patch, type } as HostConfig;
 }
 
 /** A manifest default no host of the run takes would silently do nothing. */
