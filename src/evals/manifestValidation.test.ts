@@ -434,3 +434,172 @@ describe('manifest validation', () => {
     ).toThrow('MCP server labels must be unique');
   });
 });
+
+describe('settings a host would ignore', () => {
+  const overrides = {
+    id: 'v2',
+    tools: { search: { description: 'Find it.' } },
+  };
+  const base = (extra: Record<string, unknown>): EvalManifest => ({
+    name: 'loud',
+    datasets: [{ type: 'file', path: 'x.json' }],
+    ...extra,
+  });
+
+  it.each(['claude-cli', 'cowork', 'test/runner'])(
+    'rejects toolOverrides for %s, which never shows them to the model',
+    (type) => {
+      installTestPlugin({
+        hosts: {
+          runner: { schema, run: async () => ({ finalText: '', events: [] }) },
+        },
+      });
+      expect(() =>
+        validateManifest(base({ host: { type }, toolOverrides: overrides }), {
+          namespaces: ['test'],
+        })
+      ).toThrow(`The manifest: host "${type}" can't apply toolOverrides;`);
+    }
+  );
+
+  it('rejects toolOverrides on the arm that sets them, and accepts them for vercel-sdk', () => {
+    installTestPlugin();
+    const manifest = base({
+      host: { type: 'vercel-sdk', provider: 'anthropic' },
+      arms: [
+        { name: 'sdk', toolOverrides: overrides },
+        { name: 'cli', host: { type: 'claude-cli' }, toolOverrides: overrides },
+      ],
+    });
+    expect(() => validateManifest(manifest, { namespaces: ['test'] })).toThrow(
+      `Arm "cli": host "claude-cli" can't apply toolOverrides;`
+    );
+    expect(() =>
+      validateManifest(
+        { ...manifest, arms: [manifest.arms![0]!] },
+        { namespaces: ['test'] }
+      )
+    ).not.toThrow();
+  });
+
+  it('rejects connection policy claude-cli would drop, before anything runs', () => {
+    expect(() =>
+      validateManifest(
+        base({
+          host: { type: 'claude-cli' },
+          servers: [
+            {
+              transport: 'http',
+              serverUrl: 'https://mcp.example.com',
+              proxy: { url: 'http://proxy.example.com' },
+            },
+          ],
+        })
+      )
+    ).toThrow(
+      "The manifest: claude-cli can't forward proxy for https://mcp.example.com."
+    );
+  });
+
+  it('rejects an option anthropic-api would drop', () => {
+    expect(() =>
+      validateManifest(
+        base({ host: { type: 'anthropic-api', systemPrompt: 'Be brief.' } })
+      )
+    ).toThrow(/Unrecognized key.*systemPrompt/s);
+  });
+});
+
+describe('settings a host would ignore: defaults, inheritance, opt-in', () => {
+  const overrides = {
+    id: 'v2',
+    tools: { search: { description: 'Find it.' } },
+  };
+  const manifest = (extra: Record<string, unknown>): EvalManifest => ({
+    name: 'loud',
+    datasets: [{ type: 'file', path: 'x.json' }],
+    ...extra,
+  });
+
+  it('gives a shared default only to the hosts that take it', () => {
+    const validated = validateManifest(
+      manifest({
+        provider: 'openai',
+        temperature: 0.2,
+        host: { type: 'vercel-sdk' },
+        arms: [
+          { name: 'sdk' },
+          { name: 'api', host: { type: 'anthropic-api' } },
+        ],
+      })
+    );
+    expect(validated.arms?.[0]?.host).toMatchObject({
+      type: 'vercel-sdk',
+      provider: 'openai',
+      temperature: 0.2,
+    });
+    expect(validated.arms?.[1]?.host).toMatchObject({
+      type: 'anthropic-api',
+      temperature: 0.2,
+    });
+    expect(validated.arms?.[1]?.host).not.toHaveProperty('provider');
+  });
+
+  it('rejects a default that none of the hosts takes', () => {
+    expect(() =>
+      validateManifest(
+        manifest({ temperature: 0.2, host: { type: 'claude-cli' } })
+      )
+    ).toThrow(
+      `The manifest sets "temperature", but none of its hosts (claude-cli) takes it.`
+    );
+  });
+
+  it("doesn't give an arm the options of a different host", () => {
+    const validated = validateManifest(
+      manifest({
+        host: { type: 'vercel-sdk', provider: 'openai', apiKeyEnvVar: 'KEY' },
+        arms: [{ name: 'api', host: { type: 'anthropic-api' } }],
+      })
+    );
+    expect(validated.arms?.[0]?.host).not.toHaveProperty('apiKeyEnvVar');
+  });
+
+  it('accepts toolOverrides for a plugin host that applies them', () => {
+    installTestPlugin({
+      hosts: {
+        variants: {
+          schema,
+          toolOverrides: true,
+          run: async () => ({ finalText: '', events: [] }),
+        },
+      },
+    });
+    expect(() =>
+      validateManifest(
+        manifest({ host: { type: 'test/variants' }, toolOverrides: overrides }),
+        { namespaces: ['test'] }
+      )
+    ).not.toThrow();
+  });
+
+  it('rejects a concurrency the host cannot run', () => {
+    installTestPlugin({
+      hosts: {
+        serial: {
+          schema,
+          maxConcurrency: 1,
+          run: async () => ({ finalText: '', events: [] }),
+        },
+      },
+    });
+    expect(() =>
+      validateManifest(
+        manifest({ host: { type: 'test/serial' }, concurrency: 4 }),
+        { namespaces: ['test'] }
+      )
+    ).toThrow(
+      'host "test/serial" runs at most 1 case at a time; set concurrency to 1.'
+    );
+  });
+});

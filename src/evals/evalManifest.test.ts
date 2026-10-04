@@ -264,3 +264,45 @@ describe('EvalManifestSchema', () => {
     ).toThrow();
   });
 });
+
+describe('strict manifests', () => {
+  const load = (extra: Record<string, unknown>) =>
+    loadEvalManifestFromObject(
+      { name: 'm', datasets: ['x.json'], ...extra },
+      { skipDatasetValidation: true }
+    );
+
+  it('rejects a key it does not know, instead of ignoring it', () => {
+    expect(() => load({ iteration: 5 })).toThrow(
+      /Unrecognized key.*iteration/s
+    );
+  });
+
+  it('accepts run controls, including the default accuracy threshold', () => {
+    expect(
+      load({ run: { iterations: 5, accuracyThreshold: 0.8 } }).run
+    ).toEqual({
+      iterations: 5,
+      accuracyThreshold: 0.8,
+    });
+    expect(load({ accuracyThreshold: 0.8 }).accuracyThreshold).toBe(0.8);
+    expect(() => load({ run: { accuracyThreshold: 2 } })).toThrow();
+  });
+});
+
+describe('the editor schema', () => {
+  it('declares the same top-level keys as EvalManifestSchema, and no others', () => {
+    const editor = JSON.parse(
+      fs.readFileSync(
+        new URL('../../schema/eval-manifest.schema.json', import.meta.url),
+        'utf8'
+      )
+    ) as { properties: Record<string, unknown>; additionalProperties: unknown };
+    const runtime = Object.keys(EvalManifestSchema.shape).filter(
+      // Kept only so validation can explain what replaced it.
+      (key) => key !== 'profile'
+    );
+    expect(Object.keys(editor.properties).sort()).toEqual(runtime.sort());
+    expect(editor.additionalProperties).toBe(false);
+  });
+});

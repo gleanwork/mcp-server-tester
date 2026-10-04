@@ -44,9 +44,13 @@ import { getProtocolInfo } from '../mcp/protocol.js';
 import type { Plugin } from '../plugins/plugin.js';
 import { assertDatasetNamespaces, loadSuitePlugins } from './suitePlugins.js';
 import { getDatasetSource } from './builtinDatasetSources.js';
-import { getHost } from './builtinHosts.js';
+import { assertHostSupports, getHost } from './builtinHosts.js';
 import { getResultStore } from './builtinResultStores.js';
-import { parseHostConfig, validateManifest } from './manifestValidation.js';
+import {
+  parseHostConfig,
+  validateManifest,
+  inheritHost,
+} from './manifestValidation.js';
 import {
   computeMetrics,
   type MetricSpec,
@@ -189,6 +193,38 @@ function resolveHost(
     ),
   });
   return { definition, declaration, config };
+}
+
+/**
+ * Every case that names its own host, in every arm: that host can honour the
+ * arm's servers, tool variants and concurrency. Checked before anything runs.
+ */
+function assertCaseHosts(
+  manifest: EvalManifest,
+  rawManifest: EvalManifest,
+  arms: EvalArm[],
+  datasets: EvalDataset[]
+): void {
+  for (const arm of arms) {
+    const rawArm = rawManifest.arms?.find(
+      (candidate) => candidate.name === arm.name
+    );
+    const declaration = inheritHost(rawManifest.host, rawArm?.host ?? {});
+    for (const dataset of datasets) {
+      for (const evalCase of dataset.cases) {
+        if (!evalCase.host) continue;
+        assertHostSupports(
+          parseHostConfig(inheritHost(declaration, evalCase.host), rawManifest),
+          {
+            servers: arm.servers ?? manifest.servers ?? [],
+            toolOverrides: arm.toolOverrides ?? manifest.toolOverrides,
+            concurrency: manifest.concurrency,
+            context: `Case "${evalCase.id}" in arm "${arm.name}"`,
+          }
+        );
+      }
+    }
+  }
 }
 
 /** The arm's share of passing trials, averaged over its cases. */
@@ -340,11 +376,34 @@ export async function runEvalSuite(
   const arms = selectedArms(manifest, options.arm);
   const datasets = manifest.datasets;
 
+  // Datasets load with the suite's selection controls removed: each arm
+  // selects its own cases below.
+  const sourceManifest: EvalManifest = {
+    ...manifest,
+    maxCases: undefined,
+    filterTags: undefined,
+    run: undefined,
+  };
+
   if (options.dryRun) {
+    // A dry run checks the datasets too, without the host (and its secrets).
+    const loaded = await Promise.all(
+      datasets.map((source) =>
+        getDatasetSource(source.type).load(source, {
+          rootDir,
+          manifest: sourceManifest,
+        })
+      )
+    );
+    for (const dataset of loaded) assertDatasetNamespaces(dataset, namespaces);
+    assertCaseHosts(manifest, rawManifest, arms, loaded);
     return {
       manifest,
       outputDir,
-      datasets: datasets.map((source) => ({ source })),
+      datasets: datasets.map((source, index) => ({
+        source,
+        dataset: loaded[index],
+      })),
       summary: {
         schemaVersion: 1,
         ...identity,
@@ -375,18 +434,21 @@ export async function runEvalSuite(
       source,
       dataset: await getDatasetSource(source.type).load(source, {
         rootDir,
-        manifest: {
-          ...manifest,
-          maxCases: undefined,
-          filterTags: undefined,
-          run: undefined,
-        },
+        manifest: sourceManifest,
         hostConfig: sourceHost.config,
       }),
     }))
   );
   for (const { dataset } of canonicalDatasets)
     assertDatasetNamespaces(dataset, namespaces);
+  // Before any arm runs: a case host that can't honour its arm fails now,
+  // not after earlier arms have run.
+  assertCaseHosts(
+    manifest,
+    rawManifest,
+    arms,
+    canonicalDatasets.map(({ dataset }) => dataset)
+  );
 
   for (const arm of arms) {
     const servers = options.mcpConfig
@@ -421,11 +483,7 @@ export async function runEvalSuite(
     const rawArm = rawManifest.arms?.find(
       (candidate) => candidate.name === arm.name
     ) ?? { name: arm.name };
-    const rawDeclaration: HostConfig = {
-      type: 'claude-cli',
-      ...rawManifest.host,
-      ...rawArm.host,
-    };
+    const rawDeclaration = inheritHost(rawManifest.host, rawArm.host ?? {});
     const client =
       host.definition.run || host.definition.runBatch
         ? undefined
@@ -447,7 +505,7 @@ export async function runEvalSuite(
             ...(evalCase.host
               ? {
                   host: parseHostConfig(
-                    { ...rawDeclaration, ...evalCase.host },
+                    inheritHost(rawDeclaration, evalCase.host),
                     rawManifest
                   ),
                 }
@@ -500,6 +558,7 @@ export async function runEvalSuite(
             protocol: () => directProtocol,
             concurrency: manifest.concurrency ?? 1,
             defaultLlmIterations: manifest.iterations,
+            defaultAccuracyThreshold: manifest.accuracyThreshold,
             toolOverrides: arm.toolOverrides ?? manifest.toolOverrides,
             toolMap: arm.toolMap ?? manifest.toolMap,
             ...(runHost

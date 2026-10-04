@@ -167,3 +167,22 @@ describe('buildEvalDataset canonical ingestion', () => {
     ).toEqual(['a']);
   });
 });
+
+describe('dataset errors', () => {
+  it('name the dataset and the case, and suggest the key MST uses', () => {
+    expect(() =>
+      buildEvalDataset(
+        {
+          name: 'search',
+          cases: [
+            { id: 'a', toolName: 't', args: {}, expect: { regex: ['x'] } },
+          ],
+        },
+        undefined,
+        manifest
+      )
+    ).toThrow(
+      /Dataset "search" isn't a canonical EvalDataset[\s\S]*case "a" expect: Unrecognized key: "regex" \(did you mean "matchesPattern"\?\)/
+    );
+  });
+});

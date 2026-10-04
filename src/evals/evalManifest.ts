@@ -76,6 +76,11 @@ export interface EvalManifest {
   tools?: string;
   /** Require HTTP server URLs to use an explicit /eval endpoint. */
   requireEvalEndpoint?: boolean;
+  /** Generation defaults for API hosts (anthropic-api). */
+  temperature?: number;
+  maxTokens?: number;
+  /** Default share of a host case's trials that must pass (cases may set their own). */
+  accuracyThreshold?: number;
   [key: string]: unknown;
 }
 
@@ -125,6 +130,8 @@ const EvalArmSchema = z
 
 export const EvalManifestSchema = z
   .object({
+    /** The editor schema a manifest file may point to. */
+    $schema: z.string().optional(),
     name: z.string().min(1),
     datasets: z.array(DatasetConfigSchema).min(1),
     servers: z.array(ServerConfigSchema).optional(),
@@ -148,8 +155,28 @@ export const EvalManifestSchema = z
     maxToolCalls: z.number().int().nonnegative().optional(),
     tools: z.string().optional(),
     requireEvalEndpoint: z.boolean().optional(),
+    /** Generation defaults for API hosts; the host validates their range. */
+    temperature: z.number().optional(),
+    maxTokens: z.number().optional(),
+    accuracyThreshold: z.number().min(0).max(1).optional(),
+    filterTags: z.array(z.string().min(1)).optional(),
+    /** The same controls, grouped: `run.iterations`, `run.accuracyThreshold`, ... */
+    run: z
+      .object({
+        iterations: z.number().int().positive().optional(),
+        maxCases: z.number().int().positive().optional(),
+        concurrency: z.number().int().positive().optional(),
+        filterTags: z.array(z.string().min(1)).optional(),
+        accuracyThreshold: z.number().min(0).max(1).optional(),
+      })
+      .strict()
+      .optional(),
+    redactStoredResponses: z.boolean().optional(),
+    /** Removed; kept so validation can say what replaced it. */
+    profile: z.unknown().optional(),
   })
-  .passthrough();
+  // Unknown keys are mistakes (a misspelt control would be silently ignored).
+  .strict();
 
 export type EvalManifestInput = z.input<typeof EvalManifestSchema>;
 

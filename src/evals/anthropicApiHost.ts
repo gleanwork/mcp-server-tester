@@ -46,7 +46,21 @@ const HostSchema = z
     temperature: GenerationOptions.temperature,
     maxTokens: GenerationOptions.maxTokens,
   })
-  .passthrough();
+  // An option this host doesn't use (a system prompt, say) is an error,
+  // not silently dropped.
+  .strict();
+
+/** The settings a manifest or a legacy case config may default. */
+function hostDefaults(
+  source: Record<string, unknown> | undefined
+): Record<string, unknown> {
+  if (!source) return {};
+  return Object.fromEntries(
+    ['model', 'maxToolCalls', 'timeout', 'temperature', 'maxTokens']
+      .filter((key) => source[key] !== undefined)
+      .map((key) => [key, source[key]])
+  );
+}
 
 /** Execute a single scenario. Iterations, assertions and judges belong to the runner. */
 async function runAnthropicApiHost(
@@ -55,10 +69,13 @@ async function runAnthropicApiHost(
   context: HostRunContext
 ): Promise<HostRunResult> {
   const options = { ...input, ...context, host };
+  // Manifest defaults, then the host, then a legacy case config.
   const config = HostSchema.parse({
-    ...options.manifest,
+    ...hostDefaults(options.manifest),
     ...options.host,
-    ...(context.mcpHostConfig ?? {}),
+    ...hostDefaults(
+      context.mcpHostConfig as Record<string, unknown> | undefined
+    ),
   });
   const env = { ...process.env, ...context.env, ...input.env };
   const apiKey = env[config.apiKeyEnv];
@@ -270,6 +287,7 @@ async function runAnthropicApiHost(
 }
 
 export const ANTHROPIC_API_HOST: HostDefinition = {
+  toolOverrides: true,
   schema: HostSchema,
   evidence: 'structured',
   createConfig(options = {}): MCPHostConfig {

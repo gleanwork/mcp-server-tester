@@ -1,6 +1,8 @@
 {
   "title": "Tool description variants: one arm per variant",
   "exitCode": 1,
+  "runGap": "step 7: tool variants reach plugin hosts through the tool surface",
+  "runGapError": "host \\\"usecase/model\\\" can't apply toolOverrides",
   "checks": [
     {
       "path": "arms[name=baseline].metrics.passed_rate",
@@ -12,8 +14,7 @@
     },
     {
       "path": "arms[name=verbose].metrics.passed_rate",
-      "equals": 1,
-      "gap": "step 7: tool variants reach plugin hosts through the tool surface"
+      "equals": 1
     }
   ],
   "ledger": {

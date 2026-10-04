@@ -34,8 +34,9 @@
       },
       "expect": {
         "passesJudge": {
-          "rubric": { "text": "Search results should be relevant to MCP" },
-          "configId": "search-relevance"
+          "rubric": {
+            "text": "Search results should be relevant to MCP"
+          }
         }
       }
     },
@@ -82,7 +83,7 @@
           "\\*\\*Population:\\*\\* [\\d.]+M",
           "^### Features",
           "^- [\\w\\s]+",
-          "Temperature: \\d+°C",
+          "Temperature: \\d+\u00b0C",
           "\\d{4}-\\d{2}-\\d{2}"
         ]
       }

@@ -5,23 +5,40 @@
   "description": "Organization-neutral evaluation manifest. Pluggable blocks resolve through the tester registries.",
   "type": "object",
   "required": ["name", "datasets"],
-  "additionalProperties": true,
+  "additionalProperties": false,
   "properties": {
-    "name": { "type": "string", "minLength": 1 },
+    "$schema": {
+      "type": "string",
+      "description": "The editor schema this file points to."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
     "datasets": {
       "type": "array",
       "minItems": 1,
       "items": {
         "oneOf": [
-          { "type": "string", "description": "Shorthand for a file dataset." },
+          {
+            "type": "string",
+            "description": "Shorthand for a file dataset."
+          },
           {
             "type": "object",
             "required": ["type"],
             "additionalProperties": true,
             "properties": {
-              "type": { "type": "string", "minLength": 1 },
-              "path": { "type": "string" },
-              "recursive": { "type": "boolean" }
+              "type": {
+                "type": "string",
+                "minLength": 1
+              },
+              "path": {
+                "type": "string"
+              },
+              "recursive": {
+                "type": "boolean"
+              }
             }
           }
         ]
@@ -30,20 +47,36 @@
     "servers": {
       "type": "array",
       "description": "The MCP server set under test. Each entry is an MCPConfig.",
-      "items": { "$ref": "#/definitions/mcpConfig" }
+      "items": {
+        "$ref": "#/definitions/mcpConfig"
+      }
     },
     "host": {
       "type": "object",
       "required": ["type"],
       "additionalProperties": true,
-      "properties": { "type": { "type": "string", "minLength": 1 } }
+      "properties": {
+        "type": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
     },
     "toolMap": {
       "type": "object",
-      "additionalProperties": { "type": "array", "items": { "type": "string" } }
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
     },
-    "toolOverrides": { "$ref": "#/definitions/toolOverrideVariant" },
-    "scenarioTemplate": { "type": "string" },
+    "toolOverrides": {
+      "$ref": "#/definitions/toolOverrideVariant"
+    },
+    "scenarioTemplate": {
+      "type": "string"
+    },
     "arms": {
       "type": "array",
       "items": {
@@ -51,55 +84,178 @@
         "required": ["name"],
         "additionalProperties": false,
         "properties": {
-          "name": { "type": "string", "minLength": 1 },
-          "servers": { "$ref": "#/properties/servers" },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "servers": {
+            "$ref": "#/properties/servers"
+          },
           "host": {
             "type": "object",
             "description": "Partial patch to the base host. The effective host must have a type.",
             "additionalProperties": true,
-            "properties": { "type": { "type": "string", "minLength": 1 } }
+            "properties": {
+              "type": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
           },
-          "toolMap": { "$ref": "#/properties/toolMap" },
-          "toolOverrides": { "$ref": "#/definitions/toolOverrideVariant" },
-          "scenarioTemplate": { "type": "string" },
+          "toolMap": {
+            "$ref": "#/properties/toolMap"
+          },
+          "toolOverrides": {
+            "$ref": "#/definitions/toolOverrideVariant"
+          },
+          "scenarioTemplate": {
+            "type": "string"
+          },
           "metrics": {
             "type": "array",
-            "items": { "$ref": "#/definitions/extension" }
+            "items": {
+              "$ref": "#/definitions/extension"
+            }
           },
           "judges": {
             "type": "array",
-            "items": { "$ref": "#/definitions/extension" }
+            "items": {
+              "$ref": "#/definitions/extension"
+            }
           }
         }
       }
     },
     "metrics": {
       "type": "array",
-      "items": { "$ref": "#/definitions/extension" }
+      "items": {
+        "$ref": "#/definitions/extension"
+      }
     },
     "judges": {
       "type": "array",
-      "items": { "$ref": "#/definitions/extension" }
+      "items": {
+        "$ref": "#/definitions/extension"
+      }
     },
     "results": {
       "type": "object",
       "required": ["store"],
-      "properties": { "store": { "$ref": "#/definitions/extension" } },
+      "properties": {
+        "store": {
+          "$ref": "#/definitions/extension"
+        }
+      },
       "additionalProperties": false
     },
     "plugins": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     },
-    "model": { "type": "string" },
-    "provider": { "type": "string" },
-    "concurrency": { "type": "integer", "minimum": 1 },
-    "iterations": { "type": "integer", "minimum": 1 },
-    "maxCases": { "type": "integer", "minimum": 1 },
-    "timeout": { "type": "integer", "minimum": 1 },
-    "maxToolCalls": { "type": "integer", "minimum": 0 },
-    "tools": { "type": "string" },
-    "requireEvalEndpoint": { "type": "boolean" }
+    "model": {
+      "type": "string"
+    },
+    "provider": {
+      "type": "string"
+    },
+    "concurrency": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "iterations": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "maxCases": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "timeout": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "maxToolCalls": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "tools": {
+      "type": "string"
+    },
+    "requireEvalEndpoint": {
+      "type": "boolean"
+    },
+    "accuracyThreshold": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Default share of a host case's trials that must pass; cases may set their own."
+    },
+    "filterTags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Run only cases with one of these tags."
+    },
+    "run": {
+      "type": "object",
+      "description": "The run controls, grouped: iterations, maxCases, concurrency, filterTags, accuracyThreshold.",
+      "additionalProperties": false,
+      "properties": {
+        "iterations": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxCases": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "concurrency": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "filterTags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "accuracyThreshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "temperature": {
+      "type": "number",
+      "description": "Generation default for API hosts."
+    },
+    "maxTokens": {
+      "type": "number",
+      "description": "Generation default for API hosts."
+    },
+    "redactStoredResponses": {
+      "type": "boolean",
+      "description": "Omit raw responses and trace text from stored results (default true)."
+    },
+    "extends": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Shared configs (namespace/name) from listed plugins, applied in order under the manifest."
+    },
+    "coworkSetup": {
+      "type": "object",
+      "description": "Cowork desktop setup; see docs/cowork.md."
+    }
   },
   "definitions": {
     "mcpConfig": {
@@ -108,27 +264,53 @@
         {
           "type": "object",
           "properties": {
-            "transport": { "type": "string", "const": "stdio" },
-            "label": { "type": "string", "minLength": 1 },
-            "command": { "type": "string", "minLength": 1 },
-            "args": { "type": "array", "items": { "type": "string" } },
-            "cwd": { "type": "string" },
+            "transport": {
+              "type": "string",
+              "const": "stdio"
+            },
+            "label": {
+              "type": "string",
+              "minLength": 1
+            },
+            "command": {
+              "type": "string",
+              "minLength": 1
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "cwd": {
+              "type": "string"
+            },
             "env": {
               "type": "object",
-              "propertyNames": { "type": "string" },
-              "additionalProperties": { "type": "string" }
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
             },
             "capabilities": {
               "type": "object",
               "properties": {
                 "sampling": {
                   "type": "object",
-                  "propertyNames": { "type": "string" },
+                  "propertyNames": {
+                    "type": "string"
+                  },
                   "additionalProperties": {}
                 },
                 "roots": {
                   "type": "object",
-                  "properties": { "listChanged": { "type": "boolean" } },
+                  "properties": {
+                    "listChanged": {
+                      "type": "boolean"
+                    }
+                  },
                   "required": ["listChanged"]
                 }
               }
@@ -141,16 +323,35 @@
             "protocolProbe": {
               "type": "object",
               "properties": {
-                "timeoutMs": { "type": "number", "exclusiveMinimum": 0 }
+                "timeoutMs": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
               },
               "additionalProperties": false
             },
-            "connectTimeoutMs": { "type": "number", "exclusiveMinimum": 0 },
-            "requestTimeoutMs": { "type": "number", "exclusiveMinimum": 0 },
-            "callTimeoutMs": { "type": "number", "exclusiveMinimum": 0 },
-            "quiet": { "type": "boolean" },
-            "inheritEnv": { "type": "boolean" },
-            "url": { "type": "string", "format": "uri" },
+            "connectTimeoutMs": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "requestTimeoutMs": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "callTimeoutMs": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "quiet": {
+              "type": "boolean"
+            },
+            "inheritEnv": {
+              "type": "boolean"
+            },
+            "url": {
+              "type": "string",
+              "format": "uri"
+            },
             "auth": {
               "type": "object",
               "properties": {
@@ -162,10 +363,16 @@
               "required": ["accessTokenEnv"],
               "additionalProperties": false
             },
-            "minTools": { "type": "integer", "minimum": 1, "maximum": 10000 },
+            "minTools": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            },
             "files": {
               "type": "object",
-              "propertyNames": { "type": "string" },
+              "propertyNames": {
+                "type": "string"
+              },
               "additionalProperties": {}
             }
           },
@@ -174,25 +381,44 @@
         {
           "type": "object",
           "properties": {
-            "transport": { "type": "string", "const": "http" },
-            "label": { "type": "string", "minLength": 1 },
-            "serverUrl": { "type": "string", "format": "uri" },
+            "transport": {
+              "type": "string",
+              "const": "http"
+            },
+            "label": {
+              "type": "string",
+              "minLength": 1
+            },
+            "serverUrl": {
+              "type": "string",
+              "format": "uri"
+            },
             "headers": {
               "type": "object",
-              "propertyNames": { "type": "string" },
-              "additionalProperties": { "type": "string" }
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
             },
             "capabilities": {
               "type": "object",
               "properties": {
                 "sampling": {
                   "type": "object",
-                  "propertyNames": { "type": "string" },
+                  "propertyNames": {
+                    "type": "string"
+                  },
                   "additionalProperties": {}
                 },
                 "roots": {
                   "type": "object",
-                  "properties": { "listChanged": { "type": "boolean" } },
+                  "properties": {
+                    "listChanged": {
+                      "type": "boolean"
+                    }
+                  },
                   "required": ["listChanged"]
                 }
               }
@@ -205,48 +431,99 @@
             "protocolProbe": {
               "type": "object",
               "properties": {
-                "timeoutMs": { "type": "number", "exclusiveMinimum": 0 }
+                "timeoutMs": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
               },
               "additionalProperties": false
             },
-            "connectTimeoutMs": { "type": "number", "exclusiveMinimum": 0 },
-            "requestTimeoutMs": { "type": "number", "exclusiveMinimum": 0 },
-            "callTimeoutMs": { "type": "number", "exclusiveMinimum": 0 },
+            "connectTimeoutMs": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "requestTimeoutMs": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "callTimeoutMs": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
             "auth": {
               "type": "object",
               "properties": {
-                "accessToken": { "type": "string" },
-                "accessTokenEnv": { "type": "string", "minLength": 1 },
+                "accessToken": {
+                  "type": "string"
+                },
+                "accessTokenEnv": {
+                  "type": "string",
+                  "minLength": 1
+                },
                 "oauth": {
                   "type": "object",
                   "properties": {
-                    "serverUrl": { "type": "string", "format": "uri" },
+                    "serverUrl": {
+                      "type": "string",
+                      "format": "uri"
+                    },
                     "scopes": {
                       "type": "array",
-                      "items": { "type": "string" }
+                      "items": {
+                        "type": "string"
+                      }
                     },
-                    "resource": { "type": "string", "format": "uri" },
-                    "authStatePath": { "type": "string" },
-                    "clientId": { "type": "string" },
-                    "clientSecret": { "type": "string" },
-                    "redirectUri": { "type": "string", "format": "uri" }
+                    "resource": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "authStatePath": {
+                      "type": "string"
+                    },
+                    "clientId": {
+                      "type": "string"
+                    },
+                    "clientSecret": {
+                      "type": "string"
+                    },
+                    "redirectUri": {
+                      "type": "string",
+                      "format": "uri"
+                    }
                   },
                   "required": ["serverUrl"]
                 },
                 "clientCredentials": {
                   "type": "object",
                   "properties": {
-                    "clientId": { "type": "string" },
-                    "clientSecret": { "type": "string" },
-                    "tokenEndpoint": { "type": "string", "format": "uri" },
-                    "scopes": { "type": "array", "items": { "type": "string" } }
+                    "clientId": {
+                      "type": "string"
+                    },
+                    "clientSecret": {
+                      "type": "string"
+                    },
+                    "tokenEndpoint": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "scopes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
                   }
                 }
               }
             },
             "proxy": {
               "type": "object",
-              "properties": { "url": { "type": "string", "format": "uri" } },
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
               "required": ["url"]
             },
             "retryAttempts": {
@@ -257,10 +534,18 @@
             "tls": {
               "type": "object",
               "properties": {
-                "ca": { "type": "string" },
-                "cert": { "type": "string" },
-                "key": { "type": "string" },
-                "rejectUnauthorized": { "type": "boolean" }
+                "ca": {
+                  "type": "string"
+                },
+                "cert": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                },
+                "rejectUnauthorized": {
+                  "type": "boolean"
+                }
               }
             }
           },
@@ -273,16 +558,26 @@
       "required": ["id", "tools"],
       "additionalProperties": false,
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
-        "description": { "type": "string" },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
         "tools": {
           "type": "object",
           "additionalProperties": {
             "type": "object",
             "additionalProperties": false,
             "properties": {
-              "description": { "type": "string" },
-              "inputSchema": { "type": "object", "additionalProperties": true }
+              "description": {
+                "type": "string"
+              },
+              "inputSchema": {
+                "type": "object",
+                "additionalProperties": true
+              }
             }
           }
         }
@@ -290,12 +585,20 @@
     },
     "extension": {
       "oneOf": [
-        { "type": "string", "minLength": 1 },
+        {
+          "type": "string",
+          "minLength": 1
+        },
         {
           "type": "object",
           "required": ["type"],
           "additionalProperties": true,
-          "properties": { "type": { "type": "string", "minLength": 1 } }
+          "properties": {
+            "type": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
         }
       ]
     }

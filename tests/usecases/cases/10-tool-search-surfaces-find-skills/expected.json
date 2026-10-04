@@ -1,6 +1,8 @@
 {
   "title": "The harness's tool search surfaces find_skills",
   "exitCode": 1,
+  "runGap": "step 7: tool variants reach plugin hosts through the tool surface",
+  "runGapError": "host \\\"usecase/model\\\" can't apply toolOverrides",
   "checks": [
     {
       "path": "arms[name=baseline].metrics.passed_rate",
@@ -8,8 +10,7 @@
     },
     {
       "path": "arms[name=description-v2].metrics.passed_rate",
-      "equals": 1,
-      "gap": "step 7: tool variants reach plugin hosts through the tool surface"
+      "equals": 1
     },
     {
       "path": "arms[name=baseline].metrics.tool_search_hit_rate",

@@ -306,6 +306,8 @@ function builtinHostDefinitions(): Readonly<Record<string, HostDefinition>> {
       schema: name === 'vercel-sdk' ? SdkHostSchema : CliHostSchema,
       createConfig: (options) => factory(options ?? {}),
       evidence: 'structured',
+      // The SDK host presents tool variants; the CLI only sees its servers.
+      ...(name === 'vercel-sdk' ? { toolOverrides: true } : {}),
       run: (input, config, context) =>
         runBuiltinHost(input, config, context, factory),
     };
@@ -368,18 +370,61 @@ function vercelSdkHost(options: BuiltinHostOptions): MCPHostConfig {
   };
 }
 
-function claudeCliHost(options: BuiltinHostOptions): MCPHostConfig {
-  CliHostSchema.parse(options);
-  const env = { ...process.env, ...options.env };
-  for (const server of [
-    ...(options.servers ?? []),
-    ...(options.server ? [options.server] : []),
-  ]) {
+/**
+ * Settings a host can't honour, checked before anything runs (dry runs
+ * included), so a run never reports results for a configuration the host
+ * ignored. Throws with the first problem; `context` names the manifest, arm
+ * or case.
+ */
+export function assertHostSupports(
+  host: { type: string },
+  options: {
+    servers: MCPConfig[];
+    toolOverrides?: unknown;
+    concurrency?: number;
+    context: string;
+  }
+): void {
+  const definition = getHost(host.type);
+  const appliesOverrides =
+    definition.toolOverrides === true ||
+    (definition.createConfig !== undefined &&
+      !definition.run &&
+      !definition.runBatch);
+  if (options.toolOverrides !== undefined && !appliesOverrides) {
+    throw new Error(
+      `${options.context}: host "${host.type}" can't apply toolOverrides; it would run with the original tools. ` +
+        'Use a host that shows tool variants to the model (vercel-sdk, anthropic-api), or a plugin host that declares `toolOverrides: true`.'
+    );
+  }
+  if (
+    definition.maxConcurrency !== undefined &&
+    (options.concurrency ?? 1) > definition.maxConcurrency
+  ) {
+    throw new Error(
+      `${options.context}: host "${host.type}" runs at most ${definition.maxConcurrency} case at a time; set concurrency to ${definition.maxConcurrency}.`
+    );
+  }
+  if (host.type === 'claude-cli')
+    assertClaudeCliServers(options.servers, false, options.context);
+}
+
+/**
+ * Connection policy claude-cli can't forward to its MCP servers. Unresolved
+ * `accessTokenEnv` is only known once secrets resolve, at run time.
+ */
+function assertClaudeCliServers(
+  servers: MCPConfig[],
+  resolved: boolean,
+  context = 'claude-cli'
+): void {
+  for (const server of servers) {
     if (server.transport !== 'http') continue;
     const unsupported = [
       server.auth?.clientCredentials && 'clientCredentials',
       server.auth?.oauth && 'oauth',
-      server.auth?.accessTokenEnv &&
+      resolved &&
+        server.auth?.accessTokenEnv &&
         !server.auth.accessToken &&
         'unresolved accessTokenEnv',
       server.tls && 'tls/mTLS',
@@ -392,9 +437,18 @@ function claudeCliHost(options: BuiltinHostOptions): MCPHostConfig {
     ].filter(Boolean);
     if (unsupported.length)
       throw new Error(
-        `claude-cli cannot forward connection policy for ${server.label ?? server.serverUrl}: ${unsupported.join(', ')}. Use an SDK host or explicit proxy.`
+        `${context}: claude-cli can't forward ${unsupported.join(', ')} for ${server.label ?? server.serverUrl}. Remove ${unsupported.length > 1 ? 'them' : 'it'}, or use vercel-sdk or anthropic-api.`
       );
   }
+}
+
+function claudeCliHost(options: BuiltinHostOptions): MCPHostConfig {
+  CliHostSchema.parse(options);
+  const env = { ...process.env, ...options.env };
+  assertClaudeCliServers(
+    [...(options.servers ?? []), ...(options.server ? [options.server] : [])],
+    true
+  );
   const provider =
     options.provider === 'vertex-anthropic'
       ? 'vertex'

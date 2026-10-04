@@ -245,7 +245,7 @@ describe('CLI connection policy preflight', () => {
             { transport: 'http', serverUrl: 'https://test.invalid', ...policy },
           ],
         })
-      ).toThrow('cannot forward connection policy');
+      ).toThrow("claude-cli can't forward");
     }
   );
   it('uses runtime environment for CLI provider configuration without mutation', () => {

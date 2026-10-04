@@ -296,6 +296,14 @@ export interface EvalRunnerOptions {
   defaultLlmIterations?: number;
 
   /**
+   * Default `accuracyThreshold` for host-driven cases that don't set their
+   * own: the share of a case's trials that must pass.
+   *
+   * @default 1
+   */
+  defaultAccuracyThreshold?: number;
+
+  /**
    * Default number of judge evaluations for cases that do not specify
    * `judgeReps` explicitly. Applies to any case with a `passesJudge`
    * expectation. Per-case `judgeReps` overrides this.
@@ -1102,6 +1110,7 @@ export async function runEvalDataset(
     stopOnFailure = false,
     concurrency = 1,
     defaultLlmIterations,
+    defaultAccuracyThreshold,
     defaultJudgeReps,
     onCaseComplete,
     filterTags,
@@ -1161,14 +1170,23 @@ export async function runEvalDataset(
   const tasks = casesToRun.map((evalCase) => async () => {
     // Apply defaultLlmIterations to host-driven cases that don't specify iterations.
     // Direct mode cases are deterministic — they always stay at 1 iteration.
-    const withIterations =
-      (evalCase.mode === 'host' ||
-        evalCase.mode === 'mcp_host' ||
-        evalCase.mode === 'external_host') &&
+    const hostDriven =
+      evalCase.mode === 'host' ||
+      evalCase.mode === 'mcp_host' ||
+      evalCase.mode === 'external_host';
+    const withIterations = {
+      ...evalCase,
+      ...(hostDriven &&
       evalCase.iterations === undefined &&
       defaultLlmIterations !== undefined
-        ? { ...evalCase, iterations: defaultLlmIterations }
-        : evalCase;
+        ? { iterations: defaultLlmIterations }
+        : {}),
+      ...(hostDriven &&
+      evalCase.accuracyThreshold === undefined &&
+      defaultAccuracyThreshold !== undefined
+        ? { accuracyThreshold: defaultAccuracyThreshold }
+        : {}),
+    };
 
     // Warn when a mcp_host case opts into multi-iteration accuracy measurement
     // but uses fewer iterations than the guide-recommended minimum.
