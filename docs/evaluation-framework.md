@@ -202,6 +202,24 @@ The Claude CLI and Cowork hosts read Claude Code transcripts, where skills, comm
 
 A search's `results` come from `tool_reference` blocks in its result, or, without them, from `mcp__<server>__<tool>` names in its text. This format is inferred rather than taken from recorded `ToolSearch` traces; if `tool_search_hit_rate` reads 0 where searches clearly worked, check the search's `output` in the trace. Other host tools (`Bash`, `Read`) stay tool calls with `source: 'host'`.
 
+### System prompts
+
+`systemPrompt` adds text to a host's system prompt, such as an organisation's instructions. To measure what it changes, give one arm the prompt (an arm's host inherits the manifest's when it is the same host type):
+
+```json
+"arms": [
+  { "name": "no-prompt" },
+  { "name": "org-prompt", "host": { "systemPrompt": "For actions in a connected app, call find_skills first." } }
+]
+```
+
+- **`vercel-sdk`** puts it in the model's system prompt, ahead of the skills catalog when `skills` is on.
+- **`anthropic-api`** sends it as the API's `system`.
+- **`claude-cli`** passes it with `--append-system-prompt`, so Claude Code's own system prompt stays.
+- **Cowork and ChatGPT** take organisation instructions from the app, not from MST, so `systemPrompt` is a validation error for them.
+
+A plugin host that can apply one declares `systemPrompt` in its schema. A case's `mcpHostConfig.systemPrompt` is an error when the arm's host sets one (it would replace the arm's) or can't apply one. A legacy CLI `mcpHostConfig` takes it through a `{{systemPrompt}}` placeholder in `cli.args`, such as `"--append-system-prompt", "{{systemPrompt}}"`; browser and desktop hosts reject it.
+
 ### Tool variants on every host
 
 An arm's `toolOverrides` (descriptions, input schemas, renames) reach every host:

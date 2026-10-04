@@ -38,14 +38,23 @@ function getParser(
 }
 
 /**
- * Interpolates `{{scenario}}` in each arg string.
+ * Interpolates `{{scenario}}` and `{{systemPrompt}}` in each arg string, in
+ * one pass: a value is inserted as-is, never scanned for placeholders.
  */
-export function interpolateArgs(args: string[], scenario: string): string[] {
-  return args.map((arg) => arg.replace(/\{\{scenario\}\}/g, scenario));
+export function interpolateArgs(
+  args: string[],
+  scenario: string,
+  systemPrompt = ''
+): string[] {
+  return args.map((arg) =>
+    arg.replace(/\{\{(scenario|systemPrompt)\}\}/g, (_, name: string) =>
+      name === 'scenario' ? scenario : systemPrompt
+    )
+  );
 }
 
 /**
- * Runs a CLI host: interpolates `{{scenario}}` in args, spawns the process
+ * Runs a CLI host: interpolates `{{scenario}}` and `{{systemPrompt}}` in args, spawns the process
  * directly (no shell), and parses stdout according to `outputFormat`.
  *
  * Because the process is spawned without a shell, special characters in
@@ -55,10 +64,11 @@ export function interpolateArgs(args: string[], scenario: string): string[] {
 export async function runCLIHost(
   cliConfig: CLIConfig,
   scenario: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  systemPrompt?: string
 ): Promise<MCPHostSimulationResult> {
   const timeout = cliConfig.timeout ?? DEFAULT_TIMEOUT;
-  const args = interpolateArgs(cliConfig.args, scenario);
+  const args = interpolateArgs(cliConfig.args, scenario, systemPrompt);
 
   const startTime = Date.now();
   const isClaude = cliConfig.claudeMcpServers !== undefined;

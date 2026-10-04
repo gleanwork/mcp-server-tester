@@ -83,11 +83,32 @@ export async function simulateMCPHost(
     );
   }
 
+  if (config.systemPrompt !== undefined) {
+    if (hostType === 'browser' || hostType === 'desktop') {
+      throw new Error(
+        `mcpHostConfig.systemPrompt isn't supported for '${hostType}' hosts.`
+      );
+    }
+  }
+
   if (hostType === 'cli') {
     if (!config.cli) {
       throw new Error(
         `mcpHostConfig.cli is required when hostType is 'cli'. ` +
           `Provide { command } with a shell command containing {{scenario}}.`
+      );
+    }
+    const placeholder = config.cli.args.some((arg) =>
+      arg.includes('{{systemPrompt}}')
+    );
+    if (config.systemPrompt !== undefined && !placeholder) {
+      throw new Error(
+        "systemPrompt reaches a CLI host only through a {{systemPrompt}} placeholder in cli.args (for Claude Code: '--append-system-prompt', '{{systemPrompt}}'), or use the claude-cli host."
+      );
+    }
+    if (config.systemPrompt === undefined && placeholder) {
+      throw new Error(
+        'cli.args has a {{systemPrompt}} placeholder but no systemPrompt is set.'
       );
     }
     if (
@@ -106,7 +127,8 @@ export async function simulateMCPHost(
         env: { ...config.env, ...config.cli.env },
       },
       scenario,
-      signal
+      signal,
+      config.systemPrompt
     );
   }
 

@@ -110,3 +110,20 @@ describe('validateSimulationResult', () => {
     expect(result).toContain('Expected object');
   });
 });
+
+describe('interpolateArgs with a system prompt', () => {
+  it('fills both placeholders in one pass, inserting values as-is', () => {
+    expect(
+      interpolateArgs(
+        ['-p', '{{scenario}}', '--append-system-prompt', '{{systemPrompt}}'],
+        'cost $& now',
+        'Never expand {{scenario}}.'
+      )
+    ).toEqual([
+      '-p',
+      'cost $& now',
+      '--append-system-prompt',
+      'Never expand {{scenario}}.',
+    ]);
+  });
+});

@@ -131,6 +131,7 @@ interface MCPHostConfig {
   maxTokens?: number; // Max response tokens
   apiKeyEnvVar?: string; // Override default env var name
   skills?: 'off' | 'catalog' | 'preload'; // Offer the server's Agent Skills (SDK host; default 'off')
+  systemPrompt?: string; // Added to the host's system prompt (SDK host; a CLI host takes it through a {{systemPrompt}} placeholder in cli.args)
   cli?: CLIConfig; // Required for 'cli' host type
 }
 

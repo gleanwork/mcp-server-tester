@@ -144,3 +144,37 @@ describe('getMissingDependencyMessage', () => {
     expect(msg).toContain('Unknown provider');
   });
 });
+
+describe("systemPrompt on hosts that can't apply it", () => {
+  it("rejects it for a CLI host whose arguments don't carry it", async () => {
+    await expect(
+      simulateMCPHost(createMockMCP(), 'x', {
+        hostType: 'cli',
+        systemPrompt: 'Use find_skills first.',
+        cli: { command: 'my-agent', args: ['{{scenario}}'] },
+      })
+    ).rejects.toThrow(
+      /systemPrompt reaches a CLI host only through a \{\{systemPrompt\}\} placeholder/
+    );
+    await expect(
+      simulateMCPHost(createMockMCP(), 'x', {
+        hostType: 'cli',
+        cli: {
+          command: 'claude',
+          args: ['--append-system-prompt', '{{systemPrompt}}'],
+        },
+      })
+    ).rejects.toThrow(/placeholder but no systemPrompt is set/);
+  });
+
+  it('rejects it for browser and desktop hosts', async () => {
+    for (const hostType of ['browser', 'desktop'] as const) {
+      await expect(
+        simulateMCPHost(createMockMCP(), 'x', {
+          hostType,
+          systemPrompt: 'Use find_skills first.',
+        })
+      ).rejects.toThrow(`systemPrompt isn't supported for '${hostType}' hosts`);
+    }
+  });
+});

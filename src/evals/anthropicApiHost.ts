@@ -18,7 +18,10 @@ import type {
 import type { HostConfig } from './evalManifest.js';
 import { simulationToHostRun } from './hostTrace.js';
 import { buildToolSurface, type ListedServerTools } from './toolSurface.js';
-import { GenerationOptions } from './mcpHost/hostOptions.js';
+import {
+  GenerationOptions,
+  SystemPromptOption,
+} from './mcpHost/hostOptions.js';
 
 interface ContentBlock {
   type: string;
@@ -45,18 +48,25 @@ const HostSchema = z
     timeout: z.number().int().positive().default(180_000),
     temperature: GenerationOptions.temperature,
     maxTokens: GenerationOptions.maxTokens,
+    systemPrompt: SystemPromptOption,
   })
-  // An option this host doesn't use (a system prompt, say) is an error,
-  // not silently dropped.
+  // An option this host doesn't use is an error, not silently dropped.
   .strict();
 
-/** The settings a manifest or a legacy case config may default. */
+/** The settings a manifest or a legacy case config may default (a system prompt only from a case). */
 function hostDefaults(
   source: Record<string, unknown> | undefined
 ): Record<string, unknown> {
   if (!source) return {};
   return Object.fromEntries(
-    ['model', 'maxToolCalls', 'timeout', 'temperature', 'maxTokens']
+    [
+      'model',
+      'maxToolCalls',
+      'timeout',
+      'temperature',
+      'maxTokens',
+      'systemPrompt',
+    ]
       .filter((key) => source[key] !== undefined)
       .map((key) => [key, source[key]])
   );
@@ -165,6 +175,7 @@ async function runAnthropicApiHost(
           body: JSON.stringify({
             model: config.model,
             max_tokens: config.maxTokens ?? 4096,
+            ...(config.systemPrompt ? { system: config.systemPrompt } : {}),
             temperature: config.temperature,
             messages,
             ...(tools.length ? { tools } : {}),

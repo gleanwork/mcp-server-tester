@@ -5,6 +5,7 @@ import {
   GenerationOptions,
   HostSkillsModeSchema,
   ProviderSchema,
+  SystemPromptOption,
 } from './mcpHost/hostOptions.js';
 import type { ExternalHostConfig } from './externalHost/types.js';
 import { ExternalHostConfigSchema } from './externalHost/schema.js';
@@ -358,6 +359,7 @@ const MCPHostConfigSchema = z.object({
   maxTokens: z.number().optional(),
   temperature: z.number().optional(),
   maxToolCalls: z.number().optional(),
+  systemPrompt: SystemPromptOption,
   skills: HostSkillsModeSchema.optional(),
   cli: z
     .object({

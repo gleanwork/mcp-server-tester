@@ -34,6 +34,7 @@ import {
   ProviderSchema,
   type HostEnvironment,
   HostSkillsModeSchema,
+  SystemPromptOption,
 } from '../hostOptions.js';
 
 const SdkConfigSchema = z
@@ -44,6 +45,7 @@ const SdkConfigSchema = z
     apiKeyEnvVar: z.string().min(1).optional(),
     env: z.record(z.string(), z.string().optional()).optional(),
     skills: HostSkillsModeSchema.optional(),
+    systemPrompt: SystemPromptOption,
   })
   .strict();
 
@@ -553,6 +555,10 @@ export function createVercelOrchestrator(): MCPHostSimulator {
         }
 
         const maxSteps = config.maxToolCalls ?? 10;
+        // The caller's instructions, then the skills catalog.
+        const system = [config.systemPrompt, skills?.system]
+          .filter((part): part is string => Boolean(part))
+          .join('\n\n');
         const llmStart = Date.now();
 
         const result = await withinDeadline(
@@ -560,7 +566,7 @@ export function createVercelOrchestrator(): MCPHostSimulator {
             ai,
             {
               model,
-              ...(skills ? { system: skills.system } : {}),
+              ...(system ? { system } : {}),
               prompt: scenario,
               tools,
               stopWhen: stepCountIs(Math.max(1, maxSteps)),

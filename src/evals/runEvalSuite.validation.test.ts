@@ -74,3 +74,47 @@ describe('a dry run checks datasets too', () => {
     );
   });
 });
+
+describe('a case systemPrompt the suite would lose', () => {
+  it('rejects one under a host that sets its own', async () => {
+    await expect(
+      dryRun(
+        [
+          {
+            id: 'org',
+            mode: 'host',
+            scenario: 'Find it',
+            mcpHostConfig: { systemPrompt: 'Case prompt.' },
+          },
+        ],
+        {
+          host: {
+            type: 'vercel-sdk',
+            provider: 'anthropic',
+            systemPrompt: 'Arm prompt.',
+          },
+        }
+      )
+    ).rejects.toThrow(
+      'Case "org" in arm "default" sets mcpHostConfig.systemPrompt, which would override the host\'s systemPrompt'
+    );
+  });
+
+  it("rejects one under a host that can't apply it", async () => {
+    await expect(
+      dryRun(
+        [
+          {
+            id: 'org',
+            mode: 'host',
+            scenario: 'Find it',
+            mcpHostConfig: { systemPrompt: 'Case prompt.' },
+          },
+        ],
+        { host: { type: 'cowork' } }
+      )
+    ).rejects.toThrow(
+      'Case "org" in arm "default" sets mcpHostConfig.systemPrompt, which host "cowork" can\'t apply.'
+    );
+  });
+});
