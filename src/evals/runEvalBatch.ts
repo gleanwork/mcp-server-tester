@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { resolveStorePaths } from './builtinResultStores.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
@@ -145,7 +146,13 @@ async function hasMatchingSavedResult(
       manifest.results.store,
       { namespaces }
     );
-    const store = definition.create(config);
+    // Relative store paths resolve like the suite's: manifest directory, then rootDir.
+    const store = definition.create(
+      resolveStorePaths(config, {
+        manifestDir: path.dirname(path.resolve(manifestPath)),
+        rootDir,
+      })
+    );
     const identity = manifestIdentity(manifest);
     for (const candidate of await store.listArtifacts('eval-run-summary')) {
       if (

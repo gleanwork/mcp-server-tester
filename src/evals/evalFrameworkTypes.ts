@@ -18,6 +18,8 @@ import type { EvalRunnerResult } from './evalRunner.js';
 /** Context provided to a dataset source implementation. */
 export interface DatasetSourceContext {
   rootDir: string;
+  /** The manifest's directory; relative paths resolve here before `rootDir`. */
+  manifestDir?: string;
   manifest: EvalManifest;
   /** Resolved built-in host config for legacy dataset normalization. */
   hostConfig?: MCPHostConfig;
@@ -236,7 +238,38 @@ export interface RunTelemetry {
   totalHostUsage?: Partial<UsageMetrics>;
 }
 
+/** How one arm changed since the previous run of the same manifest. */
+export interface PreviousRunArm {
+  passRateDelta: number;
+  trialPassRateDelta?: number;
+  /** Case IDs that passed before and fail now. */
+  regressed: string[];
+  /** Case IDs that failed before and pass now. */
+  improved: string[];
+  /** Case IDs new in this run. */
+  added: string[];
+  /** Case IDs the previous run had and this one doesn't. */
+  removed: string[];
+}
+
+/** This run compared with the previous run of the same manifest. */
+export interface PreviousRunComparison {
+  /** The previous run's `runId`. */
+  runId: string;
+  timestamp: string;
+  /** Whether the manifest was unchanged (`contentHash`; datasets aren't hashed). */
+  sameManifest: boolean;
+  passRate: number;
+  passRateDelta: number;
+  /** Arms present in both runs, by name. */
+  arms: Record<string, PreviousRunArm>;
+}
+
 export interface RunSummary {
+  /** This run's ID: its result store artifact ID and output directory name. */
+  runId?: string;
+  /** This run compared with the previous run of the same manifest, if there is one. */
+  previousRun?: PreviousRunComparison;
   schemaVersion: 1;
   manifestId: string;
   contentHash: string;

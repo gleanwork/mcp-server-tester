@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
+import { resolveManifestPath } from './evalManifest.js';
 import type { DatasetConfig } from './evalManifest.js';
 import type {
   DatasetSource,
@@ -29,9 +30,7 @@ async function loadFileDataset(
   context: DatasetSourceContext
 ): Promise<EvalDataset> {
   const source = FileDatasetSchema.parse(config);
-  const filePath = path.isAbsolute(source.path)
-    ? source.path
-    : path.resolve(context.rootDir, source.path);
+  const filePath = resolveManifestPath(source.path, context);
   return buildEvalDataset(
     JSON.parse(await fs.readFile(filePath, 'utf8')) as unknown,
     context.hostConfig,
@@ -78,7 +77,7 @@ async function loadDirectoryDataset(
   context: DatasetSourceContext
 ): Promise<EvalDataset> {
   const source = FileDatasetSchema.parse(config);
-  const directory = path.resolve(context.rootDir, source.path);
+  const directory = resolveManifestPath(source.path, context);
   if (!(await fs.stat(directory)).isDirectory())
     return loadFileDataset(config, context);
   async function collect(dir: string): Promise<string[]> {

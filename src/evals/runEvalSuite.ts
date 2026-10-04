@@ -45,7 +45,8 @@ import type { Plugin } from '../plugins/plugin.js';
 import { assertDatasetNamespaces, loadSuitePlugins } from './suitePlugins.js';
 import { getDatasetSource } from './builtinDatasetSources.js';
 import { assertHostSupports, getHost } from './builtinHosts.js';
-import { getResultStore } from './builtinResultStores.js';
+import { getResultStore, resolveStorePaths } from './builtinResultStores.js';
+import { compareWithPrevious, findPreviousRun } from './runBaseline.js';
 import {
   parseHostConfig,
   validateManifest,
@@ -331,6 +332,7 @@ export async function runEvalSuite(
 ): Promise<RunEvalSuiteResult> {
   const suiteStartTime = Date.now();
   const rootDir = options.rootDir ?? process.cwd();
+  const manifestDir = path.dirname(path.resolve(options.manifestPath));
   const loadedManifest = loadEvalManifest(options.manifestPath, { rootDir });
   const ambientEnv = Object.fromEntries(
     Object.entries(process.env).filter(
@@ -391,6 +393,7 @@ export async function runEvalSuite(
       datasets.map((source) =>
         getDatasetSource(source.type).load(source, {
           rootDir,
+          manifestDir,
           manifest: sourceManifest,
         })
       )
@@ -434,6 +437,7 @@ export async function runEvalSuite(
       source,
       dataset: await getDatasetSource(source.type).load(source, {
         rootDir,
+        manifestDir,
         manifest: sourceManifest,
         hostConfig: sourceHost.config,
       }),
@@ -652,6 +656,28 @@ export async function runEvalSuite(
     results: allResults,
   };
 
+  summary.runId = executionId;
+  const store = manifest.results?.store
+    ? getResultStore(manifest.results.store.type).create(
+        resolveStorePaths(manifest.results.store, { manifestDir, rootDir })
+      )
+    : undefined;
+  // The comparison is a convenience: it must never cost the run its results.
+  try {
+    const previous = await findPreviousRun({
+      manifestId: summary.manifestId,
+      runId: executionId,
+      arms: summary.arms.map((arm) => arm.name),
+      store,
+      outputRoot: path.dirname(outputDir),
+    });
+    if (previous) summary.previousRun = compareWithPrevious(previous, summary);
+  } catch (error) {
+    console.warn(
+      `[mst] Couldn't compare with the previous run: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+
   const redact =
     options.redactStoredResponses ??
     (manifest.redactStoredResponses as boolean | undefined) ??
@@ -660,10 +686,8 @@ export async function runEvalSuite(
     ? redactStoredResponses(summary)
     : structuredClone(summary);
   await fs.mkdir(outputDir, { recursive: true });
-  if (manifest.results?.store) {
+  if (store) {
     // Manifest validation already parsed defaults and transforms once.
-    const definition = getResultStore(manifest.results.store.type);
-    const store = definition.create(manifest.results.store);
     const metadata = {
       datasetName: manifest.name,
       labels: {

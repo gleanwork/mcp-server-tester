@@ -17,14 +17,12 @@
       "equals": 0.8
     },
     {
-      "path": "baseline",
-      "exists": true,
-      "gap": "step 4: `mst run` compares a run with the manifest's previous run"
+      "path": "previousRun",
+      "exists": true
     },
     {
-      "path": "baseline.passRateDelta",
-      "equals": -0.5,
-      "gap": "step 4: `mst run` compares a run with the manifest's previous run"
+      "path": "previousRun.passRateDelta",
+      "equals": -0.5
     },
     {
       "path": "arms[name=default].result.caseResults[0].iterationResults.length",
@@ -37,6 +35,22 @@
     {
       "path": "arms[name=default].result.caseResults[0].trace",
       "exists": false
+    },
+    {
+      "path": "previousRun.sameManifest",
+      "equals": true
+    },
+    {
+      "path": "previousRun.arms.default.regressed",
+      "equals": ["billing-owner"]
+    },
+    {
+      "path": "previousRun.arms.default.improved",
+      "equals": []
+    },
+    {
+      "path": "previousRun.arms.default.trialPassRateDelta",
+      "equals": -0.1
     }
   ],
   "ledger": {
