@@ -8,7 +8,6 @@
         "src/reporters/ui-src/App.tsx",
         "scripts/*.{mjs,ts}",
         "tests/**/*.{ts,mjs}",
-        "examples/browser-scripts/**/*.{ts,mjs,js}",
         "src/**/fixtures/**/*.mjs"
       ],
       "project": [
@@ -31,6 +30,5 @@
   "ignoreBinaries": ["pbcopy", "xwd"],
   "rules": {
     "optionalPeerDependencies": "off"
-  },
-  "ignore": ["examples/**/.mcp-eval-results/**"]
+  }
 }
