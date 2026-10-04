@@ -39,11 +39,7 @@ import { simulationToHostRun } from './hostTrace.js';
 import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
 import { ANTHROPIC_API_HOST } from './anthropicApiHost.js';
 import { COWORK_HOST } from './coworkHost.js';
-import {
-  CHATGPT_HOST,
-  CHATGPT_HOSTS,
-  CHATGPT_LINUX_HOST,
-} from './chatgptHost.js';
+import { CHATGPT_HOST, CHATGPT_LINUX_HOST } from './chatgptHost.js';
 
 /** A stand-in client for hosts that manage their own connections. */
 function missingClient(): Client {
@@ -336,19 +332,51 @@ function builtinHostDefinitions(): Readonly<Record<string, HostDefinition>> {
   return (builtinHosts = {
     ...hosts,
     'anthropic-api': ANTHROPIC_API_HOST,
-    ...CHATGPT_HOSTS,
-    chatgpt: process.platform === 'linux' ? CHATGPT_LINUX_HOST : CHATGPT_HOST,
-    cowork_cu: COWORK_HOST,
+    'chatgpt-mac': CHATGPT_HOST,
+    'chatgpt-linux': CHATGPT_LINUX_HOST,
     cowork: COWORK_HOST,
-    'anthropic.claude.cowork.desktop-app.macos': COWORK_HOST,
   });
 }
 
+/**
+ * Earlier names for built-in hosts, still accepted with a warning. `chatgpt`
+ * meant the ChatGPT host for the machine it ran on.
+ */
+const DEPRECATED_HOST_NAMES: Readonly<Record<string, () => string>> = {
+  cowork_cu: () => 'cowork',
+  'anthropic.claude.cowork.desktop-app.macos': () => 'cowork',
+  'openai.chatgpt.agent.desktop-app.macos': () => 'chatgpt-mac',
+  'openai.chatgpt.agent.desktop-app.linux': () => 'chatgpt-linux',
+  chatgpt: () =>
+    process.platform === 'linux' ? 'chatgpt-linux' : 'chatgpt-mac',
+};
+const warnedHostNames = new Set<string>();
+
 const hosts = extensionLookup('hosts', builtinHostDefinitions);
+
+/**
+ * A host reference's current name: a deprecated built-in name becomes its
+ * replacement, with a warning once per process; anything else is unchanged.
+ */
+export function resolveHostName(reference: string): string {
+  if (!Object.hasOwn(DEPRECATED_HOST_NAMES, reference)) return reference;
+  const current = DEPRECATED_HOST_NAMES[reference]!();
+  if (!warnedHostNames.has(reference)) {
+    warnedHostNames.add(reference);
+    process.emitWarning(
+      `Host "${reference}" is deprecated; use "${current}".`,
+      {
+        type: 'DeprecationWarning',
+        code: 'MST_DEPRECATED_HOST',
+      }
+    );
+  }
+  return current;
+}
 
 /** The host `reference` names: a built-in, or `namespace/name` from a plugin. */
 export function getHost(reference: string): HostDefinition {
-  return hosts.get(reference);
+  return hosts.get(resolveHostName(reference));
 }
 
 export function getBuiltinHostConfig(

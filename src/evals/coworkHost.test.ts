@@ -65,7 +65,7 @@ vi.mock(
 );
 const dirs: string[] = [];
 const host = {
-  type: 'cowork_cu',
+  type: 'cowork',
   timeout: 900_000,
   options: { computerUseProvider: 'anthropic-computer-use' },
 };

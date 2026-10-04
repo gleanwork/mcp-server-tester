@@ -32,7 +32,7 @@ vi.mock('./externalHost/runtime.js', () => ({
 }));
 const context = { manifest: { name: 'test', datasets: [], concurrency: 1 } };
 const config = {
-  type: 'chatgpt',
+  type: 'chatgpt-mac',
   model: 'test-chatgpt-model',
   reasoningEffort: 'medium',
 };
@@ -127,7 +127,7 @@ describe('ChatGPT V2 batch host', () => {
     for (const request of batch)
       request.config = {
         ...config,
-        type: 'openai.chatgpt.agent.desktop-app.linux',
+        type: 'chatgpt-linux',
         options: { surface: 'codex' },
         env: linuxEnvironment(home.value),
       };
