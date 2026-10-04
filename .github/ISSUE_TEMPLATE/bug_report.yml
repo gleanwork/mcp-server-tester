@@ -1,0 +1,80 @@
+name: Bug report
+description: Something in MCP Server Tester doesn't work as documented
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. For a security issue, email security@glean.com instead of opening an issue.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Run `npx mst --version`.
+      placeholder: '2.0.0-beta.7'
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Playwright fixtures and matchers
+        - Eval datasets (runEvalDataset)
+        - Suites and manifests (mst run, mst batch)
+        - A host (vercel-sdk, anthropic-api, claude-cli, Cowork, ChatGPT, a plugin host)
+        - Judges or metrics
+        - Conformance checks
+        - Agent Skills
+        - CLI and auth (init, generate, login, token)
+        - Reporter UI
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: |
+        The smallest manifest, dataset or test that shows the problem, and the command you ran.
+        `mst run --dry-run` output helps for configuration problems.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: |
+        - OS: macOS 15
+        - Node.js: 22
+        - MCP protocol: legacy / 2026-07-28 / auto
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output
+      description: Error messages or output. `DEBUG=mcp-server-tester:*` adds detail. Remove tokens and other credentials.
+      render: shell
+    validations:
+      required: false

@@ -4,7 +4,7 @@ The `@gleanwork/mcp-server-tester` CLI provides interactive commands to help you
 
 The package installs the CLI under two names: `mst` (short for MCP Server Tester) and `mcp-server-tester`. They are the same binary. Once the package is installed in your project, use `npx mst <command>`.
 
-Before the package is installed (for example, running `init` in a new directory), use the scoped package name: `npx @gleanwork/mcp-server-tester init`. A bare `npx mst` or `npx mcp-server-tester` with nothing installed fetches unrelated, unscoped npm packages of those names.
+Before the package is installed (for example, running `init` in a new directory), use the scoped package name: `npx @gleanwork/mcp-server-tester@beta init` for 2.0, which these docs describe (without `@beta`, npx fetches 1.x). A bare `npx mst` or `npx mcp-server-tester` with nothing installed fetches unrelated, unscoped npm packages of those names.
 
 ## Table of Contents
 

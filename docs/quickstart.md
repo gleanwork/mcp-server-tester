@@ -26,7 +26,7 @@ Start with direct mode. Add LLM host mode when you need to validate that your to
 The fastest way to get started is using the CLI:
 
 ```bash
-npx @gleanwork/mcp-server-tester init
+npx @gleanwork/mcp-server-tester@beta init
 
 # Follow the interactive prompts:
 ? Project name: my-mcp-tests
@@ -57,7 +57,7 @@ If you prefer to set up your project manually:
 ### 1. Install Dependencies
 
 ```bash
-npm install --save-dev @gleanwork/mcp-server-tester @playwright/test
+npm install --save-dev @gleanwork/mcp-server-tester@beta @playwright/test
 ```
 
 ### 2. Configure Playwright
