@@ -126,6 +126,19 @@ function trialToolCalls(
   return Array.isArray(calls) ? (calls as Array<{ name?: unknown }>) : [];
 }
 
+/**
+ * A trial's events from one source: MCP tool calls, or everything the host
+ * did natively. Null without a trace, or when the host declares no evidence.
+ */
+function traceEventCount(trial: Trial, source: 'mcp' | 'host'): number | null {
+  if (!trial.trace || trial.trace.evidence === 'none') return null;
+  return trial.trace.events.filter(
+    (event) =>
+      event.source === source &&
+      (source === 'host' || event.kind === 'tool_call')
+  ).length;
+}
+
 /** The trial's answer: its trace's, or the case's response text. */
 function trialText(trial: Trial, caseResult: EvalCaseResult): string | null {
   if (trial.trace) return trial.trace.finalText ?? '';
@@ -419,10 +432,15 @@ export const BUILT_IN_METRICS: Readonly<Record<string, MetricDefinition>> =
     ),
     // Usage, timing and tool counts are per trial: a case's value is the
     // mean over its trials.
+    // Reported cost, or the estimate from the manifest's pricing.
     cost_usd: metric(
       'continuous',
       (result) =>
-        perTrial(result, (trial) => trial.usage?.totalCostUsd ?? null),
+        perTrial(
+          result,
+          (trial) =>
+            trial.usage?.totalCostUsd ?? trial.usage?.estimatedCostUsd ?? null
+        ),
       meanAggregation,
       'USD'
     ),
@@ -478,6 +496,19 @@ export const BUILT_IN_METRICS: Readonly<Record<string, MetricDefinition>> =
         ),
       meanAggregation,
       'seconds'
+    ),
+    // MCP tool calls, and host-native events (host tools, skills, commands).
+    mcp_call_count: metric(
+      'continuous',
+      (result) => perTrial(result, (trial) => traceEventCount(trial, 'mcp')),
+      meanAggregation,
+      'calls'
+    ),
+    host_event_count: metric(
+      'continuous',
+      (result) => perTrial(result, (trial) => traceEventCount(trial, 'host')),
+      meanAggregation,
+      'calls'
     ),
     tool_count: metric(
       'continuous',

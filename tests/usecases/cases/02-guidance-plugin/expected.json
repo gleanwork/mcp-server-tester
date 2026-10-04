@@ -29,11 +29,7 @@
       "output_tokens_mean",
       "tool_count_mean",
       "mcp_call_count_mean",
-      "host_call_count_mean"
-    ],
-    "gaps": {
-      "mcp_call_count_mean": "step 6: count MCP calls and host calls separately",
-      "host_call_count_mean": "step 6: count MCP calls and host calls separately"
-    }
+      "host_event_count_mean"
+    ]
   }
 }

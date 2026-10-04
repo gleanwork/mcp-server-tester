@@ -30,9 +30,16 @@ export interface UsageMetrics {
   outputTokens: number;
 
   /**
-   * Total cost in USD
+   * Total cost in USD, as the host or provider reported it
    */
   totalCostUsd?: number;
+
+  /**
+   * Cost in USD estimated from the manifest's `pricing`, when the host
+   * reported none. Kept apart from `totalCostUsd` so a report never passes
+   * an estimate off as a bill.
+   */
+  estimatedCostUsd?: number;
 
   /** Reasoning tokens, already included in outputTokens. */
   reasoningOutputTokens?: number;

@@ -52,8 +52,7 @@
     },
     {
       "path": "arms[name=native].metrics.cost_usd_mean",
-      "exists": true,
-      "gap": "step 6: price usage from a model pricing table instead of omitting cost"
+      "exists": true
     },
     {
       "path": "results[0].arm",
@@ -62,6 +61,29 @@
     {
       "path": "results[1].arm",
       "equals": "native"
+    },
+    {
+      "path": "arms[name=aggregate].metrics.cost_usd_mean",
+      "equals": 0.002256
+    },
+    {
+      "path": "arms[name=native].metrics.cost_usd_mean",
+      "equals": 0.008211
+    },
+    {
+      "path": "arms[name=native].costSource",
+      "equals": "pricing"
+    },
+    {
+      "path": "armDeltas.native.metricDeltas.mcp_call_count_mean",
+      "equals": 3
+    },
+    {
+      "path": "arms[name=native].pricing.claude-sonnet-4-5",
+      "equals": {
+        "input": 3,
+        "output": 15
+      }
     }
   ],
   "ledger": {
@@ -73,23 +95,17 @@
     ],
     "deltas": [
       {
-        "key": "inputTokensDelta",
+        "key": "metricDeltas.input_tokens_mean",
         "metric": "input_tokens_mean"
       },
       {
-        "key": "outputTokensDelta",
+        "key": "metricDeltas.output_tokens_mean",
         "metric": "output_tokens_mean"
       },
       {
-        "key": "toolCallsDelta",
+        "key": "metricDeltas.tool_count_mean",
         "metric": "tool_count_mean"
       }
-    ],
-    "gaps": {
-      "mcp_call_count_mean": "step 6: count MCP calls and host calls separately",
-      "inputTokensDelta": "step 6: arm deltas cover tokens, cost and calls, not only pass rate",
-      "outputTokensDelta": "step 6: arm deltas cover tokens, cost and calls, not only pass rate",
-      "toolCallsDelta": "step 6: arm deltas cover tokens, cost and calls, not only pass rate"
-    }
+    ]
   }
 }

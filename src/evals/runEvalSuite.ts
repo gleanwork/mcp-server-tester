@@ -18,6 +18,7 @@ import {
   type EvalArm,
   type EvalManifest,
   type HostConfig,
+  type ModelPricing,
 } from './evalManifest.js';
 import type {
   EvaluationArmResult,
@@ -47,6 +48,7 @@ import { getDatasetSource } from './builtinDatasetSources.js';
 import { assertHostSupports, getHost } from './builtinHosts.js';
 import { getResultStore, resolveStorePaths } from './builtinResultStores.js';
 import { compareWithPrevious, findPreviousRun } from './runBaseline.js';
+import { costSource, estimateCosts } from './pricing.js';
 import {
   parseHostConfig,
   validateManifest,
@@ -244,8 +246,54 @@ function armEvidence(results: EvalCaseResult[]): HostEvidence | undefined {
   return EVIDENCE_STRENGTH.find((level) => levels.includes(level));
 }
 
-/** Outcome metrics every arm reports, whatever the manifest lists. */
-const CORE_METRICS = ['passed', 'trial_pass'] as const;
+/**
+ * What every arm reports, whatever the manifest lists: outcomes, calls,
+ * tokens, cost and time. A manifest's `metrics` add to these.
+ */
+const CORE_METRICS = [
+  'passed',
+  'trial_pass',
+  'tool_count',
+  'mcp_call_count',
+  'host_event_count',
+  'input_tokens',
+  'output_tokens',
+  'cost_usd',
+  'duration_s',
+  'judge_pass',
+  'judge_score',
+] as const;
+
+function isNumberRecord(value: unknown): value is Record<string, number> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.values(value).every((v) => typeof v === 'number')
+  );
+}
+
+/** Every numeric metric both arms report, as arm minus baseline (per judge for scores). */
+function metricDeltas(
+  arm: EvaluationArmResult,
+  baseline: EvaluationArmResult
+): Record<string, number | Record<string, number>> {
+  const deltas: Record<string, number | Record<string, number>> = {};
+  for (const [key, value] of Object.entries(arm.metrics ?? {})) {
+    const before = baseline.metrics?.[key];
+    if (typeof value === 'number' && typeof before === 'number') {
+      deltas[key] = value - before;
+    } else if (isNumberRecord(value) && isNumberRecord(before)) {
+      // Per-judge scores: a delta for each judge both arms ran.
+      const shared = Object.keys(value).filter((name) => name in before);
+      if (shared.length > 0)
+        deltas[key] = Object.fromEntries(
+          shared.map((name) => [name, value[name]! - before[name]!])
+        );
+    }
+  }
+  return deltas;
+}
 
 function buildArmDeltas(
   arms: EvaluationArmResult[]
@@ -269,6 +317,7 @@ function buildArmDeltas(
                 trialPassRateDelta: trials - baselineTrialRate,
               }
             : {}),
+          metricDeltas: metricDeltas(arm, arms[0]!),
           baseline: arms[0]?.name,
         },
       ];
@@ -484,6 +533,8 @@ export async function runEvalSuite(
       name: string;
       result: EvalRunnerResult;
     }> = [];
+    const appliedPricing: Record<string, ModelPricing> = {};
+    const unpricedModels = new Set<string>();
     const rawArm = rawManifest.arms?.find(
       (candidate) => candidate.name === arm.name
     ) ?? { name: arm.name };
@@ -590,6 +641,34 @@ export async function runEvalSuite(
           result,
         });
         for (const caseResult of result.caseResults) caseResult.arm = arm.name;
+        // Price usage the host reported without a cost, at the model each case
+        // ran: its own host's (a case host doesn't take the arm's model), a
+        // legacy case config's, or the arm host's (including its default).
+        const armModel =
+          host.declaration.model ??
+          (host.config as { model?: unknown } | undefined)?.model;
+        const caseModels = new Map(
+          effectiveDataset.cases.map((evalCase) => [
+            evalCase.id,
+            evalCase.host
+              ? evalCase.host.model
+              : (evalCase.mcpHostConfig?.model ?? armModel),
+          ])
+        );
+        const priced = estimateCosts(
+          result.caseResults,
+          (caseResult) => {
+            const model = caseModels.get(caseResult.id);
+            return typeof model === 'string' ? model : undefined;
+          },
+          manifest.pricing
+        );
+        Object.assign(appliedPricing, priced.applied);
+        for (const model of priced.unpriced) unpricedModels.add(model);
+        // The run's totals include the estimates.
+        result.totalHostUsage = result.caseResults.reduce<
+          UsageMetrics | undefined
+        >((sum, caseResult) => sumUsage(sum, caseResult.hostUsage), undefined);
         sourceResults.push({ name: executionDataset.name, result });
         allResults.push(...result.caseResults);
       }
@@ -597,7 +676,12 @@ export async function runEvalSuite(
       if (client) await closeMCPClient(client);
     }
 
-    armResults.push(summarizeArm(arm, servers, sourceResults));
+    const summary = summarizeArm(arm, servers, sourceResults);
+    if (Object.keys(appliedPricing).length > 0)
+      summary.pricing = appliedPricing;
+    if (unpricedModels.size > 0)
+      summary.unpricedModels = [...unpricedModels].sort();
+    armResults.push(summary);
   }
 
   const armMetrics = armResults.map((arm, index) => {
@@ -618,8 +702,18 @@ export async function runEvalSuite(
     arm.metrics = armMetrics[index]!.aggregated;
     const evidence = armEvidence(caseResults);
     if (evidence !== undefined) arm.evidence = evidence;
-    const unavailable = armMetrics[index]!.unavailable;
+    // Core metrics are reported when they apply; only listed ones are missed.
+    const listed = new Set(
+      ((arms[index]?.metrics ?? manifest.metrics ?? []) as MetricSpec[]).map(
+        (spec) => resolveMetric(spec).outName
+      )
+    );
+    const unavailable = armMetrics[index]!.unavailable.filter((name) =>
+      listed.has(name)
+    );
     if (unavailable.length > 0) arm.unavailableMetrics = unavailable;
+    const source = costSource(caseResults);
+    if (source) arm.costSource = source;
   });
   // Top-level metrics describe the baseline arm. Comparison-arm metrics remain
   // attached to their arm, avoiding case-id collisions across arms.

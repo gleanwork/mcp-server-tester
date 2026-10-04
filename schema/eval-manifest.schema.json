@@ -255,6 +255,33 @@
     "coworkSetup": {
       "type": "object",
       "description": "Cowork desktop setup; see docs/cowork.md."
+    },
+    "pricing": {
+      "type": "object",
+      "description": "USD per million tokens, by model, for hosts that report tokens but not cost.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["input", "output"],
+        "properties": {
+          "input": {
+            "type": "number",
+            "minimum": 0
+          },
+          "output": {
+            "type": "number",
+            "minimum": 0
+          },
+          "cacheRead": {
+            "type": "number",
+            "minimum": 0
+          },
+          "cacheWrite": {
+            "type": "number",
+            "minimum": 0
+          }
+        }
+      }
     }
   },
   "definitions": {

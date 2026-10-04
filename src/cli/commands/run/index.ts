@@ -52,6 +52,7 @@ export async function run(options: RunOptions): Promise<void> {
   console.log(
     `Results: ${metrics.passed ?? 0}/${metrics.total ?? 0} passed (${((metrics.passRate ?? 0) * 100).toFixed(1)}%)`
   );
+  printArmTable(result.summary.arms);
   const previous = result.summary.previousRun;
   if (previous) {
     const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
@@ -75,4 +76,74 @@ export async function run(options: RunOptions): Promise<void> {
   }
   console.log(`Output: ${path.join(result.outputDir, 'results.json')}`);
   if ((metrics.failed ?? 0) > 0) process.exitCode = 1;
+}
+
+type ArmSummary = Awaited<
+  ReturnType<typeof runEvalSuite>
+>['summary']['arms'][number];
+
+/** One row per arm: outcomes, calls, tokens, cost and time ("-" when unavailable). */
+function printArmTable(arms: ArmSummary[]): void {
+  if (arms.length === 0) return;
+  const value = (arm: ArmSummary, key: string) => {
+    const v = arm.metrics?.[key];
+    return typeof v === 'number' ? v : undefined;
+  };
+  const num = (v: number | undefined, digits = 1) =>
+    v === undefined ? '-' : v.toFixed(digits);
+  const pct = (v: number | undefined) =>
+    v === undefined ? '-' : `${(v * 100).toFixed(0)}%`;
+  const judged = arms.some(
+    (arm) => value(arm, 'judge_pass_rate') !== undefined
+  );
+  let estimated = false;
+  const rows = arms.map((arm) => {
+    const cost = value(arm, 'cost_usd_mean');
+    if (cost !== undefined && arm.costSource !== 'host') estimated = true;
+    const mcp = value(arm, 'mcp_call_count_mean');
+    const host = value(arm, 'host_event_count_mean');
+    return [
+      arm.name,
+      `${arm.result?.passed ?? 0}/${arm.result?.total ?? 0}`,
+      pct(value(arm, 'trial_pass_rate')),
+      ...(judged ? [pct(value(arm, 'judge_pass_rate'))] : []),
+      mcp === undefined && host === undefined
+        ? '-'
+        : `${num(mcp)} / ${num(host)}`,
+      num(value(arm, 'input_tokens_mean'), 0),
+      num(value(arm, 'output_tokens_mean'), 0),
+      cost === undefined
+        ? '-'
+        : `$${cost.toFixed(4)}${arm.costSource === 'host' ? '' : '*'}`,
+      value(arm, 'duration_s_mean') === undefined
+        ? '-'
+        : `${num(value(arm, 'duration_s_mean'))}s`,
+    ];
+  });
+  const header = [
+    'Arm',
+    'Passed',
+    'Trial pass',
+    ...(judged ? ['Judge pass'] : []),
+    'MCP calls / host events',
+    'Input tokens',
+    'Output tokens',
+    'Cost',
+    'Time',
+  ];
+  const widths = header.map((title, column) =>
+    Math.max(title.length, ...rows.map((row) => row[column]!.length))
+  );
+  const line = (cells: string[]) =>
+    cells
+      .map((cell, column) => cell.padEnd(widths[column]!))
+      .join('  ')
+      .trimEnd();
+  console.log('');
+  console.log(line(header));
+  for (const row of rows) console.log(line(row));
+  console.log(
+    'Calls, tokens, cost and time are means per trial.' +
+      (estimated ? ' * Includes estimates from `pricing`.' : '')
+  );
 }

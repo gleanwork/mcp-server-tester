@@ -8,6 +8,14 @@ import {
   type CoworkSetupConfig,
 } from './coworkSetup/options.js';
 
+/** USD per million tokens for one model. Cache rates default to the input rate. */
+export interface ModelPricing {
+  input: number;
+  output: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+}
+
 /** A tagged configuration block: `type` names a built-in or a plugin's `namespace/name` extension. */
 export interface TaggedConfig {
   type: string;
@@ -76,6 +84,8 @@ export interface EvalManifest {
   tools?: string;
   /** Require HTTP server URLs to use an explicit /eval endpoint. */
   requireEvalEndpoint?: boolean;
+  /** USD per million tokens, by model: estimates cost for hosts that don't report it. */
+  pricing?: Record<string, ModelPricing>;
   /** Generation defaults for API hosts (anthropic-api). */
   temperature?: number;
   maxTokens?: number;
@@ -172,6 +182,24 @@ export const EvalManifestSchema = z
       .strict()
       .optional(),
     redactStoredResponses: z.boolean().optional(),
+    /**
+     * USD per million tokens, by model, for hosts that report tokens but not
+     * cost. MST ships no prices: they change, and every estimate should be
+     * traceable to a table someone chose.
+     */
+    pricing: z
+      .record(
+        z.string().min(1),
+        z
+          .object({
+            input: z.number().nonnegative(),
+            output: z.number().nonnegative(),
+            cacheRead: z.number().nonnegative().optional(),
+            cacheWrite: z.number().nonnegative().optional(),
+          })
+          .strict()
+      )
+      .optional(),
     /** Removed; kept so validation can say what replaced it. */
     profile: z.unknown().optional(),
   })
@@ -212,6 +240,10 @@ const PluginConfigSchema = EvalManifestSchema.pick({
   maxToolCalls: true,
   tools: true,
   requireEvalEndpoint: true,
+  pricing: true,
+  accuracyThreshold: true,
+  temperature: true,
+  maxTokens: true,
 }).strict();
 
 /** A plugin's shared config: any manifest setting but its name, datasets, arms, plugins and extends. */

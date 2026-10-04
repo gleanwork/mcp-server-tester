@@ -285,7 +285,7 @@ MST's LLM calls now resolve their endpoint and credential in one place (`src/llm
 - **The `anthropic` SDK host streams.** Its agent loop uses `streamText` instead of `generateText`. Tool calls, text, steps and usage are the same; an error part in the middle of a stream now fails the case.
 - **The `openai` SDK host sends `store: false` behind `OPENAI_BASE_URL`.** Multi-turn tool loops through a gateway failed with `Item with id 'rs_…' not found`, because the AI SDK refers to earlier Responses items by id. Calls to the public API are unchanged.
 - **Unknown dataset keys are errors.** A key MST doesn't define in a dataset, a case or its `expect` block fails loading. Examples are `regex` (use `matchesPattern`), `judge` (use `passesJudge`), and a misspelt `accuracyThreshold`. 1.x ignored such keys, so the setting or assertion never applied. The error names the case.
-- **SDK hosts don't report cost.** `usage.totalCostUsd` is undefined for the Vercel AI SDK host, which knows tokens but not prices; 1.x reported 0. The same holds for Claude CLI output without a cost.
+- **SDK hosts don't report cost.** `usage.totalCostUsd` is undefined for the Vercel AI SDK host, which knows tokens but not prices; 1.x reported 0. The same holds for Claude CLI output without a cost. A suite can estimate cost with a manifest's `pricing`.
 - **Clearer SDK host errors.** Errors are classified by HTTP status as well as message text, so a 401 whose message doesn't say "401" still gets the authentication hint, and the hint now includes the provider's message: `authentication error (<provider message>)`. A plain-object stream error shows its `message` instead of `[object Object]`.
 
 ## New in 2.0 (non-breaking)
