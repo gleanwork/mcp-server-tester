@@ -6,6 +6,7 @@
  * runner reads its explicit fields and never inspects `response` to guess how
  * a case ran. Hosts and adapters produce traces; the runner owns every verdict.
  */
+import { randomUUID } from 'node:crypto';
 import { ProtocolError, type Client } from '@modelcontextprotocol/client';
 import { z } from 'zod';
 import type { MCPConfig } from '../config/mcpConfig.js';
@@ -35,6 +36,12 @@ import type {
 import { getHost } from './builtinHosts.js';
 import { hostRunToExecution, simulationTrace } from './hostTrace.js';
 import { withOriginalToolNames } from './toolSurface.js';
+import {
+  settleProxiedTrace,
+  usesToolSurfaceProxy,
+  withoutToolVariant,
+  type ToolSurfaceProxy,
+} from './toolSurfaceProxy.js';
 import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
 import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
 
@@ -241,6 +248,8 @@ export interface SuiteCaseExecutorOptions {
   batchTraces?: Map<string, HostRunResult[]>;
   /** Called with each per-case direct connection, e.g. to record its protocol. */
   onDirectConnection?: (client: Client) => void;
+  /** The arm's tool variant, which `proxy` serves to hosts that connect to their servers. */
+  toolVariant?: { id: string; proxy: () => Promise<ToolSurfaceProxy> };
 }
 
 /**
@@ -307,10 +316,40 @@ export function createSuiteCaseExecutor(
       throw new Error(
         `Host ${declaration.type} must expose run() for per-case dispatch.`
       );
+    const context = {
+      manifest,
+      arm,
+      env,
+      mcpHostConfig: evalCase.mcpHostConfig,
+    };
+    if (options.toolVariant && usesToolSurfaceProxy(definition)) {
+      const proxy = await options.toolVariant.proxy();
+      const scope = randomUUID();
+      const trace = await definition.run(
+        {
+          scenario: evalCase.scenario ?? '',
+          servers: proxy.serversFor(scope),
+          env,
+        },
+        declaration,
+        withoutToolVariant(context)
+      );
+      return hostRunToExecution(
+        settleProxiedTrace(
+          trace,
+          proxy,
+          scope,
+          servers,
+          options.toolVariant.id
+        ),
+        definition.evidence ?? 'none',
+        servers
+      );
+    }
     const trace = await definition.run(
       { scenario: evalCase.scenario ?? '', servers, env },
       declaration,
-      { manifest, arm, env, mcpHostConfig: evalCase.mcpHostConfig }
+      context
     );
     return hostRunToExecution(trace, definition.evidence ?? 'none', servers);
   };

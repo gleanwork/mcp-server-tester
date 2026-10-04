@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import { MCPConfigSchema, type MCPConfig } from '../config/mcpConfig.js';
+import { usesToolSurfaceProxy } from './toolSurfaceProxy.js';
 import {
   buildToolSurface,
   registerPresentedTools,
@@ -407,13 +408,14 @@ export function assertHostSupports(
   const definition = getHost(host.type);
   const appliesOverrides =
     definition.toolOverrides === true ||
+    usesToolSurfaceProxy(definition) ||
     (definition.createConfig !== undefined &&
       !definition.run &&
       !definition.runBatch);
   if (options.toolOverrides !== undefined && !appliesOverrides) {
     throw new Error(
       `${options.context}: host "${host.type}" can't apply toolOverrides; it would run with the original tools. ` +
-        'Use a host that shows tool variants to the model (vercel-sdk, anthropic-api), or a plugin host that declares `toolOverrides: true`.'
+        'Use a host that shows tool variants to the model (vercel-sdk, anthropic-api), or one that connects to the servers it is given.'
     );
   }
   if (

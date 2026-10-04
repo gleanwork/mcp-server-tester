@@ -56,10 +56,10 @@ describe('a dry run checks datasets too', () => {
       dryRun(
         [
           {
-            id: 'cli',
+            id: 'desktop',
             mode: 'host',
             scenario: 'Find it',
-            host: { type: 'claude-cli' },
+            host: { type: 'cowork' },
           },
         ],
         {
@@ -70,7 +70,7 @@ describe('a dry run checks datasets too', () => {
         }
       )
     ).rejects.toThrow(
-      `Case "cli" in arm "default": host "claude-cli" can't apply toolOverrides`
+      `Case "desktop" in arm "default": host "cowork" can't apply toolOverrides`
     );
   });
 });

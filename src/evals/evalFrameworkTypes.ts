@@ -126,6 +126,14 @@ export interface HostDefinition {
    * through MST's SDK host, which applies them.
    */
   readonly toolOverrides?: boolean;
+  /**
+   * For hosts with `run` or `runBatch` that don't set `toolOverrides`: the
+   * host connects to the servers in `input.servers`, so the suite can serve
+   * it an arm's tool variant through a local MCP proxy (the default). Set
+   * false for a host that connects elsewhere; a manifest that gives it
+   * `toolOverrides` then fails validation.
+   */
+  readonly toolSurfaceProxy?: boolean;
   /** The most cases the host can run at once; `concurrency` above it is an error. */
   readonly maxConcurrency?: number;
   /** Ordered traces for all selected iterations. The framework owns verdicts. */

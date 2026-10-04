@@ -13,7 +13,10 @@
 // USECASE_LEDGER, so tests can check MST's aggregates against what the host
 // actually reported.
 import fs from 'node:fs';
-import { Client } from '@modelcontextprotocol/client';
+import {
+  Client,
+  StreamableHTTPClientTransport,
+} from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { z } from 'zod';
 
@@ -142,19 +145,24 @@ async function connect(servers) {
   const connections = [];
   try {
     for (const server of servers) {
-      if (server.transport !== 'stdio') {
+      const client = new Client({ name: 'usecase-model', version: '1.0.0' });
+      if (server.transport === 'stdio') {
+        await client.connect(
+          new StdioClientTransport({
+            command: server.command,
+            args: server.args ?? [],
+            env: { PATH: process.env.PATH ?? '', ...(server.env ?? {}) },
+          })
+        );
+      } else if (server.transport === 'http') {
+        await client.connect(
+          new StreamableHTTPClientTransport(new URL(server.serverUrl))
+        );
+      } else {
         throw new Error(
-          `The use-case model host only connects to stdio servers; got ${server.transport}.`
+          `The use-case model host connects to stdio and http servers; got ${server.transport}.`
         );
       }
-      const client = new Client({ name: 'usecase-model', version: '1.0.0' });
-      await client.connect(
-        new StdioClientTransport({
-          command: server.command,
-          args: server.args ?? [],
-          env: { PATH: process.env.PATH ?? '', ...(server.env ?? {}) },
-        })
-      );
       connections.push({ label: server.label, client, tools: [] });
       connections.at(-1).tools = (await client.listTools()).tools;
     }
