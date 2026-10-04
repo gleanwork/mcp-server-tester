@@ -4,6 +4,10 @@ import { Readable } from 'node:stream';
 import { parse as parseNdjson } from 'ndjson';
 import type { LLMToolCall } from '../../mcpHost/mcpHostTypes.js';
 import type { UsageMetrics } from '../../../types/index.js';
+import {
+  splitClaudeMcpName,
+  typeClaudeCodeCall,
+} from '../../claudeCodeEvents.js';
 import { formatError } from './claudeCommon.js';
 import { findFile } from './claudeCommon.js';
 
@@ -344,12 +348,12 @@ function extractToolCalls(
       if (block.type !== 'tool_use' || !block.name) continue;
       let call = block.id ? byId.get(block.id) : undefined;
       if (!call) {
-        const mcpMatch = /^mcp__(.+)__(.+)$/.exec(block.name);
+        const mcp = splitClaudeMcpName(block.name);
         call = {
-          name: mcpMatch ? mcpMatch[2]! : block.name,
+          name: mcp ? mcp.name : block.name,
           rawName: block.name,
-          source: mcpMatch ? 'mcp' : 'host',
-          ...(mcpMatch ? { server: mcpMatch[1]! } : {}),
+          source: mcp ? 'mcp' : 'host',
+          ...(mcp ? { server: mcp.server } : {}),
           arguments: block.input ?? {},
           id: block.id,
         };
@@ -386,7 +390,10 @@ function extractToolCalls(
       call.isError = block.is_error;
     }
   }
-  return mergeToolCallOrder(auditCalls, transcriptCalls, timestamps);
+  // Results are attached, so tool searches can read theirs.
+  return mergeToolCallOrder(auditCalls, transcriptCalls, timestamps).map(
+    typeClaudeCodeCall
+  );
 }
 
 function mergeToolCallOrder(

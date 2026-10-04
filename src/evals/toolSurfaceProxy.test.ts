@@ -289,3 +289,29 @@ describe('prepareHostBatch with a tool variant', () => {
     expect(started).toBe(0);
   });
 });
+
+describe('settleProxiedTrace tool searches', () => {
+  it('records the tools a search found under their original names', () => {
+    const settled = settleProxiedTrace(
+      {
+        finalText: '',
+        events: [
+          {
+            kind: 'tool_search',
+            source: 'host',
+            name: 'ToolSearch',
+            results: [{ name: 'find_more' }, { name: 'search', server: 'agg' }],
+          },
+        ],
+      },
+      stubProxy(true, { find_more: 'find_skills' }),
+      's',
+      [catalog('aggregate', 'agg')],
+      'v'
+    );
+    expect(settled.events[0]?.results).toEqual([
+      { name: 'find_skills' },
+      { name: 'search', server: 'agg' },
+    ]);
+  });
+});

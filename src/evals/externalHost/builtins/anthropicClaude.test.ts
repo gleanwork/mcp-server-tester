@@ -1413,3 +1413,67 @@ describe('anthropicClaude trace parsing', () => {
     ).toBe(false);
   });
 });
+
+describe('Claude Code host-native events', () => {
+  it('types skill loads and tool searches from a Cowork session', async () => {
+    const trace = await parseNativeEvents([
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            {
+              type: 'tool_use',
+              id: 's',
+              name: 'ToolSearch',
+              input: { query: 'ticket' },
+            },
+            {
+              type: 'tool_use',
+              id: 'k',
+              name: 'Skill',
+              input: { skill: 'triage' },
+            },
+          ],
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 's',
+              content: [
+                { type: 'tool_reference', tool_name: 'mcp__agg__find_skills' },
+              ],
+            },
+          ],
+        },
+      },
+    ]);
+    expect(trace.toolCalls).toMatchObject([
+      {
+        kind: 'tool_search',
+        source: 'host',
+        results: [{ server: 'agg', name: 'find_skills' }],
+      },
+      { kind: 'skill', source: 'host', name: 'triage', rawName: 'Skill' },
+    ]);
+  });
+});
+
+describe('Claude session MCP names', () => {
+  it('splits a name with `__` as the CLI parser does', async () => {
+    const trace = await parseNativeEvents([
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'tool_use', id: 'x', name: 'mcp__a__b__c', input: {} },
+          ],
+        },
+      },
+    ]);
+    expect(trace.toolCalls[0]).toMatchObject({ server: 'a', name: 'b__c' });
+  });
+});

@@ -12,13 +12,11 @@
     },
     {
       "path": "arms[name=baseline].metrics.tool_search_hit_rate",
-      "equals": 0,
-      "gap": "step 8: a typed tool_search event and a tool-search hit-rate metric"
+      "equals": 0
     },
     {
       "path": "arms[name=description-v2].metrics.tool_search_hit_rate",
-      "equals": 1,
-      "gap": "step 8: a typed tool_search event and a tool-search hit-rate metric"
+      "equals": 1
     }
   ]
 }

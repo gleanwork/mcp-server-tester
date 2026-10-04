@@ -3,6 +3,10 @@ import type {
   LLMToolCall,
 } from '../../mcpHostTypes.js';
 import type { UsageMetrics } from '../../../../types/index.js';
+import {
+  splitClaudeMcpName,
+  typeClaudeCodeCall,
+} from '../../../claudeCodeEvents.js';
 
 /** Parses NDJSON (stream-json) output from CLI hosts. */
 export function parseStreamJson(stdout: string): MCPHostSimulationResult {
@@ -29,11 +33,11 @@ export function parseStreamJson(stdout: string): MCPHostSimulationResult {
       for (const block of event.message.content) {
         if (block.type === 'tool_use' && block.name) {
           const rawName = block.name;
-          const mcpMatch = /^mcp__(.+?)__(.+)$/.exec(rawName);
+          const mcp = splitClaudeMcpName(rawName);
           toolCalls.push({
-            name: mcpMatch ? mcpMatch[2]! : rawName,
-            source: mcpMatch ? 'mcp' : 'host',
-            ...(mcpMatch ? { server: mcpMatch[1] } : {}),
+            name: mcp ? mcp.name : rawName,
+            source: mcp ? 'mcp' : 'host',
+            ...(mcp ? { server: mcp.server } : {}),
             rawName,
             arguments: block.input ?? {},
             id: block.id,
@@ -89,7 +93,7 @@ export function parseStreamJson(stdout: string): MCPHostSimulationResult {
     if (event.type === 'result' && event.is_error === true) {
       return {
         success: false,
-        toolCalls,
+        toolCalls: toolCalls.map(typeClaudeCodeCall),
         error:
           typeof event.result === 'string'
             ? event.result
@@ -107,7 +111,7 @@ export function parseStreamJson(stdout: string): MCPHostSimulationResult {
 
   return {
     success: true,
-    toolCalls,
+    toolCalls: toolCalls.map(typeClaudeCodeCall),
     response: response || undefined,
     conversationHistory:
       conversationHistory.length > 0 ? conversationHistory : undefined,

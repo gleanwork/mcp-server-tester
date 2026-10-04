@@ -621,3 +621,63 @@ describe('per-trial metrics', () => {
     });
   });
 });
+
+describe('tool_search_hit', () => {
+  type Event = NonNullable<EvalCaseResult['trace']>['events'][number];
+  const search = (...names: Array<[string, string?]>): Event => ({
+    kind: 'tool_search',
+    source: 'host',
+    name: 'ToolSearch',
+    results: names.map(([name, server]) => ({
+      name,
+      ...(server ? { server } : {}),
+    })),
+  });
+  const call = (name: string, server?: string): Event => ({
+    kind: 'tool_call',
+    source: 'mcp',
+    name,
+    ...(server ? { server } : {}),
+  });
+  const traced = (
+    id: string,
+    events: Event[],
+    evidence: 'structured' | 'none' = 'structured'
+  ): EvalCaseResult => ({
+    ...result(id, true),
+    trace: { events, finalText: '', evidence },
+  });
+
+  it('is the share of trials whose search led to a call', () => {
+    const { perCase, aggregated, unavailable } = computeMetrics(
+      ['tool_search_hit'],
+      [
+        traced('hit', [
+          search(['find_skills', 'agg']),
+          call('find_skills', 'agg'),
+        ]),
+        traced('bare', [search(['find_skills']), call('find_skills', 'agg')]),
+        traced('miss', [search(['search', 'agg']), call('find_skills', 'agg')]),
+        traced('before', [
+          call('find_skills', 'agg'),
+          search(['find_skills', 'agg']),
+        ]),
+        traced('other-server', [
+          search(['find_skills', 'b']),
+          call('find_skills', 'agg'),
+        ]),
+        traced('no-search', [call('find_skills', 'agg')]),
+        traced('no-evidence', [search(['x']), call('x')], 'none'),
+      ]
+    );
+    expect(perCase.hit!.tool_search_hit).toBe(1);
+    expect(perCase.bare!.tool_search_hit).toBe(1);
+    expect(perCase.miss!.tool_search_hit).toBe(0);
+    expect(perCase.before!.tool_search_hit).toBe(0);
+    expect(perCase['other-server']!.tool_search_hit).toBe(0);
+    expect(perCase['no-search']!.tool_search_hit).toBeNull();
+    expect(perCase['no-evidence']!.tool_search_hit).toBeNull();
+    expect(aggregated.tool_search_hit_rate).toBeCloseTo(2 / 5);
+    expect(unavailable).toEqual([]);
+  });
+});

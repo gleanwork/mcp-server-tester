@@ -180,7 +180,7 @@ export default {
 
 A manifest that loads the plugin selects the host with `{ "type": "my/assistant" }`.
 
-- **The trace.** `run` returns a `HostRunResult`: `finalText`, `events`, and optional `usage`, `error` and timing fields. Each event has a `kind` (`tool_call`, `skill`, `command` or `subagent`), a `source` (`mcp` or `host`), a `name`, and optionally the MCP server label, arguments, output and ID. Record what the host did; don't reconstruct tool calls from the final text.
+- **The trace.** `run` returns a `HostRunResult`: `finalText`, `events`, and optional `usage`, `error` and timing fields. Each event has a `kind` (`tool_call`, `skill`, `command`, `subagent` or `tool_search`), a `source` (`mcp` or `host`), a `name`, and optionally the MCP server label, arguments, output and ID. Record what the host did; don't reconstruct tool calls from the final text. A `tool_search` event (the host searching its tool catalog) lists the tools the search returned in `results`, each `{ name, server? }`. Type host-native actions as their kind rather than as calls to a host tool, so skill expectations and search metrics can read them.
 - **Evidence.** Declare `evidence: 'structured'` only for authoritative protocol or host-native traces. With `observed`, `none` or no declaration, tool-call and argument assertions can't pass; text and judge assertions still run.
 - **Servers.** Events keep their MCP server labels. With more than one server, tool assertions use label-qualified names, or the manifest's `toolMap` from canonical to native names.
 - **In results.** Each host case result keeps the trace as `trace`, a `HostTrace`: the `HostRunResult` your host returned, without telemetry and diagnostics, plus its evidence. On a one-server arm, MCP events that name no server get that server's label. A case with several iterations has no `trace` of its own; each entry in `iterationResults` has the trace of that iteration. In a suite, every case result also names its `arm`. Stored results drop `finalText` and each event's `output`, the same way they drop `response`; events, servers, arguments and usage stay.
@@ -188,6 +188,19 @@ A manifest that loads the plugin selects the host with `{ "type": "my/assistant"
 - **Settings only.** `createConfig` returns settings for MST's own SDK or CLI host instead of running anything.
 - **Tool variants.** A host that connects to the servers in `input.servers` gets an arm's `toolOverrides` with no work of its own: the suite gives it `http` server configs for a local MCP proxy that applies the variant, so the host must speak Streamable HTTP (see [Tool variants on every host](#tool-variants-on-every-host)). A host that applies variants itself sets `toolOverrides: true` and reads them from `context.arm`. `buildToolSurface(listed, variant)` from `./evals` applies a variant with MST's rules (keys, renames, collisions), and `resolve(name, server)` maps a presented name back to the original tool. Record a renamed tool's calls under `originalName`, with the model's name in `rawName`, as MST's hosts do. A host that connects elsewhere (hosted connectors, say) sets `toolSurfaceProxy: false`; a manifest that gives it `toolOverrides` then fails validation.
 - **What it honours.** `maxConcurrency` caps the manifest's `concurrency`.
+
+### Claude Code host-native events
+
+The Claude CLI and Cowork hosts read Claude Code transcripts, where skills, commands, subagents and tool search are calls to host tools. They are recorded as typed events:
+
+| Claude Code tool | Event                                                  |
+| ---------------- | ------------------------------------------------------ |
+| `Skill`          | `skill`, named for the skill it loaded                 |
+| `SlashCommand`   | `command`, named for the command                       |
+| `Task`, `Agent`  | `subagent`, named for the subagent type                |
+| `ToolSearch`     | `tool_search`, with the tools it returned in `results` |
+
+A search's `results` come from `tool_reference` blocks in its result, or, without them, from `mcp__<server>__<tool>` names in its text. This format is inferred rather than taken from recorded `ToolSearch` traces; if `tool_search_hit_rate` reads 0 where searches clearly worked, check the search's `output` in the trace. Other host tools (`Bash`, `Read`) stay tool calls with `source: 'host'`.
 
 ### Tool variants on every host
 
@@ -236,7 +249,8 @@ Every arm in the run summary has `metrics`. They include, when the host reports 
 
 - `passed_rate`: the share of cases that passed.
 - `trial_pass_rate`: the share of trials that passed, averaged over cases.
-- `tool_count_mean`, `mcp_call_count_mean` and `host_event_count_mean`: per trial, every tool call; MCP tool calls; and host-native events (host tools, skills, commands, subagents). A host tool call counts in both `tool_count` and `host_event_count`, and a skill an MCP server serves counts in neither.
+- `tool_count_mean`, `mcp_call_count_mean` and `host_event_count_mean`: per trial, every tool call; MCP tool calls; and host-native events (host tools, skills, commands, subagents, tool searches). A host tool call counts in both `tool_count` and `host_event_count`; a typed host event (a skill load, command, subagent or tool search) counts only in `host_event_count`; a skill an MCP server serves counts in neither.
+- `tool_search_hit_rate`, for hosts that search their tool catalog: the share of trials where an MCP call was to a tool an earlier search returned. It doesn't check that the tool was the one the case expected; `toolsTriggered` does.
 - `input_tokens_mean`, `output_tokens_mean` and `cost_usd_mean`: usage and cost per trial.
 - `duration_s_mean`: time per trial.
 - `judge_pass_rate` and `judge_score`, for cases with judges.
@@ -254,6 +268,7 @@ A manifest's or arm's `metrics` list adds more. Built-in names:
 | `duration_s`, `duration_api_s`                                                                         | Wall time, and API time when the host reports it.                                  |
 | `response_success`, `response_len`, `response_words`                                                   | Trials without a host error, and the answer's length.                              |
 | `skill_loaded`, `skill_before_tool`, `skill_verification_failed`                                       | Agent Skills loads.                                                                |
+| `tool_search_hit`                                                                                      | Trials where a tool search returned a tool the trial then called.                  |
 | `judge_pass`, `judge_score`, `judge_name`, `judge_pass_for`, `judge_score_for`                         | Judge verdicts, from the case's last trial.                                        |
 
 - **Per trial.** Usage, timing, tool and answer metrics are measured per trial. A case's value is the mean over its trials, and an arm's is the mean over its cases (`<name>_mean`, or `<name>_rate` for shares). `first_tool` lists the first tool of each case's first trial. Runs that failed on infrastructure, such as a network error or a host that couldn't start, aren't trials, as they don't count toward accuracy.
