@@ -1,0 +1,21 @@
+{
+  "title": "An organisation-wide system prompt steers the host to find_skills",
+  "exitCode": 1,
+  "checks": [
+    {
+      "path": "arms[name=no-prompt].metrics.passed_rate",
+      "equals": 0
+    },
+    {
+      "path": "arms[name=org-prompt].metrics.passed_rate",
+      "equals": 1
+    },
+    {
+      "path": "armDeltas.org-prompt.passRateDelta",
+      "equals": 1
+    }
+  ],
+  "ledger": {
+    "metrics": ["input_tokens_mean", "output_tokens_mean", "tool_count_mean"]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "tracker",
+  "tools": [
+    {
+      "name": "search",
+      "description": "Search tracker tickets.",
+      "response": "Tickets for \"{query}\": INC-482 Checkout outage (resolved)."
+    },
+    {
+      "name": "get_issue",
+      "description": "Read a tracker ticket by id.",
+      "response": "INC-482 Checkout outage. 41 minutes of failed payments; expired TLS certificate."
+    },
+    {
+      "name": "create_issue",
+      "description": "Create a tracker ticket.",
+      "response": "Created INC-501."
+    }
+  ]
+}

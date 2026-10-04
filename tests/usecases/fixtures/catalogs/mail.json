@@ -1,0 +1,15 @@
+{
+  "name": "mail",
+  "tools": [
+    {
+      "name": "search",
+      "description": "Search email.",
+      "response": "Mail for \"{query}\": 'Postmortem: checkout outage' from the billing team."
+    },
+    {
+      "name": "get_message",
+      "description": "Read an email by id.",
+      "response": "Postmortem: checkout outage. Root cause: expired certificate."
+    }
+  ]
+}

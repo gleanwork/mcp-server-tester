@@ -1,0 +1,22 @@
+{
+  "name": "skill-intents",
+  "cases": [
+    {
+      "id": "summarize-thread",
+      "mode": "host",
+      "scenario": "Summarize the discussion in the design thread from this week",
+      "expect": {
+        "toolsTriggered": {
+          "calls": [
+            {
+              "name": "run",
+              "kind": "skill",
+              "source": "host",
+              "required": true
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

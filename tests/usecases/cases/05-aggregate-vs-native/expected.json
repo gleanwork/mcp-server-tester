@@ -1,0 +1,73 @@
+{
+  "title": "One aggregating server vs several native servers, same host",
+  "exitCode": 0,
+  "checks": [
+    {
+      "path": "arms[name=aggregate].metrics.passed_rate",
+      "equals": 1
+    },
+    {
+      "path": "arms[name=native].metrics.passed_rate",
+      "equals": 1
+    },
+    {
+      "path": "arms[name=aggregate].metrics.tool_count_mean",
+      "equals": 2
+    },
+    {
+      "path": "arms[name=native].metrics.tool_count_mean",
+      "equals": 5
+    },
+    {
+      "path": "arms[name=native].result.caseResults[0].mcpHostTrace.calls.length",
+      "equals": 5
+    },
+    {
+      "path": "arms[name=native].result.caseResults[0].mcpHostTrace.calls[0].name",
+      "equals": "github.search_issues"
+    },
+    {
+      "path": "arms[name=aggregate].result.caseResults[0].mcpHostTrace.calls[1].name",
+      "equals": "agg.read_document",
+      "gap": "step 5: the trace names each call's server, even when an arm has one server"
+    },
+    {
+      "path": "arms[name=native].metrics.cost_usd_mean",
+      "exists": true,
+      "gap": "step 6: price usage from a model pricing table instead of omitting cost"
+    },
+    {
+      "path": "results[0].arm",
+      "exists": true,
+      "gap": "step 5: each case result records the arm that produced it"
+    }
+  ],
+  "ledger": {
+    "metrics": [
+      "input_tokens_mean",
+      "output_tokens_mean",
+      "tool_count_mean",
+      "mcp_call_count_mean"
+    ],
+    "deltas": [
+      {
+        "key": "inputTokensDelta",
+        "metric": "input_tokens_mean"
+      },
+      {
+        "key": "outputTokensDelta",
+        "metric": "output_tokens_mean"
+      },
+      {
+        "key": "toolCallsDelta",
+        "metric": "tool_count_mean"
+      }
+    ],
+    "gaps": {
+      "mcp_call_count_mean": "step 6: count MCP calls and host calls separately",
+      "inputTokensDelta": "step 6: arm deltas cover tokens, cost and calls, not only pass rate",
+      "outputTokensDelta": "step 6: arm deltas cover tokens, cost and calls, not only pass rate",
+      "toolCallsDelta": "step 6: arm deltas cover tokens, cost and calls, not only pass rate"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "github",
+  "tools": [
+    {
+      "name": "search_issues",
+      "description": "Search GitHub issues and pull requests.",
+      "response": "Issues for \"{query}\": #1203 Renew payments gateway certificate (closed)."
+    },
+    {
+      "name": "get_file",
+      "description": "Read a file from a repository.",
+      "response": "runbooks/payments.md: rotate the gateway certificate every 90 days."
+    }
+  ]
+}

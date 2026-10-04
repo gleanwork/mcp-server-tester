@@ -1,0 +1,20 @@
+{
+  "name": "find-skills",
+  "cases": [
+    {
+      "id": "tracker-ticket",
+      "mode": "host",
+      "scenario": "Create a tracker ticket for the checkout outage",
+      "expect": {
+        "toolsTriggered": {
+          "calls": [
+            {
+              "name": "find_skills",
+              "required": true
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

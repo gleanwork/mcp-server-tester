@@ -1,0 +1,65 @@
+{
+  "name": "assistant-sxs",
+  "datasets": ["./dataset.json"],
+  "metrics": ["passed", "tool_count", "judge_pass", "cost_usd"],
+  "arms": [
+    {
+      "name": "assistant",
+      "servers": [],
+      "host": {
+        "type": "usecase/assistant",
+        "answer": "An expired certificate on the payments gateway; the outage lasted 41 minutes."
+      }
+    },
+    {
+      "name": "desktop",
+      "servers": ["{{server aggregate agg}}"],
+      "host": {
+        "type": "usecase/model",
+        "policy": [
+          {
+            "steps": [
+              {
+                "call": {
+                  "name": "search"
+                },
+                "args": {
+                  "query": "checkout outage"
+                }
+              },
+              {
+                "call": {
+                  "name": "read_document"
+                },
+                "args": {
+                  "id": "inc-482"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "cli",
+      "servers": ["{{server aggregate agg}}"],
+      "host": {
+        "type": "usecase/model",
+        "policy": [
+          {
+            "steps": [
+              {
+                "call": {
+                  "name": "search"
+                },
+                "args": {
+                  "query": "checkout outage"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

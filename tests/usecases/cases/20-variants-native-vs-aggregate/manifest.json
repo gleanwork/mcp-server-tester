@@ -1,0 +1,103 @@
+{
+  "name": "variants-native-vs-aggregate",
+  "datasets": ["./dataset.json"],
+  "host": {
+    "type": "usecase/model",
+    "model": "claude-sonnet-4-5",
+    "policy": [
+      {
+        "when": {
+          "plugin": "aggregate-plugin"
+        },
+        "steps": [
+          {
+            "skill": "company-search"
+          },
+          {
+            "call": {
+              "nameIncludes": "search"
+            },
+            "args": {
+              "query": "checkout outage"
+            },
+            "all": true
+          }
+        ]
+      },
+      {
+        "steps": [
+          {
+            "call": {
+              "nameIncludes": "search"
+            },
+            "args": {
+              "query": "checkout outage"
+            },
+            "all": true
+          },
+          {
+            "call": {
+              "name": "read_document"
+            },
+            "args": {
+              "id": "inc-482"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "metrics": [
+    "passed",
+    "tool_count",
+    "input_tokens",
+    "output_tokens",
+    "cost_usd",
+    "judge_pass"
+  ],
+  "arms": [
+    {
+      "name": "native-connectors",
+      "servers": [
+        "{{server github github}}",
+        "{{server tracker tracker}}",
+        "{{server chat chat}}",
+        "{{server mail mail}}"
+      ]
+    },
+    {
+      "name": "aggregate-mcp-gateway",
+      "servers": ["{{server aggregate agg}}", "{{server gateway gateway}}"]
+    },
+    {
+      "name": "aggregate-mcp-native-connectors",
+      "servers": [
+        "{{server aggregate agg}}",
+        "{{server github github}}",
+        "{{server tracker tracker}}",
+        "{{server chat chat}}",
+        "{{server mail mail}}"
+      ]
+    },
+    {
+      "name": "aggregate-plugin-gateway",
+      "servers": ["{{server aggregate agg}}", "{{server gateway gateway}}"],
+      "host": {
+        "plugins": ["aggregate-plugin"]
+      }
+    },
+    {
+      "name": "aggregate-plugin-native-connectors",
+      "servers": [
+        "{{server aggregate agg}}",
+        "{{server github github}}",
+        "{{server tracker tracker}}",
+        "{{server chat chat}}",
+        "{{server mail mail}}"
+      ],
+      "host": {
+        "plugins": ["aggregate-plugin"]
+      }
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "name": "guidance-plugin-effect",
+  "datasets": ["./dataset.json"],
+  "servers": ["{{server aggregate agg}}"],
+  "host": {
+    "type": "usecase/model",
+    "policy": [
+      {
+        "when": {
+          "plugin": "tool-guidance"
+        },
+        "steps": [
+          {
+            "call": {
+              "name": "search"
+            },
+            "args": {
+              "query": "Q3 planning"
+            }
+          }
+        ]
+      },
+      {
+        "steps": [
+          {
+            "call": {
+              "name": "search"
+            },
+            "args": {
+              "query": "Q3 planning"
+            },
+            "rate": 0.4
+          }
+        ]
+      }
+    ]
+  },
+  "iterations": 10,
+  "metrics": [
+    "passed",
+    "tool_count",
+    "input_tokens",
+    "output_tokens",
+    "cost_usd"
+  ],
+  "arms": [
+    {
+      "name": "descriptions-only"
+    },
+    {
+      "name": "with-guidance",
+      "host": {
+        "plugins": ["tool-guidance"]
+      }
+    }
+  ]
+}

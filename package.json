@@ -95,6 +95,8 @@
     "preview-reporter": "tsx scripts/preview-reporter.ts",
     "test": "vitest run",
     "test:eval-foundation": "node scripts/test-eval-foundation.mjs",
+    "test:eval-review": "node scripts/test-eval-review.mjs",
+    "test:usecases": "vitest run --config vitest.usecases.config.mts",
     "test:all": "npm run build && npm run format:check && npm run lint && npm run typecheck && npm test",
     "test:external-host": "vitest run --config vitest.external-host.config.mts",
     "test:external-host:chat": "vitest run --config vitest.external-host.config.mts -t \"Claude Chat\"",

@@ -1,0 +1,22 @@
+{
+  "title": "Tool description variants: one arm per variant",
+  "exitCode": 1,
+  "checks": [
+    {
+      "path": "arms[name=baseline].metrics.passed_rate",
+      "equals": 0
+    },
+    {
+      "path": "arms[name=concise].metrics.passed_rate",
+      "equals": 0
+    },
+    {
+      "path": "arms[name=verbose].metrics.passed_rate",
+      "equals": 1,
+      "gap": "step 7: tool variants reach plugin hosts through the tool surface"
+    }
+  ],
+  "ledger": {
+    "metrics": ["input_tokens_mean", "output_tokens_mean", "tool_count_mean"]
+  }
+}

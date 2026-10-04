@@ -1,0 +1,39 @@
+{
+  "title": "Implicit skill triggering vs the explicit command",
+  "exitCode": 1,
+  "checks": [
+    {
+      "path": "arms[name=implicit].metrics.passed_rate",
+      "equals": 0
+    },
+    {
+      "path": "arms[name=explicit].metrics.passed_rate",
+      "equals": 1
+    },
+    {
+      "path": "armDeltas.explicit.passRateDelta",
+      "equals": 1
+    },
+    {
+      "path": "arms[name=implicit].metrics.win_rate",
+      "equals": 0.6,
+      "gap": "step 2: report the iteration win rate per arm (case pass/fail hides it)"
+    },
+    {
+      "path": "arms[name=explicit].metrics.win_rate",
+      "equals": 1,
+      "gap": "step 2: report the iteration win rate per arm (case pass/fail hides it)"
+    },
+    {
+      "path": "armDeltas.explicit.winRateDelta",
+      "equals": 0.4,
+      "gap": "step 2: report the iteration win rate per arm (case pass/fail hides it)"
+    }
+  ],
+  "ledger": {
+    "metrics": ["tool_count_mean", "host_call_count_mean"],
+    "gaps": {
+      "host_call_count_mean": "step 6: count MCP calls and host calls separately"
+    }
+  }
+}

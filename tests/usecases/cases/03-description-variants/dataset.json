@@ -1,0 +1,20 @@
+{
+  "name": "triggering",
+  "cases": [
+    {
+      "id": "cross-source",
+      "mode": "host",
+      "scenario": "Find everything about the checkout outage",
+      "expect": {
+        "toolsTriggered": {
+          "calls": [
+            {
+              "name": "search",
+              "required": true
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

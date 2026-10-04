@@ -1,0 +1,39 @@
+{
+  "name": "skill-triggering",
+  "datasets": ["./dataset.json"],
+  "servers": [],
+  "host": {
+    "type": "usecase/model",
+    "policy": [
+      {
+        "when": {
+          "scenarioStartsWith": "/run"
+        },
+        "steps": [
+          {
+            "skill": "run"
+          }
+        ]
+      },
+      {
+        "steps": [
+          {
+            "skill": "run",
+            "rate": 0.6
+          }
+        ]
+      }
+    ]
+  },
+  "iterations": 10,
+  "metrics": ["passed", "tool_count"],
+  "arms": [
+    {
+      "name": "implicit"
+    },
+    {
+      "name": "explicit",
+      "scenarioTemplate": "/run {{scenario}}"
+    }
+  ]
+}

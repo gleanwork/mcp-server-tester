@@ -1,0 +1,16 @@
+{
+  "title": "Rename find_skills so the name reads as \"more tools here\"",
+  "exitCode": 1,
+  "runGap": "step 7: toolOverrides can rename a tool",
+  "runGapError": "\"keys\": \\[\\s*\"name\"\\s*\\]",
+  "checks": [
+    {
+      "path": "arms[name=baseline].metrics.passed_rate",
+      "equals": 0
+    },
+    {
+      "path": "arms[name=renamed].metrics.passed_rate",
+      "equals": 1
+    }
+  ]
+}

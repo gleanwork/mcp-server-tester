@@ -11,6 +11,8 @@ export default defineConfig({
       'dist',
       'tests/**/*.spec.ts',
       'src/**/*.integration.test.ts',
+      // Runs the built CLI; see vitest.usecases.config.mts.
+      'tests/usecases/**',
     ],
     coverage: {
       provider: 'v8',

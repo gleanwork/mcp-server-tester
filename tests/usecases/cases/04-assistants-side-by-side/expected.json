@@ -1,0 +1,37 @@
+{
+  "title": "Side by side across assistants, one with no MCP servers and no tool evidence",
+  "exitCode": 1,
+  "checks": [
+    {
+      "path": "arms[name=assistant].metrics.judge_pass_rate",
+      "equals": 1
+    },
+    {
+      "path": "arms[name=desktop].metrics.judge_pass_rate",
+      "equals": 1
+    },
+    {
+      "path": "arms[name=cli].metrics.judge_pass_rate",
+      "equals": 0
+    },
+    {
+      "path": "arms[name=assistant].metrics.cost_usd_mean",
+      "exists": false
+    },
+    {
+      "path": "arms[name=assistant].evidence",
+      "equals": "none",
+      "gap": "step 2: surface each arm's evidence, and don't report trace metrics for evidence-none hosts"
+    },
+    {
+      "path": "arms[name=assistant].metrics.tool_count_mean",
+      "exists": false,
+      "gap": "step 2: surface each arm's evidence, and don't report trace metrics for evidence-none hosts"
+    },
+    {
+      "path": "arms[name=assistant].unavailableMetrics",
+      "exists": true,
+      "gap": "step 2: surface each arm's evidence, and don't report trace metrics for evidence-none hosts"
+    }
+  ]
+}

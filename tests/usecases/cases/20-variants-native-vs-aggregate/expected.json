@@ -1,0 +1,71 @@
+{
+  "title": "One dataset across five server and plugin configurations in one run",
+  "exitCode": 1,
+  "checks": [
+    {
+      "path": "arms.length",
+      "equals": 5
+    },
+    {
+      "path": "armDeltas.length",
+      "equals": 4
+    },
+    {
+      "path": "arms[name=native-connectors].metrics.judge_pass_rate",
+      "equals": 0
+    },
+    {
+      "path": "arms[name=aggregate-mcp-gateway].metrics.judge_pass_rate",
+      "equals": 1
+    },
+    {
+      "path": "arms[name=aggregate-mcp-native-connectors].metrics.judge_pass_rate",
+      "equals": 1
+    },
+    {
+      "path": "arms[name=aggregate-plugin-gateway].metrics.judge_pass_rate",
+      "equals": 0.5
+    },
+    {
+      "path": "arms[name=aggregate-plugin-native-connectors].metrics.judge_pass_rate",
+      "equals": 0
+    },
+    {
+      "path": "arms[name=native-connectors].metrics.tool_count_mean",
+      "equals": 4
+    },
+    {
+      "path": "arms[name=aggregate-mcp-gateway].metrics.tool_count_mean",
+      "equals": 3
+    },
+    {
+      "path": "arms[name=aggregate-mcp-native-connectors].metrics.tool_count_mean",
+      "equals": 6
+    },
+    {
+      "path": "arms[name=aggregate-plugin-gateway].metrics.tool_count_mean",
+      "equals": 2
+    },
+    {
+      "path": "arms[name=aggregate-plugin-native-connectors].metrics.tool_count_mean",
+      "equals": 5
+    },
+    {
+      "path": "arms[name=aggregate-mcp-gateway].metrics.cost_usd_mean",
+      "exists": true,
+      "gap": "step 6: price usage from a model pricing table instead of omitting cost"
+    }
+  ],
+  "ledger": {
+    "metrics": ["input_tokens_mean", "output_tokens_mean", "tool_count_mean"],
+    "deltas": [
+      {
+        "key": "inputTokensDelta",
+        "metric": "input_tokens_mean"
+      }
+    ],
+    "gaps": {
+      "inputTokensDelta": "step 6: arm deltas cover tokens, cost and calls, not only pass rate"
+    }
+  }
+}
