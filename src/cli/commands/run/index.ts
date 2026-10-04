@@ -1,4 +1,6 @@
 import path from 'node:path';
+import { z } from 'zod';
+import { describeError } from '../../../utils/describeError.js';
 import {
   runEvalSuite,
   type RunEvalSuiteOptions,
@@ -24,7 +26,17 @@ export async function run(options: RunOptions): Promise<void> {
     dryRun: options.dryRun,
     arm: options.arm,
   };
-  const result = await runEvalSuite(suiteOptions);
+  let result: Awaited<ReturnType<typeof runEvalSuite>>;
+  try {
+    result = await runEvalSuite(suiteOptions);
+  } catch (error) {
+    // A validation failure says which manifest it is in.
+    if (error instanceof z.ZodError)
+      throw new Error(`${options.manifest}: ${describeError(error)}`, {
+        cause: error,
+      });
+    throw error;
+  }
 
   if (options.dryRun) {
     process.stdout.write(

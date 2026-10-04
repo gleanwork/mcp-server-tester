@@ -2,6 +2,7 @@
  * CLI open command for viewing the MCP eval reporter UI in the browser.
  */
 
+import { describeError } from '../../../utils/describeError.js';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
@@ -31,7 +32,7 @@ export async function open(options: OpenOptions): Promise<void> {
     const { default: openBrowser } = await import('open');
     await openBrowser(reportPath);
   } catch (error) {
-    console.error('Failed to open report in browser:', error);
+    console.error(`Failed to open report in browser: ${describeError(error)}`);
     console.error(`Open manually: file://${reportPath}`);
     process.exit(1);
   }

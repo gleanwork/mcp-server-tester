@@ -40,6 +40,12 @@ export const debugOAuth = createDebug(`${NAMESPACE}:oauth`);
 export const debugEval = createDebug(`${NAMESPACE}:eval`);
 
 /**
+ * Debug logger for the CLI: with it enabled, a failing command prints the
+ * error's stack and causes.
+ */
+export const debugCli = createDebug(`${NAMESPACE}:cli`);
+
+/**
  * Debug logger for HTTP-level trace logging.
  *
  * Enable with:

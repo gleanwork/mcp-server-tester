@@ -121,6 +121,106 @@ describe('mst CLI', () => {
     });
   });
 
+  describe('ordinary mistakes', () => {
+    const cases = JSON.stringify({
+      name: 'cases',
+      cases: [{ id: 'a', toolName: 'search', args: {} }],
+    });
+
+    it('a missing manifest is one line, with no stack trace', async () => {
+      const result = await runBin('run', '--manifest', 'missing.json');
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toMatch(/^mst: Evaluation manifest not found: /);
+      expect(result.stderr).not.toMatch(/\n\s+at /);
+    });
+
+    it('a misspelt key names the key, not a raw ZodError', async () => {
+      await project.write({
+        'cases.json': cases,
+        'typo.json': JSON.stringify({
+          name: 'm',
+          datasets: ['./cases.json'],
+          hostt: { type: 'vercel-sdk' },
+        }),
+      });
+      const result = await runBin(
+        'run',
+        '--manifest',
+        'typo.json',
+        '--dry-run'
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('mst: typo.json: Invalid configuration:');
+      expect(result.stderr).toContain('Unrecognized key: "hostt"');
+      expect(result.stderr).not.toContain('ZodError');
+      expect(result.stderr).not.toMatch(/\n\s+at /);
+    });
+
+    it('broken JSON names the file', async () => {
+      await project.write({ 'broken.json': '{ name: ' });
+      const result = await runBin('run', '--manifest', 'broken.json');
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toMatch(
+        /^mst: Evaluation manifest .*broken\.json isn't valid JSON: /
+      );
+    });
+
+    it('batch names each failing manifest, and a missing directory', async () => {
+      await project.write({
+        'cases.json': cases,
+        'typo.json': JSON.stringify({
+          name: 'm',
+          datasets: ['./cases.json'],
+          hostt: {},
+        }),
+      });
+      const result = await runBin(
+        'batch',
+        '--manifests',
+        'typo.json',
+        '--dry-run'
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('typo.json: Invalid configuration:');
+      expect(result.stderr).not.toContain('ZodError');
+      const missing = await runBin('batch', '--manifest-dir', 'nowhere');
+      expect(missing.exitCode).toBe(1);
+      expect(missing.stderr).toMatch(
+        /^mst: Manifest directory not found: nowhere/
+      );
+    });
+
+    it('DEBUG=mcp-server-tester:cli shows the stack', async () => {
+      const result = await runBin('run', '--manifest', 'missing.json', {
+        env: { DEBUG: 'mcp-server-tester:cli' },
+      });
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toMatch(/\n\s+at /);
+    });
+
+    it('an unknown host lists the hosts there are', async () => {
+      await project.write({
+        'cases.json': cases,
+        'host.json': JSON.stringify({
+          name: 'm',
+          datasets: ['./cases.json'],
+          host: { type: 'sdk' },
+        }),
+      });
+      const result = await runBin(
+        'run',
+        '--manifest',
+        'host.json',
+        '--dry-run'
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toMatch(
+        /^mst: Host "sdk" is not available\. Available: .*vercel-sdk/
+      );
+      expect(result.stderr).not.toMatch(/\n\s+at /);
+    });
+  });
+
   describe('open command', () => {
     it('exits with code 1 when no report exists in default directory', async () => {
       const result = await runBin('open');

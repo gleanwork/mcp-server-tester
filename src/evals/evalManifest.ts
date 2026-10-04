@@ -394,7 +394,15 @@ export function loadEvalManifest(
   if (!fs.existsSync(absolutePath)) {
     throw new Error(`Evaluation manifest not found: ${absolutePath}`);
   }
-  const raw = JSON.parse(fs.readFileSync(absolutePath, 'utf8')) as unknown;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(fs.readFileSync(absolutePath, 'utf8'));
+  } catch (error) {
+    throw new Error(
+      `Evaluation manifest ${absolutePath} isn't valid JSON: ${(error as Error).message}`,
+      { cause: error }
+    );
+  }
   return loadEvalManifestFromObject(raw, {
     ...options,
     rootDir: options.rootDir ?? path.dirname(absolutePath),

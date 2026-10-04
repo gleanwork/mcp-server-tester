@@ -22,7 +22,13 @@ async function resolveManifestPaths(options: BatchOptions): Promise<string[]> {
   if (!options.manifestDir) {
     throw new Error('Provide --manifests or --manifest-dir.');
   }
-  const names = (await fs.readdir(options.manifestDir))
+  const names = (
+    await fs.readdir(options.manifestDir).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+        throw new Error(`Manifest directory not found: ${options.manifestDir}`);
+      throw error;
+    })
+  )
     .filter((name) => name.endsWith('.json'))
     .sort();
   return names.map((name) => path.join(options.manifestDir!, name));
