@@ -19,6 +19,10 @@ export function sumUsage(
       a.totalCostUsd === undefined || b.totalCostUsd === undefined
         ? undefined
         : a.totalCostUsd + b.totalCostUsd,
+    estimatedCostUsd:
+      a.estimatedCostUsd === undefined || b.estimatedCostUsd === undefined
+        ? undefined
+        : a.estimatedCostUsd + b.estimatedCostUsd,
     reasoningOutputTokens: optionalSum(
       a.reasoningOutputTokens,
       b.reasoningOutputTokens

@@ -219,31 +219,53 @@ more than one entry so traces and metrics can attribute MCP calls correctly.
 
 ## Metrics
 
-Every arm in the run summary has `metrics`. They always include:
+Every arm in the run summary has `metrics`. They include, when the host reports them:
 
 - `passed_rate`: the share of cases that passed.
 - `trial_pass_rate`: the share of trials that passed, averaged over cases.
+- `tool_count_mean`, `mcp_call_count_mean` and `host_event_count_mean`: per trial, every tool call; MCP tool calls; and host-native events (host tools, skills, commands, subagents). A host tool call counts in both `tool_count` and `host_event_count`, and a skill an MCP server serves counts in neither.
+- `input_tokens_mean`, `output_tokens_mean` and `cost_usd_mean`: usage and cost per trial.
+- `duration_s_mean`: time per trial.
+- `judge_pass_rate` and `judge_score`, for cases with judges.
 
 A trial is one run of a case: one iteration, or the case itself when it runs once. A case passes when its trials reach its `accuracyThreshold` (1 by default), so two arms whose cases pass 60% and 100% of the time report a `passed_rate` of 0 and 1. `trial_pass_rate` reports 0.6 and 1.
 
 A manifest's or arm's `metrics` list adds more. Built-in names:
 
-| Metric                                                                                                 | Reports                                                           |
-| ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| `passed`, `trial_pass`                                                                                 | The two above.                                                    |
-| `tool_count`, `first_tool`, `is_no_action`                                                             | Tool calls in the trace. MCP calls are named `server.tool`.       |
-| `input_tokens`, `input_tokens_uncached`, `output_tokens`, `cache_read_tokens`, `cache_creation_tokens` | Host token usage. `input_tokens` includes cache reads and writes. |
-| `cost_usd`                                                                                             | Host-reported cost.                                               |
-| `duration_s`, `duration_api_s`                                                                         | Wall time, and API time when the host reports it.                 |
-| `response_success`, `response_len`, `response_words`                                                   | Trials without a host error, and the answer's length.             |
-| `skill_loaded`, `skill_before_tool`, `skill_verification_failed`                                       | Agent Skills loads.                                               |
-| `judge_pass`, `judge_score`, `judge_name`, `judge_pass_for`, `judge_score_for`                         | Judge verdicts, from the case's last trial.                       |
+| Metric                                                                                                 | Reports                                                                            |
+| ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| `passed`, `trial_pass`                                                                                 | The share of cases, and of trials, that passed.                                    |
+| `tool_count`, `mcp_call_count`, `host_event_count`, `first_tool`, `is_no_action`                       | Tool calls and host-native events in the trace. MCP calls are named `server.tool`. |
+| `input_tokens`, `input_tokens_uncached`, `output_tokens`, `cache_read_tokens`, `cache_creation_tokens` | Host token usage. `input_tokens` includes cache reads and writes.                  |
+| `cost_usd`                                                                                             | Host-reported cost, or an estimate from the manifest's `pricing`.                  |
+| `duration_s`, `duration_api_s`                                                                         | Wall time, and API time when the host reports it.                                  |
+| `response_success`, `response_len`, `response_words`                                                   | Trials without a host error, and the answer's length.                              |
+| `skill_loaded`, `skill_before_tool`, `skill_verification_failed`                                       | Agent Skills loads.                                                                |
+| `judge_pass`, `judge_score`, `judge_name`, `judge_pass_for`, `judge_score_for`                         | Judge verdicts, from the case's last trial.                                        |
 
 - **Per trial.** Usage, timing, tool and answer metrics are measured per trial. A case's value is the mean over its trials, and an arm's is the mean over its cases (`<name>_mean`, or `<name>_rate` for shares). `first_tool` lists the first tool of each case's first trial. Runs that failed on infrastructure, such as a network error or a host that couldn't start, aren't trials, as they don't count toward accuracy.
-- **Unavailable, not zero.** A metric with no value for any case is left out of `metrics` and listed in the arm's `unavailableMetrics`. A host that reports no cost has no `cost_usd`. A host whose evidence is `none` has no tool metrics.
+- **Unavailable, not zero.** A metric with no value for any case is left out of `metrics`; if the manifest lists it, it's also in the arm's `unavailableMetrics`. A host that reports no cost has no `cost_usd` unless the manifest prices its model. A host whose evidence is `none` has no tool metrics.
 - **Evidence.** An arm's `evidence` is the weakest among its cases (`none`, then `observed`, then `structured`). With `observed`, tool metrics come from a best-effort trace; compare them only between arms with the same evidence.
-- **Deltas.** `armDeltas` compares each arm with the first: `passRate`, `trialPassRate`, and their deltas.
+- **Deltas.** `armDeltas` compares each arm with the first: `passRate`, `trialPassRate` and their deltas, and `metricDeltas`, the change in every numeric metric both arms report (`metricDeltas.input_tokens_mean`, say), with `judge_score` per judge.
+- **In the CLI.** `mst run` prints a row per arm: cases passed, trial pass rate, judge pass rate when there are judges, MCP calls and host events, tokens, cost and time.
 - **Run totals.** The summary's top-level `total`, `passed`, `failed` and `passRate` count every arm; its other metrics are the first arm's.
+
+### Pricing
+
+Most hosts report tokens but not cost. A manifest (or a plugin's shared config) can price them, in USD per million tokens, by the model each case runs:
+
+```json
+"pricing": {
+  "claude-sonnet-4-5": { "input": 3, "output": 15, "cacheRead": 0.3, "cacheWrite": 3.75 }
+}
+```
+
+MST ships no prices; they change too often to bake in.
+
+- **Reported cost wins.** A host-reported cost is always used. Estimates are kept apart as `estimatedCostUsd` in each case's usage, `cost_usd` uses whichever there is, and the arm's `costSource` says which (`host`, `pricing` or `mixed`).
+- **Which model.** A case is priced at its own host's `model`, else a legacy `mcpHostConfig.model`, else the arm's or manifest's host `model` (including a host's default). A model the host picks at run time isn't known to MST, so set `host.model` to price it.
+- **Auditable.** Each arm records the prices it used in `pricing`, and models it couldn't price in `unpricedModels`; `cost_usd` leaves their trials out.
+- **Shared configs.** A manifest's `pricing` replaces a shared config's whole table; the two aren't merged.
 
 ### Compared with the previous run
 

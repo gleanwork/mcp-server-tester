@@ -62,5 +62,11 @@
         "read": ["github.get_file", "tracker.get_issue", "mail.get_message"]
       }
     }
-  ]
+  ],
+  "pricing": {
+    "claude-sonnet-4-5": {
+      "input": 3,
+      "output": 15
+    }
+  }
 }

@@ -28,9 +28,6 @@
     }
   ],
   "ledger": {
-    "metrics": ["tool_count_mean", "host_call_count_mean"],
-    "gaps": {
-      "host_call_count_mean": "step 6: count MCP calls and host calls separately"
-    }
+    "metrics": ["tool_count_mean", "host_event_count_mean"]
   }
 }

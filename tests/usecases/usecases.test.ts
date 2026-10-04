@@ -29,7 +29,7 @@ const LEDGER_METRICS = [
   'output_tokens_mean',
   'tool_count_mean',
   'mcp_call_count_mean',
-  'host_call_count_mean',
+  'host_event_count_mean',
 ] as const;
 type LedgerMetric = (typeof LEDGER_METRICS)[number];
 
@@ -286,7 +286,7 @@ function ledgerMean(
           .length;
       case 'mcp_call_count_mean':
         return entry.events.filter((event) => event.source === 'mcp').length;
-      case 'host_call_count_mean':
+      case 'host_event_count_mean':
         return entry.events.filter((event) => event.source === 'host').length;
     }
   };

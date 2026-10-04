@@ -10,6 +10,7 @@ import type {
   EvalManifest,
   ExtensionConfig,
   HostConfig,
+  ModelPricing,
 } from './evalManifest.js';
 import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
 import type { EvalResultStore } from './resultStore.js';
@@ -221,12 +222,18 @@ export interface EvaluationArmResult {
   name: string;
   servers: MCPConfig[];
   result?: EvalRunnerResult;
-  /** `passed_rate` and `trial_pass_rate`, plus the listed metrics. */
+  /** Outcomes, calls, tokens, cost and time, plus the listed metrics. */
   metrics?: Record<string, unknown>;
   /** The weakest evidence among the arm's cases. */
   evidence?: HostEvidence;
-  /** Reported metrics with no value for this arm (unavailable, not zero). */
+  /** Listed metrics with no value for this arm (unavailable, not zero). */
   unavailableMetrics?: string[];
+  /** Where `cost_usd` comes from: hosts, the manifest's `pricing`, or both. */
+  costSource?: 'host' | 'pricing' | 'mixed';
+  /** The prices the arm's estimates used, by model, so they can be audited later. */
+  pricing?: Record<string, ModelPricing>;
+  /** Models whose usage had no reported cost and no price: `cost_usd` leaves them out. */
+  unpricedModels?: string[];
   comparison?: Record<string, unknown>;
 }
 

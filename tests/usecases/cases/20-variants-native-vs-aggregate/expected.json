@@ -52,20 +52,20 @@
     },
     {
       "path": "arms[name=aggregate-mcp-gateway].metrics.cost_usd_mean",
-      "exists": true,
-      "gap": "step 6: price usage from a model pricing table instead of omitting cost"
+      "exists": true
+    },
+    {
+      "path": "arms[name=aggregate-mcp-gateway].costSource",
+      "equals": "pricing"
     }
   ],
   "ledger": {
     "metrics": ["input_tokens_mean", "output_tokens_mean", "tool_count_mean"],
     "deltas": [
       {
-        "key": "inputTokensDelta",
+        "key": "metricDeltas.input_tokens_mean",
         "metric": "input_tokens_mean"
       }
-    ],
-    "gaps": {
-      "inputTokensDelta": "step 6: arm deltas cover tokens, cost and calls, not only pass rate"
-    }
+    ]
   }
 }
