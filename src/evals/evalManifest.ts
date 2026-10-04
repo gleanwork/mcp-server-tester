@@ -116,6 +116,10 @@ const ToolOverrideVariantSchema = z
       z.string(),
       z
         .object({
+          name: z
+            .string()
+            .regex(/^[A-Za-z0-9_.-]{1,128}$/, 'Not a valid MCP tool name.')
+            .optional(),
           description: z.string().optional(),
           inputSchema: z.record(z.string(), z.unknown()).optional(),
         })

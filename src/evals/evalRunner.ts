@@ -18,6 +18,11 @@ import {
 } from './caseExecution.js';
 import type { HostEvent } from './evalFrameworkTypes.js';
 import type { TestInfo, Expect } from '@playwright/test';
+import {
+  buildToolSurface,
+  registerPresentedTools,
+  type ToolSurface,
+} from './toolSurface.js';
 import type { Tool } from '@modelcontextprotocol/client';
 import type { ZodType } from 'zod';
 import {
@@ -89,6 +94,14 @@ export type { EvalCaseResult } from '../types/reporter.js';
  */
 export interface ToolMetadataOverride {
   /**
+   * Replacement tool name shown to MCP hosts. Calls to it reach the original
+   * tool and are recorded under the original name, so a dataset's
+   * expectations read the same in every arm; the trace's `rawName` keeps the
+   * name the model used.
+   */
+  name?: string;
+
+  /**
    * Replacement tool description shown to MCP hosts.
    */
   description?: string;
@@ -102,9 +115,10 @@ export interface ToolMetadataOverride {
 /**
  * Runtime metadata variant for experimenting with MCP tool discoverability.
  *
- * Tool keys are canonical MCP server tool names. Overrides affect only the
- * metadata returned from listTools(); callTool() still forwards canonical tool
- * names and arguments to the original MCP server.
+ * Tool keys are the tools' names on their servers, or `server.tool` to pick
+ * one of several servers. Overrides change what listTools() shows; callTool()
+ * maps a renamed tool back to its original name and forwards the arguments
+ * unchanged.
  */
 export interface ToolOverrideVariant {
   /**
@@ -420,48 +434,33 @@ function createToolOverrideMCP(
   mcp: MCPFixtureApi,
   variant: ToolOverrideVariant
 ): MCPFixtureApi {
-  return {
+  let surface: ToolSurface | undefined;
+  async function load(): Promise<ToolSurface> {
+    surface = buildToolSurface([{ tools: await mcp.listTools() }], variant);
+    return surface;
+  }
+  const presented: MCPFixtureApi = {
     ...mcp,
 
     async listTools(): Promise<Array<Tool>> {
-      const tools = await mcp.listTools();
-      const knownToolNames = new Set(tools.map((tool) => tool.name));
-      const unknownToolNames = Object.keys(variant.tools).filter(
-        (name) => !knownToolNames.has(name)
-      );
-
-      if (unknownToolNames.length > 0) {
-        throw new Error(
-          `[mcp-server-tester] toolOverrides variant "${variant.id}" references unknown tool(s): ` +
-            unknownToolNames.join(', ')
-        );
-      }
-
-      return tools.map((tool) => {
-        const override = variant.tools[tool.name];
-        if (!override) {
-          return tool;
-        }
-
-        return {
-          ...tool,
-          ...(override.description !== undefined && {
-            description: override.description,
-          }),
-          ...(override.inputSchema !== undefined && {
-            inputSchema: override.inputSchema as Tool['inputSchema'],
-          }),
-        };
-      });
+      return (await load()).tools.map((entry) => entry.tool);
     },
 
     async callTool<TArgs extends Record<string, unknown>>(
       name: string,
       args: TArgs
     ) {
-      return mcp.callTool(name, args);
+      // Hosts list tools before calling them, so a renamed tool resolves.
+      // Direct cases call the server's own names and skip the listing.
+      const entry = surface?.resolve(name);
+      return mcp.callTool(entry?.originalName ?? name, args);
     },
   };
+  registerPresentedTools(
+    presented,
+    (name) => surface?.resolve(name)?.originalName
+  );
+  return presented;
 }
 
 function mapToolNames(

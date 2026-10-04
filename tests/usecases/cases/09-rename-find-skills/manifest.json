@@ -39,9 +39,6 @@
             "name": "find_more_skills_and_tools"
           }
         }
-      },
-      "toolMap": {
-        "find_skills": ["agg.find_more_skills_and_tools"]
       }
     }
   ]

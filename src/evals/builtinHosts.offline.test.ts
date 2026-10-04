@@ -4,6 +4,7 @@ import { getBuiltinHostConfig } from './builtinHosts.js';
 import { getHost } from './builtinHosts.js';
 import { createMCPClientForConfig } from '../mcp/clientFactory.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
+import type { ToolOverrideVariant } from './evalRunner.js';
 import type { HostRunInput } from './evalFrameworkTypes.js';
 
 // Keep real ai.generateText + schema conversion; only the provider and transport are offline.
@@ -30,10 +31,7 @@ const callTool = vi.fn(async () => ({
 function run(
   config: Record<string, unknown> = {},
   servers: MCPConfig[] = [],
-  toolOverrides?: {
-    id: string;
-    tools: Record<string, { description: string }>;
-  },
+  toolOverrides?: ToolOverrideVariant,
   env?: Record<string, string | undefined>
 ) {
   const input: HostRunInput & { env?: Record<string, string | undefined> } = {
@@ -163,7 +161,9 @@ describe('SDK host through the real AI SDK', () => {
       id: 'bad',
       tools: { search: { description: 'changed' } },
     });
-    expect(ambiguous.error).toContain('Ambiguous tool override');
+    expect(ambiguous.error).toContain(
+      'override "search" matches a tool on several servers; use "server.tool"'
+    );
   });
   it('routes provider-encoded tool calls back to the original MCP name', async () => {
     model = new MockLanguageModelV3({
@@ -195,6 +195,75 @@ describe('SDK host through the real AI SDK', () => {
     expect(callTool).toHaveBeenCalledWith({ name: 'search', arguments: {} });
     expect(result.events).toMatchObject([
       { source: 'mcp', server: 'a', name: 'search' },
+    ]);
+  });
+  it('renames a tool on one server and routes calls to the original', async () => {
+    model = new MockLanguageModelV3({
+      doGenerate: async () =>
+        model.doGenerateCalls.length === 1
+          ? {
+              ...answer,
+              content: [
+                {
+                  type: 'tool-call',
+                  toolCallId: 'one',
+                  toolName: 'a__find',
+                  input: '{}',
+                },
+              ],
+              finishReason: { unified: 'tool-calls', raw: 'tool_use' },
+            }
+          : answer,
+    });
+    const result = await run(
+      {},
+      ['a', 'b'].map((label) => ({
+        transport: 'http',
+        serverUrl: `https://${label}.invalid`,
+        label,
+      })),
+      { id: 'renamed', tools: { 'a.search': { name: 'find' } } }
+    );
+    expect(result.error).toBeUndefined();
+    expect(model.doGenerateCalls[0]?.tools?.map((tool) => tool.name)).toEqual([
+      'a__find',
+      'b__search',
+    ]);
+    expect(callTool).toHaveBeenCalledWith({ name: 'search', arguments: {} });
+    expect(result.events).toMatchObject([
+      { source: 'mcp', server: 'a', name: 'search', rawName: 'a__find' },
+    ]);
+  });
+  it('renames a tool on a single server', async () => {
+    model = new MockLanguageModelV3({
+      doGenerate: async () =>
+        model.doGenerateCalls.length === 1
+          ? {
+              ...answer,
+              content: [
+                {
+                  type: 'tool-call',
+                  toolCallId: 'one',
+                  toolName: 'find',
+                  input: '{}',
+                },
+              ],
+              finishReason: { unified: 'tool-calls', raw: 'tool_use' },
+            }
+          : answer,
+    });
+    const result = await run(
+      {},
+      [{ transport: 'http', serverUrl: 'https://one.invalid' }],
+      { id: 'renamed', tools: { search: { name: 'find' } } }
+    );
+    expect(result.error).toBeUndefined();
+    expect(model.doGenerateCalls[0]?.tools?.map((tool) => tool.name)).toEqual([
+      'find',
+    ]);
+    expect(callTool).toHaveBeenCalledWith({ name: 'search', arguments: {} });
+    expect(result.events).toMatchObject([
+      { source: 'mcp', name: 'search', rawName: 'find' },
     ]);
   });
   it('enforces zero calls even if the real SDK receives a tool request', async () => {

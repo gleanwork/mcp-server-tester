@@ -598,6 +598,11 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]{1,128}$",
+                "description": "Replacement tool name. Calls reach the original tool and are recorded under its original name."
+              },
               "description": {
                 "type": "string"
               },

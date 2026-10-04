@@ -16,8 +16,8 @@ import type {
 } from './mcpHost/mcpHostTypes.js';
 
 import type { HostConfig } from './evalManifest.js';
-import type { MCPConfig } from '../config/mcpConfig.js';
 import { simulationToHostRun } from './hostTrace.js';
+import { buildToolSurface, type ListedServerTools } from './toolSurface.js';
 import { GenerationOptions } from './mcpHost/hostOptions.js';
 
 interface ContentBlock {
@@ -113,14 +113,7 @@ async function runAnthropicApiHost(
       { client: Client; name: string; label?: string }
     >();
     const tools: Array<Record<string, unknown>> = [];
-    const toolEntries: Array<{
-      server: MCPConfig;
-      tool: {
-        name: string;
-        description?: string;
-        inputSchema: Record<string, unknown>;
-      };
-    }> = [];
+    const listedTools: Array<ListedServerTools & { client: Client }> = [];
     for (const server of options.servers) {
       const client = await withinDeadline(
         createMCPClientForConfig(server).then(async (connected) => {
@@ -136,46 +129,26 @@ async function runAnthropicApiHost(
       const listed = await withinDeadline(
         client.listTools({}, { signal: controller.signal })
       );
-      for (const tool of listed.tools) {
-        const name =
-          options.servers.length > 1
-            ? `${server.label}__${tool.name}`
-            : tool.name;
-        if (routing.has(name))
-          throw new Error(`Duplicate host tool name: ${name}`);
-        routing.set(name, { client, name: tool.name, label: server.label });
-        toolEntries.push({ server, tool });
-      }
+      listedTools.push({ server: server.label, client, tools: listed.tools });
     }
-    const overrides =
-      options.arm?.toolOverrides ?? options.manifest.toolOverrides;
-    for (const name of Object.keys(overrides?.tools ?? {})) {
-      const matches = toolEntries.filter(
-        ({ server, tool }) =>
-          name === tool.name || name === `${server.label}.${tool.name}`
-      );
-      if (matches.length === 0)
-        throw new Error(`Unknown tool override: ${name}`);
-      if (matches.length > 1)
-        throw new Error(`Ambiguous tool override: ${name}`);
-    }
-    for (const { server, tool } of toolEntries) {
-      const qualified = `${server.label}.${String(tool.name)}`;
-      const override =
-        overrides?.tools[qualified] ??
-        (toolEntries.filter(
-          ({ tool: candidate }) => candidate.name === tool.name
-        ).length === 1
-          ? overrides?.tools[String(tool.name)]
-          : undefined);
+    const surface = buildToolSurface(
+      listedTools,
+      options.arm?.toolOverrides ?? options.manifest.toolOverrides
+    );
+    for (const { server, originalName, tool } of surface.tools) {
       const name =
-        options.servers.length > 1
-          ? `${server.label}__${tool.name}`
-          : String(tool.name);
+        options.servers.length > 1 ? `${server}__${tool.name}` : tool.name;
+      if (routing.has(name))
+        throw new Error(`Duplicate host tool name: ${name}`);
+      routing.set(name, {
+        client: listedTools.find((item) => item.server === server)!.client,
+        name: originalName,
+        label: server,
+      });
       tools.push({
         name,
-        description: override?.description ?? tool.description,
-        input_schema: override?.inputSchema ?? tool.inputSchema,
+        description: tool.description,
+        input_schema: tool.inputSchema,
       });
     }
     const messages: Message[] = [{ role: 'user', content: case_.scenario }];
@@ -236,11 +209,13 @@ async function runAnthropicApiHost(
             { signal: controller.signal }
           )
         );
+        const recorded =
+          options.servers.length > 1
+            ? `${route.label}.${route.name}`
+            : route.name;
         toolCalls.push({
-          name:
-            options.servers.length > 1
-              ? `${route.label}.${route.name}`
-              : route.name,
+          name: recorded,
+          ...(call.name !== recorded ? { rawName: call.name } : {}),
           arguments: args,
           id: call.id,
           output: JSON.stringify(result),

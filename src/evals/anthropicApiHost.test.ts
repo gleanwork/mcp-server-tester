@@ -364,6 +364,37 @@ describe('Anthropic trace execution', () => {
     expect(body).toContain('b__search');
   });
 
+  it('renames a tool on one server and routes calls to the original', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        response(
+          [{ type: 'tool_use', id: 'call-0', name: 'a__find', input: {} }],
+          'tool_use'
+        )
+      )
+      .mockResolvedValueOnce(response([{ type: 'text', text: 'OK' }]));
+    const input = options();
+    input.servers = [
+      { transport: 'http', serverUrl: 'https://a.example', label: 'a' },
+      { transport: 'http', serverUrl: 'https://b.example', label: 'b' },
+    ];
+    input.manifest.toolOverrides = {
+      id: 'renamed',
+      tools: { 'a.search': { name: 'find' } },
+    };
+    const result = await run(input);
+    expect(
+      (requestBody(0).tools as Array<{ name: string }>).map((tool) => tool.name)
+    ).toEqual(['a__find', 'b__search']);
+    expect(callTool).toHaveBeenCalledTimes(1);
+    expect(
+      (callTool.mock.calls[0] as unknown as [{ name: string }])[0]
+    ).toMatchObject({ name: 'search' });
+    expect(result.trace?.events).toMatchObject([
+      { source: 'mcp', server: 'a', name: 'search', rawName: 'a__find' },
+    ]);
+  });
+
   it('applies description overrides and supports a no-server assistant', async () => {
     fetchMock.mockResolvedValueOnce(response([{ type: 'text', text: 'OK' }]));
     const input = options();

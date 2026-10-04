@@ -34,6 +34,7 @@ import type {
 } from './externalHost/types.js';
 import { getHost } from './builtinHosts.js';
 import { hostRunToExecution, simulationTrace } from './hostTrace.js';
+import { withOriginalToolNames } from './toolSurface.js';
 import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
 import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
 
@@ -157,10 +158,9 @@ export async function executeEvalCase(
         throw new Error(
           `Eval case ${evalCase.id}: mcpHostConfig is required for mcp_host mode`
         );
-      const simulation = await simulateMCPHost(
-        mcp,
-        evalCase.scenario,
-        evalCase.mcpHostConfig
+      const simulation = withOriginalToolNames(
+        await simulateMCPHost(mcp, evalCase.scenario, evalCase.mcpHostConfig),
+        mcp
       );
       if (simulation.success) return simulationExecution(simulation);
       const error = simulation.error || 'MCP host simulation failed';
