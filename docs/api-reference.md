@@ -1186,7 +1186,16 @@ Create an LLM judge for semantic evaluation of tool responses.
 **Parameters:**
 
 - `config?: JudgeConfig` (all fields optional)
-  - `provider?: 'anthropic' | 'openai' | 'google'` - LLM provider (default: `'anthropic'`)
+  - `provider?: 'anthropic' | 'vertex-anthropic' | 'anthropic-agent-sdk' | 'openai' | 'google'` - LLM provider (default: `'anthropic'`). Each loads its SDK on first use; install the one you use:
+
+    | Provider              | Package                          |
+    | --------------------- | -------------------------------- |
+    | `anthropic`           | `@anthropic-ai/sdk`              |
+    | `vertex-anthropic`    | `@anthropic-ai/vertex-sdk`       |
+    | `anthropic-agent-sdk` | `@anthropic-ai/claude-agent-sdk` |
+    | `openai`              | `openai`                         |
+    | `google`              | `@google/generative-ai`          |
+
   - `model?: string` - Model name (default: `'claude-sonnet-4-20250514'`)
   - `temperature?: number` - Temperature 0–1 (default: `0.0`)
   - `maxTokens?: number` - Maximum tokens for response (default: `1000`)

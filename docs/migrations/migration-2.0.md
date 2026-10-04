@@ -344,6 +344,18 @@ With the first arm as server A, `B_WINS` cases are `comparison.improvedCases`, `
 
 What changes: arms run one after another, not in parallel; there is no `aWinRate`/`bWinRate` (count the buckets above); each arm connects from its own server config, so a server that needed a separate authenticated Playwright fixture needs its auth in the config (for example `auth.accessTokenEnv`); and `comparisonStore` is gone (`saveEvalRunComparison()` stores a comparison). See [Comparing servers](../evals-guide.md#comparing-servers-ab-testing).
 
+## The Claude Agent SDK is an optional peer dependency
+
+**Affects:** judges with `provider: 'anthropic-agent-sdk'`.
+
+`@anthropic-ai/claude-agent-sdk` (about 46 MB) was installed with MST whether or not a judge used it. It is now an optional peer dependency, loaded only when an `anthropic-agent-sdk` judge runs. If you use that provider, install it:
+
+```bash
+npm install --save-dev @anthropic-ai/claude-agent-sdk
+```
+
+Without it, the judge fails with an error that names the package. The other judge providers (`anthropic`, `vertex-anthropic`, `openai`, `google`) already load their SDKs this way.
+
 ## New in 2.0 (non-breaking)
 
 - An evaluation framework over datasets: manifests, suites and batches (`mst run`, `mst batch`), arms, metrics, result stores, and plugins that add dataset sources, hosts, judges, metrics and result stores under their own namespace, and shared configs a manifest `extends`. It's in `@gleanwork/mcp-server-tester/evals`. See [Evaluation framework](../evaluation-framework.md).
