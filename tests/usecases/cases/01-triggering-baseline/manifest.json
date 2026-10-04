@@ -1,0 +1,72 @@
+{
+  "name": "triggering-baseline",
+  "datasets": ["./dataset.json"],
+  "servers": ["{{server aggregate agg}}"],
+  "host": {
+    "type": "usecase/model",
+    "policy": [
+      {
+        "when": {
+          "scenario": "planning"
+        },
+        "steps": [
+          {
+            "call": {
+              "name": "search"
+            },
+            "args": {
+              "query": "planning"
+            }
+          }
+        ]
+      },
+      {
+        "when": {
+          "scenario": "billing",
+          "run": 1
+        },
+        "steps": [
+          {
+            "call": {
+              "name": "search"
+            },
+            "args": {
+              "query": "billing owner"
+            },
+            "rate": 0.6
+          }
+        ]
+      },
+      {
+        "when": {
+          "scenario": "billing"
+        },
+        "steps": [
+          {
+            "call": {
+              "name": "search"
+            },
+            "args": {
+              "query": "billing owner"
+            },
+            "rate": 0.8
+          }
+        ]
+      }
+    ]
+  },
+  "iterations": 10,
+  "metrics": [
+    "passed",
+    "tool_count",
+    "input_tokens",
+    "output_tokens",
+    "cost_usd"
+  ],
+  "results": {
+    "store": {
+      "type": "file",
+      "dir": "./store"
+    }
+  }
+}

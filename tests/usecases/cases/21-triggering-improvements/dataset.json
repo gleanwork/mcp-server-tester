@@ -1,0 +1,20 @@
+{
+  "name": "triggering",
+  "cases": [
+    {
+      "id": "postmortem",
+      "mode": "host",
+      "scenario": "Find the checkout outage postmortem",
+      "expect": {
+        "toolsTriggered": {
+          "calls": [
+            {
+              "name": "company_search",
+              "required": true
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

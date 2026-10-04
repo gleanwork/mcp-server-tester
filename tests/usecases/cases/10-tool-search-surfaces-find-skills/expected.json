@@ -1,0 +1,25 @@
+{
+  "title": "The harness's tool search surfaces find_skills",
+  "exitCode": 1,
+  "checks": [
+    {
+      "path": "arms[name=baseline].metrics.passed_rate",
+      "equals": 0
+    },
+    {
+      "path": "arms[name=description-v2].metrics.passed_rate",
+      "equals": 1,
+      "gap": "step 7: tool variants reach plugin hosts through the tool surface"
+    },
+    {
+      "path": "arms[name=baseline].metrics.tool_search_hit_rate",
+      "equals": 0,
+      "gap": "step 8: a typed tool_search event and a tool-search hit-rate metric"
+    },
+    {
+      "path": "arms[name=description-v2].metrics.tool_search_hit_rate",
+      "equals": 1,
+      "gap": "step 8: a typed tool_search event and a tool-search hit-rate metric"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "name": "gateway",
+  "tools": [
+    {
+      "name": "search_apps",
+      "description": "Search connected apps (GitHub, tracker, chat and mail) through one gateway.",
+      "response": "Results for \"{query}\" across connected apps: GitHub #1203 Renew payments gateway certificate; Tracker INC-482 Checkout outage (resolved); Chat #payments: gateway cert expired."
+    },
+    {
+      "name": "get_item",
+      "description": "Fetch an item from a connected app.",
+      "response": "INC-482 Checkout outage (resolved)."
+    }
+  ]
+}

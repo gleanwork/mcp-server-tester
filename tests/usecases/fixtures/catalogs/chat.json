@@ -1,0 +1,10 @@
+{
+  "name": "chat",
+  "tools": [
+    {
+      "name": "search_messages",
+      "description": "Search chat messages.",
+      "response": "Messages for \"{query}\": #payments: 'gateway cert expired, rolling a new one'."
+    }
+  ]
+}

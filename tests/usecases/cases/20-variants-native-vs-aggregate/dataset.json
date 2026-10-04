@@ -1,0 +1,29 @@
+{
+  "name": "tasks",
+  "cases": [
+    {
+      "id": "outage-cause",
+      "mode": "host",
+      "scenario": "What caused the checkout outage?",
+      "expect": {
+        "passesJudge": {
+          "judge": "usecase/keywords",
+          "keywords": ["certificate"],
+          "threshold": 1
+        }
+      }
+    },
+    {
+      "id": "outage-duration",
+      "mode": "host",
+      "scenario": "How long did the checkout outage last?",
+      "expect": {
+        "passesJudge": {
+          "judge": "usecase/keywords",
+          "keywords": ["41 minutes"],
+          "threshold": 1
+        }
+      }
+    }
+  ]
+}

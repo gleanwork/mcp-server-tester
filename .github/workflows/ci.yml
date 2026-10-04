@@ -33,6 +33,12 @@ jobs:
       - name: Public evaluation foundation contracts
         run: npm run test:eval-foundation
 
+      - name: CLI smoke
+        run: npm run test:eval-review
+
+      - name: Use cases through the CLI
+        run: npm run test:usecases
+
       - run: npm test
 
       - name: Install Playwright browsers

@@ -1,0 +1,54 @@
+{
+  "title": "Triggering company search: MCP, plugin, and MCP with org instructions, next to native connectors",
+  "exitCode": 1,
+  "checks": [
+    {
+      "path": "arms[name=aggregate-mcp].metrics.passed_rate",
+      "equals": 0
+    },
+    {
+      "path": "arms[name=aggregate-plugin].metrics.passed_rate",
+      "equals": 0
+    },
+    {
+      "path": "arms[name=aggregate-mcp-org-instructions].metrics.passed_rate",
+      "equals": 1
+    },
+    {
+      "path": "armDeltas.aggregate-plugin.passRateDelta",
+      "equals": 0
+    },
+    {
+      "path": "armDeltas.aggregate-mcp-org-instructions.passRateDelta",
+      "equals": 1
+    },
+    {
+      "path": "arms[name=aggregate-mcp].metrics.win_rate",
+      "equals": 0.5,
+      "gap": "step 2: report the iteration win rate per arm (case pass/fail hides it)"
+    },
+    {
+      "path": "arms[name=aggregate-plugin].metrics.win_rate",
+      "equals": 0.8,
+      "gap": "step 2: report the iteration win rate per arm (case pass/fail hides it)"
+    },
+    {
+      "path": "arms[name=aggregate-mcp-org-instructions].metrics.win_rate",
+      "equals": 1,
+      "gap": "step 2: report the iteration win rate per arm (case pass/fail hides it)"
+    },
+    {
+      "path": "armDeltas.aggregate-plugin.winRateDelta",
+      "equals": 0.3,
+      "gap": "step 2: report the iteration win rate per arm (case pass/fail hides it)"
+    }
+  ],
+  "ledger": {
+    "metrics": ["input_tokens_mean", "output_tokens_mean", "tool_count_mean"],
+    "gaps": {
+      "input_tokens_mean": "step 2: per-arm means use only the last iteration's calls but every iteration's tokens",
+      "output_tokens_mean": "step 2: per-arm means use only the last iteration's calls but every iteration's tokens",
+      "tool_count_mean": "step 2: per-arm means use only the last iteration's calls but every iteration's tokens"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "knowledge",
+  "cases": [
+    {
+      "id": "outage-cause",
+      "mode": "host",
+      "scenario": "What caused the checkout outage, and how long did it last?",
+      "expect": {
+        "passesJudge": {
+          "judge": "usecase/keywords",
+          "keywords": ["certificate", "41 minutes"],
+          "threshold": 1
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "title": "Improve tool triggering over time: one server, one host, compared with the previous run",
+  "runs": 2,
+  "exitCode": 1,
+  "exitCodes": [0, 1],
+  "checks": [
+    {
+      "path": "metrics.passRate",
+      "equals": 0.5
+    },
+    {
+      "path": "arms[name=default].metrics.passed_rate",
+      "equals": 0.5
+    },
+    {
+      "path": "arms[name=default].metrics.win_rate",
+      "equals": 0.8,
+      "gap": "step 2: report the iteration win rate per arm (case pass/fail hides it)"
+    },
+    {
+      "path": "baseline",
+      "exists": true,
+      "gap": "step 4: `mst run` compares a run with the manifest's previous run"
+    },
+    {
+      "path": "baseline.passRateDelta",
+      "equals": -0.5,
+      "gap": "step 4: `mst run` compares a run with the manifest's previous run"
+    }
+  ],
+  "ledger": {
+    "metrics": ["input_tokens_mean", "output_tokens_mean", "tool_count_mean"],
+    "gaps": {
+      "input_tokens_mean": "step 2: per-arm means use only the last iteration's calls but every iteration's tokens",
+      "output_tokens_mean": "step 2: per-arm means use only the last iteration's calls but every iteration's tokens",
+      "tool_count_mean": "step 2: per-arm means use only the last iteration's calls but every iteration's tokens"
+    }
+  }
+}

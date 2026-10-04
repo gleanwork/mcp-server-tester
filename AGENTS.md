@@ -279,6 +279,8 @@ npm run lint                # ESLint (run `npm run lint:fix` to auto-fix)
 npm run knip                # Unused files, exports and dependencies
 npm run docs:check          # Docs snippet sync
 npm run test:eval-foundation # Public evaluation foundation contracts
+npm run test:eval-review    # CLI smoke
+npm run test:usecases       # Use cases through the CLI (tests/usecases)
 npm test                    # Unit tests (Vitest)
 npx playwright install --with-deps
 npm run test:playwright     # Integration tests (Playwright)

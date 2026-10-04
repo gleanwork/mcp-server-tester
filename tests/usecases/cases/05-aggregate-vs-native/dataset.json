@@ -1,0 +1,24 @@
+{
+  "name": "cross-source",
+  "cases": [
+    {
+      "id": "outage",
+      "mode": "host",
+      "scenario": "Find the checkout outage report and read it",
+      "expect": {
+        "toolsTriggered": {
+          "calls": [
+            {
+              "name": "search",
+              "required": true
+            },
+            {
+              "name": "read",
+              "required": true
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

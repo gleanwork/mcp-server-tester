@@ -1,0 +1,66 @@
+{
+  "name": "aggregate-vs-native",
+  "datasets": ["./dataset.json"],
+  "host": {
+    "type": "usecase/model",
+    "model": "claude-sonnet-4-5",
+    "policy": [
+      {
+        "steps": [
+          {
+            "call": {
+              "nameIncludes": "search"
+            },
+            "args": {
+              "query": "checkout outage"
+            },
+            "all": true
+          },
+          {
+            "call": {
+              "description": "read"
+            },
+            "args": {
+              "id": "inc-482"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "metrics": [
+    "passed",
+    "tool_count",
+    "input_tokens",
+    "output_tokens",
+    "cost_usd"
+  ],
+  "arms": [
+    {
+      "name": "aggregate",
+      "servers": ["{{server aggregate agg}}"],
+      "toolMap": {
+        "search": ["agg.search"],
+        "read": ["agg.read_document"]
+      }
+    },
+    {
+      "name": "native",
+      "servers": [
+        "{{server github github}}",
+        "{{server tracker tracker}}",
+        "{{server chat chat}}",
+        "{{server mail mail}}"
+      ],
+      "toolMap": {
+        "search": [
+          "github.search_issues",
+          "tracker.search",
+          "chat.search_messages",
+          "mail.search"
+        ],
+        "read": ["github.get_file", "tracker.get_issue", "mail.get_message"]
+      }
+    }
+  ]
+}
