@@ -353,6 +353,8 @@ describe('Mac tool permission transaction', () => {
       expect((await fs.stat(receipt)).isFile()).toBe(true);
     }
   );
+  // Writes and checks a 1 MB file: slow CI runners took just over the 5 s
+  // default.
   it('rejects oversized files and malformed permission maps before mutation', async () => {
     for (const bytes of [
       Buffer.alloc(1024 * 1024 + 1, ' '),
@@ -367,7 +369,7 @@ describe('Mac tool permission transaction', () => {
       expect(await fs.readFile(target)).toEqual(bytes);
       expect(await fs.readdir(directory)).toEqual([]);
     }
-  });
+  }, 20_000);
   it('refuses a same-byte replacement race before committing settings', async () => {
     const rename = fs.rename;
     vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
