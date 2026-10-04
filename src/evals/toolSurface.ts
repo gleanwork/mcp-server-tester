@@ -163,14 +163,18 @@ export function registerPresentedTools(
  */
 export function withOriginalToolNames<
   T extends {
-    toolCalls: Array<{ name: string; rawName?: string }>;
+    toolCalls: Array<{ name: string; rawName?: string; kind?: string }>;
     events?: Array<{ kind: string; name?: string; rawName?: string }>;
   },
 >(result: T, mcp: object): T {
   const originalName = presentedFixtures.get(mcp);
   if (!originalName) return result;
-  function restore<C extends { name?: string; rawName?: string }>(call: C): C {
-    if (call.name === undefined) return call;
+  function restore<
+    C extends { name?: string; rawName?: string; kind?: string },
+  >(call: C): C {
+    // Typed host events (skills, searches) are not calls to a tool.
+    if (call.name === undefined || (call.kind ?? 'tool_call') !== 'tool_call')
+      return call;
     const original = originalName!(call.name);
     return original === undefined || original === call.name
       ? call
@@ -180,9 +184,7 @@ export function withOriginalToolNames<
     ...result,
     toolCalls: result.toolCalls.map(restore),
     ...(result.events !== undefined && {
-      events: result.events.map((event) =>
-        event.kind === 'tool_call' ? restore(event) : event
-      ),
+      events: result.events.map(restore),
     }),
   };
 }

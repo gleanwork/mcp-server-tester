@@ -205,11 +205,14 @@ async function runModel(request, config, connections) {
         )
       );
       events.push({
-        kind: 'tool_call',
+        kind: 'tool_search',
         source: 'host',
         name: 'ToolSearch',
         arguments: { query: step.toolSearch },
-        output: JSON.stringify(searched.map(({ tool }) => tool.name)),
+        results: searched.map(({ connection, tool }) => ({
+          name: tool.name,
+          ...(connection.label ? { server: connection.label } : {}),
+        })),
       });
       continue;
     }

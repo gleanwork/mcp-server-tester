@@ -481,7 +481,13 @@ export const EvalExpectBlockSchema = z
             .object({
               name: z.string(),
               kind: z
-                .enum(['tool_call', 'skill', 'command', 'subagent'])
+                .enum([
+                  'tool_call',
+                  'skill',
+                  'command',
+                  'subagent',
+                  'tool_search',
+                ])
                 .optional(),
               source: z.enum(['mcp', 'host']).optional(),
               server: z.string().min(1).optional(),

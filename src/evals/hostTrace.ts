@@ -92,7 +92,7 @@ export function simulationToHostRun(
     const source =
       call.source ?? (server || servers.length === 1 ? 'mcp' : 'host');
     return {
-      kind: 'tool_call',
+      kind: call.kind ?? 'tool_call',
       source,
       name:
         server && call.source !== 'host'
@@ -113,6 +113,7 @@ export function simulationToHostRun(
       ...(call.durationMs !== undefined ? { durationMs: call.durationMs } : {}),
       ...(call.startedAt ? { startedAt: call.startedAt } : {}),
       ...(call.completedAt ? { completedAt: call.completedAt } : {}),
+      ...(call.results !== undefined ? { results: call.results } : {}),
     };
   });
   return {
@@ -137,7 +138,7 @@ export function simulationTrace(result: MCPHostSimulationResult): HostTrace {
   // The simulated host only sees the fixture's tools; CLI parsers that also
   // see host tools mark those calls `source: 'host'`.
   const events: HostEvent[] = (result.toolCalls ?? []).map((call) => ({
-    kind: 'tool_call',
+    kind: call.kind ?? 'tool_call',
     source: call.source ?? 'mcp',
     name: call.name,
     ...(call.server !== undefined ? { server: call.server } : {}),
@@ -149,6 +150,7 @@ export function simulationTrace(result: MCPHostSimulationResult): HostTrace {
     ...(call.durationMs !== undefined ? { durationMs: call.durationMs } : {}),
     ...(call.startedAt ? { startedAt: call.startedAt } : {}),
     ...(call.completedAt ? { completedAt: call.completedAt } : {}),
+    ...(call.results !== undefined ? { results: call.results } : {}),
   }));
   return {
     // A response that already carries host events (a suite host) keeps them.

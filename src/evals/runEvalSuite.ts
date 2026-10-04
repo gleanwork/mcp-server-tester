@@ -273,6 +273,7 @@ const CORE_METRICS = [
   'tool_count',
   'mcp_call_count',
   'host_event_count',
+  'tool_search_hit',
   'input_tokens',
   'output_tokens',
   'cost_usd',

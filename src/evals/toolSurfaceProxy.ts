@@ -419,6 +419,20 @@ export function settleProxiedTrace(
   return {
     ...trace,
     events: trace.events.map((event) => {
+      if (event.kind === 'tool_search' && event.results) {
+        // A search shows the variant's names; record the tools it found.
+        return {
+          ...event,
+          results: event.results.map((tool) => {
+            const original =
+              proxy.originalName(tool.name, tool.server) ??
+              (servers.length === 1
+                ? proxy.originalName(tool.name, servers[0]!.label)
+                : undefined);
+            return original === undefined ? tool : { ...tool, name: original };
+          }),
+        };
+      }
       if (event.kind !== 'tool_call' || event.source !== 'mcp') return event;
       // Hosts name a call's server in `server`, as a `label.` prefix, or
       // (with one server) not at all.

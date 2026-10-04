@@ -139,6 +139,36 @@ function traceEventCount(trial: Trial, source: 'mcp' | 'host'): number | null {
   ).length;
 }
 
+/**
+ * Whether a tool search led to a call: some MCP call in the trial was to a
+ * tool an earlier search returned. Null without searches, or without
+ * evidence of the trial's calls.
+ */
+function toolSearchHit(trial: Trial): boolean | null {
+  if (!trial.trace || trial.trace.evidence === 'none') return null;
+  const found: Array<{ name: string; server?: string }> = [];
+  let searched = false;
+  for (const event of trial.trace.events) {
+    if (event.kind === 'tool_search') {
+      searched = true;
+      found.push(...(event.results ?? []));
+    } else if (
+      event.kind === 'tool_call' &&
+      event.source === 'mcp' &&
+      found.some(
+        (tool) =>
+          tool.name === event.name &&
+          (tool.server === undefined ||
+            event.server === undefined ||
+            tool.server === event.server)
+      )
+    ) {
+      return true;
+    }
+  }
+  return searched ? false : null;
+}
+
 /** The trial's answer: its trace's, or the case's response text. */
 function trialText(trial: Trial, caseResult: EvalCaseResult): string | null {
   if (trial.trace) return trial.trace.finalText ?? '';
@@ -519,6 +549,12 @@ export const BUILT_IN_METRICS: Readonly<Record<string, MetricDefinition>> =
         ),
       meanAggregation,
       'calls'
+    ),
+    // Per case: the fraction of trials whose tool search led to a call.
+    tool_search_hit: metric(
+      'continuous',
+      (result) => perTrial(result, toolSearchHit),
+      fractionRateAggregation
     ),
     // Per case: the fraction of attempts (iterations) where it held.
     skill_loaded: metric(

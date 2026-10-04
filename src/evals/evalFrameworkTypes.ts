@@ -64,7 +64,11 @@ export interface HostRunContext {
 
 export type HostEvidence = 'structured' | 'observed' | 'none';
 export interface HostEvent {
-  kind: 'tool_call' | 'skill' | 'command' | 'subagent';
+  /**
+   * `tool_call` for MCP and host tools; host-native `skill` loads, `command`
+   * runs, `subagent` starts, and `tool_search` catalog searches.
+   */
+  kind: 'tool_call' | 'skill' | 'command' | 'subagent' | 'tool_search';
   source: 'mcp' | 'host';
   name: string;
   server?: string;
@@ -77,6 +81,8 @@ export interface HostEvent {
   durationMs?: number;
   startedAt?: string;
   completedAt?: string;
+  /** `tool_search` only: the tools the search returned, by name and server. */
+  results?: Array<{ name: string; server?: string }>;
 }
 
 /** One execution trace. Hosts never return evaluation verdicts. */

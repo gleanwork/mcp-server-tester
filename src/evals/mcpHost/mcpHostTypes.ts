@@ -294,6 +294,13 @@ export interface LLMToolCall {
   output?: string;
   /** Explicit tool-result error status; absent when not observed. */
   isError?: boolean;
+  /**
+   * The event this call is: a host-native skill load, command, subagent or
+   * tool search the parser typed, or a tool call (also when absent).
+   */
+  kind?: HostEvent['kind'];
+  /** `tool_search` only: the tools the search returned. */
+  results?: HostEvent['results'];
 }
 
 /**
