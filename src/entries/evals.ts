@@ -13,11 +13,6 @@ export type {
   StoredEvalResultRef,
   StoredEvalResultSaveOptions,
   SaveBaselineOptions,
-  ComparisonOutcome,
-  CaseComparisonResult,
-  ServerComparisonResult,
-  ServerComparisonOptions,
-  SaveServerComparisonOptions,
   CompareEvalRunsOptions,
   EvalCaseComparison,
   EvalCaseComparisonOutcome,
@@ -122,17 +117,6 @@ export type {
   StoredEvalArtifactMetadata,
 } from '../evals/resultStore.js';
 export { saveBaseline, loadBaseline } from '../evals/baseline.js';
-export {
-  runServerComparison,
-  saveServerComparison,
-} from '../evals/serverComparison.js';
-export { runSkillsComparison } from '../evals/skillsComparison.js';
-export type {
-  SkillsComparisonOptions,
-  SkillsComparisonResult,
-  SkillsComparisonVariant,
-  SkillsVariantSummary,
-} from '../evals/skillsComparison.js';
 export {
   compareEvalRuns,
   loadStoredEvalRunnerResult,

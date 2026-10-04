@@ -215,6 +215,19 @@ function assertCaseHosts(
     const declaration = inheritHost(rawManifest.host, rawArm?.host ?? {});
     for (const dataset of datasets) {
       for (const evalCase of dataset.cases) {
+        const hostSkills = (
+          inheritHost(declaration, evalCase.host ?? {}) as { skills?: unknown }
+        ).skills;
+        if (
+          hostSkills !== undefined &&
+          evalCase.mcpHostConfig?.skills !== undefined
+        ) {
+          // The case setting would silently win, so arms meant to compare
+          // skills modes would all run the case's mode.
+          throw new Error(
+            `Case "${evalCase.id}" in arm "${arm.name}" sets mcpHostConfig.skills, which would override the host's skills: set skills on the host or the case, not both.`
+          );
+        }
         if (!evalCase.host) continue;
         assertHostSupports(
           parseHostConfig(inheritHost(declaration, evalCase.host), rawManifest),

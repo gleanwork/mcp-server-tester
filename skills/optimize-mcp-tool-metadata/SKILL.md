@@ -16,7 +16,7 @@ Overrides change what the host **sees**, not what the server **accepts**. The LL
 
 - **Safe to vary:** the tool `description`; descriptive text inside `inputSchema` — property descriptions, enum documentation, examples, format hints.
 - **Never vary:** parameter names, types, `required` arrays, or schema structure. The server still validates real calls — structural changes measure server rejections, not discoverability.
-- **Out of scope entirely:** tool behavior, response shapes, auth, transport, server builds. Those need project-based A/B testing (different server configs via Playwright projects, or `runServerComparison`), which is a different workflow.
+- **Out of scope entirely:** tool behavior, response shapes, auth, transport, server builds. Those need project-based A/B testing (different server configs via Playwright projects, or suite arms with different `servers`), which is a different workflow.
 
 ## Operating Rules
 

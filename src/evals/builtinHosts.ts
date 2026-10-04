@@ -254,6 +254,8 @@ export interface BuiltinHostOptions {
   temperature?: number;
   maxTokens?: number;
   apiKeyEnvVar?: string;
+  /** The vercel-sdk host's Agent Skills mode. */
+  skills?: 'off' | 'catalog' | 'preload';
   model?: string;
   maxToolCalls?: number;
   timeout?: number;
@@ -276,6 +278,8 @@ const SdkHostSchema = z
     ...GenerationOptions,
     provider: ProviderSchema.optional(),
     apiKeyEnvVar: z.string().min(1).optional(),
+    /** Offer the server's Agent Skills: as a catalog the model loads from, or preloaded. */
+    skills: z.enum(['off', 'catalog', 'preload']).optional(),
     env: z.record(z.string(), z.string().optional()).optional(),
     server: MCPConfigSchema.optional(),
     servers: z.array(MCPConfigSchema).optional(),
@@ -367,6 +371,9 @@ function vercelSdkHost(options: BuiltinHostOptions): MCPHostConfig {
     provider: (options.provider as MCPHostConfig['provider']) ?? 'anthropic',
     model: options.model ?? 'claude-sonnet-4-20250514',
     maxToolCalls: options.maxToolCalls ?? 5,
+    ...(options.skills !== undefined && options.skills !== 'off'
+      ? { skills: options.skills }
+      : {}),
   };
 }
 

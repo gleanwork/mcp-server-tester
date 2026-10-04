@@ -23,14 +23,6 @@ export type {
 } from '../evals/evalRunner.js';
 
 export type {
-  ComparisonOutcome,
-  CaseComparisonResult,
-  ServerComparisonResult,
-  ServerComparisonOptions,
-  SaveServerComparisonOptions,
-} from '../evals/serverComparison.js';
-
-export type {
   CompareEvalRunsOptions,
   EvalCaseComparison,
   EvalCaseComparisonOutcome,

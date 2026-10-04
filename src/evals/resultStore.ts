@@ -6,8 +6,7 @@ export type StoredArtifactKind =
   | 'eval-runner-result'
   | 'eval-run-summary'
   | 'reporter-run'
-  | 'eval-run-comparison'
-  | 'server-comparison';
+  | 'eval-run-comparison';
 
 export interface StoredEvalArtifactMetadata {
   datasetName?: string;
@@ -84,7 +83,6 @@ const KIND_DIRS: Record<StoredArtifactKind, string> = {
   'eval-run-summary': 'eval-summaries',
   'reporter-run': 'reporter-runs',
   'eval-run-comparison': 'comparisons/eval-runs',
-  'server-comparison': 'comparisons/servers',
 };
 
 export function createEvalResultStore(

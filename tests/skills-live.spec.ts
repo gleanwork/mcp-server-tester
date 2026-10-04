@@ -1,5 +1,6 @@
 import { test, expect } from '../src/fixtures/mcp.js';
-import { runSkillsComparison } from '../src/evals/skillsComparison.js';
+import { runEvalDataset } from '../src/evals/evalRunner.js';
+import { computeMetrics } from '../src/evals/metrics.js';
 import type { EvalDataset } from '../src/evals/datasetTypes.js';
 
 /**
@@ -53,14 +54,34 @@ test.describe('Live skills eval (opt-in)', () => {
       ],
     };
 
-    const result = await runSkillsComparison(
-      { dataset, variants: ['off', 'catalog', 'preload'] },
-      { mcp, testInfo }
-    );
-
-    const summary = Object.fromEntries(
-      result.variants.map((variant) => [variant.mode, variant.summary])
-    );
+    // One run per skills mode, compared on the same metrics.
+    const summary: Record<string, Record<string, unknown>> = {};
+    for (const mode of ['off', 'catalog', 'preload'] as const) {
+      const result = await runEvalDataset(
+        {
+          dataset: {
+            ...dataset,
+            cases: dataset.cases.map((evalCase) => ({
+              ...evalCase,
+              mcpHostConfig: {
+                ...evalCase.mcpHostConfig!,
+                ...(mode === 'off' ? {} : { skills: mode }),
+              },
+            })),
+          },
+        },
+        { mcp, testInfo }
+      );
+      summary[mode] = computeMetrics(
+        [
+          'passed',
+          'skill_loaded',
+          'skill_before_tool',
+          'skill_verification_failed',
+        ],
+        result.caseResults
+      ).aggregated;
+    }
     await testInfo.attach('skills-comparison', {
       contentType: 'application/json',
       body: JSON.stringify(summary, null, 2),
@@ -69,9 +90,9 @@ test.describe('Live skills eval (opt-in)', () => {
 
     // The strict skill-first expectation needs the model to load the skill:
     // impossible with skills off, and preloads are not model loads.
-    expect(summary.off?.passRate).toBe(0);
-    expect(summary.preload?.passRate).toBe(0);
-    expect(summary.catalog?.skillLoadRate).toBeDefined();
-    expect(summary.catalog?.skillVerificationFailureRate ?? 0).toBe(0);
+    expect(summary.off?.passed_rate).toBe(0);
+    expect(summary.preload?.passed_rate).toBe(0);
+    expect(summary.catalog?.skill_loaded_rate).toBeDefined();
+    expect(summary.catalog?.skill_verification_failed_rate ?? 0).toBe(0);
   });
 });

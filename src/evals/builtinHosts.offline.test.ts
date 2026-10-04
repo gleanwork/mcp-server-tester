@@ -283,3 +283,17 @@ describe('CLI connection policy preflight', () => {
     }
   );
 });
+
+describe('vercel-sdk skills', () => {
+  it.each([
+    ['catalog', 'catalog'],
+    ['preload', 'preload'],
+    ['off', undefined],
+  ] as const)('skills: %s gives the SDK host skills %s', (skills, expected) => {
+    const config = getHost('vercel-sdk').createConfig!({
+      provider: 'anthropic',
+      skills,
+    });
+    expect(config.skills).toBe(expected);
+  });
+});
