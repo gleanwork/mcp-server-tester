@@ -526,10 +526,40 @@ describe('settings a host would ignore', () => {
   it('rejects an option anthropic-api would drop', () => {
     expect(() =>
       validateManifest(
-        base({ host: { type: 'anthropic-api', systemPrompt: 'Be brief.' } })
+        base({ host: { type: 'anthropic-api', reasoningEffort: 'high' } })
       )
-    ).toThrow(/Unrecognized key.*systemPrompt/s);
+    ).toThrow(/Unrecognized key.*reasoningEffort/s);
   });
+
+  it.each([
+    ['vercel-sdk', { provider: 'anthropic' }],
+    ['anthropic-api', {}],
+    ['claude-cli', {}],
+  ])('accepts a systemPrompt for %s', (type, extra) => {
+    expect(() =>
+      validateManifest(
+        base({
+          host: { type, ...extra, systemPrompt: 'Use find_skills first.' },
+        })
+      )
+    ).not.toThrow();
+  });
+
+  it.each([
+    ['cowork', {}],
+    ['chatgpt', { model: 'gpt-5' }],
+  ])(
+    'rejects a systemPrompt for %s, which has no way to apply it',
+    (type, extra) => {
+      expect(() =>
+        validateManifest(
+          base({
+            host: { type, ...extra, systemPrompt: 'Use find_skills first.' },
+          })
+        )
+      ).toThrow(/systemPrompt/);
+    }
+  );
 });
 
 describe('settings a host would ignore: defaults, inheritance, opt-in', () => {

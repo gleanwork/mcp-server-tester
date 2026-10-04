@@ -57,6 +57,7 @@ import {
   parseHostConfig,
   validateManifest,
   inheritHost,
+  takesOption,
 } from './manifestValidation.js';
 import {
   computeMetrics,
@@ -219,9 +220,26 @@ function assertCaseHosts(
     const declaration = inheritHost(rawManifest.host, rawArm?.host ?? {});
     for (const dataset of datasets) {
       for (const evalCase of dataset.cases) {
-        const hostSkills = (
-          inheritHost(declaration, evalCase.host ?? {}) as { skills?: unknown }
-        ).skills;
+        const caseHost = inheritHost(declaration, evalCase.host ?? {}) as {
+          type?: string;
+          skills?: unknown;
+          systemPrompt?: unknown;
+        };
+        const hostSkills = caseHost.skills;
+        if (evalCase.mcpHostConfig?.systemPrompt !== undefined) {
+          // A case prompt would silently replace the arm's, or be ignored by
+          // a host that takes none.
+          if (caseHost.systemPrompt !== undefined) {
+            throw new Error(
+              `Case "${evalCase.id}" in arm "${arm.name}" sets mcpHostConfig.systemPrompt, which would override the host's systemPrompt: set it on the host or the case, not both.`
+            );
+          }
+          if (!takesOption(getHost(caseHost.type!).schema, 'systemPrompt')) {
+            throw new Error(
+              `Case "${evalCase.id}" in arm "${arm.name}" sets mcpHostConfig.systemPrompt, which host "${caseHost.type}" can't apply.`
+            );
+          }
+        }
         if (
           hostSkills !== undefined &&
           evalCase.mcpHostConfig?.skills !== undefined

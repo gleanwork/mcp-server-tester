@@ -13,6 +13,7 @@ import {
 import {
   GenerationOptions,
   ProviderSchema,
+  SystemPromptOption,
   hostEnvironment,
   type HostEnvironment,
 } from './mcpHost/hostOptions.js';
@@ -267,6 +268,7 @@ export interface BuiltinHostOptions {
   temperature?: number;
   maxTokens?: number;
   apiKeyEnvVar?: string;
+  systemPrompt?: string;
   /** The vercel-sdk host's Agent Skills mode. */
   skills?: 'off' | 'catalog' | 'preload';
   model?: string;
@@ -291,6 +293,7 @@ const SdkHostSchema = z
     ...GenerationOptions,
     provider: ProviderSchema.optional(),
     apiKeyEnvVar: z.string().min(1).optional(),
+    systemPrompt: SystemPromptOption,
     /** Offer the server's Agent Skills: as a catalog the model loads from, or preloaded. */
     skills: z.enum(['off', 'catalog', 'preload']).optional(),
     env: z.record(z.string(), z.string().optional()).optional(),
@@ -303,6 +306,7 @@ const CliHostSchema = z
     type: z.literal('claude-cli').optional(),
     model: GenerationOptions.model,
     timeout: GenerationOptions.timeout,
+    systemPrompt: SystemPromptOption,
     provider: z.enum(['anthropic', 'vertex', 'vertex-anthropic']).optional(),
     apiToken: z.string().optional(),
     pluginDir: z.string().optional(),
@@ -384,6 +388,9 @@ function vercelSdkHost(options: BuiltinHostOptions): MCPHostConfig {
     provider: (options.provider as MCPHostConfig['provider']) ?? 'anthropic',
     model: options.model ?? 'claude-sonnet-4-20250514',
     maxToolCalls: options.maxToolCalls ?? 5,
+    ...(options.systemPrompt !== undefined
+      ? { systemPrompt: options.systemPrompt }
+      : {}),
     ...(options.skills !== undefined && options.skills !== 'off'
       ? { skills: options.skills }
       : {}),
@@ -581,6 +588,10 @@ function claudeCliHost(options: BuiltinHostOptions): MCPHostConfig {
     '--strict-mcp-config',
     '--permission-mode',
     'bypassPermissions',
+    // Added to Claude Code's own system prompt, which stays.
+    ...(options.systemPrompt !== undefined
+      ? ['--append-system-prompt', '{{systemPrompt}}']
+      : []),
   ];
 
   return {
@@ -591,6 +602,9 @@ function claudeCliHost(options: BuiltinHostOptions): MCPHostConfig {
       : provider) as MCPHostConfig['provider'],
     mcpServers: mcpServers as Record<string, Record<string, unknown>>,
     model,
+    ...(options.systemPrompt !== undefined
+      ? { systemPrompt: options.systemPrompt }
+      : {}),
     cli: {
       command: 'claude',
       claudeMcpServers: Object.keys(mcpServers),

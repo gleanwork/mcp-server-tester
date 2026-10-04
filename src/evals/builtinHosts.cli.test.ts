@@ -252,3 +252,24 @@ setTimeout(() => process.exit(0), 30000);
     expect(result.finalText).toBe('hello');
   });
 });
+
+describe('claude-cli systemPrompt', () => {
+  it('reaches the CLI exactly as written', async () => {
+    fs.writeFileSync(
+      path.join(directory, 'claude'),
+      `#!${process.execPath}
+const at = process.argv.indexOf('--append-system-prompt');
+console.log(JSON.stringify({ type: 'result', result: at < 0 ? 'none' : process.argv[at + 1] }));
+`,
+      { mode: 0o700 }
+    );
+    const prompt = 'Use find_skills first; never expand {{scenario}} or $&.';
+    const result = await getHost('claude-cli').run!(
+      { scenario: 'hello', servers: [], env: { PATH: directory } },
+      { type: 'claude-cli', systemPrompt: prompt },
+      { manifest: { name: 'offline', datasets: [] } }
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.finalText).toBe(prompt);
+  });
+});

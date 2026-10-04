@@ -183,6 +183,11 @@
           "enum": ["off", "catalog", "preload"],
           "default": "off",
           "description": "How the SDK host offers Agent Skills served over MCP (SEP-2640). 'catalog': list skills in the system prompt and load them with read_skill; 'preload': put every SKILL.md in the system prompt. Loads appear as kind 'skill' events for toolsTriggered."
+        },
+        "systemPrompt": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Instructions added to the host's system prompt. A CLI host needs a {{systemPrompt}} placeholder in cli.args."
         }
       }
     },

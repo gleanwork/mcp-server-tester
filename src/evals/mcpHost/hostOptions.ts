@@ -22,6 +22,12 @@ export const GenerationOptions = {
   maxTokens: z.number().int().positive().optional(),
 };
 
+/**
+ * Instructions the host adds to its system prompt, such as an
+ * organisation's instructions. Only hosts that can apply it accept it.
+ */
+export const SystemPromptOption = z.string().min(1).optional();
+
 export type HostEnvironment = Record<string, string | undefined>;
 
 /** Read execution-local credentials without mutating the parent process. */

@@ -230,6 +230,15 @@ export interface MCPHostConfig {
   temperature?: number;
 
   /**
+   * Text added to the host's system prompt, such as an organisation's
+   * instructions. The SDK host puts it in the model's system prompt; a CLI
+   * host gets it through a `{{systemPrompt}}` placeholder in `cli.args`
+   * (the claude-cli host adds `--append-system-prompt {{systemPrompt}}`).
+   * Browser and desktop hosts reject it.
+   */
+  systemPrompt?: string;
+
+  /**
    * Maximum number of tool call steps to allow in a single conversation
    * @default 10
    */

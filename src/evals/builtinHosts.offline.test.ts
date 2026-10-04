@@ -266,6 +266,30 @@ describe('SDK host through the real AI SDK', () => {
       { source: 'mcp', name: 'search', rawName: 'find' },
     ]);
   });
+  it("puts a systemPrompt in the model's system prompt", async () => {
+    const result = await run({ systemPrompt: 'Use find_skills first.' }, [
+      { transport: 'http', serverUrl: 'https://one.invalid' },
+    ]);
+    expect(result.error).toBeUndefined();
+    expect(model.doGenerateCalls[0]?.prompt[0]).toMatchObject({
+      role: 'system',
+      content: 'Use find_skills first.',
+    });
+  });
+  it('passes a claude-cli systemPrompt with --append-system-prompt', () => {
+    const config = getHost('claude-cli').createConfig!({
+      systemPrompt: 'Use find_skills first.',
+    });
+    const args = config.cli!.args;
+    // The runner fills the placeholder, so the prompt is never re-scanned.
+    expect(args[args.indexOf('--append-system-prompt') + 1]).toBe(
+      '{{systemPrompt}}'
+    );
+    expect(config.systemPrompt).toBe('Use find_skills first.');
+    expect(getHost('claude-cli').createConfig!({}).cli!.args).not.toContain(
+      '--append-system-prompt'
+    );
+  });
   it('enforces zero calls even if the real SDK receives a tool request', async () => {
     model = new MockLanguageModelV3({
       doGenerate: {

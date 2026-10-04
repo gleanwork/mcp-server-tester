@@ -395,6 +395,17 @@ describe('Anthropic trace execution', () => {
     ]);
   });
 
+  it('sends a systemPrompt as the system prompt', async () => {
+    fetchMock.mockResolvedValueOnce(response([{ type: 'text', text: 'OK' }]));
+    const input = options();
+    input.host.systemPrompt = 'Use find_skills first.';
+    await run(input);
+    expect(requestBody(0).system).toBe('Use find_skills first.');
+    fetchMock.mockResolvedValueOnce(response([{ type: 'text', text: 'OK' }]));
+    await run(options());
+    expect(requestBody(1)).not.toHaveProperty('system');
+  });
+
   it('applies description overrides and supports a no-server assistant', async () => {
     fetchMock.mockResolvedValueOnce(response([{ type: 'text', text: 'OK' }]));
     const input = options();

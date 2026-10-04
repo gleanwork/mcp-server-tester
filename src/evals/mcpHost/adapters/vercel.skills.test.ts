@@ -131,6 +131,26 @@ describe('SDK host with skills', () => {
     });
   }, 30_000);
 
+  it.each(['catalog', 'preload'] as const)(
+    '%s: a systemPrompt comes first, then the skills',
+    async (skills) => {
+      await withFixture(async (mcp) => {
+        await simulateMCPHost(mcp, 'Weather in London?', {
+          provider: 'openai',
+          skills,
+          systemPrompt: 'Org instructions.',
+        });
+        const { generateText } = await import('ai');
+        const call = vi.mocked(generateText).mock.calls[0]![0] as {
+          system?: string;
+        };
+        expect(call.system?.startsWith('Org instructions.\n\n')).toBe(true);
+        expect(call.system).toContain('weather-report');
+      });
+    },
+    30_000
+  );
+
   it('off (default): no skills, no system prompt, unchanged tool trace', async () => {
     await withFixture(async (mcp) => {
       const result = await simulateMCPHost(mcp, 'Weather in London?', {
