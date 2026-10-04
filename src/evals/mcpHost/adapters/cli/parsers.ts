@@ -77,7 +77,7 @@ export function parseStreamJson(stdout: string): MCPHostSimulationResult {
         usage = {
           inputTokens: event.usage.input_tokens ?? 0,
           outputTokens: event.usage.output_tokens ?? 0,
-          totalCostUsd: event.total_cost_usd ?? 0,
+          totalCostUsd: event.total_cost_usd,
           durationMs: event.duration_ms ?? 0,
           durationApiMs: event.duration_api_ms,
           cacheReadInputTokens: event.usage.cache_read_input_tokens,

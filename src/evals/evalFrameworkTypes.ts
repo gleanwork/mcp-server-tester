@@ -210,7 +210,12 @@ export interface EvaluationArmResult {
   name: string;
   servers: MCPConfig[];
   result?: EvalRunnerResult;
+  /** `passed_rate` and `trial_pass_rate`, plus the listed metrics. */
   metrics?: Record<string, unknown>;
+  /** The weakest evidence among the arm's cases. */
+  evidence?: HostEvidence;
+  /** Reported metrics with no value for this arm (unavailable, not zero). */
+  unavailableMetrics?: string[];
   comparison?: Record<string, unknown>;
 }
 

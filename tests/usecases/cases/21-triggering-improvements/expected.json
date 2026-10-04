@@ -23,32 +23,23 @@
       "equals": 1
     },
     {
-      "path": "arms[name=aggregate-mcp].metrics.win_rate",
-      "equals": 0.5,
-      "gap": "step 2: report the iteration win rate per arm (case pass/fail hides it)"
+      "path": "arms[name=aggregate-mcp].metrics.trial_pass_rate",
+      "equals": 0.5
     },
     {
-      "path": "arms[name=aggregate-plugin].metrics.win_rate",
-      "equals": 0.8,
-      "gap": "step 2: report the iteration win rate per arm (case pass/fail hides it)"
+      "path": "arms[name=aggregate-plugin].metrics.trial_pass_rate",
+      "equals": 0.8
     },
     {
-      "path": "arms[name=aggregate-mcp-org-instructions].metrics.win_rate",
-      "equals": 1,
-      "gap": "step 2: report the iteration win rate per arm (case pass/fail hides it)"
+      "path": "arms[name=aggregate-mcp-org-instructions].metrics.trial_pass_rate",
+      "equals": 1
     },
     {
-      "path": "armDeltas.aggregate-plugin.winRateDelta",
-      "equals": 0.3,
-      "gap": "step 2: report the iteration win rate per arm (case pass/fail hides it)"
+      "path": "armDeltas.aggregate-plugin.trialPassRateDelta",
+      "equals": 0.3
     }
   ],
   "ledger": {
-    "metrics": ["input_tokens_mean", "output_tokens_mean", "tool_count_mean"],
-    "gaps": {
-      "input_tokens_mean": "step 2: per-arm means use only the last iteration's calls but every iteration's tokens",
-      "output_tokens_mean": "step 2: per-arm means use only the last iteration's calls but every iteration's tokens",
-      "tool_count_mean": "step 2: per-arm means use only the last iteration's calls but every iteration's tokens"
-    }
+    "metrics": ["input_tokens_mean", "output_tokens_mean", "tool_count_mean"]
   }
 }

@@ -1,5 +1,9 @@
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import { simulationTrace } from './hostTrace.js';
+import {
+  isInfrastructureError,
+  isInfrastructureFailure,
+} from './infrastructureFailure.js';
 import type { HostTrace } from './evalFrameworkTypes.js';
 import { installPlugins } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
@@ -23,7 +27,6 @@ import {
 import type {
   ExternalHostCapabilitiesConfig,
   ExternalHostCorrelationConfig,
-  ExternalHostMetadata,
 } from './externalHost/types.js';
 import {
   driverToSlug,
@@ -56,10 +59,6 @@ import { sumUsage } from '../utils/usageUtils.js';
 import packageJson from '../../package.json' with { type: 'json' };
 import { attachReporterData } from '../reporters/channel.js';
 import { compareEvalRuns } from './evalRunComparison.js';
-import {
-  CLAUDE_NO_MATCHING_SESSION_MESSAGE,
-  CLAUDE_SESSION_TIMEOUT_MESSAGE,
-} from './externalHost/builtins/claudeSessions.js';
 
 /**
  * Context passed to the eval runner
@@ -876,63 +875,6 @@ async function runSingleIteration(
 }
 
 /**
- * Returns true when the error message appears to be caused by network or
- * infrastructure issues (connection resets, timeouts, rate limits, etc.)
- * rather than an assertion or logic failure.
- *
- * Accepts either an Error object or a plain string error message so it can
- * classify both thrown errors and errors surfaced via result.error.
- */
-function isInfrastructureError(err: unknown): boolean {
-  let name: string | undefined;
-  let msg: string;
-  let code: string = '';
-
-  if (err instanceof Error) {
-    name = err.name;
-    msg = err.message.toLowerCase();
-    code = ((err as NodeJS.ErrnoException).code ?? '').toLowerCase();
-  } else if (typeof err === 'string') {
-    msg = err.toLowerCase();
-  } else {
-    return false;
-  }
-
-  return (
-    name?.toLowerCase() === 'aborterror' ||
-    msg.includes('econnreset') ||
-    msg.includes('etimedout') ||
-    msg.includes('econnrefused') ||
-    msg.includes('rate limit') ||
-    msg.includes('429') ||
-    msg.includes('503') ||
-    msg.includes('network') ||
-    msg.includes('automation permission') ||
-    msg.includes('automation/accessibility') ||
-    // Cowork reports Claude binding failures as text; the wording is shared.
-    msg.includes(CLAUDE_NO_MATCHING_SESSION_MESSAGE.toLowerCase()) ||
-    msg.includes(CLAUDE_SESSION_TIMEOUT_MESSAGE.toLowerCase()) ||
-    msg.includes('failed to submit prompt to claude') ||
-    msg.includes('failed to submit prompt to desktop host') ||
-    // Prompt/context overflow — LLM couldn't run, not a tool discoverability failure
-    msg.includes('prompt is too long') ||
-    msg.includes('context length exceeded') ||
-    msg.includes('maximum context length') ||
-    msg.includes('context_length_exceeded') ||
-    msg.includes('tokens > ') ||
-    code.includes('econnreset') ||
-    code.includes('etimedout') ||
-    code.includes('econnrefused')
-  );
-}
-
-function isExternalHostInfrastructureFailure(
-  externalHost: ExternalHostMetadata | undefined
-): boolean {
-  return externalHost?.failureKind !== undefined;
-}
-
-/**
  * Runs a single eval case and returns the result.
  * When `evalCase.iterations > 1`, runs the case N times and returns accuracy.
  *
@@ -974,11 +916,7 @@ export async function runEvalCase(
       lastResult = result;
       // Check whether the tool call itself failed due to infrastructure (the
       // error is surfaced as result.error since executeEvalCase swallows throws)
-      const infraError =
-        isExternalHostInfrastructureFailure(result.externalHost) ||
-        (result.error != null &&
-          (result.hostDiagnostics?.failureKind !== undefined ||
-            isInfrastructureError(result.error)));
+      const infraError = isInfrastructureFailure(result);
       iterationResults.push({
         pass: result.pass,
         durationMs: result.durationMs,

@@ -207,6 +207,34 @@ has one implicit `default` arm.
 Each `MCPConfig` may have a `label`. Labels are required when a server set has
 more than one entry so traces and metrics can attribute MCP calls correctly.
 
+## Metrics
+
+Every arm in the run summary has `metrics`. They always include:
+
+- `passed_rate`: the share of cases that passed.
+- `trial_pass_rate`: the share of trials that passed, averaged over cases.
+
+A trial is one run of a case: one iteration, or the case itself when it runs once. A case passes when its trials reach its `accuracyThreshold` (1 by default), so two arms whose cases pass 60% and 100% of the time report a `passed_rate` of 0 and 1. `trial_pass_rate` reports 0.6 and 1.
+
+A manifest's or arm's `metrics` list adds more. Built-in names:
+
+| Metric                                                                                                 | Reports                                                           |
+| ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| `passed`, `trial_pass`                                                                                 | The two above.                                                    |
+| `tool_count`, `first_tool`, `is_no_action`                                                             | Tool calls in the trace. MCP calls are named `server.tool`.       |
+| `input_tokens`, `input_tokens_uncached`, `output_tokens`, `cache_read_tokens`, `cache_creation_tokens` | Host token usage. `input_tokens` includes cache reads and writes. |
+| `cost_usd`                                                                                             | Host-reported cost.                                               |
+| `duration_s`, `duration_api_s`                                                                         | Wall time, and API time when the host reports it.                 |
+| `response_success`, `response_len`, `response_words`                                                   | Trials without a host error, and the answer's length.             |
+| `skill_loaded`, `skill_before_tool`, `skill_verification_failed`                                       | Agent Skills loads.                                               |
+| `judge_pass`, `judge_score`, `judge_name`, `judge_pass_for`, `judge_score_for`                         | Judge verdicts, from the case's last trial.                       |
+
+- **Per trial.** Usage, timing, tool and answer metrics are measured per trial. A case's value is the mean over its trials, and an arm's is the mean over its cases (`<name>_mean`, or `<name>_rate` for shares). `first_tool` lists the first tool of each case's first trial. Runs that failed on infrastructure, such as a network error or a host that couldn't start, aren't trials, as they don't count toward accuracy.
+- **Unavailable, not zero.** A metric with no value for any case is left out of `metrics` and listed in the arm's `unavailableMetrics`. A host that reports no cost has no `cost_usd`. A host whose evidence is `none` has no tool metrics.
+- **Evidence.** An arm's `evidence` is the weakest among its cases (`none`, then `observed`, then `structured`). With `observed`, tool metrics come from a best-effort trace; compare them only between arms with the same evidence.
+- **Deltas.** `armDeltas` compares each arm with the first: `passRate`, `trialPassRate`, and their deltas.
+- **Run totals.** The summary's top-level `total`, `passed`, `failed` and `passRate` count every arm; its other metrics are the first arm's.
+
 ## CLI
 
 ```bash

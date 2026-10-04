@@ -205,7 +205,8 @@ describe('createVercelOrchestrator', () => {
     expect(result.usage).toBeDefined();
     expect(result.usage!.inputTokens).toBe(100);
     expect(result.usage!.outputTokens).toBe(50);
-    expect(result.usage!.totalCostUsd).toBe(0);
+    // The SDK reports tokens, not cost: unknown, not zero.
+    expect(result.usage!.totalCostUsd).toBeUndefined();
     expect(result.usage!.durationMs).toBeGreaterThanOrEqual(0);
   });
 
