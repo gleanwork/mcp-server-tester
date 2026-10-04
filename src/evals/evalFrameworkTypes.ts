@@ -116,6 +116,15 @@ export interface HostDefinition {
   createConfig?(options?: Record<string, unknown>): MCPHostConfig;
   /** Missing evidence declarations are treated as unverified. */
   readonly evidence?: HostEvidence;
+  /**
+   * The host shows the model an arm's `toolOverrides` (read from
+   * `context.arm` or `context.manifest`). Without it, a manifest that sets
+   * them for this host fails validation. Hosts with only `createConfig` run
+   * through MST's SDK host, which applies them.
+   */
+  readonly toolOverrides?: boolean;
+  /** The most cases the host can run at once; `concurrency` above it is an error. */
+  readonly maxConcurrency?: number;
   /** Ordered traces for all selected iterations. The framework owns verdicts. */
   runBatch?(
     requests: HostBatchRequest[],

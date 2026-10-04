@@ -48,9 +48,15 @@ export function buildEvalDataset(
 ): EvalDataset {
   const result = SourceDatasetSchema.safeParse(raw);
   if (!result.success) {
+    const name =
+      raw &&
+      typeof raw === 'object' &&
+      typeof (raw as { name?: unknown }).name === 'string'
+        ? `Dataset "${(raw as { name: string }).name}"`
+        : 'The dataset';
     throw new Error(
-      'Expected a canonical EvalDataset. Noncanonical inputs require an explicit dataset source adapter. ' +
-        result.error.message
+      `${name} isn't a canonical EvalDataset; a dataset in another format needs an explicit dataset source adapter.\n` +
+        describeIssues(raw, result.error.issues)
     );
   }
   const dataset = loadEvalDatasetFromObject(result.data);
@@ -73,4 +79,49 @@ export function selectEvalCases(
     ...dataset,
     cases: controls.maxCases ? cases.slice(0, controls.maxCases) : cases,
   };
+}
+
+/** Keys people reach for that MST spells differently. */
+const KEY_HINTS: Record<string, string> = {
+  regex: 'matchesPattern',
+  judge: 'passesJudge',
+  contains: 'containsText',
+  pattern: 'matchesPattern',
+};
+
+/** One line per issue, naming the case by its id: `case "a" expect: ...`. */
+function describeIssues(
+  raw: unknown,
+  issues: ReadonlyArray<{
+    path: PropertyKey[];
+    message: string;
+    code: string;
+    keys?: string[];
+  }>
+): string {
+  const cases = (raw as { cases?: Array<{ id?: unknown }> } | undefined)?.cases;
+  return issues
+    .map((issue) => {
+      const [first, index, ...rest] = issue.path;
+      const id =
+        first === 'cases' && typeof index === 'number'
+          ? cases?.[index]?.id
+          : undefined;
+      const where =
+        first === 'cases' && typeof index === 'number'
+          ? [
+              `case ${typeof id === 'string' ? `"${id}"` : index}`,
+              ...rest.map(String),
+            ].join(' ')
+          : issue.path.map(String).join('.') || 'dataset';
+      const hints =
+        issue.code === 'unrecognized_keys'
+          ? (issue.keys ?? [])
+              .filter((key) => KEY_HINTS[key])
+              .map((key) => ` (did you mean "${KEY_HINTS[key]}"?)`)
+              .join('')
+          : '';
+      return `  ${where}: ${issue.message}${hints}`;
+    })
+    .join('\n');
 }

@@ -41,6 +41,12 @@ runtime validation is provided by `EvalManifestSchema`.
 }
 ```
 
+A key the schema doesn't define is an error, in a manifest and in a dataset, so a misspelling fails instead of being ignored. So is a setting the selected host can't honour, such as `toolOverrides` for a host that doesn't present tool variants. `--dry-run` reports all of these, including in datasets.
+
+- **Run controls** (`iterations`, `maxCases`, `concurrency`, `filterTags`, `accuracyThreshold`) go at the top level or under `run`.
+- **Host defaults:** `model`, `provider`, `maxToolCalls`, `timeout`, `temperature` and `maxTokens` default each host option of that name, for the hosts that take it.
+- **Inheritance:** an arm or case host inherits the manifest host's options only when it's the same host type.
+
 A bare dataset path is shorthand for `{ "type": "file", "path": "..." }`.
 Every other pluggable block is a tagged object. `servers` is the complete MCP
 server set under test; an empty set is valid for hosts that provide their own
@@ -177,6 +183,7 @@ A manifest that loads the plugin selects the host with `{ "type": "my/assistant"
 - **In results.** Each host case result keeps the trace as `trace`, a `HostTrace`: the `HostRunResult` your host returned, without telemetry and diagnostics, plus its evidence. On a one-server arm, MCP events that name no server get that server's label. A case with several iterations has no `trace` of its own; each entry in `iterationResults` has the trace of that iteration. In a suite, every case result also names its `arm`. Stored results drop `finalText` and each event's `output`, the same way they drop `response`; events, servers, arguments and usage stay.
 - **Batches.** A host with `runBatch` gets one request per iteration of each host case in the dataset, and returns one trace per request, in order. A batch host can't mix host types, and its cases need unique IDs.
 - **Settings only.** `createConfig` returns settings for MST's own SDK or CLI host instead of running anything.
+- **What it honours.** Set `toolOverrides: true` if the host shows the model an arm's tool variants (from `context.arm`); without it, a manifest that gives the host `toolOverrides` fails validation. `maxConcurrency` caps the manifest's `concurrency`.
 
 ## Execution lifecycle
 

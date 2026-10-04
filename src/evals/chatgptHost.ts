@@ -303,6 +303,8 @@ function chatgptHost(platform: ChatgptPlatform): HostDefinition {
   return {
     schema: Schema,
     evidence: 'structured',
+    // One ChatGPT app window drives one conversation at a time.
+    maxConcurrency: 1,
     runBatch(requests, context) {
       return runBatch(requests, context, platform);
     },

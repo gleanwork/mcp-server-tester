@@ -428,7 +428,21 @@ const JudgeExpectConfigFieldsSchema = z.object({
   ...RubricJudgeLLMSchema.shape,
 });
 
+const JUDGE_FIELDS = new Set(Object.keys(JudgeExpectConfigFieldsSchema.shape));
+
+// A named judge's own options may sit next to these fields; a rubric
+// assertion has no others, so an unknown key there is a typo.
 const JudgeExpectConfigSchema = JudgeExpectConfigFieldsSchema.passthrough()
+  .superRefine((config, context) => {
+    if (config.judge !== undefined) return;
+    const unknown = Object.keys(config).filter((key) => !JUDGE_FIELDS.has(key));
+    if (unknown.length > 0)
+      context.addIssue({
+        code: 'unrecognized_keys',
+        keys: unknown,
+        message: `Unrecognized key${unknown.length > 1 ? 's' : ''}: ${unknown.map((key) => `"${key}"`).join(', ')}`,
+      });
+  })
   .transform((config) =>
     config.judge !== undefined
       ? config
@@ -441,49 +455,57 @@ const JudgeExpectConfigSchema = JudgeExpectConfigFieldsSchema.passthrough()
 /**
  * Zod schema for EvalExpectBlock
  */
-export const EvalExpectBlockSchema = z.object({
-  response: z.unknown().optional(),
-  schema: z.string().optional(),
-  containsText: z.union([z.string(), z.array(z.string())]).optional(),
-  matchesPattern: z.union([z.string(), z.array(z.string())]).optional(),
-  snapshot: z.string().optional(),
-  snapshotSanitizers: z.array(SnapshotSanitizerSchema).optional(),
-  isError: z.union([z.boolean(), z.string(), z.array(z.string())]).optional(),
-  passesJudge: z
-    .union([JudgeExpectConfigSchema, z.array(JudgeExpectConfigSchema).min(1)])
-    .optional(),
-  responseSize: z
-    .object({
-      maxBytes: z.number().optional(),
-      minBytes: z.number().optional(),
-    })
-    .optional(),
-  toolsTriggered: z
-    .object({
-      calls: z.array(
-        z.object({
-          name: z.string(),
-          kind: z
-            .enum(['tool_call', 'skill', 'command', 'subagent'])
-            .optional(),
-          source: z.enum(['mcp', 'host']).optional(),
-          server: z.string().min(1).optional(),
-          arguments: z.record(z.string(), z.unknown()).optional(),
-          required: z.boolean().optional(),
-        })
-      ),
-      order: z.enum(['strict', 'any']).optional(),
-      exclusive: z.boolean().optional(),
-    })
-    .optional(),
-  toolCallCount: z
-    .object({
-      min: z.number().int().min(0).optional(),
-      max: z.number().int().min(0).optional(),
-      exact: z.number().int().min(0).optional(),
-    })
-    .optional(),
-});
+export const EvalExpectBlockSchema = z
+  .object({
+    response: z.unknown().optional(),
+    schema: z.string().optional(),
+    containsText: z.union([z.string(), z.array(z.string())]).optional(),
+    matchesPattern: z.union([z.string(), z.array(z.string())]).optional(),
+    snapshot: z.string().optional(),
+    snapshotSanitizers: z.array(SnapshotSanitizerSchema).optional(),
+    isError: z.union([z.boolean(), z.string(), z.array(z.string())]).optional(),
+    passesJudge: z
+      .union([JudgeExpectConfigSchema, z.array(JudgeExpectConfigSchema).min(1)])
+      .optional(),
+    responseSize: z
+      .object({
+        maxBytes: z.number().optional(),
+        minBytes: z.number().optional(),
+      })
+      .strict()
+      .optional(),
+    toolsTriggered: z
+      .object({
+        calls: z.array(
+          z
+            .object({
+              name: z.string(),
+              kind: z
+                .enum(['tool_call', 'skill', 'command', 'subagent'])
+                .optional(),
+              source: z.enum(['mcp', 'host']).optional(),
+              server: z.string().min(1).optional(),
+              arguments: z.record(z.string(), z.unknown()).optional(),
+              required: z.boolean().optional(),
+            })
+            .strict()
+        ),
+        order: z.enum(['strict', 'any']).optional(),
+        exclusive: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
+    toolCallCount: z
+      .object({
+        min: z.number().int().min(0).optional(),
+        max: z.number().int().min(0).optional(),
+        exact: z.number().int().min(0).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  // An unknown key is a mistake: a misspelt assertion would never run.
+  .strict();
 
 /**
  * Zod schema for EvalDirectRequest
@@ -521,6 +543,8 @@ export const EvalCaseSchema = z
     tags: z.array(z.string()).optional(),
     expect: EvalExpectBlockSchema.optional(),
   })
+  // A misspelt case setting (`accuracyThresold`) would otherwise be ignored.
+  .strict()
   .superRefine((evalCase, context) => {
     if (evalCase.request && evalCase.toolName) {
       context.addIssue({
@@ -541,12 +565,18 @@ export const EvalCaseSchema = z
 /**
  * Zod schema for EvalDataset (without schemas field, as schemas aren't serializable)
  */
-export const EvalDatasetSchema = z.object({
-  name: z.string().min(1, 'name must not be empty'),
-  description: z.string().optional(),
-  cases: z.array(EvalCaseSchema).min(1, 'dataset must have at least one case'),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-});
+export const EvalDatasetSchema = z
+  .object({
+    /** The editor schema a dataset file may point to. */
+    $schema: z.string().optional(),
+    name: z.string().min(1, 'name must not be empty'),
+    description: z.string().optional(),
+    cases: z
+      .array(EvalCaseSchema)
+      .min(1, 'dataset must have at least one case'),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
 
 /**
  * Type for serialized eval dataset (without Zod schemas)

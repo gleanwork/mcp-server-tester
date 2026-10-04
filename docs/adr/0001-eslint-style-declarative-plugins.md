@@ -21,7 +21,7 @@ The built-in desktop drivers are composed from capabilities (control, input, com
 
 ## Shared configs
 
-A plugin's `configs` are named manifest fragments, and a manifest opts into them with `extends: ["namespace/name"]`. They were reserved, unread, until their shape was settled. That couldn't wait past 2.0: `configs` accepted any object and manifests pass unknown keys through, so giving either a meaning later would have changed what existing plugins and manifests did.
+A plugin's `configs` are named manifest fragments, and a manifest opts into them with `extends: ["namespace/name"]`. They were reserved, unread, until their shape was settled. That couldn't wait past 2.0: `configs` accepted any object and manifests passed unknown keys through (they're strict since 2.0), so giving either a meaning later would have changed what existing plugins and manifests did.
 
 - **What a config holds.** Any manifest key except the manifest's own: `name`, `datasets`, `arms`, `plugins` and `extends`. Unknown keys are rejected, so adding keys later won't break anything.
 - **Merging.** Configs apply in order, then the manifest. Each top-level key is replaced, never merged, as arms already replace the manifest's settings. Replacing is predictable, and a manifest can always restate a list. Appending would make it impossible to drop a judge a config adds.

@@ -388,6 +388,7 @@ Run an eval dataset. Expectations are defined per-case in the dataset's `expect`
   - `onCaseComplete?: (result: EvalCaseResult) => void` - Callback after each case completes
   - `concurrency?: number` - Max parallel cases (default: `1` = sequential)
   - `defaultLlmIterations?: number` - Default iteration count for `mcp_host` cases (default: `1`)
+  - `defaultAccuracyThreshold?: number` - Default `accuracyThreshold` for host-driven cases that don't set one (default: `1`)
   - `defaultJudgeReps?: number` - Default judge evaluation count per case (default: `1`)
   - `filterTags?: string[]` - Only run cases whose `tags` contain at least one match
   - `saveResultsTo?: string` - Save run results to file for baseline comparison

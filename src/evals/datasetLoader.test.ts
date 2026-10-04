@@ -66,7 +66,7 @@ describe('datasetLoader', () => {
             id: 'case-1',
             toolName: 'test',
             args: {},
-            expectedSchemaName: 'test-schema',
+            expect: { schema: 'test-schema' },
           },
         ],
       };
@@ -141,13 +141,13 @@ describe('datasetLoader', () => {
             id: 'case-1',
             toolName: 'test',
             args: {},
-            expectedSchemaName: 'schema-a',
+            expect: { schema: 'schema-a' },
           },
           {
             id: 'case-2',
             toolName: 'test',
             args: {},
-            expectedSchemaName: 'schema-b',
+            expect: { schema: 'schema-b' },
           },
         ],
       };
@@ -200,6 +200,64 @@ describe('datasetLoader', () => {
       const dataset = loadEvalDatasetFromObject(data);
 
       expect(dataset.schemas).toEqual({});
+    });
+  });
+});
+
+describe('strict expectations', () => {
+  it('rejects an assertion it does not know, instead of never running it', () => {
+    expect(() =>
+      loadEvalDatasetFromObject({
+        name: 'typo',
+        cases: [
+          {
+            id: 'one',
+            toolName: 'search',
+            args: {},
+            expect: { regex: ['found'] },
+          },
+        ],
+      })
+    ).toThrow(/regex/);
+  });
+});
+
+describe('strict cases', () => {
+  const dataset = (case_: Record<string, unknown>) => ({
+    name: 'typos',
+    cases: [{ id: 'one', toolName: 'search', args: {}, ...case_ }],
+  });
+
+  it.each([
+    ['a case setting', { accuracyThresold: 0.8 }, /accuracyThresold/],
+    [
+      'a rubric option',
+      { expect: { passesJudge: { rubric: 'correctness', treshold: 0.9 } } },
+      /treshold/,
+    ],
+    ['a size bound', { expect: { responseSize: { maxByte: 10 } } }, /maxByte/],
+    [
+      'a call expectation',
+      {
+        expect: {
+          toolsTriggered: { calls: [{ name: 'search', requird: true }] },
+        },
+      },
+      /requird/,
+    ],
+    ['a call count', { expect: { toolCallCount: { exactly: 1 } } }, /exactly/],
+  ])('rejects a misspelt %s', (_, case_, message) => {
+    expect(() => loadEvalDatasetFromObject(dataset(case_))).toThrow(message);
+  });
+
+  it("keeps a named judge's own options", () => {
+    const loaded = loadEvalDatasetFromObject(
+      dataset({
+        expect: { passesJudge: { judge: 'acme/quality', strictness: 2 } },
+      })
+    );
+    expect(loaded.cases[0]?.expect?.passesJudge).toMatchObject({
+      strictness: 2,
     });
   });
 });

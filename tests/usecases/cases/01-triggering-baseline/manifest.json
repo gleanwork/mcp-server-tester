@@ -55,7 +55,10 @@
       }
     ]
   },
-  "iterations": 10,
+  "run": {
+    "iterations": 10,
+    "accuracyThreshold": 0.8
+  },
   "metrics": [
     "passed",
     "tool_count",

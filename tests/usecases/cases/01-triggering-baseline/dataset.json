@@ -14,8 +14,7 @@
             }
           ]
         }
-      },
-      "accuracyThreshold": 0.8
+      }
     },
     {
       "id": "billing-owner",
@@ -30,8 +29,7 @@
             }
           ]
         }
-      },
-      "accuracyThreshold": 0.8
+      }
     }
   ]
 }

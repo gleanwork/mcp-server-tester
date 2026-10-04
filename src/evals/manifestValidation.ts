@@ -7,7 +7,7 @@ import type {
   ResultStoreDefinition,
 } from './evalFrameworkTypes.js';
 import { getDatasetSource } from './builtinDatasetSources.js';
-import { getHost } from './builtinHosts.js';
+import { assertHostSupports, getHost } from './builtinHosts.js';
 import { getJudge } from '../judge/builtinJudges.js';
 import { getMetric } from './metrics.js';
 import { getResultStore } from './builtinResultStores.js';
@@ -96,6 +96,7 @@ const SuiteControlsSchema = z
     maxCases: z.number().int().positive().optional(),
     concurrency: z.number().int().positive().optional(),
     filterTags: z.array(z.string().min(1)).optional(),
+    accuracyThreshold: z.number().min(0).max(1).optional(),
   })
   .strict();
 
@@ -167,17 +168,73 @@ function parseJudges(
   });
 }
 
+/** Manifest settings that default every host's option of the same name. */
+const HOST_DEFAULTS = [
+  'model',
+  'provider',
+  'maxToolCalls',
+  'timeout',
+  'temperature',
+  'maxTokens',
+] as const;
+
+/** Whether a host's schema takes `key`: declared, or accepted by a loose schema. */
+function takesOption(schema: ZodType, key: string): boolean {
+  if (!(schema instanceof z.ZodObject)) return true;
+  if (key in schema.shape) return true;
+  const catchall = (
+    schema._zod.def as { catchall?: { _zod: { def: { type: string } } } }
+  ).catchall?._zod.def.type;
+  return catchall !== undefined && catchall !== 'never';
+}
+
+/**
+ * A host's options with the manifest's defaults filled in, for the options
+ * its schema takes (a shared `provider` doesn't reach a host that has none).
+ */
 export function parseHostConfig(
   config: HostConfig,
   defaults?: EvalManifest,
   lookups: ManifestLookups = manifestLookups()
 ): HostConfig {
+  const definition = lookups.host(config.type);
   const options = { ...config };
-  for (const key of ['model', 'provider', 'maxToolCalls', 'timeout'] as const) {
-    if (options[key] === undefined && defaults?.[key] !== undefined)
+  for (const key of HOST_DEFAULTS) {
+    if (
+      options[key] === undefined &&
+      defaults?.[key] !== undefined &&
+      takesOption(definition.schema, key)
+    )
       options[key] = defaults[key];
   }
-  return parseConfig(options, lookups.host(config.type), 'host options');
+  return parseConfig(options, definition, 'host options');
+}
+
+/** An arm's (or case's) host: the base host's options apply only to the same host. */
+export function inheritHost(
+  base: HostConfig | undefined,
+  patch: Partial<HostConfig>
+): HostConfig {
+  const type = patch.type ?? base?.type ?? 'claude-cli';
+  return { ...(base?.type === type ? base : {}), ...patch, type } as HostConfig;
+}
+
+/** A manifest default no host of the run takes would silently do nothing. */
+function assertDefaultsUsed(
+  manifest: EvalManifest,
+  hosts: HostConfig[],
+  lookups: ManifestLookups
+): void {
+  for (const key of HOST_DEFAULTS) {
+    if (manifest[key] === undefined || hosts.length === 0) continue;
+    const used = hosts.some((host) =>
+      takesOption(lookups.host(host.type).schema, key)
+    );
+    if (!used)
+      throw new Error(
+        `The manifest sets "${key}", but none of its hosts (${[...new Set(hosts.map((host) => host.type))].join(', ')}) takes it.`
+      );
+  }
 }
 
 function effectiveHost(
@@ -256,26 +313,47 @@ export function validateManifest(
         ),
       }
     : undefined;
+  if (!manifest.arms?.length && host) {
+    assertHostSupports(host, {
+      servers: manifest.servers ?? [],
+      toolOverrides: manifest.toolOverrides,
+      concurrency: manifest.concurrency,
+      context: 'The manifest',
+    });
+  }
   const arms = manifest.arms?.map((arm) => {
     const servers = arm.servers ?? manifest.servers;
     validateLabels(servers ?? [], `arm "${arm.name}"`);
+    const armHost = arm.host
+      ? effectiveHost(manifest, inheritHost(manifest.host, arm.host), lookups)
+      : host;
+    if (armHost) {
+      assertHostSupports(armHost, {
+        servers: servers ?? [],
+        toolOverrides: arm.toolOverrides ?? manifest.toolOverrides,
+        concurrency: manifest.concurrency,
+        context: `Arm "${arm.name}"`,
+      });
+    }
     return {
       ...arm,
       servers,
-      host: arm.host
-        ? effectiveHost(
-            manifest,
-            {
-              ...manifest.host,
-              ...arm.host,
-              type: arm.host.type ?? manifest.host?.type ?? 'claude-cli',
-            },
-            lookups
-          )
-        : host,
+      host: armHost,
       metrics: arm.metrics ? parseMetrics(arm.metrics, lookups) : metrics,
       judges: arm.judges ? parseJudges(arm.judges, lookups) : judges,
     };
   });
+  assertDefaultsUsed(
+    manifest,
+    [
+      ...(manifest.arms?.length && manifest.arms.every((arm) => arm.host)
+        ? []
+        : host
+          ? [host]
+          : []),
+      ...(arms ?? []).flatMap((arm) => (arm.host ? [arm.host] : [])),
+    ],
+    lookups
+  );
   return { ...manifest, datasets, host, metrics, judges, results, arms };
 }

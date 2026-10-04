@@ -13,7 +13,7 @@ export interface LoadDatasetOptions {
   /**
    * Optional schema definitions to attach to the dataset
    *
-   * Keys should match the expectedSchemaName in eval cases
+   * Keys are the names cases refer to in `expect.schema`
    */
   schemas?: Record<string, z.ZodSchema>;
 
