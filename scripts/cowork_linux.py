@@ -38,7 +38,9 @@ class Desktop:
             raise DriverFailure("desktop_missing_or_ambiguous")
         return matches[0]
 
-    def controls(self, names: set[str], roles: set[str], *, require_enabled: bool = True):
+    def controls(self, names, roles: set[str], *, require_enabled: bool = True):
+        # names: an exact-name set, or a predicate for names that carry a description.
+        matches = names if callable(names) else names.__contains__
         pending = [self.application()]
         found = []
         seen = 0
@@ -49,7 +51,7 @@ class Desktop:
                 raise DriverFailure("accessibility_tree_budget")
             try:
                 states = node.get_state_set()
-                if (node.get_role_name() in roles and node.get_name() in names
+                if (node.get_role_name() in roles and matches(node.get_name() or "")
                         and states.contains(self.api.StateType.VISIBLE)
                         and states.contains(self.api.StateType.SHOWING)
                         and (not require_enabled or (
@@ -80,6 +82,20 @@ class Desktop:
             [configured_opener or "xdg-open", "claude://claude.ai/new?q=" + quote(prompt, safe="")],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=min(timeout, 15),
         )
+
+
+# Cowork's permission-mode picker (Manual / Auto / Skip all approvals). The trigger
+# shows the current mode; compact composers show the short trigger label.
+MODE_TRIGGER_SKIP = {"Skip all approvals", "Skip"}
+MODE_TRIGGER_OTHER = {"Manually approve", "Manual", "Auto"}
+SKIP_CHOICE = "Skip all approvals"
+SKIP_CONFIRM = {"Yes, continue"}
+MENU_ROLES = {"menu item", "radio menu item", "check menu item", "option", "list item"}
+
+
+def is_skip_choice(name: str) -> bool:
+    # A menu item's accessible name may append its description to the label.
+    return name.startswith(SKIP_CHOICE)
 
 
 class Driver:
@@ -153,11 +169,57 @@ class Driver:
                     self.action(lambda: self.desktop.activate(tabs[0]))
             time.sleep(min(0.1, self.remaining()))
 
-    def submit(self, prompt: str) -> dict:
+    def skip_approvals(self) -> None:
+        """Put the prefilled task in Cowork's bypassPermissions mode before submit.
+
+        One task-level mode covers every built-in tool (artifacts, files, and so on),
+        instead of answering approval cards tool by tool. Managed MCP toolPolicy
+        "ask"/"blocked" entries still apply in this mode. Fails closed when the
+        picker or its Skip choice is not offered.
+        """
+        requested = set()
+        menu_deadline = None
+        while True:
+            self.remaining()
+            triggers = self.desktop.controls(MODE_TRIGGER_SKIP | MODE_TRIGGER_OTHER, {"button"})
+            skip = [node for node in triggers if node.get_name() in MODE_TRIGGER_SKIP]
+            if len(skip) == 1 and len(triggers) == 1:
+                return
+            if len(triggers) > 1:
+                raise DriverFailure("permission_mode_control_ambiguous")
+            confirm = self.desktop.controls(SKIP_CONFIRM, {"button"})
+            if confirm:
+                if len(confirm) != 1 or "confirm" in requested:
+                    raise DriverFailure("skip_approvals_confirmation_unresolved")
+                requested.add("confirm")
+                self.action(lambda: self.desktop.activate(confirm[0]))
+            else:
+                choices = self.desktop.controls(is_skip_choice, MENU_ROLES)
+                if choices:
+                    if len(choices) != 1 or "choice" in requested:
+                        raise DriverFailure("skip_approvals_choice_unresolved")
+                    requested.add("choice")
+                    self.action(lambda: self.desktop.activate(choices[0]))
+                elif triggers:
+                    if "trigger" in requested:
+                        # The picker stays open without a Skip choice: bypass is not offered.
+                        if time.monotonic() >= menu_deadline:
+                            raise DriverFailure("skip_approvals_unavailable")
+                    else:
+                        requested.add("trigger")
+                        menu_deadline = time.monotonic() + 5
+                        self.action(lambda: self.desktop.activate(triggers[0]))
+                elif "trigger" not in requested:
+                    raise DriverFailure("permission_mode_control_missing")
+            time.sleep(min(0.3, self.remaining()))
+
+    def submit(self, prompt: str, skip_approvals: bool = False) -> dict:
         if not isinstance(prompt, str) or not prompt.strip():
             raise DriverFailure("invalid_prompt")
         self.select_cowork()
         self.action(lambda: self.desktop.open_prompt(prompt, self.remaining()))
+        if skip_approvals:
+            self.skip_approvals()
         while True:
             self.remaining()
             starts = self.desktop.controls({"Start task"}, {"button"})
@@ -174,12 +236,6 @@ class Driver:
         if approve_writes:
             names |= {"Always allow", "Allow always", "Full access", "Allow full access"}
         controls = self.desktop.controls(names, {"button"})
-        if not controls:
-            # Cowork confirms a built-in artifact (create_artifact) with an inline
-            # Cancel/Create card, not an Allow prompt. Creating one is a write.
-            create = self.desktop.controls({"Create"}, {"button"})
-            if create and self.desktop.controls({"Cancel"}, {"button"}):
-                controls = create
         if not controls:
             return self.receipt("hitl_checked")
         # Do not choose among unrelated prompts or continue arbitrary onboarding.
@@ -209,7 +265,7 @@ def main() -> int:
             raise DriverFailure("invalid_input")
         driver = Driver(Desktop(), args.timeout_ms, args.max_actions)
         if args.mode == "submit":
-            result = driver.submit(payload.get("prompt"))
+            result = driver.submit(payload.get("prompt"), payload.get("skipApprovals") is True)
         elif args.mode == "hitl":
             result = driver.hitl(payload.get("approveWriteTools") is True)
         elif args.mode == "reset":

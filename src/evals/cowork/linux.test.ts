@@ -285,10 +285,26 @@ describe('caller-owned Linux Cowork desktop', () => {
       linuxCoworkPlatform.submit('unchanged', options())
     ).rejects.not.toThrow('secret child diagnostic');
   });
+  it('skips approvals for the task only under the write policy', async () => {
+    await linuxCoworkPlatform.submit('q', {
+      ...options(),
+      approveWriteTools: true,
+    });
+    await linuxCoworkPlatform.submit('q', {
+      ...options(),
+      approveWriteTools: false,
+    });
+    expect(child.payloads.map((p) => JSON.parse(p).skipApprovals)).toEqual([
+      true,
+      false,
+    ]);
+  });
   it('passes the exact prompt over stdin and reports no imaginary planner usage', async () => {
     const prompt = '  Unicode 中文\nsecond line  ';
     const result = await linuxCoworkPlatform.submit(prompt, options());
-    expect(child.payloads).toEqual([JSON.stringify({ prompt })]);
+    expect(child.payloads).toEqual([
+      JSON.stringify({ prompt, skipApprovals: false }),
+    ]);
     expect(child.exec.mock.calls[0]![1]).not.toContain(prompt);
     expect(child.exec.mock.calls[0]![2].env).toMatchObject({
       MST_COWORK_URL_OPENER: '/prepared/open-url',
