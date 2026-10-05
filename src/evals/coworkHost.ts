@@ -310,9 +310,7 @@ async function runBatch(
             ...(mac && config.model ? { targetModel: config.model } : {}),
             env,
             ...(session?.appPath ? { appPath: session.appPath } : {}),
-            ...(mac
-              ? {}
-              : { approveWriteTools: coworkSetup.approveWriteTools }),
+            ...(mac ? {} : { approveWriteTools: coworkSetup.approveWriteTools }),
           });
           computerUse.submission = {
             status: 'completed',
