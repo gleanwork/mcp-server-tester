@@ -29,6 +29,8 @@ export type {
   VariantImprovementProposal,
   VariantExperimentOptions,
   VariantExperimentResult,
+  SuiteVariantExperimentOptions,
+  VariantExperimentSuite,
 } from '../types/index.js';
 export {
   EvalManifestSchema,

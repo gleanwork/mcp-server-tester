@@ -306,6 +306,8 @@ The manual loop above — run baseline, inject a variant, `compareEvalRuns`, bui
 
 The library owns the experiment mechanics; your `proposeVariants` callback owns the judgment of which variant to try next. `runVariantExperiment` never edits your MCP server source or dataset — it returns a proposal for you (or an agent) to act on.
 
+To run the experiment on a real host instead of the SDK host, give it a manifest: `runVariantExperiment({ suite: { manifestPath }, variants })`. See the [API reference](./api-reference.md#runvariantexperimentoptions-context--runvariantexperimentsuiteoptions).
+
 ```typescript snippet=snippets/variant-experiment.ts
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
 import {

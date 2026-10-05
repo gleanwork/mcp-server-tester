@@ -427,3 +427,22 @@ describe('runVariantExperiment — reporter integration', () => {
     }
   });
 });
+
+describe('runVariantExperiment — a candidate without the metric', () => {
+  it('is disqualified and marked, not scored as the baseline', async () => {
+    setRuns({
+      __baseline__: makeResult([{ id: 'c1', pass: true }], { f1: 0.5 }),
+      vA: makeResult([{ id: 'c1', pass: true }]),
+    });
+    const result = await runVariantExperiment(
+      { dataset, variants: [variant('vA')], metric: 'toolF1' },
+      context
+    );
+    expect(result.rounds[0]?.candidates[0]).toMatchObject({
+      metricUnavailable: true,
+      disqualified: true,
+      metricValue: 0.5,
+    });
+    expect(result.winner).toBeUndefined();
+  });
+});
