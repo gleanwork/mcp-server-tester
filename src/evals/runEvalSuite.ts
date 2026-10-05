@@ -673,6 +673,8 @@ export async function runEvalSuite(
         const result = await runEvalDataset(
           {
             dataset: effectiveDataset,
+            // The suite reports its own results (results.json).
+            reporting: 'none',
             protocol: () => directProtocol,
             concurrency: manifest.concurrency ?? 1,
             defaultLlmIterations: manifest.iterations,

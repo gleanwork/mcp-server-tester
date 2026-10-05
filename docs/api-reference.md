@@ -397,6 +397,7 @@ Run an eval dataset. Expectations are defined per-case in the dataset's `expect`
   - `toolOverrides?: ToolOverrideVariant` - Runtime tool metadata overrides for variant experiments
   - `mcpHostModel?: string` - Model identifier recorded in run metadata
   - `judgeModel?: string` - Judge model identifier recorded in run metadata
+  - `reporting?: 'playwright' | 'none'` - `'none'` when the caller reports results itself (suites do): no suggestion to pass `testInfo` (default: `'playwright'`)
 - `context: EvalContext`
   - `mcp: MCPFixtureApi` - MCP fixture API
   - `testInfo?: TestInfo` - Playwright test info (required for snapshot support)
