@@ -672,7 +672,6 @@ export interface EvalRunnerResult {
    * Aggregate token usage from all mcp_host LLM simulations across all cases.
    */
   totalHostUsage?: UsageMetrics;
-}
 ```
 
 ### `runVariantExperiment(options, context)` / `runVariantExperiment(suiteOptions)`
@@ -921,14 +920,15 @@ Validates the number of tool calls from an MCP host simulation result. Only appl
 const result = validateToolCallCount(simulationResult, { min: 1, max: 3 });
 ```
 
-### `validateJudge(response, config)` (async)
+### `validateJudge(response, config, run?)` (async)
 
-Evaluates a response with a judge: the built-in `rubric` LLM judge or a plugin judge. Returns a `Promise<ValidationResult>`. A judge that can't score the response (an unknown judge, invalid options, an API error) fails with `details.error` set.
+Evaluates a response with a judge: the built-in `rubric` LLM judge or a plugin judge. Returns a `Promise<ValidationResult>`. A judge that can't score the response (an unknown judge, invalid options, an API error, a score outside 0 to 1) fails with `details.error` set. A judge that skips passes with `details.skipped` set.
 
 **Parameters:**
 
 - `response: unknown` — The response to evaluate
 - `config: JudgeValidatorConfig` — Judge configuration
+- `run?: JudgeRun` — `{ evalCase?, hostResponse?, evidence? }`, from which the judge's `{ case, trial }` input is built (see [Judge contract](./evaluation-framework.md#judge-contract)). Without it, the case is empty except for `expected.answer` (the `reference`).
 
 **`JudgeValidatorConfig`:**
 
@@ -1405,7 +1405,7 @@ The `{ code, message, data? }` of the protocol error a result was made from, or 
 
 ### `EvalExpectBlock`
 
-```typescript snippet=src/evals/datasetTypes.ts#L217-L318
+```typescript snippet=src/evals/datasetTypes.ts#L228-L329
 /**
  * Unified expectation block for eval cases
  *
@@ -1512,7 +1512,7 @@ export interface EvalExpectBlock {
 
 ### `EvalCase`
 
-````typescript snippet=src/evals/datasetTypes.ts#L39-L176
+````typescript snippet=src/evals/datasetTypes.ts#L40-L187
 /**
  * A single eval test case
  *
@@ -1618,6 +1618,17 @@ export interface EvalCase {
    * (unless passesJudge.reference is explicitly provided).
    */
   canonicalAnswer?: string;
+
+  /**
+   * What the case expects, for judges: `answer` (the reference answer, which
+   * overrides `canonicalAnswer`), `criteria` (rubric criteria keyed by name),
+   * and any other ground truth. Judges read it as `case.expected`.
+   */
+  expected?: {
+    answer?: unknown;
+    criteria?: Record<string, string>;
+    [key: string]: unknown;
+  };
 
   /**
    * Arbitrary string labels for this case.

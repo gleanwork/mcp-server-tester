@@ -15,6 +15,7 @@ import type {
 import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
 import type { EvalResultStore } from './resultStore.js';
 import type { EvalRunnerResult } from './evalRunner.js';
+import type { JudgeInput, JudgeVerdict } from '../judge/judgeContract.js';
 
 /** Context provided to a dataset source implementation. */
 export interface DatasetSourceContext {
@@ -185,29 +186,30 @@ export interface MetricDefinition {
   ): { key: string; value: unknown } | undefined;
 }
 
-/** What a judge returns for one evaluation of a response. */
-export interface JudgeVerdict {
-  /** Normalized score from 0 to 1; the assertion's threshold decides pass/fail. */
-  score: number;
-  reasoning?: string;
-  /** The LLM provider that scored, when the judge uses one. */
-  provider?: string;
-  /** The model that scored, when the judge uses one. */
-  model?: string;
-}
+export type { JudgeVerdict } from '../judge/judgeContract.js';
 
 /**
  * Public judge extension point. Built-in judges (`rubric`) and plugin judges
- * share it: the framework parses `options` with `schema`, calls `evaluate`
- * once per rep, and applies the threshold to the mean score.
+ * share it: the framework parses `options` with `schema`, builds the judge's
+ * input from the case and the run, calls `evaluate` once per rep, and applies
+ * the threshold to the mean score unless the judge returns its own `pass`.
  */
 export interface JudgeDefinition {
+  /** Parses the judge's options. */
   readonly schema: ZodType;
+  /**
+   * Paths in the judge input this judge needs, such as `case.expected.answer`
+   * or `case.expected.criteria`. When one is missing or empty, the judge is
+   * not called and the result is recorded as skipped.
+   */
+  readonly requires?: readonly string[];
+  /**
+   * Grades one run of a case. `input.case` is the case as written in the
+   * dataset; `input.trial` is the observed run. `options` is parsed by `schema`.
+   */
   evaluate: (
-    candidate: unknown,
-    reference?: unknown,
-    /** Options parsed by this judge's schema, including defaults/transforms. */
-    options?: Record<string, unknown>
+    input: JudgeInput,
+    options: Record<string, unknown>
   ) => Promise<JudgeVerdict>;
 }
 
@@ -257,6 +259,8 @@ export interface RunTelemetry {
   toolCalls: number;
   failedCases: number;
   totalHostUsage?: Partial<UsageMetrics>;
+  /** Judge model usage, from judges that report it. Separate from host usage. */
+  totalJudgeUsage?: Partial<UsageMetrics>;
 }
 
 /** How one arm changed since the previous run of the same manifest. */

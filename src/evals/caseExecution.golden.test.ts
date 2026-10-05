@@ -37,6 +37,7 @@ import type { HostRunResult, JudgeDefinition } from './evalFrameworkTypes.js';
 import { runEvalSuite } from './runEvalSuite.js';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
+import type { JudgeInput } from '../judge/judgeContract.js';
 
 vi.mock('./mcpHost/mcpHostSimulation.js', async (original) => ({
   ...(await original<typeof SimulationModule>()),
@@ -175,15 +176,24 @@ const calls: unknown[][] = [];
 const caseJudges: Record<string, JudgeDefinition> = {
   'golden-case-judge': {
     schema: z.object({}).passthrough(),
-    evaluate: async (candidate, reference, options) => {
-      calls.push(['golden-case-judge', candidate, reference, options]);
+    evaluate: async ({ case: evalCase, trial }, options) => {
+      calls.push([
+        'golden-case-judge',
+        trial.response,
+        evalCase.expected.answer,
+        options,
+      ]);
       return { score: 0.9, reasoning: 'looks right' };
     },
   },
   'golden-strict-judge': {
     schema: z.object({}).passthrough(),
-    evaluate: async (candidate, reference) => {
-      calls.push(['golden-strict-judge', candidate, reference]);
+    evaluate: async ({ case: evalCase, trial }) => {
+      calls.push([
+        'golden-strict-judge',
+        trial.response,
+        evalCase.expected.answer,
+      ]);
       return { score: 0.2, reasoning: 'too vague' };
     },
   },
@@ -512,10 +522,13 @@ describe('golden: runEvalSuite hosts', () => {
   });
 
   it('manifest judges merge with case judges', async () => {
-    const evaluate = vi.fn(async (candidate: unknown) => ({
-      score: String(candidate).includes('sunny') ? 1 : 0,
-      reasoning: 'manifest judge',
-    }));
+    const evaluate = vi.fn(
+      async (input: JudgeInput, _options: Record<string, unknown>) => ({
+        // As before: the response object, not its text, so it scores 0.
+        score: String(input.trial.response).includes('sunny') ? 1 : 0,
+        reasoning: 'manifest judge',
+      })
+    );
     const result = await suite(
       'run',
       '-judged',
@@ -553,10 +566,21 @@ describe('golden: runEvalSuite hosts', () => {
         },
       }
     );
+    const input = evaluate.mock.calls[0]![0];
+    expect(input.case).toMatchObject({
+      id: 'suite-judged',
+      input: { prompt: 'Weather in London?' },
+    });
+    expect(input.trial.text).toContain('sunny');
+    // The judge calls, in the (candidate, reference, options) shape the snapshot pins.
     expect(
       stable({
         results: result.summary.results,
-        manifestJudgeCalls: evaluate.mock.calls,
+        manifestJudgeCalls: evaluate.mock.calls.map(([call, options]) => [
+          call.trial.response,
+          call.case.expected.answer,
+          options,
+        ]),
         caseJudgeCalls: calls,
       })
     ).toMatchSnapshot();

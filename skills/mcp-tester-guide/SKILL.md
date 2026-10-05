@@ -383,8 +383,8 @@ export const myPlugin: Plugin = {
   judges: {
     quality: {
       schema: z.object({}).passthrough(),
-      evaluate: async (candidate) => ({
-        score: await myCustomEvaluation(candidate),
+      evaluate: async ({ trial }) => ({
+        score: await myCustomEvaluation(trial.response),
         reasoning: 'Custom evaluation',
       }),
     },

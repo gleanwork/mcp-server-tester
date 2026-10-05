@@ -46,6 +46,8 @@ interface Trial {
   pass: boolean;
   trace?: HostTrace;
   usage?: UsageMetrics;
+  /** Usage of the trial's judges, from judges that report it. */
+  judgeUsage?: Partial<UsageMetrics>;
   durationMs: number;
   error?: string;
   /** The case ran once, so its own response is this trial's. */
@@ -64,6 +66,7 @@ function caseTrials(caseResult: EvalCaseResult): Trial[] {
         pass: iteration.pass,
         trace: iteration.trace,
         usage: iteration.hostUsage,
+        judgeUsage: iteration.judgeUsage,
         durationMs: iteration.durationMs,
         error: iteration.error,
         isCase: false,
@@ -75,6 +78,7 @@ function caseTrials(caseResult: EvalCaseResult): Trial[] {
       pass: caseResult.pass,
       trace: caseResult.trace,
       usage: caseResult.hostUsage,
+      judgeUsage: caseResult.judgeUsage,
       durationMs: caseResult.durationMs,
       error: caseResult.error,
       isCase: true,
@@ -276,7 +280,8 @@ function responseText(caseResult: EvalCaseResult): string {
     .join('\n');
 }
 
-function judgeEntries(
+/** Every judge result of a case, including skipped judges. */
+function allJudgeEntries(
   caseResult: EvalCaseResult
 ): Array<Record<string, unknown>> {
   const judge = caseResult.expectations?.judge as
@@ -291,6 +296,30 @@ function judgeEntries(
     );
   }
   return [judge];
+}
+
+/** Judge results that graded the case. Skipped judges have no verdict or score. */
+function judgeEntries(
+  caseResult: EvalCaseResult
+): Array<Record<string, unknown>> {
+  return allJudgeEntries(caseResult).filter((entry) => entry.skipped !== true);
+}
+
+type JudgeUsageField = 'totalCostUsd' | 'inputTokens' | 'outputTokens';
+
+/**
+ * A case's judge usage for one field: per trial, the sum over that trial's
+ * judges (skipped judges included), then the mean over trials. Null when no
+ * trial's judges report the field.
+ */
+function judgeUsagePerTrial(
+  caseResult: EvalCaseResult,
+  field: JudgeUsageField
+): number | null {
+  return perTrial(caseResult, (trial) => {
+    const value = trial.judgeUsage?.[field];
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  });
 }
 
 function scoreFromJudge(entry: Record<string, unknown>): number | null {
@@ -473,6 +502,25 @@ export const BUILT_IN_METRICS: Readonly<Record<string, MetricDefinition>> =
         ),
       meanAggregation,
       'USD'
+    ),
+    // Judge usage is per trial too, apart from host usage.
+    judge_cost_usd: metric(
+      'continuous',
+      (result) => judgeUsagePerTrial(result, 'totalCostUsd'),
+      meanAggregation,
+      'USD'
+    ),
+    judge_input_tokens: metric(
+      'continuous',
+      (result) => judgeUsagePerTrial(result, 'inputTokens'),
+      meanAggregation,
+      'tokens'
+    ),
+    judge_output_tokens: metric(
+      'continuous',
+      (result) => judgeUsagePerTrial(result, 'outputTokens'),
+      meanAggregation,
+      'tokens'
     ),
     input_tokens: metric(
       'continuous',

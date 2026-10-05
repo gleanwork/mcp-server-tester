@@ -16,6 +16,8 @@
  */
 export type AuthType = 'oauth' | 'api-token' | 'none';
 export type { HostDiagnostics } from './hostDiagnostics.js';
+import type { UsageMetrics } from '../judge/judgeTypes.js';
+import type { JudgeSubScore } from '../judge/judgeContract.js';
 
 /**
  * MCP protocol era.
@@ -152,6 +154,18 @@ export interface EvalExpectationResult {
    */
   judgeModel?: string;
 
+  /** The judge could not grade this case. Not counted in pass/fail or score metrics. */
+  skipped?: boolean;
+
+  /** Named sub-scores from the judge, such as one per rubric criterion. */
+  subScores?: Record<string, JudgeSubScore>;
+
+  /** Token usage and cost of the judge's own model calls. */
+  usage?: Partial<UsageMetrics>;
+
+  /** Other structured judge output. */
+  metadata?: Record<string, unknown>;
+
   /**
    * Per-judge breakdown when multiple judges are used.
    * Each entry contains the individual judge's result.
@@ -284,6 +298,13 @@ export type {
   ProviderKind,
   BuiltInRubric,
   RubricSpec,
+  JudgeInput,
+  JudgeCase,
+  JudgeCaseInput,
+  JudgeExpected,
+  JudgeTrial,
+  JudgeMessage,
+  JudgeSubScore,
 } from './judge.js';
 
 export type {

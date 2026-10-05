@@ -72,7 +72,7 @@ function acme(configs: Plugin['configs'], namespace = 'acme'): Plugin {
     judges: {
       fixed: {
         schema: z.object({ score: z.number().default(1) }).strict(),
-        evaluate: async (_candidate, _reference, options) => ({
+        evaluate: async (_input, options) => ({
           score: (options as { score: number }).score,
         }),
       },
