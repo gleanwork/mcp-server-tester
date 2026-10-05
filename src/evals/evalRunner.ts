@@ -403,6 +403,14 @@ export interface EvalRunnerOptions {
    * @example 'claude-sonnet-4-20250514'
    */
   judgeModel?: string;
+
+  /**
+   * Who reports the results. `'playwright'` (the default) attaches them to the
+   * MCP reporter when `testInfo` is given, and suggests passing it when it
+   * isn't. `'none'`: the caller reports them itself (a suite writes
+   * results.json), so there's no suggestion.
+   */
+  reporting?: 'playwright' | 'none';
 }
 
 /**
@@ -1098,6 +1106,7 @@ async function getGitHash(): Promise<string | undefined> {
 // ponytail: warn once per process, not per call — the message is identical and
 // runVariantExperiment / scripted loops call this many times.
 let warnedNoTestInfo = false;
+const warnedLowIterations = new Set<string>();
 
 export async function runEvalDataset(
   options: EvalRunnerOptions,
@@ -1198,7 +1207,14 @@ export async function runEvalDataset(
       evalCase.mode === 'external_host'
     ) {
       const effectiveIterations = withIterations.iterations ?? 1;
-      if (effectiveIterations > 1 && effectiveIterations < 10) {
+      // Once per case and count: a suite runs the same case in every arm.
+      const warning = `${evalCase.id}\u0000${evalCase.mode}\u0000${effectiveIterations}`;
+      if (
+        effectiveIterations > 1 &&
+        effectiveIterations < 10 &&
+        !warnedLowIterations.has(warning)
+      ) {
+        warnedLowIterations.add(warning);
         console.warn(
           `[mcp-server-tester] Eval case "${evalCase.id}": running ${effectiveIterations} iterations in ${evalCase.mode} mode ` +
             `may not be statistically reliable. Consider using 10+ iterations for accuracy measurements you can trust.`
@@ -1374,7 +1390,11 @@ export async function runEvalDataset(
       kind: 'evalResults',
       data: { caseResults },
     });
-  } else if (caseResults.length > 0 && !warnedNoTestInfo) {
+  } else if (
+    caseResults.length > 0 &&
+    options.reporting !== 'none' &&
+    !warnedNoTestInfo
+  ) {
     warnedNoTestInfo = true;
     console.warn(
       '[mcp-server-tester] runEvalDataset: testInfo not provided — results will not appear in the MCP reporter.\n' +

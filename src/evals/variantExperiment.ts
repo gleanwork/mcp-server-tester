@@ -670,6 +670,8 @@ function buildRunOptions(
   return {
     dataset: options.dataset,
     toolOverrides,
+    // The experiment attaches the winning run itself.
+    reporting: 'none' as const,
     defaultLlmIterations: options.defaultLlmIterations,
     defaultJudgeReps: options.defaultJudgeReps,
     concurrency: options.concurrency,
