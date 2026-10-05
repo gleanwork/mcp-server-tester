@@ -175,6 +175,12 @@ class Driver:
             names |= {"Always allow", "Allow always", "Full access", "Allow full access"}
         controls = self.desktop.controls(names, {"button"})
         if not controls:
+            # Cowork confirms a built-in artifact (create_artifact) with an inline
+            # Cancel/Create card, not an Allow prompt. Creating one is a write.
+            create = self.desktop.controls({"Create"}, {"button"})
+            if create and self.desktop.controls({"Cancel"}, {"button"}):
+                controls = create
+        if not controls:
             return self.receipt("hitl_checked")
         # Do not choose among unrelated prompts or continue arbitrary onboarding.
         once = [node for node in controls if node.get_name() == "Allow once"]
