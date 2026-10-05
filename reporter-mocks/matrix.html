@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mock · Matrix</title>
+    <style>
+      :root {
+        --bg: #f8fafc;
+        --card: #fff;
+        --border: #e2e8f0;
+        --text: #0f172a;
+        --muted: #64748b;
+        --green: #16a34a;
+        --green-bg: #f0fdf4;
+        --green-bd: #bbf7d0;
+        --red: #dc2626;
+        --red-bg: #fef2f2;
+        --red-bd: #fecaca;
+        --blue: #2563eb;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font:
+          15px/1.5 -apple-system,
+          system-ui,
+          'Segoe UI',
+          Roboto,
+          sans-serif;
+      }
+      .mock-banner {
+        background: #fffbeb;
+        border-bottom: 1px solid #fde68a;
+        color: #92400e;
+        font-size: 12px;
+        text-align: center;
+        padding: 5px;
+      }
+      .wrap {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .topbar {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        margin-bottom: 18px;
+      }
+      .topbar h1 {
+        font-size: 16px;
+        margin: 0;
+        font-weight: 700;
+      }
+      .topbar .sub {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      /* hero strip: the climb, compact */
+      .strip {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 16px 20px;
+        margin-bottom: 18px;
+      }
+      .strip .label {
+        font-weight: 600;
+      }
+      .strip .climb {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 800;
+        font-size: 20px;
+      }
+      .strip .b0 {
+        color: var(--red);
+      }
+      .strip .b1 {
+        color: #d97706;
+      }
+      .strip .b2 {
+        color: var(--green);
+      }
+      .strip .arrow {
+        color: #94a3b8;
+        font-weight: 400;
+      }
+
+      /* matrix */
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      th,
+      td {
+        padding: 0;
+        text-align: center;
+        border-bottom: 1px solid var(--border);
+        border-right: 1px solid var(--border);
+      }
+      th:last-child,
+      td:last-child {
+        border-right: none;
+      }
+      tr:last-child td {
+        border-bottom: none;
+      }
+      thead th {
+        background: #f1f5f9;
+        font-size: 12px;
+        vertical-align: top;
+        padding: 12px 12px;
+      }
+      thead th .vid {
+        font-weight: 700;
+        font-size: 13px;
+      }
+      thead th .vdesc {
+        color: var(--muted);
+        font-weight: 400;
+        font-size: 11px;
+        margin-top: 3px;
+        display: block;
+        max-width: 200px;
+      }
+      thead th .vrecall {
+        display: inline-block;
+        margin-top: 7px;
+        font-weight: 800;
+        font-size: 14px;
+      }
+      .scen {
+        text-align: left;
+        padding: 12px 14px;
+        font-size: 13px;
+      }
+      .scen .id {
+        font-weight: 600;
+      }
+      .scen .q {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .cell {
+        width: 160px;
+        height: 54px;
+        cursor: pointer;
+      }
+      .cell.pass {
+        background: var(--green-bg);
+        color: var(--green);
+      }
+      .cell.fail {
+        background: var(--red-bg);
+        color: var(--red);
+      }
+      .cell .mark {
+        font-size: 18px;
+        font-weight: 700;
+      }
+      .cell .called {
+        display: block;
+        font-size: 10px;
+        color: var(--muted);
+        margin-top: 1px;
+      }
+      .cell.sel {
+        outline: 2px solid var(--blue);
+        outline-offset: -2px;
+      }
+      tfoot td {
+        background: #f8fafc;
+        font-weight: 800;
+        padding: 12px;
+      }
+      tfoot .lbl {
+        text-align: right;
+        color: var(--muted);
+        font-weight: 600;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      .legend {
+        margin: 12px 2px;
+        color: var(--muted);
+        font-size: 12px;
+        display: flex;
+        gap: 18px;
+      }
+      .legend b.g {
+        color: var(--green);
+      }
+      .legend b.r {
+        color: var(--red);
+      }
+
+      /* selected-cell trace */
+      .trace {
+        margin-top: 16px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 16px 18px;
+        font-size: 13px;
+      }
+      .trace h3 {
+        margin: 0 0 10px;
+        font-size: 13px;
+      }
+      .trace .k {
+        color: var(--muted);
+        width: 108px;
+        display: inline-block;
+        vertical-align: top;
+      }
+      .trace .line {
+        margin: 5px 0;
+      }
+      .tool-bad {
+        color: var(--red);
+        font-weight: 600;
+      }
+      .tool-good {
+        color: var(--green);
+        font-weight: 600;
+      }
+      .quote {
+        color: #334155;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="mock-banner">
+      STATIC MOCK — “Matrix” layout · not wired to data
+    </div>
+    <div class="wrap">
+      <div class="topbar">
+        <div>
+          <h1>MCP Eval Report · Variant Experiment</h1>
+          <div class="sub">
+            knowledge-base server · optimizing
+            <span class="mono">object_store_get</span> · metric: tool recall
+          </div>
+        </div>
+        <div class="sub mono">claude-sonnet-4-5 · temp 0</div>
+      </div>
+
+      <div class="strip">
+        <span class="label">Tool recall across the experiment</span>
+        <span class="climb"
+          ><span class="b0">0%</span><span class="arrow">→</span
+          ><span class="b1">83%</span><span class="arrow">→</span
+          ><span class="b2">100%</span></span
+        >
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th class="scen" style="text-align: left; background: #f1f5f9">
+              scenario
+            </th>
+            <th>
+              <span class="vid">baseline</span
+              ><span class="vdesc"
+                >“low-level object store, not a search interface”</span
+              ><span class="vrecall" style="color: var(--red)">0%</span>
+            </th>
+            <th>
+              <span class="vid">v1 · hr-policies</span
+              ><span class="vdesc">“Search HR policies and benefits docs”</span
+              ><span class="vrecall" style="color: #d97706">83%</span>
+            </th>
+            <th>
+              <span class="vid">v2 · all-knowledge ✓</span
+              ><span class="vdesc"
+                >“Search company knowledge — policies, runbooks, retros, design
+                docs…”</span
+              ><span class="vrecall" style="color: var(--green)">100%</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="scen">
+              <span class="id">find-parental-leave-policy</span><br /><span
+                class="q"
+                >“What does our parental leave policy say…”</span
+              >
+            </td>
+            <td class="cell fail">
+              <span class="mark">✗</span><span class="called">(nothing)</span>
+            </td>
+            <td class="cell pass"><span class="mark">✓</span></td>
+            <td class="cell pass"><span class="mark">✓</span></td>
+          </tr>
+          <tr>
+            <td class="scen">
+              <span class="id">find-onboarding-guide</span><br /><span class="q"
+                >“Where’s the onboarding guide?”</span
+              >
+            </td>
+            <td class="cell fail">
+              <span class="mark">✗</span><span class="called">(nothing)</span>
+            </td>
+            <td class="cell pass"><span class="mark">✓</span></td>
+            <td class="cell pass"><span class="mark">✓</span></td>
+          </tr>
+          <tr>
+            <td class="scen">
+              <span class="id">find-api-gateway-runbook</span><br /><span
+                class="q"
+                >“Is there a runbook for the 503s?”</span
+              >
+            </td>
+            <td class="cell fail">
+              <span class="mark">✗</span
+              ><span class="called">get_service_status</span>
+            </td>
+            <td class="cell fail sel">
+              <span class="mark">✗</span
+              ><span class="called">get_service_status</span>
+            </td>
+            <td class="cell pass"><span class="mark">✓</span></td>
+          </tr>
+          <tr>
+            <td class="scen">
+              <span class="id">find-launch-retro</span><br /><span class="q"
+                >“Pull up the Q3 launch retro”</span
+              >
+            </td>
+            <td class="cell fail">
+              <span class="mark">✗</span><span class="called">(nothing)</span>
+            </td>
+            <td class="cell pass"><span class="mark">✓</span></td>
+            <td class="cell pass"><span class="mark">✓</span></td>
+          </tr>
+          <tr>
+            <td class="scen">
+              <span class="id">find-data-retention-policy</span><br /><span
+                class="q"
+                >“How long do we keep logs?”</span
+              >
+            </td>
+            <td class="cell fail">
+              <span class="mark">✗</span><span class="called">(nothing)</span>
+            </td>
+            <td class="cell pass"><span class="mark">✓</span></td>
+            <td class="cell pass"><span class="mark">✓</span></td>
+          </tr>
+          <tr>
+            <td class="scen">
+              <span class="id">find-billing-design-doc</span><br /><span
+                class="q"
+                >“Find the billing service design doc”</span
+              >
+            </td>
+            <td class="cell fail">
+              <span class="mark">✗</span><span class="called">(nothing)</span>
+            </td>
+            <td class="cell pass"><span class="mark">✓</span></td>
+            <td class="cell pass"><span class="mark">✓</span></td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td class="lbl">recall</td>
+            <td style="color: var(--red)">0%</td>
+            <td style="color: #d97706">83%</td>
+            <td style="color: var(--green)">100%</td>
+          </tr>
+        </tfoot>
+      </table>
+
+      <div class="legend">
+        <span><b class="g">✓</b> tool triggered</span>
+        <span><b class="r">✗</b> missed (shows what it called instead)</span>
+        <span>click a cell → trace ↓</span>
+      </div>
+
+      <!-- selected cell trace -->
+      <div class="trace">
+        <h3>find-api-gateway-runbook · v1 · hr-policies</h3>
+        <div class="line">
+          <span class="k">asked</span
+          ><span class="quote"
+            >“The API gateway is throwing 503s. Is there a runbook for that
+            incident?”</span
+          >
+        </div>
+        <div class="line">
+          <span class="k">model called</span
+          ><span class="tool-bad">get_service_status</span>
+          <span class="quote">{ service: "api-gateway" }</span>
+        </div>
+        <div class="line">
+          <span class="k">expected</span
+          ><span class="tool-good">object_store_get</span>
+          <span class="quote">(required, not called)</span>
+        </div>
+        <div class="line">
+          <span class="k">diagnosis</span
+          ><span class="quote"
+            >v1 scopes the tool to “HR policies”; runbooks fall outside it. v2
+            adds runbooks/retros/design-docs → fixed.</span
+          >
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mock · Answer Sheet</title>
+    <style>
+      :root {
+        --bg: #f8fafc;
+        --card: #fff;
+        --border: #e2e8f0;
+        --text: #0f172a;
+        --muted: #64748b;
+        --green: #16a34a;
+        --green-bg: #f0fdf4;
+        --green-bd: #bbf7d0;
+        --red: #dc2626;
+        --red-bg: #fef2f2;
+        --red-bd: #fecaca;
+        --blue: #2563eb;
+        --amber: #f59e0b;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font:
+          15px/1.5 -apple-system,
+          system-ui,
+          'Segoe UI',
+          Roboto,
+          sans-serif;
+      }
+      .mock-banner {
+        background: #fffbeb;
+        border-bottom: 1px solid #fde68a;
+        color: #92400e;
+        font-size: 12px;
+        text-align: center;
+        padding: 5px;
+        letter-spacing: 0.02em;
+      }
+      .wrap {
+        max-width: 1040px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+      .topbar {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        margin-bottom: 20px;
+      }
+      .topbar h1 {
+        font-size: 16px;
+        margin: 0;
+        font-weight: 700;
+      }
+      .topbar .sub {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      /* HERO */
+      .hero {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 24px 28px;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+        margin-bottom: 20px;
+        display: flex;
+        align-items: center;
+        gap: 32px;
+      }
+      .hero .num {
+        font-size: 60px;
+        font-weight: 800;
+        line-height: 1;
+        color: var(--green);
+        letter-spacing: -0.02em;
+      }
+      .hero .num small {
+        font-size: 22px;
+        font-weight: 700;
+      }
+      .hero .lead {
+        flex: 1;
+      }
+      .hero .verdict {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-weight: 700;
+        font-size: 13px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: var(--green-bg);
+        color: var(--green);
+        border: 1px solid var(--green-bd);
+      }
+      .hero .sentence {
+        font-size: 18px;
+        font-weight: 600;
+        margin: 10px 0 4px;
+      }
+      .hero .delta {
+        color: var(--green);
+        font-weight: 700;
+      }
+      .hero .compare {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .hero .metric-label {
+        color: var(--muted);
+        font-size: 13px;
+        margin-top: 6px;
+      }
+
+      .section-title {
+        font-size: 13px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        margin: 24px 0 10px;
+      }
+
+      /* ATTENTION */
+      .attn {
+        background: var(--red-bg);
+        border: 1px solid var(--red-bd);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      .row {
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--border);
+      }
+      .attn .row {
+        border-bottom: 1px solid var(--red-bd);
+      }
+      .attn .row:last-child {
+        border-bottom: none;
+      }
+      .row-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .pill-fail {
+        color: var(--red);
+        font-weight: 700;
+        font-size: 12px;
+      }
+      .pill-pass {
+        color: var(--green);
+        font-weight: 700;
+        font-size: 12px;
+      }
+      .scenario {
+        font-weight: 600;
+      }
+      .row .why {
+        color: #991b1b;
+        font-size: 13px;
+        margin-top: 4px;
+      }
+
+      /* expanded trace = "read the sample" */
+      .trace {
+        margin-top: 12px;
+        background: #fff;
+        border: 1px solid var(--red-bd);
+        border-radius: 8px;
+        padding: 14px 16px;
+        font-size: 13px;
+      }
+      .trace .k {
+        color: var(--muted);
+        width: 108px;
+        display: inline-block;
+        vertical-align: top;
+      }
+      .trace .line {
+        margin: 5px 0;
+      }
+      .tool-bad {
+        color: var(--red);
+        font-weight: 600;
+      }
+      .tool-good {
+        color: var(--green);
+        font-weight: 600;
+      }
+      .quote {
+        color: #334155;
+      }
+
+      /* PASSING (quiet) */
+      .passing {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+      }
+      .passing .row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: #475569;
+      }
+      .passing .row:last-child {
+        border-bottom: none;
+      }
+      .passing .recall {
+        margin-left: auto;
+        color: var(--green);
+        font-weight: 700;
+        font-size: 13px;
+      }
+
+      /* secondary strip */
+      .secondary {
+        margin-top: 22px;
+        display: flex;
+        gap: 22px;
+        align-items: center;
+        color: var(--muted);
+        font-size: 13px;
+        flex-wrap: wrap;
+      }
+      .secondary b {
+        color: var(--text);
+      }
+      .details-toggle {
+        margin-left: auto;
+        color: var(--blue);
+        cursor: pointer;
+      }
+      .chev {
+        color: #94a3b8;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="mock-banner">
+      STATIC MOCK — “Answer sheet” layout · not wired to data
+    </div>
+    <div class="wrap">
+      <div class="topbar">
+        <div>
+          <h1>MCP Eval Report</h1>
+          <div class="sub">
+            knowledge-base server · 6 scenarios · run 2026-06-19 14:22
+          </div>
+        </div>
+        <div class="sub mono">claude-sonnet-4-5 · temp 0 · 1 iter</div>
+      </div>
+
+      <!-- HERO: one dominant verdict, plain language -->
+      <div class="hero">
+        <div>
+          <div class="num">83<small>%</small></div>
+        </div>
+        <div class="lead">
+          <span class="verdict">▲ improved vs baseline</span>
+          <div class="sentence">
+            5 of 6 scenarios now trigger
+            <span class="mono">object_store_get</span> —
+            <span class="delta">▲ 83%</span> recall.
+          </div>
+          <div class="compare">
+            Baseline was <b>0%</b> (the tool was never called).
+            <b>1 scenario</b> still needs attention.
+          </div>
+          <div class="metric-label">tool recall · precision 100% · F1 0.91</div>
+        </div>
+      </div>
+
+      <!-- WHAT NEEDS ATTENTION: the actionable part, first -->
+      <div class="section-title">Needs attention · 1</div>
+      <div class="attn">
+        <div class="row">
+          <div class="row-head">
+            <span class="pill-fail">✗ missed</span>
+            <span class="scenario">find-api-gateway-runbook</span>
+          </div>
+          <div class="why">
+            The model reached for
+            <span class="mono">get_service_status</span> instead — it read
+            “runbook” as an ops health check, not a doc to search.
+          </div>
+
+          <!-- drill-down reads like the case, inline -->
+          <div class="trace">
+            <div class="line">
+              <span class="k">asked</span
+              ><span class="quote"
+                >“The API gateway is throwing 503s. Is there a runbook for that
+                incident?”</span
+              >
+            </div>
+            <div class="line">
+              <span class="k">model called</span
+              ><span class="tool-bad">get_service_status</span>
+              <span class="quote">{ service: "api-gateway" }</span>
+            </div>
+            <div class="line">
+              <span class="k">expected</span
+              ><span class="tool-good">object_store_get</span>
+              <span class="quote">(required, not called)</span>
+            </div>
+            <div class="line">
+              <span class="k">why it matters</span
+              ><span class="quote"
+                >current description scopes the tool to “HR policies” — runbooks
+                aren’t covered.</span
+              >
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PASSING: quiet, collapsed feel -->
+      <div class="section-title">Passing · 5</div>
+      <div class="passing">
+        <div class="row">
+          <span class="pill-pass">✓</span> find-parental-leave-policy
+          <span class="recall">100%</span>
+        </div>
+        <div class="row">
+          <span class="pill-pass">✓</span> find-onboarding-guide
+          <span class="recall">100%</span>
+        </div>
+        <div class="row">
+          <span class="pill-pass">✓</span> find-launch-retro
+          <span class="recall">100%</span>
+        </div>
+        <div class="row">
+          <span class="pill-pass">✓</span> find-data-retention-policy
+          <span class="recall">100%</span>
+        </div>
+        <div class="row">
+          <span class="pill-pass">✓</span> find-billing-design-doc
+          <span class="recall">100%</span>
+        </div>
+      </div>
+
+      <!-- everything else demoted to a faint strip -->
+      <div class="secondary">
+        <span>duration <b>31s</b></span>
+        <span>tool calls <b>7</b></span>
+        <span>precision <b>100%</b></span>
+        <span>F1 <b>0.91</b></span>
+        <span class="details-toggle"
+          >▸ Details: trend · by-tool · conformance · raw</span
+        >
+      </div>
+    </div>
+  </body>
+</html>
