@@ -218,19 +218,6 @@ session. HITL only operates on approval controls while that bound session is pen
 it never types, creates tasks, or continues onboarding. Unclassified approval prompts
 fail closed unless `coworkSetup.approveWriteTools` explicitly permits approval.
 
-With `coworkSetup.approveWriteTools`, the Linux driver starts every task in
-Cowork's `bypassPermissions` mode (**Skip all approvals** in the composer's
-permission picker, confirmed once with **Yes, continue**) before it submits.
-One task-level mode covers all built-in tools, such as `create_artifact`, which
-managed MCP `toolPolicy` does not reach. Managed `toolPolicy` `ask` and
-`blocked` entries still apply in this mode, and Cowork still prompts for its own
-exempt actions (for example, file deletion). `AskUserQuestion` still needs an
-answer, so headless runs fail fast on it. If the picker or its Skip choice is
-not offered (for example, `disableBypassPermissionsMode` is set), submission
-fails closed with `skip_approvals_unavailable` and the prompt is not sent.
-Read-only runs keep Cowork's default mode so that write prompts are still
-refused.
-
 `hostTelemetry.computerUse` records `driver: "linux-desktop"`, observed semantic
 actions, and elapsed time. Planner tokens and planner cost are **not applicable**,
 not synthetic zero-usage Anthropic calls. Native usage and cost retain their own scope.

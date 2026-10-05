@@ -29,8 +29,7 @@ class Desktop:
         self.fail = False
 
     def controls(self, names, roles, *, require_enabled=True):
-        matches = names if callable(names) else names.__contains__
-        return [node for node in self.starts + self.radios + self.approvals if matches(node.name)]
+        return [node for node in self.starts + self.radios + self.approvals if node.name in names]
 
     def selected(self, node):
         return True
@@ -42,54 +41,6 @@ class Desktop:
 
     def open_prompt(self, prompt, timeout):
         self.prompt = prompt
-
-
-def fake_clock():
-    now = [0.0]
-    def tick():
-        now[0] += 1.0
-        return now[0]
-    return tick
-
-
-class PickerDesktop(Desktop):
-    """Cowork composer with the Manual / Skip all approvals picker."""
-
-    def __init__(self, *, confirm, offered=True):
-        super().__init__()
-        self.mode = "Manually approve"
-        self.menu_open = False
-        self.confirm_open = False
-        self.confirm = confirm
-        self.offered = offered
-
-    def visible(self):
-        nodes = self.starts + self.radios + [Node(self.mode)]
-        if self.menu_open:
-            nodes += [Node("Manually approve Claude pauses")]
-            if self.offered:
-                nodes += [Node("Skip all approvals Claude never pauses")]
-        if self.confirm_open:
-            nodes += [Node("Cancel"), Node("Yes, continue")]
-        return nodes
-
-    def controls(self, names, roles, *, require_enabled=True):
-        matches = names if callable(names) else names.__contains__
-        return [node for node in self.visible() if matches(node.name)]
-
-    def activate(self, node):
-        self.actions.append(node.name)
-        if node.name == self.mode:
-            self.menu_open = True
-        elif node.name.startswith("Skip all approvals"):
-            self.menu_open = False
-            if self.confirm:
-                self.confirm_open = True
-            else:
-                self.mode = "Skip"
-        elif node.name == "Yes, continue":
-            self.confirm_open = False
-            self.mode = "Skip"
 
 
 class LinuxDriverTests(unittest.TestCase):
@@ -227,48 +178,20 @@ class LinuxDriverTests(unittest.TestCase):
         self.assertEqual(module.Driver(desktop, 1000, 4).hitl(True)["status"], "hitl_checked")
         self.assertEqual(desktop.actions, ["Allow once"])
 
-    def test_hitl_never_clicks_tool_specific_cards(self):
-        # Built-in tool cards are covered by the task's permission mode, not HITL.
+    def test_hitl_creates_a_confirmed_artifact_only_under_the_write_policy(self):
         desktop = Desktop()
         desktop.approvals = [Node("Cancel"), Node("Create")]
+        with self.assertRaisesRegex(module.DriverFailure, "write_policy"):
+            module.Driver(desktop, 1000, 4).hitl(False)
+        self.assertEqual(desktop.actions, [])
+        self.assertEqual(module.Driver(desktop, 1000, 4).hitl(True)["status"], "hitl_checked")
+        self.assertEqual(desktop.actions, ["Create"])
+
+    def test_hitl_ignores_a_create_button_without_its_confirmation_card(self):
+        desktop = Desktop()
+        desktop.approvals = [Node("Create")]
         self.assertEqual(module.Driver(desktop, 1000, 4).hitl(True)["action_count"], 0)
         self.assertEqual(desktop.actions, [])
-
-    def test_skip_approvals_selects_bypass_and_confirms_before_one_submit(self):
-        desktop = PickerDesktop(confirm=True)
-        receipt = module.Driver(desktop, 2000, 8).submit("query", True)
-        self.assertEqual(desktop.actions, ["Manually approve", "Skip all approvals Claude never pauses", "Yes, continue", "Start task"])
-        self.assertEqual(desktop.prompt, "query")
-        self.assertEqual(receipt["status"], "submitted")
-
-    def test_skip_approvals_reuses_the_remembered_choice_without_a_warning(self):
-        desktop = PickerDesktop(confirm=False)
-        module.Driver(desktop, 2000, 8).submit("query", True)
-        self.assertEqual(desktop.actions, ["Manually approve", "Skip all approvals Claude never pauses", "Start task"])
-
-    def test_skip_approvals_already_on_only_submits(self):
-        desktop = PickerDesktop(confirm=False)
-        desktop.mode = "Skip"
-        module.Driver(desktop, 2000, 8).submit("query", True)
-        self.assertEqual(desktop.actions, ["Start task"])
-
-    def test_skip_approvals_unavailable_fails_closed_without_submit(self):
-        desktop = PickerDesktop(confirm=False, offered=False)
-        with patch.object(module.time, "monotonic", side_effect=fake_clock()):
-            with self.assertRaisesRegex(module.DriverFailure, "skip_approvals_unavailable"):
-                module.Driver(desktop, 60_000, 8).submit("query", True)
-        self.assertEqual(desktop.actions, ["Manually approve"])
-
-    def test_missing_permission_picker_fails_closed_without_submit(self):
-        desktop = Desktop()
-        with self.assertRaisesRegex(module.DriverFailure, "permission_mode_control_missing"):
-            module.Driver(desktop, 2000, 8).submit("query", True)
-        self.assertEqual(desktop.actions, [])
-
-    def test_read_only_submit_leaves_the_permission_mode_alone(self):
-        desktop = PickerDesktop(confirm=True)
-        module.Driver(desktop, 2000, 8).submit("query")
-        self.assertEqual(desktop.actions, ["Start task"])
 
     def test_hitl_ambiguous_approvals_fail_closed(self):
         desktop = Desktop()

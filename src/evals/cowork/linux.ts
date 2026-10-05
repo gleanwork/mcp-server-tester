@@ -329,15 +329,7 @@ export const linuxCoworkPlatform: CoworkPlatform = {
   },
   async submit(query, options) {
     const started = Date.now();
-    // Under the write policy, the task runs in Cowork's bypassPermissions mode
-    // ("Skip all approvals"), so no built-in tool waits on a per-tool card.
-    // Managed MCP toolPolicy entries still apply. Read-only runs stay manual so
-    // their write prompts can still be refused.
-    const result = await execute(
-      'submit',
-      { prompt: query, skipApprovals: options.approveWriteTools === true },
-      options
-    );
+    const result = await execute('submit', { prompt: query }, options);
     return {
       status: 'submitted',
       action_count: result.action_count,
