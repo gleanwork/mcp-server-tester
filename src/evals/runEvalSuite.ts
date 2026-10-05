@@ -83,6 +83,12 @@ export interface RunEvalSuiteOptions {
   mcpConfig?: MCPConfig;
   dryRun?: boolean;
   arm?: string;
+  /**
+   * Arms to run instead of the manifest's, validated the same way: a list,
+   * or a function of the manifest's arms (after shared configs apply). For
+   * experiments that generate arms, such as runVariantExperiment's suite mode.
+   */
+  arms?: EvalArm[] | ((manifestArms: readonly EvalArm[]) => EvalArm[]);
   redactStoredResponses?: boolean;
 }
 
@@ -444,7 +450,17 @@ export async function runEvalSuite(
   });
   // The manifest with its shared configs applied, before parsing: what the
   // suite is identified by, and the raw settings arms and cases merge with.
-  const rawManifest = resolveManifestExtends(loadedManifest, namespaces);
+  const resolvedManifest = resolveManifestExtends(loadedManifest, namespaces);
+  const rawManifest: EvalManifest =
+    options.arms === undefined
+      ? resolvedManifest
+      : {
+          ...resolvedManifest,
+          arms:
+            typeof options.arms === 'function'
+              ? options.arms(resolvedManifest.arms ?? [])
+              : options.arms,
+        };
   const identity = manifestIdentity(rawManifest);
   let manifest = rawManifest;
 

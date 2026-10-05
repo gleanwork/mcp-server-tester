@@ -42,6 +42,8 @@ export type {
   VariantImprovementProposal,
   VariantExperimentOptions,
   VariantExperimentResult,
+  SuiteVariantExperimentOptions,
+  VariantExperimentSuite,
 } from '../evals/variantExperiment.js';
 
 export type { SaveBaselineOptions } from '../evals/baseline.js';

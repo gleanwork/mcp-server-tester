@@ -264,6 +264,8 @@ export type {
   VariantImprovementProposal,
   VariantExperimentOptions,
   VariantExperimentResult,
+  SuiteVariantExperimentOptions,
+  VariantExperimentSuite,
   HostType,
   CLIOutputFormat,
   CLIConfig,

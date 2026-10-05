@@ -12,6 +12,10 @@ import type { MCPVariantExperimentData } from '../types/reporter.js';
 import type { ZodType } from 'zod';
 import { attachReporterData } from '../reporters/channel.js';
 import { passRate } from './evalRunComparison.js';
+import type { EvalArm } from './evalManifest.js';
+import type { EvaluationArmResult } from './evalFrameworkTypes.js';
+import type { Plugin } from '../plugins/plugin.js';
+import { runEvalSuite } from './runEvalSuite.js';
 
 /**
  * Metric used to rank variant candidates and decide improvement.
@@ -27,6 +31,9 @@ export type ExperimentMetric =
   | 'toolF1'
   | 'toolPrecision'
   | 'toolRecall';
+
+/** A dataset metric, or (in suite mode) any numeric arm metric. */
+type MetricName = ExperimentMetric | (string & {});
 
 /**
  * Why a variant experiment stopped.
@@ -62,9 +69,16 @@ export interface VariantCandidateResult {
   metricDelta: number;
   /**
    * True when this candidate regressed at least one case and `allowRegressions`
-   * is not set. Disqualified candidates can never become the winner.
+   * is not set, or reported no value for the metric. Disqualified candidates
+   * can never become the winner.
    */
   disqualified: boolean;
+  /**
+   * The candidate reported no value for the metric (a suite arm can lack
+   * one, such as `cost_usd` from an unpriced host); `metricValue` is then the
+   * baseline's.
+   */
+  metricUnavailable?: true;
 }
 
 /** All candidates tried in a single round, plus the round's best non-disqualified pick. */
@@ -81,10 +95,14 @@ export interface VariantExperimentRound {
 export interface ProposeVariantsContext {
   /** 0-based index of the round about to run. */
   round: number;
-  /** The original baseline run (no overrides). */
+  /**
+   * The baseline run: no tool variant on a dataset; on a suite, the base
+   * arm as configured, including its own `toolOverrides` (variants replace
+   * them).
+   */
   baseline: EvalRunnerResult;
   /** The metric the experiment is optimizing. */
-  metric: ExperimentMetric;
+  metric: MetricName;
   /** All completed rounds so far, in order. */
   history: VariantExperimentRound[];
   /** Best non-disqualified candidate across all prior rounds, if any. */
@@ -96,7 +114,7 @@ export interface VariantImprovementProposal {
   /** `id` of the variant this proposal describes. */
   variantId: string;
   /** Metric the experiment optimized. */
-  metric: ExperimentMetric;
+  metric: MetricName;
   /** Baseline metric value. */
   baselineValue: number;
   /** Candidate metric value. */
@@ -162,11 +180,56 @@ export interface VariantExperimentOptions {
   judgeModel?: string;
 }
 
+/** Where a suite-mode experiment runs. */
+export interface VariantExperimentSuite {
+  /** The manifest whose datasets, servers, host and judges the experiment uses. */
+  manifestPath: string;
+  /**
+   * The arm variants build on, which is also the baseline: each variant runs
+   * as a copy of it with the variant as its `toolOverrides`. Default: the
+   * manifest's first arm, or the manifest's own settings when it has none.
+   */
+  arm?: string;
+  rootDir?: string;
+  pluginPaths?: string[];
+  plugins?: readonly Plugin[];
+  secretsFile?: string;
+}
+
+/**
+ * Options for {@link runVariantExperiment} on a suite: variants run as arms,
+ * on any host that can take tool variants (in-process or through MST's tool
+ * proxy), and any numeric arm metric can be the target.
+ */
+export interface SuiteVariantExperimentOptions extends Pick<
+  VariantExperimentOptions,
+  | 'variants'
+  | 'proposeVariants'
+  | 'maxRounds'
+  | 'minImprovement'
+  | 'allowRegressions'
+> {
+  suite: VariantExperimentSuite;
+  /**
+   * The arm metric to optimize: `passRate`, `trialPassRate`, or any numeric
+   * key of an arm's `metrics`, such as `tool_search_hit_rate` or
+   * `input_tokens_mean`.
+   * @default 'passRate'
+   */
+  metric?: string;
+  /** Whether higher or lower values of `metric` are better. @default 'higher' */
+  better?: 'higher' | 'lower';
+}
+
 /** Aggregated result of a variant experiment. */
 export interface VariantExperimentResult {
   /** Metric that was optimized. */
-  metric: ExperimentMetric;
-  /** The original baseline run (no overrides). */
+  metric: MetricName;
+  /**
+   * The baseline run: no tool variant on a dataset; on a suite, the base
+   * arm as configured, including its own `toolOverrides` (variants replace
+   * them).
+   */
   baseline: EvalRunnerResult;
   /** Every round that ran, in order. */
   rounds: VariantExperimentRound[];
@@ -201,20 +264,43 @@ export interface VariantExperimentResult {
  *   { dataset, variants: [variantA, variantB], metric: 'passRate' },
  *   { mcp, testInfo }
  * );
+ *
+ * // On a suite: variants run as arms, on any host that takes tool variants.
+ * const onSuite = await runVariantExperiment({
+ *   suite: { manifestPath: './eval-manifest.json' },
+ *   variants: [variantA, variantB],
+ *   metric: 'tool_search_hit_rate',
+ * });
  * if (result.proposal?.recommendation === 'apply') {
  *   console.log('Apply:', result.winner?.variant.id, '+', result.proposal.delta);
  * }
  * ```
  */
 export async function runVariantExperiment(
+  options: SuiteVariantExperimentOptions
+): Promise<VariantExperimentResult>;
+export async function runVariantExperiment(
   options: VariantExperimentOptions,
   context: EvalContext
+): Promise<VariantExperimentResult>;
+export async function runVariantExperiment(
+  options: VariantExperimentOptions | SuiteVariantExperimentOptions,
+  context?: EvalContext
 ): Promise<VariantExperimentResult> {
+  if ('suite' in options) {
+    return experiment(
+      options,
+      options.metric ?? 'passRate',
+      options.better ?? 'higher',
+      { run: suiteRunner(options), withBaseline: true },
+      undefined
+    );
+  }
+  if (!context)
+    throw new Error(
+      'runVariantExperiment needs an EvalContext for a dataset experiment.'
+    );
   const metric = options.metric ?? 'passRate';
-  const maxRounds = options.maxRounds ?? 1;
-  const minImprovement = options.minImprovement ?? 0;
-  const allowRegressions = options.allowRegressions ?? false;
-
   // Internal eval runs must not attach to the reporter individually, or the
   // report would show only the baseline run. We attach the winner's results
   // plus an experiment summary once, at the end, when testInfo is present.
@@ -222,18 +308,131 @@ export async function runVariantExperiment(
     mcp: context.mcp,
     expect: context.expect,
   };
-
-  const baseline = await runEvalDataset(
-    buildRunOptions(options, undefined),
-    internalContext
+  const run: RunVariants = async (variants) => {
+    const runs: ExperimentRun[] = [];
+    for (const variant of variants) {
+      const result = await runEvalDataset(
+        buildRunOptions(options, variant),
+        internalContext
+      );
+      runs.push({ result, value: readMetric(result, metric) });
+    }
+    return runs;
+  };
+  return experiment(
+    options,
+    metric,
+    'higher',
+    { run, withBaseline: false },
+    context
   );
+}
 
-  const baselineValue = readMetric(baseline, metric);
+/** A run of the baseline (no variant) or a variant, with its metric value. */
+interface ExperimentRun {
+  result: EvalRunnerResult;
+  value: number | undefined;
+}
+
+/** Runs the baseline (`undefined`) or variants, in order. */
+type RunVariants = (
+  variants: Array<ToolOverrideVariant | undefined>
+) => Promise<ExperimentRun[]>;
+
+interface ExperimentRunner {
+  run: RunVariants;
+  /** Run round 0's static variants together with the baseline. */
+  withBaseline: boolean;
+}
+
+/** Each call runs one suite whose arms are the base arm and/or variants of it. */
+function suiteRunner(options: SuiteVariantExperimentOptions): RunVariants {
+  const { suite } = options;
+  const metric = options.metric ?? 'passRate';
+  return async (variants) => {
+    const { summary } = await runEvalSuite({
+      manifestPath: suite.manifestPath,
+      rootDir: suite.rootDir,
+      pluginPaths: suite.pluginPaths,
+      plugins: suite.plugins,
+      secretsFile: suite.secretsFile,
+      arms: (manifestArms) => {
+        const base =
+          suite.arm === undefined
+            ? (manifestArms[0] ?? { name: 'default' })
+            : manifestArms.find((arm) => arm.name === suite.arm);
+        if (!base)
+          throw new Error(`The manifest has no arm named "${suite.arm}".`);
+        const names = new Set<string>();
+        return variants.map((variant) => {
+          const arm: EvalArm = variant
+            ? { ...base, name: variant.id, toolOverrides: variant }
+            : base;
+          if (names.has(arm.name) || (variant && variant.id === base.name))
+            throw new Error(
+              `Variant ids must be unique and differ from the base arm's name; "${arm.name}" repeats.`
+            );
+          names.add(arm.name);
+          return arm;
+        });
+      },
+    });
+    return summary.arms.map((arm) => ({
+      result: arm.result!,
+      value: armMetric(arm, metric),
+    }));
+  };
+}
+
+/** An arm's value for a suite-mode metric, if it reports one. */
+function armMetric(
+  arm: EvaluationArmResult,
+  metric: string
+): number | undefined {
+  if (metric === 'passRate')
+    return arm.result ? passRate(arm.result) : undefined;
+  const key = metric === 'trialPassRate' ? 'trial_pass_rate' : metric;
+  const value = arm.metrics?.[key];
+  return typeof value === 'number' ? value : undefined;
+}
+
+async function experiment(
+  options: Pick<
+    VariantExperimentOptions,
+    | 'variants'
+    | 'proposeVariants'
+    | 'maxRounds'
+    | 'minImprovement'
+    | 'allowRegressions'
+  >,
+  metric: MetricName,
+  better: 'higher' | 'lower',
+  runner: ExperimentRunner,
+  context: EvalContext | undefined
+): Promise<VariantExperimentResult> {
+  const maxRounds = options.maxRounds ?? 1;
+  const minImprovement = options.minImprovement ?? 0;
+  const allowRegressions = options.allowRegressions ?? false;
+  // How much better a value is: larger is better either way.
+  const gain = (value: number) => (better === 'lower' ? -value : value);
+
+  // On a suite, static round-0 variants run with the baseline: one suite
+  // run, which also checks their ids before anything runs. A dataset runs the
+  // baseline first, so an unavailable metric fails before any candidate runs.
+  const initialVariants = runner.withBaseline ? (options.variants ?? []) : [];
+  const [baselineRun, ...initialRuns] = await runner.run([
+    undefined,
+    ...initialVariants,
+  ]);
+  const baseline = baselineRun!.result;
+  const baselineValue = baselineRun!.value;
   if (baselineValue === undefined) {
     throw new Error(
-      `Metric '${metric}' is unavailable: the dataset produced no tool ` +
-        `precision/recall data. Add mcp_host cases with toolsTriggered ` +
-        `expectations, or use metric 'passRate'.`
+      `Metric '${metric}' is unavailable for the baseline. For a dataset, ` +
+        `the tool metrics need mcp_host cases with toolsTriggered ` +
+        `expectations; for a suite, use passRate, trialPassRate or a numeric ` +
+        `metric the base arm reports (tool F1, precision and recall are ` +
+        `dataset metrics).`
     );
   }
 
@@ -256,31 +455,33 @@ export async function runVariantExperiment(
       break;
     }
 
-    const candidates: VariantCandidateResult[] = [];
-    for (const variant of variants) {
-      const candidate = await scoreVariant(
-        options,
-        internalContext,
+    const runs =
+      round === 0 && initialVariants.length > 0 && variants === options.variants
+        ? initialRuns
+        : await runner.run(variants);
+    const candidates = variants.map((variant, index) =>
+      scoreVariant(
         baseline,
         baselineValue,
-        metric,
         allowRegressions,
-        variant
-      );
-      candidates.push(candidate);
-      bestAttempted = pickBetter(bestAttempted, candidate, true);
-    }
+        variant,
+        runs[index]!
+      )
+    );
+    for (const candidate of candidates)
+      bestAttempted = pickBetter(bestAttempted, candidate, true, gain);
 
     const roundBest = candidates.reduce<VariantCandidateResult | undefined>(
-      (best, candidate) => pickBetter(best, candidate, false),
+      (best, candidate) => pickBetter(best, candidate, false, gain),
       undefined
     );
     rounds.push({ round, candidates, best: roundBest });
 
     if (roundBest) {
       const improvement =
-        roundBest.metricValue - (bestSoFar?.metricValue ?? baselineValue);
-      bestSoFar = pickBetter(bestSoFar, roundBest, false);
+        gain(roundBest.metricValue) -
+        gain(bestSoFar?.metricValue ?? baselineValue);
+      bestSoFar = pickBetter(bestSoFar, roundBest, false, gain);
       if (improvement < minImprovement) {
         reason = 'no-improvement';
         break;
@@ -291,7 +492,13 @@ export async function runVariantExperiment(
   const winner = bestSoFar;
   const proposalSource = winner ?? bestAttempted;
   const proposal = proposalSource
-    ? buildProposal(metric, baselineValue, proposalSource, winner !== undefined)
+    ? buildProposal(
+        metric,
+        baselineValue,
+        proposalSource,
+        winner !== undefined,
+        gain
+      )
     : undefined;
 
   const result: VariantExperimentResult = {
@@ -304,7 +511,7 @@ export async function runVariantExperiment(
     reason,
   };
 
-  if (context.testInfo) {
+  if (context?.testInfo) {
     // Surface the best run's case results so the report reflects the optimized
     // state, plus a compact summary of how the experiment got there.
     const surfaceRun = winner?.result ?? bestAttempted?.result ?? baseline;
@@ -349,7 +556,7 @@ function buildExperimentData(
 }
 
 async function gatherVariants(
-  options: VariantExperimentOptions,
+  options: Pick<VariantExperimentOptions, 'variants' | 'proposeVariants'>,
   context: ProposeVariantsContext
 ): Promise<ToolOverrideVariant[]> {
   if (context.round === 0 && options.variants && options.variants.length > 0) {
@@ -361,35 +568,31 @@ async function gatherVariants(
   return [];
 }
 
-async function scoreVariant(
-  options: VariantExperimentOptions,
-  context: EvalContext,
+function scoreVariant(
   baseline: EvalRunnerResult,
   baselineValue: number,
-  metric: ExperimentMetric,
   allowRegressions: boolean,
-  variant: ToolOverrideVariant
-): Promise<VariantCandidateResult> {
-  const result = await runEvalDataset(
-    buildRunOptions(options, variant),
-    context
-  );
+  variant: ToolOverrideVariant,
+  run: ExperimentRun
+): VariantCandidateResult {
   const comparison = compareEvalRuns({
     baseline,
-    candidate: result,
+    candidate: run.result,
     labels: { candidate: variant.id },
   });
-  const metricValue = readMetric(result, metric) ?? baselineValue;
+  const metricValue = run.value ?? baselineValue;
   const disqualified =
-    !allowRegressions && comparison.regressedCases.length > 0;
+    run.value === undefined ||
+    (!allowRegressions && comparison.regressedCases.length > 0);
 
   return {
     variant,
-    result,
+    result: run.result,
     comparison,
     metricValue,
     metricDelta: metricValue - baselineValue,
     disqualified,
+    ...(run.value === undefined ? { metricUnavailable: true as const } : {}),
   };
 }
 
@@ -401,7 +604,8 @@ async function scoreVariant(
 function pickBetter(
   incumbent: VariantCandidateResult | undefined,
   challenger: VariantCandidateResult,
-  includeDisqualified: boolean
+  includeDisqualified: boolean,
+  gain: (value: number) => number
 ): VariantCandidateResult | undefined {
   if (!includeDisqualified && challenger.disqualified) {
     return incumbent;
@@ -409,20 +613,22 @@ function pickBetter(
   if (!incumbent) {
     return challenger;
   }
-  return challenger.metricValue > incumbent.metricValue
+  return gain(challenger.metricValue) > gain(incumbent.metricValue)
     ? challenger
     : incumbent;
 }
 
 function buildProposal(
-  metric: ExperimentMetric,
+  metric: MetricName,
   baselineValue: number,
   source: VariantCandidateResult,
-  isWinner: boolean
+  isWinner: boolean,
+  gain: (value: number) => number
 ): VariantImprovementProposal {
   let recommendation: VariantRecommendation;
   if (isWinner) {
-    recommendation = source.metricDelta > 0 ? 'apply' : 'inconclusive';
+    recommendation =
+      gain(source.metricValue) > gain(baselineValue) ? 'apply' : 'inconclusive';
   } else {
     // No shippable winner: the best attempt was disqualified by a regression.
     recommendation = source.disqualified ? 'reject' : 'inconclusive';

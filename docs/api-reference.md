@@ -674,7 +674,7 @@ export interface EvalRunnerResult {
 }
 ```
 
-### `runVariantExperiment(options, context)`
+### `runVariantExperiment(options, context)` / `runVariantExperiment(suiteOptions)`
 
 Run a tool-metadata variant experiment: establish a baseline, inject each candidate variant via `toolOverrides`, compare against the baseline, rank by a metric, guard against regressions, and emit a structured improvement proposal. This is the high-level API that wraps the manual baseline → candidate → `compareEvalRuns` loop.
 
@@ -686,14 +686,14 @@ Run a tool-metadata variant experiment: establish a baseline, inject each candid
   - `proposeVariants?: (ctx: ProposeVariantsContext) => Promise<ToolOverrideVariant[]>` - Callback returning the next candidates from prior-round evidence; return `[]` to stop
   - `metric?: 'passRate' | 'toolF1' | 'toolPrecision' | 'toolRecall'` - Ranking metric (default `'passRate'`)
   - `maxRounds?: number` - Round budget (default `1`)
-  - `minImprovement?: number` - Stop when a round's best gain is below this (default `0`)
+  - `minImprovement?: number` - Stop when a round's best gain over the best so far is below this (default `0`); with `better: 'lower'` a gain is a decrease
   - `allowRegressions?: boolean` - Allow winners that regress cases (default `false`)
   - Plus `runEvalDataset` passthrough: `defaultLlmIterations`, `defaultJudgeReps`, `concurrency`, `filterTags`, `schemas`, `mcpHostModel`, `judgeModel`
 - `context: EvalContext` - `{ mcp, testInfo? }` from your test
 
 **Returns:** `VariantExperimentResult`
 
-- `baseline` - The original no-override run
+- `baseline` - The baseline run: no tool variant on a dataset; on a suite, the base arm as configured (variants replace its `toolOverrides`)
 - `rounds` - Every round's candidates with per-candidate `result`, `comparison`, `metricValue`, `metricDelta`, `disqualified`
 - `winner` - Best non-disqualified candidate across all rounds
 - `proposal` - `VariantImprovementProposal` with `recommendation: 'apply' | 'reject' | 'inconclusive'`, metric values, `toolChanges`, and improved/regressed case ids
@@ -716,6 +716,21 @@ if (result.proposal?.recommendation === 'apply') {
   console.log(result.winner?.variant.id, result.proposal.delta);
 }
 ```
+
+**On a suite.** Pass `suite` instead of a dataset and context, and the variants run as arms of the manifest, on any host that can take tool variants: in-process for the SDK hosts, through MST's tool proxy for plugin hosts and `claude-cli`. The base arm (`suite.arm`, or the manifest's first arm) is the baseline; each variant runs as a copy of it with the variant as its `toolOverrides`.
+
+```typescript
+const result = await runVariantExperiment({
+  suite: { manifestPath: './eval-manifest.json', arm: 'control' },
+  variants: [conciseSearch, verboseSearch],
+  metric: 'input_tokens_mean', // passRate, trialPassRate, or any numeric arm metric
+  better: 'lower',
+});
+```
+
+- `metric` - `passRate` (default), `trialPassRate`, or any numeric key of an arm's `metrics`. A candidate that reports no value for it is disqualified, with `metricUnavailable: true`.
+- `better` - `'higher'` (default) or `'lower'`, for tokens, cost or time. Ranking, `minImprovement` and the recommendation follow it; `metricDelta` and `proposal.delta` stay candidate minus baseline.
+- `suite` also takes `rootDir`, `pluginPaths`, `plugins` and `secretsFile`, as `runEvalSuite` does. Static `variants` run in one suite with the baseline; later rounds run as their own suite. Variant ids must be unique and differ from the base arm's name. Each run is stored like any other run of the manifest.
 
 A candidate that regresses any case is disqualified from winning unless `allowRegressions: true`; the best attempt is still surfaced in `proposal` with `recommendation: 'reject'` so an agent can see what broke. See [MCP Host Simulation](./mcp-host.md#driving-it-from-an-agent-runvariantexperiment) for the full agent-loop example.
 
