@@ -89,6 +89,7 @@ async function runBuiltinHost(
   const clients: Array<Awaited<ReturnType<typeof createMCPClientForConfig>>> =
     [];
   let configDir: string | undefined;
+  let claudeConfigDir: string | undefined;
   const controller = new AbortController();
   const timeout =
     config.timeout ??
@@ -214,6 +215,27 @@ async function runBuiltinHost(
           config.cli = { ...config.cli, args: [...config.cli.args] };
           config.cli.args[position + 1] = file;
         }
+        // Claude Code loads the operator's skills, plugins and settings from
+        // its config directory. An empty one per run keeps them out of the
+        // results. Only an explicit CLAUDE_CONFIG_DIR (host or case env)
+        // opts out; one inherited from the shell doesn't.
+        const explicitConfigDir =
+          (host.env as HostEnvironment | undefined)?.CLAUDE_CONFIG_DIR ??
+          context.mcpHostConfig?.env?.CLAUDE_CONFIG_DIR ??
+          context.mcpHostConfig?.cli?.env?.CLAUDE_CONFIG_DIR;
+        if (
+          host.type === 'claude-cli' &&
+          (host as { isolate?: boolean }).isolate !== false &&
+          explicitConfigDir === undefined
+        ) {
+          claudeConfigDir = fs.mkdtempSync(
+            path.join(os.tmpdir(), 'mst-claude-')
+          );
+          config.cli = {
+            ...config.cli,
+            env: { ...config.cli.env, CLAUDE_CONFIG_DIR: claudeConfigDir },
+          };
+        }
       }
       if (overrides && config.hostType === 'cli')
         throw new Error(
@@ -255,7 +277,15 @@ async function runBuiltinHost(
     throw error;
   } finally {
     clearTimeout(timer);
-    if (configDir) fs.rmSync(configDir, { recursive: true, force: true });
+    // A killed CLI can still be exiting; retry rather than fail the result.
+    if (configDir)
+      fs.rmSync(configDir, { recursive: true, force: true, maxRetries: 3 });
+    if (claudeConfigDir)
+      fs.rmSync(claudeConfigDir, {
+        recursive: true,
+        force: true,
+        maxRetries: 3,
+      });
   }
 }
 
@@ -307,6 +337,12 @@ const CliHostSchema = z
     apiToken: z.string().optional(),
     pluginDir: z.string().optional(),
     pluginMcpUrl: z.string().optional(),
+    /**
+     * Run Claude Code with an empty config directory (the default), so the
+     * operator's skills, plugins and settings don't affect results. Set false
+     * to use your own, for example to sign in with a claude.ai account.
+     */
+    isolate: z.boolean().optional(),
     env: z.record(z.string(), z.string().optional()).optional(),
     server: MCPConfigSchema.optional(),
     servers: z.array(MCPConfigSchema).optional(),

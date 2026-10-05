@@ -163,6 +163,12 @@ interface CLIConfig {
 
 **Protocol:** the SDK host uses the test's MCP connection, so it follows `mcpConfig.protocol`. CLI and external hosts open their own connections. See [Protocol Versions](./protocol-versions.md).
 
+## Claude Code isolation
+
+Claude Code loads skills, plugins and settings from its config directory (`~/.claude` by default), so a run would otherwise depend on whoever runs it: their skills, plugins and settings shape what the model does and add to its input tokens. The built-in `claude-cli` host gives each run an empty `CLAUDE_CONFIG_DIR`, removed afterwards, even when your shell exports one. The MCP servers under test come from the manifest as before.
+
+That also leaves out your `settings.json`: its `env` block (a region, a base URL, a gateway) and `apiKeyHelper` don't apply. Authentication comes from the environment instead: `provider: 'vertex'` (Google Application Default Credentials) or an Anthropic API key. To run with your own configuration, for example to sign in with a claude.ai account, set `isolate: false` on the host; a `CLAUDE_CONFIG_DIR` in the host's or case's `env` is used as given.
+
 ## Claude Code startup and failure evidence
 
 The built-in `claude-cli` host uses blocking MCP initialization
