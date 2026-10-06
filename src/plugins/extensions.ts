@@ -30,6 +30,7 @@ const KIND_LABELS: Record<ExtensionKind, string> = {
   datasetSources: 'Dataset source',
   hosts: 'Host',
   judges: 'Judge',
+  pairwiseJudges: 'Pairwise judge',
   metrics: 'Metric',
   resultStores: 'Result store',
 };
@@ -39,6 +40,9 @@ const KIND_LABELS: Record<ExtensionKind, string> = {
 const STATE_KEY = Symbol.for('mcp-server-tester.extension-table.v1');
 const globalState = globalThis as unknown as Record<symbol, unknown>;
 const state = (globalState[STATE_KEY] ??= emptyState()) as ExtensionTableState;
+// A table an older copy of this package created lacks kinds added since.
+for (const [kind, map] of Object.entries(emptyState().extensions))
+  (state.extensions as Record<string, Map<string, unknown>>)[kind] ??= map;
 
 function emptyState(): ExtensionTableState {
   return {
@@ -48,6 +52,7 @@ function emptyState(): ExtensionTableState {
       datasetSources: new Map(),
       hosts: new Map(),
       judges: new Map(),
+      pairwiseJudges: new Map(),
       metrics: new Map(),
       resultStores: new Map(),
     },

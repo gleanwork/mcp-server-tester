@@ -7,6 +7,7 @@ import type {
   MetricKind,
   ResultStoreDefinition,
 } from '../evals/evalFrameworkTypes.js';
+import type { PairwiseJudgeDefinition } from '../judge/pairwiseContract.js';
 import type { PluginConfig } from '../evals/evalManifest.js';
 
 /** Identifies a plugin. `namespace` prefixes its extensions: `namespace/name`. */
@@ -28,6 +29,8 @@ export interface Plugin {
   readonly datasetSources?: Readonly<Record<string, DatasetSource>>;
   readonly hosts?: Readonly<Record<string, HostDefinition>>;
   readonly judges?: Readonly<Record<string, JudgeDefinition>>;
+  /** Judges that compare two runs of one case (a baseline and a candidate). */
+  readonly pairwiseJudges?: Readonly<Record<string, PairwiseJudgeDefinition>>;
   readonly metrics?: Readonly<Record<string, MetricDefinition>>;
   readonly resultStores?: Readonly<Record<string, ResultStoreDefinition>>;
   /**
@@ -42,6 +45,7 @@ export const EXTENSION_KINDS = [
   'datasetSources',
   'hosts',
   'judges',
+  'pairwiseJudges',
   'metrics',
   'resultStores',
 ] as const;
@@ -52,6 +56,7 @@ export interface ExtensionsByKind {
   datasetSources: DatasetSource;
   hosts: HostDefinition;
   judges: JudgeDefinition;
+  pairwiseJudges: PairwiseJudgeDefinition;
   metrics: MetricDefinition;
   resultStores: ResultStoreDefinition;
 }
@@ -65,6 +70,7 @@ const REQUIRED_FUNCTIONS: Record<ExtensionKind, readonly string[]> = {
   datasetSources: ['load'],
   hosts: ['run', 'runBatch', 'createConfig'],
   judges: ['evaluate'],
+  pairwiseJudges: ['compare'],
   metrics: ['compute'],
   resultStores: ['create'],
 };

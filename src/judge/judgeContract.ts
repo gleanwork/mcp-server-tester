@@ -221,7 +221,7 @@ export function buildJudgeTrial(
 }
 
 /** Read a dotted path such as `case.expected.criteria` from a judge input. */
-function readPath(input: JudgeInput, path: string): unknown {
+function readPath(input: object, path: string): unknown {
   let value: unknown = input;
   for (const key of path.split('.')) {
     if (!isRecord(value)) return undefined;
@@ -242,7 +242,7 @@ function isPresent(value: unknown): boolean {
  * is satisfied when its value is present and not empty.
  */
 export function missingRequirement(
-  input: JudgeInput,
+  input: object,
   requires: readonly string[] | undefined
 ): string | undefined {
   return requires?.find((path) => !isPresent(readPath(input, path)));
