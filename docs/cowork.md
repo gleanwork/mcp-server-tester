@@ -283,7 +283,7 @@ between minor versions. It is offline: it does not invoke the desktop, MCP serve
 or judges. No CLI or private parser import is required.
 
 ```typescript
-import { auditCoworkNativeRun } from '@gleanwork/mcp-server-tester/experimental/hosts';
+import { auditCoworkNativeRun } from '@gleanwork/mcp-server-tester/experimental/clients';
 
 const report = await auditCoworkNativeRun({
   rawResultsPath: '/archive/results/raw-results.json',

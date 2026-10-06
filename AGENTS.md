@@ -109,7 +109,7 @@ The public API is tiered. Each name is exported from exactly one of these entry 
 - `.` (`src/index.ts`) - The core testing interface: fixtures, matchers and validators, MCP client, config, datasets with `runEvalDataset`/`runEvalCase`, judges, conformance, skills, and their types
 - `./evals` (`src/entries/evals.ts`) - The evaluation framework: manifests, suites/batches, extension definition types, metrics, result stores, comparisons, variant experiments, `simulateMCPHost`
 - `./auth` (`src/entries/auth.ts`) - Low-level OAuth: discovery, token storage, client credentials
-- `./experimental/hosts` (`src/entries/experimentalHosts.ts`) - Desktop/external hosts, Cowork settings and audit, host plugins (may change between minors)
+- `./experimental/clients` (`src/entries/experimentalClients.ts`) - Desktop/external hosts, Cowork settings and audit, host plugins (may change between minors)
 - `./fixtures/mcp`, `./fixtures/mcpAuth`, `./reporters/mcpReporter` - Playwright fixtures and the reporter
 
 The subpaths are ESM only and share chunks with the ESM root (tsup `splitting`), so module state (the extension table, classes) is one instance across them. The CommonJS root and the fixtures/reporter bundles are separate copies; only `Symbol.for` state (the extension table and the plugin-load cache) is shared with those. New public names go in the narrowest tier that fits. `npm run knip` (in CI) fails on files, exports or dependencies nothing uses, so delete dead code rather than leaving it exported. `src/publicApi.test.ts` pins each entry point's runtime exports: after a deliberate change, update it with `npx vitest run src/publicApi.test.ts -u` and note any removal in the migration guides. Tests count as users, so an export only a test imports is not flagged.

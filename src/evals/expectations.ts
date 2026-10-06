@@ -17,8 +17,8 @@ import type {
   EvalAssertions,
   JudgeExpectConfig,
 } from './datasetTypes.js';
-import type { HostResponse } from './caseExecution.js';
-import type { HostEvidence } from './evalFrameworkTypes.js';
+import type { ClientResponse } from './caseExecution.js';
+import type { TraceEvidence } from './evalFrameworkTypes.js';
 import type { JudgeCaseSource } from '../judge/judgeContract.js';
 import type {
   ExternalHostMetadata,
@@ -56,9 +56,9 @@ export interface GradedExecution {
   /** What validators grade: a direct result, or the host response with native tool names mapped. */
   response: unknown;
   /** The host response as reported; the tool trace shows its names. Absent for direct cases. */
-  hostResponse?: HostResponse;
+  hostResponse?: ClientResponse;
   /** Normalized host evidence. Absent for direct cases and hosts that don't report it. */
-  evidence?: HostEvidence;
+  evidence?: TraceEvidence;
   /** External host metadata, whose trace source decides tool-evidence quality. */
   externalHost?: ExternalHostMetadata;
 }
@@ -288,10 +288,10 @@ function isToolCall(entry: { kind?: string }): boolean {
  */
 function toolTraceView(
   expectation: NonNullable<EvalAssertions['toolsTriggered']>,
-  graded: GradedExecution & { hostResponse: HostResponse }
+  graded: GradedExecution & { hostResponse: ClientResponse }
 ): NonNullable<EvalCaseResult['mcpHostTrace']> {
   // Match on the mapped response the validator graded.
-  const mapped = graded.response as HostResponse;
+  const mapped = graded.response as ClientResponse;
   const match = matchToolCalls(mapped.events ?? mapped.toolCalls, expectation);
   const matchedToolCalls = match.observed.filter((entry) =>
     isToolCall(entry.call)

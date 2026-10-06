@@ -12,8 +12,8 @@ import {
 import {
   hostStdioReadinessConfig,
   hostStdioServers,
-  type HostPlugin,
-  type HostStdioPaths,
+  type MarketplacePlugin,
+  type ClientStdioPaths,
 } from '../hostPlugins.js';
 import { mcpServerLabel } from '../../config/mcpConfig.js';
 
@@ -29,7 +29,7 @@ export class CoworkMcpReadinessError extends McpReadinessError {
 function resolveServer(
   server: MCPConfig,
   env: Record<string, string | undefined>,
-  stdio: { plugins: readonly HostPlugin[]; paths: HostStdioPaths }
+  stdio: { plugins: readonly MarketplacePlugin[]; paths: ClientStdioPaths }
 ): MCPConfig {
   if (!isHttpConfig(server)) {
     // The same resolved launch Desktop runs, with only its declared env and
@@ -57,7 +57,10 @@ function resolveServer(
 export async function verifyCoworkMcpServers(
   servers: MCPConfig[],
   env: Record<string, string | undefined>,
-  stdio: { plugins?: readonly HostPlugin[]; paths?: HostStdioPaths } = {}
+  stdio: {
+    plugins?: readonly MarketplacePlugin[];
+    paths?: ClientStdioPaths;
+  } = {}
 ): Promise<CoworkMcpServerReadiness[]> {
   const context = { plugins: stdio.plugins ?? [], paths: stdio.paths ?? {} };
   // Resolve labels before checking servers individually so private paths and

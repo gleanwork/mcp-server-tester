@@ -18,7 +18,7 @@ import type {
 import type { UsageMetrics } from '../../../types/index.js';
 import type { MCPFixtureApi } from '../../../mcp/fixtures/mcpFixture.js';
 import { extractText } from '../../../mcp/response.js';
-import type { HostEvent } from '../../evalFrameworkTypes.js';
+import type { TraceEvent } from '../../evalFrameworkTypes.js';
 import {
   createHostSkillsSession,
   HOST_SKILL_TOOL_NAMES,
@@ -33,7 +33,7 @@ import {
   GenerationOptions,
   ProviderSchema,
   type HostEnvironment,
-  HostSkillsModeSchema,
+  ClientSkillsModeSchema,
   SystemPromptOption,
 } from '../hostOptions.js';
 
@@ -44,7 +44,7 @@ const SdkConfigSchema = z
     ...GenerationOptions,
     apiKeyEnvVar: z.string().min(1).optional(),
     env: z.record(z.string(), z.string().optional()).optional(),
-    skills: HostSkillsModeSchema.optional(),
+    skills: ClientSkillsModeSchema.optional(),
     systemPrompt: SystemPromptOption,
   })
   .strict();
@@ -385,7 +385,7 @@ function skillsTrace(
   skills: HostSkillsSession | null
 ): Pick<MCPHostSimulationResult, 'skillLoads' | 'events'> {
   if (!skills) return {};
-  const toolEvents: HostEvent[] = toolCalls.map((call) => ({
+  const toolEvents: TraceEvent[] = toolCalls.map((call) => ({
     kind: 'tool_call',
     source: 'mcp',
     name: call.name,

@@ -13,12 +13,12 @@ import type {
   EvalExpectationResult,
   ExpectationBreakdown,
   UsageMetrics,
-  HostDiagnostics,
+  ClientDiagnostics,
   MCPProtocolInfo,
   SkillLoad,
 } from './index.js';
 import type { EvalResultStoreLike } from '../evals/resultStore.js';
-import type { HostEvidence, HostTrace } from '../evals/evalFrameworkTypes.js';
+import type { TraceEvidence, Trace } from '../evals/evalFrameworkTypes.js';
 import type {
   ExternalHostCorrelationConfig,
   ExternalHostMetadata,
@@ -277,11 +277,11 @@ export interface IterationResult {
     missed: Array<{ name: string }>;
   };
   /** Sanitized host evidence for this specific attempt. */
-  hostDiagnostics?: HostDiagnostics;
+  hostDiagnostics?: ClientDiagnostics;
   /** Evidence level retained even when raw responses are redacted. */
-  hostEvidence?: HostEvidence;
+  hostEvidence?: TraceEvidence;
   /** What the host did in this iteration (host cases). */
-  trace?: HostTrace;
+  trace?: Trace;
   /** Token usage from mcp_host LLM simulation in this iteration */
   hostUsage?: UsageMetrics;
   /** Token usage of this iteration's judges, from judges that report it. */
@@ -504,14 +504,14 @@ export interface EvalCaseResult {
   };
 
   /** Sanitized host evidence; each iteration retains its own diagnostics. */
-  hostDiagnostics?: HostDiagnostics;
+  hostDiagnostics?: ClientDiagnostics;
   /** Evidence level retained in persisted comparisons after response redaction. */
-  hostEvidence?: HostEvidence;
+  hostEvidence?: TraceEvidence;
   /**
    * What the host did (host cases with one iteration). With several
    * iterations, each one's trace is in `iterationResults`.
    */
-  trace?: HostTrace;
+  trace?: Trace;
   /** The suite arm that produced this result. */
   arm?: string;
 

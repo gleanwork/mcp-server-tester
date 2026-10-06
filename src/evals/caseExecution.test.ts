@@ -3,7 +3,10 @@ import { z } from 'zod';
 import { createSuiteCaseExecutor, executeEvalCase } from './caseExecution.js';
 import { runEvalCase } from './evalRunner.js';
 import type { EvalCase } from './datasetTypes.js';
-import type { HostDefinition, HostRunResult } from './evalFrameworkTypes.js';
+import type {
+  ClientDefinition,
+  ClientRunResult,
+} from './evalFrameworkTypes.js';
 import type { ToolSurfaceProxy } from './toolSurfaceProxy.js';
 import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
 import type * as SimulationModule from './mcpHost/mcpHostSimulation.js';
@@ -116,14 +119,14 @@ describe('custom executeCase results', () => {
 });
 
 describe('createSuiteCaseExecutor', () => {
-  const trace: HostRunResult = { finalText: 'ok', events: [], durationMs: 7 };
+  const trace: ClientRunResult = { finalText: 'ok', events: [], durationMs: 7 };
 
   /** Install `host` as `test/<name>` and return that reference. */
-  function installTestHost(name: string, host: HostDefinition): string {
+  function installTestHost(name: string, host: ClientDefinition): string {
     installPlugins([
       {
         meta: { name: 'test-plugin', namespace: 'test' },
-        hosts: { [name]: host },
+        clients: { [name]: host },
       },
     ]);
     return `test/${name}`;

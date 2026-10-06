@@ -171,7 +171,7 @@ export const HostPluginSchema = z
     'A plugin MCP server cannot be both overridden and blocked.'
   );
 
-export const HostPluginsSchema = z
+export const MarketplacePluginsSchema = z
   .array(HostPluginSchema)
   .max(16)
   .superRefine((plugins, context) => {
@@ -189,7 +189,7 @@ export const HostPluginsSchema = z
   });
 
 /** Caller input. Helpers parse it, so defaults such as `minTools` apply. */
-export type HostPlugin = z.input<typeof HostPluginSchema>;
+export type MarketplacePlugin = z.input<typeof HostPluginSchema>;
 type HostPluginMcpOverride = z.output<typeof HostPluginMcpOverrideSchema>;
 
 /** A plugin MCP server that MST treats as an eval MCP server. */
@@ -201,10 +201,11 @@ export interface HostPluginMcpServer {
 }
 
 export function hostPluginMcpServers(
-  plugins: readonly HostPlugin[]
+  plugins: readonly MarketplacePlugin[]
 ): HostPluginMcpServer[] {
-  const parsed = HostPluginsSchema.safeParse(plugins);
-  if (!parsed.success) throw new HostPluginError('plugin_invalid', 'config');
+  const parsed = MarketplacePluginsSchema.safeParse(plugins);
+  if (!parsed.success)
+    throw new MarketplacePluginError('plugin_invalid', 'config');
   return parsed.data.flatMap((plugin) =>
     Object.entries(plugin.mcp ?? {}).map(([server, override]) => ({
       plugin: plugin.name,
@@ -221,7 +222,7 @@ function hostPluginCredentialKey(plugin: string, server: string) {
   return `${plugin}/${server}`;
 }
 
-export class HostPluginError extends Error {
+export class MarketplacePluginError extends Error {
   constructor(
     readonly code:
       | 'plugin_invalid'
@@ -238,7 +239,7 @@ export class HostPluginError extends Error {
     super(
       `Host plugin setup failed (${code}: ${plugin}); no prompt was sent and nothing was retried.`
     );
-    this.name = 'HostPluginError';
+    this.name = 'MarketplacePluginError';
   }
 }
 
@@ -247,7 +248,7 @@ export class HostPluginError extends Error {
  * direct MCP credentials use. Missing or multi-line values fail closed.
  */
 export function resolveHostPluginCredentials(
-  plugins: readonly HostPlugin[],
+  plugins: readonly MarketplacePlugin[],
   env: Record<string, string | undefined>
 ): HostPluginCredentials {
   const credentials: HostPluginCredentials = {};
@@ -256,7 +257,7 @@ export function resolveHostPluginCredentials(
     if (!name) continue;
     const token = Object.hasOwn(env, name) ? env[name] : undefined;
     if (!token || /[\s\0]/.test(token))
-      throw new HostPluginError('plugin_credential_missing', plugin);
+      throw new MarketplacePluginError('plugin_credential_missing', plugin);
     credentials[hostPluginCredentialKey(plugin, server)] = token;
   }
   return credentials;
@@ -315,12 +316,12 @@ async function writePrivateFiles(options: {
         throw new Error('unsafe');
     }
   } catch {
-    throw new HostPluginError(options.code, options.owner);
+    throw new MarketplacePluginError(options.code, options.owner);
   }
   for (const [name, content] of Object.entries(options.files)) {
     const bytes = Buffer.from(JSON.stringify(content), 'utf8');
     if (bytes.length > MAX_FILE_BYTES)
-      throw new HostPluginError('plugin_invalid', options.owner);
+      throw new MarketplacePluginError('plugin_invalid', options.owner);
     let handle;
     try {
       handle = await open(
@@ -333,7 +334,7 @@ async function writePrivateFiles(options: {
       );
       await handle.writeFile(bytes);
     } catch {
-      throw new HostPluginError(options.code, options.owner);
+      throw new MarketplacePluginError(options.code, options.owner);
     } finally {
       await handle?.close();
     }
@@ -356,7 +357,7 @@ export async function materializeHostPluginMcp(options: {
     ? options.credentials[hostPluginCredentialKey(plugin, server)]
     : '';
   if (token === undefined)
-    throw new HostPluginError('plugin_credential_missing', plugin);
+    throw new MarketplacePluginError('plugin_credential_missing', plugin);
   const dataDir = join(options.dataRoot, plugin, server);
   const values = { url: override.url, dataDir, bearerToken: token };
   await writePrivateFiles({
@@ -481,7 +482,7 @@ const HostStdioServerSchema = z
       context.addIssue({ code: 'custom', message: 'At most 8 files.' });
   });
 
-export type HostStdioServer = z.output<typeof HostStdioServerSchema> & {
+export type ClientStdioServer = z.output<typeof HostStdioServerSchema> & {
   /** Plugin names referenced as `${pluginRoot:<plugin>}`. */
   pluginRoots: string[];
   /** True when `${dataDir}` or `files` are used. */
@@ -489,7 +490,7 @@ export type HostStdioServer = z.output<typeof HostStdioServerSchema> & {
 };
 
 /** Host-provided runtime paths used to resolve stdio eval servers. */
-export interface HostStdioPaths {
+export interface ClientStdioPaths {
   /** Absolute plugin root per plugin name, for `${pluginRoot:<plugin>}`. */
   pluginRoots?: Record<string, string>;
   /** Absolute private root; each server's `${dataDir}` is `<dataRoot>/<label>`. */
@@ -502,24 +503,27 @@ export interface HostStdioPaths {
  */
 export function hostStdioServers(
   servers: readonly MCPConfig[],
-  plugins: readonly HostPlugin[] = []
-): HostStdioServer[] {
+  plugins: readonly MarketplacePlugin[] = []
+): ClientStdioServer[] {
   const names = new Set(plugins.map((plugin) => plugin.name));
   const labels = new Set<string>();
   for (const [index, server] of servers.entries()) {
     const label = mcpServerLabel(server, index);
     if (labels.has(label))
-      throw new HostPluginError('mcp_server_invalid', label);
+      throw new MarketplacePluginError('mcp_server_invalid', label);
     labels.add(label);
   }
-  return servers.flatMap((server, index): HostStdioServer[] => {
+  return servers.flatMap((server, index): ClientStdioServer[] => {
     if (server.transport !== 'stdio') return [];
     const parsed = HostStdioServerSchema.safeParse({
       ...server,
       label: mcpServerLabel(server, index),
     });
     if (!parsed.success)
-      throw new HostPluginError('mcp_server_invalid', server.label ?? 'stdio');
+      throw new MarketplacePluginError(
+        'mcp_server_invalid',
+        server.label ?? 'stdio'
+      );
     const all = strings([
       parsed.data.command,
       parsed.data.args ?? [],
@@ -531,7 +535,7 @@ export function hostStdioServers(
       ...new Set(all.flatMap((name) => pluginRootName(name) ?? [])),
     ];
     if (roots.some((name) => !names.has(name)))
-      throw new HostPluginError('mcp_server_invalid', parsed.data.label);
+      throw new MarketplacePluginError('mcp_server_invalid', parsed.data.label);
     return [
       {
         ...parsed.data,
@@ -557,20 +561,20 @@ function safeAbsolute(path: string | undefined): path is string {
 
 /** Placeholder values for one server. Never includes a token. */
 function stdioValues(
-  server: HostStdioServer,
-  paths: HostStdioPaths
+  server: ClientStdioServer,
+  paths: ClientStdioPaths
 ): Record<string, string> {
   const values: Record<string, string> =
     server.url !== undefined ? { url: server.url } : {};
   if (server.usesDataDir) {
     if (!safeAbsolute(paths.dataRoot))
-      throw new HostPluginError('mcp_server_invalid', server.label);
+      throw new MarketplacePluginError('mcp_server_invalid', server.label);
     values.dataDir = join(paths.dataRoot, server.label);
   }
   for (const plugin of server.pluginRoots) {
     const root = paths.pluginRoots?.[plugin];
     if (!safeAbsolute(root))
-      throw new HostPluginError('mcp_server_invalid', server.label);
+      throw new MarketplacePluginError('mcp_server_invalid', server.label);
     values[`pluginRoot:${plugin}`] = root;
   }
   return values;
@@ -578,8 +582,8 @@ function stdioValues(
 
 /** The resolved launch: exactly what the host must run. Contains no token. */
 export function resolveHostStdioServer(
-  server: HostStdioServer,
-  paths: HostStdioPaths
+  server: ClientStdioServer,
+  paths: ClientStdioPaths
 ): {
   command: string;
   args: string[];
@@ -592,7 +596,7 @@ export function resolveHostStdioServer(
   if (server.cwd !== undefined) {
     const cwd = substitute(server.cwd, values);
     if (cwd !== '/' && !safeAbsolute(cwd))
-      throw new HostPluginError('mcp_server_invalid', server.label);
+      throw new MarketplacePluginError('mcp_server_invalid', server.label);
     // Pass all caller values as positional arguments, never shell source.
     args = [
       '-c',
@@ -622,12 +626,12 @@ export function resolveHostStdioServer(
  * Contains the credential: never log or receipt the result.
  */
 export function hostStdioFileContents(
-  server: HostStdioServer,
-  paths: HostStdioPaths,
+  server: ClientStdioServer,
+  paths: ClientStdioPaths,
   token: string | undefined
 ): Record<string, unknown> {
   if (server.auth && !token)
-    throw new HostPluginError('plugin_credential_missing', server.label);
+    throw new MarketplacePluginError('plugin_credential_missing', server.label);
   const values = {
     ...stdioValues(server, paths),
     ...(server.auth ? { bearerToken: token! } : {}),
@@ -642,7 +646,7 @@ export function hostStdioFileContents(
 
 /** Resolve each stdio server's `auth.accessTokenEnv`, keyed by label. */
 export function resolveHostStdioCredentials(
-  servers: readonly HostStdioServer[],
+  servers: readonly ClientStdioServer[],
   env: Record<string, string | undefined>
 ): Record<string, string> {
   const credentials: Record<string, string> = {};
@@ -651,7 +655,10 @@ export function resolveHostStdioCredentials(
     if (!name) continue;
     const token = Object.hasOwn(env, name) ? env[name] : undefined;
     if (!token || /[\s\0]/.test(token))
-      throw new HostPluginError('plugin_credential_missing', server.label);
+      throw new MarketplacePluginError(
+        'plugin_credential_missing',
+        server.label
+      );
     credentials[server.label] = token;
   }
   return credentials;
@@ -663,8 +670,8 @@ export function resolveHostStdioCredentials(
  * callers that prepare a host, and tests. Returns the data dir.
  */
 export async function materializeHostStdioFiles(options: {
-  server: HostStdioServer;
-  paths: HostStdioPaths;
+  server: ClientStdioServer;
+  paths: ClientStdioPaths;
   token?: string;
 }): Promise<string | undefined> {
   const { server, paths } = options;
@@ -672,7 +679,7 @@ export async function materializeHostStdioFiles(options: {
   const files = hostStdioFileContents(server, paths, options.token);
   const bytes = Buffer.byteLength(JSON.stringify(files));
   if (bytes > MAX_FILE_BYTES * 8)
-    throw new HostPluginError('plugin_invalid', server.label);
+    throw new MarketplacePluginError('plugin_invalid', server.label);
   return writePrivateFiles({
     dataRoot: paths.dataRoot!,
     segments: [server.label],
@@ -687,8 +694,8 @@ export async function materializeHostStdioFiles(options: {
  * only the declared env (plus the SDK's minimal default), never process.env.
  */
 export function hostStdioReadinessConfig(
-  server: HostStdioServer,
-  paths: HostStdioPaths
+  server: ClientStdioServer,
+  paths: ClientStdioPaths
 ): StdioMCPConfig {
   const launch = resolveHostStdioServer(server, paths);
   return {
@@ -721,7 +728,7 @@ export function hostStdioReadinessConfig(
  * `required`, so Desktop installs it on every sync. Cowork cannot read local
  * marketplace paths, so only owner/repo and HTTPS Git URLs are accepted.
  */
-export function coworkPluginMarketplace(plugin: HostPlugin): {
+export function coworkPluginMarketplace(plugin: MarketplacePlugin): {
   source: 'github' | 'git';
   repo?: string;
   url?: string;
@@ -730,7 +737,7 @@ export function coworkPluginMarketplace(plugin: HostPlugin): {
 } {
   const { source, ref } = plugin.marketplace;
   if (!ref || isAbsolute(source))
-    throw new HostPluginError('plugin_unsupported', plugin.name);
+    throw new MarketplacePluginError('plugin_unsupported', plugin.name);
   if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(source))
     return {
       source: 'github',
@@ -742,10 +749,10 @@ export function coworkPluginMarketplace(plugin: HostPlugin): {
   try {
     url = new URL(source);
   } catch {
-    throw new HostPluginError('plugin_unsupported', plugin.name);
+    throw new MarketplacePluginError('plugin_unsupported', plugin.name);
   }
   if (url.protocol !== 'https:' || url.username || url.password)
-    throw new HostPluginError('plugin_unsupported', plugin.name);
+    throw new MarketplacePluginError('plugin_unsupported', plugin.name);
   return {
     source: 'git',
     url: source,
@@ -760,18 +767,23 @@ export function coworkPluginMarketplace(plugin: HostPlugin): {
  * endpoint. Reject `plugins[].mcp`; use a stdio `servers[]` entry and
  * `blockMcpServers` instead.
  */
-export function assertCoworkHostPlugins(plugins: readonly HostPlugin[]): void {
-  const parsed = HostPluginsSchema.safeParse(plugins);
-  if (!parsed.success) throw new HostPluginError('plugin_invalid', 'config');
+export function assertCoworkHostPlugins(
+  plugins: readonly MarketplacePlugin[]
+): void {
+  const parsed = MarketplacePluginsSchema.safeParse(plugins);
+  if (!parsed.success)
+    throw new MarketplacePluginError('plugin_invalid', 'config');
   for (const plugin of plugins) {
     if (Object.keys(plugin.mcp ?? {}).length)
-      throw new HostPluginError('plugin_unsupported', plugin.name);
+      throw new MarketplacePluginError('plugin_unsupported', plugin.name);
     coworkPluginMarketplace(plugin);
   }
 }
 
 /** Managed `policy-only` entries that block each plugin's own servers. */
-export function coworkBlockedMcpEntries(plugins: readonly HostPlugin[]): Array<{
+export function coworkBlockedMcpEntries(
+  plugins: readonly MarketplacePlugin[]
+): Array<{
   name: string;
   transport: 'policy-only';
   toolPolicy: { '*': 'blocked' };

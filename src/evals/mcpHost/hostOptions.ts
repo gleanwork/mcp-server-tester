@@ -12,7 +12,7 @@ export const ProviderSchema = z.enum([
   'vertex-anthropic',
 ]);
 /** `mcpHostConfig.skills` values. */
-export const HostSkillsModeSchema = z.enum(['off', 'catalog', 'preload']);
+export const ClientSkillsModeSchema = z.enum(['off', 'catalog', 'preload']);
 
 export const GenerationOptions = {
   model: z.string().min(1).optional(),

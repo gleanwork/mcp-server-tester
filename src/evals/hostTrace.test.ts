@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { hostRunToExecution, simulationToHostRun } from './hostTrace.js';
 import { runEvalDataset } from './evalRunner.js';
-import type { HostDefinition, HostEvidence } from './evalFrameworkTypes.js';
+import type { ClientDefinition, TraceEvidence } from './evalFrameworkTypes.js';
 import { z } from 'zod';
 
 describe('per-scenario host traces', () => {
@@ -220,10 +220,10 @@ describe('per-scenario host traces', () => {
       evidence: 'observed',
     });
   });
-  it.each<HostEvidence>(['structured', 'observed', 'none'])(
+  it.each<TraceEvidence>(['structured', 'observed', 'none'])(
     'gates tool assertions for %s evidence',
     async (evidence) => {
-      const host: HostDefinition = {
+      const host: ClientDefinition = {
         schema: z.object({}),
         evidence,
         async run(input) {

@@ -1,5 +1,5 @@
 /** Sanitized host evidence, not an evaluation verdict or raw process log. */
-export interface HostDiagnostics {
+export interface ClientDiagnostics {
   failureKind?: 'startup' | 'timeout' | 'process' | 'output';
   claudeStartup?: {
     status: 'ready' | 'failed' | 'missing';

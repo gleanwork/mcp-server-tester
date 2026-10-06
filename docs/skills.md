@@ -7,7 +7,7 @@ MST can:
 - read and verify skills from tests (`mcp.skills`)
 - check that a server follows SEP-2640 (`runConformanceChecks`)
 - assert on skills methods in eval datasets (`request` cases)
-- run `mcp_host` evals where the model can load skills, and measure whether skills help (`mcpHostConfig.skills`, or suite arms with the `vercel-sdk` host's `skills`)
+- run `mcp_host` evals where the model can load skills, and measure whether skills help (`mcpHostConfig.skills`, or suite arms with the `mst` host's `skills`)
 
 The extension works in both protocol eras: servers declare it in `capabilities.extensions`, which MST reads from `initialize` (legacy) or `server/discover` (2026-07-28).
 
@@ -154,7 +154,7 @@ Metrics: `skill_loaded`, `skill_before_tool`, and `skill_verification_failed`. E
 
 ## Measuring whether skills help
 
-Models often skip skills they could use, and a matching tool can win over the skill written for it. To measure it, run the same dataset as suite arms that differ only in the `vercel-sdk` host's `skills` mode:
+Models often skip skills they could use, and a matching tool can win over the skill written for it. To measure it, run the same dataset as suite arms that differ only in the `mst` host's `skills` mode:
 
 ```json
 {
@@ -163,7 +163,7 @@ Models often skip skills they could use, and a matching tool can win over the sk
   "servers": [
     { "transport": "stdio", "command": "node", "args": ["server.js"] }
   ],
-  "host": { "type": "vercel-sdk", "provider": "anthropic" },
+  "host": { "type": "mst", "provider": "anthropic" },
   "metrics": ["skill_loaded", "skill_before_tool", "skill_verification_failed"],
   "arms": [
     { "name": "off" },

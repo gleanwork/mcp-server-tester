@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { getHost } from './builtinHosts.js';
-import type { HostRunContext } from './evalFrameworkTypes.js';
+import type { ClientRunContext } from './evalFrameworkTypes.js';
 
 let directory: string;
 beforeEach(() => {
@@ -58,7 +58,7 @@ console.log(JSON.stringify({ type: 'result', result: JSON.stringify({ env, stric
         },
       };
       const host = {
-        type: 'claude-cli',
+        type: 'claude-code',
         env: {
           HOST_ENV_SHARED: 'host',
           HOST_ENV_HOST_WINS: 'host',
@@ -66,7 +66,7 @@ console.log(JSON.stringify({ type: 'result', result: JSON.stringify({ env, stric
           CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
         },
       };
-      const context: HostRunContext = {
+      const context: ClientRunContext = {
         manifest: { name: 'offline', datasets: [] },
         env: { HOST_ENV_SHARED: 'context' },
         mcpHostConfig: {
@@ -87,7 +87,7 @@ console.log(JSON.stringify({ type: 'result', result: JSON.stringify({ env, stric
         },
       };
       const before = structuredClone({ input, host, context });
-      const result = await getHost('claude-cli').run!(input, host, context);
+      const result = await getHost('claude-code').run!(input, host, context);
       expect(result.error).toBeUndefined();
       const observed: {
         env: Record<string, string | null>;
@@ -136,9 +136,9 @@ setTimeout(() => process.exit(0), 30000);
     );
     let ownedPid: number | undefined;
     try {
-      const pending = getHost('claude-cli').run!(
+      const pending = getHost('claude-code').run!(
         { prompt: 'hello', servers: [], env: { PATH: directory } },
-        { type: 'claude-cli', timeout: deadlineMs },
+        { type: 'claude-code', timeout: deadlineMs },
         { manifest: { name: 'offline', datasets: [] } }
       );
       await vi.waitFor(() => expect(fs.existsSync(marker)).toBe(true), {
@@ -167,9 +167,9 @@ setTimeout(() => process.exit(0), 30000);
   }, 15_000);
 
   it('keeps the supplied host deadline when legacy CLI arguments replace the generated config', async () => {
-    const pending = getHost('claude-cli').run!(
+    const pending = getHost('claude-code').run!(
       { prompt: 'hello', servers: [] },
-      { type: 'claude-cli', timeout: 50 },
+      { type: 'claude-code', timeout: 50 },
       {
         manifest: { name: 'offline', datasets: [] },
         mcpHostConfig: {
@@ -189,9 +189,9 @@ setTimeout(() => process.exit(0), 30000);
   });
 
   it('retains an immediate legacy CLI timeout of zero', async () => {
-    const result = await getHost('claude-cli').run!(
+    const result = await getHost('claude-code').run!(
       { prompt: 'hello', servers: [] },
-      { type: 'claude-cli' },
+      { type: 'claude-code' },
       {
         manifest: { name: 'offline', datasets: [] },
         mcpHostConfig: {
@@ -206,9 +206,9 @@ setTimeout(() => process.exit(0), 30000);
     'explicitly rejects unsupported legacy CLI generation settings %j',
     async (mcpHostConfig) => {
       await expect(
-        getHost('claude-cli').run!(
+        getHost('claude-code').run!(
           { prompt: 'hello', servers: [] },
-          { type: 'claude-cli' },
+          { type: 'claude-code' },
           { manifest: { name: 'offline', datasets: [] }, mcpHostConfig }
         )
       ).rejects.toThrow();
@@ -216,9 +216,9 @@ setTimeout(() => process.exit(0), 30000);
   );
 
   it('applies the legacy case model before constructing generated CLI arguments', async () => {
-    const result = await getHost('claude-cli').run!(
+    const result = await getHost('claude-code').run!(
       { prompt: 'hello', servers: [], env: { PATH: directory } },
-      { type: 'claude-cli', model: 'suite-model' },
+      { type: 'claude-code', model: 'suite-model' },
       {
         manifest: { name: 'offline', datasets: [] },
         mcpHostConfig: { model: 'legacy-model' },
@@ -229,9 +229,9 @@ setTimeout(() => process.exit(0), 30000);
   });
 
   it('preserves explicit legacy command arguments instead of rewriting them', async () => {
-    const result = await getHost('claude-cli').run!(
+    const result = await getHost('claude-code').run!(
       { prompt: 'hello', servers: [] },
-      { type: 'claude-cli', model: 'suite-model' },
+      { type: 'claude-code', model: 'suite-model' },
       {
         manifest: { name: 'offline', datasets: [] },
         mcpHostConfig: {
@@ -264,9 +264,9 @@ console.log(JSON.stringify({ type: 'result', result: at < 0 ? 'none' : process.a
       { mode: 0o700 }
     );
     const prompt = 'Use find_skills first; never expand {{prompt}} or $&.';
-    const result = await getHost('claude-cli').run!(
+    const result = await getHost('claude-code').run!(
       { prompt: 'hello', servers: [], env: { PATH: directory } },
-      { type: 'claude-cli', systemPrompt: prompt },
+      { type: 'claude-code', systemPrompt: prompt },
       { manifest: { name: 'offline', datasets: [] } }
     );
     expect(result.error).toBeUndefined();
@@ -290,9 +290,9 @@ console.log(JSON.stringify({ type: 'result', result: JSON.stringify(seen) }));
   async function run(host: Record<string, unknown>) {
     vi.stubEnv('CLAUDE_CONFIG_DIR', undefined);
     fakeClaude();
-    const result = await getHost('claude-cli').run!(
+    const result = await getHost('claude-code').run!(
       { prompt: 'hello', servers: [], env: { PATH: directory } },
-      { type: 'claude-cli', ...host },
+      { type: 'claude-code', ...host },
       { manifest: { name: 'offline', datasets: [] } }
     );
     expect(result.error).toBeUndefined();
@@ -313,9 +313,9 @@ console.log(JSON.stringify({ type: 'result', result: JSON.stringify(seen) }));
   it('isolates even when the shell exports CLAUDE_CONFIG_DIR', async () => {
     fakeClaude();
     vi.stubEnv('CLAUDE_CONFIG_DIR', '/tmp/operator-claude');
-    const result = await getHost('claude-cli').run!(
+    const result = await getHost('claude-code').run!(
       { prompt: 'hello', servers: [], env: { PATH: directory } },
-      { type: 'claude-cli' },
+      { type: 'claude-code' },
       { manifest: { name: 'offline', datasets: [] } }
     );
     const seen = JSON.parse(result.finalText) as { dir: string };

@@ -18,14 +18,14 @@ import {
   type DatasetConfig,
   type EvalArm,
   type EvalManifest,
-  type HostConfig,
+  type ClientConfig,
   type ModelPricing,
 } from './evalManifest.js';
 import type {
   EvaluationArmResult,
   EvaluationSummary,
-  HostDefinition,
-  HostEvidence,
+  ClientDefinition,
+  TraceEvidence,
   RunTelemetry,
 } from './evalFrameworkTypes.js';
 import {
@@ -194,11 +194,11 @@ function resolveHost(
   servers: MCPConfig[],
   env: HostEnvironment
 ) {
-  const declaration: HostConfig = {
-    ...(arm.host ?? manifest.host ?? { type: 'claude-cli' }),
-    type: arm.host?.type ?? manifest.host?.type ?? 'claude-cli',
+  const declaration: ClientConfig = {
+    ...(arm.host ?? manifest.host ?? { type: 'claude-code' }),
+    type: arm.host?.type ?? manifest.host?.type ?? 'claude-code',
   };
-  const definition: HostDefinition = getHost(declaration.type);
+  const definition: ClientDefinition = getHost(declaration.type);
   const config = definition.createConfig?.({
     ...declaration,
     servers,
@@ -279,13 +279,13 @@ function trialPassRate(arm: EvaluationArmResult): number | undefined {
   return typeof value === 'number' ? value : undefined;
 }
 
-const EVIDENCE_STRENGTH: HostEvidence[] = ['none', 'observed', 'structured'];
+const EVIDENCE_STRENGTH: TraceEvidence[] = ['none', 'observed', 'structured'];
 
 /** The weakest evidence among an arm's cases: what its trace metrics rest on. */
-function armEvidence(results: EvalCaseResult[]): HostEvidence | undefined {
+function armEvidence(results: EvalCaseResult[]): TraceEvidence | undefined {
   const levels = results
     .map((result) => result.hostEvidence)
-    .filter((level): level is HostEvidence => level !== undefined);
+    .filter((level): level is TraceEvidence => level !== undefined);
   return EVIDENCE_STRENGTH.find((level) => levels.includes(level));
 }
 
@@ -473,7 +473,7 @@ export async function runEvalSuite(
   manifest = validateManifest(
     {
       ...manifest,
-      host: manifest.host ?? { type: 'claude-cli' },
+      host: manifest.host ?? { type: 'claude-code' },
     },
     { namespaces }
   );

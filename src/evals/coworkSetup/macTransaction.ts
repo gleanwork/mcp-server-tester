@@ -19,7 +19,7 @@ import {
   assertCoworkHostPlugins,
   coworkBlockedMcpEntries,
   coworkPluginMarketplace,
-  type HostPlugin,
+  type MarketplacePlugin,
 } from '../hostPlugins.js';
 import {
   COWORK_SETTINGS_MAX_BYTES as LIMIT,
@@ -616,7 +616,7 @@ type InstallOptions = {
   manifest: EvalManifest;
   model?: string;
   /** Installed through a pinned, required allowedPluginMarketplaces entry. */
-  plugins?: readonly HostPlugin[];
+  plugins?: readonly MarketplacePlugin[];
   arm?: string;
   managedPreferencePaths: string[];
   /** Explicit runtime credentials only; never falls back to process.env. */

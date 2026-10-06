@@ -4,7 +4,10 @@ import type {
 } from '../mcpHost/mcpHostTypes.js';
 import type { UsageMetrics } from '../../types/index.js';
 import type { CodexSetupConfig } from '../codexSetup/config.js';
-import type { HostPlugin, HostPluginCredentials } from '../hostPlugins.js';
+import type {
+  MarketplacePlugin,
+  HostPluginCredentials,
+} from '../hostPlugins.js';
 import type {
   ComputerUseTelemetry,
   SemanticDesktopTelemetry,
@@ -262,7 +265,7 @@ export interface ExternalHostConfig {
   /**
    * Host plugins that MST installs into the fresh native profile before start.
    */
-  plugins?: HostPlugin[];
+  plugins?: MarketplacePlugin[];
   /**
    * Resolved plugin MCP credentials (`<plugin>/<server>` -> token), from each
    * override's `auth.accessTokenEnv`. Never logged, receipted, or passed to the app.
@@ -274,7 +277,7 @@ export interface ExternalHostConfig {
   options?: Record<string, unknown>;
 }
 
-export interface HostRunContext {
+export interface ClientRunContext {
   runId: string;
   caseId: string;
   scenario: string;
@@ -348,7 +351,7 @@ export interface ExternalHostRunState {
 
 export interface ExternalHostCapabilityContext {
   config: ExternalHostConfig;
-  run: HostRunContext;
+  run: ClientRunContext;
   capability: HostCapability;
   binding: ExternalHostCapabilityBinding;
   state: ExternalHostRunState;
@@ -368,7 +371,7 @@ export interface ExternalHostCapabilityImplementation {
 }
 
 export interface ExternalHostRunner {
-  run(context: HostRunContext): Promise<ExternalHostRunResult>;
+  run(context: ClientRunContext): Promise<ExternalHostRunResult>;
 }
 
 export interface EvidenceSource {

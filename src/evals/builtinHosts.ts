@@ -28,16 +28,15 @@ import { createFixtureExtensions } from '../mcp/fixtures/fixtureExtensions.js';
 import type { Client } from '@modelcontextprotocol/client';
 import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
 import type {
-  HostRunInput,
-  HostRunContext,
-  HostRunResult,
+  ClientRunInput,
+  ClientRunContext,
+  ClientRunResult,
 } from './evalFrameworkTypes.js';
-import type { HostConfig } from './evalManifest.js';
-import type { HostDefinition } from './evalFrameworkTypes.js';
+import type { ClientConfig } from './evalManifest.js';
+import type { ClientDefinition } from './evalFrameworkTypes.js';
 import { extensionLookup } from '../plugins/extensions.js';
 import { simulationToHostRun } from './hostTrace.js';
 import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
-import { ANTHROPIC_API_HOST } from './anthropicApiHost.js';
 import { COWORK_HOST } from './coworkHost.js';
 import { CHATGPT_HOST, CHATGPT_LINUX_HOST } from './chatgptHost.js';
 
@@ -51,11 +50,11 @@ function missingClient(): Client {
 }
 
 async function runBuiltinHost(
-  input: HostRunInput,
-  host: HostConfig,
-  context: HostRunContext,
+  input: ClientRunInput,
+  host: ClientConfig,
+  context: ClientRunContext,
   factory: (options: BuiltinHostOptions) => MCPHostConfig
-): Promise<HostRunResult> {
+): Promise<ClientRunResult> {
   const startedAt = Date.now();
   // Runtime values are fallbacks; explicit host and legacy case values win.
   const env: HostEnvironment = {
@@ -135,7 +134,7 @@ async function runBuiltinHost(
     controller.signal.throwIfAborted();
   }
 
-  async function execute(): Promise<HostRunResult> {
+  async function execute(): Promise<ClientRunResult> {
     try {
       checkDeadline();
       // CLI hosts manage their own server connections.
@@ -224,7 +223,7 @@ async function runBuiltinHost(
           context.mcpHostConfig?.env?.CLAUDE_CONFIG_DIR ??
           context.mcpHostConfig?.cli?.env?.CLAUDE_CONFIG_DIR;
         if (
-          host.type === 'claude-cli' &&
+          host.type === 'claude-code' &&
           (host as { isolate?: boolean }).isolate !== false &&
           explicitConfigDir === undefined
         ) {
@@ -295,7 +294,7 @@ export interface BuiltinHostOptions {
   maxTokens?: number;
   apiKeyEnvVar?: string;
   systemPrompt?: string;
-  /** The vercel-sdk host's Agent Skills mode. */
+  /** The mst client's Agent Skills mode. */
   skills?: 'off' | 'catalog' | 'preload';
   model?: string;
   maxToolCalls?: number;
@@ -315,7 +314,7 @@ export interface BuiltinHostOptions {
  */
 const SdkHostSchema = z
   .object({
-    type: z.literal('vercel-sdk').optional(),
+    type: z.literal('mst').optional(),
     ...GenerationOptions,
     provider: ProviderSchema.optional(),
     apiKeyEnvVar: z.string().min(1).optional(),
@@ -329,7 +328,7 @@ const SdkHostSchema = z
   .strict();
 const CliHostSchema = z
   .object({
-    type: z.literal('claude-cli').optional(),
+    type: z.literal('claude-code').optional(),
     model: GenerationOptions.model,
     timeout: GenerationOptions.timeout,
     systemPrompt: SystemPromptOption,
@@ -348,70 +347,63 @@ const CliHostSchema = z
     servers: z.array(MCPConfigSchema).optional(),
   })
   .strict();
-let builtinHosts: Record<string, HostDefinition> | undefined;
+let builtinHosts: Record<string, ClientDefinition> | undefined;
 
 /** Built-in hosts by name, including aliases. */
-function builtinHostDefinitions(): Readonly<Record<string, HostDefinition>> {
+function builtinHostDefinitions(): Readonly<Record<string, ClientDefinition>> {
   if (builtinHosts) return builtinHosts;
-  const hosts: Record<string, HostDefinition> = {};
+  const hosts: Record<string, ClientDefinition> = {};
   for (const [name, factory] of Object.entries(BUILTIN_HOSTS)) {
     hosts[name] = {
-      schema: name === 'vercel-sdk' ? SdkHostSchema : CliHostSchema,
+      schema: name === 'mst' ? SdkHostSchema : CliHostSchema,
       createConfig: (options) => factory(options ?? {}),
       evidence: 'structured',
       // The SDK host presents tool variants; the CLI only sees its servers.
-      ...(name === 'vercel-sdk' ? { toolOverrides: true } : {}),
+      ...(name === 'mst' ? { toolOverrides: true } : {}),
       run: (input, config, context) =>
         runBuiltinHost(input, config, context, factory),
     };
   }
   return (builtinHosts = {
     ...hosts,
-    'anthropic-api': ANTHROPIC_API_HOST,
-    'chatgpt-mac': CHATGPT_HOST,
-    'chatgpt-linux': CHATGPT_LINUX_HOST,
+    // One ChatGPT client; the desktop driver follows the platform, as Cowork's does.
+    chatgpt: process.platform === 'linux' ? CHATGPT_LINUX_HOST : CHATGPT_HOST,
     cowork: COWORK_HOST,
   });
 }
 
 /**
- * Earlier names for built-in hosts, still accepted with a warning. `chatgpt`
- * meant the ChatGPT host for the machine it ran on.
+ * Earlier names for built-in clients (ADR 0002). They are errors, not
+ * aliases: each names its replacement.
  */
-const DEPRECATED_HOST_NAMES: Readonly<Record<string, () => string>> = {
-  cowork_cu: () => 'cowork',
-  'anthropic.claude.cowork.desktop-app.macos': () => 'cowork',
-  'openai.chatgpt.agent.desktop-app.macos': () => 'chatgpt-mac',
-  'openai.chatgpt.agent.desktop-app.linux': () => 'chatgpt-linux',
-  chatgpt: () =>
-    process.platform === 'linux' ? 'chatgpt-linux' : 'chatgpt-mac',
+const RENAMED_CLIENTS: Readonly<Record<string, string>> = {
+  'vercel-sdk': 'mst',
+  'anthropic-api': 'mst',
+  'claude-cli': 'claude-code',
+  'chatgpt-mac': 'chatgpt',
+  'chatgpt-linux': 'chatgpt',
+  cowork_cu: 'cowork',
+  'anthropic.claude.cowork.desktop-app.macos': 'cowork',
+  'openai.chatgpt.agent.desktop-app.macos': 'chatgpt',
+  'openai.chatgpt.agent.desktop-app.linux': 'chatgpt',
 };
-const warnedHostNames = new Set<string>();
 
-const hosts = extensionLookup('hosts', builtinHostDefinitions);
+const hosts = extensionLookup('clients', builtinHostDefinitions);
 
 /**
- * A host reference's current name: a deprecated built-in name becomes its
- * replacement, with a warning once per process; anything else is unchanged.
+ * A client reference, checked: a renamed built-in fails naming its
+ * replacement; anything else is returned unchanged.
  */
 export function resolveHostName(reference: string): string {
-  if (!Object.hasOwn(DEPRECATED_HOST_NAMES, reference)) return reference;
-  const current = DEPRECATED_HOST_NAMES[reference]!();
-  if (!warnedHostNames.has(reference)) {
-    warnedHostNames.add(reference);
-    process.emitWarning(
-      `Host "${reference}" is deprecated; use "${current}".`,
-      {
-        type: 'DeprecationWarning',
-        code: 'MST_DEPRECATED_HOST',
-      }
+  if (Object.hasOwn(RENAMED_CLIENTS, reference))
+    throw new Error(
+      `Client "${reference}" is now "${RENAMED_CLIENTS[reference]}".`
     );
-  }
-  return current;
+  return reference;
 }
 
 /** The host `reference` names: a built-in, or `namespace/name` from a plugin. */
-export function getHost(reference: string): HostDefinition {
+export function getHost(reference: string): ClientDefinition {
   return hosts.get(resolveHostName(reference));
 }
 
@@ -423,7 +415,7 @@ export function getBuiltinHostConfig(
   if (!definition) {
     const available = Object.keys(builtinHostDefinitions()).sort().join(', ');
     throw new Error(
-      `Host "${name}" is not available. Available: ${available}.`
+      `Client "${name}" is not available. Available: ${available}.`
     );
   }
   const createConfig = definition.createConfig?.bind(definition);
@@ -436,9 +428,28 @@ const BUILTIN_HOSTS: Record<
   string,
   (options: BuiltinHostOptions) => MCPHostConfig
 > = {
-  'claude-cli': claudeCliHost,
-  'vercel-sdk': vercelSdkHost,
+  'claude-code': claudeCliHost,
+  mst: vercelSdkHost,
 };
+
+/**
+ * The API that serves `model`, from its id: the mst client infers it, so an
+ * eval names only the model. `provider` overrides it (for example a gateway or
+ * Vertex routing).
+ */
+export function providerForModel(
+  model: string | undefined
+): MCPHostConfig['provider'] | undefined {
+  if (!model) return undefined;
+  if (/^claude-.*@/.test(model)) return 'vertex-anthropic';
+  if (/^claude-/.test(model)) return 'anthropic';
+  if (/^(gpt-|o\d|chatgpt-)/.test(model)) return 'openai';
+  if (/^gemini-/.test(model)) return 'google';
+  if (/^(mistral|ministral|codestral|magistral)/.test(model)) return 'mistral';
+  if (/^deepseek-/.test(model)) return 'deepseek';
+  if (/^grok-/.test(model)) return 'xai';
+  return undefined;
+}
 
 function vercelSdkHost(options: BuiltinHostOptions): MCPHostConfig {
   SdkHostSchema.parse(options);
@@ -449,7 +460,10 @@ function vercelSdkHost(options: BuiltinHostOptions): MCPHostConfig {
     apiKeyEnvVar: options.apiKeyEnvVar,
     env: options.env,
     hostType: 'sdk',
-    provider: (options.provider as MCPHostConfig['provider']) ?? 'anthropic',
+    provider:
+      (options.provider as MCPHostConfig['provider']) ??
+      providerForModel(options.model) ??
+      'anthropic',
     model: options.model ?? 'claude-sonnet-4-20250514',
     maxToolCalls: options.maxToolCalls ?? 5,
     ...(options.systemPrompt !== undefined
@@ -486,7 +500,7 @@ export function assertHostSupports(
   if (options.toolOverrides !== undefined && !appliesOverrides) {
     throw new Error(
       `${options.context}: host "${host.type}" can't apply toolOverrides; it would run with the original tools. ` +
-        'Use a host that shows tool variants to the model (vercel-sdk, anthropic-api), or one that connects to the servers it is given.'
+        'Use a client that shows tool variants to the model (mst), or one that connects to the servers it is given.'
     );
   }
   if (
@@ -497,7 +511,7 @@ export function assertHostSupports(
       `${options.context}: host "${host.type}" runs at most ${definition.maxConcurrency} case at a time; set concurrency to ${definition.maxConcurrency}.`
     );
   }
-  if (host.type === 'claude-cli')
+  if (host.type === 'claude-code')
     assertClaudeCliServers(options.servers, false, options.context);
 }
 
@@ -508,7 +522,7 @@ export function assertHostSupports(
 function assertClaudeCliServers(
   servers: MCPConfig[],
   resolved: boolean,
-  context = 'claude-cli'
+  context = 'claude-code'
 ): void {
   for (const server of servers) {
     if (server.transport !== 'http') continue;
@@ -529,7 +543,7 @@ function assertClaudeCliServers(
     ].filter(Boolean);
     if (unsupported.length)
       throw new Error(
-        `${context}: claude-cli can't forward ${unsupported.join(', ')} for ${server.label ?? server.serverUrl}. Remove ${unsupported.length > 1 ? 'them' : 'it'}, or use vercel-sdk or anthropic-api.`
+        `${context}: claude-code can't forward ${unsupported.join(', ')} for ${server.label ?? server.serverUrl}. Remove ${unsupported.length > 1 ? 'them' : 'it'}, or use vercel-sdk or anthropic-api.`
       );
   }
 }

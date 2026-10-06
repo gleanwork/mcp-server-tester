@@ -50,7 +50,7 @@ export default {meta:{name:'local-plugin',version:'1.0.0',namespace:'local'},met
         servers: [
           { transport: 'stdio', command: process.execPath, args: [serverPath] },
         ],
-        host: { type: 'vercel-sdk' },
+        host: { type: 'mst' },
         concurrency: 8,
         plugins: [pluginPath],
         metrics: ['local/plugin-metric'],

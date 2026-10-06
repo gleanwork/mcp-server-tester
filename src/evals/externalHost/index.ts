@@ -30,7 +30,7 @@ export type {
   HostCapability,
   HostDriverConfig,
   HostDriverId,
-  HostRunContext,
+  ClientRunContext,
   ObservationConfidence,
   TraceSource,
 } from './types.js';

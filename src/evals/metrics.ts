@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { UsageMetrics } from '../types/index.js';
-import type { HostTrace } from './evalFrameworkTypes.js';
+import type { Trace } from './evalFrameworkTypes.js';
 import { isInfrastructureFailure } from './infrastructureFailure.js';
 import { extensionLookup } from '../plugins/extensions.js';
 /**
@@ -44,7 +44,7 @@ function responseObject(caseResult: EvalCaseResult): Record<string, unknown> {
 /** One run of a case: an iteration, or the case itself when it runs once. */
 interface Trial {
   pass: boolean;
-  trace?: HostTrace;
+  trace?: Trace;
   usage?: UsageMetrics;
   /** Usage of the trial's judges, from judges that report it. */
   judgeUsage?: Partial<UsageMetrics>;

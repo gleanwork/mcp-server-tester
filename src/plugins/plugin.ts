@@ -1,7 +1,7 @@
 import type { ZodType } from 'zod';
 import type {
   DatasetSource,
-  HostDefinition,
+  ClientDefinition,
   JudgeDefinition,
   MetricDefinition,
   MetricKind,
@@ -27,7 +27,7 @@ export interface PluginMeta {
 export interface Plugin {
   readonly meta: PluginMeta;
   readonly datasetSources?: Readonly<Record<string, DatasetSource>>;
-  readonly hosts?: Readonly<Record<string, HostDefinition>>;
+  readonly clients?: Readonly<Record<string, ClientDefinition>>;
   readonly judges?: Readonly<Record<string, JudgeDefinition>>;
   /** Judges that compare two runs of one case (a baseline and a candidate). */
   readonly pairwiseJudges?: Readonly<Record<string, PairwiseJudgeDefinition>>;
@@ -43,7 +43,7 @@ export interface Plugin {
 
 export const EXTENSION_KINDS = [
   'datasetSources',
-  'hosts',
+  'clients',
   'judges',
   'pairwiseJudges',
   'metrics',
@@ -54,7 +54,7 @@ export type ExtensionKind = (typeof EXTENSION_KINDS)[number];
 /** The extension definitions each kind holds. */
 export interface ExtensionsByKind {
   datasetSources: DatasetSource;
-  hosts: HostDefinition;
+  clients: ClientDefinition;
   judges: JudgeDefinition;
   pairwiseJudges: PairwiseJudgeDefinition;
   metrics: MetricDefinition;
@@ -68,7 +68,7 @@ const TOP_LEVEL_KEYS = new Set<string>(['meta', 'configs', ...EXTENSION_KINDS]);
 /** The functions an extension of each kind must provide (any one of them). */
 const REQUIRED_FUNCTIONS: Record<ExtensionKind, readonly string[]> = {
   datasetSources: ['load'],
-  hosts: ['run', 'runBatch', 'createConfig'],
+  clients: ['run', 'runBatch', 'createConfig'],
   judges: ['evaluate'],
   pairwiseJudges: ['compare'],
   metrics: ['compute'],
@@ -152,6 +152,7 @@ export function assertPlugin(value: unknown, source: string): Plugin {
       'meta.namespace must be lowercase letters, digits, ".", "_" or "-", optionally scoped as "@scope/name"'
     );
   for (const key of Object.keys(value)) {
+    if (key === 'hosts') fail('`hosts` is now `clients`');
     if (!TOP_LEVEL_KEYS.has(key)) fail(`unknown key "${key}"`);
   }
   if (value.configs !== undefined) {

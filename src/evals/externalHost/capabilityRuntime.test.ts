@@ -10,7 +10,7 @@ import type {
   ExternalHostCapabilityImplementation,
   ExternalHostRunResult,
   ExternalHostRunState,
-  HostRunContext,
+  ClientRunContext,
 } from './types.js';
 
 const TEST_DRIVER = {
@@ -27,7 +27,7 @@ const TEST_CORRELATION = {
   includedInPrompt: true,
 } as const;
 
-const RUN_CONTEXT: HostRunContext = {
+const RUN_CONTEXT: ClientRunContext = {
   runId: 'run',
   caseId: 'case',
   scenario: 'scenario',

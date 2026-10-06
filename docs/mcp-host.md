@@ -164,19 +164,19 @@ interface CLIConfig {
 - **`sdk`** (default) — Programmatic via Vercel AI SDK. Reuses the framework's MCP connection. Requires `provider`.
 - **`cli`** — CLI-based hosts (e.g., Claude Code, Codex). Spawns a process with its own MCP connection. Requires `cli`.
 
-**Skills:** with `skills: 'catalog'` the SDK host lists the server's [Agent Skills](./skills.md) in the system prompt and gives the model `read_skill` and `read_resource` tools; `'preload'` puts every `SKILL.md` in the prompt. Skills the model loads (and that pass verification) appear as `kind: 'skill'` entries for `toolsTriggered`, not as tool calls; preloaded skills do not. To measure whether skills help, compare suite arms that differ in the `vercel-sdk` host's `skills` mode; see [Agent Skills](./skills.md#measuring-whether-skills-help).
+**Skills:** with `skills: 'catalog'` the SDK host lists the server's [Agent Skills](./skills.md) in the system prompt and gives the model `read_skill` and `read_resource` tools; `'preload'` puts every `SKILL.md` in the prompt. Skills the model loads (and that pass verification) appear as `kind: 'skill'` entries for `toolsTriggered`, not as tool calls; preloaded skills do not. To measure whether skills help, compare suite arms that differ in the `mst` host's `skills` mode; see [Agent Skills](./skills.md#measuring-whether-skills-help).
 
 **Protocol:** the SDK host uses the test's MCP connection, so it follows `mcpConfig.protocol`. CLI and external hosts open their own connections. See [Protocol Versions](./protocol-versions.md).
 
 ## Claude Code isolation
 
-Claude Code loads skills, plugins and settings from its config directory (`~/.claude` by default), so a run would otherwise depend on whoever runs it: their skills, plugins and settings shape what the model does and add to its input tokens. The built-in `claude-cli` host gives each run an empty `CLAUDE_CONFIG_DIR`, removed afterwards, even when your shell exports one. The MCP servers under test come from the manifest as before.
+Claude Code loads skills, plugins and settings from its config directory (`~/.claude` by default), so a run would otherwise depend on whoever runs it: their skills, plugins and settings shape what the model does and add to its input tokens. The built-in `claude-code` host gives each run an empty `CLAUDE_CONFIG_DIR`, removed afterwards, even when your shell exports one. The MCP servers under test come from the manifest as before.
 
 That also leaves out your `settings.json`: its `env` block (a region, a base URL, a gateway) and `apiKeyHelper` don't apply. Authentication comes from the environment instead: `provider: 'vertex'` (Google Application Default Credentials) or an Anthropic API key. To run with your own configuration, for example to sign in with a claude.ai account, set `isolate: false` on the host; a `CLAUDE_CONFIG_DIR` in the host's or case's `env` is used as given.
 
 ## Claude Code startup and failure evidence
 
-The built-in `claude-cli` host uses blocking MCP initialization
+The built-in `claude-code` host uses blocking MCP initialization
 (`MCP_CONNECTION_NONBLOCKING=false`). Its connection wait defaults to 30 seconds
 (`MCP_CONNECT_TIMEOUT_MS`); an explicit environment value is preserved. The
 configured overall host deadline still includes startup and is not extended.
@@ -202,7 +202,7 @@ Claude runs in an invocation-owned process group so cancellation also stops its
 MCP servers and subprocesses without affecting other runs. Windows retains
 direct-child cancellation.
 
-These controls apply to generated `claude-cli` commands, not generic CLI or SDK
+These controls apply to generated `claude-code` commands, not generic CLI or SDK
 hosts. A caller-authored Claude CLI config can opt in with
 `cli.claudeMcpServers: ["server-name"]` and `outputFormat: "stream-json"`; legacy
 custom commands are otherwise left unchanged. The built-in host supplies the
@@ -222,7 +222,7 @@ interface MCPHostSimulationResult {
   mcpDurationMs?: number; // Time in MCP tool execution
   conversationHistory?: Array<{ role: string; content: string }>;
   skillLoads?: SkillLoad[]; // Skills the host loaded (when skills are enabled)
-  events?: HostEvent[]; // Ordered tool calls and skill loads (when skills are enabled)
+  events?: TraceEvent[]; // Ordered tool calls and skill loads (when skills are enabled)
 }
 ```
 
@@ -302,7 +302,7 @@ A renamed tool's calls reach the original tool and are recorded under its origin
 }
 ```
 
-In a suite, an arm's `toolOverrides` reach every host, including plugin hosts and `claude-cli`, through a local MCP proxy; see [Tool variants on every host](./evaluation-framework.md#tool-variants-on-every-host). Mocked responses and dataset rewriting are out of scope.
+In a suite, an arm's `toolOverrides` reach every host, including plugin hosts and `claude-code`, through a local MCP proxy; see [Tool variants on every host](./evaluation-framework.md#tool-variants-on-every-host). Mocked responses and dataset rewriting are out of scope.
 
 For a complete runnable harness — including building a structured next-variant proposal from the comparison — see [`snippets/runtime-tool-override-experiment.ts`](../snippets/runtime-tool-override-experiment.ts).
 

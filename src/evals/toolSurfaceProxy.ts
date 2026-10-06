@@ -23,9 +23,9 @@ import {
   createMCPClientForConfig,
 } from '../mcp/clientFactory.js';
 import type {
-  HostDefinition,
-  HostRunContext,
-  HostRunResult,
+  ClientDefinition,
+  ClientRunContext,
+  ClientRunResult,
 } from './evalFrameworkTypes.js';
 import type { ToolOverrideVariant } from './evalRunner.js';
 import { buildToolSurface, type ToolSurface } from './toolSurface.js';
@@ -379,7 +379,7 @@ async function serveNode(
  * hosts that run cases themselves and don't apply variants, unless they opt
  * out with `toolSurfaceProxy: false`.
  */
-export function usesToolSurfaceProxy(definition: HostDefinition): boolean {
+export function usesToolSurfaceProxy(definition: ClientDefinition): boolean {
   return (
     definition.toolOverrides !== true &&
     definition.toolSurfaceProxy !== false &&
@@ -389,7 +389,9 @@ export function usesToolSurfaceProxy(definition: HostDefinition): boolean {
 }
 
 /** A proxied host's context: the proxy applies the variant, not the host. */
-export function withoutToolVariant(context: HostRunContext): HostRunContext {
+export function withoutToolVariant(
+  context: ClientRunContext
+): ClientRunContext {
   const { toolOverrides: _manifestVariant, ...manifest } = context.manifest;
   if (!context.arm) return { ...context, manifest };
   const { toolOverrides: _armVariant, ...arm } = context.arm;
@@ -403,12 +405,12 @@ export function withoutToolVariant(context: HostRunContext): HostRunContext {
  * are recorded under the tools' original names, with the host's in `rawName`.
  */
 export function settleProxiedTrace(
-  trace: HostRunResult,
+  trace: ClientRunResult,
   proxy: ToolSurfaceProxy,
   scope: string,
   servers: readonly MCPConfig[],
   variantId: string
-): HostRunResult {
+): ClientRunResult {
   const { listedTools } = proxy.endScope(scope);
   if (!trace.error && !listedTools) {
     return {

@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   HostPluginSchema,
-  HostPluginsSchema,
+  MarketplacePluginsSchema,
   assertCoworkHostPlugins,
   coworkPluginMarketplace,
   hostPluginMcpServers,
   resolveHostPluginCredentials,
-  type HostPlugin,
+  type MarketplacePlugin,
 } from './hostPlugins.js';
 
 const SHA = 'b'.repeat(40);
-const base: HostPlugin = {
+const base: MarketplacePlugin = {
   name: 'acme',
   marketplace: { source: 'Acme/Plugins', ref: SHA },
 };
@@ -20,7 +20,7 @@ const override = {
   env: { ACME_URL: '${url}', ACME_DATA: '${dataDir}' },
   files: { 'creds.json': { token: '${bearerToken}' } },
 };
-const withMcp: HostPlugin = { ...base, mcp: { acme_mcp: override } };
+const withMcp: MarketplacePlugin = { ...base, mcp: { acme_mcp: override } };
 
 describe('host plugin schema', () => {
   it('accepts the declarative override and defaults minTools to 1', () => {
@@ -67,10 +67,14 @@ describe('host plugin schema', () => {
   });
 
   it('rejects duplicate plugins and duplicate server names across plugins', () => {
-    expect(HostPluginsSchema.safeParse([base, base]).success).toBe(false);
+    expect(MarketplacePluginsSchema.safeParse([base, base]).success).toBe(
+      false
+    );
     expect(
-      HostPluginsSchema.safeParse([withMcp, { ...withMcp, name: 'other' }])
-        .success
+      MarketplacePluginsSchema.safeParse([
+        withMcp,
+        { ...withMcp, name: 'other' },
+      ]).success
     ).toBe(false);
   });
 });

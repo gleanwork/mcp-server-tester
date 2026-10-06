@@ -14,7 +14,10 @@ import {
   ComputerUseHitlBudgetError,
 } from './cowork/anthropicComputerUse.js';
 import type * as ComputerUse from './cowork/anthropicComputerUse.js';
-import type { HostBatchRequest, HostRunContext } from './evalFrameworkTypes.js';
+import type {
+  ClientBatchRequest,
+  ClientRunContext,
+} from './evalFrameworkTypes.js';
 import type * as OsModule from 'node:os';
 
 const mocks = vi.hoisted(() => ({
@@ -75,7 +78,7 @@ const server = {
   serverUrl: 'https://example.com/mcp/eval',
   auth: { accessTokenEnv: 'ACME_API_TOKEN' },
 };
-const context: HostRunContext = {
+const context: ClientRunContext = {
   manifest: {
     name: 'cowork',
     datasets: [],
@@ -88,14 +91,14 @@ const context: HostRunContext = {
     ACME_API_TOKEN: 'test-secret-token',
   },
 };
-const readOnlyContext: HostRunContext = {
+const readOnlyContext: ClientRunContext = {
   ...context,
   manifest: {
     ...context.manifest,
     coworkSetup: { approveWriteTools: false },
   },
 };
-function requests(): HostBatchRequest[] {
+function requests(): ClientBatchRequest[] {
   return ['query one', 'query two'].map((scenario, i) => ({
     caseId: `case-${i}`,
     trial: 0,
@@ -619,10 +622,10 @@ describe('V2 Cowork host', () => {
       submit: mocks.submit,
       handleHitl: mocks.hitl,
     });
-    const batch = (config: object): HostBatchRequest[] =>
+    const batch = (config: object): ClientBatchRequest[] =>
       requests().map((r) => ({
         ...r,
-        config: config as HostBatchRequest['config'],
+        config: config as ClientBatchRequest['config'],
         input: { ...r.input, servers: [evalServer] },
       }));
     const stdioContext = {

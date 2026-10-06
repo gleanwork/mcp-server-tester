@@ -62,7 +62,7 @@ describe('manifest identity', () => {
 function acme(configs: Plugin['configs'], namespace = 'acme'): Plugin {
   return {
     meta: { name: `${namespace}-plugin`, namespace },
-    hosts: {
+    clients: {
       echo: {
         schema: z.object({ type: z.string() }).passthrough(),
         evidence: 'structured',

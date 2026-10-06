@@ -2,11 +2,11 @@ import type { MCPConfig } from '../../config/mcpConfig.js';
 import {
   coworkBlockedMcpEntries,
   coworkPluginMarketplace,
-  HostPluginError,
+  MarketplacePluginError,
   hostStdioServers,
   resolveHostStdioServer,
-  type HostPlugin,
-  type HostStdioPaths,
+  type MarketplacePlugin,
+  type ClientStdioPaths,
 } from '../hostPlugins.js';
 import { mcpServerLabel } from '../../config/mcpConfig.js';
 
@@ -40,8 +40,8 @@ export function coworkManagedPluginSettings(options: {
   servers: readonly MCPConfig[];
   /** Full, globally labeled declarations when setup handles transports separately. */
   declaredServers?: readonly MCPConfig[];
-  plugins?: readonly HostPlugin[];
-  paths?: HostStdioPaths;
+  plugins?: readonly MarketplacePlugin[];
+  paths?: ClientStdioPaths;
   approveWriteTools?: boolean;
 }): CoworkManagedPluginSettings {
   const plugins = options.plugins ?? [];
@@ -70,7 +70,7 @@ export function coworkManagedPluginSettings(options: {
     )
   );
   const clash = blocked.find((entry) => labels.has(entry.name.toLowerCase()));
-  if (clash) throw new HostPluginError('mcp_server_invalid', clash.name);
+  if (clash) throw new MarketplacePluginError('mcp_server_invalid', clash.name);
   return {
     managedMcpServers: [...stdio, ...blocked],
     allowedMcpServers: stdio.map((server) => ({ serverName: server.name })),
@@ -88,7 +88,7 @@ export function coworkManagedPluginSettings(options: {
  */
 export function coworkPluginSettingsMatch(
   settings: Record<string, unknown>,
-  plugins: readonly HostPlugin[]
+  plugins: readonly MarketplacePlugin[]
 ): boolean {
   const actual = settings.allowedPluginMarketplaces;
   if (actual === undefined) return plugins.length === 0;
@@ -176,8 +176,8 @@ export function coworkMcpSettingsMatch(
   options: {
     servers: readonly MCPConfig[];
     declaredServers?: readonly MCPConfig[];
-    plugins?: readonly HostPlugin[];
-    paths?: HostStdioPaths;
+    plugins?: readonly MarketplacePlugin[];
+    paths?: ClientStdioPaths;
     approveWriteTools?: boolean;
   }
 ): boolean {

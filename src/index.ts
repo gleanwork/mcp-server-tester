@@ -109,7 +109,7 @@ export type {
   MCPConformanceResultData,
   MCPServerCapabilitiesData,
   MCPEvalData,
-  HostDiagnostics,
+  ClientDiagnostics,
 } from './types/index.js';
 export {
   MCPConfigSchema,
@@ -189,9 +189,9 @@ export type { PluginConfig } from './evals/evalManifest.js';
 // For code that calls validators or matchers outside a runner or the fixture.
 export { installPlugins } from './plugins/extensions.js';
 export type {
-  HostEvent,
-  HostEvidence,
-  HostTrace,
+  TraceEvent,
+  TraceEvidence,
+  Trace,
   JudgeDefinition,
   JudgeVerdict,
 } from './evals/evalFrameworkTypes.js';
@@ -201,10 +201,10 @@ export type {
   DirectExecution,
   HostExecution,
   FailedExecution,
-  HostResponse,
+  ClientResponse,
 } from './evals/caseExecution.js';
 export type {
-  HostSkillsMode,
+  ClientSkillsMode,
   SkillLoad,
 } from './evals/mcpHost/mcpHostTypes.js';
 export { createJudge } from './judge/judgeClient.js';

@@ -26,7 +26,7 @@ async function dryRun(
     JSON.stringify({
       name: 'validation',
       datasets: ['./cases.json'],
-      host: { type: 'vercel-sdk', provider: 'anthropic' },
+      host: { type: 'mst', provider: 'anthropic' },
       ...manifest,
     })
   );
@@ -89,7 +89,7 @@ describe('a case systemPrompt the suite would lose', () => {
         ],
         {
           host: {
-            type: 'vercel-sdk',
+            type: 'mst',
             provider: 'anthropic',
             systemPrompt: 'Arm prompt.',
           },

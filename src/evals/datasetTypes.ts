@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import { TaggedConfigSchema, type HostConfig } from './evalManifest.js';
+import { TaggedConfigSchema, type ClientConfig } from './evalManifest.js';
 import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
 import {
   GenerationOptions,
-  HostSkillsModeSchema,
+  ClientSkillsModeSchema,
   ProviderSchema,
   SystemPromptOption,
 } from './mcpHost/hostOptions.js';
@@ -11,7 +11,7 @@ import type { ExternalHostConfig } from './externalHost/types.js';
 import { ExternalHostConfigSchema } from './externalHost/schema.js';
 import type { SnapshotSanitizer } from '../assertions/validators/types.js';
 import type { BuiltInRubric, ProviderKind } from '../judge/judgeTypes.js';
-import type { HostEvent } from './evalFrameworkTypes.js';
+import type { TraceEvent } from './evalFrameworkTypes.js';
 import {
   RubricJudgeLLMSchema,
   RubricSpecSchema,
@@ -47,7 +47,7 @@ export interface EvalDirectRequest {
  */
 export interface EvalCase {
   /** Optional per-case host override: a built-in or a plugin host. */
-  host?: HostConfig;
+  host?: ClientConfig;
   /**
    * Unique identifier for this test case
    */
@@ -291,8 +291,8 @@ export interface EvalAssertions {
     calls: Array<{
       /** Tool or explicitly selected host event name. */
       name: string;
-      kind?: HostEvent['kind'];
-      source?: HostEvent['source'];
+      kind?: TraceEvent['kind'];
+      source?: TraceEvent['source'];
       server?: string;
       /** Expected arguments (partial match — extra keys are allowed) */
       arguments?: Record<string, unknown>;
@@ -365,7 +365,7 @@ const MCPHostConfigSchema = z.object({
   temperature: z.number().optional(),
   maxToolCalls: z.number().optional(),
   systemPrompt: SystemPromptOption,
-  skills: HostSkillsModeSchema.optional(),
+  skills: ClientSkillsModeSchema.optional(),
   cli: z
     .object({
       command: z.string(),

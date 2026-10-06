@@ -27,8 +27,8 @@ Choose based on your server deployment:
 
 Plain stdio is supported by these built-in evaluation host families:
 
-- Claude CLI (`claude-cli`) and Vercel AI SDK (`vercel-sdk`).
-- ChatGPT Work and Codex surfaces of the `chatgpt-mac` and `chatgpt-linux` hosts.
+- Claude CLI (`claude-code`) and Vercel AI SDK (`mst`).
+- ChatGPT Work and Codex surfaces of the `chatgpt` and `chatgpt` hosts.
 - Cowork (`cowork`) on macOS and Linux. The package exports
   `COWORK_STDIO_PLATFORMS` as `['darwin', 'linux']`.
 

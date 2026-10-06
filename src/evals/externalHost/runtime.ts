@@ -4,7 +4,7 @@ import type {
   ExternalHostCorrelationMetadata,
   ExternalHostConfig,
   ExternalHostRunResult,
-  HostRunContext,
+  ClientRunContext,
 } from './types.js';
 import {
   driverToSlug,
@@ -61,7 +61,7 @@ export async function runExternalHostScenario(
     loaded.config.correlation
   );
 
-  const context: HostRunContext = {
+  const context: ClientRunContext = {
     runId,
     caseId: options.caseId ?? 'unknown',
     scenario,

@@ -7,12 +7,12 @@
 
 import type { MCPFixtureApi } from '../../mcp/fixtures/mcpFixture.js';
 import type {
-  HostDiagnostics,
-  HostSkillsMode,
+  ClientDiagnostics,
+  ClientSkillsMode,
   SkillLoad,
   UsageMetrics,
 } from '../../types/index.js';
-import type { HostEvent } from '../evalFrameworkTypes.js';
+import type { TraceEvent } from '../evalFrameworkTypes.js';
 
 /**
  * Host type for MCP host simulation.
@@ -178,7 +178,7 @@ export interface BrowserConfig {
   cookies?: BrowserCookie[];
 }
 
-export type { HostSkillsMode, SkillLoad } from '../../types/index.js';
+export type { ClientSkillsMode, SkillLoad } from '../../types/index.js';
 
 /**
  * Configuration for MCP host simulation
@@ -233,7 +233,7 @@ export interface MCPHostConfig {
    * Text added to the host's system prompt, such as an organisation's
    * instructions. The SDK host puts it in the model's system prompt; a CLI
    * host gets it through a `{{systemPrompt}}` placeholder in `cli.args`
-   * (the claude-cli host adds `--append-system-prompt {{systemPrompt}}`).
+   * (the claude-code client adds `--append-system-prompt {{systemPrompt}}`).
    * Browser and desktop hosts reject it.
    */
   systemPrompt?: string;
@@ -261,7 +261,7 @@ export interface MCPHostConfig {
    *
    * @default 'off'
    */
-  skills?: HostSkillsMode;
+  skills?: ClientSkillsMode;
 
   /**
    * CLI host configuration (required for 'cli' host type).
@@ -307,9 +307,9 @@ export interface LLMToolCall {
    * The event this call is: a host-native skill load, command, subagent or
    * tool search the parser typed, or a tool call (also when absent).
    */
-  kind?: HostEvent['kind'];
+  kind?: TraceEvent['kind'];
   /** `tool_search` only: the tools the search returned. */
-  results?: HostEvent['results'];
+  results?: TraceEvent['results'];
 }
 
 /**
@@ -317,7 +317,7 @@ export interface LLMToolCall {
  */
 export interface MCPHostSimulationResult {
   /** Sanitized startup evidence, retained even when execution fails. */
-  diagnostics?: HostDiagnostics;
+  diagnostics?: ClientDiagnostics;
   /** Whether the simulation succeeded */
   success: boolean;
 
@@ -372,7 +372,7 @@ export interface MCPHostSimulationResult {
    * enabled; tool-call expectations read it so `kind: 'skill'` entries and
    * strict ordering work.
    */
-  events?: HostEvent[];
+  events?: TraceEvent[];
 }
 
 /**

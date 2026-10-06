@@ -8,7 +8,10 @@ import {
   type DesktopCaseOutcome,
   type DesktopHostAdapter,
 } from './desktopBatch.js';
-import type { HostBatchRequest, HostRunResult } from './evalFrameworkTypes.js';
+import type {
+  ClientBatchRequest,
+  ClientRunResult,
+} from './evalFrameworkTypes.js';
 import { McpReadinessError } from './mcpReadiness.js';
 
 const SECRET = 'sk-desktop-secret';
@@ -21,13 +24,13 @@ afterEach(async () => {
   await fs.rm(leaseDirectory, { recursive: true, force: true });
 });
 
-function requests(count: number): HostBatchRequest[] {
+function requests(count: number): ClientBatchRequest[] {
   return Array.from({ length: count }, (_, index) => ({
     caseId: `case-${index + 1}`,
     trial: 0,
     input: { prompt: `prompt ${index + 1}`, servers: [] },
     config: { type: 'fake' },
-  })) as HostBatchRequest[];
+  })) as ClientBatchRequest[];
 }
 
 const ok = (text: string): DesktopCaseOutcome => ({
@@ -257,7 +260,7 @@ describe('runDesktopBatch', () => {
   });
 
   it('keeps results and the lease when cleanup fails', async () => {
-    const results: HostRunResult[] = await runDesktopBatch(
+    const results: ClientRunResult[] = await runDesktopBatch(
       fakeHost({
         async dispose() {
           throw new Error('restore failed');

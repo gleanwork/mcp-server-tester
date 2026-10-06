@@ -22,7 +22,7 @@ runtime validation is provided by `EvalManifestSchema`.
       "label": "prod"
     }
   ],
-  "host": { "type": "vercel-sdk", "provider": "anthropic" },
+  "host": { "type": "mst", "provider": "anthropic" },
   "metrics": ["passed", "tool_count"],
   "results": { "store": { "type": "file", "dir": ".mcp-test-results" } },
   "arms": [
@@ -85,7 +85,7 @@ const plugin: Plugin = {
 export default plugin;
 ```
 
-- **Names.** Each map key names an extension within the plugin's namespace. Manifests and datasets reference it as `namespace/name`, such as `{ "type": "acme/legacy" }` or `passesJudge: { "judge": "acme/completeness" }`. Built-ins (`file`, `claude-cli`, `rubric`, `passed`, ...) use bare names, which plugins can't take.
+- **Names.** Each map key names an extension within the plugin's namespace. Manifests and datasets reference it as `namespace/name`, such as `{ "type": "acme/legacy" }` or `passesJudge: { "judge": "acme/completeness" }`. Built-ins (`file`, `claude-code`, `rubric`, `passed`, ...) use bare names, which plugins can't take.
 - **Namespace.** `meta.namespace` is required: lowercase, optionally scoped as `@scope/name`. Two different plugins can't share a namespace. Loading the same plugin again is a no-op, including a rebuilt object with the same name, version, extension definitions and configs. A plugin factory that builds differently configured copies needs a namespace per copy. A package's CommonJS and ESM builds are different objects too, so load a plugin one way; publishing plugins as ESM avoids the question.
 - **Loading.** A manifest lists plugin specifiers in `plugins`. Each one resolves relative to the manifest's directory, then `rootDir` (`--root-dir`, the working directory by default), then as a package name, resolved as `import` resolves it. `--plugins` and the `pluginPaths` / `plugins` options of `runEvalSuite` and `runEvalBatch` add to that list. Code that runs datasets directly passes plugin objects: `runEvalDataset({ dataset, plugins: [plugin] }, ctx)`, or `test.use({ mcpPlugins: [plugin] })` in Playwright. Code that calls validators or matchers on its own installs them with `installPlugins([plugin])`.
 - **Scope.** A manifest may only reference namespaces of plugins it loads, even if another suite in the same process (a batch) loaded more. The same check applies to the hosts and judges its datasets name. `runEvalDataset`, `runEvalCase` and the fixtures have no manifest, so they resolve against every plugin installed in the process.
@@ -263,9 +263,20 @@ export default {
 
 A manifest that loads the plugin declares `{ "type": "my/format", "path": "..." }` in `datasets`. Select the format in the declaration rather than inferring it from a first case, and fail on fields the source can't map instead of dropping them.
 
-### Hosts
+### Clients
 
-A host runs one input and returns its trace. It doesn't repeat cases, run judges or decide pass/fail; `runEvalDataset` does that for every host. A plugin host is the way to add a host: the built-in desktop drivers are composed from internal capabilities, which plugins can't provide.
+The client is the MCP client application an eval tests. Built-in clients have canonical names; how MST drives one (a CLI, desktop automation, an SDK) isn't part of its name:
+
+| Client        | What it is                                                                                                            |
+| ------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `claude-code` | Claude Code                                                                                                           |
+| `cowork`      | Claude Cowork, in Claude Desktop (macOS, or a prepared Linux desktop)                                                 |
+| `chatgpt`     | ChatGPT desktop; macOS or Linux follows the platform                                                                  |
+| `mst`         | MST's own client: the model gets the servers' tools and nothing else, which isolates the model and your tool metadata |
+
+Set the model beside the client. The `mst` client infers which API serves it from the model id (`claude-*`, `gpt-*`, `gemini-*` and so on; a `claude-*@date` id is Vertex). Set `provider` only to override that, for example to route through Vertex or a gateway.
+
+A client runs one input and returns its trace. It doesn't repeat cases, run judges or decide pass/fail; `runEvalDataset` does that for every client. A plugin client is the way to add one: plugins contribute them under `clients`. The built-in desktop drivers are composed from internal capabilities, which plugins can't provide.
 
 ```typescript
 import type { Plugin } from '@gleanwork/mcp-server-tester';
@@ -273,7 +284,7 @@ import { z } from 'zod';
 
 export default {
   meta: { name: 'my-mst-plugin', namespace: 'my' },
-  hosts: {
+  clients: {
     assistant: {
       schema: z.object({ type: z.literal('my/assistant') }),
       evidence: 'observed',
@@ -288,10 +299,10 @@ export default {
 
 A manifest that loads the plugin selects the host with `{ "type": "my/assistant" }`.
 
-- **The trace.** `run` returns a `HostRunResult`: `finalText`, `events`, and optional `usage`, `error` and timing fields. Each event has a `kind` (`tool_call`, `skill`, `command`, `subagent` or `tool_search`), a `source` (`mcp` or `host`), a `name`, and optionally the MCP server label, arguments, output and ID. Record what the host did; don't reconstruct tool calls from the final text. A `tool_search` event (the host searching its tool catalog) lists the tools the search returned in `results`, each `{ name, server? }`. Type host-native actions as their kind rather than as calls to a host tool, so skill expectations and search metrics can read them.
+- **The trace.** `run` returns a `ClientRunResult`: `finalText`, `events`, and optional `usage`, `error` and timing fields. Each event has a `kind` (`tool_call`, `skill`, `command`, `subagent` or `tool_search`), a `source` (`mcp` or `host`), a `name`, and optionally the MCP server label, arguments, output and ID. Record what the host did; don't reconstruct tool calls from the final text. A `tool_search` event (the host searching its tool catalog) lists the tools the search returned in `results`, each `{ name, server? }`. Type host-native actions as their kind rather than as calls to a host tool, so skill expectations and search metrics can read them.
 - **Evidence.** Declare `evidence: 'structured'` only for authoritative protocol or host-native traces. With `observed`, `none` or no declaration, tool-call and argument assertions can't pass; text and judge assertions still run.
 - **Servers.** Events keep their MCP server labels. With more than one server, tool assertions use label-qualified names, or the manifest's `toolMap` from canonical to native names.
-- **In results.** Each host case result keeps the trace as `trace`, a `HostTrace`: the `HostRunResult` your host returned, without telemetry and diagnostics, plus its evidence. On a one-server arm, MCP events that name no server get that server's label. A case with several trials has no `trace` of its own; each entry in `iterationResults` has the trace of that trial. In a suite, every case result also names its `arm`. Stored results drop `finalText` and each event's `output`, the same way they drop `response`; events, servers, arguments and usage stay.
+- **In results.** Each host case result keeps the trace as `trace`, a `Trace`: the `ClientRunResult` your host returned, without telemetry and diagnostics, plus its evidence. On a one-server arm, MCP events that name no server get that server's label. A case with several trials has no `trace` of its own; each entry in `iterationResults` has the trace of that trial. In a suite, every case result also names its `arm`. Stored results drop `finalText` and each event's `output`, the same way they drop `response`; events, servers, arguments and usage stay.
 - **Batches.** A host with `runBatch` gets one request per trial of each host case in the dataset, and returns one trace per request, in order. A batch host can't mix host types, and its cases need unique IDs.
 - **Settings only.** `createConfig` returns settings for MST's own SDK or CLI host instead of running anything.
 - **Tool variants.** A host that connects to the servers in `input.servers` gets an arm's `toolOverrides` with no work of its own: the suite gives it `http` server configs for a local MCP proxy that applies the variant, so the host must speak Streamable HTTP (see [Tool variants on every host](#tool-variants-on-every-host)). A host that applies variants itself sets `toolOverrides: true` and reads them from `context.arm`. `buildToolSurface(listed, variant)` from `./evals` applies a variant with MST's rules (keys, renames, collisions), and `resolve(name, server)` maps a presented name back to the original tool. Record a renamed tool's calls under `originalName`, with the model's name in `rawName`, as MST's hosts do. A host that connects elsewhere (hosted connectors, say) sets `toolSurfaceProxy: false`; a manifest that gives it `toolOverrides` then fails validation.
@@ -321,9 +332,8 @@ A search's `results` come from `tool_reference` blocks in its result, or, withou
 ]
 ```
 
-- **`vercel-sdk`** puts it in the model's system prompt, ahead of the skills catalog when `skills` is on.
-- **`anthropic-api`** sends it as the API's `system`.
-- **`claude-cli`** passes it with `--append-system-prompt`, so Claude Code's own system prompt stays.
+- **`mst`** puts it in the model's system prompt, ahead of the skills catalog when `skills` is on.
+- **`claude-code`** passes it with `--append-system-prompt`, so Claude Code's own system prompt stays.
 - **Cowork and ChatGPT** take organisation instructions from the app, not from MST, so `systemPrompt` is a validation error for them.
 
 A plugin host that can apply one declares `systemPrompt` in its schema. A case's `mcpHostConfig.systemPrompt` is an error when the arm's host sets one (it would replace the arm's) or can't apply one. A legacy CLI `mcpHostConfig` takes it through a `{{systemPrompt}}` placeholder in `cli.args`, such as `"--append-system-prompt", "{{systemPrompt}}"`; browser and desktop hosts reject it.
@@ -332,8 +342,8 @@ A plugin host that can apply one declares `systemPrompt` in its schema. A case's
 
 An arm's `toolOverrides` (descriptions, input schemas, renames) reach every host:
 
-- **SDK hosts** (`vercel-sdk`, `anthropic-api`) apply the variant in-process.
-- **Hosts that connect to their servers** (plugin hosts, `claude-cli`) get them through a local MCP proxy. The suite starts it on first use and gives each host request its own loopback Streamable HTTP endpoints, one per server, with the servers' labels and timeouts. The proxy presents the variant's tools and sends calls to a renamed tool to the original. Other requests (resources, prompts, skills) pass through; notifications, such as list changes and progress, don't.
+- **`mst`** applies the variant in-process.
+- **Hosts that connect to their servers** (plugin hosts, `claude-code`) get them through a local MCP proxy. The suite starts it on first use and gives each host request its own loopback Streamable HTTP endpoints, one per server, with the servers' labels and timeouts. The proxy presents the variant's tools and sends calls to a renamed tool to the original. Other requests (resources, prompts, skills) pass through; notifications, such as list changes and progress, don't.
 - **One connection per server for the arm.** The proxy connects to each server once and shares that connection across the arm's cases, where a host without a variant may connect per case. A server that keeps per-connection state sees one connection in a variant arm.
 - **A request whose host never lists the proxied tools fails.** Otherwise the run would report results for a variant the model never saw.
 - **Calls are recorded under the tools' original names**, so a dataset's expectations read the same in every arm, with the model's name in `rawName`.

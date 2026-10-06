@@ -8,7 +8,7 @@ import {
   hostStdioReadinessConfig,
   hostStdioServers,
   materializeHostStdioFiles,
-  type HostPlugin,
+  type MarketplacePlugin,
 } from '../hostPlugins.js';
 import { createMCPClientForConfig } from '../../mcp/clientFactory.js';
 import type { MCPConfig } from '../../config/mcpConfig.js';
@@ -19,7 +19,7 @@ const pluginRoot = join(
   'fixtures',
   'fake-plugin'
 );
-const plugin: HostPlugin = {
+const plugin: MarketplacePlugin = {
   name: 'fake',
   marketplace: { source: 'acme/plugins', ref: 'f'.repeat(40) },
   blockMcpServers: ['fake_plugin'],

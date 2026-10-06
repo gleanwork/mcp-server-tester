@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  HostPluginsSchema,
+  MarketplacePluginsSchema,
   assertCoworkHostPlugins,
   coworkBlockedMcpEntries,
   hostStdioFileContents,
@@ -12,7 +12,7 @@ import {
   materializeHostStdioFiles,
   resolveHostStdioCredentials,
   resolveHostStdioServer,
-  type HostPlugin,
+  type MarketplacePlugin,
 } from './hostPlugins.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import {
@@ -21,7 +21,7 @@ import {
 } from './cowork/managedSettings.js';
 
 const SHA = 'a'.repeat(40);
-const plugin: HostPlugin = {
+const plugin: MarketplacePlugin = {
   name: 'fake',
   marketplace: { source: 'acme/plugins', ref: SHA },
   blockMcpServers: ['fake_plugin'],
@@ -389,9 +389,9 @@ describe('blocked plugin MCP servers', () => {
         mcp: { fake_plugin: { url: 'https://e.test/eval' } },
       },
     ])
-      expect(HostPluginsSchema.safeParse([bad]).success).toBe(false);
+      expect(MarketplacePluginsSchema.safeParse([bad]).success).toBe(false);
     expect(
-      HostPluginsSchema.safeParse([plugin, { ...plugin, name: 'other' }])
+      MarketplacePluginsSchema.safeParse([plugin, { ...plugin, name: 'other' }])
         .success
     ).toBe(false);
   });

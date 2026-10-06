@@ -71,7 +71,7 @@ The Computer Use planner gets one credential for exactly one endpoint: MST resol
 
 Cowork's own inference is configured in Claude Desktop, not by these settings. MST stages `ANTHROPIC_API_KEY` for it, unless managed preferences already set the inference provider (for example, a gateway); see [Cowork inference](./cowork.md#inference).
 
-The `anthropic-agent-sdk` judge and CLI hosts run their own processes, which read their own configuration. The `anthropic-api` external host doesn't read the settings yet.
+The `anthropic-agent-sdk` judge and CLI hosts run their own processes, which read their own configuration.
 
 ## Why the Anthropic SDK host streams
 

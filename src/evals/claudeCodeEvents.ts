@@ -1,8 +1,8 @@
-import type { HostEvent } from './evalFrameworkTypes.js';
+import type { TraceEvent } from './evalFrameworkTypes.js';
 import type { LLMToolCall } from './mcpHost/mcpHostTypes.js';
 
 /** A tool a host's tool search surfaced. */
-export type SurfacedTool = NonNullable<HostEvent['results']>[number];
+export type SurfacedTool = NonNullable<TraceEvent['results']>[number];
 
 // An MCP tool name in text, as Claude Code writes them.
 const MCP_TOOL_IN_TEXT = /mcp__[A-Za-z0-9_-]+?__[A-Za-z0-9_.-]+/g;

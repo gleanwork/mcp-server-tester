@@ -12,10 +12,10 @@ Complete API documentation for `@gleanwork/mcp-server-tester`.
 | `@gleanwork/mcp-server-tester/reporters/mcpReporter` | The MCP reporter                                                                                                                                                   | Stable                                          |
 | `@gleanwork/mcp-server-tester/evals`                 | The evaluation framework: manifests, suites and batches, extension definition types, metrics, result stores, comparisons, variant experiments, MCP host simulation | Stable                                          |
 | `@gleanwork/mcp-server-tester/auth`                  | Low-level OAuth: discovery, token storage, client credentials                                                                                                      | Stable                                          |
-| `@gleanwork/mcp-server-tester/experimental/hosts`    | Desktop and external hosts, Cowork settings and audit, host plugins                                                                                                | Experimental: may change between minor versions |
+| `@gleanwork/mcp-server-tester/experimental/clients`  | Desktop and external hosts, Cowork settings and audit, host plugins                                                                                                | Experimental: may change between minor versions |
 | `@gleanwork/mcp-server-tester/types`                 | The root's shared types on their own, without runtime code                                                                                                         | Stable                                          |
 
-The `./evals`, `./auth` and `./experimental/hosts` subpaths are ESM only, and CommonJS code cannot `require` them. The ESM root and those three subpaths share one copy of the library, so anything registered through one is visible through the others. The CommonJS root is a separate copy; don't mix it with ESM imports of the subpaths. Optional desktop-host fields on root result types (such as `EvalCaseResult.externalHost`) are typed from `./experimental/hosts` and share its stability.
+The `./evals`, `./auth` and `./experimental/clients` subpaths are ESM only, and CommonJS code cannot `require` them. The ESM root and those three subpaths share one copy of the library, so anything registered through one is visible through the others. The CommonJS root is a separate copy; don't mix it with ESM imports of the subpaths. Optional desktop-host fields on root result types (such as `EvalCaseResult.externalHost`) are typed from `./experimental/clients` and share its stability.
 
 ## Table of Contents
 
@@ -717,7 +717,7 @@ if (result.proposal?.recommendation === 'apply') {
 }
 ```
 
-**On a suite.** Pass `suite` instead of a dataset and context, and the variants run as arms of the manifest, on any host that can take tool variants: in-process for the SDK hosts, through MST's tool proxy for plugin hosts and `claude-cli`. The base arm (`suite.arm`, or the manifest's first arm) is the baseline; each variant runs as a copy of it with the variant as its `toolOverrides`.
+**On a suite.** Pass `suite` instead of a dataset and context, and the variants run as arms of the manifest, on any host that can take tool variants: in-process for the SDK hosts, through MST's tool proxy for plugin hosts and `claude-code`. The base arm (`suite.arm`, or the manifest's first arm) is the baseline; each variant runs as a copy of it with the variant as its `toolOverrides`.
 
 ```typescript
 const result = await runVariantExperiment({
@@ -1472,8 +1472,8 @@ The `{ code, message, data? }` of the protocol error a result was made from, or 
     calls: Array<{
       /** Tool or explicitly selected host event name. */
       name: string;
-      kind?: HostEvent['kind'];
-      source?: HostEvent['source'];
+      kind?: TraceEvent['kind'];
+      source?: TraceEvent['source'];
       server?: string;
       /** Expected arguments (partial match — extra keys are allowed) */
       arguments?: Record<string, unknown>;
@@ -1522,7 +1522,7 @@ export interface EvalDataset {
  */
 export interface EvalCase {
   /** Optional per-case host override: a built-in or a plugin host. */
-  host?: HostConfig;
+  host?: ClientConfig;
   /**
    * Unique identifier for this test case
    */

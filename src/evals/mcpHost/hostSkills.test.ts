@@ -10,7 +10,7 @@ import { connectionOf } from '../../mcp/connection.js';
 import type { MCPFixtureApi } from '../../mcp/fixtures/mcpFixture.js';
 import type { ProtocolSetting } from '../../types/index.js';
 import { createHostSkillsSession, withSkillEvents } from './hostSkills.js';
-import type { HostEvent } from '../evalFrameworkTypes.js';
+import type { TraceEvent } from '../evalFrameworkTypes.js';
 
 const mock = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -197,7 +197,7 @@ describe.each(['legacy', '2026-07-28'] as const)(
 );
 
 describe('withSkillEvents', () => {
-  const tool = (name: string): HostEvent => ({
+  const tool = (name: string): TraceEvent => ({
     kind: 'tool_call',
     source: 'mcp',
     name,

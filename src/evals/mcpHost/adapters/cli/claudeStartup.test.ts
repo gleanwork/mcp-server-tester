@@ -42,7 +42,7 @@ const DEADLINE_TEST_MS = 15_000;
 // timed out before `init`, reading as `missing`). Deadline tests pass their own.
 function host(body: string, timeout = 10_000) {
   script(body);
-  return getHost('claude-cli').run!(
+  return getHost('claude-code').run!(
     {
       prompt: 'unchanged scenario',
       servers: [
@@ -59,7 +59,7 @@ function host(body: string, timeout = 10_000) {
         MCP_CONNECTION_NONBLOCKING: 'true',
       },
     },
-    { type: 'claude-cli', timeout },
+    { type: 'claude-code', timeout },
     { manifest: { name: 'offline', datasets: [] } }
   );
 }

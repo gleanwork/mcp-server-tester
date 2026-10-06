@@ -8,7 +8,7 @@ import type { Plugin } from '../plugins/plugin.js';
 import type { EvalCase } from './datasetTypes.js';
 import type {
   DatasetSource,
-  HostDefinition,
+  ClientDefinition,
   JudgeDefinition,
 } from './evalFrameworkTypes.js';
 
@@ -16,14 +16,14 @@ const dirs: string[] = [];
 let sequence = 0;
 
 interface TestPlugin extends Plugin {
-  hosts: Record<string, HostDefinition>;
+  clients: Record<string, ClientDefinition>;
   datasetSources: Record<string, DatasetSource>;
   judges: Record<string, JudgeDefinition>;
 }
 function newTestPlugin(): TestPlugin {
   return {
     meta: { name: 'timing-test-plugin', namespace: 'test' },
-    hosts: {},
+    clients: {},
     datasetSources: {},
     judges: {},
   };
@@ -49,13 +49,13 @@ afterEach(async () => {
 });
 
 async function fixture(
-  host: Pick<HostDefinition, 'run' | 'runBatch'>,
+  host: Pick<ClientDefinition, 'run' | 'runBatch'>,
   cases: EvalCase[],
   extra: Record<string, unknown> = {}
 ) {
   const hostName = `timing-host-${sequence++}`;
   const sourceName = `timing-source-${sequence++}`;
-  testPlugin.hosts[hostName] = {
+  testPlugin.clients[hostName] = {
     schema: z.object({ type: z.string() }),
     evidence: 'structured',
     ...host,
@@ -98,7 +98,7 @@ describe('suite wall-clock timing', () => {
       },
     };
     const judgeName = `test/${judgeKey}`;
-    const runBatch = vi.fn<NonNullable<HostDefinition['runBatch']>>(
+    const runBatch = vi.fn<NonNullable<ClientDefinition['runBatch']>>(
       async (requests) => {
         advance(20); // Shared setup.
         advance(50); // Concurrent requests: elapsed time is not their sum.

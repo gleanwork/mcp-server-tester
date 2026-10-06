@@ -17,10 +17,10 @@ import type { EvalCase, EvalDataset } from './datasetTypes.js';
 import type {
   DatasetSource,
   DatasetSourceContext,
-  HostDefinition,
-  HostRunOptions,
-  HostRunInput,
-  HostRunContext,
+  ClientDefinition,
+  ClientRunOptions,
+  ClientRunInput,
+  ClientRunContext,
   JudgeDefinition,
 } from './evalFrameworkTypes.js';
 import { FileEvalResultStore } from './resultStore.js';
@@ -42,21 +42,21 @@ const dirs: string[] = [];
 let sequence = 0;
 
 interface TestPlugin extends Plugin {
-  hosts: Record<string, HostDefinition>;
+  clients: Record<string, ClientDefinition>;
   datasetSources: Record<string, DatasetSource>;
   judges: Record<string, JudgeDefinition>;
 }
 function newTestPlugin(): TestPlugin {
   return {
     meta: { name: 'run-eval-suite-test-plugin', namespace: 'test' },
-    hosts: {},
+    clients: {},
     datasetSources: {},
     judges: {},
   };
 }
 /** Every extension a test defines; suites load it as the `test` plugin. */
 let testPlugin = newTestPlugin();
-function addExtension<K extends 'hosts' | 'datasetSources' | 'judges'>(
+function addExtension<K extends 'clients' | 'datasetSources' | 'judges'>(
   kind: K,
   name: string,
   definition: TestPlugin[K][string]
@@ -67,8 +67,8 @@ function addExtension<K extends 'hosts' | 'datasetSources' | 'judges'>(
   (testPlugin[kind] as Record<string, unknown>)[name] = definition;
   return `test/${name}`;
 }
-function addHost(name: string, definition: HostDefinition): string {
-  return addExtension('hosts', name, definition);
+function addHost(name: string, definition: ClientDefinition): string {
+  return addExtension('clients', name, definition);
 }
 function addDatasetSource(name: string, definition: DatasetSource): string {
   return addExtension('datasetSources', name, definition);
@@ -92,7 +92,7 @@ async function fixture(
   cases: EvalCase[],
   extra: Record<string, unknown> = {},
   // The fixture host's simulation-shaped result, adapted to a trace below.
-  run = vi.fn<(options: HostRunOptions) => Promise<{ response: unknown }>>(
+  run = vi.fn<(options: ClientRunOptions) => Promise<{ response: unknown }>>(
     async () => ({
       response: { success: true, response: 'WRONG', toolCalls: [] },
     })
@@ -101,7 +101,7 @@ async function fixture(
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'suite-review-'));
   dirs.push(dir);
   const observe =
-    vi.fn<(input: HostRunInput, context: HostRunContext) => void>();
+    vi.fn<(input: ClientRunInput, context: ClientRunContext) => void>();
   const load = vi.fn(
     async (): Promise<EvalDataset> => ({ name: 'canonical', cases })
   );
@@ -267,7 +267,7 @@ describe('suite review regressions', () => {
       vi.stubEnv('SUITE_DUMMY_TOKEN', undefined);
       vi.stubEnv('SUITE_DUMMY_HOST_KEY', undefined);
       vi.stubEnv('MCP_PLUGIN_DIR', undefined);
-      const run = vi.fn<NonNullable<HostDefinition['run']>>(async () => ({
+      const run = vi.fn<NonNullable<ClientDefinition['run']>>(async () => ({
         finalText: 'OK',
         events: [],
       }));
@@ -275,7 +275,7 @@ describe('suite review regressions', () => {
         schema: z.object({}),
         createConfig(options) {
           const { type: _type, ...hostOptions } = options ?? {};
-          return getBuiltinHostConfig('claude-cli', hostOptions);
+          return getBuiltinHostConfig('claude-code', hostOptions);
         },
         run,
       });
@@ -335,7 +335,7 @@ describe('suite review regressions', () => {
     }
   );
 
-  it.each(['claude-cli', 'vercel-sdk'])(
+  it.each(['claude-code', 'mst'])(
     'preserves declared %s environment in dataset source context',
     async (type) => {
       vi.stubEnv('HOST_ENV_SHARED', 'ambient');
@@ -453,7 +453,7 @@ describe('suite review regressions', () => {
   });
 
   it('retains top-level host defaults when a case patches the model', async () => {
-    const run = vi.fn<NonNullable<HostDefinition['run']>>(async () => ({
+    const run = vi.fn<NonNullable<ClientDefinition['run']>>(async () => ({
       finalText: 'OK',
       events: [],
     }));
@@ -1040,7 +1040,7 @@ describe('suite plugins', () => {
       path.join(rootDir, 'cli-plugin.mjs'),
       `export default {
         meta: { name: 'cli-plugin', namespace: 'cli' },
-        hosts: {
+        clients: {
           echo: {
             schema: ${acceptAll},
             run: async () => ({ finalText: 'OK', events: [] }),

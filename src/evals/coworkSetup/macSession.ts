@@ -16,8 +16,8 @@ import type { EvalManifest } from '../evalManifest.js';
 import {
   hostStdioServers,
   resolveHostStdioServer,
-  type HostPlugin,
-  type HostStdioPaths,
+  type MarketplacePlugin,
+  type ClientStdioPaths,
 } from '../hostPlugins.js';
 import { getMacCoworkController } from './macController.js';
 import { configureMacToolDefaults } from './macToolPermissions.js';
@@ -133,14 +133,14 @@ export async function prepareMacCoworkSession(options: {
   env: Record<string, string | undefined>;
   profileDirectory?: string;
   model?: string;
-  plugins?: readonly HostPlugin[];
+  plugins?: readonly MarketplacePlugin[];
   /** `host.options.appVersion`: download and run exactly this version. */
   appVersion?: string;
 }): Promise<{
   setupStatus: 'applied-not-verified';
   serverCount: number;
   /** Paths owned by the session for private stdio files. */
-  stdioPaths: HostStdioPaths;
+  stdioPaths: ClientStdioPaths;
   /** The installed, caller-owned or downloaded Claude application path. */
   appPath: string;
   /** The Claude Desktop the session runs, as recorded with each result. */

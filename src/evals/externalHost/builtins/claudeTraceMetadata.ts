@@ -7,7 +7,7 @@ import type {
   HostArtifact,
   HostCapability,
   HostDriverId,
-  HostRunContext,
+  ClientRunContext,
 } from '../types.js';
 import { driverToSlug, hostTypeFromDriver } from '../driverIdentity.js';
 import { type ClaudeTrace, metadataTimestampString } from './claudeTrace.js';
@@ -22,7 +22,7 @@ const CLAUDE_DESKTOP_MACOS_CAPABILITIES = [
 
 export function buildClaudeTraceMetadata(options: {
   config: ExternalHostConfig;
-  context: HostRunContext;
+  context: ClientRunContext;
   driver: HostDriverId;
   displayName: string;
   capabilitiesUsed?: readonly HostCapability[];
@@ -114,7 +114,7 @@ function buildEvidence(
 
 function getTraceConfidence(
   trace: ClaudeTrace,
-  correlation: HostRunContext['correlation']
+  correlation: ClientRunContext['correlation']
 ): ExternalHostMetadata['traceConfidence'] {
   if (!trace.isComplete || !trace.auditParsed) {
     return 'unknown';
@@ -154,7 +154,7 @@ function buildTraceLimitations(
 
 export function failureResult(options: {
   config: ExternalHostConfig;
-  context: HostRunContext;
+  context: ClientRunContext;
   driver: HostDriverId;
   displayName: string;
   capabilitiesUsed?: readonly HostCapability[];

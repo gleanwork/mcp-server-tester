@@ -5,7 +5,7 @@ import { getHost } from './builtinHosts.js';
 import { createMCPClientForConfig } from '../mcp/clientFactory.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import type { ToolOverrideVariant } from './evalRunner.js';
-import type { HostRunInput } from './evalFrameworkTypes.js';
+import type { ClientRunInput } from './evalFrameworkTypes.js';
 
 // Keep real ai.generateText + schema conversion; only the provider and transport are offline.
 const mocks = vi.hoisted(() => ({ model: vi.fn(), provider: vi.fn() }));
@@ -34,14 +34,14 @@ function run(
   toolOverrides?: ToolOverrideVariant,
   env?: Record<string, string | undefined>
 ) {
-  const input: HostRunInput & { env?: Record<string, string | undefined> } = {
+  const input: ClientRunInput & { env?: Record<string, string | undefined> } = {
     prompt: 'search',
     servers,
     env,
   };
-  return getHost('vercel-sdk').run!(
+  return getHost('mst').run!(
     input,
-    { type: 'vercel-sdk', provider: 'openai', ...config },
+    { type: 'mst', provider: 'openai', ...config },
     { manifest: { name: 'offline', datasets: [], toolOverrides } }
   );
 }
@@ -120,7 +120,7 @@ describe('SDK host through the real AI SDK', () => {
         env: { OPENAI_API_KEY: 'suite' },
       };
       const host = {
-        type: 'vercel-sdk',
+        type: 'mst',
         provider: 'openai',
         env: { OPENAI_API_KEY: 'host' },
       };
@@ -131,7 +131,7 @@ describe('SDK host through the real AI SDK', () => {
           precedence === 'case' ? { env: { OPENAI_API_KEY: 'case' } } : {},
       };
       const before = structuredClone({ input, host, context });
-      const result = await getHost('vercel-sdk').run!(input, host, context);
+      const result = await getHost('mst').run!(input, host, context);
       expect(result.error).toBeUndefined();
       expect(result.finalText).toBe('done');
       expect(mocks.provider).toHaveBeenCalledWith(
@@ -277,7 +277,7 @@ describe('SDK host through the real AI SDK', () => {
     });
   });
   it('passes a claude-cli systemPrompt with --append-system-prompt', () => {
-    const config = getHost('claude-cli').createConfig!({
+    const config = getHost('claude-code').createConfig!({
       systemPrompt: 'Use find_skills first.',
     });
     const args = config.cli!.args;
@@ -286,7 +286,7 @@ describe('SDK host through the real AI SDK', () => {
       '{{systemPrompt}}'
     );
     expect(config.systemPrompt).toBe('Use find_skills first.');
-    expect(getHost('claude-cli').createConfig!({}).cli!.args).not.toContain(
+    expect(getHost('claude-code').createConfig!({}).cli!.args).not.toContain(
       '--append-system-prompt'
     );
   });
@@ -333,19 +333,19 @@ describe('CLI connection policy preflight', () => {
     'rejects unsupported HTTP policy before config generation: %j',
     (policy) => {
       expect(() =>
-        getBuiltinHostConfig('claude-cli', {
+        getBuiltinHostConfig('claude-code', {
           servers: [
             { transport: 'http', serverUrl: 'https://test.invalid', ...policy },
           ],
         })
-      ).toThrow("claude-cli can't forward");
+      ).toThrow("claude-code can't forward");
     }
   );
   it('uses runtime environment for CLI provider configuration without mutation', () => {
     vi.stubEnv('ANTHROPIC_VERTEX_PROJECT_ID', undefined);
     vi.stubEnv('GOOGLE_VERTEX_PROJECT', 'ambient-project');
     const before = process.env.GOOGLE_VERTEX_PROJECT;
-    const config = getBuiltinHostConfig('claude-cli', {
+    const config = getBuiltinHostConfig('claude-code', {
       provider: 'vertex',
       env: { GOOGLE_VERTEX_PROJECT: 'run-project' },
     });
@@ -354,7 +354,7 @@ describe('CLI connection policy preflight', () => {
     expect(process.env.GOOGLE_VERTEX_PROJECT).toBe(before);
   });
   it('serializes supported static token and headers', () => {
-    const config = getBuiltinHostConfig('claude-cli', {
+    const config = getBuiltinHostConfig('claude-code', {
       servers: [
         {
           transport: 'http',
@@ -372,7 +372,7 @@ describe('CLI connection policy preflight', () => {
   it.each([{ maxTokens: 100 }, { temperature: 0.2 }, { maxToolCalls: 0 }])(
     'explicitly rejects unsupported CLI generation policy %j',
     (config) => {
-      expect(() => getBuiltinHostConfig('claude-cli', config)).toThrow();
+      expect(() => getBuiltinHostConfig('claude-code', config)).toThrow();
     }
   );
 });
@@ -383,7 +383,7 @@ describe('vercel-sdk skills', () => {
     ['preload', 'preload'],
     ['off', undefined],
   ] as const)('skills: %s gives the SDK host skills %s', (skills, expected) => {
-    const config = getHost('vercel-sdk').createConfig!({
+    const config = getHost('mst').createConfig!({
       provider: 'anthropic',
       skills,
     });

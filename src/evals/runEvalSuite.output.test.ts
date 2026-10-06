@@ -50,7 +50,7 @@ describe('suite output', () => {
         name: 'output',
         datasets: ['./cases.json'],
         servers: [{ transport: 'http', serverUrl: 'https://example.com/mcp' }],
-        host: { type: 'vercel-sdk', provider: 'anthropic' },
+        host: { type: 'mst', provider: 'anthropic' },
         arms: [{ name: 'a' }, { name: 'b' }],
       })
     );

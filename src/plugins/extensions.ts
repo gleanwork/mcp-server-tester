@@ -28,7 +28,7 @@ interface ExtensionTableState {
 
 const KIND_LABELS: Record<ExtensionKind, string> = {
   datasetSources: 'Dataset source',
-  hosts: 'Host',
+  clients: 'Client',
   judges: 'Judge',
   pairwiseJudges: 'Pairwise judge',
   metrics: 'Metric',
@@ -50,7 +50,7 @@ function emptyState(): ExtensionTableState {
     builtinKinds: new Set(),
     extensions: {
       datasetSources: new Map(),
-      hosts: new Map(),
+      clients: new Map(),
       judges: new Map(),
       pairwiseJudges: new Map(),
       metrics: new Map(),

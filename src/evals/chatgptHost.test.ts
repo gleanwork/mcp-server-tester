@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { CHATGPT_HOST, CHATGPT_LINUX_HOST } from './chatgptHost.js';
 import { runExternalHostScenario } from './externalHost/runtime.js';
 import { hostRunToExecution } from './hostTrace.js';
-import type { HostBatchRequest } from './evalFrameworkTypes.js';
+import type { ClientBatchRequest } from './evalFrameworkTypes.js';
 import { linuxEnvironment } from './chatgpt/linuxEnvironment.fixture.js';
 
 const home = vi.hoisted(() => ({ value: '' }));
@@ -32,11 +32,11 @@ vi.mock('./externalHost/runtime.js', () => ({
 }));
 const context = { manifest: { name: 'test', datasets: [], concurrency: 1 } };
 const config = {
-  type: 'chatgpt-mac',
+  type: 'chatgpt',
   model: 'test-chatgpt-model',
   reasoningEffort: 'medium',
 };
-const requests = (): HostBatchRequest[] =>
+const requests = (): ClientBatchRequest[] =>
   ['one', 'two'].map((caseId) => ({
     caseId,
     trial: 0,
@@ -127,7 +127,7 @@ describe('ChatGPT V2 batch host', () => {
     for (const request of batch)
       request.config = {
         ...config,
-        type: 'chatgpt-linux',
+        type: 'chatgpt',
         options: { surface: 'codex' },
         env: linuxEnvironment(home.value),
       };

@@ -1,7 +1,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import type { ExternalHostConfig, HostRunContext } from '../types.js';
+import type { ExternalHostConfig, ClientRunContext } from '../types.js';
 import { POLL_INTERVAL_MS, delay } from './claudeCommon.js';
 import { NativeTraceError } from '../nativeTraceError.js';
 
@@ -64,7 +64,7 @@ export async function snapshotClaudeSessions(
 interface ClaudeSessionMatchOptions {
   dataDir: string;
   marker?: string;
-  correlation?: HostRunContext['correlation'];
+  correlation?: ClientRunContext['correlation'];
   snapshot: ClaudeSessionSnapshot;
   startedAtMs: number;
   /** Fresh-session correlation: exact initial user text, never raw-text substring matching. */
@@ -347,7 +347,7 @@ function sessionMatchesCorrelation(options: {
   session: SessionCandidate;
   trace: ClaudeTrace;
   marker: string;
-  correlation?: HostRunContext['correlation'];
+  correlation?: ClientRunContext['correlation'];
   isNewOrUpdated: boolean;
   isRecent: boolean;
 }): boolean {

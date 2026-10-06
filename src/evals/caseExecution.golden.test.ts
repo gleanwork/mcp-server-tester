@@ -33,7 +33,7 @@ import type {
   ExternalHostRunResult,
 } from './externalHost/types.js';
 import { hostRunToExecution } from './hostTrace.js';
-import type { HostRunResult, JudgeDefinition } from './evalFrameworkTypes.js';
+import type { ClientRunResult, JudgeDefinition } from './evalFrameworkTypes.js';
 import { runEvalSuite } from './runEvalSuite.js';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
@@ -152,7 +152,7 @@ function externalResult(metadata: ExternalHostMetadata): ExternalHostRunResult {
   } as ExternalHostRunResult;
 }
 
-const trace: HostRunResult = {
+const trace: ClientRunResult = {
   finalText: 'It is sunny in London.',
   events: [
     {
@@ -201,7 +201,7 @@ const caseJudges: Record<string, JudgeDefinition> = {
 
 /** The test plugin: the case judges plus any extra extensions, under `test/`. */
 function goldenPlugin(
-  extra: Pick<Plugin, 'datasetSources' | 'hosts' | 'judges'> = {}
+  extra: Pick<Plugin, 'datasetSources' | 'clients' | 'judges'> = {}
 ): Plugin {
   return {
     meta: { name: 'golden-test-plugin', namespace: 'test' },
@@ -481,7 +481,7 @@ describe('golden: runEvalSuite hosts', () => {
     const source = `test/${sourceName}`;
     const plugin = goldenPlugin({
       judges,
-      hosts: {
+      clients: {
         [hostName]: {
           schema: z.object({ type: z.string() }).passthrough(),
           evidence: 'structured',

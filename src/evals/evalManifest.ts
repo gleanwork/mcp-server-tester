@@ -30,10 +30,10 @@ export interface DatasetConfig extends TaggedConfig {
 }
 
 /** A host implementation declaration. Host-specific options are plugin-owned. */
-export type HostConfig = TaggedConfig;
+export type ClientConfig = TaggedConfig;
 
 /** An arm may patch options while inheriting the base host's type. */
-export type HostConfigPatch = Partial<HostConfig>;
+export type ClientConfigPatch = Partial<ClientConfig>;
 
 /** A judge, metric, or other named extension declaration. */
 export interface ExtensionConfig extends TaggedConfig {
@@ -44,7 +44,7 @@ export interface ExtensionConfig extends TaggedConfig {
 export interface EvalArm {
   name: string;
   servers?: MCPConfig[];
-  host?: HostConfigPatch;
+  host?: ClientConfigPatch;
   toolMap?: Record<string, string[]>;
   toolOverrides?: ToolOverrideVariant;
   inputTemplate?: string;
@@ -58,7 +58,7 @@ export interface EvalManifest {
   name: string;
   datasets: DatasetConfig[];
   servers?: MCPConfig[];
-  host?: HostConfig;
+  host?: ClientConfig;
   toolMap?: Record<string, string[]>;
   toolOverrides?: ToolOverrideVariant;
   inputTemplate?: string;
@@ -87,7 +87,7 @@ export interface EvalManifest {
   requireEvalEndpoint?: boolean;
   /** USD per million tokens, by model: estimates cost for hosts that don't report it. */
   pricing?: Record<string, ModelPricing>;
-  /** Generation defaults for API hosts (anthropic-api). */
+  /** Generation defaults for clients that call a model API (mst). */
   temperature?: number;
   maxTokens?: number;
   /** Default share of a host case's trials that must pass (cases may set their own). */

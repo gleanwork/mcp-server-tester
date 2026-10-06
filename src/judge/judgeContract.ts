@@ -13,7 +13,7 @@
  */
 
 import type { UsageMetrics } from './judgeTypes.js';
-import type { HostEvent, HostEvidence } from '../evals/evalFrameworkTypes.js';
+import type { TraceEvent, TraceEvidence } from '../evals/evalFrameworkTypes.js';
 import type { LLMToolCall } from '../evals/mcpHost/mcpHostTypes.js';
 import { extractText } from '../mcp/response.js';
 
@@ -60,11 +60,11 @@ export interface JudgeTrial {
   /** The response text. */
   text: string;
   /** Tool calls and other host events, in order. Empty for direct cases. */
-  events: HostEvent[];
+  events: TraceEvent[];
   /** Conversation turns, when the host reports them. */
   messages?: JudgeMessage[];
   /** How the trace was observed. Absent for direct cases. */
-  evidence?: HostEvidence;
+  evidence?: TraceEvidence;
   /** Host model usage for this run. */
   usage?: Partial<UsageMetrics>;
 }
@@ -134,7 +134,7 @@ export interface JudgeCaseSource {
 interface HostResponseLike {
   response?: string;
   toolCalls?: LLMToolCall[];
-  events?: HostEvent[];
+  events?: TraceEvent[];
   conversationHistory?: JudgeMessage[];
   usage?: Partial<UsageMetrics>;
 }
@@ -171,7 +171,7 @@ export function buildJudgeCase(
   };
 }
 
-function toolCallEvents(calls: LLMToolCall[]): HostEvent[] {
+function toolCallEvents(calls: LLMToolCall[]): TraceEvent[] {
   return calls.map((call) => ({
     kind: 'tool_call',
     source: call.source ?? 'mcp',
@@ -187,7 +187,7 @@ function toolCallEvents(calls: LLMToolCall[]): HostEvent[] {
 /** One run, built from the graded response and the host response, if any. */
 export function buildJudgeTrial(
   response: unknown,
-  host?: { hostResponse?: unknown; evidence?: HostEvidence }
+  host?: { hostResponse?: unknown; evidence?: TraceEvidence }
 ): JudgeTrial {
   const hostResponse = (
     isRecord(host?.hostResponse)
