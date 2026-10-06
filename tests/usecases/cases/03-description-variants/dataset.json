@@ -4,8 +4,8 @@
     {
       "id": "cross-source",
       "mode": "host",
-      "scenario": "Find everything about the checkout outage",
-      "expect": {
+      "input": "Find everything about the checkout outage",
+      "assertions": {
         "toolsTriggered": {
           "calls": [
             {

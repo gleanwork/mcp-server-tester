@@ -10,7 +10,7 @@
       "args": {
         "query": "SELECT * FROM users ORDER BY id"
       },
-      "expect": {
+      "assertions": {
         "containsText": ["Alice", "Bob", "Charlie", "Diana"]
       }
     },
@@ -22,7 +22,7 @@
       "args": {
         "query": "SELECT COUNT(*) as count FROM users"
       },
-      "expect": {
+      "assertions": {
         "containsText": "4"
       }
     },
@@ -32,7 +32,7 @@
       "mode": "direct",
       "toolName": "list_tables",
       "args": {},
-      "expect": {
+      "assertions": {
         "containsText": ["users", "posts"]
       }
     },
@@ -44,7 +44,7 @@
       "args": {
         "table_name": "users"
       },
-      "expect": {
+      "assertions": {
         "containsText": ["id", "name", "email", "role", "INTEGER", "TEXT"]
       }
     },
@@ -56,7 +56,7 @@
       "args": {
         "query": "SELECT name, role FROM users WHERE role = 'admin'"
       },
-      "expect": {
+      "assertions": {
         "containsText": ["Alice", "admin"]
       }
     },
@@ -68,7 +68,7 @@
       "args": {
         "query": "SELECT u.name, p.title FROM users u JOIN posts p ON u.id = p.user_id WHERE p.published = 1"
       },
-      "expect": {
+      "assertions": {
         "containsText": ["Alice", "Bob", "Charlie"]
       }
     },
@@ -80,7 +80,7 @@
       "args": {
         "query": "SELECT COUNT(*) as count FROM posts WHERE published = 1"
       },
-      "expect": {
+      "assertions": {
         "containsText": "4"
       }
     },
@@ -92,7 +92,7 @@
       "args": {
         "query": "SELECT u.name, COUNT(p.id) as post_count FROM users u LEFT JOIN posts p ON u.id = p.user_id GROUP BY u.id ORDER BY post_count DESC"
       },
-      "expect": {
+      "assertions": {
         "containsText": ["Bob", "Alice", "Charlie"]
       }
     },
@@ -104,7 +104,7 @@
       "args": {
         "table_name": "posts"
       },
-      "expect": {
+      "assertions": {
         "containsText": ["id", "user_id", "title", "published", "content"]
       }
     },
@@ -116,7 +116,7 @@
       "args": {
         "query": "SELECT title, published FROM posts WHERE published = 1 ORDER BY id"
       },
-      "expect": {
+      "assertions": {
         "containsText": [
           "Getting Started",
           "Database Best Practices",
@@ -132,7 +132,7 @@
       "args": {
         "query": "SELECT name, email FROM users WHERE role = 'moderator'"
       },
-      "expect": {
+      "assertions": {
         "containsText": ["Bob", "bob@example.com"]
       }
     },
@@ -144,7 +144,7 @@
       "args": {
         "query": "SELECT title, published FROM posts WHERE user_id = 1 ORDER BY id"
       },
-      "expect": {
+      "assertions": {
         "containsText": ["Getting Started", "Draft: Advanced Topics"]
       }
     },
@@ -156,7 +156,7 @@
       "args": {
         "query": "SELECT SUM(CASE WHEN published = 1 THEN 1 ELSE 0 END) as published, SUM(CASE WHEN published = 0 THEN 1 ELSE 0 END) as drafts FROM posts"
       },
-      "expect": {
+      "assertions": {
         "containsText": ["published", "drafts"]
       }
     },
@@ -168,7 +168,7 @@
       "args": {
         "query": "SELECT * FORM users"
       },
-      "expect": {
+      "assertions": {
         "isError": true
       }
     },
@@ -180,7 +180,7 @@
       "args": {
         "table_name": "nonexistent_table"
       },
-      "expect": {
+      "assertions": {
         "containsText": "[]"
       }
     },
@@ -192,7 +192,7 @@
       "args": {
         "query": "SELECT COUNT(*) as count FROM users"
       },
-      "expect": {
+      "assertions": {
         "containsText": ["count", "4"]
       }
     },
@@ -202,7 +202,7 @@
       "mode": "direct",
       "toolName": "list_tables",
       "args": {},
-      "expect": {
+      "assertions": {
         "containsText": ["users", "posts"]
       }
     },
@@ -214,7 +214,7 @@
       "args": {
         "table_name": "users"
       },
-      "expect": {
+      "assertions": {
         "containsText": [
           "id",
           "name",
@@ -234,7 +234,7 @@
       "args": {
         "query": "SELECT * FROM users ORDER BY id"
       },
-      "expect": {
+      "assertions": {
         "snapshot": "users-list.json",
         "snapshotSanitizers": ["timestamp"]
       }
@@ -247,7 +247,7 @@
       "args": {
         "query": "SELECT posts.id, posts.title, users.name as author FROM posts JOIN users ON posts.user_id = users.id ORDER BY posts.id"
       },
-      "expect": {
+      "assertions": {
         "snapshot": "posts-with-users.json"
       }
     },
@@ -257,7 +257,7 @@
       "mode": "direct",
       "toolName": "list_tables",
       "args": {},
-      "expect": {
+      "assertions": {
         "snapshot": "table-list.json"
       }
     }

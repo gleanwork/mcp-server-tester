@@ -14,7 +14,7 @@ Use MCP host simulation when you need to verify:
 For most regression testing, use direct mode (`callTool`). Reserve MCP host simulation for:
 
 - New tool description development and tuning
-- Evaluating tool calling accuracy across scenarios
+- Evaluating tool calling accuracy across inputs
 - Pre-release validation of tool schemas
 
 ## Supported Providers
@@ -57,14 +57,19 @@ test('LLM triggers the right tool', async ({ mcp }, testInfo) => {
     {
       "id": "search-trigger",
       "mode": "mcp_host",
-      "scenario": "Find recent documents about quarterly planning",
+      "input": "Find recent documents about quarterly planning",
       "mcpHostConfig": {
         "provider": "anthropic",
         "model": "claude-3-5-sonnet-20241022"
       },
-      "expect": {
+      "assertions": {
         "toolsTriggered": {
-          "calls": [{ "name": "search", "required": true }]
+          "calls": [
+            {
+              "name": "search",
+              "required": true
+            }
+          ]
         }
       }
     }
@@ -72,19 +77,19 @@ test('LLM triggers the right tool', async ({ mcp }, testInfo) => {
 }
 ```
 
-## Multi-Iteration Accuracy
+## Trials and Pass Rate
 
 LLM responses are non-deterministic. Run each case multiple times and measure accuracy:
 
-```json snippet=snippets/mcp-host-iterations.json
+```json snippet=snippets/mcp-host-trials.json
 {
   "id": "search-accuracy",
   "mode": "mcp_host",
-  "scenario": "Find documents about MCP testing",
+  "input": "Find documents about MCP testing",
   "mcpHostConfig": { "provider": "anthropic" },
-  "iterations": 5,
-  "accuracyThreshold": 0.8,
-  "expect": {
+  "trials": 5,
+  "passThreshold": 0.8,
+  "assertions": {
     "toolsTriggered": {
       "calls": [{ "name": "search", "required": true }]
     }
@@ -148,7 +153,7 @@ type LLMProvider =
 
 interface CLIConfig {
   command: string; // CLI command (e.g., 'claude', 'codex')
-  args: string[]; // Arguments — use '{{scenario}}' as prompt placeholder
+  args: string[]; // Arguments — use '{{prompt}}' as prompt placeholder
   outputFormat?: 'text' | 'json' | 'stream-json'; // How to parse stdout (default: 'stream-json')
   timeout?: number; // Command timeout in ms (default: 120000)
 }
@@ -180,7 +185,7 @@ Before accepting a run, MST checks Claude's `system/init` event for every
 configured MCP server. Missing, pending, failed, or unauthenticated servers cause
 a host infrastructure failure. The actual tool catalog is recorded; a connected
 resource-only server may legitimately expose no tools. Tool expectations remain
-the responsibility of the eval assertions. MST does not alter the scenario,
+the responsibility of the eval assertions. MST does not alter the input,
 model, tool search, tool exposure, or assertions.
 
 `hostDiagnostics.claudeStartup` records server names/statuses, tool names,
@@ -259,14 +264,14 @@ const variant = {
 };
 
 const baseline = await runEvalDataset(
-  { dataset, defaultLlmIterations: 10 },
+  { dataset, defaultTrials: 10 },
   { mcp, testInfo }
 );
 
 const candidate = await runEvalDataset(
   {
     dataset,
-    defaultLlmIterations: 10,
+    defaultTrials: 10,
     toolOverrides: variant,
   },
   { mcp, testInfo }
@@ -352,7 +357,7 @@ test('optimize search description (static variants)', async ({
   ];
 
   const result = await runVariantExperiment(
-    { dataset, variants, metric: 'passRate', defaultLlmIterations: 10 },
+    { dataset, variants, metric: 'passRate', defaultTrials: 10 },
     { mcp, testInfo }
   );
 
@@ -380,7 +385,7 @@ test('optimize search description (agent loop)', async ({ mcp }, testInfo) => {
       metric: 'passRate',
       maxRounds: 4,
       minImprovement: 0.05,
-      defaultLlmIterations: 10,
+      defaultTrials: 10,
       async proposeVariants({ round, history, bestSoFar }) {
         // An agent inspects bestSoFar / history to decide the next rewrite.
         // Stop early once the best candidate has no remaining failures.

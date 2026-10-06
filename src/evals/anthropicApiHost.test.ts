@@ -11,7 +11,7 @@ async function run(
 ) {
   const trace = await ANTHROPIC_API_HOST.run!(
     {
-      scenario: options.cases[0]!.scenario!,
+      prompt: options.cases[0]!.input!,
       servers: options.servers,
       env: extra.env,
     },
@@ -47,7 +47,7 @@ const fetchMock = vi.fn<typeof fetch>();
 const case_ = {
   id: 'one',
   mode: 'mcp_host' as const,
-  scenario: 'Search',
+  input: 'Search',
   iterations: 3,
 };
 function options(maxToolCalls = 10): HostRunOptions {
@@ -243,8 +243,8 @@ describe('Anthropic generation defaults and suite precedence', () => {
           ].map((case_) => ({
             ...case_,
             mode: 'mcp_host',
-            scenario: case_.id,
-            expect: { containsText: ['OK'] },
+            input: case_.id,
+            assertions: { containsText: ['OK'] },
           })),
         })
       );

@@ -52,8 +52,8 @@ describe('offline CLI public execution path', () => {
             {
               id: 'one',
               mode: 'host',
-              scenario: 'hello',
-              expect: {
+              input: 'hello',
+              assertions: {
                 toolsTriggered: {
                   calls: [
                     { name: 'search', source: 'mcp', server: 'a' },

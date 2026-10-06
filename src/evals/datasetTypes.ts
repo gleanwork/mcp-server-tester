@@ -16,6 +16,7 @@ import {
   RubricJudgeLLMSchema,
   RubricSpecSchema,
 } from '../judge/rubricJudge.js';
+import { renamedKeys } from './renamedKeys.js';
 
 // Re-export sanitizer types from canonical source (validators/types.ts)
 // Note: For JSON datasets, the Zod schema below validates that patterns are strings.
@@ -41,8 +42,8 @@ export interface EvalDirectRequest {
  * A single eval test case
  *
  * For 'direct' mode: toolName and args, or request, are required
- * For 'mcp_host' mode: scenario and mcpHostConfig are required
- * For 'external_host' mode: scenario and externalHost are required
+ * For 'mcp_host' mode: input and mcpHostConfig are required
+ * For 'external_host' mode: input and externalHost are required
  */
 export interface EvalCase {
   /** Optional per-case host override: a built-in or a plugin host. */
@@ -88,11 +89,12 @@ export interface EvalCase {
   request?: EvalDirectRequest;
 
   /**
-   * Natural language scenario for LLM to execute (required for 'mcp_host' and 'external_host' modes)
+   * The user's request the host acts on, sent as its prompt (required for
+   * 'mcp_host' and 'external_host' modes).
    *
    * @example "Get the weather for London and tell me if I need an umbrella"
    */
-  scenario?: string;
+  input?: string;
 
   /**
    * MCP host configuration (optional for 'mcp_host' mode)
@@ -114,18 +116,18 @@ export interface EvalCase {
   metadata?: Record<string, unknown>;
 
   /**
-   * Number of times to run this case and compute an assertion pass rate.
-   * When > 1, `EvalCaseResult.assertionPassRate` is populated and `pass` is determined
-   * by `accuracyThreshold` rather than a single run.
+   * Number of trials: attempts at this case. When > 1,
+   * `EvalCaseResult.assertionPassRate` is the share of trials that passed, and
+   * `pass` is decided by `passThreshold`.
    * @default 1
    */
-  iterations?: number;
+  trials?: number;
 
   /**
-   * Minimum accuracy (0–1) required to pass when `iterations > 1`.
-   * @default 1.0 (all iterations must pass)
+   * Share of trials (0–1) that must pass for the case to pass.
+   * @default 1.0 (every trial)
    */
-  accuracyThreshold?: number;
+  passThreshold?: number;
 
   /**
    * Number of times to invoke the LLM judge per `passesJudge` assertion.
@@ -137,16 +139,10 @@ export interface EvalCase {
   judgeReps?: number;
 
   /**
-   * Golden/expected answer for this case.
-   * When set, automatically passed as `reference` to the LLM judge
-   * (unless passesJudge.reference is explicitly provided).
-   */
-  canonicalAnswer?: string;
-
-  /**
-   * What the case expects, for judges: `answer` (the reference answer, which
-   * overrides `canonicalAnswer`), `criteria` (rubric criteria keyed by name),
-   * and any other ground truth. Judges read it as `case.expected`.
+   * What the case expects, for graders: `answer` (the reference answer,
+   * passed to judges as `reference` unless an assertion sets its own),
+   * `criteria` (rubric criteria keyed by name), and any other ground truth.
+   * Judges read it as `case.expected`.
    */
   expected?: {
     answer?: unknown;
@@ -164,9 +160,7 @@ export interface EvalCase {
   tags?: string[];
 
   /**
-   * Expectations to validate against the tool response
-   *
-   * Multiple expectations can be combined and will all be validated.
+   * Assertions (code graders) each trial must pass. All of them run.
    *
    * @example
    * ```json
@@ -174,7 +168,7 @@ export interface EvalCase {
    *   "id": "weather-london",
    *   "toolName": "get_weather",
    *   "args": { "city": "London" },
-   *   "expect": {
+   *   "assertions": {
    *     "containsText": ["temperature", "conditions"],
    *     "schema": "WeatherResponse",
    *     "responseSize": { "maxBytes": 10000 },
@@ -183,7 +177,7 @@ export interface EvalCase {
    * }
    * ```
    */
-  expect?: EvalExpectBlock;
+  assertions?: EvalAssertions;
 }
 
 /**
@@ -230,7 +224,7 @@ export interface JudgeExpectConfig {
  *
  * Mirrors the Playwright matcher API for consistency.
  */
-export interface EvalExpectBlock {
+export interface EvalAssertions {
   /**
    * Exact response match (toMatchToolResponse)
    */
@@ -375,7 +369,11 @@ const MCPHostConfigSchema = z.object({
   cli: z
     .object({
       command: z.string(),
-      args: z.array(z.string()),
+      args: z.array(
+        z.string().refine((arg) => !arg.includes('{{scenario}}'), {
+          message: '`{{scenario}}` is now `{{prompt}}`',
+        })
+      ),
       outputFormat: z.enum(['stream-json', 'json']).optional(),
       claudeMcpServers: z.array(z.string().min(1)).optional(),
       timeout: z.number().optional(),
@@ -466,9 +464,9 @@ const JudgeExpectConfigSchema = JudgeExpectConfigFieldsSchema.passthrough()
   });
 
 /**
- * Zod schema for EvalExpectBlock
+ * Zod schema for EvalAssertions
  */
-export const EvalExpectBlockSchema = z
+export const EvalAssertionsSchema = z
   .object({
     response: z.unknown().optional(),
     schema: z.string().optional(),
@@ -551,14 +549,13 @@ export const EvalCaseSchema = z
     toolName: z.string().min(1, 'toolName must not be empty').optional(),
     args: z.record(z.string(), z.unknown()).optional(),
     request: EvalDirectRequestSchema.optional(),
-    scenario: z.string().optional(),
+    input: z.string().optional(),
     mcpHostConfig: MCPHostConfigSchema.optional(),
     externalHost: ExternalHostConfigSchema.optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
-    iterations: z.number().int().min(1).optional(),
-    accuracyThreshold: z.number().min(0).max(1).optional(),
+    trials: z.number().int().min(1).optional(),
+    passThreshold: z.number().min(0).max(1).optional(),
     judgeReps: z.number().int().min(1).optional(),
-    canonicalAnswer: z.string().optional(),
     expected: z
       .object({
         answer: z.unknown().optional(),
@@ -567,9 +564,16 @@ export const EvalCaseSchema = z
       .passthrough()
       .optional(),
     tags: z.array(z.string()).optional(),
-    expect: EvalExpectBlockSchema.optional(),
+    assertions: EvalAssertionsSchema.optional(),
+    ...renamedKeys({
+      scenario: 'input',
+      iterations: 'trials',
+      accuracyThreshold: 'passThreshold',
+      expect: 'assertions',
+      canonicalAnswer: 'expected.answer',
+    }),
   })
-  // A misspelt case setting (`accuracyThresold`) would otherwise be ignored.
+  // A misspelt case setting (`passThresold`) would otherwise be ignored.
   .strict()
   .superRefine((evalCase, context) => {
     if (evalCase.request && evalCase.toolName) {

@@ -1,7 +1,7 @@
 export type {
   EvalCase,
   EvalDataset,
-  EvalExpectBlock,
+  EvalAssertions,
   JudgeExpectConfig,
   SerializedEvalDataset,
   EvalMode,

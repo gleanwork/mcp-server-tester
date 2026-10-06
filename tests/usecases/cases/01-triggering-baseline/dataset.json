@@ -4,8 +4,8 @@
     {
       "id": "planning-docs",
       "mode": "host",
-      "scenario": "Find recent docs about planning",
-      "expect": {
+      "input": "Find recent docs about planning",
+      "assertions": {
         "toolsTriggered": {
           "calls": [
             {
@@ -19,8 +19,8 @@
     {
       "id": "billing-owner",
       "mode": "host",
-      "scenario": "Who owns the billing service?",
-      "expect": {
+      "input": "Who owns the billing service?",
+      "assertions": {
         "toolsTriggered": {
           "calls": [
             {

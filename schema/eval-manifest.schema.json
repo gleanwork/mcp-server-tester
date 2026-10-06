@@ -74,8 +74,9 @@
     "toolOverrides": {
       "$ref": "#/definitions/toolOverrideVariant"
     },
-    "scenarioTemplate": {
-      "type": "string"
+    "inputTemplate": {
+      "type": "string",
+      "description": "Wraps each case's input before the host sees it: `{{input}}` is replaced by the input."
     },
     "arms": {
       "type": "array",
@@ -108,8 +109,9 @@
           "toolOverrides": {
             "$ref": "#/definitions/toolOverrideVariant"
           },
-          "scenarioTemplate": {
-            "type": "string"
+          "inputTemplate": {
+            "type": "string",
+            "description": "This arm's input template: `{{input}}` is replaced by the case's input."
           },
           "metrics": {
             "type": "array",
@@ -165,9 +167,10 @@
       "type": "integer",
       "minimum": 1
     },
-    "iterations": {
+    "trials": {
       "type": "integer",
-      "minimum": 1
+      "minimum": 1,
+      "description": "Default number of trials per host case; cases may set their own."
     },
     "maxCases": {
       "type": "integer",
@@ -187,7 +190,7 @@
     "requireEvalEndpoint": {
       "type": "boolean"
     },
-    "accuracyThreshold": {
+    "passThreshold": {
       "type": "number",
       "minimum": 0,
       "maximum": 1,
@@ -203,12 +206,13 @@
     },
     "run": {
       "type": "object",
-      "description": "The run controls, grouped: iterations, maxCases, concurrency, filterTags, accuracyThreshold.",
+      "description": "The run controls, grouped: trials, maxCases, concurrency, filterTags, passThreshold.",
       "additionalProperties": false,
       "properties": {
-        "iterations": {
+        "trials": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "description": "Default number of trials per host case."
         },
         "maxCases": {
           "type": "integer",
@@ -225,10 +229,11 @@
             "minLength": 1
           }
         },
-        "accuracyThreshold": {
+        "passThreshold": {
           "type": "number",
           "minimum": 0,
-          "maximum": 1
+          "maximum": 1,
+          "description": "Default share of a host case's trials that must pass."
         }
       }
     },

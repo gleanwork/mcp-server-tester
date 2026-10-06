@@ -35,7 +35,7 @@ test('optimize search description (static variants)', async ({
   ];
 
   const result = await runVariantExperiment(
-    { dataset, variants, metric: 'passRate', defaultLlmIterations: 10 },
+    { dataset, variants, metric: 'passRate', defaultTrials: 10 },
     { mcp, testInfo }
   );
 
@@ -63,7 +63,7 @@ test('optimize search description (agent loop)', async ({ mcp }, testInfo) => {
       metric: 'passRate',
       maxRounds: 4,
       minImprovement: 0.05,
-      defaultLlmIterations: 10,
+      defaultTrials: 10,
       async proposeVariants({ round, history, bestSoFar }) {
         // An agent inspects bestSoFar / history to decide the next rewrite.
         // Stop early once the best candidate has no remaining failures.

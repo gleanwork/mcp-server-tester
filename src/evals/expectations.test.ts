@@ -114,7 +114,7 @@ describe('evaluateExpectations', () => {
 
   it('grades tool calls, metrics and the trace view on structured evidence', async () => {
     const outcome = await evaluateExpectations(
-      { mode: 'mcp_host', expect: toolExpect },
+      { mode: 'mcp_host', assertions: toolExpect },
       graded
     );
     expect(outcome.expectations.toolsTriggered?.pass).toBe(false);
@@ -137,7 +137,7 @@ describe('evaluateExpectations', () => {
 
   it('keeps metrics for a failing external_host assertion on structured evidence', async () => {
     const outcome = await evaluateExpectations(
-      { mode: 'external_host', expect: toolExpect },
+      { mode: 'external_host', assertions: toolExpect },
       { ...graded, externalHost: external() }
     );
     expect(outcome.expectations.toolsTriggered?.pass).toBe(false);
@@ -149,7 +149,7 @@ describe('evaluateExpectations', () => {
     const outcome = await evaluateExpectations(
       {
         mode: 'host',
-        expect: { ...toolExpect, containsText: 'sunny' },
+        assertions: { ...toolExpect, containsText: 'sunny' },
       },
       { ...graded, evidence: 'observed' }
     );
@@ -173,7 +173,7 @@ describe('evaluateExpectations', () => {
     const outcome = await evaluateExpectations(
       {
         mode: 'mcp_host',
-        expect: {
+        assertions: {
           toolsTriggered: {
             calls: [
               {
@@ -206,7 +206,7 @@ describe('evaluateExpectations', () => {
 
   it('applies the external trace explanation to both tool expectations', async () => {
     const outcome = await evaluateExpectations(
-      { mode: 'external_host', expect: toolExpect },
+      { mode: 'external_host', assertions: toolExpect },
       {
         ...graded,
         evidence: 'observed',
@@ -229,7 +229,7 @@ describe('evaluateExpectations', () => {
 
   it('applies host evidence when the external trace is structured', async () => {
     const outcome = await evaluateExpectations(
-      { mode: 'external_host', expect: toolExpect },
+      { mode: 'external_host', assertions: toolExpect },
       { ...graded, evidence: 'none', externalHost: external() }
     );
     expect(outcome.expectations.toolsTriggered?.details).toBe(
@@ -240,7 +240,7 @@ describe('evaluateExpectations', () => {
 
   it('fails a lone toolCallCount expectation on an evidence gap', async () => {
     const outcome = await evaluateExpectations(
-      { mode: 'host', expect: { toolCallCount: { max: 5 } } },
+      { mode: 'host', assertions: { toolCallCount: { max: 5 } } },
       { ...graded, evidence: 'observed' }
     );
     expect(outcome.expectations).toEqual({
@@ -254,7 +254,7 @@ describe('evaluateExpectations', () => {
 
   it('ignores external trace quality outside external_host mode', async () => {
     const outcome = await evaluateExpectations(
-      { mode: 'mcp_host', expect: toolExpect },
+      { mode: 'mcp_host', assertions: toolExpect },
       { ...graded, externalHost: external({ traceConfidence: 'low' }) }
     );
     expect(outcome.expectations.toolCallCount?.pass).toBe(true);
@@ -265,7 +265,7 @@ describe('evaluateExpectations', () => {
     // Not produced by the runtime (metadata is required); pinned so the
     // behaviour can't change silently.
     const outcome = await evaluateExpectations(
-      { mode: 'external_host', expect: toolExpect },
+      { mode: 'external_host', assertions: toolExpect },
       graded
     );
     expect(outcome.toolPrecision).toBe(0.5);
@@ -274,7 +274,10 @@ describe('evaluateExpectations', () => {
 
   it('builds no trace view for direct responses', async () => {
     const outcome = await evaluateExpectations(
-      { mode: 'direct', expect: { toolsTriggered: toolExpect.toolsTriggered } },
+      {
+        mode: 'direct',
+        assertions: { toolsTriggered: toolExpect.toolsTriggered },
+      },
       { response: mapped }
     );
     expect(outcome.toolPrecision).toBe(0.5);
@@ -283,7 +286,7 @@ describe('evaluateExpectations', () => {
 
   it('reports a schema that is not registered', async () => {
     const outcome = await evaluateExpectations(
-      { mode: 'direct', expect: { schema: 'Missing' } },
+      { mode: 'direct', assertions: { schema: 'Missing' } },
       { response: {} }
     );
     expect(outcome.expectations.schema).toEqual({
@@ -294,7 +297,7 @@ describe('evaluateExpectations', () => {
 
   it('reports an empty judge list as 0/0 judges passed', async () => {
     const outcome = await evaluateExpectations(
-      { mode: 'direct', expect: { passesJudge: [] } },
+      { mode: 'direct', assertions: { passesJudge: [] } },
       { response: 'x' }
     );
     expect(outcome.expectations.judge).toEqual({
@@ -325,8 +328,8 @@ describe('evaluateExpectations', () => {
     const outcome = await evaluateExpectations(
       {
         mode: 'direct',
-        canonicalAnswer: 'canonical',
-        expect: { passesJudge: { judge: 'test/expectations-test-judge' } },
+        expected: { answer: 'canonical' },
+        assertions: { passesJudge: { judge: 'test/expectations-test-judge' } },
       },
       { response: 'answer' }
     );
@@ -358,7 +361,7 @@ describe('evaluateExpectations', () => {
     const matches = await evaluateExpectations(
       {
         mode: 'direct',
-        expect: { snapshot: 'weather', snapshotSanitizers: ['uuid'] },
+        assertions: { snapshot: 'weather', snapshotSanitizers: ['uuid'] },
       },
       { response },
       { playwrightExpect }
@@ -368,7 +371,7 @@ describe('evaluateExpectations', () => {
       details: 'Matches snapshot "weather"',
     });
     const differs = await evaluateExpectations(
-      { mode: 'direct', expect: { snapshot: 'weather' } },
+      { mode: 'direct', assertions: { snapshot: 'weather' } },
       { response },
       { playwrightExpect }
     );
@@ -382,7 +385,10 @@ describe('evaluateExpectations', () => {
     const outcome = await evaluateExpectations(
       {
         mode: 'direct',
-        expect: { snapshot: 'weather', snapshotSanitizers: [{ pattern: '(' }] },
+        assertions: {
+          snapshot: 'weather',
+          snapshotSanitizers: [{ pattern: '(' }],
+        },
       },
       { response: 'x' },
       { playwrightExpect: snapshotExpect({}) }
@@ -395,7 +401,7 @@ describe('evaluateExpectations', () => {
 
   it('fails a snapshot expectation without Playwright expect', async () => {
     const outcome = await evaluateExpectations(
-      { mode: 'direct', expect: { snapshot: 'weather' } },
+      { mode: 'direct', assertions: { snapshot: 'weather' } },
       { response: 'x' }
     );
     expect(outcome.expectations.snapshot).toEqual({
@@ -409,20 +415,20 @@ describe('resolveJudges', () => {
   it('applies judge reps, then case reps, then 1', () => {
     const judges = resolveJudges({
       judgeReps: 3,
-      expect: {
+      assertions: {
         passesJudge: [{ judge: 'a', reps: 5 }, { judge: 'b' }],
       },
     });
     expect(judges.map((judge) => judge.reps)).toEqual([5, 3]);
     expect(
-      resolveJudges({ expect: { passesJudge: { judge: 'c' } } })[0]?.reps
+      resolveJudges({ assertions: { passesJudge: { judge: 'c' } } })[0]?.reps
     ).toBe(1);
   });
 
-  it('uses the canonical answer only when no reference is set', () => {
+  it('uses expected.answer only when no reference is set', () => {
     const judges = resolveJudges({
-      canonicalAnswer: 'canonical',
-      expect: {
+      expected: { answer: 'canonical' },
+      assertions: {
         passesJudge: [
           { judge: 'a', reference: 'explicit' },
           { judge: 'b', reference: '' },
@@ -438,7 +444,7 @@ describe('resolveJudges', () => {
   });
 
   it('returns nothing when no judge is configured', () => {
-    expect(resolveJudges({ expect: {} })).toEqual([]);
+    expect(resolveJudges({ assertions: {} })).toEqual([]);
   });
 });
 
@@ -446,8 +452,8 @@ describe('mergeSuiteJudges', () => {
   it('lets a case override a manifest judge and keeps its other judges', () => {
     const merged = mergeSuiteJudges(
       {
-        canonicalAnswer: 'canonical',
-        expect: {
+        expected: { answer: 'canonical' },
+        assertions: {
           passesJudge: [
             { judge: 'manifest', reference: 'case', options: { count: 3 } },
             { judge: 'case-only', threshold: 0.5 },
@@ -477,7 +483,7 @@ describe('mergeSuiteJudges', () => {
     ];
     const merged = mergeSuiteJudges(
       {
-        expect: {
+        assertions: {
           passesJudge: [
             { rubric: 'correctness', threshold: 0.9 },
             { judge: 'case-only' },
@@ -508,14 +514,14 @@ describe('mergeSuiteJudges', () => {
     ]);
   });
 
-  it('falls back from the manifest reference to the canonical answer', () => {
+  it('falls back from the manifest reference to expected.answer', () => {
     const [withSuiteRef] = mergeSuiteJudges(
-      { canonicalAnswer: 'canonical', expect: {} },
+      { expected: { answer: 'canonical' }, assertions: {} },
       [{ type: 'j', reference: 'suite' }],
       []
     );
     const [withoutRef] = mergeSuiteJudges(
-      { canonicalAnswer: 'canonical', expect: {} },
+      { expected: { answer: 'canonical' }, assertions: {} },
       [{ type: 'j' }],
       []
     );

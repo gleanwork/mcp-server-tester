@@ -141,8 +141,8 @@ async function runBatch(
 ): Promise<HostRunResult[]> {
   if (!requests.length) return [];
   const configs = requests.map((r) => CoworkSchema.parse(r.config));
-  if (requests.some((r) => !r.input.scenario.trim()))
-    throw new Error('Cowork cases require a non-empty scenario.');
+  if (requests.some((r) => !r.input.prompt.trim()))
+    throw new Error('Cowork cases require a non-empty input.');
   requireIdenticalHostSettings('Cowork', configs);
   const config = configs[0]!;
   const coworkSetup = resolveCoworkSetupConfig(context.manifest.coworkSetup);
@@ -321,7 +321,7 @@ async function runBatch(
         let sessionPath: string;
         const match = {
           dataDir,
-          exactPrompt: request.input.scenario,
+          exactPrompt: request.input.prompt,
           snapshot,
           startedAtMs,
         };
@@ -329,7 +329,7 @@ async function runBatch(
           `[mst:cowork] case ${index + 1}/${requests.length}: submitting unchanged prompt\n`
         );
         try {
-          const submission = await platform.submit(request.input.scenario, {
+          const submission = await platform.submit(request.input.prompt, {
             deadlineAt,
             maxActions: config.options.computerUseMaxActions,
             model: config.options.computerUseModel,
@@ -415,7 +415,7 @@ async function runBatch(
                 });
                 return current.length === 1 && awaitingUserAnswer(current[0]!);
               },
-              task: `Handle only the currently open Cowork task just submitted with this exact query: ${request.input.scenario}. ${approvalTask} Do not switch tasks. Never create, type, or resubmit a task. If the current task cannot be identified uniquely, stop without an action.`,
+              task: `Handle only the currently open Cowork task just submitted with this exact query: ${request.input.prompt}. ${approvalTask} Do not switch tasks. Never create, type, or resubmit a task. If the current task cannot be identified uniquely, stop without an action.`,
             });
             hitlActions += hitl.action_count;
             computerUse.hitl = {
@@ -524,7 +524,7 @@ async function runBatch(
                           ? { appPath: session.appPath }
                           : {}),
                         approveWriteTools: coworkSetup.approveWriteTools,
-                        task: `Handle only the pending tool approval in the current Cowork task for this exact query: ${request.input.scenario}. ${approvalTask} Do not switch tasks, type, or resubmit a query. If the current task cannot be identified uniquely, stop without an action.`,
+                        task: `Handle only the pending tool approval in the current Cowork task for this exact query: ${request.input.prompt}. ${approvalTask} Do not switch tasks, type, or resubmit a query. If the current task cannot be identified uniquely, stop without an action.`,
                       });
                       hitlActions += followup.action_count;
                       hitlFollowups.push({
@@ -610,7 +610,7 @@ export function createCoworkHost(platform?: CoworkPlatform): HostDefinition {
     run: async (input, config, context) =>
       (
         await runBatch(
-          [{ caseId: 'single', iteration: 0, input, config }],
+          [{ caseId: 'single', trial: 0, input, config }],
           context,
           platform
         )

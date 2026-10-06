@@ -19,7 +19,7 @@ const mcp = { authType: 'none' } as MCPFixtureApi;
 const hostCase: EvalCase = {
   id: 'host',
   mode: 'mcp_host',
-  scenario: 'query',
+  input: 'query',
   mcpHostConfig: { provider: 'anthropic' },
 };
 const manifest = { name: 'm', datasets: [] };
@@ -96,8 +96,8 @@ describe('custom executeCase results', () => {
       {
         id: 'legacy',
         mode: 'host',
-        scenario: 'query',
-        expect: { toolsTriggered: { calls: [{ name: 'search' }] } },
+        input: 'query',
+        assertions: { toolsTriggered: { calls: [{ name: 'search' }] } },
       },
       {},
       {
@@ -170,7 +170,7 @@ describe('createSuiteCaseExecutor', () => {
       evidence: 'observed',
     });
     expect(run).toHaveBeenCalledWith(
-      { scenario: 'query', servers: [], env: undefined },
+      { prompt: 'query', servers: [], env: undefined },
       { type },
       expect.objectContaining({ mcpHostConfig: hostCase.mcpHostConfig })
     );

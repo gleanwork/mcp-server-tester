@@ -4,8 +4,8 @@
     {
       "id": "outage-cause",
       "mode": "host",
-      "scenario": "What caused the checkout outage?",
-      "expect": {
+      "input": "What caused the checkout outage?",
+      "assertions": {
         "passesJudge": {
           "judge": "usecase/keywords",
           "keywords": ["certificate"],
@@ -16,8 +16,8 @@
     {
       "id": "outage-duration",
       "mode": "host",
-      "scenario": "How long did the checkout outage last?",
-      "expect": {
+      "input": "How long did the checkout outage last?",
+      "assertions": {
         "passesJudge": {
           "judge": "usecase/keywords",
           "keywords": ["41 minutes"],

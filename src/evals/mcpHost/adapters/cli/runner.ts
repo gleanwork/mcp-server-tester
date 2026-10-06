@@ -38,27 +38,27 @@ function getParser(
 }
 
 /**
- * Interpolates `{{scenario}}` and `{{systemPrompt}}` in each arg string, in
- * one pass: a value is inserted as-is, never scanned for placeholders.
+ * Interpolates `{{prompt}}` and `{{systemPrompt}}` in each arg string, in one
+ * pass: a value is inserted as-is, never scanned for placeholders.
  */
 export function interpolateArgs(
   args: string[],
-  scenario: string,
+  prompt: string,
   systemPrompt = ''
 ): string[] {
   return args.map((arg) =>
-    arg.replace(/\{\{(scenario|systemPrompt)\}\}/g, (_, name: string) =>
-      name === 'scenario' ? scenario : systemPrompt
+    arg.replace(/\{\{(prompt|systemPrompt)\}\}/g, (_, name: string) =>
+      name === 'prompt' ? prompt : systemPrompt
     )
   );
 }
 
 /**
- * Runs a CLI host: interpolates `{{scenario}}` and `{{systemPrompt}}` in args, spawns the process
+ * Runs a CLI host: interpolates `{{prompt}}` and `{{systemPrompt}}` in args, spawns the process
  * directly (no shell), and parses stdout according to `outputFormat`.
  *
  * Because the process is spawned without a shell, special characters in
- * the scenario (quotes, newlines, `$`, backticks, etc.) are passed through
+ * the prompt (quotes, newlines, `$`, backticks, etc.) are passed through
  * safely as literal argument values.
  */
 export async function runCLIHost(

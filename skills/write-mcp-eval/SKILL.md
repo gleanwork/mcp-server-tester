@@ -37,7 +37,7 @@ Generate data-driven eval datasets for MCP server tools using `@gleanwork/mcp-se
       "id": "basic-query",
       "toolName": "search",
       "args": { "query": "quarterly planning" },
-      "expect": {
+      "assertions": {
         "containsText": "quarterly"
       }
     }
@@ -62,7 +62,7 @@ Generate data-driven eval datasets for MCP server tools using `@gleanwork/mcp-se
       "toolName": "search",
       "args": { "query": "quarterly planning" },
       "tags": ["regression", "search"],
-      "expect": {
+      "assertions": {
         "containsText": ["quarterly", "planning"],
         "isError": false,
         "responseSize": { "maxBytes": 50000 }
@@ -74,7 +74,7 @@ Generate data-driven eval datasets for MCP server tools using `@gleanwork/mcp-se
 
 ## Step 2 — Write Expectations
 
-Each case's `expect` block maps directly to a Playwright matcher. Combine multiple expectations — all must pass.
+Each case's `assertions` block maps directly to a Playwright matcher. Combine multiple expectations — all must pass.
 
 ### Text containment (`containsText`)
 
@@ -83,7 +83,7 @@ Each case's `expect` block maps directly to a Playwright matcher. Combine multip
   "id": "text-check",
   "toolName": "search",
   "args": { "query": "onboarding" },
-  "expect": {
+  "assertions": {
     "containsText": "onboarding"
   }
 }
@@ -92,7 +92,7 @@ Each case's `expect` block maps directly to a Playwright matcher. Combine multip
 Multiple strings — all must be present:
 
 ```json
-"expect": {
+"assertions": {
   "containsText": ["onboarding", "guide", "new hire"]
 }
 ```
@@ -100,7 +100,7 @@ Multiple strings — all must be present:
 ### Regex patterns (`matchesPattern`)
 
 ```json
-"expect": {
+"assertions": {
   "matchesPattern": "temperature: \\d+"
 }
 ```
@@ -108,7 +108,7 @@ Multiple strings — all must be present:
 Multiple patterns — all must match:
 
 ```json
-"expect": {
+"assertions": {
   "matchesPattern": ["temperature: \\d+", "humidity: \\d+%"]
 }
 ```
@@ -116,7 +116,7 @@ Multiple patterns — all must match:
 ### Exact response (`response`)
 
 ```json
-"expect": {
+"assertions": {
   "response": { "status": "ok", "count": 42 }
 }
 ```
@@ -125,28 +125,28 @@ Multiple patterns — all must match:
 
 ```json
 // Expect any error
-"expect": { "isError": true }
+"assertions": { "isError": true }
 
 // Expect no error
-"expect": { "isError": false }
+"assertions": { "isError": false }
 
 // Expect error containing specific text
-"expect": { "isError": "not found" }
+"assertions": { "isError": "not found" }
 
 // Expect error containing one of these messages
-"expect": { "isError": ["not found", "does not exist"] }
+"assertions": { "isError": ["not found", "does not exist"] }
 ```
 
 ### Response size (`responseSize`)
 
 ```json
-"expect": {
+"assertions": {
   "responseSize": { "maxBytes": 50000 }
 }
 ```
 
 ```json
-"expect": {
+"assertions": {
   "responseSize": { "minBytes": 100, "maxBytes": 50000 }
 }
 ```
@@ -156,7 +156,7 @@ Multiple patterns — all must match:
 Schemas are referenced by name and registered in the test runner:
 
 ```json
-"expect": {
+"assertions": {
   "schema": "WeatherResponse"
 }
 ```
@@ -166,7 +166,7 @@ Register schemas when loading the dataset (see Step 3).
 ### Snapshot comparison (`snapshot`)
 
 ```json
-"expect": {
+"assertions": {
   "snapshot": "search-basic-result",
   "snapshotSanitizers": [
     "uuid",
@@ -184,7 +184,7 @@ Built-in sanitizers: `"uuid"`, `"timestamp"`, `"iso-date"`, `"objectId"`, `"jwt"
 Single judge:
 
 ```json
-"expect": {
+"assertions": {
   "passesJudge": {
     "rubric": "correctness",
     "threshold": 0.8
@@ -199,8 +199,10 @@ With reference answer:
   "id": "weather-accuracy",
   "toolName": "get_weather",
   "args": { "city": "London" },
-  "canonicalAnswer": "London typically has temperatures between 10-20°C with partly cloudy conditions",
-  "expect": {
+  "expected": {
+    "answer": "London typically has temperatures between 10-20°C with partly cloudy conditions"
+  },
+  "assertions": {
     "passesJudge": {
       "rubric": "correctness",
       "threshold": 0.7
@@ -209,12 +211,12 @@ With reference answer:
 }
 ```
 
-The `canonicalAnswer` field is automatically passed as `reference` to the judge.
+The `expected.answer` field is automatically passed as `reference` to the judge.
 
 Custom rubric text:
 
 ```json
-"expect": {
+"assertions": {
   "passesJudge": {
     "rubric": { "text": "Response should contain accurate temperature data in Celsius" },
     "threshold": 0.7
@@ -225,7 +227,7 @@ Custom rubric text:
 Multiple judges (all must pass):
 
 ```json
-"expect": {
+"assertions": {
   "passesJudge": [
     { "rubric": "correctness", "threshold": 0.8 },
     { "rubric": "completeness", "threshold": 0.7 },
@@ -240,7 +242,7 @@ Multiple judges (all must pass):
 Plugin judge (a judge your plugin provides, as `namespace/name`):
 
 ```json
-"expect": {
+"assertions": {
   "passesJudge": {
     "judge": "my/quality",
     "threshold": 0.7
@@ -254,10 +256,10 @@ Judge providers: `"anthropic"`, `"vertex-anthropic"`, `"anthropic-agent-sdk"`, `
 
 ### Combining expectations
 
-All expectations in a single `expect` block must pass:
+All expectations in a single `assertions` block must pass:
 
 ```json
-"expect": {
+"assertions": {
   "containsText": ["temperature", "humidity"],
   "matchesPattern": "\\d+°[CF]",
   "isError": false,
@@ -352,7 +354,7 @@ test('inline dataset', async ({ mcp }, testInfo) => {
         id: 'test-1',
         toolName: 'search',
         args: { query: 'test' },
-        expect: { containsText: 'result' },
+        assertions: { containsText: 'result' },
       },
     ],
   });
@@ -382,7 +384,7 @@ test('search evals match baseline', async ({ mcp }, testInfo) => {
 });
 ```
 
-## Step 5 — Multi-Iteration Accuracy
+## Step 5 — Trials and Pass Rate
 
 Run each case multiple times and measure the pass rate:
 
@@ -391,17 +393,17 @@ Run each case multiple times and measure the pass rate:
   "id": "search-reliability",
   "toolName": "search",
   "args": { "query": "quarterly planning" },
-  "iterations": 5,
-  "accuracyThreshold": 0.8,
-  "expect": {
+  "trials": 5,
+  "passThreshold": 0.8,
+  "assertions": {
     "containsText": "quarterly"
   }
 }
 ```
 
-- `iterations`: Number of times to run the case (default: 1)
-- `accuracyThreshold`: Minimum fraction of iterations that must pass (default: 1.0)
-- When `iterations > 1`, the result includes `assertionPassRate` (0–1) and `iterationResults[]`
+- `trials`: Number of times to run the case (default: 1)
+- `passThreshold`: Minimum fraction of trials that must pass (default: 1.0)
+- When `trials > 1`, the result includes `assertionPassRate` (0–1) and `iterationResults[]`
 
 ## Complete Example
 
@@ -418,7 +420,7 @@ Run each case multiple times and measure the pass rate:
       "toolName": "search",
       "args": { "query": "quarterly planning" },
       "tags": ["regression", "basic"],
-      "expect": {
+      "assertions": {
         "containsText": ["quarterly", "planning"],
         "isError": false
       }
@@ -429,7 +431,7 @@ Run each case multiple times and measure the pass rate:
       "toolName": "search",
       "args": { "query": "xyzzy_nonexistent_query_12345" },
       "tags": ["edge-case"],
-      "expect": {
+      "assertions": {
         "isError": false,
         "responseSize": { "maxBytes": 1000 }
       }
@@ -440,7 +442,7 @@ Run each case multiple times and measure the pass rate:
       "toolName": "search",
       "args": { "query": "hello & goodbye <world>" },
       "tags": ["edge-case"],
-      "expect": {
+      "assertions": {
         "isError": false
       }
     },
@@ -450,7 +452,7 @@ Run each case multiple times and measure the pass rate:
       "toolName": "search",
       "args": { "query": "common term" },
       "tags": ["regression", "performance"],
-      "expect": {
+      "assertions": {
         "responseSize": { "maxBytes": 100000 },
         "isError": false
       }
@@ -460,9 +462,11 @@ Run each case multiple times and measure the pass rate:
       "description": "Results are relevant to query",
       "toolName": "search",
       "args": { "query": "onboarding guide" },
-      "canonicalAnswer": "The onboarding guide covers new hire orientation, including team introductions and system setup",
+      "expected": {
+        "answer": "The onboarding guide covers new hire orientation, including team introductions and system setup"
+      },
       "tags": ["quality"],
-      "expect": {
+      "assertions": {
         "containsText": "onboarding",
         "passesJudge": {
           "rubric": "correctness",

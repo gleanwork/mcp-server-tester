@@ -49,7 +49,7 @@ grep -r '"mode": "llm_host"' data/
 
 ## Judge provider alias removed
 
-**Affects:** `EvalExpectBlock.passesJudge.provider`, `JudgeConfig.provider`
+**Affects:** `EvalAssertions.passesJudge.provider`, `JudgeConfig.provider`
 
 The `'claude'` string alias for the Anthropic judge provider has been removed. Use `'anthropic'` instead.
 

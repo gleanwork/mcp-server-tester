@@ -6,10 +6,10 @@ This guide covers detailed setup and configuration for `@gleanwork/mcp-server-te
 
 There are two ways to test an MCP server with this library — choose before you write your first test:
 
-| Mode                      | What it tests                                               | When to use                                                             |
-| ------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------- |
-| **Direct**                | You call a tool with specific args and assert on the output | Regression tests, CI, smoke checks — fast and deterministic             |
-| **MCP host** (`mcp_host`) | A real LLM receives your tools and decides which to call    | Testing tool discoverability — requires 10+ iterations, costs API money |
+| Mode                      | What it tests                                               | When to use                                                         |
+| ------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------- |
+| **Direct**                | You call a tool with specific args and assert on the output | Regression tests, CI, smoke checks — fast and deterministic         |
+| **MCP host** (`mcp_host`) | A real LLM receives your tools and decides which to call    | Testing tool discoverability — requires 10+ trials, costs API money |
 
 Start with direct mode. Add LLM host mode when you need to validate that your tool descriptions work for real users.
 
@@ -168,7 +168,7 @@ Create a dataset file manually (e.g., `data/evals.json`):
       "id": "london-weather",
       "toolName": "get_weather",
       "args": { "city": "London" },
-      "expect": {
+      "assertions": {
         "schema": "weather-response",
         "containsText": ["London", "temperature"]
       }
@@ -177,7 +177,7 @@ Create a dataset file manually (e.g., `data/evals.json`):
 }
 ```
 
-Expectations are declared per-case in the `expect` block. The `schema` field names a Zod schema registered when loading the dataset. See the [Expectations Guide](./expectations.md) for all available fields.
+Expectations are declared per-case in the `assertions` block. The `schema` field names a Zod schema registered when loading the dataset. See the [Expectations Guide](./expectations.md) for all available fields.
 
 ## Running Evals
 

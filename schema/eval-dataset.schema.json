@@ -39,7 +39,9 @@
       "type": "object",
       "required": ["id"],
       "additionalProperties": false,
-      "not": { "required": ["toolName", "request"] },
+      "not": {
+        "required": ["toolName", "request"]
+      },
       "description": "A single eval test case. Use 'direct' mode to call a tool (toolName + args) or send any MCP request (request); use 'mcp_host' mode to drive tool selection via natural language.",
       "properties": {
         "id": {
@@ -55,7 +57,7 @@
           "type": "string",
           "enum": ["direct", "mcp_host"],
           "default": "direct",
-          "description": "Evaluation mode. 'direct': explicit MCP tool call with toolName + args. 'mcp_host': LLM-driven tool selection from a natural language scenario."
+          "description": "Evaluation mode. 'direct': explicit MCP tool call with toolName + args. 'mcp_host': the host acts on the case's input and picks the tools."
         },
         "toolName": {
           "type": "string",
@@ -89,9 +91,9 @@
             }
           }
         },
-        "scenario": {
+        "input": {
           "type": "string",
-          "description": "Natural language prompt that the LLM host will act on. Required in 'mcp_host' mode.",
+          "description": "The user's request the host acts on, sent as its prompt. Required in 'mcp_host' mode.",
           "examples": [
             "Find recent docs about the example MCP server",
             "Who leads the developer platform team?"
@@ -100,26 +102,27 @@
         "mcpHostConfig": {
           "$ref": "#/definitions/MCPHostConfig"
         },
-        "iterations": {
+        "trials": {
           "type": "integer",
           "minimum": 1,
           "default": 1,
-          "description": "Number of times to run this case. When > 1, an accuracy score (pass rate) is computed across all runs."
+          "description": "Number of trials (attempts at this case). When > 1, the case's pass rate is the share of trials that passed."
         },
-        "accuracyThreshold": {
+        "passThreshold": {
           "type": "number",
           "minimum": 0,
           "maximum": 1,
           "default": 1.0,
-          "description": "Minimum fraction of iterations that must pass (0–1). Only meaningful when iterations > 1."
+          "description": "Share of trials (0–1) that must pass for the case to pass. Default 1 (every trial)."
         },
         "metadata": {
           "type": "object",
           "description": "Arbitrary additional metadata for this test case",
           "additionalProperties": true
         },
-        "expect": {
-          "$ref": "#/definitions/EvalExpectBlock"
+        "assertions": {
+          "$ref": "#/definitions/EvalAssertions",
+          "description": "Assertions (code graders) each trial must pass."
         }
       }
     },
@@ -191,14 +194,23 @@
         }
       }
     },
-    "EvalExpectBlock": {
+    "EvalAssertions": {
       "type": "object",
       "additionalProperties": false,
       "description": "Expectations to validate against the tool response. Multiple fields can be combined — all must pass.",
       "properties": {
         "response": {
           "description": "Exact expected response (deep-equal match). Corresponds to toMatchToolResponse().",
-          "examples": [{ "content": [{ "type": "text", "text": "hello" }] }]
+          "examples": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "hello"
+                }
+              ]
+            }
+          ]
         },
         "schema": {
           "type": "string",
@@ -206,15 +218,31 @@
         },
         "containsText": {
           "oneOf": [
-            { "type": "string" },
-            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            }
           ],
           "description": "Substring(s) that must appear in the response text. All provided strings must be present. Corresponds to toContainToolText()."
         },
         "matchesPattern": {
           "oneOf": [
-            { "type": "string" },
-            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            }
           ],
           "description": "Regular expression pattern(s) that must match the response text. All provided patterns must match. Corresponds to toMatchToolPattern()."
         },
@@ -241,7 +269,9 @@
             },
             {
               "type": "array",
-              "items": { "type": "string" },
+              "items": {
+                "type": "string"
+              },
               "minItems": 1,
               "description": "Expect an error whose message contains all of these substrings"
             }
@@ -469,7 +499,9 @@
           "properties": {
             "remove": {
               "type": "array",
-              "items": { "type": "string" },
+              "items": {
+                "type": "string"
+              },
               "minItems": 1,
               "description": "Field paths to remove. Supports dot notation for nested fields (e.g. 'meta.createdAt').",
               "examples": [["createdAt", "updatedAt"], ["meta.requestId"]]

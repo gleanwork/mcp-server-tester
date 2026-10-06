@@ -39,10 +39,10 @@ const config = {
 const requests = (): HostBatchRequest[] =>
   ['one', 'two'].map((caseId) => ({
     caseId,
-    iteration: 0,
+    trial: 0,
     config,
     input: {
-      scenario: `Answer ${caseId}`,
+      prompt: `Answer ${caseId}`,
       servers: [
         {
           transport: 'http',
@@ -173,11 +173,11 @@ describe('ChatGPT V2 batch host', () => {
   );
   it('defaults to exact-prompt matching and passes the eval query without any suffix', async () => {
     const batch = requests().slice(0, 1);
-    batch[0]!.input.scenario =
+    batch[0]!.input.prompt =
       '  Find snake_case docs — α\nDo not change this.  ';
     await CHATGPT_HOST.runBatch!(batch, context);
     const [prompt, actual] = vi.mocked(runExternalHostScenario).mock.calls[0]!;
-    expect(prompt).toBe(batch[0]!.input.scenario);
+    expect(prompt).toBe(batch[0]!.input.prompt);
     expect(prompt).not.toContain('Evaluation MCP routing');
     expect(actual.correlation).toEqual({
       strategy: 'exact_prompt',
@@ -530,7 +530,7 @@ describe('ChatGPT V2 batch host', () => {
       {
         ...requests()[0]!,
         caseId: 'three',
-        input: { ...requests()[0]!.input, scenario: 'Answer three' },
+        input: { ...requests()[0]!.input, input: 'Answer three' },
       },
     ];
     const traces = await CHATGPT_HOST.runBatch!(batch, context);
@@ -544,7 +544,7 @@ describe('ChatGPT V2 batch host', () => {
     expect(runExternalHostScenario).toHaveBeenCalledTimes(3);
     expect(
       vi.mocked(runExternalHostScenario).mock.calls.map((call) => call[0])
-    ).toEqual(batch.map((request) => request.input.scenario));
+    ).toEqual(batch.map((request) => request.input.prompt));
     for (const trace of traces.slice(1)) {
       expect(trace.error).toBeUndefined();
       expect(trace.telemetry?.caseExecution).toEqual({

@@ -310,10 +310,10 @@ export interface EvalRunnerOptions {
    * @example
    * ```typescript
    * // Run all mcp_host cases 10 times each by default
-   * await runEvalDataset({ dataset, defaultLlmIterations: 10 }, { mcp });
+   * await runEvalDataset({ dataset, defaultTrials: 10 }, { mcp });
    * ```
    */
-  defaultLlmIterations?: number;
+  defaultTrials?: number;
 
   /**
    * Default `accuracyThreshold` for host-driven cases that don't set their
@@ -321,7 +321,7 @@ export interface EvalRunnerOptions {
    *
    * @default 1
    */
-  defaultAccuracyThreshold?: number;
+  defaultPassThreshold?: number;
 
   /**
    * Default number of judge evaluations for cases that do not specify
@@ -574,24 +574,25 @@ function buildRequest(
   if (toolOverrideVariantId !== undefined) {
     request.toolOverrideVariantId = toolOverrideVariantId;
   }
-  if (evalCase.iterations !== undefined)
-    request.iterations = evalCase.iterations;
-  if (evalCase.accuracyThreshold !== undefined) {
-    request.accuracyThreshold = evalCase.accuracyThreshold;
+  if (evalCase.trials !== undefined) request.iterations = evalCase.trials;
+  if (evalCase.passThreshold !== undefined) {
+    request.accuracyThreshold = evalCase.passThreshold;
   }
   if (evalCase.judgeReps !== undefined) request.judgeReps = evalCase.judgeReps;
   if (evalCase.tags) request.tags = evalCase.tags;
-  if (evalCase.expect) {
-    request.expect = sanitizeReporterValue(evalCase.expect) as Record<
+  if (evalCase.assertions) {
+    request.expect = sanitizeReporterValue(evalCase.assertions) as Record<
       string,
       unknown
     >;
   }
 
   if (evalCase.mode === 'mcp_host' || evalCase.mode === 'host') {
-    if (evalCase.scenario) request.scenario = evalCase.scenario;
-    if (evalCase.canonicalAnswer !== undefined) {
-      request.reference = evalCase.canonicalAnswer;
+    if (evalCase.input) request.scenario = evalCase.input;
+    if (evalCase.expected?.answer !== undefined) {
+      const answer = evalCase.expected.answer;
+      request.reference =
+        typeof answer === 'string' ? answer : JSON.stringify(answer);
     }
     if (evalCase.mcpHostConfig) {
       request.mcpHostConfig = {
@@ -602,7 +603,7 @@ function buildRequest(
       };
     }
   } else if (evalCase.mode === 'external_host') {
-    if (evalCase.scenario) request.scenario = evalCase.scenario;
+    if (evalCase.input) request.scenario = evalCase.input;
     if (evalCase.externalHost) {
       let driverSlug: string | undefined;
       try {
@@ -842,9 +843,9 @@ async function runSingleIteration(
   const externalHost = host?.externalHost ?? hostResponse?.externalHost;
 
   let outcome: ExpectationOutcome = { expectations: {} };
-  if (!error && evalCase.expect) {
+  if (!error && evalCase.assertions) {
     outcome = await evaluateExpectations(
-      { ...evalCase, expect: evalCase.expect },
+      { ...evalCase, assertions: evalCase.assertions },
       {
         response: hostResponse
           ? mapToolNames(hostResponse, options.toolMap)
@@ -868,7 +869,7 @@ async function runSingleIteration(
     toolName:
       evalCase.mode === 'external_host'
         ? 'external_host'
-        : evalCase.scenario != null
+        : evalCase.input != null
           ? 'mcp_host'
           : (evalCase.toolName ?? evalCase.request?.method ?? 'unknown'),
     source: 'eval',
@@ -923,7 +924,7 @@ export async function runEvalCase(
   options: EvalCaseOptions = {}
 ): Promise<EvalCaseResult> {
   if (options.plugins) installPlugins(options.plugins);
-  const iterations = evalCase.iterations ?? 1;
+  const iterations = evalCase.trials ?? 1;
 
   if (iterations === 1) {
     return runSingleIteration(evalCase, context, options);
@@ -979,7 +980,7 @@ export async function runEvalCase(
   const assertionPassRate =
     assertionResults.length > 0 ? passCount / assertionResults.length : 0;
   const infrastructureErrorRate = infraErrors.length / iterations;
-  const threshold = evalCase.accuracyThreshold ?? 1.0;
+  const threshold = evalCase.passThreshold ?? 1.0;
 
   // Fall back to a synthetic result if all iterations threw infrastructure
   // errors. Each iteration's trace is in iterationResults; none is the case's.
@@ -992,7 +993,7 @@ export async function runEvalCase(
         toolName:
           evalCase.mode === 'external_host'
             ? 'external_host'
-            : evalCase.scenario != null
+            : evalCase.input != null
               ? 'mcp_host'
               : (evalCase.toolName ?? evalCase.request?.method ?? 'unknown'),
         source: 'eval',
@@ -1129,8 +1130,8 @@ export async function runEvalDataset(
     schemas,
     stopOnFailure = false,
     concurrency = 1,
-    defaultLlmIterations,
-    defaultAccuracyThreshold,
+    defaultTrials,
+    defaultPassThreshold,
     defaultJudgeReps,
     onCaseComplete,
     filterTags,
@@ -1167,12 +1168,12 @@ export async function runEvalDataset(
   const estimatedJudgeCalls = casesToRun.reduce((sum, c) => {
     const effectiveIterations =
       c.mode === 'host' || c.mode === 'mcp_host' || c.mode === 'external_host'
-        ? (c.iterations ?? defaultLlmIterations ?? 1)
-        : (c.iterations ?? 1);
-    if (c.expect?.passesJudge == null) return sum;
-    const judges = Array.isArray(c.expect.passesJudge)
-      ? c.expect.passesJudge
-      : [c.expect.passesJudge];
+        ? (c.trials ?? defaultTrials ?? 1)
+        : (c.trials ?? 1);
+    if (c.assertions?.passesJudge == null) return sum;
+    const judges = Array.isArray(c.assertions.passesJudge)
+      ? c.assertions.passesJudge
+      : [c.assertions.passesJudge];
     const totalReps = judges.reduce(
       (r, j) => r + (j.reps ?? c.judgeReps ?? defaultJudgeReps ?? 1),
       0
@@ -1188,23 +1189,23 @@ export async function runEvalDataset(
 
   // Build task factories for all cases
   const tasks = casesToRun.map((evalCase) => async () => {
-    // Apply defaultLlmIterations to host-driven cases that don't specify iterations.
+    // Apply defaultTrials to host-driven cases that don't specify iterations.
     // Direct mode cases are deterministic — they always stay at 1 iteration.
     const hostDriven =
       evalCase.mode === 'host' ||
       evalCase.mode === 'mcp_host' ||
       evalCase.mode === 'external_host';
-    const withIterations = {
+    const withTrialDefaults = {
       ...evalCase,
       ...(hostDriven &&
-      evalCase.iterations === undefined &&
-      defaultLlmIterations !== undefined
-        ? { iterations: defaultLlmIterations }
+      evalCase.trials === undefined &&
+      defaultTrials !== undefined
+        ? { trials: defaultTrials }
         : {}),
       ...(hostDriven &&
-      evalCase.accuracyThreshold === undefined &&
-      defaultAccuracyThreshold !== undefined
-        ? { accuracyThreshold: defaultAccuracyThreshold }
+      evalCase.passThreshold === undefined &&
+      defaultPassThreshold !== undefined
+        ? { passThreshold: defaultPassThreshold }
         : {}),
     };
 
@@ -1218,7 +1219,7 @@ export async function runEvalDataset(
       evalCase.mode === 'mcp_host' ||
       evalCase.mode === 'external_host'
     ) {
-      const effectiveIterations = withIterations.iterations ?? 1;
+      const effectiveIterations = withTrialDefaults.trials ?? 1;
       // Once per case and count: a suite runs the same case in every arm.
       const warning = `${evalCase.id}\u0000${evalCase.mode}\u0000${effectiveIterations}`;
       if (
@@ -1236,9 +1237,10 @@ export async function runEvalDataset(
 
     // Apply defaultJudgeReps to any case without explicit judgeReps
     const effectiveCase =
-      withIterations.judgeReps === undefined && defaultJudgeReps !== undefined
-        ? { ...withIterations, judgeReps: defaultJudgeReps }
-        : withIterations;
+      withTrialDefaults.judgeReps === undefined &&
+      defaultJudgeReps !== undefined
+        ? { ...withTrialDefaults, judgeReps: defaultJudgeReps }
+        : withTrialDefaults;
 
     const result = await runEvalCase(effectiveCase, effectiveContext, {
       executeCase: options.executeCase,

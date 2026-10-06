@@ -4,8 +4,8 @@
     {
       "id": "outage",
       "mode": "host",
-      "scenario": "Find the checkout outage report and read it",
-      "expect": {
+      "input": "Find the checkout outage report and read it",
+      "assertions": {
         "toolsTriggered": {
           "calls": [
             {

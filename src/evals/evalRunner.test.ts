@@ -158,7 +158,7 @@ describe('runEvalCase', () => {
       });
       const context = createContext(mcp);
       const evalCase = createEvalCase({
-        expect: { containsText: 'hello' },
+        assertions: { containsText: 'hello' },
       });
 
       const result = await runEvalCase(evalCase, context);
@@ -173,7 +173,7 @@ describe('runEvalCase', () => {
       });
       const context = createContext(mcp);
       const evalCase = createEvalCase({
-        expect: { containsText: 'goodbye' },
+        assertions: { containsText: 'goodbye' },
       });
 
       const result = await runEvalCase(evalCase, context);
@@ -188,7 +188,7 @@ describe('runEvalCase', () => {
       });
       const context = createContext(mcp);
       const evalCase = createEvalCase({
-        expect: { schema: 'PersonSchema' },
+        assertions: { schema: 'PersonSchema' },
       });
 
       const PersonSchema = z.object({
@@ -210,7 +210,7 @@ describe('runEvalCase', () => {
       });
       const context = createContext(mcp);
       const evalCase = createEvalCase({
-        expect: { schema: 'PersonSchema' },
+        assertions: { schema: 'PersonSchema' },
       });
 
       const PersonSchema = z.object({
@@ -232,7 +232,7 @@ describe('runEvalCase', () => {
       });
       const context = createContext(mcp);
       const evalCase = createEvalCase({
-        expect: { schema: 'MissingSchema' },
+        assertions: { schema: 'MissingSchema' },
       });
 
       const result = await runEvalCase(evalCase, context, { schemas: {} });
@@ -247,7 +247,7 @@ describe('runEvalCase', () => {
       });
       const context = createContext(mcp);
       const evalCase = createEvalCase({
-        expect: { matchesPattern: '#\\d+' },
+        assertions: { matchesPattern: '#\\d+' },
       });
 
       const result = await runEvalCase(evalCase, context);
@@ -263,7 +263,7 @@ describe('runEvalCase', () => {
       });
       const context = createContext(mcp);
       const evalCase = createEvalCase({
-        expect: { isError: true },
+        assertions: { isError: true },
       });
 
       const result = await runEvalCase(evalCase, context);
@@ -279,7 +279,7 @@ describe('runEvalCase', () => {
       const context = createContext(mcp);
       // The response is now the full CallToolResult, so the expected value must match it
       const evalCase = createEvalCase({
-        expect: {
+        assertions: {
           response: {
             content: [{ type: 'text', text: 'status: ok' }],
             structuredContent: undefined,
@@ -300,7 +300,7 @@ describe('runEvalCase', () => {
       });
       const context = createContext(mcp);
       const evalCase = createEvalCase({
-        expect: {
+        assertions: {
           containsText: ['Order', 'John'],
           matchesPattern: '#\\d+',
         },
@@ -319,7 +319,7 @@ describe('runEvalCase', () => {
       });
       const context = createContext(mcp);
       const evalCase = createEvalCase({
-        expect: {
+        assertions: {
           containsText: 'Order',
           matchesPattern: '#\\d+', // This will fail - no order number
         },
@@ -366,7 +366,7 @@ describe('runEvalCase', () => {
             toolName: undefined,
             args: undefined,
             request: { method: 'skills/list', params: {} },
-            expect: {
+            assertions: {
               schema: 'SkillsListResult',
               containsText: 'weather-report',
             },
@@ -395,7 +395,7 @@ describe('runEvalCase', () => {
             toolName: undefined,
             args: undefined,
             request: { method: 'skills/get', params: { uri: skillEntry.uri } },
-            expect: { schema: 'SkillsGetResult' },
+            assertions: { schema: 'SkillsGetResult' },
           }),
           withRequest(request)
         );
@@ -418,7 +418,7 @@ describe('runEvalCase', () => {
               method: 'skills/get',
               params: { uri: 'skill://nope/SKILL.md' },
             },
-            expect: { isError: 'MCP error -32602' },
+            assertions: { isError: 'MCP error -32602' },
           }),
           withRequest(request)
         );
@@ -445,7 +445,7 @@ describe('runEvalCase', () => {
             toolName: undefined,
             args: undefined,
             request: { method: 'custom/list' },
-            expect: { schema: 'SkillsListResult' },
+            assertions: { schema: 'SkillsListResult' },
           }),
           withRequest(vi.fn().mockResolvedValue({ anything: true })),
           { schemas: { SkillsListResult: z.object({ anything: z.boolean() }) } }
@@ -462,7 +462,7 @@ describe('runEvalCase', () => {
             toolName: undefined,
             args: undefined,
             request: { method: 'server/discover' },
-            expect: { schema: 'DiscoverResult' },
+            assertions: { schema: 'DiscoverResult' },
           }),
           withRequest(vi.fn().mockResolvedValue(discover))
         );
@@ -527,7 +527,7 @@ describe('runEvalCase', () => {
 
       const context = createContext(mcp);
       const evalCase = createEvalCase({
-        expect: { containsText: 'hello' },
+        assertions: { containsText: 'hello' },
       });
 
       const result = await runEvalCase(evalCase, context);
@@ -544,21 +544,21 @@ describe('runEvalCase', () => {
       const context = createContext();
       const evalCase = createEvalCase({
         mode: 'mcp_host',
-        scenario: undefined,
+        input: undefined,
         mcpHostConfig: { provider: 'openai', model: 'gpt-4' },
       });
 
       const result = await runEvalCase(evalCase, context);
 
       expect(result.pass).toBe(false);
-      expect(result.error).toContain('scenario is required');
+      expect(result.error).toContain('input is required');
     });
 
     it('should fail when mcpHostConfig is missing', async () => {
       const context = createContext();
       const evalCase = createEvalCase({
         mode: 'mcp_host',
-        scenario: 'test scenario',
+        input: 'test scenario',
         mcpHostConfig: undefined,
       });
 
@@ -586,9 +586,9 @@ describe('multi-iteration cases', () => {
     });
 
     const evalCase = createEvalCase({
-      iterations: 4,
-      accuracyThreshold: 0.5,
-      expect: { containsText: 'hello' },
+      trials: 4,
+      passThreshold: 0.5,
+      assertions: { containsText: 'hello' },
     });
 
     const result = await runEvalCase(evalCase, createContext(mcp));
@@ -609,9 +609,9 @@ describe('multi-iteration cases', () => {
   it('should fail when accuracy is below threshold', async () => {
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'wrong' }] });
     const evalCase = createEvalCase({
-      iterations: 3,
-      accuracyThreshold: 0.8,
-      expect: { containsText: 'hello' },
+      trials: 3,
+      passThreshold: 0.8,
+      assertions: { containsText: 'hello' },
     });
 
     const result = await runEvalCase(evalCase, createContext(mcp));
@@ -644,9 +644,9 @@ describe('multi-iteration cases', () => {
     });
 
     const evalCase = createEvalCase({
-      iterations: 2,
-      accuracyThreshold: 1.0,
-      expect: { containsText: 'hello' },
+      trials: 2,
+      passThreshold: 1.0,
+      assertions: { containsText: 'hello' },
     });
 
     const result = await runEvalCase(evalCase, createContext(mcp));
@@ -673,9 +673,9 @@ describe('multi-iteration cases', () => {
     });
 
     const evalCase = createEvalCase({
-      iterations: 2,
-      accuracyThreshold: 1.0,
-      expect: { containsText: 'hello' },
+      trials: 2,
+      passThreshold: 1.0,
+      assertions: { containsText: 'hello' },
     });
 
     const result = await runEvalCase(evalCase, createContext(mcp));
@@ -701,7 +701,7 @@ describe('judgeReps behavior in eval runner', () => {
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const evalCase = createEvalCase({
       judgeReps: 2,
-      expect: { containsText: 'hello' },
+      assertions: { containsText: 'hello' },
     });
 
     // Should not throw - judgeReps is accepted on EvalCase
@@ -713,7 +713,7 @@ describe('judgeReps behavior in eval runner', () => {
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const evalCase = createEvalCase({
       judgeReps: 1,
-      expect: { containsText: 'hello' },
+      assertions: { containsText: 'hello' },
     });
 
     const result = await runEvalCase(evalCase, createContext(mcp));
@@ -761,7 +761,7 @@ describe('toolsTriggered and toolCallCount expectations in eval runner', () => {
     } as unknown as Awaited<ReturnType<typeof mcp.callTool>>);
 
     const evalCase = createEvalCase({
-      expect: {
+      assertions: {
         toolsTriggered: {
           calls: [{ name: 'search', required: true }],
         },
@@ -782,7 +782,7 @@ describe('toolsTriggered and toolCallCount expectations in eval runner', () => {
     } as unknown as Awaited<ReturnType<typeof mcp.callTool>>);
 
     const evalCase = createEvalCase({
-      expect: {
+      assertions: {
         toolsTriggered: {
           calls: [{ name: 'search', required: true }],
         },
@@ -801,7 +801,7 @@ describe('toolsTriggered and toolCallCount expectations in eval runner', () => {
     });
 
     const evalCase = createEvalCase({
-      expect: { toolsTriggered: { calls: [{ name: 'search' }] } },
+      assertions: { toolsTriggered: { calls: [{ name: 'search' }] } },
     });
 
     const result = await runEvalCase(evalCase, createContext(mcp));
@@ -823,7 +823,7 @@ describe('toolsTriggered and toolCallCount expectations in eval runner', () => {
     } as unknown as Awaited<ReturnType<typeof mcp.callTool>>);
 
     const evalCase = createEvalCase({
-      expect: { toolCallCount: { min: 1, max: 3 } },
+      assertions: { toolCallCount: { min: 1, max: 3 } },
     });
 
     const result = await runEvalCase(evalCase, createContext(mcp));
@@ -831,20 +831,20 @@ describe('toolsTriggered and toolCallCount expectations in eval runner', () => {
   });
 });
 
-describe('runEvalDataset defaultLlmIterations', () => {
+describe('runEvalDataset defaultTrials', () => {
   function createDataset(cases: EvalCase[]): EvalDataset {
     return { name: 'test-dataset', cases };
   }
 
-  it('applies defaultLlmIterations to mcp_host cases without explicit iterations', async () => {
+  it('applies defaultTrials to mcp_host cases without explicit iterations', async () => {
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'ok' }] });
     const dataset = createDataset([
       createEvalCase({
         id: 'llm-case',
         mode: 'mcp_host',
-        scenario: 'test scenario',
+        input: 'test scenario',
         mcpHostConfig: { provider: 'anthropic' },
-        // no iterations field — should use defaultLlmIterations
+        // no iterations field — should use defaultTrials
       }),
     ]);
 
@@ -854,7 +854,7 @@ describe('runEvalDataset defaultLlmIterations', () => {
         hostRunToExecution({ finalText: 'ok', events: [] }, 'structured')
     );
     const result = await runEvalDataset(
-      { dataset, defaultLlmIterations: 3, executeCase },
+      { dataset, defaultTrials: 3, executeCase },
       createContext(mcp)
     );
     expect(executeCase).toHaveBeenCalledTimes(3);
@@ -862,18 +862,18 @@ describe('runEvalDataset defaultLlmIterations', () => {
     expect(result.caseResults[0]!.assertionPassRate).toBe(1);
   });
 
-  it('does not apply defaultLlmIterations to direct mode cases', async () => {
+  it('does not apply defaultTrials to direct mode cases', async () => {
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const dataset = createDataset([
       createEvalCase({
         id: 'direct-case',
         // mode defaults to 'direct'
-        expect: { containsText: 'hello' },
+        assertions: { containsText: 'hello' },
       }),
     ]);
 
     const result = await runEvalDataset(
-      { dataset, defaultLlmIterations: 5 },
+      { dataset, defaultTrials: 5 },
       createContext(mcp)
     );
 
@@ -883,23 +883,23 @@ describe('runEvalDataset defaultLlmIterations', () => {
     expect(result.passed).toBe(1);
   });
 
-  it('case-level iterations override defaultLlmIterations', async () => {
+  it('case-level iterations override defaultTrials', async () => {
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const dataset = createDataset([
       createEvalCase({
         id: 'direct-with-iterations',
-        iterations: 3,
-        accuracyThreshold: 1.0,
-        expect: { containsText: 'hello' },
+        trials: 3,
+        passThreshold: 1.0,
+        assertions: { containsText: 'hello' },
       }),
     ]);
 
     const result = await runEvalDataset(
-      { dataset, defaultLlmIterations: 10 },
+      { dataset, defaultTrials: 10 },
       createContext(mcp)
     );
 
-    // Case-level iterations: 3 wins over defaultLlmIterations: 10
+    // Case-level trials: 3 wins over defaultTrials: 10
     expect(result.caseResults[0]!.iterationResults).toHaveLength(3);
   });
 });
@@ -1034,9 +1034,9 @@ describe('runEvalDataset', () => {
     });
     const context = createContext(mcp);
     const dataset = createDataset([
-      createEvalCase({ id: 'case-1', expect: { containsText: 'hello' } }),
-      createEvalCase({ id: 'case-2', expect: { containsText: 'hello' } }),
-      createEvalCase({ id: 'case-3', expect: { containsText: 'goodbye' } }), // fails
+      createEvalCase({ id: 'case-1', assertions: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-2', assertions: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-3', assertions: { containsText: 'goodbye' } }), // fails
     ]);
 
     const result = await runEvalDataset({ dataset }, context);
@@ -1081,9 +1081,9 @@ describe('runEvalDataset', () => {
     });
     const context = createContext(mcp);
     const dataset = createDataset([
-      createEvalCase({ id: 'case-1', expect: { containsText: 'hello' } }),
-      createEvalCase({ id: 'case-2', expect: { containsText: 'goodbye' } }), // fails
-      createEvalCase({ id: 'case-3', expect: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-1', assertions: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-2', assertions: { containsText: 'goodbye' } }), // fails
+      createEvalCase({ id: 'case-3', assertions: { containsText: 'hello' } }),
     ]);
 
     const result = await runEvalDataset(
@@ -1103,9 +1103,9 @@ describe('runEvalDataset', () => {
     });
     const context = createContext(mcp);
     const dataset = createDataset([
-      createEvalCase({ id: 'case-1', expect: { containsText: 'hello' } }),
-      createEvalCase({ id: 'case-2', expect: { containsText: 'goodbye' } }), // fails
-      createEvalCase({ id: 'case-3', expect: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-1', assertions: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-2', assertions: { containsText: 'goodbye' } }), // fails
+      createEvalCase({ id: 'case-3', assertions: { containsText: 'hello' } }),
     ]);
 
     const result = await runEvalDataset(
@@ -1154,7 +1154,7 @@ describe('runEvalDataset', () => {
     const OptionsSchema = z.object({ count: z.number() });
 
     const dataset = createDataset([
-      createEvalCase({ id: 'case-1', expect: { schema: 'DatasetSchema' } }),
+      createEvalCase({ id: 'case-1', assertions: { schema: 'DatasetSchema' } }),
     ]);
     dataset.schemas = { DatasetSchema };
 
@@ -1268,7 +1268,7 @@ describe('saveResultsTo and baselineResultsFrom', () => {
   it('saves results to file when saveResultsTo is set', async () => {
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const dataset = createDataset([
-      createEvalCase({ id: 'case-1', expect: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-1', assertions: { containsText: 'hello' } }),
     ]);
     const filePath = join(tmpDir, 'results.json');
 
@@ -1286,7 +1286,7 @@ describe('saveResultsTo and baselineResultsFrom', () => {
   it('omits response by default when saving baseline', async () => {
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const dataset = createDataset([
-      createEvalCase({ id: 'case-1', expect: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-1', assertions: { containsText: 'hello' } }),
     ]);
     const filePath = join(tmpDir, 'baseline-no-response.json');
 
@@ -1305,7 +1305,7 @@ describe('saveResultsTo and baselineResultsFrom', () => {
   it('preserves response when omitResponsesFromBaseline is false', async () => {
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const dataset = createDataset([
-      createEvalCase({ id: 'case-1', expect: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-1', assertions: { containsText: 'hello' } }),
     ]);
     const filePath = join(tmpDir, 'baseline-with-response.json');
 
@@ -1325,7 +1325,7 @@ describe('saveResultsTo and baselineResultsFrom', () => {
     const store = new MemoryEvalResultStore();
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const dataset = createDataset([
-      createEvalCase({ id: 'case-1', expect: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-1', assertions: { containsText: 'hello' } }),
     ]);
 
     await runEvalDataset(
@@ -1351,7 +1351,7 @@ describe('saveResultsTo and baselineResultsFrom', () => {
     const store = new MemoryEvalResultStore();
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const dataset = createDataset([
-      createEvalCase({ id: 'case-1', expect: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-1', assertions: { containsText: 'hello' } }),
     ]);
 
     await runEvalDataset(
@@ -1375,7 +1375,7 @@ describe('saveResultsTo and baselineResultsFrom', () => {
   it('loads latest external baseline and computes regressions', async () => {
     const store = new MemoryEvalResultStore();
     const dataset = createDataset([
-      createEvalCase({ id: 'case-1', expect: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-1', assertions: { containsText: 'hello' } }),
     ]);
     await store.saveArtifact(
       createStoredEvalArtifact({
@@ -1422,7 +1422,7 @@ describe('saveResultsTo and baselineResultsFrom', () => {
   it('computes deltaPassRate when baselineResultsFrom is set', async () => {
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const dataset = createDataset([
-      createEvalCase({ id: 'case-1', expect: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-1', assertions: { containsText: 'hello' } }),
     ]);
     const baselinePath = join(tmpDir, 'baseline.json');
 
@@ -1452,7 +1452,7 @@ describe('saveResultsTo and baselineResultsFrom', () => {
       content: [{ type: 'text', text: 'hello' }],
     });
     const dataset = createDataset([
-      createEvalCase({ id: 'case-1', expect: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-1', assertions: { containsText: 'hello' } }),
     ]);
     await runEvalDataset(
       { dataset, saveResultsTo: baselinePath },
@@ -1482,7 +1482,7 @@ describe('saveResultsTo and baselineResultsFrom', () => {
       content: [{ type: 'text', text: 'world' }],
     });
     const dataset = createDataset([
-      createEvalCase({ id: 'case-1', expect: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-1', assertions: { containsText: 'hello' } }),
     ]);
     await runEvalDataset(
       { dataset, saveResultsTo: baselinePath },
@@ -1536,7 +1536,7 @@ describe('saveResultsTo and baselineResultsFrom', () => {
     // Save a baseline with only one case
     const baselinePath = join(tmpDir, 'sparse-baseline.json');
     const baselineDataset = createDataset([
-      createEvalCase({ id: 'case-1', expect: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-1', assertions: { containsText: 'hello' } }),
     ]);
     await runEvalDataset(
       { dataset: baselineDataset, saveResultsTo: baselinePath },
@@ -1545,11 +1545,11 @@ describe('saveResultsTo and baselineResultsFrom', () => {
 
     // Run with a dataset that has 5 cases, only 1 of which matches the baseline
     const currentDataset = createDataset([
-      createEvalCase({ id: 'case-1', expect: { containsText: 'hello' } }),
-      createEvalCase({ id: 'case-2', expect: { containsText: 'hello' } }),
-      createEvalCase({ id: 'case-3', expect: { containsText: 'hello' } }),
-      createEvalCase({ id: 'case-4', expect: { containsText: 'hello' } }),
-      createEvalCase({ id: 'case-5', expect: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-1', assertions: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-2', assertions: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-3', assertions: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-4', assertions: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-5', assertions: { containsText: 'hello' } }),
     ]);
     await runEvalDataset(
       { dataset: currentDataset, baselineResultsFrom: baselinePath },
@@ -1575,11 +1575,11 @@ describe('saveResultsTo and baselineResultsFrom', () => {
     // Save a baseline with 5 cases
     const baselinePath = join(tmpDir, 'full-baseline.json');
     const baselineDataset = createDataset([
-      createEvalCase({ id: 'case-1', expect: { containsText: 'hello' } }),
-      createEvalCase({ id: 'case-2', expect: { containsText: 'hello' } }),
-      createEvalCase({ id: 'case-3', expect: { containsText: 'hello' } }),
-      createEvalCase({ id: 'case-4', expect: { containsText: 'hello' } }),
-      createEvalCase({ id: 'case-5', expect: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-1', assertions: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-2', assertions: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-3', assertions: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-4', assertions: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-5', assertions: { containsText: 'hello' } }),
     ]);
     await runEvalDataset(
       { dataset: baselineDataset, saveResultsTo: baselinePath },
@@ -1620,9 +1620,9 @@ describe('evals guide iteration count guardrail warnings', () => {
       createEvalCase({
         id: 'low-iter-case',
         mode: 'mcp_host',
-        scenario: 'find something',
+        input: 'find something',
         mcpHostConfig: { provider: 'openai' },
-        iterations: 3,
+        trials: 3,
       }),
     ]);
 
@@ -1653,7 +1653,7 @@ describe('evals guide iteration count guardrail warnings', () => {
       createEvalCase({
         id: 'default-iter-case',
         mode: 'mcp_host',
-        scenario: 'find something',
+        input: 'find something',
         mcpHostConfig: { provider: 'openai' },
       }),
     ]);
@@ -1679,9 +1679,9 @@ describe('evals guide iteration count guardrail warnings', () => {
       createEvalCase({
         id: 'sufficient-iter-case',
         mode: 'mcp_host',
-        scenario: 'find something',
+        input: 'find something',
         mcpHostConfig: { provider: 'openai' },
-        iterations: 10,
+        trials: 10,
       }),
     ]);
 
@@ -1708,7 +1708,7 @@ describe('evals guide iteration count guardrail warnings', () => {
         id: 'direct-case',
         toolName: 'test-tool',
         args: { input: 'test' },
-        iterations: 1,
+        trials: 1,
       }),
     ]);
 
@@ -1721,7 +1721,7 @@ describe('evals guide iteration count guardrail warnings', () => {
     consoleSpy.mockRestore();
   });
 
-  it('does not warn when defaultLlmIterations raises the count to >= 10', async () => {
+  it('does not warn when defaultTrials raises the count to >= 10', async () => {
     const consoleSpy = vi
       .spyOn(console, 'warn')
       .mockImplementation(() => undefined);
@@ -1730,14 +1730,14 @@ describe('evals guide iteration count guardrail warnings', () => {
       createEvalCase({
         id: 'default-raised-case',
         mode: 'mcp_host',
-        scenario: 'find something',
+        input: 'find something',
         mcpHostConfig: { provider: 'openai' },
-        // No explicit iterations — defaultLlmIterations will apply
+        // No explicit iterations — defaultTrials will apply
       }),
     ]);
 
     await runEvalDataset(
-      { dataset, defaultLlmIterations: 10, executeCase: notExecuted },
+      { dataset, defaultTrials: 10, executeCase: notExecuted },
       createContext()
     );
 
@@ -1778,7 +1778,7 @@ describe('dataset-level tool precision/recall/F1 aggregation', () => {
     // Use separate runs so we can control the mock per case
     const case1 = createEvalCase({
       id: 'case-1',
-      expect: {
+      assertions: {
         toolsTriggered: {
           calls: [{ name: 'search', required: true }],
           exclusive: true,
@@ -1787,7 +1787,7 @@ describe('dataset-level tool precision/recall/F1 aggregation', () => {
     });
     const case2 = createEvalCase({
       id: 'case-2',
-      expect: {
+      assertions: {
         toolsTriggered: {
           calls: [{ name: 'search', required: true }],
           exclusive: true,
@@ -1819,7 +1819,7 @@ describe('dataset-level tool precision/recall/F1 aggregation', () => {
   it('does not set dataset tool metrics when no cases have toolsTriggered', async () => {
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const dataset = createDataset([
-      createEvalCase({ id: 'case-1', expect: { containsText: 'hello' } }),
+      createEvalCase({ id: 'case-1', assertions: { containsText: 'hello' } }),
     ]);
 
     const result = await runEvalDataset({ dataset }, createContext(mcp));
@@ -1835,7 +1835,7 @@ describe('dataset-level tool precision/recall/F1 aggregation', () => {
     const dataset = createDataset([
       createEvalCase({
         id: 'case-1',
-        expect: {
+        assertions: {
           toolsTriggered: {
             calls: [{ name: 'search', required: true }],
             exclusive: true,
@@ -1844,7 +1844,7 @@ describe('dataset-level tool precision/recall/F1 aggregation', () => {
       }),
       createEvalCase({
         id: 'case-2',
-        expect: {
+        assertions: {
           toolsTriggered: {
             calls: [{ name: 'search', required: true }],
             exclusive: true,
@@ -1883,7 +1883,7 @@ describe('multi-judge passesJudge', () => {
 
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const evalCase = createEvalCase({
-      expect: {
+      assertions: {
         passesJudge: [
           { rubric: 'correctness', threshold: 0.7 },
           { rubric: 'completeness', threshold: 0.7 },
@@ -1927,7 +1927,7 @@ describe('multi-judge passesJudge', () => {
 
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const evalCase = createEvalCase({
-      expect: {
+      assertions: {
         passesJudge: [
           { rubric: 'correctness', threshold: 0.7 },
           { judge: 'custom-judge', threshold: 0.7 },
@@ -1958,7 +1958,7 @@ describe('multi-judge passesJudge', () => {
 
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const evalCase = createEvalCase({
-      expect: {
+      assertions: {
         passesJudge: { rubric: 'correctness' },
       },
     });
@@ -1989,7 +1989,7 @@ describe('multi-judge passesJudge', () => {
 
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const evalCase = createEvalCase({
-      expect: {
+      assertions: {
         passesJudge: [{ rubric: 'correctness' }, { judge: 'domain-relevance' }],
       },
     });

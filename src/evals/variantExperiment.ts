@@ -165,7 +165,7 @@ export interface VariantExperimentOptions {
    */
   allowRegressions?: boolean;
   /** Default `mcp_host` iterations per case. Forwarded to `runEvalDataset`. */
-  defaultLlmIterations?: number;
+  defaultTrials?: number;
   /** Default judge repetitions per case. Forwarded to `runEvalDataset`. */
   defaultJudgeReps?: number;
   /** Max eval cases to run concurrently within each run. Forwarded to `runEvalDataset`. */
@@ -672,7 +672,7 @@ function buildRunOptions(
     toolOverrides,
     // The experiment attaches the winning run itself.
     reporting: 'none' as const,
-    defaultLlmIterations: options.defaultLlmIterations,
+    defaultTrials: options.defaultTrials,
     defaultJudgeReps: options.defaultJudgeReps,
     concurrency: options.concurrency,
     filterTags: options.filterTags,

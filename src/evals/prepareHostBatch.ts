@@ -42,15 +42,15 @@ export async function prepareHostBatch(
         'A batch host dataset cannot mix host types. Use separate manifests.'
       );
     queues.set(c.id, []);
-    const iterations = c.iterations ?? context.manifest.iterations ?? 1;
-    for (let iteration = 0; iteration < iterations; iteration++) {
+    const trials = c.trials ?? context.manifest.trials ?? 1;
+    for (let trial = 0; trial < trials; trial++) {
       const scope = randomUUID();
       scopes.push(scope);
       requests.push({
         caseId: c.id,
-        iteration,
+        trial,
         config: declaration,
-        input: { scenario: c.scenario ?? '', servers, env: context.env },
+        input: { prompt: c.input ?? '', servers, env: context.env },
       });
     }
   }

@@ -40,7 +40,7 @@ async function suite(caseOverrides: Record<string, unknown> = {}) {
     JSON.stringify({
       name: 'cases',
       cases: [
-        { id: 'weather', mode: 'host', scenario: 'Weather?', ...caseOverrides },
+        { id: 'weather', mode: 'host', input: 'Weather?', ...caseOverrides },
       ],
     })
   );

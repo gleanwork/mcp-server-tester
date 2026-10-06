@@ -752,7 +752,7 @@ export function GenerateApp({ options }: GenerateAppProps) {
                   description: value || undefined,
                   toolName: currentCase.toolName!,
                   args: currentCase.args!,
-                  expect: { snapshot: currentCase.id! },
+                  assertions: { snapshot: currentCase.id! },
                 };
                 setDataset((d) => ({ ...d, cases: [...d.cases, newCase] }));
                 setStep('askContinue');
@@ -775,8 +775,8 @@ export function GenerateApp({ options }: GenerateAppProps) {
             onConfirm={() => {
               setCurrentCase((c) => ({
                 ...c,
-                expect: {
-                  ...c.expect,
+                assertions: {
+                  ...c.assertions,
                   containsText: suggestions.textContains,
                 },
               }));
@@ -798,8 +798,8 @@ export function GenerateApp({ options }: GenerateAppProps) {
             onConfirm={() => {
               setCurrentCase((c) => ({
                 ...c,
-                expect: {
-                  ...c.expect,
+                assertions: {
+                  ...c.assertions,
                   matchesPattern: suggestions.regex,
                 },
               }));
@@ -818,8 +818,8 @@ export function GenerateApp({ options }: GenerateAppProps) {
             onConfirm={() => {
               setCurrentCase((c) => ({
                 ...c,
-                expect: {
-                  ...c.expect,
+                assertions: {
+                  ...c.assertions,
                   response,
                 },
               }));
@@ -841,8 +841,8 @@ export function GenerateApp({ options }: GenerateAppProps) {
                 description: currentCase.description,
                 toolName: currentCase.toolName!,
                 args: currentCase.args!,
-                expect: {
-                  ...currentCase.expect,
+                assertions: {
+                  ...currentCase.assertions,
                   snapshot: currentCase.id!,
                 },
               };
@@ -855,7 +855,7 @@ export function GenerateApp({ options }: GenerateAppProps) {
                 description: currentCase.description,
                 toolName: currentCase.toolName!,
                 args: currentCase.args!,
-                expect: currentCase.expect,
+                assertions: currentCase.assertions,
               };
               setDataset((d) => ({ ...d, cases: [...d.cases, newCase] }));
               setStep('askContinue');
@@ -908,7 +908,7 @@ export function GenerateApp({ options }: GenerateAppProps) {
           <Text> </Text>
           <Text color="cyan">Next steps:</Text>
           <Text dimColor> npx playwright test</Text>
-          {dataset.cases.some((c) => c.expect?.snapshot) && (
+          {dataset.cases.some((c) => c.assertions?.snapshot) && (
             <>
               <Text> </Text>
               <Text color="cyan">Snapshot testing:</Text>

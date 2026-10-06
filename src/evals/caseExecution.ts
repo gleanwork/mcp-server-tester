@@ -157,16 +157,16 @@ export async function executeEvalCase(
   try {
     if (mode === 'mcp_host' || mode === 'host') {
       if (!mcp) throw new Error('This host requires an MCP connection.');
-      if (!evalCase.scenario)
+      if (!evalCase.input)
         throw new Error(
-          `Eval case ${evalCase.id}: scenario is required for mcp_host mode`
+          `Eval case ${evalCase.id}: input is required for mcp_host mode`
         );
       if (!evalCase.mcpHostConfig)
         throw new Error(
           `Eval case ${evalCase.id}: mcpHostConfig is required for mcp_host mode`
         );
       const simulation = withOriginalToolNames(
-        await simulateMCPHost(mcp, evalCase.scenario, evalCase.mcpHostConfig),
+        await simulateMCPHost(mcp, evalCase.input, evalCase.mcpHostConfig),
         mcp
       );
       if (simulation.success) return simulationExecution(simulation);
@@ -177,16 +177,16 @@ export async function executeEvalCase(
       throw new Error(error);
     }
     if (mode === 'external_host') {
-      if (!evalCase.scenario)
+      if (!evalCase.input)
         throw new Error(
-          `Eval case ${evalCase.id}: scenario is required for external_host mode`
+          `Eval case ${evalCase.id}: input is required for external_host mode`
         );
       if (!evalCase.externalHost)
         throw new Error(
           `Eval case ${evalCase.id}: externalHost is required for external_host mode`
         );
       const result = await runExternalHostScenario(
-        evalCase.scenario,
+        evalCase.input,
         evalCase.externalHost,
         { caseId: evalCase.id }
       );
@@ -327,7 +327,7 @@ export function createSuiteCaseExecutor(
       const scope = randomUUID();
       const trace = await definition.run(
         {
-          scenario: evalCase.scenario ?? '',
+          prompt: evalCase.input ?? '',
           servers: proxy.serversFor(scope),
           env,
         },
@@ -347,7 +347,7 @@ export function createSuiteCaseExecutor(
       );
     }
     const trace = await definition.run(
-      { scenario: evalCase.scenario ?? '', servers, env },
+      { prompt: evalCase.input ?? '', servers, env },
       declaration,
       context
     );

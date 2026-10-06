@@ -237,8 +237,8 @@ describe('prepareHostBatch with a tool variant', () => {
           }),
       },
       [
-        { id: 'a', mode: 'host', scenario: 'x', iterations: 2 },
-        { id: 'b', mode: 'host', scenario: 'y' },
+        { id: 'a', mode: 'host', input: 'x', trials: 2 },
+        { id: 'b', mode: 'host', input: 'y' },
       ],
       { type: 'test/batch' },
       servers,
@@ -261,7 +261,7 @@ describe('prepareHostBatch with a tool variant', () => {
         runBatch: async (requests) =>
           requests.map(() => ({ finalText: '', events: [] })),
       },
-      [{ id: 'a', mode: 'host', scenario: 'x' }],
+      [{ id: 'a', mode: 'host', input: 'x' }],
       { type: 'test/batch' },
       servers,
       { manifest },

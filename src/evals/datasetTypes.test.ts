@@ -13,8 +13,8 @@ describe('datasetTypes', () => {
     const input = {
       id: 'identity',
       mode: 'host',
-      scenario: 'research',
-      expect: {
+      input: 'research',
+      assertions: {
         toolsTriggered: {
           calls: [
             { name: 'search', source: 'mcp', server: 'agg', kind: 'tool_call' },
@@ -41,8 +41,8 @@ describe('datasetTypes', () => {
       validateEvalCase({
         id: 'invalid',
         mode: 'host',
-        scenario: 'research',
-        expect: {
+        input: 'research',
+        assertions: {
           toolsTriggered: { calls: [{ name: 'search', ...identity }] },
         },
       })
@@ -67,7 +67,7 @@ describe('datasetTypes', () => {
         description: 'Get weather for London',
         toolName: 'get_weather',
         args: { city: 'London' },
-        expect: {
+        assertions: {
           response: { temperature: 20 },
           schema: 'weather-response',
           passesJudge: {
@@ -105,7 +105,7 @@ describe('datasetTypes', () => {
       const evalCase = {
         id: 'test-1',
         mode: 'mcp_host' as const,
-        scenario: 'Get the weather for London',
+        input: 'Get the weather for London',
       };
 
       expect(() => validateEvalCase(evalCase)).not.toThrow();
@@ -125,7 +125,7 @@ describe('datasetTypes', () => {
       const evalCase = {
         id: 'test-1',
         mode: 'mcp_host' as const,
-        scenario: 'Get the weather for London',
+        input: 'Get the weather for London',
       };
 
       expect(() => validateEvalCase(evalCase)).not.toThrow();
@@ -135,7 +135,7 @@ describe('datasetTypes', () => {
       const evalCase = {
         id: 'external-1',
         mode: 'external_host' as const,
-        scenario: 'Reply with exactly hello',
+        input: 'Reply with exactly hello',
         externalHost: {
           driver: {
             provider: 'anthropic',
@@ -184,7 +184,7 @@ describe('datasetTypes', () => {
       const evalCase = {
         id: 'external-1',
         mode: 'external_host' as const,
-        scenario: 'Reply with exactly hello',
+        input: 'Reply with exactly hello',
         externalHost: {
           name: 'Claude Cowork Desktop',
         },
@@ -210,8 +210,8 @@ describe('datasetTypes', () => {
     });
   });
 
-  describe('iterations and accuracyThreshold', () => {
-    it('should accept iterations and accuracyThreshold on a case', () => {
+  describe('trials and passThreshold', () => {
+    it('should accept trials and passThreshold on a case', () => {
       const raw = {
         name: 'test',
         cases: [
@@ -219,20 +219,20 @@ describe('datasetTypes', () => {
             id: 'multi-iter',
             toolName: 'add',
             args: { a: 1, b: 2 },
-            iterations: 5,
-            accuracyThreshold: 0.8,
+            trials: 5,
+            passThreshold: 0.8,
           },
         ],
       };
       const result = validateEvalDataset(raw);
-      expect(result.cases[0]!.iterations).toBe(5);
-      expect(result.cases[0]!.accuracyThreshold).toBe(0.8);
+      expect(result.cases[0]!.trials).toBe(5);
+      expect(result.cases[0]!.passThreshold).toBe(0.8);
     });
 
-    it('should reject iterations below 1', () => {
+    it('should reject trials below 1', () => {
       const raw = {
         name: 'test',
-        cases: [{ id: 'bad', toolName: 'add', args: {}, iterations: 0 }],
+        cases: [{ id: 'bad', toolName: 'add', args: {}, trials: 0 }],
       };
       expect(() => validateEvalDataset(raw)).toThrow();
     });
@@ -240,9 +240,7 @@ describe('datasetTypes', () => {
     it('should reject accuracyThreshold outside 0-1', () => {
       const raw = {
         name: 'test',
-        cases: [
-          { id: 'bad', toolName: 'add', args: {}, accuracyThreshold: 1.5 },
-        ],
+        cases: [{ id: 'bad', toolName: 'add', args: {}, passThreshold: 1.5 }],
       };
       expect(() => validateEvalDataset(raw)).toThrow();
     });
@@ -270,7 +268,7 @@ describe('datasetTypes', () => {
     it('accepts passesJudge.reps', () => {
       const result = EvalCaseSchema.safeParse({
         id: 'test',
-        expect: { passesJudge: { rubric: 'correctness', reps: 5 } },
+        assertions: { passesJudge: { rubric: 'correctness', reps: 5 } },
       });
       expect(result.success).toBe(true);
     });
@@ -278,7 +276,7 @@ describe('datasetTypes', () => {
     it('rejects passesJudge.reps: 0', () => {
       const result = EvalCaseSchema.safeParse({
         id: 'test',
-        expect: { passesJudge: { rubric: 'correctness', reps: 0 } },
+        assertions: { passesJudge: { rubric: 'correctness', reps: 0 } },
       });
       expect(result.success).toBe(false);
     });
@@ -288,7 +286,7 @@ describe('datasetTypes', () => {
     it('accepts a built-in rubric name', () => {
       const result = EvalCaseSchema.safeParse({
         id: 'test',
-        expect: { passesJudge: { rubric: 'correctness' } },
+        assertions: { passesJudge: { rubric: 'correctness' } },
       });
       expect(result.success).toBe(true);
     });
@@ -296,7 +294,7 @@ describe('datasetTypes', () => {
     it('accepts a custom rubric object', () => {
       const result = EvalCaseSchema.safeParse({
         id: 'test',
-        expect: {
+        assertions: {
           passesJudge: {
             rubric: { text: 'Evaluate if the response is helpful' },
           },
@@ -308,7 +306,9 @@ describe('datasetTypes', () => {
     it('rejects a plain string that is not a built-in rubric', () => {
       const result = EvalCaseSchema.safeParse({
         id: 'test',
-        expect: { passesJudge: { rubric: 'this is not a built-in rubric' } },
+        assertions: {
+          passesJudge: { rubric: 'this is not a built-in rubric' },
+        },
       });
       expect(result.success).toBe(false);
     });
@@ -324,7 +324,7 @@ describe('datasetTypes', () => {
       for (const rubric of names) {
         const result = EvalCaseSchema.safeParse({
           id: 'test',
-          expect: { passesJudge: { rubric } },
+          assertions: { passesJudge: { rubric } },
         });
         expect(result.success).toBe(true);
       }
@@ -333,7 +333,7 @@ describe('datasetTypes', () => {
     it('rejects a custom rubric object with empty text', () => {
       const result = EvalCaseSchema.safeParse({
         id: 'test',
-        expect: { passesJudge: { rubric: { text: '' } } },
+        assertions: { passesJudge: { rubric: { text: '' } } },
       });
       expect(result.success).toBe(false);
     });
@@ -341,7 +341,7 @@ describe('datasetTypes', () => {
     it('accepts inline judge config fields on passesJudge', () => {
       const result = EvalCaseSchema.safeParse({
         id: 'test',
-        expect: {
+        assertions: {
           passesJudge: {
             rubric: 'correctness',
             provider: 'openai',
@@ -360,7 +360,7 @@ describe('datasetTypes', () => {
     it('rejects unknown provider values in passesJudge', () => {
       const result = EvalCaseSchema.safeParse({
         id: 'test',
-        expect: {
+        assertions: {
           passesJudge: { rubric: 'correctness', provider: 'ollama' },
         },
       });
@@ -370,7 +370,7 @@ describe('datasetTypes', () => {
     it('rejects configId on passesJudge', () => {
       const result = EvalCaseSchema.safeParse({
         id: 'test',
-        expect: {
+        assertions: {
           passesJudge: { rubric: 'correctness', configId: 'my-judge' },
         },
       });
@@ -383,7 +383,7 @@ describe('datasetTypes', () => {
     it('accepts an array of judge configs', () => {
       const result = EvalCaseSchema.safeParse({
         id: 'test',
-        expect: {
+        assertions: {
           passesJudge: [
             { rubric: 'correctness', threshold: 0.8 },
             { rubric: 'completeness', threshold: 0.7 },
@@ -396,7 +396,7 @@ describe('datasetTypes', () => {
     it('accepts mixed rubric and custom judge in array', () => {
       const result = EvalCaseSchema.safeParse({
         id: 'test',
-        expect: {
+        assertions: {
           passesJudge: [
             { rubric: 'correctness' },
             { judge: 'domain-relevance', threshold: 0.9 },
@@ -409,7 +409,7 @@ describe('datasetTypes', () => {
     it('rejects empty array', () => {
       const result = EvalCaseSchema.safeParse({
         id: 'test',
-        expect: { passesJudge: [] },
+        assertions: { passesJudge: [] },
       });
       expect(result.success).toBe(false);
     });
@@ -417,7 +417,7 @@ describe('datasetTypes', () => {
     it('rejects array entry missing both judge and rubric', () => {
       const result = EvalCaseSchema.safeParse({
         id: 'test',
-        expect: {
+        assertions: {
           passesJudge: [{ threshold: 0.8 }],
         },
       });
@@ -427,7 +427,7 @@ describe('datasetTypes', () => {
     it('still accepts single object form (backwards compat)', () => {
       const result = EvalCaseSchema.safeParse({
         id: 'test',
-        expect: { passesJudge: { rubric: 'correctness' } },
+        assertions: { passesJudge: { rubric: 'correctness' } },
       });
       expect(result.success).toBe(true);
     });
@@ -441,9 +441,9 @@ describe('datasetTypes', () => {
           {
             id: 'tool-trigger-test',
             mode: 'mcp_host',
-            scenario: 'Search for documents',
+            input: 'Search for documents',
             mcpHostConfig: { provider: 'openai' },
-            expect: {
+            assertions: {
               toolsTriggered: {
                 calls: [{ name: 'search', required: true }],
                 order: 'any',
@@ -454,25 +454,37 @@ describe('datasetTypes', () => {
         ],
       };
       const result = validateEvalDataset(raw);
-      expect(result.cases[0]!.expect?.toolsTriggered).toBeDefined();
-      expect(result.cases[0]!.expect?.toolsTriggered?.calls[0]!.name).toBe(
+      expect(result.cases[0]!.assertions?.toolsTriggered).toBeDefined();
+      expect(result.cases[0]!.assertions?.toolsTriggered?.calls[0]!.name).toBe(
         'search'
       );
-      expect(result.cases[0]!.expect?.toolCallCount?.min).toBe(1);
+      expect(result.cases[0]!.assertions?.toolCallCount?.min).toBe(1);
     });
   });
 
-  describe('canonicalAnswer', () => {
-    it('accepts a canonical answer string', () => {
-      const result = EvalCaseSchema.safeParse({
-        id: 'test',
-        canonicalAnswer: 'Paris is the capital of France.',
-      });
-      expect(result.success).toBe(true);
+  describe('renamed keys', () => {
+    it.each([
+      ['scenario', 'input'],
+      ['iterations', 'trials'],
+      ['accuracyThreshold', 'passThreshold'],
+      ['expect', 'assertions'],
+      ['canonicalAnswer', 'expected.answer'],
+    ])('rejects %s and names %s', (from, to) => {
+      const result = EvalCaseSchema.safeParse({ id: 'test', [from]: 'x' });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues).toEqual([
+        expect.objectContaining({
+          path: [from],
+          message: `\`${from}\` is now \`${to}\``,
+        }),
+      ]);
     });
 
-    it('is optional — case without canonicalAnswer still validates', () => {
-      const result = EvalCaseSchema.safeParse({ id: 'test' });
+    it('accepts the reference answer as expected.answer', () => {
+      const result = EvalCaseSchema.safeParse({
+        id: 'test',
+        expected: { answer: 'Paris is the capital of France.' },
+      });
       expect(result.success).toBe(true);
     });
   });
@@ -525,7 +537,7 @@ describe('datasetTypes', () => {
               {
                 id: 'c',
                 mode: 'mcp_host',
-                scenario: 's',
+                input: 's',
                 mcpHostConfig: { provider },
               },
             ],
@@ -667,7 +679,7 @@ describe('request cases', () => {
         params: { uri: 'skill://docs/SKILL.md' },
         server: 'docs',
       },
-      expect: { schema: 'SkillsGetResult' },
+      assertions: { schema: 'SkillsGetResult' },
     });
     expect(parsed.request?.method).toBe('skills/get');
   });
@@ -688,7 +700,7 @@ describe('request cases', () => {
     const result = EvalCaseSchema.safeParse({
       id: 'host-request',
       mode: 'mcp_host',
-      scenario: 'x',
+      input: 'x',
       request: { method: 'skills/list' },
     });
     expect(result.success).toBe(false);

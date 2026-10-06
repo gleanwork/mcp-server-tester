@@ -39,8 +39,8 @@ async function execute(
       {
         id: 'one',
         mode: 'host',
-        scenario: 'offline',
-        expect: { toolsTriggered: { calls } },
+        input: 'offline',
+        assertions: { toolsTriggered: { calls } },
       },
     ],
   });
@@ -175,8 +175,8 @@ try {
         {
           id: policy,
           mode: 'host',
-          scenario: 'offline',
-          expect: {
+          input: 'offline',
+          assertions: {
             passesJudge: {
               judge: 'foundation/policy',
               reference: 'golden',
@@ -222,7 +222,7 @@ try {
     { kind: 'tool_call', name: 'search', source: 'host' },
   ]);
   assert.deepEqual(
-    wrong.dataset.cases[0].expect.toolsTriggered.calls[0],
+    wrong.dataset.cases[0].assertions.toolsTriggered.calls[0],
     expected[0]
   );
   assert.equal(wrong.result.failed, 1);

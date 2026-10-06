@@ -14,7 +14,7 @@ import type { Expect } from '@playwright/test';
 import type { ZodType } from 'zod';
 import type {
   EvalCase,
-  EvalExpectBlock,
+  EvalAssertions,
   JudgeExpectConfig,
 } from './datasetTypes.js';
 import type { HostResponse } from './caseExecution.js';
@@ -129,23 +129,16 @@ export function toolEvidenceGap(
   return hostEvidenceProblem(graded.evidence);
 }
 
-/** The case's reference answer: `expected.answer`, else `canonicalAnswer`. */
-function caseAnswer(
-  evalCase: Pick<EvalCase, 'canonicalAnswer' | 'expected'>
-): unknown {
-  return evalCase.expected?.answer !== undefined
-    ? evalCase.expected.answer
-    : evalCase.canonicalAnswer;
+/** The case's reference answer, `expected.answer`. */
+function caseAnswer(evalCase: Pick<EvalCase, 'expected'>): unknown {
+  return evalCase.expected?.answer;
 }
 
 /** Judge configurations with the case's defaults for reps and reference applied. */
 export function resolveJudges(
-  evalCase: Pick<
-    EvalCase,
-    'expect' | 'judgeReps' | 'canonicalAnswer' | 'expected'
-  >
+  evalCase: Pick<EvalCase, 'assertions' | 'judgeReps' | 'expected'>
 ): JudgeExpectConfig[] {
-  const configured = evalCase.expect?.passesJudge;
+  const configured = evalCase.assertions?.passesJudge;
   if (configured === undefined) return [];
   return (Array.isArray(configured) ? configured : [configured]).map(
     (judge) => ({
@@ -164,14 +157,14 @@ export function resolveJudges(
  * parsing, so the judge's own schema sees its inputs once.
  */
 export function mergeSuiteJudges(
-  evalCase: Pick<EvalCase, 'expect' | 'canonicalAnswer' | 'expected'>,
+  evalCase: Pick<EvalCase, 'assertions' | 'expected'>,
   judges: Array<Record<string, unknown>>,
   rawJudges: Array<Record<string, unknown>>
 ): Array<Record<string, unknown>> {
-  const existing = Array.isArray(evalCase.expect?.passesJudge)
-    ? evalCase.expect.passesJudge
-    : evalCase.expect?.passesJudge
-      ? [evalCase.expect.passesJudge]
+  const existing = Array.isArray(evalCase.assertions?.passesJudge)
+    ? evalCase.assertions.passesJudge
+    : evalCase.assertions?.passesJudge
+      ? [evalCase.assertions.passesJudge]
       : [];
   // `rawJudges[i]` is `judges[i]` before parsing. A case entry overrides a
   // manifest judge when results would give both the same name, so two
@@ -255,7 +248,7 @@ async function evaluateJudges(
 
 async function evaluateSnapshot(
   response: unknown,
-  expectBlock: EvalExpectBlock & { snapshot: string },
+  expectBlock: EvalAssertions & { snapshot: string },
   playwrightExpect: Expect | undefined
 ): Promise<EvalExpectationResult> {
   if (!playwrightExpect)
@@ -294,7 +287,7 @@ function isToolCall(entry: { kind?: string }): boolean {
  * left out of the view.
  */
 function toolTraceView(
-  expectation: NonNullable<EvalExpectBlock['toolsTriggered']>,
+  expectation: NonNullable<EvalAssertions['toolsTriggered']>,
   graded: GradedExecution & { hostResponse: HostResponse }
 ): NonNullable<EvalCaseResult['mcpHostTrace']> {
   // Match on the mapped response the validator graded.
@@ -319,20 +312,17 @@ function toolTraceView(
 }
 
 /**
- * Grades an eval case's `expect` block against what the case produced.
+ * Grades an eval case's `assertions` against what the case produced.
  * Tool-call expectations fail with the evidence gap when the evidence can't
  * support them; every other expectation is graded normally.
  */
 export async function evaluateExpectations(
-  evalCase: Pick<
-    EvalCase,
-    'mode' | 'expect' | 'judgeReps' | 'canonicalAnswer'
-  > &
-    JudgeCaseSource & { expect: EvalExpectBlock },
+  evalCase: Pick<EvalCase, 'mode' | 'assertions' | 'judgeReps'> &
+    JudgeCaseSource & { assertions: EvalAssertions },
   graded: GradedExecution,
   options: ExpectationOptions = {}
 ): Promise<ExpectationOutcome> {
-  const expectBlock = evalCase.expect;
+  const expectBlock = evalCase.assertions;
   const { response } = graded;
   const results: EvalCaseResult['expectations'] = {};
   const outcome: ExpectationOutcome = { expectations: results };

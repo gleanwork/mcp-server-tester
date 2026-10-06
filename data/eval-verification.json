@@ -7,10 +7,12 @@
       "description": "Multi-iteration: 3 runs, all should pass. Echo tool returns 'Echo: hello' in content.",
       "mode": "direct",
       "toolName": "echo",
-      "args": { "message": "hello" },
-      "iterations": 3,
-      "accuracyThreshold": 1.0,
-      "expect": {
+      "args": {
+        "message": "hello"
+      },
+      "trials": 3,
+      "passThreshold": 1.0,
+      "assertions": {
         "containsText": "hello"
       }
     },
@@ -19,10 +21,14 @@
       "description": "Multi-iteration: 5 runs of a deterministic calculation (7+3=10). Calculate tool returns 'Result: 10' in content.",
       "mode": "direct",
       "toolName": "calculate",
-      "args": { "operation": "add", "a": 7, "b": 3 },
-      "iterations": 5,
-      "accuracyThreshold": 0.8,
-      "expect": {
+      "args": {
+        "operation": "add",
+        "a": 7,
+        "b": 3
+      },
+      "trials": 5,
+      "passThreshold": 0.8,
+      "assertions": {
         "containsText": "10"
       }
     },
@@ -31,8 +37,10 @@
       "description": "Single-iteration baseline (no accuracy field expected). Verifies backward compatibility.",
       "mode": "direct",
       "toolName": "echo",
-      "args": { "message": "baseline" },
-      "expect": {
+      "args": {
+        "message": "baseline"
+      },
+      "assertions": {
         "containsText": "baseline"
       }
     },
@@ -41,10 +49,12 @@
       "description": "Multi-iteration: 3 runs with 50% accuracy threshold. Always passes since echo is deterministic.",
       "mode": "direct",
       "toolName": "echo",
-      "args": { "message": "threshold-test" },
-      "iterations": 3,
-      "accuracyThreshold": 0.5,
-      "expect": {
+      "args": {
+        "message": "threshold-test"
+      },
+      "trials": 3,
+      "passThreshold": 0.5,
+      "assertions": {
         "containsText": "threshold-test"
       }
     }

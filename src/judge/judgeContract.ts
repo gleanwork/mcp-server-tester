@@ -120,11 +120,11 @@ export interface CheckedJudgeVerdict extends JudgeVerdict {
 /** Case fields a `JudgeInput` is built from. */
 export interface JudgeCaseSource {
   id?: string;
-  scenario?: string;
+  /** The case's input, which the judge sees as `input.prompt`. */
+  input?: string;
   toolName?: string;
   args?: Record<string, unknown>;
   request?: { method: string; params?: Record<string, unknown> };
-  canonicalAnswer?: string;
   expected?: Record<string, unknown>;
   tags?: string[];
   metadata?: Record<string, unknown>;
@@ -145,19 +145,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * The judge's view of a case. `reference` (a per-judge override) wins over
- * `expected.answer`, which wins over `canonicalAnswer`.
+ * `expected.answer`.
  */
 export function buildJudgeCase(
   source: JudgeCaseSource | undefined,
   reference?: unknown
 ): JudgeCase {
   const expected: JudgeExpected = { ...(source?.expected ?? {}) };
-  const answer =
-    reference !== undefined
-      ? reference
-      : expected.answer !== undefined
-        ? expected.answer
-        : source?.canonicalAnswer;
+  const answer = reference !== undefined ? reference : expected.answer;
   if (answer !== undefined) expected.answer = answer;
   else delete expected.answer;
   const toolName = source?.toolName ?? source?.request?.method;
@@ -165,7 +160,7 @@ export function buildJudgeCase(
   return {
     ...(source?.id !== undefined && { id: source.id }),
     input: {
-      ...(source?.scenario !== undefined && { prompt: source.scenario }),
+      ...(source?.input !== undefined && { prompt: source.input }),
       ...(toolName !== undefined && {
         tool: { name: toolName, ...(args !== undefined && { args }) },
       }),

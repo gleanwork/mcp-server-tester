@@ -175,7 +175,7 @@ describe('every storing API redacts by default', () => {
               id: 'weather',
               toolName: 'get_weather',
               args: {},
-              expect: { response: { content: [] } },
+              assertions: { response: { content: [] } },
             },
           ],
         },
@@ -219,7 +219,7 @@ describe('the runner baseline', () => {
       id,
       toolName: 'echo',
       args: {},
-      expect: { containsText: expected },
+      assertions: { containsText: expected },
     }));
   }
 

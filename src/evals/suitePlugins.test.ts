@@ -16,7 +16,7 @@ describe('assertDatasetNamespaces', () => {
             id: 'a',
             toolName: 't',
             args: {},
-            expect: { passesJudge: { judge: 'other/x' } },
+            assertions: { passesJudge: { judge: 'other/x' } },
           },
         ],
       }),
@@ -25,7 +25,7 @@ describe('assertDatasetNamespaces', () => {
       'a case host',
       dataset({
         cases: [
-          { id: 'a', scenario: 's', host: { type: 'other/desk' } },
+          { id: 'a', input: 's', host: { type: 'other/desk' } },
         ] as EvalDataset['cases'],
       }),
     ],
@@ -39,7 +39,7 @@ describe('assertDatasetNamespaces', () => {
   it('allows built-in references', () => {
     const value = dataset({
       cases: [
-        { id: 'a', scenario: 's', host: { type: 'claude-cli' } },
+        { id: 'a', input: 's', host: { type: 'claude-cli' } },
       ] as EvalDataset['cases'],
     });
     expect(() => assertDatasetNamespaces(value, [])).not.toThrow();

@@ -91,7 +91,7 @@ Direct cases can call skills methods instead of a tool with `request` (direct mo
     {
       "id": "list-is-valid",
       "request": { "method": "skills/list", "params": {} },
-      "expect": {
+      "assertions": {
         "schema": "SkillsListResult",
         "containsText": "weather-report"
       }
@@ -102,7 +102,7 @@ Direct cases can call skills methods instead of a tool with `request` (direct mo
         "method": "skills/get",
         "params": { "uri": "skill://nope/SKILL.md" }
       },
-      "expect": { "isError": "MCP error -32602" }
+      "assertions": { "isError": "MCP error -32602" }
     }
   ]
 }
@@ -132,11 +132,11 @@ Loading a skill is not an MCP tool call. Loads are reported in `skillLoads`, and
 {
   "id": "weather-uses-skill",
   "mode": "mcp_host",
-  "scenario": "Write me a short weather report for London",
+  "input": "Write me a short weather report for London",
   "mcpHostConfig": { "provider": "anthropic", "skills": "catalog" },
-  "iterations": 5,
-  "accuracyThreshold": 0.8,
-  "expect": {
+  "trials": 5,
+  "passThreshold": 0.8,
+  "assertions": {
     "toolsTriggered": {
       "calls": [
         { "name": "weather-report", "kind": "skill" },
@@ -150,7 +150,7 @@ Loading a skill is not an MCP tool call. Loads are reported in `skillLoads`, and
 
 `toolCallCount` and tool precision/recall still count only MCP tool calls.
 
-Metrics: `skill_loaded`, `skill_before_tool`, and `skill_verification_failed`. Each case's value is the fraction of its iterations where it held, and `<metric>_rate` averages those over cases where skills were enabled. Loads that fail verification are not counted as loads, and attempts where every load was a preload are left out of `skill_loaded` and `skill_before_tool`.
+Metrics: `skill_loaded`, `skill_before_tool`, and `skill_verification_failed`. Each case's value is the fraction of its trials where it held, and `<metric>_rate` averages those over cases where skills were enabled. Loads that fail verification are not counted as loads, and attempts where every load was a preload are left out of `skill_loaded` and `skill_before_tool`.
 
 ## Measuring whether skills help
 
@@ -173,4 +173,4 @@ Models often skip skills they could use, and a matching tool can win over the sk
 }
 ```
 
-`mst run` reports each arm's pass and trial pass rates and the skill metrics, and `armDeltas` compares each mode with `off`. Leave `mcpHostConfig.skills` off the cases: a case setting would override the arm's, so the suite rejects the combination. Skills come from the first of an arm's servers. Use `iterations` for stable rates, and try more than one model: skill adherence varies a lot between models.
+`mst run` reports each arm's pass and trial pass rates and the skill metrics, and `armDeltas` compares each mode with `off`. Leave `mcpHostConfig.skills` off the cases: a case setting would override the arm's, so the suite rejects the combination. Skills come from the first of an arm's servers. Use `trials` for stable rates, and try more than one model: skill adherence varies a lot between models.

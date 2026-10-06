@@ -49,13 +49,13 @@ export default defineConfig({
 
 ## Step 2 — Create Test File
 
-Always import `test` and `expect` from the fixtures path:
+Always import `test` and `assertions` from the fixtures path:
 
 ```typescript
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
 ```
 
-**Do NOT import from `@gleanwork/mcp-server-tester`** — that path does not include MCP matchers on `expect`.
+**Do NOT import from `@gleanwork/mcp-server-tester`** — that path does not include MCP matchers on `assertions`.
 
 ## Step 3 — Write Tests
 

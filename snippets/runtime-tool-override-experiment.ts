@@ -23,7 +23,7 @@ test('compare a runtime tool metadata variant', async ({ mcp }, testInfo) => {
   const dataset = await loadEvalDataset('./data/host-evals.json');
 
   const baseline = await runEvalDataset(
-    { dataset, defaultLlmIterations: 10 },
+    { dataset, defaultTrials: 10 },
     { mcp, testInfo }
   );
 
@@ -52,7 +52,7 @@ test('compare a runtime tool metadata variant', async ({ mcp }, testInfo) => {
   const candidate = await runEvalDataset(
     {
       dataset,
-      defaultLlmIterations: 10,
+      defaultTrials: 10,
       toolOverrides: candidateVariant,
     },
     { mcp, testInfo }

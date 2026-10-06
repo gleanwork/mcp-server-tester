@@ -50,8 +50,8 @@ async function suite(arms?: unknown[]): Promise<string> {
         {
           id: 'cross-source',
           mode: 'host',
-          scenario: 'Find everything about the checkout outage',
-          expect: {
+          input: 'Find everything about the checkout outage',
+          assertions: {
             toolsTriggered: { calls: [{ name: 'search', required: true }] },
           },
         },

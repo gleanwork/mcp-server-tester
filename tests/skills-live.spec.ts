@@ -33,15 +33,15 @@ test.describe('Live skills eval (opt-in)', () => {
         {
           id: 'weather-report',
           mode: 'mcp_host',
-          scenario:
+          input:
             'Write me a short weather report for London and Paris, following any house style you have for weather reports.',
           mcpHostConfig: {
             provider: 'anthropic',
             model: process.env.MST_LIVE_SKILLS_MODEL,
           },
-          iterations: ITERATIONS,
-          accuracyThreshold: 0.6,
-          expect: {
+          trials: ITERATIONS,
+          passThreshold: 0.6,
+          assertions: {
             toolsTriggered: {
               calls: [
                 { name: 'weather-report', kind: 'skill' },

@@ -12,7 +12,7 @@ This directory contains a [JSON Schema (draft-07)](https://json-schema.org/draft
 
 When you point your editor at this schema, you get:
 
-- **Autocomplete** for all field names (`mode`, `mcpHostConfig.provider`, `expect.toolsTriggered`, etc.)
+- **Autocomplete** for all field names (`mode`, `mcpHostConfig.provider`, `assertions.toolsTriggered`, etc.)
 - **Inline documentation** from field descriptions displayed on hover
 - **Validation errors** for incorrect types, missing required fields, and invalid enum values (e.g. an unknown LLM provider)
 
@@ -77,7 +77,7 @@ EvalDataset (root)
         ├── mode               ("direct" | "mcp_host", default "direct")
         ├── toolName           (string)  — required for direct mode
         ├── args               (object)  — required for direct mode
-        ├── scenario           (string)  — required for mcp_host mode
+        ├── input           (string)  — required for mcp_host mode
         ├── mcpHostConfig      (MCPHostConfig)
         │   ├── provider       (enum of 10 providers, required)
         │   ├── model          (string)
@@ -85,10 +85,10 @@ EvalDataset (root)
         │   ├── maxTokens      (integer)
         │   ├── temperature    (number 0–1)
         │   └── maxToolCalls   (integer)
-        ├── iterations         (integer >= 1, default 1)
+        ├── trials         (integer >= 1, default 1)
         ├── accuracyThreshold  (number 0–1, default 1.0)
         ├── metadata           (object)
-        └── expect             (EvalExpectBlock)
+        └── expect             (EvalAssertions)
             ├── response           — exact match
             ├── schema             — named Zod schema
             ├── containsText       — substring(s)

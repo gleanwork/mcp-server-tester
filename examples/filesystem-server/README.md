@@ -72,7 +72,7 @@ test('validates config with inline case', async ({ mcp }) => {
       id: 'inline-config-check',
       toolName: 'read_file',
       args: { path: 'config.json' },
-      expect: {
+      assertions: {
         containsText: ['version', '1.0.0'],
       },
     },
@@ -118,7 +118,7 @@ Define test cases in JSON for maintainability:
   "mode": "direct",
   "toolName": "read_file",
   "args": { "path": "readme.txt" },
-  "expect": {
+  "assertions": {
     "containsText": "Hello World",
     "isError": false
   }

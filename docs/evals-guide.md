@@ -18,7 +18,7 @@ That's the gap evals fill.
 
 1. **Does the tool work?** — Call it directly with known inputs and check the output. This is deterministic. Run it once.
 
-2. **Will an LLM discover and use the tool correctly?** — Put a real LLM in front of your tools and give it a realistic scenario. Measure how often it triggers the right tool. This is probabilistic. Run it many times.
+2. **Will an LLM discover and use the tool correctly?** — Put a real LLM in front of your tools and give it a realistic input. Measure how often it triggers the right tool. This is probabilistic. Run it many times.
 
 ---
 
@@ -27,16 +27,16 @@ That's the gap evals fill.
 Every eval case has three parts:
 
 ```text
-Scenario  →  Run  →  Assertion
+Input  →  Trial  →  Assertions
 ```
 
-**Scenario**: The input. In direct mode this is tool arguments (`{ query: "MCP server testing" }`). In LLM host mode this is a natural language prompt ("Find recent docs about MCP testing").
+**Input**: What the case gives the host. In direct mode this is tool arguments (`{ query: "MCP server testing" }`). In LLM host mode this is the user's request ("Find recent docs about MCP testing").
 
-**Run**: Executing the scenario against your MCP server. In direct mode this is a single tool call. In LLM host mode this is an LLM receiving your tools and deciding which ones to call.
+**Trial**: One attempt at the case. In direct mode this is a single tool call. In LLM host mode this is an LLM receiving your tools and deciding which ones to call.
 
-**Assertion**: The pass/fail check. Did the response contain expected text? Did the LLM call the right tool? Was the call count in the expected range?
+**Assertions**: The pass/fail checks on each trial. Did the response contain expected text? Did the LLM call the right tool? Was the call count in the expected range?
 
-The eval runner orchestrates Scenario → Run → Assertion, potentially dozens of times, and reports back accuracy — the fraction of runs where every assertion passed.
+The eval runner runs each case's trials, potentially dozens of them, and reports its pass rate: the share of trials where every assertion passed.
 
 ---
 
@@ -52,7 +52,7 @@ You call a tool yourself with explicit arguments. The result is checked against 
   "mode": "direct",
   "toolName": "search",
   "args": { "query": "MCP server testing" },
-  "expect": {
+  "assertions": {
     "isError": false,
     "responseSize": { "minBytes": 100 }
   }
@@ -61,7 +61,7 @@ You call a tool yourself with explicit arguments. The result is checked against 
 
 **When to use it:** Smoke tests. Verifying your tools are connected, responding, and returning the right shape of data. Regression detection when you change tool implementations.
 
-**How many iterations:** 1. Tool responses are deterministic (or close enough). Running a search 10 times doesn't tell you more than running it once.
+**How many trials:** 1. Tool responses are deterministic (or close enough). Running a search 10 times doesn't tell you more than running it once.
 
 **What you're testing:** The tool itself, not how well it's described.
 
@@ -74,7 +74,7 @@ Direct cases can also send any MCP request instead of calling a tool, which is u
     "method": "skills/get",
     "params": { "uri": "skill://docs/SKILL.md" }
   },
-  "expect": { "schema": "SkillsGetResult" }
+  "assertions": { "schema": "SkillsGetResult" }
 }
 ```
 
@@ -84,7 +84,7 @@ Direct cases can also send any MCP request instead of calling a tool, which is u
 
 ### LLM Host Mode
 
-A real LLM receives your tools and a natural language scenario, then decides which tools to call. You assert that it made the right choices.
+A real LLM receives your tools and a natural-language input, then decides which tools to call. You assert that it made the right choices.
 
 ```json snippet=snippets/evals-tools-triggered.json
 {
@@ -93,15 +93,20 @@ A real LLM receives your tools and a natural language scenario, then decides whi
     {
       "id": "llm-triggers-search",
       "mode": "mcp_host",
-      "scenario": "Find recent internal documents about the MCP server rollout",
+      "input": "Find recent internal documents about the MCP server rollout",
       "mcpHostConfig": {
         "provider": "vertex-anthropic",
         "model": "claude-3-5-haiku@20241022"
       },
-      "accuracyThreshold": 0.8,
-      "expect": {
+      "passThreshold": 0.8,
+      "assertions": {
         "toolsTriggered": {
-          "calls": [{ "name": "search", "required": true }]
+          "calls": [
+            {
+              "name": "search",
+              "required": true
+            }
+          ]
         }
       }
     }
@@ -111,13 +116,13 @@ A real LLM receives your tools and a natural language scenario, then decides whi
 
 **When to use it:** Testing whether your tool descriptions actually communicate intent to an LLM. A/B testing tool name or description changes. Validating that tool selectivity works (people questions → `people_search`, not `search`).
 
-**How many iterations:** At least 10. LLMs are non-deterministic — the same scenario may trigger different tools on different runs. 3 iterations is almost meaningless statistically. 10 gives you a rough accuracy estimate. 20+ lets you make reliable decisions about whether a change helped.
+**How many trials:** At least 10. LLMs are non-deterministic — the same input may trigger different tools on different runs. 3 trials is almost meaningless statistically. 10 gives you a rough accuracy estimate. 20+ lets you make reliable decisions about whether a change helped.
 
 **What you're testing:** Your tool _descriptions_ and the mental model they create in the LLM, not the tool implementation.
 
 ---
 
-## Accuracy and Iterations: The Core Concept
+## Trials and Pass Rate: The Core Concept
 
 The most important thing to understand about LLM host evals is that a single run tells you almost nothing.
 
@@ -134,55 +139,55 @@ If your eval runs 10 times and the LLM picks the right tool 8 times, your accura
 **AccuracyThreshold** is the minimum accuracy needed to consider the eval "passed":
 
 ```json
-"accuracyThreshold": 0.8
+"passThreshold": 0.8
 ```
 
 This says: "I'll accept this eval as passing if the LLM gets it right at least 80% of the time." Below that threshold, the eval fails — which tells you the tool description needs work.
 
-### Why You Need More Than 3 Iterations
+### Why You Need More Than 3 Trials
 
-Here's the uncomfortable math. With 3 iterations, a tool that works 40% of the time is statistically indistinguishable from one that works 94% of the time. The confidence interval is just too wide to make decisions.
+Here's the uncomfortable math. With 3 trials, a tool that works 40% of the time is statistically indistinguishable from one that works 94% of the time. The confidence interval is just too wide to make decisions.
 
-| Iterations | Margin of error (95% CI) | Useful for                  |
-| ---------- | ------------------------ | --------------------------- |
-| 3          | ±27 percentage points    | Almost nothing              |
-| 10         | ±16 percentage points    | Detecting large regressions |
-| 20         | ±10 percentage points    | Making real decisions       |
-| 50         | ±6 percentage points     | Release gates               |
+| Trials | Margin of error (95% CI) | Useful for                  |
+| ------ | ------------------------ | --------------------------- |
+| 3      | ±27 percentage points    | Almost nothing              |
+| 10     | ±16 percentage points    | Detecting large regressions |
+| 20     | ±10 percentage points    | Making real decisions       |
+| 50     | ±6 percentage points     | Release gates               |
 
-**Practical recommendation:** 10 iterations for development/CI, 20 for release gates. The `defaultLlmIterations` option in `runEvalDataset` sets this globally so you don't have to repeat it on every case:
+**Practical recommendation:** 10 trials for development/CI, 20 for release gates. The `defaultTrials` option in `runEvalDataset` sets this globally so you don't have to repeat it on every case:
 
 ```typescript
-await runEvalDataset({ dataset, defaultLlmIterations: 10 }, { mcp, testInfo });
+await runEvalDataset({ dataset, defaultTrials: 10 }, { mcp, testInfo });
 ```
 
-Individual cases can override this with their own `iterations` field.
+Individual cases can override this with their own `trials` field.
 
 ---
 
-## Designing Good Scenarios
+## Designing Good Inputs
 
-This is where most eval efforts fall short. A single scenario phrasing tests whether your tool works for that exact phrasing, not whether the description is generally good.
+This is where most eval efforts fall short. A single input phrasing tests whether your tool works for that exact phrasing, not whether the description is generally good.
 
 ### The Diversity Problem
 
-If your only scenario for `people_search` is "Who leads the developer platform team?", and the LLM gets it right 10/10 times, you've learned that _that exact phrasing_ works. You haven't learned whether it works for "find the VP of engineering" or "who should I talk to about API access?" Those might fail.
+If your only input for `people_search` is "Who leads the developer platform team?", and the LLM gets it right 10/10 times, you've learned that _that exact phrasing_ works. You haven't learned whether it works for "find the VP of engineering" or "who should I talk to about API access?" Those might fail.
 
-**Rule of thumb:** Write at least 2-3 scenario phrasings per tool. Vary the vocabulary, the level of directness, and the implied user goal.
+**Rule of thumb:** Write at least 2-3 input phrasings per tool. Vary the vocabulary, the level of directness, and the implied user goal.
 
 ```json
-{ "scenario": "Who leads the developer platform team?" },
-{ "scenario": "Find engineers who work on the MCP server" },
-{ "scenario": "Who should I contact about developer API integrations?" }
+{ "input": "Who leads the developer platform team?" },
+{ "input": "Find engineers who work on the MCP server" },
+{ "input": "Who should I contact about developer API integrations?" }
 ```
 
-### Scenario Design Checklist
+### Input Design Checklist
 
-1. **Use natural phrasing** — Write scenarios the way a real user would ask the question, not the way an engineer would phrase a function call. "Search for recent documents about the Q4 planning process" not "Call search with query 'Q4 planning'."
+1. **Use natural phrasing** — Write inputs the way a real user would ask the question, not the way an engineer would phrase a function call. "Search for recent documents about the Q4 planning process" not "Call search with query 'Q4 planning'."
 
 2. **Test the _intent_, not the keyword** — Good tool descriptions work even when the user doesn't use the tool's name. "Find recent documents" should trigger `search` without the user saying "search".
 
-3. **Test selectivity** — For each tool, write a scenario that should trigger it and NOT other tools. This catches over-triggering (using `search` when `people_search` would be better).
+3. **Test selectivity** — For each tool, write an input that should trigger it and NOT other tools. This catches over-triggering (using `search` when `people_search` would be better).
 
 4. **Include ambiguous cases** — Real users write ambiguous queries. "Tell me about the planning process" could be a search OR a chat question. Decide what the right behavior is and assert it.
 
@@ -190,13 +195,13 @@ If your only scenario for `people_search` is "Who leads the developer platform t
 
 ### Negative Cases
 
-Not every scenario should expect a tool call. Some scenarios should result in the LLM answering from context without calling any tools:
+Not every input should expect a tool call. Some inputs should result in the LLM answering from context without calling any tools:
 
 ```json
 {
   "id": "llm-no-tool-needed",
-  "scenario": "What's 2 + 2?",
-  "expect": {
+  "input": "What's 2 + 2?",
+  "assertions": {
     "toolCallCount": { "exact": 0 }
   }
 }
@@ -276,13 +281,13 @@ Did an LLM evaluator (judge) say the response was good? This is for quality, not
     {
       "id": "search-quality-check",
       "mode": "mcp_host",
-      "scenario": "Find recent internal documents about the Q4 planning process",
+      "input": "Find recent internal documents about the Q4 planning process",
       "mcpHostConfig": {
         "provider": "vertex-anthropic",
         "model": "claude-3-5-haiku@20241022"
       },
-      "accuracyThreshold": 0.7,
-      "expect": {
+      "passThreshold": 0.7,
+      "assertions": {
         "passesJudge": {
           "rubric": {
             "text": "The response should cite specific documents, not generic advice"
@@ -310,17 +315,25 @@ Assertions compose. A case passes only if _all_ assertions pass. This lets you b
     {
       "id": "search-combined",
       "mode": "mcp_host",
-      "scenario": "Find recent internal documents about the Q4 planning process",
+      "input": "Find recent internal documents about the Q4 planning process",
       "mcpHostConfig": {
         "provider": "vertex-anthropic",
         "model": "claude-3-5-haiku@20241022"
       },
-      "accuracyThreshold": 0.7,
-      "expect": {
+      "passThreshold": 0.7,
+      "assertions": {
         "toolsTriggered": {
-          "calls": [{ "name": "search", "required": true }]
+          "calls": [
+            {
+              "name": "search",
+              "required": true
+            }
+          ]
         },
-        "toolCallCount": { "min": 1, "max": 5 },
+        "toolCallCount": {
+          "min": 1,
+          "max": 5
+        },
         "passesJudge": {
           "rubric": "completeness",
           "threshold": 0.7
@@ -337,7 +350,7 @@ This case only passes if: the LLM called `search`, made between 1 and 5 tool cal
 
 ## How to Think About Accuracy Thresholds
 
-`accuracyThreshold` is not a number to pick arbitrarily. It's a decision about acceptable failure rates.
+`passThreshold` is not a number to pick arbitrarily. It's a decision about acceptable failure rates.
 
 **Think of it as:** "In what fraction of real user interactions am I OK with the wrong tool being called?"
 
@@ -348,7 +361,7 @@ This case only passes if: the LLM called `search`, made between 1 and 5 tool cal
 | 0.8       | 1 in 5 interactions may fail      | Useful but not essential tools |
 | 0.7       | 3 in 10 interactions may fail     | Experimental features          |
 
-A threshold of 0.8 with 10 iterations means: "This eval passes if 8 or more of 10 runs trigger the right tool."
+A threshold of 0.8 with 10 trials means: "This eval passes if 8 or more of 10 runs trigger the right tool."
 
 If your description is genuinely good, you should comfortably exceed this threshold. If you're regularly sitting at exactly 8/10, your description may be borderline and worth revisiting.
 
@@ -359,20 +372,20 @@ If your description is genuinely good, you should comfortably exceed this thresh
 When your eval runs, the reporter shows:
 
 ```
-PASS  llm-search-phrasing-a  (accuracy: 90%)  — 9/10 iterations passed
-PASS  llm-people-search     (accuracy: 100%) — 10/10 iterations passed
-FAIL  llm-meeting-lookup       (accuracy: 60%)  — 6/10 iterations passed  ← needs work
+PASS  llm-search-phrasing-a  (accuracy: 90%)  — 9/10 trials passed
+PASS  llm-people-search     (accuracy: 100%) — 10/10 trials passed
+FAIL  llm-meeting-lookup       (accuracy: 60%)  — 6/10 trials passed  ← needs work
 ```
 
-**100% accuracy:** Your tool description is crystal clear for this scenario phrasing. The LLM always knows exactly what to do.
+**100% accuracy:** Your tool description is crystal clear for this input phrasing. The LLM always knows exactly what to do.
 
 **80–90% accuracy:** The description works well. Small wording improvements might push it higher, but it's production-ready.
 
-**60–79% accuracy:** The description is ambiguous or competing with other tool descriptions. Worth investigating — look at which iterations failed and what tools the LLM called instead.
+**60–79% accuracy:** The description is ambiguous or competing with other tool descriptions. Worth investigating — look at which trials failed and what tools the LLM called instead.
 
 **Below 60%:** The LLM is guessing. Something is fundamentally unclear about the tool's purpose, or a competing tool is attracting these queries.
 
-**How to debug low accuracy:** Look at the iteration-level breakdown in the detail view. If the LLM consistently picks `search` when you wanted `people_search`, the distinction between the two tools isn't clear enough in their descriptions.
+**How to debug low accuracy:** Look at the trial-level breakdown in the detail view. If the LLM consistently picks `search` when you wanted `people_search`, the distinction between the two tools isn't clear enough in their descriptions.
 
 ---
 
@@ -412,15 +425,15 @@ Run both and compare accuracy per tool. The reporter groups results by project, 
 
 ## Common Mistakes
 
-**Running too few iterations.** 3 iterations is noise. If you can't afford 10, you're better off with 0 and accepting that you don't have data yet.
+**Running too few trials.** 3 trials is noise. If you can't afford 10, you're better off with 0 and accepting that you don't have data yet.
 
-**Testing the scenario, not the description.** If you write the scenario after looking at the tool description, you're likely to use the same vocabulary the description uses. The LLM will get it right, but a real user might not. Write scenarios first.
+**Testing the input, not the description.** If you write the input after looking at the tool description, you're likely to use the same vocabulary the description uses. The LLM will get it right, but a real user might not. Write inputs first.
 
-**Ignoring selectivity.** "Will `search` be called for this scenario?" is only half the question. "Will `people_search` be called _instead of_ `search` when it should be?" is equally important.
+**Ignoring selectivity.** "Will `search` be called for this input?" is only half the question. "Will `people_search` be called _instead of_ `search` when it should be?" is equally important.
 
 **Setting threshold to 1.0 everywhere.** If your CI requires 100% accuracy, any LLM non-determinism will cause flaky failures. Reserve 1.0 for cases you're confident are genuinely always correct. Use 0.8–0.9 for most cases.
 
-**Not varying phrasings.** One scenario per tool gives you one data point. If that scenario happens to use a keyword from the tool description, you may be measuring nothing.
+**Not varying phrasings.** One input per tool gives you one data point. If that input happens to use a keyword from the tool description, you may be measuring nothing.
 
 **Forgetting that accuracy reflects your description, not the LLM.** When accuracy is low, the instinct is to blame the model. Usually the issue is the tool description. Try rewriting the description before switching models.
 
@@ -442,18 +455,18 @@ Run both and compare accuracy per tool. The reporter groups results by project, 
       "args": { "query": "hello" }, // required with toolName
 
       // For mcp_host mode instead:
-      "scenario": "Find recent documents about X",
+      "input": "Find recent documents about X",
       "mcpHostConfig": {
         "provider": "vertex-anthropic", // or "openai", "anthropic", etc.
         "model": "claude-3-5-haiku@20241022",
         "maxToolCalls": 5,
       },
 
-      // Multi-iteration (mainly for mcp_host):
-      "iterations": 10, // or use defaultLlmIterations in the runner
-      "accuracyThreshold": 0.8, // fraction that must pass (0–1)
+      // Multiple trials (mainly for mcp_host):
+      "trials": 10, // or use defaultTrials in the runner
+      "passThreshold": 0.8, // fraction that must pass (0–1)
 
-      "expect": {
+      "assertions": {
         "isError": false,
         "containsText": ["expected", "text"],
         "responseSize": { "minBytes": 100 },
@@ -490,7 +503,7 @@ test('my evals', async ({ mcp }, testInfo) => {
 
       // Apply 10 iterations to all mcp_host cases
       // that don't specify iterations explicitly
-      defaultLlmIterations: 10,
+      defaultTrials: 10,
 
       // Run up to 3 cases at once (careful with rate limits)
       concurrency: 3,
@@ -690,7 +703,7 @@ default. Set `redactStoredResponses: false` when the stored results should
 include full responses (`omitResponsesFromBaseline` controls baseline files
 written to a path). Every API that stores results (the runner, suites, the
 reporter's result store, run and server comparisons, baseline files) removes
-each case's raw `response`, echoed `expect.response`, and each host trace's
+each case's raw `response`, echoed `assertions.response`, and each host trace's
 answer text (`finalText`) and tool outputs (event `output`) by default, the
 same way. Events, servers, arguments and usage are kept.
 
@@ -861,7 +874,7 @@ To compare two MCP servers, or two configurations of one, run the same dataset a
 }
 ```
 
-`mst run --manifest server-ab.json` runs both arms with the same host and prints a row per arm: cases passed, trial pass rate, MCP calls and host events, tokens, cost and time. The run summary's `armDeltas` holds each metric's change against the first arm, and with `iterations` set, `trial_pass_rate` shows differences that case pass/fail hides. An arm can also differ by host, tool variants (`toolOverrides`), scenario template or judges. See [Arms](./evaluation-framework.md#arms) and [Metrics](./evaluation-framework.md#metrics).
+`mst run --manifest server-ab.json` runs both arms with the same host and prints a row per arm: cases passed, trial pass rate, MCP calls and host events, tokens, cost and time. The run summary's `armDeltas` holds each metric's change against the first arm, and with `trials` set, `trial_pass_rate` shows differences that case pass/fail hides. An arm can also differ by host, tool variants (`toolOverrides`), input template or judges. See [Arms](./evaluation-framework.md#arms) and [Metrics](./evaluation-framework.md#metrics).
 
 ---
 
@@ -869,9 +882,9 @@ To compare two MCP servers, or two configurations of one, run the same dataset a
 
 1. **Start with direct mode** — Build smoke tests for every tool before adding LLM host cases. You need to know the tools work before testing whether they're discoverable.
 
-2. **Add 2–3 LLM host cases per tool** — Focus on the scenarios most representative of how real users actually ask questions.
+2. **Add 2–3 LLM host cases per tool** — Focus on the inputs most representative of how real users actually ask questions.
 
-3. **Set `defaultLlmIterations: 10`** — This is the minimum for meaningful accuracy numbers.
+3. **Set `defaultTrials: 10`** — This is the minimum for meaningful accuracy numbers.
 
 4. **Review failing cases first** — Low accuracy on a tool is a signal to rewrite its description, not to lower the threshold.
 

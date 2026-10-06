@@ -48,7 +48,7 @@ console.log(JSON.stringify({ type: 'result', result: JSON.stringify({ env, stric
 `
       );
       const input = {
-        scenario: 'hello',
+        prompt: 'hello',
         servers: [],
         env: {
           PATH: directory,
@@ -137,7 +137,7 @@ setTimeout(() => process.exit(0), 30000);
     let ownedPid: number | undefined;
     try {
       const pending = getHost('claude-cli').run!(
-        { scenario: 'hello', servers: [], env: { PATH: directory } },
+        { prompt: 'hello', servers: [], env: { PATH: directory } },
         { type: 'claude-cli', timeout: deadlineMs },
         { manifest: { name: 'offline', datasets: [] } }
       );
@@ -168,7 +168,7 @@ setTimeout(() => process.exit(0), 30000);
 
   it('keeps the supplied host deadline when legacy CLI arguments replace the generated config', async () => {
     const pending = getHost('claude-cli').run!(
-      { scenario: 'hello', servers: [] },
+      { prompt: 'hello', servers: [] },
       { type: 'claude-cli', timeout: 50 },
       {
         manifest: { name: 'offline', datasets: [] },
@@ -190,7 +190,7 @@ setTimeout(() => process.exit(0), 30000);
 
   it('retains an immediate legacy CLI timeout of zero', async () => {
     const result = await getHost('claude-cli').run!(
-      { scenario: 'hello', servers: [] },
+      { prompt: 'hello', servers: [] },
       { type: 'claude-cli' },
       {
         manifest: { name: 'offline', datasets: [] },
@@ -207,7 +207,7 @@ setTimeout(() => process.exit(0), 30000);
     async (mcpHostConfig) => {
       await expect(
         getHost('claude-cli').run!(
-          { scenario: 'hello', servers: [] },
+          { prompt: 'hello', servers: [] },
           { type: 'claude-cli' },
           { manifest: { name: 'offline', datasets: [] }, mcpHostConfig }
         )
@@ -217,7 +217,7 @@ setTimeout(() => process.exit(0), 30000);
 
   it('applies the legacy case model before constructing generated CLI arguments', async () => {
     const result = await getHost('claude-cli').run!(
-      { scenario: 'hello', servers: [], env: { PATH: directory } },
+      { prompt: 'hello', servers: [], env: { PATH: directory } },
       { type: 'claude-cli', model: 'suite-model' },
       {
         manifest: { name: 'offline', datasets: [] },
@@ -230,7 +230,7 @@ setTimeout(() => process.exit(0), 30000);
 
   it('preserves explicit legacy command arguments instead of rewriting them', async () => {
     const result = await getHost('claude-cli').run!(
-      { scenario: 'hello', servers: [] },
+      { prompt: 'hello', servers: [] },
       { type: 'claude-cli', model: 'suite-model' },
       {
         manifest: { name: 'offline', datasets: [] },
@@ -241,7 +241,7 @@ setTimeout(() => process.exit(0), 30000);
             args: [
               '-e',
               'console.log(JSON.stringify({ success: true, toolCalls: [], response: process.argv[1] }))',
-              '{{scenario}}',
+              '{{prompt}}',
             ],
             outputFormat: 'json',
           },
@@ -263,9 +263,9 @@ console.log(JSON.stringify({ type: 'result', result: at < 0 ? 'none' : process.a
 `,
       { mode: 0o700 }
     );
-    const prompt = 'Use find_skills first; never expand {{scenario}} or $&.';
+    const prompt = 'Use find_skills first; never expand {{prompt}} or $&.';
     const result = await getHost('claude-cli').run!(
-      { scenario: 'hello', servers: [], env: { PATH: directory } },
+      { prompt: 'hello', servers: [], env: { PATH: directory } },
       { type: 'claude-cli', systemPrompt: prompt },
       { manifest: { name: 'offline', datasets: [] } }
     );
@@ -291,7 +291,7 @@ console.log(JSON.stringify({ type: 'result', result: JSON.stringify(seen) }));
     vi.stubEnv('CLAUDE_CONFIG_DIR', undefined);
     fakeClaude();
     const result = await getHost('claude-cli').run!(
-      { scenario: 'hello', servers: [], env: { PATH: directory } },
+      { prompt: 'hello', servers: [], env: { PATH: directory } },
       { type: 'claude-cli', ...host },
       { manifest: { name: 'offline', datasets: [] } }
     );
@@ -314,7 +314,7 @@ console.log(JSON.stringify({ type: 'result', result: JSON.stringify(seen) }));
     fakeClaude();
     vi.stubEnv('CLAUDE_CONFIG_DIR', '/tmp/operator-claude');
     const result = await getHost('claude-cli').run!(
-      { scenario: 'hello', servers: [], env: { PATH: directory } },
+      { prompt: 'hello', servers: [], env: { PATH: directory } },
       { type: 'claude-cli' },
       { manifest: { name: 'offline', datasets: [] } }
     );

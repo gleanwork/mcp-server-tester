@@ -44,7 +44,7 @@ function host(body: string, timeout = 10_000) {
   script(body);
   return getHost('claude-cli').run!(
     {
-      scenario: 'unchanged scenario',
+      prompt: 'unchanged scenario',
       servers: [
         {
           label: 'acme',
@@ -122,7 +122,7 @@ describe('Claude Code MCP startup', () => {
             {
               id: 'case',
               mode: 'mcp_host',
-              scenario: 'scenario',
+              input: 'scenario',
               mcpHostConfig: {
                 hostType: 'cli',
                 cli: { command, args: [], claudeMcpServers: ['acme'] },
@@ -146,9 +146,7 @@ describe('Claude Code MCP startup', () => {
       {
         dataset: {
           name: 'startup',
-          cases: [
-            { id: 'case', mode: 'host', scenario: 'scenario', iterations: 2 },
-          ],
+          cases: [{ id: 'case', mode: 'host', input: 'scenario', trials: 2 }],
         },
         executeCase: async () => {
           const event = attempt++ === 0 ? { ...init, mcp_servers: [] } : init;

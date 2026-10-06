@@ -43,7 +43,7 @@ runtime validation is provided by `EvalManifestSchema`.
 
 A key the schema doesn't define is an error, in a manifest and in a dataset, so a misspelling fails instead of being ignored. So is a setting the selected host can't honour, such as `toolOverrides` for a host that doesn't present tool variants. `--dry-run` reports all of these, including in datasets.
 
-- **Run controls** (`iterations`, `maxCases`, `concurrency`, `filterTags`, `accuracyThreshold`) go at the top level or under `run`.
+- **Run controls** (`trials`, `maxCases`, `concurrency`, `filterTags`, `passThreshold`) go at the top level or under `run`.
 - **Host defaults:** `model`, `provider`, `maxToolCalls`, `timeout`, `temperature` and `maxTokens` default each host option of that name, for the hosts that take it.
 - **Inheritance:** an arm or case host inherits the manifest host's options only when it's the same host type.
 
@@ -77,7 +77,7 @@ const plugin: Plugin = {
   configs: {
     recommended: {
       judges: ['acme/completeness'],
-      iterations: 3,
+      trials: 3,
     },
   },
 };
@@ -98,11 +98,11 @@ export default plugin;
     "plugins": ["@acme/mst-plugin"],
     "extends": ["acme/recommended"],
     "datasets": ["./cases.json"],
-    "iterations": 5
+    "trials": 5
   }
   ```
 
-  A config is typed `PluginConfig` and can set any documented manifest key except `name`, `datasets`, `arms`, `plugins` and `extends`. Other keys, including `run`, are rejected when a manifest extends the config; until then MST only checks that it's an object. Configs apply in order, then the manifest's own settings, including its `run` controls. Each top-level key is replaced, never merged: here the manifest's `iterations` replaces the config's, and a manifest `judges` list would replace the config's list rather than add to it. A config may use only its own plugin's extensions and built-ins, and can't extend other configs. MST has no built-in configs. A suite's `contentHash` is computed with its configs applied, so `runEvalBatch` doesn't resume a saved run after a config changes. Code that validates a manifest itself applies `extends` first with `resolveManifestExtends` (from `./evals`).
+  A config is typed `PluginConfig` and can set any documented manifest key except `name`, `datasets`, `arms`, `plugins` and `extends`. Other keys, including `run`, are rejected when a manifest extends the config; until then MST only checks that it's an object. Configs apply in order, then the manifest's own settings, including its `run` controls. Each top-level key is replaced, never merged: here the manifest's `trials` replaces the config's, and a manifest `judges` list would replace the config's list rather than add to it. A config may use only its own plugin's extensions and built-ins, and can't extend other configs. MST has no built-in configs. A suite's `contentHash` is computed with its configs applied, so `runEvalBatch` doesn't resume a saved run after a config changes. Code that validates a manifest itself applies `extends` first with `resolveManifestExtends` (from `./evals`).
 
 - **Judges.** A judge's `evaluate({ case, trial }, options)` returns a verdict with `score` from 0 to 1 ([Judge contract](#judge-contract)). MST parses `options` with the judge's schema, calls `evaluate` once per `reps`, and compares the mean score with the assertion's `threshold`. The schema sees only the judge's own options, never `threshold`, `reference`, `reps` or a manifest entry's `type` and `name`. The built-in `rubric` judge has the same contract, and a manifest can list it: `judges: [{ "type": "rubric", "rubric": "correctness" }]`.
 
@@ -126,7 +126,7 @@ those verdicts decides, and a tie fails.
 `case.expected` holds the case's ground truth:
 
 - `answer`: the assertion's `reference`, else the case's `expected.answer`,
-  else its `canonicalAnswer`.
+  else its `expected.answer`.
 - `criteria`: rubric criteria keyed by name, from the case's `expected.criteria`.
 - Any other key a dataset puts under `expected`.
 
@@ -163,7 +163,7 @@ A score or sub-score outside 0 to 1 is an error, not a verdict. When every
 judge of a case skips, the judge expectation passes.
 
 Judge usage is kept apart from host usage: `judgeUsage` on each case and
-iteration, `totalJudgeUsage` on the run and suite telemetry, and the
+trial, `totalJudgeUsage` on the run and suite telemetry, and the
 `judge_cost_usd`, `judge_input_tokens`, and `judge_output_tokens` metrics.
 The built-in `rubric` judge reports its usage the same way.
 
@@ -229,7 +229,7 @@ The built-in `file`, `dir` and `gcs` sources read canonical `EvalDataset` JSON o
 
 `dir` reads every `.json` file in the directory (subdirectories too with `"recursive": true`), validates each the same way, and merges their cases into one dataset named after the directory. `gcs` needs the optional `@google-cloud/storage` package and Application Default Credentials that can read the object.
 
-Datasets in another schema need a dataset source in your own plugin that converts them. The conversion policy (default iterations, accuracy thresholds, which judges a case gets) belongs to that source, not to MST:
+Datasets in another schema need a dataset source in your own plugin that converts them. The conversion policy (default trials, pass thresholds, which judges a case gets) belongs to that source, not to MST:
 
 ```typescript
 import {
@@ -265,7 +265,7 @@ A manifest that loads the plugin declares `{ "type": "my/format", "path": "..." 
 
 ### Hosts
 
-A host runs one scenario and returns its trace. It doesn't repeat cases, run judges or decide pass/fail; `runEvalDataset` does that for every host. A plugin host is the way to add a host: the built-in desktop drivers are composed from internal capabilities, which plugins can't provide.
+A host runs one input and returns its trace. It doesn't repeat cases, run judges or decide pass/fail; `runEvalDataset` does that for every host. A plugin host is the way to add a host: the built-in desktop drivers are composed from internal capabilities, which plugins can't provide.
 
 ```typescript
 import type { Plugin } from '@gleanwork/mcp-server-tester';
@@ -278,7 +278,7 @@ export default {
       schema: z.object({ type: z.literal('my/assistant') }),
       evidence: 'observed',
       async run(input, config, context) {
-        // input.scenario and input.servers are the unit of execution.
+        // input.prompt and input.servers are the unit of execution.
         return { finalText: 'Answer from the assistant', events: [] };
       },
     },
@@ -291,8 +291,8 @@ A manifest that loads the plugin selects the host with `{ "type": "my/assistant"
 - **The trace.** `run` returns a `HostRunResult`: `finalText`, `events`, and optional `usage`, `error` and timing fields. Each event has a `kind` (`tool_call`, `skill`, `command`, `subagent` or `tool_search`), a `source` (`mcp` or `host`), a `name`, and optionally the MCP server label, arguments, output and ID. Record what the host did; don't reconstruct tool calls from the final text. A `tool_search` event (the host searching its tool catalog) lists the tools the search returned in `results`, each `{ name, server? }`. Type host-native actions as their kind rather than as calls to a host tool, so skill expectations and search metrics can read them.
 - **Evidence.** Declare `evidence: 'structured'` only for authoritative protocol or host-native traces. With `observed`, `none` or no declaration, tool-call and argument assertions can't pass; text and judge assertions still run.
 - **Servers.** Events keep their MCP server labels. With more than one server, tool assertions use label-qualified names, or the manifest's `toolMap` from canonical to native names.
-- **In results.** Each host case result keeps the trace as `trace`, a `HostTrace`: the `HostRunResult` your host returned, without telemetry and diagnostics, plus its evidence. On a one-server arm, MCP events that name no server get that server's label. A case with several iterations has no `trace` of its own; each entry in `iterationResults` has the trace of that iteration. In a suite, every case result also names its `arm`. Stored results drop `finalText` and each event's `output`, the same way they drop `response`; events, servers, arguments and usage stay.
-- **Batches.** A host with `runBatch` gets one request per iteration of each host case in the dataset, and returns one trace per request, in order. A batch host can't mix host types, and its cases need unique IDs.
+- **In results.** Each host case result keeps the trace as `trace`, a `HostTrace`: the `HostRunResult` your host returned, without telemetry and diagnostics, plus its evidence. On a one-server arm, MCP events that name no server get that server's label. A case with several trials has no `trace` of its own; each entry in `iterationResults` has the trace of that trial. In a suite, every case result also names its `arm`. Stored results drop `finalText` and each event's `output`, the same way they drop `response`; events, servers, arguments and usage stay.
+- **Batches.** A host with `runBatch` gets one request per trial of each host case in the dataset, and returns one trace per request, in order. A batch host can't mix host types, and its cases need unique IDs.
 - **Settings only.** `createConfig` returns settings for MST's own SDK or CLI host instead of running anything.
 - **Tool variants.** A host that connects to the servers in `input.servers` gets an arm's `toolOverrides` with no work of its own: the suite gives it `http` server configs for a local MCP proxy that applies the variant, so the host must speak Streamable HTTP (see [Tool variants on every host](#tool-variants-on-every-host)). A host that applies variants itself sets `toolOverrides: true` and reads them from `context.arm`. `buildToolSurface(listed, variant)` from `./evals` applies a variant with MST's rules (keys, renames, collisions), and `resolve(name, server)` maps a presented name back to the original tool. Record a renamed tool's calls under `originalName`, with the model's name in `rawName`, as MST's hosts do. A host that connects elsewhere (hosted connectors, say) sets `toolSurfaceProxy: false`; a manifest that gives it `toolOverrides` then fails validation.
 - **What it honours.** `maxConcurrency` caps the manifest's `concurrency`.
@@ -363,7 +363,7 @@ does not replace them with a second case model.
 
 An arm is a patch over the manifest defaults. Arms replace separate A/B and
 variant-experiment concepts. An arm may change its server set, host options,
-tool-name map, scenario template, metrics, or judges. A manifest without arms
+tool-name map, input template, metrics, or judges. A manifest without arms
 has one implicit `default` arm.
 
 Each `MCPConfig` may have a `label`. Labels are required when a server set has
@@ -381,7 +381,7 @@ Every arm in the run summary has `metrics`. They include, when the host reports 
 - `duration_s_mean`: time per trial.
 - `judge_pass_rate` and `judge_score`, for cases with judges.
 
-A trial is one run of a case: one iteration, or the case itself when it runs once. A case passes when its trials reach its `accuracyThreshold` (1 by default), so two arms whose cases pass 60% and 100% of the time report a `passed_rate` of 0 and 1. `trial_pass_rate` reports 0.6 and 1.
+A trial is one run of a case: one trial, or the case itself when it runs once. A case passes when its trials reach its `passThreshold` (1 by default), so two arms whose cases pass 60% and 100% of the time report a `passed_rate` of 0 and 1. `trial_pass_rate` reports 0.6 and 1.
 
 A manifest's or arm's `metrics` list adds more. Built-in names:
 

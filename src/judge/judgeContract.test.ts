@@ -63,9 +63,11 @@ describe('buildJudgeCase', () => {
     expect(
       buildJudgeCase({
         id: 'c',
-        scenario: 'q',
-        canonicalAnswer: 'canonical',
-        expected: { criteria: { grounded: 'Cites a source' } },
+        input: 'q',
+        expected: {
+          answer: 'canonical',
+          criteria: { grounded: 'Cites a source' },
+        },
         tags: ['t'],
         metadata: { owner: 'x' },
       })
@@ -87,11 +89,10 @@ describe('buildJudgeCase', () => {
     ).toEqual({ tool: { name: 'search', args: { q: 'x' } } });
   });
 
-  it('prefers a judge reference, then expected.answer, then canonicalAnswer', () => {
-    const source = { canonicalAnswer: 'c', expected: { answer: 'e' } };
+  it('prefers a judge reference over expected.answer', () => {
+    const source = { expected: { answer: 'e' } };
     expect(buildJudgeCase(source, 'r').expected.answer).toBe('r');
     expect(buildJudgeCase(source).expected.answer).toBe('e');
-    expect(buildJudgeCase({ canonicalAnswer: 'c' }).expected.answer).toBe('c');
     expect(buildJudgeCase(undefined).expected).toEqual({});
   });
 });
@@ -142,7 +143,7 @@ describe('buildJudgeTrial', () => {
 
 describe('missingRequirement', () => {
   const input: JudgeInput = {
-    case: buildJudgeCase({ canonicalAnswer: 'a', expected: { criteria: {} } }),
+    case: buildJudgeCase({ expected: { answer: 'a', criteria: {} } }),
     trial: buildJudgeTrial('x'),
   };
 
@@ -214,11 +215,13 @@ describe('judge input', () => {
       {
         id: 'with-input',
         mode: 'host',
-        scenario: 'Summarize the plan',
-        canonicalAnswer: 'Three phases',
-        expected: { criteria: { grounded: 'Cites the plan' } },
+        input: 'Summarize the plan',
+        expected: {
+          answer: 'Three phases',
+          criteria: { grounded: 'Cites the plan' },
+        },
         tags: ['rubric'],
-        expect: {
+        assertions: {
           passesJudge: { judge: 'ctx/judge', threshold: 0.6, strict: true },
         },
       },
@@ -263,15 +266,15 @@ describe('judge input', () => {
       {
         id: 'none',
         mode: 'host',
-        scenario: 'q',
-        expect: { passesJudge: { judge: 'needs/judge' } },
+        input: 'q',
+        assertions: { passesJudge: { judge: 'needs/judge' } },
       },
       {
         id: 'some',
         mode: 'host',
-        scenario: 'q',
+        input: 'q',
         expected: { criteria: { c: 'x' } },
-        expect: { passesJudge: { judge: 'needs/judge' } },
+        assertions: { passesJudge: { judge: 'needs/judge' } },
       },
     ]);
     expect(evaluate).toHaveBeenCalledTimes(1);
@@ -289,7 +292,7 @@ describe('judge input', () => {
     expect(() =>
       validateEvalDataset({
         name: 'bad',
-        cases: [{ id: 'x', scenario: 'q', expected: { criteria: { c: 1 } } }],
+        cases: [{ id: 'x', input: 'q', expected: { criteria: { c: 1 } } }],
       })
     ).toThrow();
   });
@@ -314,8 +317,8 @@ describe('judge output', () => {
       {
         id: 'rich',
         mode: 'host',
-        scenario: 'q',
-        expect: { passesJudge: { judge: 'rich/judge', threshold: 0.9 } },
+        input: 'q',
+        assertions: { passesJudge: { judge: 'rich/judge', threshold: 0.9 } },
       },
     ]);
     const caseResult = result.caseResults[0]!;
@@ -346,8 +349,8 @@ describe('judge output', () => {
       {
         id: 'bad',
         mode: 'host',
-        scenario: 'q',
-        expect: { passesJudge: { judge: 'bad/judge' } },
+        input: 'q',
+        assertions: { passesJudge: { judge: 'bad/judge' } },
       },
     ]);
     expect(result.passed).toBe(0);
@@ -379,15 +382,15 @@ describe('judge output', () => {
       {
         id: 'no-criteria',
         mode: 'host',
-        scenario: 'q',
-        expect: { passesJudge },
+        input: 'q',
+        assertions: { passesJudge },
       },
       {
         id: 'with-criteria',
         mode: 'host',
-        scenario: 'q',
+        input: 'q',
         expected: { criteria: { c: 'x' } },
-        expect: { passesJudge },
+        assertions: { passesJudge },
       },
     ]);
     const [skippedCase, gradedCase] = result.caseResults;
@@ -478,16 +481,15 @@ describe('judge output', () => {
     });
   });
 
-  it('uses expected.answer as the reference, over canonicalAnswer', async () => {
+  it('uses expected.answer as the reference', async () => {
     const evaluate = judge('answer', async () => ({ score: 1 }));
     await run([
       {
         id: 'a',
         mode: 'host',
-        scenario: 'q',
-        canonicalAnswer: 'old',
+        input: 'q',
         expected: { answer: 'new' },
-        expect: { passesJudge: { judge: 'answer/judge' } },
+        assertions: { passesJudge: { judge: 'answer/judge' } },
       },
     ]);
     expect(evaluate.mock.calls[0]![0].case.expected.answer).toBe('new');
@@ -502,9 +504,9 @@ describe('judge output', () => {
       {
         id: 'iterated',
         mode: 'host',
-        scenario: 'q',
-        iterations: 3,
-        expect: { passesJudge: { judge: 'iter/judge' } },
+        input: 'q',
+        trials: 3,
+        assertions: { passesJudge: { judge: 'iter/judge' } },
       },
     ]);
     const caseResult = result.caseResults[0]!;
@@ -531,8 +533,8 @@ describe('judge output', () => {
       {
         id: 'only-skip',
         mode: 'host',
-        scenario: 'q',
-        expect: { passesJudge: { judge: 'skip/judge' } },
+        input: 'q',
+        assertions: { passesJudge: { judge: 'skip/judge' } },
       },
     ]);
     expect(result.caseResults[0]!.pass).toBe(true);

@@ -2,7 +2,7 @@
   "id": "comprehensive-test",
   "toolName": "get_city_info",
   "args": { "city": "London" },
-  "expect": {
+  "assertions": {
     "schema": "city-info",
     "containsText": ["London", "Population"],
     "matchesPattern": ["^## City Information", "Population: [\\d.]+M"],

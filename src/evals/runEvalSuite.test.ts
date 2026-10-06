@@ -144,7 +144,7 @@ async function fixture(
 const scenario: EvalCase = {
   id: 'same',
   mode: 'mcp_host',
-  scenario: 'Find documents',
+  input: 'Find documents',
   mcpHostConfig: { provider: 'anthropic' },
 };
 
@@ -234,7 +234,7 @@ describe('suite review regressions', () => {
       schema: z.object({ type: z.string() }),
       load: async () => ({
         name: 'shared',
-        cases: [{ id: 'case', mode: 'host', scenario: 'hello' }],
+        cases: [{ id: 'case', mode: 'host', input: 'hello' }],
       }),
     });
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'suite-arms-'));
@@ -286,7 +286,7 @@ describe('suite review regressions', () => {
           sourceConfigs.push(context.hostConfig);
           return {
             name: 'cli-source',
-            cases: [{ id: 'case', mode: 'host', scenario: 'Find documents' }],
+            cases: [{ id: 'case', mode: 'host', input: 'Find documents' }],
           };
         },
       });
@@ -408,8 +408,8 @@ describe('suite review regressions', () => {
     const original = { ...scenario, args: { nested: { untouched: true } } };
     const f = await fixture([original], {
       arms: [
-        { name: 'a', scenarioTemplate: 'A {{scenario}}' },
-        { name: 'b', scenarioTemplate: 'B {{scenario}}' },
+        { name: 'a', inputTemplate: 'A {{input}}' },
+        { name: 'b', inputTemplate: 'B {{input}}' },
       ],
     });
     const result = await runSuite({
@@ -417,11 +417,11 @@ describe('suite review regressions', () => {
       rootDir: f.dir,
     });
     expect(f.load).toHaveBeenCalledTimes(1);
-    expect(f.observe.mock.calls.map(([input]) => input.scenario)).toEqual([
+    expect(f.observe.mock.calls.map(([input]) => input.prompt)).toEqual([
       'A Find documents',
       'B Find documents',
     ]);
-    expect(original.scenario).toBe('Find documents');
+    expect(original.input).toBe('Find documents');
     expect(result.datasets[0]?.dataset).toEqual({
       name: 'canonical',
       cases: [original],
@@ -532,7 +532,7 @@ describe('suite review regressions', () => {
         { ...scenario, id: 'selected', tags: ['wanted'] },
         { ...scenario, id: 'capped', tags: ['wanted'] },
       ],
-      { filterTags: ['wanted'], run: { iterations: 2, maxCases: 1 } }
+      { filterTags: ['wanted'], run: { trials: 2, maxCases: 1 } }
     );
     // Every host must exist before the first run installs the test plugin.
     const invalidFixtures = [];
@@ -540,7 +540,7 @@ describe('suite review regressions', () => {
       { profile: 'ignored' },
       { run: { profile: 'ignored' } },
       { run: { unknown: true } },
-      { iterations: 3, run: { iterations: 2 } },
+      { trials: 3, run: { trials: 2 } },
     ])
       invalidFixtures.push(await fixture([scenario], extra));
     const result = await runSuite({
@@ -592,7 +592,7 @@ describe('suite review regressions', () => {
   it('does not mutate TLS or per-suite environment settings, including dry runs', async () => {
     vi.stubEnv('NODE_TLS_REJECT_UNAUTHORIZED', '1');
     vi.stubEnv('EVAL_ITERATIONS', 'untouched');
-    const f = await fixture([scenario], { iterations: 9, model: 'chosen' });
+    const f = await fixture([scenario], { trials: 9, model: 'chosen' });
     await runSuite({
       manifestPath: f.manifestPath,
       rootDir: f.dir,
@@ -611,8 +611,8 @@ describe('suite review regressions', () => {
     const f = await fixture([
       {
         ...scenario,
-        iterations: 3,
-        expect: {
+        trials: 3,
+        assertions: {
           containsText: 'EXPECTED',
           toolCallCount: { min: 1 },
           passesJudge: { judge: judgeName },
@@ -638,7 +638,7 @@ describe('suite review regressions', () => {
           host: { type: alternate.type, model: 'case-model' },
         },
       ],
-      { iterations: 2 }
+      { trials: 2 }
     );
     await runSuite({ manifestPath: f.manifestPath, rootDir: f.dir });
     expect(f.run).not.toHaveBeenCalled();
@@ -714,8 +714,8 @@ describe('suite review regressions', () => {
           {
             ...scenario,
             id: 'case',
-            canonicalAnswer: 'canonical-gold',
-            expect: {
+            expected: { answer: 'canonical-gold' },
+            assertions: {
               passesJudge: {
                 judge: name,
                 threshold: 0.9,
@@ -782,7 +782,7 @@ describe('suite review regressions', () => {
   });
   it('merges host patches, forwards parsed defaults and computes each arm independently', async () => {
     const f = await fixture([
-      { ...scenario, expect: { containsText: 'EXPECTED' } },
+      { ...scenario, assertions: { containsText: 'EXPECTED' } },
     ]);
     f.manifest.host = {
       type: f.type,
@@ -828,7 +828,7 @@ describe('suite review regressions', () => {
       [
         {
           ...scenario,
-          expect: {
+          assertions: {
             toolsTriggered: {
               calls: [
                 {
@@ -934,7 +934,7 @@ describe('suite review regressions', () => {
   it.each([true, false])(
     'redacts every persisted response by default with explicit opt-out (%s)',
     async (redact) => {
-      const f = await fixture([{ ...scenario, iterations: 2 }]);
+      const f = await fixture([{ ...scenario, trials: 2 }]);
       f.run.mockResolvedValue({
         response: {
           success: true,
@@ -1030,7 +1030,7 @@ describe('suite plugins', () => {
             schema: ${acceptAll},
             load: async () => ({
               name: 'from-manifest-plugin',
-              cases: [{ id: 'case', mode: 'host', scenario: 'hello' }],
+              cases: [{ id: 'case', mode: 'host', input: 'hello' }],
             }),
           },
         },
@@ -1078,7 +1078,7 @@ describe('suite plugins', () => {
     };
     installPlugins([other]);
     const f = await fixture([
-      { ...scenario, expect: { passesJudge: { judge: 'other/x' } } },
+      { ...scenario, assertions: { passesJudge: { judge: 'other/x' } } },
     ]);
 
     await expect(
@@ -1110,7 +1110,7 @@ describe('direct request cases in multi-server suites', () => {
         {
           id: 'routed',
           request: { method: 'skills/list', params: {}, server: 'b' },
-          expect: {
+          assertions: {
             schema: 'SkillsListResult',
             containsText: 'weather-report',
           },
@@ -1118,7 +1118,7 @@ describe('direct request cases in multi-server suites', () => {
         {
           id: 'unknown-label',
           request: { method: 'skills/list', server: 'nope' },
-          expect: { schema: 'SkillsListResult' },
+          assertions: { schema: 'SkillsListResult' },
         },
       ],
       { servers: [server('a'), server('b')] }

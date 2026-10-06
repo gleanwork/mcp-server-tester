@@ -92,7 +92,7 @@ type Expected = z.infer<typeof ExpectedSchema>;
 interface LedgerEntry {
   arm: string;
   caseId: string | null;
-  iteration: number | null;
+  trial: number | null;
   usage?: { inputTokens: number; outputTokens: number };
   events: Array<{
     kind: string;

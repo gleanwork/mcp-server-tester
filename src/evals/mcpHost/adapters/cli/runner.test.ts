@@ -2,17 +2,17 @@ import { describe, it, expect } from 'vitest';
 import { interpolateArgs, validateSimulationResult } from './runner.js';
 
 describe('interpolateArgs', () => {
-  it('replaces {{scenario}} in args', () => {
+  it('replaces {{prompt}} in args', () => {
     const result = interpolateArgs(
-      ['-p', '{{scenario}}', '--verbose'],
+      ['-p', '{{prompt}}', '--verbose'],
       'Find recent docs'
     );
     expect(result).toEqual(['-p', 'Find recent docs', '--verbose']);
   });
 
-  it('handles multiple occurrences of {{scenario}}', () => {
+  it('handles multiple occurrences of {{prompt}}', () => {
     const result = interpolateArgs(
-      ['--prompt', '{{scenario}}', '--log', 'Running: {{scenario}}'],
+      ['--prompt', '{{prompt}}', '--log', 'Running: {{prompt}}'],
       'hello'
     );
     expect(result).toEqual(['--prompt', 'hello', '--log', 'Running: hello']);
@@ -115,15 +115,15 @@ describe('interpolateArgs with a system prompt', () => {
   it('fills both placeholders in one pass, inserting values as-is', () => {
     expect(
       interpolateArgs(
-        ['-p', '{{scenario}}', '--append-system-prompt', '{{systemPrompt}}'],
+        ['-p', '{{prompt}}', '--append-system-prompt', '{{systemPrompt}}'],
         'cost $& now',
-        'Never expand {{scenario}}.'
+        'Never expand {{prompt}}.'
       )
     ).toEqual([
       '-p',
       'cost $& now',
       '--append-system-prompt',
-      'Never expand {{scenario}}.',
+      'Never expand {{prompt}}.',
     ]);
   });
 });

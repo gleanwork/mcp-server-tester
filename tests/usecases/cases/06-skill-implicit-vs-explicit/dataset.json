@@ -4,8 +4,8 @@
     {
       "id": "summarize-thread",
       "mode": "host",
-      "scenario": "Summarize the discussion in the design thread from this week",
-      "expect": {
+      "input": "Summarize the discussion in the design thread from this week",
+      "assertions": {
         "toolsTriggered": {
           "calls": [
             {

@@ -37,7 +37,7 @@ import { test } from '@gleanwork/mcp-server-tester/fixtures/mcpAuth';
 import mcpReporter from '@gleanwork/mcp-server-tester/reporters/mcpReporter';
 ```
 
-Always import `test` and `expect` from `@gleanwork/mcp-server-tester/fixtures/mcp` in test files. The `expect` from the main entry does NOT include MCP matchers.
+Always import `test` and `assertions` from `@gleanwork/mcp-server-tester/fixtures/mcp` in test files. The `assertions` from the main entry does NOT include MCP matchers.
 
 ## Transport Configuration
 
@@ -157,7 +157,7 @@ Data-driven test cases loaded from JSON files.
       "id": "basic-search",
       "toolName": "search",
       "args": { "query": "quarterly planning" },
-      "expect": {
+      "assertions": {
         "containsText": ["quarterly", "planning"],
         "isError": false,
         "responseSize": { "maxBytes": 50000 }
@@ -198,21 +198,21 @@ test('search tool evals', async ({ mcp }, testInfo) => {
 
 ### EvalCase fields
 
-| Field               | Required      | Description                                          |
-| ------------------- | ------------- | ---------------------------------------------------- |
-| `id`                | Yes           | Unique identifier                                    |
-| `description`       | No            | Human-readable description                           |
-| `mode`              | No            | `'direct'` (default) or `'mcp_host'`                 |
-| `toolName`          | Direct mode   | Tool to call                                         |
-| `args`              | Direct mode   | Arguments for the tool                               |
-| `scenario`          | mcp_host mode | Natural language prompt for LLM                      |
-| `mcpHostConfig`     | No            | Provider, model, host type config                    |
-| `expect`            | No            | Expectation block (see above)                        |
-| `iterations`        | No            | Number of runs for accuracy measurement (default: 1) |
-| `accuracyThreshold` | No            | Min pass rate when iterations > 1 (default: 1.0)     |
-| `judgeReps`         | No            | Judge evaluations per assertion (scores averaged)    |
-| `canonicalAnswer`   | No            | Golden answer — auto-passed as judge `reference`     |
-| `tags`              | No            | String labels for filtering and slicing              |
+| Field             | Required      | Description                                          |
+| ----------------- | ------------- | ---------------------------------------------------- |
+| `id`              | Yes           | Unique identifier                                    |
+| `description`     | No            | Human-readable description                           |
+| `mode`            | No            | `'direct'` (default) or `'mcp_host'`                 |
+| `toolName`        | Direct mode   | Tool to call                                         |
+| `args`            | Direct mode   | Arguments for the tool                               |
+| `input`           | mcp_host mode | Natural language prompt for LLM                      |
+| `mcpHostConfig`   | No            | Provider, model, host type config                    |
+| `assertions`      | No            | Expectation block (see above)                        |
+| `trials`          | No            | Number of runs for accuracy measurement (default: 1) |
+| `passThreshold`   | No            | Min pass rate when trials > 1 (default: 1.0)         |
+| `judgeReps`       | No            | Judge evaluations per assertion (scores averaged)    |
+| `expected.answer` | No            | Golden answer — auto-passed as judge `reference`     |
+| `tags`            | No            | String labels for filtering and slicing              |
 
 ## Two Testing Modes
 
@@ -226,21 +226,21 @@ Call a specific tool with known arguments. Fast, deterministic, free.
   "mode": "direct",
   "toolName": "search",
   "args": { "query": "hello" },
-  "expect": { "containsText": "results" }
+  "assertions": { "containsText": "results" }
 }
 ```
 
 ### mcp_host mode
 
-An LLM receives a natural language scenario and discovers which tools to call. Non-deterministic, costs money, measures tool description quality.
+An LLM receives a natural-language input and discovers which tools to call. Non-deterministic, costs money, measures tool description quality.
 
 ```json
 {
   "id": "search-discovery",
   "mode": "mcp_host",
-  "scenario": "Find recent documents about quarterly planning",
+  "input": "Find recent documents about quarterly planning",
   "mcpHostConfig": { "provider": "anthropic" },
-  "expect": {
+  "assertions": {
     "toolsTriggered": {
       "calls": [{ "name": "search", "required": true }]
     }
@@ -447,7 +447,7 @@ await expect(result).toSatisfyToolPredicate(asyncFn);
 const result = await mcp.callTool('search', { query: 'test' });
 expect(result).toHaveToolCalls({ calls: [{ name: 'search' }] });
 
-// RIGHT — use mcp_host mode with a scenario
+// RIGHT — use mcp_host mode with an input
 // Set mode: 'mcp_host' in your eval case
 ```
 

@@ -27,7 +27,7 @@ async function suiteDir(manifest: Record<string, unknown>): Promise<string> {
     path.join(dir, 'cases.json'),
     JSON.stringify({
       name: 'cases',
-      cases: [{ id: 'one', mode: 'mcp_host', scenario: 'Say hello' }],
+      cases: [{ id: 'one', mode: 'mcp_host', input: 'Say hello' }],
     })
   );
   await fs.writeFile(path.join(dir, 'manifest.json'), JSON.stringify(manifest));
@@ -40,7 +40,7 @@ describe('manifest identity', () => {
       name: 'identity',
       datasets: ['./cases.json'],
       judges: [{ type: 'rubric', rubric: 'correctness' }],
-      iterations: 2,
+      trials: 2,
     });
     const { summary } = await runEvalSuite({
       manifestPath: path.join(dir, 'manifest.json'),
@@ -53,7 +53,7 @@ describe('manifest identity', () => {
     }).toEqual({
       manifestId: 'identity',
       contentHash:
-        '03bb021897ce1dae78884adcf0a155256cda50ac6a9e1fb46f5e80a3b4e71cf1',
+        'ffb64e7252b1d335266b8f5d27a02801c62ffea003a6e1e6e724419fa6c231d4',
     });
   });
 });
@@ -101,14 +101,14 @@ describe('shared configs', () => {
         name: 'extends',
         extends: ['acme/recommended'],
         datasets: ['./cases.json'],
-        iterations: 3,
+        trials: 3,
       },
       [
         acme({
           recommended: {
             host: { type: 'acme/echo' },
             judges: ['acme/fixed'],
-            iterations: 2,
+            trials: 2,
             maxToolCalls: 4,
           },
         }),
@@ -117,7 +117,7 @@ describe('shared configs', () => {
     expect(manifest).toMatchObject({
       host: { type: 'acme/echo' },
       judges: [{ type: 'acme/fixed', score: 1 }],
-      iterations: 3,
+      trials: 3,
       maxToolCalls: 4,
       extends: ['acme/recommended'],
     });
@@ -160,11 +160,11 @@ describe('shared configs', () => {
       datasets: ['./cases.json'],
     };
     const first = await dryRun(manifest, [
-      acme({ recommended: { iterations: 2 } }),
+      acme({ recommended: { trials: 2 } }),
     ]);
     resetPluginsForTests();
     const second = await dryRun(manifest, [
-      acme({ recommended: { iterations: 5 } }),
+      acme({ recommended: { trials: 5 } }),
     ]);
     expect(first.summary.contentHash).not.toBe(second.summary.contentHash);
 
@@ -271,11 +271,11 @@ describe('shared configs', () => {
         name: 'run-controls',
         extends: ['acme/recommended'],
         datasets: ['./cases.json'],
-        run: { iterations: 5 },
+        run: { trials: 5 },
       },
-      [acme({ recommended: { iterations: 3, concurrency: 2 } })]
+      [acme({ recommended: { trials: 3, concurrency: 2 } })]
     );
-    expect(manifest).toMatchObject({ iterations: 5, concurrency: 2 });
+    expect(manifest).toMatchObject({ trials: 5, concurrency: 2 });
   });
 
   it('lets a config use built-ins', async () => {
@@ -312,18 +312,14 @@ describe('plugin configs', () => {
   });
 
   it('treats a rebuilt plugin with different configs as a different plugin', () => {
-    const plugin = acme({ recommended: { iterations: 1 } });
+    const plugin = acme({ recommended: { trials: 1 } });
     installPlugins([plugin]);
     // A rebuilt object around the same definitions and equal configs is the same plugin.
     expect(() =>
-      installPlugins([
-        { ...plugin, configs: { recommended: { iterations: 1 } } },
-      ])
+      installPlugins([{ ...plugin, configs: { recommended: { trials: 1 } } }])
     ).not.toThrow();
     expect(() =>
-      installPlugins([
-        { ...plugin, configs: { recommended: { iterations: 2 } } },
-      ])
+      installPlugins([{ ...plugin, configs: { recommended: { trials: 2 } } }])
     ).toThrow('uses namespace "acme", which "acme-plugin" already uses');
   });
 

@@ -2,7 +2,7 @@
   "id": "weather-format",
   "toolName": "get_weather",
   "args": { "city": "London" },
-  "expect": {
+  "assertions": {
     "matchesPattern": [
       "^## Weather",
       "Temperature: \\d+°[CF]",

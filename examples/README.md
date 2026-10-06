@@ -65,7 +65,7 @@ test('validates config', async ({ mcp }) => {
       id: 'config-check',
       toolName: 'read_file',
       args: { path: 'config.json' },
-      expect: {
+      assertions: {
         containsText: ['version', '1.0.0'],
       },
     },
