@@ -158,3 +158,11 @@ export type {
 // Agentic judges: run an agent (Codex or Claude Agent SDK) over a workspace
 // of the run's evidence.
 export * from '../judge/agentic/index.js';
+// Judging saved runs (`mst judge`).
+export { judgeSuite, savedCaseResults } from '../evals/judgeSuite.js';
+export type {
+  JudgeSuiteOptions,
+  JudgeSuiteResult,
+} from '../evals/judgeSuite.js';
+export { judgeSavedRun } from '../evals/judgeSavedRun.js';
+export type { JudgeSavedRunOptions } from '../evals/judgeSavedRun.js';

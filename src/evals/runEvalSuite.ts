@@ -293,7 +293,7 @@ function armEvidence(results: EvalCaseResult[]): HostEvidence | undefined {
  * What every arm reports, whatever the manifest lists: outcomes, calls,
  * tokens, cost and time. A manifest's `metrics` add to these.
  */
-const CORE_METRICS = [
+export const CORE_METRICS = [
   'passed',
   'trial_pass',
   'tool_count',

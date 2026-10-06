@@ -61,6 +61,11 @@ describe('host artifactsDir', () => {
     expect(seen[0]?.trial.artifactsDir).toBe('/local/session/dir');
     const stored = JSON.stringify(result);
     expect(stored).not.toContain('/local/session/dir');
+    // Its last segment is kept, so `mst judge --artifacts-root` can find it.
+    expect(
+      (result.caseResults[0]!.response as { artifactsName?: string })
+        .artifactsName
+    ).toBe('dir');
     expect(JSON.stringify(redactStoredResponses(result))).not.toContain(
       '/local/session/dir'
     );

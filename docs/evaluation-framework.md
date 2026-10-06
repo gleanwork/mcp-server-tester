@@ -576,6 +576,14 @@ anything; `run --dry-run` prints the manifest name, datasets and arms as JSON.
 Without it, `run` runs the manifest's arms and `batch` runs each listed
 manifest.
 
+`mst judge --manifest ./eval-manifest.json --results ./run/results.json` runs
+judges on a saved run's responses without running its cases (see
+[CLI](./cli.md#judge---judge-a-saved-run)). Results keep the last segment of a
+host's `artifactsDir` as `response.artifactsName`, never the local path;
+`--artifacts-root` points it at where the evidence was copied, so a judge that
+reads `trial.artifactsDir`, such as an agentic judge, judges a saved run as it
+would the live one.
+
 ## Ownership boundary
 
 The framework owns generic loading, extension lookup, execution, metrics,

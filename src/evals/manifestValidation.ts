@@ -172,6 +172,17 @@ function parseJudges(
   });
 }
 
+/**
+ * Parses judge entries as a manifest's `judges` are parsed, each by its
+ * judge's schema. For judges given apart from a manifest (`mst judge`).
+ */
+export function parseManifestJudges(
+  configs: ExtensionConfig[],
+  namespaces?: readonly string[]
+): ExtensionConfig[] {
+  return parseJudges(configs, manifestLookups(namespaces)) ?? [];
+}
+
 /** Manifest settings that default every host's option of the same name. */
 const HOST_DEFAULTS = [
   'model',

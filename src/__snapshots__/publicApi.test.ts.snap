@@ -41,6 +41,8 @@ exports[`public API > ./evals 1`] = `
   "getPairwiseJudge",
   "isEvalResultStore",
   "isProviderAvailable",
+  "judgeSavedRun",
+  "judgeSuite",
   "loadBaseline",
   "loadEvalManifest",
   "loadEvalManifestFromObject",
@@ -55,6 +57,7 @@ exports[`public API > ./evals 1`] = `
   "runVariantExperiment",
   "saveBaseline",
   "saveEvalRunComparison",
+  "savedCaseResults",
   "simulateMCPHost",
   "validateManifest",
 ]

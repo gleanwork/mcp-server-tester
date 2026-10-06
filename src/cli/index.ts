@@ -10,6 +10,7 @@ import { token } from './commands/token/index.js';
 import { open } from './commands/open/index.js';
 import { run } from './commands/run/index.js';
 import { batch } from './commands/batch/index.js';
+import { judge } from './commands/judge/index.js';
 import { setupCowork } from './commands/cowork/index.js';
 import packageJson from '../../package.json' with { type: 'json' };
 import { inspect } from 'node:util';
@@ -89,6 +90,51 @@ program
   )
   .option('--dry-run', 'Validate the manifest and plugins without executing')
   .action(run);
+
+// Judge command
+program
+  .command('judge')
+  .description(
+    "Run a manifest's judges on a saved run's responses, without running the cases"
+  )
+  .requiredOption(
+    '-m, --manifest <path>',
+    'The evaluation manifest the run used'
+  )
+  .requiredOption(
+    '-r, --results <path>',
+    'The saved run: results.json, or a stored arm result'
+  )
+  .option('--plugins <paths...>', 'Plugin modules to load, as for run')
+  .option('--arm <name>', "Judge one arm's cases, with that arm's judges")
+  .option(
+    '--judges <path>',
+    'JSON file of judges to run instead of the manifest\'s: { "judges": [...], "pairwiseJudges": [...] }'
+  )
+  .option(
+    '--artifacts-root <dir>',
+    "Directory holding the run's evidence directories, by response.artifactsName"
+  )
+  .option(
+    '--dataset <path>',
+    "Dataset file for ground truth, instead of the manifest's datasets"
+  )
+  .option(
+    '--baseline <path>',
+    'A saved baseline run to compare with, using pairwiseJudges'
+  )
+  .option(
+    '--baseline-artifacts-root <dir>',
+    "Directory holding the baseline run's evidence directories"
+  )
+  .option('--output-dir <dir>', 'Directory for the judged results')
+  .option('--concurrency <number>', 'Cases judged at once')
+  .option(
+    '--root-dir <dir>',
+    'Fallback directory for relative paths; default location for results',
+    '.'
+  )
+  .action(judge);
 
 // Batch command
 program

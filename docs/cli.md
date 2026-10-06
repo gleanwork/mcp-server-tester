@@ -685,6 +685,35 @@ npx mst run --manifest ./eval-manifest.json [options]
 
 `run` prints a row per arm (cases passed, trial pass rate, MCP calls, host events, tokens, cost, time) and, when there is one, the change since the previous run of the same manifest and arm. It writes `results.json` in the output directory and exits 1 when any case failed. `--dry-run` prints the manifest's name, output directory, datasets and arms as JSON.
 
+## `judge` - Judge a Saved Run
+
+Runs judges on the responses a run saved, without running the cases again: to add or change a judge, to judge where the run had no judge credentials, or to judge with evidence collected after the run. The manifest, its plugins and datasets load as for `run`; ground truth (`expected`, `canonicalAnswer`) comes from the datasets, not the results.
+
+### Usage
+
+```bash
+npx mst judge --manifest ./eval-manifest.json --results ./run/results.json [options]
+```
+
+### Options
+
+| Option                            | Description                                                                                                                                              |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-m, --manifest <path>`           | The manifest the run used (required).                                                                                                                    |
+| `-r, --results <path>`            | The saved run: its `results.json`, or a stored arm result (required). It must keep responses: run with `redactStoredResponses: false`.                   |
+| `--judges <path>`                 | A JSON file of judges to run instead of the manifest's: `{ "judges": [...], "pairwiseJudges": [...] }`, entries as a manifest lists them.                |
+| `--artifacts-root <dir>`          | Where the run's evidence directories were copied. A response's `artifactsName` (the last segment of the host's `artifactsDir`) names its directory here. |
+| `--dataset <path>`                | A dataset file for ground truth instead of the manifest's datasets.                                                                                      |
+| `--baseline <path>`               | A saved baseline run to compare with, using the judges file's `pairwiseJudges`. The comparison goes in `pairwise.json`.                                  |
+| `--baseline-artifacts-root <dir>` | Where the baseline run's evidence directories were copied.                                                                                               |
+| `--arm <name>`                    | Judge one arm's cases, with that arm's judges.                                                                                                           |
+| `--plugins <paths...>`            | Plugin modules to load, as for `run`.                                                                                                                    |
+| `--output-dir <dir>`              | Where to write: each judging goes in `<dir>/<id>/`. Default: `.mcp-test-results/<manifest name>/judged`.                                                 |
+| `--concurrency <number>`          | Cases judged at once. Default: the manifest's `concurrency`, else 4.                                                                                     |
+| `--root-dir <dir>`                | Fallback for relative paths, and the default results location. Default: `.`.                                                                             |
+
+`judge` replaces each case's `judge` expectation, `pass` and `judgeUsage`, and keeps its other expectations as the run graded them. A case that errored is kept as it ran. It writes `results.json` with `judgedRun` naming the saved run, stored as `run` stores results.
+
 ## `batch` - Run Several Manifests
 
 ### Usage

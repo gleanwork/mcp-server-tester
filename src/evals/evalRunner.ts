@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import { simulationTrace } from './hostTrace.js';
 import {
@@ -1497,7 +1498,11 @@ function formatBaselineRef(
     : `resultStore ${baselineResultsFrom.ref.id}`;
 }
 
-/** `response` without `artifactsDir`, a local path only judges read. */
+/**
+ * `response` without `artifactsDir`, a local path only judges read. Its last
+ * segment stays as `artifactsName`, so `mst judge --artifacts-root` can find
+ * the evidence again wherever it was copied.
+ */
 function withoutArtifactsDir(response: unknown): unknown {
   if (
     typeof response !== 'object' ||
@@ -1505,6 +1510,8 @@ function withoutArtifactsDir(response: unknown): unknown {
     !('artifactsDir' in response)
   )
     return response;
-  const { artifactsDir: _local, ...rest } = response as Record<string, unknown>;
-  return rest;
+  const { artifactsDir: local, ...rest } = response as Record<string, unknown>;
+  return typeof local === 'string' && local !== ''
+    ? { ...rest, artifactsName: path.basename(local) }
+    : rest;
 }

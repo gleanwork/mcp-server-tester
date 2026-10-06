@@ -301,6 +301,8 @@ export interface RunSummary {
   runId?: string;
   /** This run compared with the previous run of the same manifest, if there is one. */
   previousRun?: PreviousRunComparison;
+  /** For `mst judge` results: the saved run whose responses were judged. */
+  judgedRun?: { runId?: string; timestamp?: string };
   schemaVersion: 1;
   manifestId: string;
   contentHash: string;

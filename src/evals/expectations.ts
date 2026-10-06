@@ -206,7 +206,11 @@ export function mergeSuiteJudges(
   ];
 }
 
-async function evaluateJudges(
+/**
+ * Runs a case's judges and folds them into its `judge` expectation: one
+ * judge's result, or all of them with a pass count. Also judges saved runs.
+ */
+export async function evaluateJudges(
   response: unknown,
   judges: JudgeExpectConfig[],
   run: JudgeRun
