@@ -116,7 +116,7 @@ export interface EvalCase {
   metadata?: Record<string, unknown>;
 
   /**
-   * Number of trials: attempts at this case. When > 1,
+   * Number of trials (independent runs) of this case. When > 1,
    * `EvalCaseResult.assertionPassRate` is the share of trials that passed, and
    * `pass` is decided by `passThreshold`.
    * @default 1

@@ -312,7 +312,7 @@ The manual loop above — run baseline, inject a variant, `compareEvalRuns`, bui
 
 - Pass a static `variants` list for an A/B comparison, **or** a `proposeVariants` callback that returns the next candidate(s) from the previous round's evidence (`history`, `bestSoFar`).
 - Candidates are ranked by `metric` (`passRate` by default, or `toolF1` / `toolPrecision` / `toolRecall`) and always compared against the original baseline, so the resulting proposal is directly applicable.
-- A variant that regresses any case is disqualified (unless `allowRegressions: true`), so the loop never crowns a description that fixes one case while breaking another.
+- A variant that breaks cases that work today is disqualified (unless `allowRegressions: true`), so the loop never crowns a description that fixes one case while breaking another. A single flaky trial doesn't count as breaking a case, and a variant must be clearly better to be recommended (see [How variants are judged](#how-variants-are-judged)).
 - The result carries a structured `proposal` with an `apply` / `reject` / `inconclusive` recommendation, the per-tool `toolChanges`, and the improved/regressed case ids.
 
 The library owns the experiment mechanics; your `proposeVariants` callback owns the judgment of which variant to try next. `runVariantExperiment` never edits your MCP server source or dataset — it returns a proposal for you (or an agent) to act on.
@@ -371,8 +371,9 @@ test('optimize search description (static variants)', async ({
     );
   }
 
-  // The default guard never crowns a variant that regresses a case.
-  expect(result.winner?.comparison.regressedCases ?? []).toHaveLength(0);
+  // The default guard never crowns a variant that clearly broke a
+  // regression case (tag those cases "regression").
+  expect(result.winner?.measurement.brokenCaseIds ?? []).toHaveLength(0);
 });
 
 // Agent loop: propose the next variant from the previous round's evidence.
@@ -422,14 +423,43 @@ test('optimize search description (agent loop)', async ({ mcp }, testInfo) => {
 });
 ```
 
-| Option             | Default      | Purpose                                                                 |
-| ------------------ | ------------ | ----------------------------------------------------------------------- |
-| `variants`         | —            | Static candidates tried in round 0.                                     |
-| `proposeVariants`  | —            | Async callback returning the next candidates — the AI hook.             |
-| `metric`           | `'passRate'` | Ranking metric: `passRate` / `toolF1` / `toolPrecision` / `toolRecall`. |
-| `maxRounds`        | `1`          | Maximum optimization rounds.                                            |
-| `minImprovement`   | `0`          | Stop when a round's best gain falls below this.                         |
-| `allowRegressions` | `false`      | Allow a winner that regresses cases.                                    |
+| Option             | Default         | Purpose                                                                                         |
+| ------------------ | --------------- | ----------------------------------------------------------------------------------------------- |
+| `variants`         | —               | Static candidates tried in round 0.                                                             |
+| `proposeVariants`  | —               | Async callback returning the next candidates — the AI hook.                                     |
+| `metric`           | `'passRate'`    | Ranking metric: `passRate` / `toolF1` / `toolPrecision` / `toolRecall`, without held-out cases. |
+| `maxRounds`        | `1`             | Maximum optimization rounds.                                                                    |
+| `minImprovement`   | `0`             | Stop when a round's best gain falls below this.                                                 |
+| `allowRegressions` | `false`         | Allow a winner that breaks cases.                                                               |
+| `regressionCheck`  | `'significant'` | How breakage is judged: `'significant'` or `'any-case'` (see below).                            |
+| `regressionTag`    | `'regression'`  | Tag that marks regression cases (see below).                                                    |
+| `heldOutTag`       | `'held-out'`    | Tag that marks cases left out of ranking and hidden from `proposeVariants`.                     |
+
+`passRate` is the mean per-case share of trials that passed (pass@1, each case weighted equally). With one trial per case it's the share of cases that passed.
+
+#### How variants are judged
+
+A recommendation should mean the evidence supports it, so `runVariantExperiment` follows standard practice for comparing two systems on the same test cases. Every number the report shows comes from these steps.
+
+**Groups.** Cases tagged `regression` are regression cases; every other case is a capability case. This is the split between regression and capability evals in Anthropic's [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents). If no case has the tag, the baseline runs once more, only to sort cases: those that pass every trial of that run must keep working. Groups never come from the baseline run the variants are compared with. A flaky case that happened to pass that run tends to do worse on any re-run, and one that happened to fail tends to do better, so grouping by it makes unchanged variants look broken or fixed (regression to the mean). Tag your regression cases to choose the groups yourself and skip the extra run.
+
+**Clearly better.** Each case scores the share of its trials that passed, and each variant is compared with the baseline case by case, as recommended in Miller's [Adding Error Bars to Evals](https://arxiv.org/abs/2411.00640). The verdict comes from an exact paired sign-flip test, which stays valid with few cases; with one trial per case it's McNemar's exact test. A variant is clearly better on should-now-work cases when that test gives p below 0.025 / N, where N is the number of variants tried across all rounds (a Bonferroni correction, so trying many variants can't promote a lucky one). With a tool metric, the same test runs on per-case precision, recall or F1.
+
+**Breakage.** With `regressionCheck: 'significant'` (the default), a variant is disqualified when the regression cases got worse as a group (p below 0.025), or any one of them did on its own. The single-case check uses Fisher's exact test on that case's trials, Holm-corrected so the chance of wrongly calling any case broken stays below 5%. One flaky trial is not breakage. `'any-case'` disqualifies a variant when any case that passed the baseline fails with it, however small the drop, so with flaky cases it rejects good variants for noise.
+
+**Held-out cases.** Cases tagged `held-out` don't count toward ranking, and `proposeVariants` never sees them: every run in its context has them removed. They still count toward the checks above, and the report also tests the change on them alone, a check the selection couldn't have tuned to.
+
+**What these checks can't tell you:**
+
+- "No clear breakage" means the tests found none, not that none happened. With 5 trials per case, one case breaking outright can be caught on its own only when there are at most 12 regression cases; the report says when your run is too small. Breakage spread across cases is caught by the group test.
+- With one trial per case, only large changes show up as clear. In simulation, a variant that fixed most failing cases was recommended 30% of the time with 1 trial per case, 87% with 5 and 97% with 10. Use `defaultLlmIterations` or per-case `iterations` of 5 or more.
+- Cases are treated as independent. Near-duplicate prompts count as separate evidence and make results look surer than they are. Miller recommends clustered standard errors for grouped questions; they aren't supported yet.
+
+Seeded simulations in `src/evals/variantComparison.test.ts` pin these error rates. A variant identical to the baseline is called clearly better less than 5% of the time and broken less than 7.5% of the time, while a real improvement is still found more than 75% of the time.
+
+Each candidate's `measurement` holds the per-group pass rates, each `change` with its interval, p-values and `assessment`, and `brokenCaseIds`. `improvement` is the change behind the "clearly better" call, and `fixes` is that call.
+
+With `testInfo`, the experiment also attaches a case-by-case comparison of every variant, and the [UI reporter](./ui-reporter.md#comparison-tab) opens on a **Comparison** tab that shows the recommendation, each variant against the baseline, what changed, every case and trial, and why trials failed.
 
 ## Project-Based A/B Testing
 

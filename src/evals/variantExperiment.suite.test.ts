@@ -96,7 +96,7 @@ async function suite(arms?: unknown[]): Promise<string> {
 }
 
 describe('runVariantExperiment on a suite', () => {
-  it('runs variants as arms and recommends the one that passes', async () => {
+  it('runs variants as arms and ranks the one that passes first', async () => {
     const manifestPath = await suite();
     const result = await runVariantExperiment({
       suite: { manifestPath, rootDir: path.dirname(manifestPath) },
@@ -111,10 +111,12 @@ describe('runVariantExperiment on a suite', () => {
       ['verbose', 1],
     ]);
     expect(result.winner?.variant.id).toBe('verbose');
+    // One case can't show a clear improvement (the exact paired test's
+    // smallest p-value is 0.5), so the winner isn't recommended.
     expect(result.proposal).toMatchObject({
       variantId: 'verbose',
       metric: 'passRate',
-      recommendation: 'apply',
+      recommendation: 'inconclusive',
       improvedCaseIds: ['cross-source'],
     });
   }, 60_000);

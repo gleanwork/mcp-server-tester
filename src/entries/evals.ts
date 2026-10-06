@@ -31,6 +31,12 @@ export type {
   VariantExperimentResult,
   SuiteVariantExperimentOptions,
   VariantExperimentSuite,
+  BaselineMeasurement,
+  RegressionCheck,
+  VariantGroupStats,
+  PairedChange,
+  ChangeAssessment,
+  VariantGrouping,
 } from '../types/index.js';
 export {
   EvalManifestSchema,

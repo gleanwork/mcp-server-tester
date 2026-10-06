@@ -276,7 +276,7 @@ export interface IterationResult {
     }>;
     missed: Array<{ name: string }>;
   };
-  /** Sanitized host evidence for this specific attempt. */
+  /** Sanitized client evidence for this specific trial. */
   hostDiagnostics?: ClientDiagnostics;
   /** Evidence level retained even when raw responses are redacted. */
   hostEvidence?: TraceEvidence;
@@ -629,7 +629,7 @@ export interface MCPVariantExperimentData {
   metric: string;
   /** Baseline metric value (0-1), before any variant. */
   baselineValue: number;
-  /** Best metric value achieved (the winner, or best attempt) (0-1). */
+  /** Best metric value achieved (the winner, or the best candidate tried) (0-1). */
   bestValue: number;
   /** The best candidate from each round, in order. */
   rounds: Array<{
@@ -645,6 +645,255 @@ export interface MCPVariantExperimentData {
   recommendation?: string;
   /** Why the experiment stopped. */
   reason: string;
+  /**
+   * Case-by-case comparison of every variant against the baseline, computed
+   * by `compareVariants`. Absent in reports written before 2.0.
+   */
+  comparison?: MCPComparisonData;
+}
+
+/**
+ * Which cases a variant is judged on.
+ *
+ * - `capability`: a capability case, which a variant should improve.
+ * - `regression`: a regression case, which a variant must not break.
+ *
+ * Groups never come from the baseline run the variants are compared with:
+ * picking cases by that run's own results and then measuring change against
+ * it builds in regression to the mean. See `VariantGrouping`.
+ */
+export type VariantCaseGroup = 'capability' | 'regression';
+
+/**
+ * Where the case groups came from.
+ *
+ * - `declared`: cases with the regression tag are regression cases; every
+ *   other case is a capability case.
+ * - `grouping-run`: no case had the regression tag, so the experiment ran
+ *   the baseline once more, only to group cases: those that passed it are
+ *   regression cases.
+ */
+export type VariantGrouping = 'declared' | 'grouping-run';
+
+/** The library's call on a change: clearly better, clearly worse, or neither. */
+export type ChangeAssessment = 'better' | 'worse' | 'unclear';
+
+/**
+ * What went wrong in a failed trial, read from its tool-call trace.
+ *
+ * - `no-tool-call`: the client called no tools.
+ * - `wrong-tool`: the client called an unexpected tool or missed a required one.
+ * - `check-failed`: the expected tools were called, but an expectation failed.
+ * - `error`: the trial threw, or failed for an infrastructure reason.
+ */
+export type TrialFailureKind =
+  | 'no-tool-call'
+  | 'wrong-tool'
+  | 'check-failed'
+  | 'error';
+
+/**
+ * Mean per-case difference between a variant and the baseline, as a share
+ * (0.25 = 25 points).
+ *
+ * `lower` and `upper` are a 95% t-interval over cases, for display. With
+ * fewer than two cases the interval spans every possible value (-1 to 1).
+ * The assessment comes from an exact paired sign-flip test instead, which stays
+ * valid with few cases; with one trial per case it is McNemar's exact test.
+ */
+export interface PairedChange {
+  mean: number;
+  lower: number;
+  upper: number;
+  /** Cases the difference was taken over. */
+  cases: number;
+  /** One-sided p-value that the variant is better than the baseline. */
+  pBetter: number;
+  /** One-sided p-value that the variant is worse than the baseline. */
+  pWorse: number;
+  /**
+   * `better` when `pBetter` is below `alpha / variantsTried`, `worse` when
+   * `pWorse` is below `alpha`, otherwise `unclear`.
+   */
+  assessment: ChangeAssessment;
+}
+
+/** A variant's results over one case group. */
+export interface VariantGroupStats {
+  /** Cases in the group. */
+  cases: number;
+  /** Mean per-case pass rate (pass@1). Absent when the group is empty. */
+  passRate?: number;
+  /** Pass rate over cases without the held-out tag, when the group has both kinds. */
+  seenPassRate?: number;
+  /** Pass rate over held-out cases, when the group has any. */
+  heldOutPassRate?: number;
+  /** Share of the group's cases where every trial passed (pass^k). */
+  allTrialsPassedRate?: number;
+  /** Change from the baseline. Absent for the baseline and for empty groups. */
+  change?: PairedChange;
+  /**
+   * Change on the group's held-out cases alone, when it has both kinds.
+   * Variants are ranked without held-out cases, so this is a check the
+   * selection can't have tuned to.
+   */
+  heldOutChange?: PairedChange;
+}
+
+/** One trial at one case by one variant. */
+export interface VariantTrial {
+  pass: boolean;
+  /** Why the trial failed, when it did. */
+  failure?: TrialFailureKind;
+  /** Tools the client called, in order, when a trace was recorded. */
+  calls?: string[];
+  /** Required tools the client never called. */
+  missed?: string[];
+  /** Input plus output tokens, when the client reported usage. */
+  tokens?: number;
+}
+
+/** One case's results across every variant. */
+export interface VariantComparisonCase {
+  id: string;
+  /** The case's input (or description) given to the client. */
+  input?: string;
+  group: VariantCaseGroup;
+  heldOut: boolean;
+  /** Tools the case expects, from its `toolsTriggered` expectation. */
+  expectedTools?: string[];
+  /** Trials keyed by variant id (the baseline uses `baselineId`). */
+  trials: Record<string, VariantTrial[]>;
+}
+
+/** One tool field a variant changed. */
+export interface VariantToolChange {
+  tool: string;
+  field: 'description' | 'inputSchema';
+  /** The server's original value, when it could be read. */
+  before?: string;
+  after: string;
+}
+
+/** A wrong or missing tool call that recurred across a variant's failed trials. */
+export interface VariantToolMistake {
+  /** The first tool called instead, or null when no tool was called. */
+  called: string | null;
+  /** The tools that were expected. */
+  expected: string[];
+  /** Whether the expected tool was called but the trial still failed. */
+  calledExpected: boolean;
+  trials: number;
+  caseIds: string[];
+}
+
+/**
+ * Where a variant landed.
+ *
+ * - `baseline`: the reference every variant is compared with.
+ * - `recommended`: the experiment's winner.
+ * - `breaks`: disqualified for breaking cases that work today.
+ * - `better`: better than the baseline, but not the winner.
+ * - `worse`: worse than the baseline on cases that should now work.
+ * - `no-change`: no clear difference from the baseline.
+ */
+export type VariantStatus =
+  | 'baseline'
+  | 'recommended'
+  | 'breaks'
+  | 'better'
+  | 'worse'
+  | 'no-change';
+
+/** One variant's results, including the baseline. */
+export interface VariantComparisonEntry {
+  id: string;
+  /** The variant's own explanation of what it tests. */
+  description?: string;
+  status: VariantStatus;
+  /**
+   * The two checks a winner must pass: clearly better than the baseline,
+   * after adjusting for every variant tried, and not breaking
+   * `regression` cases under the experiment's rule.
+   */
+  checks?: { fixes: boolean; keepsRegressions: boolean };
+  capability: VariantGroupStats;
+  regression: VariantGroupStats;
+  /** Cases that pass more trials than with the baseline. */
+  improvedCaseIds: string[];
+  /** Cases that pass fewer trials than with the baseline. */
+  regressedCaseIds: string[];
+  /**
+   * `regression` cases that clearly broke on their own: a one-sided
+   * Fisher's exact test on each case's trials, Holm-corrected so the
+   * chance of wrongly calling any case broken stays below `caseAlpha`.
+   */
+  brokenCaseIds: string[];
+  /** Cases that passed some trials but not all. */
+  unsteadyCaseIds: string[];
+  trials: number;
+  failedTrials: number;
+  failures: Record<TrialFailureKind, number>;
+  mistakes: VariantToolMistake[];
+  meanTokensPerTrial?: number;
+  meanToolCallsPerTrial?: number;
+  toolChanges: VariantToolChange[];
+}
+
+/**
+ * How a variant is disqualified for breaking cases that work today.
+ *
+ * - `significant` (default): the variant is disqualified when its
+ *   `regression` cases clearly got worse, as a group (paired sign-flip
+ *   test, one-sided p below `alpha`) or any one case on its own (see
+ *   `brokenCaseIds`). One flaky trial is not breakage.
+ * - `any-case`: any case that passed with the baseline and fails with the
+ *   variant disqualifies it, however small the drop. With flaky cases this
+ *   rejects variants for noise.
+ */
+export type RegressionCheck = 'any-case' | 'significant';
+
+/** Every variant compared with the baseline, case by case. */
+export interface MCPComparisonData {
+  baselineId: string;
+  regressionCheck: RegressionCheck;
+  /** Where the case groups came from. */
+  grouping: VariantGrouping;
+  /** The tag that marks a regression (`regression`) case. */
+  regressionTag: string;
+  /** The tag that marks a case as held out. */
+  heldOutTag: string;
+  /**
+   * One-sided significance level for calling a change clearly better or
+   * worse. 0.025 matches the 95% intervals shown.
+   */
+  alpha: number;
+  /**
+   * Variants tried across every round. A variant counts as clearly better
+   * only when `pBetter` is below `alpha / variantsTried` (Bonferroni), so
+   * trying many variants doesn't make a lucky one look real. 0 when none ran.
+   */
+  variantsTried: number;
+  /** Familywise level for calling any single `regression` case broken. */
+  caseAlpha: number;
+  /**
+   * Trials per case needed before one regression case breaking outright
+   * can be detected on its own, given how many regression cases there are.
+   * When `regressionTrialsPerCase` is lower, only breakage across cases
+   * can be detected.
+   */
+  trialsToDetectBrokenCase: number;
+  /** Fewest trials any regression case ran, in any variant. */
+  regressionTrialsPerCase?: number;
+  /** Most trials any case ran. */
+  trialsPerCase: number;
+  /** Fewest trials any case ran. */
+  minTrialsPerCase: number;
+  /** The winner, when there is one. */
+  recommendedId?: string;
+  /** Baseline first, then candidates in the order they ran. */
+  variants: VariantComparisonEntry[];
+  cases: VariantComparisonCase[];
 }
 
 /**
