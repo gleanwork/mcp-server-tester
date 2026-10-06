@@ -19,6 +19,8 @@ import {
   type ClientStdioServer,
 } from '../clientPlugins.js';
 import {
+  COWORK_HEADLESS_DISABLED_BUILTIN_TOOLS as HEADLESS_DISABLED,
+  coworkHeadlessSettingsMatch,
   coworkJsonEqual,
   coworkManagedPluginSettings,
   coworkMcpSettingsMatch,
@@ -26,6 +28,9 @@ import {
 } from './managedSettings.js';
 
 export {
+  COWORK_HEADLESS_DISABLED_BUILTIN_TOOLS,
+  coworkHeadlessSettings,
+  coworkHeadlessSettingsMatch,
   coworkManagedPluginSettings,
   coworkMcpSettingsMatch,
   coworkPluginSettingsMatch,
@@ -158,8 +163,16 @@ function coworkLinuxOwnedSettings(
     ? (base.inferenceModels as Array<{ name?: unknown } | null>)
     : [];
   const { allowedPluginMarketplaces: _previous, ...rest } = base;
+  const disabled = Array.isArray(base.disabledBuiltinTools)
+    ? base.disabledBuiltinTools.filter(
+        (tool): tool is string => typeof tool === 'string'
+      )
+    : [];
   return {
     ...rest,
+    // Headless: nobody can answer AskUserQuestion. The image's own
+    // disabled tools stay disabled.
+    disabledBuiltinTools: [...new Set([...disabled, ...HEADLESS_DISABLED])],
     managedMcpServers: [...http, ...managed.managedMcpServers],
     allowedMcpServers: [
       ...http.map((entry) => ({ serverName: entry.name })),
@@ -476,6 +489,8 @@ export const linuxCoworkPlatform: CoworkPlatform = {
           throw new Error('model');
         if (!coworkPluginSettingsMatch(settings, plugins))
           throw new Error('plugins');
+        // Linux Cowork is always headless: nobody can answer AskUserQuestion.
+        if (!coworkHeadlessSettingsMatch(settings)) throw new Error('headless');
         const servers = transportServers(evalConfig.servers, 'Cowork');
         if (
           !coworkMcpSettingsMatch(settings, {
@@ -494,7 +509,7 @@ export const linuxCoworkPlatform: CoworkPlatform = {
         );
       } catch {
         throw new Error(
-          'Prepared Linux desktop settings do not match the eval model, MCP servers, plugins, plugin/data paths, or approval policy.'
+          'Prepared Linux desktop settings do not match the eval model, MCP servers, plugins, plugin/data paths, approval policy, or headless built-in tools.'
         );
       }
       await execute(

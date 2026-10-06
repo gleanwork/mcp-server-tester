@@ -26,6 +26,7 @@ import {
   createCoworkBundlePlan,
   prepareCoworkMcpBundle,
 } from './bundle.js';
+import { coworkHeadlessSettings } from '../cowork/managedSettings.js';
 import { createCoworkMcpPlan } from './config.js';
 import { checkManagedInferencePreferences } from './macManagedPreferences.js';
 
@@ -648,6 +649,8 @@ function profileBytes(
     ...settings,
     // Keep the evaluated application version fixed during this temporary profile.
     disableAutoUpdates: true,
+    // MST drives this profile without a user to answer clarifying questions.
+    ...coworkHeadlessSettings(),
     // The plugin's own servers would bypass the eval endpoint; block them.
     ...(options.blocked.length
       ? { managedMcpServers: [...entries, ...options.blocked] }

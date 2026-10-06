@@ -262,7 +262,8 @@ sets `MST_DESKTOP_RESTART` to the absolute path of a command that restarts Claud
 Desktop and returns once it's back. For each variant, MST then writes the
 variant's servers, plugins and model over the image's own settings, keeping the
 image's other keys and the `headersHelper` of an HTTP server with the same name
-and URL (MST writes no secrets there). It runs the restart command, checks the
+and URL (MST writes no secrets there). It adds `AskUserQuestion` to the image's
+`disabledBuiltinTools`, so the image needn't. It runs the restart command, checks the
 file as above, and probes. When the variant ends, or if the desktop isn't ready,
 the file goes back to what it was. Without `MST_DESKTOP_OWNED=1`, preparation
 stays read-only.
@@ -755,6 +756,7 @@ Desktop. MST only reads and checks them. For the example above:
   ],
   "allowedMcpServers": [{ "serverName": "acme-eval" }],
   "allowManagedMcpServersOnly": true,
+  "disabledBuiltinTools": ["AskUserQuestion"],
   "allowedPluginMarketplaces": [
     {
       "source": "github",
@@ -790,6 +792,12 @@ Claude Desktop:
   own server name from its `.mcp.json` (for example, `acme_plugin`).
 - HTTP servers match as before, `allowManagedMcpServersOnly` is `true`, and the
   pinned marketplace entries match.
+- `disabledBuiltinTools` contains `AskUserQuestion`
+  (`coworkHeadlessSettings()` builds it). A headless run has nobody to answer a
+  clarifying question, so Claude proceeds on its best assumption instead. Other
+  disabled tools are allowed. If a desktop still asks, the task stops as a
+  verified failed case (`clientTelemetry.awaitingUser`) instead of waiting.
+  The macOS eval profile MST writes sets the same key.
 - Each plugin root is an absolute, real (no symlink), non-world-writable
   directory. `mcpDataRoot` and each `<mcpDataRoot>/<label>` are real 0700
   directories owned by MST's user. Each `files` entry is a regular 0600 file

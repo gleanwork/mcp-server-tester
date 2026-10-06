@@ -12,6 +12,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  coworkHeadlessSettings,
+  coworkHeadlessSettingsMatch,
   coworkManagedPluginSettings,
   coworkPluginSettingsMatch,
   linuxCoworkPlatform,
@@ -61,6 +63,7 @@ const settings = {
     { name: 'primary', transport: 'http', url: 'https://example.com/eval' },
   ],
   allowManagedMcpServersOnly: true,
+  disabledBuiltinTools: ['AskUserQuestion'],
 };
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), 'linux-driver-test-'));
@@ -185,6 +188,47 @@ describe('caller-owned Linux Cowork desktop', () => {
       expect(child.exec).not.toHaveBeenCalled();
     }
   );
+  it.each([
+    ['missing', (({ disabledBuiltinTools: _omit, ...rest }) => rest)(settings)],
+    ['empty', { ...settings, disabledBuiltinTools: [] }],
+    [
+      'without AskUserQuestion',
+      { ...settings, disabledBuiltinTools: ['Bash'] },
+    ],
+    ['not a list', { ...settings, disabledBuiltinTools: 'AskUserQuestion' }],
+  ])(
+    'fails before UI when headless built-in tools are %s',
+    async (_kind, value) => {
+      await expect(prepare(value)).rejects.toThrow(
+        'Prepared Linux desktop settings do not match'
+      );
+      expect(child.exec).not.toHaveBeenCalled();
+    }
+  );
+  it('builds the exact headless settings it requires', () => {
+    expect(coworkHeadlessSettings()).toEqual({
+      disabledBuiltinTools: ['AskUserQuestion'],
+    });
+    expect(coworkHeadlessSettingsMatch(coworkHeadlessSettings())).toBe(true);
+    // A caller mutating its copy cannot weaken the contract.
+    coworkHeadlessSettings().disabledBuiltinTools.length = 0;
+    expect(coworkHeadlessSettings().disabledBuiltinTools).toEqual([
+      'AskUserQuestion',
+    ]);
+    expect(
+      coworkHeadlessSettingsMatch({
+        disabledBuiltinTools: ['AskUserQuestion', 1],
+      })
+    ).toBe(false);
+  });
+  it('accepts settings that disable more built-in tools than required', async () => {
+    await (
+      await prepare({
+        ...settings,
+        disabledBuiltinTools: ['WebFetch', 'AskUserQuestion'],
+      })
+    ).dispose();
+  });
   it.each([
     { ...settings, inferenceModels: [{ name: 'wrong-model' }] },
     { ...settings, managedMcpServers: [] },
@@ -425,9 +469,12 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
     allowManagedMcpServersOnly: true,
   };
 
-  async function prepareOwned(env: Record<string, string> = {}) {
+  async function prepareOwned(
+    env: Record<string, string> = {},
+    base: Record<string, unknown> = image
+  ) {
     const file = join(directory, 'settings.json');
-    const original = `${JSON.stringify(image, null, 2)}\n`;
+    const original = `${JSON.stringify(base, null, 2)}\n`;
     await writeFile(file, original);
     const lifecycle = linuxCoworkPlatform.prepare({
       evalConfig,
@@ -460,6 +507,7 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
       ],
       allowedMcpServers: [{ serverName: 'primary' }],
       allowManagedMcpServersOnly: true,
+      disabledBuiltinTools: ['AskUserQuestion'],
     });
     // The restart, then the usual probe.
     expect(child.exec.mock.calls.map((call) => String(call[0]))).toEqual([
@@ -470,6 +518,18 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
 
     await prepared.dispose();
     expect(await readFile(file, 'utf8')).toBe(original);
+  });
+
+  it("keeps the image's own disabled built-in tools beside AskUserQuestion", async () => {
+    const { file, lifecycle } = await prepareOwned(
+      {},
+      { ...image, disabledBuiltinTools: ['WebFetch', 'AskUserQuestion'] }
+    );
+    const prepared = await lifecycle;
+    expect(
+      JSON.parse(await readFile(file, 'utf8')).disabledBuiltinTools
+    ).toEqual(['WebFetch', 'AskUserQuestion']);
+    await prepared.dispose();
   });
 
   it('needs a restart command, and touches nothing without one', async () => {
@@ -545,6 +605,7 @@ describe('Linux Cowork plugins with a stdio eval server', () => {
     inferenceModels: [{ name: 'test-model' }],
     ...expected(),
     allowManagedMcpServersOnly: true,
+    ...coworkHeadlessSettings(),
   });
   async function prepareStdio(
     value: unknown,
