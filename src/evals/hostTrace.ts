@@ -71,6 +71,9 @@ export function hostRunToExecution(
         ? { llmDurationMs: trace.llmDurationMs }
         : {}),
       ...(trace.diagnostics ? { diagnostics: trace.diagnostics } : {}),
+      ...(trace.artifactsDir !== undefined
+        ? { artifactsDir: trace.artifactsDir }
+        : {}),
     },
     error: trace.error,
     usage: trace.usage,

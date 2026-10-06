@@ -16,12 +16,19 @@ exports[`public API > ./auth 1`] = `
 
 exports[`public API > ./evals 1`] = `
 [
+  "AGENT_JUDGE_RUNTIMES",
+  "AgentJudgeOptionsSchema",
   "BUILT_IN_METRICS",
   "EvalManifestSchema",
   "FileEvalResultStore",
   "GCSEvalResultStore",
+  "agentJudgeRuntimes",
+  "agenticJudge",
+  "agenticPairwiseJudge",
   "buildEvalDataset",
   "buildToolSurface",
+  "claudeRuntime",
+  "codexRuntime",
   "compareEvalRuns",
   "comparePairwise",
   "computeMetrics",

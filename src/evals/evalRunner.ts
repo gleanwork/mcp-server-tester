@@ -874,7 +874,8 @@ async function runSingleIteration(
     source: 'eval',
     pass: didCasePass(error, outcome.expectations),
     request: buildRequest(evalCase, options.toolOverrideVariantId),
-    response,
+    // A local path, for judges only: never in results.
+    response: withoutArtifactsDir(response),
     error,
     expectations: outcome.expectations,
     authType: context.mcp?.authType,
@@ -1494,4 +1495,16 @@ function formatBaselineRef(
   return baselineResultsFrom.ref === 'latest'
     ? 'resultStore latest'
     : `resultStore ${baselineResultsFrom.ref.id}`;
+}
+
+/** `response` without `artifactsDir`, a local path only judges read. */
+function withoutArtifactsDir(response: unknown): unknown {
+  if (
+    typeof response !== 'object' ||
+    response === null ||
+    !('artifactsDir' in response)
+  )
+    return response;
+  const { artifactsDir: _local, ...rest } = response as Record<string, unknown>;
+  return rest;
 }

@@ -53,6 +53,8 @@ export type HostResponse = MCPHostSimulationResult & {
   events?: HostEvent[];
   evidence?: HostEvidence;
   externalHost?: ExternalHostMetadata;
+  /** See `HostRunResult.artifactsDir`. Never stored in results. */
+  artifactsDir?: string;
 };
 
 interface ExecutionBase {

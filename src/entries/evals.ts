@@ -155,3 +155,6 @@ export type {
   PairwisePreference,
   PairwiseVerdict,
 } from '../judge/pairwiseContract.js';
+// Agentic judges: run an agent (Codex or Claude Agent SDK) over a workspace
+// of the run's evidence.
+export * from '../judge/agentic/index.js';

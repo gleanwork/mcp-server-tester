@@ -67,6 +67,12 @@ export interface JudgeTrial {
   evidence?: HostEvidence;
   /** Host model usage for this run. */
   usage?: Partial<UsageMetrics>;
+  /**
+   * Local directory of the host's own record of the run (for Cowork, the
+   * native session folder), when the host reports one and it is still on
+   * this machine. Read it; never write to it.
+   */
+  artifactsDir?: string;
 }
 
 /** The argument of `evaluate`. */
@@ -137,6 +143,7 @@ interface HostResponseLike {
   events?: HostEvent[];
   conversationHistory?: JudgeMessage[];
   usage?: Partial<UsageMetrics>;
+  artifactsDir?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -217,6 +224,9 @@ export function buildJudgeTrial(
     }),
     ...(host?.evidence !== undefined && { evidence: host.evidence }),
     ...(hostResponse?.usage !== undefined && { usage: hostResponse.usage }),
+    ...(typeof hostResponse?.artifactsDir === 'string' && {
+      artifactsDir: hostResponse.artifactsDir,
+    }),
   };
 }
 

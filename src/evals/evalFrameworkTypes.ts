@@ -98,6 +98,12 @@ export interface HostRunResult {
   /** Per-request wall time, excluding shared batch setup and cleanup. */
   durationMs?: number;
   llmDurationMs?: number;
+  /**
+   * Local directory of the host's own record of this run, such as a desktop
+   * session folder with spilled tool output and written files. Judges may
+   * read it while the run's machine is up. Never stored in results.
+   */
+  artifactsDir?: string;
 }
 
 /**

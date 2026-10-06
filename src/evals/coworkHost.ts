@@ -575,6 +575,7 @@ async function runBatch(
           );
           result = {
             ...nativeResult,
+            artifactsDir: trace.candidate.sessionDir,
             error: nativeResult.error ?? hitlError,
             telemetry: {
               source: 'claude-native',
