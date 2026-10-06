@@ -82,6 +82,10 @@ class Desktop:
         )
 
 
+# Primary actions of Cowork's built-in tool confirmation cards (always shown with Cancel).
+CARD_ACTIONS = {"Create", "Update", "Schedule", "Run", "Delete"}
+
+
 class Driver:
     def __init__(self, desktop, timeout_ms: int, max_actions: int) -> None:
         self.desktop = desktop
@@ -174,6 +178,14 @@ class Driver:
         if approve_writes:
             names |= {"Always allow", "Allow always", "Full access", "Allow full access"}
         controls = self.desktop.controls(names, {"button"})
+        if not controls:
+            # Cowork confirms built-in tools with an inline card whose primary
+            # action names the write (artifacts: Create/Update; scheduled tasks:
+            # Schedule/Update/Run/Delete) beside Cancel, not an Allow prompt.
+            # 3p desktops offer no Skip all approvals mode, so approve the card
+            # itself. Only the write policy may do this; read-only refuses below.
+            if self.desktop.controls({"Cancel"}, {"button"}):
+                controls = self.desktop.controls(CARD_ACTIONS, {"button"})
         if not controls:
             return self.receipt("hitl_checked")
         # Do not choose among unrelated prompts or continue arbitrary onboarding.

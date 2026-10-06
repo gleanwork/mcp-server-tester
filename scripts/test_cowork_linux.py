@@ -178,6 +178,39 @@ class LinuxDriverTests(unittest.TestCase):
         self.assertEqual(module.Driver(desktop, 1000, 4).hitl(True)["status"], "hitl_checked")
         self.assertEqual(desktop.actions, ["Allow once"])
 
+    def test_hitl_creates_a_confirmed_artifact_only_under_the_write_policy(self):
+        desktop = Desktop()
+        desktop.approvals = [Node("Cancel"), Node("Create")]
+        with self.assertRaisesRegex(module.DriverFailure, "write_policy"):
+            module.Driver(desktop, 1000, 4).hitl(False)
+        self.assertEqual(desktop.actions, [])
+        self.assertEqual(module.Driver(desktop, 1000, 4).hitl(True)["status"], "hitl_checked")
+        self.assertEqual(desktop.actions, ["Create"])
+
+    def test_hitl_approves_every_built_in_confirmation_card_under_the_write_policy(self):
+        for action in ("Create", "Update", "Schedule", "Run", "Delete"):
+            with self.subTest(action=action):
+                desktop = Desktop()
+                desktop.approvals = [Node("Cancel"), Node(action)]
+                with self.assertRaisesRegex(module.DriverFailure, "write_policy"):
+                    module.Driver(desktop, 1000, 4).hitl(False)
+                self.assertEqual(desktop.actions, [])
+                module.Driver(desktop, 1000, 4).hitl(True)
+                self.assertEqual(desktop.actions, [action])
+
+    def test_hitl_ambiguous_confirmation_card_fails_closed(self):
+        desktop = Desktop()
+        desktop.approvals = [Node("Cancel"), Node("Create"), Node("Run")]
+        with self.assertRaisesRegex(module.DriverFailure, "ambiguous"):
+            module.Driver(desktop, 1000, 4).hitl(True)
+        self.assertEqual(desktop.actions, [])
+
+    def test_hitl_ignores_a_create_button_without_its_confirmation_card(self):
+        desktop = Desktop()
+        desktop.approvals = [Node("Create")]
+        self.assertEqual(module.Driver(desktop, 1000, 4).hitl(True)["action_count"], 0)
+        self.assertEqual(desktop.actions, [])
+
     def test_hitl_ambiguous_approvals_fail_closed(self):
         desktop = Desktop()
         desktop.approvals = [Node("Allow"), Node("Allow")]
