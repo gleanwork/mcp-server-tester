@@ -69,7 +69,7 @@ export type CLIOutputFormat = 'stream-json' | 'json';
  * Configuration for a CLI host process.
  *
  * The process is spawned directly (no shell) with `command` and `args`.
- * Use `{{scenario}}` in any args entry as a placeholder for the natural
+ * Use `{{prompt}}` in any args entry as a placeholder for the natural
  * language prompt — the framework replaces it before spawning.
  *
  * Because args are passed directly to the process (not through a shell),
@@ -80,7 +80,7 @@ export type CLIOutputFormat = 'stream-json' | 'json';
  * ```json
  * {
  *   "command": "claude",
- *   "args": ["-p", "{{scenario}}", "--output-format", "stream-json",
+ *   "args": ["-p", "{{prompt}}", "--output-format", "stream-json",
  *            "--verbose", "--mcp-config", "{...}"]
  * }
  * ```
@@ -89,7 +89,7 @@ export type CLIOutputFormat = 'stream-json' | 'json';
  * ```json
  * {
  *   "command": "my-agent",
- *   "args": ["--prompt", "{{scenario}}", "--config", "./mcp.json"],
+ *   "args": ["--prompt", "{{prompt}}", "--config", "./mcp.json"],
  *   "outputFormat": "json"
  * }
  * ```
@@ -105,7 +105,7 @@ export interface CLIConfig {
   command: string;
 
   /**
-   * Arguments to pass. Use `{{scenario}}` as a placeholder for the prompt.
+   * Arguments to pass. Use `{{prompt}}` as a placeholder for the prompt.
    */
   args: string[];
 

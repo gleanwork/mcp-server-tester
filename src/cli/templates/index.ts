@@ -132,7 +132,7 @@ export function getDatasetTemplate(_answers: ProjectAnswers): string {
       "args": {
         "param1": "value1"
       },
-      "expect": {
+      "assertions": {
         "containsText": ["expected text"],
         "isError": false
       }

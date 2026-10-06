@@ -47,7 +47,7 @@ export interface ComparePairwiseOptions {
   judges: readonly PairwiseJudgeSpec[];
   /**
    * The dataset cases, by id, for ground truth the results don't carry
-   * (`expected`, `canonicalAnswer`, metadata). Optional: without it a case is
+   * (`expected`, metadata). Optional: without it a case is
    * built from the result's request.
    */
   cases?: ReadonlyMap<string, JudgeCaseSource>;
@@ -121,11 +121,11 @@ function caseSource(
   const request = result.request;
   return {
     id: result.id,
-    ...(request?.scenario !== undefined && { scenario: request.scenario }),
+    ...(request?.scenario !== undefined && { input: request.scenario }),
     ...(request?.args !== undefined && { args: request.args }),
     ...(result.toolName && { toolName: result.toolName }),
     ...(request?.reference !== undefined && {
-      canonicalAnswer: request.reference,
+      expected: { answer: request.reference },
     }),
     tags: result.tags ?? request?.tags ?? [],
   };

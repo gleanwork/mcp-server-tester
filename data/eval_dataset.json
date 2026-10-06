@@ -9,7 +9,7 @@
       "args": {
         "city": "London"
       },
-      "expect": {
+      "assertions": {
         "schema": "weather-response"
       }
     },
@@ -20,7 +20,7 @@
       "args": {
         "city": "Tokyo"
       },
-      "expect": {
+      "assertions": {
         "schema": "weather-response"
       }
     },
@@ -32,7 +32,7 @@
         "query": "Model Context Protocol",
         "limit": 5
       },
-      "expect": {
+      "assertions": {
         "passesJudge": {
           "rubric": {
             "text": "Search results should be relevant to MCP"
@@ -49,7 +49,7 @@
         "a": 10,
         "b": 20
       },
-      "expect": {
+      "assertions": {
         "containsText": "30"
       }
     },
@@ -60,7 +60,7 @@
       "args": {
         "city": "London"
       },
-      "expect": {
+      "assertions": {
         "containsText": [
           "## City Information",
           "**City:** London",
@@ -76,14 +76,14 @@
       "args": {
         "city": "London"
       },
-      "expect": {
+      "assertions": {
         "matchesPattern": [
           "^## City Information",
           "\\*\\*City:\\*\\* \\w+",
           "\\*\\*Population:\\*\\* [\\d.]+M",
           "^### Features",
           "^- [\\w\\s]+",
-          "Temperature: \\d+\u00b0C",
+          "Temperature: \\d+°C",
           "\\d{4}-\\d{2}-\\d{2}"
         ]
       }

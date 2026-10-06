@@ -139,7 +139,7 @@ Direct SQL queries to specific tools:
   "args": {
     "sql": "SELECT * FROM users"
   },
-  "expect": {
+  "assertions": {
     "schema": "queryResult"
   }
 }
@@ -147,18 +147,18 @@ Direct SQL queries to specific tools:
 
 ### LLM Host Mode Tests
 
-Natural language scenarios where the LLM chooses which tool and constructs the query:
+Natural language inputs where the LLM chooses which tool and constructs the query:
 
 ```json
 {
   "id": "llm-count-users",
   "mode": "mcp_host",
-  "scenario": "How many users are in the database?",
+  "input": "How many users are in the database?",
   "mcpHostConfig": {
     "provider": "anthropic",
     "model": "claude-sonnet-4-20250514"
   },
-  "expect": {
+  "assertions": {
     "toolsTriggered": {
       "calls": [{ "name": "query", "required": true }]
     }

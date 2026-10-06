@@ -4,14 +4,19 @@
     {
       "id": "search-trigger",
       "mode": "mcp_host",
-      "scenario": "Find recent documents about quarterly planning",
+      "input": "Find recent documents about quarterly planning",
       "mcpHostConfig": {
         "provider": "anthropic",
         "model": "claude-3-5-sonnet-20241022"
       },
-      "expect": {
+      "assertions": {
         "toolsTriggered": {
-          "calls": [{ "name": "search", "required": true }]
+          "calls": [
+            {
+              "name": "search",
+              "required": true
+            }
+          ]
         }
       }
     }

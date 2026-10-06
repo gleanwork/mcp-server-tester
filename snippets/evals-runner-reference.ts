@@ -10,7 +10,7 @@ test('my evals', async ({ mcp }, testInfo) => {
 
       // Apply 10 iterations to all mcp_host cases
       // that don't specify iterations explicitly
-      defaultLlmIterations: 10,
+      defaultTrials: 10,
 
       // Run up to 3 cases at once (careful with rate limits)
       concurrency: 3,

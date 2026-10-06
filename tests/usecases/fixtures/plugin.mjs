@@ -58,8 +58,8 @@ const Rule = z
   .object({
     when: z
       .object({
-        scenario: z.string().optional(),
-        scenarioStartsWith: z.string().optional(),
+        input: z.string().optional(),
+        inputStartsWith: z.string().optional(),
         instruction: z.string().optional(),
         plugin: z.string().optional(),
         /** The run index (USECASE_RUN), for cases that run more than once. */
@@ -85,20 +85,19 @@ const AssistantConfig = z
   .object({ type: z.string(), answer: z.string() })
   .strict();
 
-/** Runs a step on a deterministic share of iterations: `rate` of every 10. */
-function runsOn(rate, iteration) {
-  if (!Number.isInteger(iteration))
-    throw new Error(`Expected an integer iteration, got ${iteration}.`);
-  return iteration % 10 < Math.round(rate * 10);
+/** Runs a step on a deterministic share of trials: `rate` of every 10. */
+function runsOn(rate, trial) {
+  if (!Number.isInteger(trial))
+    throw new Error(`Expected an integer trial, got ${trial}.`);
+  return trial % 10 < Math.round(rate * 10);
 }
 
 const RUN = Number(process.env.USECASE_RUN ?? '0');
 
-function matches(when, scenario, config) {
-  const lower = scenario.toLowerCase();
-  if (when.scenario && !lower.includes(when.scenario.toLowerCase()))
-    return false;
-  if (when.scenarioStartsWith && !scenario.startsWith(when.scenarioStartsWith))
+function matches(when, input, config) {
+  const lower = input.toLowerCase();
+  if (when.input && !lower.includes(when.input.toLowerCase())) return false;
+  if (when.inputStartsWith && !input.startsWith(when.inputStartsWith))
     return false;
   if (
     when.instruction &&
@@ -176,18 +175,18 @@ async function connect(servers) {
 const chars = (value) => JSON.stringify(value ?? '').length;
 
 async function runModel(request, config, connections) {
-  const { scenario } = request.input;
+  const input = request.input.prompt;
   const visible = connections.flatMap((connection) =>
     connection.tools.map((tool) => ({ connection, tool }))
   );
   const rule = config.policy.find((candidate) =>
-    matches(candidate.when, scenario, config)
+    matches(candidate.when, input, config)
   );
   const events = [];
   const outputs = [];
   let searched;
   for (const step of rule?.steps ?? []) {
-    if (!runsOn(step.rate, request.iteration)) continue;
+    if (!runsOn(step.rate, request.trial)) continue;
     if ('skill' in step) {
       events.push({ kind: 'skill', source: 'host', name: step.skill });
       continue;
@@ -242,7 +241,7 @@ async function runModel(request, config, connections) {
   // output so far, so more tools and bigger outputs cost more input tokens.
   const prompt =
     chars(config.systemPrompt) +
-    chars(scenario) +
+    chars(input) +
     visible.reduce((sum, { tool }) => sum + chars(tool), 0);
   let inputChars = 0;
   for (let turn = 0; turn <= outputs.length; turn += 1) {
@@ -295,7 +294,7 @@ export default {
             record({
               arm: context.arm?.name ?? 'default',
               caseId: request.caseId,
-              iteration: request.iteration,
+              trial: request.trial,
               usage: result.usage,
               events: result.events.map(({ kind, source, name, server }) => ({
                 kind,
@@ -324,7 +323,7 @@ export default {
         record({
           arm: context.arm?.name ?? 'default',
           caseId: null,
-          iteration: null,
+          trial: null,
           events: [],
         });
         return result;

@@ -38,7 +38,7 @@ npm run format:check        # Check formatting
 - **`skills/`** - Agent Skills over MCP (SEP-2640): wire schemas, entry validation, and a skills client (the SDK has no skills API yet)
 - **`auth/`** - OAuth 2.1 with PKCE (`PlaywrightOAuthClientProvider`) and static token utilities
 - **`assertions/`** - Unified assertion architecture (see below)
-- **`evals/`** - Dataset types, loader, and runner (uses validators internally). `evals/caseExecution.ts` is the only place a case runs: every path (direct tool/request, simulated `mcp_host`, `external_host`, suite hosts) returns a typed `CaseExecution`, and the runner reads its fields instead of inspecting `response`. `caseExecution.golden.test.ts` pins the resulting `EvalCaseResult` for every path. `evals/expectations.ts` grades a case's `expect` block: it decides once whether the evidence can support tool-call assertions (`toolEvidenceGap`), builds the `mcpHostTrace` view, resolves judge settings (including suite manifest judges), then calls the validators. Desktop hosts (Cowork, ChatGPT) run batches through `evals/desktopBatch.ts` (lease, per-case reset policy, native-session ledger, redaction, cleanup) and share one MCP readiness rule (`isMcpServerReady` in `evals/mcpReadiness.ts`); a new desktop host supplies only prepare, one case, reset and dispose. macOS Swift controllers build and run through `evals/nativeHelper.ts`, which owns their environment policy
+- **`evals/`** - Dataset types, loader, and runner (uses validators internally). `evals/caseExecution.ts` is the only place a case runs: every path (direct tool/request, simulated `mcp_host`, `external_host`, suite hosts) returns a typed `CaseExecution`, and the runner reads its fields instead of inspecting `response`. `caseExecution.golden.test.ts` pins the resulting `EvalCaseResult` for every path. `evals/expectations.ts` grades a case's `assertions` block: it decides once whether the evidence can support tool-call assertions (`toolEvidenceGap`), builds the `mcpHostTrace` view, resolves judge settings (including suite manifest judges), then calls the validators. Desktop hosts (Cowork, ChatGPT) run batches through `evals/desktopBatch.ts` (lease, per-case reset policy, native-session ledger, redaction, cleanup) and share one MCP readiness rule (`isMcpServerReady` in `evals/mcpReadiness.ts`); a new desktop host supplies only prepare, one case, reset and dispose. macOS Swift controllers build and run through `evals/nativeHelper.ts`, which owns their environment policy
 - **`llm/`** - `resolveLLMEndpoint()`: the one place MST's own LLM calls (SDK host, judges) get their base URL and credential, including gateway bearer tokens and `MST_LLM_AUTH_COMMAND`. New LLM consumers resolve through it rather than reading `*_API_KEY` themselves. See `docs/llm-gateways.md`
 - **`judge/`** - LLM-as-a-judge via Claude Agent SDK
 - **`plugins/`** - ESLint-style plugins: the `Plugin` shape and validation (`plugin.ts`), the process-wide extension table keyed by `namespace/name`, where each kind's lookup (next to its built-ins) adds them under bare names (`extensions.ts`), and the loader (`loadPlugins.ts`). `evals/suitePlugins.ts` loads a suite's plugins and checks it only references namespaces it loads. Domain terms are in `CONTEXT.md`; decisions in `docs/adr/`
@@ -114,7 +114,7 @@ The public API is tiered. Each name is exported from exactly one of these entry 
 
 The subpaths are ESM only and share chunks with the ESM root (tsup `splitting`), so module state (the extension table, classes) is one instance across them. The CommonJS root and the fixtures/reporter bundles are separate copies; only `Symbol.for` state (the extension table and the plugin-load cache) is shared with those. New public names go in the narrowest tier that fits. `npm run knip` (in CI) fails on files, exports or dependencies nothing uses, so delete dead code rather than leaving it exported. `src/publicApi.test.ts` pins each entry point's runtime exports: after a deliberate change, update it with `npx vitest run src/publicApi.test.ts -u` and note any removal in the migration guides. Tests count as users, so an export only a test imports is not flagged.
 
-### Multi-Iteration Accuracy
+### Trials and Pass Rate
 
 Eval cases can be run multiple times to compute accuracy (win rate):
 
@@ -122,11 +122,11 @@ Eval cases can be run multiple times to compute accuracy (win rate):
 {
   "id": "search-trigger",
   "mode": "mcp_host",
-  "scenario": "Find recent docs about planning",
+  "input": "Find recent docs about planning",
   "mcpHostConfig": { "provider": "anthropic" },
-  "iterations": 5,
-  "accuracyThreshold": 0.8,
-  "expect": {
+  "trials": 5,
+  "passThreshold": 0.8,
+  "assertions": {
     "toolsTriggered": {
       "calls": [{ "name": "search", "required": true }]
     }
@@ -134,8 +134,8 @@ Eval cases can be run multiple times to compute accuracy (win rate):
 }
 ```
 
-- `iterations`: Run case N times (default: 1). When > 1, result has `assertionPassRate` (0-1) and `iterationResults[]`
-- `accuracyThreshold`: Minimum accuracy to pass (default: 1.0)
+- `trials`: Run case N times (default: 1). When > 1, result has `assertionPassRate` (0-1) and `iterationResults[]`
+- `passThreshold`: Minimum accuracy to pass (default: 1.0)
 
 ### Concurrency
 
@@ -148,7 +148,7 @@ await runEvalDataset({ dataset, concurrency: 4 }, { mcp, testInfo });
 ### Tool Call Assertions (mcp_host mode only)
 
 ```json
-"expect": {
+"assertions": {
   "toolsTriggered": {
     "calls": [{ "name": "search", "required": true }],
     "order": "any",
@@ -165,9 +165,9 @@ Validators: `validateToolCalls(response, expectation)`, `validateToolCallCount(r
 The framework supports two evaluation modes:
 
 - **Direct mode** (`mode: 'direct'`, default): Call a specific tool with known arguments and assert on the response. Fast, deterministic, free. Use for regression testing.
-- **mcp_host mode** (`mode: 'mcp_host'`): An LLM receives a natural language `scenario` and discovers which tools to call. Non-deterministic, costs money, measures tool description quality. Use selectively for tool discoverability validation.
+- **mcp_host mode** (`mode: 'mcp_host'`): An LLM receives a natural language `input` and discovers which tools to call. Non-deterministic, costs money, measures tool description quality. Use selectively for tool discoverability validation.
 
-Direct mode uses `toolName` + `args`, or `request: { method, params }` for any MCP request (e.g. `skills/get`). mcp_host mode uses `scenario` + `mcpHostConfig`; `mcpHostConfig.skills: 'catalog' | 'preload'` lets the SDK host offer the server's Agent Skills (skills the model loads are `kind: 'skill'` events for `toolsTriggered`; preloads are not). Tool call assertions (`toolsTriggered`, `toolCallCount`) only work in mcp_host mode.
+Direct mode uses `toolName` + `args`, or `request: { method, params }` for any MCP request (e.g. `skills/get`). mcp_host mode uses `input` + `mcpHostConfig`; `mcpHostConfig.skills: 'catalog' | 'preload'` lets the SDK host offer the server's Agent Skills (skills the model loads are `kind: 'skill'` events for `toolsTriggered`; preloads are not). Tool call assertions (`toolsTriggered`, `toolCallCount`) only work in mcp_host mode.
 
 ### Snapshot Testing
 
@@ -184,16 +184,16 @@ Update snapshots: `npx playwright test --update-snapshots`
 
 ### MCP Host Simulation
 
-`simulateMCPHost()` orchestrates LLM + MCP tool calls via the Vercel AI SDK. The LLM receives all available tools and a scenario prompt, then decides which tools to call.
+`simulateMCPHost()` orchestrates LLM + MCP tool calls via the Vercel AI SDK. The LLM receives all available tools and a input, then decides which tools to call.
 
 Two host types:
 
 - **`sdk`** (default): Programmatic via Vercel AI SDK. Reuses the test's MCP connection. Requires `provider`.
-- **`cli`**: CLI-based hosts (e.g., Claude Code). Spawns a process with its own MCP connection. Requires `cli` config with `command`, `args` (use `{{scenario}}` placeholder), and `outputFormat`.
+- **`cli`**: CLI-based hosts (e.g., Claude Code). Spawns a process with its own MCP connection. Requires `cli` config with `command`, `args` (use `{{prompt}}` placeholder), and `outputFormat`.
 
 Provider packages are dynamically imported — install `ai` + `@ai-sdk/<provider>` (e.g., `npm install ai @ai-sdk/anthropic`).
 
-Multi-iteration: set `iterations` and `accuracyThreshold` on an eval case. The runner executes N times, computes `assertionPassRate` (0–1), and passes if rate >= threshold.
+Multiple trials: set `trials` and `passThreshold` on an eval case. The runner executes N times, computes `assertionPassRate` (0–1), and passes if rate >= threshold.
 
 ### Fixture Composition
 
@@ -309,13 +309,13 @@ Add it to the kind's built-in record, keyed by its bare name: `builtinDatasetSou
 ### New Expectation Type (eval datasets)
 
 1. Write the validator (see above)
-2. Add the field to `EvalExpectBlockSchema` in `src/evals/datasetTypes.ts`, and its result key to `ExpectationType` in `src/types/index.ts`
+2. Add the field to `EvalAssertionsSchema` in `src/evals/datasetTypes.ts`, and its result key to `ExpectationType` in `src/types/index.ts`
 3. Add one branch to `evaluateExpectations()` in `src/evals/expectations.ts`, and a case to `src/evals/expectations.test.ts`
 
 ### New Matcher
 
 1. Create `src/assertions/matchers/toMyMatcher.ts` using a validator
-2. Import and add to the single `expect.extend({})` call in `src/assertions/matchers/index.ts`
+2. Import and add to the single `assertions.extend({})` call in `src/assertions/matchers/index.ts`
 3. Add TypeScript declaration in `src/assertions/matchers/types.ts` (inside the `PlaywrightTest.Matchers` interface)
 4. Export from `src/index.ts` (the root tier)
 

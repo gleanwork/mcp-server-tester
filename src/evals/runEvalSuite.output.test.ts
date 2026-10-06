@@ -41,9 +41,7 @@ describe('suite output', () => {
       path.join(dir, 'cases.json'),
       JSON.stringify({
         name: 'cases',
-        cases: [
-          { id: 'weather', mode: 'host', scenario: 'Weather?', iterations: 2 },
-        ],
+        cases: [{ id: 'weather', mode: 'host', input: 'Weather?', trials: 2 }],
       })
     );
     await fs.writeFile(

@@ -106,9 +106,9 @@ const simulation: MCPHostSimulationResult = {
 const hostCase: EvalCase = {
   id: 'host',
   mode: 'mcp_host',
-  scenario: 'Weather in London?',
+  input: 'Weather in London?',
   mcpHostConfig: { provider: 'anthropic' },
-  expect: {
+  assertions: {
     containsText: 'sunny',
     toolsTriggered: {
       calls: [
@@ -226,7 +226,7 @@ describe('golden: direct execution', () => {
         id: 'tool',
         toolName: 'get_weather',
         args: { city: 'London' },
-        expect: { containsText: 'sunny', isError: false },
+        assertions: { containsText: 'sunny', isError: false },
       },
       context()
     );
@@ -239,7 +239,7 @@ describe('golden: direct execution', () => {
         id: 'tool-error',
         toolName: 'get_weather',
         args: {},
-        expect: { isError: 'city' },
+        assertions: { isError: 'city' },
       },
       context(
         mockMCP(
@@ -266,7 +266,7 @@ describe('golden: direct execution', () => {
       {
         id: 'request',
         request: { method: 'skills/get', params: { name: 'weather' } },
-        expect: { containsText: 'weather' },
+        assertions: { containsText: 'weather' },
       },
       context()
     );
@@ -280,7 +280,7 @@ describe('golden: direct execution', () => {
         id: 'simulation-shaped',
         toolName: 'fake_host',
         args: {},
-        expect: {
+        assertions: {
           toolsTriggered: { calls: [{ name: 'get_weather', required: true }] },
         },
       },
@@ -324,7 +324,7 @@ describe('golden: simulated mcp_host (dataset API)', () => {
       .mockRejectedValueOnce(new Error('read ECONNRESET'))
       .mockResolvedValueOnce({ ...simulation, response: 'cloudy' });
     const result = await runEvalCase(
-      { ...hostCase, iterations: 3, accuracyThreshold: 0.5 },
+      { ...hostCase, trials: 3, passThreshold: 0.5 },
       context()
     );
     expect(stable(result)).toMatchSnapshot();
@@ -373,7 +373,7 @@ describe('golden: host traces through executeCase', () => {
   const traceCase: EvalCase = {
     ...hostCase,
     id: 'trace',
-    expect: {
+    assertions: {
       containsText: 'sunny',
       toolsTriggered: {
         calls: [
@@ -433,7 +433,7 @@ describe('golden: dataset aggregation', () => {
               id: 'd',
               toolName: 'get_weather',
               args: { city: 'London' },
-              expect: { containsText: 'sunny' },
+              assertions: { containsText: 'sunny' },
             },
             hostCase,
           ],
@@ -462,8 +462,8 @@ describe('golden: runEvalSuite hosts', () => {
       {
         id: 'suite-host',
         mode: 'mcp_host',
-        scenario: 'Weather in London?',
-        expect: {
+        input: 'Weather in London?',
+        assertions: {
           containsText: 'sunny',
           toolsTriggered: {
             calls: [{ name: 'get_weather', required: true }],
@@ -545,9 +545,9 @@ describe('golden: runEvalSuite hosts', () => {
         {
           id: 'suite-judged',
           mode: 'mcp_host',
-          scenario: 'Weather in London?',
-          canonicalAnswer: 'canonical',
-          expect: {
+          input: 'Weather in London?',
+          expected: { answer: 'canonical' },
+          assertions: {
             passesJudge: [
               {
                 judge: 'test/golden-manifest-judge',
@@ -606,8 +606,10 @@ describe('golden: runEvalSuite hosts', () => {
         {
           id: 'suite-rubric',
           mode: 'mcp_host',
-          scenario: 'Weather in London?',
-          expect: { passesJudge: { rubric: 'correctness', threshold: 0.9 } },
+          input: 'Weather in London?',
+          assertions: {
+            passesJudge: { rubric: 'correctness', threshold: 0.9 },
+          },
         },
       ]
     );
@@ -629,8 +631,8 @@ describe('golden: judges', () => {
         toolName: 'get_weather',
         args: { city: 'London' },
         judgeReps: 2,
-        canonicalAnswer: 'sunny',
-        expect: { passesJudge: { judge: 'test/golden-case-judge' } },
+        expected: { answer: 'sunny' },
+        assertions: { passesJudge: { judge: 'test/golden-case-judge' } },
       },
       context()
     );
@@ -644,8 +646,8 @@ describe('golden: judges', () => {
         toolName: 'get_weather',
         args: { city: 'London' },
         judgeReps: 3,
-        canonicalAnswer: 'unused',
-        expect: {
+        expected: { answer: 'unused' },
+        assertions: {
           passesJudge: [
             { judge: 'test/golden-case-judge', reference: 'explicit', reps: 1 },
             { judge: 'test/golden-strict-judge', threshold: 0.5 },
@@ -662,7 +664,7 @@ describe('golden: judges', () => {
       {
         ...hostCase,
         id: 'host-judged',
-        expect: { passesJudge: { judge: 'test/golden-case-judge' } },
+        assertions: { passesJudge: { judge: 'test/golden-case-judge' } },
       },
       context()
     );
@@ -708,8 +710,8 @@ describe('golden: rubric judges', () => {
         id: 'rubric-judged',
         toolName: 'get_weather',
         args: { city: 'London' },
-        canonicalAnswer: 'sunny',
-        expect: { passesJudge: { rubric: 'correctness' } },
+        expected: { answer: 'sunny' },
+        assertions: { passesJudge: { rubric: 'correctness' } },
       },
       context()
     );
@@ -728,7 +730,7 @@ describe('golden: rubric judges', () => {
         id: 'rubric-reps',
         toolName: 'get_weather',
         args: { city: 'London' },
-        expect: { passesJudge: { rubric: 'completeness', reps: 3 } },
+        assertions: { passesJudge: { rubric: 'completeness', reps: 3 } },
       },
       context()
     );
@@ -743,7 +745,7 @@ describe('golden: rubric judges', () => {
         id: 'rubric-custom',
         toolName: 'get_weather',
         args: { city: 'London' },
-        expect: {
+        assertions: {
           passesJudge: {
             rubric: { text: 'Does it say it is sunny?\nAnswer carefully.' },
             reference: 'It is sunny.',
@@ -769,7 +771,7 @@ describe('golden: rubric judges', () => {
         id: 'rubric-error',
         toolName: 'get_weather',
         args: { city: 'London' },
-        expect: { passesJudge: { rubric: 'correctness' } },
+        assertions: { passesJudge: { rubric: 'correctness' } },
       },
       context()
     );
@@ -784,7 +786,7 @@ describe('golden: rubric judges', () => {
         toolName: 'get_weather',
         args: { city: 'London' },
         judgeReps: 2,
-        expect: {
+        assertions: {
           passesJudge: [
             { rubric: 'conciseness' },
             { judge: 'test/golden-case-judge' },

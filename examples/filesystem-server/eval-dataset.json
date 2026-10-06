@@ -10,7 +10,7 @@
       "args": {
         "path": "readme.txt"
       },
-      "expect": {
+      "assertions": {
         "containsText": "Hello World",
         "isError": false
       }
@@ -23,7 +23,7 @@
       "args": {
         "path": "config.json"
       },
-      "expect": {
+      "assertions": {
         "containsText": ["version", "1.0.0", "features"],
         "matchesPattern": "\\d+\\.\\d+\\.\\d+"
       }
@@ -36,10 +36,12 @@
       "args": {
         "path": "docs"
       },
-      "expect": {
+      "assertions": {
         "containsText": ["guide.md", "api.md"],
         "isError": false,
-        "responseSize": { "maxBytes": 10000 }
+        "responseSize": {
+          "maxBytes": 10000
+        }
       }
     },
     {
@@ -50,7 +52,7 @@
       "args": {
         "path": "docs/guide.md"
       },
-      "expect": {
+      "assertions": {
         "containsText": ["# User Guide", "guide"]
       }
     },
@@ -62,7 +64,7 @@
       "args": {
         "path": "."
       },
-      "expect": {
+      "assertions": {
         "containsText": ["readme.txt", "config.json", "docs", "data"]
       }
     },
@@ -72,17 +74,22 @@
       "mode": "mcp_host",
       "toolName": "placeholder",
       "args": {},
-      "scenario": "What files are in the docs directory?",
+      "input": "What files are in the docs directory?",
       "mcpHostConfig": {
         "provider": "anthropic",
         "model": "claude-sonnet-4-20250514",
         "temperature": 0.0,
         "maxTokens": 1000
       },
-      "expect": {
+      "assertions": {
         "containsText": ["guide.md", "api.md"],
         "toolsTriggered": {
-          "calls": [{ "name": "list_directory", "required": true }]
+          "calls": [
+            {
+              "name": "list_directory",
+              "required": true
+            }
+          ]
         }
       }
     },
@@ -92,17 +99,22 @@
       "mode": "mcp_host",
       "toolName": "placeholder",
       "args": {},
-      "scenario": "Read the config.json file and tell me what version it is.",
+      "input": "Read the config.json file and tell me what version it is.",
       "mcpHostConfig": {
         "provider": "anthropic",
         "model": "claude-sonnet-4-20250514",
         "temperature": 0.0,
         "maxTokens": 1000
       },
-      "expect": {
+      "assertions": {
         "containsText": "1.0.0",
         "toolsTriggered": {
-          "calls": [{ "name": "read_file", "required": true }]
+          "calls": [
+            {
+              "name": "read_file",
+              "required": true
+            }
+          ]
         }
       }
     },
@@ -112,16 +124,21 @@
       "mode": "mcp_host",
       "toolName": "placeholder",
       "args": {},
-      "scenario": "Find all markdown files in this project.",
+      "input": "Find all markdown files in this project.",
       "mcpHostConfig": {
         "provider": "anthropic",
         "model": "claude-sonnet-4-20250514",
         "temperature": 0.0
       },
-      "expect": {
+      "assertions": {
         "containsText": [".md"],
         "toolsTriggered": {
-          "calls": [{ "name": "search_files", "required": true }]
+          "calls": [
+            {
+              "name": "search_files",
+              "required": true
+            }
+          ]
         }
       }
     },
@@ -131,16 +148,21 @@
       "mode": "mcp_host",
       "toolName": "placeholder",
       "args": {},
-      "scenario": "How many users are listed in the data/users.csv file?",
+      "input": "How many users are listed in the data/users.csv file?",
       "mcpHostConfig": {
         "provider": "anthropic",
         "model": "claude-sonnet-4-20250514",
         "temperature": 0.0
       },
-      "expect": {
+      "assertions": {
         "containsText": ["2", "Alice", "Bob"],
         "toolsTriggered": {
-          "calls": [{ "name": "read_file", "required": true }]
+          "calls": [
+            {
+              "name": "read_file",
+              "required": true
+            }
+          ]
         }
       }
     },
@@ -150,15 +172,20 @@
       "mode": "mcp_host",
       "toolName": "placeholder",
       "args": {},
-      "scenario": "Show me all files and directories in this project.",
+      "input": "Show me all files and directories in this project.",
       "mcpHostConfig": {
         "provider": "anthropic",
         "model": "claude-sonnet-4-20250514",
         "temperature": 0.0
       },
-      "expect": {
+      "assertions": {
         "toolsTriggered": {
-          "calls": [{ "name": "list_directory", "required": true }]
+          "calls": [
+            {
+              "name": "list_directory",
+              "required": true
+            }
+          ]
         }
       }
     },
@@ -170,7 +197,7 @@
       "args": {
         "path": "readme.txt"
       },
-      "expect": {
+      "assertions": {
         "response": {
           "content": "Hello World"
         }
@@ -184,7 +211,7 @@
       "args": {
         "path": "readme.txt"
       },
-      "expect": {
+      "assertions": {
         "snapshot": "readme-content.txt"
       }
     },
@@ -196,7 +223,7 @@
       "args": {
         "path": "config.json"
       },
-      "expect": {
+      "assertions": {
         "snapshot": "config-structure.json"
       }
     }

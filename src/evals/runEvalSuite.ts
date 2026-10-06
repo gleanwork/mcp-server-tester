@@ -38,7 +38,7 @@ import { createSuiteCaseExecutor } from './caseExecution.js';
 import { mergeSuiteJudges } from './expectations.js';
 import { prepareHostBatch } from './prepareHostBatch.js';
 import type { EvalRunnerResult } from './evalRunner.js';
-import { EvalExpectBlockSchema, type EvalDataset } from './datasetTypes.js';
+import { EvalAssertionsSchema, type EvalDataset } from './datasetTypes.js';
 import { selectEvalCases } from './buildEvalDataset.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { MCPProtocolInfo, UsageMetrics } from '../types/index.js';
@@ -620,7 +620,7 @@ export async function runEvalSuite(
     try {
       for (const { source, dataset } of canonicalDatasets) {
         const executionDataset = selectEvalCases(dataset, manifest);
-        const template = arm.scenarioTemplate ?? manifest.scenarioTemplate;
+        const template = arm.inputTemplate ?? manifest.inputTemplate;
         const effectiveDataset: EvalDataset = {
           ...executionDataset,
           cases: executionDataset.cases.map((evalCase) => ({
@@ -635,8 +635,8 @@ export async function runEvalSuite(
               : {}),
             ...(effectiveManifest.judges?.length
               ? {
-                  expect: EvalExpectBlockSchema.parse({
-                    ...evalCase.expect,
+                  assertions: EvalAssertionsSchema.parse({
+                    ...evalCase.assertions,
                     passesJudge: mergeSuiteJudges(
                       evalCase,
                       effectiveManifest.judges,
@@ -647,12 +647,9 @@ export async function runEvalSuite(
                   }),
                 }
               : {}),
-            ...(template && evalCase.scenario
+            ...(template && evalCase.input
               ? {
-                  scenario: template.replaceAll(
-                    '{{scenario}}',
-                    evalCase.scenario
-                  ),
+                  input: template.replaceAll('{{input}}', evalCase.input),
                 }
               : {}),
           })),
@@ -683,8 +680,8 @@ export async function runEvalSuite(
             reporting: 'none',
             protocol: () => directProtocol,
             concurrency: manifest.concurrency ?? 1,
-            defaultLlmIterations: manifest.iterations,
-            defaultAccuracyThreshold: manifest.accuracyThreshold,
+            defaultTrials: manifest.trials,
+            defaultPassThreshold: manifest.passThreshold,
             toolOverrides: arm.toolOverrides ?? manifest.toolOverrides,
             toolMap: arm.toolMap ?? manifest.toolMap,
             ...(runHost

@@ -4,8 +4,8 @@
     {
       "id": "q3-planning",
       "mode": "host",
-      "scenario": "Find the Q3 planning notes",
-      "expect": {
+      "input": "Find the Q3 planning notes",
+      "assertions": {
         "toolsTriggered": {
           "calls": [
             {

@@ -12,7 +12,7 @@ import type { HostRunOptions, HostDefinition } from './evalFrameworkTypes.js';
 import { hostRunToExecution } from './hostTrace.js';
 async function run(host: HostDefinition, options: HostRunOptions) {
   const trace = await host.run!(
-    { scenario: options.cases[0]!.scenario!, servers: options.servers },
+    { prompt: options.cases[0]!.input!, servers: options.servers },
     options.host,
     {
       manifest: options.manifest,
@@ -29,7 +29,7 @@ vi.mock('../mcp/clientFactory.js', () => ({
 vi.mock('./mcpHost/mcpHostSimulation.js', () => ({ simulateMCPHost: vi.fn() }));
 const case_ = {
   id: 'one',
-  scenario: 'Find documents',
+  input: 'Find documents',
   mode: 'mcp_host' as const,
 };
 function options(): HostRunOptions {

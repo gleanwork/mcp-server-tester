@@ -65,7 +65,7 @@ function releaseInitialize() {
 function run(timeout: number) {
   return getHost('vercel-sdk').run!(
     {
-      scenario: 'hello',
+      prompt: 'hello',
       servers: [{ transport: 'http', serverUrl, label: 'local' }],
     },
     { type: 'vercel-sdk', provider: 'openai', timeout },
@@ -198,7 +198,7 @@ describe('SDK host owned lifecycle deadline', () => {
     let settled = false;
     // No HTTP fixture or MCP clients: only promises, imports and the real AI SDK.
     const pending = getHost('vercel-sdk').run!(
-      { scenario: 'hello', servers: [] },
+      { prompt: 'hello', servers: [] },
       { type: 'vercel-sdk', provider: 'openai', timeout: 200 },
       { manifest: { name: 'offline', datasets: [] } }
     ).finally(() => {
@@ -270,7 +270,7 @@ describe('SDK host owned lifecycle deadline', () => {
     try {
       const result = await getHost('vercel-sdk').run!(
         {
-          scenario: 'hello',
+          prompt: 'hello',
           servers: [
             {
               transport: 'stdio',

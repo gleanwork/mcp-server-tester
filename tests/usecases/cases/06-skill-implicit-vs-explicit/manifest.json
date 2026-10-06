@@ -7,7 +7,7 @@
     "policy": [
       {
         "when": {
-          "scenarioStartsWith": "/run"
+          "inputStartsWith": "/run"
         },
         "steps": [
           {
@@ -25,7 +25,7 @@
       }
     ]
   },
-  "iterations": 10,
+  "trials": 10,
   "metrics": ["passed", "tool_count"],
   "arms": [
     {
@@ -33,7 +33,7 @@
     },
     {
       "name": "explicit",
-      "scenarioTemplate": "/run {{scenario}}"
+      "inputTemplate": "/run {{input}}"
     }
   ]
 }

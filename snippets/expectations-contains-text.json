@@ -2,7 +2,7 @@
   "id": "markdown-response",
   "toolName": "get_city_info",
   "args": { "city": "London" },
-  "expect": {
+  "assertions": {
     "containsText": [
       "## City Information",
       "**City:** London",

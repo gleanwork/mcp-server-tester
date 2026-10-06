@@ -61,7 +61,7 @@ export type {
   ExpectationResultMap,
   EvalCase,
   EvalDataset,
-  EvalExpectBlock,
+  EvalAssertions,
   JudgeExpectConfig,
   SerializedEvalDataset,
   EvalMode,

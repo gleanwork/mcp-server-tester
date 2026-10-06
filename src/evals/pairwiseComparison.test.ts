@@ -167,7 +167,7 @@ describe('comparePairwise', () => {
       candidate: { caseResults: [result('a', '22'), result('b', '22')] },
       judges: [{ type: 'p/oracle' }],
       cases: new Map([
-        ['a', { scenario: 'dataset q', expected: { answer: 'gold' } }],
+        ['a', { input: 'dataset q', expected: { answer: 'gold' } }],
       ]),
     });
     expect(out.cases.map((c) => c.verdicts[0]!.skipped ?? false)).toEqual([

@@ -35,7 +35,7 @@ function run(
   env?: Record<string, string | undefined>
 ) {
   const input: HostRunInput & { env?: Record<string, string | undefined> } = {
-    scenario: 'search',
+    prompt: 'search',
     servers,
     env,
   };
@@ -115,7 +115,7 @@ describe('SDK host through the real AI SDK', () => {
     async (precedence) => {
       vi.stubEnv('OPENAI_API_KEY', 'ambient');
       const input = {
-        scenario: 'hello',
+        prompt: 'hello',
         servers: [],
         env: { OPENAI_API_KEY: 'suite' },
       };

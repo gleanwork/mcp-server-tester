@@ -98,9 +98,9 @@ const readOnlyContext: HostRunContext = {
 function requests(): HostBatchRequest[] {
   return ['query one', 'query two'].map((scenario, i) => ({
     caseId: `case-${i}`,
-    iteration: 0,
+    trial: 0,
     config: host,
-    input: { scenario, servers: [server] },
+    input: { prompt: scenario, servers: [server] },
   }));
 }
 beforeEach(async () => {
@@ -994,7 +994,7 @@ describe('V2 Cowork host', () => {
     const scenario = '  café\n重复 query  ';
     const batch = requests().map((r) => ({
       ...r,
-      input: { ...r.input, scenario },
+      input: { ...r.input, prompt: scenario },
     }));
     await COWORK_HOST.runBatch!(batch, context);
     expect(mocks.submit.mock.calls.map((call) => call[0] as string)).toEqual([
@@ -1032,7 +1032,7 @@ describe('V2 Cowork host', () => {
     expect(reset.mock.calls[0]![0]).toMatchObject({ maxActions: 1 });
     // The failed case is never resent: one submit per case, in order.
     expect(mocks.submit.mock.calls.map((call) => call[0] as string)).toEqual(
-      batch.map((r) => r.input.scenario)
+      batch.map((r) => r.input.prompt)
     );
     expect(mocks.dispose).toHaveBeenCalledOnce();
   });
@@ -1108,8 +1108,8 @@ describe('V2 Cowork host', () => {
   });
   it('expands iterations once and rejects duplicate IDs before UI', async () => {
     const cases = [
-      { id: 'first', mode: 'host' as const, scenario: 'one', iterations: 2 },
-      { id: 'second', mode: 'host' as const, scenario: 'two' },
+      { id: 'first', mode: 'host' as const, input: 'one', trials: 2 },
+      { id: 'second', mode: 'host' as const, input: 'two' },
     ];
     const queues = await prepareHostBatch(
       COWORK_HOST,
@@ -1142,16 +1142,16 @@ describe('V2 Cowork host', () => {
           {
             id: 'one',
             mode: 'host',
-            scenario: 'one',
-            expect: { toolCallCount: { min: 1 } },
+            input: 'one',
+            assertions: { toolCallCount: { min: 1 } },
           },
           {
             id: 'two',
             mode: 'host',
-            scenario: 'two',
-            expect: { toolCallCount: { min: 2 } },
+            input: 'two',
+            assertions: { toolCallCount: { min: 2 } },
           },
-          { id: 'excluded', mode: 'host', scenario: 'excluded' },
+          { id: 'excluded', mode: 'host', input: 'excluded' },
         ],
       })
     );

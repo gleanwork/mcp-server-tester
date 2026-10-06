@@ -45,7 +45,7 @@ function datasetReferences(dataset: EvalDataset): string[] {
     typeof evalCase.host?.type === 'string' ? [evalCase.host.type] : []
   );
   const judges = dataset.cases.flatMap((evalCase) => {
-    const configs = evalCase.expect?.passesJudge;
+    const configs = evalCase.assertions?.passesJudge;
     const list = Array.isArray(configs) ? configs : configs ? [configs] : [];
     return list.flatMap((judge) =>
       typeof judge.judge === 'string' ? [judge.judge] : []

@@ -7,7 +7,7 @@ Complete API documentation for `@gleanwork/mcp-server-tester`.
 | Import from                                          | Contents                                                                                                                                                           | Stability                                       |
 | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------- |
 | `@gleanwork/mcp-server-tester`                       | Fixtures, matchers and validators, the MCP client, config, datasets with `runEvalDataset` and `runEvalCase`, judges, conformance, Agent Skills                     | Stable                                          |
-| `@gleanwork/mcp-server-tester/fixtures/mcp`          | `test` and `expect` with the MCP fixtures and matchers                                                                                                             | Stable                                          |
+| `@gleanwork/mcp-server-tester/fixtures/mcp`          | `test` and `assertions` with the MCP fixtures and matchers                                                                                                         | Stable                                          |
 | `@gleanwork/mcp-server-tester/fixtures/mcpAuth`      | Auth fixtures                                                                                                                                                      | Stable                                          |
 | `@gleanwork/mcp-server-tester/reporters/mcpReporter` | The MCP reporter                                                                                                                                                   | Stable                                          |
 | `@gleanwork/mcp-server-tester/evals`                 | The evaluation framework: manifests, suites and batches, extension definition types, metrics, result stores, comparisons, variant experiments, MCP host simulation | Stable                                          |
@@ -376,19 +376,19 @@ const dataset = await loadEvalDataset('./data/evals.json', {
 
 ### `runEvalDataset(options, context)`
 
-Run an eval dataset. Expectations are defined per-case in the dataset's `expect` blocks.
+Run an eval dataset. Expectations are defined per-case in the dataset's `assertions` blocks.
 
 **Parameters:**
 
 - `options: EvalRunnerOptions`
   - `dataset: EvalDataset` - Dataset to run
   - `plugins?: readonly Plugin[]` - Plugins whose extensions (for example `acme/completeness` judges) the cases use
-  - `schemas?: Record<string, ZodType>` - Schema registry for `expect.schema` validation by name
+  - `schemas?: Record<string, ZodType>` - Schema registry for `assertions.schema` validation by name
   - `stopOnFailure?: boolean` - Stop on first failure (default: `false`)
   - `onCaseComplete?: (result: EvalCaseResult) => void` - Callback after each case completes
   - `concurrency?: number` - Max parallel cases (default: `1` = sequential)
-  - `defaultLlmIterations?: number` - Default iteration count for `mcp_host` cases (default: `1`)
-  - `defaultAccuracyThreshold?: number` - Default `accuracyThreshold` for host-driven cases that don't set one (default: `1`)
+  - `defaultTrials?: number` - Default trial count for `mcp_host` cases (default: `1`)
+  - `defaultPassThreshold?: number` - Default `passThreshold` for host-driven cases that don't set one (default: `1`)
   - `defaultJudgeReps?: number` - Default judge evaluation count per case (default: `1`)
   - `filterTags?: string[]` - Only run cases whose `tags` contain at least one match
   - `saveResultsTo?: string` - Save run results to file for baseline comparison
@@ -438,14 +438,14 @@ const variant = {
 };
 
 const baseline = await runEvalDataset(
-  { dataset, defaultLlmIterations: 10 },
+  { dataset, defaultTrials: 10 },
   { mcp, testInfo }
 );
 
 const candidate = await runEvalDataset(
   {
     dataset,
-    defaultLlmIterations: 10,
+    defaultTrials: 10,
     toolOverrides: variant,
   },
   { mcp, testInfo }
@@ -688,7 +688,7 @@ Run a tool-metadata variant experiment: establish a baseline, inject each candid
   - `maxRounds?: number` - Round budget (default `1`)
   - `minImprovement?: number` - Stop when a round's best gain over the best so far is below this (default `0`); with `better: 'lower'` a gain is a decrease
   - `allowRegressions?: boolean` - Allow winners that regress cases (default `false`)
-  - Plus `runEvalDataset` passthrough: `defaultLlmIterations`, `defaultJudgeReps`, `concurrency`, `filterTags`, `schemas`, `mcpHostModel`, `judgeModel`
+  - Plus `runEvalDataset` passthrough: `defaultTrials`, `defaultJudgeReps`, `concurrency`, `filterTags`, `schemas`, `mcpHostModel`, `judgeModel`
 - `context: EvalContext` - `{ mcp, testInfo? }` from your test
 
 **Returns:** `VariantExperimentResult`
@@ -707,7 +707,7 @@ const result = await runVariantExperiment(
     dataset,
     variants: [variant],
     metric: 'passRate',
-    defaultLlmIterations: 10,
+    defaultTrials: 10,
   },
   { mcp, testInfo }
 );
@@ -762,7 +762,7 @@ test('single eval case', async ({ mcp }, testInfo) => {
       mode: 'direct',
       toolName: 'search',
       args: { query: 'planning' },
-      expect: { textContains: ['result'] },
+      assertions: { textContains: ['result'] },
     },
     { mcp, testInfo }
   );
@@ -771,7 +771,7 @@ test('single eval case', async ({ mcp }, testInfo) => {
 });
 ```
 
-When `evalCase.iterations > 1`, the case is run multiple times and `result.assertionPassRate` is populated with the fraction of passing iterations.
+When `evalCase.trials > 1`, the case is run multiple times and `result.assertionPassRate` is populated with the fraction of passing trials.
 
 ---
 
@@ -987,7 +987,7 @@ const result = await validatePredicate(
 
 ## Playwright Matchers
 
-Custom Playwright matchers for writing inline assertions against MCP tool responses. Import `expect` from the package or its fixtures:
+Custom Playwright matchers for writing inline assertions against MCP tool responses. Import `assertions` from the package or its fixtures:
 
 ```typescript
 import { expect } from '@gleanwork/mcp-server-tester';
@@ -1006,14 +1006,14 @@ test('exact response', async ({ mcp }) => {
 });
 ```
 
-For eval datasets, use the `expect.response` field:
+For eval datasets, use the `assertions.response` field:
 
 ```json
 {
   "id": "calc-test",
   "toolName": "calculate",
   "args": { "a": 2, "b": 3 },
-  "expect": {
+  "assertions": {
     "response": { "result": 5 }
   }
 }
@@ -1403,15 +1403,9 @@ The `{ code, message, data? }` of the protocol error a result was made from, or 
 
 ## Type Definitions
 
-### `EvalExpectBlock`
+### `EvalAssertions`
 
 ```typescript snippet=src/evals/datasetTypes.ts#L228-L329
-/**
- * Unified expectation block for eval cases
- *
- * Mirrors the Playwright matcher API for consistency.
- */
-export interface EvalExpectBlock {
   /**
    * Exact response match (toMatchToolResponse)
    */
@@ -1508,17 +1502,23 @@ export interface EvalExpectBlock {
     exact?: number;
   };
 }
+
+/**
+ * A complete eval dataset containing multiple test cases
+ */
+export interface EvalDataset {
+  /**
 ```
 
 ### `EvalCase`
 
-````typescript snippet=src/evals/datasetTypes.ts#L40-L187
+````typescript snippet=src/evals/datasetTypes.ts#L41-L181
 /**
  * A single eval test case
  *
  * For 'direct' mode: toolName and args, or request, are required
- * For 'mcp_host' mode: scenario and mcpHostConfig are required
- * For 'external_host' mode: scenario and externalHost are required
+ * For 'mcp_host' mode: input and mcpHostConfig are required
+ * For 'external_host' mode: input and externalHost are required
  */
 export interface EvalCase {
   /** Optional per-case host override: a built-in or a plugin host. */
@@ -1564,11 +1564,12 @@ export interface EvalCase {
   request?: EvalDirectRequest;
 
   /**
-   * Natural language scenario for LLM to execute (required for 'mcp_host' and 'external_host' modes)
+   * The user's request the host acts on, sent as its prompt (required for
+   * 'mcp_host' and 'external_host' modes).
    *
    * @example "Get the weather for London and tell me if I need an umbrella"
    */
-  scenario?: string;
+  input?: string;
 
   /**
    * MCP host configuration (optional for 'mcp_host' mode)
@@ -1590,18 +1591,18 @@ export interface EvalCase {
   metadata?: Record<string, unknown>;
 
   /**
-   * Number of times to run this case and compute an assertion pass rate.
-   * When > 1, `EvalCaseResult.assertionPassRate` is populated and `pass` is determined
-   * by `accuracyThreshold` rather than a single run.
+   * Number of trials: attempts at this case. When > 1,
+   * `EvalCaseResult.assertionPassRate` is the share of trials that passed, and
+   * `pass` is decided by `passThreshold`.
    * @default 1
    */
-  iterations?: number;
+  trials?: number;
 
   /**
-   * Minimum accuracy (0–1) required to pass when `iterations > 1`.
-   * @default 1.0 (all iterations must pass)
+   * Share of trials (0–1) that must pass for the case to pass.
+   * @default 1.0 (every trial)
    */
-  accuracyThreshold?: number;
+  passThreshold?: number;
 
   /**
    * Number of times to invoke the LLM judge per `passesJudge` assertion.
@@ -1613,16 +1614,10 @@ export interface EvalCase {
   judgeReps?: number;
 
   /**
-   * Golden/expected answer for this case.
-   * When set, automatically passed as `reference` to the LLM judge
-   * (unless passesJudge.reference is explicitly provided).
-   */
-  canonicalAnswer?: string;
-
-  /**
-   * What the case expects, for judges: `answer` (the reference answer, which
-   * overrides `canonicalAnswer`), `criteria` (rubric criteria keyed by name),
-   * and any other ground truth. Judges read it as `case.expected`.
+   * What the case expects, for graders: `answer` (the reference answer,
+   * passed to judges as `reference` unless an assertion sets its own),
+   * `criteria` (rubric criteria keyed by name), and any other ground truth.
+   * Judges read it as `case.expected`.
    */
   expected?: {
     answer?: unknown;
@@ -1640,9 +1635,7 @@ export interface EvalCase {
   tags?: string[];
 
   /**
-   * Expectations to validate against the tool response
-   *
-   * Multiple expectations can be combined and will all be validated.
+   * Assertions (code graders) each trial must pass. All of them run.
    *
    * @example
    * ```json
@@ -1650,7 +1643,7 @@ export interface EvalCase {
    *   "id": "weather-london",
    *   "toolName": "get_weather",
    *   "args": { "city": "London" },
-   *   "expect": {
+   *   "assertions": {
    *     "containsText": ["temperature", "conditions"],
    *     "schema": "WeatherResponse",
    *     "responseSize": { "maxBytes": 10000 },
@@ -1659,7 +1652,7 @@ export interface EvalCase {
    * }
    * ```
    */
-  expect?: EvalExpectBlock;
+  assertions?: EvalAssertions;
 }
 ````
 

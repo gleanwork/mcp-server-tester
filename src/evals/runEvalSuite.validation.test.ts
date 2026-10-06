@@ -44,11 +44,11 @@ describe('a dry run checks datasets too', () => {
         {
           id: 'a',
           mode: 'host',
-          scenario: 'Find it',
-          expect: { regex: ['found'] },
+          input: 'Find it',
+          assertions: { regex: ['found'] },
         },
       ])
-    ).rejects.toThrow(/case "a" expect: Unrecognized key: "regex"/);
+    ).rejects.toThrow(/case "a" assertions: Unrecognized key: "regex"/);
   });
 
   it("rejects a case host that can't honour its arm's tool variants, before anything runs", async () => {
@@ -58,7 +58,7 @@ describe('a dry run checks datasets too', () => {
           {
             id: 'desktop',
             mode: 'host',
-            scenario: 'Find it',
+            input: 'Find it',
             host: { type: 'cowork' },
           },
         ],
@@ -83,7 +83,7 @@ describe('a case systemPrompt the suite would lose', () => {
           {
             id: 'org',
             mode: 'host',
-            scenario: 'Find it',
+            input: 'Find it',
             mcpHostConfig: { systemPrompt: 'Case prompt.' },
           },
         ],
@@ -107,7 +107,7 @@ describe('a case systemPrompt the suite would lose', () => {
           {
             id: 'org',
             mode: 'host',
-            scenario: 'Find it',
+            input: 'Find it',
             mcpHostConfig: { systemPrompt: 'Case prompt.' },
           },
         ],

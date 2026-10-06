@@ -2,7 +2,7 @@
   "id": "search-test",
   "toolName": "search_docs",
   "args": { "query": "authentication" },
-  "expect": {
+  "assertions": {
     "passesJudge": {
       "rubric": {
         "text": "Evaluate if the search results are relevant to the query. Score 0-1."

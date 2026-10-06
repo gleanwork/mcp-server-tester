@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import { renamedKeys } from './renamedKeys.js';
 import { MCPConfigSchema, type MCPConfig } from '../config/mcpConfig.js';
 import type { ToolOverrideVariant } from '../types/index.js';
 import {
@@ -46,7 +47,7 @@ export interface EvalArm {
   host?: HostConfigPatch;
   toolMap?: Record<string, string[]>;
   toolOverrides?: ToolOverrideVariant;
-  scenarioTemplate?: string;
+  inputTemplate?: string;
   metrics?: ExtensionConfig[];
   judges?: ExtensionConfig[];
   coworkSetup?: CoworkSetupConfig;
@@ -60,7 +61,7 @@ export interface EvalManifest {
   host?: HostConfig;
   toolMap?: Record<string, string[]>;
   toolOverrides?: ToolOverrideVariant;
-  scenarioTemplate?: string;
+  inputTemplate?: string;
   arms?: EvalArm[];
   metrics?: ExtensionConfig[];
   judges?: ExtensionConfig[];
@@ -77,7 +78,7 @@ export interface EvalManifest {
   model?: string;
   provider?: string;
   concurrency?: number;
-  iterations?: number;
+  trials?: number;
   maxCases?: number;
   timeout?: number;
   maxToolCalls?: number;
@@ -90,7 +91,7 @@ export interface EvalManifest {
   temperature?: number;
   maxTokens?: number;
   /** Default share of a host case's trials that must pass (cases may set their own). */
-  accuracyThreshold?: number;
+  passThreshold?: number;
   [key: string]: unknown;
 }
 
@@ -105,6 +106,13 @@ const ServerConfigSchema = MCPConfigSchema;
 const HostConfigPatchSchema = TaggedConfigSchema.partial();
 
 const ToolMapSchema = z.record(z.string(), z.array(z.string()));
+
+/** A variant's input template: `{{input}}` is replaced by the case's input. */
+const InputTemplateSchema = z
+  .string()
+  .refine((template) => !template.includes('{{scenario}}'), {
+    message: '`{{scenario}}` is now `{{input}}`',
+  });
 
 // The runtime runner owns the canonical type; share its manifest validation
 // between defaults and arms rather than introducing a second override model.
@@ -135,12 +143,20 @@ const EvalArmSchema = z
     host: HostConfigPatchSchema.optional(),
     toolMap: ToolMapSchema.optional(),
     toolOverrides: ToolOverrideVariantSchema.optional(),
-    scenarioTemplate: z.string().optional(),
+    inputTemplate: InputTemplateSchema.optional(),
     metrics: z.array(ExtensionConfigSchema).optional(),
     judges: z.array(ExtensionConfigSchema).optional(),
     coworkSetup: CoworkSetupConfigSchema.optional(),
+    ...renamedKeys({ scenarioTemplate: 'inputTemplate' }),
   })
   .strict();
+
+/** Eval config keys that 2.0 renamed (ADR 0002); each fails naming its replacement. */
+export const RENAMED_MANIFEST_KEYS = {
+  scenarioTemplate: 'inputTemplate',
+  iterations: 'trials',
+  accuracyThreshold: 'passThreshold',
+} as const;
 
 export const EvalManifestSchema = z
   .object({
@@ -152,7 +168,7 @@ export const EvalManifestSchema = z
     host: TaggedConfigSchema.optional(),
     toolMap: ToolMapSchema.optional(),
     toolOverrides: ToolOverrideVariantSchema.optional(),
-    scenarioTemplate: z.string().optional(),
+    inputTemplate: InputTemplateSchema.optional(),
     arms: z.array(EvalArmSchema).optional(),
     metrics: z.array(ExtensionConfigSchema).optional(),
     judges: z.array(ExtensionConfigSchema).optional(),
@@ -163,7 +179,7 @@ export const EvalManifestSchema = z
     model: z.string().optional(),
     provider: z.string().optional(),
     concurrency: z.number().int().positive().optional(),
-    iterations: z.number().int().positive().optional(),
+    trials: z.number().int().positive().optional(),
     maxCases: z.number().int().positive().optional(),
     timeout: z.number().int().positive().optional(),
     maxToolCalls: z.number().int().nonnegative().optional(),
@@ -172,16 +188,20 @@ export const EvalManifestSchema = z
     /** Generation defaults for API hosts; the host validates their range. */
     temperature: z.number().optional(),
     maxTokens: z.number().optional(),
-    accuracyThreshold: z.number().min(0).max(1).optional(),
+    passThreshold: z.number().min(0).max(1).optional(),
     filterTags: z.array(z.string().min(1)).optional(),
-    /** The same controls, grouped: `run.iterations`, `run.accuracyThreshold`, ... */
+    /** The same controls, grouped: `run.trials`, `run.passThreshold`, ... */
     run: z
       .object({
-        iterations: z.number().int().positive().optional(),
+        trials: z.number().int().positive().optional(),
         maxCases: z.number().int().positive().optional(),
         concurrency: z.number().int().positive().optional(),
         filterTags: z.array(z.string().min(1)).optional(),
-        accuracyThreshold: z.number().min(0).max(1).optional(),
+        passThreshold: z.number().min(0).max(1).optional(),
+        ...renamedKeys({
+          iterations: 'trials',
+          accuracyThreshold: 'passThreshold',
+        }),
       })
       .strict()
       .optional(),
@@ -206,6 +226,7 @@ export const EvalManifestSchema = z
       .optional(),
     /** Removed; kept so validation can say what replaced it. */
     profile: z.unknown().optional(),
+    ...renamedKeys(RENAMED_MANIFEST_KEYS),
   })
   // Unknown keys are mistakes (a misspelt control would be silently ignored).
   .strict();
@@ -230,7 +251,7 @@ const PluginConfigSchema = EvalManifestSchema.pick({
   host: true,
   toolMap: true,
   toolOverrides: true,
-  scenarioTemplate: true,
+  inputTemplate: true,
   metrics: true,
   judges: true,
   coworkSetup: true,
@@ -238,14 +259,14 @@ const PluginConfigSchema = EvalManifestSchema.pick({
   model: true,
   provider: true,
   concurrency: true,
-  iterations: true,
+  trials: true,
   maxCases: true,
   timeout: true,
   maxToolCalls: true,
   tools: true,
   requireEvalEndpoint: true,
   pricing: true,
-  accuracyThreshold: true,
+  passThreshold: true,
   temperature: true,
   maxTokens: true,
 }).strict();

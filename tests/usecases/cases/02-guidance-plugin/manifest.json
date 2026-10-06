@@ -35,7 +35,7 @@
       }
     ]
   },
-  "iterations": 10,
+  "trials": 10,
   "metrics": [
     "passed",
     "tool_count",

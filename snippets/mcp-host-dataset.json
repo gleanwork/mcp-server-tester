@@ -1,12 +1,12 @@
 {
   "id": "find-config",
   "mode": "mcp_host",
-  "scenario": "Find the application config file and return its contents",
+  "input": "Find the application config file and return its contents",
   "mcpHostConfig": {
     "provider": "anthropic",
     "model": "claude-opus-4-20250514"
   },
-  "expect": {
+  "assertions": {
     "toolsTriggered": {
       "calls": [{ "name": "read_file", "required": true }]
     }

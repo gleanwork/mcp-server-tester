@@ -1,6 +1,6 @@
 ---
 name: write-mcp-host-eval
-description: Generate LLM host simulation evals for MCP servers. Use when asked to test tool discoverability, write mcp_host evals, or validate tool descriptions with real LLM calls. Produces eval datasets and test runners where an LLM discovers and calls tools from natural language scenarios.
+description: Generate LLM host simulation evals for MCP servers. Use when asked to test tool discoverability, write mcp_host evals, or validate tool descriptions with real LLM calls. Produces eval datasets and test runners where an LLM discovers and calls tools from natural-language inputs.
 metadata:
   author: gleanwork
   version: '1.0.0'
@@ -8,7 +8,7 @@ metadata:
 
 # Write MCP Host Simulation Evals
 
-Generate LLM host simulation evals for MCP servers using `@gleanwork/mcp-server-tester`. In `mcp_host` mode, a real LLM receives a natural language scenario and decides which MCP tools to call — testing tool discoverability, parameter clarity, and description quality.
+Generate LLM host simulation evals for MCP servers using `@gleanwork/mcp-server-tester`. In `mcp_host` mode, a real LLM receives a natural-language input and decides which MCP tools to call — testing tool discoverability, parameter clarity, and description quality.
 
 ## When to Use mcp_host Mode
 
@@ -54,11 +54,11 @@ mcp_host cases differ from direct mode cases:
 | `mode`          | `"direct"` (default) | `"mcp_host"` (required)                    |
 | `toolName`      | Required             | Not used                                   |
 | `args`          | Required             | Not used                                   |
-| `scenario`      | Not used             | Required — natural language prompt         |
+| `input`         | Not used             | Required — natural language prompt         |
 | `mcpHostConfig` | Not used             | Provider, model, host type                 |
-| `expect`        | Response assertions  | Tool call assertions + response assertions |
+| `assertions`    | Response assertions  | Tool call assertions + response assertions |
 
-The LLM receives the `scenario` as a prompt along with all available MCP tools, then decides which tools to call and with what arguments.
+The LLM receives the `input` as a prompt along with all available MCP tools, then decides which tools to call and with what arguments.
 
 ## Step 2 — Write the Eval Dataset
 
@@ -72,12 +72,12 @@ The LLM receives the `scenario` as a prompt along with all available MCP tools, 
       "id": "search-trigger",
       "mode": "mcp_host",
       "description": "LLM should use the search tool for document queries",
-      "scenario": "Find recent documents about quarterly planning",
+      "input": "Find recent documents about quarterly planning",
       "mcpHostConfig": {
         "provider": "anthropic",
         "model": "claude-sonnet-4-20250514"
       },
-      "expect": {
+      "assertions": {
         "toolsTriggered": {
           "calls": [{ "name": "search", "required": true }]
         }
@@ -118,21 +118,21 @@ For testing with CLI-based hosts like Claude Code:
   "hostType": "cli",
   "cli": {
     "command": "claude",
-    "args": ["-p", "{{scenario}}", "--output-format", "stream-json"],
+    "args": ["-p", "{{prompt}}", "--output-format", "stream-json"],
     "outputFormat": "stream-json",
     "timeout": 120000
   }
 }
 ```
 
-The `{{scenario}}` placeholder is replaced with the case's `scenario` value.
+The `{{prompt}}` placeholder is replaced with the case's `input` value.
 
 ## Step 3 — Tool Call Assertions
 
 ### `toolsTriggered` — Assert which tools were called
 
 ```json
-"expect": {
+"assertions": {
   "toolsTriggered": {
     "calls": [
       { "name": "search", "required": true },
@@ -200,7 +200,7 @@ Mix exact and regex matching:
 ### Strict order
 
 ```json
-"expect": {
+"assertions": {
   "toolsTriggered": {
     "calls": [
       { "name": "search", "required": true },
@@ -216,7 +216,7 @@ The LLM must call `search` before `get_document`.
 ### Exclusive tool calls
 
 ```json
-"expect": {
+"assertions": {
   "toolsTriggered": {
     "calls": [{ "name": "search", "required": true }],
     "exclusive": true
@@ -229,13 +229,13 @@ The LLM must call ONLY `search` — any other tool call fails the test.
 ### `toolCallCount` — Assert number of tool calls
 
 ```json
-"expect": {
+"assertions": {
   "toolCallCount": { "min": 1, "max": 3 }
 }
 ```
 
 ```json
-"expect": {
+"assertions": {
   "toolCallCount": { "exact": 2 }
 }
 ```
@@ -243,7 +243,7 @@ The LLM must call ONLY `search` — any other tool call fails the test.
 ### Combining tool call and response assertions
 
 ```json
-"expect": {
+"assertions": {
   "toolsTriggered": {
     "calls": [{ "name": "search", "required": true }]
   },
@@ -252,7 +252,7 @@ The LLM must call ONLY `search` — any other tool call fails the test.
 }
 ```
 
-## Step 4 — Multi-Iteration Accuracy
+## Step 4 — Trials and Pass Rate
 
 LLM responses are non-deterministic. Run each case multiple times and measure accuracy:
 
@@ -260,11 +260,11 @@ LLM responses are non-deterministic. Run each case multiple times and measure ac
 {
   "id": "search-accuracy",
   "mode": "mcp_host",
-  "scenario": "Find documents about MCP testing",
+  "input": "Find documents about MCP testing",
   "mcpHostConfig": { "provider": "anthropic" },
-  "iterations": 5,
-  "accuracyThreshold": 0.8,
-  "expect": {
+  "trials": 5,
+  "passThreshold": 0.8,
+  "assertions": {
     "toolsTriggered": {
       "calls": [{ "name": "search", "required": true }]
     }
@@ -272,14 +272,14 @@ LLM responses are non-deterministic. Run each case multiple times and measure ac
 }
 ```
 
-- `iterations: 5` — run the case 5 times
+- `trials: 5` — run the case 5 times
 - `accuracyThreshold: 0.8` — pass if `search` was triggered in at least 4 of 5 runs (80%)
 - Result includes `assertionPassRate` (0–1) and `iterationResults[]`
 
-Use iterations for:
+Use trials for:
 
 - Measuring tool calling reliability across runs
-- Setting realistic accuracy thresholds (start with 0.6, tighten over time)
+- Setting realistic pass thresholds (start with 0.6, tighten over time)
 - Comparing tool description variants (A/B testing)
 
 ## Step 5 — Write the Test Runner
@@ -314,7 +314,7 @@ const result = await runVariantExperiment(
     dataset,
     variants: [variant],
     metric: 'passRate',
-    defaultLlmIterations: 10,
+    defaultTrials: 10,
   },
   { mcp, testInfo }
 );
@@ -327,7 +327,7 @@ The manual two-run path below remains available when you need full control over 
 import { compareEvalRuns } from '@gleanwork/mcp-server-tester/evals';
 
 const baseline = await runEvalDataset(
-  { dataset, defaultLlmIterations: 10 },
+  { dataset, defaultTrials: 10 },
   { mcp, testInfo }
 );
 
@@ -345,7 +345,7 @@ const variant = {
 const candidate = await runEvalDataset(
   {
     dataset,
-    defaultLlmIterations: 10,
+    defaultTrials: 10,
     toolOverrides: variant,
   },
   { mcp, testInfo }
@@ -420,10 +420,10 @@ Choose the comparison mode deliberately:
       "id": "search-basic",
       "mode": "mcp_host",
       "description": "LLM triggers search for document queries",
-      "scenario": "Find recent documents about quarterly planning",
+      "input": "Find recent documents about quarterly planning",
       "mcpHostConfig": { "provider": "anthropic" },
       "tags": ["discovery", "search"],
-      "expect": {
+      "assertions": {
         "toolsTriggered": {
           "calls": [{ "name": "search", "required": true }]
         }
@@ -433,10 +433,10 @@ Choose the comparison mode deliberately:
       "id": "search-with-args",
       "mode": "mcp_host",
       "description": "LLM passes appropriate search arguments",
-      "scenario": "Search for onboarding documents for new engineers",
+      "input": "Search for onboarding documents for new engineers",
       "mcpHostConfig": { "provider": "anthropic" },
       "tags": ["discovery", "search", "args"],
-      "expect": {
+      "assertions": {
         "toolsTriggered": {
           "calls": [
             {
@@ -454,13 +454,13 @@ Choose the comparison mode deliberately:
       "id": "multi-tool-workflow",
       "mode": "mcp_host",
       "description": "LLM chains search then get_document",
-      "scenario": "Find the latest onboarding guide and show me its contents",
+      "input": "Find the latest onboarding guide and show me its contents",
       "mcpHostConfig": {
         "provider": "anthropic",
         "maxToolCalls": 5
       },
       "tags": ["workflow", "multi-tool"],
-      "expect": {
+      "assertions": {
         "toolsTriggered": {
           "calls": [
             { "name": "search", "required": true },
@@ -475,12 +475,12 @@ Choose the comparison mode deliberately:
       "id": "search-accuracy",
       "mode": "mcp_host",
       "description": "Search tool is reliably triggered",
-      "scenario": "Find documents about MCP testing best practices",
+      "input": "Find documents about MCP testing best practices",
       "mcpHostConfig": { "provider": "anthropic" },
-      "iterations": 5,
-      "accuracyThreshold": 0.8,
+      "trials": 5,
+      "passThreshold": 0.8,
       "tags": ["accuracy", "search"],
-      "expect": {
+      "assertions": {
         "toolsTriggered": {
           "calls": [{ "name": "search", "required": true }]
         }
@@ -490,10 +490,10 @@ Choose the comparison mode deliberately:
       "id": "no-tool-abuse",
       "mode": "mcp_host",
       "description": "LLM only calls search, not unrelated tools",
-      "scenario": "What documents do we have about API design?",
+      "input": "What documents do we have about API design?",
       "mcpHostConfig": { "provider": "anthropic" },
       "tags": ["precision"],
-      "expect": {
+      "assertions": {
         "toolsTriggered": {
           "calls": [{ "name": "search", "required": true }],
           "exclusive": true
@@ -543,7 +543,7 @@ Costs scale with tool count (more tools = larger system prompt) and `maxToolCall
 - Use `mode: "direct"` for regression testing (free, fast)
 - Use `mode: "mcp_host"` selectively for tool description quality validation
 - Set `temperature: 0` for most reproducible results
-- Start with `iterations: 3` and `accuracyThreshold: 0.6`, tighten as descriptions improve
+- Start with `trials: 3` and `accuracyThreshold: 0.6`, tighten as descriptions improve
 - Use `exclusive: true` to catch tool confusion early
 
 ## Checklist
@@ -551,11 +551,11 @@ Costs scale with tool count (more tools = larger system prompt) and `maxToolCall
 Before finishing, verify:
 
 - [ ] Every case has `"mode": "mcp_host"`
-- [ ] Every case has a `scenario` (natural language prompt, not tool args)
+- [ ] Every case has a `input` (natural language prompt, not tool args)
 - [ ] `mcpHostConfig.provider` matches an installed `@ai-sdk/<provider>` package
 - [ ] The corresponding API key env var is set (e.g., `ANTHROPIC_API_KEY`)
 - [ ] `$pattern` regex strings are valid (test with `new RegExp(pattern)`)
-- [ ] `iterations` and `accuracyThreshold` are set together (one without the other is a mistake)
+- [ ] `trials` and `passThreshold` are set together (one without the other is a mistake)
 - [ ] `exclusive: true` cases have all expected tools in the `calls` array
 - [ ] Test runner imports from `@gleanwork/mcp-server-tester/fixtures/mcp`
 - [ ] `runEvalDataset` receives two separate arguments: options object and context object

@@ -72,7 +72,7 @@ test.describe('snapshots', () => {
               id: snapshot,
               toolName: 'echo',
               args: { message: MESSAGE },
-              expect: { snapshot, snapshotSanitizers: ['uuid'] },
+              assertions: { snapshot, snapshotSanitizers: ['uuid'] },
             },
           ],
         },

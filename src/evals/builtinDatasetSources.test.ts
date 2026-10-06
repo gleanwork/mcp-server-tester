@@ -66,19 +66,21 @@ describe('canonical built-in dataset sources', () => {
         const case_ = {
           id: 'question',
           mode: 'host',
-          scenario: 'Find policy',
+          input: 'Find policy',
           host: { type: 'custom-host', option: true },
-          iterations: 3,
-          expect: { passesJudge: { judge: 'custom-quality', threshold: 0.8 } },
+          trials: 3,
+          assertions: {
+            passesJudge: { judge: 'custom-quality', threshold: 0.8 },
+          },
         };
         expect(
           (await load({ name: 'canonical', cases: [case_] })).cases[0]
         ).toEqual(case_);
       });
       it.each([
-        { id: 'question', scenario: 'What is our policy?' },
-        { id: 'selection', scenario: 'Find policy', expected_tool: 'search' },
-        { id: 'call', tool: 'search', expect: { isError: false } },
+        { id: 'question', input: 'What is our policy?' },
+        { id: 'selection', input: 'Find policy', expected_tool: 'search' },
+        { id: 'call', tool: 'search', assertions: { isError: false } },
       ])(
         'rejects legacy cases rather than inferring a shape',
         async (case_) => {

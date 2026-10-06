@@ -31,9 +31,7 @@ describe('datasetLoader', () => {
       };
       const dataset = loadEvalDatasetFromObject({
         name: 'host-deadline',
-        cases: [
-          { id: 'one', mode: 'mcp_host', scenario: 'hello', mcpHostConfig },
-        ],
+        cases: [{ id: 'one', mode: 'mcp_host', input: 'hello', mcpHostConfig }],
       });
 
       expect(dataset.cases[0]?.mcpHostConfig).toEqual(mcpHostConfig);
@@ -49,7 +47,7 @@ describe('datasetLoader', () => {
               {
                 id: 'one',
                 mode: 'mcp_host',
-                scenario: 'hello',
+                input: 'hello',
                 mcpHostConfig: { provider: 'openai', timeout },
               },
             ],
@@ -66,7 +64,7 @@ describe('datasetLoader', () => {
             id: 'case-1',
             toolName: 'test',
             args: {},
-            expect: { schema: 'test-schema' },
+            assertions: { schema: 'test-schema' },
           },
         ],
       };
@@ -141,13 +139,13 @@ describe('datasetLoader', () => {
             id: 'case-1',
             toolName: 'test',
             args: {},
-            expect: { schema: 'schema-a' },
+            assertions: { schema: 'schema-a' },
           },
           {
             id: 'case-2',
             toolName: 'test',
             args: {},
-            expect: { schema: 'schema-b' },
+            assertions: { schema: 'schema-b' },
           },
         ],
       };
@@ -214,7 +212,7 @@ describe('strict expectations', () => {
             id: 'one',
             toolName: 'search',
             args: {},
-            expect: { regex: ['found'] },
+            assertions: { regex: ['found'] },
           },
         ],
       })
@@ -232,20 +230,28 @@ describe('strict cases', () => {
     ['a case setting', { accuracyThresold: 0.8 }, /accuracyThresold/],
     [
       'a rubric option',
-      { expect: { passesJudge: { rubric: 'correctness', treshold: 0.9 } } },
+      { assertions: { passesJudge: { rubric: 'correctness', treshold: 0.9 } } },
       /treshold/,
     ],
-    ['a size bound', { expect: { responseSize: { maxByte: 10 } } }, /maxByte/],
+    [
+      'a size bound',
+      { assertions: { responseSize: { maxByte: 10 } } },
+      /maxByte/,
+    ],
     [
       'a call expectation',
       {
-        expect: {
+        assertions: {
           toolsTriggered: { calls: [{ name: 'search', requird: true }] },
         },
       },
       /requird/,
     ],
-    ['a call count', { expect: { toolCallCount: { exactly: 1 } } }, /exactly/],
+    [
+      'a call count',
+      { assertions: { toolCallCount: { exactly: 1 } } },
+      /exactly/,
+    ],
   ])('rejects a misspelt %s', (_, case_, message) => {
     expect(() => loadEvalDatasetFromObject(dataset(case_))).toThrow(message);
   });
@@ -253,10 +259,10 @@ describe('strict cases', () => {
   it("keeps a named judge's own options", () => {
     const loaded = loadEvalDatasetFromObject(
       dataset({
-        expect: { passesJudge: { judge: 'acme/quality', strictness: 2 } },
+        assertions: { passesJudge: { judge: 'acme/quality', strictness: 2 } },
       })
     );
-    expect(loaded.cases[0]?.expect?.passesJudge).toMatchObject({
+    expect(loaded.cases[0]?.assertions?.passesJudge).toMatchObject({
       strictness: 2,
     });
   });

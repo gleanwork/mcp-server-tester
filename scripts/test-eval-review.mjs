@@ -32,7 +32,7 @@ export default {meta:{name:'local-plugin',version:'1.0.0',namespace:'local'},met
         id: 'case-' + i,
         toolName: 'echo',
         args: { text: 'local success ' + i },
-        expect: { containsText: 'local success' },
+        assertions: { containsText: 'local success' },
       })),
     })
   );
@@ -92,7 +92,7 @@ export default {meta:{name:'local-plugin',version:'1.0.0',namespace:'local'},met
     'PASS: a changed manifest reran; three matching runs remained skipped.'
   );
   const dataset = JSON.parse(await fs.readFile(datasetPath, 'utf8'));
-  dataset.cases[0].expect.containsText = 'deliberately impossible';
+  dataset.cases[0].assertions.containsText = 'deliberately impossible';
   await fs.writeFile(datasetPath, JSON.stringify(dataset));
   const failedRun = cli(
     ['run', '--manifest', paths[0], '--output-dir', path.join(dir, 'failure')],

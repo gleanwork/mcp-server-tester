@@ -142,7 +142,7 @@ Use `--snapshot` to create datasets that use Playwright's built-in snapshot test
 npx mst generate --snapshot -o data/snapshot-tests.json
 ```
 
-This sets `expect.snapshot: "<case-id>"` for each case. When you run tests:
+This sets `assertions.snapshot: "<case-id>"` for each case. When you run tests:
 
 1. **First run**: Playwright captures snapshots to `__snapshots__/` folder
 2. **Subsequent runs**: Compares responses against captured snapshots
@@ -272,7 +272,7 @@ The generated dataset is a JSON file:
       "id": "weather-london",
       "toolName": "get_weather",
       "args": { "city": "London" },
-      "expect": {
+      "assertions": {
         "containsText": ["London", "temperature"],
         "matchesPattern": ["\\d+"]
       }
@@ -284,7 +284,7 @@ The generated dataset is a JSON file:
 ### Best Practices
 
 1. **Descriptive IDs** - Use clear, unique test case IDs (e.g., `weather-london`, `search-auth`)
-2. **Representative Cases** - Generate cases that cover different scenarios
+2. **Representative Cases** - Generate cases that cover different inputs
 3. **Review Suggestions** - The auto-suggested expectations are starting points; review and refine them
 4. **Version Control** - Commit generated datasets to track test evolution
 5. **Organize by Feature** - Create separate datasets for different tool categories

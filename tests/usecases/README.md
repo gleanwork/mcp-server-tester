@@ -22,9 +22,9 @@ The runner copies the directory to a temp directory, then fills in each `"{{serv
 `fixtures/plugin.mjs` provides:
 
 - **`usecase/model`**, a deterministic stand-in for a model. It connects to the arm's real MCP servers, lists their tools, and follows a `policy`:
-  - The first rule whose `when` matches is the case's plan. A rule can match on `scenario`, `scenarioStartsWith`, `instruction` (in the host's `systemPrompt`), a host `plugins` entry, or the `run` index.
+  - The first rule whose `when` matches is the case's plan. A rule can match on `input`, `inputStartsWith`, `instruction` (in the host's `systemPrompt`), a host `plugins` entry, or the `run` index.
   - Each step calls a visible tool chosen by `name`, `nameIncludes` or `description`, emits a host-native `skill` event, or runs a tool search.
-  - A step's `rate` makes it run on that share of iterations, deterministically.
+  - A step's `rate` makes it run on that share of trials, deterministically.
 
   Because tools are picked by what the host can see, renaming or re-describing a tool changes what it does.
 

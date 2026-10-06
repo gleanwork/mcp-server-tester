@@ -65,10 +65,10 @@ async function runBuiltinHost(
   };
   const options = { ...input, host, ...context };
   const case_ = {
-    scenario: input.scenario,
+    scenario: input.prompt,
     mcpHostConfig: context.mcpHostConfig,
   };
-  if (!input.scenario) throw new Error('Hosts require a scenario.');
+  if (!input.prompt) throw new Error('Hosts require an input.');
   // Legacy execution details (especially caller-authored CLI args) remain
   // intact, but accepted generation settings must reach the factory first.
   const legacyOptions = { ...case_.mcpHostConfig };
@@ -641,7 +641,7 @@ function claudeCliHost(options: BuiltinHostOptions): MCPHostConfig {
   const model = options.model ?? 'claude-sonnet-4-20250514';
   const baseArgs = [
     '-p',
-    '{{scenario}}',
+    '{{prompt}}',
     '--model',
     model,
     '--output-format',

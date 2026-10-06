@@ -101,12 +101,12 @@ describe('runEvalCase external_host mode', () => {
       {
         id: 'external-host-case',
         mode: 'external_host',
-        scenario: 'Say hello and search.',
+        input: 'Say hello and search.',
         externalHost: {
           driver: 'anthropic.claude.cowork.desktop-app.macos',
           name: 'Claude Cowork Desktop',
         },
-        expect: {
+        assertions: {
           containsText: 'trace acknowledged',
           toolsTriggered: {
             calls: [{ name: 'search', arguments: { query: 'planning' } }],
@@ -224,11 +224,11 @@ describe('runEvalCase external_host mode', () => {
       {
         id: 'external-host-low-confidence',
         mode: 'external_host',
-        scenario: 'Say hello and search.',
+        input: 'Say hello and search.',
         externalHost: {
           driver: 'anthropic.claude.chat.desktop-app.macos',
         },
-        expect: {
+        assertions: {
           containsText: 'trace acknowledged',
           toolsTriggered: {
             calls: [{ name: 'search' }],
@@ -285,11 +285,11 @@ describe('runEvalCase external_host mode', () => {
       {
         id: 'external-host-medium-confidence',
         mode: 'external_host',
-        scenario: 'Say hello and search.',
+        input: 'Say hello and search.',
         externalHost: {
           driver: 'anthropic.claude.cowork.desktop-app.macos',
         },
-        expect: {
+        assertions: {
           toolsTriggered: {
             calls: [{ name: 'search' }],
           },
@@ -343,12 +343,12 @@ describe('runEvalCase external_host mode', () => {
       {
         id: 'external-host-driver-failure',
         mode: 'external_host',
-        scenario: 'Say hello.',
+        input: 'Say hello.',
         externalHost: {
           driver: 'anthropic.claude.cowork.desktop-app.macos',
         },
-        iterations: 2,
-        expect: {
+        trials: 2,
+        assertions: {
           containsText: 'hello',
         },
       },

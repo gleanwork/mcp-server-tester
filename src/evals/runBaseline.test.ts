@@ -51,7 +51,7 @@ function plugin(pass: () => Set<string>): Plugin {
         schema: z.object({ type: z.string() }).passthrough(),
         evidence: 'structured',
         run: async (input) => ({
-          finalText: pass().has(input.scenario) ? 'yes' : 'no',
+          finalText: pass().has(input.prompt) ? 'yes' : 'no',
           events: [],
         }),
       },
@@ -71,8 +71,8 @@ describe('a run is compared with the previous run of the same manifest', () => {
         cases: ['a', 'b'].map((id) => ({
           id,
           mode: 'host',
-          scenario: id,
-          expect: { containsText: 'yes' },
+          input: id,
+          assertions: { containsText: 'yes' },
         })),
       })
     );
@@ -145,8 +145,8 @@ describe('a run is compared with the previous run of the same manifest', () => {
           {
             id: 'a',
             mode: 'host',
-            scenario: 'a',
-            expect: { containsText: 'yes' },
+            input: 'a',
+            assertions: { containsText: 'yes' },
           },
         ],
       })

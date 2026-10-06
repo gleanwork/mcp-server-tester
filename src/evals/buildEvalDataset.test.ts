@@ -34,34 +34,34 @@ describe('buildEvalDataset canonical ingestion', () => {
     {
       id: 'a',
       mode: 'host',
-      scenario: 'Find policy',
+      input: 'Find policy',
       host: { type: 'custom-host', option: true },
     },
     {
       id: 'a',
       mode: 'mcp_host',
-      scenario: 'Find policy',
+      input: 'Find policy',
       mcpHostConfig: { provider: 'openai', model: 'case-model' },
     },
     {
       id: 'a',
       mode: 'external_host',
-      scenario: 'Find policy',
+      input: 'Find policy',
       externalHost: { driver: 'custom-driver' },
     },
   ])('preserves canonical mode and case host override: $mode', (case_) => {
     const dataset = buildEvalDataset(
       {
         name: 'canonical',
-        cases: [{ ...case_, iterations: 2, accuracyThreshold: 0.75 }],
+        cases: [{ ...case_, trials: 2, passThreshold: 0.75 }],
       },
       { provider: 'anthropic', model: 'manifest-model' },
-      { ...manifest, iterations: 9, host: { type: 'different-host' } }
+      { ...manifest, trials: 9, host: { type: 'different-host' } }
     );
     expect(dataset.cases[0]).toEqual({
       ...case_,
-      iterations: 2,
-      accuracyThreshold: 0.75,
+      trials: 2,
+      passThreshold: 0.75,
     });
   });
 
@@ -69,7 +69,7 @@ describe('buildEvalDataset canonical ingestion', () => {
     const case_ = {
       id: 'a',
       toolName: 'search',
-      expect: {
+      assertions: {
         passesJudge: { judge: 'my-judge', reference: 'answer', threshold: 0.7 },
       },
     };
@@ -82,13 +82,13 @@ describe('buildEvalDataset canonical ingestion', () => {
   });
 
   it.each([
-    { id: 'a', scenario: 'find policy', expected_tool: 'search' },
-    { id: 'a', tool: 'search', expect: { isError: false } },
-    { id: 'a', scenario: 'find policy' },
+    { id: 'a', input: 'find policy', expected_tool: 'search' },
+    { id: 'a', tool: 'search', assertions: { isError: false } },
+    { id: 'a', input: 'find policy' },
     {
       id: 'a',
       mode: 'mcp_host',
-      scenario: 'find policy',
+      input: 'find policy',
       expected_tool: 'search',
     },
     { id: 'a', toolName: 'search', tool: 'other' },
@@ -108,7 +108,7 @@ describe('buildEvalDataset canonical ingestion', () => {
             {
               id: 'legacy',
               mode: 'host',
-              scenario: 'Find policy',
+              input: 'Find policy',
               expected_tool: 'search',
             },
           ],
@@ -175,14 +175,14 @@ describe('dataset errors', () => {
         {
           name: 'search',
           cases: [
-            { id: 'a', toolName: 't', args: {}, expect: { regex: ['x'] } },
+            { id: 'a', toolName: 't', args: {}, assertions: { regex: ['x'] } },
           ],
         },
         undefined,
         manifest
       )
     ).toThrow(
-      /Dataset "search" isn't a canonical EvalDataset[\s\S]*case "a" expect: Unrecognized key: "regex" \(did you mean "matchesPattern"\?\)/
+      /Dataset "search" isn't a canonical EvalDataset[\s\S]*case "a" assertions: Unrecognized key: "regex" \(did you mean "matchesPattern"\?\)/
     );
   });
 });

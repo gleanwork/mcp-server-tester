@@ -63,7 +63,7 @@ const allProviders: readonly LLMProvider[] = ProviderSchema.options;
  *     provider: 'anthropic',
  *     cli: {
  *       command: 'claude',
- *       args: ['-p', '{{scenario}}', '--output-format', 'stream-json', '--verbose'],
+ *       args: ['-p', '{{prompt}}', '--output-format', 'stream-json', '--verbose'],
  *     },
  *   }
  * );
@@ -95,7 +95,7 @@ export async function simulateMCPHost(
     if (!config.cli) {
       throw new Error(
         `mcpHostConfig.cli is required when hostType is 'cli'. ` +
-          `Provide { command } with a shell command containing {{scenario}}.`
+          `Provide { command } with a shell command containing {{prompt}}.`
       );
     }
     const placeholder = config.cli.args.some((arg) =>

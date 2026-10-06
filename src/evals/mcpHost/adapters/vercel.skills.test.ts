@@ -191,12 +191,12 @@ describe('SDK host with skills', () => {
             {
               id: 'uses-skill',
               mode: 'mcp_host',
-              scenario: 'What is the weather in London?',
+              input: 'What is the weather in London?',
               mcpHostConfig: {
                 provider: 'openai',
                 ...(skills ? { skills } : {}),
               },
-              expect: { toolsTriggered: SKILL_THEN_TOOL },
+              assertions: { toolsTriggered: SKILL_THEN_TOOL },
             },
           ],
         };

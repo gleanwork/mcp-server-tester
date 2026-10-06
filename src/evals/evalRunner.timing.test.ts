@@ -28,8 +28,8 @@ describe('pre-executed iteration timing', () => {
         dataset: {
           name: 'timing',
           cases: [
-            { id: 'a', mode: 'host', scenario: 'A', iterations: 2 },
-            { id: 'b', mode: 'host', scenario: 'B', iterations: 2 },
+            { id: 'a', mode: 'host', input: 'A', trials: 2 },
+            { id: 'b', mode: 'host', input: 'B', trials: 2 },
           ],
         },
         executeCase,
@@ -54,7 +54,7 @@ describe('pre-executed iteration timing', () => {
     'preserves failed-case timing with pre-execution time %s',
     async (duration) => {
       const result = await runEvalCase(
-        { id: 'failed', mode: 'host', scenario: 'A' },
+        { id: 'failed', mode: 'host', input: 'A' },
         {},
         {
           async executeCase() {
@@ -76,7 +76,7 @@ describe('pre-executed iteration timing', () => {
 
   it('measures ordinary live execution without a pre-execution duration', async () => {
     const result = await runEvalCase(
-      { id: 'live', mode: 'host', scenario: 'A', iterations: 2 },
+      { id: 'live', mode: 'host', input: 'A', trials: 2 },
       {},
       {
         async executeCase() {

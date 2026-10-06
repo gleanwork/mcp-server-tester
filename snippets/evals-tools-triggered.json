@@ -4,15 +4,20 @@
     {
       "id": "llm-triggers-search",
       "mode": "mcp_host",
-      "scenario": "Find recent internal documents about the MCP server rollout",
+      "input": "Find recent internal documents about the MCP server rollout",
       "mcpHostConfig": {
         "provider": "vertex-anthropic",
         "model": "claude-3-5-haiku@20241022"
       },
-      "accuracyThreshold": 0.8,
-      "expect": {
+      "passThreshold": 0.8,
+      "assertions": {
         "toolsTriggered": {
-          "calls": [{ "name": "search", "required": true }]
+          "calls": [
+            {
+              "name": "search",
+              "required": true
+            }
+          ]
         }
       }
     }

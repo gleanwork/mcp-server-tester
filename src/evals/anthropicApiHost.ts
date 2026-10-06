@@ -91,10 +91,10 @@ async function runAnthropicApiHost(
   const apiKey = env[config.apiKeyEnv];
   if (!apiKey)
     throw new Error(`Anthropic API key ${config.apiKeyEnv} is not set.`);
-  const case_ = { scenario: input.scenario };
+  const case_ = { scenario: input.prompt };
   if (!case_.scenario) {
     throw new Error(
-      'Anthropic API host requires exactly one scenario per invocation.'
+      'Anthropic API host requires exactly one input per invocation.'
     );
   }
   const started = Date.now();

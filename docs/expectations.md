@@ -21,14 +21,14 @@ Validates exact equality of structured data (JSON). Best for predictable, struct
 
 ### Dataset Format
 
-Use the `expect.response` field in the eval dataset JSON:
+Use the `assertions.response` field in the eval dataset JSON:
 
 ```json
 {
   "id": "calc-test",
   "toolName": "calculate",
   "args": { "a": 2, "b": 3 },
-  "expect": {
+  "assertions": {
     "response": { "result": 5 }
   }
 }
@@ -51,14 +51,14 @@ Validates that response text contains expected substrings. Ideal for markdown or
 
 ### Dataset Format
 
-Use the `expect.containsText` field in the eval dataset JSON:
+Use the `assertions.containsText` field in the eval dataset JSON:
 
 ```json snippet=snippets/expectations-contains-text.json
 {
   "id": "markdown-response",
   "toolName": "get_city_info",
   "args": { "city": "London" },
-  "expect": {
+  "assertions": {
     "containsText": [
       "## City Information",
       "**City:** London",
@@ -97,14 +97,14 @@ Validates that response text matches regex patterns. Powerful for format validat
 
 ### Dataset Format
 
-Use the `expect.matchesPattern` field in the eval dataset JSON:
+Use the `assertions.matchesPattern` field in the eval dataset JSON:
 
 ```json snippet=snippets/expectations-regex-patterns.json
 {
   "id": "weather-format",
   "toolName": "get_weather",
   "args": { "city": "London" },
-  "expect": {
+  "assertions": {
     "matchesPattern": [
       "^## Weather",
       "Temperature: \\d+°[CF]",
@@ -181,14 +181,14 @@ test('schema validation', async ({ mcp }) => {
 
 ### Dataset Format
 
-Use the `expect.schema` field to reference a named Zod schema loaded with `loadEvalDataset`:
+Use the `assertions.schema` field to reference a named Zod schema loaded with `loadEvalDataset`:
 
 ```json
 {
   "id": "get-user",
   "toolName": "get_user",
   "args": { "userId": "123" },
-  "expect": {
+  "assertions": {
     "schema": "user-response"
   }
 }
@@ -252,14 +252,14 @@ Captures and compares tool responses against stored snapshots using Playwright's
 
 ### Dataset Format
 
-Use the `expect.snapshot` field in the eval dataset JSON. Pass `testInfo` to `runEvalDataset` to enable Playwright snapshot infrastructure:
+Use the `assertions.snapshot` field in the eval dataset JSON. Pass `testInfo` to `runEvalDataset` to enable Playwright snapshot infrastructure:
 
 ```json
 {
   "id": "help-command",
   "toolName": "help",
   "args": {},
-  "expect": {
+  "assertions": {
     "snapshot": "help-output"
   }
 }
@@ -307,7 +307,7 @@ When responses contain variable data that would cause snapshot mismatches, use s
   "id": "get-user-profile",
   "toolName": "get_user",
   "args": { "id": "123" },
-  "expect": {
+  "assertions": {
     "snapshot": "user-profile",
     "snapshotSanitizers": [
       "uuid",
@@ -390,14 +390,14 @@ Every judge runs the same way. The built-in `rubric` judge asks an LLM to score 
 
 ### Dataset Format
 
-Use the `expect.passesJudge` field in the eval dataset JSON:
+Use the `assertions.passesJudge` field in the eval dataset JSON:
 
 ```json snippet=snippets/expectations-passes-judge.json
 {
   "id": "search-test",
   "toolName": "search_docs",
   "args": { "query": "authentication" },
-  "expect": {
+  "assertions": {
     "passesJudge": {
       "rubric": {
         "text": "Evaluate if the search results are relevant to the query. Score 0-1."
@@ -483,12 +483,12 @@ The matcher takes `passingThreshold` where datasets use `threshold`, plus `refer
 | `judge`      | `rubric`                       | The judge: the built-in `rubric`, or `namespace/name` from a plugin.                                                          |
 | `rubric`     | —                              | A built-in rubric name or `{ "text": "..." }`. Shorthand for the `rubric` judge.                                              |
 | `threshold`  | `0.7`                          | Minimum mean score (0–1) to pass.                                                                                             |
-| `reference`  | the case's `canonicalAnswer`   | What the judge compares the response with.                                                                                    |
+| `reference`  | the case's `expected.answer`   | What the judge compares the response with.                                                                                    |
 | `reps`       | the case's `judgeReps`, or `1` | Times the judge scores the same response; the mean is compared with `threshold`.                                              |
 | `options`    | —                              | The judge's own options. Without `options`, a named judge gets its other flat fields.                                         |
 | LLM settings | `provider`: `anthropic`        | The `rubric` judge's `provider`, `model`, `apiKeyEnvVar`, `maxTokens`, `temperature`, `maxBudgetUsd` and `maxToolOutputSize`. |
 
-`reps` repeats only the judge, not the case: `iterations: 3` with `judgeReps: 2` is 6 calls per judge.
+`reps` repeats only the judge, not the case: `trials: 3` with `judgeReps: 2` is 6 calls per judge.
 
 ### Built-in Rubrics and Scoring Scale
 
@@ -657,13 +657,13 @@ A single eval case can declare multiple expectation types at once. The runner ev
 const result = await runEvalDataset({ dataset }, { mcp, testInfo });
 ```
 
-Each eval case uses whichever `expect` fields are defined:
+Each eval case uses whichever `assertions` fields are defined:
 
-- `expect.response` → Exact match validation
-- `expect.schema` → Schema validation
-- `expect.containsText` → Text contains validation
-- `expect.matchesPattern` → Regex pattern validation
-- `expect.passesJudge` → LLM judge evaluation
+- `assertions.response` → Exact match validation
+- `assertions.schema` → Schema validation
+- `assertions.containsText` → Text contains validation
+- `assertions.matchesPattern` → Regex pattern validation
+- `assertions.passesJudge` → LLM judge evaluation
 
 You can combine multiple expectations for a single test case:
 
@@ -672,7 +672,7 @@ You can combine multiple expectations for a single test case:
   "id": "comprehensive-test",
   "toolName": "get_city_info",
   "args": { "city": "London" },
-  "expect": {
+  "assertions": {
     "schema": "city-info",
     "containsText": ["London", "Population"],
     "matchesPattern": ["^## City Information", "Population: [\\d.]+M"],
@@ -700,7 +700,7 @@ Dataset JSON (using current field names):
       "id": "city-info-text",
       "toolName": "get_city_info",
       "args": { "city": "London" },
-      "expect": {
+      "assertions": {
         "containsText": [
           "## City Information",
           "**City:** London",
@@ -712,7 +712,7 @@ Dataset JSON (using current field names):
       "id": "city-info-format",
       "toolName": "get_city_info",
       "args": { "city": "London" },
-      "expect": {
+      "assertions": {
         "matchesPattern": [
           "^## City Information",
           "\\*\\*City:\\*\\* \\w+",

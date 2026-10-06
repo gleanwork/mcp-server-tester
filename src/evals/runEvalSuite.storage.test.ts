@@ -74,8 +74,8 @@ async function fixture() {
         {
           id: 'search-case',
           mode: 'host',
-          scenario: 'Find documents',
-          expect: { toolCallCount: { min: 1, max: 1 } },
+          input: 'Find documents',
+          assertions: { toolCallCount: { min: 1, max: 1 } },
         },
       ],
     })
@@ -207,7 +207,7 @@ describe('suite storage through public APIs', () => {
     async ({ manifestRedact, apiRedact, redact }) => {
       const f = await fixture();
       f.manifest.arms = [{ name: 'baseline' }, { name: 'candidate' }];
-      f.manifest.iterations = 2;
+      f.manifest.trials = 2;
       f.manifest.redactStoredResponses = manifestRedact;
       await fs.writeFile(f.manifestPath, JSON.stringify(f.manifest));
       // Exercise unique per-ID artifacts; shared latest.json atomicity is out of scope.

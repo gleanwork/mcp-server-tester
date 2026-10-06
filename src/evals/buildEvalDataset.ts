@@ -23,11 +23,11 @@ const SourceDatasetSchema = EvalDatasetSchema.extend({
               message: 'Direct cases require toolName or request.',
             });
           }
-        } else if (!case_.scenario) {
+        } else if (!case_.input) {
           context.addIssue({
             code: 'custom',
-            path: ['scenario'],
-            message: 'Host cases require scenario.',
+            path: ['input'],
+            message: 'Host cases require input.',
           });
         }
       })

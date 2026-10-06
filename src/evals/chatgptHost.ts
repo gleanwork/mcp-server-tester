@@ -86,7 +86,7 @@ async function runBatch(
       'ChatGPT desktop does not support tool description overrides.'
     );
   const configs = requests.map((request) => Schema.parse(request.config));
-  if (requests.some((request) => !request.input.scenario.trim()))
+  if (requests.some((request) => !request.input.prompt.trim()))
     throw new Error('ChatGPT requires non-empty scenarios.');
   requireIdenticalHostSettings('ChatGPT', configs);
   const credentialEnv = requests.map((request, index) => ({
@@ -198,7 +198,7 @@ async function runBatch(
         // Eval prompts stay unchanged. Server selection is verified from native calls,
         // not enforced by adding evaluator instructions to the model's context.
         const result = await runExternalHostScenario(
-          request.input.scenario,
+          request.input.prompt,
           {
             ...externalConfigs[index]!,
             options: {
@@ -313,7 +313,7 @@ function chatgptHost(platform: ChatgptPlatform): HostDefinition {
     async run(input, config, context) {
       return (
         await runBatch(
-          [{ caseId: 'single', iteration: 0, input, config }],
+          [{ caseId: 'single', trial: 0, input, config }],
           context,
           platform
         )

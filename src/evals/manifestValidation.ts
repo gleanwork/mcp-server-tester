@@ -96,11 +96,11 @@ function parseConfig<T extends TaggedConfig>(
 
 const SuiteControlsSchema = z
   .object({
-    iterations: z.number().int().positive().optional(),
+    trials: z.number().int().positive().optional(),
     maxCases: z.number().int().positive().optional(),
     concurrency: z.number().int().positive().optional(),
     filterTags: z.array(z.string().min(1)).optional(),
-    accuracyThreshold: z.number().min(0).max(1).optional(),
+    passThreshold: z.number().min(0).max(1).optional(),
   })
   .strict();
 

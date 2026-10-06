@@ -1,11 +1,11 @@
 {
   "id": "search-accuracy",
   "mode": "mcp_host",
-  "scenario": "Find documents about MCP testing",
+  "input": "Find documents about MCP testing",
   "mcpHostConfig": { "provider": "anthropic" },
-  "iterations": 5,
-  "accuracyThreshold": 0.8,
-  "expect": {
+  "trials": 5,
+  "passThreshold": 0.8,
+  "assertions": {
     "toolsTriggered": {
       "calls": [{ "name": "search", "required": true }]
     }

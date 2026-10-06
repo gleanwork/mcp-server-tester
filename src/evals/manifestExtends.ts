@@ -39,7 +39,7 @@ export function resolveManifestExtends(
     }
   }
   assertListedNamespaces(references, namespaces);
-  // `run.iterations` and friends are the manifest's too, so lift them to the
+  // `run.trials` and friends are the manifest's too, so lift them to the
   // keys a config sets; otherwise they would conflict with the config's.
   const own = Object.fromEntries(
     Object.entries(normalizeSuiteControls(manifest)).filter(

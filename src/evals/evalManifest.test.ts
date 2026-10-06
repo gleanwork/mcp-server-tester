@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import type { ToolOverrideVariant } from '../types/index.js';
 import {
   EvalManifestSchema,
+  RENAMED_MANIFEST_KEYS,
   loadEvalManifestFromObject,
   resolveDatasetPaths,
 } from './evalManifest.js';
@@ -122,7 +123,7 @@ describe('EvalManifestSchema', () => {
         datasets: ['cases.json'],
         toolMap,
         toolOverrides: overrides,
-        scenarioTemplate: '{{scenario}}',
+        inputTemplate: '{{input}}',
         arms: [{ name: 'candidate', toolMap, toolOverrides: overrides }],
       },
       { skipDatasetValidation: true }
@@ -279,14 +280,12 @@ describe('strict manifests', () => {
   });
 
   it('accepts run controls, including the default accuracy threshold', () => {
-    expect(
-      load({ run: { iterations: 5, accuracyThreshold: 0.8 } }).run
-    ).toEqual({
-      iterations: 5,
-      accuracyThreshold: 0.8,
+    expect(load({ run: { trials: 5, passThreshold: 0.8 } }).run).toEqual({
+      trials: 5,
+      passThreshold: 0.8,
     });
-    expect(load({ accuracyThreshold: 0.8 }).accuracyThreshold).toBe(0.8);
-    expect(() => load({ run: { accuracyThreshold: 2 } })).toThrow();
+    expect(load({ passThreshold: 0.8 }).passThreshold).toBe(0.8);
+    expect(() => load({ run: { passThreshold: 2 } })).toThrow();
   });
 });
 
@@ -299,8 +298,8 @@ describe('the editor schema', () => {
       )
     ) as { properties: Record<string, unknown>; additionalProperties: unknown };
     const runtime = Object.keys(EvalManifestSchema.shape).filter(
-      // Kept only so validation can explain what replaced it.
-      (key) => key !== 'profile'
+      // Kept only so validation can explain what replaced them.
+      (key) => key !== 'profile' && !(key in RENAMED_MANIFEST_KEYS)
     );
     expect(Object.keys(editor.properties).sort()).toEqual(runtime.sort());
     expect(editor.additionalProperties).toBe(false);

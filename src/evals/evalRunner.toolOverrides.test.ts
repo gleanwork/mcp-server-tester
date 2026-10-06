@@ -45,9 +45,9 @@ function createHostDataset(): EvalDataset {
       {
         id: 'search-discovery',
         mode: 'mcp_host',
-        scenario: 'Find the expense policy',
+        input: 'Find the expense policy',
         mcpHostConfig: { provider: 'openai', model: 'gpt-4o' },
-        expect: {
+        assertions: {
           toolsTriggered: {
             calls: [{ name: 'search', required: true }],
           },
@@ -139,7 +139,7 @@ describe('runEvalDataset toolOverrides', () => {
         description: 'Read a document',
       },
     ]);
-    expect(dataset.cases[0]?.expect?.toolsTriggered?.calls[0]?.name).toBe(
+    expect(dataset.cases[0]?.assertions?.toolsTriggered?.calls[0]?.name).toBe(
       'search'
     );
   });

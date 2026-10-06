@@ -23,7 +23,7 @@ Overrides change what the host **sees**, not what the server **accepts**. The LL
 1. **Never mutate the eval dataset.** It is the behavioral contract. Variants are runtime data passed via `toolOverrides`.
 2. **Never edit the MCP server source** unless the user explicitly asks for source remediation. Your deliverable is the experiment result's `proposal`.
 3. **Respect the regression guard.** A variant that fixes two cases but breaks one is not a win. Leave `allowRegressions` at its default (`false`) unless the user accepts trade-offs.
-4. **Mind cost.** Every candidate is a full eval run (cases × iterations × LLM calls). Prefer few, well-reasoned variants per round over shotgun spreads.
+4. **Mind cost.** Every candidate is a full eval run (cases × trials × LLM calls). Prefer few, well-reasoned variants per round over shotgun spreads.
 
 ## Prerequisites
 
@@ -69,7 +69,7 @@ test('optimize search description', async ({ mcp }, testInfo) => {
     {
       dataset,
       metric: 'toolRecall',
-      defaultLlmIterations: 10,
+      defaultTrials: 10,
       variants: [
         {
           id: 'search-v2-trigger-phrases',
@@ -100,7 +100,7 @@ const result = await runVariantExperiment(
     metric: 'toolRecall',
     maxRounds: 4,
     minImprovement: 0.05,
-    defaultLlmIterations: 10,
+    defaultTrials: 10,
     async proposeVariants({ round, baseline, history, bestSoFar }) {
       const last = history.at(-1)?.best;
       const stillFailing = last?.comparison.unchangedFailures ?? [];
@@ -154,14 +154,14 @@ Emit the final `proposal` as structured output for the user:
 }
 ```
 
-Pair it with the human-readable summary: what changed, why it worked (tie back to the Step 2 hypothesis), the metric movement with iteration count (e.g. "+29% recall over 10 iterations/case"), and the exact replacement text the user can paste into their server.
+Pair it with the human-readable summary: what changed, why it worked (tie back to the Step 2 hypothesis), the metric movement with trial count (e.g. "+29% recall over 10 trials/case"), and the exact replacement text the user can paste into their server.
 
 ## Checklist
 
 - [ ] Metric chosen from observed failure mode, not defaulted blindly
 - [ ] Diagnosed `mcpHostTrace` before proposing variants
 - [ ] Variant `id`s are stable and `description`s state the hypothesis
-- [ ] `defaultLlmIterations` >= 5 (non-determinism; 10 for decisions that matter)
+- [ ] `defaultTrials` >= 5 (non-determinism; 10 for decisions that matter)
 - [ ] Dataset and server source untouched
 - [ ] Variants are wire-compatible (descriptive text only — no renames, type, or `required` changes)
 - [ ] Final answer includes the `proposal` JSON and the paste-ready metadata text

@@ -71,7 +71,7 @@ test.describe('Fixture: discovery, resources, and skills', () => {
             {
               id: 'skills-list-valid',
               request: { method: 'skills/list', params: {} },
-              expect: {
+              assertions: {
                 schema: 'SkillsListResult',
                 containsText: 'weather-report',
               },
@@ -82,7 +82,7 @@ test.describe('Fixture: discovery, resources, and skills', () => {
                 method: 'skills/get',
                 params: { uri: 'skill://weather-report/SKILL.md' },
               },
-              expect: { schema: 'SkillsGetResult' },
+              assertions: { schema: 'SkillsGetResult' },
             },
             {
               id: 'skills-get-unknown',
@@ -90,7 +90,7 @@ test.describe('Fixture: discovery, resources, and skills', () => {
                 method: 'skills/get',
                 params: { uri: 'skill://nope/SKILL.md' },
               },
-              expect: { isError: 'MCP error -32602' },
+              assertions: { isError: 'MCP error -32602' },
             },
             {
               id: 'skill-md-readable',
@@ -98,7 +98,7 @@ test.describe('Fixture: discovery, resources, and skills', () => {
                 method: 'resources/read',
                 params: { uri: 'skill://weather-report/SKILL.md' },
               },
-              expect: { containsText: '# Weather report' },
+              assertions: { containsText: '# Weather report' },
             },
           ],
         },

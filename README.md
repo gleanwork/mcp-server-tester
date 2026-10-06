@@ -57,8 +57,10 @@ Eval datasets let you define test cases as JSON files and run them with `runEval
     {
       "id": "read-config",
       "toolName": "read_file",
-      "args": { "path": "/tmp/config.json" },
-      "expect": {
+      "args": {
+        "path": "/tmp/config.json"
+      },
+      "assertions": {
         "schema": "file-content",
         "containsText": ["version", "name"]
       }
@@ -66,8 +68,10 @@ Eval datasets let you define test cases as JSON files and run them with `runEval
     {
       "id": "read-readme",
       "toolName": "read_file",
-      "args": { "path": "/tmp/README.md" },
-      "expect": {
+      "args": {
+        "path": "/tmp/README.md"
+      },
+      "assertions": {
         "snapshot": "readme-snapshot"
       }
     }
@@ -108,12 +112,12 @@ In LLM host mode, a real LLM receives your server's tool list and a natural lang
 {
   "id": "find-config",
   "mode": "mcp_host",
-  "scenario": "Find the application config file and return its contents",
+  "input": "Find the application config file and return its contents",
   "mcpHostConfig": {
     "provider": "anthropic",
     "model": "claude-opus-4-20250514"
   },
-  "expect": {
+  "assertions": {
     "toolsTriggered": {
       "calls": [{ "name": "read_file", "required": true }]
     }
@@ -121,7 +125,7 @@ In LLM host mode, a real LLM receives your server's tool list and a natural lang
 }
 ```
 
-LLM host mode makes real API calls and produces non-deterministic results. Use `iterations` to run a case multiple times and measure pass rate rather than expecting 100% on a single run. See the [LLM Host Guide](docs/mcp-host.md) for configuration and cost management.
+LLM host mode makes real API calls and produces non-deterministic results. Use `trials` to run a case multiple times and measure pass rate rather than expecting 100% on a single run. See the [LLM Host Guide](docs/mcp-host.md) for configuration and cost management.
 
 ## Installation
 
@@ -265,7 +269,7 @@ npx mst batch \
 ```
 
 Use `arms` to compare server sets or host configurations. An arm can override
-servers, host options, tool maps, scenario templates, metrics, and judges.
+servers, host options, tool maps, input templates, metrics, and judges.
 The canonical execution primitives remain `EvalDataset`, `EvalCase`,
 `EvalMode`, `MCPConfig`, and `runEvalDataset`.
 

@@ -20,7 +20,7 @@ describe('RUBRIC_JUDGE', () => {
 
     const verdict = await RUBRIC_JUDGE.evaluate(
       {
-        case: buildJudgeCase({ canonicalAnswer: 'gold' }),
+        case: buildJudgeCase({ expected: { answer: 'gold' } }),
         trial: buildJudgeTrial('answer'),
       },
       { rubric: 'correctness' }

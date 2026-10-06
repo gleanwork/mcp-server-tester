@@ -48,7 +48,8 @@ export interface HostRunOptions {
 }
 
 export interface HostRunInput {
-  scenario: string;
+  /** The case's input, sent to the host as its prompt. */
+  prompt: string;
   servers: MCPConfig[];
   /** Execution-local environment; never persisted. */
   env?: Record<string, string | undefined>;
@@ -115,7 +116,8 @@ export type HostTrace = Pick<HostRunResult, 'events' | 'usage' | 'error'> & {
 
 export interface HostBatchRequest {
   caseId: string;
-  iteration: number;
+  /** Which trial of the case this is, from 0. */
+  trial: number;
   input: HostRunInput;
   config: HostConfig;
 }

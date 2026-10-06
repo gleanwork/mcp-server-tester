@@ -24,8 +24,8 @@ afterEach(async () => {
 function requests(count: number): HostBatchRequest[] {
   return Array.from({ length: count }, (_, index) => ({
     caseId: `case-${index + 1}`,
-    iteration: 0,
-    input: { scenario: `scenario ${index + 1}`, servers: [] },
+    trial: 0,
+    input: { prompt: `prompt ${index + 1}`, servers: [] },
     config: { type: 'fake' },
   })) as HostBatchRequest[];
 }

@@ -4,8 +4,8 @@
     {
       "id": "tracker-ticket",
       "mode": "host",
-      "scenario": "Create a tracker ticket for the checkout outage",
-      "expect": {
+      "input": "Create a tracker ticket for the checkout outage",
+      "assertions": {
         "toolsTriggered": {
           "calls": [
             {

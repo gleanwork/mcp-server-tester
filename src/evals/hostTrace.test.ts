@@ -71,7 +71,7 @@ describe('per-scenario host traces', () => {
       {
         dataset: {
           name: 'combined-evidence',
-          cases: [{ id: 'one', mode: 'host', scenario: 'query' }],
+          cases: [{ id: 'one', mode: 'host', input: 'query' }],
         },
         executeCase: async () => execution,
       },
@@ -136,8 +136,8 @@ describe('per-scenario host traces', () => {
               {
                 id: 'one',
                 mode: 'host',
-                scenario: 'research',
-                expect: {
+                input: 'research',
+                assertions: {
                   toolsTriggered: {
                     calls: [
                       { name: 'research', kind: 'skill', source: 'host' },
@@ -189,8 +189,8 @@ describe('per-scenario host traces', () => {
             {
               id: 'one',
               mode: 'host',
-              scenario: 'search',
-              expect: { toolsTriggered: { calls: [{ name: 'search' }] } },
+              input: 'search',
+              assertions: { toolsTriggered: { calls: [{ name: 'search' }] } },
             },
           ],
         },
@@ -228,7 +228,7 @@ describe('per-scenario host traces', () => {
         evidence,
         async run(input) {
           return {
-            finalText: input.scenario,
+            finalText: input.prompt,
             events: [
               {
                 kind: 'tool_call',
@@ -248,9 +248,9 @@ describe('per-scenario host traces', () => {
               {
                 id: 'one',
                 mode: 'host',
-                scenario: 'EXPECTED',
-                iterations: 3,
-                expect: {
+                input: 'EXPECTED',
+                trials: 3,
+                assertions: {
                   containsText: 'EXPECTED',
                   toolsTriggered: {
                     calls: [{ name: 'search', arguments: { query: 'right' } }],
@@ -262,7 +262,7 @@ describe('per-scenario host traces', () => {
           executeCase: async (evalCase) =>
             hostRunToExecution(
               await host.run!(
-                { scenario: evalCase.scenario!, servers: [] },
+                { prompt: evalCase.input!, servers: [] },
                 { type: 'scenario-only' },
                 { manifest: { name: 'test', datasets: [] } }
               ),

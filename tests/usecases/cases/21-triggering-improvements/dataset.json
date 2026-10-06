@@ -4,8 +4,8 @@
     {
       "id": "postmortem",
       "mode": "host",
-      "scenario": "Find the checkout outage postmortem",
-      "expect": {
+      "input": "Find the checkout outage postmortem",
+      "assertions": {
         "toolsTriggered": {
           "calls": [
             {
