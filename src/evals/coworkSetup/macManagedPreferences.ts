@@ -2,9 +2,11 @@ import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
 
-// Read-only exception for trusted inference routing. In particular, MCP, plugin,
-// tool-policy and updater settings must still fail closed. Never mutate a plist.
+// Read-only exception for trusted inference routing and its display label. In
+// particular, MCP, plugin, tool-policy and updater settings must still fail
+// closed. Never mutate a plist.
 const INFERENCE_KEYS = new Set([
+  'deploymentDisplayName',
   'disableDeploymentModeChooser',
   'inferenceCredentialHelper',
   'inferenceCredentialHelperTimeoutSec',
@@ -25,9 +27,19 @@ export function inferenceOnlyManagedPreferences(value: unknown): boolean {
   );
 }
 
+/** What an accepted managed-preferences file decides about inference. */
+export interface ManagedInference {
+  /** The file sets `inferenceProvider`, so Desktop takes inference from it. */
+  setsProvider: boolean;
+}
+
+/**
+ * Reads a root-owned managed-preferences plist and accepts it only when every
+ * key is on the inference-only allowlist. Throws otherwise.
+ */
 export async function checkManagedInferencePreferences(
   file: string
-): Promise<void> {
+): Promise<ManagedInference> {
   const error = 'Unable to change Cowork configuration safely.';
   const fd = await open(
     file,
@@ -90,6 +102,10 @@ export async function checkManagedInferencePreferences(
       child.stdin?.end(bytes.subarray(0, length));
     });
     if (!inferenceOnlyManagedPreferences(value)) throw new Error(error);
+    const provider = (value as Record<string, unknown>).inferenceProvider;
+    return {
+      setsProvider: typeof provider === 'string' && provider.trim() !== '',
+    };
   } catch {
     throw new Error(error);
   } finally {

@@ -1,3 +1,4 @@
+import { hasLLMCredential } from '../llm/endpoint.js';
 import { z } from 'zod';
 import type {
   HostDefinition,
@@ -177,9 +178,11 @@ async function runBatch(
   const env = { ...process.env, ...context.env, ...config.env };
   if (
     config.options.computerUseProvider === 'anthropic-computer-use' &&
-    !env.ANTHROPIC_API_KEY
+    !hasLLMCredential('anthropic', { env })
   )
-    throw new Error('ANTHROPIC_API_KEY is required for Cowork Computer Use.');
+    throw new Error(
+      'Cowork Computer Use needs ANTHROPIC_API_KEY, or ANTHROPIC_BASE_URL with MST_LLM_AUTH_COMMAND or ANTHROPIC_AUTH_TOKEN for an LLM gateway.'
+    );
   const platform =
     selectedPlatform ??
     (await getCoworkPlatform(config.options.computerUseProvider));

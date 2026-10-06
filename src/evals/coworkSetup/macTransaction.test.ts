@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EvalManifest } from '../evalManifest.js';
+import type * as ManagedPreferencesModule from './macManagedPreferences.js';
 import {
   installMacCoworkSettings,
   restoreMacCoworkSettings,
@@ -20,7 +21,22 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     lstat: vi.fn(actual.lstat),
   };
 });
+vi.mock('./macManagedPreferences.js', async (importOriginal) => {
+  const original = await importOriginal<typeof ManagedPreferencesModule>();
+  return {
+    ...original,
+    checkManagedInferencePreferences: vi.fn(
+      original.checkManagedInferencePreferences
+    ),
+  };
+});
 const actual = await vi.importActual<typeof fs>('node:fs/promises');
+const managedPreferences = await import('./macManagedPreferences.js');
+const realCheckManaged = (
+  await vi.importActual<typeof ManagedPreferencesModule>(
+    './macManagedPreferences.js'
+  )
+).checkManagedInferencePreferences;
 const ERROR = 'Unable to change Cowork configuration safely.';
 const TOKEN = 'synthetic-inference-key';
 const MCP_TOKEN = 'synthetic-mcp-key';
@@ -120,6 +136,9 @@ function invokeHelper(
 }
 
 beforeEach(async () => {
+  vi.mocked(managedPreferences.checkManagedInferencePreferences)
+    .mockReset()
+    .mockImplementation(realCheckManaged);
   vi.mocked(fs.writeFile).mockReset().mockImplementation(actual.writeFile);
   vi.mocked(fs.rename).mockReset().mockImplementation(actual.rename);
   vi.mocked(fs.unlink).mockReset().mockImplementation(actual.unlink);
@@ -509,6 +528,66 @@ describe('Mac Cowork settings transaction', () => {
       stderr: '',
     });
     await restoreMacCoworkSettings(profileDirectory);
+    await expectClean();
+  });
+
+  describe('with managed preferences that set the inference provider', () => {
+    beforeEach(async () => {
+      // The real check requires a root-owned plist; its parsing is covered in
+      // macManagedPreferences.test.ts.
+      await fs.writeFile(join(root, 'managed.plist'), 'managed');
+      vi.mocked(
+        managedPreferences.checkManagedInferencePreferences
+      ).mockResolvedValue({ setsProvider: true });
+    });
+
+    it('installs without ANTHROPIC_API_KEY and stages no inference credential', async () => {
+      const result = await installMacCoworkSettings(
+        options({ env: { TOKEN_Search: MCP_TOKEN } })
+      );
+      const installed = await readJson(profile(result.id));
+      for (const key of [
+        'inferenceProvider',
+        'inferenceCredentialKind',
+        'inferenceCredentialHelper',
+      ])
+        expect(installed).not.toHaveProperty(key);
+      expect(installed.managedMcpServers).toHaveLength(1);
+      await expectGone(
+        stage('credentials/inference.json'),
+        stage('inference-helper.sh')
+      );
+      expect(
+        Object.keys((await readJson(journal)).files as object)
+      ).not.toContain('credentials/inference.json');
+      await result.restore();
+      await expectClean();
+    });
+
+    it('never stages a supplied ANTHROPIC_API_KEY', async () => {
+      const result = await installMacCoworkSettings(options());
+      await expectGone(stage('credentials/inference.json'));
+      for (const file of [profile(result.id), journal])
+        expect(await text(file)).not.toContain(TOKEN);
+      await result.restore();
+      await expectClean();
+    });
+
+    it('fails closed when managed inference disappears during install', async () => {
+      vi.mocked(managedPreferences.checkManagedInferencePreferences)
+        .mockResolvedValueOnce({ setsProvider: true })
+        .mockResolvedValueOnce({ setsProvider: false });
+      await rejectInstall({ env: { TOKEN_Search: MCP_TOKEN } });
+      await expectClean();
+    });
+  });
+
+  it('requires ANTHROPIC_API_KEY when managed preferences set no provider', async () => {
+    await fs.writeFile(join(root, 'managed.plist'), 'managed');
+    vi.mocked(
+      managedPreferences.checkManagedInferencePreferences
+    ).mockResolvedValue({ setsProvider: false });
+    await rejectInstall({ env: { TOKEN_Search: MCP_TOKEN } });
     await expectClean();
   });
 

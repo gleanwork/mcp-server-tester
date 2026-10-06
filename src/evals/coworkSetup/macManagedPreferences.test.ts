@@ -12,6 +12,23 @@ describe('read-only managed inference exception', () => {
       })
     ).toBe(true);
   });
+  it('allows a gateway deployment with a display name', () => {
+    expect(
+      inferenceOnlyManagedPreferences({
+        deploymentDisplayName: 'Example',
+        disableDeploymentModeChooser: true,
+        inferenceProvider: 'gateway',
+        inferenceGatewayBaseUrl: 'https://gateway.example.test/anthropic',
+        inferenceGatewayAuthScheme: 'bearer',
+        inferenceCredentialKind: 'helper-script',
+        inferenceCredentialHelper: '/trusted/helper',
+        inferenceCredentialHelperTimeoutSec: 15,
+        inferenceCredentialHelperTtlSec: 1800,
+        inferenceModels: [{ name: 'model', labelOverride: 'Model' }],
+        modelDiscoveryEnabled: false,
+      })
+    ).toBe(true);
+  });
   it.each([
     'managedMcpServers',
     'mcpServers',

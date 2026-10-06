@@ -132,6 +132,10 @@ describe('ChatGPT shared Computer Use adapter', () => {
     ).toThrow('action budget');
     vi.stubEnv('ANTHROPIC_API_KEY', '');
     expect(() => validateChatgptConfig(config)).toThrow('ANTHROPIC_API_KEY');
+    // A gateway credential is enough for the planner.
+    vi.stubEnv('ANTHROPIC_BASE_URL', 'https://gateway.example.test/anthropic');
+    vi.stubEnv('MST_LLM_AUTH_COMMAND', 'printf gateway-token');
+    expect(() => validateChatgptConfig(config)).not.toThrow();
     expect(runAnthropicComputerUseSubmission).not.toHaveBeenCalled();
   });
 

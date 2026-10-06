@@ -1,3 +1,4 @@
+import { hasLLMCredential } from '../../llm/endpoint.js';
 import {
   runAnthropicComputerUseSubmission,
   type ComputerUseSubmissionResult,
@@ -108,9 +109,9 @@ export function validateChatgptConfig(config: ExternalHostConfig): void {
     throw new Error(
       'ChatGPT macOS requires the anthropic-computer-use driver; there is no deterministic UI fallback.'
     );
-  if (!plannerEnvironment(config).ANTHROPIC_API_KEY)
+  if (!hasLLMCredential('anthropic', { env: plannerEnvironment(config) }))
     throw new Error(
-      'ANTHROPIC_API_KEY is required for the Computer Use planner.'
+      'The Computer Use planner needs ANTHROPIC_API_KEY, or ANTHROPIC_BASE_URL with MST_LLM_AUTH_COMMAND or ANTHROPIC_AUTH_TOKEN for an LLM gateway.'
     );
   const actions = config.options?.computerUseMaxActions ?? 32;
   if (!Number.isInteger(actions) || Number(actions) < 1 || Number(actions) > 64)

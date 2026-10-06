@@ -68,8 +68,29 @@ teardown; it does not delete Claude's VM bundles, user workspaces, or caches to
 free space. After an interrupted process, use explicit recovery before retrying.
 
 Root-owned, non-writable managed preferences are accepted only when every key is
-on the inference-only allowlist. Managed MCP, plugin, updater, unknown settings,
-and unsafe files still block setup. The plist is read, never modified.
+on the inference-only allowlist: inference routing, credential-helper and model
+settings, and the deployment's display name. Managed MCP, plugin, updater,
+unknown settings, and unsafe files still block setup. The plist is read, never
+modified.
+
+### Inference
+
+Two separate model clients run during a macOS case:
+
+- **Cowork's inference** (the model under test). By default, MST stages
+  `ANTHROPIC_API_KEY` for the temporary profile through a private credential
+  helper. When managed preferences set `inferenceProvider` (for example, an LLM
+  gateway with its own credential helper), they take precedence over the
+  profile: MST then requires no key, stages no inference credential, and sets no
+  provider in the profile. If those managed preferences change during setup, the
+  run fails closed.
+- **The Computer Use planner** (`host.options.computerUseModel`). It uses MST's
+  [LLM gateway settings](./llm-gateways.md): `ANTHROPIC_BASE_URL` with
+  `MST_LLM_AUTH_COMMAND` or `ANTHROPIC_AUTH_TOKEN`, else `ANTHROPIC_API_KEY`
+  against the public API. The gateway must accept the Computer Use beta tool.
+
+So on a Mac whose managed preferences route Claude Desktop through a gateway,
+setting the gateway variables for the planner is enough; no API key is needed.
 
 `MST_COWORK_APP_PATH=/absolute/path/to/Claude.app` remains a development escape
 hatch. MST neither downloads nor deletes caller-owned bundles. Do not combine it

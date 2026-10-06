@@ -221,9 +221,15 @@ function validateStaging(directory: string, profileDirectory: string): void {
     fail();
 }
 
-async function checkManaged(paths: string[]): Promise<void> {
+/** Whether accepted managed preferences set the inference provider. */
+async function checkManaged(paths: string[]): Promise<boolean> {
+  let setsProvider = false;
   for (const file of paths)
-    if (await exists(file)) await checkManagedInferencePreferences(file);
+    if (await exists(file))
+      setsProvider =
+        (await checkManagedInferencePreferences(file)).setsProvider ||
+        setsProvider;
+  return setsProvider;
 }
 
 async function atomicWrite(
@@ -624,6 +630,8 @@ function profileBytes(
     model?: string;
     marketplaces: ReturnType<typeof coworkPluginMarketplace>[];
     blocked: ReturnType<typeof coworkBlockedMcpEntries>;
+    /** Managed preferences own inference; the profile sets no provider. */
+    managedInference: boolean;
   }
 ): Buffer {
   if (
@@ -650,9 +658,13 @@ function profileBytes(
     ...(options.marketplaces.length
       ? { allowedPluginMarketplaces: options.marketplaces }
       : {}),
-    inferenceProvider: 'anthropic',
-    inferenceCredentialKind: 'helper-script',
-    inferenceCredentialHelper: join(options.directory, HELPER),
+    ...(options.managedInference
+      ? {}
+      : {
+          inferenceProvider: 'anthropic',
+          inferenceCredentialKind: 'helper-script',
+          inferenceCredentialHelper: join(options.directory, HELPER),
+        }),
   });
   if (profile.length > LIMIT) fail();
   return profile;
@@ -674,16 +686,21 @@ async function validateInstall(options: InstallOptions) {
   validateStaging(directory, profileDirectory);
   await checkDirectory(profileDirectory);
   await checkDirectory(dirname(directory));
-  await checkManaged(options.managedPreferencePaths);
+  // Managed preferences that set the provider take precedence over the
+  // profile, so MST neither needs nor stages an inference credential.
+  const managedInference = await checkManaged(options.managedPreferencePaths);
   if (await exists(join(profileDirectory, LOCK))) fail();
   if (await exists(directory)) fail();
   const env = { ...options.env };
-  const key = Object.hasOwn(env, 'ANTHROPIC_API_KEY')
-    ? env.ANTHROPIC_API_KEY
-    : undefined;
-  if (typeof key !== 'string' || !/^[A-Za-z0-9._~+/-]+=*$/.test(key)) fail();
-  const inference = jsonBytes({ ANTHROPIC_API_KEY: key });
-  if (inference.length > 64 * 1024) fail();
+  let inference: Buffer | undefined;
+  if (!managedInference) {
+    const key = Object.hasOwn(env, 'ANTHROPIC_API_KEY')
+      ? env.ANTHROPIC_API_KEY
+      : undefined;
+    if (typeof key !== 'string' || !/^[A-Za-z0-9._~+/-]+=*$/.test(key)) fail();
+    inference = jsonBytes({ ANTHROPIC_API_KEY: key });
+    if (inference.length > 64 * 1024) fail();
+  }
   const { plan, settings, privateFiles, stdioDirectories, serverLabels } =
     createCoworkBundlePlan({
       manifest: options.manifest,
@@ -693,7 +710,13 @@ async function validateInstall(options: InstallOptions) {
       env,
     });
   // Include every profile-only field before a session takes ownership or stops Desktop.
-  profileBytes(settings, { directory, model, marketplaces, blocked });
+  profileBytes(settings, {
+    directory,
+    model,
+    marketplaces,
+    blocked,
+    managedInference,
+  });
   // A blocked plugin server must never shadow an eval server (any case).
   const labels = new Set(serverLabels);
   if (blocked.some((entry) => labels.has(entry.name.toLowerCase()))) fail();
@@ -766,6 +789,7 @@ async function validateInstall(options: InstallOptions) {
     directory,
     env,
     inference,
+    managedInference,
     original,
     sourcePath,
     source,
@@ -913,24 +937,33 @@ export async function installMacCoworkSettings(
     await saveJournal(lock, journal);
     // Reserve inference.json; a conflicting MCP label fails without overwriting.
     if (Object.hasOwn(journal.files, 'credentials/inference.json')) fail();
-    const helper = Buffer.from(inferenceHelper(directory));
-    journal.files['credentials/inference.json'] = hash(inference);
-    journal.files[HELPER] = hash(helper);
-    await saveJournal(lock, journal);
-    await writeFile(
-      join(directory, 'credentials', 'inference.json'),
-      inference,
-      { mode: 0o600, flag: 'wx' }
-    );
-    await writeFile(join(directory, HELPER), helper, {
-      mode: 0o700,
-      flag: 'wx',
-    });
+    // With managed inference there is no credential or helper to stage.
+    if (inference) {
+      const helper = Buffer.from(inferenceHelper(directory));
+      journal.files['credentials/inference.json'] = hash(inference);
+      journal.files[HELPER] = hash(helper);
+      await saveJournal(lock, journal);
+      await writeFile(
+        join(directory, 'credentials', 'inference.json'),
+        inference,
+        { mode: 0o600, flag: 'wx' }
+      );
+      await writeFile(join(directory, HELPER), helper, {
+        mode: 0o700,
+        flag: 'wx',
+      });
+    }
     await writeFile(join(profileDirectory, `${id}.json`), profile, {
       mode: 0o600,
       flag: 'wx',
     });
-    await checkManaged(options.managedPreferencePaths);
+    // The profile has no inference credential when managed inference was
+    // seen, so managed inference must still be in force.
+    if (
+      (await checkManaged(options.managedPreferencePaths)) !==
+      validated.managedInference
+    )
+      fail();
     if (!(await readBytes(sourcePath)).equals(source)) fail();
     await replaceMeta(profileDirectory, original, installedMeta(journal));
     journal.phase = 'applied';

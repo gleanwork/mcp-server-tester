@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { ensureCoworkPython } from './pythonRuntime.js';
 import { promisify } from 'node:util';
+import { resolveLLMEndpoint } from '../../llm/endpoint.js';
 import {
   COMPUTER_USE_TOKEN_FIELDS as TOKEN_FIELDS,
   CoworkDriverError,
@@ -21,6 +22,33 @@ function resolveDriverPath(env: NodeJS.ProcessEnv): string {
   return createRequire(
     typeof __filename === 'string' ? __filename : import.meta.url
   ).resolve('@gleanwork/mcp-server-tester/cowork-runtime');
+}
+
+// Gateway settings MST resolves itself; the driver never reads them.
+const GATEWAY_ENV = [
+  'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_AUTH_TOKEN',
+  'MST_LLM_AUTH_COMMAND',
+  'MST_LLM_AUTH_COMMAND_TTL_MS',
+] as const;
+
+/**
+ * Resolves the planner's Anthropic endpoint with MST's LLM gateway rules (see
+ * docs/llm-gateways.md) and gives the driver one credential for exactly that
+ * endpoint: a gateway's bearer token, or `ANTHROPIC_API_KEY`.
+ */
+async function driverEnvironment(
+  env: NodeJS.ProcessEnv
+): Promise<NodeJS.ProcessEnv> {
+  const endpoint = await resolveLLMEndpoint('anthropic', { env });
+  const next: NodeJS.ProcessEnv = { ...env };
+  for (const name of GATEWAY_ENV) delete next[name];
+  delete next.ANTHROPIC_API_KEY;
+  delete next.MST_COWORK_CUA_AUTH_TOKEN;
+  next.MST_COWORK_CUA_BASE_URL = endpoint.baseURL;
+  if (endpoint.authToken) next.MST_COWORK_CUA_AUTH_TOKEN = endpoint.authToken;
+  else if (endpoint.apiKey) next.ANTHROPIC_API_KEY = endpoint.apiKey;
+  return next;
 }
 
 export interface ComputerUseOptions extends CoworkDriverOptions {
@@ -97,16 +125,16 @@ async function runComputerUseDriver(
   mode: 'submit' | 'hitl',
   label: string
 ): Promise<ComputerUseSubmissionResult | ComputerUseHitlResult> {
-  const env = {
+  if (options.deadlineAt <= Date.now())
+    throw new Error(`Computer Use ${label} deadline exceeded; not retrying.`);
+  const env = await driverEnvironment({
     ...process.env,
     ...options.env,
     ...(options.model ? { MST_COWORK_CUA_MODEL: options.model } : {}),
     ...(options.appPath ? { MST_COWORK_APP_PATH: options.appPath } : {}),
     MST_COWORK_APPROVE_WRITE_TOOLS:
       options.approveWriteTools === true ? '1' : '0',
-  };
-  if (options.deadlineAt <= Date.now())
-    throw new Error(`Computer Use ${label} deadline exceeded; not retrying.`);
+  });
   const python = await ensureCoworkPython(env);
   const DRIVER_PATH = resolveDriverPath(env);
   const timeoutMs = options.deadlineAt - Date.now();
