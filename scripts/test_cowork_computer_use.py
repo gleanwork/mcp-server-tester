@@ -65,6 +65,43 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(self.client_kwargs, {'api_key': 'test-only', 'base_url': 'https://api.anthropic.com'})
         self.assertNotIn('ANTHROPIC_AUTH_TOKEN', self.client_env)
 
+    def test_planner_sends_only_the_gateway_token_to_the_resolved_gateway(self):
+        resolved = {'MST_COWORK_CUA_BASE_URL': 'https://gateway.example/anthropic', 'MST_COWORK_CUA_AUTH_TOKEN': 'gateway-token'}
+        with patch.dict(driver.os.environ, resolved):
+            self.run_actions([], mode='hitl')
+        self.assertEqual(self.client_kwargs, {'auth_token': 'gateway-token', 'base_url': 'https://gateway.example/anthropic'})
+        # The SDK would otherwise also send ANTHROPIC_API_KEY as x-api-key.
+        self.assertNotIn('ANTHROPIC_API_KEY', self.client_env)
+
+    def test_assistant_turn_drops_fields_a_gateway_adds_to_its_reply(self):
+        reply = [
+            types.SimpleNamespace(type='text', text='Taking a screenshot.', citations=None),
+            types.SimpleNamespace(type='tool_use', id='toolu_1', name='computer', input={'action': 'screenshot'},
+                                  caller=types.SimpleNamespace(), toolset_name=None),
+            (other := types.SimpleNamespace(type='thinking', thinking='...', signature='sig')),
+        ]
+        self.assertEqual(driver.assistant_turn(reply), [
+            {'type': 'text', 'text': 'Taking a screenshot.'},
+            {'type': 'tool_use', 'id': 'toolu_1', 'name': 'computer', 'input': {'action': 'screenshot'}},
+            other,
+        ])
+
+    def test_planner_sends_back_a_clean_assistant_turn(self):
+        self.run_actions([{'action': 'screenshot'}], mode='hitl', budget=2, next_plan=[])
+        sent = self.planner_request['messages']
+        assistant = [m for m in sent if m['role'] == 'assistant']
+        self.assertTrue(assistant)
+        for message in assistant:
+            for block in message['content']:
+                self.assertIsInstance(block, dict)
+                self.assertEqual(set(block), {'type', 'id', 'name', 'input'})
+
+    def test_planner_never_sends_a_gateway_token_to_the_public_api(self):
+        with patch.dict(driver.os.environ, {'MST_COWORK_CUA_AUTH_TOKEN': 'gateway-token'}):
+            result, performed = self.run_actions([], mode='hitl')
+        self.assertIn('gateway base URL', result)
+        self.assertEqual((performed, self.client_kwargs), (0, {}))
+
     def test_cowork_hitl_defaults_to_read_only_and_never_persistent_approval(self):
         with patch.dict(driver.os.environ, {'MST_COWORK_APPROVE_WRITE_TOOLS': '0'}):
             self.run_actions([], mode='hitl')

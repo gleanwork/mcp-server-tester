@@ -182,6 +182,25 @@ def check_chatgpt_permissions() -> None:
         raise DesktopBlockedError('accessibility_required')
 
 
+# The fields the Messages API accepts for each block of an assistant turn.
+ASSISTANT_BLOCK_FIELDS = {'text': ('type', 'text'), 'tool_use': ('type', 'id', 'name', 'input')}
+
+
+def assistant_turn(content: Any) -> list[Any]:
+    """A planner reply as the next request's assistant turn.
+
+    Text and tool_use blocks keep only the fields the API accepts back. LLM
+    gateways can rebuild replies with empty extra fields (an empty `caller`,
+    `citations: null`) that the API rejects when they are sent back. Other
+    block types pass through unchanged.
+    """
+    turn = []
+    for block in content:
+        fields = ASSISTANT_BLOCK_FIELDS.get(getattr(block, 'type', None))
+        turn.append({name: getattr(block, name) for name in fields} if fields else block)
+    return turn
+
+
 def trim_screenshot_history(messages: list[dict[str, Any]], keep: int = 3) -> None:
     """Retain recent visual grounding without resending an ever-growing image history."""
     images = []
@@ -276,9 +295,18 @@ async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemet
     except ImportError as error:
         raise RuntimeError("Install the Computer Use dependencies: pip install anthropic pyautogui mss Pillow") from error
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
+    # MST resolves the planner endpoint (an LLM gateway or the public API) and
+    # passes one credential for it: MST_COWORK_CUA_AUTH_TOKEN, sent as a bearer
+    # token to a gateway, or ANTHROPIC_API_KEY. Inherited ANTHROPIC_BASE_URL and
+    # ANTHROPIC_AUTH_TOKEN are never read, so the SDK can't mix them.
+    base_url = os.environ.get("MST_COWORK_CUA_BASE_URL") or PUBLIC_API_BASE_URL
+    auth_token = os.environ.get("MST_COWORK_CUA_AUTH_TOKEN")
+    api_key = None if auth_token else os.environ.get("ANTHROPIC_API_KEY")
+    if not auth_token and not api_key:
         raise RuntimeError("ANTHROPIC_API_KEY is required for the Computer Use submission driver")
+    if auth_token and base_url.rstrip('/') == PUBLIC_API_BASE_URL:
+        # A gateway token never goes to the public API.
+        raise RuntimeError("A gateway token requires a gateway base URL")
 
     if application not in {'cowork', 'chatgpt'}:
         raise RuntimeError('Unsupported desktop application')
@@ -288,12 +316,13 @@ async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemet
     if chatgpt_surface not in {'chatgpt-work', 'codex'}:
         raise RuntimeError('Unsupported ChatGPT surface')
     surface = ('ChatGPT Work' if chatgpt_surface == 'chatgpt-work' else 'Codex') if application == 'chatgpt' else 'Cowork'
-    # This driver doesn't support LLM gateways yet: it always calls the public
-    # API with ANTHROPIC_API_KEY. Otherwise the SDK would pick up an inherited
-    # ANTHROPIC_BASE_URL (sending this key to a gateway) and ANTHROPIC_AUTH_TOKEN
-    # (sending a gateway token to the public API).
     os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
-    client = anthropic.Anthropic(api_key=api_key, base_url=PUBLIC_API_BASE_URL)
+    if auth_token:
+        # The SDK falls back to ANTHROPIC_API_KEY; send only the bearer token.
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+        client = anthropic.Anthropic(auth_token=auth_token, base_url=base_url)
+    else:
+        client = anthropic.Anthropic(api_key=api_key, base_url=base_url)
     model = os.environ.get("MST_COWORK_CUA_MODEL", DEFAULT_MODEL)
     log(f"starting driver with model={model}, max_actions={max_actions}, app={application}")
     app_path = os.environ.get("MST_COWORK_APP_PATH") if application == "cowork" else None
@@ -445,7 +474,7 @@ async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemet
             betas=["computer-use-2025-11-24"],
         )
         telemetry.observe(response)
-        messages.append({"role": "assistant", "content": response.content})
+        messages.append({"role": "assistant", "content": assistant_turn(response.content)})
         tool_results: list[dict[str, Any]] = []
         for block in response.content:
             if getattr(block, "type", None) != "tool_use":

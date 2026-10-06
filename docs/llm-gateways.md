@@ -65,8 +65,13 @@ A case's `mcpHostConfig.env` takes part in this too, so a dataset can set `MST_L
 | `mcp_host` SDK host, `provider: 'openai'`    |           | Yes    | Uses the Responses API; sends `store: false` behind a base URL override (see below).                   |
 | `anthropic` judge                            | Yes       |        |                                                                                                        |
 | `openai` judge                               |           | Yes    | Uses non-streaming Chat Completions, which some gateways don't serve. Use the `anthropic` judge there. |
+| Computer Use planner (Cowork, ChatGPT macOS) | Yes       |        | The gateway must accept the Computer Use beta tool.                                                    |
 
-The `anthropic-agent-sdk` judge and CLI hosts run their own processes, which read their own configuration. These don't read the settings yet: the `anthropic-api` external host, Cowork's Computer Use driver and Cowork inference, and the ChatGPT desktop host's Computer Use planner. The Computer Use driver (used by both desktop hosts) always calls the public Anthropic API with `ANTHROPIC_API_KEY`, and ignores an exported `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`, so neither credential reaches the wrong endpoint.
+The Computer Use planner gets one credential for exactly one endpoint: MST resolves both with the rules above, and the driver ignores `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` from its own environment.
+
+Cowork's own inference is configured in Claude Desktop, not by these settings. MST stages `ANTHROPIC_API_KEY` for it, unless managed preferences already set the inference provider (for example, a gateway); see [Cowork inference](./cowork.md#inference).
+
+The `anthropic-agent-sdk` judge and CLI hosts run their own processes, which read their own configuration. The `anthropic-api` external host doesn't read the settings yet.
 
 ## Why the Anthropic SDK host streams
 

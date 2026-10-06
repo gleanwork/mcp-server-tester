@@ -1,7 +1,7 @@
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, it, onTestFinished } from 'vitest';
+import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
 import {
   ComputerUseDriverError,
   ComputerUseHitlBudgetError,
@@ -40,6 +40,83 @@ it.each(['chatgpt', 'cowork'] as const)(
       },
     });
     expect(result.model).toBe('claude-sonnet-4-6');
+  }
+);
+
+afterEach(() => vi.unstubAllEnvs());
+
+const GATEWAY = 'https://gateway.example.test/anthropic';
+it.each([
+  {
+    name: 'a gateway auth command',
+    env: {
+      ANTHROPIC_BASE_URL: `${GATEWAY}/v1`,
+      MST_LLM_AUTH_COMMAND: 'printf gateway-token',
+      ANTHROPIC_API_KEY: 'public-key',
+    },
+    seen: { base: GATEWAY, token: 'gateway-token', key: null },
+  },
+  {
+    name: 'a static gateway token',
+    env: { ANTHROPIC_BASE_URL: GATEWAY, ANTHROPIC_AUTH_TOKEN: 'static-token' },
+    seen: { base: GATEWAY, token: 'static-token', key: null },
+  },
+  {
+    name: 'the public API key',
+    env: { ANTHROPIC_API_KEY: 'public-key' },
+    seen: { base: 'https://api.anthropic.com', token: null, key: 'public-key' },
+  },
+  {
+    name: 'a gateway token without a gateway URL',
+    env: {
+      ANTHROPIC_AUTH_TOKEN: 'static-token',
+      ANTHROPIC_API_KEY: 'public-key',
+    },
+    seen: { base: 'https://api.anthropic.com', token: null, key: 'public-key' },
+  },
+])(
+  'gives the planner one credential for its endpoint: $name',
+  async ({ env, seen }) => {
+    for (const name of [
+      'ANTHROPIC_BASE_URL',
+      'ANTHROPIC_AUTH_TOKEN',
+      'ANTHROPIC_API_KEY',
+      'MST_LLM_AUTH_COMMAND',
+      'MST_COWORK_CUA_BASE_URL',
+      'MST_COWORK_CUA_AUTH_TOKEN',
+    ])
+      vi.stubEnv(name, '');
+    const directory = await mkdtemp(join(tmpdir(), 'cu-endpoint-'));
+    onTestFinished(() => rm(directory, { recursive: true, force: true }));
+    await mkdir(join(directory, 'scripts'));
+    await writeFile(join(directory, 'package.json'), '{"type":"commonjs"}');
+    const snapshot = join(directory, 'env.json');
+    await writeFile(
+      join(directory, 'scripts/cowork_computer_use.py'),
+      `
+    const e = process.env;
+    require('fs').writeFileSync(e.SNAPSHOT, JSON.stringify({
+      base: e.MST_COWORK_CUA_BASE_URL,
+      token: e.MST_COWORK_CUA_AUTH_TOKEN || null,
+      key: e.ANTHROPIC_API_KEY || null,
+      gateway: ['ANTHROPIC_BASE_URL','ANTHROPIC_AUTH_TOKEN','MST_LLM_AUTH_COMMAND'].filter((n) => e[n]),
+    }));
+    console.log(JSON.stringify({status:'submitted',action_count:2,submission_action:{action:'key',text:'enter'},model:'test'}));
+  `
+    );
+    await runAnthropicComputerUseSubmission('query', {
+      deadlineAt: Date.now() + 10000,
+      env: {
+        ...env,
+        SNAPSHOT: snapshot,
+        MST_COWORK_DRIVER_ROOT: directory,
+        MST_COWORK_PYTHON: process.execPath,
+      },
+    });
+    expect(JSON.parse(await readFile(snapshot, 'utf8'))).toEqual({
+      ...seen,
+      gateway: [],
+    });
   }
 );
 
