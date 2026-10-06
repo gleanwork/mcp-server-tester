@@ -152,7 +152,7 @@
     "react-dom": "^18.3.1",
     "recharts": "^3.7.0",
     "release-it": "^19.2.4",
-    "tailwindcss": "^3.4.15",
+    "tailwindcss": "^4.3.3",
     "tsup": "^8.3.5",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
