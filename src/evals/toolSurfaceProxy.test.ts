@@ -7,7 +7,7 @@ import {
   closeMCPClient,
   createMCPClientForConfig,
 } from '../mcp/clientFactory.js';
-import type { HostRunResult } from './evalFrameworkTypes.js';
+import type { ClientRunResult } from './evalFrameworkTypes.js';
 import { prepareHostBatch } from './prepareHostBatch.js';
 import {
   settleProxiedTrace,
@@ -173,7 +173,7 @@ describe('settleProxiedTrace', () => {
   ];
 
   it('maps calls named by server field, label prefix, or the one server', () => {
-    const trace: HostRunResult = {
+    const trace: ClientRunResult = {
       finalText: '',
       events: [call('find_more', 'agg'), call('agg.find_more'), call('other')],
     };

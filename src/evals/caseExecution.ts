@@ -19,14 +19,14 @@ import {
   createMCPFixture,
   type MCPFixtureApi,
 } from '../mcp/fixtures/mcpFixture.js';
-import type { HostDiagnostics, UsageMetrics } from '../types/index.js';
+import type { ClientDiagnostics, UsageMetrics } from '../types/index.js';
 import type { EvalCase } from './datasetTypes.js';
-import type { EvalArm, EvalManifest, HostConfig } from './evalManifest.js';
+import type { EvalArm, EvalManifest, ClientConfig } from './evalManifest.js';
 import type {
-  HostEvent,
-  HostEvidence,
-  HostRunResult,
-  HostTrace,
+  TraceEvent,
+  TraceEvidence,
+  ClientRunResult,
+  Trace,
 } from './evalFrameworkTypes.js';
 import { runExternalHostScenario } from './externalHost/runtime.js';
 import type {
@@ -49,9 +49,9 @@ import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
 const AnyResultSchema = z.looseObject({});
 
 /** The host payload validators and reports read: the simulation shape. */
-export type HostResponse = MCPHostSimulationResult & {
-  events?: HostEvent[];
-  evidence?: HostEvidence;
+export type ClientResponse = MCPHostSimulationResult & {
+  events?: TraceEvent[];
+  evidence?: TraceEvidence;
   externalHost?: ExternalHostMetadata;
 };
 
@@ -71,17 +71,17 @@ export interface DirectExecution extends ExecutionBase {
 /** An LLM or desktop host run, adapted to the simulation-shaped response. */
 export interface HostExecution extends ExecutionBase {
   kind: 'host';
-  response: HostResponse;
+  response: ClientResponse;
   /**
    * What the host did, as it reported it. A custom executor may omit it;
    * the runner then derives it from `response`.
    */
-  trace?: HostTrace;
+  trace?: Trace;
   /** Declared trace evidence. Undefined for the legacy simulated host. */
-  evidence?: HostEvidence;
+  evidence?: TraceEvidence;
   usage?: UsageMetrics;
   telemetry?: Record<string, unknown>;
-  diagnostics?: HostDiagnostics;
+  diagnostics?: ClientDiagnostics;
   externalHost?: ExternalHostMetadata;
 }
 
@@ -240,12 +240,12 @@ export async function executeEvalCase(
 /** Everything a suite needs to run one case of one arm. */
 export interface SuiteCaseExecutorOptions {
   servers: MCPConfig[];
-  host: HostConfig;
+  host: ClientConfig;
   manifest: EvalManifest;
   arm?: EvalArm;
   env?: Record<string, string | undefined>;
   /** Traces from a batch host, consumed once per case iteration. */
-  batchTraces?: Map<string, HostRunResult[]>;
+  batchTraces?: Map<string, ClientRunResult[]>;
   /** Called with each per-case direct connection, e.g. to record its protocol. */
   onDirectConnection?: (client: Client) => void;
   /** The arm's tool variant, which `proxy` serves to hosts that connect to their servers. */

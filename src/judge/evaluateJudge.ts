@@ -4,7 +4,7 @@
  * judge and plugin judges).
  */
 import type { ValidationResult } from '../assertions/validators/types.js';
-import type { HostEvidence } from '../evals/evalFrameworkTypes.js';
+import type { TraceEvidence } from '../evals/evalFrameworkTypes.js';
 import { parseExtensionOptions } from '../plugins/plugin.js';
 import { getJudge } from './builtinJudges.js';
 import {
@@ -25,7 +25,7 @@ export interface JudgeRun {
   /** The host response as reported, with host tool names. */
   hostResponse?: unknown;
   /** How the host trace was observed. */
-  evidence?: HostEvidence;
+  evidence?: TraceEvidence;
 }
 
 /** Minimum judge score that passes when no threshold is given. */

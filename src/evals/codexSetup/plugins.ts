@@ -2,16 +2,19 @@ import { lstat, readFile, realpath, rename, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { parse, stringify } from 'smol-toml';
 import {
-  HostPluginError,
-  HostPluginsSchema,
+  MarketplacePluginError,
+  MarketplacePluginsSchema,
   hostPluginMcpServers,
   materializeHostPluginMcp,
-  type HostPlugin,
+  type MarketplacePlugin,
   type HostPluginCredentials,
 } from '../hostPlugins.js';
 import { runBounded } from './native.js';
 
-export { HostPluginError, type HostPlugin } from '../hostPlugins.js';
+export {
+  MarketplacePluginError,
+  type MarketplacePlugin,
+} from '../hostPlugins.js';
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const COMMAND_TIMEOUT_MS = 180_000;
@@ -44,22 +47,23 @@ export async function installCodexPlugins(options: {
   codexPath: string;
   env: Record<string, string>;
   codexHome: string;
-  plugins: readonly HostPlugin[];
+  plugins: readonly MarketplacePlugin[];
   credentials: HostPluginCredentials;
   /** Direct MCP labels; a plugin server must not shadow one. */
   reservedLabels?: readonly string[];
 }): Promise<HostPluginReceipt[]> {
   const { codexPath, env, codexHome } = options;
-  const parsed = HostPluginsSchema.safeParse(options.plugins);
-  if (!parsed.success) throw new HostPluginError('plugin_invalid', 'config');
+  const parsed = MarketplacePluginsSchema.safeParse(options.plugins);
+  if (!parsed.success)
+    throw new MarketplacePluginError('plugin_invalid', 'config');
   const plugins = parsed.data;
   const reserved = new Set(options.reservedLabels ?? []);
   for (const { plugin, server } of hostPluginMcpServers(plugins))
     if (reserved.has(server))
-      throw new HostPluginError('plugin_invalid', plugin);
+      throw new MarketplacePluginError('plugin_invalid', plugin);
   const run = async (
     args: string[],
-    code: HostPluginError['code'],
+    code: MarketplacePluginError['code'],
     name: string
   ) => {
     const result = await runBounded(codexPath, args, {
@@ -69,7 +73,7 @@ export async function installCodexPlugins(options: {
       maxOutputBytes: COMMAND_OUTPUT_BYTES,
     });
     if (result.failure || result.exitCode !== 0)
-      throw new HostPluginError(code, name);
+      throw new MarketplacePluginError(code, name);
     return lastJsonObject(result.output.toString('utf8'), code, name);
   };
   const receipts: HostPluginReceipt[] = [];
@@ -91,7 +95,10 @@ export async function installCodexPlugins(options: {
     );
     const marketplace = added.marketplaceName;
     if (typeof marketplace !== 'string' || !NAME.test(marketplace))
-      throw new HostPluginError('plugin_marketplace_failed', plugin.name);
+      throw new MarketplacePluginError(
+        'plugin_marketplace_failed',
+        plugin.name
+      );
     const installed = await run(
       ['plugin', 'add', `${plugin.name}@${marketplace}`, '--json'],
       'plugin_install_failed',
@@ -122,7 +129,7 @@ export async function installCodexPlugins(options: {
           declared.mcpServers as Record<string, unknown> | undefined
         )?.[target.server];
         if (!isStdio(server))
-          throw new HostPluginError('plugin_mcp_invalid', plugin.name);
+          throw new MarketplacePluginError('plugin_mcp_invalid', plugin.name);
         const cwd = resolve(
           root,
           typeof server.cwd === 'string' ? server.cwd : '.'
@@ -135,7 +142,7 @@ export async function installCodexPlugins(options: {
           !inside(root, cwd, true) ||
           [server.command, ...args].some((value) => value.includes('${'))
         )
-          throw new HostPluginError('plugin_mcp_invalid', plugin.name);
+          throw new MarketplacePluginError('plugin_mcp_invalid', plugin.name);
         const { env: overrideEnv } = await materializeHostPluginMcp({
           dataRoot: join(codexHome, 'mst-plugin-data'),
           server: target,
@@ -157,7 +164,7 @@ export async function installCodexPlugins(options: {
     const settings = parse(await readFile(configPath, 'utf8'));
     const current = (settings.mcp_servers ?? {}) as Record<string, unknown>;
     if (Object.keys(servers).some((name) => Object.hasOwn(current, name)))
-      throw new HostPluginError('plugin_invalid', 'label');
+      throw new MarketplacePluginError('plugin_invalid', 'label');
     settings.mcp_servers = { ...current, ...servers } as typeof settings;
     const temporary = `${configPath}.mst-plugins`;
     await writeFile(temporary, stringify(settings), {
@@ -171,7 +178,7 @@ export async function installCodexPlugins(options: {
 
 /** Readiness targets: every overridden plugin server, under its own name. */
 export function codexPluginReadinessTargets(
-  plugins: readonly HostPlugin[]
+  plugins: readonly MarketplacePlugin[]
 ): HostPluginReadinessTarget[] {
   return hostPluginMcpServers(plugins).map(({ server, override }) => ({
     label: server,
@@ -208,7 +215,7 @@ async function ownedDirectoryInside(
   plugin: string
 ): Promise<string> {
   if (typeof path !== 'string' || !isAbsolute(path))
-    throw new HostPluginError('plugin_install_failed', plugin);
+    throw new MarketplacePluginError('plugin_install_failed', plugin);
   try {
     const [real, realParent, info] = await Promise.all([
       realpath(path),
@@ -223,7 +230,7 @@ async function ownedDirectoryInside(
       throw new Error();
     return real;
   } catch {
-    throw new HostPluginError('plugin_install_failed', plugin);
+    throw new MarketplacePluginError('plugin_install_failed', plugin);
   }
 }
 
@@ -237,14 +244,14 @@ async function readJson(
       throw new Error();
     return value as Record<string, unknown>;
   } catch {
-    throw new HostPluginError('plugin_mcp_invalid', plugin);
+    throw new MarketplacePluginError('plugin_mcp_invalid', plugin);
   }
 }
 
 /** The CLI prints diagnostics before its --json object on the shared stream. */
 function lastJsonObject(
   output: string,
-  code: HostPluginError['code'],
+  code: MarketplacePluginError['code'],
   plugin: string
 ): Record<string, unknown> {
   const end = output.lastIndexOf('}');
@@ -261,7 +268,7 @@ function lastJsonObject(
       /* keep scanning back to the enclosing object */
     }
   }
-  throw new HostPluginError(code, plugin);
+  throw new MarketplacePluginError(code, plugin);
 }
 
 function inside(parent: string, child: string, allowEqual = false): boolean {

@@ -1,9 +1,9 @@
 import type { MCPFixtureApi } from '../../mcp/fixtures/mcpFixture.js';
 import { skillRootUri } from '../../skills/skillEntry.js';
 import type { SkillEntry } from '../../skills/skillsTypes.js';
-import type { HostSkillsMode, SkillLoad } from '../../types/index.js';
+import type { ClientSkillsMode, SkillLoad } from '../../types/index.js';
 import { errorMessage } from '../../utils/errorMessage.js';
-import type { HostEvent } from '../evalFrameworkTypes.js';
+import type { TraceEvent } from '../evalFrameworkTypes.js';
 
 /**
  * Host-side Agent Skills support for the simulated (SDK) host, following the
@@ -133,7 +133,7 @@ function owningEntry(
  */
 export async function createHostSkillsSession(
   mcp: MCPFixtureApi,
-  mode: HostSkillsMode | undefined,
+  mode: ClientSkillsMode | undefined,
   options: { countToolCalls: () => number }
 ): Promise<HostSkillsSession | null> {
   if (!mode || mode === 'off' || !mcp.skills.supported()) return null;
@@ -349,14 +349,14 @@ export async function createHostSkillsSession(
  * the model, so they produce no events.
  */
 export function withSkillEvents(
-  toolEvents: HostEvent[],
+  toolEvents: TraceEvent[],
   loads: readonly SkillLoad[]
-): HostEvent[] {
+): TraceEvent[] {
   const skillEvents = loads.filter(
     (load) =>
       load.kind === 'skill' && load.via !== 'preload' && load.verified !== false
   );
-  const events: HostEvent[] = [];
+  const events: TraceEvent[] = [];
   let next = 0;
   toolEvents.forEach((event, index) => {
     while (
@@ -374,7 +374,7 @@ export function withSkillEvents(
   return events;
 }
 
-function skillEvent(load: SkillLoad): HostEvent {
+function skillEvent(load: SkillLoad): TraceEvent {
   return {
     kind: 'skill',
     source: 'mcp',

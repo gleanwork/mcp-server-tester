@@ -277,7 +277,7 @@ export default {
     version: '1.0.0',
     namespace: 'usecase',
   },
-  hosts: {
+  clients: {
     model: {
       schema: ModelConfig,
       evidence: 'structured',

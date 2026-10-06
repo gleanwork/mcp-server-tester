@@ -8,9 +8,12 @@ import {
 import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
 import { getBuiltinHostConfig } from './builtinHosts.js';
 import { getHost } from './builtinHosts.js';
-import type { HostRunOptions, HostDefinition } from './evalFrameworkTypes.js';
+import type {
+  ClientRunOptions,
+  ClientDefinition,
+} from './evalFrameworkTypes.js';
 import { hostRunToExecution } from './hostTrace.js';
-async function run(host: HostDefinition, options: HostRunOptions) {
+async function run(host: ClientDefinition, options: ClientRunOptions) {
   const trace = await host.run!(
     { prompt: options.cases[0]!.input!, servers: options.servers },
     options.host,
@@ -32,12 +35,12 @@ const case_ = {
   input: 'Find documents',
   mode: 'mcp_host' as const,
 };
-function options(): HostRunOptions {
+function options(): ClientRunOptions {
   return {
     dataset: { name: 'test', cases: [case_] },
     cases: [case_],
     servers: [{ transport: 'http', serverUrl: 'https://example.com' }],
-    host: { type: 'vercel-sdk', model: 'selected' },
+    host: { type: 'mst', model: 'selected' },
     manifest: { name: 'test', datasets: [] },
   };
 }
@@ -71,7 +74,7 @@ describe('built-in host execution', () => {
         return { success: true, response: 'OK', toolCalls: [] };
       }
     );
-    const host = getHost('vercel-sdk');
+    const host = getHost('mst');
     await run(host, options());
     await run(host, {
       ...options(),
@@ -92,7 +95,7 @@ describe('built-in host execution', () => {
       response: (await mcp.listTools()).map((tool) => tool.name).join(','),
       toolCalls: [],
     }));
-    const host = getHost('vercel-sdk');
+    const host = getHost('mst');
     expect(
       (await run(host, { ...options(), servers: [] })).response
     ).toMatchObject({ response: '' });
@@ -112,7 +115,7 @@ describe('built-in host execution', () => {
   it('keeps provider configuration in child env and removes its temporary credential file', async () => {
     vi.stubEnv('ANTHROPIC_API_KEY', 'do-not-change');
     vi.stubEnv('CLAUDE_CODE_USE_VERTEX', 'original');
-    const config = getBuiltinHostConfig('claude-cli', { provider: 'vertex' });
+    const config = getBuiltinHostConfig('claude-code', { provider: 'vertex' });
     expect(config.cli?.env?.ANTHROPIC_API_KEY).toBeUndefined();
     expect(process.env.ANTHROPIC_API_KEY).toBe('do-not-change');
     expect(process.env.CLAUDE_CODE_USE_VERTEX).toBe('original');
@@ -132,9 +135,9 @@ describe('built-in host execution', () => {
         return { success: true, toolCalls: [] };
       }
     );
-    await run(getHost('claude-cli'), {
+    await run(getHost('claude-code'), {
       ...options(),
-      host: { type: 'claude-cli' },
+      host: { type: 'claude-code' },
       servers: ['first', 'second'].map((label) => ({
         transport: 'http',
         label,

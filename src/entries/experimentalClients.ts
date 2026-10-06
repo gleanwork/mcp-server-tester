@@ -1,8 +1,8 @@
 /**
- * @gleanwork/mcp-server-tester/experimental/hosts
+ * @gleanwork/mcp-server-tester/experimental/clients
  *
- * Experimental desktop and external hosts: the external-host runtime and
- * capability types, Cowork settings and native-run audit, and host plugins.
+ * Experimental desktop clients: the external-host runtime and capability
+ * types, Cowork settings and native-run audit, and marketplace plugins.
  * Expect breaking changes between minor versions.
  *
  * @packageDocumentation
@@ -35,9 +35,9 @@ export {
   resolveHostStdioServer,
 } from '../evals/hostPlugins.js';
 export type {
-  HostPlugin,
-  HostStdioPaths,
-  HostStdioServer,
+  MarketplacePlugin,
+  ClientStdioPaths,
+  ClientStdioServer,
 } from '../evals/hostPlugins.js';
 export {
   driverToSlug,
@@ -64,7 +64,7 @@ export type {
   HostCapability,
   HostDriverConfig,
   HostDriverId,
-  HostRunContext,
+  ClientRunContext,
   ObservationConfidence,
   TraceSource,
 } from '../evals/externalHost/index.js';

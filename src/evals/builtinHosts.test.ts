@@ -3,7 +3,7 @@ import { getBuiltinHostConfig } from './builtinHosts.js';
 
 describe('getBuiltinHostConfig', () => {
   it('passes the configured model to the Claude CLI', () => {
-    const config = getBuiltinHostConfig('claude-cli', {
+    const config = getBuiltinHostConfig('claude-code', {
       model: 'claude-sonnet-4-6',
       server: {
         transport: 'http',

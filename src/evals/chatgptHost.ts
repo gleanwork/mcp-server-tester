@@ -2,16 +2,16 @@ import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import type {
-  HostBatchRequest,
-  HostDefinition,
-  HostRunContext,
-  HostRunResult,
+  ClientBatchRequest,
+  ClientDefinition,
+  ClientRunContext,
+  ClientRunResult,
 } from './evalFrameworkTypes.js';
 import { runExternalHostScenario } from './externalHost/runtime.js';
 import { ChatgptAppSession } from './chatgptSetup/session.js';
 import { chatgptServers } from './chatgptSetup/config.js';
 import {
-  HostPluginsSchema,
+  MarketplacePluginsSchema,
   hostPluginMcpServers,
   resolveHostPluginCredentials,
 } from './hostPlugins.js';
@@ -40,7 +40,7 @@ const Schema = z
     timeout: z.number().int().positive().default(300_000),
     env: z.record(z.string(), z.string()).optional(),
     /** Host-owned: plugins installed into the fresh Linux profile. */
-    plugins: HostPluginsSchema.optional().refine(
+    plugins: MarketplacePluginsSchema.optional().refine(
       (plugins) => !plugins?.some((p) => p.blockMcpServers?.length),
       'ChatGPT does not support plugins[].blockMcpServers; use plugins[].mcp.'
     ),
@@ -74,10 +74,10 @@ const Schema = z
   .strict();
 
 async function runBatch(
-  requests: HostBatchRequest[],
-  context: HostRunContext,
+  requests: ClientBatchRequest[],
+  context: ClientRunContext,
   platform: ChatgptPlatform
-): Promise<HostRunResult[]> {
+): Promise<ClientRunResult[]> {
   if (!requests.length) return [];
   if ((context.manifest.concurrency ?? 1) !== 1)
     throw new Error('ChatGPT desktop requires concurrency 1.');
@@ -254,7 +254,7 @@ async function runBatch(
           measurementError =
             'ChatGPT completed without calling a required evaluation MCP tool on the configured server selection.';
         if (measurementError) trace.error = measurementError;
-        const caseResult: HostRunResult = {
+        const caseResult: ClientRunResult = {
           ...trace,
           durationMs: Date.now() - started,
           ...(result.success ? { llmDurationMs: result.llmDurationMs } : {}),
@@ -299,7 +299,7 @@ async function runBatch(
   );
 }
 
-function chatgptHost(platform: ChatgptPlatform): HostDefinition {
+function chatgptHost(platform: ChatgptPlatform): ClientDefinition {
   return {
     schema: Schema,
     evidence: 'structured',

@@ -6,7 +6,7 @@ import {
   hostStdioServers,
   resolveHostStdioCredentials,
   resolveHostStdioServer,
-  type HostPlugin,
+  type MarketplacePlugin,
 } from '../hostPlugins.js';
 import type { EvalManifest } from '../evalManifest.js';
 import {
@@ -129,7 +129,7 @@ type BundlePlanOptions = {
   arm?: string;
   runtimeDirectory: string;
   env?: Record<string, string | undefined>;
-  plugins?: readonly HostPlugin[];
+  plugins?: readonly MarketplacePlugin[];
 };
 
 /** Read-only preflight shared by the bundle writer and the Mac app lifecycle.

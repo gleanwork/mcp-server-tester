@@ -16,7 +16,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   codexPluginReadinessTargets,
   installCodexPlugins,
-  type HostPlugin,
+  type MarketplacePlugin,
 } from './plugins.js';
 
 const SHA = 'a'.repeat(40);
@@ -72,7 +72,7 @@ esac
 }
 
 /** A generic fake plugin: nothing here is known to MST. */
-const plugin: HostPlugin = {
+const plugin: MarketplacePlugin = {
   name: 'acme',
   marketplace: { source: 'acme/plugins', ref: SHA },
   mcp: {
@@ -98,7 +98,7 @@ const credentials = { 'acme/acme_mcp': TOKEN };
 function install(
   script: string,
   home: string,
-  plugins: HostPlugin[],
+  plugins: MarketplacePlugin[],
   extra: Partial<Parameters<typeof installCodexPlugins>[0]> = {}
 ) {
   return installCodexPlugins({

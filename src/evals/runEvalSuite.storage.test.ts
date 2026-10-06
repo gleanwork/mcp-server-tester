@@ -11,7 +11,7 @@ import {
   runEvalSuite,
   type EvalManifest,
   type EvaluationSummary,
-  type HostDefinition,
+  type ClientDefinition,
   type ResultStoreDefinition,
 } from '../entries/evals.js';
 import type { Plugin } from '../index.js';
@@ -21,13 +21,13 @@ const dirs: string[] = [];
 let sequence = 0;
 
 interface TestPlugin extends Plugin {
-  hosts: Record<string, HostDefinition>;
+  clients: Record<string, ClientDefinition>;
   resultStores: Record<string, ResultStoreDefinition>;
 }
 function newTestPlugin(): TestPlugin {
   return {
     meta: { name: 'storage-test-plugin', namespace: 'test' },
-    hosts: {},
+    clients: {},
     resultStores: {},
   };
 }
@@ -46,7 +46,7 @@ async function fixture() {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'suite-storage-'));
   dirs.push(rootDir);
   const hostName = `storage-host-${sequence++}`;
-  const run = vi.fn<NonNullable<HostDefinition['run']>>(
+  const run = vi.fn<NonNullable<ClientDefinition['run']>>(
     async (_input, _config, context) => ({
       finalText: 'PRIVATE_RESPONSE_MARKER',
       events: Array.from(
@@ -61,7 +61,7 @@ async function fixture() {
       ),
     })
   );
-  testPlugin.hosts[hostName] = {
+  testPlugin.clients[hostName] = {
     schema: z.object({}),
     evidence: 'structured',
     run,

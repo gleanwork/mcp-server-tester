@@ -1,8 +1,8 @@
 import { StringDecoder } from 'node:string_decoder';
-import type { HostDiagnostics } from '../../../../types/hostDiagnostics.js';
+import type { ClientDiagnostics } from '../../../../types/hostDiagnostics.js';
 
 const MAX_STARTUP_BYTES = 4 * 1024 * 1024;
-type Startup = NonNullable<HostDiagnostics['claudeStartup']>;
+type Startup = NonNullable<ClientDiagnostics['claudeStartup']>;
 
 /** Observe Claude's own registration, not a separate tools/list connection. */
 export class ClaudeStartup {
@@ -14,7 +14,7 @@ export class ClaudeStartup {
 
   constructor(private readonly expectedServers: string[]) {}
 
-  get diagnostics(): HostDiagnostics {
+  get diagnostics(): ClientDiagnostics {
     return {
       claudeStartup: this.result ?? {
         status: 'missing',

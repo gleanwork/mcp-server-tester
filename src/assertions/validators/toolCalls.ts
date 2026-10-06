@@ -6,26 +6,26 @@
  */
 import type { ValidationResult } from './types.js';
 import type {
-  HostEvent,
-  HostEvidence,
+  TraceEvent,
+  TraceEvidence,
 } from '../../evals/evalFrameworkTypes.js';
 
 /** Legacy simulations omit identity metadata; explicit expectations never infer it. */
-type TraceCall = Pick<HostEvent, 'name' | 'arguments'> &
-  Partial<Pick<HostEvent, 'kind' | 'source' | 'server'>>;
+type TraceCall = Pick<TraceEvent, 'name' | 'arguments'> &
+  Partial<Pick<TraceEvent, 'kind' | 'source' | 'server'>>;
 
 interface TraceResponse {
   success: unknown;
   toolCalls: TraceCall[];
-  events?: HostEvent[];
-  evidence?: HostEvidence;
+  events?: TraceEvent[];
+  evidence?: TraceEvidence;
 }
 
 export interface ToolCallExpectation {
   calls: Array<{
     name: string;
-    kind?: HostEvent['kind'];
-    source?: HostEvent['source'];
+    kind?: TraceEvent['kind'];
+    source?: TraceEvent['source'];
     server?: string;
     arguments?: Record<string, unknown>;
     required?: boolean;
@@ -117,7 +117,7 @@ export function matchesIdentity(
  * can. Hosts that don't report evidence are treated as structured.
  */
 export function hostEvidenceProblem(
-  evidence: HostEvidence | undefined
+  evidence: TraceEvidence | undefined
 ): string | undefined {
   return evidence === undefined || evidence === 'structured'
     ? undefined

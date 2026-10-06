@@ -1,8 +1,8 @@
 import type {
-  HostEvent,
-  HostEvidence,
-  HostRunResult,
-  HostTrace,
+  TraceEvent,
+  TraceEvidence,
+  ClientRunResult,
+  Trace,
 } from './evalFrameworkTypes.js';
 import { withSkillEvents } from './mcpHost/hostSkills.js';
 import { mcpServerLabel, type MCPConfig } from '../config/mcpConfig.js';
@@ -13,7 +13,7 @@ import type { HostExecution } from './caseExecution.js';
  * On a one-server arm, an MCP event that names no server came from that
  * server; give it the server's label so every call is attributable.
  */
-function attributed(events: HostEvent[], servers: MCPConfig[]): HostEvent[] {
+function attributed(events: TraceEvent[], servers: MCPConfig[]): TraceEvent[] {
   if (servers.length !== 1) return events;
   const label = mcpServerLabel(servers[0]!, 0);
   return events.map((event) =>
@@ -25,8 +25,8 @@ function attributed(events: HostEvent[], servers: MCPConfig[]): HostEvent[] {
 
 /** Adapt a host run once at the runner boundary, retaining original events for reporting. */
 export function hostRunToExecution(
-  run: HostRunResult,
-  evidence: HostEvidence,
+  run: ClientRunResult,
+  evidence: TraceEvidence,
   servers: MCPConfig[] = []
 ): HostExecution {
   const trace = { ...run, events: attributed(run.events, servers) };
@@ -84,8 +84,8 @@ export function hostRunToExecution(
 export function simulationToHostRun(
   result: MCPHostSimulationResult,
   servers: MCPConfig[]
-): HostRunResult {
-  const toolEvents: HostEvent[] = result.toolCalls.map((call) => {
+): ClientRunResult {
+  const toolEvents: TraceEvent[] = result.toolCalls.map((call) => {
     const server = servers.find(
       (server) => server.label && call.name.startsWith(`${server.label}.`)
     );
@@ -134,10 +134,10 @@ export function simulationToHostRun(
  * The trace of a simulated (SDK/CLI/browser) or external host result. Its
  * tool calls came through the MCP fixture unless they say otherwise.
  */
-export function simulationTrace(result: MCPHostSimulationResult): HostTrace {
+export function simulationTrace(result: MCPHostSimulationResult): Trace {
   // The simulated host only sees the fixture's tools; CLI parsers that also
   // see host tools mark those calls `source: 'host'`.
-  const events: HostEvent[] = (result.toolCalls ?? []).map((call) => ({
+  const events: TraceEvent[] = (result.toolCalls ?? []).map((call) => ({
     kind: call.kind ?? 'tool_call',
     source: call.source ?? 'mcp',
     name: call.name,

@@ -1,7 +1,7 @@
 import { z, type ZodType } from 'zod';
 import type {
   DatasetSource,
-  HostDefinition,
+  ClientDefinition,
   JudgeDefinition,
   MetricDefinition,
   ResultStoreDefinition,
@@ -22,7 +22,7 @@ import {
 import type {
   EvalManifest,
   ExtensionConfig,
-  HostConfig,
+  ClientConfig,
   TaggedConfig,
 } from './evalManifest.js';
 import { judgeOwnOptions } from '../judge/evaluateJudge.js';
@@ -36,7 +36,7 @@ import { judgeOwnOptions } from '../judge/evaluateJudge.js';
  */
 interface ManifestLookups {
   datasetSource(reference: string): DatasetSource;
-  host(reference: string): HostDefinition;
+  host(reference: string): ClientDefinition;
   metric(reference: string): MetricDefinition;
   judge(reference: string): JudgeDefinition;
   resultStore(reference: string): ResultStoreDefinition;
@@ -197,13 +197,13 @@ export function takesOption(schema: ZodType, key: string): boolean {
  * its schema takes (a shared `provider` doesn't reach a host that has none).
  */
 export function parseHostConfig(
-  config: HostConfig,
+  config: ClientConfig,
   defaults?: EvalManifest,
   lookups: ManifestLookups = manifestLookups()
-): HostConfig {
+): ClientConfig {
   const definition = lookups.host(config.type);
   // A deprecated name is recorded as the current one.
-  const options: HostConfig = {
+  const options: ClientConfig = {
     ...config,
     type: resolveHostName(config.type),
   };
@@ -220,20 +220,20 @@ export function parseHostConfig(
 
 /** An arm's (or case's) host: the base host's options apply only to the same host. */
 export function inheritHost(
-  base: HostConfig | undefined,
-  patch: Partial<HostConfig>
-): HostConfig {
+  base: ClientConfig | undefined,
+  patch: Partial<ClientConfig>
+): ClientConfig {
   // Deprecated names resolve first, so `cowork_cu` inherits from `cowork`.
-  const type = resolveHostName(patch.type ?? base?.type ?? 'claude-cli');
+  const type = resolveHostName(patch.type ?? base?.type ?? 'claude-code');
   const inherited =
     base !== undefined && resolveHostName(base.type) === type ? base : {};
-  return { ...inherited, ...patch, type } as HostConfig;
+  return { ...inherited, ...patch, type } as ClientConfig;
 }
 
 /** A manifest default no host of the run takes would silently do nothing. */
 function assertDefaultsUsed(
   manifest: EvalManifest,
-  hosts: HostConfig[],
+  hosts: ClientConfig[],
   lookups: ManifestLookups
 ): void {
   for (const key of HOST_DEFAULTS) {
@@ -250,9 +250,9 @@ function assertDefaultsUsed(
 
 function effectiveHost(
   manifest: EvalManifest,
-  host: HostConfig | undefined,
+  host: ClientConfig | undefined,
   lookups: ManifestLookups
-): HostConfig | undefined {
+): ClientConfig | undefined {
   return host ? parseHostConfig(host, manifest, lookups) : undefined;
 }
 

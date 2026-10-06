@@ -1,10 +1,10 @@
 import { hasLLMCredential } from '../llm/endpoint.js';
 import { z } from 'zod';
 import type {
-  HostDefinition,
-  HostBatchRequest,
-  HostRunContext,
-  HostRunResult,
+  ClientDefinition,
+  ClientBatchRequest,
+  ClientRunContext,
+  ClientRunResult,
 } from './evalFrameworkTypes.js';
 import { getCoworkPlatform, type CoworkPlatform } from './cowork/platform.js';
 import { verifyCoworkMcpServers } from './cowork/mcpReadiness.js';
@@ -28,8 +28,8 @@ import {
 import { awaitingUserAnswer } from './externalHost/builtins/claudeTrace.js';
 import { simulationToHostRun } from './hostTrace.js';
 import {
-  HostPluginError,
-  HostPluginsSchema,
+  MarketplacePluginError,
+  MarketplacePluginsSchema,
   assertCoworkHostPlugins,
   hostStdioServers,
 } from './hostPlugins.js';
@@ -121,13 +121,13 @@ const CoworkSchema = z
     provider: z.literal('anthropic').optional(),
     env: z.record(z.string(), z.string()).optional(),
     /** Host-owned: installed through managed allowedPluginMarketplaces. */
-    plugins: HostPluginsSchema.optional(),
+    plugins: MarketplacePluginsSchema.optional(),
   })
   .strict();
 /** Platforms with managed stdio setup, readiness, and cleanup support. */
 export const COWORK_STDIO_PLATFORMS = ['darwin', 'linux'] as const;
 
-const failure = (error: string): HostRunResult => ({
+const failure = (error: string): ClientRunResult => ({
   finalText: '',
   events: [],
   error,
@@ -135,10 +135,10 @@ const failure = (error: string): HostRunResult => ({
 
 /** Shared desktop, one managed transaction, then ordinary V2 trace evaluation. */
 async function runBatch(
-  requests: HostBatchRequest[],
-  context: HostRunContext,
+  requests: ClientBatchRequest[],
+  context: ClientRunContext,
   selectedPlatform?: CoworkPlatform
-): Promise<HostRunResult[]> {
+): Promise<ClientRunResult[]> {
   if (!requests.length) return [];
   const configs = requests.map((r) => CoworkSchema.parse(r.config));
   if (requests.some((r) => !r.input.prompt.trim()))
@@ -167,7 +167,7 @@ async function runBatch(
     config.options.computerUseProvider !== 'linux-desktop' &&
     stdioServers.some((server) => server.pluginRoots.length)
   )
-    throw new HostPluginError(
+    throw new MarketplacePluginError(
       'mcp_server_unsupported',
       stdioServers.find((server) => server.pluginRoots.length)!.label
     );
@@ -179,7 +179,10 @@ async function runBatch(
     unknownRoot ||
     (config.options.mcpDataRoot && !stdioServers.some((s) => s.usesDataDir))
   )
-    throw new HostPluginError('mcp_server_invalid', unknownRoot ?? 'dataRoot');
+    throw new MarketplacePluginError(
+      'mcp_server_invalid',
+      unknownRoot ?? 'dataRoot'
+    );
   const httpServers = servers
     .map((server, index) => ({
       ...server,
@@ -291,7 +294,7 @@ async function runBatch(
           status: string;
           telemetry?: CoworkDriverTelemetry;
         }> = [];
-        let result: HostRunResult = failure(
+        let result: ClientRunResult = failure(
           'Cowork submission was not attempted.'
         );
         let continuation: DesktopContinuation = 'allowed';
@@ -600,7 +603,7 @@ async function runBatch(
   );
 }
 
-export function createCoworkHost(platform?: CoworkPlatform): HostDefinition {
+export function createCoworkHost(platform?: CoworkPlatform): ClientDefinition {
   return {
     schema: CoworkSchema,
     evidence: 'structured',

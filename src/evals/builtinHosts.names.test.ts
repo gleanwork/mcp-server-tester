@@ -1,38 +1,30 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getHost } from './builtinHosts.js';
-import { inheritHost, validateManifest } from './manifestValidation.js';
+import { describe, expect, it } from 'vitest';
+import { getHost, providerForModel } from './builtinHosts.js';
+import { validateManifest } from './manifestValidation.js';
+import { CHATGPT_HOST, CHATGPT_LINUX_HOST } from './chatgptHost.js';
 
-afterEach(() => vi.restoreAllMocks());
-
-describe('built-in host names', () => {
+describe('built-in client names', () => {
   it.each([
+    ['vercel-sdk', 'mst'],
+    ['anthropic-api', 'mst'],
+    ['claude-cli', 'claude-code'],
+    ['chatgpt-mac', 'chatgpt'],
+    ['chatgpt-linux', 'chatgpt'],
     ['cowork_cu', 'cowork'],
     ['anthropic.claude.cowork.desktop-app.macos', 'cowork'],
-    ['openai.chatgpt.agent.desktop-app.macos', 'chatgpt-mac'],
-    ['openai.chatgpt.agent.desktop-app.linux', 'chatgpt-linux'],
-  ])('%s is a deprecated name for %s, with one warning', (old, current) => {
-    const warn = vi.spyOn(process, 'emitWarning').mockImplementation(() => {});
-    expect(getHost(old)).toBe(getHost(current));
-    getHost(old);
-    const deprecations = warn.mock.calls.filter(
-      ([message]) => typeof message === 'string' && message.includes(`"${old}"`)
-    );
-    expect(deprecations).toEqual([
-      [
-        `Host "${old}" is deprecated; use "${current}".`,
-        { type: 'DeprecationWarning', code: 'MST_DEPRECATED_HOST' },
-      ],
-    ]);
+    ['openai.chatgpt.agent.desktop-app.macos', 'chatgpt'],
+    ['openai.chatgpt.agent.desktop-app.linux', 'chatgpt'],
+  ])('%s fails naming %s', (old, current) => {
+    expect(() => getHost(old)).toThrow(`Client "${old}" is now "${current}".`);
   });
 
-  it('chatgpt is the ChatGPT host for this platform', () => {
-    vi.spyOn(process, 'emitWarning').mockImplementation(() => {});
+  it('chatgpt is the ChatGPT client for this platform', () => {
     expect(getHost('chatgpt')).toBe(
-      getHost(process.platform === 'linux' ? 'chatgpt-linux' : 'chatgpt-mac')
+      process.platform === 'linux' ? CHATGPT_LINUX_HOST : CHATGPT_HOST
     );
   });
 
-  it('an unknown host lists only the current names', () => {
+  it('an unknown client lists only the canonical names', () => {
     expect(() =>
       validateManifest({
         name: 'm',
@@ -40,17 +32,27 @@ describe('built-in host names', () => {
         host: { type: 'sdk' },
       })
     ).toThrow(
-      'Host "sdk" is not available. Available: anthropic-api, chatgpt-linux, chatgpt-mac, claude-cli, cowork, vercel-sdk.'
+      'Client "sdk" is not available. Available: chatgpt, claude-code, cowork, mst.'
     );
   });
+});
 
-  it('resolves a deprecated name before inheriting, so the arm keeps the manifest options', () => {
-    vi.spyOn(process, 'emitWarning').mockImplementation(() => {});
-    expect(
-      inheritHost(
-        { type: 'cowork', model: 'claude-sonnet-4-6' },
-        { type: 'cowork_cu' }
-      )
-    ).toEqual({ type: 'cowork', model: 'claude-sonnet-4-6' });
+describe('providerForModel', () => {
+  it.each([
+    ['claude-sonnet-4-6', 'anthropic'],
+    ['claude-haiku-4-5@20251001', 'vertex-anthropic'],
+    ['gpt-5', 'openai'],
+    ['o3-mini', 'openai'],
+    ['gemini-2.5-pro', 'google'],
+    ['mistral-large-latest', 'mistral'],
+    ['deepseek-chat', 'deepseek'],
+    ['grok-4', 'xai'],
+  ])('%s is served by %s', (model, provider) => {
+    expect(providerForModel(model)).toBe(provider);
+  });
+
+  it('leaves an unknown model to the provider setting', () => {
+    expect(providerForModel('my-local-model')).toBeUndefined();
+    expect(providerForModel(undefined)).toBeUndefined();
   });
 });

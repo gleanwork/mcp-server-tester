@@ -1,5 +1,5 @@
 import type { EvalManifest } from '../evalManifest.js';
-import type { HostPlugin, HostStdioPaths } from '../hostPlugins.js';
+import type { MarketplacePlugin, ClientStdioPaths } from '../hostPlugins.js';
 import type {
   CoworkDriverOptions,
   CoworkDriverProvider,
@@ -24,9 +24,9 @@ export interface CoworkPlatform {
     env: Record<string, string | undefined>;
     model?: string;
     /** Validated host plugins; Cowork installs them via allowedPluginMarketplaces. */
-    plugins?: readonly HostPlugin[];
+    plugins?: readonly MarketplacePlugin[];
     /** Caller-owned runtime paths for a prepared Linux desktop. */
-    stdioPaths?: HostStdioPaths;
+    stdioPaths?: ClientStdioPaths;
     /** macOS: run exactly this Claude Desktop version instead of the installed one. */
     appVersion?: string;
   }): Promise<{
@@ -35,7 +35,7 @@ export interface CoworkPlatform {
     /** macOS returns the application it runs. */
     app?: CoworkHostApp;
     /** macOS returns transaction-owned paths after installing its private profile. */
-    stdioPaths?: HostStdioPaths;
+    stdioPaths?: ClientStdioPaths;
     dispose(): Promise<void>;
   }>;
   recover(): Promise<unknown>;

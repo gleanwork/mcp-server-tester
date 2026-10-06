@@ -11,8 +11,8 @@ import {
   hostStdioServers,
   resolveHostStdioCredentials,
   resolveHostStdioServer,
-  type HostStdioPaths,
-  type HostStdioServer,
+  type ClientStdioPaths,
+  type ClientStdioServer,
 } from '../hostPlugins.js';
 import {
   coworkJsonEqual,
@@ -216,8 +216,8 @@ async function privateDirectory(path: string): Promise<void> {
  * regular 0600 file, ours) with exactly the substituted JSON content.
  */
 async function verifyStdioPaths(
-  servers: readonly HostStdioServer[],
-  paths: HostStdioPaths,
+  servers: readonly ClientStdioServer[],
+  paths: ClientStdioPaths,
   env: Record<string, string | undefined>
 ): Promise<void> {
   const tokens = resolveHostStdioCredentials(servers, env);

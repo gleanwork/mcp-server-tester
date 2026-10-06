@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import * as root from './index.js';
 import * as auth from './entries/auth.js';
 import * as evals from './entries/evals.js';
-import * as experimentalHosts from './entries/experimentalHosts.js';
+import * as experimentalClients from './entries/experimentalClients.js';
 import * as fixturesMcp from './fixtures/mcp.js';
 import * as fixturesMcpAuth from './fixtures/mcpAuth.js';
 
@@ -26,8 +26,8 @@ describe('public API', () => {
   it('./auth', () => {
     expect(names(auth)).toMatchSnapshot();
   });
-  it('./experimental/hosts', () => {
-    expect(names(experimentalHosts)).toMatchSnapshot();
+  it('./experimental/clients', () => {
+    expect(names(experimentalClients)).toMatchSnapshot();
   });
   // Separate bundles that re-export `test` and `expect` on purpose.
   it('./fixtures/mcp and ./fixtures/mcpAuth', () => {
@@ -37,7 +37,7 @@ describe('public API', () => {
     }).toMatchSnapshot();
   });
   it('exports each name from one tier', () => {
-    const tiers = { root, auth, evals, experimentalHosts };
+    const tiers = { root, auth, evals, experimentalClients };
     const seen = new Map<string, string>();
     const duplicates: string[] = [];
     for (const [tier, entry] of Object.entries(tiers)) {

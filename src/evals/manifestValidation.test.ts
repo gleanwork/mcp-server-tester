@@ -5,7 +5,7 @@ import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 import type {
   DatasetSource,
-  HostDefinition,
+  ClientDefinition,
   JudgeDefinition,
   MetricDefinition,
   ResultStoreDefinition,
@@ -21,7 +21,7 @@ function baseExtensions(): Required<TestExtensions> {
     schema,
     load: async () => ({ name: 'file', cases: [] }),
   };
-  const host: HostDefinition = {
+  const host: ClientDefinition = {
     schema,
     createConfig: () => ({ hostType: 'sdk' }),
   };
@@ -42,7 +42,7 @@ function baseExtensions(): Required<TestExtensions> {
   };
   return {
     datasetSources: { file: datasetSource },
-    hosts: { sdk: host },
+    clients: { sdk: host },
     judges: { correctness: judge },
     pairwiseJudges: {},
     metrics: { passed: metric },
@@ -56,7 +56,7 @@ function installTestPlugin(extra: TestExtensions = {}): void {
   const plugin: Plugin = {
     meta: { name: 'test-plugin', namespace: 'test' },
     datasetSources: { ...base.datasetSources, ...extra.datasetSources },
-    hosts: { ...base.hosts, ...extra.hosts },
+    clients: { ...base.clients, ...extra.clients },
     judges: { ...base.judges, ...extra.judges },
     metrics: { ...base.metrics, ...extra.metrics },
     resultStores: { ...base.resultStores, ...extra.resultStores },
@@ -93,7 +93,7 @@ describe('manifest validation', () => {
         datasetSources: {
           x: { schema, load: async () => ({ name: 'x', cases: [] }) },
         },
-        hosts: { x: { schema, createConfig: () => ({ hostType: 'sdk' }) } },
+        clients: { x: { schema, createConfig: () => ({ hostType: 'sdk' }) } },
         judges: { x: { schema, evaluate: async () => ({ score: 1 }) } },
       });
       const manifest: EvalManifest = {
@@ -157,7 +157,7 @@ describe('manifest validation', () => {
           load: async () => ({ name: 'data', cases: [] }),
         },
       },
-      hosts: {
+      clients: {
         custom: {
           schema: optionsSchema,
           createConfig: () => ({ hostType: 'sdk' }),
@@ -304,7 +304,7 @@ describe('manifest validation', () => {
           load: async () => ({ name: 'data', cases: [] }),
         },
       },
-      hosts: {
+      clients: {
         strict: {
           schema: required,
           createConfig: () => ({ hostType: 'sdk' }),
@@ -354,7 +354,7 @@ describe('manifest validation', () => {
 
   it('validates effective top-level host options in arm overrides', () => {
     installTestPlugin({
-      hosts: {
+      clients: {
         limited: {
           schema: z.object({
             maxToolCalls: z.number().max(2),
@@ -449,7 +449,7 @@ describe('settings a host would ignore', () => {
 
   function installHosts() {
     installTestPlugin({
-      hosts: {
+      clients: {
         runner: { schema, run: async () => ({ finalText: '', events: [] }) },
         elsewhere: {
           schema,
@@ -460,11 +460,11 @@ describe('settings a host would ignore', () => {
     });
   }
 
-  it.each(['cowork', 'chatgpt-mac', 'test/elsewhere'])(
+  it.each(['cowork', 'chatgpt', 'test/elsewhere'])(
     'rejects toolOverrides for %s, which never shows them to the model',
     (type) => {
       installHosts();
-      const host = type === 'chatgpt-mac' ? { type, model: 'gpt-5' } : { type };
+      const host = type === 'chatgpt' ? { type, model: 'gpt-5' } : { type };
       expect(() =>
         validateManifest(base({ host, toolOverrides: overrides }), {
           namespaces: ['test'],
@@ -473,7 +473,7 @@ describe('settings a host would ignore', () => {
     }
   );
 
-  it.each(['claude-cli', 'test/runner'])(
+  it.each(['claude-code', 'test/runner'])(
     'accepts toolOverrides for %s, served through the tool-variant proxy',
     (type) => {
       installHosts();
@@ -488,7 +488,7 @@ describe('settings a host would ignore', () => {
   it('rejects toolOverrides on the arm that sets them, and accepts them for vercel-sdk', () => {
     installTestPlugin();
     const manifest = base({
-      host: { type: 'vercel-sdk', provider: 'anthropic' },
+      host: { type: 'mst', provider: 'anthropic' },
       arms: [
         { name: 'sdk', toolOverrides: overrides },
         { name: 'desktop', host: { type: 'cowork' }, toolOverrides: overrides },
@@ -505,11 +505,11 @@ describe('settings a host would ignore', () => {
     ).not.toThrow();
   });
 
-  it('rejects connection policy claude-cli would drop, before anything runs', () => {
+  it('rejects connection policy claude-code would drop, before anything runs', () => {
     expect(() =>
       validateManifest(
         base({
-          host: { type: 'claude-cli' },
+          host: { type: 'claude-code' },
           servers: [
             {
               transport: 'http',
@@ -520,22 +520,20 @@ describe('settings a host would ignore', () => {
         })
       )
     ).toThrow(
-      "The manifest: claude-cli can't forward proxy for https://mcp.example.com."
+      "The manifest: claude-code can't forward proxy for https://mcp.example.com."
     );
   });
 
-  it('rejects an option anthropic-api would drop', () => {
+  it('rejects an option mst would drop', () => {
     expect(() =>
-      validateManifest(
-        base({ host: { type: 'anthropic-api', reasoningEffort: 'high' } })
-      )
+      validateManifest(base({ host: { type: 'mst', reasoningEffort: 'high' } }))
     ).toThrow(/Unrecognized key.*reasoningEffort/s);
   });
 
   it.each([
-    ['vercel-sdk', { provider: 'anthropic' }],
-    ['anthropic-api', {}],
-    ['claude-cli', {}],
+    ['mst', { provider: 'anthropic' }],
+    ['mst', {}],
+    ['claude-code', {}],
   ])('accepts a systemPrompt for %s', (type, extra) => {
     expect(() =>
       validateManifest(
@@ -548,7 +546,7 @@ describe('settings a host would ignore', () => {
 
   it.each([
     ['cowork', {}],
-    ['chatgpt-mac', { model: 'gpt-5' }],
+    ['chatgpt', { model: 'gpt-5' }],
   ])(
     'rejects a systemPrompt for %s, which has no way to apply it',
     (type, extra) => {
@@ -574,45 +572,45 @@ describe('settings a host would ignore: defaults, inheritance, opt-in', () => {
     ...extra,
   });
 
-  it('gives a shared default only to the hosts that take it', () => {
+  it('gives a shared default only to the clients that take it', () => {
     const validated = validateManifest(
       manifest({
-        provider: 'openai',
+        model: 'claude-sonnet-4-6',
         temperature: 0.2,
-        host: { type: 'vercel-sdk' },
+        host: { type: 'mst' },
         arms: [
-          { name: 'sdk' },
-          { name: 'api', host: { type: 'anthropic-api' } },
+          { name: 'mst' },
+          { name: 'code', host: { type: 'claude-code' } },
         ],
       })
     );
     expect(validated.arms?.[0]?.host).toMatchObject({
-      type: 'vercel-sdk',
-      provider: 'openai',
+      type: 'mst',
+      model: 'claude-sonnet-4-6',
       temperature: 0.2,
     });
     expect(validated.arms?.[1]?.host).toMatchObject({
-      type: 'anthropic-api',
-      temperature: 0.2,
+      type: 'claude-code',
+      model: 'claude-sonnet-4-6',
     });
-    expect(validated.arms?.[1]?.host).not.toHaveProperty('provider');
+    expect(validated.arms?.[1]?.host).not.toHaveProperty('temperature');
   });
 
   it('rejects a default that none of the hosts takes', () => {
     expect(() =>
       validateManifest(
-        manifest({ temperature: 0.2, host: { type: 'claude-cli' } })
+        manifest({ temperature: 0.2, host: { type: 'claude-code' } })
       )
     ).toThrow(
-      `The manifest sets "temperature", but none of its hosts (claude-cli) takes it.`
+      `The manifest sets "temperature", but none of its hosts (claude-code) takes it.`
     );
   });
 
   it("doesn't give an arm the options of a different host", () => {
     const validated = validateManifest(
       manifest({
-        host: { type: 'vercel-sdk', provider: 'openai', apiKeyEnvVar: 'KEY' },
-        arms: [{ name: 'api', host: { type: 'anthropic-api' } }],
+        host: { type: 'mst', provider: 'openai', apiKeyEnvVar: 'KEY' },
+        arms: [{ name: 'code', host: { type: 'claude-code' } }],
       })
     );
     expect(validated.arms?.[0]?.host).not.toHaveProperty('apiKeyEnvVar');
@@ -620,7 +618,7 @@ describe('settings a host would ignore: defaults, inheritance, opt-in', () => {
 
   it('accepts toolOverrides for a plugin host that applies them', () => {
     installTestPlugin({
-      hosts: {
+      clients: {
         variants: {
           schema,
           toolOverrides: true,
@@ -638,7 +636,7 @@ describe('settings a host would ignore: defaults, inheritance, opt-in', () => {
 
   it('rejects a concurrency the host cannot run', () => {
     installTestPlugin({
-      hosts: {
+      clients: {
         serial: {
           schema,
           maxConcurrency: 1,

@@ -12,7 +12,7 @@ describe('assertPlugin', () => {
   it('accepts every extension kind', () => {
     const value = plugin({
       datasetSources: { legacy: { schema, load: async () => ({}) } },
-      hosts: { desk: { schema, run: async () => ({}) } },
+      clients: { desk: { schema, run: async () => ({}) } },
       judges: { complete: { schema, evaluate: async () => ({ score: 1 }) } },
       metrics: { hits: { schema, kind: 'continuous', compute: () => 1 } },
       resultStores: { bucket: { schema, create: () => ({}) } },
@@ -79,9 +79,9 @@ describe('assertPlugin', () => {
   it.each([
     ['datasetSources', { schema }, 'datasetSources.x needs a load function'],
     [
-      'hosts',
+      'clients',
       { schema },
-      'hosts.x needs a run, runBatch or createConfig function',
+      'clients.x needs a run, runBatch or createConfig function',
     ],
     ['judges', { schema }, 'judges.x needs an evaluate function'],
     [

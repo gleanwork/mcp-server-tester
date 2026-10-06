@@ -4,7 +4,7 @@ import {
   isInfrastructureError,
   isInfrastructureFailure,
 } from './infrastructureFailure.js';
-import type { HostTrace } from './evalFrameworkTypes.js';
+import type { Trace } from './evalFrameworkTypes.js';
 import { installPlugins } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 import type { EvalDataset, EvalCase } from './datasetTypes.js';
@@ -14,9 +14,9 @@ import {
   failedExecution,
   type CaseExecution,
   type HostExecution,
-  type HostResponse,
+  type ClientResponse,
 } from './caseExecution.js';
-import type { HostEvent } from './evalFrameworkTypes.js';
+import type { TraceEvent } from './evalFrameworkTypes.js';
 import type { TestInfo, Expect } from '@playwright/test';
 import {
   buildToolSurface,
@@ -478,9 +478,9 @@ function createToolOverrideMCP(
 }
 
 function mapToolNames(
-  response: HostResponse,
+  response: ClientResponse,
   toolMap?: Record<string, string[]>
-): HostResponse {
+): ClientResponse {
   if (!toolMap) return response;
   const aliases = new Map<string, string>();
   for (const [canonical, names] of Object.entries(toolMap)) {
@@ -492,7 +492,7 @@ function mapToolNames(
     }
   }
   function mapCall<
-    T extends { name: string; server?: string; kind?: HostEvent['kind'] },
+    T extends { name: string; server?: string; kind?: TraceEvent['kind'] },
   >(call: T): T {
     if (call.kind !== undefined && call.kind !== 'tool_call') return call;
     const qualified = call.server ? `${call.server}.${call.name}` : call.name;
@@ -794,7 +794,7 @@ function caseTrace(
   host: HostExecution,
   evidence: HostExecution['evidence'],
   error: string | undefined
-): HostTrace {
+): Trace {
   const {
     evidence: _evidence,
     error: _error,

@@ -32,7 +32,7 @@ afterEach(() => resetPluginsForTests());
 describe('extension table', () => {
   it('serves built-ins under bare names without any plugin loaded', () => {
     expect(getDatasetSource('file')).toBeDefined();
-    expect(getHost('claude-cli')).toBeDefined();
+    expect(getHost('claude-code')).toBeDefined();
     expect(getMetric('passed')).toBeDefined();
     expect(getResultStore('file')).toBeDefined();
     expect(loadedNamespaces()).toEqual([]);
@@ -131,6 +131,6 @@ describe('extension table', () => {
     resetPluginsForTests();
 
     expect(loadedNamespaces()).toEqual([]);
-    expect(getHost('claude-cli')).toBeDefined();
+    expect(getHost('claude-code')).toBeDefined();
   });
 });

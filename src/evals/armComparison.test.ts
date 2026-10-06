@@ -18,7 +18,7 @@ afterEach(async () => {
 /** A host that reports 1M input and 100k output tokens, and no cost. */
 const plugin: Plugin = {
   meta: { name: 'arm-comparison', namespace: 'arms' },
-  hosts: {
+  clients: {
     tokens: {
       schema: z
         .object({ type: z.string(), model: z.string().optional() })

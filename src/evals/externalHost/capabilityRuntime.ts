@@ -23,7 +23,7 @@ import type {
   ExternalHostRunner,
   HostCapability,
   HostDriverId,
-  HostRunContext,
+  ClientRunContext,
 } from './types.js';
 
 interface LoadedExternalHostCapability {
@@ -54,7 +54,7 @@ export function createExternalHostRunner(
   loaded: LoadedExternalHostConfig
 ): ExternalHostRunner {
   return {
-    async run(context: HostRunContext): Promise<ExternalHostRunResult> {
+    async run(context: ClientRunContext): Promise<ExternalHostRunResult> {
       return runLoadedExternalHost(loaded, context);
     },
   };
@@ -125,7 +125,7 @@ export function loadExternalHostConfig(
 
 async function runLoadedExternalHost(
   loaded: LoadedExternalHostConfig,
-  context: HostRunContext
+  context: ClientRunContext
 ): Promise<ExternalHostRunResult> {
   const state: ExternalHostRunState = {
     driver: loaded.driver,
@@ -186,7 +186,7 @@ async function runLoadedExternalHost(
 
 async function runExternalHostCapabilityPipeline(
   loaded: LoadedExternalHostConfig,
-  context: HostRunContext,
+  context: ClientRunContext,
   state: ExternalHostRunState,
   enteredCapabilities: LoadedExternalHostCapability[]
 ): Promise<ExternalHostRunResult> {
@@ -224,7 +224,7 @@ async function runExternalHostCapabilityPipeline(
 
 function capabilityContext(
   loaded: LoadedExternalHostConfig,
-  run: HostRunContext,
+  run: ClientRunContext,
   state: ExternalHostRunState,
   loadedCapability: LoadedExternalHostCapability
 ): ExternalHostCapabilityContext {
@@ -330,7 +330,7 @@ function formatError(error: unknown): string {
 
 function runtimeFailure(
   loaded: LoadedExternalHostConfig,
-  context: HostRunContext,
+  context: ClientRunContext,
   error: string
 ): ExternalHostRunResult {
   return {

@@ -46,7 +46,7 @@ describe('resolveManifestPath', () => {
 function plugin(pass: () => Set<string>): Plugin {
   return {
     meta: { name: 'baseline-test', namespace: 'base' },
-    hosts: {
+    clients: {
       fixed: {
         schema: z.object({ type: z.string() }).passthrough(),
         evidence: 'structured',

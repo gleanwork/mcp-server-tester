@@ -8,14 +8,14 @@ import {
   toolEvidenceGap,
   type GradedExecution,
 } from './expectations.js';
-import type { HostResponse } from './caseExecution.js';
+import type { ClientResponse } from './caseExecution.js';
 import type { ExternalHostMetadata } from './externalHost/types.js';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 
 afterEach(() => resetPluginsForTests());
 
-const hostResponse: HostResponse = {
+const hostResponse: ClientResponse = {
   success: true,
   response: 'It is sunny.',
   toolCalls: [
@@ -25,7 +25,7 @@ const hostResponse: HostResponse = {
 };
 
 /** The same response with native names mapped to MCP names, as the runner grades it. */
-const mapped: HostResponse = {
+const mapped: ClientResponse = {
   ...hostResponse,
   toolCalls: [
     { name: 'get_weather', arguments: { city: 'London' } },

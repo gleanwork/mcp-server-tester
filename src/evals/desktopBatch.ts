@@ -15,7 +15,10 @@
  */
 import { mkdir, open, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { HostBatchRequest, HostRunResult } from './evalFrameworkTypes.js';
+import type {
+  ClientBatchRequest,
+  ClientRunResult,
+} from './evalFrameworkTypes.js';
 import {
   redactHostError,
   redactHostSecrets,
@@ -30,7 +33,7 @@ export type DesktopContinuation =
   | 'reset';
 
 export interface DesktopCaseOutcome {
-  result: HostRunResult;
+  result: ClientRunResult;
   continuation: DesktopContinuation;
 }
 
@@ -65,7 +68,7 @@ export interface DesktopHostAdapter<Session> {
   ready?(session: Session): Promise<void>;
   runCase(
     session: Session,
-    request: HostBatchRequest,
+    request: ClientBatchRequest,
     index: number,
     ledger: NativeSessionLedger
   ): Promise<DesktopCaseOutcome>;
@@ -129,7 +132,7 @@ function surfaceable(
   return redactedHostError(error, secrets, fallback);
 }
 
-function notSubmitted(message: string): HostRunResult {
+function notSubmitted(message: string): ClientRunResult {
   return {
     finalText: '',
     events: [],
@@ -143,15 +146,15 @@ function notSubmitted(message: string): HostRunResult {
 /** Runs a desktop batch under the rules above. */
 export async function runDesktopBatch<Session>(
   adapter: DesktopHostAdapter<Session>,
-  requests: HostBatchRequest[]
-): Promise<HostRunResult[]> {
+  requests: ClientBatchRequest[]
+): Promise<ClientRunResult[]> {
   if (!requests.length) return [];
   const secrets = [...adapter.secrets];
   const redact = (error: unknown, fallback: string): string =>
     redactHostError(error, secrets, fallback);
   const lease = await claimLease(adapter);
 
-  const results: HostRunResult[] = [];
+  const results: ClientRunResult[] = [];
   const attributed = new Set<string>();
   const ledger: NativeSessionLedger = {
     claim(sessionId) {

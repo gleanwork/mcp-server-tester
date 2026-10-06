@@ -5,7 +5,7 @@ Codex CLI, Codex APIs, or an inference API to run the evaluated query.
 
 ## Surface and platform
 
-Use `type: 'chatgpt-mac'` for macOS or `type: 'chatgpt-linux'` for Linux.
+Use `type: 'chatgpt'` for macOS or `type: 'chatgpt'` for Linux.
 (The earlier names `openai.chatgpt.agent.desktop-app.macos`,
 `openai.chatgpt.agent.desktop-app.linux` and the platform-dependent `chatgpt`
 still work, with a deprecation warning.) Both accept `options.surface: 'chatgpt-work' | 'codex'`,
@@ -32,7 +32,7 @@ Example Linux host settings (inside a V2 evaluation manifest):
 
 ```json
 {
-  "type": "chatgpt-linux",
+  "type": "chatgpt",
   "model": "your-native-model-id",
   "reasoningEffort": "medium",
   "timeout": 300000,
@@ -243,7 +243,7 @@ exact prompt before the one send.
 ### Native UI protocol and limits
 
 The Node adapter uses only the `prepare` and `submit` modes of the packaged
-`chatgpt-linux-runtime` script.
+`chatgpt-runtime` script.
 It accepts `--timeout-ms` and `--max-actions`, with JSON stdin containing `surface`
 and, only for submission, `prompt`. A successful receipt contains `status`
 (`ready` or `submitted`), `surface`, `action_count`, and `duration_ms`. The Node

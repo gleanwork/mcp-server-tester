@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { EvalCase } from './datasetTypes.js';
-import type { HostConfig } from './evalManifest.js';
+import type { ClientConfig } from './evalManifest.js';
 import type {
-  HostDefinition,
-  HostRunContext,
-  HostBatchRequest,
-  HostRunResult,
+  ClientDefinition,
+  ClientRunContext,
+  ClientBatchRequest,
+  ClientRunResult,
 } from './evalFrameworkTypes.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import {
@@ -17,17 +17,17 @@ import {
 
 /** Pre-execute a batch host, retaining per-case iteration queues for the evaluator. */
 export async function prepareHostBatch(
-  definition: HostDefinition,
+  definition: ClientDefinition,
   cases: EvalCase[],
-  config: HostConfig,
+  config: ClientConfig,
   servers: MCPConfig[],
-  context: HostRunContext,
+  context: ClientRunContext,
   toolVariant?: { id: string; proxy: () => Promise<ToolSurfaceProxy> }
-): Promise<Map<string, HostRunResult[]> | undefined> {
+): Promise<Map<string, ClientRunResult[]> | undefined> {
   if (!definition.runBatch) return undefined;
   const scopes: string[] = [];
-  const requests: HostBatchRequest[] = [];
-  const queues = new Map<string, HostRunResult[]>();
+  const requests: ClientBatchRequest[] = [];
+  const queues = new Map<string, ClientRunResult[]>();
   for (const c of cases) {
     if ((c.mode ?? 'direct') === 'direct') continue;
     if (c.mode === 'external_host')

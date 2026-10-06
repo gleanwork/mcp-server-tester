@@ -111,7 +111,7 @@ installPlugins([
         load: async () => ({ name: 'unused', cases: [] }),
       },
     },
-    hosts: {
+    clients: {
       host: {
         schema: z.object({
           model: z.string(),

@@ -53,7 +53,7 @@ exports[`public API > ./evals 1`] = `
 ]
 `;
 
-exports[`public API > ./experimental/hosts 1`] = `
+exports[`public API > ./experimental/clients 1`] = `
 [
   "COWORK_STDIO_PLATFORMS",
   "auditCoworkNativeRun",

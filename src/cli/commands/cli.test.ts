@@ -140,7 +140,7 @@ describe('mst CLI', () => {
         'typo.json': JSON.stringify({
           name: 'm',
           datasets: ['./cases.json'],
-          hostt: { type: 'vercel-sdk' },
+          hostt: { type: 'mst' },
         }),
       });
       const result = await runBin(
@@ -198,7 +198,7 @@ describe('mst CLI', () => {
       expect(result.stderr).toMatch(/\n\s+at /);
     });
 
-    it('an unknown host lists the hosts there are', async () => {
+    it('an unknown client lists the clients there are', async () => {
       await project.write({
         'cases.json': cases,
         'host.json': JSON.stringify({
@@ -215,7 +215,7 @@ describe('mst CLI', () => {
       );
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toMatch(
-        /^mst: Host "sdk" is not available\. Available: .*vercel-sdk/
+        /^mst: Client "sdk" is not available. Available: chatgpt, claude-code, cowork, mst./
       );
       expect(result.stderr).not.toMatch(/\n\s+at /);
     });

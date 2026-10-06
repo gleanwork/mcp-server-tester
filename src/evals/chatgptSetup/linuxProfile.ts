@@ -41,7 +41,10 @@ import {
   installCodexPlugins,
   type HostPluginReceipt,
 } from '../codexSetup/plugins.js';
-import type { HostPlugin, HostPluginCredentials } from '../hostPlugins.js';
+import type {
+  MarketplacePlugin,
+  HostPluginCredentials,
+} from '../hostPlugins.js';
 import { createLinuxChatgptApp } from './linuxApp.js';
 
 /** The caller -> MST process environment. All paths are absolute and normalized. */
@@ -230,7 +233,7 @@ export interface ChatgptPlatformProfile {
   beforeStart(
     setup: ResolvedCodexSetup,
     environment: Record<string, string>,
-    plugins?: readonly HostPlugin[],
+    plugins?: readonly MarketplacePlugin[],
     credentials?: HostPluginCredentials
   ): Promise<void>;
   dispose(): Promise<void>;

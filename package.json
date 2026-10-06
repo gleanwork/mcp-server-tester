@@ -40,9 +40,9 @@
       "types": "./dist/auth.d.ts",
       "import": "./dist/auth.js"
     },
-    "./experimental/hosts": {
-      "types": "./dist/experimental/hosts.d.ts",
-      "import": "./dist/experimental/hosts.js"
+    "./experimental/clients": {
+      "types": "./dist/experimental/clients.d.ts",
+      "import": "./dist/experimental/clients.js"
     },
     "./types": {
       "types": "./dist/types/index.d.ts",

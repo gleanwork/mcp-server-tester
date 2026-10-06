@@ -32,7 +32,7 @@ export default defineConfig([
       'types/index': 'src/types/index.ts',
       evals: 'src/entries/evals.ts',
       auth: 'src/entries/auth.ts',
-      'experimental/hosts': 'src/entries/experimentalHosts.ts',
+      'experimental/clients': 'src/entries/experimentalClients.ts',
     },
     format: ['esm'],
     dts: true,

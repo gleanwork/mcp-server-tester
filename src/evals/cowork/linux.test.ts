@@ -16,7 +16,7 @@ import {
   coworkPluginSettingsMatch,
   linuxCoworkPlatform,
 } from './linux.js';
-import type { HostPlugin } from '../hostPlugins.js';
+import type { MarketplacePlugin } from '../hostPlugins.js';
 import {
   CoworkDriverError,
   CoworkHitlBudgetError,
@@ -97,7 +97,10 @@ afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 
-async function prepare(value: unknown = settings, plugins?: HostPlugin[]) {
+async function prepare(
+  value: unknown = settings,
+  plugins?: MarketplacePlugin[]
+) {
   const file = join(directory, 'settings.json');
   await writeFile(file, JSON.stringify(value));
   return linuxCoworkPlatform.prepare({
@@ -108,7 +111,7 @@ async function prepare(value: unknown = settings, plugins?: HostPlugin[]) {
   });
 }
 const SHA = 'c'.repeat(40);
-const plugin: HostPlugin = {
+const plugin: MarketplacePlugin = {
   name: 'acme',
   marketplace: { source: 'acme/plugins', ref: SHA },
 };
@@ -420,7 +423,7 @@ describe('Linux Cowork plugins with a stdio eval server', () => {
       },
     },
   } as MCPConfig;
-  const fake: HostPlugin = {
+  const fake: MarketplacePlugin = {
     name: 'fake',
     marketplace: { source: 'acme/plugins', ref: SHA },
     blockMcpServers: ['fake_plugin'],

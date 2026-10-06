@@ -2,14 +2,14 @@ import type { Plugin } from '../plugins/plugin.js';
 import type { ZodType } from 'zod';
 import type { EvalDataset, EvalCase } from './datasetTypes.js';
 import type { EvalCaseResult } from '../types/reporter.js';
-import type { HostDiagnostics, UsageMetrics } from '../types/index.js';
+import type { ClientDiagnostics, UsageMetrics } from '../types/index.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import type {
   DatasetConfig,
   EvalArm,
   EvalManifest,
   ExtensionConfig,
-  HostConfig,
+  ClientConfig,
   ModelPricing,
 } from './evalManifest.js';
 import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
@@ -37,17 +37,17 @@ export interface DatasetSource {
 }
 
 /** Options supplied to a host implementation. */
-export interface HostRunOptions {
+export interface ClientRunOptions {
   dataset: EvalDataset;
   cases: EvalCase[];
   servers: MCPConfig[];
-  host: HostConfig;
+  host: ClientConfig;
   manifest: EvalManifest;
   arm?: EvalArm;
   dryRun?: boolean;
 }
 
-export interface HostRunInput {
+export interface ClientRunInput {
   /** The case's input, sent to the host as its prompt. */
   prompt: string;
   servers: MCPConfig[];
@@ -55,7 +55,7 @@ export interface HostRunInput {
   env?: Record<string, string | undefined>;
 }
 
-export interface HostRunContext {
+export interface ClientRunContext {
   manifest: EvalManifest;
   arm?: EvalArm;
   /** Runtime-only environment isolated per suite. */
@@ -64,8 +64,8 @@ export interface HostRunContext {
   mcpHostConfig?: MCPHostConfig;
 }
 
-export type HostEvidence = 'structured' | 'observed' | 'none';
-export interface HostEvent {
+export type TraceEvidence = 'structured' | 'observed' | 'none';
+export interface TraceEvent {
   /**
    * `tool_call` for MCP and host tools; host-native `skill` loads, `command`
    * runs, `subagent` starts, and `tool_search` catalog searches.
@@ -88,10 +88,10 @@ export interface HostEvent {
 }
 
 /** One execution trace. Hosts never return evaluation verdicts. */
-export interface HostRunResult {
-  diagnostics?: HostDiagnostics;
+export interface ClientRunResult {
+  diagnostics?: ClientDiagnostics;
   finalText: string;
-  events: HostEvent[];
+  events: TraceEvent[];
   error?: string;
   usage?: UsageMetrics;
   /** Native and driver observations remain separately scoped; UI actions are not LLM usage. */
@@ -102,32 +102,32 @@ export interface HostRunResult {
 }
 
 /**
- * What a host did in one trial: the `HostRunResult` it returned, without
+ * What a host did in one trial: the `ClientRunResult` it returned, without
  * telemetry and diagnostics, plus the evidence it declared. Case results keep
  * it for host cases (one per iteration). In a suite, every MCP event names its
  * `server` label. Stored results drop `finalText` and event `output`, which
  * can hold data from the server under test.
  */
-export type HostTrace = Pick<HostRunResult, 'events' | 'usage' | 'error'> & {
+export type Trace = Pick<ClientRunResult, 'events' | 'usage' | 'error'> & {
   finalText?: string;
   /** Declared evidence; absent for the legacy simulated host. */
-  evidence?: HostEvidence;
+  evidence?: TraceEvidence;
 };
 
-export interface HostBatchRequest {
+export interface ClientBatchRequest {
   caseId: string;
   /** Which trial of the case this is, from 0. */
   trial: number;
-  input: HostRunInput;
-  config: HostConfig;
+  input: ClientRunInput;
+  config: ClientConfig;
 }
 
 /** Public host extension point. */
-export interface HostDefinition {
+export interface ClientDefinition {
   readonly schema: ZodType;
   createConfig?(options?: Record<string, unknown>): MCPHostConfig;
   /** Missing evidence declarations are treated as unverified. */
-  readonly evidence?: HostEvidence;
+  readonly evidence?: TraceEvidence;
   /**
    * The host shows the model an arm's `toolOverrides` (read from
    * `context.arm` or `context.manifest`). Without it, a manifest that sets
@@ -147,14 +147,14 @@ export interface HostDefinition {
   readonly maxConcurrency?: number;
   /** Ordered traces for all selected iterations. The framework owns verdicts. */
   runBatch?(
-    requests: HostBatchRequest[],
-    context: HostRunContext
-  ): Promise<HostRunResult[]>;
+    requests: ClientBatchRequest[],
+    context: ClientRunContext
+  ): Promise<ClientRunResult[]>;
   run?(
-    input: HostRunInput,
-    config: HostConfig,
-    context: HostRunContext
-  ): Promise<HostRunResult>;
+    input: ClientRunInput,
+    config: ClientConfig,
+    context: ClientRunContext
+  ): Promise<ClientRunResult>;
 }
 
 /** Values emitted by a metric for one evaluation case. */
@@ -243,7 +243,7 @@ export interface EvaluationArmResult {
   /** Outcomes, calls, tokens, cost and time, plus the listed metrics. */
   metrics?: Record<string, unknown>;
   /** The weakest evidence among the arm's cases. */
-  evidence?: HostEvidence;
+  evidence?: TraceEvidence;
   /** Listed metrics with no value for this arm (unavailable, not zero). */
   unavailableMetrics?: string[];
   /** Where `cost_usd` comes from: hosts, the manifest's `pricing`, or both. */

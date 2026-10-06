@@ -3,7 +3,7 @@ import type {
   ExternalHostRunResult,
   HostCapability,
   HostDriverId,
-  HostRunContext,
+  ClientRunContext,
 } from '../types.js';
 import {
   readMacosAccessibilityText,
@@ -21,7 +21,7 @@ import { configStringOption } from './bindingOptions.js';
 
 async function readAccessibilityFallback(
   config: ExternalHostConfig,
-  context: HostRunContext,
+  context: ClientRunContext,
   driver: HostDriverId,
   displayName: string,
   capabilitiesUsed: readonly HostCapability[],
@@ -128,7 +128,7 @@ export function looksLikeClaudeChatSurface(visibleText: string): boolean {
 
 export async function waitForAccessibilityTrace(options: {
   config: ExternalHostConfig;
-  context: HostRunContext;
+  context: ClientRunContext;
   driver: HostDriverId;
   displayName: string;
   capabilitiesUsed: readonly HostCapability[];

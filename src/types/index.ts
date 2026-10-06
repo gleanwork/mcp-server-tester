@@ -15,7 +15,7 @@
  * - 'none': No authentication
  */
 export type AuthType = 'oauth' | 'api-token' | 'none';
-export type { HostDiagnostics } from './hostDiagnostics.js';
+export type { ClientDiagnostics } from './hostDiagnostics.js';
 import type { UsageMetrics } from '../judge/judgeTypes.js';
 import type { JudgeSubScore } from '../judge/judgeContract.js';
 
@@ -51,7 +51,7 @@ export type ProtocolRevision =
 export type ProtocolSetting = 'legacy' | 'auto' | ProtocolRevision;
 
 /** How the simulated (SDK) host offers Agent Skills to the model. */
-export type HostSkillsMode = 'off' | 'catalog' | 'preload';
+export type ClientSkillsMode = 'off' | 'catalog' | 'preload';
 
 /** One skill (or skill file) the simulated host loaded for the model. */
 export interface SkillLoad {
