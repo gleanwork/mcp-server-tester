@@ -1,44 +1,130 @@
 # MCP Server Tester
 
-Tests and evaluates MCP servers: direct tool checks, data-driven evals, and suites that compare hosts and server configurations. Extension follows ESLint's plugin model.
+Tests and evaluates MCP servers. Tests check a server's tools and protocol directly; evals have a host act on cases and grade what it did, comparing variants of the setup. The vocabulary follows common eval usage ([ADR 0002](docs/adr/0002-common-eval-vocabulary.md)). Extension follows ESLint's plugin model.
 
 ## Language
 
-**Manifest**:
-A JSON file describing one evaluation suite: its datasets, servers, host, metrics, judges and arms. `mst run` runs one.
-_Avoid_: config, suite file
+### Evals
+
+**Eval**:
+A definition of what to evaluate and how: its datasets, variants, graders and metrics.
+_Avoid_: suite, manifest, task, benchmark
+
+**Eval config**:
+The JSON file that defines one eval. `mst run` runs one.
+_Avoid_: manifest, suite file, config (unqualified)
 
 **Dataset**:
-A named list of cases. A manifest names datasets by source: a file, a directory, a GCS object, or a plugin's dataset source.
+A named list of cases. An eval names datasets by source: a file, a directory, a GCS object, or a plugin's dataset source.
 _Avoid_: eval set, test file
 
 **Case**:
-One thing to check: a direct tool call or MCP request, or a scenario a host acts on, with the expectations its result must meet.
-_Avoid_: test, example
+One input for a host to act on, with what is expected of the result.
+_Avoid_: example, sample, task, test, scenario
+
+**Input**:
+What a case gives the host to act on: the user's request, sent to the host as its prompt.
+_Avoid_: scenario, query
+
+**Expected**:
+A case's ground truth that graders check against: an answer, rubric criteria, or the tool calls it should trigger.
+_Avoid_: canonical answer, golden, target, reference
 
 **Host**:
-What runs a case's scenario: an LLM with the servers' tools (MST's SDK host, the Anthropic API), an agent CLI, or a desktop app. A host returns a trace and never a verdict.
-_Avoid_: client, agent, runner
+What acts on a case: an LLM with the servers' tools, an agent CLI, or a desktop app (an agent harness). A host returns a trace, never a score.
+_Avoid_: client, agent, runner, solver, provider
 
-**Arm**:
-One configuration a suite compares, varying the servers, the host and its options (a system prompt is `host.systemPrompt`), the tool variant, the scenario template, judges or metrics. Every arm runs the same cases.
-_Avoid_: variant (a tool variant is one thing an arm can vary), treatment
+**Variant**:
+One setup an eval tests: the host and its options (model, system prompt), the MCP servers, and the tool metadata the host sees. Every variant runs the same cases.
+_Avoid_: arm, treatment, experiment, configuration
 
-**Tool variant**:
-The tool names, descriptions and input schemas an arm shows the host instead of the servers' own (`toolOverrides`). Calls are recorded under the tools' original names.
-_Avoid_: override set, A/B config
+**Baseline**:
+The variant the others are compared against.
+_Avoid_: control, reference
+
+**Tool metadata**:
+The tool names, descriptions and input schemas a variant shows the host instead of the servers' own. Calls are still recorded under the tools' original names.
+_Avoid_: tool variant, tool overrides, override set
+
+**Trial**:
+One attempt at a case by one variant. A case runs a set number of trials; attempts that failed on infrastructure aren't trials.
+_Avoid_: iteration, attempt, epoch, repetition, sample
 
 **Trace**:
 What a host did in one trial, in order: tool calls (MCP or host), skill loads, commands, subagents and tool searches, with usage and the final answer.
-_Avoid_: transcript, log, response
+_Avoid_: transcript, trajectory, log, response
 
 **Evidence**:
-How far a host's trace can be trusted for tool assertions: `structured` (protocol or host-native records), `observed` (best effort) or `none`. Only `structured` evidence can pass `toolsTriggered` and `toolCallCount`; a host that declares nothing counts as unverified.
+How far a host's trace can be trusted for tool assertions: `structured` (protocol or host-native records), `observed` (best effort) or `none`. Only `structured` evidence can pass tool-call assertions; a host that declares nothing counts as unverified.
 _Avoid_: confidence, fidelity
 
-**Verdict**:
-Whether a case passed, decided by MST from the trace and the case's expectations; with iterations, whether its trials reached the accuracy threshold. Hosts supply traces and judges scores; MST owns the verdict.
-_Avoid_: result, score
+### Grading
+
+**Grader**:
+Logic that scores a trial: an assertion or a judge.
+_Avoid_: scorer, evaluator, checker
+
+**Assertion**:
+A code grader: a deterministic check of a trial's trace or answer, such as the tools it triggered or text the answer contains.
+_Avoid_: expectation, check, validator
+
+**Judge**:
+A model grader: an LLM that scores a trial against the case's expected result or a rubric.
+_Avoid_: LLM grader, evaluator, rater
+
+**Pairwise judge**:
+A judge that compares two variants' trials of the same case and says which is better, instead of scoring one alone.
+_Avoid_: comparator, preference model
+
+**Score**:
+A grader's result for one trial: a value from 0 to 1, whether it passed, and why.
+_Avoid_: verdict, grade, rating
+
+**Pass threshold**:
+The share of a case's trials that must pass for the case to pass; all of them by default.
+_Avoid_: accuracy threshold
+
+**Pass**:
+Whether a case's trials met its pass threshold, decided by MST from the graders' scores, never by the host.
+_Avoid_: verdict, success
+
+**Metric**:
+An aggregate over a run's trials or cases, such as pass rate, pass^k, tool recall, tokens, cost or latency.
+_Avoid_: KPI, stat
+
+### Runs and comparisons
+
+**Run**:
+One execution of an eval: every variant on every case, for the case's number of trials.
+_Avoid_: experiment, suite run, execution
+
+**Comparison**:
+How a variant differs from the baseline, or a run from an earlier run: metric changes with confidence intervals, and the cases that improved or regressed.
+_Avoid_: diff, A/B result
+
+**Regression case**:
+A case the baseline passes, which a variant must keep passing.
+_Avoid_: keep-working case, guard case
+
+**Capability case**:
+A case the baseline fails, which a variant improves on by passing.
+_Avoid_: should-work case, target case
+
+**Held-out case**:
+A case tagged `held-out`, kept out of view while a variant was written, so its results show whether the variant generalizes.
+_Avoid_: unseen case, test split
+
+**Tool optimization**:
+A run of tool-metadata variants, proposed up front or round by round, compared with the baseline, ending in a recommendation to apply one or none.
+_Avoid_: variant experiment, tool experiment
+
+### Tests
+
+**Test**:
+A direct check of a server, with no host: a Playwright test that calls tools or sends requests through MST's fixtures and checks the results with its matchers. Tests aren't evals and aren't graded.
+_Avoid_: direct case, unit eval
+
+### Extending MST
 
 **Plugin**:
 A plain object, the default export of a module or package, that contributes named extensions to MST under one namespace. A plugin is data that core reads; it does not call into core to register itself.
@@ -49,7 +135,7 @@ The prefix a plugin's extensions are referenced by, as `namespace/name` (for exa
 _Avoid_: scope, prefix
 
 **Extension**:
-One named thing a plugin contributes: a dataset source, host, judge, metric or result store.
+One named thing a plugin contributes: a dataset source, host, judge, pairwise judge, metric or result store.
 _Avoid_: contribution, registration, capability
 
 **Built-in**:
@@ -57,12 +143,8 @@ An extension that ships with MST and is referenced by a bare name (for example `
 _Avoid_: core plugin, default
 
 **Shared config**:
-A named, reusable manifest fragment a plugin offers (for example `recommended`), which a suite opts into; a plugin cannot impose it.
+A named, reusable fragment of an eval config that a plugin offers (for example `recommended`), which an eval opts into; a plugin cannot impose it.
 _Avoid_: preset, profile
-
-**Trial**:
-One run of a case: one iteration, or the case itself when it runs once. Per-trial metrics average over a case's trials; runs that failed on infrastructure aren't trials.
-_Avoid_: attempt, sample
 
 **Endpoint source**:
 (Planned.) An extension that supplies the base URL and credentials MST's own LLM calls use. A run uses exactly one; the built-in `env` source reads environment variables.
