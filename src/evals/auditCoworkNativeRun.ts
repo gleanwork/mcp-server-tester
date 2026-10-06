@@ -589,6 +589,7 @@ async function auditCase(
     const {
       computerUse: _computerUse,
       hitlWarning: _hitlWarning,
+      hostApp: _hostApp,
       batchCase: _batchCase,
       batchLifecycle: _batchLifecycle,
       ...native

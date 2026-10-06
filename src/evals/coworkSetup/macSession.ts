@@ -30,7 +30,8 @@ import {
 } from './macLocalMcp.js';
 import {
   acquireMacCoworkApp,
-  macCoworkVersion,
+  macCoworkAppVersion,
+  readMacCoworkAppVersion,
   removeMacCoworkApp,
   verifyMacCoworkAppVersion,
 } from './macApp.js';
@@ -42,6 +43,27 @@ import {
 import { mcpServerLabel } from '../../config/mcpConfig.js';
 
 const ERROR = 'Unable to prepare the Mac Cowork session safely.';
+const INSTALLED_APP = '/Applications/Claude.app';
+
+/** Setup errors that are safe to show and tell the operator what to change. */
+function actionable(error: unknown): error is Error {
+  return (
+    error instanceof Error &&
+    (error.message.startsWith('Unable to acquire Claude Desktop ') ||
+      error.message === 'Unable to read the Claude Desktop version.' ||
+      error.message.startsWith('MST_COWORK_APP_VERSION was removed') ||
+      error.message.startsWith('Invalid host.options.appVersion') ||
+      error.message.startsWith('Set host.options.appVersion'))
+  );
+}
+
+/** The Claude Desktop a session runs. Recorded with each case result. */
+export interface MacCoworkApp {
+  name: 'Claude Desktop';
+  version: string;
+  /** `pinned`: downloaded for `host.options.appVersion`; else the installed app. */
+  source: 'installed' | 'pinned';
+}
 const CLEANUP_ERROR =
   'Unable to restore the Mac Cowork session safely. Recovery state retained.';
 const LEASE = '.mst-session-lock';
@@ -112,13 +134,17 @@ export async function prepareMacCoworkSession(options: {
   profileDirectory?: string;
   model?: string;
   plugins?: readonly HostPlugin[];
+  /** `host.options.appVersion`: download and run exactly this version. */
+  appVersion?: string;
 }): Promise<{
   setupStatus: 'applied-not-verified';
   serverCount: number;
   /** Paths owned by the session for private stdio files. */
   stdioPaths: HostStdioPaths;
-  /** The pinned or caller-owned Claude application path. */
+  /** The installed, caller-owned or downloaded Claude application path. */
   appPath: string;
+  /** The Claude Desktop the session runs, as recorded with each result. */
+  app: MacCoworkApp;
   dispose(): Promise<void>;
 }> {
   try {
@@ -127,14 +153,9 @@ export async function prepareMacCoworkSession(options: {
     const manifest = structuredClone(options.manifest);
     if (manifest.arms !== undefined || !options.env) throw new Error(ERROR);
     const env = { ...options.env };
-    const version = macCoworkVersion(env);
-    if (
-      resolveCoworkSetupConfig(manifest.coworkSetup).approveWriteTools &&
-      version !== '1.52386.6'
-    ) {
-      throw new Error(ERROR);
-    }
-    const pinnedApp = !env.MST_COWORK_APP_PATH;
+    // Without an explicit pin, run the installed (or caller-owned) app.
+    const pinnedVersion = macCoworkAppVersion(options.appVersion, env);
+    const pinnedApp = pinnedVersion !== undefined;
     const profileDirectory = resolve(
       join(homedir(), 'Library/Application Support/Claude-3p/configLibrary')
     );
@@ -341,12 +362,14 @@ export async function prepareMacCoworkSession(options: {
     };
 
     let appPath: string;
+    let version: string;
     try {
       await ownsLease();
       await preflightMacCoworkSettings(installOptions);
       appPath = pinnedApp
-        ? await acquireMacCoworkApp(appDirectory, version)
-        : env.MST_COWORK_APP_PATH!;
+        ? await acquireMacCoworkApp(appDirectory, pinnedVersion)
+        : (env.MST_COWORK_APP_PATH ?? INSTALLED_APP);
+      version = await readMacCoworkAppVersion(appPath);
       controller = await getMacCoworkController(appPath);
       await ownsLease();
       await stop();
@@ -364,35 +387,35 @@ export async function prepareMacCoworkSession(options: {
       if (!(await controller.state()).running) throw new Error(ERROR);
     } catch (error) {
       await cleanup();
-      if (
-        error instanceof Error &&
-        error.message.startsWith('Unable to acquire Claude Desktop ')
-      )
-        throw error;
+      if (actionable(error)) throw error;
       throw new Error(ERROR);
     }
     let disposal: Promise<void> | undefined;
     return {
       setupStatus: transaction.status,
       appPath,
+      app: {
+        name: 'Claude Desktop',
+        version,
+        source: pinnedApp ? 'pinned' : 'installed',
+      },
       serverCount: manifest.servers?.length ?? 0,
       stdioPaths,
       dispose() {
         // Concurrent/repeated callers share one cleanup, including its failure.
         disposal ??= (async () => {
           try {
-            if (pinnedApp) {
-              await verifyMacCoworkAppVersion(appPath, version);
-              const state = await controller.state();
-              if (
-                state.runningAppPath &&
-                (await realpath(state.runningAppPath)) !==
-                  (await realpath(appPath))
-              )
-                throw new Error(
-                  'The running Claude Desktop bundle changed during evaluation; refusing results.'
-                );
-            }
+            // Pinned or not, the app must not change during the run.
+            await verifyMacCoworkAppVersion(appPath, version);
+            const state = await controller.state();
+            if (
+              state.runningAppPath &&
+              (await realpath(state.runningAppPath)) !==
+                (await realpath(appPath))
+            )
+              throw new Error(
+                'The running Claude Desktop bundle changed during evaluation; refusing results.'
+              );
           } finally {
             await cleanup();
           }
@@ -403,8 +426,7 @@ export async function prepareMacCoworkSession(options: {
   } catch (error) {
     throw new Error(
       error instanceof Error &&
-        (error.message === CLEANUP_ERROR ||
-          error.message.startsWith('Unable to acquire Claude Desktop '))
+        (error.message === CLEANUP_ERROR || actionable(error))
         ? error.message
         : ERROR
     );

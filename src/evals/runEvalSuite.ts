@@ -71,6 +71,7 @@ import {
   REDACT_STORED_RESPONSES_BY_DEFAULT,
   redactStoredResponses,
 } from './resultStore.js';
+import packageJson from '../../package.json' with { type: 'json' };
 
 export interface RunEvalSuiteOptions {
   manifestPath: string;
@@ -860,6 +861,8 @@ export async function runEvalSuite(
     // Manifest validation already parsed defaults and transforms once.
     const metadata = {
       datasetName: manifest.name,
+      // The MST that produced the results, next to the suite's content hash.
+      packageVersion: packageJson.version,
       labels: {
         manifestId: summary.manifestId,
         contentHash: summary.contentHash,

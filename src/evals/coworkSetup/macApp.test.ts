@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   acquireMacCoworkApp,
-  macCoworkVersion,
+  macCoworkAppVersion,
+  readMacCoworkAppVersion,
   removeMacCoworkApp,
   resolveMacCoworkRelease,
 } from './macApp.js';
@@ -82,19 +83,34 @@ afterEach(async () => {
   await fs.rm(root, { recursive: true, force: true });
 });
 describe('pinned Mac bundle provisioning (native execution mocked)', () => {
-  it('defaults to the known pin and rejects malformed or conflicting selectors', () => {
-    expect(macCoworkVersion({})).toBe(version);
-    expect(macCoworkVersion({ MST_COWORK_APP_VERSION: '2.3.4' })).toBe('2.3.4');
+  it('has no default pin: only the manifest pins a version', () => {
+    expect(macCoworkAppVersion(undefined, {})).toBeUndefined();
+    expect(macCoworkAppVersion('2.3.4', {})).toBe('2.3.4');
     for (const value of ['latest', '../Claude', '1.2', '1.2.3\n'])
-      expect(() =>
-        macCoworkVersion({ MST_COWORK_APP_VERSION: value })
-      ).toThrow();
+      expect(() => macCoworkAppVersion(value, {})).toThrow(
+        'Invalid host.options.appVersion'
+      );
     expect(() =>
-      macCoworkVersion({
-        MST_COWORK_APP_VERSION: version,
-        MST_COWORK_APP_PATH: '/app',
-      })
+      macCoworkAppVersion(version, { MST_COWORK_APP_PATH: '/app' })
     ).toThrow('not both');
+    // The old environment pin fails loudly rather than silently unpinning.
+    expect(() =>
+      macCoworkAppVersion(undefined, { MST_COWORK_APP_VERSION: version })
+    ).toThrow('host.options.appVersion');
+  });
+  it('reads an exact installed version and rejects anything else', async () => {
+    execute.mockResolvedValueOnce({ stdout: '2.19675.1\n' });
+    await expect(
+      readMacCoworkAppVersion('/Applications/Claude.app')
+    ).resolves.toBe('2.19675.1');
+    expect(execute.mock.calls.at(-1)?.[1].at(-1)).toBe(
+      '/Applications/Claude.app/Contents/Info.plist'
+    );
+    for (const stdout of ['', '2.2553', 'latest\n'])
+      await expect(
+        (execute.mockResolvedValueOnce({ stdout }),
+        readMacCoworkAppVersion('/Applications/Claude.app'))
+      ).rejects.toThrow('Unable to read the Claude Desktop version.');
   });
   it('accepts only an exact pin from the trusted release directory', () => {
     expect(resolveMacCoworkRelease(feed(), version).version).toBe(version);
