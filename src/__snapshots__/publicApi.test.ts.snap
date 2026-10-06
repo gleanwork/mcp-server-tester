@@ -55,8 +55,11 @@ exports[`public API > ./evals 1`] = `
 
 exports[`public API > ./experimental/hosts 1`] = `
 [
+  "COWORK_HEADLESS_DISABLED_BUILTIN_TOOLS",
   "COWORK_STDIO_PLATFORMS",
   "auditCoworkNativeRun",
+  "coworkHeadlessSettings",
+  "coworkHeadlessSettingsMatch",
   "coworkManagedPluginSettings",
   "coworkMcpSettingsMatch",
   "coworkPluginMarketplace",

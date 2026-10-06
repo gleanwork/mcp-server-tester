@@ -598,6 +598,7 @@ Desktop. MST only reads and checks them. For the example above:
   ],
   "allowedMcpServers": [{ "serverName": "acme-eval" }],
   "allowManagedMcpServersOnly": true,
+  "disabledBuiltinTools": ["AskUserQuestion"],
   "allowedPluginMarketplaces": [
     {
       "source": "github",
@@ -633,6 +634,12 @@ Claude Desktop:
   own server name from its `.mcp.json` (for example, `acme_plugin`).
 - HTTP servers match as before, `allowManagedMcpServersOnly` is `true`, and the
   pinned marketplace entries match.
+- `disabledBuiltinTools` contains `AskUserQuestion`
+  (`coworkHeadlessSettings()` builds it). A headless run has nobody to answer a
+  clarifying question, so Claude proceeds on its best assumption instead. Other
+  disabled tools are allowed. If a desktop still asks, the task stops as a
+  verified failed case (`hostTelemetry.awaitingUser`) instead of waiting.
+  The macOS eval profile MST writes sets the same key.
 - Each plugin root is an absolute, real (no symlink), non-world-writable
   directory. `mcpDataRoot` and each `<mcpDataRoot>/<label>` are real 0700
   directories owned by MST's user. Each `files` entry is a regular 0600 file
