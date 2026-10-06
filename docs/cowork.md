@@ -217,6 +217,12 @@ uncertain action. The shared native collector still requires a new exact-prompt
 session. HITL only operates on approval controls while that bound session is pending;
 it never types, creates tasks, or continues onboarding. Unclassified approval prompts
 fail closed unless `coworkSetup.approveWriteTools` explicitly permits approval.
+Built-in Cowork tools ignore managed MCP `toolPolicy` and confirm with an inline
+card whose primary action names the write (`Create`/`Update` for artifacts;
+`Schedule`/`Update`/`Run`/`Delete` for scheduled tasks) beside `Cancel`. The 3p
+desktop offers no Skip all approvals mode, so under `approveWriteTools` HITL
+approves that card; read-only runs refuse it. More than one candidate action
+fails closed.
 
 `hostTelemetry.computerUse` records `driver: "linux-desktop"`, observed semantic
 actions, and elapsed time. Planner tokens and planner cost are **not applicable**,
