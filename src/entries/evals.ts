@@ -136,3 +136,22 @@ export type {
   SurfaceTool,
   ToolSurface,
 } from '../evals/toolSurface.js';
+export {
+  comparePairwise,
+  getPairwiseJudge,
+} from '../evals/pairwiseComparison.js';
+export type {
+  ComparePairwiseOptions,
+  PairwiseCaseResult,
+  PairwiseCaseVerdict,
+  PairwiseComparisonResult,
+  PairwiseJudgeSpec,
+  PairwiseJudgeSummary,
+} from '../evals/pairwiseComparison.js';
+export type {
+  PairwiseDimension,
+  PairwiseJudgeDefinition,
+  PairwiseJudgeInput,
+  PairwisePreference,
+  PairwiseVerdict,
+} from '../judge/pairwiseContract.js';

@@ -44,6 +44,7 @@ function baseExtensions(): Required<TestExtensions> {
     datasetSources: { file: datasetSource },
     hosts: { sdk: host },
     judges: { correctness: judge },
+    pairwiseJudges: {},
     metrics: { passed: metric },
     resultStores: { file: resultStore },
   };

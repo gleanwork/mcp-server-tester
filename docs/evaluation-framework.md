@@ -167,6 +167,55 @@ iteration, `totalJudgeUsage` on the run and suite telemetry, and the
 `judge_cost_usd`, `judge_input_tokens`, and `judge_output_tokens` metrics.
 The built-in `rubric` judge reports its usage the same way.
 
+### Pairwise judges
+
+A pairwise judge compares two runs of the same case, a baseline and a
+candidate, and says which is better. It is a separate extension kind,
+`pairwiseJudges`, because a preference is not a score against a threshold:
+pointwise judges decide whether a case passes, pairwise judges decide which
+arm did better.
+
+```ts
+const plugin = {
+  meta: { name: 'my-judges', namespace: 'mine' },
+  pairwiseJudges: {
+    overall: {
+      schema: z.object({}).strict(),
+      requires: ['case.expected.answer'], // optional; missing -> skipped
+      compare: async ({ case: c, baseline, candidate }, options) => ({
+        preference: 'candidate', // 'baseline' | 'candidate' | 'tie'
+        strength: 0.6, // optional, 0..1
+        dimensions: { correctness: { preference: 'tie' } }, // optional
+        usage,
+        model,
+        version, // optional
+      }),
+    },
+  },
+};
+```
+
+`baseline` and `candidate` are `JudgeTrial`s, so a judge reads text, host
+events (tool calls and their output), and evidence the same way a pointwise
+judge does.
+
+`comparePairwise({ baseline, candidate, judges, cases? })` runs the listed
+judges on every case both runs have, matched by id. The runs can be two arms
+of one suite, a run and a stored baseline, or runs made on separate machines.
+Pass `cases` (dataset cases by id) when judges need ground truth that results
+do not carry.
+
+- Each judge runs each case in both orders, and the swapped verdict is mapped
+  back, to cancel position bias. A verdict whose two orders disagree is
+  reported with `consistent: false`. A judge that debiases itself sets
+  `swapPositions: false`.
+- `reps` repeats each order; the majority preference wins, ties break to tie.
+- A skipped comparison or a judge error is recorded on the case, not counted
+  as a preference.
+- The summary reports, per judge, wins, losses, ties, `candidateWinRate`
+  (wins plus half the ties, over compared cases), order `consistency`,
+  per-dimension win rates, and judge usage.
+
 ### Dataset sources
 
 The built-in `file`, `dir` and `gcs` sources read canonical `EvalDataset` JSON only. They don't infer expectations from a first case, attach hosts or add judges, and they reject fields they don't know, on every case. A minimal direct dataset needs a name, a case ID and a tool name:
