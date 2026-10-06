@@ -8,19 +8,42 @@ import type {
 import type { EvalDataset } from './datasetTypes.js';
 import { compareEvalRuns } from './evalRunComparison.js';
 import type { EvalRunComparisonResult } from './evalRunComparison.js';
-import type { MCPVariantExperimentData } from '../types/reporter.js';
+import type {
+  EvalCaseResult,
+  MCPVariantExperimentData,
+  PairedChange,
+  RegressionCheck,
+  VariantGrouping,
+} from '../types/reporter.js';
 import type { ZodType } from 'zod';
 import { attachReporterData } from '../reporters/channel.js';
-import { passRate } from './evalRunComparison.js';
 import type { EvalArm } from './evalManifest.js';
 import type { EvaluationArmResult } from './evalFrameworkTypes.js';
 import type { Plugin } from '../plugins/plugin.js';
 import { runEvalSuite } from './runEvalSuite.js';
+import {
+  DEFAULT_HELD_OUT_TAG,
+  DEFAULT_REGRESSION_TAG,
+  compareVariants,
+  breaksRegressionCases,
+  caseTags,
+  meanCasePassRate,
+  measureAgainstBaseline,
+  scoreChange,
+} from './variantComparison.js';
+import type {
+  CompareVariantsOptions,
+  BaselineMeasurement,
+  CaseGrouping,
+} from './variantComparison.js';
 
 /**
- * Metric used to rank variant candidates and decide improvement.
+ * Metric used to rank variant candidates and decide improvement. Every
+ * metric is computed without held-out cases.
  *
- * - `passRate`: passed / total across the dataset (always available).
+ * - `passRate`: mean per-case share of trials that passed (pass@1, each
+ *   case weighted equally). Always available. With one trial per case
+ *   this is the share of cases that passed.
  * - `toolF1` / `toolPrecision` / `toolRecall`: dataset-level tool-call metrics,
  *   only available when the dataset has `mcp_host` cases with `toolsTriggered`
  *   expectations. Choosing one of these when no such cases exist throws a clear
@@ -34,6 +57,16 @@ export type ExperimentMetric =
 
 /** A dataset metric, or (in suite mode) any numeric arm metric. */
 type MetricName = ExperimentMetric | (string & {});
+
+const EXPERIMENT_METRICS = new Set<string>([
+  'passRate',
+  'toolF1',
+  'toolPrecision',
+  'toolRecall',
+]);
+function isExperimentMetric(metric: MetricName): metric is ExperimentMetric {
+  return EXPERIMENT_METRICS.has(metric);
+}
 
 /**
  * Why a variant experiment stopped.
@@ -63,14 +96,35 @@ export interface VariantCandidateResult {
   result: EvalRunnerResult;
   /** Comparison of this candidate against the original baseline run. */
   comparison: EvalRunComparisonResult;
-  /** The selected metric's value for this candidate. */
+  /** The selected metric's value for this candidate, without held-out cases. */
   metricValue: number;
   /** `metricValue` minus the baseline's metric value. */
   metricDelta: number;
   /**
-   * True when this candidate regressed at least one case and `allowRegressions`
-   * is not set, or reported no value for the metric. Disqualified candidates
-   * can never become the winner.
+   * Pass rates and per-case changes from the baseline on capability
+   * (`capability`) and regression (`regression`) cases. Once the experiment
+   * ends, improvement assessments account for every variant tried.
+   */
+  measurement: BaselineMeasurement;
+  /**
+   * The metric's paired per-case change from the baseline, over every case.
+   * `passRate` uses `measurement.capability.change`.
+   */
+  improvement: PairedChange;
+  /**
+   * True when the candidate is clearly better than the baseline after
+   * adjusting for every variant tried: the metric improved (up, or down with
+   * `better: 'lower'`), and for a dataset metric its paired per-case change
+   * passes the sign-flip test at `0.025 / variantsTried`. An arm metric has
+   * no per-case scores, so its improvement is taken as is. Final once the
+   * experiment ends.
+   */
+  fixes: boolean;
+  /**
+   * True when this candidate breaks cases that work today, as judged by
+   * `regressionCheck`, and `allowRegressions` is not set, or when it
+   * reported no value for the metric. Disqualified candidates can never
+   * become the winner.
    */
   disqualified: boolean;
   /**
@@ -91,19 +145,19 @@ export interface VariantExperimentRound {
   best?: VariantCandidateResult;
 }
 
-/** Context passed to a `proposeVariants` callback before each round. */
+/**
+ * Context passed to a `proposeVariants` callback before each round. Held-out
+ * cases are removed from every run in it, so proposals can't be tuned to
+ * them and they stay a fair check on the winner.
+ */
 export interface ProposeVariantsContext {
   /** 0-based index of the round about to run. */
   round: number;
-  /**
-   * The baseline run: no tool variant on a dataset; on a suite, the base
-   * arm as configured, including its own `toolOverrides` (variants replace
-   * them).
-   */
+  /** The original baseline run (no overrides), without held-out cases. */
   baseline: EvalRunnerResult;
   /** The metric the experiment is optimizing. */
   metric: MetricName;
-  /** All completed rounds so far, in order. */
+  /** All completed rounds so far, in order, without held-out cases. */
   history: VariantExperimentRound[];
   /** Best non-disqualified candidate across all prior rounds, if any. */
   bestSoFar?: VariantCandidateResult;
@@ -128,9 +182,11 @@ export interface VariantImprovementProposal {
   /** IDs of cases that passed in baseline and failed with this variant. */
   regressedCaseIds: string[];
   /**
-   * `apply` when the variant improved the metric without disqualifying
-   * regressions; `reject` when the best attempt regressed cases (and
-   * regressions are not allowed); `inconclusive` when nothing beat baseline.
+   * `apply` when the variant improved the metric without breaking cases
+   * (with `regressionCheck: 'significant'` and the `passRate` metric, the
+   * improvement on cases the baseline fails must also be clear); `reject`
+   * when the best candidate tried broke cases (and regressions are not allowed);
+   * `inconclusive` when nothing clearly beat baseline.
    */
   recommendation: VariantRecommendation;
 }
@@ -158,13 +214,50 @@ export interface VariantExperimentOptions {
    */
   minImprovement?: number;
   /**
-   * When false (default), any candidate that regresses a case is disqualified
-   * from winning and surfaced with `recommendation: 'reject'`. When true,
-   * regressions do not disqualify.
+   * When false (default), any candidate that breaks cases under
+   * `regressionCheck` is disqualified from winning and surfaced with
+   * `recommendation: 'reject'`. When true, breakage does not disqualify.
    * @default false
    */
   allowRegressions?: boolean;
-  /** Default `mcp_host` iterations per case. Forwarded to `runEvalDataset`. */
+  /**
+   * How "breaks cases that work today" is judged, on regression
+   * (`regression`) cases. See `regressionTag` for how those are chosen.
+   *
+   * - `significant` (default): each case scores the share of its trials
+   *   that passed. The candidate is disqualified when regression cases
+   *   clearly got worse: as a group (exact paired sign-flip test, one-sided
+   *   p < 0.025), or any one case on its own (Fisher's exact test on its
+   *   trials, Holm-corrected at 0.05 across regression cases). One flaky
+   *   trial is noise, not breakage.
+   * - `any-case`: any case that passed with the baseline and fails with the
+   *   candidate disqualifies it, however small the drop. With flaky cases
+   *   this rejects good variants for noise.
+   *
+   * Either way, a candidate is recommended only when it is clearly better:
+   * the sign-flip test on its paired per-case change passes at
+   * `0.025 / variantsTried`.
+   * @default 'significant'
+   */
+  regressionCheck?: RegressionCheck;
+  /**
+   * Cases with this tag are regression cases (they must keep working), and
+   * every other case is a capability case a variant should improve. When no
+   * case has the tag, the experiment runs the baseline once more and treats
+   * the cases that passed that run as regression cases. It never groups by
+   * the baseline run variants are compared with, which would build in
+   * regression to the mean.
+   * @default 'regression'
+   */
+  regressionTag?: string;
+  /**
+   * Cases with this tag are held out: they don't count toward ranking, and
+   * `proposeVariants` never sees them, so their results are a fair check on
+   * the winner. They still count toward breakage and improvement checks.
+   * @default 'held-out'
+   */
+  heldOutTag?: string;
+  /** Default `mcp_host` trials per case. Forwarded to `runEvalDataset`. */
   defaultTrials?: number;
   /** Default judge repetitions per case. Forwarded to `runEvalDataset`. */
   defaultJudgeReps?: number;
@@ -172,7 +265,7 @@ export interface VariantExperimentOptions {
   concurrency?: number;
   /** Run only cases with at least one of these tags. Forwarded to `runEvalDataset`. */
   filterTags?: string[];
-  /** Schema registry for `expect.schema` cases. Forwarded to `runEvalDataset`. */
+  /** Schema registry for `assertions.schema` cases. Forwarded to `runEvalDataset`. */
   schemas?: Record<string, ZodType>;
   /** MCP host model identifier recorded in run metadata. */
   mcpHostModel?: string;
@@ -208,6 +301,9 @@ export interface SuiteVariantExperimentOptions extends Pick<
   | 'maxRounds'
   | 'minImprovement'
   | 'allowRegressions'
+  | 'regressionCheck'
+  | 'regressionTag'
+  | 'heldOutTag'
 > {
   suite: VariantExperimentSuite;
   /**
@@ -231,6 +327,13 @@ export interface VariantExperimentResult {
    * them).
    */
   baseline: EvalRunnerResult;
+  /** Where the case groups came from. */
+  grouping: VariantGrouping;
+  /**
+   * The extra baseline run used only to group cases, when no case had the
+   * regression tag.
+   */
+  groupingBaseline?: EvalRunnerResult;
   /** Every round that ran, in order. */
   rounds: VariantExperimentRound[];
   /** Best non-disqualified candidate across all rounds, if any. */
@@ -264,13 +367,6 @@ export interface VariantExperimentResult {
  *   { dataset, variants: [variantA, variantB], metric: 'passRate' },
  *   { mcp, testInfo }
  * );
- *
- * // On a suite: variants run as arms, on any host that takes tool variants.
- * const onSuite = await runVariantExperiment({
- *   suite: { manifestPath: './eval-manifest.json' },
- *   variants: [variantA, variantB],
- *   metric: 'tool_search_hit_rate',
- * });
  * if (result.proposal?.recommendation === 'apply') {
  *   console.log('Apply:', result.winner?.variant.id, '+', result.proposal.delta);
  * }
@@ -315,7 +411,12 @@ export async function runVariantExperiment(
         buildRunOptions(options, variant),
         internalContext
       );
-      runs.push({ result, value: readMetric(result, metric) });
+      runs.push({
+        result,
+        value: isExperimentMetric(metric)
+          ? readMetric(result, metric)
+          : undefined,
+      });
     }
     return runs;
   };
@@ -390,7 +491,7 @@ function armMetric(
   metric: string
 ): number | undefined {
   if (metric === 'passRate')
-    return arm.result ? passRate(arm.result) : undefined;
+    return arm.result ? meanCasePassRate(arm.result) : undefined;
   const key = metric === 'trialPassRate' ? 'trial_pass_rate' : metric;
   const value = arm.metrics?.[key];
   return typeof value === 'number' ? value : undefined;
@@ -404,6 +505,9 @@ async function experiment(
     | 'maxRounds'
     | 'minImprovement'
     | 'allowRegressions'
+    | 'regressionCheck'
+    | 'regressionTag'
+    | 'heldOutTag'
   >,
   metric: MetricName,
   better: 'higher' | 'lower',
@@ -413,6 +517,9 @@ async function experiment(
   const maxRounds = options.maxRounds ?? 1;
   const minImprovement = options.minImprovement ?? 0;
   const allowRegressions = options.allowRegressions ?? false;
+  const regressionCheck = options.regressionCheck ?? 'significant';
+  const heldOutTag = options.heldOutTag ?? DEFAULT_HELD_OUT_TAG;
+  const regressionTag = options.regressionTag ?? DEFAULT_REGRESSION_TAG;
   // How much better a value is: larger is better either way.
   const gain = (value: number) => (better === 'lower' ? -value : value);
 
@@ -425,18 +532,41 @@ async function experiment(
     ...initialVariants,
   ]);
   const baseline = baselineRun!.result;
-  const baselineValue = baselineRun!.value;
+  const seenBaseline = withoutHeldOut(baseline, heldOutTag);
+  const baselineValue = metricOf(baselineRun!, metric, heldOutTag);
   if (baselineValue === undefined) {
     throw new Error(
       `Metric '${metric}' is unavailable for the baseline. For a dataset, ` +
         `the tool metrics need mcp_host cases with toolsTriggered ` +
-        `expectations; for a suite, use passRate, trialPassRate or a numeric ` +
+        `assertions; for a suite, use passRate, trialPassRate or a numeric ` +
         `metric the base arm reports (tool F1, precision and recall are ` +
         `dataset metrics).`
     );
   }
 
+  // Groups must not come from `baseline` itself: cases picked for passing a
+  // run tend to do worse when re-run, and cases picked for failing tend to do
+  // better, even with no change at all. Declared tags are independent of any
+  // run; otherwise a separate run does the grouping. It runs only once there
+  // is a variant to compare.
+  const declared = baseline.caseResults.some((c) =>
+    caseTags(c).includes(regressionTag)
+  );
+  let grouping: CaseGrouping | undefined = declared
+    ? { source: 'declared', tag: regressionTag }
+    : undefined;
+  let groupingBaseline: EvalRunnerResult | undefined;
+  const ensureGrouping = async (): Promise<CaseGrouping> => {
+    if (!grouping) {
+      const [groupingRun] = await runner.run([undefined]);
+      groupingBaseline = groupingRun!.result;
+      grouping = { source: 'grouping-run', run: groupingBaseline };
+    }
+    return grouping;
+  };
+
   const rounds: VariantExperimentRound[] = [];
+  const proposerHistory: VariantExperimentRound[] = [];
   let bestSoFar: VariantCandidateResult | undefined;
   let bestAttempted: VariantCandidateResult | undefined;
   let reason: VariantExperimentReason = 'max-rounds';
@@ -444,10 +574,10 @@ async function experiment(
   for (let round = 0; round < maxRounds; round++) {
     const variants = await gatherVariants(options, {
       round,
-      baseline,
+      baseline: seenBaseline,
       metric,
-      history: rounds,
-      bestSoFar,
+      history: proposerHistory,
+      bestSoFar: bestSoFar && proposerViewOf(bestSoFar, proposerHistory),
     });
 
     if (variants.length === 0) {
@@ -459,14 +589,16 @@ async function experiment(
       round === 0 && initialVariants.length > 0 && variants === options.variants
         ? initialRuns
         : await runner.run(variants);
+    const rules: ScoringRules = {
+      metric,
+      better,
+      allowRegressions,
+      regressionCheck,
+      heldOutTag,
+      grouping: await ensureGrouping(),
+    };
     const candidates = variants.map((variant, index) =>
-      scoreVariant(
-        baseline,
-        baselineValue,
-        allowRegressions,
-        variant,
-        runs[index]!
-      )
+      scoreVariant(baseline, baselineValue, rules, variant, runs[index]!)
     );
     for (const candidate of candidates)
       bestAttempted = pickBetter(bestAttempted, candidate, true, gain);
@@ -476,6 +608,9 @@ async function experiment(
       undefined
     );
     rounds.push({ round, candidates, best: roundBest });
+    proposerHistory.push(
+      proposerRound({ round, candidates, best: roundBest }, seenBaseline, rules)
+    );
 
     if (roundBest) {
       const improvement =
@@ -489,21 +624,33 @@ async function experiment(
     }
   }
 
+  // Trying more variants raises the chance that one looks better by luck, so
+  // improvement is judged once, at the end, against every variant tried.
+  const tried = rounds.reduce((n, round) => n + round.candidates.length, 0);
+  if (grouping) {
+    const finalGrouping: CaseGrouping = grouping;
+    for (const candidate of rounds.flatMap((r) => r.candidates)) {
+      judgeImprovement(candidate, baseline, {
+        metric,
+        better,
+        grouping: finalGrouping,
+        heldOutTag,
+        variantsTried: tried,
+      });
+    }
+  }
+
   const winner = bestSoFar;
   const proposalSource = winner ?? bestAttempted;
   const proposal = proposalSource
-    ? buildProposal(
-        metric,
-        baselineValue,
-        proposalSource,
-        winner !== undefined,
-        gain
-      )
+    ? buildProposal(metric, baselineValue, proposalSource, winner !== undefined)
     : undefined;
 
   const result: VariantExperimentResult = {
     metric,
     baseline,
+    grouping: grouping?.source ?? (declared ? 'declared' : 'grouping-run'),
+    ...(groupingBaseline ? { groupingBaseline } : {}),
     rounds,
     winner,
     proposal,
@@ -519,19 +666,94 @@ async function experiment(
       kind: 'evalResults',
       data: { caseResults: surfaceRun.caseResults },
     });
+    const originalTools = await readOriginalTools(context, result);
     await attachReporterData(context.testInfo, {
       kind: 'variantExperiment',
-      data: buildExperimentData(result, baselineValue),
+      data: buildExperimentData(result, baselineValue, {
+        regressionCheck,
+        regressionTag,
+        heldOutTag,
+        originalTools,
+      }),
     });
   }
 
   return result;
 }
 
+/**
+ * A run's value for `metric`. Dataset metrics are computed without held-out
+ * cases; an arm metric (suite mode) is the arm's own value.
+ */
+function metricOf(
+  run: ExperimentRun,
+  metric: MetricName,
+  heldOutTag: string
+): number | undefined {
+  return isExperimentMetric(metric)
+    ? readMetric(withoutHeldOut(run.result, heldOutTag), metric)
+    : run.value;
+}
+
+/**
+ * The server's own metadata for the tools the variants change, so the report
+ * can show what each variant changed. Best effort: a failure leaves it out.
+ */
+async function readOriginalTools(
+  context: EvalContext,
+  result: VariantExperimentResult
+): Promise<CompareVariantsOptions['originalTools']> {
+  const changed = new Set(
+    result.rounds.flatMap((round) =>
+      round.candidates.flatMap((c) => Object.keys(c.variant.tools))
+    )
+  );
+  if (changed.size === 0 || typeof context.mcp?.listTools !== 'function') {
+    return undefined;
+  }
+  try {
+    const tools = await context.mcp.listTools();
+    return Object.fromEntries(
+      tools
+        .filter((tool) => changed.has(tool.name))
+        .map((tool) => [
+          tool.name,
+          { description: tool.description, inputSchema: tool.inputSchema },
+        ])
+    );
+  } catch {
+    return undefined;
+  }
+}
+
 function buildExperimentData(
   result: VariantExperimentResult,
-  baselineValue: number
+  baselineValue: number,
+  report: Pick<
+    CompareVariantsOptions,
+    'regressionCheck' | 'heldOutTag' | 'originalTools'
+  > & { regressionTag: string }
 ): MCPVariantExperimentData {
+  const { regressionTag, ...analysis } = report;
+  const recommendedId =
+    result.proposal?.recommendation === 'apply'
+      ? result.winner?.variant.id
+      : undefined;
+  const candidates = result.rounds.flatMap((round) => round.candidates);
+  // With no variants and no tags, no grouping run happened: group nothing.
+  const grouping: CaseGrouping =
+    result.grouping === 'declared'
+      ? { source: 'declared', tag: regressionTag }
+      : {
+          source: 'grouping-run',
+          run: result.groupingBaseline ?? {
+            total: 0,
+            passed: 0,
+            failed: 0,
+            caseResults: [],
+            durationMs: 0,
+          },
+        };
   return {
     metric: result.metric,
     baselineValue,
@@ -552,6 +774,21 @@ function buildExperimentData(
     winnerVariantId: result.winner?.variant.id,
     recommendation: result.proposal?.recommendation,
     reason: result.reason,
+    comparison: compareVariants({
+      baseline: result.baseline,
+      candidates: candidates.map((c) => ({
+        id: c.variant.id,
+        description: c.variant.description,
+        tools: c.variant.tools,
+        result: c.result,
+        fixes: c.fixes,
+        disqualified: c.disqualified,
+      })),
+      winnerId: recommendedId,
+      grouping,
+      variantsTried: candidates.length,
+      ...analysis,
+    }),
   };
 }
 
@@ -568,32 +805,133 @@ async function gatherVariants(
   return [];
 }
 
+interface ScoringRules {
+  metric: MetricName;
+  better: 'higher' | 'lower';
+  allowRegressions: boolean;
+  regressionCheck: RegressionCheck;
+  heldOutTag: string;
+  grouping: CaseGrouping;
+}
+
 function scoreVariant(
   baseline: EvalRunnerResult,
   baselineValue: number,
-  allowRegressions: boolean,
+  rules: ScoringRules,
   variant: ToolOverrideVariant,
   run: ExperimentRun
 ): VariantCandidateResult {
+  const { metric, allowRegressions, regressionCheck } = rules;
   const comparison = compareEvalRuns({
     baseline,
     candidate: run.result,
     labels: { candidate: variant.id },
   });
-  const metricValue = run.value ?? baselineValue;
-  const disqualified =
-    run.value === undefined ||
-    (!allowRegressions && comparison.regressedCases.length > 0);
+  const value = metricOf(run, metric, rules.heldOutTag);
+  const metricValue = value ?? baselineValue;
+  // Breakage doesn't depend on how many variants are tried; improvement
+  // does, so `judgeImprovement` settles it once the experiment ends.
+  const measurement = measureAgainstBaseline(baseline, run.result, rules);
+  const breaks =
+    regressionCheck === 'significant'
+      ? breaksRegressionCases(measurement)
+      : comparison.regressedCases.length > 0;
 
-  return {
+  const candidate: VariantCandidateResult = {
     variant,
     result: run.result,
     comparison,
     metricValue,
     metricDelta: metricValue - baselineValue,
-    disqualified,
-    ...(run.value === undefined ? { metricUnavailable: true as const } : {}),
+    measurement,
+    improvement: measurement.capability.change ?? pairedNone(),
+    fixes: false,
+    disqualified: value === undefined || (!allowRegressions && breaks),
+    ...(value === undefined ? { metricUnavailable: true as const } : {}),
   };
+  judgeImprovement(
+    candidate,
+    baseline,
+    { ...rules, variantsTried: 1 },
+    measurement
+  );
+  return candidate;
+}
+
+function pairedNone(): PairedChange {
+  return {
+    mean: 0,
+    lower: -1,
+    upper: 1,
+    cases: 0,
+    pBetter: 1,
+    pWorse: 1,
+    assessment: 'unclear',
+  };
+}
+
+/** Per-case score behind each tool metric. */
+function caseScoreOf(
+  metric: Exclude<ExperimentMetric, 'passRate'>
+): (result: EvalCaseResult) => number | undefined {
+  switch (metric) {
+    case 'toolPrecision':
+      return (c) => c.toolPrecision;
+    case 'toolRecall':
+      return (c) => c.toolRecall;
+    case 'toolF1':
+      return (c) => {
+        if (c.toolPrecision === undefined || c.toolRecall === undefined) {
+          return undefined;
+        }
+        const sum = c.toolPrecision + c.toolRecall;
+        return sum > 0 ? (2 * c.toolPrecision * c.toolRecall) / sum : 0;
+      };
+  }
+}
+
+interface ImprovementRules {
+  metric: MetricName;
+  better: 'higher' | 'lower';
+  grouping: CaseGrouping;
+  heldOutTag: string;
+  variantsTried: number;
+}
+
+/**
+ * Settles whether a candidate is clearly better, adjusting for the number of
+ * variants tried (Bonferroni). For `passRate`, the evidence is the paired
+ * change on capability cases; for tool metrics, the paired change in the
+ * per-case score over every case. Either way the metric must also have gone
+ * up, and the sign-flip test must pass at `0.025 / variantsTried`.
+ */
+function judgeImprovement(
+  candidate: VariantCandidateResult,
+  baseline: EvalRunnerResult,
+  rules: ImprovementRules,
+  measurement = measureAgainstBaseline(baseline, candidate.result, rules)
+): void {
+  candidate.measurement = measurement;
+  const improved =
+    rules.better === 'lower'
+      ? candidate.metricDelta < 0
+      : candidate.metricDelta > 0;
+  if (!isExperimentMetric(rules.metric)) {
+    // An arm metric has no per-case scores to test, so its gain stands.
+    candidate.improvement = pairedNone();
+    candidate.fixes = improved;
+    return;
+  }
+  candidate.improvement =
+    rules.metric === 'passRate'
+      ? (candidate.measurement.capability.change ?? pairedNone())
+      : scoreChange(
+          baseline,
+          candidate.result,
+          caseScoreOf(rules.metric),
+          rules.variantsTried
+        );
+  candidate.fixes = improved && candidate.improvement.assessment === 'better';
 }
 
 /**
@@ -618,19 +956,121 @@ function pickBetter(
     : incumbent;
 }
 
+/**
+ * A run without its held-out cases, with the run-level counts and tool
+ * metrics recomputed so nothing about held-out cases leaks through.
+ */
+function withoutHeldOut(
+  result: EvalRunnerResult,
+  heldOutTag: string
+): EvalRunnerResult {
+  const caseResults = result.caseResults.filter(
+    (c) => !caseTags(c).includes(heldOutTag)
+  );
+  if (caseResults.length === result.caseResults.length) return result;
+  const passed = caseResults.filter((c) => c.pass).length;
+  const scored = caseResults.filter(
+    (c) => c.toolPrecision !== undefined || c.toolRecall !== undefined
+  );
+  const precision =
+    scored.length > 0
+      ? scored.reduce((sum, c) => sum + (c.toolPrecision ?? 0), 0) /
+        scored.length
+      : undefined;
+  const recall =
+    scored.length > 0
+      ? scored.reduce((sum, c) => sum + (c.toolRecall ?? 0), 0) / scored.length
+      : undefined;
+  return {
+    total: caseResults.length,
+    passed,
+    failed: caseResults.length - passed,
+    caseResults,
+    durationMs: result.durationMs,
+    ...(result.metadata ? { metadata: result.metadata } : {}),
+    ...(precision !== undefined && recall !== undefined
+      ? {
+          datasetToolPrecision: precision,
+          datasetToolRecall: recall,
+          datasetToolF1:
+            precision + recall > 0
+              ? (2 * precision * recall) / (precision + recall)
+              : 0,
+        }
+      : {}),
+  };
+}
+
+/** A candidate as `proposeVariants` sees it: without held-out cases. */
+function proposerCandidate(
+  candidate: VariantCandidateResult,
+  seenBaseline: EvalRunnerResult,
+  rules: ScoringRules
+): VariantCandidateResult {
+  const result = withoutHeldOut(candidate.result, rules.heldOutTag);
+  if (result === candidate.result) return candidate;
+  const measurement = measureAgainstBaseline(seenBaseline, result, rules);
+  return {
+    ...candidate,
+    result,
+    comparison: compareEvalRuns({
+      baseline: seenBaseline,
+      candidate: result,
+      labels: { candidate: candidate.variant.id },
+    }),
+    measurement,
+    improvement:
+      rules.metric === 'passRate'
+        ? (measurement.capability.change ?? pairedNone())
+        : isExperimentMetric(rules.metric)
+          ? scoreChange(
+              seenBaseline,
+              result,
+              caseScoreOf(rules.metric as Exclude<ExperimentMetric, 'passRate'>)
+            )
+          : pairedNone(),
+  };
+}
+
+function proposerRound(
+  round: VariantExperimentRound,
+  seenBaseline: EvalRunnerResult,
+  rules: ScoringRules
+): VariantExperimentRound {
+  const candidates = round.candidates.map((c) =>
+    proposerCandidate(c, seenBaseline, rules)
+  );
+  const bestIndex = round.best ? round.candidates.indexOf(round.best) : -1;
+  return {
+    round: round.round,
+    candidates,
+    ...(bestIndex >= 0 ? { best: candidates[bestIndex] } : {}),
+  };
+}
+
+/** `candidate`'s held-out-free view from the proposer history. */
+function proposerViewOf(
+  candidate: VariantCandidateResult,
+  history: VariantExperimentRound[]
+): VariantCandidateResult {
+  for (const round of history) {
+    const match = round.candidates.find((c) => c.variant === candidate.variant);
+    if (match) return match;
+  }
+  return candidate;
+}
+
 function buildProposal(
   metric: MetricName,
   baselineValue: number,
   source: VariantCandidateResult,
-  isWinner: boolean,
-  gain: (value: number) => number
+  isWinner: boolean
 ): VariantImprovementProposal {
   let recommendation: VariantRecommendation;
   if (isWinner) {
-    recommendation =
-      gain(source.metricValue) > gain(baselineValue) ? 'apply' : 'inconclusive';
+    recommendation = source.fixes ? 'apply' : 'inconclusive';
   } else {
-    // No shippable winner: the best attempt was disqualified by a regression.
+    // No shippable winner: the best candidate tried was disqualified for breaking cases.
     recommendation = source.disqualified ? 'reject' : 'inconclusive';
   }
 
@@ -653,7 +1093,7 @@ function readMetric(
 ): number | undefined {
   switch (metric) {
     case 'passRate':
-      return passRate(result);
+      return meanCasePassRate(result);
     case 'toolF1':
       return result.datasetToolF1;
     case 'toolPrecision':

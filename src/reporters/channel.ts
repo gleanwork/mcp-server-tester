@@ -92,6 +92,19 @@ const PAYLOAD_SCHEMAS = {
     baselineValue: z.number(),
     bestValue: z.number(),
     rounds: z.array(z.looseObject({})),
+    comparison: z
+      .looseObject({
+        baselineId: z.string(),
+        grouping: z.enum(['declared', 'grouping-run']),
+        alpha: z.number(),
+        variantsTried: z.number(),
+        caseAlpha: z.number(),
+        variants: z.array(z.looseObject({ id: z.string() })),
+        cases: z.array(
+          z.looseObject({ id: z.string(), trials: z.looseObject({}) })
+        ),
+      })
+      .optional(),
   }),
   conformance: z.looseObject({
     pass: z.boolean(),

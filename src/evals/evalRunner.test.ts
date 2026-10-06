@@ -1632,10 +1632,10 @@ describe('evals guide iteration count guardrail warnings', () => {
     );
 
     expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining('running 3 iterations in mcp_host mode')
+      expect.stringContaining('running 3 trials in mcp_host mode')
     );
     expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Consider using 10+ iterations')
+      expect.stringContaining('Consider 10+ trials')
     );
     expect(consoleSpy).toHaveBeenCalledWith(
       expect.stringContaining('low-iter-case')

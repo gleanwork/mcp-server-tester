@@ -12,12 +12,13 @@ import { ByToolTable } from './components/Dashboard/ByToolTable';
 import { FailureBreakdown } from './components/Dashboard/FailureBreakdown';
 import { TrendChart } from './components/Dashboard/TrendChart';
 import { VariantExperimentCard } from './components/Dashboard/VariantExperimentCard';
+import { ComparisonView } from './components/Comparison/ComparisonView';
 import { ResultsTable } from './components/Results/ResultsTable';
 import { DetailModal } from './components/Results/DetailModal';
 import { ConformancePanel } from './components/Conformance/ConformancePanel';
 import { ServerCapabilities } from './components/ServerInfo/ServerCapabilities';
 
-type Tab = 'overview' | 'evals' | 'tests';
+type Tab = 'overview' | 'comparison' | 'evals' | 'tests';
 
 function App() {
   const data: MCPEvalData = window.MCP_EVAL_DATA || {
@@ -59,9 +60,14 @@ function App() {
     [data.runData.results]
   );
 
-  // Default to Tests if present (simpler → complex), then Evals, then Overview
-  const defaultTab: Tab =
-    testResults.length > 0
+  const experiment = data.runData.variantExperiment;
+  const comparison = experiment?.comparison;
+
+  // A comparison opens on its answer. Otherwise default to Tests if
+  // present (simpler → complex), then Evals, then Overview.
+  const defaultTab: Tab = comparison
+    ? 'comparison'
+    : testResults.length > 0
       ? 'tests'
       : evalResults.length > 0
         ? 'evals'
@@ -85,6 +91,7 @@ function App() {
 
   const tabs: { id: Tab; label: string; count?: number }[] = [
     { id: 'overview', label: 'Overview' },
+    ...(comparison ? [{ id: 'comparison' as Tab, label: 'Comparison' }] : []),
     ...(hasTests
       ? [{ id: 'tests' as Tab, label: 'Tests', count: testResults.length }]
       : []),
@@ -163,6 +170,20 @@ function App() {
             </div>
           )}
 
+          {activeTab === 'comparison' && experiment && comparison && (
+            <div
+              role="tabpanel"
+              id="comparison-panel"
+              aria-labelledby="tab-comparison"
+              tabIndex={0}
+              className="contents"
+            >
+              <ErrorBoundary label="Comparison tab">
+                <ComparisonView experiment={experiment} data={comparison} />
+              </ErrorBoundary>
+            </div>
+          )}
+
           {activeTab === 'evals' && (
             <div
               role="tabpanel"
@@ -176,8 +197,8 @@ function App() {
                   {/* Eval-specific metrics: accuracy, tool recall, regressions */}
                   <MetricsCards results={evalResults} mode="eval" />
 
-                  {/* Variant experiment summary, when this run was one */}
-                  {data.runData.variantExperiment && (
+                  {/* Tool optimization summary, for reports without the Comparison tab */}
+                  {data.runData.variantExperiment && !comparison && (
                     <VariantExperimentCard
                       data={data.runData.variantExperiment}
                     />

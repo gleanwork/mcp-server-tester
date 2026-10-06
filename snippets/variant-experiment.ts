@@ -49,8 +49,9 @@ test('optimize search description (static variants)', async ({
     );
   }
 
-  // The default guard never crowns a variant that regresses a case.
-  expect(result.winner?.comparison.regressedCases ?? []).toHaveLength(0);
+  // The default guard never crowns a variant that clearly broke a
+  // regression case (tag those cases "regression").
+  expect(result.winner?.measurement.brokenCaseIds ?? []).toHaveLength(0);
 });
 
 // Agent loop: propose the next variant from the previous round's evidence.

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { EvalRunnerResult, EvalContext } from './evalRunner.js';
 import type { EvalDataset } from './datasetTypes.js';
 import type { ToolOverrideVariant } from './evalRunner.js';
+import type { MCPVariantExperimentData } from '../types/reporter.js';
 
 const mocks = vi.hoisted(() => ({ runEvalDataset: vi.fn() }));
 vi.mock('./evalRunner.js', () => ({ runEvalDataset: mocks.runEvalDataset }));
@@ -11,6 +12,22 @@ import { runVariantExperiment } from './variantExperiment.js';
 interface CaseSpec {
   id: string;
   pass: boolean;
+  tags?: string[];
+}
+
+const REGRESSION = ['regression'];
+
+/** `n` capability cases `f1`..`fn`. */
+function caps(n: number, pass: boolean | ((i: number) => boolean)): CaseSpec[] {
+  return Array.from({ length: n }, (_, i) => ({
+    id: `f${i + 1}`,
+    pass: typeof pass === 'function' ? pass(i) : pass,
+  }));
+}
+
+/** A declared regression case. */
+function reg(id: string, pass: boolean): CaseSpec {
+  return { id, pass, tags: REGRESSION };
 }
 
 function makeResult(
@@ -29,6 +46,7 @@ function makeResult(
       pass: c.pass,
       expectations: {},
       durationMs: 1,
+      ...(c.tags ? { tags: c.tags } : {}),
     })),
     durationMs: 1,
     datasetToolF1: metrics?.f1,
@@ -37,11 +55,23 @@ function makeResult(
   };
 }
 
-/** Wire the mocked runner to return a canned result keyed by variant id. */
+/**
+ * Wire the mocked runner to return a canned result keyed by variant id. The
+ * first run without overrides is `__baseline__`; a second (the grouping run)
+ * is `__grouping__`, falling back to `__baseline__`.
+ */
 function setRuns(map: Record<string, EvalRunnerResult>): void {
+  let baselineRuns = 0;
   mocks.runEvalDataset.mockImplementation(
     async (opts: { toolOverrides?: ToolOverrideVariant }) => {
-      const key = opts.toolOverrides?.id ?? '__baseline__';
+      let key = opts.toolOverrides?.id;
+      if (key === undefined) {
+        baselineRuns++;
+        key =
+          baselineRuns > 1 && map.__grouping__
+            ? '__grouping__'
+            : '__baseline__';
+      }
       const result = map[key];
       if (!result) {
         throw new Error(`no mock run registered for "${key}"`);
@@ -65,21 +95,9 @@ beforeEach(() => {
 describe('runVariantExperiment — single round', () => {
   it('ranks candidates by passRate and proposes applying the best', async () => {
     setRuns({
-      __baseline__: makeResult([
-        { id: 'c1', pass: true },
-        { id: 'c2', pass: false },
-        { id: 'c3', pass: false },
-      ]),
-      vA: makeResult([
-        { id: 'c1', pass: true },
-        { id: 'c2', pass: true },
-        { id: 'c3', pass: false },
-      ]),
-      vB: makeResult([
-        { id: 'c1', pass: true },
-        { id: 'c2', pass: true },
-        { id: 'c3', pass: true },
-      ]),
+      __baseline__: makeResult([reg('r1', true), ...caps(8, false)]),
+      vA: makeResult([reg('r1', true), ...caps(8, (i) => i < 4)]),
+      vB: makeResult([reg('r1', true), ...caps(8, true)]),
     });
 
     const result = await runVariantExperiment(
@@ -89,30 +107,41 @@ describe('runVariantExperiment — single round', () => {
 
     expect(result.winner?.variant.id).toBe('vB');
     expect(result.proposal?.recommendation).toBe('apply');
-    expect(result.proposal?.delta).toBeCloseTo(2 / 3);
-    expect(result.proposal?.improvedCaseIds.sort()).toEqual(['c2', 'c3']);
+    expect(result.proposal?.delta).toBeCloseTo(8 / 9);
+    expect(result.proposal?.improvedCaseIds).toHaveLength(8);
     expect(result.proposal?.regressedCaseIds).toEqual([]);
-    // baseline + 2 candidates
+    expect(result.grouping).toBe('declared');
+    // baseline + 2 candidates; declared groups need no grouping run
     expect(mocks.runEvalDataset).toHaveBeenCalledTimes(3);
+  });
+
+  it('needs enough cases to call an improvement clear', async () => {
+    // Two of two failing cases fixed is a 1-in-4 chance under no effect.
+    setRuns({
+      __baseline__: makeResult([reg('r1', true), ...caps(2, false)]),
+      v: makeResult([reg('r1', true), ...caps(2, true)]),
+    });
+    const result = await runVariantExperiment(
+      { dataset, variants: [variant('v')] },
+      context
+    );
+    expect(result.winner?.variant.id).toBe('v');
+    expect(result.winner?.improvement.pBetter).toBeCloseTo(1 / 4);
+    expect(result.winner?.fixes).toBe(false);
+    expect(result.proposal?.recommendation).toBe('inconclusive');
   });
 
   it('disqualifies a regressing candidate and recommends rejecting it', async () => {
     setRuns({
-      __baseline__: makeResult([
-        { id: 'c1', pass: true },
-        { id: 'c2', pass: false },
-        { id: 'c3', pass: false },
-      ]),
-      // improves c2/c3 but breaks c1
-      vReg: makeResult([
-        { id: 'c1', pass: false },
-        { id: 'c2', pass: true },
-        { id: 'c3', pass: true },
-      ]),
+      __baseline__: makeResult([reg('c1', true), ...caps(8, false)]),
+      // improves every failing case but breaks c1
+      vReg: makeResult([reg('c1', false), ...caps(8, true)]),
     });
 
+    // One trial per case can't tell a broken case from a flaky one, so
+    // this uses the strict rule; see the regressionCheck tests for trials.
     const result = await runVariantExperiment(
-      { dataset, variants: [variant('vReg')] },
+      { dataset, variants: [variant('vReg')], regressionCheck: 'any-case' },
       context
     );
 
@@ -124,20 +153,17 @@ describe('runVariantExperiment — single round', () => {
 
   it('allows regressions when opted in', async () => {
     setRuns({
-      __baseline__: makeResult([
-        { id: 'c1', pass: true },
-        { id: 'c2', pass: false },
-        { id: 'c3', pass: false },
-      ]),
-      vReg: makeResult([
-        { id: 'c1', pass: false },
-        { id: 'c2', pass: true },
-        { id: 'c3', pass: true },
-      ]),
+      __baseline__: makeResult([reg('c1', true), ...caps(8, false)]),
+      vReg: makeResult([reg('c1', false), ...caps(8, true)]),
     });
 
     const result = await runVariantExperiment(
-      { dataset, variants: [variant('vReg')], allowRegressions: true },
+      {
+        dataset,
+        variants: [variant('vReg')],
+        regressionCheck: 'any-case',
+        allowRegressions: true,
+      },
       context
     );
 
@@ -344,14 +370,8 @@ describe('runVariantExperiment — multi-round proposeVariants', () => {
 describe('runVariantExperiment — reporter integration', () => {
   it('attaches winner results and an experiment summary when testInfo is present', async () => {
     setRuns({
-      __baseline__: makeResult([
-        { id: 'c1', pass: false },
-        { id: 'c2', pass: false },
-      ]),
-      v1: makeResult([
-        { id: 'c1', pass: true },
-        { id: 'c2', pass: true },
-      ]),
+      __baseline__: makeResult(caps(8, false)),
+      v1: makeResult(caps(8, true)),
     });
     const attach = vi.fn();
     const ctx = { mcp: {}, testInfo: { attach } } as unknown as EvalContext;
@@ -425,6 +445,379 @@ describe('runVariantExperiment — reporter integration', () => {
       const passedCtx = call[1] as EvalContext;
       expect(passedCtx.testInfo).toBeUndefined();
     }
+  });
+
+  it('attaches a case-by-case comparison with the original tool text', async () => {
+    setRuns({
+      __baseline__: makeResult([...caps(7, false), reg('r1', true)]),
+      v1: makeResult([...caps(7, true), reg('r1', true)]),
+    });
+    const attach = vi.fn();
+    const listTools = vi.fn(async () => [
+      { name: 'search', description: 'original text', inputSchema: {} },
+      { name: 'other', description: 'untouched', inputSchema: {} },
+    ]);
+    const ctx = {
+      mcp: { listTools },
+      testInfo: { attach },
+    } as unknown as EvalContext;
+
+    await runVariantExperiment({ dataset, variants: [variant('v1')] }, ctx);
+
+    const expCall = attach.mock.calls.find(
+      (c) => c[0] === 'mcp-variant-experiment'
+    );
+    const summary = JSON.parse(
+      (expCall![1] as { body: Buffer }).body.toString()
+    ) as MCPVariantExperimentData;
+    const comparison = summary.comparison!;
+    expect(comparison.regressionCheck).toBe('significant');
+    expect(comparison).toMatchObject({
+      grouping: 'declared',
+      regressionTag: 'regression',
+      variantsTried: 1,
+    });
+    expect(comparison.recommendedId).toBe('v1');
+    expect(comparison.variants.map((v) => v.status)).toEqual([
+      'baseline',
+      'recommended',
+    ]);
+    expect(comparison.variants[1]!.checks).toEqual({
+      fixes: true,
+      keepsRegressions: true,
+    });
+    expect(comparison.cases.map((c) => c.group)).toEqual([
+      ...Array<string>(7).fill('capability'),
+      'regression',
+    ]);
+    expect(comparison.variants[1]!.toolChanges).toEqual([
+      {
+        tool: 'search',
+        field: 'description',
+        before: 'original text',
+        after: 'desc for v1',
+      },
+    ]);
+  });
+
+  it('still attaches the comparison when listTools fails', async () => {
+    setRuns({
+      __baseline__: makeResult([{ id: 'c1', pass: false }]),
+      v1: makeResult([{ id: 'c1', pass: true }]),
+    });
+    const attach = vi.fn();
+    const ctx = {
+      mcp: { listTools: vi.fn(async () => Promise.reject(new Error('down'))) },
+      testInfo: { attach },
+    } as unknown as EvalContext;
+
+    await runVariantExperiment({ dataset, variants: [variant('v1')] }, ctx);
+
+    const expCall = attach.mock.calls.find(
+      (c) => c[0] === 'mcp-variant-experiment'
+    );
+    const summary = JSON.parse(
+      (expCall![1] as { body: Buffer }).body.toString()
+    ) as MCPVariantExperimentData;
+    expect(summary.comparison!.variants[1]!.toolChanges[0]!.before).toBe(
+      undefined
+    );
+  });
+});
+
+/** A run where each case passed `passes` of `trials` trials. */
+function makeAttemptsResult(
+  cases: Array<{
+    id: string;
+    passes: number;
+    trials?: number;
+    tags?: string[];
+    toolPrecision?: number;
+    toolRecall?: number;
+  }>
+): EvalRunnerResult {
+  const caseResults = cases.map((c) => {
+    const trials = c.trials ?? 5;
+    return {
+      id: c.id,
+      datasetName: 'ds',
+      toolName: 't',
+      source: 'eval' as const,
+      pass: c.passes === trials,
+      expectations: {},
+      durationMs: 1,
+      ...(c.tags ? { tags: c.tags } : {}),
+      ...(c.toolPrecision !== undefined
+        ? { toolPrecision: c.toolPrecision }
+        : {}),
+      ...(c.toolRecall !== undefined ? { toolRecall: c.toolRecall } : {}),
+      assertionPassRate: c.passes / trials,
+      iterationResults: Array.from({ length: trials }, (_, i) => ({
+        pass: i < c.passes,
+        durationMs: 1,
+      })),
+    };
+  });
+  return {
+    total: caseResults.length,
+    passed: caseResults.filter((c) => c.pass).length,
+    failed: caseResults.filter((c) => !c.pass).length,
+    caseResults,
+    durationMs: 1,
+  };
+}
+
+describe('runVariantExperiment — regressionCheck', () => {
+  // Eight capability cases the baseline fails, eight declared regression
+  // cases it passes on every trial.
+  const fixCases = ['f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'f7', 'f8'];
+  const keepCases = ['k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'k7', 'k8'];
+  const keep = (id: string, passes: number) => ({
+    id,
+    passes,
+    tags: REGRESSION,
+  });
+  const baseline = makeAttemptsResult([
+    ...fixCases.map((id) => ({ id, passes: 0 })),
+    ...keepCases.map((id) => keep(id, 5)),
+  ]);
+  // Fixes everything, but one working case slips to 4 of 5.
+  const slips = makeAttemptsResult([
+    ...fixCases.map((id) => ({ id, passes: 5 })),
+    ...keepCases.map((id) => keep(id, id === 'k1' ? 4 : 5)),
+  ]);
+  // Fixes everything, but most working cases fall apart.
+  const breaks = makeAttemptsResult([
+    ...fixCases.map((id) => ({ id, passes: 5 })),
+    ...keepCases.map((id) => keep(id, id < 'k7' ? 1 : 5)),
+  ]);
+
+  it('disqualifies one slipped case under the any-case check', async () => {
+    setRuns({ __baseline__: baseline, slips });
+    const result = await runVariantExperiment(
+      { dataset, variants: [variant('slips')], regressionCheck: 'any-case' },
+      context
+    );
+    expect(result.winner).toBeUndefined();
+    expect(result.proposal?.recommendation).toBe('reject');
+  });
+
+  it('treats one slipped trial as noise by default', async () => {
+    setRuns({ __baseline__: baseline, slips, breaks });
+    const result = await runVariantExperiment(
+      { dataset, variants: [variant('breaks'), variant('slips')] },
+      context
+    );
+    const [brk, slp] = result.rounds[0]!.candidates;
+    expect(brk!.disqualified).toBe(true);
+    expect(slp!.disqualified).toBe(false);
+    expect(slp!.measurement.regression.change?.mean).toBeCloseTo(-0.025);
+    expect(result.winner?.variant.id).toBe('slips');
+    expect(result.proposal?.recommendation).toBe('apply');
+  });
+
+  it('needs a clear improvement to recommend under the significant check', async () => {
+    // One of four failing cases improves by one trial: too small to tell.
+    const barely = makeAttemptsResult([
+      { id: 'f1', passes: 1 },
+      ...fixCases.slice(1).map((id) => ({ id, passes: 0 })),
+      ...keepCases.map((id) => keep(id, 5)),
+    ]);
+    setRuns({ __baseline__: baseline, barely });
+    const result = await runVariantExperiment(
+      {
+        dataset,
+        variants: [variant('barely')],
+        regressionCheck: 'significant',
+      },
+      context
+    );
+    expect(result.winner?.variant.id).toBe('barely');
+    expect(result.proposal?.recommendation).toBe('inconclusive');
+  });
+
+  it('disqualifies a variant that breaks one working case outright', async () => {
+    // Fixes everything; one working case drops from 5/5 to 0/5. The average
+    // change (-12.5 pts) is within noise, but that case clearly broke.
+    const breaksOne = makeAttemptsResult([
+      ...fixCases.map((id) => ({ id, passes: 5 })),
+      ...keepCases.map((id) => keep(id, id === 'k1' ? 0 : 5)),
+    ]);
+    setRuns({ __baseline__: baseline, breaksOne });
+    const result = await runVariantExperiment(
+      { dataset, variants: [variant('breaksOne')] },
+      context
+    );
+    const [candidate] = result.rounds[0]!.candidates;
+    expect(candidate!.measurement.regression.change!.upper).toBeGreaterThan(0);
+    expect(candidate!.measurement.brokenCaseIds).toEqual(['k1']);
+    expect(candidate!.disqualified).toBe(true);
+    expect(result.proposal?.recommendation).toBe('reject');
+  });
+
+  it('tests tool metrics on per-case scores, not the dataset total', async () => {
+    // The dataset F1 went up, but no case has per-case scores to back it.
+    setRuns({
+      __baseline__: { ...baseline, datasetToolF1: 0.6 },
+      noEvidence: { ...slips, datasetToolF1: 0.7 },
+    });
+    const thin = await runVariantExperiment(
+      { dataset, variants: [variant('noEvidence')], metric: 'toolF1' },
+      context
+    );
+    expect(thin.winner?.improvement.cases).toBe(0);
+    expect(thin.proposal?.recommendation).toBe('inconclusive');
+
+    // Per-case precision went up on every capability case.
+    // As the runner reports it: per-case scores and their dataset mean.
+    const scored = (precision: number, source: EvalRunnerResult) => {
+      const caseResults = source.caseResults.map((c) => ({
+        ...c,
+        toolPrecision: c.id.startsWith('f') ? precision : 1,
+        toolRecall: 1,
+      }));
+      return {
+        ...source,
+        caseResults,
+        datasetToolPrecision:
+          caseResults.reduce((sum, c) => sum + c.toolPrecision, 0) /
+          caseResults.length,
+        datasetToolRecall: 1,
+      };
+    };
+    setRuns({
+      __baseline__: scored(0.2, baseline),
+      better: scored(0.9, slips),
+    });
+    const result = await runVariantExperiment(
+      { dataset, variants: [variant('better')], metric: 'toolPrecision' },
+      context
+    );
+    expect(result.winner?.improvement.assessment).toBe('better');
+    expect(result.proposal?.recommendation).toBe('apply');
+  });
+});
+
+describe('runVariantExperiment — grouping', () => {
+  const plain = (passes: number[]) =>
+    makeAttemptsResult(passes.map((p, i) => ({ id: `c${i}`, passes: p })));
+
+  it('runs a separate grouping baseline when no case is tagged', async () => {
+    setRuns({
+      __baseline__: plain([5, 0, 0, 0, 0, 0, 0, 0, 0]),
+      // c0 is flaky: it passed the baseline, but not the grouping run.
+      __grouping__: plain([4, 0, 0, 0, 0, 0, 0, 0, 5]),
+      v: plain([5, 5, 5, 5, 5, 5, 5, 5, 5]),
+    });
+    const result = await runVariantExperiment(
+      { dataset, variants: [variant('v')] },
+      context
+    );
+    expect(mocks.runEvalDataset).toHaveBeenCalledTimes(3);
+    expect(result.grouping).toBe('grouping-run');
+    expect(result.groupingBaseline).toBeDefined();
+    // Groups come from the grouping run, not the baseline.
+    const m = result.winner!.measurement;
+    expect(m.regression.cases).toBe(1);
+    expect(m.capability.cases).toBe(8);
+  });
+
+  it('skips the grouping run when there is nothing to compare', async () => {
+    setRuns({ __baseline__: plain([5, 0]) });
+    const result = await runVariantExperiment(
+      { dataset, variants: [] },
+      context
+    );
+    expect(result.reason).toBe('no-variants');
+    expect(mocks.runEvalDataset).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('runVariantExperiment — selection hygiene', () => {
+  const heldOut = ['held-out'];
+  const fixes = (seen: number, held: number) =>
+    makeAttemptsResult([
+      ...Array.from({ length: 8 }, (_, i) => ({ id: `s${i}`, passes: seen })),
+      ...Array.from({ length: 8 }, (_, i) => ({
+        id: `h${i}`,
+        passes: held,
+        tags: heldOut,
+      })),
+      { id: 'r', passes: 5, tags: REGRESSION },
+    ]);
+
+  it('ranks variants without held-out cases', async () => {
+    setRuns({
+      __baseline__: fixes(0, 0),
+      seenOnly: fixes(4, 0),
+      heldOnly: fixes(0, 5),
+    });
+    const result = await runVariantExperiment(
+      { dataset, variants: [variant('heldOnly'), variant('seenOnly')] },
+      context
+    );
+    // heldOnly passes more cases overall, but only on held-out ones.
+    expect(result.winner?.variant.id).toBe('seenOnly');
+    const [heldOnly] = result.rounds[0]!.candidates;
+    expect(heldOnly!.metricDelta).toBe(0);
+  });
+
+  it('never shows held-out cases to proposeVariants', async () => {
+    setRuns({ __baseline__: fixes(0, 0), v1: fixes(5, 5), v2: fixes(5, 5) });
+    const seenIds: string[][] = [];
+    await runVariantExperiment(
+      {
+        dataset,
+        maxRounds: 2,
+        minImprovement: -1,
+        proposeVariants: async (ctx) => {
+          seenIds.push(ctx.baseline.caseResults.map((c) => c.id));
+          for (const round of ctx.history) {
+            for (const c of round.candidates) {
+              seenIds.push(c.result.caseResults.map((r) => r.id));
+              seenIds.push(c.comparison.improvedCases.map((r) => r.id));
+            }
+          }
+          return ctx.round === 0 ? [variant('v1')] : [variant('v2')];
+        },
+      },
+      context
+    );
+    expect(seenIds.flat().some((id) => id.startsWith('h'))).toBe(false);
+    expect(seenIds.flat()).toContain('s0');
+  });
+
+  it('adjusts improvement for every variant tried', async () => {
+    // 7 of 8 cases fixed: p = 1/128 = 0.008. Clear for one variant, and for
+    // three (0.025 / 3 = 0.0083), but not for four (0.00625).
+    const sevenFixed = makeAttemptsResult([
+      ...Array.from({ length: 8 }, (_, i) => ({
+        id: `s${i}`,
+        passes: i < 7 ? 5 : 0,
+      })),
+      { id: 'r', passes: 5, tags: REGRESSION },
+    ]);
+    const none = makeAttemptsResult([
+      ...Array.from({ length: 8 }, (_, i) => ({ id: `s${i}`, passes: 0 })),
+      { id: 'r', passes: 5, tags: REGRESSION },
+    ]);
+    const tryN = async (n: number) => {
+      const ids = Array.from({ length: n }, (_, i) => `v${i}`);
+      setRuns({
+        __baseline__: none,
+        ...Object.fromEntries(
+          ids.map((id, i) => [id, i === 0 ? sevenFixed : none])
+        ),
+      });
+      return runVariantExperiment(
+        { dataset, variants: ids.map((id) => variant(id)) },
+        context
+      );
+    };
+    expect((await tryN(3)).proposal?.recommendation).toBe('apply');
+    const four = await tryN(4);
+    expect(four.winner?.variant.id).toBe('v0');
+    expect(four.proposal?.recommendation).toBe('inconclusive');
   });
 });
 

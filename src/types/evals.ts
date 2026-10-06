@@ -46,6 +46,15 @@ export type {
   VariantExperimentSuite,
 } from '../evals/variantExperiment.js';
 
+export type { BaselineMeasurement } from '../evals/variantComparison.js';
+export type {
+  RegressionCheck,
+  VariantGroupStats,
+  PairedChange,
+  ChangeAssessment,
+  VariantGrouping,
+} from './reporter.js';
+
 export type { SaveBaselineOptions } from '../evals/baseline.js';
 
 export type {

@@ -24,6 +24,7 @@ This guide covers upgrading from 1.x (the last 1.x release is 1.1.1). Features f
 - [Server comparisons are suite arms](#server-comparisons-are-suite-arms)
 - [The Claude Agent SDK is an optional peer dependency](#the-claude-agent-sdk-is-an-optional-peer-dependency)
 - [`getResponseSizeBytes` is no longer exported](#getresponsesizebytes-is-no-longer-exported)
+- [`runVariantExperiment` needs clear evidence to recommend a variant](#runvariantexperiment-needs-clear-evidence-to-recommend-a-variant)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
 ---
@@ -364,6 +365,20 @@ Without it, the judge fails with an error that names the package. The other judg
 **Affects:** code that imports `getResponseSizeBytes`.
 
 It was the helper behind `validateSize`. Check a response's size with `validateSize(response, { maxBytes })` or `expect(response).toHaveToolResponseSize({ maxBytes })`.
+
+## `runVariantExperiment` needs clear evidence to recommend a variant
+
+**Affects:** code that calls `runVariantExperiment` and acts on `proposal.recommendation`, `winner`, `metricValue` or `delta`, or a `proposeVariants` callback that reads held-out cases.
+
+Variant experiments now follow standard practice for comparing two systems on the same cases, so `'apply'` means the evidence supports it. See [How variants are judged](../mcp-host.md#how-variants-are-judged) for the method and its limits.
+
+- **A recommendation needs a clear improvement.** `'apply'` now needs an exact paired sign-flip test on per-case results to give p below 0.025 divided by the number of variants tried. Before, any gain in the metric was enough. Small datasets and single-trial runs will report `'inconclusive'` more often; run several trials per case (`defaultLlmIterations` or `iterations`) to tell real gains from noise. There is no opt-out. Tool metrics use the same test on per-case precision, recall or F1.
+- **`regressionCheck` defaults to `'significant'`.** One flaky trial on a working case no longer disqualifies a variant; a case or group that clearly got worse still does. Set `regressionCheck: 'any-case'` for the previous rule.
+- **Tag your regression cases.** Breakage is judged on cases tagged `regression` (or `regressionTag`). Without the tag, the experiment runs the baseline one extra time, only to decide which cases are regression cases, which costs one more run of the dataset.
+- **`passRate` is the mean per-case pass rate.** It is now the mean of each case's share of trials passed, not the share of cases that passed every trial. With one trial per case the value is the same, except that a case whose trials all failed for infrastructure reasons is left out instead of counted as a failure. Every metric now leaves out held-out cases, so `metricValue`, `baselineValue` and `delta` change when the dataset has them.
+- **`proposeVariants` never sees held-out cases.** Every run in its context has them removed, so they stay a fair check on the winner.
+
+New fields: candidates have `measurement`, `improvement` and `fixes`, and the result has `grouping` and, when an extra run was needed, `groupingBaseline`.
 
 ## New in 2.0 (non-breaking)
 

@@ -687,14 +687,18 @@ Run a tool-metadata variant experiment: establish a baseline, inject each candid
   - `metric?: 'passRate' | 'toolF1' | 'toolPrecision' | 'toolRecall'` - Ranking metric (default `'passRate'`)
   - `maxRounds?: number` - Round budget (default `1`)
   - `minImprovement?: number` - Stop when a round's best gain over the best so far is below this (default `0`); with `better: 'lower'` a gain is a decrease
-  - `allowRegressions?: boolean` - Allow winners that regress cases (default `false`)
+  - `allowRegressions?: boolean` - Allow winners that break cases (default `false`)
+  - `regressionCheck?: 'significant' | 'any-case'` - How breakage is judged on regression cases. `'significant'` (default): they got worse as a group (exact paired sign-flip test, p < 0.025) or one did on its own (Fisher's exact test, Holm-corrected at 0.05). `'any-case'`: any case that passes with the baseline fails with the candidate. Either way, recommending needs a clear improvement: p < 0.025 / variants tried. See [How variants are judged](./mcp-host.md#how-variants-are-judged)
+  - `regressionTag?: string` - Tag marking regression cases (default `'regression'`). When no case has it, the baseline runs once more, only to group cases
+  - `heldOutTag?: string` - Tag marking held-out cases: left out of ranking and hidden from `proposeVariants` (default `'held-out'`)
   - Plus `runEvalDataset` passthrough: `defaultTrials`, `defaultJudgeReps`, `concurrency`, `filterTags`, `schemas`, `mcpHostModel`, `judgeModel`
 - `context: EvalContext` - `{ mcp, testInfo? }` from your test
 
 **Returns:** `VariantExperimentResult`
 
 - `baseline` - The baseline run: no tool variant on a dataset; on a suite, the base arm as configured (variants replace its `toolOverrides`)
-- `rounds` - Every round's candidates with per-candidate `result`, `comparison`, `metricValue`, `metricDelta`, `disqualified`
+- `grouping` - `'declared'` (from `regressionTag`) or `'grouping-run'`; `groupingBaseline` holds the extra run when one was needed
+- `rounds` - Every round's candidates with per-candidate `result`, `comparison`, `metricValue` and `metricDelta` (without held-out cases), `measurement` (per-group pass rates, changes with p-values and verdicts, and `brokenCaseIds`), `improvement` and `fixes` (the clearly-better call, adjusted for every variant tried), `disqualified`
 - `winner` - Best non-disqualified candidate across all rounds
 - `proposal` - `VariantImprovementProposal` with `recommendation: 'apply' | 'reject' | 'inconclusive'`, metric values, `toolChanges`, and improved/regressed case ids
 - `reason` - Why the experiment stopped: `'no-variants' | 'no-improvement' | 'max-rounds' | 'threshold-met'`
@@ -732,7 +736,7 @@ const result = await runVariantExperiment({
 - `better` - `'higher'` (default) or `'lower'`, for tokens, cost or time. Ranking, `minImprovement` and the recommendation follow it; `metricDelta` and `proposal.delta` stay candidate minus baseline.
 - `suite` also takes `rootDir`, `pluginPaths`, `plugins` and `secretsFile`, as `runEvalSuite` does. Static `variants` run in one suite with the baseline; later rounds run as their own suite. Variant ids must be unique and differ from the base arm's name. Each run is stored like any other run of the manifest.
 
-A candidate that regresses any case is disqualified from winning unless `allowRegressions: true`; the best attempt is still surfaced in `proposal` with `recommendation: 'reject'` so an agent can see what broke. See [MCP Host Simulation](./mcp-host.md#driving-it-from-an-agent-runvariantexperiment) for the full agent-loop example.
+A candidate that breaks cases that work today is disqualified from winning unless `allowRegressions: true`; the best candidate tried is still surfaced in `proposal` with `recommendation: 'reject'` so an agent can see what broke. See [MCP Host Simulation](./mcp-host.md#driving-it-from-an-agent-runvariantexperiment) for the full agent-loop example.
 
 ### `runEvalCase(evalCase, context, options?)`
 
@@ -1591,7 +1595,7 @@ export interface EvalCase {
   metadata?: Record<string, unknown>;
 
   /**
-   * Number of trials: attempts at this case. When > 1,
+   * Number of trials (independent runs) of this case. When > 1,
    * `EvalCaseResult.assertionPassRate` is the share of trials that passed, and
    * `pass` is decided by `passThreshold`.
    * @default 1

@@ -107,15 +107,15 @@ One execution of an eval: every variant on every case, for the case's number of 
 _Avoid_: experiment, suite run, execution
 
 **Comparison**:
-How a variant differs from the baseline, or a run from an earlier run: metric changes with confidence intervals, and the cases that improved or regressed.
-_Avoid_: diff, A/B result
+How a variant differs from the baseline, or a run from an earlier run: metric changes with confidence intervals, an assessment of each change (better, worse or unclear, from a paired test), and the cases that improved or regressed.
+_Avoid_: diff, A/B result, verdict
 
 **Regression case**:
-A case the baseline passes, which a variant must keep passing.
+A case that works today, which a variant must keep passing. Declared with the `regression` tag; when no case has the tag, the cases that pass a separate grouping run of the baseline. Never chosen from the baseline run variants are compared with, which would build in regression to the mean.
 _Avoid_: keep-working case, guard case
 
 **Capability case**:
-A case the baseline fails, which a variant improves on by passing.
+Any case that isn't a regression case: one a variant should improve on.
 _Avoid_: should-work case, target case
 
 **Held-out case**:

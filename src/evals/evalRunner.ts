@@ -1229,8 +1229,8 @@ export async function runEvalDataset(
       ) {
         warnedLowIterations.add(warning);
         console.warn(
-          `[mcp-server-tester] Eval case "${evalCase.id}": running ${effectiveIterations} iterations in ${evalCase.mode} mode ` +
-            `may not be statistically reliable. Consider using 10+ iterations for accuracy measurements you can trust.`
+          `[mcp-server-tester] Eval case "${evalCase.id}": running ${effectiveIterations} trials in ${evalCase.mode} mode ` +
+            `may not be statistically reliable. Consider 10+ trials for pass rates you can trust.`
         );
       }
     }
