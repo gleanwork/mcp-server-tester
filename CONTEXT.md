@@ -1,6 +1,6 @@
 # MCP Server Tester
 
-Tests and evaluates MCP servers. Tests check a server's tools and protocol directly; evals have a host act on cases and grade what it did, comparing variants of the setup. The vocabulary follows common eval usage ([ADR 0002](docs/adr/0002-common-eval-vocabulary.md)). Extension follows ESLint's plugin model.
+Tests and evaluates MCP servers. Tests check a server's tools and protocol directly; evals have a client act on cases and grade what it did, comparing variants of the setup. The vocabulary follows common eval usage ([ADR 0002](docs/adr/0002-common-eval-vocabulary.md)). Extension follows ESLint's plugin model.
 
 ## Language
 
@@ -19,23 +19,31 @@ A named list of cases. An eval names datasets by source: a file, a directory, a 
 _Avoid_: eval set, test file
 
 **Case**:
-One input for a host to act on, with what is expected of the result.
+One input for a client to act on, with what is expected of the result.
 _Avoid_: example, sample, task, test, scenario
 
 **Input**:
-What a case gives the host to act on: the user's request, sent to the host as its prompt.
+What a case gives the client to act on: the user's request, sent to the client as its prompt.
 _Avoid_: scenario, query
 
 **Expected**:
 A case's ground truth that graders check against: an answer, rubric criteria, or the tool calls it should trigger.
 _Avoid_: canonical answer, golden, target, reference
 
-**Host**:
-What acts on a case: an LLM with the servers' tools, an agent CLI, or a desktop app (an agent harness). A host returns a trace, never a score.
-_Avoid_: client, agent, runner, solver, provider
+**Client**:
+The MCP client application an eval tests, named canonically: `claude-code`, `cowork`, `chatgpt`, or `mst` (MST's own client, which gives the model the servers' tools and nothing else). How MST drives it (a CLI, desktop automation, an SDK) is not part of its name. A client returns a trace, never a score.
+_Avoid_: host, harness, agent, runner, solver, provider
+
+**Model**:
+The LLM a client runs a case with, set beside the client (for example `claude-sonnet-4-6`); without it, the client's default.
+_Avoid_: provider, engine
+
+**MCP connection**:
+MST's own connection to an MCP server, through which tests call tools directly.
+_Avoid_: client (that is the application under test)
 
 **Variant**:
-One setup an eval tests: the host and its options (model, system prompt), the MCP servers, and the tool metadata the host sees. Every variant runs the same cases.
+One setup an eval tests: the client, its model and options (such as a system prompt), the MCP servers, and the tool metadata the client sees. Every variant runs the same cases.
 _Avoid_: arm, treatment, experiment, configuration
 
 **Baseline**:
@@ -43,7 +51,7 @@ The variant the others are compared against.
 _Avoid_: control, reference
 
 **Tool metadata**:
-The tool names, descriptions and input schemas a variant shows the host instead of the servers' own. Calls are still recorded under the tools' original names.
+The tool names, descriptions and input schemas a variant shows the client instead of the servers' own. Calls are still recorded under the tools' original names.
 _Avoid_: tool variant, tool overrides, override set
 
 **Trial**:
@@ -51,11 +59,11 @@ One attempt at a case by one variant. A case runs a set number of trials; attemp
 _Avoid_: iteration, attempt, epoch, repetition, sample
 
 **Trace**:
-What a host did in one trial, in order: tool calls (MCP or host), skill loads, commands, subagents and tool searches, with usage and the final answer.
+What a client did in one trial, in order: tool calls (MCP or the client's own), skill loads, commands, subagents and tool searches, with usage and the final answer.
 _Avoid_: transcript, trajectory, log, response
 
 **Evidence**:
-How far a host's trace can be trusted for tool assertions: `structured` (protocol or host-native records), `observed` (best effort) or `none`. Only `structured` evidence can pass tool-call assertions; a host that declares nothing counts as unverified.
+How far a client's trace can be trusted for tool assertions: `structured` (protocol or the client's own records), `observed` (best effort) or `none`. Only `structured` evidence can pass tool-call assertions; a client that declares nothing counts as unverified.
 _Avoid_: confidence, fidelity
 
 ### Grading
@@ -85,7 +93,7 @@ The share of a case's trials that must pass for the case to pass; all of them by
 _Avoid_: accuracy threshold
 
 **Pass**:
-Whether a case's trials met its pass threshold, decided by MST from the graders' scores, never by the host.
+Whether a case's trials met its pass threshold, decided by MST from the graders' scores, never by the client.
 _Avoid_: verdict, success
 
 **Metric**:
@@ -121,7 +129,7 @@ _Avoid_: variant experiment, tool experiment
 ### Tests
 
 **Test**:
-A direct check of a server, with no host: a Playwright test that calls tools or sends requests through MST's fixtures and checks the results with its matchers. Tests aren't evals and aren't graded.
+A direct check of a server, with no client: a Playwright test that calls tools or sends requests through MST's fixtures and checks the results with its matchers. Tests aren't evals and aren't graded.
 _Avoid_: direct case, unit eval
 
 ### Extending MST
@@ -135,7 +143,7 @@ The prefix a plugin's extensions are referenced by, as `namespace/name` (for exa
 _Avoid_: scope, prefix
 
 **Extension**:
-One named thing a plugin contributes: a dataset source, host, judge, pairwise judge, metric or result store.
+One named thing a plugin contributes: a dataset source, client, judge, pairwise judge, metric or result store.
 _Avoid_: contribution, registration, capability
 
 **Built-in**:
@@ -151,5 +159,5 @@ _Avoid_: preset, profile
 _Avoid_: gateway config, LLM provider
 
 **Marketplace plugin**:
-A Claude or Codex plugin installed into a desktop host under test. Unrelated to an MST plugin.
+A Claude or Codex plugin installed into a desktop client under test. Unrelated to an MST plugin.
 _Avoid_: plugin (unqualified)
