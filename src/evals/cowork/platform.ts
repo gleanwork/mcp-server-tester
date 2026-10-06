@@ -7,6 +7,14 @@ import type {
   CoworkHitlReceipt,
 } from './driver.js';
 
+/** The desktop application a session runs, recorded with each case result. */
+interface CoworkHostApp {
+  name: string;
+  version: string;
+  /** `pinned`: the manifest's `host.options.appVersion`; else the installed app. */
+  source: 'installed' | 'pinned';
+}
+
 /** The shared batch lifecycle does not choose OS paths or control an application.
  * Implementations must retain the existing bounded, no-resubmission contract. */
 export interface CoworkPlatform {
@@ -19,9 +27,13 @@ export interface CoworkPlatform {
     plugins?: readonly HostPlugin[];
     /** Caller-owned runtime paths for a prepared Linux desktop. */
     stdioPaths?: HostStdioPaths;
+    /** macOS: run exactly this Claude Desktop version instead of the installed one. */
+    appVersion?: string;
   }): Promise<{
-    /** macOS returns the pinned or caller-owned application path. */
+    /** macOS returns the installed, caller-owned or pinned application path. */
     appPath?: string;
+    /** macOS returns the application it runs. */
+    app?: CoworkHostApp;
     /** macOS returns transaction-owned paths after installing its private profile. */
     stdioPaths?: HostStdioPaths;
     dispose(): Promise<void>;

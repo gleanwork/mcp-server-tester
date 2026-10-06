@@ -11,6 +11,7 @@ import {
 import { getMacCoworkController } from './macController.js';
 import {
   acquireMacCoworkApp,
+  readMacCoworkAppVersion,
   removeMacCoworkApp,
   verifyMacCoworkAppVersion,
 } from './macApp.js';
@@ -27,6 +28,7 @@ vi.mock('./macApp.js', async (original) => ({
   ...(await original<typeof MacApp>()),
   acquireMacCoworkApp: vi.fn(),
   removeMacCoworkApp: vi.fn(),
+  readMacCoworkAppVersion: vi.fn(),
   verifyMacCoworkAppVersion: vi.fn(),
 }));
 vi.mock('node:fs/promises', async (original) => {
@@ -53,6 +55,9 @@ const actualOs = await vi.importActual<typeof os>('node:os');
 const actualFs = await vi.importActual<typeof fs>('node:fs/promises');
 const actualMacApp = await vi.importActual<typeof MacApp>('./macApp.js');
 const SOURCE = '11111111-2222-3333-4444-555555555555';
+// A manifest pin (host.options.appVersion) and the installed app's version.
+const PIN = '1.52386.6';
+const INSTALLED = '2.19675.1';
 const ORIGINAL =
   JSON.stringify({
     appliedId: SOURCE,
@@ -173,6 +178,11 @@ beforeEach(async () => {
     .mockReset()
     .mockImplementation(actualMacApp.removeMacCoworkApp);
   vi.mocked(verifyMacCoworkAppVersion).mockReset().mockResolvedValue();
+  vi.mocked(readMacCoworkAppVersion)
+    .mockReset()
+    .mockImplementation(async (app) =>
+      app === '/synthetic/Claude.app' ? PIN : INSTALLED
+    );
   running = true;
   events = [];
   controller.state.mockReset().mockImplementation(async () => ({ running }));
@@ -437,10 +447,45 @@ describe('automatic Mac Cowork session (no native execution)', () => {
     await fs.access(join(lease, 'session.json'));
   });
 
+  it('runs the installed app by default, records its version and checks it at the end', async () => {
+    const session = await prepare();
+    expect(acquireMacCoworkApp).not.toHaveBeenCalled();
+    expect(getMacCoworkController).toHaveBeenCalledWith(
+      '/Applications/Claude.app'
+    );
+    expect(session.app).toEqual({
+      name: 'Claude Desktop',
+      version: INSTALLED,
+      source: 'installed',
+    });
+    expect((await json(join(lease, 'session.json'))).pinnedApp).toBeUndefined();
+    await session.dispose();
+    expect(verifyMacCoworkAppVersion).toHaveBeenCalledWith(
+      '/Applications/Claude.app',
+      INSTALLED
+    );
+    expect(removeMacCoworkApp).not.toHaveBeenCalled();
+    await clean();
+  });
+  it('refuses results when the installed app changes during evaluation', async () => {
+    const session = await prepare();
+    vi.mocked(verifyMacCoworkAppVersion).mockRejectedValueOnce(
+      new Error('changed bundle')
+    );
+    await expect(session.dispose()).rejects.toThrow('changed bundle');
+    expect(removeMacCoworkApp).not.toHaveBeenCalled();
+    await clean();
+  });
+  it('rejects the removed MST_COWORK_APP_VERSION before any app action', async () => {
+    await expect(
+      prepare({ env: { ...env, MST_COWORK_APP_VERSION: PIN } })
+    ).rejects.toThrow('host.options.appVersion');
+    await expectNoSessionMutation();
+  });
   it('journals the pin before acquisition and restores the installed app before removing it', async () => {
     vi.mocked(acquireMacCoworkApp).mockImplementationOnce(
       async (directory, version) => {
-        expect(version).toBe('1.52386.6');
+        expect(version).toBe(PIN);
         const receipt = await json(join(lease, 'session.json'));
         expect(receipt.pinnedApp).toBe(true);
         expect(directory).toBe(`${String(receipt.stagingDirectory)}-app`);
@@ -451,10 +496,15 @@ describe('automatic Mac Cowork session (no native execution)', () => {
     vi.mocked(removeMacCoworkApp).mockImplementationOnce(async () => {
       expect(events).toEqual(['stop', 'start', 'stop', 'start']);
     });
-    const session = await prepare();
+    const session = await prepare({ appVersion: PIN });
     expect(getMacCoworkController).toHaveBeenCalledWith(
       '/synthetic/Claude.app'
     );
+    expect(session.app).toEqual({
+      name: 'Claude Desktop',
+      version: PIN,
+      source: 'pinned',
+    });
     await session.dispose();
     expect(removeMacCoworkApp).toHaveBeenCalledTimes(1);
     await clean();
@@ -467,13 +517,15 @@ describe('automatic Mac Cowork session (no native execution)', () => {
         'Unable to acquire Claude Desktop 1.52386.6: checksum verification failed.'
       );
     });
-    await expect(prepare()).rejects.toThrow('checksum verification failed');
+    await expect(prepare({ appVersion: PIN })).rejects.toThrow(
+      'checksum verification failed'
+    );
     expect(events).toEqual([]);
     expect(removeMacCoworkApp).toHaveBeenCalledTimes(1);
     await clean();
   });
   it('still restores and removes the app when the pin changes during evaluation', async () => {
-    const session = await prepare();
+    const session = await prepare({ appVersion: PIN });
     vi.mocked(verifyMacCoworkAppVersion).mockRejectedValueOnce(
       new Error('changed bundle')
     );
@@ -483,7 +535,7 @@ describe('automatic Mac Cowork session (no native execution)', () => {
     await clean();
   });
   it('retains the receipt when temporary app removal fails', async () => {
-    const session = await prepare();
+    const session = await prepare({ appVersion: PIN });
     vi.mocked(removeMacCoworkApp).mockRejectedValueOnce(new Error('busy'));
     await expect(session.dispose()).rejects.toThrow('Recovery state retained');
     expect((await fs.stat(join(lease, 'session.json'))).isFile()).toBe(true);

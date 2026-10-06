@@ -7,7 +7,6 @@ import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 
-export const PINNED_MAC_COWORK_VERSION = '1.52386.6';
 const exec = promisify(execFile);
 const MAX_DOWNLOAD = 1024 * 1024 * 1024;
 const VERSION = /^\d+\.\d+\.\d+$(?![\s\S])/;
@@ -22,19 +21,28 @@ const Feed = z.object({
   releases: z.array(z.object({ version: z.string(), updateTo: Update })),
 });
 
-export function macCoworkVersion(
+/**
+ * The Claude Desktop version a session runs: `host.options.appVersion` when the
+ * manifest pins one, otherwise whatever is installed. MST has no default pin.
+ */
+export function macCoworkAppVersion(
+  appVersion: string | undefined,
   env: Record<string, string | undefined>
-): string {
-  const version = env.MST_COWORK_APP_VERSION ?? PINNED_MAC_COWORK_VERSION;
-  if (!VERSION.test(version))
+): string | undefined {
+  if (env.MST_COWORK_APP_VERSION !== undefined)
     throw new Error(
-      'Invalid MST_COWORK_APP_VERSION; expected an exact x.y.z version.'
+      'MST_COWORK_APP_VERSION was removed; pin a version with host.options.appVersion in the manifest.'
     );
-  if (env.MST_COWORK_APP_VERSION && env.MST_COWORK_APP_PATH)
+  if (appVersion === undefined) return undefined;
+  if (!VERSION.test(appVersion))
     throw new Error(
-      'Set MST_COWORK_APP_VERSION or MST_COWORK_APP_PATH, not both.'
+      'Invalid host.options.appVersion; expected an exact x.y.z version.'
     );
-  return version;
+  if (env.MST_COWORK_APP_PATH)
+    throw new Error(
+      'Set host.options.appVersion or MST_COWORK_APP_PATH, not both.'
+    );
+  return appVersion;
 }
 
 /** Only the exact release returned by Anthropic's bounded update feed is accepted. */
@@ -102,10 +110,8 @@ export async function removeMacCoworkApp(directory: string): Promise<void> {
   await rm(directory, { recursive: true });
 }
 
-export async function verifyMacCoworkAppVersion(
-  app: string,
-  version: string
-): Promise<void> {
+/** The bundle's `CFBundleShortVersionString`; throws unless it is `x.y.z`. */
+export async function readMacCoworkAppVersion(app: string): Promise<string> {
   try {
     const { stdout } = await exec(
       '/usr/bin/plutil',
@@ -119,12 +125,24 @@ export async function verifyMacCoworkAppVersion(
       ],
       nativeOptions(dirname(app))
     );
-    if (stdout.trim() !== version) throw new Error();
+    const version = stdout.trim();
+    if (!VERSION.test(version)) throw new Error();
+    return version;
   } catch {
-    throw new Error(
-      `Claude Desktop pin ${version} could not be verified; refusing results from a changed bundle.`
-    );
+    throw new Error('Unable to read the Claude Desktop version.');
   }
+}
+
+/** Throws unless the bundle is still exactly `version`. */
+export async function verifyMacCoworkAppVersion(
+  app: string,
+  version: string
+): Promise<void> {
+  const actual = await readMacCoworkAppVersion(app).catch(() => undefined);
+  if (actual !== version)
+    throw new Error(
+      `Claude Desktop ${version} could not be verified; refusing results from a changed bundle.`
+    );
 }
 
 /** Acquire without executing the downloaded application or changing installed apps.

@@ -32,36 +32,56 @@ manually edit `configLibrary` files.
 The batch preflight reports this setup command immediately when the profile is
 missing. It does not wait for a case timeout.
 
-### Automatic pinned Claude Desktop bundle
+### Which Claude Desktop runs
 
-On macOS, MST downloads Claude Desktop **1.52386.6** for each managed session.
-No app bundle or administrator password is required. It resolves the exact pin
-through Anthropic's release service, downloads into a private temporary directory,
-and checks the advertised size and SHA-256, Anthropic code signature, bundle ID,
-and embedded version before launch. An unavailable pin or failed check stops the
-run; MST never silently falls back to the installed app or latest release.
+By default, MST runs the installed `/Applications/Claude.app`, whatever its
+version, and records that version with every case result as
+`hostTelemetry.hostApp`:
 
-```bash
-# Optional exact-version override; the default needs no environment variable.
-MST_COWORK_APP_VERSION=1.52386.6 \
-COWORK_ENV_FILE=/absolute/path/to/private.env \
-  ./scripts/run-cowork.sh \
-  --manifests /absolute/path/to/manifest.json \
-  --root-dir /absolute/path/to/eval-root
+```json
+{ "name": "Claude Desktop", "version": "2.19675.1", "source": "installed" }
 ```
 
+MST has no built-in version. To run an exact version instead, for example to
+reproduce an earlier result or to keep a series of runs on one version, pin it
+in the manifest:
+
+```json
+{
+  "host": {
+    "type": "cowork",
+    "options": {
+      "computerUseProvider": "anthropic-computer-use",
+      "appVersion": "1.52386.6"
+    }
+  }
+}
+```
+
+With `appVersion`, MST downloads that release for the session. No app bundle or
+administrator password is required. It resolves the exact version through
+Anthropic's release service, downloads into a private temporary directory, and
+checks the advertised size and SHA-256, Anthropic code signature, bundle ID, and
+embedded version before launch. An unavailable version or failed check stops the
+run; MST never falls back to the installed app or the latest release. The
+recorded `source` is `pinned`. The earlier `MST_COWORK_APP_VERSION` environment
+variable is rejected with a message pointing to `appVersion`.
+
+Pinned or not, the version must not change during a run. MST requests disabled
+app updates in its evaluation profile and rechecks the version before accepting
+run completion; a changed bundle fails the run. Compare runs on the same
+`hostApp.version`: a newer Claude Desktop can change results.
+
 MST does not replace `/Applications/Claude.app` or write managed preferences.
-It uses the existing signed-in `Claude-3p` profile, requests disabled app updates
-in its evaluation profile, and rechecks the bundle version before accepting run
-completion. A managed configuration can override profile settings; a changed
-bundle fails the run. MST stops the downloaded app, restores the original profile
-and running app, and removes its download directory.
-Cleanup failures retain the session receipt for `cowork recover`; recovery also
-removes the temporary app. A hard process crash during acquisition can leave the
-journaled download until recovery. Do not run two Claude bundles simultaneously.
+It uses the existing signed-in `Claude-3p` profile. A managed configuration can
+override profile settings. MST stops the app it ran, restores the original
+profile and running app, and removes any download directory. Cleanup failures
+retain the session receipt for `cowork recover`; recovery also removes a
+downloaded app. A hard process crash during acquisition can leave the journaled
+download until recovery. Do not run two Claude bundles simultaneously.
 
 Claude's workspace disk-space check is separate from MCP authentication. Leave
-headroom for both the temporary app download and Claude's VM/workspace setup. A
+headroom for Claude's VM/workspace setup, and for the download when pinning. A
 successful connector preflight does not bypass a "Not enough disk space" error.
 MST removes its own temporary bundle, bridge credentials, and settings on normal
 teardown; it does not delete Claude's VM bundles, user workspaces, or caches to
@@ -92,11 +112,12 @@ Two separate model clients run during a macOS case:
 So on a Mac whose managed preferences route Claude Desktop through a gateway,
 setting the gateway variables for the planner is enough; no API key is needed.
 
-`MST_COWORK_APP_PATH=/absolute/path/to/Claude.app` remains a development escape
-hatch. MST neither downloads nor deletes caller-owned bundles. Do not combine it
-with `MST_COWORK_APP_VERSION`. Linux provisioning is unchanged.
+`MST_COWORK_APP_PATH=/absolute/path/to/Claude.app` runs an app installed
+somewhere other than `/Applications`. MST neither downloads nor deletes
+caller-owned bundles, and records their version too. Don't combine it with
+`appVersion`. Linux provisioning is unchanged.
 
-Pinning alone does not prove MCP availability. Managed inference configuration
+Running an app doesn't prove MCP availability. Managed inference configuration
 can take precedence over a profile's MCP list. On macOS, MST now exposes declared
 servers through Claude's supported local Developer MCP surface instead:
 
@@ -151,11 +172,13 @@ like `false`, and `true` is rejected. Credentials are not inferred from arbitrar
 environment variable names.
 
 `coworkSetup.approveWriteTools` defaults to false. Mac Computer Use approves only
-clearly read-only tools by default. On pinned Claude 1.52386.6, explicit opt-in
-stages local connector defaults for the declared tool inventory before launch,
-using the same enabled and content-fingerprint keys as the connector picker.
+clearly read-only tools by default. Explicit opt-in stages local connector
+defaults for the declared tool inventory before launch, using the same enabled
+and content-fingerprint keys as the connector picker (live-verified on Claude
+Desktop 1.52386.6 and 2.19675.1). If a later version stores them differently,
+its approval prompts remain and cases fail or time out rather than pass.
 Both bare `server:tool` and `local:server:tool` names are staged because the
-pinned renderer switches naming paths with `cowork_snapshot_sync`. Mac write
+renderer switches naming paths with `cowork_snapshot_sync`. Mac write
 opt-in disables the approval-click fallback: staging must work without clicking
 a pending approval. Managed wildcard policies do not cover these local
 Developer MCP connections.

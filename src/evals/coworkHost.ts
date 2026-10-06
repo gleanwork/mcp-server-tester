@@ -58,6 +58,14 @@ const OptionsSchema = z
       .optional(),
     dataDir: z.string().min(1).optional(),
     /**
+     * macOS: download and run exactly this Claude Desktop version (`x.y.z`).
+     * Omit it to run the installed app. Either way, the version is recorded.
+     */
+    appVersion: z
+      .string()
+      .regex(/^\d+\.\d+\.\d+$/)
+      .optional(),
+    /**
      * Linux: absolute root of each staged plugin, for `${pluginRoot:<plugin>}`
      * in stdio eval servers. The caller stages it from the pinned ref.
      */
@@ -89,6 +97,16 @@ const OptionsSchema = z
         code: 'custom',
         path: ['computerUseModel'],
         message: 'linux-desktop does not use a planner model.',
+      });
+    if (
+      options.computerUseProvider === 'linux-desktop' &&
+      options.appVersion !== undefined
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['appVersion'],
+        message:
+          'appVersion requires anthropic-computer-use; linux-desktop runs the prepared desktop.',
       });
   });
 const CoworkSchema = z
@@ -213,6 +231,9 @@ async function runBatch(
           manifest: managedManifest,
           env,
           model: config.model,
+          ...(config.options.appVersion
+            ? { appVersion: config.options.appVersion }
+            : {}),
           ...(plugins.length ? { plugins } : {}),
           ...(stdioServers.length &&
           config.options.computerUseProvider === 'linux-desktop'
@@ -280,6 +301,8 @@ async function runBatch(
             durationMs: Date.now() - caseStartedAt,
             telemetry: {
               ...result.telemetry,
+              // What actually ran, pinned or not, so results show app drift.
+              ...(session?.app ? { hostApp: session.app } : {}),
               computerUse: {
                 ...computerUse,
                 ...(hitlFollowups.length ? { hitlFollowups } : {}),

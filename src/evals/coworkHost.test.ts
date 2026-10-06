@@ -253,6 +253,35 @@ describe('V2 Cowork host', () => {
     expect(mocks.dispose).toHaveBeenCalledOnce();
   });
 
+  it('passes a manifest app pin to setup and records the app on each case', async () => {
+    const app = {
+      name: 'Claude Desktop',
+      version: '1.52386.6',
+      source: 'pinned',
+    } as const;
+    mocks.setup.mockResolvedValueOnce({ app, dispose: mocks.dispose });
+    const pinned = {
+      ...host,
+      options: { ...host.options, appVersion: '1.52386.6' },
+    };
+    const [result] = await COWORK_HOST.runBatch!(
+      [{ ...requests()[0]!, config: pinned }],
+      readOnlyContext
+    );
+    expect(mocks.setup).toHaveBeenCalledWith(
+      expect.objectContaining({ appVersion: '1.52386.6' })
+    );
+    expect(result!.telemetry?.hostApp).toEqual(app);
+  });
+  it('rejects an app pin for the prepared Linux desktop', () => {
+    expect(() =>
+      COWORK_HOST.schema.parse({
+        type: 'cowork',
+        options: { computerUseProvider: 'linux-desktop', appVersion: '1.2.3' },
+      })
+    ).toThrow('appVersion requires anthropic-computer-use');
+  });
+
   it('uses the selected session bundle for both submission and HITL', async () => {
     mocks.setup.mockResolvedValueOnce({
       appPath: '/private/tmp/pinned/Claude.app',
