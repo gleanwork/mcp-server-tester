@@ -23,8 +23,8 @@ One input for a host to act on, with what is expected of the result.
 _Avoid_: example, sample, task, test, scenario
 
 **Input**:
-What a case gives the host to act on: the user's request.
-_Avoid_: scenario, query, prompt
+What a case gives the host to act on: the user's request, sent to the host as its prompt.
+_Avoid_: scenario, query
 
 **Expected**:
 A case's ground truth that graders check against: an answer, rubric criteria, or the tool calls it should trigger.
