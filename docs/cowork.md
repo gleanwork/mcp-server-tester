@@ -50,10 +50,8 @@ in the manifest:
 {
   "client": "cowork",
   "clientOptions": {
-    "options": {
-      "computerUseProvider": "anthropic-computer-use",
-      "appVersion": "1.52386.6"
-    }
+    "computerUseProvider": "anthropic-computer-use",
+    "appVersion": "1.52386.6"
   }
 }
 ```
@@ -104,7 +102,7 @@ Two separate model clients run during a macOS case:
   profile: MST then requires no key, stages no inference credential, and sets no
   provider in the profile. If those managed preferences change during setup, the
   run fails closed.
-- **The Computer Use planner** (`clientOptions.options.computerUseModel`). It uses MST's
+- **The Computer Use planner** (`clientOptions.computerUseModel`). It uses MST's
   [LLM gateway settings](./llm-gateways.md): `ANTHROPIC_BASE_URL` with
   `MST_LLM_AUTH_COMMAND` or `ANTHROPIC_AUTH_TOKEN`, else `ANTHROPIC_API_KEY`
   against the public API. The gateway must accept the Computer Use beta tool.
@@ -152,9 +150,9 @@ judges according to their plugin's requirements.
 `--dry-run` checks configuration, not GUI execution or model behavior.
 
 Use client `cowork` (`cowork_cu` and `anthropic.claude.cowork.desktop-app.macos` still work, with a deprecation warning). `model` selects the Cowork
-inference model; `clientOptions.options.computerUseModel` independently selects the planner.
+inference model; `clientOptions.computerUseModel` independently selects the planner.
 The inference provider is `anthropic`. On macOS the desktop driver selector is
-`clientOptions.options.computerUseProvider: "anthropic-computer-use"`.
+`clientOptions.computerUseProvider: "anthropic-computer-use"`.
 
 MST applies a fixed inference model list with discovery disabled. On macOS,
 managed settings can override that profile. The submission driver therefore
@@ -225,7 +223,7 @@ when installing the normal published package.
 
 ## Attach to a prepared Linux desktop
 
-Use `client: "cowork"` and `clientOptions.options.computerUseProvider: "linux-desktop"`
+Use `client: "cowork"` and `clientOptions.computerUseProvider: "linux-desktop"`
 with the normal `batch` command. `computerUseModel` is rejected for this backend:
 there is no LLM desktop planner. If omitted, the driver defaults to the native
 backend for the current OS. Cross-platform provider combinations fail before UI
@@ -247,7 +245,7 @@ matches `coworkPluginMarketplace(plugin)`; without `plugins`, it must be absent
 or empty. Stdio eval servers and blocked plugin servers follow the contract in
 [Host plugins](#host-plugins). Native sessions default to
 `$XDG_CONFIG_HOME/Claude-3p/local-agent-mode-sessions`, or
-`$HOME/.config/Claude-3p/local-agent-mode-sessions`; `options.dataDir` overrides it.
+`$HOME/.config/Claude-3p/local-agent-mode-sessions`; `clientOptions.dataDir` overrides it.
 Preparation is read-only. MST does not provision or authenticate the environment,
 change its launch policy, or manage its lifecycle.
 
@@ -442,13 +440,11 @@ The config has two independent parts:
 {
   "client": "cowork",
   "clientOptions": {
-    "options": {
-      "computerUseProvider": "linux-desktop",
-      "pluginRoots": {
-        "acme": "/opt/example-app/plugins/acme"
-      },
-      "mcpDataRoot": "/config/mcp-data"
+    "computerUseProvider": "linux-desktop",
+    "pluginRoots": {
+      "acme": "/opt/example-app/plugins/acme"
     },
+    "mcpDataRoot": "/config/mcp-data",
     "plugins": [
       {
         "name": "acme",
@@ -522,9 +518,9 @@ Unknown keys fail; Cowork does not currently accept the general MCP client's
 
 - `${url}`: the declared `url`; allowed in command, args, env, cwd, and files.
 - `${dataDir}`: the private per-server directory; allowed in command, args,
-  env, cwd, and files. On Linux it is `<options.mcpDataRoot>/<label>`; on macOS
+  env, cwd, and files. On Linux it is `<clientOptions.mcpDataRoot>/<label>`; on macOS
   it is `<transaction staging directory>/stdio/<label>`.
-- `${pluginRoot:<plugin>}`: `options.pluginRoots[<plugin>]` on Linux; allowed
+- `${pluginRoot:<plugin>}`: `clientOptions.pluginRoots[<plugin>]` on Linux; allowed
   in command, args, env, cwd, and files. `<plugin>` must be a declared plugin.
 - `${bearerToken}`: the value of `auth.accessTokenEnv`; allowed only in files.
 

@@ -44,32 +44,30 @@ const Schema = z
       (plugins) => !plugins?.some((p) => p.blockMcpServers?.length),
       'ChatGPT does not support plugins[].blockMcpServers; use plugins[].mcp.'
     ),
+    configPath: z.string().min(1).optional(),
+    requireMcpCalls: z.boolean().optional(),
+    surface: z.enum(['chatgpt-work', 'codex']).default('chatgpt-work'),
+    correlation: z
+      .enum(['exact_prompt', 'prompt_marker'])
+      .default('exact_prompt'),
+    computerUseProvider: z.literal('anthropic-computer-use').optional(),
+    nativeMaxActions: z
+      .number()
+      .int()
+      .min(1)
+      .max(NATIVE_MAX_ACTIONS.max)
+      .optional(),
+    computerUseModel: z
+      .string()
+      .regex(/^[A-Za-z0-9._:-]+$/)
+      .optional(),
+    computerUseMaxActions: z.number().int().min(1).max(64).optional(),
     options: z
-      .object({
-        configPath: z.string().min(1).optional(),
-        requireMcpCalls: z.boolean().optional(),
-        surface: z.enum(['chatgpt-work', 'codex']).default('chatgpt-work'),
-        correlation: z
-          .enum(['exact_prompt', 'prompt_marker'])
-          .default('exact_prompt'),
-        computerUseProvider: z.literal('anthropic-computer-use').optional(),
-        nativeMaxActions: z
-          .number()
-          .int()
-          .min(1)
-          .max(NATIVE_MAX_ACTIONS.max)
-          .optional(),
-        computerUseModel: z
-          .string()
-          .regex(/^[A-Za-z0-9._:-]+$/)
-          .optional(),
-        computerUseMaxActions: z.number().int().min(1).max(64).optional(),
+      .never({
+        message:
+          '`clientOptions.options` is gone: set its keys in `clientOptions` directly (`clientOptions.surface`, not `clientOptions.options.surface`).',
       })
-      .strict()
-      .default({
-        correlation: 'exact_prompt',
-        surface: 'chatgpt-work',
-      }),
+      .optional(),
   })
   .strict();
 
@@ -130,11 +128,11 @@ async function runBatch(
         reasoningEffort: config.reasoningEffort,
         timeoutMs: config.timeout,
         correlation: {
-          strategy: config.options.correlation,
-          includeInPrompt: config.options.correlation === 'prompt_marker',
+          strategy: config.correlation,
+          includeInPrompt: config.correlation === 'prompt_marker',
         },
         codexSetup: {
-          configPath: config.options.configPath,
+          configPath: config.configPath,
           servers: serverConfig.servers,
         },
         ...(config.plugins?.length
@@ -145,10 +143,10 @@ async function runBatch(
           : {}),
         options: {
           environment: { ...config.env, ...serverConfig.environment },
-          computerUseModel: config.options.computerUseModel,
-          surface: config.options.surface,
-          nativeMaxActions: config.options.nativeMaxActions,
-          ...platform.hostOptions(config.options, environment),
+          computerUseModel: config.computerUseModel,
+          surface: config.surface,
+          nativeMaxActions: config.nativeMaxActions,
+          ...platform.hostOptions(config, environment),
           computerUseEnvironment: environment,
         },
       };
@@ -248,7 +246,7 @@ async function runBatch(
             'ChatGPT called an MCP server outside the configured evaluation server selection.';
         else if (
           executionTrusted &&
-          config.options.requireMcpCalls &&
+          config.requireMcpCalls &&
           !selectedCalls.length
         )
           measurementError =
@@ -269,7 +267,7 @@ async function runBatch(
                 : measurementError
                   ? 'failed'
                   : 'passed',
-              required: config.options.requireMcpCalls === true,
+              required: config.requireMcpCalls === true,
               selectedServers: [...serverLabels],
               configuredMcpCallCount: selectedCalls.length,
               externalMcpCallCount: mcpCalls.length,

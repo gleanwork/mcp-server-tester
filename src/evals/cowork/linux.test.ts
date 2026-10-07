@@ -46,7 +46,7 @@ const manifest: EvalManifest = {
   name: 'linux-contract',
   datasets: [],
   client: 'cowork',
-  clientOptions: { options: { computerUseProvider: 'linux-desktop' } },
+  clientOptions: { computerUseProvider: 'linux-desktop' },
   servers: [
     {
       transport: 'http',

@@ -122,13 +122,31 @@ afterEach(async () => {
 });
 
 describe('ChatGPT V2 batch host', () => {
+  it('takes its options directly, not nested under options', () => {
+    expect(
+      CHATGPT_HOST.schema.parse({
+        type: 'chatgpt',
+        model: 'm',
+        surface: 'codex',
+      })
+    ).toMatchObject({ surface: 'codex', correlation: 'exact_prompt' });
+    expect(() =>
+      CHATGPT_HOST.schema.parse({
+        type: 'chatgpt',
+        model: 'm',
+        options: { surface: 'codex' },
+      })
+    ).toThrow(
+      '`clientOptions.options` is gone: set its keys in `clientOptions` directly'
+    );
+  });
   it('routes Linux through the native identity and isolated batch lifecycle', async () => {
     const batch = requests();
     for (const request of batch)
       request.config = {
         ...config,
         type: 'chatgpt',
-        options: { surface: 'codex' },
+        surface: 'codex',
         env: linuxEnvironment(home.value),
       };
     await CHATGPT_LINUX_HOST.runBatch!(batch, context);
@@ -160,7 +178,7 @@ describe('ChatGPT V2 batch host', () => {
     'forwards explicit macOS %s surface without prompt instructions',
     async (surface) => {
       const batch = requests().slice(0, 1);
-      batch[0]!.config = { ...config, options: { surface } };
+      batch[0]!.config = { ...config, surface };
       await CHATGPT_HOST.runBatch!(batch, context);
       expect(runExternalHostScenario).toHaveBeenCalledWith(
         'Answer one',
@@ -186,7 +204,7 @@ describe('ChatGPT V2 batch host', () => {
   });
   it('exposes prompt markers only as an opt-in correlation mode', async () => {
     const batch = requests().slice(0, 1);
-    batch[0]!.config = { ...config, options: { correlation: 'prompt_marker' } };
+    batch[0]!.config = { ...config, correlation: 'prompt_marker' };
     await CHATGPT_HOST.runBatch!(batch, context);
     expect(
       vi.mocked(runExternalHostScenario).mock.calls[0]![1].correlation
@@ -283,10 +301,8 @@ describe('ChatGPT V2 batch host', () => {
     const batch = requests().slice(0, 1);
     batch[0]!.config = {
       ...config,
-      options: {
-        computerUseModel: 'claude-sonnet-4-6',
-        computerUseMaxActions: 40,
-      },
+      computerUseModel: 'claude-sonnet-4-6',
+      computerUseMaxActions: 40,
     };
     await CHATGPT_HOST.runBatch!(batch, {
       ...context,
@@ -308,7 +324,7 @@ describe('ChatGPT V2 batch host', () => {
     const batch = requests();
     batch[0]!.config = {
       ...config,
-      options: { computerUseProvider: 'linux-desktop' },
+      computerUseProvider: 'linux-desktop',
     };
     await expect(CHATGPT_HOST.runBatch!(batch, context)).rejects.toThrow();
     expect(runExternalHostScenario).not.toHaveBeenCalled();
@@ -447,7 +463,7 @@ describe('ChatGPT V2 batch host', () => {
     const batch = [...requests(), { ...requests()[0]!, caseId: 'three' }].map(
       (r) => ({
         ...r,
-        config: { ...config, options: { requireMcpCalls: true } },
+        config: { ...config, requireMcpCalls: true },
       })
     );
     const traces = await CHATGPT_HOST.runBatch!(batch, context);
@@ -503,7 +519,7 @@ describe('ChatGPT V2 batch host', () => {
       ],
     });
     const batch = requests().slice(0, 1);
-    batch[0]!.config = { ...config, options: { requireMcpCalls: true } };
+    batch[0]!.config = { ...config, requireMcpCalls: true };
     const [trace] = await CHATGPT_HOST.runBatch!(batch, context);
     expect(trace!.error).toBeUndefined();
     expect(trace!.telemetry?.mcpSelection).toMatchObject({
@@ -602,7 +618,7 @@ describe('ChatGPT V2 batch host', () => {
       .slice(0, 1)
       .map((r) => ({
         ...r,
-        config: { ...config, plugins, options: { requireMcpCalls: true } },
+        config: { ...config, plugins, requireMcpCalls: true },
         input: { ...r.input, servers: [] },
       }));
     const [trace] = await CHATGPT_HOST.runBatch!(batch, context);
@@ -669,7 +685,7 @@ describe('ChatGPT V2 batch host', () => {
       toolCalls: [],
     });
     const batch = requests().slice(0, 1);
-    batch[0]!.config = { ...config, options: { requireMcpCalls: true } };
+    batch[0]!.config = { ...config, requireMcpCalls: true };
     const [trace] = await CHATGPT_HOST.runBatch!(batch, context);
     expect(trace!.error).toContain('without calling');
   });

@@ -28,15 +28,15 @@ process arguments. Run ChatGPT evaluations from an environment that holds only
 the credentials the run needs. Narrowing the helper to an allowlist is planned,
 once it is confirmed on a real Mac that ChatGPT still launches and signs in.
 
-Example Linux host settings (inside a V2 evaluation manifest):
+Example Linux client settings (in an eval manifest):
 
 ```json
 {
-  "type": "chatgpt",
+  "client": "chatgpt",
   "model": "your-native-model-id",
-  "reasoningEffort": "medium",
-  "timeout": 300000,
-  "options": {
+  "clientOptions": {
+    "reasoningEffort": "medium",
+    "timeout": 300000,
     "surface": "chatgpt-work",
     "nativeMaxActions": 24,
     "requireMcpCalls": true,
