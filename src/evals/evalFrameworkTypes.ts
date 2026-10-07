@@ -51,6 +51,13 @@ export interface ClientRunInput {
   /** The case's input, sent to the host as its prompt. */
   prompt: string;
   servers: MCPConfig[];
+  /**
+   * When `servers` go through MST's tool-variant proxy: the same servers on
+   * an endpoint for MST's own checks (such as a readiness probe), so the
+   * check's traffic isn't taken for the client's. Connect the client itself
+   * only to `servers`.
+   */
+  checkServers?: MCPConfig[];
   /** Execution-local environment; never persisted. */
   env?: Record<string, string | undefined>;
 }
@@ -143,6 +150,13 @@ export interface ClientDefinition {
    * `toolOverrides` then fails validation.
    */
   readonly toolSurfaceProxy?: boolean;
+  /**
+   * The host connects to one server set for its whole batch, the first
+   * request's `input.servers`, rather than to each request's. The proxy then
+   * serves the batch on one endpoint, and checks once, for the batch, that
+   * the host listed the variant's tools.
+   */
+  readonly serversPerBatch?: boolean;
   /** The most cases the host can run at once; `concurrency` above it is an error. */
   readonly maxConcurrency?: number;
   /** Ordered traces for all selected iterations. The framework owns verdicts. */

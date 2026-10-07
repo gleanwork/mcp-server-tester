@@ -328,20 +328,23 @@ export function createSuiteCaseExecutor(
     if (options.toolVariant && usesToolSurfaceProxy(definition)) {
       const proxy = await options.toolVariant.proxy();
       const scope = randomUUID();
+      const checkScope = randomUUID();
       const trace = await definition.run(
         {
           prompt: evalCase.input ?? '',
           servers: proxy.serversFor(scope),
+          checkServers: proxy.serversFor(checkScope),
           env,
         },
         declaration,
         withoutToolVariant(context)
       );
+      proxy.endScope(checkScope);
       return hostRunToExecution(
         settleProxiedTrace(
           trace,
           proxy,
-          scope,
+          proxy.endScope(scope).listedTools,
           servers,
           options.toolVariant.id
         ),

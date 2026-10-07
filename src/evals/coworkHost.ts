@@ -152,6 +152,8 @@ async function runBatch(
   // Fail before any desktop action if Cowork cannot apply a plugin as declared.
   assertCoworkHostPlugins(plugins);
   const servers = requests[0]!.input.servers;
+  // MST's readiness probe uses its own endpoint when the servers are proxied.
+  const checkServers = requests[0]!.input.checkServers ?? servers;
   // Validate declarations before desktop actions. macOS resolves host-resolved
   // paths inside its leased setup transaction; Linux uses prepared runtime paths.
   const mac = config.computerUseProvider === 'anthropic-computer-use';
@@ -243,7 +245,7 @@ async function runBatch(
       // The readiness gate runs once setup has resolved the stdio paths.
       async ready() {
         if (!servers.length) return;
-        const readiness = await verifyCoworkMcpServers(servers, env, {
+        const readiness = await verifyCoworkMcpServers(checkServers, env, {
           plugins,
           paths: stdioPaths,
         });
@@ -601,8 +603,9 @@ export function createCoworkHost(platform?: CoworkPlatform): ClientDefinition {
   return {
     schema: CoworkSchema,
     evidence: 'structured',
-    // Not verified against MST's local tool-variant proxy.
-    toolSurfaceProxy: false,
+    // Cowork sets up its MCP servers once per batch, so a tool variant goes
+    // through one proxy endpoint for the whole batch.
+    serversPerBatch: true,
     runBatch: (requests, context) => runBatch(requests, context, platform),
     run: async (input, config, context) =>
       (

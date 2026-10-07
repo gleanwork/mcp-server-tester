@@ -60,7 +60,8 @@ describe('a dry run checks datasets too', () => {
             id: 'desktop',
             mode: 'host',
             input: 'Find it',
-            client: 'cowork',
+            client: 'chatgpt',
+            model: 'gpt-5',
           },
         ],
         {
@@ -71,7 +72,7 @@ describe('a dry run checks datasets too', () => {
         }
       )
     ).rejects.toThrow(
-      `Case "desktop" in arm "default": client "cowork" can't apply toolOverrides`
+      `Case "desktop" in arm "default": client "chatgpt" can't apply toolOverrides`
     );
   });
 });

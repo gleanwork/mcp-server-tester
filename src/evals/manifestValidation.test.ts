@@ -478,7 +478,7 @@ describe('settings a host would ignore', () => {
     });
   }
 
-  it.each(['cowork', 'chatgpt', 'test/elsewhere'])(
+  it.each(['chatgpt', 'test/elsewhere'])(
     'rejects toolOverrides for %s, which never shows them to the model',
     (type) => {
       installHosts();
@@ -506,18 +506,29 @@ describe('settings a host would ignore', () => {
     }
   );
 
-  it('rejects toolOverrides on the arm that sets them, and accepts them for vercel-sdk', () => {
+  it('accepts toolOverrides for cowork, served through the tool-variant proxy', () => {
+    expect(() =>
+      validateManifest(base({ client: 'cowork', toolOverrides: overrides }))
+    ).not.toThrow();
+  });
+
+  it('rejects toolOverrides on the arm that sets them, and accepts them for mst', () => {
     installTestPlugin();
     const manifest = base({
       client: 'mst',
       clientOptions: { provider: 'anthropic' },
       arms: [
         { name: 'sdk', toolOverrides: overrides },
-        { name: 'desktop', client: 'cowork', toolOverrides: overrides },
+        {
+          name: 'desktop',
+          client: 'chatgpt',
+          model: 'gpt-5',
+          toolOverrides: overrides,
+        },
       ],
     });
     expect(() => validateManifest(manifest, { namespaces: ['test'] })).toThrow(
-      `Arm "desktop": client "cowork" can't apply toolOverrides;`
+      `Arm "desktop": client "chatgpt" can't apply toolOverrides;`
     );
     expect(() =>
       validateManifest(
