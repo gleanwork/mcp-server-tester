@@ -40,9 +40,9 @@ export interface CoworkPlatform {
   }>;
   recover(): Promise<unknown>;
   /**
-   * After a failed case, return the app to a fresh task so the next case is
-   * independent. Never types or submits. Optional: without it, a failed case
-   * stops the batch.
+   * After a failed case, leave the app with no task running and no prompt
+   * open, so the next case is independent. Never types or presses keys.
+   * Optional: without it, a failed case stops the batch.
    */
   reset?(options: CoworkDriverOptions): Promise<void>;
   submit(

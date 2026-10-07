@@ -125,6 +125,57 @@ class DriverTests(unittest.TestCase):
                 self.assertEqual(self.launches[0].args[0], ['open', '-a', path])
                 self.assertTrue(self.launches[0].kwargs['check'])
 
+    def test_cowork_reset_with_nothing_running_takes_no_action(self):
+        result, count = self.run_actions([], mode='reset')
+        self.assertEqual(result['status'], 'reset_done')
+        self.assertEqual(count, 0)
+        self.assertIn('never approve', self.planner_request['system'])
+        self.assertNotIn('fill_query', [tool['name'] for tool in self.requested_tools])
+
+    def test_cowork_reset_clicks_stop_then_reports_done(self):
+        stop = {'action': 'left_click', 'coordinate': [10, 10]}
+        result, count = self.run_actions([stop], mode='reset', next_plan=[])
+        self.assertEqual(result['status'], 'reset_done')
+        self.assertEqual(self.executed_actions, [stop])
+
+    def test_cowork_reset_never_types_presses_keys_or_drags(self):
+        for action in (
+            {'action': 'type', 'text': 'x'},
+            {'action': 'key', 'text': 'enter'},
+            {'action': 'left_click_drag', 'coordinate': [10, 10]},
+            {'action': 'double_click', 'coordinate': [10, 10]},
+            {'action': 'right_click', 'coordinate': [10, 10]},
+        ):
+            result, count = self.run_actions([action], mode='reset')
+            self.assertIn('Reset cannot type, press keys', result)
+            self.assertEqual(self.executed_actions, [])
+
+    def test_cowork_reset_refuses_other_tools(self):
+        result, count = self.run_actions([{'tool': 'fill_query', 'input': {}}], mode='reset')
+        self.assertIn('Reset cannot type, press keys', result)
+        self.assertEqual(self.executed_actions, [])
+
+    def test_cowork_reset_that_only_watches_until_the_budget_fails(self):
+        # Never concluding the app is idle is not a reset.
+        result, count = self.run_actions([{'action': 'screenshot'}], mode='reset', budget=2)
+        self.assertIn('Computer Use reset exceeded 2 actions', result)
+
+    def test_cowork_reset_forbids_send_and_answers(self):
+        self.run_actions([], mode='reset')
+        prompt = self.planner_request['messages'][0]['content'][0]['text']
+        self.assertIn('Never click Send', prompt)
+        self.assertIn('do not answer it', prompt)
+
+    def test_cowork_reset_that_keeps_acting_fails(self):
+        click = {'action': 'left_click', 'coordinate': [10, 10]}
+        result, count = self.run_actions([click], mode='reset', budget=2)
+        self.assertIn('Computer Use reset exceeded 2 actions', result)
+
+    def test_chatgpt_reset_is_not_automated(self):
+        result, count = self.run_actions([], mode='reset', application='chatgpt')
+        self.assertIn('resets are not automated', result)
+        self.assertEqual(count, 0)
+
     def test_cowork_target_model_blocks_fill_without_confirmation(self):
         result, count = self.run_actions([FILL, ENTER], budget=2, target_model='claude-opus-4-6')
         self.assertIsInstance(result, str)
@@ -279,7 +330,7 @@ class DriverTests(unittest.TestCase):
 
     def test_chatgpt_rejects_automatic_permission_approval(self):
         result, count = self.run_actions([], mode='hitl', application='chatgpt')
-        self.assertIn('approvals are not automated', result)
+        self.assertIn('approvals and resets are not automated', result)
         self.assertEqual(count, 0)
         self.assertEqual(self.launches, [])
 

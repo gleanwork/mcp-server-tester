@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import {
   runAnthropicComputerUseSubmission,
   runAnthropicComputerUseHitl,
+  runAnthropicComputerUseReset,
 } from './anthropicComputerUse.js';
 import { prepareMacCoworkSession } from '../coworkSetup/macSession.js';
 import { recoverMacCoworkSession } from '../coworkSetup/recoverSession.js';
@@ -25,6 +26,11 @@ export const macCoworkPlatform: CoworkPlatform = {
     return prepareMacCoworkSession(options);
   },
   recover: recoverMacCoworkSession,
+  // After a failed case: stop the task and decline any prompt, so the next
+  // case runs alone. A reset that fails stops the batch (see desktopBatch).
+  async reset(options) {
+    await runAnthropicComputerUseReset(options);
+  },
   submit: runAnthropicComputerUseSubmission,
   handleHitl: runAnthropicComputerUseHitl,
 };

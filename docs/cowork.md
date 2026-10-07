@@ -389,13 +389,16 @@ absent from the per-case snapshot, and a recent creation timestamp (five seconds
 of clock tolerance). Existing sessions remain excluded even if updated. Answers
 and tool output are never prompt matches. MST binds the unique new session within
 30 seconds after submission and pins collection to it. A failed case is never
-retried or resent. On Linux, each case is self-contained: after a submit, binding,
-HITL, or trace failure, MST records that case's failure, opens one empty new-task
-deep link, waits read-only (up to 60 seconds) for the Cowork start surface, and
-continues. The next case takes its own session snapshot, so a late session from
-the failed case cannot be attributed to it. If that reset fails, the remaining
-cases are not submitted. macOS has no reset yet; there, a submit or binding
-failure stops further submissions. Per-case snapshots distinguish
+retried or resent. Each case is self-contained: after a submit, binding, HITL, or
+trace failure, MST records that case's failure and resets the app before the next
+case. On Linux the reset opens one empty new-task deep link and waits read-only
+(about 10 seconds) for the Cowork start surface. On macOS, the Computer Use planner
+stops a task that is still running and declines an open permission prompt, within
+eight actions. The driver refuses typing, key presses and drags, and the planner is
+instructed never to click Send, approve, or answer a question; a reset that never
+concludes the app is idle fails. The next case takes its own
+session snapshot, so a late session from the failed case cannot be attributed to
+it. If the reset fails, the remaining cases are not submitted. Per-case snapshots distinguish
 repeated identical prompts. Use a dedicated desktop: do not manually create or
 switch tasks during evaluation.
 

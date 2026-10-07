@@ -311,7 +311,7 @@ async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemet
     if application not in {'cowork', 'chatgpt'}:
         raise RuntimeError('Unsupported desktop application')
     if application == 'chatgpt' and mode != 'submit':
-        raise RuntimeError('ChatGPT permission approvals are not automated')
+        raise RuntimeError('ChatGPT permission approvals and resets are not automated')
     app_name = 'ChatGPT' if application == 'chatgpt' else 'Claude'
     if chatgpt_surface not in {'chatgpt-work', 'codex'}:
         raise RuntimeError('Unsupported ChatGPT surface')
@@ -338,7 +338,28 @@ async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemet
         "display_width_px": DISPLAY_WIDTH,
         "display_height_px": DISPLAY_HEIGHT,
     }]
-    if mode == "hitl":
+    if mode == "reset":
+        # After a failed case: leave no task running and no prompt open, so the
+        # next case's fresh task is independent. Never types or submits.
+        messages: list[dict[str, Any]] = [{
+            "role": "user",
+            "content": (
+                "Inspect the visible Claude Desktop Cowork window. If a task is still running, "
+                "click its Stop control once. If a tool permission prompt is open, decline it "
+                "(Deny, Don't allow or Cancel); never approve. If the task is asking a question, "
+                "do not answer it or choose an option; stop the task instead. Never click Send, "
+                "Submit or any control that starts or continues a task, even if the composer "
+                "has text. Do not type, press keys, open another app or change settings. When no "
+                "task is running and no prompt is open, stop without an action."
+            ),
+        }]
+        system = (
+            "You are a bounded reset operator. Use screenshots and Computer Use clicks only. "
+            "Stop a running task or decline a permission prompt; never approve, answer a "
+            "question, authenticate, type, click Send or Submit, or change settings. If nothing "
+            "is running and no prompt is open, stop without an action."
+        )
+    elif mode == "hitl":
         approval_policy = (
             "This evaluation explicitly permits tool writes. "
             if os.environ.get('MST_COWORK_APPROVE_WRITE_TOOLS') == '1'
@@ -493,9 +514,9 @@ async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemet
                 code = action.get('code')
                 raise DesktopBlockedError(code if code in BLOCKER_CODES else 'navigation_blocked')
             refusal = None
-            if mode == "hitl" and (tool_name != "computer" or action_name not in {"screenshot", "wait", "mouse_move", "cursor_position", "left_click", "scroll"}):
+            if mode in ("hitl", "reset") and (tool_name != "computer" or action_name not in {"screenshot", "wait", "mouse_move", "cursor_position", "left_click", "scroll"}):
                 telemetry.refused += 1
-                raise RuntimeError("HITL cannot type, press keys, drag, or submit tasks")
+                raise RuntimeError(f"{'Reset' if mode == 'reset' else 'HITL'} cannot type, press keys, drag, or submit tasks")
             if mode == "submit":
                 if require_model_confirmation and tool_name == 'confirm_model':
                     model_confirmed = False
@@ -534,7 +555,7 @@ async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemet
                 tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": refusal, "is_error": True})
                 continue
             log(f"executing action {actions_executed}: {action_name}")
-            if mode == "hitl" and action_name not in {
+            if mode in ("hitl", "reset") and action_name not in {
                 "screenshot",
                 "wait",
                 "mouse_move",
@@ -551,7 +572,7 @@ async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemet
                 screenshot_revision = ui_revision
             if tool_name == "fill_query":
                 typed_query = True
-            if submitted and mode != "hitl":
+            if submitted and mode == "submit":
                 log("submission boundary reached; stopping immediately")
                 return {
                     "status": "submitted",
@@ -569,6 +590,9 @@ async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemet
                 "content": tool_content,
             })
         if not tool_results:
+            if mode == "reset":
+                log("reset: no task running and no prompt open")
+                return {"status": "reset_done", "action_count": actions_executed, "model": model}
             if mode == "hitl":
                 log("no HITL action was needed")
                 return {"status": "hitl_checked", "action_count": actions_executed, "model": model}
@@ -577,6 +601,10 @@ async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemet
             raise RuntimeError(f"Computer Use planner stopped before submitting the {surface} query")
         messages.append({"role": "user", "content": tool_results})
 
+    if mode == "reset":
+        # The planner never concluded the app was idle (it may still be waiting on a
+        # running task), so the next case cannot be known to run alone.
+        raise RuntimeError(f"Computer Use reset exceeded {max_actions} actions")
     if mode == "hitl" and not hitl_action_taken:
         log("no visible HITL prompt found within the bounded check")
         return {
@@ -598,7 +626,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("query")
     parser.add_argument("--max-actions", type=int, default=DEFAULT_MAX_ACTIONS)
-    parser.add_argument("--mode", choices=["submit", "hitl"], default="submit")
+    parser.add_argument("--mode", choices=["submit", "hitl", "reset"], default="submit")
     parser.add_argument("--app", choices=["cowork", "chatgpt"], default="cowork")
     parser.add_argument('--surface', choices=['chatgpt-work', 'codex'], default='chatgpt-work')
     parser.add_argument("--target-model")

@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   dispose: vi.fn(),
   submit: vi.fn(),
   hitl: vi.fn(),
+  reset: vi.fn(),
   snapshot: vi.fn(),
   trace: vi.fn(),
   matches: vi.fn(),
@@ -55,6 +56,7 @@ vi.mock('./cowork/anthropicComputerUse.js', async (original) => ({
   ...(await original<typeof ComputerUse>()),
   runAnthropicComputerUseSubmission: mocks.submit,
   runAnthropicComputerUseHitl: mocks.hitl,
+  runAnthropicComputerUseReset: mocks.reset,
 }));
 vi.mock(
   './externalHost/builtins/claudeSessions.js',
@@ -135,6 +137,10 @@ beforeEach(async () => {
   mocks.hitl.mockImplementation(async () => {
     mocks.order.push('hitl');
     return { status: 'hitl_checked', action_count: 0 };
+  });
+  mocks.reset.mockImplementation(async () => {
+    mocks.order.push('reset');
+    return { status: 'reset_done', action_count: 1 };
   });
   let index = 0;
   mocks.bind.mockReset().mockImplementation(async () => ({
@@ -450,6 +456,9 @@ describe('V2 Cowork host', () => {
       ).mockRejectedValueOnce(
         new ComputerUseDriverError('driver failed', partial)
       );
+      // The app cannot be reset, so nothing more is sent and the shape of the
+      // failed case is the whole result.
+      mocks.reset.mockRejectedValueOnce(new Error('cowork_not_ready'));
       const result = await COWORK_HOST.runBatch!(requests(), readOnlyContext);
       expect(result[0]).toMatchObject({
         error: 'driver failed',
@@ -971,7 +980,8 @@ describe('V2 Cowork host', () => {
       );
       const results = await COWORK_HOST.runBatch!(batch(), stdioContext);
       expect(results[0]!.error).toBe('adapter rejected [REDACTED]');
-      expect(results[1]!.error).toContain('Not submitted');
+      expect(mocks.reset).toHaveBeenCalledOnce();
+      expect(results[1]!.error).toBeUndefined();
       expect(JSON.stringify(results)).not.toContain('good-token');
       expect(mocks.dispose).toHaveBeenCalledOnce();
     });
@@ -1008,6 +1018,37 @@ describe('V2 Cowork host', () => {
     const missing = await COWORK_HOST.runBatch!(requests(), readOnlyContext);
     expect(missing[0]!.error).toBe('native task never completed');
   });
+  it('on macOS, resets with Computer Use after a failed case, then runs the next', async () => {
+    mocks.trace.mockRejectedValueOnce(new Error('native trace timeout'));
+    const result = await COWORK_HOST.runBatch!(requests(), context);
+    expect(result[0]!.error).toBe('native trace timeout');
+    expect(result[1]!.error).toBeUndefined();
+    expect(mocks.reset).toHaveBeenCalledOnce();
+    expect(mocks.reset.mock.calls[0]![0]).toMatchObject({
+      deadlineAt: expect.any(Number),
+    });
+    // The reset runs between the failed case and the next submission.
+    expect(mocks.order.filter((step) => step !== 'trace')).toEqual([
+      'setup',
+      'submit',
+      'reset',
+      'submit',
+      'dispose',
+    ]);
+  });
+
+  it('on macOS, sends nothing more when the reset fails', async () => {
+    mocks.trace.mockRejectedValueOnce(new Error('native trace timeout'));
+    mocks.reset.mockRejectedValueOnce(
+      new Error(
+        'Computer Use reset failed: driver exited unsuccessfully; not retrying'
+      )
+    );
+    const result = await COWORK_HOST.runBatch!(requests(), context);
+    expect(mocks.submit).toHaveBeenCalledOnce();
+    expect(result[1]!.error).toContain('could not be reset');
+  });
+
   it('does not hide a HITL failure when native response collection succeeds', async () => {
     mocks.hitl.mockRejectedValueOnce(new Error('HITL timed out'));
     const result = await COWORK_HOST.runBatch!(requests(), readOnlyContext);
@@ -1018,16 +1059,21 @@ describe('V2 Cowork host', () => {
     });
     expect(result[1]!.error).toBeUndefined();
   });
-  it('stops after missing or ambiguous native binding without resubmission or HITL', async () => {
+  it('never resubmits or runs HITL for a missing or ambiguous native binding; resets and runs the next case', async () => {
     mocks.bind.mockRejectedValueOnce(
       new Error('Ambiguous exact prompt sessions')
     );
     const result = await COWORK_HOST.runBatch!(requests(), context);
-    expect(mocks.submit).toHaveBeenCalledTimes(1);
+    expect(mocks.submit.mock.calls.map((call) => call[0] as string)).toEqual([
+      'query one',
+      'query two',
+    ]);
+    expect(mocks.reset).toHaveBeenCalledOnce();
     expect(mocks.hitl).not.toHaveBeenCalled();
-    expect(mocks.trace).not.toHaveBeenCalled();
+    // Only the next case is traced; the unbound one is never inspected.
+    expect(mocks.trace).toHaveBeenCalledOnce();
     expect(result[0]!.error).toContain('Ambiguous');
-    expect(result[1]!.error).toContain('Not submitted');
+    expect(result[1]!.error).toBeUndefined();
   });
   it('preserves whitespace and Unicode and binds repeated identical prompts to different sessions', async () => {
     const scenario = '  café\n重复 query  ';
@@ -1068,7 +1114,7 @@ describe('V2 Cowork host', () => {
     ]);
     expect(mocks.submit).toHaveBeenCalledTimes(3);
     expect(reset).toHaveBeenCalledTimes(2);
-    expect(reset.mock.calls[0]![0]).toMatchObject({ maxActions: 1 });
+    expect(reset.mock.calls[0]![0]).not.toHaveProperty('maxActions');
     // The failed case is never resent: one submit per case, in order.
     expect(mocks.submit.mock.calls.map((call) => call[0] as string)).toEqual(
       batch.map((r) => r.input.prompt)
@@ -1092,9 +1138,28 @@ describe('V2 Cowork host', () => {
     expect(result[1]!.error).toContain('cowork_not_ready');
     expect(mocks.dispose).toHaveBeenCalledOnce();
   });
-  it('never retries an ambiguous submit and, without a reset, cancels later submissions', async () => {
+  it('never retries an ambiguous submit; resets and runs the next case', async () => {
     mocks.submit.mockRejectedValueOnce(new Error('uncertain test-secret-key'));
     const result = await COWORK_HOST.runBatch!(requests(), context);
+    expect(mocks.submit.mock.calls.map((call) => call[0] as string)).toEqual([
+      'query one',
+      'query two',
+    ]);
+    expect(mocks.reset).toHaveBeenCalledOnce();
+    expect(result[0]!.error).toContain('[REDACTED]');
+    expect(result[1]!.error).toBeUndefined();
+    expect(mocks.dispose).toHaveBeenCalledOnce();
+  });
+  it('never retries an ambiguous submit and, without a reset, cancels later submissions', async () => {
+    const host = createCoworkHost({
+      dataDirectory: () => '/prepared/session',
+      prepare: mocks.setup,
+      recover: vi.fn(),
+      submit: mocks.submit,
+      handleHitl: mocks.hitl,
+    });
+    mocks.submit.mockRejectedValueOnce(new Error('uncertain test-secret-key'));
+    const result = await host.runBatch!(requests(), context);
     expect(mocks.submit).toHaveBeenCalledTimes(1);
     expect(mocks.hitl).not.toHaveBeenCalled();
     expect(result[0]!.error).toContain('[REDACTED]');

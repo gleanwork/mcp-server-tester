@@ -262,11 +262,14 @@ async function runBatch(
         ? {
             async reset(session: Session, index: number) {
               process.stderr.write(
-                `[mst:cowork] resetting to a fresh task before case ${index + 1}\n`
+                `[mst:cowork] resetting the app before case ${index + 1}\n`
               );
+              // Each platform bounds its own reset (one action within 10
+              // seconds on Linux, eight Computer Use actions on macOS); this
+              // deadline only stops a stuck driver.
               await platform.reset!({
-                deadlineAt: Date.now() + 60_000,
-                maxActions: 1,
+                deadlineAt: Date.now() + 180_000,
+                model: config.computerUseModel,
                 env,
                 ...(session?.appPath ? { appPath: session.appPath } : {}),
               });
