@@ -168,3 +168,11 @@ export {
   PLANNED_WRITE_KEY,
 } from '../proxy/dryRunProxyServer.js';
 export type { DryRunProxyServerOptions } from '../proxy/dryRunProxyServer.js';
+
+// Connectors: a plugin's vendor MCP servers, signed in to with `mst auth`.
+export type {
+  ConnectorAuth,
+  ConnectorDefinition,
+  ConnectorLaunchContext,
+  OAuthClient,
+} from '../auth/grants/types.js';

@@ -9,6 +9,7 @@ import type {
 } from '../evals/evalFrameworkTypes.js';
 import type { PairwiseJudgeDefinition } from '../judge/pairwiseContract.js';
 import type { PluginConfig } from '../evals/evalConfig.js';
+import type { ConnectorDefinition } from '../auth/grants/types.js';
 
 /** Identifies a plugin. `namespace` prefixes its extensions: `namespace/name`. */
 export interface PluginMeta {
@@ -34,6 +35,12 @@ export interface Plugin {
   readonly metrics?: Readonly<Record<string, MetricDefinition>>;
   readonly resultStores?: Readonly<Record<string, ResultStoreDefinition>>;
   /**
+   * Vendor MCP servers as this organization uses them: URL, how to sign in,
+   * and how a client reaches them. An eval config uses one as
+   * `{ "connector": "namespace/name" }`; `mst auth` signs in to it.
+   */
+  readonly connectors?: Readonly<Record<string, ConnectorDefinition>>;
+  /**
    * Shared eval config settings. An eval config that lists this plugin applies one
    * with `extends: ["namespace/name"]`. A config may use only this plugin's
    * extensions and built-ins.
@@ -48,6 +55,7 @@ export const EXTENSION_KINDS = [
   'pairwiseJudges',
   'metrics',
   'resultStores',
+  'connectors',
 ] as const;
 export type ExtensionKind = (typeof EXTENSION_KINDS)[number];
 
@@ -59,6 +67,7 @@ export interface ExtensionsByKind {
   pairwiseJudges: PairwiseJudgeDefinition;
   metrics: MetricDefinition;
   resultStores: ResultStoreDefinition;
+  connectors: ConnectorDefinition;
 }
 
 const NAMESPACE = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
@@ -73,6 +82,8 @@ const REQUIRED_FUNCTIONS: Record<ExtensionKind, readonly string[]> = {
   pairwiseJudges: ['compare'],
   metrics: ['compute'],
   resultStores: ['create'],
+  // A connector is data plus optional functions; checked in extensionProblem.
+  connectors: [],
 };
 
 /** Every metric kind; a Record so a new MetricKind must be added here. */
@@ -103,6 +114,8 @@ function extensionProblem(
     : `${kind}."${name}"`;
   if (!EXTENSION_NAME.test(name)) return `${label} is not a valid name`;
   if (!isRecord(definition)) return `${label} must be an object`;
+  // A connector has no options, so no schema.
+  if (kind === 'connectors') return connectorProblem(label, definition);
   const schema = definition.schema as { safeParse?: unknown } | undefined;
   if (typeof schema?.safeParse !== 'function')
     return `${label} needs a Zod schema`;
@@ -116,6 +129,64 @@ function extensionProblem(
     !(typeof definition.kind === 'string' && definition.kind in METRIC_KINDS)
   )
     return `${label} needs a kind: ${Object.keys(METRIC_KINDS).join(', ')}`;
+  return undefined;
+}
+
+const CONNECTOR_AUTH_TYPES: Record<string, readonly string[]> = {
+  none: [],
+  static: ['token'],
+  'client-credentials': ['client'],
+  oauth: [],
+};
+
+function connectorProblem(
+  label: string,
+  definition: Record<string, unknown>
+): string | undefined {
+  if (typeof definition.url !== 'string') return `${label} needs a url`;
+  try {
+    const url = new URL(definition.url);
+    if (url.protocol !== 'https:' && url.hostname !== '127.0.0.1')
+      return `${label}: url must be https`;
+  } catch {
+    return `${label}: url is not a URL`;
+  }
+  if (
+    definition.grant !== undefined &&
+    (typeof definition.grant !== 'string' ||
+      !EXTENSION_NAME.test(definition.grant))
+  )
+    return `${label}: grant must be a name (letters, digits, ".", "_" or "-")`;
+  const auth = definition.auth;
+  if (!isRecord(auth) || typeof auth.type !== 'string')
+    return `${label} needs auth: { type: ${Object.keys(CONNECTOR_AUTH_TYPES).join(' | ')} }`;
+  const functions = CONNECTOR_AUTH_TYPES[auth.type];
+  if (!functions) return `${label}: unknown auth type "${auth.type}"`;
+  for (const fn of functions)
+    if (typeof auth[fn] !== 'function')
+      return `${label}: auth type "${auth.type}" needs ${describeFunctions([fn])}`;
+  if (
+    auth.type === 'client-credentials' &&
+    typeof auth.tokenEndpoint !== 'string'
+  )
+    return `${label}: auth type "client-credentials" needs a tokenEndpoint`;
+  if (auth.type === 'oauth') {
+    if (
+      auth.flow !== undefined &&
+      auth.flow !== 'authorization-code' &&
+      auth.flow !== 'device'
+    )
+      return `${label}: auth.flow must be "authorization-code" or "device"`;
+    if (auth.client !== undefined && typeof auth.client !== 'function')
+      return `${label}: auth.client must be a function`;
+    if (auth.flow === 'device' && typeof auth.client !== 'function')
+      return `${label}: device sign-in needs auth.client`;
+  }
+  if (
+    definition.launch !== undefined &&
+    typeof definition.launch !== 'function'
+  )
+    return `${label}: launch must be a function`;
   return undefined;
 }
 
