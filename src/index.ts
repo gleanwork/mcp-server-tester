@@ -64,8 +64,6 @@ export type {
   EvalAssertions,
   JudgeExpectConfig,
   SerializedEvalDataset,
-  EvalMode,
-  EvalDirectRequest,
   LoadDatasetOptions,
   EvalCaseRequest,
   EvalContext,
@@ -198,7 +196,6 @@ export type {
 export { runEvalDataset, runEvalCase } from './evals/evalRunner.js';
 export type {
   CaseExecution,
-  DirectExecution,
   HostExecution,
   FailedExecution,
   ClientResponse,

@@ -400,10 +400,7 @@ export async function runVariantExperiment(
   // Internal eval runs must not attach to the reporter individually, or the
   // report would show only the baseline run. We attach the winner's results
   // plus an experiment summary once, at the end, when testInfo is present.
-  const internalContext: EvalContext = {
-    mcp: context.mcp,
-    expect: context.expect,
-  };
+  const internalContext: EvalContext = { mcp: context.mcp };
   const run: RunVariants = async (variants) => {
     const runs: ExperimentRun[] = [];
     for (const variant of variants) {

@@ -1,6 +1,8 @@
 # Expectations Guide
 
-The framework supports multiple types of expectations to validate MCP tool responses. This guide covers all available expectation types and how to use them.
+MST's matchers assert on an MCP tool's response in a Playwright test: call the tool with `mcp.callTool()`, then `expect(result).toContainToolText(...)` and so on. This guide covers each matcher.
+
+Eval cases assert on what the client under test did, not on a tool response. Their `assertions` take a subset: `containsText` and `matchesPattern` (on the client's answer), `passesJudge`, `toolsTriggered` and `toolCallCount`. The [Evals Guide](./evals-guide.md) covers them. Sections below show the case form where one exists.
 
 ## Table of Contents
 
@@ -19,21 +21,6 @@ The framework supports multiple types of expectations to validate MCP tool respo
 
 Validates exact equality of structured data (JSON). Best for predictable, structured responses.
 
-### Dataset Format
-
-Use the `assertions.response` field in the eval dataset JSON:
-
-```json
-{
-  "id": "calc-test",
-  "toolName": "calculate",
-  "args": { "a": 2, "b": 3 },
-  "assertions": {
-    "response": { "result": 5 }
-  }
-}
-```
-
 ### Inline Test Usage
 
 ```typescript
@@ -49,22 +36,16 @@ test('exact response', async ({ mcp }) => {
 
 Validates that response text contains expected substrings. Ideal for markdown or unstructured text responses.
 
-### Dataset Format
+### Eval Case Format
 
-Use the `assertions.containsText` field in the eval dataset JSON:
+In an eval case, `assertions.containsText` checks the client's answer:
 
 ```json snippet=snippets/expectations-contains-text.json
 {
-  "id": "markdown-response",
-  "toolName": "get_city_info",
-  "args": { "city": "London" },
+  "id": "london-summary",
+  "input": "Give me a short summary of London",
   "assertions": {
-    "containsText": [
-      "## City Information",
-      "**City:** London",
-      "### Features",
-      "- Public Transportation"
-    ]
+    "containsText": ["London", "population"]
   }
 }
 ```
@@ -95,22 +76,16 @@ test('text contains', async ({ mcp }) => {
 
 Validates that response text matches regex patterns. Powerful for format validation and flexible pattern matching.
 
-### Dataset Format
+### Eval Case Format
 
-Use the `assertions.matchesPattern` field in the eval dataset JSON:
+In an eval case, `assertions.matchesPattern` checks the client's answer:
 
 ```json snippet=snippets/expectations-regex-patterns.json
 {
   "id": "weather-format",
-  "toolName": "get_weather",
-  "args": { "city": "London" },
+  "input": "What's the weather in London? Give the temperature in °C.",
   "assertions": {
-    "matchesPattern": [
-      "^## Weather",
-      "Temperature: \\d+°[CF]",
-      "Conditions?: (Sunny|Cloudy|Rainy|Snowy)",
-      "\\d{4}-\\d{2}-\\d{2}"
-    ]
+    "matchesPattern": ["\\d+\\s?°C", "(Sunny|Cloudy|Rainy|Snowy)"]
   }
 }
 ```
@@ -144,27 +119,6 @@ test('pattern match', async ({ mcp }) => {
 
 Validates response structure and types using Zod schemas. Best for structured data with specific type requirements.
 
-### Usage
-
-Load the dataset with schemas attached, then reference them by name in each case:
-
-```typescript
-import { loadEvalDataset, runEvalDataset } from '@gleanwork/mcp-server-tester';
-import { z } from 'zod';
-
-const dataset = await loadEvalDataset('./evals.json', {
-  schemas: {
-    'user-response': z.object({
-      id: z.string(),
-      name: z.string(),
-      email: z.string().email(),
-    }),
-  },
-});
-
-const result = await runEvalDataset({ dataset }, { mcp, testInfo });
-```
-
 ### Inline Test Usage
 
 ```typescript snippet=snippets/expectations-schema-validation.ts
@@ -177,21 +131,6 @@ test('schema validation', async ({ mcp }) => {
   const result = await mcp.callTool('get_user', { userId: '123' });
   expect(result).toMatchToolSchema(UserSchema);
 });
-```
-
-### Dataset Format
-
-Use the `assertions.schema` field to reference a named Zod schema loaded with `loadEvalDataset`:
-
-```json
-{
-  "id": "get-user",
-  "toolName": "get_user",
-  "args": { "userId": "123" },
-  "assertions": {
-    "schema": "user-response"
-  }
-}
 ```
 
 ### Schema Capabilities
@@ -250,25 +189,6 @@ Captures and compares tool responses against stored snapshots using Playwright's
 | Static content tools                    | Non-deterministic ordering        |
 | Regression testing with controlled data | Pagination cursors                |
 
-### Dataset Format
-
-Use the `assertions.snapshot` field in the eval dataset JSON. Pass `testInfo` to `runEvalDataset` to enable Playwright snapshot infrastructure:
-
-```json
-{
-  "id": "help-command",
-  "toolName": "help",
-  "args": {},
-  "assertions": {
-    "snapshot": "help-output"
-  }
-}
-```
-
-```typescript
-const result = await runEvalDataset({ dataset }, { mcp, testInfo });
-```
-
 ### Inline Test Usage
 
 ```typescript
@@ -299,25 +219,6 @@ When responses contain variable data that would cause snapshot mismatches, use s
 | `iso-date`  | ISO 8601 dates                   | `[ISO_DATE]`  |
 | `objectId`  | MongoDB ObjectIds (24 hex chars) | `[OBJECT_ID]` |
 | `jwt`       | JWT tokens                       | `[JWT]`       |
-
-#### Dataset Format with Sanitizers
-
-```json
-{
-  "id": "get-user-profile",
-  "toolName": "get_user",
-  "args": { "id": "123" },
-  "assertions": {
-    "snapshot": "user-profile",
-    "snapshotSanitizers": [
-      "uuid",
-      "iso-date",
-      { "pattern": "session_[a-zA-Z0-9]+", "replacement": "[SESSION]" },
-      { "remove": ["lastLoginAt", "metrics.requestId"] }
-    ]
-  }
-}
-```
 
 #### Sanitizer Types
 
@@ -388,19 +289,18 @@ A judge scores a response from 0 to 1, and the assertion passes when the score r
 
 Every judge runs the same way. The built-in `rubric` judge asks an LLM to score the response against a rubric. A plugin can add judges of its own, referenced as `namespace/name` (see [Plugins](./evaluation-framework.md#plugins)).
 
-### Dataset Format
+### Eval Case Format
 
-Use the `assertions.passesJudge` field in the eval dataset JSON:
+In an eval case, `assertions.passesJudge` judges the client's answer:
 
 ```json snippet=snippets/expectations-passes-judge.json
 {
-  "id": "search-test",
-  "toolName": "search_docs",
-  "args": { "query": "authentication" },
+  "id": "auth-docs",
+  "input": "Find our documentation on authentication",
   "assertions": {
     "passesJudge": {
       "rubric": {
-        "text": "Evaluate if the search results are relevant to the query. Score 0-1."
+        "text": "Evaluate if the answer points to relevant authentication docs. Score 0-1."
       },
       "threshold": 0.7
     }
@@ -430,7 +330,10 @@ import { loadEvalDataset, runEvalDataset } from '@gleanwork/mcp-server-tester';
 // Each case's passesJudge chooses its judge and the judge's LLM settings.
 test('search relevance eval with judge', async ({ mcp }, testInfo) => {
   const dataset = await loadEvalDataset('./data/evals.json');
-  const result = await runEvalDataset({ dataset }, { mcp, testInfo });
+  const result = await runEvalDataset(
+    { dataset, client: 'mst', model: 'claude-haiku-4-5' },
+    { mcp, testInfo }
+  );
   expect(result.passed).toBe(result.total);
 });
 ```
@@ -651,31 +554,41 @@ The custom Playwright matchers follow standard Playwright/Jest prefix convention
 
 ## Combining Multiple Expectations
 
-A single eval case can declare multiple expectation types at once. The runner evaluates each defined field independently and reports results per expectation:
+A test can apply several matchers to one response:
 
 ```typescript
-const result = await runEvalDataset({ dataset }, { mcp, testInfo });
+test('city info', async ({ mcp }) => {
+  const result = await mcp.callTool('get_city_info', { city: 'London' });
+  expect(result).toMatchToolSchema(CityInfoSchema);
+  expect(result).toContainToolText(['London', 'Population']);
+  expect(result).toMatchToolPattern([
+    /^## City Information/m,
+    /Population: [\d.]+M/,
+  ]);
+  await expect(result).toPassToolJudge('correctness');
+});
 ```
 
-Each eval case uses whichever `assertions` fields are defined:
-
-- `assertions.response` → Exact match validation
-- `assertions.schema` → Schema validation
-- `assertions.containsText` → Text contains validation
-- `assertions.matchesPattern` → Regex pattern validation
-- `assertions.passesJudge` → LLM judge evaluation
-
-You can combine multiple expectations for a single test case:
+An eval case can declare several assertions too. Each is graded on its own and reported per assertion:
 
 ```json snippet=snippets/expectations-combined.json
 {
-  "id": "comprehensive-test",
-  "toolName": "get_city_info",
-  "args": { "city": "London" },
+  "id": "london-city-info",
+  "input": "Tell me about London: its population and main features",
+  "expected": {
+    "answer": "London has about 8.9M people and is known for its museums and transport."
+  },
   "assertions": {
-    "schema": "city-info",
-    "containsText": ["London", "Population"],
-    "matchesPattern": ["^## City Information", "Population: [\\d.]+M"],
+    "containsText": ["London"],
+    "matchesPattern": ["[\\d.]+\\s?M"],
+    "toolsTriggered": {
+      "calls": [
+        {
+          "name": "get_city_info",
+          "required": true
+        }
+      ]
+    },
     "passesJudge": {
       "rubric": "correctness",
       "threshold": 0.7
@@ -685,53 +598,6 @@ You can combine multiple expectations for a single test case:
 ```
 
 ## Examples
-
-### Testing Markdown Responses
-
-Many MCP servers return markdown-formatted responses. Here's a complete example:
-
-Dataset JSON (using current field names):
-
-```json
-{
-  "name": "city-info",
-  "cases": [
-    {
-      "id": "city-info-text",
-      "toolName": "get_city_info",
-      "args": { "city": "London" },
-      "assertions": {
-        "containsText": [
-          "## City Information",
-          "**City:** London",
-          "### Features"
-        ]
-      }
-    },
-    {
-      "id": "city-info-format",
-      "toolName": "get_city_info",
-      "args": { "city": "London" },
-      "assertions": {
-        "matchesPattern": [
-          "^## City Information",
-          "\\*\\*City:\\*\\* \\w+",
-          "\\*\\*Population:\\*\\* [\\d.]+M",
-          "Temperature: \\d+°C",
-          "\\d{4}-\\d{2}-\\d{2}"
-        ]
-      }
-    }
-  ]
-}
-```
-
-In your test:
-
-```typescript
-const dataset = await loadEvalDataset('./data/city-info.json');
-const result = await runEvalDataset({ dataset }, { mcp, testInfo });
-```
 
 ### Choosing the Right Expectation
 

@@ -73,11 +73,10 @@ describe('pricing', () => {
         ],
       },
       [
-        { id: 'arm-model', mode: 'host', input: 'q' },
+        { id: 'arm-model', input: 'q' },
         {
           // Its own host: priced at its model, not the arm's.
           id: 'own-model',
-          mode: 'host',
           input: 'q',
           client: 'arms/tokens',
           model: 'model-a',
@@ -113,7 +112,7 @@ describe('judge scores in the comparison', () => {
         ],
         judges: [{ type: 'arms/score', name: 'quality', value: 0.4 }],
       },
-      [{ id: 'one', mode: 'host', input: 'q' }]
+      [{ id: 'one', input: 'q' }]
     );
     const delta = summary.armDeltas.high as {
       metricDeltas: Record<string, unknown>;

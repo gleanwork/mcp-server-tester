@@ -2,7 +2,6 @@ import { z } from 'zod';
 import {
   EvalCaseSchema,
   EvalDatasetSchema,
-  isClientCase,
   type EvalDataset,
 } from './datasetTypes.js';
 import type { EvalManifest } from './evalManifest.js';
@@ -14,25 +13,7 @@ import { normalizeSuiteControls } from './manifestValidation.js';
 // dropping an assertion field can turn an intended failure into a passing case.
 const SourceDatasetSchema = EvalDatasetSchema.extend({
   cases: z
-    .array(
-      EvalCaseSchema.strict().superRefine((case_, context) => {
-        if (!isClientCase(case_)) {
-          if (!case_.toolName && !case_.request) {
-            context.addIssue({
-              code: 'custom',
-              path: ['toolName'],
-              message: 'Direct cases require toolName or request.',
-            });
-          }
-        } else if (!case_.input) {
-          context.addIssue({
-            code: 'custom',
-            path: ['input'],
-            message: 'Client cases require input.',
-          });
-        }
-      })
-    )
+    .array(EvalCaseSchema.strict())
     .min(1, 'dataset must have at least one case'),
 });
 

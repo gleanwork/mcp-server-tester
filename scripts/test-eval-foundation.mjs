@@ -38,7 +38,6 @@ async function execute(
     cases: [
       {
         id: 'one',
-        mode: 'host',
         input: 'offline',
         assertions: { toolsTriggered: { calls } },
       },
@@ -174,7 +173,6 @@ try {
       cases: [
         {
           id: policy,
-          mode: 'host',
           input: 'offline',
           assertions: {
             passesJudge: {
@@ -189,7 +187,10 @@ try {
     const result = await runEvalDataset(
       {
         dataset,
-        executeCase: async () => ({ kind: 'direct', response: 'candidate' }),
+        executeCase: async () => ({
+          kind: 'host',
+          response: { success: true, toolCalls: [], response: 'candidate' },
+        }),
       },
       {}
     );

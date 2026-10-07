@@ -107,8 +107,8 @@ function perTrial(
 /**
  * A trial's tool calls, each named `server.tool` when an MCP call names its
  * server; null when the host declares no evidence of them or the trial has
- * no record of them. A case without a trace (a direct case) falls back to
- * its response.
+ * no record of them. A result without a trace (stored before traces were
+ * recorded) falls back to its response.
  */
 function trialToolCalls(
   trial: Trial,

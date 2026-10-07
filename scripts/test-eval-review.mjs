@@ -21,7 +21,21 @@ await server.connect(new StdioServerTransport());`
   await fs.writeFile(
     pluginPath,
     `import {z} from ${JSON.stringify(import.meta.resolve('zod'))};
-export default {meta:{name:'local-plugin',version:'1.0.0',namespace:'local'},metrics:{'plugin-metric':{schema:z.object({}).passthrough(),kind:'binary',compute(result){return result.pass;}}}};`
+import {Client} from ${JSON.stringify(import.meta.resolve('@modelcontextprotocol/client'))};
+import {StdioClientTransport} from ${JSON.stringify(import.meta.resolve('@modelcontextprotocol/client/stdio'))};
+// A deterministic client: it connects to the real server, calls echo with the
+// case's input, and answers with the tool's text.
+const echo = {schema:z.object({}).passthrough(),evidence:'structured',async run(input){
+  const server = input.servers[0];
+  const client = new Client({name:'local-echo',version:'1'});
+  await client.connect(new StdioClientTransport({command:server.command,args:server.args??[]}));
+  try {
+    const args = {text: input.prompt};
+    const result = await client.callTool({name:'echo',arguments:args});
+    return {finalText: result.content.map((block) => block.text ?? '').join(''), events:[{kind:'tool_call',source:'mcp',name:'echo',arguments:args}]};
+  } finally { await client.close(); }
+}};
+export default {meta:{name:'local-plugin',version:'1.0.0',namespace:'local'},clients:{echo},metrics:{'plugin-metric':{schema:z.object({}).passthrough(),kind:'binary',compute(result){return result.pass;}}}};`
   );
   const datasetPath = path.join(dir, 'dataset.json');
   await fs.writeFile(
@@ -30,9 +44,11 @@ export default {meta:{name:'local-plugin',version:'1.0.0',namespace:'local'},met
       name: 'local-five',
       cases: Array.from({ length: 5 }, (_, i) => ({
         id: 'case-' + i,
-        toolName: 'echo',
-        args: { text: 'local success ' + i },
-        assertions: { containsText: 'local success' },
+        input: 'local success ' + i,
+        assertions: {
+          containsText: 'local success',
+          toolsTriggered: { calls: [{ name: 'echo', required: true }] },
+        },
       })),
     })
   );
@@ -50,7 +66,7 @@ export default {meta:{name:'local-plugin',version:'1.0.0',namespace:'local'},met
         servers: [
           { transport: 'stdio', command: process.execPath, args: [serverPath] },
         ],
-        client: 'mst',
+        client: 'local/echo',
         concurrency: 8,
         plugins: [pluginPath],
         metrics: ['local/plugin-metric'],

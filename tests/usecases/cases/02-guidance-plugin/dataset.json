@@ -3,7 +3,6 @@
   "cases": [
     {
       "id": "q3-planning",
-      "mode": "host",
       "input": "Find the Q3 planning notes",
       "assertions": {
         "toolsTriggered": {

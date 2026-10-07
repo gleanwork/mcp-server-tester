@@ -15,7 +15,7 @@ import type {
 import { hostRunToExecution } from './hostTrace.js';
 async function run(host: ClientDefinition, options: ClientRunOptions) {
   const trace = await host.run!(
-    { prompt: options.cases[0]!.input!, servers: options.servers },
+    { prompt: options.cases[0]!.input, servers: options.servers },
     options.host,
     { manifest: options.manifest, arm: options.arm }
   );

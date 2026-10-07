@@ -70,7 +70,6 @@ describe('a run is compared with the previous run of the same manifest', () => {
         name: 'cases',
         cases: ['a', 'b'].map((id) => ({
           id,
-          mode: 'host',
           input: id,
           assertions: { containsText: 'yes' },
         })),
@@ -144,7 +143,6 @@ describe('a run is compared with the previous run of the same manifest', () => {
         cases: [
           {
             id: 'a',
-            mode: 'host',
             input: 'a',
             assertions: { containsText: 'yes' },
           },

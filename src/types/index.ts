@@ -249,8 +249,6 @@ export type {
   EvalAssertions,
   JudgeExpectConfig,
   SerializedEvalDataset,
-  EvalMode,
-  EvalDirectRequest,
   LoadDatasetOptions,
   EvalContext,
   EvalRunnerResult,

@@ -3,7 +3,6 @@
   "cases": [
     {
       "id": "outage-cause",
-      "mode": "host",
       "input": "What caused the checkout outage?",
       "assertions": {
         "passesJudge": {
@@ -15,7 +14,6 @@
     },
     {
       "id": "outage-duration",
-      "mode": "host",
       "input": "How long did the checkout outage last?",
       "assertions": {
         "passesJudge": {

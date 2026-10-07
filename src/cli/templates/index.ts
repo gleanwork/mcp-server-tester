@@ -104,17 +104,24 @@ test.describe('MCP Server Tests', () => {
     expect(result.pass).toBe(true);
   });
 
-  test('should run eval dataset', async ({ mcp }, testInfo) => {
-    // Load dataset (the dataset JSON uses the 'expect' block for assertions)
+  // A direct tool call: replace the tool, its arguments and what it returns.
+  test('your_tool_name returns the expected text', async ({ mcp }) => {
+    const result = await mcp.callTool('your_tool_name', { param1: 'value1' });
+    expect(result).not.toBeToolError();
+    expect(result).toContainToolText('expected text');
+  });
+
+  // An eval: a model gets your tools and each case's input, and the
+  // assertions check what it did. It calls a paid model API, so it needs a key
+  // (and \`npm install ai @ai-sdk/anthropic\`).
+  test('a model picks the right tools', async ({ mcp }, testInfo) => {
+    test.skip(!process.env.ANTHROPIC_API_KEY, 'Set ANTHROPIC_API_KEY to run evals');
     const dataset = await loadEvalDataset('./data/example-dataset.json');
-
-    // Run evals - the runner uses validators internally based on 'expect' block
     const result = await runEvalDataset(
-      { dataset },
-      { mcp, testInfo, expect }
+      { dataset, client: 'mst', model: 'claude-haiku-4-5' },
+      { mcp, testInfo }
     );
-
-    expect(result.passed).toBeGreaterThan(0);
+    expect(result.passed).toBe(result.total);
   });
 });
 `;
@@ -123,18 +130,16 @@ test.describe('MCP Server Tests', () => {
 export function getDatasetTemplate(_answers: ProjectAnswers): string {
   return `{
   "name": "example-eval-dataset",
-  "description": "Example evaluation dataset for MCP server testing",
+  "description": "Example eval cases: requests a user might make, and the tools a model should call",
   "cases": [
     {
       "id": "example-case-1",
-      "description": "Example test case - replace with your actual tool",
-      "toolName": "your_tool_name",
-      "args": {
-        "param1": "value1"
-      },
+      "description": "Example case - replace with a request your server should handle",
+      "input": "Replace with something a user would ask, such as: find the latest planning doc",
       "assertions": {
-        "containsText": ["expected text"],
-        "isError": false
+        "toolsTriggered": {
+          "calls": [{ "name": "your_tool_name", "required": true }]
+        }
       }
     }
   ],

@@ -38,7 +38,7 @@ npm run format:check        # Check formatting
 - **`skills/`** - Agent Skills over MCP (SEP-2640): wire schemas, entry validation, and a skills client (the SDK has no skills API yet)
 - **`auth/`** - OAuth 2.1 with PKCE (`PlaywrightOAuthClientProvider`) and static token utilities
 - **`assertions/`** - Unified assertion architecture (see below)
-- **`evals/`** - Dataset types, loader, and runner (uses validators internally). `evals/caseExecution.ts` is the only place a case runs: every path (direct tool/request, simulated `mcp_host`, `external_host`, suite hosts) returns a typed `CaseExecution`, and the runner reads its fields instead of inspecting `response`. `caseExecution.golden.test.ts` pins the resulting `EvalCaseResult` for every path. `evals/expectations.ts` grades a case's `assertions` block: it decides once whether the evidence can support tool-call assertions (`toolEvidenceGap`), builds the `mcpHostTrace` view, resolves judge settings (including suite manifest judges), then calls the validators. Desktop hosts (Cowork, ChatGPT) run batches through `evals/desktopBatch.ts` (lease, per-case reset policy, native-session ledger, redaction, cleanup) and share one MCP readiness rule (`isMcpServerReady` in `evals/mcpReadiness.ts`); a new desktop host supplies only prepare, one case, reset and dispose. macOS Swift controllers build and run through `evals/nativeHelper.ts`, which owns their environment policy
+- **`evals/`** - Dataset types, loader, and runner (uses validators internally). `evals/caseExecution.ts` is the only place a case runs: every path (the `mst` client on a Playwright test's connection, a suite's client, a custom `executeCase`) returns a typed `CaseExecution` (`host` or `failed`), and the runner reads its fields instead of inspecting `response`. `caseExecution.golden.test.ts` pins the resulting `EvalCaseResult` for every path. `evals/expectations.ts` grades a case's `assertions` block: it decides once whether the evidence can support tool-call assertions (`toolEvidenceGap`), builds the `mcpHostTrace` view, resolves judge settings (including suite manifest judges), then calls the validators. Desktop hosts (Cowork, ChatGPT) run batches through `evals/desktopBatch.ts` (lease, per-case reset policy, native-session ledger, redaction, cleanup) and share one MCP readiness rule (`isMcpServerReady` in `evals/mcpReadiness.ts`); a new desktop host supplies only prepare, one case, reset and dispose. macOS Swift controllers build and run through `evals/nativeHelper.ts`, which owns their environment policy
 - **`llm/`** - `resolveLLMEndpoint()`: the one place MST's own LLM calls (SDK host, judges) get their base URL and credential, including gateway bearer tokens and `MST_LLM_AUTH_COMMAND`. New LLM consumers resolve through it rather than reading `*_API_KEY` themselves. See `docs/llm-gateways.md`
 - **`judge/`** - LLM-as-a-judge via Claude Agent SDK
 - **`plugins/`** - ESLint-style plugins: the `Plugin` shape and validation (`plugin.ts`), the process-wide extension table keyed by `namespace/name`, where each kind's lookup (next to its built-ins) adds them under bare names (`extensions.ts`), and the loader (`loadPlugins.ts`). `evals/suitePlugins.ts` loads a suite's plugins and checks it only references namespaces it loads. Domain terms are in `CONTEXT.md`; decisions in `docs/adr/`
@@ -73,19 +73,19 @@ if (!result.pass) console.log(result.message);
 
 ### Available Matchers
 
-| Matcher                                  | Purpose                                       |
-| ---------------------------------------- | --------------------------------------------- |
-| `toMatchToolResponse(expected)`          | Exact response match (deep equal)             |
-| `toContainToolText(text)`                | Response contains text substring(s)           |
-| `toMatchToolPattern(pattern)`            | Response matches regex pattern(s)             |
-| `toMatchToolSchema(schema)`              | Response validates against Zod schema         |
-| `toMatchToolSnapshot(name, sanitizers?)` | Response matches saved snapshot               |
-| `toBeToolError(expected?)`               | Response is (or is not) an error              |
-| `toPassToolJudge(rubric, options?)`      | Response passes LLM-as-judge evaluation       |
-| `toHaveToolResponseSize(options)`        | Response size is within bounds                |
-| `toSatisfyToolPredicate(fn, desc?)`      | Response satisfies custom predicate           |
-| `toHaveToolCalls(expectation)`           | LLM called the expected tools (mcp_host mode) |
-| `toHaveToolCallCount(options)`           | LLM made N tool calls (mcp_host mode)         |
+| Matcher                                  | Purpose                                 |
+| ---------------------------------------- | --------------------------------------- |
+| `toMatchToolResponse(expected)`          | Exact response match (deep equal)       |
+| `toContainToolText(text)`                | Response contains text substring(s)     |
+| `toMatchToolPattern(pattern)`            | Response matches regex pattern(s)       |
+| `toMatchToolSchema(schema)`              | Response validates against Zod schema   |
+| `toMatchToolSnapshot(name, sanitizers?)` | Response matches saved snapshot         |
+| `toBeToolError(expected?)`               | Response is (or is not) an error        |
+| `toPassToolJudge(rubric, options?)`      | Response passes LLM-as-judge evaluation |
+| `toHaveToolResponseSize(options)`        | Response size is within bounds          |
+| `toSatisfyToolPredicate(fn, desc?)`      | Response satisfies custom predicate     |
+| `toHaveToolCalls(expectation)`           | The client called the expected tools    |
+| `toHaveToolCallCount(options)`           | The client made N tool calls            |
 
 ### Playwright Fixtures (`src/fixtures/mcp.ts`)
 
@@ -121,9 +121,7 @@ Eval cases can be run multiple times to compute accuracy (win rate):
 ```json
 {
   "id": "search-trigger",
-  "mode": "mcp_host",
   "input": "Find recent docs about planning",
-  "mcpHostConfig": { "provider": "anthropic" },
   "trials": 5,
   "passThreshold": 0.8,
   "assertions": {
@@ -142,10 +140,13 @@ Eval cases can be run multiple times to compute accuracy (win rate):
 Run multiple eval cases in parallel:
 
 ```typescript
-await runEvalDataset({ dataset, concurrency: 4 }, { mcp, testInfo });
+await runEvalDataset(
+  { dataset, client: 'mst', model: 'claude-haiku-4-5', concurrency: 4 },
+  { mcp, testInfo }
+);
 ```
 
-### Tool Call Assertions (mcp_host mode only)
+### Tool Call Assertions
 
 ```json
 "assertions": {
@@ -160,18 +161,14 @@ await runEvalDataset({ dataset, concurrency: 4 }, { mcp, testInfo });
 
 Validators: `validateToolCalls(response, expectation)`, `validateToolCallCount(response, options)`
 
-### Testing Modes
+### Tests and Evals
 
-The framework supports two evaluation modes:
-
-- **Direct mode** (`mode: 'direct'`, default): Call a specific tool with known arguments and assert on the response. Fast, deterministic, free. Use for regression testing.
-- **mcp_host mode** (`mode: 'mcp_host'`): An LLM receives a natural language `input` and discovers which tools to call. Non-deterministic, costs money, measures tool description quality. Use selectively for tool discoverability validation.
-
-Direct mode uses `toolName` + `args`, or `request: { method, params }` for any MCP request (e.g. `skills/get`). mcp_host mode uses `input` + `mcpHostConfig`; `mcpHostConfig.skills: 'catalog' | 'preload'` lets the SDK host offer the server's Agent Skills (skills the model loads are `kind: 'skill'` events for `toolsTriggered`; preloads are not). Tool call assertions (`toolsTriggered`, `toolCallCount`) only work in mcp_host mode.
+- **Tool tests** are Playwright tests: `mcp.callTool(name, args)` (or `mcp.request(method, params, schema)`) and the matchers. Fast, deterministic, free. Use for regression testing. `mst generate` writes them as a spec. There are no direct eval cases: `toolName`, `args`, `request` and `mode` on a case fail with what replaces them, as do the tool-response assertions (`response`, `schema`, `snapshot`, `isError`, `responseSize`).
+- **Evals** run every case (`input` + `assertions`) on a client and its model. Non-deterministic, costs money, measures tool description quality. In a Playwright test, `runEvalDataset({ dataset, client: 'mst', model })` runs cases on the `mst` client over the test's connection; other clients (`claude-code`, `cowork`, `chatgpt`, plugins) run in suites (`mst run`). A case can set its own `client`, `model` and `clientOptions`. The `mst` client's `skills: 'catalog' | 'preload'` option offers the server's Agent Skills (skills the model loads are `kind: 'skill'` events for `toolsTriggered`; preloads are not).
 
 ### Snapshot Testing
 
-`toMatchToolSnapshot(name, sanitizers?)` compares tool responses against saved baselines. Requires Playwright `testInfo` (destructure from second arg: `async ({ mcp }, testInfo)`). The matcher and eval `snapshot` expectations both run `validateSnapshot` against `playwrightSnapshotStore(expect)`; unit tests pass their own `SnapshotStore`. This repo's own snapshots live in `tests/__snapshots__/` (platform-free `snapshotPathTemplate`), exercised by `tests/snapshot.spec.ts`.
+`toMatchToolSnapshot(name, sanitizers?)` compares tool responses against saved baselines. Requires Playwright `testInfo` (destructure from second arg: `async ({ mcp }, testInfo)`). The matcher runs `validateSnapshot` against `playwrightSnapshotStore(expect)`; unit tests pass their own `SnapshotStore`. This repo's own snapshots live in `tests/__snapshots__/` (platform-free `snapshotPathTemplate`), exercised by `tests/snapshot.spec.ts`.
 
 Built-in sanitizers: `'uuid'`, `'iso-date'`, `'timestamp'`, `'jwt'`, `'objectId'`
 
@@ -224,7 +221,7 @@ Custom judges come from plugins: a plugin's `judges: { completeness: { schema, e
 - Common pitfalls:
   - Missing `testInfo` for snapshot matchers (destructure from second test arg)
   - Wrong import path — use `@gleanwork/mcp-server-tester/fixtures/mcp` for tests, not the root path
-  - Provider package not installed for mcp_host mode (`npm install ai @ai-sdk/<provider>`)
+  - Provider package not installed for the `mst` client (`npm install ai @ai-sdk/<provider>`)
   - Missing `await` on async matchers (`toPassToolJudge`, `toMatchToolSnapshot`, `toSatisfyToolPredicate`)
   - Importing from `@modelcontextprotocol/sdk` (v1): use `@modelcontextprotocol/client` (types, transports, auth) or `@modelcontextprotocol/server` (mock servers)
   - Pinning `protocol: '2026-07-28'` against a legacy-only server fails by design; use `'legacy'` or `'auto'`
@@ -325,9 +322,9 @@ Add it to the kind's built-in record, keyed by its bare name: `builtinDatasetSou
 2. Write a completion adapter in `src/judge/myProviderJudge.ts`: `(config: JudgeConfig) => JudgeCompletionAdapter`, which sends `{ system, prompt }` and returns `{ text, usage }`. Load the SDK with `loadJudgeSdk(() => import('pkg'), ...)` from `src/judge/adapterSupport.ts`, and type only the SDK surface you read (no `any`). Don't build prompts or parse verdicts there: `src/judge/llmJudge.ts` owns the prompt, the parser, the `maxToolOutputSize` guard and usage defaults for every provider. For an Anthropic- or OpenAI-shaped API, check the credential up front with `requireJudgeCredential` and resolve the endpoint per call with `resolveLLMEndpoint` (`src/llm/endpoint.ts`), so gateways work
 3. Add it to `JUDGE_PROVIDERS` in `src/judge/judgeClient.ts` (the record is typed by `ProviderKind`, so a missing entry is a compile error)
 
-### New LLM Host Provider (mcp_host mode)
+### New LLM Host Provider (the mst client)
 
-Supported `LLMProvider` values for `mcpHostConfig.provider` (defined in `src/evals/mcpHost/mcpHostTypes.ts`):
+Supported `LLMProvider` values for the `mst` client's `provider` option (defined in `src/evals/mcpHost/mcpHostTypes.ts`):
 
 `'openai' | 'anthropic' | 'azure' | 'google' | 'mistral' | 'deepseek' | 'openrouter' | 'xai' | 'vertex-anthropic'`
 

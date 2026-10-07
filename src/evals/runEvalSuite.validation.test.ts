@@ -44,7 +44,6 @@ describe('a dry run checks datasets too', () => {
       dryRun([
         {
           id: 'a',
-          mode: 'host',
           input: 'Find it',
           assertions: { regex: ['found'] },
         },
@@ -58,7 +57,6 @@ describe('a dry run checks datasets too', () => {
         [
           {
             id: 'desktop',
-            mode: 'host',
             input: 'Find it',
             client: 'chatgpt',
             model: 'gpt-5',
@@ -84,7 +82,6 @@ describe('a case systemPrompt', () => {
         [
           {
             id: 'org',
-            mode: 'host',
             input: 'Find it',
             clientOptions: { systemPrompt: 'Case prompt.' },
           },

@@ -603,14 +603,6 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <InfoField
-                        label="Mode"
-                        value={
-                          <code className="text-xs bg-muted px-2 py-1 rounded">
-                            {result.request.mode ?? result.toolName}
-                          </code>
-                        }
-                      />
-                      <InfoField
                         label="Dataset"
                         value={
                           <span className="font-medium">

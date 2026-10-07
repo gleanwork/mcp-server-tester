@@ -9,7 +9,7 @@ Before the package is installed (for example, running `init` in a new directory)
 ## Table of Contents
 
 - [init - Initialize Project](#init---initialize-project)
-- [generate - Generate Eval Dataset](#generate---generate-eval-dataset)
+- [generate - Generate Eval Dataset](#generate---generate-playwright-tests)
 - [login - OAuth Authentication](#login---oauth-authentication)
 - [token - Export Tokens for CI/CD](#token---export-tokens-for-cicd)
 - [run - Run an Evaluation Manifest](#run---run-an-evaluation-manifest)
@@ -62,7 +62,7 @@ my-mcp-tests/
 ├── tests/
 │   └── mcp.spec.ts        # Example test file
 ├── data/
-│   └── example-dataset.json  # Sample eval dataset
+│   └── example-dataset.json  # Sample eval cases, run on a model
 ├── package.json           # Dependencies and scripts
 └── tsconfig.json          # TypeScript configuration
 ```
@@ -106,20 +106,29 @@ test('lists tools', async ({ mcp }) => {
 
 ```json snippet=snippets/cli-generated-dataset.json
 {
-  "name": "example-evals",
+  "name": "example-eval-dataset",
   "cases": [
     {
-      "id": "example-1",
-      "toolName": "example_tool",
-      "args": { "input": "test" }
+      "id": "example-case-1",
+      "input": "Replace with something a user would ask",
+      "assertions": {
+        "toolsTriggered": {
+          "calls": [
+            {
+              "name": "your_tool_name",
+              "required": true
+            }
+          ]
+        }
+      }
     }
   ]
 }
 ```
 
-## `generate` - Generate Eval Dataset
+## `generate` - Generate Playwright Tests
 
-Interactively create eval datasets by connecting to your MCP server and generating test cases.
+Interactively record Playwright tests by connecting to your MCP server and calling its tools. Each call becomes a `test()` that calls the tool and asserts on its response with MST's matchers.
 
 ### Usage
 
@@ -130,21 +139,21 @@ npx mst generate [options]
 ### Options
 
 - `-c, --config <path>` - Path to MCP config JSON file
-- `-o, --output <path>` - Output dataset path (default: "data/dataset.json")
-- `-s, --snapshot` - Use Playwright snapshot testing for all cases
+- `-o, --output <path>` - Spec file to write or add to (default: "tests/generated.spec.ts")
+- `-s, --snapshot` - Compare every response with a saved snapshot
 - `-h, --help` - Display help
 
 ### Snapshot Mode
 
-Use `--snapshot` to create datasets that use Playwright's built-in snapshot testing:
+Use `--snapshot` to have every test compare its response with a saved snapshot:
 
 ```bash
-npx mst generate --snapshot -o data/snapshot-tests.json
+npx mst generate --snapshot -o tests/snapshot.spec.ts
 ```
 
-This sets `assertions.snapshot: "<case-id>"` for each case. When you run tests:
+Each test ends with `await expect(result).toMatchToolSnapshot('<test name>')`. When you run tests:
 
-1. **First run**: Playwright captures snapshots to `__snapshots__/` folder
+1. **First run**: Playwright writes each missing snapshot and fails that test; run again to compare
 2. **Subsequent runs**: Compares responses against captured snapshots
 3. **Update snapshots**: Run `npx playwright test --update-snapshots` when server behavior changes
 
@@ -184,15 +193,15 @@ Suggested expectations:
   Regex patterns:
     - \d+
 
-# Step 5: Configure test case
-? Test case ID: weather-london
+# Step 5: Configure the test
+? Test name: weather-london
 ? Add text contains expectations? Yes
 ? Add regex expectations? Yes
-✓ Added test case "weather-london"
+✓ Added test "weather-london"
 
 # Step 6: Continue or finish
-? Add another test case? No
-✓ Dataset saved to data/dataset.json
+? Add another test? No
+✓ Spec saved to tests/generated.spec.ts
 ```
 
 ### Features
@@ -226,16 +235,17 @@ Response preview:
 **Updated:** 2025-01-22
 ```
 
-#### 4. Append to Existing Datasets
+#### 4. Add to an Existing Spec
 
-The generator can append to existing dataset files:
+The generator can add tests to a spec it wrote earlier, above its `// mst generate adds new tests above this line.` marker. Edits you made to the file stay:
 
 ```bash
-npx mst generate -o data/existing.json
+npx mst generate -o tests/weather.spec.ts
 
-✓ Found existing dataset with 5 cases
-? Add new test cases? Yes
+Spec file exists at tests/weather.spec.ts. Add tests to it? Yes
 ```
+
+A spec without the marker (one you wrote by hand) is left alone: choose a new `--output` file.
 
 ### Using a Config File
 
@@ -262,38 +272,38 @@ npx mst generate -c mcp-config.json
 
 ### Output Format
 
-The generated dataset is a JSON file:
+The generated spec is an ordinary Playwright test file:
 
-```json
-{
-  "name": "generated-dataset",
-  "cases": [
-    {
-      "id": "weather-london",
-      "toolName": "get_weather",
-      "args": { "city": "London" },
-      "assertions": {
-        "containsText": ["London", "temperature"],
-        "matchesPattern": ["\\d+"]
-      }
-    }
-  ]
-}
+```typescript
+import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
+
+// Generated by `mst generate`: each test calls one tool and asserts on its
+// response. Edit the tests freely; keep the marker line to add more.
+test.describe('MCP tools', () => {
+  test('weather-london', async ({ mcp }) => {
+    const result = await mcp.callTool('get_weather', { city: 'London' });
+    expect(result).not.toBeToolError();
+    expect(result).toContainToolText(['London', 'temperature']);
+    expect(result).toMatchToolPattern(new RegExp('\\d+'));
+  });
+
+  // mst generate adds new tests above this line.
+});
 ```
 
 ### Best Practices
 
-1. **Descriptive IDs** - Use clear, unique test case IDs (e.g., `weather-london`, `search-auth`)
-2. **Representative Cases** - Generate cases that cover different inputs
-3. **Review Suggestions** - The auto-suggested expectations are starting points; review and refine them
-4. **Version Control** - Commit generated datasets to track test evolution
-5. **Organize by Feature** - Create separate datasets for different tool categories
+1. **Descriptive names** - Use clear, unique test names (e.g., `weather-london`, `search-auth`)
+2. **Representative calls** - Record calls that cover different inputs
+3. **Review suggestions** - The suggested assertions are starting points; review and refine them in the spec
+4. **Version control** - Commit generated specs to track test evolution
+5. **Organize by feature** - Write separate specs for different tool categories
 
 ### Example Session
 
 ```bash
-# Generate dataset for a weather service
-npx mst generate -o data/weather-tests.json
+# Generate tests for a weather service
+npx mst generate -o tests/weather.spec.ts
 
 # Test case 1: Sunny day
 ? Tool: get_weather
@@ -315,7 +325,7 @@ npx mst generate -o data/weather-tests.json
 ? ID: weather-invalid
 ✓ Added
 
-✓ Dataset saved with 3 cases
+✓ Spec saved with 3 tests
 ```
 
 ### Troubleshooting

@@ -32,7 +32,6 @@ test.describe('Live skills eval (opt-in)', () => {
       cases: [
         {
           id: 'weather-report',
-          mode: 'host',
           input:
             'Write me a short weather report for London and Paris, following any house style you have for weather reports.',
           trials: ITERATIONS,

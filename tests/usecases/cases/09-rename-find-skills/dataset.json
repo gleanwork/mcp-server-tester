@@ -3,7 +3,6 @@
   "cases": [
     {
       "id": "tracker-ticket",
-      "mode": "host",
       "input": "Create a tracker ticket for the checkout outage",
       "assertions": {
         "toolsTriggered": {

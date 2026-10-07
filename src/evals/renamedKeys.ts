@@ -16,3 +16,19 @@ export function renamedKeys<const T extends Record<string, string>>(
     ])
   ) as { [K in keyof T]: z.ZodOptional<z.ZodNever> };
 }
+
+/**
+ * Schema fields for keys that 2.0 removed. An old key is still recognized,
+ * so a config that uses one fails with `reason` (what replaces it) rather
+ * than as an unrecognized key.
+ */
+export function removedKeys<const T extends Record<string, string>>(
+  reasons: T
+): { [K in keyof T]: z.ZodOptional<z.ZodNever> } {
+  return Object.fromEntries(
+    Object.entries(reasons).map(([key, reason]) => [
+      key,
+      z.never({ message: `\`${key}\` is gone: ${reason}` }).optional(),
+    ])
+  ) as { [K in keyof T]: z.ZodOptional<z.ZodNever> };
+}

@@ -1,6 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { z } from 'zod';
-import { ProtocolError } from '@modelcontextprotocol/client';
 import {
   runEvalCase,
   runEvalDataset,
@@ -23,6 +21,31 @@ import {
 import { createFixtureExtensions } from '../mcp/fixtures/fixtureExtensions.js';
 import type { CaseExecution } from './caseExecution.js';
 import { hostRunToExecution } from './hostTrace.js';
+import type * as SimulationModule from './mcpHost/mcpHostSimulation.js';
+import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
+import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
+
+// A stand-in for the mst client's model: it calls the connection's tool once
+// and answers with what the tool returned. A tool result shaped like a
+// simulation is taken as the client's whole run, so a test can set the calls.
+vi.mock('./mcpHost/mcpHostSimulation.js', async (original) => ({
+  ...(await original<typeof SimulationModule>()),
+  simulateMCPHost: vi.fn(
+    async (mcp: MCPFixtureApi): Promise<MCPHostSimulationResult> => {
+      const result = (await mcp.callTool('test-tool', {
+        input: 'test',
+      })) as unknown as Record<string, unknown>;
+      if ('success' in result && 'toolCalls' in result)
+        return result as unknown as MCPHostSimulationResult;
+      const text = ((result.content as Array<{ text?: string }>) ?? [])
+        .map((block) => block.text ?? '')
+        .join('');
+      return result.isError
+        ? { success: false, toolCalls: [], error: text }
+        : { success: true, toolCalls: [], response: text };
+    }
+  ),
+}));
 
 function createMockMCP(callToolResponse?: {
   content?: unknown;
@@ -61,8 +84,7 @@ function createContext(mcp?: MCPFixtureApi): EvalContext {
 function createEvalCase(overrides: Partial<EvalCase> = {}): EvalCase {
   return {
     id: 'test-case',
-    toolName: 'test-tool',
-    args: { input: 'test' },
+    input: 'test',
     ...overrides,
   };
 }
@@ -109,38 +131,22 @@ class MemoryEvalResultStore implements EvalResultStore {
 }
 
 describe('runEvalCase', () => {
-  describe('direct mode', () => {
-    it('should call tool and return result', async () => {
+  describe('cases on the mst client', () => {
+    it('runs the case on the mst client and returns its answer', async () => {
       const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
       const context = createContext(mcp);
       const evalCase = createEvalCase();
 
       const result = await runEvalCase(evalCase, context);
 
-      // eslint-disable-next-line @typescript-eslint/unbound-method
-      expect(mcp.callTool).toHaveBeenCalledWith('test-tool', { input: 'test' });
+      expect(simulateMCPHost).toHaveBeenCalledWith(
+        mcp,
+        'test',
+        expect.objectContaining({ hostType: 'sdk' })
+      );
       expect(result.id).toBe('test-case');
-      expect(result.toolName).toBe('test-tool');
       expect(result.source).toBe('eval');
-      expect(result.response).toBeDefined();
-    });
-
-    it('should return full CallToolResult as response', async () => {
-      const mcp = createMockMCP({
-        content: [{ type: 'text', text: 'fallback' }],
-        structuredContent: { data: 'structured' },
-      });
-      const context = createContext(mcp);
-      const evalCase = createEvalCase();
-
-      const result = await runEvalCase(evalCase, context);
-
-      // response is the full CallToolResult, not just structuredContent
-      expect(result.response).toMatchObject({
-        content: [{ type: 'text', text: 'fallback' }],
-        structuredContent: { data: 'structured' },
-        isError: false,
-      });
+      expect(result.response).toMatchObject({ response: 'hello' });
     });
 
     it('should pass when no expect block is provided', async () => {
@@ -182,65 +188,6 @@ describe('runEvalCase', () => {
       expect(result.expectations.textContains?.pass).toBe(false);
     });
 
-    it('should validate with expect.schema when schema is provided', async () => {
-      const mcp = createMockMCP({
-        structuredContent: { name: 'test', age: 25 },
-      });
-      const context = createContext(mcp);
-      const evalCase = createEvalCase({
-        assertions: { schema: 'PersonSchema' },
-      });
-
-      const PersonSchema = z.object({
-        name: z.string(),
-        age: z.number(),
-      });
-
-      const result = await runEvalCase(evalCase, context, {
-        schemas: { PersonSchema },
-      });
-
-      expect(result.pass).toBe(true);
-      expect(result.expectations.schema?.pass).toBe(true);
-    });
-
-    it('should fail when expect.schema validation fails', async () => {
-      const mcp = createMockMCP({
-        structuredContent: { name: 'test', age: 'not-a-number' },
-      });
-      const context = createContext(mcp);
-      const evalCase = createEvalCase({
-        assertions: { schema: 'PersonSchema' },
-      });
-
-      const PersonSchema = z.object({
-        name: z.string(),
-        age: z.number(),
-      });
-
-      const result = await runEvalCase(evalCase, context, {
-        schemas: { PersonSchema },
-      });
-
-      expect(result.pass).toBe(false);
-      expect(result.expectations.schema?.pass).toBe(false);
-    });
-
-    it('should fail when schema is not found in registry', async () => {
-      const mcp = createMockMCP({
-        structuredContent: { data: 'test' },
-      });
-      const context = createContext(mcp);
-      const evalCase = createEvalCase({
-        assertions: { schema: 'MissingSchema' },
-      });
-
-      const result = await runEvalCase(evalCase, context, { schemas: {} });
-
-      expect(result.pass).toBe(false);
-      expect(result.expectations.schema?.details).toContain('not found');
-    });
-
     it('should validate expect.matchesPattern', async () => {
       const mcp = createMockMCP({
         content: [{ type: 'text', text: 'Order #12345 confirmed' }],
@@ -254,44 +201,6 @@ describe('runEvalCase', () => {
 
       expect(result.pass).toBe(true);
       expect(result.expectations.regex?.pass).toBe(true);
-    });
-
-    it('should validate expect.isError for error responses', async () => {
-      const mcp = createMockMCP({
-        content: [{ type: 'text', text: 'Error: something went wrong' }],
-        isError: true,
-      });
-      const context = createContext(mcp);
-      const evalCase = createEvalCase({
-        assertions: { isError: true },
-      });
-
-      const result = await runEvalCase(evalCase, context);
-
-      expect(result.pass).toBe(true);
-      expect(result.expectations.error?.pass).toBe(true);
-    });
-
-    it('should validate expect.response for exact match', async () => {
-      const mcp = createMockMCP({
-        content: [{ type: 'text', text: 'status: ok' }],
-      });
-      const context = createContext(mcp);
-      // The response is now the full CallToolResult, so the expected value must match it
-      const evalCase = createEvalCase({
-        assertions: {
-          response: {
-            content: [{ type: 'text', text: 'status: ok' }],
-            structuredContent: undefined,
-            isError: false,
-          },
-        },
-      });
-
-      const result = await runEvalCase(evalCase, context);
-
-      expect(result.pass).toBe(true);
-      expect(result.expectations.exact?.pass).toBe(true);
     });
 
     it('should validate multiple expectations together', async () => {
@@ -330,164 +239,6 @@ describe('runEvalCase', () => {
       expect(result.pass).toBe(false);
       expect(result.expectations.textContains?.pass).toBe(true);
       expect(result.expectations.regex?.pass).toBe(false);
-    });
-
-    it('should fail when toolName is missing', async () => {
-      const context = createContext();
-      const evalCase = createEvalCase({ toolName: undefined });
-
-      const result = await runEvalCase(evalCase, context);
-
-      expect(result.pass).toBe(false);
-      expect(result.error).toContain('toolName or request is required');
-    });
-
-    describe('request cases', () => {
-      const skillEntry = {
-        uri: 'skill://weather-report/SKILL.md',
-        frontmatter: { name: 'weather-report', description: 'Weather' },
-        resources: [
-          {
-            uri: 'skill://weather-report/SKILL.md',
-            digest: `sha256:${'a'.repeat(64)}`,
-            size: 10,
-          },
-        ],
-      };
-
-      function withRequest(request: MCPFixtureApi['request']) {
-        return createContext({ ...createMockMCP(), request });
-      }
-
-      it('sends the request and validates the result with a built-in schema', async () => {
-        const request = vi.fn().mockResolvedValue({ skills: [skillEntry] });
-        const result = await runEvalCase(
-          createEvalCase({
-            toolName: undefined,
-            args: undefined,
-            request: { method: 'skills/list', params: {} },
-            assertions: {
-              schema: 'SkillsListResult',
-              containsText: 'weather-report',
-            },
-          }),
-          withRequest(request)
-        );
-
-        expect(request).toHaveBeenCalledWith(
-          'skills/list',
-          {},
-          expect.anything()
-        );
-        expect(result.error).toBeUndefined();
-        expect(result.pass).toBe(true);
-      });
-
-      it('fails the built-in schema for an entry that breaks SEP-2640', async () => {
-        const request = vi.fn().mockResolvedValue({
-          skill: {
-            ...skillEntry,
-            frontmatter: { name: 'other', description: 'x' },
-          },
-        });
-        const result = await runEvalCase(
-          createEvalCase({
-            toolName: undefined,
-            args: undefined,
-            request: { method: 'skills/get', params: { uri: skillEntry.uri } },
-            assertions: { schema: 'SkillsGetResult' },
-          }),
-          withRequest(request)
-        );
-
-        expect(result.pass).toBe(false);
-        expect(result.expectations.schema?.details).toContain(
-          'frontmatter.name'
-        );
-      });
-
-      it('turns a JSON-RPC error into an error result for expect.isError', async () => {
-        const request = vi
-          .fn()
-          .mockRejectedValue(new ProtocolError(-32602, 'Unknown skill'));
-        const result = await runEvalCase(
-          createEvalCase({
-            toolName: undefined,
-            args: undefined,
-            request: {
-              method: 'skills/get',
-              params: { uri: 'skill://nope/SKILL.md' },
-            },
-            assertions: { isError: 'MCP error -32602' },
-          }),
-          withRequest(request)
-        );
-
-        expect(result.error).toBeUndefined();
-        expect(result.pass).toBe(true);
-      });
-
-      it('records the request method as the case tool name', async () => {
-        const result = await runEvalCase(
-          createEvalCase({
-            toolName: undefined,
-            args: undefined,
-            request: { method: 'skills/list' },
-          }),
-          withRequest(vi.fn().mockResolvedValue({ skills: [] }))
-        );
-        expect(result.toolName).toBe('skills/list');
-      });
-
-      it('lets a user schema override a built-in schema of the same name', async () => {
-        const result = await runEvalCase(
-          createEvalCase({
-            toolName: undefined,
-            args: undefined,
-            request: { method: 'custom/list' },
-            assertions: { schema: 'SkillsListResult' },
-          }),
-          withRequest(vi.fn().mockResolvedValue({ anything: true })),
-          { schemas: { SkillsListResult: z.object({ anything: z.boolean() }) } }
-        );
-        expect(result.pass).toBe(true);
-      });
-
-      it.each([
-        [{ supportedVersions: ['2026-07-28'], capabilities: {} }, true],
-        [{ supportedVersions: [], capabilities: {} }, false],
-      ])('validates DiscoverResult %j', async (discover, pass) => {
-        const result = await runEvalCase(
-          createEvalCase({
-            toolName: undefined,
-            args: undefined,
-            request: { method: 'server/discover' },
-            assertions: { schema: 'DiscoverResult' },
-          }),
-          withRequest(vi.fn().mockResolvedValue(discover))
-        );
-        expect(result.pass).toBe(pass);
-      });
-
-      it('rejects cases that set both request and toolName', async () => {
-        const result = await runEvalCase(
-          createEvalCase({ request: { method: 'skills/list' } }),
-          withRequest(vi.fn())
-        );
-
-        expect(result.pass).toBe(false);
-        expect(result.error).toContain('mutually exclusive');
-      });
-    });
-
-    it('should fail when args are missing', async () => {
-      const context = createContext();
-      const evalCase = createEvalCase({ args: undefined });
-
-      const result = await runEvalCase(evalCase, context);
-
-      expect(result.pass).toBe(false);
-      expect(result.error).toContain('args is required');
     });
 
     it('should track duration', async () => {
@@ -543,20 +294,18 @@ describe('runEvalCase', () => {
     it('should fail when scenario is missing', async () => {
       const context = createContext();
       const evalCase = createEvalCase({
-        mode: 'host',
         input: undefined,
       });
 
       const result = await runEvalCase(evalCase, context);
 
       expect(result.pass).toBe(false);
-      expect(result.error).toContain('a client case needs input');
+      expect(result.error).toContain('a case needs input');
     });
 
     it('fails a case on a client other than mst, which runs in a suite', async () => {
       const context = createContext();
       const evalCase = createEvalCase({
-        mode: 'host',
         input: 'test scenario',
       });
 
@@ -570,7 +319,7 @@ describe('runEvalCase', () => {
 
     it("records the run's client and model on the result", async () => {
       const result = await runEvalCase(
-        createEvalCase({ mode: 'host', input: 'test scenario' }),
+        createEvalCase({ input: 'test scenario' }),
         createContext(),
         {
           client: 'mst',
@@ -742,7 +491,7 @@ describe('defaultJudgeReps', () => {
   it('is accepted as an option without error', async () => {
     const dataset: EvalDataset = {
       name: 'default-reps-test',
-      cases: [{ id: 'a', toolName: 'echo', args: {} }],
+      cases: [{ id: 'a', input: 'echo' }],
     };
     const result = await runEvalDataset(
       { dataset, defaultJudgeReps: 3 },
@@ -754,7 +503,7 @@ describe('defaultJudgeReps', () => {
   it('does not override per-case judgeReps', async () => {
     const dataset: EvalDataset = {
       name: 'override-test',
-      cases: [{ id: 'a', toolName: 'echo', args: {}, judgeReps: 2 }],
+      cases: [{ id: 'a', input: 'echo', judgeReps: 2 }],
     };
     // Just verify it runs without error — judgeReps: 2 stays 2
     const result = await runEvalDataset(
@@ -811,8 +560,7 @@ describe('toolsTriggered and toolCallCount expectations in eval runner', () => {
     expect(result.pass).toBe(false);
   });
 
-  it('fails toolsTriggered with informative message when response is not a simulation', async () => {
-    // A plain text response (standard CallToolResult) is not a simulation result
+  it('fails toolsTriggered when the client called no tools', async () => {
     const mcp = createMockMCP({
       content: [{ type: 'text', text: 'plain text' }],
     });
@@ -824,7 +572,7 @@ describe('toolsTriggered and toolCallCount expectations in eval runner', () => {
     const result = await runEvalCase(evalCase, createContext(mcp));
     expect(result.expectations.toolsTriggered?.pass).toBe(false);
     expect(result.expectations.toolsTriggered?.details).toContain(
-      'host simulation response'
+      "Expected tool 'search' to be called"
     );
   });
 
@@ -858,7 +606,6 @@ describe('runEvalDataset defaultTrials', () => {
     const dataset = createDataset([
       createEvalCase({
         id: 'llm-case',
-        mode: 'host',
         input: 'test scenario',
         // no iterations field — should use defaultTrials
       }),
@@ -876,27 +623,6 @@ describe('runEvalDataset defaultTrials', () => {
     expect(executeCase).toHaveBeenCalledTimes(3);
     expect(result.caseResults[0]!.iterationResults).toHaveLength(3);
     expect(result.caseResults[0]!.assertionPassRate).toBe(1);
-  });
-
-  it('does not apply defaultTrials to direct mode cases', async () => {
-    const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
-    const dataset = createDataset([
-      createEvalCase({
-        id: 'direct-case',
-        // mode defaults to 'direct'
-        assertions: { containsText: 'hello' },
-      }),
-    ]);
-
-    const result = await runEvalDataset(
-      { dataset, defaultTrials: 5 },
-      createContext(mcp)
-    );
-
-    // Direct mode case should NOT have iterationResults (only ran once)
-    expect(result.caseResults[0]!.iterationResults).toBeUndefined();
-    expect(result.caseResults[0]!.assertionPassRate).toBeUndefined();
-    expect(result.passed).toBe(1);
   });
 
   it('case-level iterations override defaultTrials', async () => {
@@ -1003,10 +729,8 @@ describe('runEvalDataset', () => {
       {
         dataset: createDataset([createEvalCase({ id: 'case-1' })]),
         protocol: () => protocol,
-        executeCase: async () => ({
-          kind: 'direct',
-          response: { content: [] },
-        }),
+        executeCase: async () =>
+          hostRunToExecution({ finalText: '', events: [] }, 'structured'),
       },
       { ...createContext(), mcp: undefined }
     );
@@ -1159,29 +883,6 @@ describe('runEvalDataset', () => {
       body: expect.any(Buffer),
     });
   });
-
-  it('should merge schemas from dataset and options', async () => {
-    const mcp = createMockMCP({
-      structuredContent: { name: 'test' },
-    });
-    const context = createContext(mcp);
-
-    const DatasetSchema = z.object({ name: z.string() });
-    const OptionsSchema = z.object({ count: z.number() });
-
-    const dataset = createDataset([
-      createEvalCase({ id: 'case-1', assertions: { schema: 'DatasetSchema' } }),
-    ]);
-    dataset.schemas = { DatasetSchema };
-
-    const result = await runEvalDataset(
-      { dataset, schemas: { OptionsSchema } },
-      context
-    );
-
-    // Dataset schema should work
-    expect(result.caseResults[0]!.pass).toBe(true);
-  });
 });
 
 describe('filterTags', () => {
@@ -1194,10 +895,10 @@ describe('filterTags', () => {
     const dataset: EvalDataset = {
       name: 'filter-test',
       cases: [
-        { id: 'a', toolName: 'echo', args: {}, tags: ['search'] },
-        { id: 'b', toolName: 'echo', args: {}, tags: ['nav'] },
-        { id: 'c', toolName: 'echo', args: {}, tags: ['search', 'nav'] },
-        { id: 'd', toolName: 'echo', args: {} }, // no tags
+        { id: 'a', input: 'echo', tags: ['search'] },
+        { id: 'b', input: 'echo', tags: ['nav'] },
+        { id: 'c', input: 'echo', tags: ['search', 'nav'] },
+        { id: 'd', input: 'echo' }, // no tags
       ],
     };
     const result = await runEvalDataset(
@@ -1217,8 +918,8 @@ describe('filterTags', () => {
     const dataset: EvalDataset = {
       name: 'no-filter-test',
       cases: [
-        { id: 'x', toolName: 'echo', args: {}, tags: ['search'] },
-        { id: 'y', toolName: 'echo', args: {} },
+        { id: 'x', input: 'echo', tags: ['search'] },
+        { id: 'y', input: 'echo' },
       ],
     };
     const result = await runEvalDataset({ dataset }, createContext());
@@ -1228,7 +929,7 @@ describe('filterTags', () => {
   it('returns zero cases when no cases match filterTags', async () => {
     const dataset: EvalDataset = {
       name: 'no-match-test',
-      cases: [{ id: 'x', toolName: 'echo', args: {}, tags: ['search'] }],
+      cases: [{ id: 'x', input: 'echo', tags: ['search'] }],
     };
     const result = await runEvalDataset(
       { dataset, filterTags: ['nav'] },
@@ -1635,7 +1336,6 @@ describe('evals guide iteration count guardrail warnings', () => {
     const dataset = createDataset([
       createEvalCase({
         id: 'low-iter-case',
-        mode: 'host',
         input: 'find something',
         trials: 3,
       }),
@@ -1667,7 +1367,6 @@ describe('evals guide iteration count guardrail warnings', () => {
     const dataset = createDataset([
       createEvalCase({
         id: 'default-iter-case',
-        mode: 'host',
         input: 'find something',
       }),
     ]);
@@ -1692,7 +1391,6 @@ describe('evals guide iteration count guardrail warnings', () => {
     const dataset = createDataset([
       createEvalCase({
         id: 'sufficient-iter-case',
-        mode: 'host',
         input: 'find something',
         trials: 10,
       }),
@@ -1710,30 +1408,6 @@ describe('evals guide iteration count guardrail warnings', () => {
     consoleSpy.mockRestore();
   });
 
-  it('does not warn for direct mode cases regardless of iterations', async () => {
-    const consoleSpy = vi
-      .spyOn(console, 'warn')
-      .mockImplementation(() => undefined);
-
-    const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
-    const dataset = createDataset([
-      createEvalCase({
-        id: 'direct-case',
-        toolName: 'test-tool',
-        args: { input: 'test' },
-        trials: 1,
-      }),
-    ]);
-
-    await runEvalDataset({ dataset }, createContext(mcp));
-
-    expect(consoleSpy).not.toHaveBeenCalledWith(
-      expect.stringContaining('may not be statistically reliable')
-    );
-
-    consoleSpy.mockRestore();
-  });
-
   it('does not warn when defaultTrials raises the count to >= 10', async () => {
     const consoleSpy = vi
       .spyOn(console, 'warn')
@@ -1742,7 +1416,6 @@ describe('evals guide iteration count guardrail warnings', () => {
     const dataset = createDataset([
       createEvalCase({
         id: 'default-raised-case',
-        mode: 'host',
         input: 'find something',
         // No explicit iterations — defaultTrials will apply
       }),

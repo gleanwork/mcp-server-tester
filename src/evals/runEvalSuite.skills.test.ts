@@ -39,9 +39,7 @@ async function suite(caseOverrides: Record<string, unknown> = {}) {
     path.join(dir, 'cases.json'),
     JSON.stringify({
       name: 'cases',
-      cases: [
-        { id: 'weather', mode: 'host', input: 'Weather?', ...caseOverrides },
-      ],
+      cases: [{ id: 'weather', input: 'Weather?', ...caseOverrides }],
     })
   );
   await fs.writeFile(

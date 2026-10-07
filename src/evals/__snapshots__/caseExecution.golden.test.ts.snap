@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`golden: dataset aggregation > mixed direct and host cases 1`] = `
+exports[`golden: dataset aggregation > two cases, one failing 1`] = `
 {
   "caseResults": [
     {
@@ -13,29 +13,73 @@ exports[`golden: dataset aggregation > mixed direct and host cases 1`] = `
           "pass": true,
         },
       },
+      "hostUsage": {
+        "durationMs": "<time>",
+        "inputTokens": 100,
+        "outputTokens": 20,
+      },
       "id": "d",
       "pass": true,
       "project": "golden",
       "request": {
-        "args": {
-          "city": "London",
-        },
         "expect": {
           "containsText": "sunny",
         },
-        "mode": "direct",
+        "scenario": "Is it sunny in London?",
       },
       "response": {
-        "content": [
+        "response": "It is sunny in London.",
+        "success": true,
+        "toolCalls": [
           {
-            "text": "sunny, 21C",
-            "type": "text",
+            "arguments": {
+              "city": "London",
+            },
+            "name": "get_weather",
+            "output": "sunny",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "name": "search",
           },
         ],
-        "isError": false,
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 100,
+          "outputTokens": 20,
+        },
       },
       "source": "eval",
-      "toolName": "get_weather",
+      "toolName": "mcp_host",
+      "trace": {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "source": "mcp",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "kind": "tool_call",
+            "name": "search",
+            "source": "mcp",
+          },
+        ],
+        "finalText": "It is sunny in London.",
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 100,
+          "outputTokens": 20,
+        },
+      },
     },
     {
       "authType": "none",
@@ -106,7 +150,6 @@ exports[`golden: dataset aggregation > mixed direct and host cases 1`] = `
             ],
           },
         },
-        "mode": "host",
         "scenario": "Weather in London?",
       },
       "response": {
@@ -186,195 +229,10 @@ exports[`golden: dataset aggregation > mixed direct and host cases 1`] = `
     "total": 2,
     "totalHostUsage": {
       "durationMs": "<time>",
-      "inputTokens": 100,
-      "outputTokens": 20,
+      "inputTokens": 200,
+      "outputTokens": 40,
     },
   },
-}
-`;
-
-exports[`golden: direct execution > request 1`] = `
-{
-  "authType": "none",
-  "datasetName": "single-case",
-  "durationMs": "<time>",
-  "expectations": {
-    "textContains": {
-      "details": "Response contains expected text",
-      "pass": true,
-    },
-  },
-  "id": "request",
-  "pass": true,
-  "project": "golden",
-  "request": {
-    "expect": {
-      "containsText": "weather",
-    },
-    "mode": "direct",
-  },
-  "response": {
-    "skill": {
-      "name": "weather",
-    },
-  },
-  "source": "eval",
-  "toolName": "skills/get",
-}
-`;
-
-exports[`golden: direct execution > tool call 1`] = `
-{
-  "authType": "none",
-  "datasetName": "single-case",
-  "durationMs": "<time>",
-  "expectations": {
-    "error": {
-      "details": "Response is not an error as expected",
-      "pass": true,
-    },
-    "textContains": {
-      "details": "Response contains expected text",
-      "pass": true,
-    },
-  },
-  "id": "tool",
-  "pass": true,
-  "project": "golden",
-  "request": {
-    "args": {
-      "city": "London",
-    },
-    "expect": {
-      "containsText": "sunny",
-      "isError": false,
-    },
-    "mode": "direct",
-  },
-  "response": {
-    "content": [
-      {
-        "text": "sunny, 21C",
-        "type": "text",
-      },
-    ],
-    "isError": false,
-  },
-  "source": "eval",
-  "toolName": "get_weather",
-}
-`;
-
-exports[`golden: direct execution > tool call that throws 1`] = `
-{
-  "authType": "none",
-  "datasetName": "single-case",
-  "durationMs": "<time>",
-  "error": "socket closed",
-  "expectations": {},
-  "id": "tool-throws",
-  "pass": false,
-  "project": "golden",
-  "request": {
-    "args": {},
-    "mode": "direct",
-  },
-  "source": "eval",
-  "toolName": "get_weather",
-}
-`;
-
-exports[`golden: direct execution > tool error result 1`] = `
-{
-  "authType": "none",
-  "datasetName": "single-case",
-  "durationMs": "<time>",
-  "expectations": {
-    "error": {
-      "details": "Error message contains expected text",
-      "pass": true,
-    },
-  },
-  "id": "tool-error",
-  "pass": true,
-  "project": "golden",
-  "request": {
-    "args": {},
-    "expect": {
-      "isError": "city",
-    },
-    "mode": "direct",
-  },
-  "response": {
-    "content": [
-      {
-        "text": "city is required",
-        "type": "text",
-      },
-    ],
-    "isError": true,
-  },
-  "source": "eval",
-  "toolName": "get_weather",
-}
-`;
-
-exports[`golden: direct execution > tool result shaped like a host simulation 1`] = `
-{
-  "authType": "none",
-  "datasetName": "single-case",
-  "durationMs": "<time>",
-  "expectations": {
-    "toolsTriggered": {
-      "details": "All tool call expectations met",
-      "pass": true,
-    },
-  },
-  "id": "simulation-shaped",
-  "pass": true,
-  "project": "golden",
-  "request": {
-    "args": {},
-    "expect": {
-      "toolsTriggered": {
-        "calls": [
-          {
-            "name": "get_weather",
-            "required": true,
-          },
-        ],
-      },
-    },
-    "mode": "direct",
-  },
-  "response": {
-    "response": "It is sunny in London.",
-    "success": true,
-    "toolCalls": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "name": "get_weather",
-        "output": "sunny",
-      },
-      {
-        "arguments": {
-          "q": "London",
-        },
-        "name": "search",
-      },
-    ],
-    "usage": {
-      "durationMs": "<time>",
-      "inputTokens": 100,
-      "outputTokens": 20,
-    },
-  },
-  "source": "eval",
-  "toolName": "fake_host",
-  "toolPrecision": 0.5,
-  "toolRecall": 1,
 }
 `;
 
@@ -408,7 +266,6 @@ exports[`golden: host traces through executeCase > executeCase that throws 1`] =
         ],
       },
     },
-    "mode": "host",
     "scenario": "Weather in London?",
   },
   "source": "eval",
@@ -455,7 +312,6 @@ exports[`golden: host traces through executeCase > host trace error 1`] = `
         ],
       },
     },
-    "mode": "host",
     "scenario": "Weather in London?",
   },
   "response": {
@@ -599,7 +455,6 @@ exports[`golden: host traces through executeCase > none evidence 1`] = `
         ],
       },
     },
-    "mode": "host",
     "scenario": "Weather in London?",
   },
   "response": {
@@ -742,7 +597,6 @@ exports[`golden: host traces through executeCase > observed evidence 1`] = `
         ],
       },
     },
-    "mode": "host",
     "scenario": "Weather in London?",
   },
   "response": {
@@ -902,7 +756,6 @@ exports[`golden: host traces through executeCase > structured evidence 1`] = `
         ],
       },
     },
-    "mode": "host",
     "scenario": "Weather in London?",
   },
   "response": {
@@ -1056,7 +909,6 @@ exports[`golden: judges > judges a host response 1`] = `
           "judge": "test/golden-case-judge",
         },
       },
-      "mode": "host",
       "scenario": "Weather in London?",
     },
     "response": {
@@ -1122,13 +974,28 @@ exports[`golden: judges > one judge with case reps and the canonical answer as r
     [
       "golden-case-judge",
       {
-        "content": [
+        "response": "It is sunny in London.",
+        "success": true,
+        "toolCalls": [
           {
-            "text": "sunny, 21C",
-            "type": "text",
+            "arguments": {
+              "city": "London",
+            },
+            "name": "get_weather",
+            "output": "sunny",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "name": "search",
           },
         ],
-        "isError": false,
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 100,
+          "outputTokens": 20,
+        },
       },
       "sunny",
       {},
@@ -1136,13 +1003,28 @@ exports[`golden: judges > one judge with case reps and the canonical answer as r
     [
       "golden-case-judge",
       {
-        "content": [
+        "response": "It is sunny in London.",
+        "success": true,
+        "toolCalls": [
           {
-            "text": "sunny, 21C",
-            "type": "text",
+            "arguments": {
+              "city": "London",
+            },
+            "name": "get_weather",
+            "output": "sunny",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "name": "search",
           },
         ],
-        "isError": false,
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 100,
+          "outputTokens": 20,
+        },
       },
       "sunny",
       {},
@@ -1161,32 +1043,77 @@ exports[`golden: judges > one judge with case reps and the canonical answer as r
         "score": 0.9,
       },
     },
+    "hostUsage": {
+      "durationMs": "<time>",
+      "inputTokens": 100,
+      "outputTokens": 20,
+    },
     "id": "judged",
     "pass": true,
     "project": "golden",
     "request": {
-      "args": {
-        "city": "London",
-      },
       "expect": {
         "passesJudge": {
           "judge": "test/golden-case-judge",
         },
       },
       "judgeReps": 2,
-      "mode": "direct",
+      "reference": "sunny",
+      "scenario": "Weather in London?",
     },
     "response": {
-      "content": [
+      "response": "It is sunny in London.",
+      "success": true,
+      "toolCalls": [
         {
-          "text": "sunny, 21C",
-          "type": "text",
+          "arguments": {
+            "city": "London",
+          },
+          "name": "get_weather",
+          "output": "sunny",
+        },
+        {
+          "arguments": {
+            "q": "London",
+          },
+          "name": "search",
         },
       ],
-      "isError": false,
+      "usage": {
+        "durationMs": "<time>",
+        "inputTokens": 100,
+        "outputTokens": 20,
+      },
     },
     "source": "eval",
-    "toolName": "get_weather",
+    "toolName": "mcp_host",
+    "trace": {
+      "events": [
+        {
+          "arguments": {
+            "city": "London",
+          },
+          "kind": "tool_call",
+          "name": "get_weather",
+          "output": "sunny",
+          "source": "mcp",
+        },
+        {
+          "arguments": {
+            "q": "London",
+          },
+          "kind": "tool_call",
+          "name": "search",
+          "source": "mcp",
+        },
+      ],
+      "finalText": "It is sunny in London.",
+      "usage": {
+        "durationMs": "<time>",
+        "inputTokens": 100,
+        "outputTokens": 20,
+      },
+    },
   },
 }
 `;
@@ -1197,13 +1124,28 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
     [
       "golden-case-judge",
       {
-        "content": [
+        "response": "It is sunny in London.",
+        "success": true,
+        "toolCalls": [
           {
-            "text": "sunny, 21C",
-            "type": "text",
+            "arguments": {
+              "city": "London",
+            },
+            "name": "get_weather",
+            "output": "sunny",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "name": "search",
           },
         ],
-        "isError": false,
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 100,
+          "outputTokens": 20,
+        },
       },
       "explicit",
       {},
@@ -1211,39 +1153,84 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
     [
       "golden-strict-judge",
       {
-        "content": [
+        "response": "It is sunny in London.",
+        "success": true,
+        "toolCalls": [
           {
-            "text": "sunny, 21C",
-            "type": "text",
+            "arguments": {
+              "city": "London",
+            },
+            "name": "get_weather",
+            "output": "sunny",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "name": "search",
           },
         ],
-        "isError": false,
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 100,
+          "outputTokens": 20,
+        },
       },
       "unused",
     ],
     [
       "golden-strict-judge",
       {
-        "content": [
+        "response": "It is sunny in London.",
+        "success": true,
+        "toolCalls": [
           {
-            "text": "sunny, 21C",
-            "type": "text",
+            "arguments": {
+              "city": "London",
+            },
+            "name": "get_weather",
+            "output": "sunny",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "name": "search",
           },
         ],
-        "isError": false,
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 100,
+          "outputTokens": 20,
+        },
       },
       "unused",
     ],
     [
       "golden-strict-judge",
       {
-        "content": [
+        "response": "It is sunny in London.",
+        "success": true,
+        "toolCalls": [
           {
-            "text": "sunny, 21C",
-            "type": "text",
+            "arguments": {
+              "city": "London",
+            },
+            "name": "get_weather",
+            "output": "sunny",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "name": "search",
           },
         ],
-        "isError": false,
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 100,
+          "outputTokens": 20,
+        },
       },
       "unused",
     ],
@@ -1274,13 +1261,15 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
         "pass": false,
       },
     },
+    "hostUsage": {
+      "durationMs": "<time>",
+      "inputTokens": 100,
+      "outputTokens": 20,
+    },
     "id": "multi-judged",
     "pass": false,
     "project": "golden",
     "request": {
-      "args": {
-        "city": "London",
-      },
       "expect": {
         "passesJudge": [
           {
@@ -1295,19 +1284,62 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
         ],
       },
       "judgeReps": 3,
-      "mode": "direct",
+      "reference": "unused",
+      "scenario": "Weather in London?",
     },
     "response": {
-      "content": [
+      "response": "It is sunny in London.",
+      "success": true,
+      "toolCalls": [
         {
-          "text": "sunny, 21C",
-          "type": "text",
+          "arguments": {
+            "city": "London",
+          },
+          "name": "get_weather",
+          "output": "sunny",
+        },
+        {
+          "arguments": {
+            "q": "London",
+          },
+          "name": "search",
         },
       ],
-      "isError": false,
+      "usage": {
+        "durationMs": "<time>",
+        "inputTokens": 100,
+        "outputTokens": 20,
+      },
     },
     "source": "eval",
-    "toolName": "get_weather",
+    "toolName": "mcp_host",
+    "trace": {
+      "events": [
+        {
+          "arguments": {
+            "city": "London",
+          },
+          "kind": "tool_call",
+          "name": "get_weather",
+          "output": "sunny",
+          "source": "mcp",
+        },
+        {
+          "arguments": {
+            "q": "London",
+          },
+          "kind": "tool_call",
+          "name": "search",
+          "source": "mcp",
+        },
+      ],
+      "finalText": "It is sunny in London.",
+      "usage": {
+        "durationMs": "<time>",
+        "inputTokens": 100,
+        "outputTokens": 20,
+      },
+    },
   },
 }
 `;
@@ -1322,13 +1354,28 @@ exports[`golden: rubric judges > a built-in rubric with the default provider and
     [
       "llm.evaluate",
       {
-        "content": [
+        "response": "It is sunny in London.",
+        "success": true,
+        "toolCalls": [
           {
-            "text": "sunny, 21C",
-            "type": "text",
+            "arguments": {
+              "city": "London",
+            },
+            "name": "get_weather",
+            "output": "sunny",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "name": "search",
           },
         ],
-        "isError": false,
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 100,
+          "outputTokens": 20,
+        },
       },
       "sunny",
       "Evaluate whether the response is factually correct and accurately answers the question. Compare against the reference answer if provided. Score 1.0 for fully correct with no errors; Score 0.75 for mostly correct with one minor inaccuracy or omission; Score 0.5 for partially correct — answers part of the question but misses key elements; Score 0.25 for minimally relevant but substantially incorrect or missing most key details; Score 0.0 for incorrect, irrelevant, or directly contradicting the reference.",
@@ -1348,31 +1395,76 @@ exports[`golden: rubric judges > a built-in rubric with the default provider and
         "score": 0.8,
       },
     },
+    "hostUsage": {
+      "durationMs": "<time>",
+      "inputTokens": 100,
+      "outputTokens": 20,
+    },
     "id": "rubric-judged",
     "pass": true,
     "project": "golden",
     "request": {
-      "args": {
-        "city": "London",
-      },
       "expect": {
         "passesJudge": {
           "rubric": "correctness",
         },
       },
-      "mode": "direct",
+      "reference": "sunny",
+      "scenario": "Weather in London?",
     },
     "response": {
-      "content": [
+      "response": "It is sunny in London.",
+      "success": true,
+      "toolCalls": [
         {
-          "text": "sunny, 21C",
-          "type": "text",
+          "arguments": {
+            "city": "London",
+          },
+          "name": "get_weather",
+          "output": "sunny",
+        },
+        {
+          "arguments": {
+            "q": "London",
+          },
+          "name": "search",
         },
       ],
-      "isError": false,
+      "usage": {
+        "durationMs": "<time>",
+        "inputTokens": 100,
+        "outputTokens": 20,
+      },
     },
     "source": "eval",
-    "toolName": "get_weather",
+    "toolName": "mcp_host",
+    "trace": {
+      "events": [
+        {
+          "arguments": {
+            "city": "London",
+          },
+          "kind": "tool_call",
+          "name": "get_weather",
+          "output": "sunny",
+          "source": "mcp",
+        },
+        {
+          "arguments": {
+            "q": "London",
+          },
+          "kind": "tool_call",
+          "name": "search",
+          "source": "mcp",
+        },
+      ],
+      "finalText": "It is sunny in London.",
+      "usage": {
+        "durationMs": "<time>",
+        "inputTokens": 100,
+        "outputTokens": 20,
+      },
+    },
   },
 }
 `;
@@ -1394,13 +1486,28 @@ exports[`golden: rubric judges > a custom-text rubric with provider, model, LLM 
     [
       "llm.evaluate",
       {
-        "content": [
+        "response": "It is sunny in London.",
+        "success": true,
+        "toolCalls": [
           {
-            "text": "sunny, 21C",
-            "type": "text",
+            "arguments": {
+              "city": "London",
+            },
+            "name": "get_weather",
+            "output": "sunny",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "name": "search",
           },
         ],
-        "isError": false,
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 100,
+          "outputTokens": 20,
+        },
       },
       "It is sunny.",
       "Does it say it is sunny?",
@@ -1421,13 +1528,15 @@ exports[`golden: rubric judges > a custom-text rubric with provider, model, LLM 
         "score": 0.6,
       },
     },
+    "hostUsage": {
+      "durationMs": "<time>",
+      "inputTokens": 100,
+      "outputTokens": 20,
+    },
     "id": "rubric-custom",
     "pass": false,
     "project": "golden",
     "request": {
-      "args": {
-        "city": "London",
-      },
       "expect": {
         "passesJudge": {
           "apiKeyEnvVar": "[redacted]",
@@ -1444,19 +1553,61 @@ Answer carefully.",
           "threshold": 0.9,
         },
       },
-      "mode": "direct",
+      "scenario": "Weather in London?",
     },
     "response": {
-      "content": [
+      "response": "It is sunny in London.",
+      "success": true,
+      "toolCalls": [
         {
-          "text": "sunny, 21C",
-          "type": "text",
+          "arguments": {
+            "city": "London",
+          },
+          "name": "get_weather",
+          "output": "sunny",
+        },
+        {
+          "arguments": {
+            "q": "London",
+          },
+          "name": "search",
         },
       ],
-      "isError": false,
+      "usage": {
+        "durationMs": "<time>",
+        "inputTokens": 100,
+        "outputTokens": 20,
+      },
     },
     "source": "eval",
-    "toolName": "get_weather",
+    "toolName": "mcp_host",
+    "trace": {
+      "events": [
+        {
+          "arguments": {
+            "city": "London",
+          },
+          "kind": "tool_call",
+          "name": "get_weather",
+          "output": "sunny",
+          "source": "mcp",
+        },
+        {
+          "arguments": {
+            "q": "London",
+          },
+          "kind": "tool_call",
+          "name": "search",
+          "source": "mcp",
+        },
+      ],
+      "finalText": "It is sunny in London.",
+      "usage": {
+        "durationMs": "<time>",
+        "inputTokens": 100,
+        "outputTokens": 20,
+      },
+    },
   },
 }
 `;
@@ -1471,13 +1622,28 @@ exports[`golden: rubric judges > a judge client error fails the expectation 1`] 
     [
       "llm.evaluate",
       {
-        "content": [
+        "response": "It is sunny in London.",
+        "success": true,
+        "toolCalls": [
           {
-            "text": "sunny, 21C",
-            "type": "text",
+            "arguments": {
+              "city": "London",
+            },
+            "name": "get_weather",
+            "output": "sunny",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "name": "search",
           },
         ],
-        "isError": false,
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 100,
+          "outputTokens": 20,
+        },
       },
       null,
       "Evaluate whether the response is factually correct and accurately answers the question. Compare against the reference answer if provided. Score 1.0 for fully correct with no errors; Score 0.75 for mostly correct with one minor inaccuracy or omission; Score 0.5 for partially correct — answers part of the question but misses key elements; Score 0.25 for minimally relevant but substantially incorrect or missing most key details; Score 0.0 for incorrect, irrelevant, or directly contradicting the reference.",
@@ -1494,31 +1660,75 @@ exports[`golden: rubric judges > a judge client error fails the expectation 1`] 
         "pass": false,
       },
     },
+    "hostUsage": {
+      "durationMs": "<time>",
+      "inputTokens": 100,
+      "outputTokens": 20,
+    },
     "id": "rubric-error",
     "pass": false,
     "project": "golden",
     "request": {
-      "args": {
-        "city": "London",
-      },
       "expect": {
         "passesJudge": {
           "rubric": "correctness",
         },
       },
-      "mode": "direct",
+      "scenario": "Weather in London?",
     },
     "response": {
-      "content": [
+      "response": "It is sunny in London.",
+      "success": true,
+      "toolCalls": [
         {
-          "text": "sunny, 21C",
-          "type": "text",
+          "arguments": {
+            "city": "London",
+          },
+          "name": "get_weather",
+          "output": "sunny",
+        },
+        {
+          "arguments": {
+            "q": "London",
+          },
+          "name": "search",
         },
       ],
-      "isError": false,
+      "usage": {
+        "durationMs": "<time>",
+        "inputTokens": 100,
+        "outputTokens": 20,
+      },
     },
     "source": "eval",
-    "toolName": "get_weather",
+    "toolName": "mcp_host",
+    "trace": {
+      "events": [
+        {
+          "arguments": {
+            "city": "London",
+          },
+          "kind": "tool_call",
+          "name": "get_weather",
+          "output": "sunny",
+          "source": "mcp",
+        },
+        {
+          "arguments": {
+            "q": "London",
+          },
+          "kind": "tool_call",
+          "name": "search",
+          "source": "mcp",
+        },
+      ],
+      "finalText": "It is sunny in London.",
+      "usage": {
+        "durationMs": "<time>",
+        "inputTokens": 100,
+        "outputTokens": 20,
+      },
+    },
   },
 }
 `;
@@ -1533,13 +1743,28 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
     [
       "llm.evaluate",
       {
-        "content": [
+        "response": "It is sunny in London.",
+        "success": true,
+        "toolCalls": [
           {
-            "text": "sunny, 21C",
-            "type": "text",
+            "arguments": {
+              "city": "London",
+            },
+            "name": "get_weather",
+            "output": "sunny",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "name": "search",
           },
         ],
-        "isError": false,
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 100,
+          "outputTokens": 20,
+        },
       },
       null,
       "Evaluate whether the response is appropriately concise without losing important information. Penalize unnecessary verbosity, padding, or repetition. Score 1.0 for well-sized — concise and complete with no unnecessary content; Score 0.75 for slightly verbose but no information is lost or repeated; Score 0.5 for moderately verbose — some padding or repetition that reduces clarity; Score 0.25 for excessively verbose — significantly overlong with substantial filler or repetition; Score 0.0 for extremely verbose — so padded or repetitive that the core answer is obscured.",
@@ -1547,13 +1772,28 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
     [
       "golden-case-judge",
       {
-        "content": [
+        "response": "It is sunny in London.",
+        "success": true,
+        "toolCalls": [
           {
-            "text": "sunny, 21C",
-            "type": "text",
+            "arguments": {
+              "city": "London",
+            },
+            "name": "get_weather",
+            "output": "sunny",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "name": "search",
           },
         ],
-        "isError": false,
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 100,
+          "outputTokens": 20,
+        },
       },
       null,
       {},
@@ -1561,13 +1801,28 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
     [
       "golden-case-judge",
       {
-        "content": [
+        "response": "It is sunny in London.",
+        "success": true,
+        "toolCalls": [
           {
-            "text": "sunny, 21C",
-            "type": "text",
+            "arguments": {
+              "city": "London",
+            },
+            "name": "get_weather",
+            "output": "sunny",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "name": "search",
           },
         ],
-        "isError": false,
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 100,
+          "outputTokens": 20,
+        },
       },
       null,
       {},
@@ -1579,13 +1834,28 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
     [
       "llm.evaluate",
       {
-        "content": [
+        "response": "It is sunny in London.",
+        "success": true,
+        "toolCalls": [
           {
-            "text": "sunny, 21C",
-            "type": "text",
+            "arguments": {
+              "city": "London",
+            },
+            "name": "get_weather",
+            "output": "sunny",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "name": "search",
           },
         ],
-        "isError": false,
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 100,
+          "outputTokens": 20,
+        },
       },
       null,
       "Evaluate whether the response is appropriately concise without losing important information. Penalize unnecessary verbosity, padding, or repetition. Score 1.0 for well-sized — concise and complete with no unnecessary content; Score 0.75 for slightly verbose but no information is lost or repeated; Score 0.5 for moderately verbose — some padding or repetition that reduces clarity; Score 0.25 for excessively verbose — significantly overlong with substantial filler or repetition; Score 0.0 for extremely verbose — so padded or repetitive that the core answer is obscured.",
@@ -1617,13 +1887,15 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
         "pass": true,
       },
     },
+    "hostUsage": {
+      "durationMs": "<time>",
+      "inputTokens": 100,
+      "outputTokens": 20,
+    },
     "id": "rubric-and-plugin",
     "pass": true,
     "project": "golden",
     "request": {
-      "args": {
-        "city": "London",
-      },
       "expect": {
         "passesJudge": [
           {
@@ -1635,19 +1907,61 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
         ],
       },
       "judgeReps": 2,
-      "mode": "direct",
+      "scenario": "Weather in London?",
     },
     "response": {
-      "content": [
+      "response": "It is sunny in London.",
+      "success": true,
+      "toolCalls": [
         {
-          "text": "sunny, 21C",
-          "type": "text",
+          "arguments": {
+            "city": "London",
+          },
+          "name": "get_weather",
+          "output": "sunny",
+        },
+        {
+          "arguments": {
+            "q": "London",
+          },
+          "name": "search",
         },
       ],
-      "isError": false,
+      "usage": {
+        "durationMs": "<time>",
+        "inputTokens": 100,
+        "outputTokens": 20,
+      },
     },
     "source": "eval",
-    "toolName": "get_weather",
+    "toolName": "mcp_host",
+    "trace": {
+      "events": [
+        {
+          "arguments": {
+            "city": "London",
+          },
+          "kind": "tool_call",
+          "name": "get_weather",
+          "output": "sunny",
+          "source": "mcp",
+        },
+        {
+          "arguments": {
+            "q": "London",
+          },
+          "kind": "tool_call",
+          "name": "search",
+          "source": "mcp",
+        },
+      ],
+      "finalText": "It is sunny in London.",
+      "usage": {
+        "durationMs": "<time>",
+        "inputTokens": 100,
+        "outputTokens": 20,
+      },
+    },
   },
 }
 `;
@@ -1662,13 +1976,28 @@ exports[`golden: rubric judges > reps average the scores and report their spread
     [
       "llm.evaluate",
       {
-        "content": [
+        "response": "It is sunny in London.",
+        "success": true,
+        "toolCalls": [
           {
-            "text": "sunny, 21C",
-            "type": "text",
+            "arguments": {
+              "city": "London",
+            },
+            "name": "get_weather",
+            "output": "sunny",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "name": "search",
           },
         ],
-        "isError": false,
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 100,
+          "outputTokens": 20,
+        },
       },
       null,
       "Evaluate whether the response fully addresses all aspects of the question. Score 1.0 if the response covers all key points comprehensively; Score 0.75 if the response covers most key points with one minor gap; Score 0.5 if the response partially answers — covers some aspects but misses others; Score 0.25 if the response touches on the topic but misses most key aspects; Score 0.0 if major aspects of the question are entirely missing or the response is off-topic.",
@@ -1680,13 +2009,28 @@ exports[`golden: rubric judges > reps average the scores and report their spread
     [
       "llm.evaluate",
       {
-        "content": [
+        "response": "It is sunny in London.",
+        "success": true,
+        "toolCalls": [
           {
-            "text": "sunny, 21C",
-            "type": "text",
+            "arguments": {
+              "city": "London",
+            },
+            "name": "get_weather",
+            "output": "sunny",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "name": "search",
           },
         ],
-        "isError": false,
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 100,
+          "outputTokens": 20,
+        },
       },
       null,
       "Evaluate whether the response fully addresses all aspects of the question. Score 1.0 if the response covers all key points comprehensively; Score 0.75 if the response covers most key points with one minor gap; Score 0.5 if the response partially answers — covers some aspects but misses others; Score 0.25 if the response touches on the topic but misses most key aspects; Score 0.0 if major aspects of the question are entirely missing or the response is off-topic.",
@@ -1698,13 +2042,28 @@ exports[`golden: rubric judges > reps average the scores and report their spread
     [
       "llm.evaluate",
       {
-        "content": [
+        "response": "It is sunny in London.",
+        "success": true,
+        "toolCalls": [
           {
-            "text": "sunny, 21C",
-            "type": "text",
+            "arguments": {
+              "city": "London",
+            },
+            "name": "get_weather",
+            "output": "sunny",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "name": "search",
           },
         ],
-        "isError": false,
+        "usage": {
+          "durationMs": "<time>",
+          "inputTokens": 100,
+          "outputTokens": 20,
+        },
       },
       null,
       "Evaluate whether the response fully addresses all aspects of the question. Score 1.0 if the response covers all key points comprehensively; Score 0.75 if the response covers most key points with one minor gap; Score 0.5 if the response partially answers — covers some aspects but misses others; Score 0.25 if the response touches on the topic but misses most key aspects; Score 0.0 if major aspects of the question are entirely missing or the response is off-topic.",
@@ -1724,32 +2083,76 @@ exports[`golden: rubric judges > reps average the scores and report their spread
         "score": 0.533333333333,
       },
     },
+    "hostUsage": {
+      "durationMs": "<time>",
+      "inputTokens": 100,
+      "outputTokens": 20,
+    },
     "id": "rubric-reps",
     "pass": false,
     "project": "golden",
     "request": {
-      "args": {
-        "city": "London",
-      },
       "expect": {
         "passesJudge": {
           "reps": 3,
           "rubric": "completeness",
         },
       },
-      "mode": "direct",
+      "scenario": "Weather in London?",
     },
     "response": {
-      "content": [
+      "response": "It is sunny in London.",
+      "success": true,
+      "toolCalls": [
         {
-          "text": "sunny, 21C",
-          "type": "text",
+          "arguments": {
+            "city": "London",
+          },
+          "name": "get_weather",
+          "output": "sunny",
+        },
+        {
+          "arguments": {
+            "q": "London",
+          },
+          "name": "search",
         },
       ],
-      "isError": false,
+      "usage": {
+        "durationMs": "<time>",
+        "inputTokens": 100,
+        "outputTokens": 20,
+      },
     },
     "source": "eval",
-    "toolName": "get_weather",
+    "toolName": "mcp_host",
+    "trace": {
+      "events": [
+        {
+          "arguments": {
+            "city": "London",
+          },
+          "kind": "tool_call",
+          "name": "get_weather",
+          "output": "sunny",
+          "source": "mcp",
+        },
+        {
+          "arguments": {
+            "q": "London",
+          },
+          "kind": "tool_call",
+          "name": "search",
+          "source": "mcp",
+        },
+      ],
+      "finalText": "It is sunny in London.",
+      "usage": {
+        "durationMs": "<time>",
+        "inputTokens": 100,
+        "outputTokens": 20,
+      },
+    },
   },
 }
 `;
@@ -1945,7 +2348,6 @@ exports[`golden: runEvalSuite hosts > a manifest declares two rubric judges and 
             },
           ],
         },
-        "mode": "host",
         "scenario": "Weather in London?",
       },
       "response": {
@@ -2219,7 +2621,6 @@ exports[`golden: runEvalSuite hosts > manifest judges merge with case judges 1`]
             },
           ],
         },
-        "mode": "host",
         "reference": "canonical",
         "scenario": "Weather in London?",
       },
@@ -2371,7 +2772,6 @@ exports[`golden: runEvalSuite hosts > run host 1`] = `
           ],
         },
       },
-      "mode": "host",
       "scenario": "Weather in London?",
     },
     "response": {
@@ -2523,7 +2923,6 @@ exports[`golden: runEvalSuite hosts > runBatch host 1`] = `
           ],
         },
       },
-      "mode": "host",
       "scenario": "Weather in London?",
     },
     "response": {
@@ -2825,7 +3224,6 @@ exports[`golden: the mst client (dataset API) > iterations exclude infrastructur
       },
     },
     "iterations": 3,
-    "mode": "host",
     "scenario": "Weather in London?",
   },
   "response": {
@@ -2925,7 +3323,6 @@ exports[`golden: the mst client (dataset API) > maps native tool names through t
         ],
       },
     },
-    "mode": "host",
     "scenario": "Weather in London?",
   },
   "response": {
@@ -3016,7 +3413,6 @@ exports[`golden: the mst client (dataset API) > simulation failure 1`] = `
         ],
       },
     },
-    "mode": "host",
     "scenario": "Weather in London?",
   },
   "source": "eval",
@@ -3094,7 +3490,6 @@ exports[`golden: the mst client (dataset API) > succeeds with tool evidence and 
         ],
       },
     },
-    "mode": "host",
     "scenario": "Weather in London?",
   },
   "response": {

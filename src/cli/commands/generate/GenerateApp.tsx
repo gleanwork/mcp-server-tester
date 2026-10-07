@@ -15,12 +15,13 @@ import {
 } from '../../../config/mcpConfig.js';
 import { listKnownServers, type KnownServer } from '../../../auth/storage.js';
 import { CLIOAuthClient } from '../../../auth/cli.js';
-import type {
-  EvalDataset,
-  EvalCase,
-  SerializedEvalDataset,
-} from '../../../evals/datasetTypes.js';
 import { suggestExpectations } from '../../utils/expectationSuggester.js';
+import {
+  appendToolChecks,
+  canAppendToolChecks,
+  renderToolTestSpec,
+  type ToolCheck,
+} from '../../utils/toolTestSpec.js';
 import { writeFile, readFile, stat, mkdir } from 'fs/promises';
 import { resolve, dirname } from 'path';
 
@@ -32,7 +33,7 @@ type Step =
   | 'configHttp'
   | 'connecting'
   | 'authRequired'
-  | 'datasetName'
+  | 'suiteName'
   | 'appendPrompt'
   | 'selectTool'
   | 'enterArgField'
@@ -102,6 +103,8 @@ export function GenerateApp({ options }: GenerateAppProps) {
   const [tools, setTools] = useState<Tool[]>([]);
   const [selectedTool, setSelectedTool] = useState<Tool | null>(null);
   const [response, setResponse] = useState<unknown>(null);
+  // The whole result, which an exact-match assertion compares against.
+  const [fullResult, setFullResult] = useState<unknown>(null);
   const [callError, setCallError] = useState<string | null>(null);
 
   // Schema form state
@@ -111,16 +114,18 @@ export function GenerateApp({ options }: GenerateAppProps) {
   const [currentPropertyIndex, setCurrentPropertyIndex] = useState(0);
   const [argValues, setArgValues] = useState<Record<string, unknown>>({});
 
-  // Dataset state
-  const [dataset, setDataset] = useState<EvalDataset>({
-    name: 'my-mcp-evals',
-    description: 'Generated eval dataset',
-    cases: [],
+  // Spec state: the tests to write, and the file they go into
+  const [spec, setSpec] = useState<{ name: string; checks: ToolCheck[] }>({
+    name: 'MCP tools',
+    checks: [],
   });
-  const [outputPath] = useState(resolve(options.output || 'data/dataset.json'));
+  const [existingSource, setExistingSource] = useState<string | null>(null);
+  const [outputPath] = useState(
+    resolve(options.output || 'tests/generated.spec.ts')
+  );
 
-  // Current case state
-  const [currentCase, setCurrentCase] = useState<Partial<EvalCase>>({});
+  // Current test state
+  const [currentCase, setCurrentCase] = useState<Partial<ToolCheck>>({});
   const [suggestions, setSuggestions] = useState<{
     textContains: string[];
     regex: string[];
@@ -229,7 +234,7 @@ export function GenerateApp({ options }: GenerateAppProps) {
         if (fileExists) {
           setStep('appendPrompt');
         } else {
-          setStep('datasetName');
+          setStep('suiteName');
         }
       } catch (err) {
         if (isMountedRef.current) {
@@ -256,6 +261,7 @@ export function GenerateApp({ options }: GenerateAppProps) {
       });
       const responseData = result.structuredContent ?? result.content;
       setResponse(responseData);
+      setFullResult(result);
       setCallError(null);
 
       // Get suggestions
@@ -275,23 +281,35 @@ export function GenerateApp({ options }: GenerateAppProps) {
     }
   }
 
-  async function saveDataset() {
-    try {
-      // Note: We use the EvalDataset type for building, then serialize.
-      // The CLI only creates string patterns, so this is JSON-safe.
-      const serialized = {
-        name: dataset.name,
-        description: dataset.description,
-        cases: dataset.cases,
-        metadata: {
-          version: '1.0',
-          created: new Date().toISOString().split('T')[0],
-        },
-      };
+  /** Add the recorded call as a test. */
+  function addCheck(check: Partial<ToolCheck>) {
+    const complete: ToolCheck = {
+      id: check.id!,
+      toolName: check.toolName!,
+      args: check.args!,
+      ...(check.description !== undefined
+        ? { description: check.description }
+        : {}),
+      ...(check.containsText ? { containsText: check.containsText } : {}),
+      ...(check.matchesPattern ? { matchesPattern: check.matchesPattern } : {}),
+      ...(check.response !== undefined ? { response: check.response } : {}),
+      ...(check.snapshot ? { snapshot: true } : {}),
+    };
+    setSpec((current) => ({
+      ...current,
+      checks: [...current.checks, complete],
+    }));
+  }
 
+  async function saveSpec() {
+    try {
+      const source =
+        existingSource !== null
+          ? appendToolChecks(existingSource, spec.checks)
+          : renderToolTestSpec(spec.name, spec.checks);
       // Create directory if it doesn't exist
       await mkdir(dirname(outputPath), { recursive: true });
-      await writeFile(outputPath, JSON.stringify(serialized, null, 2));
+      await writeFile(outputPath, source);
       setStep('done');
     } catch (err) {
       setError(
@@ -480,30 +498,27 @@ export function GenerateApp({ options }: GenerateAppProps) {
             Connected! Found {tools.length} tools
           </StatusMessage>
           <Text> </Text>
-          <Text>Dataset file exists at {outputPath}. Append to it?</Text>
+          <Text>Spec file exists at {outputPath}. Add tests to it?</Text>
           <ConfirmInput
             onConfirm={async () => {
-              try {
-                const content = await readFile(outputPath, 'utf-8');
-                const existing = JSON.parse(content) as SerializedEvalDataset;
-                setDataset({
-                  name: existing.name,
-                  description: existing.description,
-                  cases: existing.cases,
-                  metadata: existing.metadata,
-                });
-                setStep('selectTool');
-              } catch {
-                setStep('datasetName');
+              const content = await readFile(outputPath, 'utf-8');
+              if (!canAppendToolChecks(content)) {
+                setError(
+                  `${outputPath} wasn't written by mst generate, so it can't add tests to it. Choose a new --output file.`
+                );
+                setStep('error');
+                return;
               }
+              setExistingSource(content);
+              setStep('selectTool');
             }}
-            onCancel={() => setStep('datasetName')}
+            onCancel={() => setStep('suiteName')}
           />
         </Box>
       )}
 
-      {/* Dataset name */}
-      {step === 'datasetName' && (
+      {/* Test suite name */}
+      {step === 'suiteName' && (
         <Box flexDirection="column">
           {client && (
             <StatusMessage status="success">
@@ -511,11 +526,11 @@ export function GenerateApp({ options }: GenerateAppProps) {
             </StatusMessage>
           )}
           <Text> </Text>
-          <Text>Dataset name:</Text>
+          <Text>Test suite name:</Text>
           <TextInput
-            defaultValue="my-mcp-evals"
+            defaultValue="MCP tools"
             onSubmit={(value) => {
-              setDataset((d) => ({ ...d, name: value }));
+              setSpec((current) => ({ ...current, name: value }));
               setStep('selectTool');
             }}
           />
@@ -723,9 +738,9 @@ export function GenerateApp({ options }: GenerateAppProps) {
       {/* Case ID */}
       {step === 'caseId' && (
         <Box flexDirection="column">
-          <Text>Test case ID:</Text>
+          <Text>Test name:</Text>
           <TextInput
-            defaultValue={`${selectedTool?.name}-${dataset.cases.length + 1}`}
+            defaultValue={`${selectedTool?.name}-${spec.checks.length + 1}`}
             onSubmit={(value) => {
               setCurrentCase((c) => ({ ...c, id: value }));
               setStep('caseDescription');
@@ -746,15 +761,12 @@ export function GenerateApp({ options }: GenerateAppProps) {
                 description: value || undefined,
               }));
               if (options.snapshot) {
-                // Skip to adding case with snapshot
-                const newCase: EvalCase = {
-                  id: currentCase.id!,
+                // Skip to adding the test with a snapshot
+                addCheck({
+                  ...currentCase,
                   description: value || undefined,
-                  toolName: currentCase.toolName!,
-                  args: currentCase.args!,
-                  assertions: { snapshot: currentCase.id! },
-                };
-                setDataset((d) => ({ ...d, cases: [...d.cases, newCase] }));
+                  snapshot: true,
+                });
                 setStep('askContinue');
               } else {
                 setStep('useTextContains');
@@ -775,10 +787,7 @@ export function GenerateApp({ options }: GenerateAppProps) {
             onConfirm={() => {
               setCurrentCase((c) => ({
                 ...c,
-                assertions: {
-                  ...c.assertions,
-                  containsText: suggestions.textContains,
-                },
+                containsText: suggestions.textContains,
               }));
               setStep('useRegex');
             }}
@@ -798,10 +807,7 @@ export function GenerateApp({ options }: GenerateAppProps) {
             onConfirm={() => {
               setCurrentCase((c) => ({
                 ...c,
-                assertions: {
-                  ...c.assertions,
-                  matchesPattern: suggestions.regex,
-                },
+                matchesPattern: suggestions.regex,
               }));
               setStep('useExact');
             }}
@@ -816,13 +822,7 @@ export function GenerateApp({ options }: GenerateAppProps) {
           <Text>Add exact match expectation?</Text>
           <ConfirmInput
             onConfirm={() => {
-              setCurrentCase((c) => ({
-                ...c,
-                assertions: {
-                  ...c.assertions,
-                  response,
-                },
-              }));
+              setCurrentCase((c) => ({ ...c, response: fullResult }));
               setStep('useSnapshot');
             }}
             onCancel={() => setStep('useSnapshot')}
@@ -836,28 +836,11 @@ export function GenerateApp({ options }: GenerateAppProps) {
           <Text>Use Playwright snapshot testing?</Text>
           <ConfirmInput
             onConfirm={() => {
-              const newCase: EvalCase = {
-                id: currentCase.id!,
-                description: currentCase.description,
-                toolName: currentCase.toolName!,
-                args: currentCase.args!,
-                assertions: {
-                  ...currentCase.assertions,
-                  snapshot: currentCase.id!,
-                },
-              };
-              setDataset((d) => ({ ...d, cases: [...d.cases, newCase] }));
+              addCheck({ ...currentCase, snapshot: true });
               setStep('askContinue');
             }}
             onCancel={() => {
-              const newCase: EvalCase = {
-                id: currentCase.id!,
-                description: currentCase.description,
-                toolName: currentCase.toolName!,
-                args: currentCase.args!,
-                assertions: currentCase.assertions,
-              };
-              setDataset((d) => ({ ...d, cases: [...d.cases, newCase] }));
+              addCheck(currentCase);
               setStep('askContinue');
             }}
           />
@@ -868,11 +851,11 @@ export function GenerateApp({ options }: GenerateAppProps) {
       {step === 'askContinue' && (
         <Box flexDirection="column">
           <StatusMessage status="success">
-            Added test case "{currentCase.id}"
+            Added test "{currentCase.id}"
           </StatusMessage>
-          <Text>Total cases: {dataset.cases.length}</Text>
+          <Text>Total tests: {spec.checks.length}</Text>
           <Text> </Text>
-          <Text>Add another test case?</Text>
+          <Text>Add another test?</Text>
           <ConfirmInput
             onConfirm={() => {
               setCurrentCase({});
@@ -881,34 +864,35 @@ export function GenerateApp({ options }: GenerateAppProps) {
               setCurrentPropertyIndex(0);
               setArgValues({});
               setResponse(null);
+              setFullResult(null);
               setCallError(null);
               setSuggestions({ textContains: [], regex: [] });
               setStep('selectTool');
             }}
             onCancel={() => {
               setStep('saving');
-              setTimeout(() => saveDataset(), 0);
+              setTimeout(() => saveSpec(), 0);
             }}
           />
         </Box>
       )}
 
       {/* Saving */}
-      {step === 'saving' && <Spinner label="Saving dataset..." />}
+      {step === 'saving' && <Spinner label="Saving spec..." />}
 
       {/* Done */}
       {step === 'done' && (
         <Box flexDirection="column">
           <StatusMessage status="success">
-            Dataset generation complete!
+            Spec generation complete!
           </StatusMessage>
           <Text> </Text>
-          <Text color="cyan">Total test cases: {dataset.cases.length}</Text>
+          <Text color="cyan">Tests added: {spec.checks.length}</Text>
           <Text dimColor>Output: {outputPath}</Text>
           <Text> </Text>
           <Text color="cyan">Next steps:</Text>
-          <Text dimColor> npx playwright test</Text>
-          {dataset.cases.some((c) => c.assertions?.snapshot) && (
+          <Text dimColor> npx playwright test {outputPath}</Text>
+          {spec.checks.some((check) => check.snapshot) && (
             <>
               <Text> </Text>
               <Text color="cyan">Snapshot testing:</Text>

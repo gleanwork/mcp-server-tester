@@ -95,7 +95,6 @@ const simulation: MCPHostSimulationResult = {
 
 const hostCase: EvalCase = {
   id: 'host',
-  mode: 'host',
   input: 'Weather in London?',
   assertions: {
     containsText: 'sunny',
@@ -173,81 +172,6 @@ beforeEach(() => {
   installPlugins([goldenPlugin()]);
   calls.length = 0;
   vi.mocked(simulateMCPHost).mockReset().mockResolvedValue(simulation);
-});
-
-describe('golden: direct execution', () => {
-  it('tool call', async () => {
-    const result = await runEvalCase(
-      {
-        id: 'tool',
-        toolName: 'get_weather',
-        args: { city: 'London' },
-        assertions: { containsText: 'sunny', isError: false },
-      },
-      context()
-    );
-    expect(stable(result)).toMatchSnapshot();
-  });
-
-  it('tool error result', async () => {
-    const result = await runEvalCase(
-      {
-        id: 'tool-error',
-        toolName: 'get_weather',
-        args: {},
-        assertions: { isError: 'city' },
-      },
-      context(
-        mockMCP(
-          vi.fn().mockResolvedValue({
-            content: [{ type: 'text', text: 'city is required' }],
-            isError: true,
-          })
-        )
-      )
-    );
-    expect(stable(result)).toMatchSnapshot();
-  });
-
-  it('tool call that throws', async () => {
-    const result = await runEvalCase(
-      { id: 'tool-throws', toolName: 'get_weather', args: {} },
-      context(mockMCP(vi.fn().mockRejectedValue(new Error('socket closed'))))
-    );
-    expect(stable(result)).toMatchSnapshot();
-  });
-
-  it('request', async () => {
-    const result = await runEvalCase(
-      {
-        id: 'request',
-        request: { method: 'skills/get', params: { name: 'weather' } },
-        assertions: { containsText: 'weather' },
-      },
-      context()
-    );
-    expect(stable(result)).toMatchSnapshot();
-  });
-
-  it('tool result shaped like a host simulation', async () => {
-    // Legacy tests fake mcp_host this way; pin what the runner does with it.
-    const result = await runEvalCase(
-      {
-        id: 'simulation-shaped',
-        toolName: 'fake_host',
-        args: {},
-        assertions: {
-          toolsTriggered: { calls: [{ name: 'get_weather', required: true }] },
-        },
-      },
-      context(
-        mockMCP(
-          vi.fn().mockResolvedValue(simulation as unknown as never) as never
-        )
-      )
-    );
-    expect(stable(result)).toMatchSnapshot();
-  });
 });
 
 describe('golden: the mst client (dataset API)', () => {
@@ -341,7 +265,7 @@ describe('golden: host traces through executeCase', () => {
 });
 
 describe('golden: dataset aggregation', () => {
-  it('mixed direct and host cases', async () => {
+  it('two cases, one failing', async () => {
     const result = await runEvalDataset(
       {
         dataset: {
@@ -349,8 +273,7 @@ describe('golden: dataset aggregation', () => {
           cases: [
             {
               id: 'd',
-              toolName: 'get_weather',
-              args: { city: 'London' },
+              input: 'Is it sunny in London?',
               assertions: { containsText: 'sunny' },
             },
             hostCase,
@@ -379,7 +302,6 @@ describe('golden: runEvalSuite hosts', () => {
     cases: EvalCase[] = [
       {
         id: 'suite-host',
-        mode: 'host',
         input: 'Weather in London?',
         assertions: {
           containsText: 'sunny',
@@ -462,7 +384,6 @@ describe('golden: runEvalSuite hosts', () => {
       [
         {
           id: 'suite-judged',
-          mode: 'host',
           input: 'Weather in London?',
           expected: { answer: 'canonical' },
           assertions: {
@@ -523,7 +444,6 @@ describe('golden: runEvalSuite hosts', () => {
       [
         {
           id: 'suite-rubric',
-          mode: 'host',
           input: 'Weather in London?',
           assertions: {
             passesJudge: { rubric: 'correctness', threshold: 0.9 },
@@ -546,8 +466,7 @@ describe('golden: judges', () => {
     const result = await runEvalCase(
       {
         id: 'judged',
-        toolName: 'get_weather',
-        args: { city: 'London' },
+        input: 'Weather in London?',
         judgeReps: 2,
         expected: { answer: 'sunny' },
         assertions: { passesJudge: { judge: 'test/golden-case-judge' } },
@@ -561,8 +480,7 @@ describe('golden: judges', () => {
     const result = await runEvalCase(
       {
         id: 'multi-judged',
-        toolName: 'get_weather',
-        args: { city: 'London' },
+        input: 'Weather in London?',
         judgeReps: 3,
         expected: { answer: 'unused' },
         assertions: {
@@ -626,8 +544,7 @@ describe('golden: rubric judges', () => {
     const result = await runEvalCase(
       {
         id: 'rubric-judged',
-        toolName: 'get_weather',
-        args: { city: 'London' },
+        input: 'Weather in London?',
         expected: { answer: 'sunny' },
         assertions: { passesJudge: { rubric: 'correctness' } },
       },
@@ -646,8 +563,7 @@ describe('golden: rubric judges', () => {
     const result = await runEvalCase(
       {
         id: 'rubric-reps',
-        toolName: 'get_weather',
-        args: { city: 'London' },
+        input: 'Weather in London?',
         assertions: { passesJudge: { rubric: 'completeness', reps: 3 } },
       },
       context()
@@ -661,8 +577,7 @@ describe('golden: rubric judges', () => {
     const result = await runEvalCase(
       {
         id: 'rubric-custom',
-        toolName: 'get_weather',
-        args: { city: 'London' },
+        input: 'Weather in London?',
         assertions: {
           passesJudge: {
             rubric: { text: 'Does it say it is sunny?\nAnswer carefully.' },
@@ -687,8 +602,7 @@ describe('golden: rubric judges', () => {
     const result = await runEvalCase(
       {
         id: 'rubric-error',
-        toolName: 'get_weather',
-        args: { city: 'London' },
+        input: 'Weather in London?',
         assertions: { passesJudge: { rubric: 'correctness' } },
       },
       context()
@@ -701,8 +615,7 @@ describe('golden: rubric judges', () => {
     const result = await runEvalCase(
       {
         id: 'rubric-and-plugin',
-        toolName: 'get_weather',
-        args: { city: 'London' },
+        input: 'Weather in London?',
         judgeReps: 2,
         assertions: {
           passesJudge: [

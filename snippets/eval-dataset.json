@@ -3,23 +3,34 @@
   "cases": [
     {
       "id": "read-config",
-      "toolName": "read_file",
-      "args": {
-        "path": "/tmp/config.json"
-      },
+      "input": "What version is set in the app's config file?",
       "assertions": {
-        "schema": "file-content",
-        "containsText": ["version", "name"]
+        "toolsTriggered": {
+          "calls": [
+            {
+              "name": "read_file",
+              "required": true
+            }
+          ]
+        },
+        "containsText": "1.0.0"
       }
     },
     {
-      "id": "read-readme",
-      "toolName": "read_file",
-      "args": {
-        "path": "/tmp/README.md"
-      },
+      "id": "summarize-readme",
+      "input": "Summarize the README in two sentences",
       "assertions": {
-        "snapshot": "readme-snapshot"
+        "toolsTriggered": {
+          "calls": [
+            {
+              "name": "read_file",
+              "required": true
+            }
+          ]
+        },
+        "passesJudge": {
+          "rubric": "groundedness"
+        }
       }
     }
   ]

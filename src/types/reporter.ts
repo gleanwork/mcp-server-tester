@@ -289,9 +289,6 @@ export interface IterationResult {
  * Preserves what was sent so results are self-contained for debugging.
  */
 export interface EvalCaseRequest {
-  /** Eval execution mode */
-  mode?: string;
-
   /** Human-readable description of the case */
   description?: string;
   /** Runtime tool override variant identifier, when one was used */
@@ -312,8 +309,7 @@ export interface EvalCaseRequest {
   /** Configured expectation block, sanitized for reporter output */
   expect?: Record<string, unknown>;
 
-  // Direct mode fields
-  /** Tool arguments (direct mode) */
+  /** Tool arguments, for a tool call the reporter tracked in a Playwright test */
   args?: Record<string, unknown>;
 
   // Client case fields

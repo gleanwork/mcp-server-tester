@@ -1,8 +1,9 @@
 /**
  * Filesystem MCP Server - Comprehensive Testing Example
  *
- * Demonstrates all testing patterns: direct API, inline evals, JSON datasets,
- * and LLM host simulation (E2E).
+ * Demonstrates the testing patterns: direct tool calls with matchers,
+ * data-driven tool checks (tool-checks.json), and evals on a model
+ * (eval-dataset.json).
  */
 
 import { test as base } from '@playwright/test';
@@ -13,10 +14,9 @@ import {
   closeMCPClient,
   type MCPConfig,
   type MCPFixtureApi,
-  loadEvalDataset,
-  runEvalDataset,
   runEvalCase,
   type EvalCase,
+  type SnapshotSanitizer,
   runConformanceChecks,
   extractText,
   normalizeWhitespace,
@@ -28,6 +28,7 @@ import { ConfigFileSchema } from '../schemas/fileContentSchema.js';
 import path from 'path';
 
 import evalDataset from '../eval-dataset.json' with { type: 'json' };
+import toolChecks from '../tool-checks.json' with { type: 'json' };
 
 type FilesystemFixtures = {
   fileProject: Project;
@@ -164,88 +165,47 @@ test.describe('Direct API Tests', () => {
   });
 });
 
-test.describe('Inline Eval Cases', () => {
-  test('validates config content with inline case', async ({ mcp }) => {
-    const result = await runEvalCase(
-      {
-        id: 'inline-config-check',
-        toolName: 'read_file',
-        args: { path: 'config.json' },
-        expect: {
-          containsText: ['version', '1.0.0', 'features'],
-        },
-      },
-      { mcp }
-    );
+/** One entry in tool-checks.json: a tool call and what its response must show. */
+interface ToolCheck {
+  name: string;
+  description?: string;
+  tool: string;
+  args: Record<string, unknown>;
+  containsText?: string | string[];
+  matchesPattern?: string | string[];
+  isError?: boolean | string | string[];
+  responseSize?: { maxBytes?: number; minBytes?: number };
+  response?: unknown;
+  snapshot?: string;
+  sanitizers?: SnapshotSanitizer[];
+}
 
-    expect(result.pass).toBe(true);
-    expect(result.toolName).toBe('read_file');
-  });
-
-  test('validates directory listing with regex', async ({ mcp }) => {
-    const result = await runEvalCase(
-      {
-        id: 'inline-docs-listing',
-        toolName: 'list_directory',
-        args: { path: 'docs' },
-        expect: {
-          containsText: ['guide.md', 'api.md'],
-          matchesPattern: ['\\.md'],
-        },
-      },
-      { mcp }
-    );
-
-    expect(result.pass).toBe(true);
-  });
-});
-
-test.describe('Eval Dataset (Batch)', () => {
-  test('runs all direct mode cases', async ({ mcp }, testInfo) => {
-    const dataset = await loadEvalDataset(
-      path.join(import.meta.dirname, '..', 'eval-dataset.json')
-    );
-
-    const directCases = dataset.cases.filter(
-      (c) => c.mode === 'direct' || !c.mode
-    );
-    const directDataset = { ...dataset, cases: directCases };
-
-    // The runner uses validators internally based on the 'expect' block
-    const result = await runEvalDataset(
-      { dataset: directDataset },
-      { mcp, testInfo, expect }
-    );
-
-    expect(result.passed).toBe(result.total);
-    expect(result.failed).toBe(0);
-  });
-});
-
-test.describe('Eval: Direct Mode', () => {
-  const directCases = evalDataset.cases.filter(
-    (c) => c.mode === 'direct' || !c.mode
-  );
-
-  for (const evalCase of directCases) {
-    test(evalCase.id, async ({ mcp }, testInfo) => {
-      // The runner uses validators internally based on the 'expect' block
-      const result = await runEvalCase(evalCase as EvalCase, {
-        mcp,
-        testInfo,
-        expect,
-      });
-
-      if (!result.pass) {
-        const failures = Object.entries(result.expectations || {})
-          .filter(([_, exp]) => !exp.pass)
-          .map(([name, exp]) => `${name}: ${exp.details}`)
-          .join('\n');
-
-        expect.soft(result.pass, `Eval failed:\n${failures}`).toBe(true);
-      }
-
-      expect(result.pass).toBe(true);
+/**
+ * Data-driven tool checks: each entry in tool-checks.json is a Playwright
+ * test that calls the tool and asserts on its response with the matchers.
+ */
+test.describe('Tool checks (tool-checks.json)', () => {
+  for (const check of toolChecks.checks as ToolCheck[]) {
+    test(check.name, async ({ mcp }) => {
+      const result = await mcp.callTool(check.tool, check.args);
+      if (check.isError === false) expect(result).not.toBeToolError();
+      else if (check.isError !== undefined)
+        expect(result).toBeToolError(
+          check.isError === true ? undefined : check.isError
+        );
+      if (check.containsText)
+        expect(result).toContainToolText(check.containsText);
+      if (check.matchesPattern)
+        expect(result).toMatchToolPattern(check.matchesPattern);
+      if (check.responseSize)
+        expect(result).toHaveToolResponseSize(check.responseSize);
+      if (check.response !== undefined)
+        expect(result).toMatchToolResponse(check.response);
+      if (check.snapshot)
+        await expect(result).toMatchToolSnapshot(
+          check.snapshot,
+          check.sanitizers
+        );
     });
   }
 });
@@ -308,8 +268,8 @@ test.describe('LLM Host Simulation (E2E)', () => {
 });
 
 test.describe('Eval: LLM Host Mode', () => {
-  // Cases with input run on the client the case names (mst).
-  const llmCases = evalDataset.cases.filter((c) => c.input !== undefined);
+  // Every case runs on the client it names (mst).
+  const llmCases = evalDataset.cases;
 
   for (const evalCase of llmCases) {
     const provider = 'anthropic';

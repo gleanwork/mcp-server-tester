@@ -3,7 +3,6 @@
   "cases": [
     {
       "id": "outage",
-      "mode": "host",
       "input": "Find the checkout outage report and read it",
       "assertions": {
         "toolsTriggered": {

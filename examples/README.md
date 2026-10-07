@@ -6,14 +6,14 @@ Complete working examples demonstrating how to use `@gleanwork/mcp-server-tester
 
 ```
                     ┌─────────────────────┐
-                    │   LLM Host E2E      │  ← Real LLM discovers & calls tools
-                    │   (functional)      │     Requires API keys
+                    │   Evals             │  ← A client and model pick the tools
+                    │   (eval-dataset)    │     Requires API keys
                     ├─────────────────────┤
-                    │   Data-Driven       │  ← JSON datasets + expectations
-                    │   (eval datasets)   │     No LLM required
+                    │   Data-driven tests │  ← tool-checks.json, one test each
+                    │   (Playwright)      │     No LLM required
                     ├─────────────────────┤
-                    │   Direct API        │  ← Tool calls + assertions
-                    │   (unit/integration)│     No LLM required
+                    │   Tool tests        │  ← Tool calls + matchers
+                    │   (Playwright)      │     No LLM required
                     └─────────────────────┘
 ```
 
@@ -54,79 +54,68 @@ test('reads a file', async ({ mcp }) => {
 });
 ```
 
-### Layer 2: Inline Eval Cases
+### Layer 2: Data-Driven Tool Tests (JSON)
 
-Define eval cases in code with expectations - same expectations, no JSON:
+Keep tool calls and what they must return in JSON, and turn each into a test:
 
-```typescript
-test('validates config', async ({ mcp }) => {
-  const result = await runEvalCase(
-    {
-      id: 'config-check',
-      toolName: 'read_file',
-      args: { path: 'config.json' },
-      assertions: {
-        containsText: ['version', '1.0.0'],
-      },
-    },
-    { mcp }
-  );
-
-  expect(result.pass).toBe(true);
-});
+```json
+{
+  "name": "should read readme.txt file",
+  "tool": "read_file",
+  "args": { "path": "readme.txt" },
+  "containsText": "Hello World",
+  "isError": false
+}
 ```
 
-### Layer 3: Data-Driven Tests (JSON)
-
-Load test cases from JSON files for maintainability:
-
 ```typescript
-const dataset = await loadEvalDataset('./eval-dataset.json');
+import toolChecks from '../tool-checks.json' with { type: 'json' };
 
-const result = await runEvalDataset({ dataset }, { mcp, testInfo, expect });
-
-expect(result.passed).toBe(result.total);
+for (const check of toolChecks.checks) {
+  test(check.name, async ({ mcp }) => {
+    const result = await mcp.callTool(check.tool, check.args);
+    if (check.isError === false) expect(result).not.toBeToolError();
+    if (check.containsText)
+      expect(result).toContainToolText(check.containsText);
+    // ...one matcher per field: see tests/filesystem-eval.spec.ts
+  });
+}
 ```
 
-### Layer 4: LLM Host Simulation (E2E Functional)
+### Layer 3: Evals (E2E Functional)
 
-Test how MCP servers are **really used** - an LLM discovers tools and calls them:
+Test how MCP servers are **really used**: a client and its model get each case's input and pick the tools. The assertions check what it did:
 
 ```typescript
-test('LLM discovers directory contents', async ({ mcp }) => {
-  const result = await simulateMCPHost(
-    mcp,
-    'What files are in the docs directory?',
-    { provider: 'anthropic', model: 'claude-sonnet-4-20250514', temperature: 0 }
+test('a model picks the right tools', async ({ mcp }, testInfo) => {
+  const dataset = await loadEvalDataset('./eval-dataset.json');
+  const result = await runEvalDataset(
+    { dataset, client: 'mst', model: 'claude-sonnet-4-5' },
+    { mcp, testInfo }
   );
-
-  expect(result.success).toBe(true);
-  expect(result.toolCalls.length).toBeGreaterThan(0);
-  expect(result.response).toContain('guide');
+  expect(result.passed).toBe(result.total);
 });
 ```
 
 ## Example Comparison
 
-| Feature             | basic | filesystem | sqlite |
-| ------------------- | ----- | ---------- | ------ |
-| Transport           | stdio | stdio      | stdio  |
-| Direct API Tests    | ✓     | ✓          | ✓      |
-| Inline Eval Cases   | ✗     | ✓          | ✗      |
-| JSON Eval Datasets  | ✗     | ✓          | ✓      |
-| LLM Host Simulation | ✗     | ✓          | ✗      |
-| LLM Host from JSON  | ✗     | ✓          | ✓      |
-| MCP Reporter        | ✗     | ✓          | ✗      |
+| Feature           | basic | filesystem | sqlite |
+| ----------------- | ----- | ---------- | ------ |
+| Transport         | stdio | stdio      | stdio  |
+| Tool tests        | ✓     | ✓          | ✓      |
+| Data-driven tests | ✗     | ✓          | ✓      |
+| Evals on a model  | ✗     | ✓          | ✗      |
+| MCP Reporter      | ✗     | ✓          | ✗      |
 
 ## Running LLM Tests
 
-LLM host tests require an Anthropic API key:
+Evals require an Anthropic API key:
 
 ```bash
 ANTHROPIC_API_KEY=your-key npm test
 ```
 
-**Cost note**: LLM host mode incurs API costs. Use direct mode for most tests.
+**Cost note**: evals incur API costs. Use tool tests for most checks.
 
 ## Learn More
 

@@ -115,8 +115,8 @@ describe('suite wall-clock timing', () => {
     const f = await fixture(
       { runBatch },
       [
-        { id: 'explicit', mode: 'host', input: 'A', trials: 2 },
-        { id: 'default', mode: 'host', input: 'B' },
+        { id: 'explicit', input: 'A', trials: 2 },
+        { id: 'default', input: 'B' },
       ],
       {
         trials: 3,
@@ -161,7 +161,7 @@ describe('suite wall-clock timing', () => {
           return { finalText: 'OK', events: [], durationMs: 30 };
         },
       },
-      [{ id: 'live', mode: 'host', input: 'A', trials: 2 }]
+      [{ id: 'live', input: 'A', trials: 2 }]
     );
 
     const result = await runEvalSuite(f);

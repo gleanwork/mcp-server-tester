@@ -237,8 +237,8 @@ describe('prepareHostBatch with a tool variant', () => {
           }),
       },
       [
-        { id: 'a', mode: 'host', input: 'x', trials: 2 },
-        { id: 'b', mode: 'host', input: 'y' },
+        { id: 'a', input: 'x', trials: 2 },
+        { id: 'b', input: 'y' },
       ],
       { type: 'test/batch' },
       servers,
@@ -261,32 +261,13 @@ describe('prepareHostBatch with a tool variant', () => {
         runBatch: async (requests) =>
           requests.map(() => ({ finalText: '', events: [] })),
       },
-      [{ id: 'a', mode: 'host', input: 'x' }],
+      [{ id: 'a', input: 'x' }],
       { type: 'test/batch' },
       servers,
       { manifest },
       { id: 'v', proxy: async () => stubProxy(false) }
     );
     expect(queues?.get('a')?.[0]?.error).toContain('tool variant "v"');
-  });
-
-  it('starts no proxy for a dataset with no host cases', async () => {
-    let started = 0;
-    await prepareHostBatch(
-      { schema: z.object({}), runBatch: async () => [] },
-      [{ id: 'd', toolName: 'search', args: {} }],
-      { type: 'test/batch' },
-      servers,
-      { manifest },
-      {
-        id: 'v',
-        proxy: async () => {
-          started++;
-          return stubProxy();
-        },
-      }
-    );
-    expect(started).toBe(0);
   });
 });
 
@@ -356,8 +337,8 @@ describe('a batch host that connects to one server set for the batch', () => {
         },
       },
       [
-        { id: 'a', mode: 'host', input: 'x', trials: 2 },
-        { id: 'b', mode: 'host', input: 'y' },
+        { id: 'a', input: 'x', trials: 2 },
+        { id: 'b', input: 'y' },
       ],
       { type: 'test/batch' },
       [catalog('aggregate', 'agg')],

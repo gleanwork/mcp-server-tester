@@ -76,26 +76,19 @@ Canonical shared type definitions, kept here to prevent drift between modules:
 
 ## Data Flows
 
-### Direct Eval Case (mode: "direct")
+### Tool Test (a Playwright test with matchers)
 
 ```
-dataset JSON (on disk)
-   ↓  datasetLoader.ts: loadEvalDataset()
-EvalDataset (validated by Zod schema in datasetTypes.ts)
-   ↓  evalRunner.ts: runEvalDataset()
-per EvalCase:
-   ↓  mcp.callTool(toolName, args)  ← MCPFixtureApi
+test(... async ({ mcp }) => ...)
+   ↓  mcp.callTool(name, args)  ← MCPFixtureApi
    ↓  MCP SDK Client.callTool()
    ↓  Transport (stdio or HTTP)
    ↓  MCP Server (under test)
 CallToolResult (raw SDK response)
-   ↓  response.ts: normalizeToolResponse()
-NormalizedToolResponse (.text, .isError, .contentBlocks)
+   ↓  matchers/: expect(result).toContainToolText(), toMatchToolSchema(), ...
    ↓  validators/: validateText(), validateSchema(), validatePattern(), etc.
 ValidationResult (pass: boolean, message: string)
-   ↓  evalRunner.ts: aggregated into EvalCaseResult
-EvalRunnerResult (.passed, .failed, .caseResults, .durationMs)
-   ↓  mcpReporter.ts: attached to Playwright TestInfo as JSON attachment
+   ↓  mcpReporter.ts: the fixture records the call for the MCP reporter
 HTML report (ui-dist/)
 ```
 

@@ -27,6 +27,20 @@ import path from 'node:path';
 import { saveBaseline } from './baseline.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import { createFixtureExtensions } from '../mcp/fixtures/fixtureExtensions.js';
+import type * as SimulationModule from './mcpHost/mcpHostSimulation.js';
+
+// A stand-in for the mst client's model: it calls the connection's tool once
+// and answers with the tool's text.
+vi.mock('./mcpHost/mcpHostSimulation.js', async (original) => ({
+  ...(await original<typeof SimulationModule>()),
+  simulateMCPHost: vi.fn(async (mcp: MCPFixtureApi) => {
+    const result = (await mcp.callTool('tool', {})) as {
+      content?: Array<{ text?: string }>;
+    };
+    const text = (result.content ?? []).map((b) => b.text ?? '').join('');
+    return { success: true, toolCalls: [], response: text };
+  }),
+}));
 
 function memoryStore(): EvalResultStore & {
   saved: StoredEvalArtifact<unknown>[];
@@ -173,9 +187,8 @@ describe('every storing API redacts by default', () => {
           cases: [
             {
               id: 'weather',
-              toolName: 'get_weather',
-              args: {},
-              assertions: { response: { content: [] } },
+              input: 'Weather?',
+              assertions: { containsText: 'sunny' },
             },
           ],
         },
@@ -217,8 +230,7 @@ describe('the runner baseline', () => {
   function cases(entries: Array<[id: string, expected: string]>) {
     return entries.map(([id, expected]) => ({
       id,
-      toolName: 'echo',
-      args: {},
+      input: 'Echo',
       assertions: { containsText: expected },
     }));
   }

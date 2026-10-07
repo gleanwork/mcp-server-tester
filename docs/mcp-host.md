@@ -11,7 +11,7 @@ Use MCP host simulation when you need to verify:
 - **Description quality**: Does the tool description accurately represent what the tool does?
 - **End-to-end behavior**: Does the full chain of LLM → tools → response work?
 
-For most regression testing, use direct mode (`callTool`). Reserve MCP host simulation for:
+For most regression testing, use tool tests (`mcp.callTool()` with the matchers). Reserve MCP host simulation for:
 
 - New tool description development and tuning
 - Evaluating tool calling accuracy across inputs

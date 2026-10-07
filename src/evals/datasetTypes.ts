@@ -1,41 +1,20 @@
 import { z } from 'zod';
 import { clientFieldSchemas, type ClientFields } from './clientFields.js';
-import type { SnapshotSanitizer } from '../assertions/validators/types.js';
 import type { BuiltInRubric, ProviderKind } from '../judge/judgeTypes.js';
 import type { TraceEvent } from './evalFrameworkTypes.js';
 import {
   RubricJudgeLLMSchema,
   RubricSpecSchema,
 } from '../judge/rubricJudge.js';
-import { renamedKeys } from './renamedKeys.js';
-
-// Re-export sanitizer types from canonical source (validators/types.ts)
-// Note: For JSON datasets, the Zod schema below validates that patterns are strings.
-// The TypeScript types allow RegExp for runtime usage with Playwright matchers.
-/**
- * How a case runs: `'host'` on the client under test, `'direct'` as a tool
- * call or MCP request. A case with `input` runs on the client without it.
- */
-export type EvalMode = 'direct' | 'host';
+import { removedKeys, renamedKeys } from './renamedKeys.js';
 
 /**
- * A direct-mode MCP request, used instead of `toolName` + `args`.
- */
-export interface EvalDirectRequest {
-  /** JSON-RPC method, e.g. 'skills/list', 'skills/get', 'resources/read'. */
-  method: string;
-  /** Request params (without `_meta`; MST adds the protocol envelope). */
-  params?: Record<string, unknown>;
-  /** Server label to send it to, when a manifest targets several servers. */
-  server?: string;
-}
-
-/**
- * A single eval test case.
+ * A single eval case: an input the client under test acts on, and what to
+ * assert about what it did. The case runs on the `client`, `model` and
+ * `clientOptions` it inherits from the suite (or the run), changed by its own.
  *
- * A case with `input` runs on the client under test: the `client`, `model`
- * and `clientOptions` it inherits from the suite (or the run), changed by its
- * own. A direct case has `toolName` and `args`, or `request`, instead.
+ * Direct tool calls aren't cases: write them as Playwright tests with
+ * `mcp.callTool()` and the matchers.
  */
 export interface EvalCase extends ClientFields {
   /**
@@ -49,34 +28,11 @@ export interface EvalCase extends ClientFields {
   description?: string;
 
   /**
-   * How the case runs: `'host'` on the client, `'direct'` as a tool call or
-   * request. Inferred: a case with `input` runs on the client.
-   */
-  mode?: EvalMode;
-
-  /** The MCP tool a direct case calls. */
-  toolName?: string;
-
-  /** The arguments a direct case calls `toolName` with. */
-  args?: Record<string, unknown>;
-
-  /**
-   * Direct mode alternative to `toolName`: send any MCP request (for example
-   * `skills/get` or `resources/read`) and run the expectations against its
-   * JSON result. A JSON-RPC error becomes an error result, so `expect.isError`
-   * works as it does for tools. Mutually exclusive with `toolName`.
-   *
-   * @example { "method": "skills/get", "params": { "uri": "skill://docs/SKILL.md" } }
-   */
-  request?: EvalDirectRequest;
-
-  /**
-   * The user's request the client acts on, sent as its prompt. A case with
-   * `input` runs on the client.
+   * The user's request the client acts on, sent as its prompt.
    *
    * @example "Get the weather for London and tell me if I need an umbrella"
    */
-  input?: string;
+  input: string;
 
   /** Additional metadata for this test case. */
   metadata?: Record<string, unknown>;
@@ -192,42 +148,14 @@ export interface JudgeExpectConfig {
  */
 export interface EvalAssertions {
   /**
-   * Exact response match (toMatchToolResponse)
-   */
-  response?: unknown;
-
-  /**
-   * Name of schema to validate against (toMatchToolSchema)
-   */
-  schema?: string;
-
-  /**
-   * Text substring(s) that must be present (toContainToolText)
+   * Text substring(s) the client's answer must contain (toContainToolText)
    */
   containsText?: string | string[];
 
   /**
-   * Regex pattern(s) that must match (toMatchToolPattern)
+   * Regex pattern(s) the client's answer must match (toMatchToolPattern)
    */
   matchesPattern?: string | string[];
-
-  /**
-   * Snapshot name for comparison (toMatchToolSnapshot)
-   */
-  snapshot?: string;
-
-  /**
-   * Snapshot sanitizers to apply
-   */
-  snapshotSanitizers?: SnapshotSanitizer[];
-
-  /**
-   * Error expectation (toBeToolError)
-   * - true: expects any error
-   * - false: expects no error
-   * - string: expects error containing this message
-   */
-  isError?: boolean | string | string[];
 
   /**
    * LLM-as-judge evaluation (toPassToolJudge)
@@ -238,19 +166,8 @@ export interface EvalAssertions {
   passesJudge?: JudgeExpectConfig | JudgeExpectConfig[];
 
   /**
-   * Response size validation (toHaveToolResponseSize)
-   */
-  responseSize?: {
-    /** Maximum allowed size in bytes */
-    maxBytes?: number;
-    /** Minimum required size in bytes */
-    minBytes?: number;
-  };
-
-  /**
-   * Asserts which tools the LLM called during a host simulation.
-   * Only meaningful for client cases with high-confidence
-   * structured tool evidence — direct mode has no tool call trace.
+   * Asserts which tools the client called. Needs structured tool evidence
+   * (a client that reports what it called).
    */
   toolsTriggered?: {
     /** Expected tool calls */
@@ -275,8 +192,8 @@ export interface EvalAssertions {
   };
 
   /**
-   * Asserts the number of tool calls made during a host simulation.
-   * External-host runs require high-confidence structured tool evidence.
+   * Asserts the number of tool calls the client made. Needs structured tool
+   * evidence.
    */
   toolCallCount?: {
     /** Minimum number of tool calls */
@@ -308,32 +225,10 @@ export interface EvalDataset {
   cases: Array<EvalCase>;
 
   /**
-   * Optional schema definitions referenced by test cases
-   */
-  schemas?: Record<string, z.ZodSchema>;
-
-  /**
    * Additional dataset metadata
    */
   metadata?: Record<string, unknown>;
 }
-
-/**
- * Zod schema for SnapshotSanitizer
- */
-const SnapshotSanitizerSchema = z.union([
-  // Built-in sanitizers
-  z.enum(['timestamp', 'uuid', 'iso-date', 'objectId', 'jwt']),
-  // Custom regex sanitizer
-  z.object({
-    pattern: z.string(),
-    replacement: z.string().optional(),
-  }),
-  // Field removal sanitizer
-  z.object({
-    remove: z.array(z.string()),
-  }),
-]);
 
 /**
  * Zod schema for a single judge configuration
@@ -378,22 +273,10 @@ const JudgeExpectConfigSchema = JudgeExpectConfigFieldsSchema.passthrough()
  */
 export const EvalAssertionsSchema = z
   .object({
-    response: z.unknown().optional(),
-    schema: z.string().optional(),
     containsText: z.union([z.string(), z.array(z.string())]).optional(),
     matchesPattern: z.union([z.string(), z.array(z.string())]).optional(),
-    snapshot: z.string().optional(),
-    snapshotSanitizers: z.array(SnapshotSanitizerSchema).optional(),
-    isError: z.union([z.boolean(), z.string(), z.array(z.string())]).optional(),
     passesJudge: z
       .union([JudgeExpectConfigSchema, z.array(JudgeExpectConfigSchema).min(1)])
-      .optional(),
-    responseSize: z
-      .object({
-        maxBytes: z.number().optional(),
-        minBytes: z.number().optional(),
-      })
-      .strict()
       .optional(),
     toolsTriggered: z
       .object({
@@ -430,28 +313,27 @@ export const EvalAssertionsSchema = z
       })
       .strict()
       .optional(),
+    // Assertions on a direct tool response are Playwright matchers now.
+    ...removedKeys({
+      response:
+        'it checked a tool response: use `toMatchToolResponse` in a Playwright test',
+      schema:
+        'it checked a tool response: use `toMatchToolSchema` in a Playwright test',
+      snapshot:
+        'it checked a tool response: use `toMatchToolSnapshot` in a Playwright test',
+      snapshotSanitizers:
+        'pass sanitizers to `toMatchToolSnapshot` in a Playwright test',
+      isError:
+        'it checked a tool response: use `toBeToolError` in a Playwright test',
+      responseSize:
+        'it checked a tool response: use `toHaveToolResponseSize` in a Playwright test',
+    }),
   })
   // An unknown key is a mistake: a misspelt assertion would never run.
   .strict();
 
-/**
- * Zod schema for EvalDirectRequest
- */
-const EvalDirectRequestSchema = z
-  .object({
-    method: z.string().min(1, 'request.method must not be empty'),
-    params: z.record(z.string(), z.unknown()).optional(),
-    server: z.string().min(1).optional(),
-  })
-  .strict() satisfies z.ZodType<EvalDirectRequest>;
-
-/** What replaced each pre-2.0 case mode. */
-const REMOVED_MODES: Record<string, string> = {
-  mcp_host:
-    "`mode: 'mcp_host'` is gone: a case with `input` runs on the client. Remove `mode`, and name the client and model with `client` and `model` on the case, the suite, or runEvalDataset",
-  external_host:
-    "`mode: 'external_host'` is gone: a case with `input` runs on the client. Remove `mode`, and run the case in a suite with `client: 'chatgpt'` or a plugin client",
-};
+const DIRECT_CALLS =
+  'direct tool calls are Playwright tests: call `mcp.callTool(name, args)` in a test and assert with the matchers (`toContainToolText`, `toMatchToolSchema`, `toBeToolError`, ...). An eval case has an `input` the client acts on';
 
 /**
  * Zod schema for EvalCase
@@ -460,32 +342,19 @@ export const EvalCaseSchema = z
   .object({
     id: z.string().min(1, 'id must not be empty'),
     description: z.string().optional(),
-    mode: z
-      .enum(['direct', 'host'], {
-        error: (issue) =>
-          typeof issue.input === 'string' &&
-          Object.hasOwn(REMOVED_MODES, issue.input)
-            ? REMOVED_MODES[issue.input]
-            : "mode must be 'host' or 'direct'",
-      })
-      .optional(),
     ...clientFieldSchemas,
-    toolName: z.string().min(1, 'toolName must not be empty').optional(),
-    args: z.record(z.string(), z.unknown()).optional(),
-    request: EvalDirectRequestSchema.optional(),
-    input: z.string().optional(),
-    mcpHostConfig: z
-      .never({
-        message:
-          '`mcpHostConfig` is gone: set the client and model with `client`, `model` and `clientOptions`, on the case, the suite, or runEvalDataset',
-      })
-      .optional(),
-    externalHost: z
-      .never({
-        message:
-          "`externalHost` is gone: run the case in a suite with `client: 'chatgpt'` or a plugin client",
-      })
-      .optional(),
+    input: z.string().min(1, 'input must not be empty'),
+    ...removedKeys({
+      mode: 'every case runs on the client. Remove `mode`; write a direct tool call as a Playwright test (`mcp.callTool()` with the matchers)',
+      toolName: DIRECT_CALLS,
+      args: DIRECT_CALLS,
+      request:
+        'direct requests are Playwright tests: call `mcp.request(method, params, schema)` in a test and assert on its result',
+      mcpHostConfig:
+        'set the client and model with `client`, `model` and `clientOptions`, on the case, the suite, or runEvalDataset',
+      externalHost:
+        "run the case in a suite with `client: 'chatgpt'` or a plugin client",
+    }),
     metadata: z.record(z.string(), z.unknown()).optional(),
     trials: z.number().int().min(1).optional(),
     passThreshold: z.number().min(0).max(1).optional(),
@@ -508,53 +377,10 @@ export const EvalCaseSchema = z
     }),
   })
   // A misspelt case setting (`passThresold`) would otherwise be ignored.
-  .strict()
-  .superRefine((evalCase, context) => {
-    if (evalCase.request && evalCase.toolName) {
-      context.addIssue({
-        code: 'custom',
-        path: ['request'],
-        message: 'request and toolName are mutually exclusive',
-      });
-    }
-    if (evalCase.request && evalCase.mode === 'host') {
-      context.addIssue({
-        code: 'custom',
-        path: ['request'],
-        message: 'request is only valid for direct cases',
-      });
-    }
-    if (
-      evalCase.input !== undefined &&
-      evalCase.mode !== 'host' &&
-      (evalCase.toolName !== undefined || evalCase.request !== undefined)
-    ) {
-      context.addIssue({
-        code: 'custom',
-        path: ['input'],
-        message:
-          'A case runs on the client (`input`) or calls a tool directly (`toolName` or `request`), not both',
-      });
-    }
-  });
+  .strict();
 
 /**
- * Whether a case runs on the client under test (it has `input`, or says
- * `mode: 'host'`) rather than calling a tool or sending a request directly.
- */
-export function isClientCase(
-  evalCase: Pick<EvalCase, 'mode' | 'input' | 'toolName' | 'request'>
-): boolean {
-  if (evalCase.mode !== undefined) return evalCase.mode === 'host';
-  return (
-    evalCase.input !== undefined &&
-    evalCase.toolName === undefined &&
-    evalCase.request === undefined
-  );
-}
-
-/**
- * Zod schema for EvalDataset (without schemas field, as schemas aren't serializable)
+ * Zod schema for EvalDataset
  */
 export const EvalDatasetSchema = z
   .object({

@@ -51,7 +51,6 @@ describe('offline CLI public execution path', () => {
           cases: [
             {
               id: 'one',
-              mode: 'host',
               input: 'hello',
               assertions: {
                 toolsTriggered: {
