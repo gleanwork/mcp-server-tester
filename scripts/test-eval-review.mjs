@@ -66,10 +66,10 @@ export default {meta:{name:'local-plugin',version:'1.0.0',namespace:'local'},cli
         servers: [
           { transport: 'stdio', command: process.execPath, args: [serverPath] },
         ],
-        client: 'local/echo',
+        client: 'local/client/echo',
         concurrency: 8,
         plugins: [pluginPath],
-        metrics: ['local/plugin-metric'],
+        metrics: ['local/metric/plugin-metric'],
         results: { store: { type: 'file', dir: path.join(dir, `store-${i}`) } },
       })
     );
@@ -119,7 +119,7 @@ export default {meta:{name:'local-plugin',version:'1.0.0',namespace:'local'},cli
   const summary = JSON.parse(await fs.readFile(summaryPath, 'utf8'));
   assert.equal(summary.metrics.failed, 1);
   assert.equal(summary.metrics.passed, 4);
-  assert.equal(summary.metrics['local/plugin-metric_rate'], 0.8);
+  assert.equal(summary.metrics['local/metric/plugin-metric_rate'], 0.8);
   console.log('PASS: wrong assertion failed, plugin metric=0.8, CLI exit=1.');
 } finally {
   await fs.rm(dir, { recursive: true, force: true });

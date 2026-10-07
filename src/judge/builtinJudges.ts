@@ -9,7 +9,7 @@ function builtinJudges(): Readonly<Record<string, JudgeDefinition>> {
 
 const judges = extensionLookup('judges', builtinJudges);
 
-/** The judge `reference` names: a built-in, or `namespace/name` from a plugin. */
+/** The judge `reference` names: a built-in, or `<namespace>/judge/<name>` from a plugin. */
 export function getJudge(reference: string): JudgeDefinition {
   return judges.get(reference);
 }

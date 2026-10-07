@@ -190,7 +190,7 @@ MST ships `mst/credential-store/local`. It stores files at `~/.mcp-server-tester
 
 ## Out of M1
 
-The `servers` map and kind checks (M2). Remote credential stores and delivering tokens into VMs and containers (M5–M7: the environment contract must carry `tokenFile` renewal across the boundary). An MST-owned interceptor kind.
+The `servers` map (kind checks landed with ADR 0003: a connector is `<namespace>/connector/<name>`). Remote credential stores and delivering tokens into VMs and containers (M5–M7: the environment contract must carry `tokenFile` renewal across the boundary). An MST-owned interceptor kind.
 
 ## Decisions
 

@@ -11,7 +11,7 @@
   "toolMap": {
     "company_search": ["agg.search"]
   },
-  "client": "usecase/model",
+  "client": "usecase/client/model",
   "clientOptions": {
     "policy": [
       {

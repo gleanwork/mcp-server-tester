@@ -6,7 +6,7 @@
     {
       "name": "assistant",
       "servers": [],
-      "client": "usecase/assistant",
+      "client": "usecase/client/assistant",
       "clientOptions": {
         "answer": "An expired certificate on the payments gateway; the outage lasted 41 minutes."
       }
@@ -14,7 +14,7 @@
     {
       "name": "desktop",
       "servers": ["{{server aggregate agg}}"],
-      "client": "usecase/model",
+      "client": "usecase/client/model",
       "clientOptions": {
         "policy": [
           {
@@ -43,7 +43,7 @@
     {
       "name": "cli",
       "servers": ["{{server aggregate agg}}"],
-      "client": "usecase/model",
+      "client": "usecase/client/model",
       "clientOptions": {
         "policy": [
           {

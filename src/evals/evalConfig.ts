@@ -1,6 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import {
+  extensionReferenceSchema,
+  taggedReferenceSchema,
+} from './referenceSchemas.js';
+import { checkReferenceKind } from '../plugins/extensions.js';
 import { removedKeys, renamedKeys } from './renamedKeys.js';
 import { clientFieldSchemas, type ClientFields } from './clientFields.js';
 import { MCPConfigSchema, type MCPConfig } from '../config/mcpConfig.js';
@@ -21,7 +26,7 @@ export interface ModelPricing {
   cacheWrite?: number;
 }
 
-/** A tagged configuration block: `type` names a built-in or a plugin's `namespace/name` extension. */
+/** A tagged configuration block: `type` names a built-in or a plugin's `<namespace>/<kind>/<name>` extension. */
 export interface TaggedConfig {
   type: string;
   [key: string]: unknown;
@@ -46,7 +51,7 @@ export interface ExtensionConfig extends TaggedConfig {
  * expands it (see `expandConnectorServers`); `mst auth` signs in to it.
  */
 export interface ConnectorServerConfig {
-  /** `namespace/name` of a plugin connector. */
+  /** `<namespace>/connector/<name>` of a plugin connector. */
   connector: string;
   /** The server's label. Default: the connector's name. */
   label?: string;
@@ -109,7 +114,7 @@ export interface EvalConfig {
   servers?: EvalServerConfig[];
   /**
    * The client under test: `mst`, `claude-code`, `cowork`, `chatgpt`, or a
-   * plugin's `namespace/name`. @default 'claude-code'
+   * plugin's `<namespace>/client/<name>`. @default 'claude-code'
    */
   client?: string;
   /** The client's own options, such as Cowork's `appVersion`. */
@@ -130,7 +135,7 @@ export interface EvalConfig {
   };
   plugins?: string[];
   /**
-   * Shared configs (`namespace/name`) from listed plugins, applied in order
+   * Shared configs (`<namespace>/config/<name>`) from listed plugins, applied in order
    * under the eval config's own settings.
    */
   extends?: string[];
@@ -174,10 +179,14 @@ export function variantToolMetadata(
   };
 }
 
-const TaggedConfigSchema = z.object({ type: z.string().min(1) }).passthrough();
-
-const DatasetConfigSchema = z.union([z.string().min(1), TaggedConfigSchema]);
-const ExtensionConfigSchema = z.union([z.string().min(1), TaggedConfigSchema]);
+// A bare dataset string is a path; a tagged dataset names its source.
+const DatasetConfigSchema = z.union([
+  z.string().min(1),
+  taggedReferenceSchema('dataset'),
+]);
+const MetricConfigSchema = extensionReferenceSchema('metric');
+const JudgeConfigSchema = extensionReferenceSchema('judge');
+const ResultStoreConfigSchema = extensionReferenceSchema('result-store');
 
 /**
  * A server an eval config names by connector (`{ "connector": "acme/slack" }`)
@@ -186,12 +195,20 @@ const ExtensionConfigSchema = z.union([z.string().min(1), TaggedConfigSchema]);
  */
 const ConnectorServerSchema = z
   .object({
-    connector: z
-      .string()
-      .regex(
-        /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*$/,
-        'A connector is `namespace/name`.'
-      ),
+    connector: z.string().superRefine((reference, context) => {
+      if (!reference.includes('/')) {
+        context.addIssue({
+          code: 'custom',
+          message: `A connector is \`<namespace>/connector/<name>\`: use "<namespace>/connector/${reference}".`,
+        });
+        return;
+      }
+      try {
+        checkReferenceKind(reference, 'connector');
+      } catch (error) {
+        context.addIssue({ code: 'custom', message: (error as Error).message });
+      }
+    }),
     /** The server's label. Default: the connector's name. */
     label: z
       .string()
@@ -246,8 +263,8 @@ const EvalVariantSchema = z
     toolMap: ToolMapSchema.optional(),
     tools: ToolMetadataSchema.optional(),
     inputTemplate: InputTemplateSchema.optional(),
-    metrics: z.array(ExtensionConfigSchema).optional(),
-    judges: z.array(ExtensionConfigSchema).optional(),
+    metrics: z.array(MetricConfigSchema).optional(),
+    judges: z.array(JudgeConfigSchema).optional(),
     coworkSetup: CoworkSetupConfigSchema.optional(),
     ...renamedKeys({ scenarioTemplate: 'inputTemplate' }),
     ...removedKeys({ toolOverrides: TOOL_OVERRIDES_MOVED }),
@@ -275,10 +292,10 @@ export const EvalConfigSchema = z
     inputTemplate: InputTemplateSchema.optional(),
     variants: z.array(EvalVariantSchema).optional(),
     baseline: z.string().min(1).optional(),
-    metrics: z.array(ExtensionConfigSchema).optional(),
-    judges: z.array(ExtensionConfigSchema).optional(),
+    metrics: z.array(MetricConfigSchema).optional(),
+    judges: z.array(JudgeConfigSchema).optional(),
     coworkSetup: CoworkSetupConfigSchema.optional(),
-    results: z.object({ store: ExtensionConfigSchema }).strict().optional(),
+    results: z.object({ store: ResultStoreConfigSchema }).strict().optional(),
     plugins: z.array(z.string().min(1)).optional(),
     extends: z.array(z.string().min(1)).optional(),
     provider: z.string().optional(),
@@ -349,7 +366,7 @@ const CONFIG_OWN_KEYS = [
 
 /**
  * The eval config settings a plugin shares in `configs`. An eval config applies one
- * with `extends: ["namespace/name"]`. Unknown keys are rejected.
+ * with `extends: ["<namespace>/config/<name>"]`. Unknown keys are rejected.
  */
 const PluginConfigSchema = EvalConfigSchema.pick({
   servers: true,

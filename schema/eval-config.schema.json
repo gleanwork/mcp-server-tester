@@ -46,7 +46,7 @@
     },
     "servers": {
       "type": "array",
-      "description": "The MCP server set under test. Each entry is an MCPConfig, or a plugin connector (`{ \"connector\": \"namespace/name\" }`) that `mst auth` signs in to.",
+      "description": "The MCP server set under test. Each entry is an MCPConfig, or a plugin connector (`{ \"connector\": \"<namespace>/connector/<name>\" }`) that `mst auth` signs in to.",
       "items": {
         "anyOf": [
           {
@@ -61,7 +61,7 @@
     "client": {
       "type": "string",
       "minLength": 1,
-      "description": "The client under test: mst, claude-code, cowork, chatgpt, or a plugin's namespace/name. Default: claude-code."
+      "description": "The client under test: mst, claude-code, cowork, chatgpt, or a plugin's <namespace>/client/<name>. Default: claude-code."
     },
     "clientOptions": {
       "type": "object",
@@ -300,7 +300,7 @@
         "type": "string",
         "minLength": 1
       },
-      "description": "Shared configs (namespace/name) from listed plugins, applied in order under the eval config's own settings."
+      "description": "Shared configs (<namespace>/config/<name>) from listed plugins, applied in order under the eval config's own settings."
     },
     "coworkSetup": {
       "type": "object",
@@ -677,8 +677,8 @@
       "properties": {
         "connector": {
           "type": "string",
-          "description": "`namespace/name` of a plugin connector.",
-          "pattern": "^(?:@[a-z0-9][a-z0-9._-]*\\/)?[a-z0-9][a-z0-9._-]*\\/[A-Za-z0-9][A-Za-z0-9._-]*$"
+          "description": "`<namespace>/connector/<name>` of a plugin connector.",
+          "pattern": "^(?:@[a-z0-9][a-z0-9._-]*\\/)?[a-z0-9][a-z0-9._-]*\\/connector\\/[A-Za-z0-9][A-Za-z0-9._-]*$"
         },
         "label": {
           "type": "string",

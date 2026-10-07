@@ -239,12 +239,12 @@ Multiple judges (all must pass):
 }
 ```
 
-Plugin judge (a judge your plugin provides, as `namespace/name`):
+Plugin judge (a judge your plugin provides, as `<namespace>/judge/<name>`):
 
 ```json
 "assertions": {
   "passesJudge": {
-    "judge": "my/quality",
+    "judge": "my/judge/quality",
     "threshold": 0.7
   }
 }

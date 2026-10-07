@@ -93,12 +93,12 @@ describe('getConnector', () => {
       auth: { type: 'oauth' },
     };
     installPlugins([plugin({ slack }) as never]);
-    expect(getConnector('acme/slack')).toBe(slack);
+    expect(getConnector('acme/connector/slack')).toBe(slack);
     expect(() => getConnector('slack')).toThrow('must be namespaced');
-    expect(() => getConnector('acme/jira')).toThrow(
-      'Connector "acme/jira" is not available. Available: acme/slack.'
+    expect(() => getConnector('acme/connector/jira')).toThrow(
+      'Connector "acme/connector/jira" is not available. Available: acme/connector/slack.'
     );
-    expect(() => getConnector('other/jira')).toThrow(
+    expect(() => getConnector('other/connector/jira')).toThrow(
       'needs the "other" plugin'
     );
   });
@@ -115,19 +115,19 @@ describe('grantTargets', () => {
     const uses: ConnectorUse[] = [
       {
         label: 'gmail',
-        reference: 'acme/gmail',
+        reference: 'acme/connector/gmail',
         connector: google(['gmail.readonly']),
         url: 'https://gmail.example/mcp',
       },
       {
         label: 'gdrive',
-        reference: 'acme/gdrive',
+        reference: 'acme/connector/gdrive',
         connector: google(['drive.readonly', 'gmail.readonly']),
         url: 'https://drive.example/mcp',
       },
       {
         label: 'slack',
-        reference: 'acme/slack',
+        reference: 'acme/connector/slack',
         connector: {
           url: 'https://slack.example/mcp',
           auth: { type: 'oauth' },
@@ -155,7 +155,7 @@ describe('grantTargets', () => {
     const [target] = grantTargets([
       {
         label: 'x',
-        reference: '@acme/evals/x',
+        reference: '@acme/evals/connector/x',
         connector: { url: 'https://x.example', auth: { type: 'oauth' } },
         url: 'https://x.example',
       },
@@ -168,13 +168,13 @@ describe('grantTargets', () => {
       grantTargets([
         {
           label: 'a',
-          reference: 'acme/a',
+          reference: 'acme/connector/a',
           connector: google([]),
           url: 'https://a.example',
         },
         {
           label: 'b',
-          reference: 'acme/b',
+          reference: 'acme/connector/b',
           connector: {
             url: 'https://b.example',
             grant: 'google',
@@ -193,13 +193,15 @@ describe('grantIdentity', () => {
       url: 'https://x.example',
       auth: { type: 'oauth' as const },
     };
-    expect(grantIdentity({ reference: 'acme/slack', connector })).toEqual({
+    expect(
+      grantIdentity({ reference: 'acme/connector/slack', connector })
+    ).toEqual({
       key: 'acme.slack',
       name: 'acme/slack',
     });
     expect(
       grantIdentity({
-        reference: 'acme/gmail',
+        reference: 'acme/connector/gmail',
         connector: { ...connector, grant: 'google' },
       })
     ).toEqual({ key: 'acme.google', name: 'acme/google' });

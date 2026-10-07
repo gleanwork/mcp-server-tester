@@ -28,7 +28,7 @@ import { parseExtensionOptions } from '../plugins/plugin.js';
 
 const pairwiseJudges = extensionLookup('pairwiseJudges', () => ({}));
 
-/** The pairwise judge `reference` names: `namespace/name` from a plugin. */
+/** The pairwise judge `reference` names: `<namespace>/pairwise-judge/<name>` from a plugin. */
 export function getPairwiseJudge(reference: string): PairwiseJudgeDefinition {
   return pairwiseJudges.get(reference);
 }

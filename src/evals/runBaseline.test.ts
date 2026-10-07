@@ -78,7 +78,7 @@ describe('a run is compared with the previous run of the same eval config', () =
     const evalConfig = (name: string) => ({
       name,
       datasets: ['./cases.json'],
-      client: 'base/fixed',
+      client: 'base/client/fixed',
       // Relative to the eval config, not to rootDir.
       results: { store: { type: 'file', dir: './store' } },
     });
@@ -154,7 +154,7 @@ describe('a run is compared with the previous run of the same eval config', () =
       JSON.stringify({
         name: 'm',
         datasets: ['./cases.json'],
-        client: 'base/fixed',
+        client: 'base/client/fixed',
         results: { store: { type: 'file', dir: './store' } },
       })
     );

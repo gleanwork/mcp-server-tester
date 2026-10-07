@@ -239,7 +239,7 @@ export interface EvalRunnerOptions {
   /** The client's own options, such as `systemPrompt` or `skills`. */
   clientOptions?: ClientOptions;
 
-  /** Plugins whose extensions (for example `acme/completeness` judges) the cases use. */
+  /** Plugins whose extensions (for example `acme/judge/completeness` judges) the cases use. */
   plugins?: readonly Plugin[];
 
   /**
@@ -407,7 +407,7 @@ export interface EvalCaseOptions {
   model?: string;
   /** The client's own options, such as `systemPrompt` or `skills`. */
   clientOptions?: ClientOptions;
-  /** Plugins whose extensions (for example `acme/completeness` judges) the case uses. */
+  /** Plugins whose extensions (for example `acme/judge/completeness` judges) the case uses. */
   plugins?: readonly Plugin[];
   toolMap?: Record<string, string[]>;
   /** Case executor called once per trial; assertions remain runner-owned. */

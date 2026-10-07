@@ -682,10 +682,16 @@ A connector server names a plugin's connector instead of a transport:
 {
   "plugins": ["@acme/mst-plugin"],
   "variants": [
-    { "name": "aggregated", "servers": [{ "connector": "acme/glean" }] },
+    {
+      "name": "aggregated",
+      "servers": [{ "connector": "acme/connector/glean" }]
+    },
     {
       "name": "native",
-      "servers": [{ "connector": "acme/slack" }, { "connector": "acme/gmail" }]
+      "servers": [
+        { "connector": "acme/connector/slack" },
+        { "connector": "acme/connector/gmail" }
+      ]
     }
   ]
 }

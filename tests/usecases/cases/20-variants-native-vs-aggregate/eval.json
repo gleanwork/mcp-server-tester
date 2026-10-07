@@ -1,7 +1,7 @@
 {
   "name": "variants-native-vs-aggregate",
   "datasets": ["./dataset.json"],
-  "client": "usecase/model",
+  "client": "usecase/client/model",
   "model": "claude-sonnet-4-5",
   "clientOptions": {
     "policy": [

@@ -54,6 +54,11 @@ function newTestPlugin(): TestPlugin {
 }
 /** Every extension a test defines; evals load it as the `test` plugin. */
 let testPlugin = newTestPlugin();
+const KIND_SEGMENT = {
+  clients: 'client',
+  datasetSources: 'dataset',
+  judges: 'judge',
+} as const;
 function addExtension<K extends 'clients' | 'datasetSources' | 'judges'>(
   kind: K,
   name: string,
@@ -63,7 +68,7 @@ function addExtension<K extends 'clients' | 'datasetSources' | 'judges'>(
   if (loadedNamespaces().includes('test'))
     throw new Error('Define test extensions before the first run.');
   (testPlugin[kind] as Record<string, unknown>)[name] = definition;
-  return `test/${name}`;
+  return `test/${KIND_SEGMENT[kind]}/${name}`;
 }
 function addClient(name: string, definition: ClientDefinition): string {
   return addExtension('clients', name, definition);
@@ -946,8 +951,8 @@ describe('eval plugins', () => {
       JSON.stringify({
         name: 'cli-and-config-plugins',
         plugins: ['./config-plugin.mjs'],
-        datasets: [{ type: 'mp/cases' }],
-        client: 'cli/echo',
+        datasets: [{ type: 'mp/dataset/cases' }],
+        client: 'cli/client/echo',
       })
     );
 
@@ -970,13 +975,13 @@ describe('eval plugins', () => {
     };
     installPlugins([other]);
     const f = await fixture([
-      { ...scenario, assertions: { passesJudge: { judge: 'other/x' } } },
+      { ...scenario, assertions: { passesJudge: { judge: 'other/judge/x' } } },
     ]);
 
     await expect(
       runEvalConfig({ configPath: f.configPath, rootDir: f.dir })
     ).rejects.toThrow(
-      `Dataset "canonical" references "other/x", but doesn't load the "other" plugin`
+      `Dataset "canonical" references "other/judge/x", but doesn't load the "other" plugin`
     );
     expect(f.run).not.toHaveBeenCalled();
     expect(evaluate).not.toHaveBeenCalled();

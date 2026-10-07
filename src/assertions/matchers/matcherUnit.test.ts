@@ -462,36 +462,36 @@ describe('toPassToolJudge', () => {
 
   it('fails on negation when the judge passes', async () => {
     await vitestExpect(
-      mcpExpect(textResponse).not.toPassToolJudge({ judge: 'unit/high' })
+      mcpExpect(textResponse).not.toPassToolJudge({ judge: 'unit/judge/high' })
     ).rejects.toThrow('Expected judge evaluation to fail, but it passed');
   });
 
   it('passes on negation when the judge fails', async () => {
     await vitestExpect(
-      mcpExpect(textResponse).not.toPassToolJudge({ judge: 'unit/low' })
+      mcpExpect(textResponse).not.toPassToolJudge({ judge: 'unit/judge/low' })
     ).resolves.not.toThrow();
   });
 
   it('fails with or without .not when the judge throws', async () => {
     await vitestExpect(
-      mcpExpect(textResponse).toPassToolJudge({ judge: 'unit/crash' })
+      mcpExpect(textResponse).toPassToolJudge({ judge: 'unit/judge/crash' })
     ).rejects.toThrow('judge offline');
     await vitestExpect(
-      mcpExpect(textResponse).not.toPassToolJudge({ judge: 'unit/crash' })
+      mcpExpect(textResponse).not.toPassToolJudge({ judge: 'unit/judge/crash' })
     ).rejects.toThrow('judge offline');
   });
 
   it('negates a judge list as "not every judge passes"', async () => {
     await vitestExpect(
       mcpExpect(textResponse).not.toPassToolJudge([
-        { judge: 'unit/high' },
-        { judge: 'unit/low' },
+        { judge: 'unit/judge/high' },
+        { judge: 'unit/judge/low' },
       ])
     ).resolves.not.toThrow();
     await vitestExpect(
       mcpExpect(textResponse).not.toPassToolJudge([
-        { judge: 'unit/high' },
-        { judge: 'unit/high' },
+        { judge: 'unit/judge/high' },
+        { judge: 'unit/judge/high' },
       ])
     ).rejects.toThrow('Expected at least one judge to fail');
   });
@@ -499,14 +499,14 @@ describe('toPassToolJudge', () => {
   it('fails a judge list with a crashing judge, with or without .not', async () => {
     await vitestExpect(
       mcpExpect(textResponse).not.toPassToolJudge([
-        { judge: 'unit/low' },
-        { judge: 'unit/crash' },
+        { judge: 'unit/judge/low' },
+        { judge: 'unit/judge/crash' },
       ])
     ).rejects.toThrow('judge offline');
     await vitestExpect(
       mcpExpect(textResponse).toPassToolJudge([
-        { judge: 'unit/high' },
-        { judge: 'unit/crash' },
+        { judge: 'unit/judge/high' },
+        { judge: 'unit/judge/crash' },
       ])
     ).rejects.toThrow('judge offline');
   });

@@ -31,6 +31,7 @@ This guide covers upgrading from 1.x (the last 1.x release is 1.1.1). Features f
 - [Eval configs and variants](#eval-configs-and-variants)
 - [Result fields use the eval vocabulary](#result-fields-use-the-eval-vocabulary)
 - [Eval APIs and client contracts say eval, client and tool optimization](#eval-apis-and-client-contracts-say-eval-client-and-tool-optimization)
+- [Plugin extension names say their kind](#plugin-extension-names-say-their-kind)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
 ---
@@ -638,6 +639,24 @@ The eval APIs use the 2.0 vocabulary ([ADR 0002](../adr/0002-common-eval-vocabul
 **Reporter.** The reporter's tool optimization data is `toolOptimization` (was `variantExperiment`), in the `mcp-tool-optimization` attachment (was `mcp-variant-experiment`).
 
 **Internals.** Modules moved with the names: `evals/runEvalSuite.ts` is `evals/runEval.ts`, `evals/variantExperiment.ts` is `evals/toolOptimization.ts`, `evals/mcpHost/` is `evals/mstClient/`, `evals/externalHost/` is `evals/externalClient/`, and the `*Host*` modules are `*Client*`. `docs/mcp-host.md` is [`docs/mst-client.md`](../mst-client.md).
+
+## Plugin extension names say their kind
+
+**Affects:** eval configs, datasets, shared configs and code that name a plugin's extensions, and plugins whose option schemas check `type`.
+
+A plugin extension's name is `<namespace>/<kind>/<name>` ([ADR 0003](../adr/0003-extension-names-say-their-kind.md)). The kind is `dataset`, `client`, `judge`, `pairwise-judge`, `metric`, `result-store`, `connector` or `config`, from the plugin key the extension is declared under. Plugins don't change their keys.
+
+| Before                                                                       | 2.0                                                          |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `"datasets": [{ "type": "acme/legacy" }]`                                    | `"datasets": [{ "type": "acme/dataset/legacy" }]`            |
+| `"client": "acme/assistant"`                                                 | `"client": "acme/client/assistant"`                          |
+| `"judge": "acme/completeness"` (also `judges`, `toPassToolJudge({ judge })`) | `"judge": "acme/judge/completeness"`                         |
+| `"metrics": ["acme/hits"]`                                                   | `"metrics": ["acme/metric/hits"]`                            |
+| `"results": { "store": { "type": "acme/bq" } }`                              | `"results": { "store": { "type": "acme/result-store/bq" } }` |
+| `"extends": ["acme/recommended"]`                                            | `"extends": ["acme/config/recommended"]`                     |
+| `{ "connector": "acme/slack" }`                                              | `{ "connector": "acme/connector/slack" }`                    |
+
+A two-part name fails with the full one (`needs its kind: use "acme/judge/completeness"`), and a name used as the wrong kind fails with what it is (`"acme/judge/x" is a judge, not a dataset source`). Built-ins keep their short names and may be written in full (`mst/judge/rubric`); plugins can't use the `mst` namespace. A plugin schema that checks `type: z.literal('acme/legacy')` checks the new name. Aggregate keys built from a plugin metric's name include the kind (`acme/metric/hits_rate`).
 
 ## New in 2.0 (non-breaking)
 

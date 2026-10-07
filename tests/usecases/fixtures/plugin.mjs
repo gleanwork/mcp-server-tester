@@ -337,7 +337,7 @@ export default {
         // Judge the client's answer, never its trace.
         const answer = trial.text;
         if (!answer)
-          throw new Error('usecase/keywords judges a text response.');
+          throw new Error('usecase/judge/keywords judges a text response.');
         const haystack = answer.toLowerCase();
         const missing = options.keywords.filter(
           (keyword) => !haystack.includes(keyword.toLowerCase())

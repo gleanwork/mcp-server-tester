@@ -37,6 +37,7 @@ npx mst plugins --plugins @acme/mst-plugin
   dataset            acme/dataset/info-seeking, acme/dataset/action-taking, acme/dataset/tool-selection
   judge              acme/judge/correctness, acme/judge/completeness, acme/judge/groundedness
   pairwise-judge     acme/pairwise-judge/preference
+  connector          acme/connector/slack, acme/connector/jira
   credential-store   acme/credential-store/secret-manager
   setup              acme/setup/reset-test-tenant
   env                acme/env/cloud-vm

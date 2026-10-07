@@ -2,7 +2,7 @@
   "name": "find-skills-rename",
   "datasets": ["./dataset.json"],
   "servers": ["{{server aggregate agg}}"],
-  "client": "usecase/model",
+  "client": "usecase/client/model",
   "clientOptions": {
     "policy": [
       {

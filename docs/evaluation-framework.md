@@ -91,7 +91,7 @@ const plugin: Plugin = {
   // Also: clients, metrics, resultStores.
   configs: {
     recommended: {
-      judges: ['acme/completeness'],
+      judges: ['acme/judge/completeness'],
       trials: 3,
     },
   },
@@ -100,18 +100,18 @@ const plugin: Plugin = {
 export default plugin;
 ```
 
-- **Names.** Each map key names an extension within the plugin's namespace. Eval configs and datasets reference it as `namespace/name`, such as `{ "type": "acme/legacy" }` or `passesJudge: { "judge": "acme/completeness" }`. Built-ins (`file`, `claude-code`, `rubric`, `passed`, ...) use bare names, which plugins can't take.
+- **Names.** Each map key names an extension within the plugin's namespace. Eval configs and datasets reference it as `<namespace>/<kind>/<name>`, such as `{ "type": "acme/dataset/legacy" }` or `passesJudge: { "judge": "acme/judge/completeness" }`. The kind is `dataset`, `client`, `judge`, `pairwise-judge`, `metric`, `result-store`, `connector` or `config`, and it must match where the name is used: `acme/judge/x` in `datasets` is an error. Built-ins (`file`, `claude-code`, `rubric`, `passed`, ...) use bare names, or the full `mst/<kind>/<name>` (`mst/judge/rubric`); the `mst` namespace is reserved.
 - **Namespace.** `meta.namespace` is required: lowercase, optionally scoped as `@scope/name`. Two different plugins can't share a namespace. Loading the same plugin again is a no-op, including a rebuilt object with the same name, version, extension definitions and configs. A plugin factory that builds differently configured copies needs a namespace per copy. A package's CommonJS and ESM builds are different objects too, so load a plugin one way; publishing plugins as ESM avoids the question.
 - **Loading.** An eval config lists plugin specifiers in `plugins`. Each one resolves relative to the eval config's directory, then `rootDir` (`--root-dir`, the working directory by default), then as a package name, resolved as `import` resolves it. `--plugins` and the `pluginPaths` / `plugins` options of `runEval` and `runEvalBatch` add to that list. Code that runs datasets directly passes plugin objects: `runEvalDataset({ dataset, plugins: [plugin] }, ctx)`, or `test.use({ mcpPlugins: [plugin] })` in Playwright. Code that calls validators or matchers on its own installs them with `installPlugins([plugin])`.
 - **Scope.** An eval config may only reference namespaces of plugins it loads, even if another eval in the same process (a batch) loaded more. The same check applies to the clients and judges its datasets name. `runEvalDataset`, `runEvalCase` and the fixtures have no eval config, so they resolve against every plugin installed in the process.
 - **Contracts.** Each extension has a Zod `schema` for its options and the functions its kind needs: `load` (dataset sources), `run` or `runBatch` (clients), `evaluate` (judges), `kind` and `compute` (metrics), and `create` (result stores). MST validates the plugin when it loads, and names the plugin and extension in any error.
-- **Shared configs.** `configs` holds named eval config settings an eval can opt into. An eval that loads the plugin applies one with `"extends": ["acme/recommended"]`:
+- **Shared configs.** `configs` holds named eval config settings an eval can opt into. An eval that loads the plugin applies one with `"extends": ["acme/config/recommended"]`:
 
   ```json
   {
     "name": "acme-eval",
     "plugins": ["@acme/mst-plugin"],
-    "extends": ["acme/recommended"],
+    "extends": ["acme/config/recommended"],
     "datasets": ["./cases.json"],
     "trials": 5
   }
@@ -254,7 +254,7 @@ import {
 import { z } from 'zod';
 
 const MySourceSchema = z
-  .object({ type: z.literal('my/format'), path: z.string().min(1) })
+  .object({ type: z.literal('my/dataset/format'), path: z.string().min(1) })
   .strict();
 
 export default {
@@ -276,7 +276,7 @@ export default {
 } satisfies Plugin;
 ```
 
-An eval config that loads the plugin declares `{ "type": "my/format", "path": "..." }` in `datasets`. Select the format in the declaration rather than inferring it from a first case, and fail on fields the source can't map instead of dropping them.
+An eval config that loads the plugin declares `{ "type": "my/dataset/format", "path": "..." }` in `datasets`. Select the format in the declaration rather than inferring it from a first case, and fail on fields the source can't map instead of dropping them.
 
 ### Clients
 
@@ -301,7 +301,7 @@ export default {
   meta: { name: 'my-mst-plugin', namespace: 'my' },
   clients: {
     assistant: {
-      schema: z.object({ type: z.literal('my/assistant') }),
+      schema: z.object({ type: z.literal('my/client/assistant') }),
       evidence: 'observed',
       async run(input, config, context) {
         // input.prompt and input.servers are the unit of execution.
@@ -312,7 +312,7 @@ export default {
 } satisfies Plugin;
 ```
 
-An eval config that loads the plugin selects the client with `"client": "my/assistant"`, and passes its options in `clientOptions`.
+An eval config that loads the plugin selects the client with `"client": "my/client/assistant"`, and passes its options in `clientOptions`.
 
 - **The trace.** `run` returns a `ClientRunResult`: `finalText`, `events`, and optional `usage`, `error` and timing fields. Each event has a `kind` (`tool_call`, `skill`, `command`, `subagent` or `tool_search`), a `source` (`mcp` or `builtin`), a `name`, and optionally the MCP server label, arguments, output and ID. Record what the host did; don't reconstruct tool calls from the final text. A `tool_search` event (the host searching its tool catalog) lists the tools the search returned in `results`, each `{ name, server? }`. Type client-native actions as their kind rather than as calls to a host tool, so skill assertions and search metrics can read them.
 - **Evidence.** Declare `evidence: 'structured'` only for authoritative protocol or client-native traces. With `observed`, `none` or no declaration, tool-call and argument assertions can't pass; text and judge assertions still run.

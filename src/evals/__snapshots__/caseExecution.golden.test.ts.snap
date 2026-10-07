@@ -897,7 +897,7 @@ exports[`golden: judges > judges a client response 1`] = `
     "request": {
       "assertions": {
         "passesJudge": {
-          "judge": "test/golden-case-judge",
+          "judge": "test/judge/golden-case-judge",
         },
       },
       "client": "mst",
@@ -929,8 +929,8 @@ exports[`golden: judges > judges a client response 1`] = `
     },
     "scores": {
       "judge": {
-        "details": "Judge "test/golden-case-judge" passed with score 0.90",
-        "judgeName": "test/golden-case-judge",
+        "details": "Judge "test/judge/golden-case-judge" passed with score 0.90",
+        "judgeName": "test/judge/golden-case-judge",
         "pass": true,
         "reasoning": "looks right",
         "score": 0.9,
@@ -1045,7 +1045,7 @@ exports[`golden: judges > one judge with case reps and the canonical answer as r
     "request": {
       "assertions": {
         "passesJudge": {
-          "judge": "test/golden-case-judge",
+          "judge": "test/judge/golden-case-judge",
         },
       },
       "client": "mst",
@@ -1079,8 +1079,8 @@ exports[`golden: judges > one judge with case reps and the canonical answer as r
     },
     "scores": {
       "judge": {
-        "details": "Judge "test/golden-case-judge" passed with score 0.90 (mean of 2 reps: [0.90, 0.90])",
-        "judgeName": "test/golden-case-judge",
+        "details": "Judge "test/judge/golden-case-judge" passed with score 0.90 (mean of 2 reps: [0.90, 0.90])",
+        "judgeName": "test/judge/golden-case-judge",
         "pass": true,
         "reasoning": "looks right",
         "score": 0.9,
@@ -1251,12 +1251,12 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
       "assertions": {
         "passesJudge": [
           {
-            "judge": "test/golden-case-judge",
+            "judge": "test/judge/golden-case-judge",
             "reference": "explicit",
             "reps": 1,
           },
           {
-            "judge": "test/golden-strict-judge",
+            "judge": "test/judge/golden-strict-judge",
             "threshold": 0.5,
           },
         ],
@@ -1295,15 +1295,15 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
         "details": "1/2 judges passed",
         "judgeResults": [
           {
-            "details": "Judge "test/golden-case-judge" passed with score 0.90",
-            "judgeName": "test/golden-case-judge",
+            "details": "Judge "test/judge/golden-case-judge" passed with score 0.90",
+            "judgeName": "test/judge/golden-case-judge",
             "pass": true,
             "reasoning": "looks right",
             "score": 0.9,
           },
           {
-            "details": "Judge "test/golden-strict-judge" failed with score 0.20 (threshold: 0.5) (mean of 3 reps: [0.20, 0.20, 0.20]). too vague",
-            "judgeName": "test/golden-strict-judge",
+            "details": "Judge "test/judge/golden-strict-judge" failed with score 0.20 (threshold: 0.5) (mean of 3 reps: [0.20, 0.20, 0.20]). too vague",
+            "judgeName": "test/judge/golden-strict-judge",
             "pass": false,
             "reasoning": "too vague",
             "score": 0.2,
@@ -1880,7 +1880,7 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
             "rubric": "conciseness",
           },
           {
-            "judge": "test/golden-case-judge",
+            "judge": "test/judge/golden-case-judge",
           },
         ],
       },
@@ -1924,8 +1924,8 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
             "score": 0.8,
           },
           {
-            "details": "Judge "test/golden-case-judge" passed with score 0.90 (mean of 2 reps: [0.90, 0.90])",
-            "judgeName": "test/golden-case-judge",
+            "details": "Judge "test/judge/golden-case-judge" passed with score 0.90 (mean of 2 reps: [0.90, 0.90])",
+            "judgeName": "test/judge/golden-case-judge",
             "pass": true,
             "reasoning": "looks right",
             "score": 0.9,
@@ -2321,7 +2321,7 @@ exports[`golden: runEval clients > an eval config declares two rubric judges and
             },
           ],
         },
-        "client": "test/golden-run-rubric-host",
+        "client": "test/client/golden-run-rubric-host",
         "input": "Weather in London?",
       },
       "response": {
@@ -2581,21 +2581,21 @@ exports[`golden: runEval clients > eval config judges merge with case judges 1`]
         "assertions": {
           "passesJudge": [
             {
-              "judge": "test/golden-case-judge",
+              "judge": "test/judge/golden-case-judge",
               "threshold": 0.5,
             },
             {
               "count": 2,
-              "judge": "test/golden-config-judge",
+              "judge": "test/judge/golden-config-judge",
               "options": {
                 "count": 3,
               },
               "reference": "case ref",
-              "type": "test/golden-config-judge",
+              "type": "test/judge/golden-config-judge",
             },
           ],
         },
-        "client": "test/golden-run-judged-host",
+        "client": "test/client/golden-run-judged-host",
         "input": "Weather in London?",
         "reference": "canonical",
       },
@@ -2657,15 +2657,15 @@ exports[`golden: runEval clients > eval config judges merge with case judges 1`]
           "details": "1/2 judges passed",
           "judgeResults": [
             {
-              "details": "Judge "test/golden-case-judge" passed with score 0.90",
-              "judgeName": "test/golden-case-judge",
+              "details": "Judge "test/judge/golden-case-judge" passed with score 0.90",
+              "judgeName": "test/judge/golden-case-judge",
               "pass": true,
               "reasoning": "looks right",
               "score": 0.9,
             },
             {
-              "details": "Judge "test/golden-config-judge" failed with score 0.00 (threshold: 0.7). eval config judge",
-              "judgeName": "test/golden-config-judge",
+              "details": "Judge "test/judge/golden-config-judge" failed with score 0.00 (threshold: 0.7). eval config judge",
+              "judgeName": "test/judge/golden-config-judge",
               "pass": false,
               "reasoning": "eval config judge",
               "score": 0,
@@ -2740,7 +2740,7 @@ exports[`golden: runEval clients > run client 1`] = `
           ],
         },
       },
-      "client": "test/golden-run-host",
+      "client": "test/client/golden-run-host",
       "input": "Weather in London?",
     },
     "response": {
@@ -2890,7 +2890,7 @@ exports[`golden: runEval clients > runBatch client 1`] = `
           ],
         },
       },
-      "client": "test/golden-runBatch-host",
+      "client": "test/client/golden-runBatch-host",
       "input": "Weather in London?",
     },
     "response": {

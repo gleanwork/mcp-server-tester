@@ -83,7 +83,7 @@ async function fixture() {
   const configPath = path.join(rootDir, 'eval.json');
   const evalConfig: EvalConfig = {
     name: 'storage-suite',
-    client: `test/${clientName}`,
+    client: `test/client/${clientName}`,
     datasets: [{ type: 'file', path: './dataset.json' }],
     results: { store: { type: 'file', dir: storeDir } },
   };
@@ -98,8 +98,8 @@ describe('eval storage through public APIs', () => {
       const f = await fixture();
       const typeName = `transformed-store-${sequence++}`;
       const aliasName = `decoy-store-${sequence++}`;
-      const type = `test/${typeName}`;
-      const alias = `test/${aliasName}`;
+      const type = `test/result-store/${typeName}`;
+      const alias = `test/result-store/${aliasName}`;
       testPlugin.resultStores[typeName] = {
         schema: z.object({
           dir: z

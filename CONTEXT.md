@@ -143,11 +143,11 @@ A plain object, the default export of a module or package, that contributes name
 _Avoid_: register hook, extension module
 
 **Namespace**:
-The prefix a plugin's extensions are referenced by, as `namespace/name` (for example `acme/legacy`). Declared by the plugin's `meta.namespace`.
+The first part of a plugin extension's name, `<namespace>/<kind>/<name>` (for example `acme/judge/completeness`). Declared by the plugin's `meta.namespace`; `mst` is reserved for the built-ins.
 _Avoid_: scope, prefix
 
 **Extension**:
-One named thing a plugin contributes: a dataset source, client, judge, pairwise judge, metric or result store.
+One named thing a plugin contributes, of one kind: a dataset source (`dataset`), client (`client`), judge (`judge`), pairwise judge (`pairwise-judge`), metric (`metric`), result store (`result-store`), connector (`connector`) or shared config (`config`). Its name says its kind: `acme/judge/completeness` is a judge.
 _Avoid_: contribution, registration, capability
 
 **Built-in**:

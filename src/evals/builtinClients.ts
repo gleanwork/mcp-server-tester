@@ -389,7 +389,7 @@ export function resolveClientName(reference: string): string {
   return reference;
 }
 
-/** The client `reference` names: a built-in, or `namespace/name` from a plugin. */
+/** The client `reference` names: a built-in, or `<namespace>/client/<name>` from a plugin. */
 export function getClient(reference: string): ClientDefinition {
   return clientDefinitions.get(resolveClientName(reference));
 }

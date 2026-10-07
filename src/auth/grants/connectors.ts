@@ -9,11 +9,11 @@ import type { ConnectorDefinition } from './types.js';
 
 const connectors = extensionLookup('connectors', () => ({}));
 
-/** The connector `reference` (`namespace/name`) names, from a loaded plugin. */
+/** The connector `reference` (`<namespace>/connector/<name>`) names, from a loaded plugin. */
 export function getConnector(reference: string): ConnectorDefinition {
   if (!reference.includes('/'))
     throw new Error(
-      `Connector "${reference}" must be namespaced: "<plugin namespace>/${reference}".`
+      `Connector "${reference}" must be namespaced: "<plugin namespace>/connector/${reference}".`
     );
   return connectors.get(reference);
 }
@@ -22,7 +22,7 @@ export function getConnector(reference: string): ConnectorDefinition {
 export interface ConnectorUse {
   /** The server's label in the eval config. */
   label: string;
-  /** `namespace/name`. */
+  /** `<namespace>/connector/<name>`. */
   reference: string;
   connector: ConnectorDefinition;
   /** The endpoint: the eval config's `url`, else the connector's. */

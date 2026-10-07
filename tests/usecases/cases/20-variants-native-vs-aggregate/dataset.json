@@ -6,7 +6,7 @@
       "input": "What caused the checkout outage?",
       "assertions": {
         "passesJudge": {
-          "judge": "usecase/keywords",
+          "judge": "usecase/judge/keywords",
           "keywords": ["certificate"],
           "threshold": 1
         }
@@ -17,7 +17,7 @@
       "input": "How long did the checkout outage last?",
       "assertions": {
         "passesJudge": {
-          "judge": "usecase/keywords",
+          "judge": "usecase/judge/keywords",
           "keywords": ["41 minutes"],
           "threshold": 1
         }

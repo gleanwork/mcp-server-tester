@@ -5,6 +5,7 @@
  * plugin judge. Both run through `evaluateJudge`.
  */
 
+import { builtinShortName } from '../../plugins/extensions.js';
 import type { ValidationResult } from './types.js';
 import type { ProviderKind } from '../../judge/judgeTypes.js';
 import type { RubricSpec } from '../../judge/rubrics.js';
@@ -54,7 +55,7 @@ export interface JudgeValidatorConfig {
   /** Fail if response exceeds this size in bytes before judging */
   maxToolOutputSize?: number;
   /**
-   * The judge to run: the built-in `rubric`, or `namespace/name` from a
+   * The judge to run: the built-in `rubric`, or `<namespace>/judge/<name>` from a
    * plugin. It returns a normalized score; `threshold` decides pass/fail and
    * `reps` how many times it scores the response.
    */
@@ -103,7 +104,7 @@ export async function validateJudge(
 
 /**
  * The name results give the judge an assertion runs (`correctness`,
- * `acme/completeness`), or undefined when it names none. Eval configs
+ * `acme/judge/completeness`), or undefined when it names none. Eval configs
  * match case overrides on it.
  */
 export function judgeNameOf(config: JudgeValidatorConfig): string | undefined {
@@ -121,10 +122,16 @@ function judgeRequest(config: JudgeValidatorConfig): JudgeRequest | string {
   if (config.judge !== undefined) {
     // `options`, when given, is the judge's whole option set.
     const options = config.options ?? judgeOwnOptions(config);
+    let judge: string;
+    try {
+      judge = builtinShortName(config.judge, 'judge');
+    } catch (error) {
+      return (error as Error).message;
+    }
     return {
       ...assertion,
-      judge: config.judge,
-      label: judgeLabel(config.judge, options),
+      judge,
+      label: judgeLabel(judge, options),
       options,
     };
   }

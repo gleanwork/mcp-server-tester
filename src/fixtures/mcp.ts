@@ -42,7 +42,7 @@ type MCPFixtures = {
 
   /**
    * Plugins whose extensions this project's tests use, for example a
-   * judge referenced as `toPassToolJudge({ judge: 'acme/completeness' })`.
+   * judge referenced as `toPassToolJudge({ judge: 'acme/judge/completeness' })`.
    * Set with `test.use({ mcpPlugins: [acme] })` or in a project's `use` block.
    */
   mcpPlugins: readonly Plugin[];

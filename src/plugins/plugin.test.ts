@@ -31,6 +31,7 @@ describe('assertPlugin', () => {
     [undefined, 'meta.namespace is required'],
     ['Acme', 'meta.namespace must be lowercase'],
     ['acme/tools', 'meta.namespace must be lowercase'],
+    ['mst', 'meta.namespace "mst" is reserved for MST\'s built-ins'],
   ])('rejects namespace %s', (namespace, message) => {
     const value = plugin({ meta: { name: 'x', namespace } });
     expect(() => assertPlugin(value, './x.js')).toThrow(message);
@@ -109,9 +110,39 @@ describe('assertPlugin', () => {
 
 describe('parseExtensionReference', () => {
   it.each([
+    // A bare name is a built-in.
     ['file', { name: 'file' }],
+    [
+      'acme/judge/quality',
+      { namespace: 'acme', kind: 'judge', name: 'quality' },
+    ],
+    [
+      'acme/pairwise-judge/prefer',
+      { namespace: 'acme', kind: 'pairwise-judge', name: 'prefer' },
+    ],
+    [
+      'acme/result-store/bucket',
+      { namespace: 'acme', kind: 'result-store', name: 'bucket' },
+    ],
+    [
+      'acme/config/recommended',
+      { namespace: 'acme', kind: 'config', name: 'recommended' },
+    ],
+    ['mst/judge/rubric', { namespace: 'mst', kind: 'judge', name: 'rubric' }],
+    [
+      '@scope/pkg/judge/x',
+      { namespace: '@scope/pkg', kind: 'judge', name: 'x' },
+    ],
+    // Two parts: no kind, which lookups reject with the full name.
     ['acme/legacy', { namespace: 'acme', name: 'legacy' }],
     ['@acme/tools/legacy', { namespace: '@acme/tools', name: 'legacy' }],
+    // An unknown kind is kept so the lookup can name it.
+    ['acme/judges/x', { namespace: 'acme', kind: 'judges', name: 'x' }],
+    [
+      '@scope/pkg/widget/x',
+      { namespace: '@scope/pkg', kind: 'widget', name: 'x' },
+    ],
+    ['acme/a/b/c', { namespace: 'acme', kind: 'a/b', name: 'c' }],
   ])('parses %s', (reference, expected) => {
     expect(parseExtensionReference(reference)).toEqual(expected);
   });

@@ -43,7 +43,7 @@ beforeEach(async () => {
     JSON.stringify({
       name: 'narrowing',
       datasets: ['./cases.json'],
-      client: 'acme/record',
+      client: 'acme/client/record',
       servers: [],
       trials: 2,
       filterTags: ['keep'],

@@ -91,16 +91,20 @@ describe('client, model and clientOptions', () => {
         },
         configs: {
           recommended: {
-            client: 'acme/echo',
+            client: 'acme/client/echo',
             clientOptions: { region: 'eu' },
             trials: 3,
           },
         },
       },
     ]);
-    const base = { name: 'm', datasets: [], extends: ['acme/recommended'] };
+    const base = {
+      name: 'm',
+      datasets: [],
+      extends: ['acme/config/recommended'],
+    };
     expect(resolveConfigExtends(base, ['acme'])).toMatchObject({
-      client: 'acme/echo',
+      client: 'acme/client/echo',
       clientOptions: { region: 'eu' },
       trials: 3,
     });

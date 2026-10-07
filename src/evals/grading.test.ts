@@ -206,13 +206,13 @@ describe('gradeTrial', () => {
     const outcome = await gradeTrial(
       {
         expected: { answer: 'canonical' },
-        assertions: { passesJudge: { judge: 'test/grading-test-judge' } },
+        assertions: { passesJudge: { judge: 'test/judge/grading-test-judge' } },
       },
       { response: 'answer' }
     );
     expect(outcome.scores.judge).toMatchObject({
       pass: true,
-      judgeName: 'test/grading-test-judge',
+      judgeName: 'test/judge/grading-test-judge',
     });
     expect(seen).toEqual([{ candidate: 'answer', reference: 'canonical' }]);
   });

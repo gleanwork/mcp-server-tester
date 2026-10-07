@@ -1,5 +1,8 @@
 import { getSharedConfig } from '../plugins/extensions.js';
-import { parseExtensionReference } from '../plugins/plugin.js';
+import {
+  BUILTIN_NAMESPACE,
+  parseExtensionReference,
+} from '../plugins/plugin.js';
 import {
   parsePluginConfig,
   type EvalConfig,
@@ -34,7 +37,7 @@ export function resolveConfigExtends(
   for (const reference of references) {
     if (parseExtensionReference(reference).namespace === undefined) {
       throw new Error(
-        `The eval config extends "${reference}", but MST has no built-in configs. Name a plugin's config: "namespace/${reference}".`
+        `The eval config extends "${reference}", but MST has no built-in configs. Name a plugin's config: "<namespace>/config/${reference}".`
       );
     }
   }
@@ -68,9 +71,13 @@ function sharedConfig(reference: string): Record<string, unknown> {
   const { namespace } = parseExtensionReference(reference);
   for (const used of configReferences(config)) {
     const owner = parseExtensionReference(used).namespace;
-    if (owner !== undefined && owner !== namespace) {
+    if (
+      owner !== undefined &&
+      owner !== BUILTIN_NAMESPACE &&
+      owner !== namespace
+    ) {
       throw new Error(
-        `${label} references "${used}". A shared config may use only its own plugin's extensions ("${namespace}/...") and built-ins.`
+        `${label} references "${used}". A shared config may use only its own plugin's extensions ("${namespace}/<kind>/...") and built-ins.`
       );
     }
   }
@@ -86,6 +93,9 @@ function configReferences(config: ParsedPluginConfig): string[] {
     // A metric names its definition in `metric`, or by its `type`.
     ...(config.metrics ?? []).map((metric) =>
       typeof metric.metric === 'string' ? metric.metric : metric.type
+    ),
+    ...(config.servers ?? []).map((server) =>
+      'connector' in server ? server.connector : undefined
     ),
   ].filter((type): type is string => typeof type === 'string');
 }

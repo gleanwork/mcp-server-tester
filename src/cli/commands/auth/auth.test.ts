@@ -58,9 +58,9 @@ export default {
   configs: {
     servers: {
       servers: [
-        { connector: 'acme/jira' },
-        { connector: 'acme/gmail' },
-        { connector: 'acme/gcal' },
+        { connector: 'acme/connector/jira' },
+        { connector: 'acme/connector/gmail' },
+        { connector: 'acme/connector/gcal' },
       ],
     },
   },
@@ -72,14 +72,14 @@ export default {
       name: 'e',
       datasets: ['./cases.json'],
       plugins: ['./plugin.mjs'],
-      extends: ['acme/servers'],
+      extends: ['acme/config/servers'],
       variants: [
         {
           name: 'native',
           servers: [
-            { connector: 'acme/jira' },
-            { connector: 'acme/gmail' },
-            { connector: 'acme/gcal' },
+            { connector: 'acme/connector/jira' },
+            { connector: 'acme/connector/gmail' },
+            { connector: 'acme/connector/gcal' },
           ],
         },
       ],

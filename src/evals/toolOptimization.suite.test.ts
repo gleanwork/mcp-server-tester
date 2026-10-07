@@ -74,7 +74,7 @@ async function evalRun(variants?: unknown[]): Promise<string> {
           label: 'agg',
         },
       ],
-      client: 'usecase/model',
+      client: 'usecase/client/model',
       clientOptions: {
         policy: [
           {

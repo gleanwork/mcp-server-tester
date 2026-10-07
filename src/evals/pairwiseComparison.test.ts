@@ -78,7 +78,7 @@ describe('comparePairwise', () => {
           result('y', 'only cand'),
         ],
       },
-      judges: [{ type: 'p/longer' }],
+      judges: [{ type: 'p/pairwise-judge/longer' }],
     });
     expect(out.baseline).toBe('control');
     expect(out.unmatched).toEqual({
@@ -102,7 +102,7 @@ describe('comparePairwise', () => {
     expect(calls[0]!.case.input.prompt).toBe('q-a');
     const [summary] = out.summary;
     expect(summary).toMatchObject({
-      judge: 'p/longer',
+      judge: 'p/pairwise-judge/longer',
       compared: 3,
       candidateWins: 1,
       baselineWins: 1,
@@ -127,7 +127,7 @@ describe('comparePairwise', () => {
     const out = await comparePairwise({
       baseline: { caseResults: [result('a', '1')] },
       candidate: { caseResults: [result('a', '2')] },
-      judges: [{ type: 'p/first' }],
+      judges: [{ type: 'p/pairwise-judge/first' }],
     });
     expect(out.cases[0]!.preferences[0]).toMatchObject({
       preference: 'tie',
@@ -150,7 +150,7 @@ describe('comparePairwise', () => {
     const out = await comparePairwise({
       baseline: { caseResults: [result('a', '1')] },
       candidate: { caseResults: [result('a', '2')] },
-      judges: [{ type: 'p/once', reps: 3 }],
+      judges: [{ type: 'p/pairwise-judge/once', reps: 3 }],
     });
     expect(n).toBe(3);
     expect(out.cases[0]!.preferences[0]!.preference).toBe('candidate');
@@ -165,7 +165,7 @@ describe('comparePairwise', () => {
     const out = await comparePairwise({
       baseline: { caseResults: [result('a', '1'), result('b', '1')] },
       candidate: { caseResults: [result('a', '22'), result('b', '22')] },
-      judges: [{ type: 'p/oracle' }],
+      judges: [{ type: 'p/pairwise-judge/oracle' }],
       cases: new Map([
         ['a', { input: 'dataset q', expected: { answer: 'gold' } }],
       ]),
@@ -217,7 +217,7 @@ describe('comparePairwise', () => {
       candidate: {
         caseResults: [result('a', 'y'), result('b', 'y'), result('c', 'y')],
       },
-      judges: [{ type: 'p/picky' }],
+      judges: [{ type: 'p/pairwise-judge/picky' }],
     });
     expect(out.cases.map((c) => c.preferences[0])).toMatchObject([
       { skipped: true, reasoning: 'no evidence' },
@@ -255,7 +255,7 @@ describe('comparePairwise', () => {
     const out = await comparePairwise({
       baseline: { caseResults: [result('a', 'old')] },
       candidate: { caseResults: [result('a', 'new')] },
-      judges: [{ type: 'p/multi' }],
+      judges: [{ type: 'p/pairwise-judge/multi' }],
     });
     const preference = out.cases[0]!.preferences[0]!;
     expect(preference).toMatchObject({
@@ -283,13 +283,15 @@ describe('comparePairwise', () => {
       comparePairwise({
         baseline: { caseResults: [] },
         candidate: { caseResults: [] },
-        judges: [{ type: 'p/strict', options: { mode: 'b' } }],
+        judges: [{ type: 'p/pairwise-judge/strict', options: { mode: 'b' } }],
       })
-    ).rejects.toThrow(/pairwise judge options "p\/strict"/);
-    expect(() => getPairwiseJudge('p/missing')).toThrow(
-      /Pairwise judge "p\/missing" is not available/
+    ).rejects.toThrow(/pairwise judge options "p\/pairwise-judge\/strict"/);
+    expect(() => getPairwiseJudge('p/pairwise-judge/missing')).toThrow(
+      /Pairwise judge "p\/pairwise-judge\/missing" is not available/
     );
-    expect(() => getPairwiseJudge('q/any')).toThrow(/needs the "q" plugin/);
+    expect(() => getPairwiseJudge('q/pairwise-judge/any')).toThrow(
+      /needs the "q" plugin/
+    );
   });
 });
 
