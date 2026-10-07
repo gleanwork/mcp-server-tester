@@ -313,10 +313,10 @@ function cleanupFailure(
     error: result.success
       ? cleanupMessage
       : `${result.error}; ${cleanupMessage}`,
-    externalHost: {
-      ...result.externalHost,
+    clientMetadata: {
+      ...result.clientMetadata,
       traceLimitations: [
-        ...(result.externalHost.traceLimitations ?? []),
+        ...(result.clientMetadata.traceLimitations ?? []),
         cleanupMessage,
       ],
       failureKind: 'cleanup_failed',
@@ -337,13 +337,13 @@ function runtimeFailure(
     success: false,
     toolCalls: [],
     error,
-    externalHost: {
+    clientMetadata: {
       driver: loaded.driver,
       driverSlug: loaded.driverSlug,
       displayName: loaded.displayName,
-      hostName: loaded.displayName,
-      hostType: loaded.config.hostType ?? hostTypeFromDriver(loaded.driver),
-      hostVariant: loaded.config.variant,
+      clientName: loaded.displayName,
+      clientType: loaded.config.hostType ?? hostTypeFromDriver(loaded.driver),
+      clientVariant: loaded.config.variant,
       capabilitiesUsed: loaded.capabilitiesUsed,
       traceSource: 'none',
       traceConfidence: 'unknown',

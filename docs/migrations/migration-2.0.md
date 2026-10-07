@@ -29,6 +29,7 @@ This guide covers upgrading from 1.x (the last 1.x release is 1.1.1). Features f
 - [Direct cases are Playwright tests](#direct-cases-are-playwright-tests)
 - [The simulator and the external-host runtime are internal](#the-simulator-and-the-external-host-runtime-are-internal)
 - [Eval configs and variants](#eval-configs-and-variants)
+- [Result fields name the client](#result-fields-name-the-client)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
 ---
@@ -421,7 +422,7 @@ await runEvalDataset(
 - `provider` is inferred from the model id; set `clientOptions.provider` to override it (a gateway, or Vertex routing).
 - An `external_host` case runs in a suite with `client: 'chatgpt'`, or a plugin client.
 - `mcpHostConfig.cli` and `browser` (caller-authored CLI and browser hosts) have no replacement in a case; a plugin client can wrap a custom host.
-- `mcpHostModel` is now `model`; the run metadata still records it as `mcpHostModel`.
+- `mcpHostModel` is now `model`, in options and in run metadata.
 - Results record the case's client and model as `request.client` and `request.model`, instead of `request.mcpHostConfig` and `request.externalHost`.
 - Plugin clients: `ClientRunContext.mcpHostConfig` is gone. A case's options arrive in the client config the suite resolves.
 - A case with `input` and a `toolName` or `request` fails validation: a case runs on the client or calls a tool directly, not both. Remove a placeholder `toolName` and `args` from client cases.
@@ -504,7 +505,7 @@ const result = await runEvalCase(
 - Browser and desktop hosts, and a caller-authored CLI host, have no replacement. A plugin client (`run` or `runBatch`) can drive any host and report its trace.
 - A plugin client needs `run` or `runBatch`; `createConfig` is gone.
 - `buildEvalDataset(raw, evalConfig)` takes no host config, and `DatasetSourceContext` has no `hostConfig`.
-- The ChatGPT client still records what it saw on each result's `externalHost`, and `./experimental/clients` still exports the types for it (`ExternalHostMetadata` and the types it uses).
+- The ChatGPT client still records what it saw on each result (now `clientMetadata`; see [Result fields name the client](#result-fields-name-the-client)), and `./experimental/clients` still exports the types for it (`ClientMetadata` and the types it uses).
 - The external-host drivers for the Claude desktop chat and Cowork surfaces (driven through Accessibility) are gone; the `cowork` client covers Cowork.
 
 ## Eval configs and variants
@@ -554,6 +555,44 @@ ADR 0002's vocabulary reaches the config: an eval config compares **variants**, 
 - **Options.** `runEvalSuite({ configPath, variant, variants })` (were `manifestPath`, `arm`, `arms`), whose result has `evalConfig` (was `manifest`); `runEvalBatch({ configPaths, configDir })`. `runVariantExperiment({ suite: { configPath, baseVariant } })` (were `manifestPath`, `arm`).
 - **Plugins.** A client's context is `{ evalConfig, variant, env }` (were `manifest`, `arm`); a dataset source's is `{ rootDir, configDir, evalConfig }`. A client that shows tool metadata itself declares `toolMetadata: true` (was `toolOverrides: true`) and reads it with `variantToolMetadata(context.evalConfig, context.variant)`.
 - **Results.** `results.json` names the run by `configId` and `configName`, lists `variants` (was `arms`) and `variantDeltas` (was `armDeltas`); each case result has `variant` (was `arm`), and `previousRun` has `sameConfig` and `variants`. A run doesn't find a previous run stored before this change.
+
+## Result fields name the client
+
+**Affects:** code and tools that read eval results (`results.json`, `EvalRunnerResult`, stored artifacts, baselines, reporter data), and code that imports `ExternalHostMetadata`.
+
+Results use the 2.0 vocabulary ([ADR 0002](../adr/0002-common-eval-vocabulary.md)): they name the client a case ran on, not a host.
+
+| 1.x                                                            | 2.0                                                          |
+| -------------------------------------------------------------- | ------------------------------------------------------------ |
+| `toolName: 'mcp_host'` on a case result                        | no `toolName`; see `request.client`                          |
+| `request.scenario`                                             | `request.input`                                              |
+| `request.iterations`                                           | `request.trials`                                             |
+| `request.accuracyThreshold`                                    | `request.passThreshold`                                      |
+| `request.expect`                                               | `request.assertions`                                         |
+| `request.toolOverrideVariantId`                                | `request.toolVariantId`                                      |
+| `mcpHostTrace`                                                 | `toolCallTrace`                                              |
+| `hostUsage`                                                    | `clientUsage`                                                |
+| `totalHostUsage` (on a run result and in `telemetry`)          | `totalClientUsage`                                           |
+| `hostTelemetry` (and its `hostApp`)                            | `clientTelemetry` (and `clientApp`)                          |
+| `hostDiagnostics`                                              | `clientDiagnostics`                                          |
+| `hostEvidence`                                                 | `traceEvidence`                                              |
+| `externalHost`                                                 | `clientMetadata`                                             |
+| `externalHost.hostName`, `.hostType`, `.hostVariant`           | `clientMetadata.clientName`, `.clientType`, `.clientVariant` |
+| `traceSource: 'host-local-transcript'`, `'host-native-export'` | `'client-local-transcript'`, `'client-native-export'`        |
+| `metadata.toolOverrideVariantId`                               | `metadata.toolVariantId`                                     |
+| `metadata.mcpHostModel`                                        | `metadata.model`                                             |
+| `ExternalHostMetadata` type                                    | `ClientMetadata`                                             |
+
+`toolName` is optional on `EvalCaseResult`: it is set only for a tool call a Playwright test made. `request.client` is always set; a case that names no client records `mst`.
+
+The `runEvalDataset`, `runEvalCase` and `runVariantExperiment` options `mcpHostModel` and `toolOverrideVariantId` are now `model` and `toolVariantId`; the old names fail with the new ones.
+
+Stored results are `schemaVersion: 2`, for result store artifacts and suite `results.json`. Results written by an earlier MST aren't read as if they were current:
+
+- Loading one explicitly fails with the renames and "Rerun to write it again". That covers a stored artifact by ID, the latest stored baseline for a comparison, and a `loadBaseline()` file.
+- History (the previous run of an eval config, the reporter's trend) skips them.
+
+Rerun a baseline with 2.0 to compare against it.
 
 ## New in 2.0 (non-breaking)
 

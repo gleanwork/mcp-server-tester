@@ -97,8 +97,10 @@ describe('pricing', () => {
     expect(b!.metrics?.cost_usd_mean).toBeCloseTo(3, 9);
     expect(b!.unpricedModels).toEqual(['model-b']);
     // Totals include estimates; the run total is unknown while usage is unpriced.
-    expect(a!.result?.totalHostUsage?.estimatedCostUsd).toBeCloseTo(6, 9);
-    expect(summary.telemetry?.totalHostUsage?.estimatedCostUsd).toBeUndefined();
+    expect(a!.result?.totalClientUsage?.estimatedCostUsd).toBeCloseTo(6, 9);
+    expect(
+      summary.telemetry?.totalClientUsage?.estimatedCostUsd
+    ).toBeUndefined();
   });
 });
 

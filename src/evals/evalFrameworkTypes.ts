@@ -268,7 +268,7 @@ export interface RunTelemetry {
   cases: number;
   toolCalls: number;
   failedCases: number;
-  totalHostUsage?: Partial<UsageMetrics>;
+  totalClientUsage?: Partial<UsageMetrics>;
   /** Judge model usage, from judges that report it. Separate from host usage. */
   totalJudgeUsage?: Partial<UsageMetrics>;
 }
@@ -305,7 +305,8 @@ export interface RunSummary {
   runId?: string;
   /** This run compared with the previous run of the same eval config, if there is one. */
   previousRun?: PreviousRunComparison;
-  schemaVersion: 1;
+  /** The result format: see `RESULT_SCHEMA_VERSION`. */
+  schemaVersion: 2;
   configId: string;
   contentHash: string;
   timestamp: string;

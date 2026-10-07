@@ -1,3 +1,4 @@
+import { RESULT_SCHEMA_VERSION } from './resultFormat.js';
 import { rejectRenamedOptions } from './renamedKeys.js';
 import { configIdentity } from './configIdentity.js';
 import { resolveConfigExtends } from './configExtends.js';
@@ -274,7 +275,7 @@ const EVIDENCE_STRENGTH: TraceEvidence[] = ['none', 'observed', 'structured'];
 /** The weakest evidence among a variant's cases: what its trace metrics rest on. */
 function variantEvidence(results: EvalCaseResult[]): TraceEvidence | undefined {
   const levels = results
-    .map((result) => result.hostEvidence)
+    .map((result) => result.traceEvidence)
     .filter((level): level is TraceEvidence => level !== undefined);
   return EVIDENCE_STRENGTH.find((level) => levels.includes(level));
 }
@@ -386,11 +387,11 @@ function summarizeVariant(
   results: Array<{ name: string; result: EvalRunnerResult }>
 ): EvaluationVariantResult {
   const caseResults: EvalCaseResult[] = [];
-  let totalHostUsage: UsageMetrics | undefined;
+  let totalClientUsage: UsageMetrics | undefined;
   for (const { result } of results) {
     caseResults.push(...result.caseResults);
-    if (result.totalHostUsage) {
-      totalHostUsage = sumUsage(totalHostUsage, result.totalHostUsage);
+    if (result.totalClientUsage) {
+      totalClientUsage = sumUsage(totalClientUsage, result.totalClientUsage);
     }
   }
   const totalJudgeUsage = sumJudgeUsage(
@@ -408,7 +409,7 @@ function summarizeVariant(
         (sum, item) => sum + item.result.durationMs,
         0
       ),
-      totalHostUsage,
+      totalClientUsage,
       ...(totalJudgeUsage !== undefined && { totalJudgeUsage }),
     },
   };
@@ -527,7 +528,7 @@ export async function runEvalSuite(
         dataset: loaded[index],
       })),
       summary: {
-        schemaVersion: 1,
+        schemaVersion: RESULT_SCHEMA_VERSION,
         ...identity,
         timestamp: new Date().toISOString(),
         durationMs: 0,
@@ -750,9 +751,12 @@ export async function runEvalSuite(
         Object.assign(appliedPricing, priced.applied);
         for (const model of priced.unpriced) unpricedModels.add(model);
         // The run's totals include the estimates.
-        result.totalHostUsage = result.caseResults.reduce<
+        result.totalClientUsage = result.caseResults.reduce<
           UsageMetrics | undefined
-        >((sum, caseResult) => sumUsage(sum, caseResult.hostUsage), undefined);
+        >(
+          (sum, caseResult) => sumUsage(sum, caseResult.clientUsage),
+          undefined
+        );
         sourceResults.push({ name: executionDataset.name, result });
         allResults.push(...result.caseResults);
       }
@@ -803,9 +807,12 @@ export async function runEvalSuite(
   // Top-level metrics describe the baseline variant. Comparison-variant metrics remain
   // attached to their variant, avoiding case-id collisions across variants.
   const computedMetrics = variantMetrics[0]?.aggregated ?? {};
-  let totalHostUsage: UsageMetrics | undefined;
+  let totalClientUsage: UsageMetrics | undefined;
   for (const variant of variantResults) {
-    totalHostUsage = sumUsage(totalHostUsage, variant.result?.totalHostUsage);
+    totalClientUsage = sumUsage(
+      totalClientUsage,
+      variant.result?.totalClientUsage
+    );
   }
   const totalJudgeUsage = sumJudgeUsage(
     variantResults.map((variant) => variant.result?.totalJudgeUsage)
@@ -814,11 +821,11 @@ export async function runEvalSuite(
     cases: allResults.length,
     toolCalls: countTrialToolCalls(allResults),
     failedCases: allResults.filter((result) => !result.pass).length,
-    totalHostUsage,
+    totalClientUsage,
     ...(totalJudgeUsage !== undefined && { totalJudgeUsage }),
   };
   const summary: EvaluationSummary = {
-    schemaVersion: 1,
+    schemaVersion: RESULT_SCHEMA_VERSION,
     ...identity,
     timestamp: new Date().toISOString(),
     durationMs: Date.now() - suiteStartTime,

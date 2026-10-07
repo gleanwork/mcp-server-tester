@@ -52,12 +52,12 @@ export function estimateCosts(
     const model = modelOf(result);
     if (result.iterationResults?.length) {
       for (const iteration of result.iterationResults)
-        price(iteration.hostUsage, model);
-      result.hostUsage = result.iterationResults.reduce<
+        price(iteration.clientUsage, model);
+      result.clientUsage = result.iterationResults.reduce<
         UsageMetrics | undefined
-      >((sum, iteration) => sumUsage(sum, iteration.hostUsage), undefined);
+      >((sum, iteration) => sumUsage(sum, iteration.clientUsage), undefined);
     } else {
-      price(result.hostUsage, model);
+      price(result.clientUsage, model);
     }
   }
   return { applied, unpriced: [...unpriced].sort() };
@@ -72,8 +72,8 @@ export function costSource(
     result.iterationResults?.length
       ? result.iterationResults
           .filter((iteration) => !iteration.isInfrastructureError)
-          .map((iteration) => iteration.hostUsage)
-      : [result.hostUsage]
+          .map((iteration) => iteration.clientUsage)
+      : [result.clientUsage]
   );
   const reported = usages.some((usage) => usage?.totalCostUsd !== undefined);
   const estimated = usages.some(

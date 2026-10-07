@@ -189,9 +189,7 @@ export function compareEvalRuns(
   return {
     baselineLabel: labels?.baseline ?? 'baseline',
     candidateLabel:
-      labels?.candidate ??
-      candidate.metadata?.toolOverrideVariantId ??
-      'candidate',
+      labels?.candidate ?? candidate.metadata?.toolVariantId ?? 'candidate',
     baselinePassRate,
     candidatePassRate,
     deltaPassRate: candidatePassRate - baselinePassRate,

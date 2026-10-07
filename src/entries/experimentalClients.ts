@@ -40,12 +40,12 @@ export type {
   ClientStdioServer,
 } from '../evals/hostPlugins.js';
 // What a desktop client (ChatGPT) records about a run, on each result's
-// `externalHost`.
+// `clientMetadata`.
 export type {
   EvidenceSource,
   ExternalHostCorrelationMetadata,
   ExternalHostFailureKind,
-  ExternalHostMetadata,
+  ClientMetadata,
   ExternalHostSession,
   ExternalHostTelemetry,
   ExternalHostType,

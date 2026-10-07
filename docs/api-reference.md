@@ -443,7 +443,7 @@ const candidate = await runEvalDataset(
   { mcp, testInfo }
 );
 
-console.log(candidate.metadata?.toolOverrideVariantId);
+console.log(candidate.metadata?.toolVariantId);
 ```
 
 Use `compareEvalRuns()` to summarize the completed baseline and candidate runs:
@@ -586,7 +586,7 @@ await saveEvalRunComparison({ store, comparison, id: 'candidate-comparison' });
 
 **Result Structure:**
 
-```typescript snippet=src/evals/evalRunner.ts#L126-L208
+```typescript snippet=src/evals/evalRunner.ts#L127-L209
 /**
  * Overall result of running an eval dataset
  */
@@ -663,7 +663,7 @@ export interface EvalRunnerResult {
   /**
    * Aggregate token usage from every client case's model calls.
    */
-  totalHostUsage?: UsageMetrics;
+  totalClientUsage?: UsageMetrics;
 
   /**
    * Aggregate token usage of judges across all cases, from judges that report it.

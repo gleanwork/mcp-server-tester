@@ -1,5 +1,5 @@
 import type { EvalCaseResult } from '../types/reporter.js';
-import type { ExternalHostMetadata } from './externalHost/types.js';
+import type { ClientMetadata } from './externalHost/types.js';
 import {
   CLAUDE_NO_MATCHING_SESSION_MESSAGE,
   CLAUDE_SESSION_TIMEOUT_MESSAGE,
@@ -57,9 +57,9 @@ export function isInfrastructureError(err: unknown): boolean {
 }
 
 function isExternalHostInfrastructureFailure(
-  externalHost: ExternalHostMetadata | undefined
+  clientMetadata: ClientMetadata | undefined
 ): boolean {
-  return externalHost?.failureKind !== undefined;
+  return clientMetadata?.failureKind !== undefined;
 }
 
 /**
@@ -68,12 +68,12 @@ function isExternalHostInfrastructureFailure(
  * accuracy and of per-trial metrics.
  */
 export function isInfrastructureFailure(
-  result: Pick<EvalCaseResult, 'error' | 'hostDiagnostics' | 'externalHost'>
+  result: Pick<EvalCaseResult, 'error' | 'clientDiagnostics' | 'clientMetadata'>
 ): boolean {
   return (
-    isExternalHostInfrastructureFailure(result.externalHost) ||
+    isExternalHostInfrastructureFailure(result.clientMetadata) ||
     (result.error != null &&
-      (result.hostDiagnostics?.failureKind !== undefined ||
+      (result.clientDiagnostics?.failureKind !== undefined ||
         isInfrastructureError(result.error)))
   );
 }

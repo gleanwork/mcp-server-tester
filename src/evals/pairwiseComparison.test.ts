@@ -23,7 +23,7 @@ function result(
     pass: true,
     expectations: {},
     durationMs: 1,
-    request: { scenario: `q-${id}` },
+    request: { input: `q-${id}` },
     response: { response: text, events: [] },
     ...extra,
   } as EvalCaseResult;

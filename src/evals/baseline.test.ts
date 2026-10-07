@@ -5,6 +5,40 @@ import { mkdtemp, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
+describe('baselines from an earlier MST', () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'older-baseline-'));
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it.each([
+    ['the mcp_host placeholder', { toolName: 'mcp_host' }],
+    ['a renamed field', { hostUsage: { inputTokens: 1 } }],
+    ['request.scenario', { request: { scenario: 'hi' } }],
+    ['a renamed trial field', { iterationResults: [{ mcpHostTrace: {} }] }],
+  ])('fails clearly on %s', async (_label, fields) => {
+    const { writeFile } = await import('fs/promises');
+    const file = join(dir, 'baseline.json');
+    await writeFile(
+      file,
+      JSON.stringify({
+        total: 1,
+        passed: 1,
+        failed: 0,
+        caseResults: [
+          { id: 'a', pass: true, source: 'eval', expectations: {}, ...fields },
+        ],
+      })
+    );
+    await expect(loadBaseline(file)).rejects.toThrow(
+      `Baseline ${file} was written by an earlier MST. 2.0 renamed result fields`
+    );
+  });
+});
+
 const makeResult = (
   overrides: Partial<EvalRunnerResult> = {}
 ): EvalRunnerResult => ({

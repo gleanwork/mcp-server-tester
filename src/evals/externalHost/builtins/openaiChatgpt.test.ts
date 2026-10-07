@@ -169,7 +169,7 @@ describe('bounded native binding wait and failure classification', () => {
         expect(result).toMatchObject({
           success: false,
           toolCalls: [],
-          externalHost: {
+          clientMetadata: {
             failureKind: 'no_matching_session',
             traceSource: 'none',
             traceConfidence: 'unknown',
@@ -179,8 +179,8 @@ describe('bounded native binding wait and failure classification', () => {
         expect(result).not.toHaveProperty('response');
         if (!result) throw new Error('Missing result');
         // Unmatched sessions are never copied or referenced.
-        expect(result.externalHost.artifacts).toEqual([]);
-        expect(JSON.stringify(result.externalHost)).not.toContain(
+        expect(result.clientMetadata.artifacts).toEqual([]);
+        expect(JSON.stringify(result.clientMetadata)).not.toContain(
           'private-session'
         );
         expect(findChatgptTrace).toHaveBeenCalledWith(
@@ -260,8 +260,8 @@ describe('bounded native binding wait and failure classification', () => {
         expect(result).toMatchObject({
           success: true,
           response: 'done',
-          externalHost: {
-            traceSource: 'host-local-transcript',
+          clientMetadata: {
+            traceSource: 'client-local-transcript',
             correlation: { nativePromptMatch: 'native_terminal_lf' },
           },
         });
@@ -310,9 +310,9 @@ describe('bounded native binding wait and failure classification', () => {
         toolCalls: [
           { source: 'host', server: 'cua_repl', rawName: 'cua_repl.js' },
         ],
-        externalHost: {
+        clientMetadata: {
           failureKind: 'host_run_failed',
-          traceSource: 'host-local-transcript',
+          traceSource: 'client-local-transcript',
           traceConfidence: 'low',
           telemetry: {
             hostToolCallCount: 1,
@@ -328,7 +328,7 @@ describe('bounded native binding wait and failure classification', () => {
       expect(findChatgptTrace).toHaveBeenCalledTimes(1);
       if (!result) throw new Error('Missing result');
       // The bound (aborted) transcript is preserved as evidence, not accepted.
-      expect(result.externalHost.artifacts).toEqual([
+      expect(result.clientMetadata.artifacts).toEqual([
         expect.objectContaining({
           kind: 'transcript',
           summary: expect.stringMatching(
@@ -337,7 +337,7 @@ describe('bounded native binding wait and failure classification', () => {
         }),
       ]);
       expect(
-        await readFile(result.externalHost.artifacts[0]!.path!, 'utf8')
+        await readFile(result.clientMetadata.artifacts[0]!.path!, 'utf8')
       ).toBe(content);
     } finally {
       await rm(home, { recursive: true, force: true });
@@ -373,10 +373,10 @@ describe('bounded native binding wait and failure classification', () => {
       const result = await capture(ctx);
       expect(result).toMatchObject({
         success: false,
-        externalHost: {
+        clientMetadata: {
           failureKind: 'timeout',
           traceConfidence: 'low',
-          traceSource: 'host-local-transcript',
+          traceSource: 'client-local-transcript',
           session: { id: 'session', turnId: 'turn' },
           telemetry: { partial: true, mcpToolCallCount: 1 },
           traceLimitations: expect.arrayContaining([
@@ -422,7 +422,7 @@ describe('bounded native binding wait and failure classification', () => {
       expect(result).toMatchObject({
         success: false,
         error: expect.stringContaining('stalled'),
-        externalHost: {
+        clientMetadata: {
           failureKind: 'timeout',
           artifacts: expect.arrayContaining([
             expect.objectContaining({
@@ -521,7 +521,7 @@ describe('bounded native binding wait and failure classification', () => {
       expect(result).toMatchObject({
         success: false,
         error: message,
-        externalHost: {
+        clientMetadata: {
           failureKind,
           traceConfidence: 'unknown',
           traceSource: 'none',
@@ -539,7 +539,7 @@ describe('bounded native binding wait and failure classification', () => {
       const ctx = context(home, true, 1);
       chatgptRunState(ctx.state).evidenceDir = undefined;
       const result = await capture(ctx);
-      expect(result?.externalHost.artifacts).toEqual([]);
+      expect(result?.clientMetadata.artifacts).toEqual([]);
     } finally {
       await rm(home, { recursive: true, force: true });
     }
@@ -670,7 +670,7 @@ describe('submission is chosen by the platform, not the capability id', () => {
       success: false,
       error:
         'ChatGPT native submission failed: Linux ChatGPT requires its MST-owned app session.',
-      externalHost: {
+      clientMetadata: {
         failureKind: 'submission_failed',
         nativeController: {
           provider: 'linux-atspi',
@@ -695,7 +695,7 @@ describe('submission is chosen by the platform, not the capability id', () => {
     expect(result).toMatchObject({
       success: false,
       error: 'ChatGPT Computer Use submission failed: planner refused',
-      externalHost: { failureKind: 'submission_failed' },
+      clientMetadata: { failureKind: 'submission_failed' },
     });
     expect(chatgptRunState(ctx.state)).toMatchObject({
       promptSubmitted: false,
@@ -816,7 +816,7 @@ describe('what the platform decides', () => {
     expect(result).toMatchObject({
       success: false,
       error: 'ChatGPT native submission failed: Send control missing.',
-      externalHost: {
+      clientMetadata: {
         failureKind: 'submission_failed',
         nativeController: {
           provider: 'linux-atspi',
@@ -831,10 +831,10 @@ describe('what the platform decides', () => {
     expect(screenshots.saveStallScreenshot).toHaveBeenCalledWith(
       expect.objectContaining({ label: 'submit' })
     );
-    expect(result!.externalHost.traceLimitations).toContain(
+    expect(result!.clientMetadata.traceLimitations).toContain(
       'ChatGPT display at submission failure screenshot unavailable: no display in unit tests'
     );
-    expect(result!.externalHost.traceLimitations).toContain(
+    expect(result!.clientMetadata.traceLimitations).toContain(
       'Native evidence directory is unavailable.'
     );
   });

@@ -1,3 +1,4 @@
+import { RESULT_SCHEMA_VERSION } from './resultFormat.js';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import {
@@ -453,14 +454,14 @@ async function auditCase(
   servers: MCPConfig[],
   options: AuditCoworkNativeRunOptions
 ): Promise<void> {
-  const sessionId = object(saved.hostTelemetry).nativeSessionId;
+  const sessionId = object(saved.clientTelemetry).nativeSessionId;
   if (typeof sessionId !== 'string' || !SESSION.test(sessionId)) {
     result.issues.push('INVALID_SESSION_ID');
     return;
   }
   result.sessionId = sessionId;
   const trace = await nativeTrace(resolve(options.nativeRoot), sessionId);
-  if (object(saved.hostTelemetry).awaitingUser !== undefined) {
+  if (object(saved.clientTelemetry).awaitingUser !== undefined) {
     // A headless run stopped on an unanswered AskUserQuestion. Verified only when
     // the native transcript itself ends on that pending host call and the case
     // failed: a model outcome (quality failure), never a passing case.
@@ -469,7 +470,7 @@ async function auditCase(
     if (models.length === 1 && MODEL.test(models[0]!))
       result.model = models[0]!;
     if (
-      object(saved.hostTelemetry).awaitingUser !== 'AskUserQuestion' ||
+      object(saved.clientTelemetry).awaitingUser !== 'AskUserQuestion' ||
       !awaitingUserAnswer(trace) ||
       saved.pass !== false ||
       !trace.transcriptParsed ||
@@ -550,8 +551,8 @@ async function auditCase(
     ).response
   );
   if (
-    typeof object(saved.request).scenario !== 'string' ||
-    trace.candidate.metadata.initialMessage !== object(saved.request).scenario
+    typeof object(saved.request).input !== 'string' ||
+    trace.candidate.metadata.initialMessage !== object(saved.request).input
   )
     result.issues.push('PROMPT_MISMATCH');
   if (
@@ -563,14 +564,17 @@ async function auditCase(
     result.issues.push('EVENTS_MISMATCH');
   if (!same(response.toolCalls, replay.toolCalls))
     result.issues.push('TOOL_CALLS_MISMATCH');
-  if (!same(response.usage, trace.usage) || !same(saved.hostUsage, trace.usage))
+  if (
+    !same(response.usage, trace.usage) ||
+    !same(saved.clientUsage, trace.usage)
+  )
     result.issues.push('USAGE_MISMATCH');
   if (response.llmDurationMs !== trace.llmDurationMs)
     result.issues.push('TIMING_MISMATCH');
   if (
     response.success !== true ||
     response.evidence !== 'structured' ||
-    saved.hostEvidence !== 'structured'
+    saved.traceEvidence !== 'structured'
   )
     result.issues.push('EVIDENCE_FLAGS_MISMATCH');
   const telemetry = {
@@ -581,7 +585,7 @@ async function auditCase(
     correlation: 'exact-initial-prompt',
   };
   for (const stored of [
-    object(saved.hostTelemetry),
+    object(saved.clientTelemetry),
     object(response.telemetry),
   ]) {
     // Only live controller and batch-runner observations are excluded; all
@@ -589,7 +593,7 @@ async function auditCase(
     const {
       computerUse: _computerUse,
       hitlWarning: _hitlWarning,
-      hostApp: _hostApp,
+      clientApp: _clientApp,
       batchCase: _batchCase,
       batchLifecycle: _batchLifecycle,
       ...native
@@ -660,7 +664,7 @@ export async function auditCoworkNativeRun(
       )
     );
     if (
-      raw.schemaVersion !== 1 ||
+      raw.schemaVersion !== RESULT_SCHEMA_VERSION ||
       !Array.isArray(raw.results) ||
       raw.results.length > 1000 ||
       !Array.isArray(raw.variants) ||

@@ -268,8 +268,8 @@ export interface VariantExperimentOptions {
   filterTags?: string[];
   /** Schema registry for `assertions.schema` cases. Forwarded to `runEvalDataset`. */
   schemas?: Record<string, ZodType>;
-  /** MCP host model identifier recorded in run metadata. */
-  mcpHostModel?: string;
+  /** The model cases run on, and recorded in run metadata. Forwarded to `runEvalDataset`. */
+  model?: string;
   /** Judge model identifier recorded in run metadata. */
   judgeModel?: string;
 }
@@ -399,6 +399,11 @@ export async function runVariantExperiment(
       undefined
     );
   }
+  rejectRenamedOptions(
+    options,
+    { mcpHostModel: 'model' },
+    'runVariantExperiment'
+  );
   if (!context)
     throw new Error(
       'runVariantExperiment needs an EvalContext for a dataset experiment.'
@@ -1135,7 +1140,7 @@ function buildRunOptions(
     concurrency: options.concurrency,
     filterTags: options.filterTags,
     schemas: options.schemas,
-    mcpHostModel: options.mcpHostModel,
+    model: options.model,
     judgeModel: options.judgeModel,
   };
 }

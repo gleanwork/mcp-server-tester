@@ -63,7 +63,7 @@ function memoryStore(): EvalResultStore & {
   } as unknown as EvalResultStore & { saved: StoredEvalArtifact<unknown>[] };
 }
 
-/** Every key path in a JSON value, e.g. "caseResults.0.request.expect.response". */
+/** Every key path in a JSON value, e.g. "caseResults.0.request.assertions.response". */
 function keyPaths(value: unknown, prefix = ''): string[] {
   if (value === null || typeof value !== 'object') return [];
   return Object.entries(value).flatMap(([key, nested]) => {
@@ -85,7 +85,7 @@ const caseResult: EvalCaseResult = {
   expectations: {},
   durationMs: 1,
   response: { content: [{ type: 'text', text: 'secret token abc' }] },
-  request: { expect: { response: { content: [] } } },
+  request: { assertions: { response: { content: [] } } },
 };
 
 function run(overrides: Partial<EvalRunnerResult> = {}): EvalRunnerResult {
@@ -112,7 +112,7 @@ describe('redactStoredResponses', () => {
     const redacted = redactStoredResponses(value);
     expect(responsePaths(value)).toEqual([
       'caseResults.0.response',
-      'caseResults.0.request.expect.response',
+      'caseResults.0.request.assertions.response',
     ]);
     expect(responsePaths(redacted)).toEqual([]);
     expect(redacted.caseResults[0]?.id).toBe('weather');
@@ -125,9 +125,9 @@ describe('redactStoredResponses', () => {
           ...caseResult,
           request: {
             args: { response: 'tool argument' },
-            expect: { response: { content: [] } },
+            assertions: { response: { content: [] } },
           },
-          mcpHostTrace: {
+          toolCallTrace: {
             calls: [
               {
                 name: 'reply',
@@ -142,7 +142,7 @@ describe('redactStoredResponses', () => {
     });
     expect(responsePaths(redactStoredResponses(value))).toEqual([
       'caseResults.0.request.args.response',
-      'caseResults.0.mcpHostTrace.calls.0.arguments.response',
+      'caseResults.0.toolCallTrace.calls.0.arguments.response',
     ]);
     // Outside a case result, nothing is stripped.
     expect(redactStoredResponses({ response: 'x' })).toEqual({ response: 'x' });

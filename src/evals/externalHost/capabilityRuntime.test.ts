@@ -43,12 +43,12 @@ function successFor(state: ExternalHostRunState): ExternalHostRunResult {
     success: true,
     response: 'done',
     toolCalls: [],
-    externalHost: {
+    clientMetadata: {
       driver: state.driver,
       driverSlug: state.driverSlug,
       displayName: state.displayName,
-      hostName: state.displayName,
-      hostType: 'custom',
+      clientName: state.displayName,
+      clientType: 'custom',
       capabilitiesUsed: state.capabilitiesUsed,
       traceSource: 'manual-import',
       traceConfidence: 'high',
@@ -115,7 +115,7 @@ describe('external host capability runtime', () => {
     expect(result).toMatchObject({
       success: true,
       response: 'composed result',
-      externalHost: {
+      clientMetadata: {
         driverSlug: 'test.host.chat.desktop-app.macos',
         capabilitiesUsed: [
           'control',
@@ -401,7 +401,7 @@ describe('external host capability lifecycle', () => {
       success: false,
       error:
         'External host capability failed: boom; External host cleanup failed: stuck',
-      externalHost: { failureKind: 'cleanup_failed' },
+      clientMetadata: { failureKind: 'cleanup_failed' },
     });
   });
 
@@ -427,7 +427,7 @@ describe('external host capability lifecycle', () => {
     expect(result).toMatchObject({
       success: false,
       error: 'External host capability failed: boom',
-      externalHost: { failureKind: 'host_run_failed' },
+      clientMetadata: { failureKind: 'host_run_failed' },
     });
     expect(calls).toEqual([
       'throw.a.setup',
@@ -459,7 +459,7 @@ describe('external host capability lifecycle', () => {
       success: false,
       response: 'done',
       error: 'External host cleanup failed: stuck',
-      externalHost: {
+      clientMetadata: {
         failureKind: 'cleanup_failed',
         traceLimitations: ['External host cleanup failed: stuck'],
       },
@@ -479,7 +479,7 @@ describe('external host capability lifecycle', () => {
       success: false,
       error:
         'External host test.host.chat.desktop-app.macos completed without producing a result.',
-      externalHost: { failureKind: 'host_run_failed' },
+      clientMetadata: { failureKind: 'host_run_failed' },
     });
   });
 
@@ -496,7 +496,7 @@ describe('external host capability lifecycle', () => {
 
     expect(result).toMatchObject({
       success: false,
-      externalHost: { failureKind: 'unsupported_host' },
+      clientMetadata: { failureKind: 'unsupported_host' },
     });
     expect(!result.success && result.error).toContain('missing.capability');
   });
@@ -514,7 +514,7 @@ describe('external host capability lifecycle', () => {
 
     expect(result).toMatchObject({
       success: false,
-      externalHost: { failureKind: 'unsupported_host' },
+      clientMetadata: { failureKind: 'unsupported_host' },
     });
     expect(!result.success && result.error).toContain(
       'module: capabilities were removed'

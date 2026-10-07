@@ -29,7 +29,7 @@ import type {
   ExternalHostCapabilityImplementation,
   ExternalHostConfig,
   ExternalHostFailureKind,
-  ExternalHostMetadata,
+  ClientMetadata,
   ExternalHostRunResult,
   HostCapability,
   HostDriverId,
@@ -67,9 +67,9 @@ export interface ChatgptRunState {
   baseline?: ChatgptSessionSnapshot;
   promptSubmitted: boolean;
   /** macOS submission receipt. */
-  computerUse?: ExternalHostMetadata['computerUse'];
+  computerUse?: ClientMetadata['computerUse'];
   /** Linux submission receipt. */
-  nativeController?: ExternalHostMetadata['nativeController'];
+  nativeController?: ClientMetadata['nativeController'];
 }
 
 /** The ChatGPT capabilities' shared slot in `state.data`. */
@@ -319,7 +319,7 @@ async function submitNatively(
     };
     return;
   } catch (error) {
-    const nativeController: ExternalHostMetadata['nativeController'] = {
+    const nativeController: ClientMetadata['nativeController'] = {
       provider: 'linux-atspi',
       surface: chatgptSurface(config),
       submission: {
@@ -388,7 +388,7 @@ async function submitWithComputerUse(
       submission: { status: 'completed', telemetry: receipt.telemetry },
     };
   } catch (error) {
-    const computerUse: ExternalHostMetadata['computerUse'] = {
+    const computerUse: ClientMetadata['computerUse'] = {
       provider: 'anthropic-computer-use',
       submission: {
         status: 'failed',
@@ -463,7 +463,7 @@ function attachScreenshot(
   name: string,
   summary?: string
 ): void {
-  const external = result.externalHost;
+  const external = result.clientMetadata;
   if (!external) return;
   if (screenshot.path)
     external.artifacts = [
@@ -612,7 +612,7 @@ async function captureChatgptComputerUseResult({
               usage: trace.usage,
               llmDurationMs: trace.llmDurationMs,
               mcpDurationMs: trace.mcpDurationMs,
-              externalHost: {
+              clientMetadata: {
                 ...metadata,
                 correlation: {
                   ...metadata.correlation,
@@ -623,7 +623,7 @@ async function captureChatgptComputerUseResult({
                       }
                     : {}),
                 },
-                traceSource: 'host-local-transcript',
+                traceSource: 'client-local-transcript',
                 traceConfidence: 'high',
                 traceLimitations: trace.limitations,
                 artifacts: [
@@ -646,22 +646,22 @@ async function captureChatgptComputerUseResult({
                 },
                 telemetry: trace.telemetry,
                 sources: {
-                  finalAnswer: 'host-local-transcript',
-                  toolCalls: 'host-local-transcript',
-                  usage: trace.usage ? 'host-local-transcript' : 'none',
+                  finalAnswer: 'client-local-transcript',
+                  toolCalls: 'client-local-transcript',
+                  usage: trace.usage ? 'client-local-transcript' : 'none',
                   cost: 'none',
                 },
                 evidence: {
                   finalAnswer: {
-                    source: 'host-local-transcript',
+                    source: 'client-local-transcript',
                     confidence: 'high',
                   },
                   toolCalls: {
-                    source: 'host-local-transcript',
+                    source: 'client-local-transcript',
                     confidence: 'high',
                   },
                   usage: {
-                    source: trace.usage ? 'host-local-transcript' : 'none',
+                    source: trace.usage ? 'client-local-transcript' : 'none',
                     confidence: trace.usage ? 'high' : 'unknown',
                   },
                   cost: { source: 'none', confidence: 'unknown' },
@@ -731,17 +731,17 @@ function partialFailure(
   error: string
 ): ExternalHostRunResult {
   const metadata = buildMetadata(options);
-  const usageSource = trace.usage ? 'host-local-transcript' : 'none';
+  const usageSource = trace.usage ? 'client-local-transcript' : 'none';
   return {
     success: false,
     error,
     toolCalls: trace.toolCalls,
     conversationHistory: trace.conversationHistory,
     usage: trace.usage,
-    externalHost: {
+    clientMetadata: {
       ...metadata,
       failureKind,
-      traceSource: 'host-local-transcript',
+      traceSource: 'client-local-transcript',
       traceConfidence: 'low',
       traceLimitations: trace.limitations,
       artifacts: [
@@ -763,13 +763,13 @@ function partialFailure(
       telemetry: trace.telemetry,
       sources: {
         finalAnswer: 'none',
-        toolCalls: 'host-local-transcript',
+        toolCalls: 'client-local-transcript',
         usage: usageSource,
         cost: 'none',
       },
       evidence: {
         finalAnswer: { source: 'none', confidence: 'unknown' },
-        toolCalls: { source: 'host-local-transcript', confidence: 'low' },
+        toolCalls: { source: 'client-local-transcript', confidence: 'low' },
         usage: {
           source: usageSource,
           confidence: trace.usage ? 'low' : 'unknown',
@@ -811,7 +811,7 @@ async function withEvidence(
     caseId: run.caseId,
     matched,
   });
-  const external = result.externalHost;
+  const external = result.clientMetadata;
   if (!external) return result;
   external.artifacts = [
     ...external.artifacts.filter(
@@ -829,7 +829,7 @@ async function withEvidence(
       toolCalls: [],
       error:
         'The matched native ChatGPT transcript could not be preserved as evidence.',
-      externalHost: {
+      clientMetadata: {
         ...external,
         failureKind: 'host_run_failed',
         traceSource: 'none',
@@ -845,17 +845,17 @@ interface MetadataOptions {
   driver: HostDriverId;
   displayName: string;
   capabilitiesUsed: readonly HostCapability[];
-  computerUse?: ExternalHostMetadata['computerUse'];
-  nativeController?: ExternalHostMetadata['nativeController'];
+  computerUse?: ClientMetadata['computerUse'];
+  nativeController?: ClientMetadata['nativeController'];
 }
-function buildMetadata(options: MetadataOptions): ExternalHostMetadata {
+function buildMetadata(options: MetadataOptions): ClientMetadata {
   return {
     driver: options.driver,
     driverSlug: driverToSlug(options.driver),
     displayName: options.displayName,
-    hostName: options.displayName,
-    hostType: options.config.hostType ?? hostTypeFromDriver(options.driver),
-    hostVariant: options.config.variant,
+    clientName: options.displayName,
+    clientType: options.config.hostType ?? hostTypeFromDriver(options.driver),
+    clientVariant: options.config.variant,
     capabilitiesUsed: [...options.capabilitiesUsed],
     traceSource: 'none',
     traceConfidence: 'unknown',
@@ -886,7 +886,7 @@ function failureResult(
     success: false,
     toolCalls: [],
     error: options.error,
-    externalHost: {
+    clientMetadata: {
       ...buildMetadata(options),
       failureKind: options.failureKind,
       traceLimitations: options.limitations,

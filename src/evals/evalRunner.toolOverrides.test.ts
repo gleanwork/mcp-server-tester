@@ -114,10 +114,8 @@ describe('runEvalDataset toolOverrides', () => {
     );
 
     expect(result.failed).toBe(0);
-    expect(result.metadata?.toolOverrideVariantId).toBe(
-      'search-description-v2'
-    );
-    expect(result.caseResults[0]?.request?.toolOverrideVariantId).toBe(
+    expect(result.metadata?.toolVariantId).toBe('search-description-v2');
+    expect(result.caseResults[0]?.request?.toolVariantId).toBe(
       'search-description-v2'
     );
     expect(observedTools).toMatchObject([

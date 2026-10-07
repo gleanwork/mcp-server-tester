@@ -5,24 +5,23 @@ import { computeMetrics } from './metrics.js';
 
 function result(
   id: string,
-  usage: EvalCaseResult['hostUsage'],
-  iterations?: Array<EvalCaseResult['hostUsage']>
+  usage: EvalCaseResult['clientUsage'],
+  iterations?: Array<EvalCaseResult['clientUsage']>
 ): EvalCaseResult {
   return {
     id,
     datasetName: 'd',
-    toolName: 'mcp_host',
     source: 'eval',
     pass: true,
     expectations: {},
     durationMs: 1,
-    hostUsage: usage,
+    clientUsage: usage,
     ...(iterations
       ? {
-          iterationResults: iterations.map((hostUsage) => ({
+          iterationResults: iterations.map((clientUsage) => ({
             pass: true,
             durationMs: 1,
-            hostUsage,
+            clientUsage,
           })),
         }
       : {}),
@@ -48,8 +47,8 @@ describe('estimateCosts', () => {
     ];
     estimateCosts(results, () => 'priced', pricing);
     const iterations = results[0]!.iterationResults!;
-    expect(iterations[0]!.hostUsage!.estimatedCostUsd).toBeCloseTo(0.0048, 9);
-    expect(iterations[1]!.hostUsage!.estimatedCostUsd).toBeCloseTo(0.0045, 9);
+    expect(iterations[0]!.clientUsage!.estimatedCostUsd).toBeCloseTo(0.0048, 9);
+    expect(iterations[1]!.clientUsage!.estimatedCostUsd).toBeCloseTo(0.0045, 9);
     expect(
       computeMetrics(['cost_usd'], results).aggregated.cost_usd_mean
     ).toBeCloseTo(0.00465, 9);
@@ -70,8 +69,8 @@ describe('estimateCosts', () => {
     });
     estimateCosts([reported], () => 'priced', pricing);
     estimateCosts([unpriced], () => 'other-model', pricing);
-    expect(reported.hostUsage).not.toHaveProperty('estimatedCostUsd');
-    expect(unpriced.hostUsage).not.toHaveProperty('estimatedCostUsd');
+    expect(reported.clientUsage).not.toHaveProperty('estimatedCostUsd');
+    expect(unpriced.clientUsage).not.toHaveProperty('estimatedCostUsd');
     expect(costSource([reported])).toBe('host');
     expect(costSource([unpriced])).toBeUndefined();
     estimateCosts([unpriced], () => 'priced', pricing);

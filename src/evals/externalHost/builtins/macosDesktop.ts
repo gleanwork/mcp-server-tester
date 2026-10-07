@@ -223,13 +223,13 @@ function desktopFailureResult({
     success: false,
     toolCalls: [],
     error,
-    externalHost: {
+    clientMetadata: {
       driver: state.driver,
       driverSlug: driverToSlug(state.driver),
       displayName: state.displayName,
-      hostName: state.displayName,
-      hostType: config.hostType ?? hostTypeFromDriver(state.driver),
-      hostVariant: config.variant,
+      clientName: state.displayName,
+      clientType: config.hostType ?? hostTypeFromDriver(state.driver),
+      clientVariant: config.variant,
       capabilitiesUsed: state.capabilitiesUsed,
       traceSource: 'none',
       traceConfidence: 'unknown',

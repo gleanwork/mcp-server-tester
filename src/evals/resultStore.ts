@@ -1,3 +1,4 @@
+import { RESULT_SCHEMA_VERSION, olderResultsError } from './resultFormat.js';
 import type { ProtocolEra } from '../types/index.js';
 import { mkdir, readFile, readdir, writeFile } from 'fs/promises';
 import { join } from 'path';
@@ -15,8 +16,8 @@ export interface StoredEvalArtifactMetadata {
   runNumber?: string;
   trigger?: string;
   packageVersion?: string;
-  toolOverrideVariantId?: string;
-  mcpHostModel?: string;
+  toolVariantId?: string;
+  model?: string;
   judgeModel?: string;
   /** Negotiated MCP protocol revision of the run, e.g. '2026-07-28'. */
   protocolVersion?: string;
@@ -27,7 +28,8 @@ export interface StoredEvalArtifactMetadata {
 }
 
 export interface StoredEvalArtifact<T> {
-  schemaVersion: 1;
+  /** The result format: see `RESULT_SCHEMA_VERSION`. */
+  schemaVersion: typeof RESULT_SCHEMA_VERSION;
   kind: StoredArtifactKind;
   id: string;
   createdAt: string;
@@ -151,8 +153,8 @@ function stripResponses(value: unknown): void {
   if (isCaseResult(value)) {
     delete value.response;
     const request = value.request;
-    if (isJsonObject(request) && isJsonObject(request.expect))
-      delete request.expect.response;
+    if (isJsonObject(request) && isJsonObject(request.assertions))
+      delete request.assertions.response;
     stripTrace(value.trace);
     if (Array.isArray(value.iterationResults))
       for (const iteration of value.iterationResults)
@@ -184,7 +186,7 @@ export function createStoredEvalArtifact<T>(options: {
 }): StoredEvalArtifact<T> {
   const createdAt = options.createdAt ?? new Date().toISOString();
   return {
-    schemaVersion: 1,
+    schemaVersion: RESULT_SCHEMA_VERSION,
     kind: options.kind,
     id: options.id ?? createDefaultArtifactId(createdAt),
     createdAt,
@@ -248,7 +250,7 @@ export class FileEvalResultStore implements EvalResultStore {
       join(this.dir, KIND_DIRS[kind], `${id}.json`),
       'utf8'
     );
-    return JSON.parse(raw) as StoredEvalArtifact<T>;
+    return currentArtifact<T>(JSON.parse(raw), `Stored ${kind} '${id}'`);
   }
 
   async loadLatestArtifact<T>(
@@ -259,7 +261,7 @@ export class FileEvalResultStore implements EvalResultStore {
         join(this.dir, KIND_DIRS[kind], 'latest.json'),
         'utf8'
       );
-      return JSON.parse(raw) as StoredEvalArtifact<T>;
+      return currentArtifact<T>(JSON.parse(raw), `The latest stored ${kind}`);
     } catch (error) {
       if (isMissingFileError(error)) {
         return null;
@@ -290,11 +292,11 @@ export class FileEvalResultStore implements EvalResultStore {
             join(this.dir, KIND_DIRS[kind], file),
             'utf8'
           );
-          return toSummary(JSON.parse(raw) as StoredEvalArtifact<unknown>);
+          return JSON.parse(raw) as StoredEvalArtifact<unknown>;
         })
     );
 
-    return summaries
+    return currentSummaries(summaries)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .slice(0, options.limit);
   }
@@ -362,7 +364,10 @@ export class GCSEvalResultStore implements EvalResultStore {
       this.objectPath(kind, `${encodeURIComponent(id)}.json`)
     );
     const [buffer] = await file.download();
-    return JSON.parse(buffer.toString('utf8')) as StoredEvalArtifact<T>;
+    return currentArtifact<T>(
+      JSON.parse(buffer.toString('utf8')),
+      `Stored ${kind} '${id}'`
+    );
   }
 
   async loadLatestArtifact<T>(
@@ -374,7 +379,10 @@ export class GCSEvalResultStore implements EvalResultStore {
     if (!exists) return null;
 
     const [buffer] = await file.download();
-    return JSON.parse(buffer.toString('utf8')) as StoredEvalArtifact<T>;
+    return currentArtifact<T>(
+      JSON.parse(buffer.toString('utf8')),
+      `The latest stored ${kind}`
+    );
   }
 
   async listArtifacts(
@@ -393,13 +401,13 @@ export class GCSEvalResultStore implements EvalResultStore {
         )
         .map(async (file) => {
           const [buffer] = await file.download();
-          return toSummary(
-            JSON.parse(buffer.toString('utf8')) as StoredEvalArtifact<unknown>
-          );
+          return JSON.parse(
+            buffer.toString('utf8')
+          ) as StoredEvalArtifact<unknown>;
         })
     );
 
-    return summaries
+    return currentSummaries(summaries)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .slice(0, options.limit);
   }
@@ -429,6 +437,26 @@ export class GCSEvalResultStore implements EvalResultStore {
     const parts = [this.prefix, KIND_DIRS[kind], filename].filter(Boolean);
     return parts.join('/');
   }
+}
+
+/** An artifact an explicit load asked for: older formats fail clearly. */
+function currentArtifact<T>(
+  value: unknown,
+  what: string
+): StoredEvalArtifact<T> {
+  const artifact = value as StoredEvalArtifact<T>;
+  if (artifact?.schemaVersion !== RESULT_SCHEMA_VERSION)
+    throw olderResultsError(what, artifact?.schemaVersion);
+  return artifact;
+}
+
+/** History listings skip artifacts in an older result format. */
+function currentSummaries(
+  artifacts: Array<StoredEvalArtifact<unknown>>
+): StoredArtifactSummary[] {
+  return artifacts
+    .filter((artifact) => artifact?.schemaVersion === RESULT_SCHEMA_VERSION)
+    .map(toSummary);
 }
 
 function toSummary(

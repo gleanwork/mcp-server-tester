@@ -304,7 +304,7 @@ const mockData: MCPEvalData = {
           {
             pass: true,
             durationMs: 1100,
-            mcpHostTrace: {
+            toolCallTrace: {
               calls: [
                 {
                   name: 'search',
@@ -318,7 +318,7 @@ const mockData: MCPEvalData = {
           {
             pass: true,
             durationMs: 1250,
-            mcpHostTrace: {
+            toolCallTrace: {
               calls: [
                 {
                   name: 'search',
@@ -332,7 +332,7 @@ const mockData: MCPEvalData = {
           {
             pass: false,
             durationMs: 980,
-            mcpHostTrace: {
+            toolCallTrace: {
               calls: [
                 {
                   name: 'chat',
@@ -346,7 +346,7 @@ const mockData: MCPEvalData = {
           {
             pass: true,
             durationMs: 1150,
-            mcpHostTrace: {
+            toolCallTrace: {
               calls: [
                 {
                   name: 'search',
@@ -360,7 +360,7 @@ const mockData: MCPEvalData = {
           {
             pass: true,
             durationMs: 1200,
-            mcpHostTrace: {
+            toolCallTrace: {
               calls: [
                 {
                   name: 'search',
@@ -387,7 +387,7 @@ const mockData: MCPEvalData = {
           },
           toolCallCount: { pass: true, details: 'Called 1 tool (expected 1)' },
         },
-        mcpHostTrace: {
+        toolCallTrace: {
           calls: [
             {
               name: 'search',
@@ -425,7 +425,7 @@ const mockData: MCPEvalData = {
             details: 'Required tool create_document was not called',
           },
         },
-        mcpHostTrace: {
+        toolCallTrace: {
           calls: [
             {
               name: 'search',
@@ -459,7 +459,7 @@ const mockData: MCPEvalData = {
         expectations: {
           toolsTriggered: { pass: true, details: 'search was called' },
         },
-        mcpHostTrace: {
+        toolCallTrace: {
           calls: [
             {
               name: 'search',
@@ -505,7 +505,7 @@ const mockData: MCPEvalData = {
             details: 'search was called as expected',
           },
         },
-        mcpHostTrace: {
+        toolCallTrace: {
           calls: [
             {
               name: 'search',

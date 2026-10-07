@@ -1,3 +1,4 @@
+import { RESULT_SCHEMA_VERSION } from './resultFormat.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {
@@ -22,6 +23,8 @@ function isComparable(
 ): value is EvaluationSummary {
   if (typeof value !== 'object' || value === null) return false;
   const summary = value as EvaluationSummary;
+  // A run in an older result format isn't a baseline.
+  if (summary.schemaVersion !== RESULT_SCHEMA_VERSION) return false;
   if (summary.configId !== configId || !Array.isArray(summary.variants))
     return false;
   const names = summary.variants.map((variant) => variant.name).sort();

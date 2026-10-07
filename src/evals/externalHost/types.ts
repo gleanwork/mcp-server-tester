@@ -25,8 +25,8 @@ export type HostCapability =
 export type TraceSource =
   | 'mcp-proxy'
   | 'mcp-server-logs'
-  | 'host-local-transcript'
-  | 'host-native-export'
+  | 'client-local-transcript'
+  | 'client-native-export'
   | 'browser-api'
   | 'accessibility'
   | 'dom'
@@ -175,13 +175,13 @@ export interface ExternalHostCorrelationMetadata {
   nativePromptSha256?: string;
 }
 
-export interface ExternalHostMetadata {
+export interface ClientMetadata {
   driver: HostDriverId;
   driverSlug: string;
   displayName: string;
-  hostName: string;
-  hostType: ExternalHostType;
-  hostVariant?: string;
+  clientName: string;
+  clientType: ExternalHostType;
+  clientVariant?: string;
   capabilitiesUsed: HostCapability[];
   traceSource: TraceSource;
   traceConfidence: ObservationConfidence;
@@ -289,7 +289,7 @@ export interface ClientRunContext {
 }
 
 export interface ExternalHostSimulationResult extends MCPHostSimulationResult {
-  externalHost: ExternalHostMetadata;
+  clientMetadata: ClientMetadata;
 }
 
 interface ExternalHostRunSuccess {
@@ -300,7 +300,7 @@ interface ExternalHostRunSuccess {
   usage?: UsageMetrics;
   llmDurationMs?: number;
   mcpDurationMs?: number;
-  externalHost: ExternalHostMetadata;
+  clientMetadata: ClientMetadata;
 }
 
 interface ExternalHostRunFailure {
@@ -310,7 +310,7 @@ interface ExternalHostRunFailure {
   /** Partial native evidence from a bound turn that did not complete. */
   conversationHistory?: MCPHostSimulationResult['conversationHistory'];
   usage?: UsageMetrics;
-  externalHost: ExternalHostMetadata;
+  clientMetadata: ClientMetadata;
 }
 
 export type ExternalHostRunResult =

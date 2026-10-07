@@ -40,8 +40,8 @@ function toolCallCount(result: EvalCaseResult): number {
 function usageRecord(
   result: EvalCaseResult
 ): Record<string, unknown> | undefined {
-  if (result.hostUsage) {
-    return result.hostUsage as unknown as Record<string, unknown>;
+  if (result.clientUsage) {
+    return result.clientUsage as unknown as Record<string, unknown>;
   }
   const response = isRecord(result.response) ? result.response : undefined;
   return isRecord(response?.usage) ? response.usage : undefined;
@@ -70,8 +70,8 @@ function failureLabel(result: EvalCaseResult): string | undefined {
     return undefined;
   }
 
-  if (result.externalHost?.failureKind) {
-    return `host: ${result.externalHost.failureKind}`;
+  if (result.clientMetadata?.failureKind) {
+    return `host: ${result.clientMetadata.failureKind}`;
   }
 
   if (result.error) {
@@ -235,36 +235,36 @@ function ResultRow({
         </span>
       )}
 
-      {result.externalHost && (
+      {result.clientMetadata && (
         <>
           <span
             className="inline-flex items-center px-2 py-0.5 rounded text-xs shrink-0 bg-teal-500/15 text-teal-700 dark:text-teal-300"
-            title={`External host: ${result.externalHost.driverSlug}`}
+            title={`External host: ${result.clientMetadata.driverSlug}`}
           >
-            {result.externalHost.driver.provider}/
-            {result.externalHost.driver.product}
+            {result.clientMetadata.driver.provider}/
+            {result.clientMetadata.driver.product}
           </span>
           <span
             className="inline-flex items-center px-2 py-0.5 rounded text-xs shrink-0 bg-cyan-500/15 text-cyan-700 dark:text-cyan-300"
-            title={result.externalHost.driverSlug}
+            title={result.clientMetadata.driverSlug}
           >
-            {result.externalHost.driver.surface} ·{' '}
-            {result.externalHost.driver.runtime}
-            {result.externalHost.driver.platform
-              ? ` · ${result.externalHost.driver.platform}`
+            {result.clientMetadata.driver.surface} ·{' '}
+            {result.clientMetadata.driver.runtime}
+            {result.clientMetadata.driver.platform
+              ? ` · ${result.clientMetadata.driver.platform}`
               : ''}
           </span>
           <span
             className={`inline-flex items-center px-2 py-0.5 rounded text-xs shrink-0 ${
-              result.externalHost.traceConfidence === 'high'
+              result.clientMetadata.traceConfidence === 'high'
                 ? 'bg-green-500/15 text-green-700 dark:text-green-400'
-                : result.externalHost.traceConfidence === 'medium'
+                : result.clientMetadata.traceConfidence === 'medium'
                   ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
                   : 'bg-gray-500/15 text-gray-700 dark:text-gray-300'
             }`}
-            title={`Trace source: ${result.externalHost.traceSource}`}
+            title={`Trace source: ${result.clientMetadata.traceSource}`}
           >
-            {result.externalHost.traceConfidence} trace
+            {result.clientMetadata.traceConfidence} trace
           </span>
           <span
             className="inline-flex items-center px-2 py-0.5 rounded text-xs shrink-0 bg-muted text-muted-foreground"
@@ -310,19 +310,13 @@ function ResultRow({
 
       <span className="flex-1 text-sm font-medium truncate">{result.id}</span>
 
-      {result.toolName &&
-      result.toolName !== 'mcp_host' &&
-      result.toolName !== 'external_host' ? (
+      {result.toolName ? (
         <code className="text-xs bg-muted px-2 py-1 rounded shrink-0">
           {result.toolName}
         </code>
-      ) : result.toolName === 'mcp_host' ? (
+      ) : result.request?.client ? (
         <span className="text-xs text-muted-foreground shrink-0 italic">
-          mcp_host
-        </span>
-      ) : result.toolName === 'external_host' ? (
-        <span className="text-xs text-muted-foreground shrink-0 italic">
-          external_host
+          {result.request.client}
         </span>
       ) : null}
 

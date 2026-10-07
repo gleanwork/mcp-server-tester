@@ -288,11 +288,11 @@ export function pairedChange(
 /** Classifies a failed trial from its trace and error. */
 function failureOf(
   trial: Pick<IterationResult, 'error' | 'isInfrastructureError'> & {
-    mcpHostTrace?: IterationResult['mcpHostTrace'];
+    toolCallTrace?: IterationResult['toolCallTrace'];
   }
 ): TrialFailureKind {
   if (trial.isInfrastructureError || trial.error) return 'error';
-  const trace = trial.mcpHostTrace;
+  const trace = trial.toolCallTrace;
   if (!trace) return 'check-failed';
   if (trace.calls.length === 0) return 'no-tool-call';
   if (
@@ -313,11 +313,11 @@ function toAttempt(
   pass: boolean,
   source: Pick<
     IterationResult,
-    'error' | 'isInfrastructureError' | 'hostUsage'
-  > & { mcpHostTrace?: IterationResult['mcpHostTrace'] }
+    'error' | 'isInfrastructureError' | 'clientUsage'
+  > & { toolCallTrace?: IterationResult['toolCallTrace'] }
 ): RecordedAttempt {
-  const trace = source.mcpHostTrace;
-  const usage = source.hostUsage;
+  const trace = source.toolCallTrace;
+  const usage = source.clientUsage;
   return {
     pass,
     ...(pass ? {} : { failure: failureOf(source) }),
@@ -614,7 +614,7 @@ export interface CompareVariantsOptions {
 }
 
 function expectedToolsOf(result: EvalCaseResult): string[] | undefined {
-  const triggered = result.request?.expect?.toolsTriggered;
+  const triggered = result.request?.assertions?.toolsTriggered;
   if (!triggered || typeof triggered !== 'object') return undefined;
   const calls = (triggered as { calls?: unknown }).calls;
   if (!Array.isArray(calls)) return undefined;
@@ -742,7 +742,7 @@ export function compareVariants(
         attemptCounts.push(recorded.length);
         trials[run.id] = recorded.map(stripAttempt);
       }
-      const input = base.request?.scenario ?? base.request?.description;
+      const input = base.request?.input ?? base.request?.description;
       const expectedTools = expectedToolsOf(base);
       return {
         id: base.id,

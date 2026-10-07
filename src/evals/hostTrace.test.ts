@@ -79,9 +79,9 @@ describe('per-scenario host traces', () => {
     );
     expect(result.caseResults[0]).toMatchObject({
       pass: false,
-      hostDiagnostics: diagnostics,
-      hostUsage: usage,
-      hostTelemetry: telemetry,
+      clientDiagnostics: diagnostics,
+      clientUsage: usage,
+      clientTelemetry: telemetry,
       response: { diagnostics, telemetry, llmDurationMs: 123 },
     });
   });
@@ -172,7 +172,7 @@ describe('per-scenario host traces', () => {
         ],
       });
       expect(trace.events[1]?.name).toBe('native_search');
-      expect(result.caseResults[0]?.mcpHostTrace).toMatchObject({
+      expect(result.caseResults[0]?.toolCallTrace).toMatchObject({
         calls: [{ name: 'native_search', status: 'expected' }],
         missed: [],
       });
@@ -209,7 +209,7 @@ describe('per-scenario host traces', () => {
     expect(result.caseResults[0]?.response).toMatchObject({
       evidence: 'observed',
     });
-    expect(result.caseResults[0]?.mcpHostTrace).toBeUndefined();
+    expect(result.caseResults[0]?.toolCallTrace).toBeUndefined();
     // An executor that returns only a response still gets a trace.
     expect(result.caseResults[0]?.trace).toEqual({
       events: [
@@ -278,7 +278,7 @@ describe('per-scenario host traces', () => {
       expect(result.caseResults[0]?.response).toMatchObject({ evidence });
       if (evidence !== 'structured') {
         for (const iteration of result.caseResults[0]?.iterationResults ?? []) {
-          expect(iteration.mcpHostTrace).toBeUndefined();
+          expect(iteration.toolCallTrace).toBeUndefined();
         }
       }
       expect(result.caseResults[0]?.expectations?.textContains?.pass).toBe(

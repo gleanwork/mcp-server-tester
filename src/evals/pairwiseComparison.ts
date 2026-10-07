@@ -121,7 +121,7 @@ function caseSource(
   const request = result.request;
   return {
     id: result.id,
-    ...(request?.scenario !== undefined && { input: request.scenario }),
+    ...(request?.input !== undefined && { input: request.input }),
     ...(request?.reference !== undefined && {
       expected: { answer: request.reference },
     }),
@@ -132,7 +132,9 @@ function caseSource(
 function trial(result: EvalCaseResult) {
   return buildJudgeTrial(result.response, {
     hostResponse: result.response,
-    ...(result.hostEvidence !== undefined && { evidence: result.hostEvidence }),
+    ...(result.traceEvidence !== undefined && {
+      evidence: result.traceEvidence,
+    }),
   });
 }
 

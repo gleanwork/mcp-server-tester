@@ -304,7 +304,7 @@ async function runBatch(
             telemetry: {
               ...result.telemetry,
               // What actually ran, pinned or not, so results show app drift.
-              ...(session?.app ? { hostApp: session.app } : {}),
+              ...(session?.app ? { clientApp: session.app } : {}),
               computerUse: {
                 ...computerUse,
                 ...(hitlFollowups.length ? { hitlFollowups } : {}),

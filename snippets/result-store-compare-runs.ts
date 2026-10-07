@@ -19,7 +19,7 @@ const comparison = compareEvalRuns({
   candidate: candidate.data,
   labels: {
     baseline: 'current',
-    candidate: candidate.metadata?.toolOverrideVariantId ?? 'candidate',
+    candidate: candidate.metadata?.toolVariantId ?? 'candidate',
   },
 });
 

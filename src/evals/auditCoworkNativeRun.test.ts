@@ -148,15 +148,15 @@ async function fixture(
   const saved = {
     id: 'case-1',
     pass: true as boolean | null,
-    request: { scenario: metadata.initialMessage },
+    request: { input: metadata.initialMessage },
     response: JSON.parse(JSON.stringify(replay.response)) as RecordValue,
-    hostUsage: JSON.parse(JSON.stringify(trace.usage)) as RecordValue,
-    hostTelemetry: JSON.parse(JSON.stringify(telemetry)) as RecordValue,
-    hostEvidence: 'structured',
+    clientUsage: JSON.parse(JSON.stringify(trace.usage)) as RecordValue,
+    clientTelemetry: JSON.parse(JSON.stringify(telemetry)) as RecordValue,
+    traceEvidence: 'structured',
     expectations: { judge: { pass: true } },
   };
   const raw = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     results: [saved],
     variants: [{ servers: [], result: { caseResults: [saved] } }],
   };
@@ -193,6 +193,14 @@ function records(value: unknown): RecordValue[] {
 }
 
 describe('auditCoworkNativeRun', () => {
+  it('rejects results written by an earlier MST', async () => {
+    const f = await fixture();
+    (f.raw as { schemaVersion: number }).schemaVersion = 1;
+    const report = await f.audit();
+    expect(report.evidencePassed).toBe(false);
+    expect(report.issues).toContain('INVALID_RESULTS');
+  });
+
   it('replays the native parser and normalizers, hashes attachments, and returns no content or paths', async () => {
     const f = await fixture();
     const report = await f.audit();
@@ -277,7 +285,7 @@ describe('auditCoworkNativeRun', () => {
     [
       'prompt',
       (saved) => {
-        saved.request.scenario += 'tampered';
+        saved.request.input += 'tampered';
       },
       'PROMPT_MISMATCH',
     ],
@@ -291,7 +299,7 @@ describe('auditCoworkNativeRun', () => {
     [
       'usage',
       (saved) => {
-        saved.hostUsage.inputTokens = 999;
+        saved.clientUsage.inputTokens = 999;
       },
       'USAGE_MISMATCH',
     ],
@@ -305,21 +313,21 @@ describe('auditCoworkNativeRun', () => {
     [
       'cost',
       (saved) => {
-        saved.hostTelemetry.totalCostUsd = 999;
+        saved.clientTelemetry.totalCostUsd = 999;
       },
       'TELEMETRY_MISMATCH',
     ],
     [
       'cache',
       (saved) => {
-        saved.hostTelemetry.cacheReadInputTokens = 999;
+        saved.clientTelemetry.cacheReadInputTokens = 999;
       },
       'TELEMETRY_MISMATCH',
     ],
     [
       'native duration',
       (saved) => {
-        saved.hostTelemetry.durationMs = 999;
+        saved.clientTelemetry.durationMs = 999;
       },
       'TELEMETRY_MISMATCH',
     ],
@@ -375,7 +383,7 @@ describe('auditCoworkNativeRun', () => {
     [
       'unrecognized telemetry',
       (saved) => {
-        saved.hostTelemetry.unrecognized = secret;
+        saved.clientTelemetry.unrecognized = secret;
       },
       'TELEMETRY_MISMATCH',
     ],
@@ -393,7 +401,7 @@ describe('auditCoworkNativeRun', () => {
 
   it('excludes live computer-use telemetry from replay equality', async () => {
     const f = await fixture();
-    f.saved.hostTelemetry.computerUse = { arbitraryDriverDuration: 12345 };
+    f.saved.clientTelemetry.computerUse = { arbitraryDriverDuration: 12345 };
     expect((await f.audit()).evidencePassed).toBe(true);
   });
 
@@ -425,7 +433,7 @@ describe('auditCoworkNativeRun', () => {
     await writeFile(f.auditPath, jsonl);
     await writeFile(f.transcriptPath, jsonl);
     f.saved.pass = false;
-    f.saved.hostTelemetry.awaitingUser = 'AskUserQuestion';
+    f.saved.clientTelemetry.awaitingUser = 'AskUserQuestion';
     return f;
   }
 
@@ -445,7 +453,7 @@ describe('auditCoworkNativeRun', () => {
   it('rejects an awaiting-user claim the native transcript does not show', async () => {
     const f = await fixture();
     f.saved.pass = false;
-    f.saved.hostTelemetry.awaitingUser = 'AskUserQuestion';
+    f.saved.clientTelemetry.awaitingUser = 'AskUserQuestion';
     const report = await f.audit();
     expect(report.cases[0]?.issues).toContain('AWAITING_USER_UNVERIFIED');
     expect(report.evidencePassed).toBe(false);
@@ -460,7 +468,7 @@ describe('auditCoworkNativeRun', () => {
     // runDesktopBatch adds batchCase/batchLifecycle after the native trace is read.
     const f = await fixture();
     for (const stored of [
-      f.saved.hostTelemetry,
+      f.saved.clientTelemetry,
       f.saved.response.telemetry as RecordValue,
     ]) {
       stored.batchCase = { index: 0, caseId: 'case-1', count: 1 };
@@ -468,7 +476,7 @@ describe('auditCoworkNativeRun', () => {
     }
     expect((await f.audit()).evidencePassed).toBe(true);
     // A native-derived field still has to match.
-    f.saved.hostTelemetry.totalCostUsd = 999;
+    f.saved.clientTelemetry.totalCostUsd = 999;
     expect((await f.audit()).cases[0]?.issues).toContain('TELEMETRY_MISMATCH');
   });
 
@@ -674,7 +682,7 @@ describe('auditCoworkNativeRun', () => {
 
   it('rejects session traversal before opening a native file', async () => {
     const f = await fixture();
-    f.saved.hostTelemetry.nativeSessionId = '../../private';
+    f.saved.clientTelemetry.nativeSessionId = '../../private';
     const report = await f.audit();
     expect(report.cases[0]?.sessionId).toBeNull();
     expect(report.cases[0]?.issues).toEqual(['INVALID_SESSION_ID']);

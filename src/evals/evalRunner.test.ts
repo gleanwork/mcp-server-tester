@@ -1718,7 +1718,7 @@ describe('experiment metadata in EvalRunnerResult', () => {
       createContext(mcp)
     );
 
-    expect(result.metadata!.mcpHostModel).toBe('claude-opus-4-20250514');
+    expect(result.metadata!.model).toBe('claude-opus-4-20250514');
   });
 
   it('omits the model and judgeModel from metadata when not provided', async () => {
@@ -1727,7 +1727,7 @@ describe('experiment metadata in EvalRunnerResult', () => {
 
     const result = await runEvalDataset({ dataset }, createContext(mcp));
 
-    expect(result.metadata!.mcpHostModel).toBeUndefined();
+    expect(result.metadata!.model).toBeUndefined();
     expect(result.metadata!.judgeModel).toBeUndefined();
   });
 });

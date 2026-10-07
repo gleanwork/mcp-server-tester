@@ -179,3 +179,36 @@ describe('a run is compared with the previous run of the same eval config', () =
     expect(second.summary.metrics.passRate).toBe(1);
   });
 });
+
+describe('findPreviousRun', () => {
+  it('skips a run in an older result format', async () => {
+    const { findPreviousRun } = await import('./runBaseline.js');
+    const outputRoot = await tempDir();
+    const summary = (schemaVersion: number, timestamp: string) => ({
+      schemaVersion,
+      configId: 'cfg',
+      timestamp,
+      variants: [{ name: 'a' }],
+    });
+    await fs.mkdir(path.join(outputRoot, 'older'));
+    await fs.writeFile(
+      path.join(outputRoot, 'older', 'results.json'),
+      JSON.stringify(summary(1, '2026-10-02T00:00:00.000Z'))
+    );
+    const lookup = {
+      configId: 'cfg',
+      runId: 'now',
+      variants: ['a'],
+      outputRoot,
+    };
+    await expect(findPreviousRun(lookup)).resolves.toBeUndefined();
+    await fs.mkdir(path.join(outputRoot, 'current'));
+    await fs.writeFile(
+      path.join(outputRoot, 'current', 'results.json'),
+      JSON.stringify(summary(2, '2026-10-01T00:00:00.000Z'))
+    );
+    await expect(findPreviousRun(lookup)).resolves.toMatchObject({
+      runId: 'current',
+    });
+  });
+});

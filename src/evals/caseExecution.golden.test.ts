@@ -2,7 +2,7 @@
  * Characterization tests: the EvalCaseResult each execution path produces.
  *
  * These pin the runner's observable output (verdicts, `response`, evidence,
- * `mcpHostTrace`, usage, errors, iteration accounting) across the
+ * `toolCallTrace`, usage, errors, iteration accounting) across the
  * case-execution refactor. A snapshot change here is a behaviour change and
  * must be deliberate.
  */

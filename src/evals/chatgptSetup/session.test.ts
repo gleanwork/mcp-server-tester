@@ -312,7 +312,7 @@ describe('ChatGPT batch app lifecycle', () => {
           managedChatgptSession: session,
         });
         expect(result.success).toBe(true);
-        markers.add(result.externalHost.correlation.marker);
+        markers.add(result.clientMetadata.correlation.marker);
       }
       expect(events).toEqual([
         'state',
@@ -492,7 +492,7 @@ describe('ChatGPT Linux native lifecycle', () => {
           options: { ...config.options, managedChatgptSession: session },
         });
         expect(result.success).toBe(true);
-        expect(result.externalHost).toMatchObject({
+        expect(result.clientMetadata).toMatchObject({
           driver: { platform: 'linux' },
           computerUse: undefined,
           nativeController: {
@@ -500,7 +500,7 @@ describe('ChatGPT Linux native lifecycle', () => {
             surface: 'codex',
             submission: { status: 'completed' },
           },
-          traceSource: 'host-local-transcript',
+          traceSource: 'client-local-transcript',
           artifacts: [
             {
               kind: 'transcript',
@@ -643,11 +643,11 @@ describe('ChatGPT Linux native lifecycle', () => {
     });
     const result = await runExternalHostScenario('query', linuxConfig());
     expect(result.success).toBe(false);
-    expect(result.externalHost.nativeController?.submission).toMatchObject({
+    expect(result.clientMetadata.nativeController?.submission).toMatchObject({
       status: 'failed',
       draftState,
     });
-    expect(result.externalHost.computerUse).toBeUndefined();
+    expect(result.clientMetadata.computerUse).toBeUndefined();
     expect(findChatgptTrace).not.toHaveBeenCalled();
     expect(runLinuxChatgptDesktop).toHaveBeenCalledTimes(2);
   });
@@ -673,21 +673,21 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
     expect(vi.mocked(runAnthropicComputerUseSubmission).mock.calls[0]![0]).toBe(
       'Say done'
     );
-    expect(result.externalHost.correlation).toMatchObject({
+    expect(result.clientMetadata.correlation).toMatchObject({
       strategy: 'exact_prompt',
       includedInPrompt: false,
       promptUnchanged: true,
     });
-    expect(result.externalHost.session).not.toHaveProperty('runMarker');
+    expect(result.clientMetadata.session).not.toHaveProperty('runMarker');
     if (result.success) {
       expect(result.response).toBe('native answer');
       expect(result.usage).toMatchObject({ inputTokens: 20, outputTokens: 3 });
       expect(result.usage?.totalCostUsd).toBeUndefined();
-      expect(result.externalHost.computerUse?.submission.telemetry).toEqual(
+      expect(result.clientMetadata.computerUse?.submission.telemetry).toEqual(
         plannerUsage
       );
-      expect(result.externalHost.sources?.toolCalls).toBe(
-        'host-local-transcript'
+      expect(result.clientMetadata.sources?.toolCalls).toBe(
+        'client-local-transcript'
       );
     }
     expect(JSON.stringify(result)).not.toContain('test-controller-key');
@@ -701,13 +701,13 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
     expect(
       vi.mocked(runAnthropicComputerUseSubmission).mock.calls[0]![0]
     ).toContain('[eval-run-marker:');
-    expect(result.externalHost.correlation).toMatchObject({
+    expect(result.clientMetadata.correlation).toMatchObject({
       strategy: 'prompt_marker',
       includedInPrompt: true,
       promptUnchanged: false,
     });
-    expect(result.externalHost.session.runMarker).toBe(
-      result.externalHost.correlation.marker
+    expect(result.clientMetadata.session.runMarker).toBe(
+      result.clientMetadata.correlation.marker
     );
   });
   it.each(['none', 'host_session_metadata'] as const)(
@@ -805,7 +805,7 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
     async (model, effort) => {
       const result = await run(model, {}, effort);
       expect(result.success).toBe(false);
-      expect(result.externalHost.failureKind).toBe('host_run_failed');
+      expect(result.clientMetadata.failureKind).toBe('host_run_failed');
       expect(restore).toHaveBeenCalledTimes(1);
     }
   );
@@ -816,7 +816,7 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
         'Ambiguous matching ChatGPT sessions for this query.'
       )
     );
-    expect((await run()).externalHost.failureKind).toBe(
+    expect((await run()).clientMetadata.failureKind).toBe(
       'ambiguous_matching_sessions'
     );
     expect(restore).toHaveBeenCalledTimes(1);
@@ -831,7 +831,7 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
     const result = await run();
     expect(result.success).toBe(false);
     expect(
-      result.externalHost.computerUse?.submission.telemetry?.accounting
+      result.clientMetadata.computerUse?.submission.telemetry?.accounting
     ).toBe('partial');
     expect(runAnthropicComputerUseSubmission).toHaveBeenCalledTimes(1);
     expect(findChatgptTrace).not.toHaveBeenCalled();
@@ -860,7 +860,7 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error('still running'));
     const result = await run();
-    expect(result.externalHost.failureKind).toBe('cleanup_failed');
+    expect(result.clientMetadata.failureKind).toBe('cleanup_failed');
     expect(restore).not.toHaveBeenCalled();
   });
   it('does not restart after a restoration failure', async () => {

@@ -210,8 +210,8 @@ async function runBatch(
         const trace = simulationToHostRun(result, request.input.servers);
         if (trace.error) trace.error = redactHostSecrets(trace.error, secrets);
         if (result.success) {
-          const id = result.externalHost.session.id;
-          if (!id || !result.externalHost.session.turnId || !ledger.claim(id))
+          const id = result.clientMetadata.session.id;
+          if (!id || !result.clientMetadata.session.turnId || !ledger.claim(id))
             trace.error =
               'ChatGPT requires a distinct native session and turn for each fresh query; refusing duplicate attribution.';
         }
@@ -278,9 +278,9 @@ async function runBatch(
               unexpectedServers,
               ...(measurementError ? { error: measurementError } : {}),
             },
-            externalHost: result.externalHost,
-            computerUse: result.externalHost.computerUse,
-            nativeController: result.externalHost.nativeController,
+            clientMetadata: result.clientMetadata,
+            computerUse: result.clientMetadata.computerUse,
+            nativeController: result.clientMetadata.nativeController,
             // Failed bound turns keep their partial native history.
             ...(result.conversationHistory
               ? { conversationHistory: result.conversationHistory }
