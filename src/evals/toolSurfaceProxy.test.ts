@@ -178,7 +178,7 @@ describe('settleProxiedTrace', () => {
       events: [call('find_more', 'agg'), call('agg.find_more'), call('other')],
     };
     expect(
-      settleProxiedTrace(trace, stubProxy(), 's', two, 'v').events
+      settleProxiedTrace(trace, stubProxy(), true, two, 'v').events
     ).toMatchObject([
       { name: 'find_skills', server: 'agg', rawName: 'find_more' },
       { name: 'agg.find_skills', rawName: 'agg.find_more' },
@@ -189,7 +189,7 @@ describe('settleProxiedTrace', () => {
       settleProxiedTrace(
         { finalText: '', events: [call('find_more', 'mcp-server')] },
         stubProxy(),
-        's',
+        true,
         unlabelled,
         'v'
       ).events
@@ -201,7 +201,7 @@ describe('settleProxiedTrace', () => {
       settleProxiedTrace(
         { finalText: '', events: [] },
         stubProxy(false),
-        's',
+        false,
         two,
         'v'
       ).error
@@ -210,7 +210,7 @@ describe('settleProxiedTrace', () => {
       settleProxiedTrace(
         { finalText: '', events: [], error: 'host crashed' },
         stubProxy(false),
-        's',
+        false,
         two,
         'v'
       ).error
@@ -305,7 +305,7 @@ describe('settleProxiedTrace tool searches', () => {
         ],
       },
       stubProxy(true, { find_more: 'find_skills' }),
-      's',
+      true,
       [catalog('aggregate', 'agg')],
       'v'
     );
@@ -313,5 +313,78 @@ describe('settleProxiedTrace tool searches', () => {
       { name: 'find_skills' },
       { name: 'search', server: 'agg' },
     ]);
+  });
+});
+
+describe('a batch host that connects to one server set for the batch', () => {
+  const manifest = { name: 'm', datasets: [] };
+
+  /** Lists tools from each server, as a host or a readiness probe would. */
+  async function listFrom(servers: MCPConfig[]) {
+    for (const config of servers) {
+      const client = await createMCPClientForConfig(config);
+      try {
+        await client.listTools();
+      } finally {
+        await closeMCPClient(client);
+      }
+    }
+  }
+
+  async function runBatchWith(
+    connect: (endpoints: {
+      servers: MCPConfig[];
+      check: MCPConfig[];
+    }) => Promise<void>
+  ) {
+    const proxy = await start([catalog('aggregate', 'agg')]);
+    const seen: string[] = [];
+    const queues = await prepareHostBatch(
+      {
+        schema: z.object({}),
+        serversPerBatch: true,
+        runBatch: async (requests) => {
+          for (const request of requests)
+            seen.push(
+              (request.input.servers[0] as { serverUrl: string }).serverUrl
+            );
+          await connect({
+            servers: requests[0]!.input.servers,
+            check: requests[0]!.input.checkServers!,
+          });
+          return requests.map(() => ({ finalText: '', events: [] }));
+        },
+      },
+      [
+        { id: 'a', mode: 'host', input: 'x', trials: 2 },
+        { id: 'b', mode: 'host', input: 'y' },
+      ],
+      { type: 'test/batch' },
+      [catalog('aggregate', 'agg')],
+      { manifest },
+      { id: 'v2', proxy: async () => proxy }
+    );
+    return { queues: queues!, seen };
+  }
+
+  it('serves the whole batch on one endpoint and checks once that the host listed tools', async () => {
+    const { queues, seen } = await runBatchWith(async ({ servers, check }) => {
+      expect(check[0]).not.toEqual(servers[0]);
+      expect(check[0]).toMatchObject({ label: 'agg' });
+      await listFrom(check);
+      await listFrom(servers);
+    });
+    expect(new Set(seen).size).toBe(1);
+    for (const id of ['a', 'b'])
+      for (const trace of queues.get(id)!) expect(trace.error).toBeUndefined();
+  });
+
+  it("doesn't take MST's own check for the host listing tools", async () => {
+    const { queues } = await runBatchWith(async ({ check }) => {
+      await listFrom(check);
+    });
+    for (const id of ['a', 'b'])
+      for (const trace of queues.get(id)!)
+        expect(trace.error).toContain('tool variant "v2"');
   });
 });

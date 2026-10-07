@@ -63,11 +63,16 @@ export async function prepareHostBatch(
     toolVariant && usesToolSurfaceProxy(definition)
       ? await toolVariant.proxy()
       : undefined;
+  // A host that connects to one server set for the batch shares one scope.
+  const shared = proxy && definition.serversPerBatch;
+  if (shared) scopes.fill(scopes[0]!);
+  const checkScope = randomUUID();
   if (proxy) {
     requests.forEach((request, index) => {
       request.input = {
         ...request.input,
         servers: proxy.serversFor(scopes[index]!),
+        checkServers: proxy.serversFor(checkScope),
       };
     });
   }
@@ -75,10 +80,14 @@ export async function prepareHostBatch(
     requests,
     proxy ? withoutToolVariant(context) : context
   );
+  if (proxy) proxy.endScope(checkScope);
   if (traces.length !== requests.length)
     throw new Error(
       'Batch host returned an incomplete trace set; refusing to resubmit.'
     );
+  const batchListed = shared
+    ? proxy.endScope(scopes[0]!).listedTools
+    : undefined;
   requests.forEach((request, index) =>
     queues
       .get(request.caseId)!
@@ -87,7 +96,7 @@ export async function prepareHostBatch(
           ? settleProxiedTrace(
               traces[index]!,
               proxy,
-              scopes[index]!,
+              batchListed ?? proxy.endScope(scopes[index]!).listedTools,
               servers,
               toolVariant!.id
             )

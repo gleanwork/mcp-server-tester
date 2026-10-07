@@ -407,11 +407,10 @@ export function withoutToolVariant(
 export function settleProxiedTrace(
   trace: ClientRunResult,
   proxy: ToolSurfaceProxy,
-  scope: string,
+  listedTools: boolean,
   servers: readonly MCPConfig[],
   variantId: string
 ): ClientRunResult {
-  const { listedTools } = proxy.endScope(scope);
   if (!trace.error && !listedTools) {
     return {
       ...trace,

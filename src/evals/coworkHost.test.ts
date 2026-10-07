@@ -317,6 +317,30 @@ describe('V2 Cowork host', () => {
       expect.objectContaining({ appPath: '/private/tmp/pinned/Claude.app' })
     );
   });
+  it('probes readiness on the check endpoint when its servers are proxied', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+    const prepared = createCoworkHost({
+      dataDirectory: () => '/prepared/session',
+      prepare: mocks.setup,
+      recover: vi.fn(),
+      submit: mocks.submit,
+      handleHitl: mocks.hitl,
+    });
+    const check = { ...server, serverUrl: 'https://example.com/check/eval' };
+    const batch = requests().map((r) => ({
+      ...r,
+      config: { ...host, computerUseProvider: 'linux-desktop' },
+      input: { ...r.input, checkServers: [check] },
+    }));
+    const result = await prepared.runBatch!(batch, { ...context, env: {} });
+    expect(result.every((r) => !r.error)).toBe(true);
+    expect(mocks.readiness).toHaveBeenCalledWith([check], expect.any(Object), {
+      plugins: [],
+      paths: {},
+    });
+    expect(COWORK_HOST.serversPerBatch).toBe(true);
+    expect(COWORK_HOST.toolSurfaceProxy).toBeUndefined();
+  });
   it('selects the semantic Linux driver without requiring a planner API key', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
     expect(COWORK_HOST.schema.parse({ type: 'cowork' })).toMatchObject({
