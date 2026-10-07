@@ -11,6 +11,12 @@ import { open } from './commands/open/index.js';
 import { run } from './commands/run/index.js';
 import { batch } from './commands/batch/index.js';
 import { setupCowork } from './commands/cowork/index.js';
+import {
+  auth,
+  authRevoke,
+  authStatus,
+  type AuthOptions,
+} from './commands/auth/index.js';
 import packageJson from '../../package.json' with { type: 'json' };
 import { inspect } from 'node:util';
 import { debugCli } from '../debug.js';
@@ -90,6 +96,47 @@ program
   .option('--state-dir <dir>', 'Custom directory for token storage')
   .action(token);
 
+// Auth command: sign in to an eval config's connector servers
+function withConfig(options: AuthOptions): AuthOptions {
+  // Not a commander requiredOption: that would also bind `auth status --config`.
+  if (typeof options.config !== 'string')
+    throw new Error("required option '-c, --config <path>' not specified");
+  return options;
+}
+function authOptions(command: Command): Command {
+  return command
+    .option('-c, --config <path>', 'Path to an eval config JSON')
+    .option('--plugins <paths...>', 'Plugin modules to load')
+    .option('--server <labels...>', 'Only these servers')
+    .option(
+      '--store <dir>',
+      'Credential store directory (default: ~/.mcp-server-tester/grants)'
+    )
+    .option('--root-dir <dir>', 'Fallback directory for relative paths', '.');
+}
+const authCommand = authOptions(
+  program
+    .command('auth')
+    .description(
+      'Sign in once to the connector servers an eval config uses; runs refresh the tokens'
+    )
+    .option('--force', 'Sign in again even if a valid grant exists')
+).action((options: AuthOptions) => auth(withConfig(options)));
+authOptions(
+  authCommand
+    .command('status')
+    .description('Show which servers are signed in (exits 1 if any is not)')
+).action((_options: AuthOptions, command: Command) =>
+  authStatus(withConfig(command.optsWithGlobals<AuthOptions>()))
+);
+authOptions(
+  authCommand
+    .command('revoke')
+    .description("Revoke servers' grants at the provider and delete them")
+).action((_options: AuthOptions, command: Command) =>
+  authRevoke(withConfig(command.optsWithGlobals<AuthOptions>()))
+);
+
 // Run command
 program
   .command('run')
@@ -105,6 +152,10 @@ program
     '.'
   )
   .option('--dry-run', 'Validate the config and plugins without executing')
+  .option(
+    '--store <dir>',
+    'Credential store for connector servers (default: ~/.mcp-server-tester/grants)'
+  )
   .addOption(removedFlag('-m, --manifest <path>', '--config'))
   .addOption(removedFlag('--arm <name>', '--variant'))
   .action((options: Record<string, unknown>) => {

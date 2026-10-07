@@ -12,6 +12,7 @@ Before the package is installed (for example, running `init` in a new directory)
 - [generate - Generate Eval Dataset](#generate---generate-playwright-tests)
 - [login - OAuth Authentication](#login---oauth-authentication)
 - [token - Export Tokens for CI/CD](#token---export-tokens-for-cicd)
+- [auth - Sign In to Connector Servers](#auth---sign-in-to-connector-servers)
 - [run - Run an Eval Config](#run---run-an-eval-config)
 - [batch - Run Several Eval Configs](#batch---run-several-eval-configs)
 - [open - Open the Reporter](#open---open-the-reporter)
@@ -671,6 +672,51 @@ npx mst token https://api.example.com/mcp
 # Run 'mst login https://api.example.com/mcp' to authenticate first.
 ```
 
+## `auth` - Sign In to Connector Servers
+
+Signs in once to every connector server an eval config uses. After that, each `mst run` refreshes the tokens itself and deletes them when it ends: no `.env`, no copied tokens.
+
+A connector server names a plugin's connector instead of a transport:
+
+```json
+{
+  "plugins": ["@acme/mst-plugin"],
+  "variants": [
+    { "name": "aggregated", "servers": [{ "connector": "acme/glean" }] },
+    {
+      "name": "native",
+      "servers": [{ "connector": "acme/slack" }, { "connector": "acme/gmail" }]
+    }
+  ]
+}
+```
+
+The plugin's connector says where the server is, how to sign in, and how the client reaches it (for example, through the [dry-run proxy](./cowork.md#dry-run-proxy), which blocks writes). See [docs/design/auth-and-connectors.md](./design/auth-and-connectors.md).
+
+### Usage
+
+```bash
+npx mst auth --config ./eval.json [--server <labels...>] [--force]
+npx mst auth status --config ./eval.json
+npx mst auth revoke --config ./eval.json --server <labels...>
+```
+
+`auth` signs in to each grant that has none: it opens the browser (or prints a device code), stores the grant, then connects once and checks that the server lists at least the connector's `minTools`, so an under-scoped sign-in fails now and not halfway through a run. Connectors that share a grant (for example Gmail, Drive and Calendar) sign in once, with all their scopes. A valid grant is left alone unless you pass `--force`.
+
+`auth status` changes nothing and exits 1 when a server is not signed in. `auth revoke` revokes the grant at the provider (when it has a revocation endpoint) and deletes it.
+
+### Options
+
+| Option                 | Description                                                                                 |
+| ---------------------- | ------------------------------------------------------------------------------------------- |
+| `-c, --config <path>`  | The eval config (required).                                                                 |
+| `--server <labels...>` | Only these servers.                                                                         |
+| `--force`              | Sign in again even if a valid grant exists.                                                 |
+| `--store <dir>`        | Where grants are kept. Default: `$MST_CREDENTIALS_DIR`, else `~/.mcp-server-tester/grants`. |
+| `--plugins <paths...>` | Plugin modules to load, as well as the eval config's own `plugins`.                         |
+
+Grants are 0600 files in a 0700 directory. Refresh tokens stay there; access tokens reach a run only through private files it deletes when it ends, or run-private environment variables. Neither appears in results, logs or the client's settings. If a run needs a server that is not signed in, it stops before any client starts and prints the `mst auth` command to run.
+
 ## `run` - Run an Eval Config
 
 Runs an eval config's variants and writes the run summary. See [Evaluation framework](./evaluation-framework.md) for the eval config format.
@@ -692,6 +738,7 @@ npx mst run --config ./eval.json [options]
 | `--root-dir <dir>`      | Fallback for relative eval config paths, and the default results location. Default: `.`.                                                                                                                                                        |
 | `--secrets-file <path>` | A JSON or dotenv-style file of environment values for the run (API keys, `auth.accessTokenEnv` tokens, stdio server environments), kept out of the eval config. A relative path resolves against the root; its values override the environment. |
 | `--dry-run`             | Validate the eval config, its plugins and datasets without running anything.                                                                                                                                                                    |
+| `--store <dir>`         | Where connector servers' grants are (see [`auth`](#auth---sign-in-to-connector-servers)). Default: `~/.mcp-server-tester/grants`.                                                                                                               |
 
 `run` prints a row per variant (cases passed, trial pass rate, MCP calls, host events, tokens, cost, time) and, when there is one, the change since the previous run of the same eval config and variant. It writes `results.json` in the output directory and exits 1 when any case failed. `--dry-run` prints the eval config's name, output directory, datasets and variants as JSON.
 

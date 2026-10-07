@@ -101,7 +101,10 @@ describe('EvalConfigSchema', () => {
       z.toJSONSchema(MCPConfigSchema, { target: 'draft-7', io: 'input' })
     );
     expect(schema.properties.servers.items).toEqual({
-      $ref: '#/definitions/mcpConfig',
+      anyOf: [
+        { $ref: '#/definitions/mcpConfig' },
+        { $ref: '#/definitions/connectorServer' },
+      ],
     });
     expect(
       schema.properties.variants.items.properties.client.required
@@ -355,5 +358,48 @@ describe('the editor schema', () => {
     );
     expect(Object.keys(editor.properties).sort()).toEqual(runtime.sort());
     expect(editor.additionalProperties).toBe(false);
+  });
+});
+
+describe('connector servers', () => {
+  it('accepts connector entries in servers and variants, and rejects bad ones', () => {
+    const config = loadEvalConfigFromObject(
+      {
+        name: 'connectors',
+        datasets: [{ type: 'file', path: 'cases.json' }],
+        servers: [{ connector: 'acme/glean' }],
+        variants: [
+          {
+            name: 'native',
+            servers: [
+              { connector: 'acme/slack', label: 'slack' },
+              {
+                connector: '@acme/evals/jira',
+                url: 'https://jira.example/mcp',
+              },
+            ],
+          },
+        ],
+      },
+      { skipDatasetValidation: true }
+    );
+    expect(config.servers).toEqual([{ connector: 'acme/glean' }]);
+    expect(config.variants?.[0]?.servers).toHaveLength(2);
+    for (const bad of [
+      { connector: 'slack' },
+      { connector: 'acme/slack', transport: 'http' },
+      { connector: 'acme/slack', token: 'x' },
+      { connector: 'acme/slack', label: '1bad' },
+    ])
+      expect(() =>
+        loadEvalConfigFromObject(
+          {
+            name: 'x',
+            datasets: [{ type: 'file', path: 'c.json' }],
+            servers: [bad],
+          },
+          { skipDatasetValidation: true }
+        )
+      ).toThrow();
   });
 });

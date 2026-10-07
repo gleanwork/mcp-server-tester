@@ -6,6 +6,7 @@ import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { CoworkPlatform } from './platform.js';
+import { transportServers } from '../evalConfig.js';
 import {
   hostStdioFileContents,
   hostStdioServers,
@@ -287,7 +288,7 @@ export const linuxCoworkPlatform: CoworkPlatform = {
         throw new Error('model');
       if (!coworkPluginSettingsMatch(settings, plugins))
         throw new Error('plugins');
-      const servers = evalConfig.servers ?? [];
+      const servers = transportServers(evalConfig.servers, 'Cowork');
       if (
         !coworkMcpSettingsMatch(settings, {
           servers,

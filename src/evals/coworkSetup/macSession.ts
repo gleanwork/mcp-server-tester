@@ -12,7 +12,7 @@ import {
 } from 'node:fs/promises';
 import { homedir, tmpdir, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { EvalConfig } from '../evalConfig.js';
+import { transportServers, type EvalConfig } from '../evalConfig.js';
 import {
   hostStdioServers,
   resolveHostStdioServer,
@@ -182,10 +182,12 @@ export async function prepareMacCoworkSession(options: {
     if (!evalConfig.servers) throw new Error(ERROR);
     const plugins = structuredClone(options.plugins ?? []);
     const stdioPaths = { dataRoot: join(stagingDirectory, 'stdio') };
-    const labeledServers = evalConfig.servers.map((server, index) => ({
-      ...server,
-      label: mcpServerLabel(server, index),
-    }));
+    const labeledServers = transportServers(evalConfig.servers, 'Cowork').map(
+      (server, index) => ({
+        ...server,
+        label: mcpServerLabel(server, index),
+      })
+    );
     // Check plugin shadowing against the complete set before splitting transports.
     coworkManagedPluginSettings({
       servers: [],

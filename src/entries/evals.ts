@@ -176,3 +176,7 @@ export type {
   ConnectorLaunchContext,
   OAuthClient,
 } from '../auth/grants/types.js';
+export type {
+  ConnectorServerConfig,
+  EvalServerConfig,
+} from '../evals/evalConfig.js';

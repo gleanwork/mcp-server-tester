@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { z } from 'zod';
+import { localCredentialStore } from '../../../auth/grants/localStore.js';
 import { describeError } from '../../../utils/describeError.js';
 import {
   runEvalSuite,
@@ -14,6 +15,8 @@ export interface RunOptions {
   variant?: string;
   outputDir?: string;
   secretsFile?: string;
+  /** Credential store directory for connector servers. */
+  store?: string;
 }
 
 export async function run(options: RunOptions): Promise<void> {
@@ -25,6 +28,9 @@ export async function run(options: RunOptions): Promise<void> {
     secretsFile: options.secretsFile,
     dryRun: options.dryRun,
     variant: options.variant,
+    ...(options.store
+      ? { credentialStore: localCredentialStore(path.resolve(options.store)) }
+      : {}),
   };
   let result: Awaited<ReturnType<typeof runEvalSuite>>;
   try {

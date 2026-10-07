@@ -46,9 +46,16 @@
     },
     "servers": {
       "type": "array",
-      "description": "The MCP server set under test. Each entry is an MCPConfig.",
+      "description": "The MCP server set under test. Each entry is an MCPConfig, or a plugin connector (`{ \"connector\": \"namespace/name\" }`) that `mst auth` signs in to.",
       "items": {
-        "$ref": "#/definitions/mcpConfig"
+        "anyOf": [
+          {
+            "$ref": "#/definitions/mcpConfig"
+          },
+          {
+            "$ref": "#/definitions/connectorServer"
+          }
+        ]
       }
     },
     "client": {
@@ -663,6 +670,29 @@
         }
       },
       "description": "Tool metadata a variant shows its client instead of the servers' own: a new name, description or input schema, keyed by the tool's name on its server. Calls are still recorded under the original names."
+    },
+    "connectorServer": {
+      "type": "object",
+      "description": "A server named by a plugin connector. `mst run` launches it as the connector says, with a fresh token from `mst auth`.",
+      "properties": {
+        "connector": {
+          "type": "string",
+          "description": "`namespace/name` of a plugin connector.",
+          "pattern": "^(?:@[a-z0-9][a-z0-9._-]*\\/)?[a-z0-9][a-z0-9._-]*\\/[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "label": {
+          "type": "string",
+          "description": "The server's label. Default: the connector's name.",
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Overrides the connector's endpoint."
+        }
+      },
+      "required": ["connector"],
+      "additionalProperties": false
     }
   }
 }
