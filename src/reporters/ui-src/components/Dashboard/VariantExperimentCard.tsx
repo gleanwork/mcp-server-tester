@@ -1,4 +1,3 @@
-import React from 'react';
 import { FlaskConical } from 'lucide-react';
 import type { MCPVariantExperimentData } from '../../types';
 import { rateColorClass } from '../../utils';

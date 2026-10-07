@@ -380,7 +380,7 @@ describe('validateError', () => {
     content: [{ type: 'text', text: 'Success!' }],
   };
 
-  describe('boolean expectations', () => {
+  describe('boolean assertions', () => {
     it('should pass when expecting error and response is error', () => {
       const result = validateError(errorResponse('Something went wrong'), true);
       expect(result.pass).toBe(true);
@@ -406,7 +406,7 @@ describe('validateError', () => {
     });
   });
 
-  describe('string message expectations', () => {
+  describe('string message assertions', () => {
     it('should pass when error message contains expected text', () => {
       const result = validateError(
         errorResponse('File not found'),

@@ -131,7 +131,7 @@ function isCaseResult(value: JsonObject): boolean {
   return (
     typeof value.id === 'string' &&
     typeof value.pass === 'boolean' &&
-    isJsonObject(value.expectations)
+    isJsonObject(value.scores)
   );
 }
 
@@ -156,9 +156,9 @@ function stripResponses(value: unknown): void {
     if (isJsonObject(request) && isJsonObject(request.assertions))
       delete request.assertions.response;
     stripTrace(value.trace);
-    if (Array.isArray(value.iterationResults))
-      for (const iteration of value.iterationResults)
-        if (isJsonObject(iteration)) stripTrace(iteration.trace);
+    if (Array.isArray(value.trialResults))
+      for (const trial of value.trialResults)
+        if (isJsonObject(trial)) stripTrace(trial.trace);
   }
   for (const nested of Object.values(value)) stripResponses(nested);
 }

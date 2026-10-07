@@ -46,7 +46,7 @@ function callBuildRunData(reporter: MCPReporter, durationMs: number) {
       failed: number;
       passRate: number;
       datasetBreakdown: Record<string, number>;
-      expectationBreakdown: Record<string, number>;
+      graderBreakdown: Record<string, number>;
     };
     results: EvalCaseResult[];
     conformanceChecks?: unknown[];
@@ -67,7 +67,7 @@ function makeResult(
     datasetName: 'test-dataset',
     toolName: 'search',
     source: 'eval',
-    expectations: {},
+    scores: {},
     durationMs: 100,
     ...overrides,
   };
@@ -233,7 +233,7 @@ describe('MCPReporter.buildRunData()', () => {
               failed: 1,
               passRate: 0.5,
               datasetBreakdown: { dataset: 2 },
-              expectationBreakdown: {
+              graderBreakdown: {
                 exact: 0,
                 schema: 0,
                 textContains: 0,
@@ -268,123 +268,123 @@ describe('MCPReporter.buildRunData()', () => {
     });
   });
 
-  describe('expectation counters', () => {
-    it('counts exact expectation', () => {
+  describe('grader counters', () => {
+    it('counts exact assertion', () => {
       setResults(reporter, [
-        makeResult({ pass: true, expectations: { exact: { pass: true } } }),
+        makeResult({ pass: true, scores: { exact: { pass: true } } }),
       ]);
 
       const data = callBuildRunData(reporter, 100);
 
-      expect(data.metrics.expectationBreakdown.exact).toBe(1);
+      expect(data.metrics.graderBreakdown.exact).toBe(1);
     });
 
-    it('counts schema expectation', () => {
+    it('counts schema assertion', () => {
       setResults(reporter, [
-        makeResult({ pass: true, expectations: { schema: { pass: true } } }),
+        makeResult({ pass: true, scores: { schema: { pass: true } } }),
       ]);
 
       const data = callBuildRunData(reporter, 100);
 
-      expect(data.metrics.expectationBreakdown.schema).toBe(1);
+      expect(data.metrics.graderBreakdown.schema).toBe(1);
     });
 
-    it('counts textContains expectation', () => {
+    it('counts textContains assertion', () => {
       setResults(reporter, [
         makeResult({
           pass: true,
-          expectations: { textContains: { pass: true } },
+          scores: { textContains: { pass: true } },
         }),
       ]);
 
       const data = callBuildRunData(reporter, 100);
 
-      expect(data.metrics.expectationBreakdown.textContains).toBe(1);
+      expect(data.metrics.graderBreakdown.textContains).toBe(1);
     });
 
-    it('counts regex expectation', () => {
+    it('counts regex assertion', () => {
       setResults(reporter, [
-        makeResult({ pass: true, expectations: { regex: { pass: true } } }),
+        makeResult({ pass: true, scores: { regex: { pass: true } } }),
       ]);
 
       const data = callBuildRunData(reporter, 100);
 
-      expect(data.metrics.expectationBreakdown.regex).toBe(1);
+      expect(data.metrics.graderBreakdown.regex).toBe(1);
     });
 
-    it('counts snapshot expectation', () => {
+    it('counts snapshot assertion', () => {
       setResults(reporter, [
-        makeResult({ pass: true, expectations: { snapshot: { pass: true } } }),
+        makeResult({ pass: true, scores: { snapshot: { pass: true } } }),
       ]);
 
       const data = callBuildRunData(reporter, 100);
 
-      expect(data.metrics.expectationBreakdown.snapshot).toBe(1);
+      expect(data.metrics.graderBreakdown.snapshot).toBe(1);
     });
 
-    it('counts judge expectation', () => {
+    it('counts judge assertion', () => {
       setResults(reporter, [
-        makeResult({ pass: true, expectations: { judge: { pass: true } } }),
+        makeResult({ pass: true, scores: { judge: { pass: true } } }),
       ]);
 
       const data = callBuildRunData(reporter, 100);
 
-      expect(data.metrics.expectationBreakdown.judge).toBe(1);
+      expect(data.metrics.graderBreakdown.judge).toBe(1);
     });
 
-    it('counts error expectation', () => {
+    it('counts error assertion', () => {
       setResults(reporter, [
-        makeResult({ pass: true, expectations: { error: { pass: true } } }),
+        makeResult({ pass: true, scores: { error: { pass: true } } }),
       ]);
 
       const data = callBuildRunData(reporter, 100);
 
-      expect(data.metrics.expectationBreakdown.error).toBe(1);
+      expect(data.metrics.graderBreakdown.error).toBe(1);
     });
 
-    it('counts size expectation (validates Issue 5 fix)', () => {
+    it('counts size assertion (validates Issue 5 fix)', () => {
       setResults(reporter, [
-        makeResult({ pass: true, expectations: { size: { pass: true } } }),
+        makeResult({ pass: true, scores: { size: { pass: true } } }),
       ]);
 
       const data = callBuildRunData(reporter, 100);
 
-      // This test validates that the size expectation counter increments correctly.
+      // This test validates that the size assertion counter increments correctly.
       // If this fails with count=0, the Issue 5 fix is missing from buildRunData.
-      expect(data.metrics.expectationBreakdown.size).toBe(1);
+      expect(data.metrics.graderBreakdown.size).toBe(1);
     });
 
-    it('counts toolsTriggered expectation', () => {
+    it('counts toolsTriggered assertion', () => {
       setResults(reporter, [
         makeResult({
           pass: true,
-          expectations: { toolsTriggered: { pass: true } },
+          scores: { toolsTriggered: { pass: true } },
         }),
       ]);
 
       const data = callBuildRunData(reporter, 100);
 
-      expect(data.metrics.expectationBreakdown.toolsTriggered).toBe(1);
+      expect(data.metrics.graderBreakdown.toolsTriggered).toBe(1);
     });
 
-    it('counts toolCallCount expectation', () => {
+    it('counts toolCallCount assertion', () => {
       setResults(reporter, [
         makeResult({
           pass: true,
-          expectations: { toolCallCount: { pass: true } },
+          scores: { toolCallCount: { pass: true } },
         }),
       ]);
 
       const data = callBuildRunData(reporter, 100);
 
-      expect(data.metrics.expectationBreakdown.toolCallCount).toBe(1);
+      expect(data.metrics.graderBreakdown.toolCallCount).toBe(1);
     });
 
-    it('counts multiple expectation types from the same result', () => {
+    it('counts multiple grader types from the same result', () => {
       setResults(reporter, [
         makeResult({
           pass: true,
-          expectations: {
+          scores: {
             textContains: { pass: true },
             schema: { pass: false },
             judge: { pass: true },
@@ -394,41 +394,41 @@ describe('MCPReporter.buildRunData()', () => {
 
       const data = callBuildRunData(reporter, 100);
 
-      expect(data.metrics.expectationBreakdown.textContains).toBe(1);
-      expect(data.metrics.expectationBreakdown.schema).toBe(1);
-      expect(data.metrics.expectationBreakdown.judge).toBe(1);
-      expect(data.metrics.expectationBreakdown.exact).toBe(0);
+      expect(data.metrics.graderBreakdown.textContains).toBe(1);
+      expect(data.metrics.graderBreakdown.schema).toBe(1);
+      expect(data.metrics.graderBreakdown.judge).toBe(1);
+      expect(data.metrics.graderBreakdown.exact).toBe(0);
     });
 
-    it('aggregates expectation counts across multiple results', () => {
+    it('aggregates grader counts across multiple results', () => {
       setResults(reporter, [
         makeResult({
           pass: true,
-          expectations: { textContains: { pass: true } },
+          scores: { textContains: { pass: true } },
         }),
         makeResult({
           pass: true,
-          expectations: { textContains: { pass: true } },
+          scores: { textContains: { pass: true } },
         }),
         makeResult({
           pass: false,
-          expectations: { textContains: { pass: false } },
+          scores: { textContains: { pass: false } },
         }),
-        makeResult({ pass: true, expectations: { judge: { pass: true } } }),
+        makeResult({ pass: true, scores: { judge: { pass: true } } }),
       ]);
 
       const data = callBuildRunData(reporter, 400);
 
-      expect(data.metrics.expectationBreakdown.textContains).toBe(3);
-      expect(data.metrics.expectationBreakdown.judge).toBe(1);
+      expect(data.metrics.graderBreakdown.textContains).toBe(3);
+      expect(data.metrics.graderBreakdown.judge).toBe(1);
     });
 
-    it('initializes all expectation counters to 0 when no expectations are set', () => {
-      setResults(reporter, [makeResult({ pass: true, expectations: {} })]);
+    it('initializes all grader counters to 0 when no assertions are set', () => {
+      setResults(reporter, [makeResult({ pass: true, scores: {} })]);
 
       const data = callBuildRunData(reporter, 100);
 
-      const breakdown = data.metrics.expectationBreakdown;
+      const breakdown = data.metrics.graderBreakdown;
       expect(breakdown.exact).toBe(0);
       expect(breakdown.schema).toBe(0);
       expect(breakdown.textContains).toBe(0);

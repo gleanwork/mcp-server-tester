@@ -268,7 +268,7 @@ describe('per-scenario host traces', () => {
         },
         {}
       );
-      expect(result.caseResults[0]?.iterationResults).toHaveLength(3);
+      expect(result.caseResults[0]?.trialResults).toHaveLength(3);
       expect(result.passed).toBe(evidence === 'structured' ? 1 : 0);
       const verifiedMetric = evidence === 'structured' ? 1 : undefined;
       expect(result.datasetToolPrecision).toBe(verifiedMetric);
@@ -277,13 +277,11 @@ describe('per-scenario host traces', () => {
       expect(result.caseResults[0]?.toolRecall).toBe(verifiedMetric);
       expect(result.caseResults[0]?.response).toMatchObject({ evidence });
       if (evidence !== 'structured') {
-        for (const iteration of result.caseResults[0]?.iterationResults ?? []) {
-          expect(iteration.toolCallTrace).toBeUndefined();
+        for (const trial of result.caseResults[0]?.trialResults ?? []) {
+          expect(trial.toolCallTrace).toBeUndefined();
         }
       }
-      expect(result.caseResults[0]?.expectations?.textContains?.pass).toBe(
-        true
-      );
+      expect(result.caseResults[0]?.scores?.textContains?.pass).toBe(true);
     }
   );
   it('retains server labels and non-tool events without requiring them in single-server assertions', () => {

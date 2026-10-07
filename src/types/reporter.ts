@@ -9,9 +9,9 @@
 import type {
   AuthType,
   ResultSource,
-  ExpectationType,
-  EvalExpectationResult,
-  ExpectationBreakdown,
+  GraderType,
+  GraderScore,
+  GraderBreakdown,
   UsageMetrics,
   ClientDiagnostics,
   MCPProtocolInfo,
@@ -242,16 +242,16 @@ export interface MCPServerCapabilitiesData {
 }
 
 /**
- * Result of a single iteration within a multi-iteration eval case
+ * Result of a single trial within a multi-trial eval case
  */
-export interface IterationResult {
-  /** Whether this iteration passed */
+export interface TrialResult {
+  /** Whether this trial passed */
   pass: boolean;
-  /** Execution time for this iteration */
+  /** Execution time for this trial */
   durationMs: number;
-  /** Error message if the iteration failed with an exception */
+  /** Error message if the trial failed with an exception */
   error?: string;
-  /** When true, this iteration failed due to network/infrastructure issues rather than an assertion failure */
+  /** When true, this trial failed due to network/infrastructure issues rather than an assertion failure */
   isInfrastructureError?: boolean;
   /**
    * Ordered trace of tool calls the client made in this trial (client cases only).
@@ -274,7 +274,7 @@ export interface IterationResult {
   trace?: Trace;
   /** Token usage from the client's model calls in this trial */
   clientUsage?: UsageMetrics;
-  /** Token usage of this iteration's judges, from judges that report it. */
+  /** Token usage of this trial's judges, from judges that report it. */
   judgeUsage?: Partial<UsageMetrics>;
   /** Skills the `mst` client loaded in this trial (skills enabled). */
   skillLoads?: SkillLoad[];
@@ -294,10 +294,10 @@ export interface EvalCaseRequest {
   /** Runtime tool override variant identifier, when one was used */
   toolVariantId?: string;
 
-  /** Number of iterations configured for this case */
+  /** Number of trials configured for this case */
   trials?: number;
 
-  /** Accuracy threshold configured for this case */
+  /** Pass threshold configured for this case */
   passThreshold?: number;
 
   /** Judge repetitions configured for this case */
@@ -306,7 +306,7 @@ export interface EvalCaseRequest {
   /** Tags from the source eval case */
   tags?: string[];
 
-  /** Configured expectation block, sanitized for reporter output */
+  /** Configured assertions, sanitized for reporter output */
   assertions?: Record<string, unknown>;
 
   /** Tool arguments, for a tool call the reporter tracked in a Playwright test */
@@ -370,9 +370,9 @@ export interface EvalCaseResult {
   error?: string;
 
   /**
-   * Expectation results
+   * Grader scores, by grader type
    */
-  expectations: Partial<Record<ExpectationType, EvalExpectationResult>>;
+  scores: Partial<Record<GraderType, GraderScore>>;
 
   /**
    * Authentication type used for this test
@@ -390,25 +390,25 @@ export interface EvalCaseResult {
   durationMs: number;
 
   /**
-   * Assertion pass rate (0–1): passes divided by non-infrastructure iterations.
-   * Only present when the case was run with `iterations > 1`.
+   * Assertion pass rate (0–1): passes divided by non-infrastructure trials.
+   * Only present when the case was run with `trials > 1`.
    *
    * Infrastructure errors (network timeouts, rate limits, etc.) are excluded from
    * the denominator so that environment reliability does not inflate this metric.
    */
-  assertionPassRate?: number;
+  passRate?: number;
 
   /**
-   * 95% Wilson score confidence interval for `assertionPassRate`.
-   * Only present when the case was run with `iterations > 1`.
+   * 95% Wilson score confidence interval for `passRate`.
+   * Only present when the case was run with `trials > 1`.
    *
    * Interpet as: the true pass rate is likely between `lower` and `upper`.
-   * Wider intervals mean fewer iterations were run; run more iterations to narrow them.
+   * Wider intervals mean fewer trials were run; run more trials to narrow them.
    *
    * @example { lower: 0.35, upper: 0.93 } // 7/10 passes → 70% ± wide CI
    * @example { lower: 0.57, upper: 0.80 } // 35/50 passes → 70% ± narrow CI
    */
-  assertionPassRateCI?: {
+  passRateCI?: {
     /** Lower bound of the 95% confidence interval (0–1) */
     lower: number;
     /** Upper bound of the 95% confidence interval (0–1) */
@@ -416,16 +416,16 @@ export interface EvalCaseResult {
   };
 
   /**
-   * Infrastructure error rate (0–1): infra errors divided by total iterations.
-   * Only present when the case was run with `iterations > 1`.
+   * Infrastructure error rate (0–1): infra errors divided by total trials.
+   * Only present when the case was run with `trials > 1`.
    */
   infrastructureErrorRate?: number;
 
   /**
-   * Per-iteration pass/fail breakdown.
-   * Only present when the case was run with `iterations > 1`.
+   * Per-trial pass/fail breakdown.
+   * Only present when the case was run with `trials > 1`.
    */
-  iterationResults?: Array<IterationResult>;
+  trialResults?: Array<TrialResult>;
 
   /**
    * Tags from the source eval case, for filtering and slicing reports.
@@ -435,14 +435,14 @@ export interface EvalCaseResult {
   /**
    * Precision of tool calls made (0–1).
    * 1.0 means every tool called was expected; <1.0 means unexpected tools were called.
-   * Populated whenever a `toolsTriggered` expectation is evaluated.
+   * Populated whenever a `toolsTriggered` assertion is evaluated.
    */
   toolPrecision?: number;
 
   /**
    * Recall of required tool calls (0–1).
    * 1.0 means all required tools were called; <1.0 means some were missed.
-   * Only populated when toolsTriggered expectation was evaluated.
+   * Only populated when toolsTriggered assertion was evaluated.
    */
   toolRecall?: number;
 
@@ -453,14 +453,14 @@ export interface EvalCaseResult {
   baselinePass?: boolean;
 
   /**
-   * Number of iterations that failed due to infrastructure errors (network, rate limits, etc.)
-   * Only present when the case was run with `iterations > 1`.
+   * Number of trials that failed due to infrastructure errors (network, rate limits, etc.)
+   * Only present when the case was run with `trials > 1`.
    */
   infrastructureErrorCount?: number;
 
   /**
    * Ordered trace of tool calls the client made.
-   * Only populated when the eval case uses toolsTriggered expectations.
+   * Only populated when the eval case uses toolsTriggered assertions.
    */
   toolCallTrace?: {
     /** The ordered sequence of tool calls made by the LLM */
@@ -481,8 +481,8 @@ export interface EvalCaseResult {
   /** Evidence level retained in persisted comparisons after response redaction. */
   traceEvidence?: TraceEvidence;
   /**
-   * What the host did (host cases with one iteration). With several
-   * iterations, each one's trace is in `iterationResults`.
+   * What the host did (host cases with one trial). With several
+   * trials, each one's trace is in `trialResults`.
    */
   trace?: Trace;
   /** The suite variant that produced this result. */
@@ -495,10 +495,10 @@ export interface EvalCaseResult {
   clientUsage?: UsageMetrics;
   /**
    * Token usage of the case's judges, from judges that report it.
-   * Summed across all iterations.
+   * Summed across all trials.
    */
   judgeUsage?: Partial<UsageMetrics>;
-  /** Native single-iteration measurements; multi-iteration values live in iterationResults. */
+  /** Native single-trial measurements; multi-trial values live in trialResults. */
   clientTelemetry?: Record<string, unknown>;
 
   /**
@@ -561,9 +561,9 @@ export interface MCPEvalRunData {
     datasetBreakdown: Record<string, number>;
 
     /**
-     * Expectation type breakdown
+     * Grader type breakdown
      */
-    expectationBreakdown: ExpectationBreakdown;
+    graderBreakdown: GraderBreakdown;
 
     /**
      * Aggregate token usage from every client case's model calls in this run.
@@ -656,7 +656,7 @@ export type ChangeAssessment = 'better' | 'worse' | 'unclear';
  *
  * - `no-tool-call`: the client called no tools.
  * - `wrong-tool`: the client called an unexpected tool or missed a required one.
- * - `check-failed`: the expected tools were called, but an expectation failed.
+ * - `check-failed`: the expected tools were called, but an assertion failed.
  * - `error`: the trial threw, or failed for an infrastructure reason.
  */
 export type TrialFailureKind =
@@ -733,7 +733,7 @@ export interface VariantComparisonCase {
   input?: string;
   group: VariantCaseGroup;
   heldOut: boolean;
-  /** Tools the case expects, from its `toolsTriggered` expectation. */
+  /** Tools the case expects, from its `toolsTriggered` assertion. */
   expectedTools?: string[];
   /** Trials keyed by variant id (the baseline uses `baselineId`). */
   trials: Record<string, VariantTrial[]>;

@@ -131,7 +131,7 @@ function enrichErrorMessage(err: unknown, provider: string): string {
   ) {
     return (
       `MCP host simulation failed: rate limited.\n` +
-      `Hint: reduce concurrency, add delays between iterations, or upgrade your API plan.`
+      `Hint: reduce concurrency, add delays between requests, or upgrade your API plan.`
     );
   }
 

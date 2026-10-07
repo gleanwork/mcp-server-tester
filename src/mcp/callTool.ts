@@ -73,7 +73,7 @@ const trackedClients = new WeakSet<Client>();
  * errors the server sent) so they can be told apart from `ProtocolError`s the
  * SDK raises locally. `Client.callTool()` throws local ones before sending (an
  * uncompilable `outputSchema`) and after receiving (structured content that
- * does not match the output schema); those are client-side verdicts, not
+ * does not match the output schema); those are client-side errors, not
  * server errors, and must not be reported as if the server returned them.
  */
 function trackServerErrors(client: Client): void {

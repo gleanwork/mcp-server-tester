@@ -9,7 +9,7 @@
  * - `options` is how this judge grades, parsed by the judge's schema.
  *
  * The pass threshold belongs to the framework, not the judge. A judge returns
- * a score, and may return its own verdict, sub-scores, usage, or a skip.
+ * a score, and may return its own pass/fail, sub-scores, usage, or a skip.
  */
 
 import type { UsageMetrics } from './judgeTypes.js';
@@ -82,13 +82,13 @@ export interface JudgeSubScore {
 }
 
 /** What a judge returns for one rep. Only `score` is required. */
-export interface JudgeVerdict {
+export interface JudgeScore {
   /** Score from 0 to 1. Ignored when `skipped` is true. */
   score: number;
   reasoning?: string;
   /**
-   * The judge's own verdict. When absent, the framework compares `score`
-   * with the threshold. Over several reps, the majority verdict wins.
+   * The judge's own pass/fail. When absent, the framework compares `score`
+   * with the threshold. Over several reps, the majority pass/fail wins.
    */
   pass?: boolean;
   /**
@@ -108,8 +108,8 @@ export interface JudgeVerdict {
   metadata?: Record<string, unknown>;
 }
 
-/** A judge verdict after checks, with pass/fail resolved. */
-export interface CheckedJudgeVerdict extends JudgeVerdict {
+/** A judge score after checks, with pass/fail resolved. */
+export interface CheckedJudgeScore extends JudgeScore {
   pass: boolean;
   /** The `pass` the judge returned itself, if any. */
   judgePass?: boolean;
@@ -250,14 +250,14 @@ function checkScore(value: unknown, label: string): number {
  * and every sub-score must be between 0 and 1, and `pass` defaults to
  * `score >= threshold`.
  */
-export function checkJudgeVerdict(
+export function checkJudgeScore(
   output: unknown,
   threshold: number
-): CheckedJudgeVerdict {
+): CheckedJudgeScore {
   if (!isRecord(output)) {
-    throw new Error('returned no verdict object');
+    throw new Error('returned no score object');
   }
-  const result = output as unknown as JudgeVerdict;
+  const result = output as unknown as JudgeScore;
   if (result.pass !== undefined && typeof result.pass !== 'boolean') {
     throw new Error('returned a `pass` that is not a boolean');
   }
@@ -318,7 +318,7 @@ export function sumJudgeUsage(
   return total;
 }
 
-/** Usage of every judge recorded on a case's judge expectation. */
+/** Usage of every judge recorded on a case's judge assertion. */
 export function caseJudgeUsage(
   judge:
     | {

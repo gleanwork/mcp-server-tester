@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import type { MCPComparisonData, MCPVariantExperimentData } from '../../types';
 import { Recommendation } from './Recommendation';
 import { VariantTable } from './VariantTable';

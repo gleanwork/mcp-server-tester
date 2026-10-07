@@ -48,7 +48,7 @@ npm run test:watch
 
 - Configuration validation
 - Dataset types and loading
-- Expectations (exact, schema, textContains, regex, snapshot, judge)
+- Assertions (exact, schema, textContains, regex, snapshot, judge)
 - MCP client factory and fixtures
 - LLM host simulation
 - Judge implementations (OpenAI, Anthropic)
@@ -174,7 +174,7 @@ npm run build      # Build succeeds
 ├── src/
 │   ├── config/       # MCPConfig types + Zod validation
 │   ├── mcp/          # Client factory, fixtures, MCPFixtureApi
-│   ├── evals/        # Dataset types, loader, runner, expectations
+│   ├── evals/        # Dataset types, loader, runner, grading
 │   ├── judge/        # LLM-as-a-judge (OpenAI, Anthropic)
 │   ├── spec/         # Protocol conformance checks
 │   └── index.ts      # Public API exports
@@ -317,7 +317,7 @@ Follow these conventions:
 1. Create `src/assertions/validators/myValidator.ts` returning `ValidationResult`
 2. Export from `src/assertions/validators/index.ts`
 3. Add unit tests in `validators.test.ts`
-4. Update `docs/expectations.md`
+4. Update `docs/assertions.md`
 
 #### New LLM Judge Provider
 
@@ -326,7 +326,7 @@ Follow these conventions:
 3. Add case to `createJudge()` switch in `src/judge/judgeClient.ts`
 4. Use environment variables for API keys
 5. Add tests
-6. Update `docs/expectations.md`
+6. Update `docs/assertions.md`
 
 #### New Transport Type
 

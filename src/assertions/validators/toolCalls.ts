@@ -10,7 +10,7 @@ import type {
   TraceEvidence,
 } from '../../evals/evalFrameworkTypes.js';
 
-/** Legacy simulations omit identity metadata; explicit expectations never infer it. */
+/** Legacy simulations omit identity metadata; explicit assertions never infer it. */
 type TraceCall = Pick<TraceEvent, 'name' | 'arguments'> &
   Partial<Pick<TraceEvent, 'kind' | 'source' | 'server'>>;
 
@@ -21,7 +21,7 @@ interface TraceResponse {
   evidence?: TraceEvidence;
 }
 
-export interface ToolCallExpectation {
+export interface ToolCallAssertion {
   calls: Array<{
     name: string;
     kind?: TraceEvent['kind'];
@@ -99,7 +99,7 @@ function partialMatch(
 /** Shared identity matching for assertions and reported tool traces. */
 export function matchesIdentity(
   call: TraceCall,
-  expected: ToolCallExpectation['calls'][number]
+  expected: ToolCallAssertion['calls'][number]
 ): boolean {
   return (
     (call.name === expected.name ||
@@ -138,7 +138,7 @@ function unverifiedEvidence(
 
 function findMatchingCall(
   actual: TraceCall[],
-  expected: ToolCallExpectation['calls'][number],
+  expected: ToolCallAssertion['calls'][number],
   startIndex = 0
 ): number {
   for (let i = startIndex; i < actual.length; i++) {
@@ -156,12 +156,12 @@ function findMatchingCall(
 }
 
 /**
- * How an observed trace lines up with a tool-call expectation. This is the
+ * How an observed trace lines up with a tool-call assertion. This is the
  * one matcher behind precision, recall and the reported trace.
  */
 export interface ToolCallMatch {
   /**
-   * Every observed event, in order, and whether the expectation names it
+   * Every observed event, in order, and whether the assertion names it
    * (identity only). The fraction marked expected is the precision.
    */
   observed: Array<{ call: TraceCall; expected: boolean }>;
@@ -169,22 +169,22 @@ export interface ToolCallMatch {
    * Required calls with no observed call matching their identity and
    * arguments. Their share of the required calls is what recall misses.
    */
-  missed: ToolCallExpectation['calls'];
+  missed: ToolCallAssertion['calls'];
 }
 
-/** Matches an observed trace (all event kinds, in order) against an expectation. */
+/** Matches an observed trace (all event kinds, in order) against an assertion. */
 export function matchToolCalls(
   actual: TraceCall[],
-  expectation: ToolCallExpectation
+  assertion: ToolCallAssertion
 ): ToolCallMatch {
   return {
     observed: actual.map((call) => ({
       call,
-      expected: expectation.calls.some((expected) =>
+      expected: assertion.calls.some((expected) =>
         matchesIdentity(call, expected)
       ),
     })),
-    missed: expectation.calls.filter(
+    missed: assertion.calls.filter(
       (expected) =>
         expected.required !== false && findMatchingCall(actual, expected) === -1
     ),
@@ -195,17 +195,17 @@ export function matchToolCalls(
  * Validates tool calls made during a host simulation.
  *
  * @param response - Must be an MCPHostSimulationResult-compatible response
- * @param expectation - Expected tool call specification
+ * @param assertion - Expected tool call specification
  */
 export function validateToolCalls(
   response: unknown,
-  expectation: ToolCallExpectation
+  assertion: ToolCallAssertion
 ): ValidationResult {
   if (!isSimulationResult(response)) {
     return {
       pass: false,
       message:
-        'toolsTriggered expectation requires a host simulation response with structured tool calls',
+        'toolsTriggered assertion requires a host simulation response with structured tool calls',
     };
   }
 
@@ -213,12 +213,12 @@ export function validateToolCalls(
   if (unverified) return unverified;
 
   // Selectors constrain matching, not the observed trace. Retain every event so
-  // exclusive expectations and precision also account for unexpected kinds.
+  // exclusive assertions and precision also account for unexpected kinds.
   const actual = response.events ?? response.toolCalls;
-  const match = matchToolCalls(actual, expectation);
+  const match = matchToolCalls(actual, assertion);
 
   // Recall: fraction of required calls that were made.
-  const requiredCount = expectation.calls.filter(
+  const requiredCount = assertion.calls.filter(
     (c) => c.required !== false
   ).length;
   const recall =
@@ -229,7 +229,7 @@ export function validateToolCalls(
   // Precision: fraction of actual calls that were expected. Always computed
   // so the metric reflects tool call efficiency; whether unexpected calls
   // FAIL is controlled separately by exclusive=true (below).
-  const allowedNames = new Set(expectation.calls.map((c) => c.name));
+  const allowedNames = new Set(assertion.calls.map((c) => c.name));
   const precision =
     actual.length > 0
       ? match.observed.filter((entry) => entry.expected).length / actual.length
@@ -237,12 +237,12 @@ export function validateToolCalls(
 
   const metrics = { precision, recall };
 
-  const order = expectation.order ?? 'any';
+  const order = assertion.order ?? 'any';
 
   if (order === 'strict') {
     // All calls must appear in the specified sequence
     let searchFrom = 0;
-    for (const expected of expectation.calls) {
+    for (const expected of assertion.calls) {
       const idx = findMatchingCall(actual, expected, searchFrom);
       if (idx === -1) {
         if (expected.required !== false) {
@@ -262,7 +262,7 @@ export function validateToolCalls(
     }
   } else {
     // Any order: each required call must appear somewhere
-    const required = expectation.calls.filter((c) => c.required !== false);
+    const required = assertion.calls.filter((c) => c.required !== false);
     for (const expected of required) {
       const idx = findMatchingCall(actual, expected);
       if (idx === -1) {
@@ -283,7 +283,7 @@ export function validateToolCalls(
     }
   }
 
-  if (expectation.exclusive === true) {
+  if (assertion.exclusive === true) {
     const unexpected = match.observed
       .filter((entry) => !entry.expected)
       .map((entry) => entry.call);
@@ -301,7 +301,7 @@ export function validateToolCalls(
     }
   }
 
-  return { pass: true, message: 'All tool call expectations met', metrics };
+  return { pass: true, message: 'All tool call assertions met', metrics };
 }
 
 /**
@@ -318,7 +318,7 @@ export function validateToolCallCount(
     return {
       pass: false,
       message:
-        'toolCallCount expectation requires a host simulation response with structured tool calls',
+        'toolCallCount assertion requires a host simulation response with structured tool calls',
     };
   }
 

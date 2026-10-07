@@ -6,7 +6,7 @@ import type { EvalCaseResult } from '../types/reporter.js';
 import type {
   PairwiseJudgeDefinition,
   PairwiseJudgeInput,
-  PairwiseVerdict,
+  PairwisePreference,
 } from '../judge/pairwiseContract.js';
 import { comparePairwise, getPairwiseJudge } from './pairwiseComparison.js';
 
@@ -21,7 +21,7 @@ function result(
     toolName: '',
     source: 'eval',
     pass: true,
-    expectations: {},
+    scores: {},
     durationMs: 1,
     request: { input: `q-${id}` },
     response: { response: text, events: [] },
@@ -88,8 +88,8 @@ describe('comparePairwise', () => {
     expect(
       out.cases.map((c) => [
         c.id,
-        c.verdicts[0]!.preference,
-        c.verdicts[0]!.consistent,
+        c.preferences[0]!.preference,
+        c.preferences[0]!.consistent,
       ])
     ).toEqual([
       ['a', 'candidate', true],
@@ -111,7 +111,7 @@ describe('comparePairwise', () => {
       consistency: 1,
     });
     expect(summary!.usage?.totalCostUsd).toBeCloseTo(0.06);
-    expect(out.cases[0]!.verdicts[0]).toMatchObject({
+    expect(out.cases[0]!.preferences[0]).toMatchObject({
       version: 'v1',
       strength: 1,
     });
@@ -129,7 +129,7 @@ describe('comparePairwise', () => {
       candidate: { caseResults: [result('a', '2')] },
       judges: [{ type: 'p/first' }],
     });
-    expect(out.cases[0]!.verdicts[0]).toMatchObject({
+    expect(out.cases[0]!.preferences[0]).toMatchObject({
       preference: 'tie',
       consistent: false,
     });
@@ -153,8 +153,8 @@ describe('comparePairwise', () => {
       judges: [{ type: 'p/once', reps: 3 }],
     });
     expect(n).toBe(3);
-    expect(out.cases[0]!.verdicts[0]!.preference).toBe('candidate');
-    expect(out.cases[0]!.verdicts[0]!.consistent).toBeUndefined();
+    expect(out.cases[0]!.preferences[0]!.preference).toBe('candidate');
+    expect(out.cases[0]!.preferences[0]!.consistent).toBeUndefined();
   });
 
   it('skips cases missing required ground truth, and uses dataset cases for it', async () => {
@@ -170,11 +170,11 @@ describe('comparePairwise', () => {
         ['a', { input: 'dataset q', expected: { answer: 'gold' } }],
       ]),
     });
-    expect(out.cases.map((c) => c.verdicts[0]!.skipped ?? false)).toEqual([
+    expect(out.cases.map((c) => c.preferences[0]!.skipped ?? false)).toEqual([
       false,
       true,
     ]);
-    expect(out.cases[1]!.verdicts[0]!.reasoning).toBe(
+    expect(out.cases[1]!.preferences[0]!.reasoning).toBe(
       'no case.expected.answer'
     );
     expect(calls[0]!.case).toMatchObject({
@@ -199,7 +199,7 @@ describe('comparePairwise', () => {
               preference: 'tie',
               skipped: true,
               reasoning: 'no evidence',
-            } satisfies PairwiseVerdict;
+            } satisfies PairwisePreference;
           if (input.baseline.text === 'bad' || input.candidate.text === 'bad')
             return { preference: 'nope' } as never;
           throw new Error('provider down');
@@ -219,7 +219,7 @@ describe('comparePairwise', () => {
       },
       judges: [{ type: 'p/picky' }],
     });
-    expect(out.cases.map((c) => c.verdicts[0])).toMatchObject([
+    expect(out.cases.map((c) => c.preferences[0])).toMatchObject([
       { skipped: true, reasoning: 'no evidence' },
       { error: 'returned preference nope' },
       { error: 'provider down' },
@@ -257,12 +257,12 @@ describe('comparePairwise', () => {
       candidate: { caseResults: [result('a', 'new')] },
       judges: [{ type: 'p/multi' }],
     });
-    const verdict = out.cases[0]!.verdicts[0]!;
-    expect(verdict).toMatchObject({
+    const preference = out.cases[0]!.preferences[0]!;
+    expect(preference).toMatchObject({
       preference: 'candidate',
       consistent: true,
     });
-    expect(verdict.dimensions?.correctness).toMatchObject({
+    expect(preference.dimensions?.correctness).toMatchObject({
       preference: 'candidate',
       candidate: { score: 0.9 },
     });

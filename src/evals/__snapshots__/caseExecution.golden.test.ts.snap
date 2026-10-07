@@ -12,12 +12,6 @@ exports[`golden: dataset aggregation > two cases, one failing 1`] = `
       },
       "datasetName": "mixed",
       "durationMs": "<time>",
-      "expectations": {
-        "textContains": {
-          "details": "Response contains expected text",
-          "pass": true,
-        },
-      },
       "id": "d",
       "pass": true,
       "project": "golden",
@@ -50,6 +44,12 @@ exports[`golden: dataset aggregation > two cases, one failing 1`] = `
           "durationMs": "<time>",
           "inputTokens": 100,
           "outputTokens": 20,
+        },
+      },
+      "scores": {
+        "textContains": {
+          "details": "Response contains expected text",
+          "pass": true,
         },
       },
       "source": "eval",
@@ -90,20 +90,6 @@ exports[`golden: dataset aggregation > two cases, one failing 1`] = `
       },
       "datasetName": "mixed",
       "durationMs": "<time>",
-      "expectations": {
-        "textContains": {
-          "details": "Response contains expected text",
-          "pass": true,
-        },
-        "toolCallCount": {
-          "details": "Tool call count (2) is within expected range",
-          "pass": true,
-        },
-        "toolsTriggered": {
-          "details": "Expected tool 'forecast' to be called, but it was not",
-          "pass": false,
-        },
-      },
       "id": "host",
       "pass": false,
       "project": "golden",
@@ -152,6 +138,20 @@ exports[`golden: dataset aggregation > two cases, one failing 1`] = `
           "durationMs": "<time>",
           "inputTokens": 100,
           "outputTokens": 20,
+        },
+      },
+      "scores": {
+        "textContains": {
+          "details": "Response contains expected text",
+          "pass": true,
+        },
+        "toolCallCount": {
+          "details": "Tool call count (2) is within expected range",
+          "pass": true,
+        },
+        "toolsTriggered": {
+          "details": "Expected tool 'forecast' to be called, but it was not",
+          "pass": false,
         },
       },
       "source": "eval",
@@ -242,7 +242,6 @@ exports[`golden: host traces through executeCase > executeCase that throws 1`] =
   "datasetName": "single-case",
   "durationMs": "<time>",
   "error": "host crashed",
-  "expectations": {},
   "id": "trace",
   "pass": false,
   "project": "golden",
@@ -269,6 +268,7 @@ exports[`golden: host traces through executeCase > executeCase that throws 1`] =
     "client": "mst",
     "input": "Weather in London?",
   },
+  "scores": {},
   "source": "eval",
 }
 `;
@@ -287,7 +287,6 @@ exports[`golden: host traces through executeCase > host trace error 1`] = `
   "datasetName": "single-case",
   "durationMs": "<time>",
   "error": "native session missing",
-  "expectations": {},
   "id": "trace",
   "pass": false,
   "project": "golden",
@@ -367,6 +366,7 @@ exports[`golden: host traces through executeCase > host trace error 1`] = `
       "outputTokens": 10,
     },
   },
+  "scores": {},
   "source": "eval",
   "trace": {
     "error": "native session missing",
@@ -417,20 +417,6 @@ exports[`golden: host traces through executeCase > none evidence 1`] = `
   },
   "datasetName": "single-case",
   "durationMs": "<time>",
-  "expectations": {
-    "textContains": {
-      "details": "Response contains expected text",
-      "pass": true,
-    },
-    "toolCallCount": {
-      "details": "Host evidence is none; structured tool evidence is required.",
-      "pass": false,
-    },
-    "toolsTriggered": {
-      "details": "Host evidence is none; structured tool evidence is required.",
-      "pass": false,
-    },
-  },
   "id": "trace",
   "pass": false,
   "project": "golden",
@@ -508,6 +494,20 @@ exports[`golden: host traces through executeCase > none evidence 1`] = `
       "durationMs": "<time>",
       "inputTokens": 50,
       "outputTokens": 10,
+    },
+  },
+  "scores": {
+    "textContains": {
+      "details": "Response contains expected text",
+      "pass": true,
+    },
+    "toolCallCount": {
+      "details": "Host evidence is none; structured tool evidence is required.",
+      "pass": false,
+    },
+    "toolsTriggered": {
+      "details": "Host evidence is none; structured tool evidence is required.",
+      "pass": false,
     },
   },
   "source": "eval",
@@ -559,20 +559,6 @@ exports[`golden: host traces through executeCase > observed evidence 1`] = `
   },
   "datasetName": "single-case",
   "durationMs": "<time>",
-  "expectations": {
-    "textContains": {
-      "details": "Response contains expected text",
-      "pass": true,
-    },
-    "toolCallCount": {
-      "details": "Host evidence is observed; structured tool evidence is required.",
-      "pass": false,
-    },
-    "toolsTriggered": {
-      "details": "Host evidence is observed; structured tool evidence is required.",
-      "pass": false,
-    },
-  },
   "id": "trace",
   "pass": false,
   "project": "golden",
@@ -652,6 +638,20 @@ exports[`golden: host traces through executeCase > observed evidence 1`] = `
       "outputTokens": 10,
     },
   },
+  "scores": {
+    "textContains": {
+      "details": "Response contains expected text",
+      "pass": true,
+    },
+    "toolCallCount": {
+      "details": "Host evidence is observed; structured tool evidence is required.",
+      "pass": false,
+    },
+    "toolsTriggered": {
+      "details": "Host evidence is observed; structured tool evidence is required.",
+      "pass": false,
+    },
+  },
   "source": "eval",
   "trace": {
     "events": [
@@ -701,20 +701,6 @@ exports[`golden: host traces through executeCase > structured evidence 1`] = `
   },
   "datasetName": "single-case",
   "durationMs": "<time>",
-  "expectations": {
-    "textContains": {
-      "details": "Response contains expected text",
-      "pass": true,
-    },
-    "toolCallCount": {
-      "details": "Expected at most 1 tool call(s), but got 2",
-      "pass": false,
-    },
-    "toolsTriggered": {
-      "details": "All tool call expectations met",
-      "pass": true,
-    },
-  },
   "id": "trace",
   "pass": false,
   "project": "golden",
@@ -792,6 +778,20 @@ exports[`golden: host traces through executeCase > structured evidence 1`] = `
       "durationMs": "<time>",
       "inputTokens": 50,
       "outputTokens": 10,
+    },
+  },
+  "scores": {
+    "textContains": {
+      "details": "Response contains expected text",
+      "pass": true,
+    },
+    "toolCallCount": {
+      "details": "Expected at most 1 tool call(s), but got 2",
+      "pass": false,
+    },
+    "toolsTriggered": {
+      "details": "All tool call assertions met",
+      "pass": true,
     },
   },
   "source": "eval",
@@ -891,15 +891,6 @@ exports[`golden: judges > judges a host response 1`] = `
     },
     "datasetName": "single-case",
     "durationMs": "<time>",
-    "expectations": {
-      "judge": {
-        "details": "Judge "test/golden-case-judge" passed with score 0.90",
-        "judgeName": "test/golden-case-judge",
-        "pass": true,
-        "reasoning": "looks right",
-        "score": 0.9,
-      },
-    },
     "id": "host-judged",
     "pass": true,
     "project": "golden",
@@ -934,6 +925,15 @@ exports[`golden: judges > judges a host response 1`] = `
         "durationMs": "<time>",
         "inputTokens": 100,
         "outputTokens": 20,
+      },
+    },
+    "scores": {
+      "judge": {
+        "details": "Judge "test/golden-case-judge" passed with score 0.90",
+        "judgeName": "test/golden-case-judge",
+        "pass": true,
+        "reasoning": "looks right",
+        "score": 0.9,
       },
     },
     "source": "eval",
@@ -1039,15 +1039,6 @@ exports[`golden: judges > one judge with case reps and the canonical answer as r
     },
     "datasetName": "single-case",
     "durationMs": "<time>",
-    "expectations": {
-      "judge": {
-        "details": "Judge "test/golden-case-judge" passed with score 0.90 (mean of 2 reps: [0.90, 0.90])",
-        "judgeName": "test/golden-case-judge",
-        "pass": true,
-        "reasoning": "looks right",
-        "score": 0.9,
-      },
-    },
     "id": "judged",
     "pass": true,
     "project": "golden",
@@ -1084,6 +1075,15 @@ exports[`golden: judges > one judge with case reps and the canonical answer as r
         "durationMs": "<time>",
         "inputTokens": 100,
         "outputTokens": 20,
+      },
+    },
+    "scores": {
+      "judge": {
+        "details": "Judge "test/golden-case-judge" passed with score 0.90 (mean of 2 reps: [0.90, 0.90])",
+        "judgeName": "test/golden-case-judge",
+        "pass": true,
+        "reasoning": "looks right",
+        "score": 0.9,
       },
     },
     "source": "eval",
@@ -1244,28 +1244,6 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
     },
     "datasetName": "single-case",
     "durationMs": "<time>",
-    "expectations": {
-      "judge": {
-        "details": "1/2 judges passed",
-        "judgeResults": [
-          {
-            "details": "Judge "test/golden-case-judge" passed with score 0.90",
-            "judgeName": "test/golden-case-judge",
-            "pass": true,
-            "reasoning": "looks right",
-            "score": 0.9,
-          },
-          {
-            "details": "Judge "test/golden-strict-judge" failed with score 0.20 (threshold: 0.5) (mean of 3 reps: [0.20, 0.20, 0.20]). too vague",
-            "judgeName": "test/golden-strict-judge",
-            "pass": false,
-            "reasoning": "too vague",
-            "score": 0.2,
-          },
-        ],
-        "pass": false,
-      },
-    },
     "id": "multi-judged",
     "pass": false,
     "project": "golden",
@@ -1310,6 +1288,28 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
         "durationMs": "<time>",
         "inputTokens": 100,
         "outputTokens": 20,
+      },
+    },
+    "scores": {
+      "judge": {
+        "details": "1/2 judges passed",
+        "judgeResults": [
+          {
+            "details": "Judge "test/golden-case-judge" passed with score 0.90",
+            "judgeName": "test/golden-case-judge",
+            "pass": true,
+            "reasoning": "looks right",
+            "score": 0.9,
+          },
+          {
+            "details": "Judge "test/golden-strict-judge" failed with score 0.20 (threshold: 0.5) (mean of 3 reps: [0.20, 0.20, 0.20]). too vague",
+            "judgeName": "test/golden-strict-judge",
+            "pass": false,
+            "reasoning": "too vague",
+            "score": 0.2,
+          },
+        ],
+        "pass": false,
       },
     },
     "source": "eval",
@@ -1390,16 +1390,6 @@ exports[`golden: rubric judges > a built-in rubric with the default provider and
     },
     "datasetName": "single-case",
     "durationMs": "<time>",
-    "expectations": {
-      "judge": {
-        "details": "Judge "correctness" passed with score 0.80",
-        "judgeName": "correctness",
-        "judgeProvider": "anthropic",
-        "pass": true,
-        "reasoning": "Accurate.",
-        "score": 0.8,
-      },
-    },
     "id": "rubric-judged",
     "pass": true,
     "project": "golden",
@@ -1435,6 +1425,16 @@ exports[`golden: rubric judges > a built-in rubric with the default provider and
         "durationMs": "<time>",
         "inputTokens": 100,
         "outputTokens": 20,
+      },
+    },
+    "scores": {
+      "judge": {
+        "details": "Judge "correctness" passed with score 0.80",
+        "judgeName": "correctness",
+        "judgeProvider": "anthropic",
+        "pass": true,
+        "reasoning": "Accurate.",
+        "score": 0.8,
       },
     },
     "source": "eval",
@@ -1522,17 +1522,6 @@ exports[`golden: rubric judges > a custom-text rubric with provider, model, LLM 
     },
     "datasetName": "single-case",
     "durationMs": "<time>",
-    "expectations": {
-      "judge": {
-        "details": "Judge "rubric" failed with score 0.60 (threshold: 0.9). Partly.",
-        "judgeModel": "gpt-test",
-        "judgeName": "rubric",
-        "judgeProvider": "openai",
-        "pass": false,
-        "reasoning": "Partly.",
-        "score": 0.6,
-      },
-    },
     "id": "rubric-custom",
     "pass": false,
     "project": "golden",
@@ -1580,6 +1569,17 @@ Answer carefully.",
         "outputTokens": 20,
       },
     },
+    "scores": {
+      "judge": {
+        "details": "Judge "rubric" failed with score 0.60 (threshold: 0.9). Partly.",
+        "judgeModel": "gpt-test",
+        "judgeName": "rubric",
+        "judgeProvider": "openai",
+        "pass": false,
+        "reasoning": "Partly.",
+        "score": 0.6,
+      },
+    },
     "source": "eval",
     "trace": {
       "events": [
@@ -1612,7 +1612,7 @@ Answer carefully.",
 }
 `;
 
-exports[`golden: rubric judges > a judge client error fails the expectation 1`] = `
+exports[`golden: rubric judges > a judge client error fails the assertion 1`] = `
 {
   "calls": [
     [
@@ -1658,13 +1658,6 @@ exports[`golden: rubric judges > a judge client error fails the expectation 1`] 
     },
     "datasetName": "single-case",
     "durationMs": "<time>",
-    "expectations": {
-      "judge": {
-        "details": "Judge "correctness" error: rate limited",
-        "judgeName": "correctness",
-        "pass": false,
-      },
-    },
     "id": "rubric-error",
     "pass": false,
     "project": "golden",
@@ -1699,6 +1692,13 @@ exports[`golden: rubric judges > a judge client error fails the expectation 1`] 
         "durationMs": "<time>",
         "inputTokens": 100,
         "outputTokens": 20,
+      },
+    },
+    "scores": {
+      "judge": {
+        "details": "Judge "correctness" error: rate limited",
+        "judgeName": "correctness",
+        "pass": false,
       },
     },
     "source": "eval",
@@ -1870,28 +1870,6 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
     },
     "datasetName": "single-case",
     "durationMs": "<time>",
-    "expectations": {
-      "judge": {
-        "details": "2/2 judges passed",
-        "judgeResults": [
-          {
-            "details": "Judge "conciseness" passed with score 0.80 (mean of 2 reps: [0.70, 0.90])",
-            "judgeName": "conciseness",
-            "judgeProvider": "anthropic",
-            "pass": true,
-            "score": 0.8,
-          },
-          {
-            "details": "Judge "test/golden-case-judge" passed with score 0.90 (mean of 2 reps: [0.90, 0.90])",
-            "judgeName": "test/golden-case-judge",
-            "pass": true,
-            "reasoning": "looks right",
-            "score": 0.9,
-          },
-        ],
-        "pass": true,
-      },
-    },
     "id": "rubric-and-plugin",
     "pass": true,
     "project": "golden",
@@ -1932,6 +1910,28 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
         "durationMs": "<time>",
         "inputTokens": 100,
         "outputTokens": 20,
+      },
+    },
+    "scores": {
+      "judge": {
+        "details": "2/2 judges passed",
+        "judgeResults": [
+          {
+            "details": "Judge "conciseness" passed with score 0.80 (mean of 2 reps: [0.70, 0.90])",
+            "judgeName": "conciseness",
+            "judgeProvider": "anthropic",
+            "pass": true,
+            "score": 0.8,
+          },
+          {
+            "details": "Judge "test/golden-case-judge" passed with score 0.90 (mean of 2 reps: [0.90, 0.90])",
+            "judgeName": "test/golden-case-judge",
+            "pass": true,
+            "reasoning": "looks right",
+            "score": 0.9,
+          },
+        ],
+        "pass": true,
       },
     },
     "source": "eval",
@@ -2078,16 +2078,6 @@ exports[`golden: rubric judges > reps average the scores and report their spread
     },
     "datasetName": "single-case",
     "durationMs": "<time>",
-    "expectations": {
-      "judge": {
-        "details": "Judge "completeness" failed with score 0.53 (threshold: 0.7) (mean of 3 reps: [0.20, 0.90, 0.50]). third",
-        "judgeName": "completeness",
-        "judgeProvider": "anthropic",
-        "pass": false,
-        "reasoning": "third",
-        "score": 0.533333333333,
-      },
-    },
     "id": "rubric-reps",
     "pass": false,
     "project": "golden",
@@ -2123,6 +2113,16 @@ exports[`golden: rubric judges > reps average the scores and report their spread
         "durationMs": "<time>",
         "inputTokens": 100,
         "outputTokens": 20,
+      },
+    },
+    "scores": {
+      "judge": {
+        "details": "Judge "completeness" failed with score 0.53 (threshold: 0.7) (mean of 3 reps: [0.20, 0.90, 0.50]). third",
+        "judgeName": "completeness",
+        "judgeProvider": "anthropic",
+        "pass": false,
+        "reasoning": "third",
+        "score": 0.533333333333,
       },
     },
     "source": "eval",
@@ -2297,30 +2297,6 @@ exports[`golden: runEvalSuite hosts > an eval config declares two rubric judges 
       },
       "datasetName": "golden",
       "durationMs": "<time>",
-      "expectations": {
-        "judge": {
-          "details": "1/2 judges passed",
-          "judgeResults": [
-            {
-              "details": "Judge "correctness" failed with score 0.60 (threshold: 0.9). Says sunny.",
-              "judgeName": "correctness",
-              "judgeProvider": "anthropic",
-              "pass": false,
-              "reasoning": "Says sunny.",
-              "score": 0.6,
-            },
-            {
-              "details": "Judge "conciseness" passed with score 0.80",
-              "judgeName": "conciseness",
-              "judgeProvider": "anthropic",
-              "pass": true,
-              "reasoning": "Short.",
-              "score": 0.8,
-            },
-          ],
-          "pass": false,
-        },
-      },
       "id": "suite-rubric",
       "pass": false,
       "request": {
@@ -2399,6 +2375,30 @@ exports[`golden: runEvalSuite hosts > an eval config declares two rubric judges 
           "durationMs": "<time>",
           "inputTokens": 50,
           "outputTokens": 10,
+        },
+      },
+      "scores": {
+        "judge": {
+          "details": "1/2 judges passed",
+          "judgeResults": [
+            {
+              "details": "Judge "correctness" failed with score 0.60 (threshold: 0.9). Says sunny.",
+              "judgeName": "correctness",
+              "judgeProvider": "anthropic",
+              "pass": false,
+              "reasoning": "Says sunny.",
+              "score": 0.6,
+            },
+            {
+              "details": "Judge "conciseness" passed with score 0.80",
+              "judgeName": "conciseness",
+              "judgeProvider": "anthropic",
+              "pass": true,
+              "reasoning": "Short.",
+              "score": 0.8,
+            },
+          ],
+          "pass": false,
         },
       },
       "source": "eval",
@@ -2575,28 +2575,6 @@ exports[`golden: runEvalSuite hosts > eval config judges merge with case judges 
       },
       "datasetName": "golden",
       "durationMs": "<time>",
-      "expectations": {
-        "judge": {
-          "details": "1/2 judges passed",
-          "judgeResults": [
-            {
-              "details": "Judge "test/golden-case-judge" passed with score 0.90",
-              "judgeName": "test/golden-case-judge",
-              "pass": true,
-              "reasoning": "looks right",
-              "score": 0.9,
-            },
-            {
-              "details": "Judge "test/golden-config-judge" failed with score 0.00 (threshold: 0.7). eval config judge",
-              "judgeName": "test/golden-config-judge",
-              "pass": false,
-              "reasoning": "eval config judge",
-              "score": 0,
-            },
-          ],
-          "pass": false,
-        },
-      },
       "id": "suite-judged",
       "pass": false,
       "request": {
@@ -2674,6 +2652,28 @@ exports[`golden: runEvalSuite hosts > eval config judges merge with case judges 
           "outputTokens": 10,
         },
       },
+      "scores": {
+        "judge": {
+          "details": "1/2 judges passed",
+          "judgeResults": [
+            {
+              "details": "Judge "test/golden-case-judge" passed with score 0.90",
+              "judgeName": "test/golden-case-judge",
+              "pass": true,
+              "reasoning": "looks right",
+              "score": 0.9,
+            },
+            {
+              "details": "Judge "test/golden-config-judge" failed with score 0.00 (threshold: 0.7). eval config judge",
+              "judgeName": "test/golden-config-judge",
+              "pass": false,
+              "reasoning": "eval config judge",
+              "score": 0,
+            },
+          ],
+          "pass": false,
+        },
+      },
       "source": "eval",
       "trace": {
         "events": [
@@ -2726,16 +2726,6 @@ exports[`golden: runEvalSuite hosts > run host 1`] = `
     },
     "datasetName": "golden",
     "durationMs": "<time>",
-    "expectations": {
-      "textContains": {
-        "details": "Response contains expected text",
-        "pass": true,
-      },
-      "toolsTriggered": {
-        "details": "All tool call expectations met",
-        "pass": true,
-      },
-    },
     "id": "suite-host",
     "pass": true,
     "request": {
@@ -2804,6 +2794,16 @@ exports[`golden: runEvalSuite hosts > run host 1`] = `
         "durationMs": "<time>",
         "inputTokens": 50,
         "outputTokens": 10,
+      },
+    },
+    "scores": {
+      "textContains": {
+        "details": "Response contains expected text",
+        "pass": true,
+      },
+      "toolsTriggered": {
+        "details": "All tool call assertions met",
+        "pass": true,
       },
     },
     "source": "eval",
@@ -2876,16 +2876,6 @@ exports[`golden: runEvalSuite hosts > runBatch host 1`] = `
     },
     "datasetName": "golden",
     "durationMs": "<time>",
-    "expectations": {
-      "textContains": {
-        "details": "Response contains expected text",
-        "pass": true,
-      },
-      "toolsTriggered": {
-        "details": "All tool call expectations met",
-        "pass": true,
-      },
-    },
     "id": "suite-host",
     "pass": true,
     "request": {
@@ -2956,6 +2946,16 @@ exports[`golden: runEvalSuite hosts > runBatch host 1`] = `
         "outputTokens": 10,
       },
     },
+    "scores": {
+      "textContains": {
+        "details": "Response contains expected text",
+        "pass": true,
+      },
+      "toolsTriggered": {
+        "details": "All tool call assertions met",
+        "pass": true,
+      },
+    },
     "source": "eval",
     "toolCallTrace": {
       "calls": [
@@ -3013,13 +3013,301 @@ exports[`golden: runEvalSuite hosts > runBatch host 1`] = `
 ]
 `;
 
-exports[`golden: the mst client (dataset API) > iterations exclude infrastructure errors from accuracy 1`] = `
+exports[`golden: the mst client (dataset API) > maps native tool names through toolMap 1`] = `
 {
-  "assertionPassRate": 0,
-  "assertionPassRateCI": {
-    "lower": 0,
-    "upper": 0.7097805044546776,
+  "authType": "none",
+  "clientUsage": {
+    "durationMs": "<time>",
+    "inputTokens": 100,
+    "outputTokens": 20,
   },
+  "datasetName": "single-case",
+  "durationMs": "<time>",
+  "id": "host",
+  "pass": true,
+  "project": "golden",
+  "request": {
+    "assertions": {
+      "containsText": "sunny",
+      "toolCallCount": {
+        "max": 3,
+        "min": 1,
+      },
+      "toolsTriggered": {
+        "calls": [
+          {
+            "name": "get_weather",
+            "required": true,
+          },
+          {
+            "name": "forecast",
+            "required": true,
+          },
+        ],
+      },
+    },
+    "client": "mst",
+    "input": "Weather in London?",
+  },
+  "response": {
+    "response": "It is sunny in London.",
+    "success": true,
+    "toolCalls": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "name": "get_weather",
+        "output": "sunny",
+      },
+      {
+        "arguments": {
+          "q": "London",
+        },
+        "name": "search",
+      },
+    ],
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 100,
+      "outputTokens": 20,
+    },
+  },
+  "scores": {
+    "textContains": {
+      "details": "Response contains expected text",
+      "pass": true,
+    },
+    "toolCallCount": {
+      "details": "Tool call count (2) is within expected range",
+      "pass": true,
+    },
+    "toolsTriggered": {
+      "details": "All tool call assertions met",
+      "pass": true,
+    },
+  },
+  "source": "eval",
+  "toolCallTrace": {
+    "calls": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "name": "get_weather",
+        "status": "expected",
+      },
+      {
+        "arguments": {
+          "q": "London",
+        },
+        "name": "search",
+        "status": "expected",
+      },
+    ],
+    "missed": [],
+  },
+  "toolPrecision": 1,
+  "toolRecall": 1,
+  "trace": {
+    "events": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "source": "mcp",
+      },
+      {
+        "arguments": {
+          "q": "London",
+        },
+        "kind": "tool_call",
+        "name": "search",
+        "source": "mcp",
+      },
+    ],
+    "finalText": "It is sunny in London.",
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 100,
+      "outputTokens": 20,
+    },
+  },
+}
+`;
+
+exports[`golden: the mst client (dataset API) > simulation failure 1`] = `
+{
+  "authType": "none",
+  "datasetName": "single-case",
+  "durationMs": "<time>",
+  "error": "provider rejected the request",
+  "id": "host",
+  "pass": false,
+  "project": "golden",
+  "request": {
+    "assertions": {
+      "containsText": "sunny",
+      "toolCallCount": {
+        "max": 3,
+        "min": 1,
+      },
+      "toolsTriggered": {
+        "calls": [
+          {
+            "name": "get_weather",
+            "required": true,
+          },
+          {
+            "name": "forecast",
+            "required": true,
+          },
+        ],
+      },
+    },
+    "client": "mst",
+    "input": "Weather in London?",
+  },
+  "scores": {},
+  "source": "eval",
+}
+`;
+
+exports[`golden: the mst client (dataset API) > succeeds with tool evidence and a missed required tool 1`] = `
+{
+  "authType": "none",
+  "clientUsage": {
+    "durationMs": "<time>",
+    "inputTokens": 100,
+    "outputTokens": 20,
+  },
+  "datasetName": "single-case",
+  "durationMs": "<time>",
+  "id": "host",
+  "pass": false,
+  "project": "golden",
+  "request": {
+    "assertions": {
+      "containsText": "sunny",
+      "toolCallCount": {
+        "max": 3,
+        "min": 1,
+      },
+      "toolsTriggered": {
+        "calls": [
+          {
+            "name": "get_weather",
+            "required": true,
+          },
+          {
+            "name": "forecast",
+            "required": true,
+          },
+        ],
+      },
+    },
+    "client": "mst",
+    "input": "Weather in London?",
+  },
+  "response": {
+    "response": "It is sunny in London.",
+    "success": true,
+    "toolCalls": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "name": "get_weather",
+        "output": "sunny",
+      },
+      {
+        "arguments": {
+          "q": "London",
+        },
+        "name": "search",
+      },
+    ],
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 100,
+      "outputTokens": 20,
+    },
+  },
+  "scores": {
+    "textContains": {
+      "details": "Response contains expected text",
+      "pass": true,
+    },
+    "toolCallCount": {
+      "details": "Tool call count (2) is within expected range",
+      "pass": true,
+    },
+    "toolsTriggered": {
+      "details": "Expected tool 'forecast' to be called, but it was not",
+      "pass": false,
+    },
+  },
+  "source": "eval",
+  "toolCallTrace": {
+    "calls": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "name": "get_weather",
+        "status": "expected",
+      },
+      {
+        "arguments": {
+          "q": "London",
+        },
+        "name": "search",
+        "status": "unexpected",
+      },
+    ],
+    "missed": [
+      {
+        "name": "forecast",
+      },
+    ],
+  },
+  "toolPrecision": 0.5,
+  "toolRecall": 0.5,
+  "trace": {
+    "events": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "source": "mcp",
+      },
+      {
+        "arguments": {
+          "q": "London",
+        },
+        "kind": "tool_call",
+        "name": "search",
+        "source": "mcp",
+      },
+    ],
+    "finalText": "It is sunny in London.",
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 100,
+      "outputTokens": 20,
+    },
+  },
+}
+`;
+
+exports[`golden: the mst client (dataset API) > trials exclude infrastructure errors from the pass rate 1`] = `
+{
   "authType": "none",
   "clientUsage": {
     "durationMs": "<time>",
@@ -3028,7 +3316,66 @@ exports[`golden: the mst client (dataset API) > iterations exclude infrastructur
   },
   "datasetName": "single-case",
   "durationMs": "<time>",
-  "expectations": {
+  "id": "host",
+  "infrastructureErrorCount": 1,
+  "infrastructureErrorRate": 0.3333333333333333,
+  "pass": false,
+  "passRate": 0,
+  "passRateCI": {
+    "lower": 0,
+    "upper": 0.7097805044546776,
+  },
+  "project": "golden",
+  "request": {
+    "assertions": {
+      "containsText": "sunny",
+      "toolCallCount": {
+        "max": 3,
+        "min": 1,
+      },
+      "toolsTriggered": {
+        "calls": [
+          {
+            "name": "get_weather",
+            "required": true,
+          },
+          {
+            "name": "forecast",
+            "required": true,
+          },
+        ],
+      },
+    },
+    "client": "mst",
+    "input": "Weather in London?",
+    "passThreshold": 0.5,
+    "trials": 3,
+  },
+  "response": {
+    "response": "cloudy",
+    "success": true,
+    "toolCalls": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "name": "get_weather",
+        "output": "sunny",
+      },
+      {
+        "arguments": {
+          "q": "London",
+        },
+        "name": "search",
+      },
+    ],
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 100,
+      "outputTokens": 20,
+    },
+  },
+  "scores": {
     "textContains": {
       "details": "Response does not contain expected text: "sunny"",
       "pass": false,
@@ -3042,10 +3389,33 @@ exports[`golden: the mst client (dataset API) > iterations exclude infrastructur
       "pass": false,
     },
   },
-  "id": "host",
-  "infrastructureErrorCount": 1,
-  "infrastructureErrorRate": 0.3333333333333333,
-  "iterationResults": [
+  "source": "eval",
+  "toolCallTrace": {
+    "calls": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "name": "get_weather",
+        "status": "expected",
+      },
+      {
+        "arguments": {
+          "q": "London",
+        },
+        "name": "search",
+        "status": "unexpected",
+      },
+    ],
+    "missed": [
+      {
+        "name": "forecast",
+      },
+    ],
+  },
+  "toolPrecision": 0.5,
+  "toolRecall": 0.5,
+  "trialResults": [
     {
       "clientUsage": {
         "durationMs": "<time>",
@@ -3173,375 +3543,5 @@ exports[`golden: the mst client (dataset API) > iterations exclude infrastructur
       },
     },
   ],
-  "pass": false,
-  "project": "golden",
-  "request": {
-    "assertions": {
-      "containsText": "sunny",
-      "toolCallCount": {
-        "max": 3,
-        "min": 1,
-      },
-      "toolsTriggered": {
-        "calls": [
-          {
-            "name": "get_weather",
-            "required": true,
-          },
-          {
-            "name": "forecast",
-            "required": true,
-          },
-        ],
-      },
-    },
-    "client": "mst",
-    "input": "Weather in London?",
-    "passThreshold": 0.5,
-    "trials": 3,
-  },
-  "response": {
-    "response": "cloudy",
-    "success": true,
-    "toolCalls": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "name": "get_weather",
-        "output": "sunny",
-      },
-      {
-        "arguments": {
-          "q": "London",
-        },
-        "name": "search",
-      },
-    ],
-    "usage": {
-      "durationMs": "<time>",
-      "inputTokens": 100,
-      "outputTokens": 20,
-    },
-  },
-  "source": "eval",
-  "toolCallTrace": {
-    "calls": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "name": "get_weather",
-        "status": "expected",
-      },
-      {
-        "arguments": {
-          "q": "London",
-        },
-        "name": "search",
-        "status": "unexpected",
-      },
-    ],
-    "missed": [
-      {
-        "name": "forecast",
-      },
-    ],
-  },
-  "toolPrecision": 0.5,
-  "toolRecall": 0.5,
-}
-`;
-
-exports[`golden: the mst client (dataset API) > maps native tool names through toolMap 1`] = `
-{
-  "authType": "none",
-  "clientUsage": {
-    "durationMs": "<time>",
-    "inputTokens": 100,
-    "outputTokens": 20,
-  },
-  "datasetName": "single-case",
-  "durationMs": "<time>",
-  "expectations": {
-    "textContains": {
-      "details": "Response contains expected text",
-      "pass": true,
-    },
-    "toolCallCount": {
-      "details": "Tool call count (2) is within expected range",
-      "pass": true,
-    },
-    "toolsTriggered": {
-      "details": "All tool call expectations met",
-      "pass": true,
-    },
-  },
-  "id": "host",
-  "pass": true,
-  "project": "golden",
-  "request": {
-    "assertions": {
-      "containsText": "sunny",
-      "toolCallCount": {
-        "max": 3,
-        "min": 1,
-      },
-      "toolsTriggered": {
-        "calls": [
-          {
-            "name": "get_weather",
-            "required": true,
-          },
-          {
-            "name": "forecast",
-            "required": true,
-          },
-        ],
-      },
-    },
-    "client": "mst",
-    "input": "Weather in London?",
-  },
-  "response": {
-    "response": "It is sunny in London.",
-    "success": true,
-    "toolCalls": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "name": "get_weather",
-        "output": "sunny",
-      },
-      {
-        "arguments": {
-          "q": "London",
-        },
-        "name": "search",
-      },
-    ],
-    "usage": {
-      "durationMs": "<time>",
-      "inputTokens": 100,
-      "outputTokens": 20,
-    },
-  },
-  "source": "eval",
-  "toolCallTrace": {
-    "calls": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "name": "get_weather",
-        "status": "expected",
-      },
-      {
-        "arguments": {
-          "q": "London",
-        },
-        "name": "search",
-        "status": "expected",
-      },
-    ],
-    "missed": [],
-  },
-  "toolPrecision": 1,
-  "toolRecall": 1,
-  "trace": {
-    "events": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "kind": "tool_call",
-        "name": "get_weather",
-        "output": "sunny",
-        "source": "mcp",
-      },
-      {
-        "arguments": {
-          "q": "London",
-        },
-        "kind": "tool_call",
-        "name": "search",
-        "source": "mcp",
-      },
-    ],
-    "finalText": "It is sunny in London.",
-    "usage": {
-      "durationMs": "<time>",
-      "inputTokens": 100,
-      "outputTokens": 20,
-    },
-  },
-}
-`;
-
-exports[`golden: the mst client (dataset API) > simulation failure 1`] = `
-{
-  "authType": "none",
-  "datasetName": "single-case",
-  "durationMs": "<time>",
-  "error": "provider rejected the request",
-  "expectations": {},
-  "id": "host",
-  "pass": false,
-  "project": "golden",
-  "request": {
-    "assertions": {
-      "containsText": "sunny",
-      "toolCallCount": {
-        "max": 3,
-        "min": 1,
-      },
-      "toolsTriggered": {
-        "calls": [
-          {
-            "name": "get_weather",
-            "required": true,
-          },
-          {
-            "name": "forecast",
-            "required": true,
-          },
-        ],
-      },
-    },
-    "client": "mst",
-    "input": "Weather in London?",
-  },
-  "source": "eval",
-}
-`;
-
-exports[`golden: the mst client (dataset API) > succeeds with tool evidence and a missed required tool 1`] = `
-{
-  "authType": "none",
-  "clientUsage": {
-    "durationMs": "<time>",
-    "inputTokens": 100,
-    "outputTokens": 20,
-  },
-  "datasetName": "single-case",
-  "durationMs": "<time>",
-  "expectations": {
-    "textContains": {
-      "details": "Response contains expected text",
-      "pass": true,
-    },
-    "toolCallCount": {
-      "details": "Tool call count (2) is within expected range",
-      "pass": true,
-    },
-    "toolsTriggered": {
-      "details": "Expected tool 'forecast' to be called, but it was not",
-      "pass": false,
-    },
-  },
-  "id": "host",
-  "pass": false,
-  "project": "golden",
-  "request": {
-    "assertions": {
-      "containsText": "sunny",
-      "toolCallCount": {
-        "max": 3,
-        "min": 1,
-      },
-      "toolsTriggered": {
-        "calls": [
-          {
-            "name": "get_weather",
-            "required": true,
-          },
-          {
-            "name": "forecast",
-            "required": true,
-          },
-        ],
-      },
-    },
-    "client": "mst",
-    "input": "Weather in London?",
-  },
-  "response": {
-    "response": "It is sunny in London.",
-    "success": true,
-    "toolCalls": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "name": "get_weather",
-        "output": "sunny",
-      },
-      {
-        "arguments": {
-          "q": "London",
-        },
-        "name": "search",
-      },
-    ],
-    "usage": {
-      "durationMs": "<time>",
-      "inputTokens": 100,
-      "outputTokens": 20,
-    },
-  },
-  "source": "eval",
-  "toolCallTrace": {
-    "calls": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "name": "get_weather",
-        "status": "expected",
-      },
-      {
-        "arguments": {
-          "q": "London",
-        },
-        "name": "search",
-        "status": "unexpected",
-      },
-    ],
-    "missed": [
-      {
-        "name": "forecast",
-      },
-    ],
-  },
-  "toolPrecision": 0.5,
-  "toolRecall": 0.5,
-  "trace": {
-    "events": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "kind": "tool_call",
-        "name": "get_weather",
-        "output": "sunny",
-        "source": "mcp",
-      },
-      {
-        "arguments": {
-          "q": "London",
-        },
-        "kind": "tool_call",
-        "name": "search",
-        "source": "mcp",
-      },
-    ],
-    "finalText": "It is sunny in London.",
-    "usage": {
-      "durationMs": "<time>",
-      "inputTokens": 100,
-      "outputTokens": 20,
-    },
-  },
 }
 `;

@@ -84,6 +84,10 @@ _Avoid_: LLM grader, evaluator, rater
 A judge that compares two variants' trials of the same case and says which is better, instead of scoring one alone.
 _Avoid_: comparator, preference model
 
+**Preference**:
+A pairwise judge's result comparing two variants on one case: which side's trials it prefers (or a tie), how strongly, and why. Several reps, and the swapped order, reconcile into one preference per case.
+_Avoid_: verdict, vote
+
 **Score**:
 A grader's result for one trial: a value from 0 to 1, whether it passed, and why.
 _Avoid_: verdict, grade, rating

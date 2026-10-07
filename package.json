@@ -103,7 +103,7 @@
     "test:external-host:cowork": "vitest run --config vitest.external-host.config.mts -t \"Claude Cowork\"",
     "test:playwright": "playwright test",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.ui.json",
     "knip": "knip"
   },
   "dependencies": {

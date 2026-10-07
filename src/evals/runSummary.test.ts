@@ -82,7 +82,7 @@ const caseResult: EvalCaseResult = {
   toolName: 'get_weather',
   source: 'eval',
   pass: true,
-  expectations: {},
+  scores: {},
   durationMs: 1,
   response: { content: [{ type: 'text', text: 'secret token abc' }] },
   request: { assertions: { response: { content: [] } } },

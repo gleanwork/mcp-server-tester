@@ -279,7 +279,7 @@ test.describe('Eval: LLM Host Mode', () => {
       }
 
       if (!result.pass) {
-        const failures = Object.entries(result.expectations || {})
+        const failures = Object.entries(result.scores || {})
           .filter(([_, exp]) => !exp.pass)
           .map(([name, exp]) => `${name}: ${exp.details}`)
           .join('\n');

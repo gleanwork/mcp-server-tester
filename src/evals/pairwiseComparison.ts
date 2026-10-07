@@ -20,8 +20,8 @@ import type {
   PairwiseDimension,
   PairwiseJudgeDefinition,
   PairwiseJudgeInput,
+  PreferredSide,
   PairwisePreference,
-  PairwiseVerdict,
 } from '../judge/pairwiseContract.js';
 import { extensionLookup } from '../plugins/extensions.js';
 import { parseExtensionOptions } from '../plugins/plugin.js';
@@ -56,15 +56,15 @@ export interface ComparePairwiseOptions {
 }
 
 /** One judge's comparison of one case. */
-export interface PairwiseCaseVerdict {
+export interface PairwiseCasePreference {
   judge: string;
-  preference?: PairwisePreference;
+  preference?: PreferredSide;
   /** Mean strength toward the preferred side, 0 to 1. */
   strength?: number;
   skipped?: boolean;
   error?: string;
   reasoning?: string;
-  /** Whether the swapped-order verdict agreed, when the judge ran both orders. */
+  /** Whether the swapped-order preference agreed, when the judge ran both orders. */
   consistent?: boolean;
   dimensions?: Record<string, PairwiseDimension>;
   usage?: Partial<UsageMetrics>;
@@ -76,7 +76,7 @@ export interface PairwiseCaseVerdict {
 
 export interface PairwiseCaseResult {
   id: string;
-  verdicts: PairwiseCaseVerdict[];
+  preferences: PairwiseCasePreference[];
 }
 
 /** One judge's aggregate over all compared cases. */
@@ -107,7 +107,7 @@ export interface PairwiseComparisonResult {
   usage?: Partial<UsageMetrics>;
 }
 
-const flip: Record<PairwisePreference, PairwisePreference> = {
+const flip: Record<PreferredSide, PreferredSide> = {
   baseline: 'candidate',
   candidate: 'baseline',
   tie: 'tie',
@@ -138,31 +138,31 @@ function trial(result: EvalCaseResult) {
   });
 }
 
-function checkVerdict(value: unknown): PairwiseVerdict {
-  const verdict = value as PairwiseVerdict;
-  if (typeof verdict !== 'object' || verdict === null)
-    throw new Error('returned no verdict');
-  if (verdict.skipped) return verdict;
-  if (!['baseline', 'candidate', 'tie'].includes(verdict.preference))
-    throw new Error(`returned preference ${String(verdict.preference)}`);
+function checkPreference(value: unknown): PairwisePreference {
+  const preference = value as PairwisePreference;
+  if (typeof preference !== 'object' || preference === null)
+    throw new Error('returned no preference');
+  if (preference.skipped) return preference;
+  if (!['baseline', 'candidate', 'tie'].includes(preference.preference))
+    throw new Error(`returned preference ${String(preference.preference)}`);
   if (
-    verdict.strength !== undefined &&
+    preference.strength !== undefined &&
     !(
-      Number.isFinite(verdict.strength) &&
-      verdict.strength >= 0 &&
-      verdict.strength <= 1
+      Number.isFinite(preference.strength) &&
+      preference.strength >= 0 &&
+      preference.strength <= 1
     )
   )
     throw new Error(
-      `returned strength ${String(verdict.strength)}, not between 0 and 1`
+      `returned strength ${String(preference.strength)}, not between 0 and 1`
     );
-  return verdict;
+  return preference;
 }
 
-// Majority preference across verdicts; ties break to 'tie'.
-function majority(verdicts: readonly PairwiseVerdict[]): PairwisePreference {
+// Majority preference across preferences; ties break to 'tie'.
+function majority(preferences: readonly PairwisePreference[]): PreferredSide {
   const count = { baseline: 0, candidate: 0, tie: 0 };
-  for (const v of verdicts) count[v.preference] += 1;
+  for (const v of preferences) count[v.preference] += 1;
   if (count.candidate > count.baseline && count.candidate >= count.tie)
     return 'candidate';
   if (count.baseline > count.candidate && count.baseline >= count.tie)
@@ -171,18 +171,18 @@ function majority(verdicts: readonly PairwiseVerdict[]): PairwisePreference {
 }
 
 function mergeDimensions(
-  verdicts: readonly PairwiseVerdict[]
+  preferences: readonly PairwisePreference[]
 ): Record<string, PairwiseDimension> | undefined {
   const names = new Set(
-    verdicts.flatMap((v) => Object.keys(v.dimensions ?? {}))
+    preferences.flatMap((v) => Object.keys(v.dimensions ?? {}))
   );
   if (names.size === 0) return undefined;
   const out: Record<string, PairwiseDimension> = {};
   for (const name of names) {
-    const all = verdicts.flatMap((v) =>
+    const all = preferences.flatMap((v) =>
       v.dimensions?.[name] ? [v.dimensions[name]] : []
     );
-    const preference = majority(all as PairwiseVerdict[]);
+    const preference = majority(all as PairwisePreference[]);
     const first = all.find((d) => d.preference === preference) ?? all[0]!;
     out[name] = { ...first, preference };
   }
@@ -195,7 +195,7 @@ async function judgeCase(
   options: Record<string, unknown>,
   reps: number,
   input: PairwiseJudgeInput
-): Promise<PairwiseCaseVerdict> {
+): Promise<PairwiseCasePreference> {
   const missing = missingRequirement(input, judge.requires);
   if (missing !== undefined)
     return { judge: label, skipped: true, reasoning: `no ${missing}` };
@@ -205,15 +205,15 @@ async function judgeCase(
     candidate: input.baseline,
   };
   const both = judge.swapPositions !== false;
-  const forward: PairwiseVerdict[] = [];
-  const reverse: PairwiseVerdict[] = [];
+  const forward: PairwisePreference[] = [];
+  const reverse: PairwisePreference[] = [];
   try {
     for (let i = 0; i < reps; i++) {
-      forward.push(checkVerdict(await judge.compare(input, options)));
+      forward.push(checkPreference(await judge.compare(input, options)));
       if (forward.at(-1)!.skipped) break;
       if (both) {
-        const r = checkVerdict(await judge.compare(swapped, options));
-        // Report the swapped verdict from the original orientation.
+        const r = checkPreference(await judge.compare(swapped, options));
+        // Report the swapped preference from the original orientation.
         reverse.push({
           ...r,
           preference: flip[r.preference] ?? r.preference,
@@ -282,9 +282,9 @@ async function judgeCase(
 
 function summarize(
   judge: string,
-  verdicts: readonly PairwiseCaseVerdict[]
+  preferences: readonly PairwiseCasePreference[]
 ): PairwiseJudgeSummary {
-  const decided = verdicts.filter((v) => v.preference !== undefined);
+  const decided = preferences.filter((v) => v.preference !== undefined);
   const wins = decided.filter((v) => v.preference === 'candidate').length;
   const losses = decided.filter((v) => v.preference === 'baseline').length;
   const ties = decided.filter((v) => v.preference === 'tie').length;
@@ -298,15 +298,15 @@ function summarize(
         d.preference === 'candidate' ? 1 : d.preference === 'tie' ? 0.5 : 0;
       dims.set(name, entry);
     }
-  const usage = sumJudgeUsage(verdicts.map((v) => v.usage));
+  const usage = sumJudgeUsage(preferences.map((v) => v.usage));
   return {
     judge,
     compared: decided.length,
     candidateWins: wins,
     baselineWins: losses,
     ties,
-    skipped: verdicts.filter((v) => v.skipped).length,
-    errors: verdicts.filter((v) => v.error !== undefined).length,
+    skipped: preferences.filter((v) => v.skipped).length,
+    errors: preferences.filter((v) => v.error !== undefined).length,
     ...(decided.length > 0 && {
       candidateWinRate: (wins + ties / 2) / decided.length,
     }),
@@ -386,17 +386,17 @@ export async function comparePairwise(
       baseline: trial(b),
       candidate: trial(c),
     };
-    const verdicts: PairwiseCaseVerdict[] = [];
+    const preferences: PairwiseCasePreference[] = [];
     for (const r of resolved)
-      verdicts.push(
+      preferences.push(
         await judgeCase(r.label, r.judge, r.options, r.reps, input)
       );
-    return { id, verdicts };
+    return { id, preferences };
   });
   const summary = resolved.map((r) =>
     summarize(
       r.label,
-      cases.map((c) => c.verdicts.find((v) => v.judge === r.label)!)
+      cases.map((c) => c.preferences.find((v) => v.judge === r.label)!)
     )
   );
   const usage = sumJudgeUsage(summary.map((s) => s.usage));

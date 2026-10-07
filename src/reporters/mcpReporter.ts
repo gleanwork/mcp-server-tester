@@ -310,7 +310,7 @@ export default class MCPReporter implements Reporter {
   private buildRunData(durationMs: number): MCPEvalRunData {
     const total = this.allResults.length;
     const datasetBreakdown: Record<string, number> = {};
-    const expectationBreakdown = {
+    const graderBreakdown = {
       exact: 0,
       schema: 0,
       textContains: 0,
@@ -330,16 +330,16 @@ export default class MCPReporter implements Reporter {
       const datasetName = r.datasetName || 'Unknown Dataset';
       datasetBreakdown[datasetName] = (datasetBreakdown[datasetName] || 0) + 1;
 
-      if (r.expectations.exact) expectationBreakdown.exact++;
-      if (r.expectations.schema) expectationBreakdown.schema++;
-      if (r.expectations.textContains) expectationBreakdown.textContains++;
-      if (r.expectations.regex) expectationBreakdown.regex++;
-      if (r.expectations.snapshot) expectationBreakdown.snapshot++;
-      if (r.expectations.judge) expectationBreakdown.judge++;
-      if (r.expectations.error) expectationBreakdown.error++;
-      if (r.expectations.size) expectationBreakdown.size++;
-      if (r.expectations.toolsTriggered) expectationBreakdown.toolsTriggered++;
-      if (r.expectations.toolCallCount) expectationBreakdown.toolCallCount++;
+      if (r.scores.exact) graderBreakdown.exact++;
+      if (r.scores.schema) graderBreakdown.schema++;
+      if (r.scores.textContains) graderBreakdown.textContains++;
+      if (r.scores.regex) graderBreakdown.regex++;
+      if (r.scores.snapshot) graderBreakdown.snapshot++;
+      if (r.scores.judge) graderBreakdown.judge++;
+      if (r.scores.error) graderBreakdown.error++;
+      if (r.scores.size) graderBreakdown.size++;
+      if (r.scores.toolsTriggered) graderBreakdown.toolsTriggered++;
+      if (r.scores.toolCallCount) graderBreakdown.toolCallCount++;
     }
 
     const failed = total - passed;
@@ -363,7 +363,7 @@ export default class MCPReporter implements Reporter {
         failed,
         passRate: passRate({ passed, total }),
         datasetBreakdown,
-        expectationBreakdown,
+        graderBreakdown: graderBreakdown,
         totalClientUsage,
       },
       results: this.allResults,
@@ -539,7 +539,7 @@ function autoTrackedResult(
     request: { args: call.args },
     response: call.result,
     error: passed ? undefined : failureMessage(result),
-    expectations: {},
+    scores: {},
     authType: call.authType,
     project: call.project,
     durationMs: call.durationMs,

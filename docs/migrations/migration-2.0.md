@@ -29,7 +29,7 @@ This guide covers upgrading from 1.x (the last 1.x release is 1.1.1). Features f
 - [Direct cases are Playwright tests](#direct-cases-are-playwright-tests)
 - [The simulator and the external-host runtime are internal](#the-simulator-and-the-external-host-runtime-are-internal)
 - [Eval configs and variants](#eval-configs-and-variants)
-- [Result fields name the client](#result-fields-name-the-client)
+- [Result fields use the eval vocabulary](#result-fields-use-the-eval-vocabulary)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
 ---
@@ -505,7 +505,7 @@ const result = await runEvalCase(
 - Browser and desktop hosts, and a caller-authored CLI host, have no replacement. A plugin client (`run` or `runBatch`) can drive any host and report its trace.
 - A plugin client needs `run` or `runBatch`; `createConfig` is gone.
 - `buildEvalDataset(raw, evalConfig)` takes no host config, and `DatasetSourceContext` has no `hostConfig`.
-- The ChatGPT client still records what it saw on each result (now `clientMetadata`; see [Result fields name the client](#result-fields-name-the-client)), and `./experimental/clients` still exports the types for it (`ClientMetadata` and the types it uses).
+- The ChatGPT client still records what it saw on each result (now `clientMetadata`; see [Result fields use the eval vocabulary](#result-fields-use-the-eval-vocabulary)), and `./experimental/clients` still exports the types for it (`ClientMetadata` and the types it uses).
 - The external-host drivers for the Claude desktop chat and Cowork surfaces (driven through Accessibility) are gone; the `cowork` client covers Cowork.
 
 ## Eval configs and variants
@@ -556,11 +556,11 @@ ADR 0002's vocabulary reaches the config: an eval config compares **variants**, 
 - **Plugins.** A client's context is `{ evalConfig, variant, env }` (were `manifest`, `arm`); a dataset source's is `{ rootDir, configDir, evalConfig }`. A client that shows tool metadata itself declares `toolMetadata: true` (was `toolOverrides: true`) and reads it with `variantToolMetadata(context.evalConfig, context.variant)`.
 - **Results.** `results.json` names the run by `configId` and `configName`, lists `variants` (was `arms`) and `variantDeltas` (was `armDeltas`); each case result has `variant` (was `arm`), and `previousRun` has `sameConfig` and `variants`. A run doesn't find a previous run stored before this change.
 
-## Result fields name the client
+## Result fields use the eval vocabulary
 
-**Affects:** code and tools that read eval results (`results.json`, `EvalRunnerResult`, stored artifacts, baselines, reporter data), and code that imports `ExternalHostMetadata`.
+**Affects:** code and tools that read eval results (`results.json`, `EvalRunnerResult`, stored artifacts, baselines, reporter data, pairwise comparisons), and code that imports the result, judge or pairwise types below.
 
-Results use the 2.0 vocabulary ([ADR 0002](../adr/0002-common-eval-vocabulary.md)): they name the client a case ran on, not a host.
+Results use the 2.0 vocabulary ([ADR 0002](../adr/0002-common-eval-vocabulary.md)): they name the client a case ran on, not a host, and they record trials and the graders' scores.
 
 | 1.x                                                            | 2.0                                                          |
 | -------------------------------------------------------------- | ------------------------------------------------------------ |
@@ -581,7 +581,26 @@ Results use the 2.0 vocabulary ([ADR 0002](../adr/0002-common-eval-vocabulary.md
 | `traceSource: 'host-local-transcript'`, `'host-native-export'` | `'client-local-transcript'`, `'client-native-export'`        |
 | `metadata.toolOverrideVariantId`                               | `metadata.toolVariantId`                                     |
 | `metadata.mcpHostModel`                                        | `metadata.model`                                             |
+| `expectations` (one result per assertion or judge)             | `scores`                                                     |
+| `iterationResults`                                             | `trialResults`                                               |
+| `assertionPassRate`, `assertionPassRateCI`                     | `passRate`, `passRateCI`                                     |
+| `metrics.expectationBreakdown` (reporter data)                 | `metrics.graderBreakdown`                                    |
+| pairwise `cases[].verdicts`                                    | `cases[].preferences`                                        |
 | `ExternalHostMetadata` type                                    | `ClientMetadata`                                             |
+
+The types follow:
+
+| Before                                                      | 2.0                             |
+| ----------------------------------------------------------- | ------------------------------- |
+| `ExpectationType`                                           | `GraderType`                    |
+| `EvalExpectationResult`, `ExpectationResultMap`             | `GraderScore`, `GraderScoreMap` |
+| `ExpectationBreakdown`                                      | `GraderBreakdown`               |
+| `IterationResult`                                           | `TrialResult`                   |
+| `ToolCallExpectation`                                       | `ToolCallAssertion`             |
+| `JudgeVerdict` (what a judge returns)                       | `JudgeScore`                    |
+| `PairwiseVerdict` (what a pairwise judge returns)           | `PairwisePreference`            |
+| `PairwisePreference` (`'baseline' \| 'candidate' \| 'tie'`) | `PreferredSide`                 |
+| `PairwiseCaseVerdict`                                       | `PairwiseCasePreference`        |
 
 `toolName` is optional on `EvalCaseResult`: it is set only for a tool call a Playwright test made. `request.client` is always set; a case that names no client records `mst`.
 

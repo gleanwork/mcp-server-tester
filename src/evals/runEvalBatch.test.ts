@@ -50,7 +50,7 @@ function completedSummary(evalConfig: EvalConfig): EvaluationSummary {
       source: 'eval',
       pass: true,
       durationMs: 1,
-      expectations: {},
+      scores: {},
     },
   ];
   return {

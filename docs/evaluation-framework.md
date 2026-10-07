@@ -119,7 +119,7 @@ export default plugin;
 
   A config is typed `PluginConfig` and can set any documented eval config key except `name`, `datasets`, `variants`, `plugins` and `extends`. Other keys, including `run`, are rejected when an eval config extends the config; until then MST only checks that it's an object. Configs apply in order, then the eval config's own settings, including its `run` controls. Each top-level key is replaced, never merged: here the eval config's `trials` replaces the config's, and an eval config `judges` list would replace the config's list rather than add to it. A config may use only its own plugin's extensions and built-ins, and can't extend other configs. MST has no built-in configs. A suite's `contentHash` is computed with its configs applied, so `runEvalBatch` doesn't resume a saved run after a config changes. Code that validates an eval config itself applies `extends` first with `resolveConfigExtends` (from `./evals`).
 
-- **Judges.** A judge's `evaluate({ case, trial }, options)` returns a verdict with `score` from 0 to 1 ([Judge contract](#judge-contract)). MST parses `options` with the judge's schema, calls `evaluate` once per `reps`, and compares the mean score with the assertion's `threshold`. The schema sees only the judge's own options, never `threshold`, `reference`, `reps` or an eval config entry's `type` and `name`. The built-in `rubric` judge has the same contract, and an eval config can list it: `judges: [{ "type": "rubric", "rubric": "correctness" }]`.
+- **Judges.** A judge's `evaluate({ case, trial }, options)` returns a score: `score` from 0 to 1 ([Judge contract](#judge-contract)). MST parses `options` with the judge's schema, calls `evaluate` once per `reps`, and compares the mean score with the assertion's `threshold`. The schema sees only the judge's own options, never `threshold`, `reference`, `reps` or an eval config entry's `type` and `name`. The built-in `rubric` judge has the same contract, and an eval config can list it: `judges: [{ "type": "rubric", "rubric": "correctness" }]`.
 
 Plugins load before eval config validation, so validation can check every reference and schema.
 
@@ -136,7 +136,7 @@ A judge is called as `evaluate({ case, trial }, options)`, once per `reps`:
 
 The threshold is not in the input. MST compares the mean score with it,
 unless the judge returns its own `pass`; over several reps, the majority of
-those verdicts decides, and a tie fails.
+those decides, and a tie fails.
 
 `case.expected` holds the case's ground truth:
 
@@ -163,19 +163,19 @@ judges: {
 When a required path is missing or empty, MST does not call the judge and
 records it as skipped.
 
-A judge returns a `JudgeVerdict`. Only `score` (0 to 1) is required:
+A judge returns a `JudgeScore`. Only `score` (0 to 1) is required:
 
 | Field               | Effect                                                                                                           |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `pass`              | The judge's own verdict. Without it, the case passes when the mean score meets the threshold.                    |
+| `pass`              | The judge's own pass/fail. Without it, the case passes when the mean score meets the threshold.                  |
 | `skipped`           | The judge cannot grade this case. It doesn't count for pass/fail or judge metrics; the remaining reps don't run. |
 | `subScores`         | Named sub-scores, such as one per criterion: `{ [key]: { score, pass?, reasoning? } }`.                          |
 | `usage`             | The judge's own token usage and cost, summed over reps.                                                          |
 | `provider`, `model` | Reported as `judgeProvider` and `judgeModel`.                                                                    |
 | `metadata`          | Other JSON output, kept in the result.                                                                           |
 
-A score or sub-score outside 0 to 1 is an error, not a verdict. When every
-judge of a case skips, the judge expectation passes.
+A score or sub-score outside 0 to 1 is an error, not a result. When every
+judge of a case skips, the judge assertion passes.
 
 Judge usage is kept apart from host usage: `judgeUsage` on each case and
 trial, `totalJudgeUsage` on the run and suite telemetry, and the
@@ -220,8 +220,8 @@ of one suite, a run and a stored baseline, or runs made on separate machines.
 Pass `cases` (dataset cases by id) when judges need ground truth that results
 do not carry.
 
-- Each judge runs each case in both orders, and the swapped verdict is mapped
-  back, to cancel position bias. A verdict whose two orders disagree is
+- Each judge runs each case in both orders, and the swapped preference is mapped
+  back, to cancel position bias. A preference whose two orders disagree is
   reported with `consistent: false`. A judge that debiases itself sets
   `swapPositions: false`.
 - `reps` repeats each order; the majority preference wins, ties break to tie.
@@ -233,7 +233,7 @@ do not carry.
 
 ### Dataset sources
 
-The built-in `file`, `dir` and `gcs` sources read canonical `EvalDataset` JSON only. They don't infer expectations from a first case, attach hosts or add judges, and they reject fields they don't know, on every case. A minimal dataset needs a name, a case ID and an input:
+The built-in `file`, `dir` and `gcs` sources read canonical `EvalDataset` JSON only. They don't infer assertions from a first case, attach hosts or add judges, and they reject fields they don't know, on every case. A minimal dataset needs a name, a case ID and an input:
 
 ```json
 {
@@ -314,10 +314,10 @@ export default {
 
 An eval config that loads the plugin selects the client with `"client": "my/assistant"`, and passes its options in `clientOptions`.
 
-- **The trace.** `run` returns a `ClientRunResult`: `finalText`, `events`, and optional `usage`, `error` and timing fields. Each event has a `kind` (`tool_call`, `skill`, `command`, `subagent` or `tool_search`), a `source` (`mcp` or `host`), a `name`, and optionally the MCP server label, arguments, output and ID. Record what the host did; don't reconstruct tool calls from the final text. A `tool_search` event (the host searching its tool catalog) lists the tools the search returned in `results`, each `{ name, server? }`. Type host-native actions as their kind rather than as calls to a host tool, so skill expectations and search metrics can read them.
+- **The trace.** `run` returns a `ClientRunResult`: `finalText`, `events`, and optional `usage`, `error` and timing fields. Each event has a `kind` (`tool_call`, `skill`, `command`, `subagent` or `tool_search`), a `source` (`mcp` or `host`), a `name`, and optionally the MCP server label, arguments, output and ID. Record what the host did; don't reconstruct tool calls from the final text. A `tool_search` event (the host searching its tool catalog) lists the tools the search returned in `results`, each `{ name, server? }`. Type host-native actions as their kind rather than as calls to a host tool, so skill assertions and search metrics can read them.
 - **Evidence.** Declare `evidence: 'structured'` only for authoritative protocol or host-native traces. With `observed`, `none` or no declaration, tool-call and argument assertions can't pass; text and judge assertions still run.
 - **Servers.** Events keep their MCP server labels. With more than one server, tool assertions use label-qualified names, or the eval config's `toolMap` from canonical to native names.
-- **In results.** Each host case result keeps the trace as `trace`, a `Trace`: the `ClientRunResult` your host returned, without telemetry and diagnostics, plus its evidence. On a one-server variant, MCP events that name no server get that server's label. A case with several trials has no `trace` of its own; each entry in `iterationResults` has the trace of that trial. In a suite, every case result also names its `variant`. Stored results drop `finalText` and each event's `output`, the same way they drop `response`; events, servers, arguments and usage stay.
+- **In results.** Each host case result keeps the trace as `trace`, a `Trace`: the `ClientRunResult` your host returned, without telemetry and diagnostics, plus its evidence. On a one-server variant, MCP events that name no server get that server's label. A case with several trials has no `trace` of its own; each entry in `trialResults` has the trace of that trial. In a suite, every case result also names its `variant`. Stored results drop `finalText` and each event's `output`, the same way they drop `response`; events, servers, arguments and usage stay.
 - **Batches.** A host with `runBatch` gets one request per trial of each host case in the dataset, and returns one trace per request, in order. A batch host can't mix host types, and its cases need unique IDs.
 - **Tool variants.** A host that connects to the servers in `input.servers` gets a variant's tool metadata (`tools`) with no work of its own: the suite gives it `http` server configs for a local MCP proxy that applies the variant, so the host must speak Streamable HTTP (see [Tool variants on every host](#tool-variants-on-every-host)). A client that shows tool metadata itself sets `toolMetadata: true`; `variantToolMetadata(context.evalConfig, context.variant)` from `./evals` gives the variant's (its own `tools`, else the config's), and `buildToolSurface(listed, metadata)` applies it with MST's rules (keys, renames, collisions), and `resolve(name, server)` maps a presented name back to the original tool. Record a renamed tool's calls under `originalName`, with the model's name in `rawName`, as MST's hosts do. A batch host that connects to one server set for the whole batch (the first request's `input.servers`) sets `serversPerBatch: true`, and the batch shares one proxy endpoint. A proxied request also carries `input.checkServers`: the same servers on an endpoint for the host's own checks, such as a readiness probe, so that traffic isn't taken for the model seeing the variant. A host that connects elsewhere (hosted connectors, say) sets `toolSurfaceProxy: false`; an eval config that gives it `tools` then fails validation.
 - **What it honours.** `maxConcurrency` caps the eval config's `concurrency`.
@@ -360,7 +360,7 @@ A variant's tool metadata (`tools`: descriptions, input schemas, renames) reache
 - **Hosts that connect to their servers** (plugin hosts, `claude-code`, `cowork`) get them through a local MCP proxy. The suite starts it on first use and gives each host request its own loopback Streamable HTTP endpoints, one per server, with the servers' labels and timeouts. The proxy presents the variant's tools and sends calls to a renamed tool to the original. Other requests (resources, prompts, skills) pass through; notifications, such as list changes and progress, don't.
 - **One connection per server for the variant.** The proxy connects to each server once and shares that connection across the variant's cases, where a client without tool metadata may connect per case. A server that keeps per-connection state sees one connection for a variant with tool metadata.
 - **A request whose host never lists the proxied tools fails.** Otherwise the run would report results for a variant the model never saw. Cowork sets up its servers once per batch, so it lists them once: the batch shares one endpoint, and the check is for the batch. MST's own readiness probe uses a separate endpoint and doesn't count.
-- **Calls are recorded under the tools' original names**, so a dataset's expectations read the same in every variant, with the model's name in `rawName`.
+- **Calls are recorded under the tools' original names**, so a dataset's assertions read the same in every variant, with the model's name in `rawName`.
 
 The ChatGPT desktop client opts out until it is verified with the proxy, so an eval config that gives it `tools` fails validation.
 
@@ -419,7 +419,7 @@ An eval config's or variant's `metrics` list adds more. Built-in names:
 | `response_success`, `response_len`, `response_words`                                                   | Trials without a host error, and the answer's length.                              |
 | `skill_loaded`, `skill_before_tool`, `skill_verification_failed`                                       | Agent Skills loads.                                                                |
 | `tool_search_hit`                                                                                      | Trials where a tool search returned a tool the trial then called.                  |
-| `judge_pass`, `judge_score`, `judge_name`, `judge_pass_for`, `judge_score_for`                         | Judge verdicts, from the case's last trial.                                        |
+| `judge_pass`, `judge_score`, `judge_name`, `judge_pass_for`, `judge_score_for`                         | Judge scores, from the case's last trial.                                          |
 
 - **Per trial.** Usage, timing, tool and answer metrics are measured per trial. A case's value is the mean over its trials, and a variant's is the mean over its cases (`<name>_mean`, or `<name>_rate` for shares). `first_tool` lists the first tool of each case's first trial. Runs that failed on infrastructure, such as a network error or a host that couldn't start, aren't trials, as they don't count toward accuracy.
 - **Unavailable, not zero.** A metric with no value for any case is left out of `metrics`; if the eval config lists it, it's also in the variant's `unavailableMetrics`. A host that reports no cost has no `cost_usd` unless the eval config prices its model. A host whose evidence is `none` has no tool metrics.

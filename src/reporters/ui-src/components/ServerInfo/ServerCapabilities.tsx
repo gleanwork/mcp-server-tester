@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import { Wrench } from 'lucide-react';
 import type { MCPServerCapabilitiesData } from '../../types';
 

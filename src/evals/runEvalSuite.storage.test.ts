@@ -271,9 +271,7 @@ describe('suite storage through public APIs', () => {
           });
           expect(artifact.data).toEqual(variant.result);
           expect(artifact.data.caseResults).toHaveLength(1);
-          expect(artifact.data.caseResults[0]?.iterationResults).toHaveLength(
-            2
-          );
+          expect(artifact.data.caseResults[0]?.trialResults).toHaveLength(2);
           artifacts.push(artifact.data);
         }
         expect(

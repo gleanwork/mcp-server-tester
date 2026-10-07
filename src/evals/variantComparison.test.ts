@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { EvalCaseResult, IterationResult } from '../types/reporter.js';
+import type { EvalCaseResult, TrialResult } from '../types/reporter.js';
 import type { EvalRunnerResult } from './evalRunner.js';
 import {
   compareVariants,
@@ -14,7 +14,7 @@ import {
 } from './variantComparison.js';
 import type { CaseGrouping } from './variantComparison.js';
 
-type Trace = NonNullable<IterationResult['toolCallTrace']>;
+type Trace = NonNullable<TrialResult['toolCallTrace']>;
 
 interface CaseSpec {
   id: string;
@@ -28,7 +28,7 @@ interface CaseSpec {
 }
 
 function caseResult(spec: CaseSpec): EvalCaseResult {
-  const iterations: IterationResult[] = spec.trials.map((pass, i) => ({
+  const trials: TrialResult[] = spec.trials.map((pass, i) => ({
     pass,
     durationMs: 1,
     ...(spec.traces?.[i] ? { toolCallTrace: spec.traces[i] } : {}),
@@ -44,7 +44,7 @@ function caseResult(spec: CaseSpec): EvalCaseResult {
         }
       : {}),
   }));
-  const counted = iterations.filter((it) => !it.isInfrastructureError);
+  const counted = trials.filter((it) => !it.isInfrastructureError);
   const rate =
     counted.length > 0
       ? counted.filter((it) => it.pass).length / counted.length
@@ -54,16 +54,16 @@ function caseResult(spec: CaseSpec): EvalCaseResult {
     datasetName: 'ds',
     source: 'eval',
     pass: rate === 1,
-    expectations: {},
+    scores: {},
     durationMs: 1,
     tags: spec.tags,
     request: {
       input: `Prompt for ${spec.id}`,
       assertions: { toolsTriggered: { calls: [{ name: 'search' }] } },
     },
-    ...(iterations.length > 1 ? { iterationResults: iterations } : {}),
-    ...(iterations.length === 1 && iterations[0]!.toolCallTrace
-      ? { toolCallTrace: iterations[0]!.toolCallTrace }
+    ...(trials.length > 1 ? { trialResults: trials } : {}),
+    ...(trials.length === 1 && trials[0]!.toolCallTrace
+      ? { toolCallTrace: trials[0]!.toolCallTrace }
       : {}),
   };
 }

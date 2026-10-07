@@ -16,7 +16,7 @@ import type {
 import type { ProviderKind } from '../../judge/judgeTypes.js';
 import type { RubricSpec } from '../../judge/rubrics.js';
 import type {
-  ToolCallExpectation,
+  ToolCallAssertion,
   ToolCallCountOptions,
 } from '../validators/toolCalls.js';
 
@@ -237,7 +237,7 @@ declare global {
        * });
        * ```
        */
-      toHaveToolCalls(expectation: ToolCallExpectation): R;
+      toHaveToolCalls(assertion: ToolCallAssertion): R;
 
       /**
        * Validates the number of tool calls a client made.

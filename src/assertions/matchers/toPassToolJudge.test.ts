@@ -246,9 +246,9 @@ describe('toPassToolJudge', () => {
     });
   });
 
-  // The matcher reports the judge's verdict; Playwright applies `.not`.
+  // The matcher reports the judge's score; Playwright applies `.not`.
   describe('isNot (negation)', () => {
-    it('reports a failing verdict under .not, so the negated assertion passes', async () => {
+    it('reports a failing result under .not, so the negated assertion passes', async () => {
       const mockJudge = makeMockJudge([
         { pass: false, score: 0.2, reasoning: 'Bad' },
       ]);
@@ -262,7 +262,7 @@ describe('toPassToolJudge', () => {
       expect(result.pass).toBe(false);
     });
 
-    it('reports a passing verdict under .not, so the negated assertion fails', async () => {
+    it('reports a passing result under .not, so the negated assertion fails', async () => {
       const mockJudge = makeMockJudge([
         { pass: true, score: 0.9, reasoning: 'Great' },
       ]);
@@ -507,7 +507,7 @@ describe('toPassToolJudge', () => {
         .mockResolvedValue({ score: 0.1, reasoning: 'Nope' });
       const judge = installJudge('strict', executor);
 
-      // The matcher reports the failing verdict; Playwright's `.not` turns
+      // The matcher reports the failing result; Playwright's `.not` turns
       // it into a passing assertion.
       const context = { isNot: true };
       const result = await toPassToolJudge.call(context, 'response', {

@@ -430,7 +430,7 @@ describe('validateJudge', () => {
       expect(result.details?.error).toBe(result.message);
     });
 
-    it('treats a non-numeric score as an error, not a verdict', async () => {
+    it('treats a non-numeric score as an error, not a result', async () => {
       const judge = installJudge('nan-judge', async () => ({ score: NaN }));
       const result = await validateJudge('response', { judge });
 

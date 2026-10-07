@@ -25,11 +25,11 @@
       "equals": -0.5
     },
     {
-      "path": "variants[name=default].result.caseResults[0].iterationResults.length",
+      "path": "variants[name=default].result.caseResults[0].trialResults.length",
       "equals": 10
     },
     {
-      "path": "variants[name=default].result.caseResults[0].iterationResults[0].trace.events[0].server",
+      "path": "variants[name=default].result.caseResults[0].trialResults[0].trace.events[0].server",
       "equals": "agg"
     },
     {

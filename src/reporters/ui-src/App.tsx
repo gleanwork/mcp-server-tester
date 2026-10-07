@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { createRoot } from 'react-dom/client';
 import type { MCPEvalData, EvalCaseResult } from './types';
@@ -32,7 +32,7 @@ function App() {
         failed: 0,
         passRate: 0,
         datasetBreakdown: {},
-        expectationBreakdown: {
+        graderBreakdown: {
           exact: 0,
           schema: 0,
           textContains: 0,
@@ -194,7 +194,7 @@ function App() {
             >
               <ErrorBoundary label="Evals tab">
                 <>
-                  {/* Eval-specific metrics: accuracy, tool recall, regressions */}
+                  {/* Eval-specific metrics: pass rate, tool recall, regressions */}
                   <MetricsCards results={evalResults} mode="eval" />
 
                   {/* Tool optimization summary, for reports without the Comparison tab */}

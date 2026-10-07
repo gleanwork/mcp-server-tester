@@ -60,9 +60,9 @@ Common issues and how to fix them.
 
 ---
 
-## Eval accuracy much lower in CI than locally
+## Eval pass rates much lower in CI than locally
 
-**Symptom:** The `infrastructureErrorRate` field in eval run results is high when running in CI, but the same evals pass consistently on a developer machine. `assertionPassRate` appears low as a result.
+**Symptom:** The `infrastructureErrorRate` field in eval run results is high when running in CI, but the same evals pass consistently on a developer machine. `passRate` appears low as a result.
 
 **Cause:** CI environments often have stricter rate limits, slower network paths, and no retry tolerance. MCP tool calls that succeed quickly locally may time out or hit provider rate limits in CI.
 
@@ -94,7 +94,7 @@ Common issues and how to fix them.
    }
    ```
 
-4. **Inspect `infrastructureErrorRate` separately from `assertionPassRate`.** Infrastructure errors (timeouts, connection resets) are distinct from assertion failures. A high infrastructure error rate signals a connectivity or capacity problem, not a quality problem with your MCP server.
+4. **Inspect `infrastructureErrorRate` separately from `passRate`.** Infrastructure errors (timeouts, connection resets) are distinct from assertion failures. A high infrastructure error rate signals a connectivity or capacity problem, not a quality problem with your MCP server.
 
 ---
 

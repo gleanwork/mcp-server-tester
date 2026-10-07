@@ -149,7 +149,7 @@ export {
 export type {
   ComparePairwiseOptions,
   PairwiseCaseResult,
-  PairwiseCaseVerdict,
+  PairwiseCasePreference,
   PairwiseComparisonResult,
   PairwiseJudgeSpec,
   PairwiseJudgeSummary,
@@ -158,6 +158,6 @@ export type {
   PairwiseDimension,
   PairwiseJudgeDefinition,
   PairwiseJudgeInput,
+  PreferredSide,
   PairwisePreference,
-  PairwiseVerdict,
 } from '../judge/pairwiseContract.js';

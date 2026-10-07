@@ -18,7 +18,7 @@ describe('RUBRIC_JUDGE', () => {
       .mockResolvedValue({ pass: true, score: 0.8, reasoning: 'ok', usage });
     vi.mocked(createJudge).mockReturnValue({ evaluate });
 
-    const verdict = await RUBRIC_JUDGE.evaluate(
+    const score = await RUBRIC_JUDGE.evaluate(
       {
         case: buildJudgeCase({ expected: { answer: 'gold' } }),
         trial: buildJudgeTrial('answer'),
@@ -31,7 +31,7 @@ describe('RUBRIC_JUDGE', () => {
       'gold',
       expect.stringContaining('factually correct')
     );
-    expect(verdict).toMatchObject({ score: 0.8, reasoning: 'ok', usage });
+    expect(score).toMatchObject({ score: 0.8, reasoning: 'ok', usage });
   });
 
   it('passes a null reference when the case has no answer', async () => {

@@ -41,7 +41,7 @@ function result(
       toolCalls: (options.calls ?? []).map((name) => ({ name })),
       response: 'one two three',
     },
-    expectations: options.judge
+    scores: options.judge
       ? {
           judge: {
             pass: options.judge.pass,
@@ -409,10 +409,10 @@ describe('skill metrics', () => {
     expect(aggregated.skill_verification_failed_rate).toBe(0.25);
   });
 
-  it('averages across iterations', () => {
+  it('averages across trials', () => {
     const multi = {
       ...result('multi', true),
-      iterationResults: [
+      trialResults: [
         { pass: true, durationMs: 1, skillLoads: [load(true, 0)] },
         { pass: false, durationMs: 1, skillLoads: [] },
         { pass: true, durationMs: 1, skillLoads: [load(true, 1)] },
@@ -470,13 +470,13 @@ describe('per-trial metrics', () => {
     datasetName: 'd',
     source: 'eval',
     pass: false,
-    expectations: {},
+    scores: {},
     durationMs: 999,
-    // The case keeps the last iteration's response and the summed usage.
+    // The case keeps the last trial's response and the summed usage.
     response: { toolCalls: [] },
     clientUsage: usage(600),
-    assertionPassRate: 0.5,
-    iterationResults: [
+    passRate: 0.5,
+    trialResults: [
       { pass: true, durationMs: 100, trace: trace(2), clientUsage: usage(100) },
       {
         pass: false,
@@ -484,7 +484,7 @@ describe('per-trial metrics', () => {
         trace: trace(1),
         clientUsage: usage(300),
       },
-      // Infrastructure failures don't count, as for accuracy.
+      // Infrastructure failures don't count, as for the pass rate.
       {
         pass: false,
         durationMs: 0,
@@ -512,8 +512,8 @@ describe('per-trial metrics', () => {
     const single: EvalCaseResult = {
       ...iterated(),
       id: 'single',
-      iterationResults: undefined,
-      assertionPassRate: undefined,
+      trialResults: undefined,
+      passRate: undefined,
       pass: true,
     };
     const { aggregated } = computeMetrics(
@@ -525,9 +525,7 @@ describe('per-trial metrics', () => {
 
   it('reports no trace metrics for a host with no evidence, and lists them as unavailable', () => {
     const blind = iterated({
-      iterationResults: [
-        { pass: true, durationMs: 100, trace: trace(0, 'none') },
-      ],
+      trialResults: [{ pass: true, durationMs: 100, trace: trace(0, 'none') }],
     });
     const { aggregated, unavailable } = computeMetrics(
       ['tool_count', 'first_tool', 'cost_usd', 'passed'],
@@ -544,7 +542,7 @@ describe('per-trial metrics', () => {
       toolName: 'search',
       source: 'eval',
       pass: true,
-      expectations: {},
+      scores: {},
       durationMs: 5,
       response: { toolCalls: [{ name: 'a' }, { name: 'b' }] },
     };
@@ -555,7 +553,7 @@ describe('per-trial metrics', () => {
 
   it('names MCP tools by server, and reads only the first trial for first_tool', () => {
     const labelled = iterated({
-      iterationResults: [
+      trialResults: [
         {
           pass: true,
           durationMs: 1,
@@ -584,7 +582,7 @@ describe('per-trial metrics', () => {
       datasetName: 'd',
       source: 'eval' as const,
       pass: false,
-      expectations: {},
+      scores: {},
       durationMs: 30_000,
       response: undefined,
     };
@@ -611,10 +609,10 @@ describe('per-trial metrics', () => {
     });
   });
 
-  it("doesn't borrow the case's response for an iteration without a trace", () => {
+  it("doesn't borrow the case's response for a trial without a trace", () => {
     const partial = iterated({
       response: { toolCalls: [{ name: 'a' }, { name: 'b' }, { name: 'c' }] },
-      iterationResults: [
+      trialResults: [
         { pass: true, durationMs: 1, trace: trace(1) },
         { pass: false, durationMs: 1, error: 'assertion threw' },
       ],

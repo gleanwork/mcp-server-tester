@@ -1,7 +1,8 @@
 /**
  * The stored result format. Version 2 is the 2.0 result vocabulary (ADR
- * 0002): results name the client, not a host. Results written by an earlier
- * MST fail with what to do instead of losing fields silently.
+ * 0002): results name the client, not a host, and record trials and
+ * scores. Results written by an earlier MST fail with what to do instead of
+ * losing fields silently.
  */
 export const RESULT_SCHEMA_VERSION = 2;
 
@@ -13,10 +14,14 @@ const RENAMED_RESULT_FIELDS: Record<string, string> = {
   hostDiagnostics: 'clientDiagnostics',
   hostEvidence: 'traceEvidence',
   externalHost: 'clientMetadata',
+  expectations: 'scores',
+  iterationResults: 'trialResults',
+  assertionPassRate: 'passRate',
+  assertionPassRateCI: 'passRateCI',
 };
 
 const MIGRATION =
-  'docs/migrations/migration-2.0.md#result-fields-name-the-client';
+  'docs/migrations/migration-2.0.md#result-fields-use-the-eval-vocabulary';
 
 export function olderResultsError(
   what: string,
@@ -52,8 +57,8 @@ function hasOlderFields(result: Record<string, unknown>): boolean {
   if (isObject(request) && ('scenario' in request || 'expect' in request))
     return true;
   return (
-    Array.isArray(result.iterationResults) &&
-    result.iterationResults.some(
+    Array.isArray(result.trialResults) &&
+    result.trialResults.some(
       (trial) => isObject(trial) && Object.keys(trial).some(isRenamed)
     )
   );

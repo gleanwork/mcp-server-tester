@@ -9,7 +9,7 @@
  * - `baseline` and `candidate` are the two observed runs, as `JudgeTrial`s.
  * - `options` is how this judge compares, parsed by the judge's schema.
  *
- * A pairwise verdict is a preference, not a score against a threshold, so it
+ * A pairwise preference is not a score against a threshold, so it
  * is kept apart from pointwise judges: pointwise judges decide whether a case
  * passes; pairwise judges decide which variant did better.
  */
@@ -26,11 +26,11 @@ export interface PairwiseJudgeInput {
 }
 
 /** Which run the judge prefers. */
-export type PairwisePreference = 'baseline' | 'candidate' | 'tie';
+export type PreferredSide = 'baseline' | 'candidate' | 'tie';
 
 /** What a pairwise judge returns for one rep. Only `preference` is required. */
-export interface PairwiseVerdict {
-  preference: PairwisePreference;
+export interface PairwisePreference {
+  preference: PreferredSide;
   /**
    * How strongly, from 0 (no preference) to 1 (decisive). A judge that
    * reports a graded margin (for example a 7-point scale) maps it here.
@@ -48,15 +48,15 @@ export interface PairwiseVerdict {
   usage?: Partial<UsageMetrics>;
   provider?: string;
   model?: string;
-  /** Judge version that produced the verdict, such as a frozen prompt hash. */
+  /** Judge version that produced the preference, such as a frozen prompt hash. */
   version?: string;
   /** Other structured output, kept in results as-is. Must be JSON-serializable. */
   metadata?: Record<string, unknown>;
 }
 
-/** One dimension of a pairwise verdict. */
+/** One dimension of a pairwise preference. */
 export interface PairwiseDimension {
-  preference: PairwisePreference;
+  preference: PreferredSide;
   strength?: number;
   reasoning?: string;
   /** Pointwise scores of each side on this dimension, when the judge has them. */
@@ -76,12 +76,12 @@ export interface PairwiseJudgeDefinition {
   readonly requires?: readonly string[];
   /**
    * Whether to also compare with the runs swapped and reconcile the two
-   * verdicts, to cancel position bias. Default true. A judge that already
+   * preferences, to cancel position bias. Default true. A judge that already
    * randomizes or debiases order itself sets false.
    */
   readonly swapPositions?: boolean;
   compare: (
     input: PairwiseJudgeInput,
     options: Record<string, unknown>
-  ) => Promise<PairwiseVerdict>;
+  ) => Promise<PairwisePreference>;
 }

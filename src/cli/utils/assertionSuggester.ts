@@ -1,27 +1,27 @@
 /**
- * Expectation suggester - analyzes MCP tool responses and suggests appropriate expectations
+ * Assertion suggester: analyzes MCP tool responses and suggests appropriate assertions
  */
 
 import type { Tool } from '@modelcontextprotocol/client';
 import { extractText } from '../../mcp/response.js';
 
-export interface ExpectationSuggestions {
+export interface AssertionSuggestions {
   textContains: string[];
   regex: string[];
 }
 
 /**
- * Suggests expectations based on a tool response
+ * Suggests assertions based on a tool response
  *
  * @param response - The tool response to analyze
  * @param tool - The tool that generated the response
- * @returns Suggested expectations
+ * @returns Suggested assertions
  */
-export function suggestExpectations(
+export function suggestAssertions(
   response: unknown,
   tool: Tool
-): ExpectationSuggestions {
-  const suggestions: ExpectationSuggestions = {
+): AssertionSuggestions {
+  const suggestions: AssertionSuggestions = {
     textContains: [],
     regex: [],
   };
@@ -29,7 +29,7 @@ export function suggestExpectations(
   // Extract text from response
   const text = extractText(response);
 
-  // Suggest text contains expectations
+  // Suggest text contains assertions
   suggestions.textContains = suggestTextContains(text, tool);
 
   // Suggest regex patterns
@@ -39,7 +39,7 @@ export function suggestExpectations(
 }
 
 /**
- * Suggests text contains expectations by extracting key phrases
+ * Suggests text contains assertions by extracting key phrases
  */
 function suggestTextContains(text: string, _tool: Tool): string[] {
   const suggestions: string[] = [];

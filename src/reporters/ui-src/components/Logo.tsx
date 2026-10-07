@@ -1,5 +1,3 @@
-import React from 'react';
-
 /**
  * MCP icon mark — the three connected-arc symbol from the Model Context Protocol brand.
  * Extracted from the official MCP wordmark SVG (light.svg).

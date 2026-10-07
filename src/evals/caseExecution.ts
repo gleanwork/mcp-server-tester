@@ -4,7 +4,7 @@
  * Every path (the mst client on a Playwright test's connection, or a suite's
  * client) produces a `CaseExecution`. The
  * runner reads its explicit fields and never inspects `response` to guess how
- * a case ran. Hosts and adapters produce traces; the runner owns every verdict.
+ * a case ran. Hosts and adapters produce traces; the runner owns every score.
  */
 import { randomUUID } from 'node:crypto';
 import type { MCPConfig } from '../config/mcpConfig.js';
@@ -43,7 +43,7 @@ export type ClientResponse = MCPHostSimulationResult & {
 };
 
 interface ExecutionBase {
-  /** Set when execution failed; expectations are not evaluated. */
+  /** Set when execution failed; assertions are not evaluated. */
   error?: string;
   /** Host time spent before the runner's timer started (batch traces). */
   preExecutionDurationMs?: number;
@@ -182,7 +182,7 @@ export interface SuiteCaseExecutorOptions {
   evalConfig: EvalConfig;
   variant?: EvalVariant;
   env?: Record<string, string | undefined>;
-  /** Traces from a batch host, consumed once per case iteration. */
+  /** Traces from a batch host, consumed once per case trial. */
   batchTraces?: Map<string, ClientRunResult[]>;
   /** The variant's tool metadata, which `proxy` serves to clients that connect to their servers. */
   toolVariant?: { id: string; proxy: () => Promise<ToolSurfaceProxy> };

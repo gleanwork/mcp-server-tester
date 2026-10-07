@@ -180,7 +180,7 @@ mcp-server-tester/
 2. Export function returning `EvalExpectation`
 3. Add to `src/index.ts` exports
 4. Add unit tests
-5. Update `docs/expectations.md`
+5. Update `docs/assertions.md`
 
 Example:
 
@@ -203,7 +203,7 @@ export function createMyExpectation(): EvalExpectation {
 3. Add to `createLLMJudgeClient()` switch in `src/judge/index.ts`
 4. Use environment variables for API keys
 5. Add tests
-6. Update `docs/expectations.md`
+6. Update `docs/assertions.md`
 
 ### New Transport Type
 

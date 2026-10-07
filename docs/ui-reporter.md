@@ -41,7 +41,7 @@ npx mst open
 
 ![MCP Server Tester — Overview tab](img/ux-overview.png)
 
-The Overview tab shows **Test Suites** and **Eval Datasets** side by side with their own separate pass rates. These are fundamentally different kinds of results — a test is binary (pass or fail), an eval has an assertion pass rate across iterations — so they are never collapsed into a single combined number.
+The Overview tab shows **Test Suites** and **Eval Datasets** side by side with their own separate pass rates. These are fundamentally different kinds of results — a test is binary (pass or fail), an eval has an assertion pass rate across trials — so they are never collapsed into a single combined number.
 
 Below the cards, the **Pass Rate Trend** chart shows historical pass rates across runs. This is the main signal for answering "are we getting better over time?"
 
@@ -91,40 +91,40 @@ Conformance checks validate that your MCP server implements the protocol correct
 
 ![MCP Server Tester — Evals tab](img/ux-evals.png)
 
-The Evals tab shows data-driven eval dataset results, including multi-iteration accuracy and LLM host mode tool discovery metrics.
+The Evals tab shows data-driven eval dataset results, including multi-trial pass rates and LLM host mode tool discovery metrics.
 
 ### Metrics bar
 
 From left to right, in order of urgency:
 
-- **Pass rate** — fraction of cases that passed their accuracy threshold
+- **Pass rate** — fraction of cases that met their pass threshold
 - **Regressions / fixed** — cases that changed vs the baseline run (only shown when a baseline is provided)
 - **X/Y passed** — compact pass count
-- **Avg pass rate** — mean assertion pass rate across multi-iteration cases
-- **Tool discovery** — mean recall across client cases with `toolsTriggered` expectations
+- **Avg pass rate** — mean trial pass rate across multi-trial cases
+- **Tool discovery** — mean recall across client cases with `toolsTriggered` assertions
 
-### Iteration dots and CI
+### Trial dots and CI
 
-For multi-iteration cases, each row shows:
+For multi-trial cases, each row shows:
 
 - A pass rate badge: `80% 4/5`
-- Iteration dots showing per-run results
+- Trial dots showing each trial
 
 The dot legend below the filter bar explains the symbols:
 
 | Symbol    | Meaning                                        |
 | --------- | ---------------------------------------------- |
-| ● (green) | Iteration passed                               |
-| ● (red)   | Iteration failed                               |
+| ● (green) | Trial passed                                   |
+| ● (red)   | Trial failed                                   |
 | ○ (grey)  | Infrastructure error (excluded from pass rate) |
 
-Infrastructure errors (network timeouts, rate limits) are excluded from the assertion pass rate denominator so environment reliability doesn't inflate your accuracy numbers.
+Infrastructure errors (network timeouts, rate limits) are excluded from the pass rate denominator so environment reliability doesn't distort your pass rates.
 
 ### Detail panel
 
 Click **Show details** to expand:
 
-- **Why Cases Fail** — breakdown of which expectation types are causing failures (`textContains`, `schema`, `judge`, etc.)
+- **Why Cases Fail** — breakdown of which assertion types are causing failures (`textContains`, `schema`, `judge`, etc.)
 - **Performance by Tool** — per-tool pass rate, average duration, recall, and precision
 
 ### Tag filtering
@@ -138,10 +138,10 @@ Tag buttons above the search bar let you filter to specific subsets. Tags come f
 Click any result row to open the detail modal:
 
 1. **Status and metadata** — Pass/Fail badge, source (Eval Dataset or Test Suite), auth type, project
-2. **Pass rate and CI** (multi-iteration only) — assertion pass rate with 95% confidence interval. Hover for: _"the true pass rate is likely between X% and Y%. Run more iterations to narrow this range."_
+2. **Pass rate and CI** (multi-trial only) — trial pass rate with 95% confidence interval. Hover for: _"the true pass rate is likely between X% and Y%. Run more trials to narrow this range."_
 3. **Error details** — error message and stack trace (failed cases only)
 4. **Response preview** — full tool response, scrollable
-5. **Expectation results** — each expectation type with pass/fail and failure message
+5. **Assertion results** — each assertion type with pass/fail and failure message
 6. **Duration** — total execution time
 
 ---
@@ -277,5 +277,5 @@ npx mst open
 ## Next Steps
 
 - See the [Quick Start Guide](./quickstart.md) for running tests
-- Check the [Expectations Guide](./expectations.md) for validation setup
+- Check the [Assertions Guide](./assertions.md) for validation setup
 - Explore [Examples](../examples) for sample test suites

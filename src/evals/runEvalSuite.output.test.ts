@@ -25,7 +25,7 @@ afterEach(async () => {
 });
 
 describe('suite output', () => {
-  it('prints no reporter hint, and the iterations warning once across variants', async () => {
+  it('prints no reporter hint, and the trials warning once across variants', async () => {
     vi.mocked(createMCPClientForConfig).mockResolvedValue({
       listTools: vi.fn(async () => ({ tools: [] })),
     } as unknown as Awaited<ReturnType<typeof createMCPClientForConfig>>);

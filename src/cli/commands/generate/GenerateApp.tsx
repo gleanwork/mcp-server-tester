@@ -15,7 +15,7 @@ import {
 } from '../../../config/mcpConfig.js';
 import { listKnownServers, type KnownServer } from '../../../auth/storage.js';
 import { CLIOAuthClient } from '../../../auth/cli.js';
-import { suggestExpectations } from '../../utils/expectationSuggester.js';
+import { suggestAssertions } from '../../utils/assertionSuggester.js';
 import {
   appendToolChecks,
   canAppendToolChecks,
@@ -265,7 +265,7 @@ export function GenerateApp({ options }: GenerateAppProps) {
       setCallError(null);
 
       // Get suggestions
-      const sugg = suggestExpectations(responseData, selectedTool);
+      const sugg = suggestAssertions(responseData, selectedTool);
       setSuggestions(sugg);
 
       // Initialize current case
@@ -711,7 +711,7 @@ export function GenerateApp({ options }: GenerateAppProps) {
               <JsonPreview data={response} maxLines={10} />
               {suggestions.textContains.length > 0 && (
                 <Box flexDirection="column" marginTop={1}>
-                  <Text color="cyan">Suggested expectations:</Text>
+                  <Text color="cyan">Suggested assertions:</Text>
                   <Text dimColor>
                     Text contains:{' '}
                     {suggestions.textContains.map((t) => `"${t}"`).join(', ')}
@@ -779,7 +779,7 @@ export function GenerateApp({ options }: GenerateAppProps) {
       {/* Use text contains */}
       {step === 'useTextContains' && suggestions.textContains.length > 0 && (
         <Box flexDirection="column">
-          <Text>Add text contains expectations?</Text>
+          <Text>Add text contains assertions?</Text>
           <Text dimColor>
             ({suggestions.textContains.map((t) => `"${t}"`).join(', ')})
           </Text>
@@ -799,7 +799,7 @@ export function GenerateApp({ options }: GenerateAppProps) {
       {/* Use regex */}
       {step === 'useRegex' && suggestions.regex.length > 0 && (
         <Box flexDirection="column">
-          <Text>Add regex expectations?</Text>
+          <Text>Add regex assertions?</Text>
           <Text dimColor>
             ({suggestions.regex.map((r) => `/${r}/`).join(', ')})
           </Text>
@@ -819,7 +819,7 @@ export function GenerateApp({ options }: GenerateAppProps) {
       {/* Use exact match */}
       {step === 'useExact' && (
         <Box flexDirection="column">
-          <Text>Add exact match expectation?</Text>
+          <Text>Add exact match assertion?</Text>
           <ConfirmInput
             onConfirm={() => {
               setCurrentCase((c) => ({ ...c, response: fullResult }));

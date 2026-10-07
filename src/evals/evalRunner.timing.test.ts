@@ -13,8 +13,8 @@ function advance(ms: number): void {
   vi.setSystemTime(Date.now() + ms);
 }
 
-describe('pre-executed iteration timing', () => {
-  it('adds known pre-execution time once per iteration without changing dataset wall time', async () => {
+describe('pre-executed trial timing', () => {
+  it('adds known pre-execution time once per trial without changing dataset wall time', async () => {
     const durations = [10, 20, undefined, 40];
     const executeCase = vi.fn(async (): Promise<CaseExecution> => {
       advance(3);
@@ -41,7 +41,7 @@ describe('pre-executed iteration timing', () => {
     expect(result.caseResults.map((c) => c.durationMs)).toEqual([36, 46]);
     expect(
       result.caseResults.map((c) =>
-        c.iterationResults?.map((iteration) => iteration.durationMs)
+        c.trialResults?.map((trial) => trial.durationMs)
       )
     ).toEqual([
       [13, 23],
@@ -90,6 +90,6 @@ describe('pre-executed iteration timing', () => {
     );
 
     expect(result.durationMs).toBe(50);
-    expect(result.iterationResults?.map((r) => r.durationMs)).toEqual([25, 25]);
+    expect(result.trialResults?.map((r) => r.durationMs)).toEqual([25, 25]);
   });
 });

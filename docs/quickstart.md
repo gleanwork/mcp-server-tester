@@ -137,7 +137,7 @@ Response preview:
   "conditions": "Sunny"
 }
 
-Suggested expectations:
+Suggested assertions:
   Text contains:
     - "London"
     - "temperature"
@@ -145,8 +145,8 @@ Suggested expectations:
     - \d+
 
 ? Test name: weather-london
-? Add text contains expectations? Yes
-? Add regex expectations? Yes
+? Add text contains assertions? Yes
+? Add regex assertions? Yes
 ✓ Added test "weather-london"
 
 ? Add another test? No
@@ -204,11 +204,11 @@ test('run weather evals', async ({ mcp }, testInfo) => {
 });
 ```
 
-See the [Expectations Guide](./expectations.md) for all available expectation types.
+See the [Assertions Guide](./assertions.md) for all available assertion types.
 
 ## Next Steps
 
-- Explore [Expectation Types](./expectations.md) for validation options
+- Explore [Assertion Types](./assertions.md) for validation options
 - Learn about [Transport Configuration](./transports.md)
 - Set up [Authentication](./authentication.md) for OAuth or token auth
 - Check out the [Examples](../examples) for real-world usage

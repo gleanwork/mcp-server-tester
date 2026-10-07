@@ -1,4 +1,4 @@
-/** Sanitized host evidence, not an evaluation verdict or raw process log. */
+/** Sanitized host evidence, not an evaluation score or raw process log. */
 export interface ClientDiagnostics {
   failureKind?: 'startup' | 'timeout' | 'process' | 'output';
   claudeStartup?: {

@@ -374,6 +374,6 @@ import type {
 
 ## Need Help?
 
-- See the [Expectations Guide](./expectations.md) for complete matcher documentation
+- See the [Expectations Guide](./assertions.md) for complete matcher documentation
 - Check [API Reference](./api-reference.md) for function signatures
 - File issues at [GitHub](https://github.com/gleanwork/mcp-server-tester/issues)

@@ -1,24 +1,24 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import type { EvalCaseResult } from '../../types';
-import type { ExpectationType } from '../../types';
+import type { GraderType } from '../../types';
 
 interface FailureCount {
-  type: ExpectationType;
+  type: GraderType;
   count: number;
 }
 
 function computeFailureCounts(results: EvalCaseResult[]): FailureCount[] {
-  const counts = new Map<ExpectationType, number>();
+  const counts = new Map<GraderType, number>();
 
   for (const result of results) {
     if (result.pass) continue;
 
-    for (const [type, expectation] of Object.entries(result.expectations) as [
-      ExpectationType,
+    for (const [type, assertion] of Object.entries(result.scores) as [
+      GraderType,
       { pass: boolean },
     ][]) {
-      if (expectation.pass === false) {
+      if (assertion.pass === false) {
         counts.set(type, (counts.get(type) ?? 0) + 1);
       }
     }

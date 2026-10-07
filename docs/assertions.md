@@ -1,4 +1,4 @@
-# Expectations Guide
+# Assertions Guide
 
 MST's matchers assert on an MCP tool's response in a Playwright test: call the tool with `mcp.callTool()`, then `expect(result).toContainToolText(...)` and so on. This guide covers each matcher.
 
@@ -14,7 +14,7 @@ Eval cases assert on what the client under test did, not on a tool response. The
 - [LLM-as-a-Judge](#llm-as-a-judge)
 - [Response Size](#response-size)
 - [Custom Predicate](#custom-predicate)
-- [Combining Multiple Expectations](#combining-multiple-expectations)
+- [Combining Multiple Assertions](#combining-multiple-assertions)
 - [Examples](#examples)
 
 ## Exact Match
@@ -40,7 +40,7 @@ Validates that response text contains expected substrings. Ideal for markdown or
 
 In an eval case, `assertions.containsText` checks the client's answer:
 
-```json snippet=snippets/expectations-contains-text.json
+```json snippet=snippets/assertions-contains-text.json
 {
   "id": "london-summary",
   "input": "Give me a short summary of London",
@@ -80,7 +80,7 @@ Validates that response text matches regex patterns. Powerful for format validat
 
 In an eval case, `assertions.matchesPattern` checks the client's answer:
 
-```json snippet=snippets/expectations-regex-patterns.json
+```json snippet=snippets/assertions-regex-patterns.json
 {
   "id": "weather-format",
   "input": "What's the weather in London? Give the temperature in °C.",
@@ -121,7 +121,7 @@ Validates response structure and types using Zod schemas. Best for structured da
 
 ### Inline Test Usage
 
-```typescript snippet=snippets/expectations-schema-validation.ts
+```typescript snippet=snippets/assertions-schema-validation.ts
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
 import { z } from 'zod';
 
@@ -273,7 +273,7 @@ When responses contain variable data that would cause snapshot mismatches, use s
 
 ### Programmatic Sanitizer Use
 
-Sanitizers are applied automatically by `toMatchToolSnapshot()`. The sanitizer names (`'uuid'`, `'timestamp'`, etc.) and custom regex patterns are specified inline on the expectation as shown above.
+Sanitizers are applied automatically by `toMatchToolSnapshot()`. The sanitizer names (`'uuid'`, `'timestamp'`, etc.) and custom regex patterns are specified inline on the assertion as shown above.
 
 ### Best Practices
 
@@ -293,7 +293,7 @@ Every judge runs the same way. The built-in `rubric` judge asks an LLM to score 
 
 In an eval case, `assertions.passesJudge` judges the client's answer:
 
-```json snippet=snippets/expectations-passes-judge.json
+```json snippet=snippets/assertions-passes-judge.json
 {
   "id": "auth-docs",
   "input": "Find our documentation on authentication",
@@ -477,7 +477,7 @@ The predicate receives the raw MCP `CallToolResult` object as the first argument
 
 ### Inline Test Usage
 
-```typescript snippet=snippets/expectations-custom-predicate.ts
+```typescript snippet=snippets/assertions-custom-predicate.ts
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
 
 test('response contains at least three results', async ({ mcp }) => {
@@ -493,7 +493,7 @@ test('response contains at least three results', async ({ mcp }) => {
 });
 ```
 
-```typescript snippet=snippets/expectations-json-predicate.ts
+```typescript snippet=snippets/assertions-json-predicate.ts
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
 
 test('JSON content is parseable', async ({ mcp }) => {
@@ -552,7 +552,7 @@ The custom Playwright matchers follow standard Playwright/Jest prefix convention
 | `toPass*`    | External evaluation      | `toPassToolJudge`                                                                       |
 | `toSatisfy*` | Custom predicate         | `toSatisfyToolPredicate`                                                                |
 
-## Combining Multiple Expectations
+## Combining Multiple Assertions
 
 A test can apply several matchers to one response:
 
@@ -571,7 +571,7 @@ test('city info', async ({ mcp }) => {
 
 An eval case can declare several assertions too. Each is graded on its own and reported per assertion:
 
-```json snippet=snippets/expectations-combined.json
+```json snippet=snippets/assertions-combined.json
 {
   "id": "london-city-info",
   "input": "Tell me about London: its population and main features",
@@ -599,17 +599,17 @@ An eval case can declare several assertions too. Each is graded on its own and r
 
 ## Examples
 
-### Choosing the Right Expectation
+### Choosing the Right Assertion
 
-| Response Type                       | Recommended Expectation | Why                                        |
-| ----------------------------------- | ----------------------- | ------------------------------------------ |
-| JSON with fixed structure           | Exact Match             | Predictable, structured data               |
-| JSON with variable values           | Schema                  | Type-safe validation with flexibility      |
-| Markdown/formatted text             | Text Contains           | Order-independent content validation       |
-| Text with specific format           | Regex                   | Pattern-based validation                   |
-| Deterministic output (help, config) | Snapshot                | Detect any changes to known-good output    |
-| Variable data with stable structure | Snapshot + Sanitizers   | Normalize timestamps/IDs before comparison |
-| Subjective quality                  | LLM Judge               | Semantic understanding required            |
+| Response Type                       | Recommended Assertion | Why                                        |
+| ----------------------------------- | --------------------- | ------------------------------------------ |
+| JSON with fixed structure           | Exact Match           | Predictable, structured data               |
+| JSON with variable values           | Schema                | Type-safe validation with flexibility      |
+| Markdown/formatted text             | Text Contains         | Order-independent content validation       |
+| Text with specific format           | Regex                 | Pattern-based validation                   |
+| Deterministic output (help, config) | Snapshot              | Detect any changes to known-good output    |
+| Variable data with stable structure | Snapshot + Sanitizers | Normalize timestamps/IDs before comparison |
+| Subjective quality                  | LLM Judge             | Semantic understanding required            |
 
 ### Next Steps
 

@@ -82,13 +82,13 @@ function resultToolCalls(
 
 /**
  * Skill loads recorded by the simulated host (skills enabled): from the
- * response, or the last iteration when responses were omitted.
+ * response, or the last trial when responses were omitted.
  */
 function resultSkillLoads(result: EvalCaseResult): SkillLoad[] {
   const fromResponse = responseRecord(result).skillLoads;
   const loads = Array.isArray(fromResponse)
     ? fromResponse
-    : (result.iterationResults?.at(-1)?.skillLoads ?? []);
+    : (result.trialResults?.at(-1)?.skillLoads ?? []);
   return loads.filter(
     (load): load is SkillLoad =>
       isRecord(load) &&
@@ -181,60 +181,58 @@ function JsonBlock({ value }: { value: unknown }) {
   );
 }
 
-function expectationEntries(result: EvalCaseResult) {
-  return Object.entries(result.expectations ?? {}).filter(
+function scoreEntries(result: EvalCaseResult) {
+  return Object.entries(result.scores ?? {}).filter(
     (entry): entry is [string, NonNullable<(typeof entry)[1]>] =>
       entry[1] !== undefined
   );
 }
 
-function failedExpectationEntries(result: EvalCaseResult) {
-  return expectationEntries(result).filter(([, expectation]) => {
-    return !expectation.pass;
+function failedScoreEntries(result: EvalCaseResult) {
+  return scoreEntries(result).filter(([, score]) => {
+    return !score.pass;
   });
 }
 
-function getVerdictSummary(result: EvalCaseResult): {
+function getOutcomeSummary(result: EvalCaseResult): {
   category: string;
   reason: string;
 } {
-  const failedAssertions = failedExpectationEntries(result).map(
-    ([type]) => type
-  );
+  const failedGraders = failedScoreEntries(result).map(([type]) => type);
 
   if (result.pass) {
     return {
       category: 'Pass',
-      reason: 'All configured assertions passed.',
+      reason: 'All configured graders passed.',
     };
   }
 
   if (result.clientMetadata?.failureKind) {
     return {
-      category: 'Host or automation failure',
+      category: 'Client or automation failure',
       reason: `The driver failed before producing trustworthy eval evidence: ${result.clientMetadata.failureKind}.`,
     };
   }
 
   if (result.error) {
-    const firstLine = stripAnsiCodes(result.error).split('\n')[0];
+    const firstLine = stripAnsiCodes(result.error).split('\n')[0] ?? '';
     return {
       category: 'Execution failure',
       reason: firstLine,
     };
   }
 
-  if (failedAssertions.length > 0) {
+  if (failedGraders.length > 0) {
     return {
       category: 'Assertion failure',
-      reason: `${failedAssertions.length} configured assertion${failedAssertions.length === 1 ? '' : 's'} failed: ${failedAssertions.join(', ')}.`,
+      reason: `${failedGraders.length} configured grader${failedGraders.length === 1 ? '' : 's'} failed: ${failedGraders.join(', ')}.`,
     };
   }
 
   return {
     category: 'Failure',
     reason:
-      'The run failed without a specific assertion or host-driver error in the report.',
+      'The run failed without a specific assertion or client error in the report.',
   };
 }
 
@@ -292,12 +290,12 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
         if (event.shiftKey) {
           if (document.activeElement === first) {
             event.preventDefault();
-            last.focus();
+            last?.focus();
           }
         } else {
           if (document.activeElement === last) {
             event.preventDefault();
-            first.focus();
+            first?.focus();
           }
         }
       }
@@ -317,13 +315,12 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
 
   const responseText = formatResponsePreview(result.response);
   const isLargeResponse = responseText.length > 500;
-  const expectationRows = expectationEntries(result);
-  const failedExpectationRows = failedExpectationEntries(result);
-  const hasAssertions = expectationRows.length > 0;
-  const hasIterations =
-    result.iterationResults && result.iterationResults.length > 0;
-  const iterations = result.iterationResults!;
-  const displayRate = result.assertionPassRate;
+  const scoreRows = scoreEntries(result);
+  const failedScoreRows = failedScoreEntries(result);
+  const hasAssertions = scoreRows.length > 0;
+  const hasTrials = result.trialResults && result.trialResults.length > 0;
+  const trials = result.trialResults!;
+  const displayRate = result.passRate;
   const infraErrorRate = result.infrastructureErrorRate;
   const externalHostEvidenceRows = result.clientMetadata
     ? getExternalHostEvidenceRows(result.clientMetadata)
@@ -334,7 +331,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
   const answer = finalAnswer(result);
   const llmDurationMs = numberField(responseRecord(result), 'llmDurationMs');
   const mcpDurationMs = numberField(responseRecord(result), 'mcpDurationMs');
-  const verdict = getVerdictSummary(result);
+  const outcome = getOutcomeSummary(result);
 
   return (
     <>
@@ -385,7 +382,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                   ▲ Fixed since baseline
                 </span>
               )}
-              {/* Assertion pass rate badge — only for multi-iteration cases */}
+              {/* Assertion pass rate badge — only for multi-trial cases */}
               {displayRate !== undefined && (
                 <span
                   className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-semibold shrink-0 ${
@@ -396,25 +393,21 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                         : 'bg-red-500/20 text-red-700 dark:text-red-400'
                   }`}
                   title={
-                    result.assertionPassRateCI
-                      ? `95% confidence interval: the true pass rate is likely between ${(result.assertionPassRateCI.lower * 100).toFixed(0)}% and ${(result.assertionPassRateCI.upper * 100).toFixed(0)}%. Run more iterations to narrow this range.`
+                    result.passRateCI
+                      ? `95% confidence interval: the true pass rate is likely between ${(result.passRateCI.lower * 100).toFixed(0)}% and ${(result.passRateCI.upper * 100).toFixed(0)}%. Run more trials to narrow this range.`
                       : undefined
                   }
                 >
                   {(displayRate * 100).toFixed(0)}% pass rate
-                  {result.assertionPassRateCI && (
+                  {result.passRateCI && (
                     <span className="text-xs opacity-70 font-normal">
-                      {` ±${Math.round(((result.assertionPassRateCI.upper - result.assertionPassRateCI.lower) / 2) * 100)}%`}
+                      {` ±${Math.round(((result.passRateCI.upper - result.passRateCI.lower) / 2) * 100)}%`}
                     </span>
                   )}
-                  {hasIterations && (
+                  {hasTrials && (
                     <span className="text-xs opacity-70">
-                      ({iterations.filter((r) => r.pass).length}/
-                      {
-                        iterations.filter((r) => !r.isInfrastructureError)
-                          .length
-                      }
-                      )
+                      ({trials.filter((r) => r.pass).length}/
+                      {trials.filter((r) => !r.isInfrastructureError).length})
                     </span>
                   )}
                 </span>
@@ -423,11 +416,10 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
               {infraErrorRate !== undefined && infraErrorRate > 0 && (
                 <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-semibold shrink-0 bg-orange-500/20 text-orange-700 dark:text-orange-400">
                   {(infraErrorRate * 100).toFixed(0)}% infra errors
-                  {hasIterations && (
+                  {hasTrials && (
                     <span className="text-xs opacity-70">
-                      (
-                      {iterations.filter((r) => r.isInfrastructureError).length}
-                      /{iterations.length})
+                      ({trials.filter((r) => r.isInfrastructureError).length}/
+                      {trials.length})
                     </span>
                   )}
                 </span>
@@ -510,7 +502,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
               )}
             </div>
 
-            <CollapsibleSection title="Verdict" defaultOpen={true}>
+            <CollapsibleSection title="Outcome" defaultOpen={true}>
               <div className="space-y-4">
                 <div
                   className={`rounded-md border p-4 ${
@@ -523,17 +515,17 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                 >
                   <div className="flex flex-wrap items-center gap-2 mb-2">
                     <span className="text-sm font-semibold">
-                      {verdict.category}
+                      {outcome.category}
                     </span>
-                    {failedExpectationRows.length > 0 && (
+                    {failedScoreRows.length > 0 && (
                       <span className="text-xs text-muted-foreground">
-                        {failedExpectationRows.length} failed assertion
-                        {failedExpectationRows.length === 1 ? '' : 's'}
+                        {failedScoreRows.length} failed grader
+                        {failedScoreRows.length === 1 ? '' : 's'}
                       </span>
                     )}
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    {verdict.reason}
+                    {outcome.reason}
                   </p>
                 </div>
 
@@ -614,16 +606,16 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                         }
                       />
                       <InfoField
-                        label="Iterations"
+                        label="Trials"
                         value={
                           result.request.trials ??
-                          result.iterationResults?.length ??
+                          result.trialResults?.length ??
                           1
                         }
                       />
                       {result.request.passThreshold !== undefined && (
                         <InfoField
-                          label="Accuracy Threshold"
+                          label="Pass Threshold"
                           value={`${(result.request.passThreshold * 100).toFixed(0)}%`}
                         />
                       )}
@@ -682,7 +674,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                     {result.request.assertions && (
                       <div>
                         <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
-                          Configured Expectations
+                          Configured Assertions
                         </h4>
                         <JsonBlock value={result.request.assertions} />
                       </div>
@@ -719,13 +711,13 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                 defaultOpen={true}
                 badge={
                   <span className="text-xs text-muted-foreground ml-auto">
-                    {expectationRows.filter(([, e]) => e.pass).length}/
-                    {expectationRows.length} passed
+                    {scoreRows.filter(([, e]) => e.pass).length}/
+                    {scoreRows.length} passed
                   </span>
                 }
               >
                 <div className="space-y-2">
-                  {expectationRows.map(([type, exp]) => (
+                  {scoreRows.map(([type, exp]) => (
                     <div
                       key={type}
                       className={`p-3 rounded-md border-l-4 ${
@@ -758,7 +750,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
 
             {result.clientMetadata && (
               <CollapsibleSection
-                title="Host Outcomes & Evidence"
+                title="Client Outcomes & Evidence"
                 defaultOpen={true}
               >
                 <div className="space-y-4">
@@ -885,7 +877,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                           )}
                         />
                         <InfoField
-                          label="Host Duration"
+                          label="Client Duration"
                           value={formatMs(
                             numberField(clientUsage, 'durationMs')
                           )}
@@ -937,7 +929,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                     <InfoField
-                      label="Host"
+                      label="Client"
                       value={
                         <>
                           <p className="font-medium">
@@ -1098,7 +1090,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
               </CollapsibleSection>
             )}
 
-            {/* Tool Calls — for llm_host eval cases with tool call expectations */}
+            {/* Tool calls, for client cases with tool-call assertions */}
             {result.source === 'eval' && result.toolPrecision !== undefined && (
               <CollapsibleSection title="Tool Calls" defaultOpen={true}>
                 {result.toolCallTrace ? (
@@ -1156,10 +1148,10 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
               </CollapsibleSection>
             )}
 
-            {/* Iterations breakdown — for multi-iteration cases */}
-            {hasIterations && (
+            {/* Trials breakdown — for multi-trial cases */}
+            {hasTrials && (
               <CollapsibleSection
-                title="Iterations"
+                title="Trials"
                 defaultOpen={true}
                 badge={
                   displayRate !== undefined ? (
@@ -1185,12 +1177,12 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                         <th className="text-left py-2 pr-4 font-medium">
                           Duration
                         </th>
-                        {iterations.some((r) => r.toolCallTrace) && (
+                        {trials.some((r) => r.toolCallTrace) && (
                           <th className="text-left py-2 pr-4 font-medium">
                             Tools called
                           </th>
                         )}
-                        {iterations.some((r) => r.clientMetadata) && (
+                        {trials.some((r) => r.clientMetadata) && (
                           <th className="text-left py-2 pr-4 font-medium">
                             Host trace
                           </th>
@@ -1199,7 +1191,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                       </tr>
                     </thead>
                     <tbody>
-                      {iterations.map((iter, i) => (
+                      {trials.map((trial, i) => (
                         <tr
                           key={i}
                           className="border-b border-border/50 last:border-0"
@@ -1210,28 +1202,28 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                           <td className="py-2 pr-4">
                             <span
                               className={`font-semibold ${
-                                iter.isInfrastructureError
+                                trial.isInfrastructureError
                                   ? 'text-orange-600 dark:text-orange-400'
-                                  : iter.pass
+                                  : trial.pass
                                     ? 'text-green-600 dark:text-green-400'
                                     : 'text-red-600 dark:text-red-400'
                               }`}
                             >
-                              {iter.isInfrastructureError
+                              {trial.isInfrastructureError
                                 ? '⚠ infra'
-                                : iter.pass
+                                : trial.pass
                                   ? '✓ pass'
                                   : '✗ fail'}
                             </span>
                           </td>
                           <td className="py-2 pr-4 text-muted-foreground">
-                            {iter.durationMs.toFixed(0)}ms
+                            {trial.durationMs.toFixed(0)}ms
                           </td>
-                          {iterations.some((r) => r.toolCallTrace) && (
+                          {trials.some((r) => r.toolCallTrace) && (
                             <td className="py-2 pr-4">
-                              {iter.toolCallTrace ? (
+                              {trial.toolCallTrace ? (
                                 <span className="flex flex-wrap gap-1 items-center">
-                                  {iter.toolCallTrace.calls.map((c, j) => (
+                                  {trial.toolCallTrace.calls.map((c, j) => (
                                     <code
                                       key={j}
                                       className={`text-xs px-1.5 py-0.5 rounded ${
@@ -1248,7 +1240,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                                       {c.name}
                                     </code>
                                   ))}
-                                  {iter.toolCallTrace.missed.map((m, j) => (
+                                  {trial.toolCallTrace.missed.map((m, j) => (
                                     <code
                                       key={`missed-${j}`}
                                       className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground line-through"
@@ -1257,8 +1249,8 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                                       {m.name}
                                     </code>
                                   ))}
-                                  {iter.toolCallTrace.calls.length === 0 &&
-                                    iter.toolCallTrace.missed.length === 0 && (
+                                  {trial.toolCallTrace.calls.length === 0 &&
+                                    trial.toolCallTrace.missed.length === 0 && (
                                       <span className="text-xs text-muted-foreground">
                                         no tools called
                                       </span>
@@ -1271,16 +1263,16 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                               )}
                             </td>
                           )}
-                          {iterations.some((r) => r.clientMetadata) && (
+                          {trials.some((r) => r.clientMetadata) && (
                             <td className="py-2 pr-4">
-                              {iter.clientMetadata ? (
+                              {trial.clientMetadata ? (
                                 <span
                                   className="text-xs text-muted-foreground"
-                                  title={iter.clientMetadata.traceSource}
+                                  title={trial.clientMetadata.traceSource}
                                 >
-                                  {iter.clientMetadata.driverSlug ??
-                                    iter.clientMetadata.clientName}{' '}
-                                  · {iter.clientMetadata.traceConfidence}
+                                  {trial.clientMetadata.driverSlug ??
+                                    trial.clientMetadata.clientName}{' '}
+                                  · {trial.clientMetadata.traceConfidence}
                                 </span>
                               ) : (
                                 <span className="text-xs text-muted-foreground">
@@ -1290,7 +1282,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                             </td>
                           )}
                           <td className="py-2 text-xs text-muted-foreground font-mono">
-                            {iter.error ? stripAnsiCodes(iter.error) : '—'}
+                            {trial.error ? stripAnsiCodes(trial.error) : '—'}
                           </td>
                         </tr>
                       ))}

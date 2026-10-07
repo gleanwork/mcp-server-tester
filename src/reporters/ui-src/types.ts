@@ -7,7 +7,7 @@
  * esbuild inlines type imports at bundle time (stripped at runtime — zero overhead).
  */
 
-export type { ExpectationType, SkillLoad } from '../../types/index.js';
+export type { GraderType, SkillLoad } from '../../types/index.js';
 
 export type {
   MCPConformanceCheck,
@@ -26,6 +26,8 @@ export type {
   MCPEvalHistoricalSummary,
   MCPEvalData,
 } from '../../types/reporter.js';
+
+import type { MCPEvalData } from '../../types/reporter.js';
 
 declare global {
   interface Window {

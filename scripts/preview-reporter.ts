@@ -37,7 +37,7 @@ const mockData: MCPEvalData = {
         'document-evals': 6,
         'llm-host-suite': 4,
       },
-      expectationBreakdown: {
+      graderBreakdown: {
         exact: 2,
         schema: 3,
         textContains: 9,
@@ -64,7 +64,7 @@ const mockData: MCPEvalData = {
             { type: 'text', text: 'Found 12 results for "quarterly report".' },
           ],
         },
-        expectations: {
+        scores: {
           textContains: { pass: true, details: 'Contains "quarterly report"' },
           size: { pass: true, details: 'Response size within bounds' },
         },
@@ -80,7 +80,7 @@ const mockData: MCPEvalData = {
         pass: false,
         baselinePass: true,
         response: { content: [{ type: 'text', text: 'No results found.' }] },
-        expectations: {
+        scores: {
           textContains: {
             pass: false,
             details: 'Expected "results" but got "No results found."',
@@ -89,7 +89,7 @@ const mockData: MCPEvalData = {
         authType: 'api-token',
         durationMs: 198,
       },
-      // Direct mode — search with multi-iteration
+      // Direct mode — search with multi-trial
       {
         id: 'search-relevance',
         datasetName: 'search-evals',
@@ -97,10 +97,10 @@ const mockData: MCPEvalData = {
         source: 'eval',
         pass: true,
         baselinePass: false,
-        assertionPassRate: 0.8,
-        assertionPassRateCI: { lower: 0.37, upper: 0.97 },
+        passRate: 0.8,
+        passRateCI: { lower: 0.37, upper: 0.97 },
         infrastructureErrorRate: 0,
-        iterationResults: [
+        trialResults: [
           { pass: true, durationMs: 289 },
           { pass: true, durationMs: 312 },
           { pass: false, durationMs: 445 },
@@ -110,7 +110,7 @@ const mockData: MCPEvalData = {
         response: {
           content: [{ type: 'text', text: 'Found 8 highly relevant results.' }],
         },
-        expectations: {
+        scores: {
           judge: {
             pass: true,
             details: 'Score: 0.84 — results are relevant and well-ranked',
@@ -120,18 +120,18 @@ const mockData: MCPEvalData = {
         tags: ['flaky', 'high-priority'],
         durationMs: 1625,
       },
-      // Direct mode — search with infra error in one iteration
+      // Direct mode — search with infra error in one trial
       {
         id: 'search-rate-limit',
         datasetName: 'search-evals',
         toolName: 'search',
         source: 'eval',
         pass: true,
-        assertionPassRate: 1.0,
-        assertionPassRateCI: { lower: 0.54, upper: 1.0 },
+        passRate: 1.0,
+        passRateCI: { lower: 0.54, upper: 1.0 },
         infrastructureErrorRate: 0.2,
         infrastructureErrorCount: 1,
-        iterationResults: [
+        trialResults: [
           { pass: true, durationMs: 290 },
           {
             pass: false,
@@ -144,7 +144,7 @@ const mockData: MCPEvalData = {
           { pass: true, durationMs: 288 },
         ],
         response: { content: [{ type: 'text', text: 'Found results.' }] },
-        expectations: {
+        scores: {
           textContains: { pass: true, details: 'Contains expected text' },
         },
         authType: 'api-token',
@@ -167,7 +167,7 @@ const mockData: MCPEvalData = {
             },
           ],
         },
-        expectations: {
+        scores: {
           schema: {
             pass: true,
             details: 'Response matches DocumentCreated schema',
@@ -188,7 +188,7 @@ const mockData: MCPEvalData = {
         response: {
           content: [{ type: 'text', text: '{"error": "Permission denied"}' }],
         },
-        expectations: {
+        scores: {
           schema: {
             pass: false,
             details:
@@ -219,7 +219,7 @@ const mockData: MCPEvalData = {
             },
           ],
         },
-        expectations: {
+        scores: {
           exact: { pass: true, details: 'Response matches expected value' },
         },
         authType: 'oauth',
@@ -240,7 +240,7 @@ const mockData: MCPEvalData = {
             },
           ],
         },
-        expectations: {
+        scores: {
           textContains: { pass: true, details: 'Contains expected tool names' },
         },
         authType: 'api-token',
@@ -259,7 +259,7 @@ const mockData: MCPEvalData = {
             { type: 'text', text: '{"id": "doc-123", "updated": true}' },
           ],
         },
-        expectations: {
+        scores: {
           schema: {
             pass: true,
             details: 'Response matches UpdateResult schema',
@@ -278,7 +278,7 @@ const mockData: MCPEvalData = {
         baselinePass: true,
         error: 'Document doc-999 not found',
         response: null,
-        expectations: {
+        scores: {
           textContains: {
             pass: false,
             details: 'Expected success response but got error',
@@ -298,9 +298,9 @@ const mockData: MCPEvalData = {
         baselinePass: true,
         toolPrecision: 1.0,
         toolRecall: 1.0,
-        assertionPassRate: 0.9,
+        passRate: 0.9,
         infrastructureErrorRate: 0,
-        iterationResults: [
+        trialResults: [
           {
             pass: true,
             durationMs: 1100,
@@ -380,7 +380,7 @@ const mockData: MCPEvalData = {
             },
           ],
         },
-        expectations: {
+        scores: {
           toolsTriggered: {
             pass: true,
             details: 'search was called as expected',
@@ -419,7 +419,7 @@ const mockData: MCPEvalData = {
             },
           ],
         },
-        expectations: {
+        scores: {
           toolsTriggered: {
             pass: false,
             details: 'Required tool create_document was not called',
@@ -456,7 +456,7 @@ const mockData: MCPEvalData = {
             },
           ],
         },
-        expectations: {
+        scores: {
           toolsTriggered: { pass: true, details: 'search was called' },
         },
         toolCallTrace: {
@@ -494,7 +494,7 @@ const mockData: MCPEvalData = {
         toolPrecision: 1.0,
         toolRecall: 1.0,
         response: { content: [{ type: 'text', text: 'I found some stuff.' }] },
-        expectations: {
+        scores: {
           judge: {
             pass: false,
             details:
@@ -534,7 +534,7 @@ const mockData: MCPEvalData = {
             },
           ],
         },
-        expectations: {
+        scores: {
           snapshot: { pass: true, details: 'Matches snapshot "server-info"' },
         },
         authType: 'api-token',
@@ -552,7 +552,7 @@ const mockData: MCPEvalData = {
             { type: 'text', text: 'Last updated: 2026-03-02T14:00:00Z' },
           ],
         },
-        expectations: {
+        scores: {
           regex: { pass: true, details: 'Matches ISO date pattern' },
         },
         authType: 'api-token',
@@ -568,7 +568,7 @@ const mockData: MCPEvalData = {
         baselinePass: false,
         error: 'Internal server error: timeout after 30000ms',
         response: null,
-        expectations: {
+        scores: {
           error: {
             pass: false,
             details: 'Expected success response but got server error',
@@ -594,7 +594,7 @@ const mockData: MCPEvalData = {
             },
           ],
         },
-        expectations: {
+        scores: {
           judge: {
             pass: true,
             details:
@@ -700,7 +700,7 @@ async function main() {
     `   Tools: search, create_document, update_document, get_server_info`
   );
   console.log(`   mcp_host cases: 4 (with precision/recall/trace)`);
-  console.log(`   Multi-iteration: 2 cases`);
+  console.log(`   Multi-trial: 2 cases`);
   console.log(`   Historical runs: ${mockData.historical.length}`);
 
   try {

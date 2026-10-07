@@ -109,7 +109,7 @@ describe('Claude Code MCP startup', () => {
     DEADLINE_TEST_MS
   );
 
-  it('retains separate diagnostics and infrastructure classification for every iteration', async () => {
+  it('retains separate diagnostics and infrastructure classification for every trial', async () => {
     let attempt = 0;
     const result = await runEvalDataset(
       {
@@ -131,13 +131,11 @@ describe('Claude Code MCP startup', () => {
     );
     const row = result.caseResults[0]!;
     expect(row.infrastructureErrorCount).toBe(1);
-    expect(row.assertionPassRate).toBe(1);
+    expect(row.passRate).toBe(1);
     expect(
-      row.iterationResults?.map(
-        (r) => r.clientDiagnostics?.claudeStartup?.status
-      )
+      row.trialResults?.map((r) => r.clientDiagnostics?.claudeStartup?.status)
     ).toEqual(['failed', 'ready']);
-    expect(row.iterationResults?.[0]?.clientDiagnostics?.failureKind).toBe(
+    expect(row.trialResults?.[0]?.clientDiagnostics?.failureKind).toBe(
       'startup'
     );
   });

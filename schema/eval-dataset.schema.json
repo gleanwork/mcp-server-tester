@@ -126,7 +126,7 @@
     "EvalAssertions": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Expectations to validate against the tool response. Multiple fields can be combined — all must pass.",
+      "description": "Assertions to check against what the client did. Multiple fields can be combined; all must pass.",
       "properties": {
         "containsText": {
           "oneOf": [

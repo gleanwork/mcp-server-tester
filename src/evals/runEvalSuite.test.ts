@@ -491,7 +491,7 @@ describe('suite review regressions', () => {
     expect(process.env.EVAL_ITERATIONS).toBe('untouched');
     expect(f.run).not.toHaveBeenCalled();
   });
-  it('runs text, call-count and plugin judge assertions for every custom-host iteration', async () => {
+  it('runs text, call-count and plugin judge assertions for every custom-host trial', async () => {
     const judge = vi.fn(async () => ({ score: 0 }));
     const judgeName = addJudge(`review-judge-${sequence++}`, {
       schema: z.object({}).passthrough(),
@@ -515,9 +515,9 @@ describe('suite review regressions', () => {
     expect(f.run).toHaveBeenCalledTimes(3);
     expect(judge).toHaveBeenCalledTimes(3);
     expect(result.summary.results[0]?.pass).toBe(false);
-    expect(result.summary.results[0]?.iterationResults).toHaveLength(3);
+    expect(result.summary.results[0]?.trialResults).toHaveLength(3);
   });
-  it('preserves per-case host overrides and iterations for canonical host mode', async () => {
+  it('preserves per-case host overrides and trials for canonical host mode', async () => {
     const alternate = await fixture([scenario]);
     const f = await fixture(
       [
@@ -715,7 +715,7 @@ describe('suite review regressions', () => {
       result.summary.variants.map((variant) => variant.metrics?.passed_rate)
     ).toEqual([1, 0]);
   });
-  it('maps multiple native tools to a canonical expectation without dropping argument checks', async () => {
+  it('maps multiple native tools to a canonical assertion without dropping argument checks', async () => {
     const f = await fixture(
       [
         {

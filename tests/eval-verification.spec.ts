@@ -49,7 +49,7 @@ function scriptedClient(mcp: MCPFixtureApi) {
 }
 
 test.describe('Eval Enhancement Verification', () => {
-  test('multi-iteration accuracy fields are populated', async ({
+  test('multi-trial pass rate fields are populated', async ({
     mcp,
   }, testInfo) => {
     const dataset = await loadEvalDataset(
@@ -64,31 +64,31 @@ test.describe('Eval Enhancement Verification', () => {
     // All cases should pass
     expect(result.passed).toBe(result.total);
 
-    // Multi-iteration cases should have assertionPassRate and iterationResults
+    // Multi-trial cases should have passRate and trialResults
     const multiIterCases = result.caseResults.filter(
-      (r) => r.iterationResults !== undefined
+      (r) => r.trialResults !== undefined
     );
 
     expect(multiIterCases.length).toBeGreaterThan(0);
 
     for (const r of multiIterCases) {
-      expect(r.assertionPassRate).toBeDefined();
-      expect(r.assertionPassRate).toBeGreaterThanOrEqual(0);
-      expect(r.assertionPassRate).toBeLessThanOrEqual(1);
-      expect(Array.isArray(r.iterationResults)).toBe(true);
+      expect(r.passRate).toBeDefined();
+      expect(r.passRate).toBeGreaterThanOrEqual(0);
+      expect(r.passRate).toBeLessThanOrEqual(1);
+      expect(Array.isArray(r.trialResults)).toBe(true);
     }
 
-    // Log assertionPassRate results for inspection
+    // Log passRate results for inspection
     console.log('Assertion pass rate results:');
     for (const r of multiIterCases) {
-      const iterCount = r.iterationResults?.length ?? 0;
+      const trialCount = r.trialResults?.length ?? 0;
       console.log(
-        `  ${r.id}: assertionPassRate=${(r.assertionPassRate ?? 0).toFixed(2)}, iterations=${iterCount}, pass=${r.pass}`
+        `  ${r.id}: passRate=${(r.passRate ?? 0).toFixed(2)}, trials=${trialCount}, pass=${r.pass}`
       );
     }
   });
 
-  test('echo multi-iteration case: 3 iterations, all pass', async ({
+  test('echo multi-trial case: 3 trials, all pass', async ({
     mcp,
   }, testInfo) => {
     const dataset = await loadEvalDataset(
@@ -104,13 +104,13 @@ test.describe('Eval Enhancement Verification', () => {
       (r) => r.id === 'multi-iter-echo-always-passes'
     );
     expect(echoCase).toBeDefined();
-    expect(echoCase?.assertionPassRate).toBe(1.0);
-    expect(echoCase?.iterationResults).toHaveLength(3);
-    expect(echoCase?.iterationResults?.every((iter) => iter.pass)).toBe(true);
+    expect(echoCase?.passRate).toBe(1.0);
+    expect(echoCase?.trialResults).toHaveLength(3);
+    expect(echoCase?.trialResults?.every((iter) => iter.pass)).toBe(true);
     expect(echoCase?.pass).toBe(true);
   });
 
-  test('calculate multi-iteration case: 5 iterations, deterministic', async ({
+  test('calculate multi-trial case: 5 trials, deterministic', async ({
     mcp,
   }, testInfo) => {
     const dataset = await loadEvalDataset(
@@ -126,14 +126,12 @@ test.describe('Eval Enhancement Verification', () => {
       (r) => r.id === 'multi-iter-calculate-addition'
     );
     expect(calcCase).toBeDefined();
-    expect(calcCase?.assertionPassRate).toBe(1.0); // 7+3=10 is always correct
-    expect(calcCase?.iterationResults).toHaveLength(5);
+    expect(calcCase?.passRate).toBe(1.0); // 7+3=10 is always correct
+    expect(calcCase?.trialResults).toHaveLength(5);
     expect(calcCase?.pass).toBe(true); // 1.0 >= 0.8 threshold
   });
 
-  test('single-iteration case: no assertionPassRate fields', async ({
-    mcp,
-  }, testInfo) => {
+  test('single-trial case: no passRate fields', async ({ mcp }, testInfo) => {
     const dataset = await loadEvalDataset(
       join(__dirname, '../data/eval-verification.json')
     );
@@ -147,8 +145,8 @@ test.describe('Eval Enhancement Verification', () => {
       (r) => r.id === 'single-iter-baseline'
     );
     expect(baselineCase).toBeDefined();
-    expect(baselineCase?.assertionPassRate).toBeUndefined();
-    expect(baselineCase?.iterationResults).toBeUndefined();
+    expect(baselineCase?.passRate).toBeUndefined();
+    expect(baselineCase?.trialResults).toBeUndefined();
     expect(baselineCase?.pass).toBe(true);
   });
 
@@ -169,7 +167,7 @@ test.describe('Eval Enhancement Verification', () => {
     expect(result.passed).toBe(4);
   });
 
-  test('calculate multi-iteration case: 5 iterations, deterministic result', async ({
+  test('calculate multi-trial case: 5 trials, deterministic result', async ({
     mcp,
   }, testInfo) => {
     const dataset = await loadEvalDataset(
@@ -185,8 +183,8 @@ test.describe('Eval Enhancement Verification', () => {
       (r) => r.id === 'multi-iter-calculate-addition'
     );
     expect(calcCase).toBeDefined();
-    expect(calcCase?.assertionPassRate).toBe(1.0); // 7+3=10 is always correct
-    expect(calcCase?.iterationResults).toHaveLength(5);
+    expect(calcCase?.passRate).toBe(1.0); // 7+3=10 is always correct
+    expect(calcCase?.trialResults).toHaveLength(5);
     expect(calcCase?.pass).toBe(true); // 1.0 >= 0.8 threshold
   });
 });

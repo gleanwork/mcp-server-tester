@@ -65,7 +65,7 @@ function isExternalHostInfrastructureFailure(
 /**
  * Whether a run failed on infrastructure (a network failure, a host that
  * couldn't start) rather than on its assertions. Such runs are left out of
- * accuracy and of per-trial metrics.
+ * the pass rate and of per-trial metrics.
  */
 export function isInfrastructureFailure(
   result: Pick<EvalCaseResult, 'error' | 'clientDiagnostics' | 'clientMetadata'>

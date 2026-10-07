@@ -41,7 +41,7 @@ export function validateError(
   const actualIsError = isErrorResponse(response);
   const errorMessage = actualIsError ? extractErrorMessage(response) : '';
 
-  // Handle boolean expectation
+  // Handle boolean assertion
   if (typeof expected === 'boolean') {
     if (expected) {
       // Expect an error
@@ -76,7 +76,7 @@ export function validateError(
     }
   }
 
-  // Handle string or string[] expectation
+  // Handle string or string[] assertion
   const expectedMessages = Array.isArray(expected) ? expected : [expected];
 
   // Must be an error first
