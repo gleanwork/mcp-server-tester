@@ -551,6 +551,48 @@ described in [chatgpt-desktop.md](chatgpt-desktop.md#linux-runtime-contract).
 MST's transport does not make a server read-only. Native-proxy write
 interception is a host/catalog policy responsibility, not a stdio guarantee.
 
+### Dry-run proxy
+
+To let a client use a real HTTP MCP server without writing to it, put MST's
+dry-run proxy in front of it. The proxy is a stdio MCP server. The client sees
+the upstream server's real tools. Read-only tool calls go upstream. Every
+other tool call returns a planned-write result and never reaches the server:
+
+```json
+{
+  "_mst_planned_write": {
+    "server": "slack",
+    "tool_name": "send_message",
+    "arguments": {}
+  }
+}
+```
+
+It fails closed. A tool is read-only only when it is annotated
+`readOnlyHint: true` and not `destructiveHint: true`. A tool without
+annotations, or one the server does not list, is a write. `readOnlyTools`
+allows reads on a server that annotates nothing; `alwaysWriteTools` intercepts
+tools annotated as reads.
+
+`dryRunProxyServer()` (from `@gleanwork/mcp-server-tester/evals`) returns the
+stdio server entry. It holds the path of a token file, never a token:
+
+```ts
+import { dryRunProxyServer } from '@gleanwork/mcp-server-tester/evals';
+
+const slack = dryRunProxyServer({
+  label: 'slack',
+  upstreamUrl: 'https://mcp.slack.com/mcp',
+  tokenFile: '/private/run/slack.json', // { "version": 1, "accessToken": "..." }
+  minTools: 10,
+});
+```
+
+The proxy re-reads the token file when it is replaced, so a renewed token
+takes effect on the next request without restarting the MCP session. After a
+401 it waits up to 90 seconds for a new token, then retries once. If none
+arrives, it logs `CONNECTOR_AUTH_EXPIRED` to stderr. It never logs a token.
+
 ### macOS setup contract
 
 MST validates the full server set before changing the app or profile. HTTP,

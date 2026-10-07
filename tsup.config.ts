@@ -79,6 +79,22 @@ export default defineConfig([
       js: '#!/usr/bin/env node',
     },
   },
+  // Dry-run proxy: a small stdio entry point a client launches once per
+  // server, so it doesn't load the whole CLI.
+  {
+    entry: { dryRun: 'src/proxy/dryRunProxyMain.ts' },
+    format: ['esm'],
+    dts: false,
+    splitting: false,
+    sourcemap: false,
+    treeshake: true,
+    minify: false,
+    outDir: 'dist/proxy',
+    tsconfig: './tsconfig.build.json',
+    banner: {
+      js: '#!/usr/bin/env node',
+    },
+  },
   // Reporter build
   {
     entry: ['src/reporters/mcpReporter.ts'],
