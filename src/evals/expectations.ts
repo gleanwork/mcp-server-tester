@@ -20,10 +20,7 @@ import type {
 import type { ClientResponse } from './caseExecution.js';
 import type { TraceEvidence } from './evalFrameworkTypes.js';
 import type { JudgeCaseSource } from '../judge/judgeContract.js';
-import type {
-  ExternalHostMetadata,
-  TraceSource,
-} from './externalHost/types.js';
+import type { ExternalHostMetadata } from './externalHost/types.js';
 import type { EvalExpectationResult } from '../types/index.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import { BUILTIN_RESULT_SCHEMAS } from './builtinResultSchemas.js';
@@ -82,50 +79,13 @@ export interface ExpectationOutcome {
   mcpHostTrace?: EvalCaseResult['mcpHostTrace'];
 }
 
-/** Trace sources that record tool calls as data rather than inferring them. */
-const STRUCTURED_EXTERNAL_SOURCES: ReadonlySet<TraceSource> = new Set([
-  'mcp-proxy',
-  'mcp-server-logs',
-  'host-local-transcript',
-  'host-native-export',
-]);
-
-/** Where an external host's tool calls came from, when it has no per-field evidence. */
-function toolCallTraceSource(externalHost: ExternalHostMetadata): TraceSource {
-  return externalHost.sources?.toolCalls ?? externalHost.traceSource;
-}
-
-/** Whether an external host's trace is good enough to grade tool calls. */
-function hasStructuredToolEvidence(
-  externalHost: ExternalHostMetadata
-): boolean {
-  const evidence = externalHost.evidence?.toolCalls;
-  if (evidence)
-    return (
-      evidence.confidence === 'high' &&
-      STRUCTURED_EXTERNAL_SOURCES.has(evidence.source)
-    );
-  return (
-    externalHost.traceConfidence === 'high' &&
-    STRUCTURED_EXTERNAL_SOURCES.has(toolCallTraceSource(externalHost))
-  );
-}
-
 /**
  * Why tool-call expectations can't be graded for this execution, or undefined
- * when the evidence is sufficient. The external host's trace source is
- * checked first because it is the more specific explanation.
+ * when the evidence is sufficient.
  */
 export function toolEvidenceGap(
-  evalCase: Pick<EvalCase, 'mode'>,
-  graded: Pick<GradedExecution, 'evidence' | 'externalHost'>
+  graded: Pick<GradedExecution, 'evidence'>
 ): string | undefined {
-  const externalHost =
-    evalCase.mode === 'external_host' ? graded.externalHost : undefined;
-  if (externalHost && !hasStructuredToolEvidence(externalHost))
-    return `External host trace source ${toolCallTraceSource(
-      externalHost
-    )} (${externalHost.traceConfidence} confidence) cannot support tool-call assertions. Use protocol traces or host-native structured traces for toolsTriggered/toolCallCount.`;
   return hostEvidenceProblem(graded.evidence);
 }
 
@@ -373,7 +333,7 @@ export async function evaluateExpectations(
   const gap =
     expectBlock.toolsTriggered !== undefined ||
     expectBlock.toolCallCount !== undefined
-      ? toolEvidenceGap(evalCase, graded)
+      ? toolEvidenceGap(graded)
       : undefined;
 
   if (expectBlock.toolsTriggered !== undefined) {

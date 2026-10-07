@@ -17,11 +17,7 @@ async function run(host: ClientDefinition, options: ClientRunOptions) {
   const trace = await host.run!(
     { prompt: options.cases[0]!.input!, servers: options.servers },
     options.host,
-    {
-      manifest: options.manifest,
-      arm: options.arm,
-      mcpHostConfig: options.cases[0]?.mcpHostConfig,
-    }
+    { manifest: options.manifest, arm: options.arm }
   );
   return hostRunToExecution(trace, host.evidence ?? 'none', options.servers);
 }
@@ -33,7 +29,6 @@ vi.mock('./mcpHost/mcpHostSimulation.js', () => ({ simulateMCPHost: vi.fn() }));
 const case_ = {
   id: 'one',
   input: 'Find documents',
-  mode: 'mcp_host' as const,
 };
 function options(): ClientRunOptions {
   return {

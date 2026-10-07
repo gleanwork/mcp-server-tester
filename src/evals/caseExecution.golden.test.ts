@@ -22,16 +22,10 @@ import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import { createFixtureExtensions } from '../mcp/fixtures/fixtureExtensions.js';
 import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
 import type * as SimulationModule from './mcpHost/mcpHostSimulation.js';
-import type * as RuntimeModule from './externalHost/runtime.js';
 import type * as JudgeClientModule from '../judge/judgeClient.js';
 import { createJudge } from '../judge/judgeClient.js';
 import type { JudgeConfig, JudgeResult } from '../judge/judgeTypes.js';
 import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
-import { runExternalHostScenario } from './externalHost/runtime.js';
-import type {
-  ExternalHostMetadata,
-  ExternalHostRunResult,
-} from './externalHost/types.js';
 import { hostRunToExecution } from './hostTrace.js';
 import type { ClientRunResult, JudgeDefinition } from './evalFrameworkTypes.js';
 import { runEvalSuite } from './runEvalSuite.js';
@@ -42,10 +36,6 @@ import type { JudgeInput } from '../judge/judgeContract.js';
 vi.mock('./mcpHost/mcpHostSimulation.js', async (original) => ({
   ...(await original<typeof SimulationModule>()),
   simulateMCPHost: vi.fn(),
-}));
-vi.mock('./externalHost/runtime.js', async (original) => ({
-  ...(await original<typeof RuntimeModule>()),
-  runExternalHostScenario: vi.fn(),
 }));
 vi.mock('../judge/judgeClient.js', async (original) => ({
   ...(await original<typeof JudgeClientModule>()),
@@ -105,9 +95,8 @@ const simulation: MCPHostSimulationResult = {
 
 const hostCase: EvalCase = {
   id: 'host',
-  mode: 'mcp_host',
+  mode: 'host',
   input: 'Weather in London?',
-  mcpHostConfig: { provider: 'anthropic' },
   assertions: {
     containsText: 'sunny',
     toolsTriggered: {
@@ -119,38 +108,6 @@ const hostCase: EvalCase = {
     toolCallCount: { min: 1, max: 3 },
   },
 };
-
-function externalMetadata(
-  overrides: Partial<ExternalHostMetadata> = {}
-): ExternalHostMetadata {
-  return {
-    driver: {
-      provider: 'openai',
-      product: 'chatgpt',
-      surface: 'agent',
-      runtime: 'desktop-app',
-      platform: 'macos',
-    },
-    driverSlug: 'openai.chatgpt.agent.desktop-app.macos',
-    displayName: 'ChatGPT',
-    hostName: 'ChatGPT',
-    hostType: 'desktop',
-    capabilitiesUsed: [],
-    traceSource: 'host-local-transcript',
-    traceConfidence: 'high',
-    artifacts: [],
-    session: { id: 'session', turnId: 'turn' },
-    correlation: { strategy: 'exact_prompt', includedInPrompt: false },
-    ...overrides,
-  } as ExternalHostMetadata;
-}
-
-function externalResult(metadata: ExternalHostMetadata): ExternalHostRunResult {
-  return {
-    ...simulation,
-    externalHost: metadata,
-  } as ExternalHostRunResult;
-}
 
 const trace: ClientRunResult = {
   finalText: 'It is sunny in London.',
@@ -216,7 +173,6 @@ beforeEach(() => {
   installPlugins([goldenPlugin()]);
   calls.length = 0;
   vi.mocked(simulateMCPHost).mockReset().mockResolvedValue(simulation);
-  vi.mocked(runExternalHostScenario).mockReset();
 });
 
 describe('golden: direct execution', () => {
@@ -294,7 +250,7 @@ describe('golden: direct execution', () => {
   });
 });
 
-describe('golden: simulated mcp_host (dataset API)', () => {
+describe('golden: the mst client (dataset API)', () => {
   it('succeeds with tool evidence and a missed required tool', async () => {
     expect(stable(await runEvalCase(hostCase, context()))).toMatchSnapshot();
     expect(simulateMCPHost).toHaveBeenCalledTimes(1);
@@ -325,44 +281,6 @@ describe('golden: simulated mcp_host (dataset API)', () => {
       .mockResolvedValueOnce({ ...simulation, response: 'cloudy' });
     const result = await runEvalCase(
       { ...hostCase, trials: 3, passThreshold: 0.5 },
-      context()
-    );
-    expect(stable(result)).toMatchSnapshot();
-  });
-});
-
-describe('golden: external_host', () => {
-  it('high-confidence native trace', async () => {
-    vi.mocked(runExternalHostScenario).mockResolvedValue(
-      externalResult(externalMetadata())
-    );
-    const result = await runEvalCase(
-      {
-        ...hostCase,
-        id: 'external',
-        mode: 'external_host',
-        mcpHostConfig: undefined,
-        externalHost: { driver: 'openai.chatgpt.agent.desktop-app.macos' },
-      } as EvalCase,
-      context()
-    );
-    expect(stable(result)).toMatchSnapshot();
-  });
-
-  it('low-confidence trace cannot support tool assertions', async () => {
-    vi.mocked(runExternalHostScenario).mockResolvedValue(
-      externalResult(
-        externalMetadata({ traceSource: 'screenshot', traceConfidence: 'low' })
-      )
-    );
-    const result = await runEvalCase(
-      {
-        ...hostCase,
-        id: 'external-low',
-        mode: 'external_host',
-        mcpHostConfig: undefined,
-        externalHost: { driver: 'openai.chatgpt.agent.desktop-app.macos' },
-      } as EvalCase,
       context()
     );
     expect(stable(result)).toMatchSnapshot();
@@ -461,7 +379,7 @@ describe('golden: runEvalSuite hosts', () => {
     cases: EvalCase[] = [
       {
         id: 'suite-host',
-        mode: 'mcp_host',
+        mode: 'host',
         input: 'Weather in London?',
         assertions: {
           containsText: 'sunny',
@@ -544,7 +462,7 @@ describe('golden: runEvalSuite hosts', () => {
       [
         {
           id: 'suite-judged',
-          mode: 'mcp_host',
+          mode: 'host',
           input: 'Weather in London?',
           expected: { answer: 'canonical' },
           assertions: {
@@ -605,7 +523,7 @@ describe('golden: runEvalSuite hosts', () => {
       [
         {
           id: 'suite-rubric',
-          mode: 'mcp_host',
+          mode: 'host',
           input: 'Weather in London?',
           assertions: {
             passesJudge: { rubric: 'correctness', threshold: 0.9 },

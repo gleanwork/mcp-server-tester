@@ -7,7 +7,12 @@ import {
 import type { Trace } from './evalFrameworkTypes.js';
 import { installPlugins } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
-import type { EvalDataset, EvalCase } from './datasetTypes.js';
+import {
+  isClientCase,
+  type EvalDataset,
+  type EvalCase,
+} from './datasetTypes.js';
+import type { ClientOptions } from './clientFields.js';
 import {
   checkedExecution,
   executeEvalCase,
@@ -29,15 +34,6 @@ import {
   evaluateExpectations,
   type ExpectationOutcome,
 } from './expectations.js';
-import type {
-  ExternalHostCapabilitiesConfig,
-  ExternalHostCorrelationConfig,
-} from './externalHost/types.js';
-import {
-  driverToSlug,
-  normalizeHostDriver,
-} from './externalHost/driverIdentity.js';
-import { getBuiltinDriverConfig } from './externalHost/builtinDrivers.js';
 import type {
   MCPProtocolInfo,
   SkillLoad,
@@ -187,14 +183,14 @@ export interface EvalRunnerResult {
   improvements?: number;
 
   /**
-   * Average tool precision across all mcp_host cases that have a
+   * Average tool precision across all client cases that have a
    * `toolsTriggered` expectation (precision = fraction of called tools
    * that were expected). Only present when at least one such case ran.
    */
   datasetToolPrecision?: number;
 
   /**
-   * Average tool recall across all mcp_host cases that have a
+   * Average tool recall across all client cases that have a
    * `toolsTriggered` expectation (recall = fraction of required tools
    * that were actually called). Only present when at least one such case ran.
    */
@@ -212,7 +208,7 @@ export interface EvalRunnerResult {
   metadata?: EvalRunMetadata;
 
   /**
-   * Aggregate token usage from all mcp_host LLM simulations across all cases.
+   * Aggregate token usage from every client case's model calls.
    */
   totalHostUsage?: UsageMetrics;
 
@@ -243,6 +239,19 @@ export interface EvalRunnerOptions {
    */
   dataset: EvalDataset;
 
+  /**
+   * The client cases run on, the model it uses and its options; a case's own
+   * `client`, `model` and `clientOptions` change them. Outside a suite, cases
+   * run on `mst`, on the test's MCP connection.
+   *
+   * @example { client: 'mst', model: 'claude-haiku-4-5' }
+   */
+  client?: string;
+  /** The model the client uses. Recorded in run metadata. */
+  model?: string;
+  /** The client's own options, such as `systemPrompt` or `skills`. */
+  clientOptions?: ClientOptions;
+
   /** Plugins whose extensions (for example `acme/completeness` judges) the cases use. */
   plugins?: readonly Plugin[];
 
@@ -257,8 +266,8 @@ export interface EvalRunnerOptions {
   toolMap?: Record<string, string[]>;
 
   /**
-   * Optional case executor, replacing the fixture for all but `external_host`
-   * cases. Returns how the case ran; the runner still owns all verdicts.
+   * Optional case executor, replacing the fixture. Returns how the case ran;
+   * the runner still owns all verdicts.
    */
   executeCase?: (evalCase: EvalCase) => Promise<CaseExecution>;
 
@@ -298,26 +307,28 @@ export interface EvalRunnerOptions {
   concurrency?: number;
 
   /**
-   * Default iteration count for `mcp_host` mode cases that do not specify
-   * `iterations` explicitly. Has no effect on `direct` mode cases (which are
-   * deterministic and always default to 1 iteration).
+   * Default trial count for client cases that don't set `trials`. Has no
+   * effect on direct cases (which are deterministic and always run once).
    *
    * Set to 10 for standard runs or 20 for release gates. Individual cases can
-   * still override this with their own `iterations` field.
+   * still override this with their own `trials` field.
    *
-   * @default 1 (preserves historical behaviour when not set)
+   * @default 1
    *
    * @example
    * ```typescript
-   * // Run all mcp_host cases 10 times each by default
-   * await runEvalDataset({ dataset, defaultTrials: 10 }, { mcp });
+   * // Run every client case 10 times by default
+   * await runEvalDataset(
+   *   { dataset, client: 'mst', model: 'claude-haiku-4-5', defaultTrials: 10 },
+   *   { mcp }
+   * );
    * ```
    */
   defaultTrials?: number;
 
   /**
-   * Default `accuracyThreshold` for host-driven cases that don't set their
-   * own: the share of a case's trials that must pass.
+   * Default `passThreshold` for client cases that don't set their own: the
+   * share of a case's trials that must pass.
    *
    * @default 1
    */
@@ -395,14 +406,6 @@ export interface EvalRunnerOptions {
   toolOverrides?: ToolOverrideVariant;
 
   /**
-   * MCP host model identifier to record in run metadata.
-   * Use this to identify which model was used when running mcp_host cases.
-   *
-   * @example 'claude-opus-4-20250514'
-   */
-  mcpHostModel?: string;
-
-  /**
    * Judge model identifier to record in run metadata.
    * Use this to identify which model was used for judge evaluations.
    *
@@ -423,6 +426,18 @@ export interface EvalRunnerOptions {
  * Options for running a single eval case
  */
 export interface EvalCaseOptions {
+  /**
+   * The client cases run on, the model it uses and its options; a case's own
+   * `client`, `model` and `clientOptions` change them. Outside a suite, cases
+   * run on `mst`, on the test's MCP connection.
+   *
+   * @example { client: 'mst', model: 'claude-haiku-4-5' }
+   */
+  client?: string;
+  /** The model the client uses. Recorded in run metadata. */
+  model?: string;
+  /** The client's own options, such as `systemPrompt` or `skills`. */
+  clientOptions?: ClientOptions;
   /** Plugins whose extensions (for example `acme/completeness` judges) the case uses. */
   plugins?: readonly Plugin[];
   toolMap?: Record<string, string[]>;
@@ -565,8 +580,9 @@ function didCasePass(
  */
 function buildRequest(
   evalCase: EvalCase,
-  toolOverrideVariantId?: string
+  run: EvalCaseOptions
 ): EvalCaseRequest {
+  const toolOverrideVariantId = run.toolOverrideVariantId;
   const request: EvalCaseRequest = {
     mode: evalCase.mode ?? 'direct',
   };
@@ -587,155 +603,27 @@ function buildRequest(
     >;
   }
 
-  if (evalCase.mode === 'mcp_host' || evalCase.mode === 'host') {
+  if (isClientCase(evalCase)) {
+    const client = evalCase.client ?? run.client;
+    // A case's own client doesn't take the run's model.
+    const model =
+      evalCase.model ??
+      (evalCase.client === undefined || evalCase.client === run.client
+        ? run.model
+        : undefined);
+    if (client !== undefined) request.client = client;
+    if (model !== undefined) request.model = model;
     if (evalCase.input) request.scenario = evalCase.input;
     if (evalCase.expected?.answer !== undefined) {
       const answer = evalCase.expected.answer;
       request.reference =
         typeof answer === 'string' ? answer : JSON.stringify(answer);
     }
-    if (evalCase.mcpHostConfig) {
-      request.mcpHostConfig = {
-        provider: evalCase.mcpHostConfig.provider,
-        ...(evalCase.mcpHostConfig.model !== undefined && {
-          model: evalCase.mcpHostConfig.model,
-        }),
-      };
-    }
-  } else if (evalCase.mode === 'external_host') {
-    if (evalCase.input) request.scenario = evalCase.input;
-    if (evalCase.externalHost) {
-      let driverSlug: string | undefined;
-      try {
-        driverSlug = driverToSlug(
-          normalizeHostDriver(evalCase.externalHost.driver)
-        );
-      } catch {
-        driverSlug = undefined;
-      }
-      const builtinConfig = driverSlug
-        ? getBuiltinDriverConfig(driverSlug)
-        : undefined;
-      const effectiveOptions = mergeReporterOptions(
-        builtinConfig?.options,
-        evalCase.externalHost.options
-      );
-      const effectiveCapabilities = mergeReporterCapabilities(
-        builtinConfig?.capabilities,
-        evalCase.externalHost.capabilities
-      );
-      const effectiveCorrelation = mergeReporterCorrelation(
-        builtinConfig?.correlation,
-        evalCase.externalHost.correlation
-      );
-      request.externalHost = {
-        driver: evalCase.externalHost.driver,
-        driverSlug,
-        name: evalCase.externalHost.name ?? builtinConfig?.name,
-        hostType: evalCase.externalHost.hostType,
-        variant: evalCase.externalHost.variant,
-        timeoutMs: evalCase.externalHost.timeoutMs,
-        usesBuiltInDefaults: builtinConfig !== undefined,
-        correlation: effectiveCorrelation,
-        options: sanitizeReporterRecord(effectiveOptions),
-        capabilities: serializeExternalHostCapabilities(effectiveCapabilities),
-      };
-    }
   } else {
     if (evalCase.args) request.args = evalCase.args;
   }
 
   return request;
-}
-
-function mergeReporterOptions(
-  base: Record<string, unknown> | undefined,
-  override: Record<string, unknown> | undefined
-): Record<string, unknown> | undefined {
-  if (!base) {
-    return override;
-  }
-  if (!override) {
-    return base;
-  }
-  return {
-    ...base,
-    ...override,
-  };
-}
-
-function mergeReporterCapabilities(
-  base: ExternalHostCapabilitiesConfig | undefined,
-  override: ExternalHostCapabilitiesConfig | undefined
-): ExternalHostCapabilitiesConfig | undefined {
-  if (!base) {
-    return override;
-  }
-  if (!override) {
-    return base;
-  }
-  return {
-    ...base,
-    ...override,
-  };
-}
-
-function mergeReporterCorrelation(
-  base: ExternalHostCorrelationConfig | undefined,
-  override: ExternalHostCorrelationConfig | undefined
-): ExternalHostCorrelationConfig | undefined {
-  if (!base) {
-    return override;
-  }
-  if (!override) {
-    return base;
-  }
-  return {
-    ...base,
-    ...override,
-  };
-}
-
-function serializeExternalHostCapabilities(
-  capabilities: ExternalHostCapabilitiesConfig | undefined
-): NonNullable<EvalCaseRequest['externalHost']>['capabilities'] {
-  if (!capabilities || typeof capabilities !== 'object') {
-    return undefined;
-  }
-
-  const serialized: NonNullable<
-    NonNullable<EvalCaseRequest['externalHost']>['capabilities']
-  > = {};
-
-  for (const [capability, bindingOrBindings] of Object.entries(capabilities)) {
-    const bindings = Array.isArray(bindingOrBindings)
-      ? bindingOrBindings
-      : [bindingOrBindings];
-    serialized[capability] = bindings
-      .filter((binding): binding is NonNullable<typeof binding> =>
-        Boolean(binding)
-      )
-      .map((binding) => ({
-        uses: binding.uses,
-        ...(binding.provides !== undefined && {
-          provides: [...binding.provides],
-        }),
-        ...(binding.with !== undefined && {
-          with: sanitizeReporterRecord(binding.with),
-        }),
-      }));
-  }
-
-  return serialized;
-}
-
-function sanitizeReporterRecord(
-  value: Record<string, unknown> | undefined
-): Record<string, unknown> | undefined {
-  if (!value) {
-    return undefined;
-  }
-  return sanitizeReporterValue(value) as Record<string, unknown>;
 }
 
 function sanitizeReporterValue(value: unknown): unknown {
@@ -814,14 +702,16 @@ async function runSingleIteration(
 ): Promise<EvalCaseResult> {
   const startTime = Date.now();
 
-  // A custom executor (e.g. a suite host) replaces the fixture path, except
-  // for legacy external_host cases.
+  // A custom executor (e.g. a suite's client) replaces the fixture path.
   let execution: CaseExecution;
   try {
-    execution =
-      options.executeCase && evalCase.mode !== 'external_host'
-        ? checkedExecution(await options.executeCase(evalCase))
-        : await executeEvalCase(evalCase, context.mcp);
+    execution = options.executeCase
+      ? checkedExecution(await options.executeCase(evalCase))
+      : await executeEvalCase(evalCase, context.mcp, {
+          client: options.client,
+          model: options.model,
+          clientOptions: options.clientOptions,
+        });
   } catch (error) {
     execution = failedExecution(error);
   }
@@ -867,14 +757,12 @@ async function runSingleIteration(
     id: evalCase.id,
     datasetName: options.datasetName ?? 'single-case',
     toolName:
-      evalCase.mode === 'external_host'
-        ? 'external_host'
-        : evalCase.input != null
-          ? 'mcp_host'
-          : (evalCase.toolName ?? evalCase.request?.method ?? 'unknown'),
+      evalCase.input != null
+        ? 'mcp_host'
+        : (evalCase.toolName ?? evalCase.request?.method ?? 'unknown'),
     source: 'eval',
     pass: didCasePass(error, outcome.expectations),
-    request: buildRequest(evalCase, options.toolOverrideVariantId),
+    request: buildRequest(evalCase, options),
     response,
     error,
     expectations: outcome.expectations,
@@ -991,11 +879,9 @@ export async function runEvalCase(
         id: evalCase.id,
         datasetName: options.datasetName ?? 'single-case',
         toolName:
-          evalCase.mode === 'external_host'
-            ? 'external_host'
-            : evalCase.input != null
-              ? 'mcp_host'
-              : (evalCase.toolName ?? evalCase.request?.method ?? 'unknown'),
+          evalCase.input != null
+            ? 'mcp_host'
+            : (evalCase.toolName ?? evalCase.request?.method ?? 'unknown'),
         source: 'eval',
         pass: false,
         error: iterationResults[0]?.error,
@@ -1004,7 +890,7 @@ export async function runEvalCase(
         project: context.mcp?.project,
         durationMs: 0,
         tags: evalCase.tags,
-        request: buildRequest(evalCase, options.toolOverrideVariantId),
+        request: buildRequest(evalCase, options),
       };
 
   const totalHostUsage = iterationResults.reduce(
@@ -1141,9 +1027,9 @@ export async function runEvalDataset(
     resultStore,
     baselineResultsFrom,
     toolOverrides,
-    mcpHostModel,
     judgeModel,
   } = options;
+  const mcpHostModel = options.model;
   if (options.plugins) installPlugins(options.plugins);
 
   const startTime = Date.now();
@@ -1166,10 +1052,9 @@ export async function runEvalDataset(
 
   // Preflight cost warning: estimate the number of LLM judge API calls this run will make
   const estimatedJudgeCalls = casesToRun.reduce((sum, c) => {
-    const effectiveIterations =
-      c.mode === 'host' || c.mode === 'mcp_host' || c.mode === 'external_host'
-        ? (c.trials ?? defaultTrials ?? 1)
-        : (c.trials ?? 1);
+    const effectiveIterations = isClientCase(c)
+      ? (c.trials ?? defaultTrials ?? 1)
+      : (c.trials ?? 1);
     if (c.assertions?.passesJudge == null) return sum;
     const judges = Array.isArray(c.assertions.passesJudge)
       ? c.assertions.passesJudge
@@ -1189,12 +1074,9 @@ export async function runEvalDataset(
 
   // Build task factories for all cases
   const tasks = casesToRun.map((evalCase) => async () => {
-    // Apply defaultTrials to host-driven cases that don't specify iterations.
-    // Direct mode cases are deterministic — they always stay at 1 iteration.
-    const hostDriven =
-      evalCase.mode === 'host' ||
-      evalCase.mode === 'mcp_host' ||
-      evalCase.mode === 'external_host';
+    // Apply defaultTrials to client cases that don't set trials. Direct
+    // cases are deterministic: they always run once.
+    const hostDriven = isClientCase(evalCase);
     const withTrialDefaults = {
       ...evalCase,
       ...(hostDriven &&
@@ -1209,19 +1091,13 @@ export async function runEvalDataset(
         : {}),
     };
 
-    // Warn when a mcp_host case opts into multi-iteration accuracy measurement
-    // but uses fewer iterations than the guide-recommended minimum.
-    // Single-iteration mcp_host runs (the default) are a valid smoke-test pattern
-    // and are not warned about — the warning is scoped to cases that have
-    // explicitly chosen a multi-iteration count that is too small to be reliable.
-    if (
-      evalCase.mode === 'host' ||
-      evalCase.mode === 'mcp_host' ||
-      evalCase.mode === 'external_host'
-    ) {
+    // Warn when a client case runs several trials, but fewer than the
+    // guide's minimum. One trial (the default) is a valid smoke test, so the
+    // warning is only for a count chosen too small to be reliable.
+    if (hostDriven) {
       const effectiveIterations = withTrialDefaults.trials ?? 1;
       // Once per case and count: a suite runs the same case in every arm.
-      const warning = `${evalCase.id}\u0000${evalCase.mode}\u0000${effectiveIterations}`;
+      const warning = `${evalCase.id}\u0000${effectiveIterations}`;
       if (
         effectiveIterations > 1 &&
         effectiveIterations < 10 &&
@@ -1229,7 +1105,7 @@ export async function runEvalDataset(
       ) {
         warnedLowIterations.add(warning);
         console.warn(
-          `[mcp-server-tester] Eval case "${evalCase.id}": running ${effectiveIterations} trials in ${evalCase.mode} mode ` +
+          `[mcp-server-tester] Eval case "${evalCase.id}": running ${effectiveIterations} trials ` +
             `may not be statistically reliable. Consider 10+ trials for pass rates you can trust.`
         );
       }
@@ -1243,6 +1119,9 @@ export async function runEvalDataset(
         : withTrialDefaults;
 
     const result = await runEvalCase(effectiveCase, effectiveContext, {
+      client: options.client,
+      model: options.model,
+      clientOptions: options.clientOptions,
       executeCase: options.executeCase,
       toolMap: options.toolMap,
       datasetName: dataset.name,

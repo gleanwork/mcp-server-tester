@@ -387,15 +387,15 @@ Run an eval dataset. Expectations are defined per-case in the dataset's `asserti
   - `stopOnFailure?: boolean` - Stop on first failure (default: `false`)
   - `onCaseComplete?: (result: EvalCaseResult) => void` - Callback after each case completes
   - `concurrency?: number` - Max parallel cases (default: `1` = sequential)
-  - `defaultTrials?: number` - Default trial count for `mcp_host` cases (default: `1`)
-  - `defaultPassThreshold?: number` - Default `passThreshold` for host-driven cases that don't set one (default: `1`)
+  - `client?: string`, `model?: string`, `clientOptions?: ClientOptions` - The client cases run on, its model and options; a case's own fields change them. Outside a suite, cases run on `mst`, on the test's MCP connection (default client: `'mst'`)
+  - `defaultTrials?: number` - Default trial count for client cases (default: `1`)
+  - `defaultPassThreshold?: number` - Default `passThreshold` for client cases that don't set one (default: `1`)
   - `defaultJudgeReps?: number` - Default judge evaluation count per case (default: `1`)
   - `filterTags?: string[]` - Only run cases whose `tags` contain at least one match
   - `saveResultsTo?: string` - Save run results to file for baseline comparison
   - `omitResponsesFromBaseline?: boolean` - Strip responses from saved baseline (default: `true`)
   - `baselineResultsFrom?: string` - Load baseline file for regression detection
   - `toolOverrides?: ToolOverrideVariant` - Runtime tool metadata overrides for variant experiments
-  - `mcpHostModel?: string` - Model identifier recorded in run metadata
   - `judgeModel?: string` - Judge model identifier recorded in run metadata
   - `reporting?: 'playwright' | 'none'` - `'none'` when the caller reports results itself (suites do): no suggestion to pass `testInfo` (default: `'playwright'`)
 - `context: EvalContext`
@@ -594,10 +594,7 @@ await saveEvalRunComparison({ store, comparison, id: 'candidate-comparison' });
 
 **Result Structure:**
 
-```typescript snippet=src/evals/evalRunner.ts#L140-L217
-/**
- * Overall result of running an eval dataset
- */
+```typescript snippet=src/evals/evalRunner.ts#L140-L219
 export interface EvalRunnerResult {
   /**
    * Total number of cases
@@ -644,14 +641,14 @@ export interface EvalRunnerResult {
   improvements?: number;
 
   /**
-   * Average tool precision across all mcp_host cases that have a
+   * Average tool precision across all client cases that have a
    * `toolsTriggered` expectation (precision = fraction of called tools
    * that were expected). Only present when at least one such case ran.
    */
   datasetToolPrecision?: number;
 
   /**
-   * Average tool recall across all mcp_host cases that have a
+   * Average tool recall across all client cases that have a
    * `toolsTriggered` expectation (recall = fraction of required tools
    * that were actually called). Only present when at least one such case ran.
    */
@@ -669,9 +666,15 @@ export interface EvalRunnerResult {
   metadata?: EvalRunMetadata;
 
   /**
-   * Aggregate token usage from all mcp_host LLM simulations across all cases.
+   * Aggregate token usage from every client case's model calls.
    */
   totalHostUsage?: UsageMetrics;
+
+  /**
+   * Aggregate token usage of judges across all cases, from judges that report it.
+   */
+  totalJudgeUsage?: Partial<UsageMetrics>;
+}
 ```
 
 ### `runVariantExperiment(options, context)` / `runVariantExperiment(suiteOptions)`
@@ -691,7 +694,7 @@ Run a tool-metadata variant experiment: establish a baseline, inject each candid
   - `regressionCheck?: 'significant' | 'any-case'` - How breakage is judged on regression cases. `'significant'` (default): they got worse as a group (exact paired sign-flip test, p < 0.025) or one did on its own (Fisher's exact test, Holm-corrected at 0.05). `'any-case'`: any case that passes with the baseline fails with the candidate. Either way, recommending needs a clear improvement: p < 0.025 / variants tried. See [How variants are judged](./mcp-host.md#how-variants-are-judged)
   - `regressionTag?: string` - Tag marking regression cases (default `'regression'`). When no case has it, the baseline runs once more, only to group cases
   - `heldOutTag?: string` - Tag marking held-out cases: left out of ranking and hidden from `proposeVariants` (default `'held-out'`)
-  - Plus `runEvalDataset` passthrough: `defaultTrials`, `defaultJudgeReps`, `concurrency`, `filterTags`, `schemas`, `mcpHostModel`, `judgeModel`
+  - Plus `runEvalDataset` passthrough: `client`, `model`, `clientOptions`, `defaultTrials`, `defaultJudgeReps`, `concurrency`, `filterTags`, `schemas`, `judgeModel`
 - `context: EvalContext` - `{ mcp, testInfo? }` from your test
 
 **Returns:** `VariantExperimentResult`
@@ -891,7 +894,7 @@ const result = validateResponse(response, { status: 'ok', count: 42 });
 
 ### `validateToolCalls(response, expectation)`
 
-Validates tool calls from an MCP host simulation result. Only applicable to `mcp_host` mode.
+Validates the tool calls in a client case's trace. Only applicable to client cases.
 
 **Parameters:**
 
@@ -913,7 +916,7 @@ const result = validateToolCalls(simulationResult, expectation);
 
 ### `validateToolCallCount(response, options)`
 
-Validates the number of tool calls from an MCP host simulation result. Only applicable to `mcp_host` mode.
+Validates the number of tool calls in a client case's trace. Only applicable to client cases.
 
 **Parameters:**
 
@@ -1139,9 +1142,9 @@ test('custom predicate', async ({ mcp }) => {
 });
 ```
 
-### `toHaveToolCalls(expectation)` (mcp_host mode only)
+### `toHaveToolCalls(expectation)` (client cases only)
 
-Assert that the LLM made specific tool calls when given a natural language prompt. Only meaningful in `mcp_host` mode.
+Assert that the client made specific tool calls when given a natural language prompt. Only meaningful for client cases.
 
 ```typescript
 test('tool discovery', async ({ mcp }) => {
@@ -1154,9 +1157,9 @@ test('tool discovery', async ({ mcp }) => {
 });
 ```
 
-### `toHaveToolCallCount(options)` (mcp_host mode only)
+### `toHaveToolCallCount(options)` (client cases only)
 
-Assert that the LLM made a specific number of tool calls. Only meaningful in `mcp_host` mode.
+Assert that the client made a specific number of tool calls. Only meaningful for client cases.
 
 ```typescript
 test('call count', async ({ mcp }) => {
@@ -1251,7 +1254,7 @@ The following utilities are available for checking whether optional LLM provider
 
 #### `isProviderAvailable(provider)`
 
-Check whether the npm package required for a given `mcp_host` provider is installed in the current environment.
+Check whether the npm package required for a given `mst` client provider is installed in the current environment.
 
 ```typescript
 import { isProviderAvailable } from '@gleanwork/mcp-server-tester/evals';
@@ -1272,7 +1275,7 @@ const message = getMissingDependencyMessage('openai');
 // e.g. "Provider 'openai' requires the 'openai' package. Run: npm install openai"
 ```
 
-See [LLM Host Guide](./mcp-host.md) for full details on configuring `mcp_host` mode.
+See [LLM Host Guide](./mcp-host.md) for full details on configuring the `mst` client.
 
 ## Conformance Functions
 
@@ -1409,7 +1412,13 @@ The `{ code, message, data? }` of the protocol error a result was made from, or 
 
 ### `EvalAssertions`
 
-```typescript snippet=src/evals/datasetTypes.ts#L226-L327
+```typescript snippet=src/evals/datasetTypes.ts#L188-L289
+/**
+ * Unified expectation block for eval cases
+ *
+ * Mirrors the Playwright matcher API for consistency.
+ */
+export interface EvalAssertions {
   /**
    * Exact response match (toMatchToolResponse)
    */
@@ -1468,7 +1477,7 @@ The `{ code, message, data? }` of the protocol error a result was made from, or 
 
   /**
    * Asserts which tools the LLM called during a host simulation.
-   * Only meaningful for mcp_host or external_host runs with high-confidence
+   * Only meaningful for client cases with high-confidence
    * structured tool evidence — direct mode has no tool call trace.
    */
   toolsTriggered?: {
@@ -1506,23 +1515,17 @@ The `{ code, message, data? }` of the protocol error a result was made from, or 
     exact?: number;
   };
 }
-
-/**
- * A complete eval dataset containing multiple test cases
- */
-export interface EvalDataset {
-  /**
 ```
 
 ### `EvalCase`
 
-````typescript snippet=src/evals/datasetTypes.ts#L41-L179
+````typescript snippet=src/evals/datasetTypes.ts#L33-L147
 /**
- * A single eval test case
+ * A single eval test case.
  *
- * For 'direct' mode: toolName and args, or request, are required
- * For 'mcp_host' mode: input and mcpHostConfig are required
- * For 'external_host' mode: input and externalHost are required
+ * A case with `input` runs on the client under test: the `client`, `model`
+ * and `clientOptions` it inherits from the suite (or the run), changed by its
+ * own. A direct case has `toolName` and `args`, or `request`, instead.
  */
 export interface EvalCase extends ClientFields {
   /**
@@ -1536,23 +1539,15 @@ export interface EvalCase extends ClientFields {
   description?: string;
 
   /**
-   * Evaluation mode
-   * - 'direct': Direct API calls to MCP tools (default)
-   * - 'mcp_host': SDK/CLI host simulation via natural language
-   * - 'external_host': Real external MCP host driven by configured capabilities
-   *
-   * @default 'direct'
+   * How the case runs: `'host'` on the client, `'direct'` as a tool call or
+   * request. Inferred: a case with `input` runs on the client.
    */
   mode?: EvalMode;
 
-  /**
-   * Name of the MCP tool to call (required for 'direct' mode, optional for 'mcp_host' mode)
-   */
+  /** The MCP tool a direct case calls. */
   toolName?: string;
 
-  /**
-   * Arguments to pass to the tool (required for 'direct' mode, optional for 'mcp_host' mode)
-   */
+  /** The arguments a direct case calls `toolName` with. */
   args?: Record<string, unknown>;
 
   /**
@@ -1566,30 +1561,14 @@ export interface EvalCase extends ClientFields {
   request?: EvalDirectRequest;
 
   /**
-   * The user's request the host acts on, sent as its prompt (required for
-   * 'mcp_host' and 'external_host' modes).
+   * The user's request the client acts on, sent as its prompt. A case with
+   * `input` runs on the client.
    *
    * @example "Get the weather for London and tell me if I need an umbrella"
    */
   input?: string;
 
-  /**
-   * MCP host configuration (optional for 'mcp_host' mode)
-   *
-   * If not specified, uses default configuration from test environment
-   */
-  mcpHostConfig?: MCPHostConfig;
-
-  /**
-   * External host configuration (required for 'external_host' mode)
-   */
-  externalHost?: ExternalHostConfig;
-
-  /**
-   * Additional metadata for this test case
-   *
-   * For 'mcp_host' mode, can include 'expectedToolCalls' for validation
-   */
+  /** Additional metadata for this test case. */
   metadata?: Record<string, unknown>;
 
   /**

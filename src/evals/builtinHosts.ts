@@ -56,33 +56,16 @@ async function runBuiltinHost(
   factory: (options: BuiltinHostOptions) => MCPHostConfig
 ): Promise<ClientRunResult> {
   const startedAt = Date.now();
-  // Runtime values are fallbacks; explicit host and legacy case values win.
+  // Runtime values are fallbacks; the client's own env wins.
   const env: HostEnvironment = {
     ...hostEnvironment(input, context),
     ...(host.env as HostEnvironment | undefined),
-    ...context.mcpHostConfig?.env,
   };
   const options = { ...input, host, ...context };
-  const case_ = {
-    scenario: input.prompt,
-    mcpHostConfig: context.mcpHostConfig,
-  };
-  if (!input.prompt) throw new Error('Hosts require an input.');
-  // Legacy execution details (especially caller-authored CLI args) remain
-  // intact, but accepted generation settings must reach the factory first.
-  const legacyOptions = { ...case_.mcpHostConfig };
-  delete legacyOptions.hostType;
-  delete legacyOptions.cli;
-  delete legacyOptions.browser;
-  delete legacyOptions.mcpServers;
+  if (!input.prompt) throw new Error('Clients require an input.');
+  const prompt = input.prompt;
   const config = {
-    ...factory({
-      ...options.host,
-      ...legacyOptions,
-      servers: options.servers,
-      env,
-    }),
-    ...case_.mcpHostConfig,
+    ...factory({ ...options.host, servers: options.servers, env }),
     env,
   };
   const clients: Array<Awaited<ReturnType<typeof createMCPClientForConfig>>> =
@@ -216,12 +199,10 @@ async function runBuiltinHost(
         }
         // Claude Code loads the operator's skills, plugins and settings from
         // its config directory. An empty one per run keeps them out of the
-        // results. Only an explicit CLAUDE_CONFIG_DIR (host or case env)
+        // results. Only an explicit CLAUDE_CONFIG_DIR (the client's env)
         // opts out; one inherited from the shell doesn't.
-        const explicitConfigDir =
-          (host.env as HostEnvironment | undefined)?.CLAUDE_CONFIG_DIR ??
-          context.mcpHostConfig?.env?.CLAUDE_CONFIG_DIR ??
-          context.mcpHostConfig?.cli?.env?.CLAUDE_CONFIG_DIR;
+        const explicitConfigDir = (host.env as HostEnvironment | undefined)
+          ?.CLAUDE_CONFIG_DIR;
         if (
           host.type === 'claude-code' &&
           (host as { isolate?: boolean }).isolate !== false &&
@@ -245,7 +226,7 @@ async function runBuiltinHost(
       const response = withOriginalToolNames(
         await simulateMCPHost(
           mcp,
-          case_.scenario,
+          prompt,
           config,
           timeout === undefined ? undefined : controller.signal
         ),

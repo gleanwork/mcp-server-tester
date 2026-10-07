@@ -1,14 +1,5 @@
 import { z } from 'zod';
 import { clientFieldSchemas, type ClientFields } from './clientFields.js';
-import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
-import {
-  GenerationOptions,
-  ClientSkillsModeSchema,
-  ProviderSchema,
-  SystemPromptOption,
-} from './mcpHost/hostOptions.js';
-import type { ExternalHostConfig } from './externalHost/types.js';
-import { ExternalHostConfigSchema } from './externalHost/schema.js';
 import type { SnapshotSanitizer } from '../assertions/validators/types.js';
 import type { BuiltInRubric, ProviderKind } from '../judge/judgeTypes.js';
 import type { TraceEvent } from './evalFrameworkTypes.js';
@@ -22,9 +13,10 @@ import { renamedKeys } from './renamedKeys.js';
 // Note: For JSON datasets, the Zod schema below validates that patterns are strings.
 // The TypeScript types allow RegExp for runtime usage with Playwright matchers.
 /**
- * Evaluation mode
+ * How a case runs: `'host'` on the client under test, `'direct'` as a tool
+ * call or MCP request. A case with `input` runs on the client without it.
  */
-export type EvalMode = 'direct' | 'host' | 'mcp_host' | 'external_host';
+export type EvalMode = 'direct' | 'host';
 
 /**
  * A direct-mode MCP request, used instead of `toolName` + `args`.
@@ -39,11 +31,11 @@ export interface EvalDirectRequest {
 }
 
 /**
- * A single eval test case
+ * A single eval test case.
  *
- * For 'direct' mode: toolName and args, or request, are required
- * For 'mcp_host' mode: input and mcpHostConfig are required
- * For 'external_host' mode: input and externalHost are required
+ * A case with `input` runs on the client under test: the `client`, `model`
+ * and `clientOptions` it inherits from the suite (or the run), changed by its
+ * own. A direct case has `toolName` and `args`, or `request`, instead.
  */
 export interface EvalCase extends ClientFields {
   /**
@@ -57,23 +49,15 @@ export interface EvalCase extends ClientFields {
   description?: string;
 
   /**
-   * Evaluation mode
-   * - 'direct': Direct API calls to MCP tools (default)
-   * - 'mcp_host': SDK/CLI host simulation via natural language
-   * - 'external_host': Real external MCP host driven by configured capabilities
-   *
-   * @default 'direct'
+   * How the case runs: `'host'` on the client, `'direct'` as a tool call or
+   * request. Inferred: a case with `input` runs on the client.
    */
   mode?: EvalMode;
 
-  /**
-   * Name of the MCP tool to call (required for 'direct' mode, optional for 'mcp_host' mode)
-   */
+  /** The MCP tool a direct case calls. */
   toolName?: string;
 
-  /**
-   * Arguments to pass to the tool (required for 'direct' mode, optional for 'mcp_host' mode)
-   */
+  /** The arguments a direct case calls `toolName` with. */
   args?: Record<string, unknown>;
 
   /**
@@ -87,30 +71,14 @@ export interface EvalCase extends ClientFields {
   request?: EvalDirectRequest;
 
   /**
-   * The user's request the host acts on, sent as its prompt (required for
-   * 'mcp_host' and 'external_host' modes).
+   * The user's request the client acts on, sent as its prompt. A case with
+   * `input` runs on the client.
    *
    * @example "Get the weather for London and tell me if I need an umbrella"
    */
   input?: string;
 
-  /**
-   * MCP host configuration (optional for 'mcp_host' mode)
-   *
-   * If not specified, uses default configuration from test environment
-   */
-  mcpHostConfig?: MCPHostConfig;
-
-  /**
-   * External host configuration (required for 'external_host' mode)
-   */
-  externalHost?: ExternalHostConfig;
-
-  /**
-   * Additional metadata for this test case
-   *
-   * For 'mcp_host' mode, can include 'expectedToolCalls' for validation
-   */
+  /** Additional metadata for this test case. */
   metadata?: Record<string, unknown>;
 
   /**
@@ -281,7 +249,7 @@ export interface EvalAssertions {
 
   /**
    * Asserts which tools the LLM called during a host simulation.
-   * Only meaningful for mcp_host or external_host runs with high-confidence
+   * Only meaningful for client cases with high-confidence
    * structured tool evidence — direct mode has no tool call trace.
    */
   toolsTriggered?: {
@@ -349,62 +317,6 @@ export interface EvalDataset {
    */
   metadata?: Record<string, unknown>;
 }
-
-/**
- * Zod schema for MCPHostConfig (simplified for serialization)
- */
-const MCPHostConfigSchema = z.object({
-  hostType: z.enum(['sdk', 'cli', 'browser', 'desktop']).optional(),
-  provider: ProviderSchema.optional(),
-  apiKeyEnvVar: z.string().optional(),
-  model: z.string().optional(),
-  timeout: GenerationOptions.timeout,
-  maxTokens: z.number().optional(),
-  temperature: z.number().optional(),
-  maxToolCalls: z.number().optional(),
-  systemPrompt: SystemPromptOption,
-  skills: ClientSkillsModeSchema.optional(),
-  cli: z
-    .object({
-      command: z.string(),
-      args: z.array(
-        z.string().refine((arg) => !arg.includes('{{scenario}}'), {
-          message: '`{{scenario}}` is now `{{prompt}}`',
-        })
-      ),
-      outputFormat: z.enum(['stream-json', 'json']).optional(),
-      claudeMcpServers: z.array(z.string().min(1)).optional(),
-      timeout: z.number().optional(),
-    })
-    .optional(),
-  mcpServers: z
-    .record(z.string(), z.record(z.string(), z.unknown()))
-    .optional(),
-  browser: z
-    .object({
-      script: z.string(),
-      timeout: z.number().optional(),
-      headless: z.boolean().optional(),
-      storageState: z.string().optional(),
-      cookies: z
-        .array(
-          z.object({
-            name: z.string(),
-            value: z.string(),
-            url: z.string().optional(),
-            domain: z.string().optional(),
-            path: z.string().optional(),
-            expires: z.number().optional(),
-            httpOnly: z.boolean().optional(),
-            secure: z.boolean().optional(),
-            sameSite: z.enum(['Strict', 'Lax', 'None']).optional(),
-            partitionKey: z.string().optional(),
-          })
-        )
-        .optional(),
-    })
-    .optional(),
-});
 
 /**
  * Zod schema for SnapshotSanitizer
@@ -533,23 +445,47 @@ const EvalDirectRequestSchema = z
   })
   .strict() satisfies z.ZodType<EvalDirectRequest>;
 
+/** What replaced each pre-2.0 case mode. */
+const REMOVED_MODES: Record<string, string> = {
+  mcp_host:
+    "`mode: 'mcp_host'` is gone: a case with `input` runs on the client. Remove `mode`, and name the client and model with `client` and `model` on the case, the suite, or runEvalDataset",
+  external_host:
+    "`mode: 'external_host'` is gone: a case with `input` runs on the client. Remove `mode`, and run the case in a suite with `client: 'chatgpt'` or a plugin client",
+};
+
 /**
  * Zod schema for EvalCase
- *
- * toolName and args are optional for mcp_host mode (which uses scenario instead)
  */
 export const EvalCaseSchema = z
   .object({
     id: z.string().min(1, 'id must not be empty'),
     description: z.string().optional(),
-    mode: z.enum(['direct', 'host', 'mcp_host', 'external_host']).optional(),
+    mode: z
+      .enum(['direct', 'host'], {
+        error: (issue) =>
+          typeof issue.input === 'string' &&
+          Object.hasOwn(REMOVED_MODES, issue.input)
+            ? REMOVED_MODES[issue.input]
+            : "mode must be 'host' or 'direct'",
+      })
+      .optional(),
     ...clientFieldSchemas,
     toolName: z.string().min(1, 'toolName must not be empty').optional(),
     args: z.record(z.string(), z.unknown()).optional(),
     request: EvalDirectRequestSchema.optional(),
     input: z.string().optional(),
-    mcpHostConfig: MCPHostConfigSchema.optional(),
-    externalHost: ExternalHostConfigSchema.optional(),
+    mcpHostConfig: z
+      .never({
+        message:
+          '`mcpHostConfig` is gone: set the client and model with `client`, `model` and `clientOptions`, on the case, the suite, or runEvalDataset',
+      })
+      .optional(),
+    externalHost: z
+      .never({
+        message:
+          "`externalHost` is gone: run the case in a suite with `client: 'chatgpt'` or a plugin client",
+      })
+      .optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
     trials: z.number().int().min(1).optional(),
     passThreshold: z.number().min(0).max(1).optional(),
@@ -581,14 +517,41 @@ export const EvalCaseSchema = z
         message: 'request and toolName are mutually exclusive',
       });
     }
-    if (evalCase.request && (evalCase.mode ?? 'direct') !== 'direct') {
+    if (evalCase.request && evalCase.mode === 'host') {
       context.addIssue({
         code: 'custom',
         path: ['request'],
-        message: 'request is only valid for direct-mode cases',
+        message: 'request is only valid for direct cases',
+      });
+    }
+    if (
+      evalCase.input !== undefined &&
+      evalCase.mode !== 'host' &&
+      (evalCase.toolName !== undefined || evalCase.request !== undefined)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['input'],
+        message:
+          'A case runs on the client (`input`) or calls a tool directly (`toolName` or `request`), not both',
       });
     }
   });
+
+/**
+ * Whether a case runs on the client under test (it has `input`, or says
+ * `mode: 'host'`) rather than calling a tool or sending a request directly.
+ */
+export function isClientCase(
+  evalCase: Pick<EvalCase, 'mode' | 'input' | 'toolName' | 'request'>
+): boolean {
+  if (evalCase.mode !== undefined) return evalCase.mode === 'host';
+  return (
+    evalCase.input !== undefined &&
+    evalCase.toolName === undefined &&
+    evalCase.request === undefined
+  );
+}
 
 /**
  * Zod schema for EvalDataset (without schemas field, as schemas aren't serializable)

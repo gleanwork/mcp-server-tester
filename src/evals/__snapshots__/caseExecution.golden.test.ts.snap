@@ -106,10 +106,7 @@ exports[`golden: dataset aggregation > mixed direct and host cases 1`] = `
             ],
           },
         },
-        "mcpHostConfig": {
-          "provider": "anthropic",
-        },
-        "mode": "mcp_host",
+        "mode": "host",
         "scenario": "Weather in London?",
       },
       "response": {
@@ -381,415 +378,6 @@ exports[`golden: direct execution > tool result shaped like a host simulation 1`
 }
 `;
 
-exports[`golden: external_host > high-confidence native trace 1`] = `
-{
-  "authType": "none",
-  "datasetName": "single-case",
-  "durationMs": "<time>",
-  "expectations": {
-    "textContains": {
-      "details": "Response contains expected text",
-      "pass": true,
-    },
-    "toolCallCount": {
-      "details": "Tool call count (2) is within expected range",
-      "pass": true,
-    },
-    "toolsTriggered": {
-      "details": "Expected tool 'forecast' to be called, but it was not",
-      "pass": false,
-    },
-  },
-  "externalHost": {
-    "artifacts": [],
-    "capabilitiesUsed": [],
-    "correlation": {
-      "includedInPrompt": false,
-      "strategy": "exact_prompt",
-    },
-    "displayName": "ChatGPT",
-    "driver": {
-      "platform": "macos",
-      "product": "chatgpt",
-      "provider": "openai",
-      "runtime": "desktop-app",
-      "surface": "agent",
-    },
-    "driverSlug": "openai.chatgpt.agent.desktop-app.macos",
-    "hostName": "ChatGPT",
-    "hostType": "desktop",
-    "session": {
-      "id": "session",
-      "turnId": "turn",
-    },
-    "traceConfidence": "high",
-    "traceSource": "host-local-transcript",
-  },
-  "hostUsage": {
-    "durationMs": "<time>",
-    "inputTokens": 100,
-    "outputTokens": 20,
-  },
-  "id": "external",
-  "mcpHostTrace": {
-    "calls": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "name": "get_weather",
-        "status": "expected",
-      },
-      {
-        "arguments": {
-          "q": "London",
-        },
-        "name": "search",
-        "status": "unexpected",
-      },
-    ],
-    "missed": [
-      {
-        "name": "forecast",
-      },
-    ],
-  },
-  "pass": false,
-  "project": "golden",
-  "request": {
-    "expect": {
-      "containsText": "sunny",
-      "toolCallCount": {
-        "max": 3,
-        "min": 1,
-      },
-      "toolsTriggered": {
-        "calls": [
-          {
-            "name": "get_weather",
-            "required": true,
-          },
-          {
-            "name": "forecast",
-            "required": true,
-          },
-        ],
-      },
-    },
-    "externalHost": {
-      "capabilities": {
-        "completion": [
-          {
-            "provides": [
-              "trace",
-              "normalize",
-            ],
-            "uses": "builtin:openai.chatgpt.computerUseTrace",
-          },
-        ],
-        "control": [
-          {
-            "uses": "builtin:openai.chatgpt.configLifecycle",
-          },
-          {
-            "uses": "builtin:openai.chatgpt.appLifecycle",
-          },
-          {
-            "uses": "builtin:openai.chatgpt.computerUseSurface",
-          },
-        ],
-        "input": [
-          {
-            "uses": "builtin:openai.chatgpt.computerUseSubmit",
-          },
-        ],
-      },
-      "correlation": {
-        "strategy": "exact_prompt",
-      },
-      "driver": "openai.chatgpt.agent.desktop-app.macos",
-      "driverSlug": "openai.chatgpt.agent.desktop-app.macos",
-      "name": "ChatGPT Agent Desktop",
-      "usesBuiltInDefaults": true,
-    },
-    "mode": "external_host",
-    "scenario": "Weather in London?",
-  },
-  "response": {
-    "externalHost": {
-      "artifacts": [],
-      "capabilitiesUsed": [],
-      "correlation": {
-        "includedInPrompt": false,
-        "strategy": "exact_prompt",
-      },
-      "displayName": "ChatGPT",
-      "driver": {
-        "platform": "macos",
-        "product": "chatgpt",
-        "provider": "openai",
-        "runtime": "desktop-app",
-        "surface": "agent",
-      },
-      "driverSlug": "openai.chatgpt.agent.desktop-app.macos",
-      "hostName": "ChatGPT",
-      "hostType": "desktop",
-      "session": {
-        "id": "session",
-        "turnId": "turn",
-      },
-      "traceConfidence": "high",
-      "traceSource": "host-local-transcript",
-    },
-    "response": "It is sunny in London.",
-    "success": true,
-    "toolCalls": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "name": "get_weather",
-        "output": "sunny",
-      },
-      {
-        "arguments": {
-          "q": "London",
-        },
-        "name": "search",
-      },
-    ],
-    "usage": {
-      "durationMs": "<time>",
-      "inputTokens": 100,
-      "outputTokens": 20,
-    },
-  },
-  "source": "eval",
-  "toolName": "external_host",
-  "toolPrecision": 0.5,
-  "toolRecall": 0.5,
-  "trace": {
-    "events": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "kind": "tool_call",
-        "name": "get_weather",
-        "output": "sunny",
-        "source": "mcp",
-      },
-      {
-        "arguments": {
-          "q": "London",
-        },
-        "kind": "tool_call",
-        "name": "search",
-        "source": "mcp",
-      },
-    ],
-    "finalText": "It is sunny in London.",
-    "usage": {
-      "durationMs": "<time>",
-      "inputTokens": 100,
-      "outputTokens": 20,
-    },
-  },
-}
-`;
-
-exports[`golden: external_host > low-confidence trace cannot support tool assertions 1`] = `
-{
-  "authType": "none",
-  "datasetName": "single-case",
-  "durationMs": "<time>",
-  "expectations": {
-    "textContains": {
-      "details": "Response contains expected text",
-      "pass": true,
-    },
-    "toolCallCount": {
-      "details": "External host trace source screenshot (low confidence) cannot support tool-call assertions. Use protocol traces or host-native structured traces for toolsTriggered/toolCallCount.",
-      "pass": false,
-    },
-    "toolsTriggered": {
-      "details": "External host trace source screenshot (low confidence) cannot support tool-call assertions. Use protocol traces or host-native structured traces for toolsTriggered/toolCallCount.",
-      "pass": false,
-    },
-  },
-  "externalHost": {
-    "artifacts": [],
-    "capabilitiesUsed": [],
-    "correlation": {
-      "includedInPrompt": false,
-      "strategy": "exact_prompt",
-    },
-    "displayName": "ChatGPT",
-    "driver": {
-      "platform": "macos",
-      "product": "chatgpt",
-      "provider": "openai",
-      "runtime": "desktop-app",
-      "surface": "agent",
-    },
-    "driverSlug": "openai.chatgpt.agent.desktop-app.macos",
-    "hostName": "ChatGPT",
-    "hostType": "desktop",
-    "session": {
-      "id": "session",
-      "turnId": "turn",
-    },
-    "traceConfidence": "low",
-    "traceSource": "screenshot",
-  },
-  "hostUsage": {
-    "durationMs": "<time>",
-    "inputTokens": 100,
-    "outputTokens": 20,
-  },
-  "id": "external-low",
-  "pass": false,
-  "project": "golden",
-  "request": {
-    "expect": {
-      "containsText": "sunny",
-      "toolCallCount": {
-        "max": 3,
-        "min": 1,
-      },
-      "toolsTriggered": {
-        "calls": [
-          {
-            "name": "get_weather",
-            "required": true,
-          },
-          {
-            "name": "forecast",
-            "required": true,
-          },
-        ],
-      },
-    },
-    "externalHost": {
-      "capabilities": {
-        "completion": [
-          {
-            "provides": [
-              "trace",
-              "normalize",
-            ],
-            "uses": "builtin:openai.chatgpt.computerUseTrace",
-          },
-        ],
-        "control": [
-          {
-            "uses": "builtin:openai.chatgpt.configLifecycle",
-          },
-          {
-            "uses": "builtin:openai.chatgpt.appLifecycle",
-          },
-          {
-            "uses": "builtin:openai.chatgpt.computerUseSurface",
-          },
-        ],
-        "input": [
-          {
-            "uses": "builtin:openai.chatgpt.computerUseSubmit",
-          },
-        ],
-      },
-      "correlation": {
-        "strategy": "exact_prompt",
-      },
-      "driver": "openai.chatgpt.agent.desktop-app.macos",
-      "driverSlug": "openai.chatgpt.agent.desktop-app.macos",
-      "name": "ChatGPT Agent Desktop",
-      "usesBuiltInDefaults": true,
-    },
-    "mode": "external_host",
-    "scenario": "Weather in London?",
-  },
-  "response": {
-    "externalHost": {
-      "artifacts": [],
-      "capabilitiesUsed": [],
-      "correlation": {
-        "includedInPrompt": false,
-        "strategy": "exact_prompt",
-      },
-      "displayName": "ChatGPT",
-      "driver": {
-        "platform": "macos",
-        "product": "chatgpt",
-        "provider": "openai",
-        "runtime": "desktop-app",
-        "surface": "agent",
-      },
-      "driverSlug": "openai.chatgpt.agent.desktop-app.macos",
-      "hostName": "ChatGPT",
-      "hostType": "desktop",
-      "session": {
-        "id": "session",
-        "turnId": "turn",
-      },
-      "traceConfidence": "low",
-      "traceSource": "screenshot",
-    },
-    "response": "It is sunny in London.",
-    "success": true,
-    "toolCalls": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "name": "get_weather",
-        "output": "sunny",
-      },
-      {
-        "arguments": {
-          "q": "London",
-        },
-        "name": "search",
-      },
-    ],
-    "usage": {
-      "durationMs": "<time>",
-      "inputTokens": 100,
-      "outputTokens": 20,
-    },
-  },
-  "source": "eval",
-  "toolName": "external_host",
-  "trace": {
-    "events": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "kind": "tool_call",
-        "name": "get_weather",
-        "output": "sunny",
-        "source": "mcp",
-      },
-      {
-        "arguments": {
-          "q": "London",
-        },
-        "kind": "tool_call",
-        "name": "search",
-        "source": "mcp",
-      },
-    ],
-    "finalText": "It is sunny in London.",
-    "usage": {
-      "durationMs": "<time>",
-      "inputTokens": 100,
-      "outputTokens": 20,
-    },
-  },
-}
-`;
-
 exports[`golden: host traces through executeCase > executeCase that throws 1`] = `
 {
   "authType": "none",
@@ -820,10 +408,7 @@ exports[`golden: host traces through executeCase > executeCase that throws 1`] =
         ],
       },
     },
-    "mcpHostConfig": {
-      "provider": "anthropic",
-    },
-    "mode": "mcp_host",
+    "mode": "host",
     "scenario": "Weather in London?",
   },
   "source": "eval",
@@ -870,10 +455,7 @@ exports[`golden: host traces through executeCase > host trace error 1`] = `
         ],
       },
     },
-    "mcpHostConfig": {
-      "provider": "anthropic",
-    },
-    "mode": "mcp_host",
+    "mode": "host",
     "scenario": "Weather in London?",
   },
   "response": {
@@ -1017,10 +599,7 @@ exports[`golden: host traces through executeCase > none evidence 1`] = `
         ],
       },
     },
-    "mcpHostConfig": {
-      "provider": "anthropic",
-    },
-    "mode": "mcp_host",
+    "mode": "host",
     "scenario": "Weather in London?",
   },
   "response": {
@@ -1163,10 +742,7 @@ exports[`golden: host traces through executeCase > observed evidence 1`] = `
         ],
       },
     },
-    "mcpHostConfig": {
-      "provider": "anthropic",
-    },
-    "mode": "mcp_host",
+    "mode": "host",
     "scenario": "Weather in London?",
   },
   "response": {
@@ -1326,10 +902,7 @@ exports[`golden: host traces through executeCase > structured evidence 1`] = `
         ],
       },
     },
-    "mcpHostConfig": {
-      "provider": "anthropic",
-    },
-    "mode": "mcp_host",
+    "mode": "host",
     "scenario": "Weather in London?",
   },
   "response": {
@@ -1483,10 +1056,7 @@ exports[`golden: judges > judges a host response 1`] = `
           "judge": "test/golden-case-judge",
         },
       },
-      "mcpHostConfig": {
-        "provider": "anthropic",
-      },
-      "mode": "mcp_host",
+      "mode": "host",
       "scenario": "Weather in London?",
     },
     "response": {
@@ -2353,6 +1923,7 @@ exports[`golden: runEvalSuite hosts > a manifest declares two rubric judges and 
       "id": "suite-rubric",
       "pass": false,
       "request": {
+        "client": "test/golden-run-rubric-host",
         "expect": {
           "passesJudge": [
             {
@@ -2374,7 +1945,7 @@ exports[`golden: runEvalSuite hosts > a manifest declares two rubric judges and 
             },
           ],
         },
-        "mode": "mcp_host",
+        "mode": "host",
         "scenario": "Weather in London?",
       },
       "response": {
@@ -2630,6 +2201,7 @@ exports[`golden: runEvalSuite hosts > manifest judges merge with case judges 1`]
       "id": "suite-judged",
       "pass": false,
       "request": {
+        "client": "test/golden-run-judged-host",
         "expect": {
           "passesJudge": [
             {
@@ -2647,7 +2219,7 @@ exports[`golden: runEvalSuite hosts > manifest judges merge with case judges 1`]
             },
           ],
         },
-        "mode": "mcp_host",
+        "mode": "host",
         "reference": "canonical",
         "scenario": "Weather in London?",
       },
@@ -2787,6 +2359,7 @@ exports[`golden: runEvalSuite hosts > run host 1`] = `
     },
     "pass": true,
     "request": {
+      "client": "test/golden-run-host",
       "expect": {
         "containsText": "sunny",
         "toolsTriggered": {
@@ -2798,7 +2371,7 @@ exports[`golden: runEvalSuite hosts > run host 1`] = `
           ],
         },
       },
-      "mode": "mcp_host",
+      "mode": "host",
       "scenario": "Weather in London?",
     },
     "response": {
@@ -2938,6 +2511,7 @@ exports[`golden: runEvalSuite hosts > runBatch host 1`] = `
     },
     "pass": true,
     "request": {
+      "client": "test/golden-runBatch-host",
       "expect": {
         "containsText": "sunny",
         "toolsTriggered": {
@@ -2949,7 +2523,7 @@ exports[`golden: runEvalSuite hosts > runBatch host 1`] = `
           ],
         },
       },
-      "mode": "mcp_host",
+      "mode": "host",
       "scenario": "Weather in London?",
     },
     "response": {
@@ -3044,7 +2618,7 @@ exports[`golden: runEvalSuite hosts > runBatch host 1`] = `
 ]
 `;
 
-exports[`golden: simulated mcp_host (dataset API) > iterations exclude infrastructure errors from accuracy 1`] = `
+exports[`golden: the mst client (dataset API) > iterations exclude infrastructure errors from accuracy 1`] = `
 {
   "assertionPassRate": 0,
   "assertionPassRateCI": {
@@ -3251,10 +2825,7 @@ exports[`golden: simulated mcp_host (dataset API) > iterations exclude infrastru
       },
     },
     "iterations": 3,
-    "mcpHostConfig": {
-      "provider": "anthropic",
-    },
-    "mode": "mcp_host",
+    "mode": "host",
     "scenario": "Weather in London?",
   },
   "response": {
@@ -3288,7 +2859,7 @@ exports[`golden: simulated mcp_host (dataset API) > iterations exclude infrastru
 }
 `;
 
-exports[`golden: simulated mcp_host (dataset API) > maps native tool names through toolMap 1`] = `
+exports[`golden: the mst client (dataset API) > maps native tool names through toolMap 1`] = `
 {
   "authType": "none",
   "datasetName": "single-case",
@@ -3354,10 +2925,7 @@ exports[`golden: simulated mcp_host (dataset API) > maps native tool names throu
         ],
       },
     },
-    "mcpHostConfig": {
-      "provider": "anthropic",
-    },
-    "mode": "mcp_host",
+    "mode": "host",
     "scenario": "Weather in London?",
   },
   "response": {
@@ -3418,7 +2986,7 @@ exports[`golden: simulated mcp_host (dataset API) > maps native tool names throu
 }
 `;
 
-exports[`golden: simulated mcp_host (dataset API) > simulation failure 1`] = `
+exports[`golden: the mst client (dataset API) > simulation failure 1`] = `
 {
   "authType": "none",
   "datasetName": "single-case",
@@ -3448,10 +3016,7 @@ exports[`golden: simulated mcp_host (dataset API) > simulation failure 1`] = `
         ],
       },
     },
-    "mcpHostConfig": {
-      "provider": "anthropic",
-    },
-    "mode": "mcp_host",
+    "mode": "host",
     "scenario": "Weather in London?",
   },
   "source": "eval",
@@ -3459,7 +3024,7 @@ exports[`golden: simulated mcp_host (dataset API) > simulation failure 1`] = `
 }
 `;
 
-exports[`golden: simulated mcp_host (dataset API) > succeeds with tool evidence and a missed required tool 1`] = `
+exports[`golden: the mst client (dataset API) > succeeds with tool evidence and a missed required tool 1`] = `
 {
   "authType": "none",
   "datasetName": "single-case",
@@ -3529,10 +3094,7 @@ exports[`golden: simulated mcp_host (dataset API) > succeeds with tool evidence 
         ],
       },
     },
-    "mcpHostConfig": {
-      "provider": "anthropic",
-    },
-    "mode": "mcp_host",
+    "mode": "host",
     "scenario": "Weather in London?",
   },
   "response": {

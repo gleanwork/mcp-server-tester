@@ -42,7 +42,7 @@
       "not": {
         "required": ["toolName", "request"]
       },
-      "description": "A single eval test case. Use 'direct' mode to call a tool (toolName + args) or send any MCP request (request); use 'mcp_host' mode to drive tool selection via natural language.",
+      "description": "A single eval test case. A case with input runs on the client under test, which picks the tools; a direct case calls a tool (toolName + args) or sends any MCP request (request).",
       "properties": {
         "id": {
           "type": "string",
@@ -55,18 +55,17 @@
         },
         "mode": {
           "type": "string",
-          "enum": ["direct", "mcp_host"],
-          "default": "direct",
-          "description": "Evaluation mode. 'direct': explicit MCP tool call with toolName + args. 'mcp_host': the host acts on the case's input and picks the tools."
+          "enum": ["direct", "host"],
+          "description": "How the case runs: 'host' on the client under test, 'direct' as a tool call or MCP request. Inferred: a case with input runs on the client."
         },
         "toolName": {
           "type": "string",
           "minLength": 1,
-          "description": "Name of the MCP tool to invoke. In 'direct' mode, set either toolName (with args) or request; optional in 'mcp_host' mode."
+          "description": "The MCP tool a direct case calls. Set either toolName (with args) or request."
         },
         "args": {
           "type": "object",
-          "description": "Arguments to pass to the tool. Required with toolName in 'direct' mode; optional in 'mcp_host' mode.",
+          "description": "The arguments a direct case calls toolName with.",
           "additionalProperties": true
         },
         "request": {
@@ -93,14 +92,24 @@
         },
         "input": {
           "type": "string",
-          "description": "The user's request the host acts on, sent as its prompt. Required in 'mcp_host' mode.",
+          "description": "The user's request the client acts on, sent as its prompt. A case with input runs on the client.",
           "examples": [
             "Find recent docs about the example MCP server",
             "Who leads the developer platform team?"
           ]
         },
-        "mcpHostConfig": {
-          "$ref": "#/definitions/MCPHostConfig"
+        "client": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The client the case runs on: mst, claude-code, cowork, chatgpt, or a plugin's namespace/name. Inherits the suite's (or the run's) client."
+        },
+        "model": {
+          "type": "string",
+          "description": "The model the client uses."
+        },
+        "clientOptions": {
+          "type": "object",
+          "description": "The client's own options, such as systemPrompt or skills for mst, or appVersion for cowork."
         },
         "trials": {
           "type": "integer",
@@ -115,6 +124,33 @@
           "default": 1.0,
           "description": "Share of trials (0–1) that must pass for the case to pass. Default 1 (every trial)."
         },
+        "judgeReps": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of times to run each judge; scores are averaged."
+        },
+        "expected": {
+          "type": "object",
+          "description": "What the case expects, for graders: answer (the reference answer), criteria (rubric criteria by name), and any other ground truth.",
+          "properties": {
+            "answer": {
+              "description": "The reference answer judges compare against."
+            },
+            "criteria": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Labels for filtering runs and slicing results, such as 'regression'."
+        },
         "metadata": {
           "type": "object",
           "description": "Arbitrary additional metadata for this test case",
@@ -123,74 +159,6 @@
         "assertions": {
           "$ref": "#/definitions/EvalAssertions",
           "description": "Assertions (code graders) each trial must pass."
-        }
-      }
-    },
-    "MCPHostConfig": {
-      "type": "object",
-      "required": ["provider"],
-      "additionalProperties": false,
-      "description": "Configuration for the LLM host used in 'mcp_host' mode. All providers run through the Vercel AI SDK.",
-      "properties": {
-        "provider": {
-          "type": "string",
-          "enum": [
-            "openai",
-            "anthropic",
-            "azure",
-            "google",
-            "mistral",
-            "ollama",
-            "deepseek",
-            "openrouter",
-            "xai",
-            "vertex-anthropic"
-          ],
-          "description": "LLM provider. 'vertex-anthropic' routes Anthropic Claude through Google Vertex AI (useful when api.anthropic.com is blocked). Each provider requires the corresponding @ai-sdk/* package."
-        },
-        "model": {
-          "type": "string",
-          "description": "Model identifier. Uses the provider's default if omitted.",
-          "examples": [
-            "gpt-4o",
-            "claude-3-5-haiku@20241022",
-            "claude-3-5-sonnet-20241022",
-            "gemini-1.5-pro"
-          ]
-        },
-        "apiKeyEnvVar": {
-          "type": "string",
-          "description": "Name of the environment variable that holds the API key for this provider. Defaults to the provider's standard env var (e.g. OPENAI_API_KEY).",
-          "examples": ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "MISTRAL_API_KEY"]
-        },
-        "maxTokens": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "Maximum number of tokens to generate in the LLM response"
-        },
-        "temperature": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1,
-          "default": 0,
-          "description": "Sampling temperature. 0 = fully deterministic; 1 = maximum creativity."
-        },
-        "maxToolCalls": {
-          "type": "integer",
-          "minimum": 1,
-          "default": 10,
-          "description": "Maximum number of tool call steps allowed in a single LLM conversation"
-        },
-        "skills": {
-          "type": "string",
-          "enum": ["off", "catalog", "preload"],
-          "default": "off",
-          "description": "How the SDK host offers Agent Skills served over MCP (SEP-2640). 'catalog': list skills in the system prompt and load them with read_skill; 'preload': put every SKILL.md in the system prompt. Loads appear as kind 'skill' events for toolsTriggered."
-        },
-        "systemPrompt": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Instructions added to the host's system prompt. A CLI host needs a {{systemPrompt}} placeholder in cli.args."
         }
       }
     },
@@ -398,7 +366,7 @@
       "type": "object",
       "required": ["calls"],
       "additionalProperties": false,
-      "description": "Asserts which tools the LLM called during an 'mcp_host' simulation. Only meaningful in mcp_host mode. Corresponds to toHaveToolCalls().",
+      "description": "Asserts which tools the client called. Only meaningful for client cases. Corresponds to toHaveToolCalls().",
       "properties": {
         "calls": {
           "type": "array",
@@ -447,7 +415,7 @@
     "ToolCallCount": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Asserts the total number of tool calls made during an 'mcp_host' simulation. Only meaningful in mcp_host mode. Corresponds to toHaveToolCallCount().",
+      "description": "Asserts the total number of tool calls the client made. Only meaningful for client cases. Corresponds to toHaveToolCallCount().",
       "properties": {
         "min": {
           "type": "integer",

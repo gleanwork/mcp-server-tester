@@ -27,7 +27,7 @@ async function suiteDir(manifest: Record<string, unknown>): Promise<string> {
     path.join(dir, 'cases.json'),
     JSON.stringify({
       name: 'cases',
-      cases: [{ id: 'one', mode: 'mcp_host', input: 'Say hello' }],
+      cases: [{ id: 'one', input: 'Say hello' }],
     })
   );
   await fs.writeFile(path.join(dir, 'manifest.json'), JSON.stringify(manifest));

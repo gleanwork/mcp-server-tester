@@ -110,8 +110,8 @@ describe('SDK host through the real AI SDK', () => {
     );
     expect(process.env.OPENAI_API_KEY).toBe(before);
   });
-  it.each(['host', 'case'] as const)(
-    'uses explicit %s credentials ahead of suite environment at the SDK provider boundary',
+  it.each(['host'] as const)(
+    "uses the client's own %s credentials ahead of suite environment at the SDK provider boundary",
     async (precedence) => {
       vi.stubEnv('OPENAI_API_KEY', 'ambient');
       const input = {
@@ -127,8 +127,6 @@ describe('SDK host through the real AI SDK', () => {
       const context = {
         manifest: { name: 'offline', datasets: [] },
         env: { OPENAI_API_KEY: 'context' },
-        mcpHostConfig:
-          precedence === 'case' ? { env: { OPENAI_API_KEY: 'case' } } : {},
       };
       const before = structuredClone({ input, host, context });
       const result = await getHost('mst').run!(input, host, context);

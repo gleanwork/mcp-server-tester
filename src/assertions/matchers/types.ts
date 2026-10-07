@@ -227,7 +227,7 @@ declare global {
       ): Promise<R>;
 
       /**
-       * Validates which tools the LLM called during a mcp_host simulation.
+       * Validates which tools a client called.
        *
        * @example
        * ```typescript
@@ -240,7 +240,7 @@ declare global {
       toHaveToolCalls(expectation: ToolCallExpectation): R;
 
       /**
-       * Validates the number of tool calls made during a mcp_host simulation.
+       * Validates the number of tool calls a client made.
        *
        * @example
        * ```typescript

@@ -43,7 +43,10 @@ import { runEvalDataset, loadEvalDataset } from '@gleanwork/mcp-server-tester';
 
 test('LLM triggers the right tool', async ({ mcp }, testInfo) => {
   const dataset = await loadEvalDataset('./data/evals.json');
-  const result = await runEvalDataset({ dataset }, { mcp, testInfo });
+  const result = await runEvalDataset(
+    { dataset, client: 'mst', model: 'claude-haiku-4-5' },
+    { mcp, testInfo }
+  );
   expect(result.passed).toBe(result.total);
 });
 ```
@@ -56,12 +59,7 @@ test('LLM triggers the right tool', async ({ mcp }, testInfo) => {
   "cases": [
     {
       "id": "search-trigger",
-      "mode": "mcp_host",
       "input": "Find recent documents about quarterly planning",
-      "mcpHostConfig": {
-        "provider": "anthropic",
-        "model": "claude-3-5-sonnet-20241022"
-      },
       "assertions": {
         "toolsTriggered": {
           "calls": [
@@ -84,14 +82,17 @@ LLM responses are non-deterministic. Run each case multiple times and measure ac
 ```json snippet=snippets/mcp-host-trials.json
 {
   "id": "search-accuracy",
-  "mode": "mcp_host",
   "input": "Find documents about MCP testing",
-  "mcpHostConfig": { "provider": "anthropic" },
   "trials": 5,
   "passThreshold": 0.8,
   "assertions": {
     "toolsTriggered": {
-      "calls": [{ "name": "search", "required": true }]
+      "calls": [
+        {
+          "name": "search",
+          "required": true
+        }
+      ]
     }
   }
 }
@@ -202,15 +203,12 @@ Claude runs in an invocation-owned process group so cancellation also stops its
 MCP servers and subprocesses without affecting other runs. Windows retains
 direct-child cancellation.
 
-These controls apply to generated `claude-code` commands, not generic CLI or SDK
-hosts. A caller-authored Claude CLI config can opt in with
-`cli.claudeMcpServers: ["server-name"]` and `outputFormat: "stream-json"`; legacy
-custom commands are otherwise left unchanged. The built-in host supplies the
-server names from its generated MCP config.
+These controls apply to the `claude-code` client, which supplies the server
+names from its generated MCP config.
 
 ## MCPHostSimulationResult
 
-The response for a `mcp_host` case is an `MCPHostSimulationResult`:
+The response for a case on the `mst` client is an `MCPHostSimulationResult`:
 
 ```typescript
 interface MCPHostSimulationResult {
@@ -233,7 +231,7 @@ LLM host simulation calls a real LLM API. Approximate costs:
 - Anthropic Claude 3.5 Sonnet: ~$0.003–0.01 per test (varies by tool count)
 - OpenAI GPT-4o: ~$0.005–0.02 per test
 
-**Recommendation:** Use `mode: "direct"` for regression testing. Use `mode: "mcp_host"` selectively for tool description quality validation.
+**Recommendation:** Use direct tool calls for regression testing. Use client cases selectively for tool description quality validation.
 
 ## Runtime Tool Override Experiments
 

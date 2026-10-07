@@ -152,12 +152,9 @@ Natural language inputs where the LLM chooses which tool and constructs the quer
 ```json
 {
   "id": "llm-count-users",
-  "mode": "mcp_host",
   "input": "How many users are in the database?",
-  "mcpHostConfig": {
-    "provider": "anthropic",
-    "model": "claude-sonnet-4-20250514"
-  },
+  "client": "mst",
+  "model": "claude-sonnet-4-5",
   "assertions": {
     "toolsTriggered": {
       "calls": [{ "name": "query", "required": true }]

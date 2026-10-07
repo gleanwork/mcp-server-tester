@@ -1,5 +1,5 @@
 /**
- * Tool call validators for mcp_host simulation results.
+ * Tool call validators for a client case's trace.
  *
  * These validators extract the tool call trace from an MCPHostSimulationResult
  * and apply assertions against expected call lists and counts.

@@ -80,13 +80,4 @@ describe('skills modes as suite arms', () => {
       vi.mocked(simulateMCPHost).mock.calls.map(([, , config]) => config.skills)
     ).toEqual([undefined, undefined, 'catalog', 'preload']);
   });
-
-  it('rejects a case that sets its own skills mode under an arm that sets one', async () => {
-    await expect(
-      suite({ mcpHostConfig: { skills: 'catalog' } })
-    ).rejects.toThrow(
-      /Case "weather" in arm "explicit-off" sets mcpHostConfig\.skills.*set skills on the host or the case, not both/
-    );
-    expect(simulateMCPHost).not.toHaveBeenCalled();
-  });
 });

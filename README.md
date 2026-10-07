@@ -108,18 +108,20 @@ Supported assertion types:
 
 In LLM host mode, a real LLM receives your server's tool list and a natural language prompt, then decides which tools to call. This tests whether your tool names, descriptions, and input schemas are clear enough for autonomous use — a different question from whether the tools return correct output.
 
+A case with `input` runs on the client. In a Playwright test, `runEvalDataset` names the client and model (`{ dataset, client: 'mst', model: 'claude-haiku-4-5' }`), and the `mst` client uses the test's MCP connection; a suite manifest names them with `client` and `model`. A case can set its own `client`, `model` and `clientOptions`.
+
 ```json snippet=snippets/mcp-host-dataset.json
 {
   "id": "find-config",
-  "mode": "mcp_host",
   "input": "Find the application config file and return its contents",
-  "mcpHostConfig": {
-    "provider": "anthropic",
-    "model": "claude-opus-4-20250514"
-  },
   "assertions": {
     "toolsTriggered": {
-      "calls": [{ "name": "read_file", "required": true }]
+      "calls": [
+        {
+          "name": "read_file",
+          "required": true
+        }
+      ]
     }
   }
 }

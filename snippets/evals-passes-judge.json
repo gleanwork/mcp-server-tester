@@ -3,12 +3,7 @@
   "cases": [
     {
       "id": "search-quality-check",
-      "mode": "mcp_host",
       "input": "Find recent internal documents about the Q4 planning process",
-      "mcpHostConfig": {
-        "provider": "vertex-anthropic",
-        "model": "claude-3-5-haiku@20241022"
-      },
       "passThreshold": 0.7,
       "assertions": {
         "passesJudge": {

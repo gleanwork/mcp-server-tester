@@ -184,7 +184,7 @@ const HOST_DEFAULTS = [
 ] as const;
 
 /** Whether a host's schema takes `key`: declared, or accepted by a loose schema. */
-export function takesOption(schema: ZodType, key: string): boolean {
+function takesOption(schema: ZodType, key: string): boolean {
   if (!(schema instanceof z.ZodObject)) return true;
   if (key in schema.shape) return true;
   const catchall = (

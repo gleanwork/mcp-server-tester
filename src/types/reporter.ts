@@ -19,17 +19,7 @@ import type {
 } from './index.js';
 import type { EvalResultStoreLike } from '../evals/resultStore.js';
 import type { TraceEvidence, Trace } from '../evals/evalFrameworkTypes.js';
-import type {
-  ExternalHostCorrelationConfig,
-  ExternalHostMetadata,
-  HostDriverId,
-} from '../evals/externalHost/types.js';
-
-interface SerializedExternalHostCapabilityBinding {
-  uses: string;
-  provides?: string[];
-  with?: Record<string, unknown>;
-}
+import type { ExternalHostMetadata } from '../evals/externalHost/types.js';
 
 /**
  * Configuration options for MCP Eval Reporter
@@ -104,7 +94,7 @@ export interface EvalRunMetadata {
   packageVersion: string;
   /** Runtime tool override variant identifier, when one was used */
   toolOverrideVariantId?: string;
-  /** MCP host model identifier (if mcp_host mode) */
+  /** The model client cases ran on, when the run named it. */
   mcpHostModel?: string;
   /** Judge model identifier (if judge was used) */
   judgeModel?: string;
@@ -264,7 +254,7 @@ export interface IterationResult {
   /** When true, this iteration failed due to network/infrastructure issues rather than an assertion failure */
   isInfrastructureError?: boolean;
   /**
-   * Ordered trace of tool calls made by the LLM during this iteration (mcp_host mode only).
+   * Ordered trace of tool calls the client made in this trial (client cases only).
    * Captures what was actually called so you can distinguish "LLM didn't call the tool"
    * from "LLM called the wrong tool" from "tool was called but assertion failed".
    */
@@ -282,7 +272,7 @@ export interface IterationResult {
   hostEvidence?: TraceEvidence;
   /** What the host did in this iteration (host cases). */
   trace?: Trace;
-  /** Token usage from mcp_host LLM simulation in this iteration */
+  /** Token usage from the client's model calls in this trial */
   hostUsage?: UsageMetrics;
   /** Token usage of this iteration's judges, from judges that report it. */
   judgeUsage?: Partial<UsageMetrics>;
@@ -326,29 +316,15 @@ export interface EvalCaseRequest {
   /** Tool arguments (direct mode) */
   args?: Record<string, unknown>;
 
-  // mcp_host mode fields
-  /** Natural language scenario sent to the LLM (mcp_host mode) */
+  // Client case fields
+  /** The input sent to the client as its prompt */
   scenario?: string;
   /** Golden/reference answer associated with the case, when supplied. */
   reference?: string;
-  /** LLM provider/model configuration (mcp_host mode) */
-  mcpHostConfig?: {
-    provider?: string;
-    model?: string;
-  };
-  /** External host configuration summary (external_host mode) */
-  externalHost?: {
-    driver: HostDriverId | string;
-    driverSlug?: string;
-    name?: string;
-    hostType?: string;
-    variant?: string;
-    timeoutMs?: number;
-    usesBuiltInDefaults?: boolean;
-    correlation?: ExternalHostCorrelationConfig;
-    options?: Record<string, unknown>;
-    capabilities?: Record<string, SerializedExternalHostCapabilityBinding[]>;
-  };
+  /** The client the case ran on, when the run or the case named it. */
+  client?: string;
+  /** The model the client used, when the run or the case named it. */
+  model?: string;
 }
 
 /**
@@ -486,7 +462,7 @@ export interface EvalCaseResult {
   infrastructureErrorCount?: number;
 
   /**
-   * Ordered trace of tool calls made by the LLM in mcp_host mode.
+   * Ordered trace of tool calls the client made.
    * Only populated when the eval case uses toolsTriggered expectations.
    */
   mcpHostTrace?: {
@@ -516,8 +492,8 @@ export interface EvalCaseResult {
   arm?: string;
 
   /**
-   * Aggregate token usage from mcp_host LLM simulation for this case.
-   * Summed across all iterations. Only populated for mcp_host mode cases.
+   * Aggregate token usage from the client's model calls for this case.
+   * Summed across all trials. Only populated for client cases.
    */
   hostUsage?: UsageMetrics;
   /**
@@ -530,7 +506,7 @@ export interface EvalCaseResult {
 
   /**
    * External host trace and evidence metadata.
-   * Populated for external_host mode cases.
+   * Populated for clients that drive a desktop app, such as ChatGPT.
    */
   externalHost?: ExternalHostMetadata;
 }
@@ -593,7 +569,7 @@ export interface MCPEvalRunData {
     expectationBreakdown: ExpectationBreakdown;
 
     /**
-     * Aggregate token usage from all mcp_host LLM simulations in this run.
+     * Aggregate token usage from every client case's model calls in this run.
      */
     totalHostUsage?: UsageMetrics;
   };

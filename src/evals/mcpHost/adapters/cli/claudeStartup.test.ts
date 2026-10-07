@@ -7,7 +7,6 @@ import { runCLIHost } from './runner.js';
 import { getHost } from '../../../builtinHosts.js';
 import { hostRunToExecution } from '../../../hostTrace.js';
 import { runEvalDataset } from '../../../evalRunner.js';
-import type { MCPFixtureApi } from '../../../../mcp/fixtures/mcpFixture.js';
 
 const init = {
   type: 'system',
@@ -109,36 +108,6 @@ describe('Claude Code MCP startup', () => {
     },
     DEADLINE_TEST_MS
   );
-
-  it('retains failed startup evidence through the legacy dataset runner', async () => {
-    const command = script(
-      `console.log(${JSON.stringify(line({ ...init, mcp_servers: [] }))});`
-    );
-    const result = await runEvalDataset(
-      {
-        dataset: {
-          name: 'legacy',
-          cases: [
-            {
-              id: 'case',
-              mode: 'mcp_host',
-              input: 'scenario',
-              mcpHostConfig: {
-                hostType: 'cli',
-                cli: { command, args: [], claudeMcpServers: ['acme'] },
-              },
-            },
-          ],
-        },
-      },
-      { mcp: { authType: 'none' } as MCPFixtureApi }
-    );
-    expect(result.caseResults[0]?.pass).toBe(false);
-    expect(result.caseResults[0]?.hostDiagnostics).toMatchObject({
-      failureKind: 'startup',
-      claudeStartup: { status: 'failed' },
-    });
-  });
 
   it('retains separate diagnostics and infrastructure classification for every iteration', async () => {
     let attempt = 0;

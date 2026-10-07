@@ -1,7 +1,7 @@
 /**
  * toHaveToolCallCount Matcher
  *
- * Validates the number of tool calls made during a mcp_host simulation.
+ * Validates the number of tool calls a client made.
  */
 
 import { validateToolCallCount } from '../validators/toolCalls.js';

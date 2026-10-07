@@ -2,7 +2,7 @@
  * Where MST's LLM calls go and how they authenticate.
  *
  * Every consumer that talks to an Anthropic- or OpenAI-shaped API (the
- * `mcp_host` simulator, LLM judges) resolves its base URL and credential
+ * mst client, LLM judges) resolves its base URL and credential
  * here, so a gateway is configured once with environment variables:
  *
  * - `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL`: the endpoint override. The
@@ -188,7 +188,7 @@ const pendingTokens = new Map<string, Promise<string>>();
 
 /**
  * A token belongs to the command and the environment it ran in: a case's
- * `mcpHostConfig.env` can change what the command prints.
+ * client's `env` can change what the command prints.
  */
 function tokenKey(command: string, env: LLMEnvironment): string {
   const entries = Object.entries(env)

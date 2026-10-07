@@ -45,7 +45,7 @@ import type {
  *   case weighted equally). Always available. With one trial per case
  *   this is the share of cases that passed.
  * - `toolF1` / `toolPrecision` / `toolRecall`: dataset-level tool-call metrics,
- *   only available when the dataset has `mcp_host` cases with `toolsTriggered`
+ *   only available when the dataset has client cases with `toolsTriggered`
  *   expectations. Choosing one of these when no such cases exist throws a clear
  *   error rather than silently ranking on nothing.
  */
@@ -257,7 +257,7 @@ export interface VariantExperimentOptions {
    * @default 'held-out'
    */
   heldOutTag?: string;
-  /** Default `mcp_host` trials per case. Forwarded to `runEvalDataset`. */
+  /** Default trials per client case. Forwarded to `runEvalDataset`. */
   defaultTrials?: number;
   /** Default judge repetitions per case. Forwarded to `runEvalDataset`. */
   defaultJudgeReps?: number;
@@ -537,7 +537,7 @@ async function experiment(
   if (baselineValue === undefined) {
     throw new Error(
       `Metric '${metric}' is unavailable for the baseline. For a dataset, ` +
-        `the tool metrics need mcp_host cases with toolsTriggered ` +
+        `the tool metrics need client cases with toolsTriggered ` +
         `assertions; for a suite, use passRate, trialPassRate or a numeric ` +
         `metric the base arm reports (tool F1, precision and recall are ` +
         `dataset metrics).`

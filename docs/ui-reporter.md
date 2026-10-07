@@ -101,7 +101,7 @@ From left to right, in order of urgency:
 - **Regressions / fixed** — cases that changed vs the baseline run (only shown when a baseline is provided)
 - **X/Y passed** — compact pass count
 - **Avg pass rate** — mean assertion pass rate across multi-iteration cases
-- **Tool discovery** — mean recall across `mcp_host` cases with `toolsTriggered` expectations
+- **Tool discovery** — mean recall across client cases with `toolsTriggered` expectations
 
 ### Iteration dots and CI
 

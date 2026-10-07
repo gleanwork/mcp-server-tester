@@ -44,7 +44,11 @@ import { createSuiteCaseExecutor } from './caseExecution.js';
 import { mergeSuiteJudges } from './expectations.js';
 import { prepareHostBatch } from './prepareHostBatch.js';
 import type { EvalRunnerResult } from './evalRunner.js';
-import { EvalAssertionsSchema, type EvalDataset } from './datasetTypes.js';
+import {
+  EvalAssertionsSchema,
+  isClientCase,
+  type EvalDataset,
+} from './datasetTypes.js';
 import { selectEvalCases } from './buildEvalDataset.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { MCPProtocolInfo, UsageMetrics } from '../types/index.js';
@@ -64,7 +68,6 @@ import {
   parseHostConfig,
   validateManifest,
   inheritHost,
-  takesOption,
 } from './manifestValidation.js';
 import {
   computeMetrics,
@@ -237,36 +240,6 @@ function assertCaseHosts(
     for (const dataset of datasets) {
       for (const evalCase of dataset.cases) {
         const casePatch = clientPatchOf(evalCase);
-        const caseHost = inheritHost(declaration, casePatch ?? {}) as {
-          type?: string;
-          skills?: unknown;
-          systemPrompt?: unknown;
-        };
-        const hostSkills = caseHost.skills;
-        if (evalCase.mcpHostConfig?.systemPrompt !== undefined) {
-          // A case prompt would silently replace the arm's, or be ignored by
-          // a host that takes none.
-          if (caseHost.systemPrompt !== undefined) {
-            throw new Error(
-              `Case "${evalCase.id}" in arm "${arm.name}" sets mcpHostConfig.systemPrompt, which would override the host's systemPrompt: set it on the host or the case, not both.`
-            );
-          }
-          if (!takesOption(getHost(caseHost.type!).schema, 'systemPrompt')) {
-            throw new Error(
-              `Case "${evalCase.id}" in arm "${arm.name}" sets mcpHostConfig.systemPrompt, which host "${caseHost.type}" can't apply.`
-            );
-          }
-        }
-        if (
-          hostSkills !== undefined &&
-          evalCase.mcpHostConfig?.skills !== undefined
-        ) {
-          // The case setting would silently win, so arms meant to compare
-          // skills modes would all run the case's mode.
-          throw new Error(
-            `Case "${evalCase.id}" in arm "${arm.name}" sets mcpHostConfig.skills, which would override the host's skills: set skills on the host or the case, not both.`
-          );
-        }
         if (!casePatch) continue;
         assertHostSupports(
           parseHostConfig(inheritHost(declaration, casePatch), rawManifest),
@@ -671,6 +644,15 @@ export async function runEvalSuite(
         const runHost =
           typeof host.definition.run === 'function' ||
           typeof host.definition.runBatch === 'function';
+        if (!runHost && effectiveDataset.cases.some(isClientCase))
+          throw new Error(
+            `Client "${host.declaration.type}" has neither run() nor runBatch(), so it can't run cases.`
+          );
+        // The model each case runs on prices its usage and labels its result:
+        // a case client's own, or the arm client's (including its default).
+        const armModel =
+          host.declaration.model ??
+          (host.config as { model?: unknown } | undefined)?.model;
         const batchStartTime = Date.now();
         const batchTraces = await prepareHostBatch(
           host.definition,
@@ -689,6 +671,8 @@ export async function runEvalSuite(
         const result = await runEvalDataset(
           {
             dataset: effectiveDataset,
+            client: host.declaration.type,
+            ...(typeof armModel === 'string' ? { model: armModel } : {}),
             // The suite reports its own results (results.json).
             reporting: 'none',
             protocol: () => directProtocol,
@@ -723,18 +707,12 @@ export async function runEvalSuite(
           result,
         });
         for (const caseResult of result.caseResults) caseResult.arm = arm.name;
-        // Price usage the host reported without a cost, at the model each case
-        // ran: its own host's (a case host doesn't take the arm's model), a
-        // legacy case config's, or the arm host's (including its default).
-        const armModel =
-          host.declaration.model ??
-          (host.config as { model?: unknown } | undefined)?.model;
+        // Price usage the client reported without a cost, at the model each
+        // case ran (a case client doesn't take the arm's model).
         const caseModels = new Map(
           effectiveDataset.cases.map((evalCase) => [
             evalCase.id,
-            clientPatchOf(evalCase)
-              ? evalCase.model
-              : (evalCase.mcpHostConfig?.model ?? armModel),
+            clientPatchOf(evalCase) ? evalCase.model : armModel,
           ])
         );
         const priced = estimateCosts(

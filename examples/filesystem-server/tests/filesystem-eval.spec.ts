@@ -308,10 +308,11 @@ test.describe('LLM Host Simulation (E2E)', () => {
 });
 
 test.describe('Eval: LLM Host Mode', () => {
-  const llmCases = evalDataset.cases.filter((c) => c.mode === 'mcp_host');
+  // Cases with input run on the client the case names (mst).
+  const llmCases = evalDataset.cases.filter((c) => c.input !== undefined);
 
   for (const evalCase of llmCases) {
-    const provider = evalCase.mcpHostConfig?.provider || 'unknown';
+    const provider = 'anthropic';
 
     test(evalCase.id, async ({ mcp }, testInfo) => {
       if (!hasApiKey(provider)) {
