@@ -13,10 +13,21 @@ export interface RunOptions {
   rootDir?: string;
   dryRun?: boolean;
   variant?: string;
+  /** `--case`: run only these case ids. */
+  case?: string[];
+  /** `--trials`: trials per case. */
+  trials?: string | number;
   outputDir?: string;
   secretsFile?: string;
   /** Credential store directory for connector servers. */
   store?: string;
+}
+
+function parseTrials(value: string | number): number {
+  const trials = Number(value);
+  if (!Number.isInteger(trials) || trials < 1)
+    throw new Error(`--trials must be a positive integer, got "${value}"`);
+  return trials;
 }
 
 export async function run(options: RunOptions): Promise<void> {
@@ -28,6 +39,10 @@ export async function run(options: RunOptions): Promise<void> {
     secretsFile: options.secretsFile,
     dryRun: options.dryRun,
     variant: options.variant,
+    ...(options.case?.length ? { cases: options.case } : {}),
+    ...(options.trials !== undefined
+      ? { trials: parseTrials(options.trials) }
+      : {}),
     ...(options.store
       ? { credentialStore: localCredentialStore(path.resolve(options.store)) }
       : {}),

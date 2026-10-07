@@ -144,6 +144,11 @@ program
   .option('-c, --config <path>', 'Path to an eval config JSON')
   .option('--plugins <paths...>', 'Plugin modules to load before the run')
   .option('--variant <name>', "Run one of the config's variants")
+  .option(
+    '--case <ids...>',
+    "Run only these case ids (instead of the config's tags and case cap)"
+  )
+  .option('--trials <n>', 'Trials per case, instead of the config or case')
   .option('--output-dir <dir>', 'Directory for run artifacts')
   .option('--secrets-file <path>', 'JSON or dotenv-style runtime secrets file')
   .option(
