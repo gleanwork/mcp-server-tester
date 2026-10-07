@@ -14,11 +14,11 @@ import { homedir, tmpdir, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
 import { transportServers, type EvalConfig } from '../evalConfig.js';
 import {
-  hostStdioServers,
-  resolveHostStdioServer,
+  clientStdioServers,
+  resolveClientStdioServer,
   type MarketplacePlugin,
   type ClientStdioPaths,
-} from '../hostPlugins.js';
+} from '../clientPlugins.js';
 import { getMacCoworkController } from './macController.js';
 import { configureMacToolDefaults } from './macToolPermissions.js';
 import { resolveCoworkSetupConfig } from './options.js';
@@ -52,8 +52,8 @@ function actionable(error: unknown): error is Error {
     (error.message.startsWith('Unable to acquire Claude Desktop ') ||
       error.message === 'Unable to read the Claude Desktop version.' ||
       error.message.startsWith('MST_COWORK_APP_VERSION was removed') ||
-      error.message.startsWith('Invalid host.options.appVersion') ||
-      error.message.startsWith('Set host.options.appVersion'))
+      error.message.startsWith('Invalid clientOptions.appVersion') ||
+      error.message.startsWith('Set clientOptions.appVersion'))
   );
 }
 
@@ -61,7 +61,7 @@ function actionable(error: unknown): error is Error {
 export interface MacCoworkApp {
   name: 'Claude Desktop';
   version: string;
-  /** `pinned`: downloaded for `host.options.appVersion`; else the installed app. */
+  /** `pinned`: downloaded for `clientOptions.appVersion`; else the installed app. */
   source: 'installed' | 'pinned';
 }
 const CLEANUP_ERROR =
@@ -134,7 +134,7 @@ export async function prepareMacCoworkSession(options: {
   profileDirectory?: string;
   model?: string;
   plugins?: readonly MarketplacePlugin[];
-  /** `host.options.appVersion`: download and run exactly this version. */
+  /** `clientOptions.appVersion`: download and run exactly this version. */
   appVersion?: string;
 }): Promise<{
   setupStatus: 'applied-not-verified';
@@ -198,8 +198,8 @@ export async function prepareMacCoworkSession(options: {
     // localDeveloperMCP; only the transaction owns private-file materialization.
     const localServers = [
       ...labeledServers.filter((server) => server.transport === 'http'),
-      ...hostStdioServers(labeledServers, plugins).map((server) => {
-        const launch = resolveHostStdioServer(server, stdioPaths);
+      ...clientStdioServers(labeledServers, plugins).map((server) => {
+        const launch = resolveClientStdioServer(server, stdioPaths);
         return {
           transport: 'stdio' as const,
           label: server.label,

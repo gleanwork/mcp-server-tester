@@ -5,7 +5,7 @@
  * It owns the rules every execution path shares:
  * - whether the evidence can support tool-call assertions (decided once, here);
  * - the tool-trace view reported next to `toolsTriggered`;
- * - how judge settings resolve (case defaults, suite eval config judges).
+ * - how judge settings resolve (case defaults, eval config judges).
  *
  * Validators stay pure leaves: this module decides what to grade and with
  * which settings, then calls them.
@@ -18,7 +18,7 @@ import type {
 import type { ClientResponse } from './caseExecution.js';
 import type { TraceEvidence } from './evalFrameworkTypes.js';
 import type { JudgeCaseSource } from '../judge/judgeContract.js';
-import type { ClientMetadata } from './externalHost/types.js';
+import type { ClientMetadata } from './externalClient/types.js';
 import type { GraderScore } from '../types/index.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import {
@@ -30,7 +30,7 @@ import {
   type JudgeRun,
 } from '../assertions/validators/index.js';
 import {
-  hostEvidenceProblem,
+  clientEvidenceProblem,
   matchesIdentity,
   matchToolCalls,
 } from '../assertions/validators/toolCalls.js';
@@ -42,10 +42,10 @@ export interface GradedExecution {
   /** What validators grade: the client's response with native tool names mapped. */
   response: unknown;
   /** The client's response as reported; the tool trace shows its names. */
-  hostResponse?: ClientResponse;
+  clientResponse?: ClientResponse;
   /** Normalized client evidence. Absent for clients that don't report it. */
   evidence?: TraceEvidence;
-  /** External host metadata, whose trace source decides tool-evidence quality. */
+  /** External client metadata, whose trace source decides tool-evidence quality. */
   clientMetadata?: ClientMetadata;
 }
 
@@ -56,7 +56,7 @@ export interface GradingOutcome {
   toolRecall?: number;
   /**
    * Expected, unexpected and missed calls, when `toolsTriggered` was graded
-   * on sufficient evidence and the case ran on a host.
+   * on sufficient evidence and the case ran on a client.
    */
   toolCallTrace?: EvalCaseResult['toolCallTrace'];
 }
@@ -68,7 +68,7 @@ export interface GradingOutcome {
 export function toolEvidenceGap(
   graded: Pick<GradedExecution, 'evidence'>
 ): string | undefined {
-  return hostEvidenceProblem(graded.evidence);
+  return clientEvidenceProblem(graded.evidence);
 }
 
 /** The case's reference answer, `expected.answer`. */
@@ -93,12 +93,12 @@ export function resolveJudges(
 }
 
 /**
- * The case's `passesJudge` list with a suite eval config's judges merged in.
+ * The case's `passesJudge` list with an eval config's judges merged in.
  * A case entry naming an eval config judge overrides that judge's settings;
  * other case entries are kept. `rawJudges` are the eval config entries before
  * parsing, so the judge's own schema sees its inputs once.
  */
-export function mergeSuiteJudges(
+export function mergeEvalJudges(
   evalCase: Pick<EvalCase, 'assertions' | 'expected'>,
   judges: Array<Record<string, unknown>>,
   rawJudges: Array<Record<string, unknown>>
@@ -194,12 +194,12 @@ function isToolCall(entry: { kind?: string }): boolean {
 /**
  * Expected, unexpected and missed tool calls, from the same match the
  * validator grades (statuses agree with precision, `missed` with recall).
- * Calls are shown with the host's own names; skills and other events are
+ * Calls are shown with the client's own names; skills and other events are
  * left out of the view.
  */
 function toolTraceView(
   assertion: NonNullable<EvalAssertions['toolsTriggered']>,
-  graded: GradedExecution & { hostResponse: ClientResponse }
+  graded: GradedExecution & { clientResponse: ClientResponse }
 ): NonNullable<EvalCaseResult['toolCallTrace']> {
   // Match on the mapped response the validator graded.
   const mapped = graded.response as ClientResponse;
@@ -209,7 +209,7 @@ function toolTraceView(
   );
   const expectedToolCalls = assertion.calls.filter(isToolCall);
   return {
-    calls: graded.hostResponse.toolCalls.map((call, index) => ({
+    calls: graded.clientResponse.toolCalls.map((call, index) => ({
       name: call.name,
       arguments: call.arguments,
       status:
@@ -270,10 +270,10 @@ export async function gradeTrial(
       };
       outcome.toolPrecision = validation.metrics?.precision;
       outcome.toolRecall = validation.metrics?.recall;
-      if (graded.hostResponse)
+      if (graded.clientResponse)
         outcome.toolCallTrace = toolTraceView(expectBlock.toolsTriggered, {
           ...graded,
-          hostResponse: graded.hostResponse,
+          clientResponse: graded.clientResponse,
         });
     }
   }
@@ -297,7 +297,7 @@ export async function gradeTrial(
   if (expectBlock.passesJudge !== undefined)
     results.judge = await evaluateJudges(response, resolveJudges(evalCase), {
       evalCase,
-      hostResponse: graded.hostResponse,
+      clientResponse: graded.clientResponse,
       evidence: graded.evidence,
     });
 

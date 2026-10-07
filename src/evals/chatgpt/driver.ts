@@ -3,8 +3,8 @@ import {
   runAnthropicComputerUseSubmission,
   type ComputerUseSubmissionResult,
 } from '../cowork/anthropicComputerUse.js';
-import type { ExternalHostConfig } from '../externalHost/types.js';
-import { normalizeHostDriver } from '../externalHost/driverIdentity.js';
+import type { ExternalClientConfig } from '../externalClient/types.js';
+import { normalizeClientDriver } from '../externalClient/driverIdentity.js';
 import { NATIVE_MAX_ACTIONS } from './linuxContract.js';
 
 export { ComputerUseDriverError } from '../cowork/anthropicComputerUse.js';
@@ -22,7 +22,7 @@ export interface ChatgptApplicationController {
 /** App-specific options only; the screenshot/action loop is shared with Cowork. */
 export function submitChatgptQuery(
   query: string,
-  config: ExternalHostConfig,
+  config: ExternalClientConfig,
   deadlineAt: number
 ): Promise<ComputerUseSubmissionResult> {
   if (isLinuxChatgpt(config))
@@ -41,7 +41,7 @@ export function submitChatgptQuery(
   });
 }
 
-export function chatgptSurface(config: ExternalHostConfig): ChatgptSurface {
+export function chatgptSurface(config: ExternalClientConfig): ChatgptSurface {
   const surface = config.options?.surface ?? 'chatgpt-work';
   if (surface !== 'chatgpt-work' && surface !== 'codex')
     throw new Error('ChatGPT surface must be chatgpt-work or codex.');
@@ -49,7 +49,7 @@ export function chatgptSurface(config: ExternalHostConfig): ChatgptSurface {
 }
 
 /** The only validation of the Linux native action budget. */
-export function nativeMaxActions(config: ExternalHostConfig): number {
+export function nativeMaxActions(config: ExternalClientConfig): number {
   const actions = Number(
     config.options?.nativeMaxActions ?? NATIVE_MAX_ACTIONS.default
   );
@@ -64,12 +64,12 @@ export function nativeMaxActions(config: ExternalHostConfig): number {
   return actions;
 }
 
-export function isLinuxChatgpt(config: ExternalHostConfig): boolean {
-  return normalizeHostDriver(config.driver).platform === 'linux';
+export function isLinuxChatgpt(config: ExternalClientConfig): boolean {
+  return normalizeClientDriver(config.driver).platform === 'linux';
 }
 
 export function chatgptDesktopEnvironment(
-  config: ExternalHostConfig
+  config: ExternalClientConfig
 ): NodeJS.ProcessEnv {
   return {
     ...process.env,
@@ -77,14 +77,14 @@ export function chatgptDesktopEnvironment(
   };
 }
 
-function plannerEnvironment(config: ExternalHostConfig): NodeJS.ProcessEnv {
+function plannerEnvironment(config: ExternalClientConfig): NodeJS.ProcessEnv {
   return {
     ...process.env,
     ...readLaunchEnvironment(config.options?.computerUseEnvironment),
   };
 }
 
-export function validateChatgptConfig(config: ExternalHostConfig): void {
+export function validateChatgptConfig(config: ExternalClientConfig): void {
   chatgptSurface(config);
   if (config.options?.chatgptTrace === 'accessibility')
     throw new Error(

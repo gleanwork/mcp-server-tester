@@ -14,10 +14,10 @@
 
 import type { UsageMetrics } from './judgeTypes.js';
 import type { TraceEvent, TraceEvidence } from '../evals/evalFrameworkTypes.js';
-import type { LLMToolCall } from '../evals/mcpHost/mcpHostTypes.js';
+import type { LLMToolCall } from '../evals/mstClient/types.js';
 import { extractText } from '../mcp/response.js';
 
-/** One conversation turn, as the host reported it. */
+/** One conversation turn, as the client reported it. */
 export interface JudgeMessage {
   role: 'user' | 'assistant' | 'tool';
   content?: string;
@@ -59,11 +59,11 @@ export interface JudgeTrial {
   text: string;
   /** Tool calls and other client events, in order. Empty for a tool result. */
   events: TraceEvent[];
-  /** Conversation turns, when the host reports them. */
+  /** Conversation turns, when the client reports them. */
   messages?: JudgeMessage[];
   /** How the trace was observed. Absent for a tool result. */
   evidence?: TraceEvidence;
-  /** Host model usage for this run. */
+  /** Client model usage for this run. */
   usage?: Partial<UsageMetrics>;
 }
 
@@ -125,8 +125,8 @@ export interface JudgeCaseSource {
   metadata?: Record<string, unknown>;
 }
 
-/** The host response fields a `JudgeTrial` is built from. */
-interface HostResponseLike {
+/** The client response fields a `JudgeTrial` is built from. */
+interface ClientResponseLike {
   response?: string;
   toolCalls?: LLMToolCall[];
   events?: TraceEvent[];
@@ -174,34 +174,34 @@ function toolCallEvents(calls: LLMToolCall[]): TraceEvent[] {
   }));
 }
 
-/** One run, built from the graded response and the host response, if any. */
+/** One run, built from the graded response and the client response, if any. */
 export function buildJudgeTrial(
   response: unknown,
-  host?: { hostResponse?: unknown; evidence?: TraceEvidence }
+  client?: { clientResponse?: unknown; evidence?: TraceEvidence }
 ): JudgeTrial {
-  const hostResponse = (
-    isRecord(host?.hostResponse)
-      ? host.hostResponse
+  const clientResponse = (
+    isRecord(client?.clientResponse)
+      ? client.clientResponse
       : isRecord(response) && Array.isArray(response.toolCalls)
         ? response
         : undefined
-  ) as HostResponseLike | undefined;
+  ) as ClientResponseLike | undefined;
   const text =
-    typeof hostResponse?.response === 'string'
-      ? hostResponse.response
+    typeof clientResponse?.response === 'string'
+      ? clientResponse.response
       : extractText(response);
   const events =
-    hostResponse?.events ??
-    (hostResponse?.toolCalls ? toolCallEvents(hostResponse.toolCalls) : []);
+    clientResponse?.events ??
+    (clientResponse?.toolCalls ? toolCallEvents(clientResponse.toolCalls) : []);
   return {
     response,
     text,
     events,
-    ...(hostResponse?.conversationHistory !== undefined && {
-      messages: hostResponse.conversationHistory,
+    ...(clientResponse?.conversationHistory !== undefined && {
+      messages: clientResponse.conversationHistory,
     }),
-    ...(host?.evidence !== undefined && { evidence: host.evidence }),
-    ...(hostResponse?.usage !== undefined && { usage: hostResponse.usage }),
+    ...(client?.evidence !== undefined && { evidence: client.evidence }),
+    ...(clientResponse?.usage !== undefined && { usage: clientResponse.usage }),
   };
 }
 

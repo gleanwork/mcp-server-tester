@@ -11,8 +11,8 @@ import { resolveResultStoreConfig } from './configValidation.js';
 import { configIdentity } from './configIdentity.js';
 import { resolveConfigExtends } from './configExtends.js';
 import type { Plugin } from '../plugins/plugin.js';
-import { loadSuitePlugins } from './suitePlugins.js';
-import { runEvalSuite, type RunEvalSuiteOptions } from './runEvalSuite.js';
+import { loadEvalPlugins } from './evalPlugins.js';
+import { runEval, type RunEvalOptions } from './runEval.js';
 import type {
   EvaluationBatchItem,
   EvaluationBatchOptions,
@@ -140,14 +140,14 @@ async function hasMatchingSavedResult(
     const loaded = loadEvalConfig(configPath, { rootDir });
     // A shared config may supply the store, so resolve before deciding.
     if (!loaded.results?.store && !loaded.extends?.length) return false;
-    const namespaces = await loadSuitePlugins({
+    const namespaces = await loadEvalPlugins({
       configPath,
       evalConfig: loaded,
       rootDir,
       pluginPaths,
       plugins,
     });
-    // Identified as runEvalSuite identifies it: with its shared configs applied.
+    // Identified as runEval identifies it: with its shared configs applied.
     const evalConfig = resolveConfigExtends(loaded, namespaces);
     if (!evalConfig.results?.store) return false;
     // Another eval config in this batch may have loaded a plugin this one doesn't list.
@@ -155,7 +155,7 @@ async function hasMatchingSavedResult(
       evalConfig.results.store,
       { namespaces }
     );
-    // Relative store paths resolve like the suite's: eval config directory, then rootDir.
+    // Relative store paths resolve like the eval's: eval config directory, then rootDir.
     const store = definition.create(
       resolveStorePaths(config, {
         configDir: path.dirname(path.resolve(configPath)),
@@ -259,7 +259,7 @@ export async function runEvalBatch(
           ))
         )
           return { configPath, outputDir, skipped: true };
-        const suiteOptions: RunEvalSuiteOptions = {
+        const evalOptions: RunEvalOptions = {
           configPath,
           rootDir,
           pluginPaths: options.pluginPaths,
@@ -271,7 +271,7 @@ export async function runEvalBatch(
         return {
           configPath,
           outputDir,
-          result: await runEvalSuite(suiteOptions),
+          result: await runEval(evalOptions),
         };
       } catch (error) {
         return {

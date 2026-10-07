@@ -337,7 +337,7 @@ describe('Mac Cowork settings transaction', () => {
     await restoreMacCoworkSettings(profileDirectory);
     await expectClean();
   });
-  it('installs host plugins through a pinned, required marketplace entry', async () => {
+  it('installs client plugins through a pinned, required marketplace entry', async () => {
     const ref = 'e'.repeat(40);
     const installed = await installMacCoworkSettings(
       options({

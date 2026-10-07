@@ -38,10 +38,10 @@ npm run format:check        # Check formatting
 - **`skills/`** - Agent Skills over MCP (SEP-2640): wire schemas, entry validation, and a skills client (the SDK has no skills API yet)
 - **`auth/`** - OAuth 2.1 with PKCE (`PlaywrightOAuthClientProvider`) and static token utilities
 - **`assertions/`** - Unified assertion architecture (see below)
-- **`evals/`** - Dataset types, loader, and runner (uses validators internally). `evals/caseExecution.ts` is the only place a case runs: every path (the `mst` client on a Playwright test's connection, a suite's client, a custom `executeCase`) returns a typed `CaseExecution` (`host` or `failed`), and the runner reads its fields instead of inspecting `response`. `caseExecution.golden.test.ts` pins the resulting `EvalCaseResult` for every path. `evals/grading.ts` grades a case's `assertions` block: it decides once whether the evidence can support tool-call assertions (`toolEvidenceGap`), builds the `toolCallTrace` view, resolves judge settings (including suite eval config judges), then calls the validators. Desktop hosts (Cowork, ChatGPT) run batches through `evals/desktopBatch.ts` (lease, per-case reset policy, native-session ledger, redaction, cleanup) and share one MCP readiness rule (`isMcpServerReady` in `evals/mcpReadiness.ts`); a new desktop host supplies only prepare, one case, reset and dispose. macOS Swift controllers build and run through `evals/nativeHelper.ts`, which owns their environment policy
-- **`llm/`** - `resolveLLMEndpoint()`: the one place MST's own LLM calls (SDK host, judges) get their base URL and credential, including gateway bearer tokens and `MST_LLM_AUTH_COMMAND`. New LLM consumers resolve through it rather than reading `*_API_KEY` themselves. See `docs/llm-gateways.md`
+- **`evals/`** - Dataset types, loader, and runner (uses validators internally). `evals/caseExecution.ts` is the only place a case runs: every path (the `mst` client on a Playwright test's connection, an eval's client, a custom `executeCase`) returns a typed `CaseExecution` (`completed` or `failed`), and the runner reads its fields instead of inspecting `response`. `caseExecution.golden.test.ts` pins the resulting `EvalCaseResult` for every path. `evals/grading.ts` grades a case's `assertions` block: it decides once whether the evidence can support tool-call assertions (`toolEvidenceGap`), builds the `toolCallTrace` view, resolves judge settings (including suite eval config judges), then calls the validators. Desktop hosts (Cowork, ChatGPT) run batches through `evals/desktopBatch.ts` (lease, per-case reset policy, native-session ledger, redaction, cleanup) and share one MCP readiness rule (`isMcpServerReady` in `evals/mcpReadiness.ts`); a new desktop host supplies only prepare, one case, reset and dispose. macOS Swift controllers build and run through `evals/nativeHelper.ts`, which owns their environment policy
+- **`llm/`** - `resolveLLMEndpoint()`: the one place MST's own LLM calls (SDK client, judges) get their base URL and credential, including gateway bearer tokens and `MST_LLM_AUTH_COMMAND`. New LLM consumers resolve through it rather than reading `*_API_KEY` themselves. See `docs/llm-gateways.md`
 - **`judge/`** - LLM-as-a-judge via Claude Agent SDK
-- **`plugins/`** - ESLint-style plugins: the `Plugin` shape and validation (`plugin.ts`), the process-wide extension table keyed by `namespace/name`, where each kind's lookup (next to its built-ins) adds them under bare names (`extensions.ts`), and the loader (`loadPlugins.ts`). `evals/suitePlugins.ts` loads a suite's plugins and checks it only references namespaces it loads. Domain terms are in `CONTEXT.md`; decisions in `docs/adr/`
+- **`plugins/`** - ESLint-style plugins: the `Plugin` shape and validation (`plugin.ts`), the process-wide extension table keyed by `namespace/name`, where each kind's lookup (next to its built-ins) adds them under bare names (`extensions.ts`), and the loader (`loadPlugins.ts`). `evals/evalPlugins.ts` loads an eval's plugins and checks it only references namespaces it loads. Domain terms are in `CONTEXT.md`; decisions in `docs/adr/`
 - **`spec/`** - Conformance check registry (`checks/core.ts`, `checks/modern.ts`, `checks/skills.ts`), raw probe channel, and cross-era checks
 - **`reporters/`** - Custom Playwright reporter with React-based UI. `reporters/channel.ts` owns every attachment the reporter reads (names, payload types, read-side Zod schemas). Write with `attachReporterData(testInfo, { kind, data })`, never `testInfo.attach('mcp-...')` directly
 - **`cli/`** - The CLI, shipped as `mst` and `mcp-server-tester` (the same binary): `init`, `generate`, `login`, `token`, `run`, `batch`, `cowork`, `open`
@@ -107,9 +107,9 @@ Configuration is read from `project.use.mcpConfig` in playwright.config.ts. The 
 The public API is tiered. Each name is exported from exactly one of these entry points (`./types` additionally re-exports the root's shared types without runtime code):
 
 - `.` (`src/index.ts`) - The core testing interface: fixtures, matchers and validators, MCP client, config, datasets with `runEvalDataset`/`runEvalCase`, judges, conformance, skills, and their types
-- `./evals` (`src/entries/evals.ts`) - The evaluation framework: eval configs, suites/batches, extension definition types, metrics, result stores, comparisons, variant experiments
+- `./evals` (`src/entries/evals.ts`) - The evaluation framework: eval configs, evals/batches, extension definition types, metrics, result stores, comparisons, tool optimizations
 - `./auth` (`src/entries/auth.ts`) - Low-level OAuth: discovery, token storage, client credentials
-- `./experimental/clients` (`src/entries/experimentalClients.ts`) - Desktop-run metadata types, Cowork settings and audit, host plugins (may change between minors)
+- `./experimental/clients` (`src/entries/experimentalClients.ts`) - Desktop-run metadata types, Cowork settings and audit, client plugins (may change between minors)
 - `./fixtures/mcp`, `./fixtures/mcpAuth`, `./reporters/mcpReporter` - Playwright fixtures and the reporter
 
 The subpaths are ESM only and share chunks with the ESM root (tsup `splitting`), so module state (the extension table, classes) is one instance across them. The CommonJS root and the fixtures/reporter bundles are separate copies; only `Symbol.for` state (the extension table and the plugin-load cache) is shared with those. New public names go in the narrowest tier that fits. `npm run knip` (in CI) fails on files, exports or dependencies nothing uses, so delete dead code rather than leaving it exported. `src/publicApi.test.ts` pins each entry point's runtime exports: after a deliberate change, update it with `npx vitest run src/publicApi.test.ts -u` and note any removal in the migration guides. Tests count as users, so an export only a test imports is not flagged.
@@ -181,7 +181,7 @@ Update snapshots: `npx playwright test --update-snapshots`
 
 ### The mst and claude-code Clients
 
-`simulateMCPHost()` (internal, in `src/evals/mcpHost/`) runs the `mst` and `claude-code` clients: the `sdk` path drives a model through the Vercel AI SDK over the test's MCP connection; the `cli` path spawns Claude Code with its own connection. Tests and evals reach it only through `runEvalDataset`/`runEvalCase` or a suite. The external-host runtime in `src/evals/externalHost/` is likewise internal to the ChatGPT client; `./experimental/clients` exports only the metadata types results carry.
+`simulateMstClient()` (internal, in `src/evals/mstClient/`) runs the `mst` and `claude-code` clients: the `sdk` path drives a model through the Vercel AI SDK over the test's MCP connection; the `cli` path spawns Claude Code with its own connection. Tests and evals reach it only through `runEvalDataset`/`runEvalCase` or an eval. The external-client runtime in `src/evals/externalClient/` is likewise internal to the ChatGPT client; `./experimental/clients` exports only the metadata types results carry.
 
 Provider packages are dynamically imported — install `ai` + `@ai-sdk/<provider>` (e.g., `npm install ai @ai-sdk/anthropic`).
 
@@ -288,9 +288,9 @@ Use conventional commits: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore
 
 ## Adding New Features
 
-### New Built-in Extension (dataset source, host, judge, metric, result store)
+### New Built-in Extension (dataset source, client, judge, metric, result store)
 
-Add it to the kind's built-in record, keyed by its bare name: `builtinDatasetSources()`, `builtinHostDefinitions()`, `builtinJudges()` (`src/judge/builtinJudges.ts`), `BUILT_IN_METRICS`, or `builtinResultStores()`. Each kind's lookup (`getHost`, `getJudge`, ...) lives next to that record and installs it on first use; the extension table (`src/plugins/extensions.ts`) knows no built-ins. Organization-specific extensions belong in a plugin, not here.
+Add it to the kind's built-in record, keyed by its bare name: `builtinDatasetSources()`, `builtinClientDefinitions()`, `builtinJudges()` (`src/judge/builtinJudges.ts`), `BUILT_IN_METRICS`, or `builtinResultStores()`. Each kind's lookup (`getClient`, `getJudge`, ...) lives next to that record and installs it on first use; the extension table (`src/plugins/extensions.ts`) knows no built-ins. Organization-specific extensions belong in a plugin, not here.
 
 ### New Validator
 
@@ -317,18 +317,18 @@ Add it to the kind's built-in record, keyed by its bare name: `builtinDatasetSou
 2. Write a completion adapter in `src/judge/myProviderJudge.ts`: `(config: JudgeConfig) => JudgeCompletionAdapter`, which sends `{ system, prompt }` and returns `{ text, usage }`. Load the SDK with `loadJudgeSdk(() => import('pkg'), ...)` from `src/judge/adapterSupport.ts`, and type only the SDK surface you read (no `any`). Don't build prompts or parse verdicts there: `src/judge/llmJudge.ts` owns the prompt, the parser, the `maxToolOutputSize` guard and usage defaults for every provider. For an Anthropic- or OpenAI-shaped API, check the credential up front with `requireJudgeCredential` and resolve the endpoint per call with `resolveLLMEndpoint` (`src/llm/endpoint.ts`), so gateways work
 3. Add it to `JUDGE_PROVIDERS` in `src/judge/judgeClient.ts` (the record is typed by `ProviderKind`, so a missing entry is a compile error)
 
-### New LLM Host Provider (the mst client)
+### New LLM Client Provider (the mst client)
 
-Supported `LLMProvider` values for the `mst` client's `provider` option (defined in `src/evals/mcpHost/mcpHostTypes.ts`):
+Supported `LLMProvider` values for the `mst` client's `provider` option (defined in `src/evals/mstClient/types.ts`):
 
 `'openai' | 'anthropic' | 'azure' | 'google' | 'mistral' | 'deepseek' | 'openrouter' | 'xai' | 'vertex-anthropic'`
 
 To add a new provider:
 
-1. Add to `LLMProvider` union in `src/evals/mcpHost/mcpHostTypes.ts`
-2. Add to `ProviderSchema` in `src/evals/mcpHost/hostOptions.ts` (the dataset schema and the simulator's supported set derive from it)
-3. Create an adapter in `src/evals/mcpHost/adapters/`
-4. Register in `src/evals/mcpHost/adapter.ts`
+1. Add to `LLMProvider` union in `src/evals/mstClient/types.ts`
+2. Add to `ProviderSchema` in `src/evals/mstClient/clientOptions.ts` (the dataset schema and the simulator's supported set derive from it)
+3. Create an adapter in `src/evals/mstClient/adapters/`
+4. Register in `src/evals/mstClient/adapter.ts`
 
 ### New Transport Type
 

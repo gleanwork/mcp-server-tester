@@ -134,7 +134,7 @@ describe('Linux ChatGPT environment contract', () => {
     ['HOME', '/'],
     ['TMPDIR', '/tmp/../tmp/x'],
     ['XDG_CONFIG_HOME', '/elsewhere/.config'],
-    ['DBUS_SESSION_BUS_ADDRESS', 'tcp:host=x'],
+    ['DBUS_SESSION_BUS_ADDRESS', 'tcp:client=x'],
     ['AT_SPI_BUS_ADDRESS', ''],
     ['DISPLAY', ''],
     ['GNOME_KEYRING_CONTROL', ''],
@@ -162,13 +162,13 @@ describe('fresh MST-owned Linux profile', () => {
       install: {
         credentialStore: 'keyring',
         executionPolicy: POLICY,
-        hostToolPolicy: {
+        builtinToolPolicy: {
           disabledPlugins: ['unified-computer-use@openai-bundled'],
           webSearch: 'disabled',
         },
       },
       readiness: {
-        hostToolPolicy: {
+        builtinToolPolicy: {
           disabledPlugins: ['unified-computer-use@openai-bundled'],
           webSearch: 'disabled',
         },

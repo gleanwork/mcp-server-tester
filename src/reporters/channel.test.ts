@@ -53,7 +53,7 @@ const caseResult: EvalCaseResult = {
 const samples: ReporterAttachment[] = [
   { kind: 'evalResults', data: { caseResults: [caseResult] } },
   {
-    kind: 'variantExperiment',
+    kind: 'toolOptimization',
     data: {
       metric: 'passRate',
       baselineValue: 0.5,
@@ -62,7 +62,7 @@ const samples: ReporterAttachment[] = [
       reason: 'improved',
     } as unknown as Extract<
       ReporterAttachment,
-      { kind: 'variantExperiment' }
+      { kind: 'toolOptimization' }
     >['data'],
   },
   {
@@ -127,13 +127,13 @@ describe('reporter channel', () => {
       samples.map((sample, index) => ({
         name: [
           'mcp-test-results',
-          'mcp-variant-experiment',
+          'mcp-tool-optimization',
           'mcp-conformance-checks',
           'mcp-list-tools',
           'mcp-call-get_weather',
         ][index],
         contentType: 'application/json',
-        // Eval results and experiments are compact; the rest pretty-printed.
+        // Eval results and optimizations are compact; the rest pretty-printed.
         body:
           index < 2
             ? JSON.stringify(sample.data)

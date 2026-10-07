@@ -1,6 +1,6 @@
 import { rejectRenamedOptions } from './renamedKeys.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
-import { simulationTrace } from './hostTrace.js';
+import { simulationTrace } from './clientTrace.js';
 import {
   isInfrastructureError,
   isInfrastructureFailure,
@@ -15,7 +15,7 @@ import {
   executeEvalCase,
   failedExecution,
   type CaseExecution,
-  type HostExecution,
+  type ClientExecution,
   type ClientResponse,
 } from './caseExecution.js';
 import type { TraceEvent } from './evalFrameworkTypes.js';
@@ -78,7 +78,7 @@ export type { EvalCaseResult } from '../types/reporter.js';
  */
 export interface ToolMetadataOverride {
   /**
-   * Replacement tool name shown to MCP hosts. Calls to it reach the original
+   * Replacement tool name shown to clients. Calls to it reach the original
    * tool and are recorded under the original name, so a dataset's
    * assertions read the same in every variant; the trace's `rawName` keeps the
    * name the model used.
@@ -86,12 +86,12 @@ export interface ToolMetadataOverride {
   name?: string;
 
   /**
-   * Replacement tool description shown to MCP hosts.
+   * Replacement tool description shown to clients.
    */
   description?: string;
 
   /**
-   * Replacement input schema shown to MCP hosts.
+   * Replacement input schema shown to clients.
    */
   inputSchema?: Record<string, unknown>;
 }
@@ -190,7 +190,7 @@ export interface EvalRunnerResult {
   datasetToolF1?: number;
 
   /**
-   * Experiment tracking metadata captured at run time.
+   * Optimization tracking metadata captured at run time.
    */
   metadata?: EvalRunMetadata;
 
@@ -228,7 +228,7 @@ export interface EvalRunnerOptions {
 
   /**
    * The client cases run on, the model it uses and its options; a case's own
-   * `client`, `model` and `clientOptions` change them. Outside a suite, cases
+   * `client`, `model` and `clientOptions` change them. Outside an eval, cases
    * run on `mst`, on the test's MCP connection.
    *
    * @example { client: 'mst', model: 'claude-haiku-4-5' }
@@ -244,7 +244,7 @@ export interface EvalRunnerOptions {
 
   /**
    * Protocol to record in run metadata when `context.mcp` is absent (for
-   * example eval config suites that connect per case). A function is read when
+   * example eval config evals that connect per case). A function is read when
    * the run finishes.
    */
   protocol?: MCPProtocolInfo | (() => MCPProtocolInfo | undefined);
@@ -347,7 +347,7 @@ export interface EvalRunnerOptions {
    *
    * Every API that stores results uses the same policy and default
    * (`redactStoredResponses` in the result store), so artifacts written by the
-   * runner, suite, reporter and comparisons are redacted the same way.
+   * runner, eval, reporter and comparisons are redacted the same way.
    *
    * @default true
    */
@@ -366,9 +366,9 @@ export interface EvalRunnerOptions {
   baselineResultsFrom?: string | StoredEvalResultLoadOptions;
 
   /**
-   * Runtime MCP tool metadata overrides used for variant experiments.
+   * Runtime MCP tool metadata overrides used for tool optimizations.
    *
-   * Overrides are applied to the tool list shown to MCP hosts without changing
+   * Overrides are applied to the tool list shown to clients without changing
    * the eval dataset or mutating the underlying MCP server. Tool keys must be
    * canonical tool names exposed by the server.
    */
@@ -385,7 +385,7 @@ export interface EvalRunnerOptions {
   /**
    * Who reports the results. `'playwright'` (the default) attaches them to the
    * MCP reporter when `testInfo` is given, and suggests passing it when it
-   * isn't. `'none'`: the caller reports them itself (a suite writes
+   * isn't. `'none'`: the caller reports them itself (an eval writes
    * results.json), so there's no suggestion.
    */
   reporting?: 'playwright' | 'none';
@@ -397,7 +397,7 @@ export interface EvalRunnerOptions {
 export interface EvalCaseOptions {
   /**
    * The client cases run on, the model it uses and its options; a case's own
-   * `client`, `model` and `clientOptions` change them. Outside a suite, cases
+   * `client`, `model` and `clientOptions` change them. Outside an eval, cases
    * run on `mst`, on the test's MCP connection.
    *
    * @example { client: 'mst', model: 'claude-haiku-4-5' }
@@ -623,8 +623,8 @@ function isSecretLikeKey(key: string): boolean {
 
 /** Normalize declared evidence; anything but structured or observed is none. */
 function normalizeEvidence(
-  evidence: HostExecution['evidence']
-): HostExecution['evidence'] {
+  evidence: ClientExecution['evidence']
+): ClientExecution['evidence'] {
   if (evidence === undefined) return undefined;
   return evidence === 'structured' || evidence === 'observed'
     ? evidence
@@ -636,19 +636,19 @@ function normalizeEvidence(
  * Extracted from runEvalCase to support multi-trial pass rate loops.
  */
 /**
- * The trace a host case result keeps: the execution's (or one derived from
+ * The trace a client case result keeps: the execution's (or one derived from
  * its response), with the case's evidence and error, so they always agree.
  */
 function caseTrace(
-  host: HostExecution,
-  evidence: HostExecution['evidence'],
+  client: ClientExecution,
+  evidence: ClientExecution['evidence'],
   error: string | undefined
 ): Trace {
   const {
     evidence: _evidence,
     error: _error,
     ...trace
-  } = host.trace ?? simulationTrace(host.response);
+  } = client.trace ?? simulationTrace(client.response);
   return {
     ...trace,
     ...(evidence !== undefined ? { evidence } : {}),
@@ -663,7 +663,7 @@ async function runTrial(
 ): Promise<EvalCaseResult> {
   const startTime = Date.now();
 
-  // A custom executor (e.g. a suite's client) replaces the fixture path.
+  // A custom executor (e.g. an eval's client) replaces the fixture path.
   let execution: CaseExecution;
   try {
     execution = options.executeCase
@@ -676,41 +676,46 @@ async function runTrial(
   } catch (error) {
     execution = failedExecution(error);
   }
-  const host = execution.kind === 'host' ? execution : undefined;
+  const clientExecution =
+    execution.kind === 'completed' ? execution : undefined;
   const evidence = normalizeEvidence(
-    host ? (host.evidence ?? host.response.evidence) : undefined
+    clientExecution
+      ? (clientExecution.evidence ?? clientExecution.response.evidence)
+      : undefined
   );
   // Keep evidence consistent in assertions, metrics, reports and redacted artifacts.
-  const hostResponse =
-    host && evidence !== undefined
-      ? { ...host.response, evidence }
-      : host?.response;
-  const response = hostResponse ?? execution.response;
+  const clientResponse =
+    clientExecution && evidence !== undefined
+      ? { ...clientExecution.response, evidence }
+      : clientExecution?.response;
+  const response = clientResponse ?? execution.response;
   const error =
     execution.error ??
-    (hostResponse && !hostResponse.success
-      ? (hostResponse.error ?? 'Host execution failed.')
+    (clientResponse && !clientResponse.success
+      ? (clientResponse.error ?? 'Client execution failed.')
       : undefined);
-  const clientMetadata = host?.clientMetadata ?? hostResponse?.clientMetadata;
+  const clientMetadata =
+    clientExecution?.clientMetadata ?? clientResponse?.clientMetadata;
 
   let outcome: GradingOutcome = { scores: {} };
   if (!error && evalCase.assertions) {
     outcome = await gradeTrial(
       { ...evalCase, assertions: evalCase.assertions },
       {
-        response: hostResponse
-          ? mapToolNames(hostResponse, options.toolMap)
+        response: clientResponse
+          ? mapToolNames(clientResponse, options.toolMap)
           : response,
-        hostResponse,
+        clientResponse: clientResponse,
         evidence,
         clientMetadata,
       }
     );
   }
 
-  const clientUsage = host?.usage ?? hostResponse?.usage;
+  const clientUsage = clientExecution?.usage ?? clientResponse?.usage;
   const judgeUsage = caseJudgeUsage(outcome.scores.judge);
-  const clientDiagnostics = host?.diagnostics ?? hostResponse?.diagnostics;
+  const clientDiagnostics =
+    clientExecution?.diagnostics ?? clientResponse?.diagnostics;
 
   // Build result - use test context for authType and project (Playwright is source of truth)
   return {
@@ -733,11 +738,13 @@ async function runTrial(
     toolRecall: outcome.toolRecall,
     toolCallTrace: outcome.toolCallTrace,
     traceEvidence: evidence,
-    ...(host ? { trace: caseTrace(host, evidence, error) } : {}),
+    ...(clientExecution
+      ? { trace: caseTrace(clientExecution, evidence, error) }
+      : {}),
     ...(clientDiagnostics ? { clientDiagnostics } : {}),
     clientUsage,
     ...(judgeUsage !== undefined && { judgeUsage }),
-    clientTelemetry: host?.telemetry,
+    clientTelemetry: clientExecution?.telemetry,
     clientMetadata,
   };
 }
@@ -954,7 +961,7 @@ async function getGitHash(): Promise<string | undefined> {
 }
 
 // ponytail: warn once per process, not per call — the message is identical and
-// runVariantExperiment / scripted loops call this many times.
+// runToolOptimization / scripted loops call this many times.
 let warnedNoTestInfo = false;
 const warnedLowTrials = new Set<string>();
 
@@ -1034,7 +1041,7 @@ export async function runEvalDataset(
     // warning is only for a count chosen too small to be reliable.
     {
       const effectiveTrials = withTrialDefaults.trials ?? 1;
-      // Once per case and count: a suite runs the same case in every variant.
+      // Once per case and count: a runs the same case in every variant.
       const warning = `${evalCase.id}\u0000${effectiveTrials}`;
       if (
         effectiveTrials > 1 &&

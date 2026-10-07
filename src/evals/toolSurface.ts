@@ -7,7 +7,7 @@ export interface ListedServerTools {
   tools: Tool[];
 }
 
-/** A tool as the host shows it to the model. */
+/** A tool as the client shows it to the model. */
 export interface SurfaceTool {
   /** The label of the server that serves the tool, if it has one. */
   server?: string;
@@ -21,8 +21,8 @@ export interface SurfaceTool {
  * A variant's tools as the client presents them: the servers' tools with the
  * variant's tool metadata (renames, descriptions, input schemas) applied.
  *
- * Every host builds its tool list from a surface, so a variant means the same
- * thing on every host. Hosts still choose how to qualify names across
+ * Every client builds its tool list from a surface, so a variant means the same
+ * thing on every client. Clients still choose how to qualify names across
  * several servers (`label.tool`, `label__tool`); the surface's names are
  * per server.
  */
@@ -136,7 +136,7 @@ export function buildToolSurface(
   };
 }
 
-// The MCP fixtures that present a surface, and how each maps a name a host
+// The MCP fixtures that present a surface, and how each maps a name a client
 // called back to the tool's original name in the same namespace. Keyed by the
 // fixture object itself: a copy (`{ ...mcp }`) is not registered.
 const presentedFixtures = new WeakMap<
@@ -145,7 +145,7 @@ const presentedFixtures = new WeakMap<
 >();
 
 /**
- * Records that `mcp` presents a tool surface. `originalName` maps a name a host
+ * Records that `mcp` presents a tool surface. `originalName` maps a name a client
  * called (as `mcp.listTools()` showed it) to the original tool's name in the
  * same form, or undefined for a name it doesn't know.
  */
@@ -157,7 +157,7 @@ export function registerPresentedTools(
 }
 
 /**
- * Records a host's tool calls through a presented surface under the tools'
+ * Records a client's tool calls through a presented surface under the tools'
  * original names, so assertions and comparisons read the same names in
  * every variant. `rawName` keeps the name the model used.
  */
@@ -172,7 +172,7 @@ export function withOriginalToolNames<
   function restore<
     C extends { name?: string; rawName?: string; kind?: string },
   >(call: C): C {
-    // Typed host events (skills, searches) are not calls to a tool.
+    // Typed client events (skills, searches) are not calls to a tool.
     if (call.name === undefined || (call.kind ?? 'tool_call') !== 'tool_call')
       return call;
     const original = originalName!(call.name);

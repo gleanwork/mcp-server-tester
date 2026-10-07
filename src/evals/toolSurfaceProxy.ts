@@ -43,10 +43,10 @@ interface ProxiedToolCall {
   durationMs: number;
 }
 
-/** What one scope's (one host request's) traffic did through the proxy. */
+/** What one scope's (one client request's) traffic did through the proxy. */
 interface ToolSurfaceProxyActivity {
   /**
-   * The host listed tools from a proxied server (always true when no server
+   * The client listed tools from a proxied server (always true when no server
    * has tools, since there is nothing to list).
    */
   listedTools: boolean;
@@ -54,14 +54,14 @@ interface ToolSurfaceProxyActivity {
 }
 
 /**
- * Serves a variant's servers with its tool variant applied, for hosts that
- * connect to servers themselves (plugin hosts, the Claude CLI). Each upstream
+ * Serves a variant's servers with its tool variant applied, for clients that
+ * connect to servers themselves (plugin clients, the Claude CLI). Each upstream
  * server gets a loopback Streamable HTTP endpoint with the same label; each
- * host request gets its own scope, so the suite can tell whether the host saw
+ * client request gets its own scope, so the eval can tell whether the client saw
  * the variant. The proxy holds one connection to each server for the variant.
  */
 export interface ToolSurfaceProxy {
-  /** Server configs for one host request, pointing at the proxy. */
+  /** Server configs for one client request, pointing at the proxy. */
   serversFor(scope: string): MCPConfig[];
   /** The scope's traffic so far. */
   activity(scope: string): ToolSurfaceProxyActivity;
@@ -89,7 +89,7 @@ interface Upstream {
   config: MCPConfig;
   client: Client;
   capabilities: Record<string, unknown>;
-  /** Per-request timeout, as the host would have used against the server. */
+  /** Per-request timeout, as the client would have used against the server. */
   timeout?: number;
 }
 
@@ -205,7 +205,7 @@ export async function startToolSurfaceProxy(
       },
       close() {
         // Don't wait for in-flight calls: closing the upstream clients ends
-        // them, and dropping the sockets ends the hosts' requests.
+        // them, and dropping the sockets ends the clients' requests.
         closing ??= Promise.allSettled([
           handler.close(),
           new Promise<void>((resolve) => {
@@ -375,8 +375,8 @@ async function serveNode(
 }
 
 /**
- * Whether the suite gives a client a variant's tool metadata through the proxy:
- * hosts that run cases themselves and don't apply variants, unless they opt
+ * Whether the eval gives a client a variant's tool metadata through the proxy:
+ * clients that run cases themselves and don't apply variants, unless they opt
  * out with `toolSurfaceProxy: false`.
  */
 export function usesToolSurfaceProxy(definition: ClientDefinition): boolean {
@@ -388,7 +388,7 @@ export function usesToolSurfaceProxy(definition: ClientDefinition): boolean {
   );
 }
 
-/** A proxied host's context: the proxy applies the variant, not the host. */
+/** A proxied client's context: the proxy applies the variant, not the client. */
 export function withoutToolVariant(
   context: ClientRunContext
 ): ClientRunContext {
@@ -399,10 +399,10 @@ export function withoutToolVariant(
 }
 
 /**
- * Settles one proxied host request. A host that never listed the proxied
+ * Settles one proxied client request. A client that never listed the proxied
  * tools never showed the model the variant, so its trace becomes an error
- * rather than a result for a variant it ignored. Tool calls the host reports
- * are recorded under the tools' original names, with the host's in `rawName`.
+ * rather than a result for a variant it ignored. Tool calls the client reports
+ * are recorded under the tools' original names, with the client's in `rawName`.
  */
 export function settleProxiedTrace(
   trace: ClientRunResult,
@@ -414,7 +414,7 @@ export function settleProxiedTrace(
   if (!trace.error && !listedTools) {
     return {
       ...trace,
-      error: `The host never listed tools from the servers it was given, so the model didn't see tool variant "${variantId}". Variants reach hosts that connect to input.servers.`,
+      error: `The client never listed tools from the servers it was given, so the model didn't see tool variant "${variantId}". Variants reach clients that connect to input.servers.`,
     };
   }
   return {
@@ -435,7 +435,7 @@ export function settleProxiedTrace(
         };
       }
       if (event.kind !== 'tool_call' || event.source !== 'mcp') return event;
-      // Hosts name a call's server in `server`, as a `label.` prefix, or
+      // Clients name a call's server in `server`, as a `label.` prefix, or
       // (with one server) not at all.
       let server = event.server;
       let name = event.name;

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import {
-  createSuiteCaseExecutor,
+  createEvalCaseExecutor,
   executeEvalCase,
   playwrightClientOf,
 } from './caseExecution.js';
@@ -12,47 +12,47 @@ import type {
   ClientRunResult,
 } from './evalFrameworkTypes.js';
 import type { ToolSurfaceProxy } from './toolSurfaceProxy.js';
-import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
-import type * as SimulationModule from './mcpHost/mcpHostSimulation.js';
+import { simulateMstClient } from './mstClient/simulation.js';
+import type * as SimulationModule from './mstClient/simulation.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
 
-vi.mock('./mcpHost/mcpHostSimulation.js', async (original) => ({
+vi.mock('./mstClient/simulation.js', async (original) => ({
   ...(await original<typeof SimulationModule>()),
-  simulateMCPHost: vi.fn(),
+  simulateMstClient: vi.fn(),
 }));
 
 const mcp = { authType: 'none' } as MCPFixtureApi;
-const hostCase: EvalCase = {
-  id: 'host',
+const clientCase: EvalCase = {
+  id: 'client',
   input: 'query',
 };
 const evalConfig = { name: 'm', datasets: [] };
 
-beforeEach(() => vi.mocked(simulateMCPHost).mockReset());
+beforeEach(() => vi.mocked(simulateMstClient).mockReset());
 
 describe('executeEvalCase', () => {
-  it('adapts a successful simulation to a host execution', async () => {
-    vi.mocked(simulateMCPHost).mockResolvedValue({
+  it('adapts a successful simulation to a client execution', async () => {
+    vi.mocked(simulateMstClient).mockResolvedValue({
       success: true,
       response: 'answer',
       toolCalls: [],
       usage: { inputTokens: 1, outputTokens: 2, durationMs: 3 },
     });
-    await expect(executeEvalCase(hostCase, mcp)).resolves.toMatchObject({
-      kind: 'host',
+    await expect(executeEvalCase(clientCase, mcp)).resolves.toMatchObject({
+      kind: 'completed',
       response: { success: true, response: 'answer' },
       usage: { inputTokens: 1 },
     });
   });
 
   it('fails a simulation failure without keeping its response', async () => {
-    vi.mocked(simulateMCPHost).mockResolvedValue({
+    vi.mocked(simulateMstClient).mockResolvedValue({
       success: false,
       toolCalls: [],
       error: 'rejected',
     });
-    await expect(executeEvalCase(hostCase, mcp)).resolves.toEqual({
+    await expect(executeEvalCase(clientCase, mcp)).resolves.toEqual({
       kind: 'failed',
       response: undefined,
       error: 'rejected',
@@ -60,13 +60,13 @@ describe('executeEvalCase', () => {
   });
 
   it("runs on the run's mst client, with the case's own fields over it", async () => {
-    vi.mocked(simulateMCPHost).mockResolvedValue({
+    vi.mocked(simulateMstClient).mockResolvedValue({
       success: true,
       response: 'answer',
       toolCalls: [],
     });
     await executeEvalCase(
-      { ...hostCase, clientOptions: { systemPrompt: 'Case prompt.' } },
+      { ...clientCase, clientOptions: { systemPrompt: 'Case prompt.' } },
       mcp,
       {
         client: 'mst',
@@ -74,11 +74,11 @@ describe('executeEvalCase', () => {
         clientOptions: { systemPrompt: 'Run prompt.', maxToolCalls: 9 },
       }
     );
-    expect(simulateMCPHost).toHaveBeenCalledWith(
+    expect(simulateMstClient).toHaveBeenCalledWith(
       mcp,
       'query',
       expect.objectContaining({
-        hostType: 'sdk',
+        clientType: 'sdk',
         provider: 'openai',
         model: 'gpt-5',
         systemPrompt: 'Case prompt.',
@@ -87,20 +87,20 @@ describe('executeEvalCase', () => {
     );
   });
 
-  it('fails a case on another client, which runs in a suite', async () => {
+  it('fails a case on another client, which runs in an eval', async () => {
     await expect(
-      executeEvalCase({ ...hostCase, client: 'claude-code' }, mcp)
+      executeEvalCase({ ...clientCase, client: 'claude-code' }, mcp)
     ).resolves.toMatchObject({
       kind: 'failed',
-      error: expect.stringContaining('Run "claude-code" in a suite (mst run).'),
+      error: expect.stringContaining('Run "claude-code" in an eval (mst run).'),
     });
-    expect(simulateMCPHost).not.toHaveBeenCalled();
+    expect(simulateMstClient).not.toHaveBeenCalled();
   });
 
   it("doesn't carry the run's options to a case's own client", () => {
     expect(
       playwrightClientOf(
-        { ...hostCase, client: 'mst', model: 'claude-haiku-4-5' },
+        { ...clientCase, client: 'mst', model: 'claude-haiku-4-5' },
         { client: 'acme/other', model: 'x', clientOptions: { region: 'eu' } }
       )
     ).toEqual({ model: 'claude-haiku-4-5' });
@@ -135,7 +135,7 @@ describe('custom executeCase results', () => {
     );
     expect(result.pass).toBe(false);
     expect(result.error).toContain(
-      "executeCase must return a CaseExecution with kind 'host' or 'failed'"
+      "executeCase must return a CaseExecution with kind 'completed' or 'failed'"
     );
   });
 
@@ -151,19 +151,19 @@ describe('custom executeCase results', () => {
       }
     );
     expect(result.pass).toBe(false);
-    expect(result.error).toContain("kind 'host' or 'failed'");
+    expect(result.error).toContain("kind 'completed' or 'failed'");
   });
 });
 
-describe('createSuiteCaseExecutor', () => {
+describe('createEvalCaseExecutor', () => {
   const trace: ClientRunResult = { finalText: 'ok', events: [], durationMs: 7 };
 
   /** Install `host` as `test/<name>` and return that reference. */
-  function installTestHost(name: string, host: ClientDefinition): string {
+  function installTestClient(name: string, client: ClientDefinition): string {
     installPlugins([
       {
         meta: { name: 'test-plugin', namespace: 'test' },
-        clients: { [name]: host },
+        clients: { [name]: client },
       },
     ]);
     return `test/${name}`;
@@ -172,41 +172,41 @@ describe('createSuiteCaseExecutor', () => {
   afterEach(() => resetPluginsForTests());
 
   it('consumes each batch trace once and never resubmits', async () => {
-    const type = installTestHost('case-execution-batch-host', {
+    const type = installTestClient('case-execution-batch-host', {
       schema: z.object({ type: z.string() }),
       evidence: 'structured',
       runBatch: async () => [],
     });
-    const execute = createSuiteCaseExecutor({
+    const execute = createEvalCaseExecutor({
       servers: [],
-      host: { type },
+      client: { type },
       evalConfig,
-      batchTraces: new Map([['host', [trace]]]),
+      batchTraces: new Map([['client', [trace]]]),
     });
-    await expect(execute(hostCase)).resolves.toMatchObject({
-      kind: 'host',
+    await expect(execute(clientCase)).resolves.toMatchObject({
+      kind: 'completed',
       evidence: 'structured',
       preExecutionDurationMs: 7,
     });
-    await expect(execute(hostCase)).rejects.toThrow(
+    await expect(execute(clientCase)).rejects.toThrow(
       'Batch trace already consumed or missing; refusing to resubmit.'
     );
   });
 
   it('dispatches per case to run() with the declared evidence', async () => {
     const run = vi.fn(async () => trace);
-    const type = installTestHost('case-execution-run-host', {
+    const type = installTestClient('case-execution-run-host', {
       schema: z.object({ type: z.string() }),
       evidence: 'observed',
       run,
     });
-    const execute = createSuiteCaseExecutor({
+    const execute = createEvalCaseExecutor({
       servers: [],
-      host: { type },
+      client: { type },
       evalConfig,
     });
-    await expect(execute(hostCase)).resolves.toMatchObject({
-      kind: 'host',
+    await expect(execute(clientCase)).resolves.toMatchObject({
+      kind: 'completed',
       evidence: 'observed',
     });
     expect(run).toHaveBeenCalledWith(
@@ -240,7 +240,7 @@ describe('createSuiteCaseExecutor', () => {
       tools: { find_skills: { name: 'find_more' } },
     };
 
-    it('runs a proxied host on per-case proxy servers without the variant', async () => {
+    it('runs a proxied client on per-case proxy servers without the variant', async () => {
       const run = vi.fn(async () => ({
         finalText: 'ok',
         events: [
@@ -252,20 +252,20 @@ describe('createSuiteCaseExecutor', () => {
           },
         ],
       }));
-      const type = installTestHost('proxied-run-host', {
+      const type = installTestClient('proxied-run-host', {
         schema: z.object({ type: z.string() }),
         evidence: 'structured',
         run,
       });
       const proxy = stubProxy(true);
-      const execute = createSuiteCaseExecutor({
+      const execute = createEvalCaseExecutor({
         servers,
-        host: { type },
+        client: { type },
         evalConfig: variantConfig,
         toolVariant: { id: 'renamed', proxy: async () => proxy },
       });
-      const execution = await execute(hostCase);
-      expect(execution).toMatchObject({ kind: 'host' });
+      const execution = await execute(clientCase);
+      expect(execution).toMatchObject({ kind: 'completed' });
       const [input, , context] = run.mock.calls[0] as unknown as [
         { servers: Array<{ serverUrl: string }> },
         unknown,
@@ -274,47 +274,47 @@ describe('createSuiteCaseExecutor', () => {
       expect(input.servers[0]?.serverUrl).toMatch(/^http:\/\/127\.0\.0\.1:1\//);
       expect(context.evalConfig).not.toHaveProperty('tools');
       expect(
-        execution.kind === 'host' ? execution.trace?.events : undefined
+        execution.kind === 'completed' ? execution.trace?.events : undefined
       ).toMatchObject([
         { name: 'find_skills', rawName: 'find_more', server: 'agg' },
       ]);
     });
 
-    it('fails a case whose host never listed the proxied tools', async () => {
-      const type = installTestHost('proxied-ignoring-host', {
+    it('fails a case whose client never listed the proxied tools', async () => {
+      const type = installTestClient('proxied-ignoring-host', {
         schema: z.object({ type: z.string() }),
         evidence: 'structured',
         run: async () => ({ finalText: 'ok', events: [] }),
       });
-      const execute = createSuiteCaseExecutor({
+      const execute = createEvalCaseExecutor({
         servers,
-        host: { type },
+        client: { type },
         evalConfig: variantConfig,
         toolVariant: { id: 'renamed', proxy: async () => stubProxy(false) },
       });
-      await expect(execute(hostCase)).resolves.toMatchObject({
+      await expect(execute(clientCase)).resolves.toMatchObject({
         error: expect.stringContaining(
           'the model didn\'t see tool variant "renamed"'
         ),
       });
     });
 
-    it('leaves a host that applies variants itself on the real servers', async () => {
+    it('leaves a client that applies variants itself on the real servers', async () => {
       const run = vi.fn(async () => trace);
-      const type = installTestHost('native-variant-host', {
+      const type = installTestClient('native-variant-host', {
         schema: z.object({ type: z.string() }),
         evidence: 'structured',
         toolMetadata: true,
         run,
       });
       const proxy = vi.fn(async () => stubProxy(true));
-      const execute = createSuiteCaseExecutor({
+      const execute = createEvalCaseExecutor({
         servers,
-        host: { type },
+        client: { type },
         evalConfig: variantConfig,
         toolVariant: { id: 'renamed', proxy },
       });
-      await execute(hostCase);
+      await execute(clientCase);
       expect(proxy).not.toHaveBeenCalled();
       expect(run).toHaveBeenCalledWith(
         expect.objectContaining({ servers }),

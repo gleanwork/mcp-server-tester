@@ -135,7 +135,7 @@ describe('Codex configuration lifecycle', () => {
           approvalPolicy: 'never',
           sandboxMode: 'danger-full-access',
         },
-        hostToolPolicy: {
+        builtinToolPolicy: {
           disabledPlugins: ['unified-computer-use@openai-bundled'],
           webSearch: 'disabled',
           disabledFeatures: ['workspace_dependencies'],
@@ -164,7 +164,7 @@ describe('Codex configuration lifecycle', () => {
     expect(await readFile(configPath, 'utf8')).toBe(original);
   });
 
-  it('omits the execution and host tool policies unless requested', async () => {
+  it('omits the execution and built-in tool policies unless requested', async () => {
     const { configPath } = await tempConfig();
     const installation = await installCodexConfig({ configPath, servers: [] });
     const installed = parse(await readFile(configPath, 'utf8'));
@@ -182,28 +182,28 @@ describe('Codex configuration lifecycle', () => {
   it.each([
     ['executionPolicy', invalidPolicy, 'execution policy'],
     [
-      'hostToolPolicy',
+      'builtinToolPolicy',
       { disabledPlugins: ['a@b', 'a@b'], webSearch: 'disabled' },
-      'host tool policy',
+      'built-in tool policy',
     ],
     [
-      'hostToolPolicy',
+      'builtinToolPolicy',
       { disabledPlugins: ['x"]\nenabled = true'], webSearch: 'disabled' },
-      'host tool policy',
+      'built-in tool policy',
     ],
     [
-      'hostToolPolicy',
+      'builtinToolPolicy',
       { disabledPlugins: [], webSearch: 'live' },
-      'host tool policy',
+      'built-in tool policy',
     ],
     [
-      'hostToolPolicy',
+      'builtinToolPolicy',
       {
         disabledPlugins: [],
         webSearch: 'disabled',
         disabledFeatures: ['x]\nenabled = true'],
       },
-      'host tool policy',
+      'built-in tool policy',
     ],
     ['trustedProject', 'relative/workspace', 'trusted project'],
     ['trustedProject', '/', 'trusted project'],

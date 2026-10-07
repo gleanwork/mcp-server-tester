@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { runEvalSuite } from './runEvalSuite.js';
+import { runEval } from './runEval.js';
 import { resolveConfigPath } from './evalConfig.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
@@ -42,7 +42,7 @@ describe('resolveManifestPath', () => {
   });
 });
 
-/** A host that passes a case when its scenario mentions the current outcome. */
+/** A client that passes a case when its scenario mentions the current outcome. */
 function plugin(pass: () => Set<string>): Plugin {
   return {
     meta: { name: 'baseline-test', namespace: 'base' },
@@ -62,10 +62,10 @@ function plugin(pass: () => Set<string>): Plugin {
 describe('a run is compared with the previous run of the same eval config', () => {
   it('finds it in the result store, ignoring other eval configs that share the store', async () => {
     const root = await tempDir();
-    const suite = path.join(root, 'suite');
-    await fs.mkdir(suite);
+    const evalRun = path.join(root, 'suite');
+    await fs.mkdir(evalRun);
     await fs.writeFile(
-      path.join(suite, 'cases.json'),
+      path.join(evalRun, 'cases.json'),
       JSON.stringify({
         name: 'cases',
         cases: ['a', 'b'].map((id) => ({
@@ -83,21 +83,21 @@ describe('a run is compared with the previous run of the same eval config', () =
       results: { store: { type: 'file', dir: './store' } },
     });
     await fs.writeFile(
-      path.join(suite, 'one.json'),
+      path.join(evalRun, 'one.json'),
       JSON.stringify(evalConfig('one'))
     );
     await fs.writeFile(
-      path.join(suite, 'two.json'),
+      path.join(evalRun, 'two.json'),
       JSON.stringify(evalConfig('two'))
     );
     let passing = new Set(['a', 'b']);
-    const host = plugin(() => passing);
+    const clientPlugin = plugin(() => passing);
     const run = (file: string) =>
-      runEvalSuite({
-        configPath: path.join(suite, file),
+      runEval({
+        configPath: path.join(evalRun, file),
         rootDir: root,
         outputDir: path.join(root, 'out'),
-        plugins: [host],
+        plugins: [clientPlugin],
       });
 
     const first = await run('one.json');
@@ -125,19 +125,19 @@ describe('a run is compared with the previous run of the same eval config', () =
         },
       },
     });
-    await expect(fs.stat(path.join(suite, 'store'))).resolves.toBeTruthy();
+    await expect(fs.stat(path.join(evalRun, 'store'))).resolves.toBeTruthy();
   });
 
   it('keeps a store next to the eval config even if rootDir has one, and survives a corrupt summary', async () => {
     const root = await tempDir();
-    const suite = path.join(root, 'suite');
-    await fs.mkdir(suite);
+    const evalRun = path.join(root, 'suite');
+    await fs.mkdir(evalRun);
     // A store directory of the same name where the run starts.
     await fs.mkdir(path.join(root, 'store', 'eval-summaries'), {
       recursive: true,
     });
     await fs.writeFile(
-      path.join(suite, 'cases.json'),
+      path.join(evalRun, 'cases.json'),
       JSON.stringify({
         name: 'cases',
         cases: [
@@ -150,7 +150,7 @@ describe('a run is compared with the previous run of the same eval config', () =
       })
     );
     await fs.writeFile(
-      path.join(suite, 'm.json'),
+      path.join(evalRun, 'm.json'),
       JSON.stringify({
         name: 'm',
         datasets: ['./cases.json'],
@@ -158,13 +158,13 @@ describe('a run is compared with the previous run of the same eval config', () =
         results: { store: { type: 'file', dir: './store' } },
       })
     );
-    const host = plugin(() => new Set(['a']));
+    const clientPlugin = plugin(() => new Set(['a']));
     const run = () =>
-      runEvalSuite({
-        configPath: path.join(suite, 'm.json'),
+      runEval({
+        configPath: path.join(evalRun, 'm.json'),
         rootDir: root,
         outputDir: path.join(root, 'out'),
-        plugins: [host],
+        plugins: [clientPlugin],
       });
     await run();
     expect(
@@ -172,7 +172,7 @@ describe('a run is compared with the previous run of the same eval config', () =
     ).toEqual([]);
     // A summary that can't be read isn't a baseline, and doesn't fail the run.
     await fs.writeFile(
-      path.join(suite, 'store', 'eval-summaries', 'broken.json'),
+      path.join(evalRun, 'store', 'eval-summaries', 'broken.json'),
       '{'
     );
     const second = await run();

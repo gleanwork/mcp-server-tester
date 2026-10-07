@@ -12,7 +12,7 @@ MST can connect with either era, pin a specific revision, and run the same tests
 ## Table of Contents
 
 - [Choosing a protocol](#choosing-a-protocol)
-- [Running a suite against several protocols](#running-a-suite-against-several-protocols)
+- [Running tests against several protocols](#running-tests-against-several-protocols)
 - [Checking what was negotiated](#checking-what-was-negotiated)
 - [Conformance by era](#conformance-by-era)
 - [Cross-era checks](#cross-era-checks)
@@ -46,7 +46,7 @@ You can also override the protocol for a project or file with the `mcpProtocol` 
 test.use({ mcpProtocol: '2026-07-28' });
 ```
 
-## Running a suite against several protocols
+## Running tests against several protocols
 
 `protocolMatrix()` turns one Playwright project into one project per protocol:
 

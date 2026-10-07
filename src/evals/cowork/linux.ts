@@ -8,13 +8,13 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { CoworkPlatform } from './platform.js';
 import { transportServers } from '../evalConfig.js';
 import {
-  hostStdioFileContents,
-  hostStdioServers,
-  resolveHostStdioCredentials,
-  resolveHostStdioServer,
+  clientStdioFileContents,
+  clientStdioServers,
+  resolveClientStdioCredentials,
+  resolveClientStdioServer,
   type ClientStdioPaths,
   type ClientStdioServer,
-} from '../hostPlugins.js';
+} from '../clientPlugins.js';
 import {
   coworkJsonEqual,
   coworkMcpSettingsMatch,
@@ -221,7 +221,7 @@ async function verifyStdioPaths(
   paths: ClientStdioPaths,
   env: Record<string, string | undefined>
 ): Promise<void> {
-  const tokens = resolveHostStdioCredentials(servers, env);
+  const tokens = resolveClientStdioCredentials(servers, env);
   for (const server of servers) {
     for (const plugin of server.pluginRoots) {
       const root = paths.pluginRoots?.[plugin];
@@ -234,11 +234,11 @@ async function verifyStdioPaths(
       )
         throw new Error('plugin root');
     }
-    const launch = resolveHostStdioServer(server, paths);
+    const launch = resolveClientStdioServer(server, paths);
     if (!launch.dataDir) continue;
     await privateDirectory(paths.dataRoot!);
     await privateDirectory(launch.dataDir);
-    const files = hostStdioFileContents(server, paths, tokens[server.label]);
+    const files = clientStdioFileContents(server, paths, tokens[server.label]);
     for (const [name, content] of Object.entries(files)) {
       const handle = await open(
         join(launch.dataDir, name),
@@ -299,7 +299,7 @@ export const linuxCoworkPlatform: CoworkPlatform = {
       )
         throw new Error('servers');
       await verifyStdioPaths(
-        hostStdioServers(servers, plugins),
+        clientStdioServers(servers, plugins),
         stdioPaths,
         env
       );

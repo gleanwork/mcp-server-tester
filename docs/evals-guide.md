@@ -10,7 +10,7 @@ A **test** checks that your code does what you wrote it to do. Pass or fail, det
 
 An **eval** checks that your _system_ does what a _user_ needs it to do. Probabilistic, needs multiple runs, takes seconds or minutes.
 
-For MCP servers, this distinction matters enormously. Your tool definitions — the names, descriptions, and schemas you expose to AI clients — directly affect whether Claude Desktop, ChatGPT, or any other LLM host will actually _use_ your tools correctly. A unit test can verify that your `search` tool returns results. It cannot tell you whether a real user asking "find recent docs about planning" will cause Claude to call `search` in the first place.
+For MCP servers, this distinction matters enormously. Your tool definitions — the names, descriptions, and schemas you expose to AI clients — directly affect whether Claude Desktop, ChatGPT, or any other LLM client will actually _use_ your tools correctly. A unit test can verify that your `search` tool returns results. It cannot tell you whether a real user asking "find recent docs about planning" will cause Claude to call `search` in the first place.
 
 That's the gap evals fill.
 
@@ -72,7 +72,7 @@ A case with `input` runs on the client. In a Playwright test, `runEvalDataset` n
 
 ```json snippet=snippets/evals-tools-triggered.json
 {
-  "name": "llm-host-evals",
+  "name": "llm-client-evals",
   "cases": [
     {
       "id": "llm-triggers-search",
@@ -103,7 +103,7 @@ A case with `input` runs on the client. In a Playwright test, `runEvalDataset` n
 
 ## Trials and Pass Rate: The Core Concept
 
-The most important thing to understand about LLM host evals is that a single run tells you almost nothing.
+The most important thing to understand about LLM client evals is that a single run tells you almost nothing.
 
 Suppose you run your eval once and the LLM calls the right tool. Did you write a good tool description? Maybe. Did you get lucky? Also maybe. You can't tell from one sample.
 
@@ -202,7 +202,7 @@ Does the client's answer include expected substrings?
 
 ### `toolsTriggered`
 
-Did the LLM call the right tools? This is the core assertion for LLM host mode.
+Did the LLM call the right tools? This is the core assertion for LLM client mode.
 
 ```json
 {
@@ -364,7 +364,7 @@ const candidate = await runEvalDataset(
 );
 ```
 
-Compare the pass rates per case. To decide whether a variant really is better (paired per case, with a significance test and a regression check), use `runVariantExperiment`: see [Runtime Tool Override Experiments](./mcp-host.md#runtime-tool-override-experiments).
+Compare the pass rates per case. To decide whether a variant really is better (paired per case, with a significance test and a regression check), use `runToolOptimization`: see [Runtime Tool Override Optimizations](./mst-client.md#tool-optimization).
 
 ---
 
@@ -397,7 +397,7 @@ Compare the pass rates per case. To decide whether a variant really is better (p
 
       // The client acts on the input
       "input": "Find recent documents about X",
-      // Optional: the run (runEvalDataset or a suite) names the client and
+      // Optional: the run (runEvalDataset or an eval) names the client and
       // model; a case can set its own
       "client": "mst",
       "model": "claude-haiku-4-5@20251001", // Vertex, from the @ in the id
@@ -488,7 +488,7 @@ If more than 20% of current case IDs have no matching baseline entry, the runner
 
 ### The `saveBaseline` and `loadBaseline` functions
 
-These are the low-level functions underlying the `saveResultsTo` / `baselineResultsFrom` options. Export them when you need to manage baselines programmatically — for example, in a CI script that only promotes the baseline after a full suite passes.
+These are the low-level functions underlying the `saveResultsTo` / `baselineResultsFrom` options. Export them when you need to manage baselines programmatically — for example, in a CI script that only promotes the baseline after a full eval passes.
 
 ```typescript
 import { saveBaseline, loadBaseline } from '@gleanwork/mcp-server-tester/evals';
@@ -507,7 +507,7 @@ console.log(`Baseline: ${saved.passed}/${saved.total} passing`);
 
 **Step 1: Capture the baseline on your main branch.**
 
-Run your eval suite after a known-good state and write the results to a file. Commit that file (or store it in CI artifacts) so future runs can reference it.
+Run your eval after a known-good state and write the results to a file. Commit that file (or store it in CI artifacts) so future runs can reference it.
 
 ```typescript
 const result = await runEvalDataset(
@@ -645,16 +645,16 @@ test('compare against latest baseline', async ({ mcp }, testInfo) => {
 When `saveResultsTo` targets the store, saved results still omit responses by
 default. Set `redactStoredResponses: false` when the stored results should
 include full responses (`omitResponsesFromBaseline` controls baseline files
-written to a path). Every API that stores results (the runner, suites, the
+written to a path). Every API that stores results (the runner, evals, the
 reporter's result store, run and server comparisons, baseline files) removes
-each case's raw `response`, and each host trace's
+each case's raw `response`, and each client trace's
 answer text (`finalText`) and tool outputs (event `output`) by default, the
 same way. Events, servers, arguments and usage are kept.
 
 ### Stored Variant Comparisons
 
 Stored eval runs can be loaded back into `compareEvalRuns()`. This is useful for
-tool override experiments where one run captures the current tool metadata and
+tool override optimizations where one run captures the current tool metadata and
 another captures a proposed variant.
 
 ```typescript snippet=snippets/result-store-compare-runs.ts
@@ -786,7 +786,7 @@ test('manual baseline management', async ({ mcp }, testInfo) => {
 
 ## Comparing servers (A/B testing)
 
-To compare two MCP servers, or two configurations of one, run the same dataset as two variants of a suite, each with its own `servers`:
+To compare two MCP servers, or two configurations of one, run the same dataset as two variants of an eval, each with its own `servers`:
 
 ```json
 {
@@ -821,7 +821,7 @@ To compare two MCP servers, or two configurations of one, run the same dataset a
 }
 ```
 
-`mst run --config server-ab.json` runs both variants with the same host and prints a row per variant: cases passed, trial pass rate, MCP calls and host events, tokens, cost and time. The run summary's `variantDeltas` holds each metric's change against the first variant, and with `trials` set, `trial_pass_rate` shows differences that case pass/fail hides. A variant can also differ by host, tool variants (`toolOverrides`), input template or judges. See [Variants](./evaluation-framework.md#variants) and [Metrics](./evaluation-framework.md#metrics).
+`mst run --config server-ab.json` runs both variants with the same client and prints a row per variant: cases passed, trial pass rate, MCP calls and client events, tokens, cost and time. The run summary's `variantDeltas` holds each metric's change against the first variant, and with `trials` set, `trial_pass_rate` shows differences that case pass/fail hides. A variant can also differ by client, tool variants (`toolOverrides`), input template or judges. See [Variants](./evaluation-framework.md#variants) and [Metrics](./evaluation-framework.md#metrics).
 
 ---
 

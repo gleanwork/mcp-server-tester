@@ -19,7 +19,7 @@ function formatResponsePreview(response: unknown): string {
   return JSON.stringify(response, null, 2) ?? '';
 }
 
-function getExternalHostEvidenceRows(
+function getExternalClientEvidenceRows(
   clientMetadata: NonNullable<EvalCaseResult['clientMetadata']>
 ) {
   const labels = {
@@ -81,7 +81,7 @@ function resultToolCalls(
 }
 
 /**
- * Skill loads recorded by the simulated host (skills enabled): from the
+ * Skill loads recorded by the simulated client (skills enabled): from the
  * response, or the last trial when responses were omitted.
  */
 function resultSkillLoads(result: EvalCaseResult): SkillLoad[] {
@@ -322,10 +322,10 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
   const trials = result.trialResults!;
   const displayRate = result.passRate;
   const infraErrorRate = result.infrastructureErrorRate;
-  const externalHostEvidenceRows = result.clientMetadata
-    ? getExternalHostEvidenceRows(result.clientMetadata)
+  const externalClientEvidenceRows = result.clientMetadata
+    ? getExternalClientEvidenceRows(result.clientMetadata)
     : [];
-  const hostToolCalls = resultToolCalls(result);
+  const clientToolCalls = resultToolCalls(result);
   const skillLoads = resultSkillLoads(result);
   const clientUsage = usageForResult(result);
   const answer = finalAnswer(result);
@@ -771,7 +771,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                         Tool Calls
                       </div>
                       <div className="text-lg font-semibold">
-                        {hostToolCalls.length}
+                        {clientToolCalls.length}
                       </div>
                     </div>
                     <div className="rounded-md bg-muted p-3">
@@ -798,13 +798,13 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                     </div>
                   </div>
 
-                  {hostToolCalls.length > 0 && (
+                  {clientToolCalls.length > 0 && (
                     <div>
                       <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
                         Observed Tool Calls
                       </h4>
                       <div className="space-y-2">
-                        {hostToolCalls.map((call, i) => (
+                        {clientToolCalls.map((call, i) => (
                           <div
                             key={`${call.name}-${i}`}
                             className="rounded-md border bg-muted/50 p-3 text-xs"
@@ -1018,13 +1018,13 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                     </div>
                   </div>
 
-                  {externalHostEvidenceRows.length > 0 && (
+                  {externalClientEvidenceRows.length > 0 && (
                     <div>
                       <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
                         Evidence Sources
                       </h4>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                        {externalHostEvidenceRows.map((row) => (
+                        {externalClientEvidenceRows.map((row) => (
                           <div key={row.key} className="rounded bg-muted p-2">
                             <div className="font-medium">{row.label}</div>
                             <div className="text-muted-foreground">
@@ -1038,7 +1038,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
 
                   {result.clientMetadata.failureKind && (
                     <div className="rounded-md bg-orange-500/10 text-orange-700 dark:text-orange-300 p-3 text-sm">
-                      Host failure: {result.clientMetadata.failureKind}
+                      Client failure: {result.clientMetadata.failureKind}
                     </div>
                   )}
 
@@ -1184,7 +1184,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                         )}
                         {trials.some((r) => r.clientMetadata) && (
                           <th className="text-left py-2 pr-4 font-medium">
-                            Host trace
+                            Client trace
                           </th>
                         )}
                         <th className="text-left py-2 font-medium">Error</th>

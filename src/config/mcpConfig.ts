@@ -93,9 +93,9 @@ export interface MCPAuthConfig {
 }
 
 /**
- * MCP host capabilities that can be registered with the server
+ * client capabilities that can be registered with the server
  */
-export interface MCPHostCapabilities {
+export interface MCPClientCapabilities {
   /**
    * Sampling capabilities (for LLM sampling)
    */
@@ -152,9 +152,9 @@ export interface StdioMCPConfig {
   quiet?: boolean;
 
   /**
-   * Host capabilities to register with the server
+   * Client capabilities to register with the server
    */
-  capabilities?: MCPHostCapabilities;
+  capabilities?: MCPClientCapabilities;
 
   /**
    * Protocol to speak. Default: 'legacy' (the `initialize` handshake,
@@ -190,18 +190,18 @@ export interface StdioMCPConfig {
   inheritEnv?: boolean;
 
   /**
-   * Host-resolved eval server (desktop hosts only): the eval endpoint this
+   * Client-resolved eval server (desktop clients only): the eval endpoint this
    * stdio process talks to, substituted as `${url}`. See docs/cowork.md.
    */
   url?: string;
 
-  /** Host-resolved eval server: the credential substituted as `${bearerToken}` in `files`. */
+  /** Client-resolved eval server: the credential substituted as `${bearerToken}` in `files`. */
   auth?: { accessTokenEnv: string };
 
   /** Readiness fails closed below this many tools. */
   minTools?: number;
 
-  /** Host-resolved eval server: private JSON files written in `${dataDir}`. */
+  /** Client-resolved eval server: private JSON files written in `${dataDir}`. */
   files?: Record<string, unknown>;
 }
 
@@ -233,9 +233,9 @@ export interface HttpMCPConfig {
   auth?: MCPAuthConfig;
 
   /**
-   * Host capabilities to register with the server
+   * Client capabilities to register with the server
    */
-  capabilities?: MCPHostCapabilities;
+  capabilities?: MCPClientCapabilities;
 
   /**
    * Protocol to speak. Default: 'legacy' (the `initialize` handshake,
@@ -339,9 +339,9 @@ const ProtocolProbeSchema = z
   .strict();
 
 /**
- * Zod schema for MCPHostCapabilities
+ * Zod schema for MCPClientCapabilities
  */
-const MCPHostCapabilitiesSchema = z.object({
+const MCPClientCapabilitiesSchema = z.object({
   sampling: z.record(z.string(), z.unknown()).optional(),
   roots: z
     .object({
@@ -402,7 +402,7 @@ const StdioConfigSchema = z.object({
   args: z.array(z.string()).optional(),
   cwd: z.string().optional(),
   env: z.record(z.string(), z.string()).optional(),
-  capabilities: MCPHostCapabilitiesSchema.optional(),
+  capabilities: MCPClientCapabilitiesSchema.optional(),
   protocol: ProtocolSettingSchema.optional(),
   protocolProbe: ProtocolProbeSchema.optional(),
   connectTimeoutMs: z.number().positive().optional(),
@@ -422,11 +422,11 @@ const StdioConfigSchema = z.object({
 const HOST_RESOLVED = /\$\{(?:url|dataDir|bearerToken|pluginRoot:[^}]*)\}/;
 
 /**
- * True when a stdio server declares host-resolved eval fields (`url`, `auth`,
+ * True when a stdio server declares client-resolved eval fields (`url`, `auth`,
  * `files`, or a `${url}`/`${dataDir}`/`${pluginRoot:...}` placeholder). Only a
- * host that resolves them may launch it; see docs/cowork.md.
+ * client that resolves them may launch it; see docs/cowork.md.
  */
-export function usesHostResolvedFields(config: MCPConfig): boolean {
+export function usesClientResolvedFields(config: MCPConfig): boolean {
   if (config.transport !== 'stdio') return false;
   return (
     config.url !== undefined ||
@@ -472,7 +472,7 @@ const HttpConfigSchema = z.object({
       return true;
     }),
   headers: z.record(z.string(), z.string()).optional(),
-  capabilities: MCPHostCapabilitiesSchema.optional(),
+  capabilities: MCPClientCapabilitiesSchema.optional(),
   protocol: ProtocolSettingSchema.optional(),
   protocolProbe: ProtocolProbeSchema.optional(),
   connectTimeoutMs: z.number().positive().optional(),

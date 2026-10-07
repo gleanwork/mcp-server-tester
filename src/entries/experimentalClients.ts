@@ -18,7 +18,7 @@ export type {
   CoworkNativeAuditTiming,
   CoworkNativeAuditAttachment,
 } from '../evals/auditCoworkNativeRun.js';
-export { COWORK_STDIO_PLATFORMS } from '../evals/coworkHost.js';
+export { COWORK_STDIO_PLATFORMS } from '../evals/coworkClient.js';
 export {
   coworkManagedPluginSettings,
   coworkMcpSettingsMatch,
@@ -30,31 +30,31 @@ export type {
 } from '../evals/cowork/managedSettings.js';
 export {
   coworkPluginMarketplace,
-  hostStdioServers,
-  materializeHostStdioFiles,
-  resolveHostStdioServer,
-} from '../evals/hostPlugins.js';
+  clientStdioServers,
+  materializeClientStdioFiles,
+  resolveClientStdioServer,
+} from '../evals/clientPlugins.js';
 export type {
   MarketplacePlugin,
   ClientStdioPaths,
   ClientStdioServer,
-} from '../evals/hostPlugins.js';
+} from '../evals/clientPlugins.js';
 // What a desktop client (ChatGPT) records about a run, on each result's
 // `clientMetadata`.
 export type {
   EvidenceSource,
-  ExternalHostCorrelationMetadata,
-  ExternalHostFailureKind,
+  ExternalClientCorrelationMetadata,
+  ExternalClientFailureKind,
   ClientMetadata,
-  ExternalHostSession,
-  ExternalHostTelemetry,
-  ExternalHostType,
-  HostArtifact,
-  HostCapability,
-  HostDriverId,
+  ExternalClientSession,
+  ExternalClientTelemetry,
+  ExternalClientType,
+  ClientArtifact,
+  ClientCapability,
+  ClientDriverId,
   ObservationConfidence,
   TraceSource,
-} from '../evals/externalHost/index.js';
+} from '../evals/externalClient/index.js';
 export type {
   ComputerUseTelemetry,
   SemanticDesktopTelemetry,

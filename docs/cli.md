@@ -742,7 +742,7 @@ npx mst run --config ./eval.json [options]
 | `--dry-run`             | Validate the eval config, its plugins and datasets without running anything.                                                                                                                                                                    |
 | `--store <dir>`         | Where connector servers' grants are (see [`auth`](#auth---sign-in-to-connector-servers)). Default: `~/.mcp-server-tester/grants`.                                                                                                               |
 
-`run` prints a row per variant (cases passed, trial pass rate, MCP calls, host events, tokens, cost, time) and, when there is one, the change since the previous run of the same eval config and variant. It writes `results.json` in the output directory and exits 1 when any case failed. `--dry-run` prints the eval config's name, output directory, datasets and variants as JSON.
+`run` prints a row per variant (cases passed, trial pass rate, MCP calls, client events, tokens, cost, time) and, when there is one, the change since the previous run of the same eval config and variant. It writes `results.json` in the output directory and exits 1 when any case failed. `--dry-run` prints the eval config's name, output directory, datasets and variants as JSON.
 
 ## `batch` - Run Several Eval Configs
 
@@ -783,7 +783,7 @@ Opens the [UI reporter](./ui-reporter.md) the Playwright reporter wrote in a res
 npx mst cowork setup
 ```
 
-Initialises or validates the empty Claude third-party profile that the Cowork host runs in, on macOS. See [Cowork](./cowork.md).
+Initialises or validates the empty Claude third-party profile that the Cowork client runs in, on macOS. See [Cowork](./cowork.md).
 
 ## Next Steps
 

@@ -152,13 +152,13 @@ describe('mst CLI', () => {
         'typo.json': JSON.stringify({
           name: 'm',
           datasets: ['./cases.json'],
-          hostt: { type: 'mst' },
+          clientt: { type: 'mst' },
         }),
       });
       const result = await runBin('run', '--config', 'typo.json', '--dry-run');
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toContain('mst: typo.json: Invalid configuration:');
-      expect(result.stderr).toContain('Unrecognized key: "hostt"');
+      expect(result.stderr).toContain('Unrecognized key: "clientt"');
       expect(result.stderr).not.toContain('ZodError');
       expect(result.stderr).not.toMatch(/\n\s+at /);
     });
@@ -178,7 +178,7 @@ describe('mst CLI', () => {
         'typo.json': JSON.stringify({
           name: 'm',
           datasets: ['./cases.json'],
-          hostt: {},
+          clientt: {},
         }),
       });
       const result = await runBin(

@@ -54,7 +54,7 @@ async function execute(
           }
         : {}),
       executeCase: async () => ({
-        kind: 'host',
+        kind: 'completed',
         evidence,
         response: {
           success: true,
@@ -111,7 +111,7 @@ installPlugins([
       },
     },
     clients: {
-      host: {
+      client: {
         schema: z.object({
           model: z.string(),
           count: z.number().transform((value) => value * 3),
@@ -188,7 +188,7 @@ try {
       {
         dataset,
         executeCase: async () => ({
-          kind: 'host',
+          kind: 'completed',
           response: { success: true, toolCalls: [], response: 'candidate' },
         }),
       },
@@ -220,7 +220,7 @@ try {
     { name: 'search', source: 'mcp', server: 'wanted', kind: 'tool_call' },
   ];
   const wrong = await execute(expected, [
-    { kind: 'tool_call', name: 'search', source: 'host' },
+    { kind: 'tool_call', name: 'search', source: 'builtin' },
   ]);
   assert.deepEqual(
     wrong.dataset.cases[0].assertions.toolsTriggered.calls[0],
@@ -232,8 +232,8 @@ try {
   ]);
   assert.equal(right.result.passed, 1);
   const skill = await execute(
-    [{ kind: 'skill', name: 'research', source: 'host' }],
-    [{ kind: 'skill', name: 'research', source: 'host' }]
+    [{ kind: 'skill', name: 'research', source: 'builtin' }],
+    [{ kind: 'skill', name: 'research', source: 'builtin' }]
   );
   assert.equal(skill.result.passed, 1);
   assert.equal(
@@ -279,7 +279,7 @@ try {
   });
   const { result: observed } = await execute(
     [{ name: 'search' }],
-    [{ kind: 'tool_call', source: 'host', name: 'search' }],
+    [{ kind: 'tool_call', source: 'builtin', name: 'search' }],
     { evidence: 'observed', store }
   );
   assert.equal(observed.failed, 1);
@@ -297,7 +297,7 @@ try {
     {
       name: 'patch',
       datasets: [{ type: 'foundation/source' }],
-      client: 'foundation/host',
+      client: 'foundation/client',
       model: 'base',
       clientOptions: { count: 2 },
       variants: [{ name: 'variant', model: 'variant' }],
@@ -318,7 +318,11 @@ try {
       model: resolved.variants[0].model,
       clientOptions: resolved.variants[0].clientOptions,
     },
-    { client: 'foundation/host', model: 'variant', clientOptions: { count: 6 } }
+    {
+      client: 'foundation/client',
+      model: 'variant',
+      clientOptions: { count: 6 },
+    }
   );
   assert.throws(() =>
     validateEvalConfig({
@@ -357,7 +361,7 @@ try {
     )
   );
   console.log(
-    'PASS: suite servers share canonical MCP configuration validation and preserve labels.'
+    'PASS: eval servers share canonical MCP configuration validation and preserve labels.'
   );
 } finally {
   await fs.rm(root, { recursive: true, force: true });

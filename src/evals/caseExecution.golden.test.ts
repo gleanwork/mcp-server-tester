@@ -20,22 +20,22 @@ import {
 import type { EvalCase } from './datasetTypes.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import { createFixtureExtensions } from '../mcp/fixtures/fixtureExtensions.js';
-import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
-import type * as SimulationModule from './mcpHost/mcpHostSimulation.js';
+import { simulateMstClient } from './mstClient/simulation.js';
+import type * as SimulationModule from './mstClient/simulation.js';
 import type * as JudgeClientModule from '../judge/judgeClient.js';
 import { createJudge } from '../judge/judgeClient.js';
 import type { JudgeConfig, JudgeResult } from '../judge/judgeTypes.js';
-import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
-import { hostRunToExecution } from './hostTrace.js';
+import type { MstClientSimulationResult } from './mstClient/types.js';
+import { clientRunToExecution } from './clientTrace.js';
 import type { ClientRunResult, JudgeDefinition } from './evalFrameworkTypes.js';
-import { runEvalSuite } from './runEvalSuite.js';
+import { runEval } from './runEval.js';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 import type { JudgeInput } from '../judge/judgeContract.js';
 
-vi.mock('./mcpHost/mcpHostSimulation.js', async (original) => ({
+vi.mock('./mstClient/simulation.js', async (original) => ({
   ...(await original<typeof SimulationModule>()),
-  simulateMCPHost: vi.fn(),
+  simulateMstClient: vi.fn(),
 }));
 vi.mock('../judge/judgeClient.js', async (original) => ({
   ...(await original<typeof JudgeClientModule>()),
@@ -83,7 +83,7 @@ function context(mcp: MCPFixtureApi = mockMCP()): EvalContext {
   };
 }
 
-const simulation: MCPHostSimulationResult = {
+const simulation: MstClientSimulationResult = {
   success: true,
   response: 'It is sunny in London.',
   toolCalls: [
@@ -93,8 +93,8 @@ const simulation: MCPHostSimulationResult = {
   usage: { inputTokens: 100, outputTokens: 20, durationMs: 5 },
 };
 
-const hostCase: EvalCase = {
-  id: 'host',
+const clientCase: EvalCase = {
+  id: 'client',
   input: 'Weather in London?',
   assertions: {
     containsText: 'sunny',
@@ -119,8 +119,8 @@ const trace: ClientRunResult = {
       arguments: { city: 'London' },
       output: 'sunny',
     },
-    { kind: 'skill', source: 'host', name: 'forecasting' },
-    { kind: 'tool_call', source: 'host', name: 'web_search' },
+    { kind: 'skill', source: 'builtin', name: 'forecasting' },
+    { kind: 'tool_call', source: 'builtin', name: 'web_search' },
   ],
   usage: { inputTokens: 50, outputTokens: 10, durationMs: 3 },
   telemetry: { native: 'kept' },
@@ -171,13 +171,13 @@ afterEach(() => resetPluginsForTests());
 beforeEach(() => {
   installPlugins([goldenPlugin()]);
   calls.length = 0;
-  vi.mocked(simulateMCPHost).mockReset().mockResolvedValue(simulation);
+  vi.mocked(simulateMstClient).mockReset().mockResolvedValue(simulation);
 });
 
 describe('golden: the mst client (dataset API)', () => {
   it('succeeds with tool evidence and a missed required tool', async () => {
-    expect(stable(await runEvalCase(hostCase, context()))).toMatchSnapshot();
-    expect(simulateMCPHost).toHaveBeenCalledTimes(1);
+    expect(stable(await runEvalCase(clientCase, context()))).toMatchSnapshot();
+    expect(simulateMstClient).toHaveBeenCalledTimes(1);
   });
 
   it('maps native tool names through toolMap', async () => {
@@ -185,35 +185,35 @@ describe('golden: the mst client (dataset API)', () => {
       toolMap: { forecast: ['search'] },
     };
     expect(
-      stable(await runEvalCase(hostCase, context(), options))
+      stable(await runEvalCase(clientCase, context(), options))
     ).toMatchSnapshot();
   });
 
   it('simulation failure', async () => {
-    vi.mocked(simulateMCPHost).mockResolvedValue({
+    vi.mocked(simulateMstClient).mockResolvedValue({
       success: false,
       toolCalls: [],
       error: 'provider rejected the request',
     });
-    expect(stable(await runEvalCase(hostCase, context()))).toMatchSnapshot();
+    expect(stable(await runEvalCase(clientCase, context()))).toMatchSnapshot();
   });
 
   it('trials exclude infrastructure errors from the pass rate', async () => {
-    vi.mocked(simulateMCPHost)
+    vi.mocked(simulateMstClient)
       .mockResolvedValueOnce(simulation)
       .mockRejectedValueOnce(new Error('read ECONNRESET'))
       .mockResolvedValueOnce({ ...simulation, response: 'cloudy' });
     const result = await runEvalCase(
-      { ...hostCase, trials: 3, passThreshold: 0.5 },
+      { ...clientCase, trials: 3, passThreshold: 0.5 },
       context()
     );
     expect(stable(result)).toMatchSnapshot();
   });
 });
 
-describe('golden: host traces through executeCase', () => {
+describe('golden: client traces through executeCase', () => {
   const traceCase: EvalCase = {
-    ...hostCase,
+    ...clientCase,
     id: 'trace',
     assertions: {
       containsText: 'sunny',
@@ -232,7 +232,7 @@ describe('golden: host traces through executeCase', () => {
     async (evidence) => {
       const result = await runEvalCase(traceCase, context(), {
         executeCase: async () => ({
-          ...hostRunToExecution(trace, evidence, [
+          ...clientRunToExecution(trace, evidence, [
             { transport: 'stdio', command: 'a', label: 'weather' },
             { transport: 'stdio', command: 'b', label: 'other' },
           ]),
@@ -243,10 +243,10 @@ describe('golden: host traces through executeCase', () => {
     }
   );
 
-  it('host trace error', async () => {
+  it('client trace error', async () => {
     const result = await runEvalCase(traceCase, context(), {
       executeCase: async () =>
-        hostRunToExecution(
+        clientRunToExecution(
           { ...trace, error: 'native session missing' },
           'structured'
         ),
@@ -257,7 +257,7 @@ describe('golden: host traces through executeCase', () => {
   it('executeCase that throws', async () => {
     const result = await runEvalCase(traceCase, context(), {
       executeCase: async () => {
-        throw new Error('host crashed');
+        throw new Error('client crashed');
       },
     });
     expect(stable(result)).toMatchSnapshot();
@@ -276,7 +276,7 @@ describe('golden: dataset aggregation', () => {
               input: 'Is it sunny in London?',
               assertions: { containsText: 'sunny' },
             },
-            hostCase,
+            clientCase,
           ],
         },
       },
@@ -287,7 +287,7 @@ describe('golden: dataset aggregation', () => {
   });
 });
 
-describe('golden: runEvalSuite hosts', () => {
+describe('golden: runEval clients', () => {
   const dirs: string[] = [];
   afterEach(async () => {
     await Promise.all(
@@ -295,7 +295,7 @@ describe('golden: runEvalSuite hosts', () => {
     );
   });
 
-  async function suite(
+  async function evalRun(
     kind: 'run' | 'runBatch',
     variant = '',
     configExtra: Record<string, unknown> = {},
@@ -315,14 +315,14 @@ describe('golden: runEvalSuite hosts', () => {
   ) {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'golden-suite-'));
     dirs.push(dir);
-    const hostName = `golden-${kind}${variant}-host`;
+    const clientName = `golden-${kind}${variant}-host`;
     const sourceName = `golden-${kind}${variant}-source`;
-    const type = `test/${hostName}`;
+    const type = `test/${clientName}`;
     const source = `test/${sourceName}`;
     const plugin = goldenPlugin({
       judges,
       clients: {
-        [hostName]: {
+        [clientName]: {
           schema: z.object({ type: z.string() }).passthrough(),
           evidence: 'structured',
           ...(kind === 'run'
@@ -340,7 +340,7 @@ describe('golden: runEvalSuite hosts', () => {
         },
       },
     });
-    // The suite installs its own copy of the test plugin, with this host.
+    // The eval installs its own copy of the test plugin, with this client.
     resetPluginsForTests();
     const configPath = path.join(dir, 'eval.json');
     await fs.writeFile(
@@ -353,11 +353,11 @@ describe('golden: runEvalSuite hosts', () => {
         ...configExtra,
       })
     );
-    return runEvalSuite({ configPath, outputDir: dir, plugins: [plugin] });
+    return runEval({ configPath, outputDir: dir, plugins: [plugin] });
   }
 
-  it.each(['run', 'runBatch'] as const)('%s host', async (kind) => {
-    const result = await suite(kind);
+  it.each(['run', 'runBatch'] as const)('%s client', async (kind) => {
+    const result = await evalRun(kind);
     expect(stable(result.summary.results)).toMatchSnapshot();
   });
 
@@ -369,14 +369,14 @@ describe('golden: runEvalSuite hosts', () => {
         reasoning: 'eval config judge',
       })
     );
-    const result = await suite(
+    const result = await evalRun(
       'run',
       '-judged',
       {
         judges: [
           {
             type: 'test/golden-config-judge',
-            reference: 'suite ref',
+            reference: 'eval ref',
             count: 2,
           },
         ],
@@ -432,7 +432,7 @@ describe('golden: runEvalSuite hosts', () => {
       { score: 0.6, reasoning: 'Says sunny.' },
       { score: 0.8, reasoning: 'Short.' },
     ]);
-    const result = await suite(
+    const result = await evalRun(
       'run',
       '-rubric',
       {
@@ -495,10 +495,10 @@ describe('golden: judges', () => {
     expect(stable({ result, calls })).toMatchSnapshot();
   });
 
-  it('judges a host response', async () => {
+  it('judges a client response', async () => {
     const result = await runEvalCase(
       {
-        ...hostCase,
+        ...clientCase,
         id: 'host-judged',
         assertions: { passesJudge: { judge: 'test/golden-case-judge' } },
       },

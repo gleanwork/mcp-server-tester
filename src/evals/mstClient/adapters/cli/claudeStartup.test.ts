@@ -1,0 +1,272 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { ClaudeStartup } from './claudeStartup.js';
+import { runCLIClient } from './runner.js';
+import { getClient } from '../../../builtinClients.js';
+import { clientRunToExecution } from '../../../clientTrace.js';
+import { runEvalDataset } from '../../../evalRunner.js';
+
+const init = {
+  type: 'system',
+  subtype: 'init',
+  model: 'claude-sonnet-4-6',
+  claude_code_version: '2.1.195',
+  mcp_servers: [{ name: 'acme', status: 'connected' }],
+  tools: ['Bash', 'ToolSearch', 'mcp__acme__search'],
+};
+function line(event: unknown): string {
+  return `${JSON.stringify(event)}\n`;
+}
+let directory: string;
+beforeEach(() => {
+  directory = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-startup-'));
+});
+afterEach(() => fs.rmSync(directory, { recursive: true, force: true }));
+
+function script(body: string): string {
+  const file = path.join(directory, 'claude');
+  fs.writeFileSync(file, `#!${process.execPath}\n${body}`, { mode: 0o700 });
+  return file;
+}
+
+// Deadline tests hang on purpose, so they wait the full deadline: it must leave
+// room for Node startup plus the first output line under full-eval load.
+const DEADLINE_MS = 4000;
+const DEADLINE_TEST_MS = 15_000;
+
+// Scripts that finish return when the child exits; the default only bounds a
+// hang. Keep it well above Node startup under full-eval load (a 1.5s default
+// timed out before `init`, reading as `missing`). Deadline tests pass their own.
+function host(body: string, timeout = 10_000) {
+  script(body);
+  return getClient('claude-code').run!(
+    {
+      prompt: 'unchanged scenario',
+      servers: [
+        {
+          label: 'acme',
+          transport: 'http',
+          serverUrl: 'https://mcp.invalid',
+          auth: { accessToken: 'credential-canary' },
+        },
+      ],
+      env: {
+        PATH: directory,
+        ENABLE_TOOL_SEARCH: 'true',
+        MCP_CONNECTION_NONBLOCKING: 'true',
+      },
+    },
+    { type: 'claude-code', timeout },
+    { evalConfig: { name: 'offline', datasets: [] } }
+  );
+}
+
+describe('Claude Code MCP startup', () => {
+  it('keeps dotted tool names and rejects an unproven catalog shape', () => {
+    const valid = new ClaudeStartup(['acme']);
+    expect(
+      valid.push(
+        Buffer.from(line({ ...init, tools: ['mcp__acme__github.search_code'] }))
+      )
+    ).toBeUndefined();
+    expect(valid.diagnostics.claudeStartup?.servers[0]?.tools).toEqual([
+      'mcp__acme__github.search_code',
+    ]);
+    const invalid = new ClaudeStartup(['acme']);
+    expect(invalid.push(Buffer.from(line({ ...init, tools: null })))).toContain(
+      'MCP connection failed'
+    );
+    expect(invalid.diagnostics.claudeStartup?.status).toBe('failed');
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'stops owned descendants even when they ignore SIGTERM and hold pipes open',
+    async () => {
+      const marker = path.join(directory, 'descendant.txt');
+      const pidFile = path.join(directory, 'descendant.pid');
+      const descendant = `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); fs.writeFileSync(${JSON.stringify(marker)}, 'x'); process.on('SIGTERM', () => {}); setInterval(() => fs.appendFileSync(${JSON.stringify(marker)}, 'x'), 20);`;
+      try {
+        const result = await host(
+          `console.log(${JSON.stringify(line(init))}); require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(descendant)}], { stdio: 'inherit' }); setInterval(() => {}, 1000);`,
+          DEADLINE_MS
+        );
+        expect(result.error).toContain('timed out');
+        const before = fs.readFileSync(marker, 'utf8');
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(fs.readFileSync(marker, 'utf8')).toBe(before);
+      } finally {
+        if (fs.existsSync(pidFile)) {
+          try {
+            process.kill(Number(fs.readFileSync(pidFile, 'utf8')), 'SIGKILL');
+          } catch (error) {
+            expect((error as NodeJS.ErrnoException).code).toBe('ESRCH');
+          }
+        }
+      }
+    },
+    DEADLINE_TEST_MS
+  );
+
+  it('retains separate diagnostics and infrastructure classification for every trial', async () => {
+    let attempt = 0;
+    const result = await runEvalDataset(
+      {
+        dataset: {
+          name: 'startup',
+          cases: [{ id: 'case', input: 'scenario', trials: 2 }],
+        },
+        executeCase: async () => {
+          const event = attempt++ === 0 ? { ...init, mcp_servers: [] } : init;
+          return clientRunToExecution(
+            await host(
+              `console.log(${JSON.stringify(line(event))}); console.log(JSON.stringify({type:'result',result:'answer'}));`
+            ),
+            'structured'
+          );
+        },
+      },
+      {}
+    );
+    const row = result.caseResults[0]!;
+    expect(row.infrastructureErrorCount).toBe(1);
+    expect(row.passRate).toBe(1);
+    expect(
+      row.trialResults?.map((r) => r.clientDiagnostics?.claudeStartup?.status)
+    ).toEqual(['failed', 'ready']);
+    expect(row.trialResults?.[0]?.clientDiagnostics?.failureKind).toBe(
+      'startup'
+    );
+  });
+
+  it('retains only bounded metadata from a chunked init event', () => {
+    const observer = new ClaudeStartup(['acme']);
+    const stream = Buffer.from(
+      line({ ...init, token: 'credential-canary', message: 'private scenario' })
+    );
+    for (let i = 0; i < stream.length; i += 7)
+      expect(observer.push(stream.subarray(i, i + 7))).toBeUndefined();
+    expect(observer.diagnostics.claudeStartup).toMatchObject({
+      status: 'ready',
+      model: init.model,
+      version: init.claude_code_version,
+      servers: [
+        { name: 'acme', status: 'connected', tools: ['mcp__acme__search'] },
+      ],
+    });
+    expect(JSON.stringify(observer.diagnostics)).not.toMatch(
+      /credential-canary|private scenario|Bash|ToolSearch/
+    );
+  });
+
+  it.each(['pending', 'failed', 'needs-auth', 'disabled'])(
+    'rejects %s servers before evaluating the answer',
+    async (status) => {
+      const result = await host(
+        `console.log(${JSON.stringify(line({ ...init, mcp_servers: [{ name: 'acme', status }] }))}); setInterval(() => {}, 1000);`
+      );
+      expect(result.error).toContain('MCP connection failed');
+      expect(result.diagnostics?.claudeStartup?.status).toBe('failed');
+      expect(clientRunToExecution(result, 'structured').response).toMatchObject(
+        {
+          success: false,
+          diagnostics: { claudeStartup: { status: 'failed' } },
+        }
+      );
+      expect(JSON.stringify(result)).not.toContain('credential-canary');
+    }
+  );
+
+  it('reports an empty catalog without rejecting legitimate resource-only servers', () => {
+    const observer = new ClaudeStartup(['acme', 'jira']);
+    expect(
+      observer.push(
+        Buffer.from(
+          line({
+            ...init,
+            mcp_servers: [
+              ...init.mcp_servers,
+              { name: 'jira', status: 'connected' },
+            ],
+          })
+        )
+      )
+    ).toBeUndefined();
+    expect(observer.diagnostics.claudeStartup?.status).toBe('ready');
+    expect(observer.diagnostics.claudeStartup?.servers[1]?.tools).toEqual([]);
+  });
+
+  it('does not treat an empty stream or an unproven no-tools answer as success', async () => {
+    for (const body of [
+      '',
+      'console.log(JSON.stringify({type:"result",result:"No access"}));',
+    ]) {
+      const result = await host(body);
+      expect(result.error).toContain('MCP connection failed');
+      expect(result.diagnostics?.claudeStartup?.status).toBe('missing');
+    }
+  });
+
+  it('enforces blocking startup without changing tool search or the prompt', async () => {
+    const result = await host(`
+const assert = require('node:assert/strict');
+assert.equal(process.env.MCP_CONNECTION_NONBLOCKING, 'false');
+assert.equal(process.env.MCP_CONNECT_TIMEOUT_MS, '30000');
+assert.equal(process.env.ENABLE_TOOL_SEARCH, 'true');
+assert.equal(process.argv[process.argv.indexOf('-p') + 1], 'unchanged scenario');
+setTimeout(() => { console.log(${JSON.stringify(line(init))}); console.log(JSON.stringify({ type: 'result', result: 'answer', usage: { input_tokens: 4, output_tokens: 2 } })); }, 100);
+`);
+    expect(result.error).toBeUndefined();
+    expect(result.finalText).toBe('answer');
+    expect(result.usage?.inputTokens).toBe(4);
+    expect(result.diagnostics?.claudeStartup?.status).toBe('ready');
+  });
+
+  it(
+    'retains the partial trace and startup evidence at the enclosing client deadline',
+    async () => {
+      const result = await host(
+        `
+console.log(${JSON.stringify(line(init))});
+console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'call1', name: 'mcp__acme__search', input: { query: 'sample' } }] } }));
+setInterval(() => {}, 1000);
+`,
+        // Allow process startup under parallel CI load; test the enclosing deadline,
+        // not whether the OS schedules a new Node process quickly.
+        DEADLINE_MS
+      );
+      expect(result.error).toContain('timed out');
+      expect(result.events).toMatchObject([
+        { name: 'search', source: 'mcp', server: 'acme' },
+      ]);
+      expect(result.diagnostics?.claudeStartup?.status).toBe('ready');
+      expect(result.usage).toBeUndefined();
+    },
+    DEADLINE_TEST_MS
+  );
+
+  it('retains evidence on nonzero exit without persisting raw stderr', async () => {
+    const result = await host(
+      `console.log(${JSON.stringify(line(init))}); console.error('credential-canary'); process.exitCode = 7;`
+    );
+    expect(result.error).toContain('exit code 7');
+    expect(result.diagnostics?.claudeStartup?.status).toBe('ready');
+    expect(JSON.stringify(result)).not.toContain('credential-canary');
+  });
+
+  it('does not impose the Claude startup protocol on generic CLI clients', async () => {
+    const result = await runCLIClient(
+      {
+        command: script(
+          'console.log(JSON.stringify({type:"result",result:"generic"}));'
+        ),
+        args: [],
+      },
+      'test'
+    );
+    expect(result.success).toBe(true);
+    expect(result.response).toBe('generic');
+    expect(result.diagnostics).toBeUndefined();
+  });
+});

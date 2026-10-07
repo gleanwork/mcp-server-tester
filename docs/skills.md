@@ -7,7 +7,7 @@ MST can:
 - read and verify skills from tests (`mcp.skills`)
 - check that a server follows SEP-2640 (`runConformanceChecks`)
 - assert on skills methods in eval datasets (`request` cases)
-- run evals where the model can load skills, and measure whether skills help (the `mst` client's `skills` option, or suite variants that set it)
+- run evals where the model can load skills, and measure whether skills help (the `mst` client's `skills` option, or eval variants that set it)
 
 The extension works in both protocol eras: servers declare it in `capabilities.extensions`, which MST reads from `initialize` (legacy) or `server/discover` (2026-07-28).
 
@@ -121,7 +121,7 @@ Set the `mst` client's `skills` option (`clientOptions.skills`) to let it offer 
 | `'catalog'`       | A system-prompt list of each skill's name, description, server, and URI, plus `read_skill(server, uri)` to load a skill and `read_resource(server, uri)` for its files |
 | `'preload'`       | Every `SKILL.md` placed in the system prompt, plus `read_resource`                                                                                                     |
 
-`catalog` follows the host guidelines in SEP-2640:
+`catalog` follows the client guidelines in SEP-2640:
 
 - Nothing is fetched until the model asks, and skill content is marked as untrusted server input.
 - Reads go to the skill's own server. A file under a listed skill is checked against that skill's entry, whether or not the skill is loaded; files of a `"dynamic"` skill are accepted. URIs outside any skill are read as plain resources.
@@ -129,7 +129,7 @@ Set the `mst` client's `skills` option (`clientOptions.skills`) to let it offer 
 - Relative paths resolve against the most recently loaded skill's directory.
 - A file that fails verification is returned to the model as an error instead of its content.
 
-Loading a skill is not an MCP tool call. Loads are reported in `skillLoads`, and each `SKILL.md` the model loads (and that passes verification) becomes a `skill` event in order with tool calls, so `toolsTriggered` can assert it. Preloaded skills are in context without the model choosing them, so they produce no events: a `kind: 'skill'` assertion cannot pass in `'preload'` mode. The same assertion works for external hosts that report skill use, such as Claude Code:
+Loading a skill is not an MCP tool call. Loads are reported in `skillLoads`, and each `SKILL.md` the model loads (and that passes verification) becomes a `skill` event in order with tool calls, so `toolsTriggered` can assert it. Preloaded skills are in context without the model choosing them, so they produce no events: a `kind: 'skill'` assertion cannot pass in `'preload'` mode. The same assertion works for external clients that report skill use, such as Claude Code:
 
 ```json
 {
@@ -158,7 +158,7 @@ Metrics: `skill_loaded`, `skill_before_tool`, and `skill_verification_failed`. E
 
 ## Measuring whether skills help
 
-Models often skip skills they could use, and a matching tool can win over the skill written for it. To measure it, run the same dataset as suite variants that differ only in the `mst` host's `skills` mode:
+Models often skip skills they could use, and a matching tool can win over the skill written for it. To measure it, run the same dataset as eval variants that differ only in the `mst` client's `skills` mode:
 
 ```json
 {

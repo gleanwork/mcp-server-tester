@@ -9,10 +9,10 @@ import type {
 import { getDatasetSource } from './builtinDatasetSources.js';
 import { clientFieldsOf, clientOf, clientPatchOf } from './clientFields.js';
 import {
-  assertHostSupports,
-  getHost,
-  resolveHostName,
-} from './builtinHosts.js';
+  assertClientSupports,
+  getClient,
+  resolveClientName,
+} from './builtinClients.js';
 import { getJudge } from '../judge/builtinJudges.js';
 import { getMetric } from './metrics.js';
 import { getResultStore } from './builtinResultStores.js';
@@ -31,7 +31,7 @@ import {
 import type { MCPConfig } from '../config/mcpConfig.js';
 
 /**
- * The servers a host must support. A connector server is checked once `mst
+ * The servers a client must support. A connector server is checked once `mst
  * run` has expanded it (to the entry its connector launches).
  */
 function declaredTransports(
@@ -45,14 +45,14 @@ import { judgeOwnOptions } from '../judge/evaluateJudge.js';
 
 /**
  * The lookups validation resolves references through. With `namespaces`, each
- * reference is checked against the suite's plugins where it is resolved: the
- * extension table is shared by every suite in a process (a batch), so without
- * this a suite could pass only because another one loaded the plugin
+ * reference is checked against the eval's plugins where it is resolved: the
+ * extension table is shared by every eval in a process (a batch), so without
+ * this an eval could pass only because another one loaded the plugin
  * (ADR-0001).
  */
 interface ConfigLookups {
   datasetSource(reference: string): DatasetSource;
-  host(reference: string): ClientDefinition;
+  client(reference: string): ClientDefinition;
   metric(reference: string): MetricDefinition;
   judge(reference: string): JudgeDefinition;
   resultStore(reference: string): ResultStoreDefinition;
@@ -67,7 +67,7 @@ function configLookups(namespaces?: readonly string[]): ConfigLookups {
   }
   return {
     datasetSource: scoped(getDatasetSource),
-    host: scoped(getHost),
+    client: scoped(getClient),
     metric: scoped(getMetric),
     judge: scoped(getJudge),
     resultStore: scoped(getResultStore),
@@ -108,7 +108,7 @@ function parseConfig<T extends TaggedConfig>(
   } as T;
 }
 
-const SuiteControlsSchema = z
+const EvalControlsSchema = z
   .object({
     trials: z.number().int().positive().optional(),
     maxCases: z.number().int().positive().optional(),
@@ -119,19 +119,16 @@ const SuiteControlsSchema = z
   .strict();
 
 /** Canonical top-level controls, with explicit support for the run namespace. */
-export function normalizeSuiteControls(evalConfig: EvalConfig): EvalConfig {
+export function normalizeEvalControls(evalConfig: EvalConfig): EvalConfig {
   if (evalConfig.profile !== undefined) {
     throw new Error(
-      'Evaluation profile is not supported; use explicit host and run controls.'
+      'Evaluation profile is not supported; use explicit client and run controls.'
     );
   }
-  const nested = SuiteControlsSchema.parse(evalConfig.run ?? {});
-  const top = SuiteControlsSchema.parse(
+  const nested = EvalControlsSchema.parse(evalConfig.run ?? {});
+  const top = EvalControlsSchema.parse(
     Object.fromEntries(
-      Object.keys(SuiteControlsSchema.shape).map((key) => [
-        key,
-        evalConfig[key],
-      ])
+      Object.keys(EvalControlsSchema.shape).map((key) => [key, evalConfig[key]])
     )
   );
   for (const key of Object.keys(nested) as Array<keyof typeof nested>) {
@@ -189,7 +186,7 @@ function parseJudges(
   });
 }
 
-/** Eval config settings that default every host's option of the same name. */
+/** Eval config settings that default every client's option of the same name. */
 const HOST_DEFAULTS = [
   'model',
   'provider',
@@ -199,7 +196,7 @@ const HOST_DEFAULTS = [
   'maxTokens',
 ] as const;
 
-/** Whether a host's schema takes `key`: declared, or accepted by a loose schema. */
+/** Whether a client's schema takes `key`: declared, or accepted by a loose schema. */
 function takesOption(schema: ZodType, key: string): boolean {
   if (!(schema instanceof z.ZodObject)) return true;
   if (key in schema.shape) return true;
@@ -210,19 +207,19 @@ function takesOption(schema: ZodType, key: string): boolean {
 }
 
 /**
- * A host's options with the eval config's defaults filled in, for the options
- * its schema takes (a shared `provider` doesn't reach a host that has none).
+ * A client's options with the eval config's defaults filled in, for the options
+ * its schema takes (a shared `provider` doesn't reach a client that has none).
  */
-export function parseHostConfig(
+export function parseClientConfig(
   config: ClientConfig,
   defaults?: EvalConfig,
   lookups: ConfigLookups = configLookups()
 ): ClientConfig {
-  const definition = lookups.host(config.type);
+  const definition = lookups.client(config.type);
   // A deprecated name is recorded as the current one.
   const options: ClientConfig = {
     ...config,
-    type: resolveHostName(config.type),
+    type: resolveClientName(config.type),
   };
   for (const key of HOST_DEFAULTS) {
     if (
@@ -232,45 +229,45 @@ export function parseHostConfig(
     )
       options[key] = defaults[key];
   }
-  return parseConfig(options, definition, 'host options');
+  return parseConfig(options, definition, 'client options');
 }
 
 /** A variant's (or case's) client: the base client's options apply only to the same client. */
-export function inheritHost(
+export function inheritClient(
   base: ClientConfig | undefined,
   patch: Partial<ClientConfig>
 ): ClientConfig {
   // Deprecated names resolve first, so `cowork_cu` inherits from `cowork`.
-  const type = resolveHostName(patch.type ?? base?.type ?? 'claude-code');
+  const type = resolveClientName(patch.type ?? base?.type ?? 'claude-code');
   const inherited =
-    base !== undefined && resolveHostName(base.type) === type ? base : {};
+    base !== undefined && resolveClientName(base.type) === type ? base : {};
   return { ...inherited, ...patch, type } as ClientConfig;
 }
 
-/** An eval config default no host of the run takes would silently do nothing. */
+/** An eval config default no client of the run takes would silently do nothing. */
 function assertDefaultsUsed(
   evalConfig: EvalConfig,
-  hosts: ClientConfig[],
+  clientConfigs: ClientConfig[],
   lookups: ConfigLookups
 ): void {
   for (const key of HOST_DEFAULTS) {
-    if (evalConfig[key] === undefined || hosts.length === 0) continue;
-    const used = hosts.some((host) =>
-      takesOption(lookups.host(host.type).schema, key)
+    if (evalConfig[key] === undefined || clientConfigs.length === 0) continue;
+    const used = clientConfigs.some((client) =>
+      takesOption(lookups.client(client.type).schema, key)
     );
     if (!used)
       throw new Error(
-        `The eval config sets "${key}", but none of its clients (${[...new Set(hosts.map((host) => host.type))].join(', ')}) takes it.`
+        `The eval config sets "${key}", but none of its clients (${[...new Set(clientConfigs.map((client) => client.type))].join(', ')}) takes it.`
       );
   }
 }
 
-function effectiveHost(
+function effectiveClient(
   evalConfig: EvalConfig,
-  host: ClientConfig | undefined,
+  client: ClientConfig | undefined,
   lookups: ConfigLookups
 ): ClientConfig | undefined {
-  return host ? parseHostConfig(host, evalConfig, lookups) : undefined;
+  return client ? parseClientConfig(client, evalConfig, lookups) : undefined;
 }
 
 function validateLabels(
@@ -288,7 +285,7 @@ function validateLabels(
   }
 }
 
-/** Reject references to plugin namespaces the suite didn't load (ADR-0001). */
+/** Reject references to plugin namespaces the eval didn't load (ADR-0001). */
 export function assertListedNamespaces(
   references: readonly string[],
   namespaces: readonly string[],
@@ -306,7 +303,7 @@ export function assertListedNamespaces(
 
 export interface ValidateEvalConfigOptions {
   /**
-   * Namespaces of the plugins this suite loads. When given, references to any
+   * Namespaces of the plugins this eval loads. When given, references to any
    * other namespace are rejected.
    */
   namespaces?: readonly string[];
@@ -316,20 +313,20 @@ export interface ValidateEvalConfigOptions {
  * Validate an eval config against the schemas of the extensions it names and return
  * parsed options, including effective variant inheritance. Callers must use the returned eval config to retain defaults and
  * transforms. The input is not mutated, and each effective config is parsed once. Apply an eval config's `extends`
- * first, with `resolveConfigExtends`; `runEvalSuite` does both.
+ * first, with `resolveConfigExtends`; `runEval` does both.
  */
 export function validateEvalConfig(
   evalConfig: EvalConfig,
   options: ValidateEvalConfigOptions = {}
 ): EvalConfig {
-  evalConfig = normalizeSuiteControls(evalConfig);
+  evalConfig = normalizeEvalControls(evalConfig);
   const lookups = configLookups(options.namespaces);
   validateLabels(evalConfig.servers ?? [], 'the eval config');
   const datasets = evalConfig.datasets.map((config) =>
     parseConfig(config, lookups.datasetSource(config.type), 'dataset options')
   );
   const base = clientOf(evalConfig);
-  const host = effectiveHost(evalConfig, base, lookups);
+  const client = effectiveClient(evalConfig, base, lookups);
   const metrics = parseMetrics(evalConfig.metrics, lookups);
   const judges = parseJudges(evalConfig.judges, lookups);
   const results = evalConfig.results
@@ -342,25 +339,25 @@ export function validateEvalConfig(
         ),
       }
     : undefined;
-  if (!evalConfig.variants?.length && host) {
-    assertHostSupports(host, {
+  if (!evalConfig.variants?.length && client) {
+    assertClientSupports(client, {
       servers: declaredTransports(evalConfig.servers),
       tools: evalConfig.tools,
       concurrency: evalConfig.concurrency,
       context: 'The eval config',
     });
   }
-  const variantHosts: ClientConfig[] = [];
+  const variantClients: ClientConfig[] = [];
   const variants = evalConfig.variants?.map((variant) => {
     const servers = variant.servers ?? evalConfig.servers;
     validateLabels(servers ?? [], `variant "${variant.name}"`);
     const patch = clientPatchOf(variant);
-    const variantHost = patch
-      ? effectiveHost(evalConfig, inheritHost(base, patch), lookups)
-      : host;
-    if (patch && variantHost) variantHosts.push(variantHost);
-    if (variantHost) {
-      assertHostSupports(variantHost, {
+    const variantClient = patch
+      ? effectiveClient(evalConfig, inheritClient(base, patch), lookups)
+      : client;
+    if (patch && variantClient) variantClients.push(variantClient);
+    if (variantClient) {
+      assertClientSupports(variantClient, {
         servers: declaredTransports(servers),
         tools: variant.tools ?? evalConfig.tools,
         concurrency: evalConfig.concurrency,
@@ -370,7 +367,7 @@ export function validateEvalConfig(
     return {
       ...variant,
       servers,
-      ...(variantHost ? clientFieldsOf(variantHost) : {}),
+      ...(variantClient ? clientFieldsOf(variantClient) : {}),
       metrics: variant.metrics
         ? parseMetrics(variant.metrics, lookups)
         : metrics,
@@ -383,17 +380,17 @@ export function validateEvalConfig(
       ...(evalConfig.variants?.length &&
       evalConfig.variants.every((variant) => clientPatchOf(variant))
         ? []
-        : host
-          ? [host]
+        : client
+          ? [client]
           : []),
-      ...variantHosts,
+      ...variantClients,
     ],
     lookups
   );
   return {
     ...evalConfig,
     datasets,
-    ...(host ? clientFieldsOf(host) : {}),
+    ...(client ? clientFieldsOf(client) : {}),
     metrics,
     judges,
     results,

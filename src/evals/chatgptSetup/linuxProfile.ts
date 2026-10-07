@@ -26,25 +26,25 @@ import { loginWithApiKey } from '../codexSetup/auth.js';
 import type {
   CodexConfigInstallOptions,
   CodexExecutionPolicy,
-  CodexHostToolPolicy,
+  CodexBuiltinToolPolicy,
   ResolvedCodexSetup,
 } from '../codexSetup/config.js';
 import {
   CodexSetupError,
   type CodexSetupErrorCode,
 } from '../codexSetup/native.js';
-import type { ExternalHostConfig } from '../externalHost/types.js';
+import type { ExternalClientConfig } from '../externalClient/types.js';
 import type { McpServerReadiness } from '../mcpReadiness.js';
 import { preflightChatgptMcpServers } from './mcpPreflight.js';
 import {
   codexPluginReadinessTargets,
   installCodexPlugins,
-  type HostPluginReceipt,
+  type ClientPluginReceipt,
 } from '../codexSetup/plugins.js';
 import type {
   MarketplacePlugin,
-  HostPluginCredentials,
-} from '../hostPlugins.js';
+  ClientPluginCredentials,
+} from '../clientPlugins.js';
 import { createLinuxChatgptApp } from './linuxApp.js';
 
 /** The caller -> MST process environment. All paths are absolute and normalized. */
@@ -151,7 +151,7 @@ export function readLinuxChatgptEnvironment(
 
 /** Linux options and environment checks shared by preflight, lock, and session. */
 export function validateLinuxChatgptConfig(
-  config: ExternalHostConfig
+  config: ExternalClientConfig
 ): LinuxChatgptEnvironment {
   const desktop = chatgptDesktopEnvironment(config);
   const environment = readLinuxChatgptEnvironment(desktop);
@@ -199,7 +199,7 @@ export const LINUX_CHATGPT_EXECUTION_POLICY: CodexExecutionPolicy = {
  * plugin `enabled` flag before it adds `cua_repl`; the rollout records the
  * result in `turn_context.disabled_plugin_ids`.
  */
-export const LINUX_CHATGPT_HOST_TOOL_POLICY: CodexHostToolPolicy = {
+export const LINUX_CHATGPT_BUILTIN_TOOL_POLICY: CodexBuiltinToolPolicy = {
   disabledPlugins: ['unified-computer-use@openai-bundled'],
   webSearch: 'disabled',
   // workspace_dependencies makes the app download and unpack a ~1.6 GB office
@@ -211,12 +211,12 @@ export const LINUX_CHATGPT_HOST_TOOL_POLICY: CodexHostToolPolicy = {
 /** Sanitized setup receipt. No prompts, URLs, tokens, or native output. */
 export interface LinuxChatgptReadiness {
   executionPolicy: CodexExecutionPolicy;
-  hostToolPolicy: CodexHostToolPolicy;
+  builtinToolPolicy: CodexBuiltinToolPolicy;
   login: 'not-run' | 'verified' | 'failed';
   mcpPreflight: McpServerReadiness[];
   mcpStatus?: AppServerStatus;
-  /** Installed host plugins; no paths, URLs, or credentials. */
-  plugins?: HostPluginReceipt[];
+  /** Installed client plugins; no paths, URLs, or credentials. */
+  plugins?: ClientPluginReceipt[];
   error?: CodexSetupErrorCode | 'plugin_setup_failed';
 }
 
@@ -224,7 +224,10 @@ export interface ChatgptPlatformProfile {
   readonly configPath: string;
   readonly install: Pick<
     CodexConfigInstallOptions,
-    'credentialStore' | 'trustedProject' | 'executionPolicy' | 'hostToolPolicy'
+    | 'credentialStore'
+    | 'trustedProject'
+    | 'executionPolicy'
+    | 'builtinToolPolicy'
   >;
   readonly controller: ChatgptApplicationController;
   readonly evidenceDir?: string;
@@ -234,7 +237,7 @@ export interface ChatgptPlatformProfile {
     setup: ResolvedCodexSetup,
     environment: Record<string, string>,
     plugins?: readonly MarketplacePlugin[],
-    credentials?: HostPluginCredentials
+    credentials?: ClientPluginCredentials
   ): Promise<void>;
   dispose(): Promise<void>;
 }
@@ -270,10 +273,12 @@ export async function createLinuxChatgptProfile(
   await privateDirectory(workspace, 'workspace_unsafe');
   const readiness: LinuxChatgptReadiness = {
     executionPolicy: { ...LINUX_CHATGPT_EXECUTION_POLICY },
-    hostToolPolicy: {
-      disabledPlugins: [...LINUX_CHATGPT_HOST_TOOL_POLICY.disabledPlugins],
-      webSearch: LINUX_CHATGPT_HOST_TOOL_POLICY.webSearch,
-      disabledFeatures: [...LINUX_CHATGPT_HOST_TOOL_POLICY.disabledFeatures!],
+    builtinToolPolicy: {
+      disabledPlugins: [...LINUX_CHATGPT_BUILTIN_TOOL_POLICY.disabledPlugins],
+      webSearch: LINUX_CHATGPT_BUILTIN_TOOL_POLICY.webSearch,
+      disabledFeatures: [
+        ...LINUX_CHATGPT_BUILTIN_TOOL_POLICY.disabledFeatures!,
+      ],
     },
     login: 'not-run',
     mcpPreflight: [],
@@ -288,7 +293,7 @@ export async function createLinuxChatgptProfile(
       credentialStore: 'keyring',
       trustedProject: workspace,
       executionPolicy: LINUX_CHATGPT_EXECUTION_POLICY,
-      hostToolPolicy: LINUX_CHATGPT_HOST_TOOL_POLICY,
+      builtinToolPolicy: LINUX_CHATGPT_BUILTIN_TOOL_POLICY,
     },
     controller: createLinuxChatgptApp({
       appPath: environment.appPath,

@@ -31,10 +31,10 @@ The dataset-driven evaluation engine. Key files:
 
 - `datasetTypes.ts` — Zod schemas for `EvalDataset`, `EvalCase`, and all assertion block types.
 - `datasetLoader.ts` — reads and validates JSON datasets from disk.
-- `evalRunner.ts` — `runEvalDataset()` iterates cases, calls the MCP server (or the LLM host simulator), validates results against each case's assertion block, and returns `EvalRunnerResult`. Supports multi-trial accuracy tracking and configurable concurrency.
+- `evalRunner.ts` — `runEvalDataset()` iterates cases, calls the MCP server (or the LLM client simulator), validates results against each case's assertion block, and returns `EvalRunnerResult`. Supports multi-trial accuracy tracking and configurable concurrency.
 - `baseline.ts` — saves and loads pass/fail baselines for tracking regressions across runs.
 - `resultStore.ts` — persists eval runs, reporter runs, and comparison artifacts to local files or GCS using a shared JSON envelope.
-- `mcpHost/` — LLM host simulation (see data flow below).
+- `mstClient/` — the `mst` client: a model through the Vercel AI SDK, or Claude Code (see data flow below).
 
 ### `src/judge/`
 
@@ -57,7 +57,7 @@ MCP protocol conformance checks. `conformanceChecks.ts` runs a set of server-lev
 
 ### `src/reporters/`
 
-Custom Playwright reporter. `channel.ts` is the contract between the code that records results on a test (the fixture's `listTools`/`callTool`, conformance and cross-era checks, `runEvalDataset`, variant experiments) and the reporter: attachment names, payload types, one writer (`attachReporterData`) and a schema-checked reader. `mcpReporter.ts` is a Playwright `Reporter` implementation that reads channel data from each test and writes JSON/HTML output. This repo's own `playwright.config.ts` runs it once the UI is built. The `ui-src/` subdirectory contains the React application that renders the report UI; it is compiled separately and embedded into `ui-dist/`. `build-ui.ts` is the build script for the React app.
+Custom Playwright reporter. `channel.ts` is the contract between the code that records results on a test (the fixture's `listTools`/`callTool`, conformance and cross-era checks, `runEvalDataset`, tool optimizations) and the reporter: attachment names, payload types, one writer (`attachReporterData`) and a schema-checked reader. `mcpReporter.ts` is a Playwright `Reporter` implementation that reads channel data from each test and writes JSON/HTML output. This repo's own `playwright.config.ts` runs it once the UI is built. The `ui-src/` subdirectory contains the React application that renders the report UI; it is compiled separately and embedded into `ui-dist/`. `build-ui.ts` is the build script for the React app.
 
 ### `src/cli/`
 
@@ -97,13 +97,13 @@ HTML report (ui-dist/)
 ```
 EvalCase { input, assertions.toolsTriggered }, run { client: "mst", model }
    ↓  caseExecution.ts: a case with input runs on the client
-   ↓  mcpHost/mcpHostSimulation.ts: simulateMCPHost()
-   ↓  mcpHost/adapters/vercel.ts: createVercelOrchestrator()
+   ↓  mstClient/simulation.ts: simulateMstClient()
+   ↓  mstClient/adapters/vercel.ts: createVercelOrchestrator()
       - Lists MCP tools via mcp.listTools()
       - Sends tools + input to the configured LLM provider (via Vercel AI SDK)
       - LLM generates text and calls tools autonomously (multi-turn, up to maxSteps)
       - Each tool call is forwarded to the MCP server via mcp.callTool()
-MCPHostSimulationResult (.toolCallsMade[], .success, .finalText)
+MstClientSimulationResult (.toolCallsMade[], .success, .finalText)
    ↓  validators/: validateToolCalls(), validateToolCallCount()
 ValidationResult
    ↓  evalRunner.ts: rolled into EvalCaseResult (with a pass rate over N trials)

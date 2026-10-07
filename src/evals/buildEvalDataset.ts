@@ -6,7 +6,7 @@ import {
 } from './datasetTypes.js';
 import type { EvalConfig } from './evalConfig.js';
 import { loadEvalDatasetFromObject } from './datasetLoader.js';
-import { normalizeSuiteControls } from './configValidation.js';
+import { normalizeEvalControls } from './configValidation.js';
 
 // Source ingestion must not silently discard noncanonical fields. In particular,
 // dropping an assertion field can turn an intended failure into a passing case.
@@ -47,7 +47,7 @@ function selectEvalCases(
   dataset: EvalDataset,
   evalConfig: EvalConfig
 ): EvalDataset {
-  const controls = normalizeSuiteControls(evalConfig);
+  const controls = normalizeEvalControls(evalConfig);
   const tags = controls.filterTags as string[] | undefined;
   const cases = tags?.length
     ? dataset.cases.filter((evalCase) =>

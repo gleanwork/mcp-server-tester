@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { MCPComparisonData, MCPVariantExperimentData } from '../../types';
+import type { MCPComparisonData, MCPToolOptimizationData } from '../../types';
 import { Recommendation } from './Recommendation';
 import { VariantTable } from './VariantTable';
 import { ChangeDiff } from './ChangeDiff';
@@ -27,10 +27,10 @@ function attemptsText(data: MCPComparisonData): string {
  * library; it calculates nothing itself.
  */
 export function ComparisonView({
-  experiment,
+  optimization,
   data,
 }: {
-  experiment: MCPVariantExperimentData;
+  optimization: MCPToolOptimizationData;
   data: MCPComparisonData;
 }) {
   const candidates = data.variants.filter((v) => v.id !== data.baselineId);
@@ -72,7 +72,7 @@ export function ComparisonView({
           <dl className="mt-2 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1">
             <dt className="text-muted-foreground">Ranked by</dt>
             <dd>
-              <span className="font-mono">{experiment.metric}</span>, without
+              <span className="font-mono">{optimization.metric}</span>, without
               held-out cases
             </dd>
             <dt className="text-muted-foreground">Regression check</dt>
@@ -100,8 +100,8 @@ export function ComparisonView({
             </dd>
             <dt className="text-muted-foreground">Rounds</dt>
             <dd>
-              {experiment.rounds.length}; stopped because{' '}
-              {REASON_TEXT[experiment.reason] ?? experiment.reason}
+              {optimization.rounds.length}; stopped because{' '}
+              {REASON_TEXT[optimization.reason] ?? optimization.reason}
             </dd>
             <dt className="text-muted-foreground">Cases</dt>
             <dd>
@@ -125,7 +125,7 @@ export function ComparisonView({
         <Recommendation
           data={data}
           what={singular}
-          metric={experiment.metric}
+          metric={optimization.metric}
           onShowUnsteady={() => {
             if (data.recommendedId) setSelectedId(data.recommendedId);
             setFilter('unsteady');

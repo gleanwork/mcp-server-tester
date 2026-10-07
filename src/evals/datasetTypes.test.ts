@@ -17,7 +17,7 @@ describe('datasetTypes', () => {
         toolsTriggered: {
           calls: [
             { name: 'search', source: 'mcp', server: 'agg', kind: 'tool_call' },
-            { name: 'research', source: 'host', kind: 'skill' },
+            { name: 'research', source: 'builtin', kind: 'skill' },
           ],
         },
         passesJudge: {
@@ -84,6 +84,18 @@ describe('datasetTypes', () => {
       [{ id: 'test-1', input: '' }, 'with an empty input'],
     ])('rejects a case %j (%s)', (evalCase) => {
       expect(() => validateEvalCase(evalCase)).toThrow(ZodError);
+    });
+
+    it('names the replacement for a tool call source of host', () => {
+      expect(() =>
+        validateEvalCase({
+          id: 'test-1',
+          input: 'x',
+          assertions: {
+            toolsTriggered: { calls: [{ name: 'search', source: 'host' }] },
+          },
+        })
+      ).toThrow("`source: 'host'` is now `source: 'builtin'`");
     });
 
     it.each([

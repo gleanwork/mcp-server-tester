@@ -23,18 +23,18 @@ Choose based on your server deployment:
 - Use **stdio** for local development and testing
 - Use **HTTP** for remote servers or production environments
 
-### Evaluation host support
+### Evaluation client support
 
-Plain stdio is supported by these built-in evaluation host families:
+Plain stdio is supported by these built-in evaluation client families:
 
 - Claude CLI (`claude-code`) and Vercel AI SDK (`mst`).
-- ChatGPT Work and Codex surfaces of the `chatgpt` and `chatgpt` hosts.
+- ChatGPT Work and Codex surfaces of the `chatgpt` and `chatgpt` clients.
 - Cowork (`cowork`) on macOS and Linux. The package exports
   `COWORK_STDIO_PLATFORMS` as `['darwin', 'linux']`.
 
 Plain stdio uses `command`, optional `args`, `cwd`, and declared `env`; it does
 not require a URL or plugin. Cowork also supports private file-backed native
-proxies and mixed HTTP/stdio sets. Its host-resolved fields (`url`, `auth`,
+proxies and mixed HTTP/stdio sets. Its client-resolved fields (`url`, `auth`,
 `files`, `minTools`, and placeholders) are not portable to ChatGPT or direct
 MCP clients. ChatGPT plugin-specific overrides use `plugins[].mcp` instead.
 
@@ -211,7 +211,7 @@ export default defineConfig({
 
 ### Protocol Version
 
-Both transports accept `protocol`. The default, `'legacy'`, uses the `initialize` handshake exactly as MST 1.x did. Pin `'2026-07-28'` to test the stateless protocol, pin a legacy revision such as `'2025-06-18'`, or use `'auto'` to probe and fall back. The legacy HTTP+SSE fallback only speaks 2024-11-05, so a connection pinned to any other revision never falls back to it. See [Protocol Versions](./protocol-versions.md) for running a suite against several protocols.
+Both transports accept `protocol`. The default, `'legacy'`, uses the `initialize` handshake exactly as MST 1.x did. Pin `'2026-07-28'` to test the stateless protocol, pin a legacy revision such as `'2025-06-18'`, or use `'auto'` to probe and fall back. The legacy HTTP+SSE fallback only speaks 2024-11-05, so a connection pinned to any other revision never falls back to it. See [Protocol Versions](./protocol-versions.md) for running an eval against several protocols.
 
 > **Security note:** When `serverUrl` uses `http://` with a non-localhost address, the framework emits a console warning: tokens and credentials are transmitted unencrypted over plain HTTP. Always use `https://` for remote servers. The warning is suppressed for `localhost` / `127.0.0.1` since local development traffic stays on the machine.
 

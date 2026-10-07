@@ -10,11 +10,11 @@ import {
   toCoworkServers,
 } from '../coworkSetup/config.js';
 import {
-  hostStdioReadinessConfig,
-  hostStdioServers,
+  clientStdioReadinessConfig,
+  clientStdioServers,
   type MarketplacePlugin,
   type ClientStdioPaths,
-} from '../hostPlugins.js';
+} from '../clientPlugins.js';
 import { mcpServerLabel } from '../../config/mcpConfig.js';
 
 export type CoworkMcpServerReadiness = McpServerReadiness;
@@ -34,9 +34,9 @@ function resolveServer(
   if (!isHttpConfig(server)) {
     // The same resolved launch Desktop runs, with only its declared env and
     // the caller's data dir. Readiness fails closed below `minTools`.
-    const [parsed] = hostStdioServers([server], stdio.plugins);
+    const [parsed] = clientStdioServers([server], stdio.plugins);
     if (!parsed) throw new Error('Invalid Cowork MCP configuration.');
-    return hostStdioReadinessConfig(parsed, stdio.paths);
+    return clientStdioReadinessConfig(parsed, stdio.paths);
   }
   const [coworkServer] = toCoworkServers([server]);
   if (!coworkServer) throw new Error('Invalid Cowork MCP configuration.');

@@ -2,19 +2,19 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
   gradeTrial,
-  mergeSuiteJudges,
+  mergeEvalJudges,
   resolveJudges,
   toolEvidenceGap,
   type GradedExecution,
 } from './grading.js';
 import type { ClientResponse } from './caseExecution.js';
-import type { ClientMetadata } from './externalHost/types.js';
+import type { ClientMetadata } from './externalClient/types.js';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 
 afterEach(() => resetPluginsForTests());
 
-const hostResponse: ClientResponse = {
+const clientResponse: ClientResponse = {
   success: true,
   response: 'It is sunny.',
   toolCalls: [
@@ -25,7 +25,7 @@ const hostResponse: ClientResponse = {
 
 /** The same response with native names mapped to MCP names, as the runner grades it. */
 const mapped: ClientResponse = {
-  ...hostResponse,
+  ...clientResponse,
   toolCalls: [
     { name: 'get_weather', arguments: { city: 'London' } },
     { name: 'search', arguments: {} },
@@ -51,17 +51,17 @@ const toolExpect = {
 };
 
 describe('toolEvidenceGap', () => {
-  it('accepts hosts that report no evidence and structured evidence', () => {
+  it('accepts clients that report no evidence and structured evidence', () => {
     expect(toolEvidenceGap({})).toBeUndefined();
     expect(toolEvidenceGap({ evidence: 'structured' })).toBeUndefined();
   });
 
   it('explains observed and missing evidence', () => {
     expect(toolEvidenceGap({ evidence: 'observed' })).toBe(
-      'Host evidence is observed; structured tool evidence is required.'
+      'Client evidence is observed; structured tool evidence is required.'
     );
     expect(toolEvidenceGap({ evidence: 'none' })).toBe(
-      'Host evidence is none; structured tool evidence is required.'
+      'Client evidence is none; structured tool evidence is required.'
     );
   });
 });
@@ -69,7 +69,7 @@ describe('toolEvidenceGap', () => {
 describe('gradeTrial', () => {
   const graded: GradedExecution = {
     response: mapped,
-    hostResponse,
+    clientResponse: clientResponse,
     evidence: 'structured',
   };
 
@@ -79,7 +79,7 @@ describe('gradeTrial', () => {
     expect(outcome.scores.toolCallCount?.pass).toBe(true);
     expect(outcome.toolPrecision).toBe(0.5);
     expect(outcome.toolRecall).toBe(0.5);
-    // Matched on mapped names, shown with the host's own names.
+    // Matched on mapped names, shown with the client's own names.
     expect(outcome.toolCallTrace).toEqual({
       calls: [
         {
@@ -101,7 +101,7 @@ describe('gradeTrial', () => {
       { ...graded, evidence: 'observed' }
     );
     const details =
-      'Host evidence is observed; structured tool evidence is required.';
+      'Client evidence is observed; structured tool evidence is required.';
     expect(outcome.scores.toolsTriggered).toEqual({
       pass: false,
       details,
@@ -159,7 +159,7 @@ describe('gradeTrial', () => {
       toolCallCount: {
         pass: false,
         details:
-          'Host evidence is observed; structured tool evidence is required.',
+          'Client evidence is observed; structured tool evidence is required.',
       },
     });
   });
@@ -255,9 +255,9 @@ describe('resolveJudges', () => {
   });
 });
 
-describe('mergeSuiteJudges', () => {
+describe('mergeEvalJudges', () => {
   it('lets a case override an eval config judge and keeps its other judges', () => {
-    const merged = mergeSuiteJudges(
+    const merged = mergeEvalJudges(
       {
         expected: { answer: 'canonical' },
         assertions: {
@@ -288,7 +288,7 @@ describe('mergeSuiteJudges', () => {
       { type: 'rubric', rubric: 'correctness' },
       { type: 'rubric', rubric: 'conciseness', threshold: 0.6 },
     ];
-    const merged = mergeSuiteJudges(
+    const merged = mergeEvalJudges(
       {
         assertions: {
           passesJudge: [
@@ -322,17 +322,17 @@ describe('mergeSuiteJudges', () => {
   });
 
   it('falls back from the eval config reference to expected.answer', () => {
-    const [withSuiteRef] = mergeSuiteJudges(
+    const [withEvalRef] = mergeEvalJudges(
       { expected: { answer: 'canonical' }, assertions: {} },
       [{ type: 'j', reference: 'suite' }],
       []
     );
-    const [withoutRef] = mergeSuiteJudges(
+    const [withoutRef] = mergeEvalJudges(
       { expected: { answer: 'canonical' }, assertions: {} },
       [{ type: 'j' }],
       []
     );
-    expect(withSuiteRef?.reference).toBe('suite');
+    expect(withEvalRef?.reference).toBe('suite');
     expect(withoutRef?.reference).toBe('canonical');
   });
 });

@@ -49,9 +49,9 @@ Below the cards, the **Pass Rate Trend** chart shows historical pass rates acros
 
 ## Comparison Tab
 
-![MCP Server Tester — Comparison tab](img/ux-experiment.png)
+![MCP Server Tester — Comparison tab](img/ux-tool-optimization.png)
 
-When the run is a [`runVariantExperiment`](./mcp-host.md#driving-it-from-an-agent-runvariantexperiment), the report opens on the Comparison tab. It answers which variant to ship first, then lets you dig into why:
+When the run is a [`runToolOptimization`](./mst-client.md#driving-it-from-an-agent-runtooloptimization), the report opens on the Comparison tab. It answers which variant to ship first, then lets you dig into why:
 
 - **Result** — the recommended variant, the two checks it passed (clearly better on capability cases, and no clear breakage on regression cases), why each other variant wasn't chosen, and caveats: cases that pass only some trials, a gain not confirmed on held-out cases, too few cases for any variant to be clearly better, a run too small to catch one case breaking, or groups that came from an extra baseline run.
 - **All variants compared** — each variant's pass rate on capability cases and regression cases, colored by the library's assessment of its change from the baseline: green is clearly better, red is clearly worse, grey is within noise. **Show statistics** adds the 95% ranges and p-values, the seen versus held-out split, pass^k, and improved/regressed case counts.
@@ -59,7 +59,7 @@ When the run is a [`runVariantExperiment`](./mcp-host.md#driving-it-from-an-agen
 - **Case by case** — every case and every trial for every variant. A cell is green when all trials passed, amber when some did, and red when none did or it got worse than the baseline; ▲ and ▼ mark changes. Select a cell to compare its trials, including the tools called, with the baseline's.
 - **Why trials failed** — failed trials grouped by what went wrong (no tool called, wrong tool, right tool but a check failed, error), plus the selected variant's most common tool mix-ups.
 
-The library computes every number and assessment on this tab; the reporter only renders them. See [How variants are judged](./mcp-host.md#how-variants-are-judged) for the method and its limits.
+The library computes every number and assessment on this tab; the reporter only renders them. See [How variants are judged](./mst-client.md#how-variants-are-judged) for the method and its limits.
 
 ---
 
@@ -91,7 +91,7 @@ Conformance checks validate that your MCP server implements the protocol correct
 
 ![MCP Server Tester — Evals tab](img/ux-evals.png)
 
-The Evals tab shows data-driven eval dataset results, including multi-trial pass rates and LLM host mode tool discovery metrics.
+The Evals tab shows data-driven eval dataset results, including multi-trial pass rates and LLM client mode tool discovery metrics.
 
 ### Metrics bar
 

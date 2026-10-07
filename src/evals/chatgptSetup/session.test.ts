@@ -5,17 +5,17 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ControllerModule from './macController.js';
 import type * as ConfigModule from '../codexSetup/config.js';
-import type * as TraceModule from '../externalHost/builtins/chatgptTrace.js';
+import type * as TraceModule from '../externalClient/builtins/chatgptTrace.js';
 import type * as ComputerUseModule from '../cowork/anthropicComputerUse.js';
 import {
   findChatgptTrace,
   parseChatgptTrace,
   snapshotChatgptSessions,
-} from '../externalHost/builtins/chatgptTrace.js';
-import { runExternalHostScenario } from '../externalHost/runtime.js';
-import { NativeTraceError } from '../externalHost/nativeTraceError.js';
+} from '../externalClient/builtins/chatgptTrace.js';
+import { runExternalClientCase } from '../externalClient/runtime.js';
+import { NativeTraceError } from '../externalClient/nativeTraceError.js';
 import { ChatgptAppSession } from './session.js';
-import type { ExternalHostConfig } from '../externalHost/types.js';
+import type { ExternalClientConfig } from '../externalClient/types.js';
 import { getChatgptApplicationController } from './macController.js';
 import {
   installCodexConfig,
@@ -44,7 +44,7 @@ vi.mock('../mcpReadiness.js', async (original) => ({
   ...(await original<typeof ReadinessModule>()),
   checkMcpServers: vi.fn(),
 }));
-vi.mock('../externalHost/builtins/chatgptTrace.js', async (original) => ({
+vi.mock('../externalClient/builtins/chatgptTrace.js', async (original) => ({
   ...(await original<typeof TraceModule>()),
   findChatgptTrace: vi.fn(),
   snapshotChatgptSessions: vi.fn(),
@@ -222,7 +222,7 @@ beforeEach(() => {
       evidenceDir: env.evidenceDir,
       readiness: {
         executionPolicy: POLICY,
-        hostToolPolicy: { disabledPlugins: [], webSearch: 'disabled' },
+        builtinToolPolicy: { disabledPlugins: [], webSearch: 'disabled' },
         login: 'verified',
         mcpPreflight: [],
       },
@@ -263,7 +263,7 @@ function testConfig(
   model = 'gpt-test',
   options: Record<string, unknown> = {},
   reasoningEffort: 'low' | 'medium' = 'low'
-): ExternalHostConfig {
+): ExternalClientConfig {
   return {
     driver: 'openai.chatgpt.agent.desktop-app.macos',
     timeoutMs: 1000,
@@ -295,7 +295,7 @@ function run(
   options: Record<string, unknown> = {},
   reasoningEffort: 'low' | 'medium' = 'low'
 ) {
-  return runExternalHostScenario(
+  return runExternalClientCase(
     'Say done',
     testConfig(model, options, reasoningEffort)
   );
@@ -405,7 +405,7 @@ describe('ChatGPT batch app lifecycle', () => {
 
 describe('ChatGPT Linux native lifecycle', () => {
   let home: string;
-  function linuxConfig(): ExternalHostConfig {
+  function linuxConfig(): ExternalClientConfig {
     const base = testConfig();
     return {
       ...base,
@@ -441,7 +441,7 @@ describe('ChatGPT Linux native lifecycle', () => {
     await rm(home, { recursive: true, force: true });
   });
 
-  it('passes host plugins to the Linux profile before start', async () => {
+  it('passes client plugins to the Linux profile before start', async () => {
     const plugins = [{ name: 'acme', marketplace: { source: '/opt/plugins' } }];
     const session = new ChatgptAppSession();
     try {
@@ -487,7 +487,7 @@ describe('ChatGPT Linux native lifecycle', () => {
       await session.prepare(config);
       expect(session.telemetry.nativeSetup).toEqual(linuxTelemetry().telemetry);
       for (let i = 0; i < 2; i++) {
-        const result = await runExternalHostScenario('exact query', {
+        const result = await runExternalClientCase('exact query', {
           ...config,
           options: { ...config.options, managedChatgptSession: session },
         });
@@ -622,7 +622,7 @@ describe('ChatGPT Linux native lifecycle', () => {
     vi.mocked(runLinuxChatgptDesktop).mockRejectedValueOnce(
       new NativeChatgptDriverError('surface failed')
     );
-    const result = await runExternalHostScenario('query', linuxConfig());
+    const result = await runExternalClientCase('query', linuxConfig());
     expect(result.success).toBe(false);
     expect(runLinuxChatgptDesktop).toHaveBeenCalledTimes(1);
     expect(snapshotChatgptSessions).not.toHaveBeenCalled();
@@ -641,7 +641,7 @@ describe('ChatGPT Linux native lifecycle', () => {
         throw new NativeChatgptDriverError('uncertain send', { draftState });
       return linuxTelemetry(0);
     });
-    const result = await runExternalHostScenario('query', linuxConfig());
+    const result = await runExternalClientCase('query', linuxConfig());
     expect(result.success).toBe(false);
     expect(result.clientMetadata.nativeController?.submission).toMatchObject({
       status: 'failed',
@@ -693,7 +693,7 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
     expect(JSON.stringify(result)).not.toContain('test-controller-key');
   });
   it('supports opt-in markers without changing the default', async () => {
-    const result = await runExternalHostScenario('Say done', {
+    const result = await runExternalClientCase('Say done', {
       ...testConfig(),
       correlation: { strategy: 'prompt_marker' },
     });
@@ -710,10 +710,10 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
       result.clientMetadata.correlation.marker
     );
   });
-  it.each(['none', 'host_session_metadata'] as const)(
+  it.each(['none', 'client_session_metadata'] as const)(
     'rejects unsupported %s correlation before touching the app',
     async (strategy) => {
-      const result = await runExternalHostScenario('Say done', {
+      const result = await runExternalClientCase('Say done', {
         ...testConfig(),
         correlation: { strategy },
       });
@@ -772,8 +772,8 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
       expect(installCodexConfig).not.toHaveBeenCalled();
     }
   );
-  it('rejects reserved MCP namespaces in direct external-host configuration before touching the app', async () => {
-    const result = await runExternalHostScenario('Say done', {
+  it('rejects reserved MCP namespaces in direct external-client configuration before touching the app', async () => {
+    const result = await runExternalClientCase('Say done', {
       ...testConfig(),
       codexSetup: {
         configPath: '/tmp/chatgpt-test/config.toml',
@@ -805,7 +805,7 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
     async (model, effort) => {
       const result = await run(model, {}, effort);
       expect(result.success).toBe(false);
-      expect(result.clientMetadata.failureKind).toBe('host_run_failed');
+      expect(result.clientMetadata.failureKind).toBe('client_run_failed');
       expect(restore).toHaveBeenCalledTimes(1);
     }
   );

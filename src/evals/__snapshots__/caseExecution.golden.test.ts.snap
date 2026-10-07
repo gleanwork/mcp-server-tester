@@ -1,5 +1,618 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`golden: client traces through executeCase > client trace error 1`] = `
+{
+  "authType": "none",
+  "clientTelemetry": {
+    "native": "kept",
+  },
+  "clientUsage": {
+    "durationMs": "<time>",
+    "inputTokens": 50,
+    "outputTokens": 10,
+  },
+  "datasetName": "single-case",
+  "durationMs": "<time>",
+  "error": "native session missing",
+  "id": "trace",
+  "pass": false,
+  "project": "golden",
+  "request": {
+    "assertions": {
+      "containsText": "sunny",
+      "toolCallCount": {
+        "max": 1,
+      },
+      "toolsTriggered": {
+        "calls": [
+          {
+            "name": "weather.get_weather",
+            "required": true,
+          },
+          {
+            "kind": "skill",
+            "name": "forecasting",
+            "required": true,
+          },
+        ],
+      },
+    },
+    "client": "mst",
+    "input": "Weather in London?",
+  },
+  "response": {
+    "events": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "server": "weather",
+        "source": "mcp",
+      },
+      {
+        "kind": "skill",
+        "name": "forecasting",
+        "source": "builtin",
+      },
+      {
+        "kind": "tool_call",
+        "name": "web_search",
+        "source": "builtin",
+      },
+    ],
+    "evidence": "structured",
+    "response": "It is sunny in London.",
+    "success": false,
+    "telemetry": {
+      "native": "kept",
+    },
+    "toolCalls": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "server": "weather",
+        "source": "mcp",
+      },
+      {
+        "arguments": {},
+        "kind": "tool_call",
+        "name": "web_search",
+        "source": "builtin",
+      },
+    ],
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 50,
+      "outputTokens": 10,
+    },
+  },
+  "scores": {},
+  "source": "eval",
+  "trace": {
+    "error": "native session missing",
+    "events": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "server": "weather",
+        "source": "mcp",
+      },
+      {
+        "kind": "skill",
+        "name": "forecasting",
+        "source": "builtin",
+      },
+      {
+        "kind": "tool_call",
+        "name": "web_search",
+        "source": "builtin",
+      },
+    ],
+    "evidence": "structured",
+    "finalText": "It is sunny in London.",
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 50,
+      "outputTokens": 10,
+    },
+  },
+  "traceEvidence": "structured",
+}
+`;
+
+exports[`golden: client traces through executeCase > executeCase that throws 1`] = `
+{
+  "authType": "none",
+  "datasetName": "single-case",
+  "durationMs": "<time>",
+  "error": "client crashed",
+  "id": "trace",
+  "pass": false,
+  "project": "golden",
+  "request": {
+    "assertions": {
+      "containsText": "sunny",
+      "toolCallCount": {
+        "max": 1,
+      },
+      "toolsTriggered": {
+        "calls": [
+          {
+            "name": "weather.get_weather",
+            "required": true,
+          },
+          {
+            "kind": "skill",
+            "name": "forecasting",
+            "required": true,
+          },
+        ],
+      },
+    },
+    "client": "mst",
+    "input": "Weather in London?",
+  },
+  "scores": {},
+  "source": "eval",
+}
+`;
+
+exports[`golden: client traces through executeCase > none evidence 1`] = `
+{
+  "authType": "none",
+  "clientTelemetry": {
+    "native": "kept",
+  },
+  "clientUsage": {
+    "durationMs": "<time>",
+    "inputTokens": 50,
+    "outputTokens": 10,
+  },
+  "datasetName": "single-case",
+  "durationMs": "<time>",
+  "id": "trace",
+  "pass": false,
+  "project": "golden",
+  "request": {
+    "assertions": {
+      "containsText": "sunny",
+      "toolCallCount": {
+        "max": 1,
+      },
+      "toolsTriggered": {
+        "calls": [
+          {
+            "name": "weather.get_weather",
+            "required": true,
+          },
+          {
+            "kind": "skill",
+            "name": "forecasting",
+            "required": true,
+          },
+        ],
+      },
+    },
+    "client": "mst",
+    "input": "Weather in London?",
+  },
+  "response": {
+    "events": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "server": "weather",
+        "source": "mcp",
+      },
+      {
+        "kind": "skill",
+        "name": "forecasting",
+        "source": "builtin",
+      },
+      {
+        "kind": "tool_call",
+        "name": "web_search",
+        "source": "builtin",
+      },
+    ],
+    "evidence": "none",
+    "response": "It is sunny in London.",
+    "success": true,
+    "telemetry": {
+      "native": "kept",
+    },
+    "toolCalls": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "weather.get_weather",
+        "output": "sunny",
+        "server": "weather",
+        "source": "mcp",
+      },
+      {
+        "arguments": {},
+        "kind": "tool_call",
+        "name": "web_search",
+        "source": "builtin",
+      },
+    ],
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 50,
+      "outputTokens": 10,
+    },
+  },
+  "scores": {
+    "textContains": {
+      "details": "Response contains expected text",
+      "pass": true,
+    },
+    "toolCallCount": {
+      "details": "Client evidence is none; structured tool evidence is required.",
+      "pass": false,
+    },
+    "toolsTriggered": {
+      "details": "Client evidence is none; structured tool evidence is required.",
+      "pass": false,
+    },
+  },
+  "source": "eval",
+  "trace": {
+    "events": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "server": "weather",
+        "source": "mcp",
+      },
+      {
+        "kind": "skill",
+        "name": "forecasting",
+        "source": "builtin",
+      },
+      {
+        "kind": "tool_call",
+        "name": "web_search",
+        "source": "builtin",
+      },
+    ],
+    "evidence": "none",
+    "finalText": "It is sunny in London.",
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 50,
+      "outputTokens": 10,
+    },
+  },
+  "traceEvidence": "none",
+}
+`;
+
+exports[`golden: client traces through executeCase > observed evidence 1`] = `
+{
+  "authType": "none",
+  "clientTelemetry": {
+    "native": "kept",
+  },
+  "clientUsage": {
+    "durationMs": "<time>",
+    "inputTokens": 50,
+    "outputTokens": 10,
+  },
+  "datasetName": "single-case",
+  "durationMs": "<time>",
+  "id": "trace",
+  "pass": false,
+  "project": "golden",
+  "request": {
+    "assertions": {
+      "containsText": "sunny",
+      "toolCallCount": {
+        "max": 1,
+      },
+      "toolsTriggered": {
+        "calls": [
+          {
+            "name": "weather.get_weather",
+            "required": true,
+          },
+          {
+            "kind": "skill",
+            "name": "forecasting",
+            "required": true,
+          },
+        ],
+      },
+    },
+    "client": "mst",
+    "input": "Weather in London?",
+  },
+  "response": {
+    "events": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "server": "weather",
+        "source": "mcp",
+      },
+      {
+        "kind": "skill",
+        "name": "forecasting",
+        "source": "builtin",
+      },
+      {
+        "kind": "tool_call",
+        "name": "web_search",
+        "source": "builtin",
+      },
+    ],
+    "evidence": "observed",
+    "response": "It is sunny in London.",
+    "success": true,
+    "telemetry": {
+      "native": "kept",
+    },
+    "toolCalls": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "weather.get_weather",
+        "output": "sunny",
+        "server": "weather",
+        "source": "mcp",
+      },
+      {
+        "arguments": {},
+        "kind": "tool_call",
+        "name": "web_search",
+        "source": "builtin",
+      },
+    ],
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 50,
+      "outputTokens": 10,
+    },
+  },
+  "scores": {
+    "textContains": {
+      "details": "Response contains expected text",
+      "pass": true,
+    },
+    "toolCallCount": {
+      "details": "Client evidence is observed; structured tool evidence is required.",
+      "pass": false,
+    },
+    "toolsTriggered": {
+      "details": "Client evidence is observed; structured tool evidence is required.",
+      "pass": false,
+    },
+  },
+  "source": "eval",
+  "trace": {
+    "events": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "server": "weather",
+        "source": "mcp",
+      },
+      {
+        "kind": "skill",
+        "name": "forecasting",
+        "source": "builtin",
+      },
+      {
+        "kind": "tool_call",
+        "name": "web_search",
+        "source": "builtin",
+      },
+    ],
+    "evidence": "observed",
+    "finalText": "It is sunny in London.",
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 50,
+      "outputTokens": 10,
+    },
+  },
+  "traceEvidence": "observed",
+}
+`;
+
+exports[`golden: client traces through executeCase > structured evidence 1`] = `
+{
+  "authType": "none",
+  "clientTelemetry": {
+    "native": "kept",
+  },
+  "clientUsage": {
+    "durationMs": "<time>",
+    "inputTokens": 50,
+    "outputTokens": 10,
+  },
+  "datasetName": "single-case",
+  "durationMs": "<time>",
+  "id": "trace",
+  "pass": false,
+  "project": "golden",
+  "request": {
+    "assertions": {
+      "containsText": "sunny",
+      "toolCallCount": {
+        "max": 1,
+      },
+      "toolsTriggered": {
+        "calls": [
+          {
+            "name": "weather.get_weather",
+            "required": true,
+          },
+          {
+            "kind": "skill",
+            "name": "forecasting",
+            "required": true,
+          },
+        ],
+      },
+    },
+    "client": "mst",
+    "input": "Weather in London?",
+  },
+  "response": {
+    "events": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "server": "weather",
+        "source": "mcp",
+      },
+      {
+        "kind": "skill",
+        "name": "forecasting",
+        "source": "builtin",
+      },
+      {
+        "kind": "tool_call",
+        "name": "web_search",
+        "source": "builtin",
+      },
+    ],
+    "evidence": "structured",
+    "response": "It is sunny in London.",
+    "success": true,
+    "telemetry": {
+      "native": "kept",
+    },
+    "toolCalls": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "weather.get_weather",
+        "output": "sunny",
+        "server": "weather",
+        "source": "mcp",
+      },
+      {
+        "arguments": {},
+        "kind": "tool_call",
+        "name": "web_search",
+        "source": "builtin",
+      },
+    ],
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 50,
+      "outputTokens": 10,
+    },
+  },
+  "scores": {
+    "textContains": {
+      "details": "Response contains expected text",
+      "pass": true,
+    },
+    "toolCallCount": {
+      "details": "Expected at most 1 tool call(s), but got 2",
+      "pass": false,
+    },
+    "toolsTriggered": {
+      "details": "All tool call assertions met",
+      "pass": true,
+    },
+  },
+  "source": "eval",
+  "toolCallTrace": {
+    "calls": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "name": "weather.get_weather",
+        "status": "expected",
+      },
+      {
+        "arguments": {},
+        "name": "web_search",
+        "status": "unexpected",
+      },
+    ],
+    "missed": [],
+  },
+  "toolPrecision": 0.6666666666666666,
+  "toolRecall": 1,
+  "trace": {
+    "events": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "server": "weather",
+        "source": "mcp",
+      },
+      {
+        "kind": "skill",
+        "name": "forecasting",
+        "source": "builtin",
+      },
+      {
+        "kind": "tool_call",
+        "name": "web_search",
+        "source": "builtin",
+      },
+    ],
+    "evidence": "structured",
+    "finalText": "It is sunny in London.",
+    "usage": {
+      "durationMs": "<time>",
+      "inputTokens": 50,
+      "outputTokens": 10,
+    },
+  },
+  "traceEvidence": "structured",
+}
+`;
+
 exports[`golden: dataset aggregation > two cases, one failing 1`] = `
 {
   "caseResults": [
@@ -90,7 +703,7 @@ exports[`golden: dataset aggregation > two cases, one failing 1`] = `
       },
       "datasetName": "mixed",
       "durationMs": "<time>",
-      "id": "host",
+      "id": "client",
       "pass": false,
       "project": "golden",
       "request": {
@@ -236,620 +849,7 @@ exports[`golden: dataset aggregation > two cases, one failing 1`] = `
 }
 `;
 
-exports[`golden: host traces through executeCase > executeCase that throws 1`] = `
-{
-  "authType": "none",
-  "datasetName": "single-case",
-  "durationMs": "<time>",
-  "error": "host crashed",
-  "id": "trace",
-  "pass": false,
-  "project": "golden",
-  "request": {
-    "assertions": {
-      "containsText": "sunny",
-      "toolCallCount": {
-        "max": 1,
-      },
-      "toolsTriggered": {
-        "calls": [
-          {
-            "name": "weather.get_weather",
-            "required": true,
-          },
-          {
-            "kind": "skill",
-            "name": "forecasting",
-            "required": true,
-          },
-        ],
-      },
-    },
-    "client": "mst",
-    "input": "Weather in London?",
-  },
-  "scores": {},
-  "source": "eval",
-}
-`;
-
-exports[`golden: host traces through executeCase > host trace error 1`] = `
-{
-  "authType": "none",
-  "clientTelemetry": {
-    "native": "kept",
-  },
-  "clientUsage": {
-    "durationMs": "<time>",
-    "inputTokens": 50,
-    "outputTokens": 10,
-  },
-  "datasetName": "single-case",
-  "durationMs": "<time>",
-  "error": "native session missing",
-  "id": "trace",
-  "pass": false,
-  "project": "golden",
-  "request": {
-    "assertions": {
-      "containsText": "sunny",
-      "toolCallCount": {
-        "max": 1,
-      },
-      "toolsTriggered": {
-        "calls": [
-          {
-            "name": "weather.get_weather",
-            "required": true,
-          },
-          {
-            "kind": "skill",
-            "name": "forecasting",
-            "required": true,
-          },
-        ],
-      },
-    },
-    "client": "mst",
-    "input": "Weather in London?",
-  },
-  "response": {
-    "events": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "kind": "tool_call",
-        "name": "get_weather",
-        "output": "sunny",
-        "server": "weather",
-        "source": "mcp",
-      },
-      {
-        "kind": "skill",
-        "name": "forecasting",
-        "source": "host",
-      },
-      {
-        "kind": "tool_call",
-        "name": "web_search",
-        "source": "host",
-      },
-    ],
-    "evidence": "structured",
-    "response": "It is sunny in London.",
-    "success": false,
-    "telemetry": {
-      "native": "kept",
-    },
-    "toolCalls": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "kind": "tool_call",
-        "name": "get_weather",
-        "output": "sunny",
-        "server": "weather",
-        "source": "mcp",
-      },
-      {
-        "arguments": {},
-        "kind": "tool_call",
-        "name": "web_search",
-        "source": "host",
-      },
-    ],
-    "usage": {
-      "durationMs": "<time>",
-      "inputTokens": 50,
-      "outputTokens": 10,
-    },
-  },
-  "scores": {},
-  "source": "eval",
-  "trace": {
-    "error": "native session missing",
-    "events": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "kind": "tool_call",
-        "name": "get_weather",
-        "output": "sunny",
-        "server": "weather",
-        "source": "mcp",
-      },
-      {
-        "kind": "skill",
-        "name": "forecasting",
-        "source": "host",
-      },
-      {
-        "kind": "tool_call",
-        "name": "web_search",
-        "source": "host",
-      },
-    ],
-    "evidence": "structured",
-    "finalText": "It is sunny in London.",
-    "usage": {
-      "durationMs": "<time>",
-      "inputTokens": 50,
-      "outputTokens": 10,
-    },
-  },
-  "traceEvidence": "structured",
-}
-`;
-
-exports[`golden: host traces through executeCase > none evidence 1`] = `
-{
-  "authType": "none",
-  "clientTelemetry": {
-    "native": "kept",
-  },
-  "clientUsage": {
-    "durationMs": "<time>",
-    "inputTokens": 50,
-    "outputTokens": 10,
-  },
-  "datasetName": "single-case",
-  "durationMs": "<time>",
-  "id": "trace",
-  "pass": false,
-  "project": "golden",
-  "request": {
-    "assertions": {
-      "containsText": "sunny",
-      "toolCallCount": {
-        "max": 1,
-      },
-      "toolsTriggered": {
-        "calls": [
-          {
-            "name": "weather.get_weather",
-            "required": true,
-          },
-          {
-            "kind": "skill",
-            "name": "forecasting",
-            "required": true,
-          },
-        ],
-      },
-    },
-    "client": "mst",
-    "input": "Weather in London?",
-  },
-  "response": {
-    "events": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "kind": "tool_call",
-        "name": "get_weather",
-        "output": "sunny",
-        "server": "weather",
-        "source": "mcp",
-      },
-      {
-        "kind": "skill",
-        "name": "forecasting",
-        "source": "host",
-      },
-      {
-        "kind": "tool_call",
-        "name": "web_search",
-        "source": "host",
-      },
-    ],
-    "evidence": "none",
-    "response": "It is sunny in London.",
-    "success": true,
-    "telemetry": {
-      "native": "kept",
-    },
-    "toolCalls": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "kind": "tool_call",
-        "name": "weather.get_weather",
-        "output": "sunny",
-        "server": "weather",
-        "source": "mcp",
-      },
-      {
-        "arguments": {},
-        "kind": "tool_call",
-        "name": "web_search",
-        "source": "host",
-      },
-    ],
-    "usage": {
-      "durationMs": "<time>",
-      "inputTokens": 50,
-      "outputTokens": 10,
-    },
-  },
-  "scores": {
-    "textContains": {
-      "details": "Response contains expected text",
-      "pass": true,
-    },
-    "toolCallCount": {
-      "details": "Host evidence is none; structured tool evidence is required.",
-      "pass": false,
-    },
-    "toolsTriggered": {
-      "details": "Host evidence is none; structured tool evidence is required.",
-      "pass": false,
-    },
-  },
-  "source": "eval",
-  "trace": {
-    "events": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "kind": "tool_call",
-        "name": "get_weather",
-        "output": "sunny",
-        "server": "weather",
-        "source": "mcp",
-      },
-      {
-        "kind": "skill",
-        "name": "forecasting",
-        "source": "host",
-      },
-      {
-        "kind": "tool_call",
-        "name": "web_search",
-        "source": "host",
-      },
-    ],
-    "evidence": "none",
-    "finalText": "It is sunny in London.",
-    "usage": {
-      "durationMs": "<time>",
-      "inputTokens": 50,
-      "outputTokens": 10,
-    },
-  },
-  "traceEvidence": "none",
-}
-`;
-
-exports[`golden: host traces through executeCase > observed evidence 1`] = `
-{
-  "authType": "none",
-  "clientTelemetry": {
-    "native": "kept",
-  },
-  "clientUsage": {
-    "durationMs": "<time>",
-    "inputTokens": 50,
-    "outputTokens": 10,
-  },
-  "datasetName": "single-case",
-  "durationMs": "<time>",
-  "id": "trace",
-  "pass": false,
-  "project": "golden",
-  "request": {
-    "assertions": {
-      "containsText": "sunny",
-      "toolCallCount": {
-        "max": 1,
-      },
-      "toolsTriggered": {
-        "calls": [
-          {
-            "name": "weather.get_weather",
-            "required": true,
-          },
-          {
-            "kind": "skill",
-            "name": "forecasting",
-            "required": true,
-          },
-        ],
-      },
-    },
-    "client": "mst",
-    "input": "Weather in London?",
-  },
-  "response": {
-    "events": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "kind": "tool_call",
-        "name": "get_weather",
-        "output": "sunny",
-        "server": "weather",
-        "source": "mcp",
-      },
-      {
-        "kind": "skill",
-        "name": "forecasting",
-        "source": "host",
-      },
-      {
-        "kind": "tool_call",
-        "name": "web_search",
-        "source": "host",
-      },
-    ],
-    "evidence": "observed",
-    "response": "It is sunny in London.",
-    "success": true,
-    "telemetry": {
-      "native": "kept",
-    },
-    "toolCalls": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "kind": "tool_call",
-        "name": "weather.get_weather",
-        "output": "sunny",
-        "server": "weather",
-        "source": "mcp",
-      },
-      {
-        "arguments": {},
-        "kind": "tool_call",
-        "name": "web_search",
-        "source": "host",
-      },
-    ],
-    "usage": {
-      "durationMs": "<time>",
-      "inputTokens": 50,
-      "outputTokens": 10,
-    },
-  },
-  "scores": {
-    "textContains": {
-      "details": "Response contains expected text",
-      "pass": true,
-    },
-    "toolCallCount": {
-      "details": "Host evidence is observed; structured tool evidence is required.",
-      "pass": false,
-    },
-    "toolsTriggered": {
-      "details": "Host evidence is observed; structured tool evidence is required.",
-      "pass": false,
-    },
-  },
-  "source": "eval",
-  "trace": {
-    "events": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "kind": "tool_call",
-        "name": "get_weather",
-        "output": "sunny",
-        "server": "weather",
-        "source": "mcp",
-      },
-      {
-        "kind": "skill",
-        "name": "forecasting",
-        "source": "host",
-      },
-      {
-        "kind": "tool_call",
-        "name": "web_search",
-        "source": "host",
-      },
-    ],
-    "evidence": "observed",
-    "finalText": "It is sunny in London.",
-    "usage": {
-      "durationMs": "<time>",
-      "inputTokens": 50,
-      "outputTokens": 10,
-    },
-  },
-  "traceEvidence": "observed",
-}
-`;
-
-exports[`golden: host traces through executeCase > structured evidence 1`] = `
-{
-  "authType": "none",
-  "clientTelemetry": {
-    "native": "kept",
-  },
-  "clientUsage": {
-    "durationMs": "<time>",
-    "inputTokens": 50,
-    "outputTokens": 10,
-  },
-  "datasetName": "single-case",
-  "durationMs": "<time>",
-  "id": "trace",
-  "pass": false,
-  "project": "golden",
-  "request": {
-    "assertions": {
-      "containsText": "sunny",
-      "toolCallCount": {
-        "max": 1,
-      },
-      "toolsTriggered": {
-        "calls": [
-          {
-            "name": "weather.get_weather",
-            "required": true,
-          },
-          {
-            "kind": "skill",
-            "name": "forecasting",
-            "required": true,
-          },
-        ],
-      },
-    },
-    "client": "mst",
-    "input": "Weather in London?",
-  },
-  "response": {
-    "events": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "kind": "tool_call",
-        "name": "get_weather",
-        "output": "sunny",
-        "server": "weather",
-        "source": "mcp",
-      },
-      {
-        "kind": "skill",
-        "name": "forecasting",
-        "source": "host",
-      },
-      {
-        "kind": "tool_call",
-        "name": "web_search",
-        "source": "host",
-      },
-    ],
-    "evidence": "structured",
-    "response": "It is sunny in London.",
-    "success": true,
-    "telemetry": {
-      "native": "kept",
-    },
-    "toolCalls": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "kind": "tool_call",
-        "name": "weather.get_weather",
-        "output": "sunny",
-        "server": "weather",
-        "source": "mcp",
-      },
-      {
-        "arguments": {},
-        "kind": "tool_call",
-        "name": "web_search",
-        "source": "host",
-      },
-    ],
-    "usage": {
-      "durationMs": "<time>",
-      "inputTokens": 50,
-      "outputTokens": 10,
-    },
-  },
-  "scores": {
-    "textContains": {
-      "details": "Response contains expected text",
-      "pass": true,
-    },
-    "toolCallCount": {
-      "details": "Expected at most 1 tool call(s), but got 2",
-      "pass": false,
-    },
-    "toolsTriggered": {
-      "details": "All tool call assertions met",
-      "pass": true,
-    },
-  },
-  "source": "eval",
-  "toolCallTrace": {
-    "calls": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "name": "weather.get_weather",
-        "status": "expected",
-      },
-      {
-        "arguments": {},
-        "name": "web_search",
-        "status": "unexpected",
-      },
-    ],
-    "missed": [],
-  },
-  "toolPrecision": 0.6666666666666666,
-  "toolRecall": 1,
-  "trace": {
-    "events": [
-      {
-        "arguments": {
-          "city": "London",
-        },
-        "kind": "tool_call",
-        "name": "get_weather",
-        "output": "sunny",
-        "server": "weather",
-        "source": "mcp",
-      },
-      {
-        "kind": "skill",
-        "name": "forecasting",
-        "source": "host",
-      },
-      {
-        "kind": "tool_call",
-        "name": "web_search",
-        "source": "host",
-      },
-    ],
-    "evidence": "structured",
-    "finalText": "It is sunny in London.",
-    "usage": {
-      "durationMs": "<time>",
-      "inputTokens": 50,
-      "outputTokens": 10,
-    },
-  },
-  "traceEvidence": "structured",
-}
-`;
-
-exports[`golden: judges > judges a host response 1`] = `
+exports[`golden: judges > judges a client response 1`] = `
 {
   "calls": [
     [
@@ -2157,7 +2157,7 @@ exports[`golden: rubric judges > reps average the scores and report their spread
 }
 `;
 
-exports[`golden: runEvalSuite hosts > an eval config declares two rubric judges and a case overrides one 1`] = `
+exports[`golden: runEval clients > an eval config declares two rubric judges and a case overrides one 1`] = `
 {
   "calls": [
     [
@@ -2181,12 +2181,12 @@ exports[`golden: runEvalSuite hosts > an eval config declares two rubric judges 
           {
             "kind": "skill",
             "name": "forecasting",
-            "source": "host",
+            "source": "builtin",
           },
           {
             "kind": "tool_call",
             "name": "web_search",
-            "source": "host",
+            "source": "builtin",
           },
         ],
         "evidence": "structured",
@@ -2210,7 +2210,7 @@ exports[`golden: runEvalSuite hosts > an eval config declares two rubric judges 
             "arguments": {},
             "kind": "tool_call",
             "name": "web_search",
-            "source": "host",
+            "source": "builtin",
           },
         ],
         "usage": {
@@ -2243,12 +2243,12 @@ exports[`golden: runEvalSuite hosts > an eval config declares two rubric judges 
           {
             "kind": "skill",
             "name": "forecasting",
-            "source": "host",
+            "source": "builtin",
           },
           {
             "kind": "tool_call",
             "name": "web_search",
-            "source": "host",
+            "source": "builtin",
           },
         ],
         "evidence": "structured",
@@ -2272,7 +2272,7 @@ exports[`golden: runEvalSuite hosts > an eval config declares two rubric judges 
             "arguments": {},
             "kind": "tool_call",
             "name": "web_search",
-            "source": "host",
+            "source": "builtin",
           },
         ],
         "usage": {
@@ -2339,12 +2339,12 @@ exports[`golden: runEvalSuite hosts > an eval config declares two rubric judges 
           {
             "kind": "skill",
             "name": "forecasting",
-            "source": "host",
+            "source": "builtin",
           },
           {
             "kind": "tool_call",
             "name": "web_search",
-            "source": "host",
+            "source": "builtin",
           },
         ],
         "evidence": "structured",
@@ -2368,7 +2368,7 @@ exports[`golden: runEvalSuite hosts > an eval config declares two rubric judges 
             "arguments": {},
             "kind": "tool_call",
             "name": "web_search",
-            "source": "host",
+            "source": "builtin",
           },
         ],
         "usage": {
@@ -2417,12 +2417,12 @@ exports[`golden: runEvalSuite hosts > an eval config declares two rubric judges 
           {
             "kind": "skill",
             "name": "forecasting",
-            "source": "host",
+            "source": "builtin",
           },
           {
             "kind": "tool_call",
             "name": "web_search",
-            "source": "host",
+            "source": "builtin",
           },
         ],
         "evidence": "structured",
@@ -2440,7 +2440,7 @@ exports[`golden: runEvalSuite hosts > an eval config declares two rubric judges 
 }
 `;
 
-exports[`golden: runEvalSuite hosts > eval config judges merge with case judges 1`] = `
+exports[`golden: runEval clients > eval config judges merge with case judges 1`] = `
 {
   "caseJudgeCalls": [
     [
@@ -2460,12 +2460,12 @@ exports[`golden: runEvalSuite hosts > eval config judges merge with case judges 
           {
             "kind": "skill",
             "name": "forecasting",
-            "source": "host",
+            "source": "builtin",
           },
           {
             "kind": "tool_call",
             "name": "web_search",
-            "source": "host",
+            "source": "builtin",
           },
         ],
         "evidence": "structured",
@@ -2489,7 +2489,7 @@ exports[`golden: runEvalSuite hosts > eval config judges merge with case judges 
             "arguments": {},
             "kind": "tool_call",
             "name": "web_search",
-            "source": "host",
+            "source": "builtin",
           },
         ],
         "usage": {
@@ -2519,12 +2519,12 @@ exports[`golden: runEvalSuite hosts > eval config judges merge with case judges 
           {
             "kind": "skill",
             "name": "forecasting",
-            "source": "host",
+            "source": "builtin",
           },
           {
             "kind": "tool_call",
             "name": "web_search",
-            "source": "host",
+            "source": "builtin",
           },
         ],
         "evidence": "structured",
@@ -2548,7 +2548,7 @@ exports[`golden: runEvalSuite hosts > eval config judges merge with case judges 
             "arguments": {},
             "kind": "tool_call",
             "name": "web_search",
-            "source": "host",
+            "source": "builtin",
           },
         ],
         "usage": {
@@ -2614,12 +2614,12 @@ exports[`golden: runEvalSuite hosts > eval config judges merge with case judges 
           {
             "kind": "skill",
             "name": "forecasting",
-            "source": "host",
+            "source": "builtin",
           },
           {
             "kind": "tool_call",
             "name": "web_search",
-            "source": "host",
+            "source": "builtin",
           },
         ],
         "evidence": "structured",
@@ -2643,7 +2643,7 @@ exports[`golden: runEvalSuite hosts > eval config judges merge with case judges 
             "arguments": {},
             "kind": "tool_call",
             "name": "web_search",
-            "source": "host",
+            "source": "builtin",
           },
         ],
         "usage": {
@@ -2690,12 +2690,12 @@ exports[`golden: runEvalSuite hosts > eval config judges merge with case judges 
           {
             "kind": "skill",
             "name": "forecasting",
-            "source": "host",
+            "source": "builtin",
           },
           {
             "kind": "tool_call",
             "name": "web_search",
-            "source": "host",
+            "source": "builtin",
           },
         ],
         "evidence": "structured",
@@ -2713,7 +2713,7 @@ exports[`golden: runEvalSuite hosts > eval config judges merge with case judges 
 }
 `;
 
-exports[`golden: runEvalSuite hosts > run host 1`] = `
+exports[`golden: runEval clients > run client 1`] = `
 [
   {
     "clientTelemetry": {
@@ -2758,12 +2758,12 @@ exports[`golden: runEvalSuite hosts > run host 1`] = `
         {
           "kind": "skill",
           "name": "forecasting",
-          "source": "host",
+          "source": "builtin",
         },
         {
           "kind": "tool_call",
           "name": "web_search",
-          "source": "host",
+          "source": "builtin",
         },
       ],
       "evidence": "structured",
@@ -2787,7 +2787,7 @@ exports[`golden: runEvalSuite hosts > run host 1`] = `
           "arguments": {},
           "kind": "tool_call",
           "name": "web_search",
-          "source": "host",
+          "source": "builtin",
         },
       ],
       "usage": {
@@ -2841,12 +2841,12 @@ exports[`golden: runEvalSuite hosts > run host 1`] = `
         {
           "kind": "skill",
           "name": "forecasting",
-          "source": "host",
+          "source": "builtin",
         },
         {
           "kind": "tool_call",
           "name": "web_search",
-          "source": "host",
+          "source": "builtin",
         },
       ],
       "evidence": "structured",
@@ -2863,7 +2863,7 @@ exports[`golden: runEvalSuite hosts > run host 1`] = `
 ]
 `;
 
-exports[`golden: runEvalSuite hosts > runBatch host 1`] = `
+exports[`golden: runEval clients > runBatch client 1`] = `
 [
   {
     "clientTelemetry": {
@@ -2908,12 +2908,12 @@ exports[`golden: runEvalSuite hosts > runBatch host 1`] = `
         {
           "kind": "skill",
           "name": "forecasting",
-          "source": "host",
+          "source": "builtin",
         },
         {
           "kind": "tool_call",
           "name": "web_search",
-          "source": "host",
+          "source": "builtin",
         },
       ],
       "evidence": "structured",
@@ -2937,7 +2937,7 @@ exports[`golden: runEvalSuite hosts > runBatch host 1`] = `
           "arguments": {},
           "kind": "tool_call",
           "name": "web_search",
-          "source": "host",
+          "source": "builtin",
         },
       ],
       "usage": {
@@ -2991,12 +2991,12 @@ exports[`golden: runEvalSuite hosts > runBatch host 1`] = `
         {
           "kind": "skill",
           "name": "forecasting",
-          "source": "host",
+          "source": "builtin",
         },
         {
           "kind": "tool_call",
           "name": "web_search",
-          "source": "host",
+          "source": "builtin",
         },
       ],
       "evidence": "structured",
@@ -3023,7 +3023,7 @@ exports[`golden: the mst client (dataset API) > maps native tool names through t
   },
   "datasetName": "single-case",
   "durationMs": "<time>",
-  "id": "host",
+  "id": "client",
   "pass": true,
   "project": "golden",
   "request": {
@@ -3145,7 +3145,7 @@ exports[`golden: the mst client (dataset API) > simulation failure 1`] = `
   "datasetName": "single-case",
   "durationMs": "<time>",
   "error": "provider rejected the request",
-  "id": "host",
+  "id": "client",
   "pass": false,
   "project": "golden",
   "request": {
@@ -3186,7 +3186,7 @@ exports[`golden: the mst client (dataset API) > succeeds with tool evidence and 
   },
   "datasetName": "single-case",
   "durationMs": "<time>",
-  "id": "host",
+  "id": "client",
   "pass": false,
   "project": "golden",
   "request": {
@@ -3316,7 +3316,7 @@ exports[`golden: the mst client (dataset API) > trials exclude infrastructure er
   },
   "datasetName": "single-case",
   "durationMs": "<time>",
-  "id": "host",
+  "id": "client",
   "infrastructureErrorCount": 1,
   "infrastructureErrorRate": 0.3333333333333333,
   "pass": false,

@@ -17,7 +17,7 @@ import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import {
   validateMCPConfig,
-  usesHostResolvedFields,
+  usesClientResolvedFields,
   type MCPConfig,
 } from '../../config/mcpConfig.js';
 import { resolveCoworkMcpHeaders, toCoworkServers } from './config.js';
@@ -179,7 +179,7 @@ export function validateMacLocalServers(servers: MCPConfig[]): void {
         server.label.toLowerCase()
       ) ||
       names.has(server.label.toLowerCase()) ||
-      (server.transport === 'stdio' && usesHostResolvedFields(server))
+      (server.transport === 'stdio' && usesClientResolvedFields(server))
     )
       throw new Error(ERROR);
     names.add(server.label.toLowerCase());

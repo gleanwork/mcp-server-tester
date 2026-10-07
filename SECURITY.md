@@ -25,13 +25,13 @@ Only the latest release is actively supported with security patches.
 In scope:
 
 - OAuth and token handling (`mst login`, `mst token`, token storage)
-- Secrets: `--secrets-file`, `auth.accessTokenEnv` and host credentials, and their redaction from stored results, reports and logs
-- The local MCP proxy that serves tool variants to hosts (it listens on 127.0.0.1)
-- Processes MST starts (stdio MCP servers, CLI hosts) and plugins it loads. Both run with your privileges by design; a report should show MST running or exposing something you didn't configure.
+- Secrets: `--secrets-file`, `auth.accessTokenEnv` and client credentials, and their redaction from stored results, reports and logs
+- The local MCP proxy that serves tool variants to clients (it listens on 127.0.0.1)
+- Processes MST starts (stdio MCP servers, CLI clients) and plugins it loads. Both run with your privileges by design; a report should show MST running or exposing something you didn't configure.
 
 Out of scope:
 
-- Vulnerabilities in the MCP servers or hosts you test with MST; report those to their maintainers
+- Vulnerabilities in the MCP servers or clients you test with MST; report those to their maintainers
 - Social engineering and denial of service
 
 ## Disclosure

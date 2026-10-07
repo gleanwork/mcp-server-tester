@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { hostRunToExecution } from '../evals/hostTrace.js';
+import { clientRunToExecution } from '../evals/clientTrace.js';
 import { z } from 'zod';
 import { runEvalDataset } from '../evals/evalRunner.js';
 import { validateEvalDataset } from '../evals/datasetTypes.js';
@@ -57,7 +57,7 @@ async function run(
     {
       dataset,
       executeCase: async () =>
-        hostRunToExecution({ finalText: answer, events: [] }, 'structured'),
+        clientRunToExecution({ finalText: answer, events: [] }, 'structured'),
     },
     {}
   );
@@ -97,8 +97,8 @@ describe('buildJudgeCase', () => {
 });
 
 describe('buildJudgeTrial', () => {
-  it('reads text, tool events, messages, and usage from a host response', () => {
-    const hostResponse = {
+  it('reads text, tool events, messages, and usage from a client response', () => {
+    const clientResponse = {
       success: true,
       response: 'final text',
       toolCalls: [{ name: 'search', arguments: { q: 'x' }, output: 'hit' }],
@@ -106,9 +106,12 @@ describe('buildJudgeTrial', () => {
       usage: { inputTokens: 1, outputTokens: 2, durationMs: 3 },
     };
     expect(
-      buildJudgeTrial(hostResponse, { hostResponse, evidence: 'structured' })
+      buildJudgeTrial(clientResponse, {
+        clientResponse: clientResponse,
+        evidence: 'structured',
+      })
     ).toEqual({
-      response: hostResponse,
+      response: clientResponse,
       text: 'final text',
       events: [
         {
@@ -125,12 +128,14 @@ describe('buildJudgeTrial', () => {
     });
   });
 
-  it('keeps host events when the host reports them', () => {
+  it('keeps client events when the client reports them', () => {
     const events = [
-      { kind: 'skill' as const, source: 'host' as const, name: 's' },
+      { kind: 'skill' as const, source: 'builtin' as const, name: 's' },
     ];
-    const hostResponse = { response: 't', toolCalls: [], events };
-    expect(buildJudgeTrial(hostResponse, { hostResponse }).events).toBe(events);
+    const clientResponse = { response: 't', toolCalls: [], events };
+    expect(
+      buildJudgeTrial(clientResponse, { clientResponse: clientResponse }).events
+    ).toBe(events);
   });
 
   it('reads a direct result as text with no events', () => {

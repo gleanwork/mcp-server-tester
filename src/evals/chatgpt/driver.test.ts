@@ -7,14 +7,14 @@ import {
 } from './driver.js';
 import { runAnthropicComputerUseSubmission } from '../cowork/anthropicComputerUse.js';
 import type * as ComputerUseModule from '../cowork/anthropicComputerUse.js';
-import type { ExternalHostConfig } from '../externalHost/types.js';
+import type { ExternalClientConfig } from '../externalClient/types.js';
 
 vi.mock('../cowork/anthropicComputerUse.js', async (original) => ({
   ...(await original<typeof ComputerUseModule>()),
   runAnthropicComputerUseSubmission: vi.fn(),
 }));
 
-const config: ExternalHostConfig = {
+const config: ExternalClientConfig = {
   driver: 'openai.chatgpt.agent.desktop-app.macos',
   model: 'test-chatgpt-model',
   reasoningEffort: 'medium',

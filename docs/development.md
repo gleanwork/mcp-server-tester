@@ -50,7 +50,7 @@ npm run test:watch
 - Dataset types and loading
 - Assertions (exact, schema, textContains, regex, snapshot, judge)
 - MCP client factory and fixtures
-- LLM host simulation
+- LLM client simulation
 - Judge implementations (OpenAI, Anthropic)
 
 ### Integration Tests (Playwright)

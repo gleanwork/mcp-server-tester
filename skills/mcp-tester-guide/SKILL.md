@@ -14,7 +14,7 @@ metadata:
 
 - Playwright fixtures for automated MCP tool testing
 - Data-driven eval datasets with optional LLM-as-a-judge scoring
-- MCP host simulation via real LLM providers (Anthropic, OpenAI, Google, etc.)
+- client simulation via real LLM providers (Anthropic, OpenAI, Google, etc.)
 - A custom Playwright reporter with an interactive UI
 
 **Requires Node.js >= 22.0.0 and Playwright.**
@@ -398,7 +398,7 @@ await expect(result).toPassToolJudge({
 });
 ```
 
-## MCP Host Providers
+## MCP Client Providers
 
 For `mcp_host` mode, install `ai` plus the provider package:
 

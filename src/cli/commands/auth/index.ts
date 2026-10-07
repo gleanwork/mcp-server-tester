@@ -24,7 +24,7 @@ import {
 import type { CredentialStore } from '../../../auth/grants/types.js';
 import { loadEvalConfig } from '../../../evals/evalConfig.js';
 import { resolveConfigExtends } from '../../../evals/configExtends.js';
-import { loadSuitePlugins } from '../../../evals/suitePlugins.js';
+import { loadEvalPlugins } from '../../../evals/evalPlugins.js';
 import { connectorUses } from '../../../evals/connectorServers.js';
 import {
   closeMCPClient,
@@ -58,7 +58,7 @@ async function context(
     rootDir,
     skipDatasetValidation: true,
   });
-  const namespaces = await loadSuitePlugins({
+  const namespaces = await loadEvalPlugins({
     configPath: options.config,
     evalConfig: loaded,
     rootDir,

@@ -12,7 +12,7 @@ import {
 } from './evalConfig.js';
 
 describe('EvalConfigSchema', () => {
-  it('accepts partial variant host options without weakening the base host tag', () => {
+  it('accepts partial variant client options without weakening the base client tag', () => {
     const base = {
       name: 'patch',
       datasets: ['cases.json'],

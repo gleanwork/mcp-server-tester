@@ -192,10 +192,10 @@ approval inspections within the original per-case action budget; prompts are
 never resubmitted. Follow-up usage is recorded under
 `clientTelemetry.computerUse.hitlFollowups`.
 
-For the host application's login-backed OOTB connectors, use its
+For the client application's login-backed OOTB connectors, use its
 `nativeConnectors` selector and existing dry-run proxy entries alongside your
 MCP server's `/eval` endpoint. The registry, OAuth login, and vendor write classification remain
-in the host application, not MST. Missing or
+in the client application, not MST. Missing or
 expired credentials fail preflight rather than silently dropping a connector.
 
 ## Run an installed release
@@ -239,11 +239,11 @@ resolves the Python driver independently of the working directory.
 The driver reads `/etc/claude-desktop/managed-settings.json` (or the absolute
 `MST_COWORK_SETTINGS_FILE`) and fails if its model, MCP servers, or wildcard
 approval policy disagree with the eval config. Other `policy-only` entries must
-block all tools (`{"*": "blocked"}`). With host `plugins`,
+block all tools (`{"*": "blocked"}`). With client `plugins`,
 `allowedPluginMarketplaces` must contain exactly one entry per plugin that
 matches `coworkPluginMarketplace(plugin)`; without `plugins`, it must be absent
 or empty. Stdio eval servers and blocked plugin servers follow the contract in
-[Host plugins](#host-plugins). Native sessions default to
+[Client plugins](#client-plugins). Native sessions default to
 `$XDG_CONFIG_HOME/Claude-3p/local-agent-mode-sessions`, or
 `$HOME/.config/Claude-3p/local-agent-mode-sessions`; `clientOptions.dataDir` overrides it.
 Preparation is read-only. MST does not provision or authenticate the environment,
@@ -276,7 +276,7 @@ native evidence.
 
 ## Audit a saved Linux native run
 
-Use `auditCoworkNativeRun` from the experimental hosts subpath, which may change
+Use `auditCoworkNativeRun` from the experimental clients subpath, which may change
 between minor versions. It is offline: it does not invoke the desktop, MCP servers,
 or judges. No CLI or private parser import is required.
 
@@ -311,7 +311,7 @@ native/
     .claude/projects/<project>/<CLI UUID>/tool-results/<name>.txt
 ```
 
-The audit uses MST's existing native parser and both host normalizers. It checks
+The audit uses MST's existing native parser and both client normalizers. It checks
 exact case count, unique case/session identities, exact initial prompt, final
 response, ordered normalized events and tool calls (arguments, output, IDs and
 provenance), usage/cache/cost, native/API durations, completion/nonerror flags,
@@ -359,8 +359,8 @@ the bytes present at audit time; notices contain no original digest to authentic
 
 ## Structure and behavior
 
-- `desktopBatch.ts`: the batch lifecycle shared with the ChatGPT host: the desktop lease, per-case reset policy, native-session de-duplication, redaction, and cleanup.
-- `coworkHost.ts`: Cowork's setup, one case (submit, bind, HITL, native collection), reset, and trace conversion.
+- `desktopBatch.ts`: the batch lifecycle shared with the ChatGPT client: the desktop lease, per-case reset policy, native-session de-duplication, redaction, and cleanup.
+- `coworkClient.ts`: Cowork's setup, one case (submit, bind, HITL, native collection), reset, and trace conversion.
 - `cowork/platform.ts`: small injectable platform interface and OS selection.
 - `cowork/macos.ts`: wiring to the existing setup, recovery, and desktop functions.
 - `coworkSetup/`: profile/MCP settings, private header helpers, and guarded restore.
@@ -428,15 +428,15 @@ several Linux displays) don't block each other. If cleanup or restoration fails,
 so and the lease is kept, so the next run stops until you have inspected the
 desktop and removed the file. An interrupted run leaves it behind in the same way.
 
-## Host plugins
+## Client plugins
 
 The config has two independent parts:
 
 - `clientOptions.plugins[]` installs plugins (their skills). On Cowork, a plugin can
   also block its own MCP servers with `blockMcpServers`.
 - `servers[]` is the MCP server set under test. Both plain stdio and
-  host-resolved stdio entries are supported on macOS and Linux, alongside HTTP.
-  A host-resolved entry can launch a native proxy with private credential files
+  client-resolved stdio entries are supported on macOS and Linux, alongside HTTP.
+  A client-resolved entry can launch a native proxy with private credential files
   or, on Linux, resolve a file from a declared plugin.
 
 ```json
@@ -504,7 +504,7 @@ Cowork accepts plain stdio `servers[]` entries without a URL, plugin, or proxy:
 }
 ```
 
-Use paths that exist on the desktop host. `command` is required; `label`,
+Use paths that exist on the desktop client. `command` is required; `label`,
 `args`, `env`, and `cwd` are optional. A missing label becomes `server-<index>`
 using the one-based position in `servers[]`. `cwd` must resolve to an absolute
 path. Desktop has no `cwd` field, so MST converts it to a fixed `/bin/sh` wrapper
@@ -513,7 +513,7 @@ interpolated into shell source. `inheritEnv: true` is unsupported: declare all
 required server environment variables in `env`. Omitting `inheritEnv` has the
 same Cowork behavior as `false`.
 
-Host-resolved entries can also set `url`, `auth.accessTokenEnv`, `files`, and
+Client-resolved entries can also set `url`, `auth.accessTokenEnv`, `files`, and
 `minTools` (default 1). The readiness client accepts `connectTimeoutMs`,
 `requestTimeoutMs`, `callTimeoutMs`, and `quiet`; these are not Desktop settings.
 Unknown keys fail; Cowork does not currently accept the general MCP client's
@@ -545,11 +545,11 @@ with a known local adapter path. The private files and URL/env substitutions
 remain supported, including in mixed HTTP/stdio server sets.
 
 ChatGPT Work/Codex and direct MCP clients support plain stdio, but not Cowork's
-host-resolved fields. For ChatGPT plugin overrides, use `plugins[].mcp` as
+client-resolved fields. For ChatGPT plugin overrides, use `plugins[].mcp` as
 described in [chatgpt-desktop.md](chatgpt-desktop.md#linux-runtime-contract).
 
 MST's transport does not make a server read-only. Native-proxy write
-interception is a host/catalog policy responsibility, not a stdio guarantee.
+interception is a client/catalog policy responsibility, not a stdio guarantee.
 
 ### Dry-run proxy
 
@@ -688,7 +688,7 @@ Claude Desktop:
 Build the expected entries with `coworkManagedPluginSettings({servers, plugins,
 paths: {pluginRoots, dataRoot}})` and check a file with `coworkMcpSettingsMatch`.
 Both are exported from the package root and never include a token. Append HTTP
-entries as before. `materializeHostStdioFiles` writes the private files for TS
+entries as before. `materializeClientStdioFiles` writes the private files for TS
 callers.
 
 ### Readiness
@@ -698,7 +698,7 @@ same resolved command, args, env, and data dir (when used), but without the pare
 environment. On macOS it uses the paths returned by the setup transaction; on
 Linux it uses the caller-owned paths checked during prepare. Every server, stdio
 or HTTP, must connect and list at least one tool (the same rule as the ChatGPT
-host). It fails closed with `too few tools (<n> < <minTools>)` when the server
+client). It fails closed with `too few tools (<n> < <minTools>)` when the server
 lists fewer than `minTools` tools. For example, an adapter with a bad
 token may list only its static tools. Desktop-side readiness (for example, a
 caller's own log check) should also compare each server's `toolCount` with
@@ -720,7 +720,7 @@ Cowork rejects `plugins[].mcp` overrides with `plugin_unsupported` before any UI
 action. Claude Desktop 2.7032.0 has no managed way to give a plugin's own MCP
 server a custom endpoint, credential, or data directory:
 
-- Host-bridged plugin stdio servers get only the plugin's declared `env` and
+- Client-bridged plugin stdio servers get only the plugin's declared `env` and
   `CLAUDE_PLUGIN_ROOT`. Placeholders expand only from `HOME`, `LOGNAME`, `PATH`,
   `SHELL`, `TERM`, and `USER`. `${CLAUDE_PLUGIN_DATA}` is left unexpanded, and
   a server that uses `${user_config.*}` is dropped.

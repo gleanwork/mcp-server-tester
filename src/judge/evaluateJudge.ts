@@ -1,6 +1,6 @@
 /**
  * The one way a judge runs, for every caller (matchers, validators, eval
- * assertions and suite eval configs) and every judge (the built-in `rubric`
+ * assertions and eval configs) and every judge (the built-in `rubric`
  * judge and plugin judges).
  */
 import type { ValidationResult } from '../assertions/validators/types.js';
@@ -22,9 +22,9 @@ import {
 export interface JudgeRun {
   /** The case as written in the dataset. */
   evalCase?: JudgeCaseSource;
-  /** The host response as reported, with host tool names. */
-  hostResponse?: unknown;
-  /** How the host trace was observed. */
+  /** The client response as reported, with built-in tool names. */
+  clientResponse?: unknown;
+  /** How the client trace was observed. */
   evidence?: TraceEvidence;
 }
 

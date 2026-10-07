@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { runEvalSuite } from './runEvalSuite.js';
+import { runEval } from './runEval.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 import type { MCPConfig, StdioMCPConfig } from '../config/mcpConfig.js';
@@ -155,7 +155,7 @@ describe('connector servers in a run', () => {
         },
       ],
     });
-    const { summary } = await runEvalSuite({
+    const { summary } = await runEval({
       configPath,
       rootDir: dir,
       plugins: [testPlugin()],
@@ -201,7 +201,7 @@ describe('connector servers in a run', () => {
     const configPath = await writeSuite({
       servers: [{ connector: 'acme/slack' }, { connector: 'acme/gmail' }],
     });
-    const error = await runEvalSuite({
+    const error = await runEval({
       configPath,
       rootDir: dir,
       plugins: [testPlugin()],
@@ -220,7 +220,7 @@ describe('connector servers in a run', () => {
       servers: [{ connector: 'acme/slack' }],
     });
     await expect(
-      runEvalSuite({
+      runEval({
         configPath,
         rootDir: dir,
         plugins: [testPlugin()],
@@ -235,7 +235,7 @@ describe('connector servers in a run', () => {
       servers: [{ connector: 'acme/jira' }],
     });
     await expect(
-      runEvalSuite({
+      runEval({
         configPath,
         rootDir: dir,
         plugins: [testPlugin()],
@@ -344,7 +344,7 @@ describe('variant selection', () => {
     // Glean is not signed in, but the native variant doesn't use it.
     seen.length = 0;
     const plugin = testPlugin();
-    await runEvalSuite({
+    await runEval({
       configPath,
       rootDir: dir,
       plugins: [plugin],
@@ -354,7 +354,7 @@ describe('variant selection', () => {
     expect(seen).toHaveLength(1);
     // The aggregated variant inherits the config's servers, so it needs Glean.
     await expect(
-      runEvalSuite({
+      runEval({
         configPath,
         rootDir: dir,
         plugins: [plugin],

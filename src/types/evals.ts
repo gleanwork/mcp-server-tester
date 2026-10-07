@@ -31,18 +31,18 @@ export type {
 } from '../evals/evalRunComparison.js';
 
 export type {
-  ExperimentMetric,
-  VariantExperimentReason,
+  OptimizationMetric,
+  ToolOptimizationReason,
   VariantRecommendation,
   VariantCandidateResult,
-  VariantExperimentRound,
+  ToolOptimizationRound,
   ProposeVariantsContext,
   VariantImprovementProposal,
-  VariantExperimentOptions,
-  VariantExperimentResult,
-  SuiteVariantExperimentOptions,
-  VariantExperimentSuite,
-} from '../evals/variantExperiment.js';
+  ToolOptimizationOptions,
+  ToolOptimizationResult,
+  EvalToolOptimizationOptions,
+  ToolOptimizationEval,
+} from '../evals/toolOptimization.js';
 
 export type { BaselineMeasurement } from '../evals/variantComparison.js';
 export type {
@@ -58,5 +58,5 @@ export type { SaveBaselineOptions } from '../evals/baseline.js';
 export type {
   LLMProvider,
   LLMToolCall,
-  MCPHostSimulationResult,
-} from '../evals/mcpHost/index.js';
+  MstClientSimulationResult,
+} from '../evals/mstClient/index.js';

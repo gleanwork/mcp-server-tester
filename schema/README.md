@@ -25,7 +25,7 @@ Add a `$schema` property at the top of your dataset file pointing to the schema 
 ```json
 {
   "$schema": "../schema/eval-dataset.schema.json",
-  "name": "my-eval-suite",
+  "name": "my-eval",
   "cases": [...]
 }
 ```
@@ -75,7 +75,7 @@ EvalDataset (root)
         ├── id                 (string, required)
         ├── description        (string)
         ├── input              (string, required)  — the prompt the client acts on
-        ├── client             (string)  — the client, inherited from the suite or run
+        ├── client             (string)  — the client, inherited from the eval or run
         ├── model              (string)  — the model the client uses
         ├── clientOptions      (object)  — the client's own options
         ├── trials             (integer >= 1, default 1)
@@ -134,6 +134,6 @@ The mst client infers the API from `model`. Its `clientOptions.provider` overrid
 The schema is hand-maintained alongside the TypeScript types in:
 
 - `src/evals/datasetTypes.ts` — Zod schemas and TypeScript interfaces
-- `src/evals/mcpHost/mcpHostTypes.ts` — the `LLMProvider` union
+- `src/evals/mstClient/types.ts` — the `LLMProvider` union
 
 If you add a new provider, a new assertion field, or change an existing type, update `schema/eval-dataset.schema.json` to match.

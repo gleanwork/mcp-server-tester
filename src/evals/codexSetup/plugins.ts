@@ -4,24 +4,24 @@ import { parse, stringify } from 'smol-toml';
 import {
   MarketplacePluginError,
   MarketplacePluginsSchema,
-  hostPluginMcpServers,
-  materializeHostPluginMcp,
+  clientPluginMcpServers,
+  materializeClientPluginMcp,
   type MarketplacePlugin,
-  type HostPluginCredentials,
-} from '../hostPlugins.js';
+  type ClientPluginCredentials,
+} from '../clientPlugins.js';
 import { runBounded } from './native.js';
 
 export {
   MarketplacePluginError,
   type MarketplacePlugin,
-} from '../hostPlugins.js';
+} from '../clientPlugins.js';
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const COMMAND_TIMEOUT_MS = 180_000;
 const COMMAND_OUTPUT_BYTES = 256 * 1024;
 
 /** Sanitized install receipt. No paths, URLs, or credentials. */
-export interface HostPluginReceipt {
+export interface ClientPluginReceipt {
   name: string;
   marketplace: string;
   version: string;
@@ -31,7 +31,7 @@ export interface HostPluginReceipt {
 }
 
 /** A plugin MCP server that must pass readiness under its own label. */
-export interface HostPluginReadinessTarget {
+export interface ClientPluginReadinessTarget {
   label: string;
   minTools: number;
 }
@@ -48,17 +48,17 @@ export async function installCodexPlugins(options: {
   env: Record<string, string>;
   codexHome: string;
   plugins: readonly MarketplacePlugin[];
-  credentials: HostPluginCredentials;
+  credentials: ClientPluginCredentials;
   /** Direct MCP labels; a plugin server must not shadow one. */
   reservedLabels?: readonly string[];
-}): Promise<HostPluginReceipt[]> {
+}): Promise<ClientPluginReceipt[]> {
   const { codexPath, env, codexHome } = options;
   const parsed = MarketplacePluginsSchema.safeParse(options.plugins);
   if (!parsed.success)
     throw new MarketplacePluginError('plugin_invalid', 'config');
   const plugins = parsed.data;
   const reserved = new Set(options.reservedLabels ?? []);
-  for (const { plugin, server } of hostPluginMcpServers(plugins))
+  for (const { plugin, server } of clientPluginMcpServers(plugins))
     if (reserved.has(server))
       throw new MarketplacePluginError('plugin_invalid', plugin);
   const run = async (
@@ -76,7 +76,7 @@ export async function installCodexPlugins(options: {
       throw new MarketplacePluginError(code, name);
     return lastJsonObject(result.output.toString('utf8'), code, name);
   };
-  const receipts: HostPluginReceipt[] = [];
+  const receipts: ClientPluginReceipt[] = [];
   const servers: Record<string, Record<string, unknown>> = {};
   for (const plugin of plugins) {
     const { source, ref } = plugin.marketplace;
@@ -115,13 +115,13 @@ export async function installCodexPlugins(options: {
     );
     const version =
       typeof manifest.version === 'string' ? manifest.version : 'unknown';
-    const receipt: HostPluginReceipt = {
+    const receipt: ClientPluginReceipt = {
       name: plugin.name,
       marketplace,
       version,
       ref,
     };
-    const overrides = hostPluginMcpServers([plugin]);
+    const overrides = clientPluginMcpServers([plugin]);
     if (overrides.length) {
       const declared = await readJson(join(root, '.mcp.json'), plugin.name);
       for (const target of overrides) {
@@ -137,13 +137,13 @@ export async function installCodexPlugins(options: {
         const args = (server.args ?? []).map((arg) =>
           arg.startsWith('./') ? resolve(root, arg) : arg
         );
-        // Codex does not expand host placeholders in config.toml.
+        // Codex does not expand client placeholders in config.toml.
         if (
           !inside(root, cwd, true) ||
           [server.command, ...args].some((value) => value.includes('${'))
         )
           throw new MarketplacePluginError('plugin_mcp_invalid', plugin.name);
-        const { env: overrideEnv } = await materializeHostPluginMcp({
+        const { env: overrideEnv } = await materializeClientPluginMcp({
           dataRoot: join(codexHome, 'mst-plugin-data'),
           server: target,
           credentials: options.credentials,
@@ -179,8 +179,8 @@ export async function installCodexPlugins(options: {
 /** Readiness targets: every overridden plugin server, under its own name. */
 export function codexPluginReadinessTargets(
   plugins: readonly MarketplacePlugin[]
-): HostPluginReadinessTarget[] {
-  return hostPluginMcpServers(plugins).map(({ server, override }) => ({
+): ClientPluginReadinessTarget[] {
+  return clientPluginMcpServers(plugins).map(({ server, override }) => ({
     label: server,
     minTools: override.minTools,
   }));

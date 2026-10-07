@@ -3,7 +3,10 @@ import * as os from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EvalConfig } from '../evalConfig.js';
-import { hostStdioServers, resolveHostStdioServer } from '../hostPlugins.js';
+import {
+  clientStdioServers,
+  resolveClientStdioServer,
+} from '../clientPlugins.js';
 import {
   COWORK_SETTINGS_MAX_BYTES as LIMIT,
   createCoworkBundlePlan,
@@ -55,7 +58,7 @@ const actualOs = await vi.importActual<typeof os>('node:os');
 const actualFs = await vi.importActual<typeof fs>('node:fs/promises');
 const actualMacApp = await vi.importActual<typeof MacApp>('./macApp.js');
 const SOURCE = '11111111-2222-3333-4444-555555555555';
-// An eval config pin (host.options.appVersion) and the installed app's version.
+// An eval config pin (clientOptions.appVersion) and the installed app's version.
 const PIN = '1.52386.6';
 const INSTALLED = '2.19675.1';
 const ORIGINAL =
@@ -233,8 +236,8 @@ function sizedNativeManifest(bytes: number): EvalConfig {
     evalConfig: input,
     runtimeDirectory: join(root, 'unused'),
   });
-  const launches = hostStdioServers(servers).map((server) =>
-    resolveHostStdioServer(server, {})
+  const launches = clientStdioServers(servers).map((server) =>
+    resolveClientStdioServer(server, {})
   );
   let remaining =
     bytes - settingsBytes.length - Buffer.byteLength(JSON.stringify(launches));
@@ -479,7 +482,7 @@ describe('automatic Mac Cowork session (no native execution)', () => {
   it('rejects the removed MST_COWORK_APP_VERSION before any app action', async () => {
     await expect(
       prepare({ env: { ...env, MST_COWORK_APP_VERSION: PIN } })
-    ).rejects.toThrow('host.options.appVersion');
+    ).rejects.toThrow('clientOptions.appVersion');
     await expectNoSessionMutation();
   });
   it('journals the pin before acquisition and restores the installed app before removing it', async () => {

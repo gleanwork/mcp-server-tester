@@ -88,7 +88,7 @@ MST then owns, in order:
    `sandbox_mode = "danger-full-access"`.
 3. `codex login --with-api-key` with the key on stdin only, then `codex login status`.
 4. Direct MCP preflight (connect and list tools for each configured server; the
-   same readiness rule as the Cowork host), then a
+   same readiness rule as the Cowork client), then a
    read-only `codex app-server` probe (`initialize`, `initialized`,
    `mcpServerStatus/list` only; server requests abort; 30 s, 256 KiB/line, 4 MiB
    total). Every configured server must be initialized with at least one tool and
@@ -103,19 +103,19 @@ MST then owns, in order:
 7. Copy evidence, stop the app group (TERM, then KILL, then verify no member
    remains), restore config, and remove the workspace. The caller deletes HOME.
 
-Host tool policy: code mode hides MCP tools until the model searches for them,
+Built-in tool policy: code mode hides MCP tools until the model searches for them,
 so the model uses the first capable tool it can see. On the headless VM, that
 is the bundled browser (`cua_repl`) or web search, and the MCP server under
 test is never tried. On Linux, MST writes
 `[plugins."unified-computer-use@openai-bundled"] enabled = false` (the plugin
 that adds `cua_repl`) and `web_search = "disabled"`.
-`nativeReadiness.hostToolPolicy` records both values. The rollout records
+`nativeReadiness.builtinToolPolicy` records both values. The rollout records
 the disabled plugin in `turn_context.disabled_plugin_ids`. Shell commands
-stay available. Any host tool call is recorded separately from MCP calls.
+stay available. Any built-in tool call is recorded separately from MCP calls.
 macOS is unchanged.
 
-Host plugins (Linux only): a fresh profile has no plugins, so the model has no
-skills that point it at the MCP server. The host config has two independent
+Client plugins (Linux only): a fresh profile has no plugins, so the model has no
+skills that point it at the MCP server. The client config has two independent
 parts: MCP servers (the eval config `servers`, which may be empty) and
 `plugins`. MST has no plugin-specific code. The caller supplies each plugin
 and, optionally, a declarative override for each of the plugin's own MCP
@@ -179,7 +179,7 @@ marketplace, version, ref, and overridden server names.
 ChatGPT Work and Codex support plain stdio `servers[]` entries on macOS and
 Linux: use `command`, optional `args`, `cwd`, and declared `env`. No URL or
 plugin is required. ChatGPT rejects two Cowork-only forms before the app starts:
-host-resolved stdio entries (`url`, `auth`, `files`, `minTools`, or
+client-resolved stdio entries (`url`, `auth`, `files`, `minTools`, or
 `${url}`/`${dataDir}`/`${pluginRoot:...}` placeholders) and
 `plugins[].blockMcpServers`. For plugin-specific endpoint and credential
 overrides, use the Linux `plugins[].mcp` setup above. See
@@ -393,7 +393,7 @@ On Linux, MST copies the matched (or bound but failed) transcript into
 (32 MiB limit). The artifact references the copy and includes its sha256. Copies
 read only regular, owned, single-link files inside the session root, without
 following symlinks, and are verified after writing. A successful case whose
-matched transcript cannot be preserved fails as `host_run_failed`. Unmatched
+matched transcript cannot be preserved fails as `client_run_failed`. Unmatched
 sessions are not copied. macOS does not copy evidence; its artifact references
 the native transcript path.
 
@@ -401,7 +401,7 @@ The preserved Codex trace above contains `gpt-5.6-terra`, medium effort, and the
 native terminal-LF prompt form. It ends in `turn_aborted`, without `task_complete`.
 It is evidence for originator binding, **not a completed or passing evaluation**.
 The parser's `complete` flag means terminal: an abort also sets `error`, and the
-adapter returns `host_run_failed` (with partial telemetry) before accepting any
+adapter returns `client_run_failed` (with partial telemetry) before accepting any
 final answer. Offline tests
 use a minimized, redacted abort fixture; no model calls are needed.
 
@@ -414,10 +414,10 @@ The parser reads only native structure in the matched turn, never tool-result te
   without output is marked `pending` in `toolProvenance`.
 - A `function_call` namespace `mcp__<label>` is an MCP call. Configured labels map
   back with the app's namespace form (non-alphanumeric → `_`, so `acme-eval` is
-  `mcp__acme_eval`). `executed_tool_calls` must agree. `cua_repl.js` stays a host
+  `mcp__acme_eval`). `executed_tool_calls` must agree. `cua_repl.js` stays a client
   tool. Unknown namespaces remain external MCP calls.
-- Work code mode: a `custom_tool_call` `exec` is one host call. MST keeps only the
-  nested host tool names (for example `web__run`, `exec_command`), input length,
+- Work code mode: a `custom_tool_call` `exec` is one built-in call. MST keeps only the
+  nested built-in tool names (for example `web__run`, `exec_command`), input length,
   and sha256, never the code. Each nested `tools.mcp__<label>__<tool>` reference
   (or `executed_tool_calls` entry) is also an MCP call on that label. These nested
   calls have no separate arguments or latency, and a trace limitation says so.
@@ -426,7 +426,7 @@ The parser reads only native structure in the matched turn, never tool-result te
 - Usage comes from `token_usage_record` (`turn_token_usage`).
 
 A bound turn that times out or aborts still fails (`timeout` or
-`host_run_failed`). The result keeps the recorded tool calls, usage, and
+`client_run_failed`). The result keeps the recorded tool calls, usage, and
 conversation, with `telemetry.partial: true`, `traceConfidence: 'low'`, and the
 limitation "Turn did not complete; tool calls and usage are partial." Partial
 usage duration is the native elapsed time so far.
@@ -438,7 +438,7 @@ case (`batchLifecycle.recoveryCount`). The failed case is never retried or resen
 The next case still requires its own exact prompt and fresh native session, so a
 late answer from the failed case cannot be attributed to it. If the restart fails,
 the remaining cases are not submitted. A completed, reliably attributed turn can
-fail the configured-MCP measurement without a restart. Host tool calls remain distinct from
+fail the configured-MCP measurement without a restart. Built-in tool calls remain distinct from
 MCP calls; unexpected or unattributed MCP servers fail measurement, and
 `requireMcpCalls` requires a call on the configured server selection.
 

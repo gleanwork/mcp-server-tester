@@ -5,11 +5,11 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { verifyCoworkMcpServers } from './mcpReadiness.js';
 import {
-  hostStdioReadinessConfig,
-  hostStdioServers,
-  materializeHostStdioFiles,
+  clientStdioReadinessConfig,
+  clientStdioServers,
+  materializeClientStdioFiles,
   type MarketplacePlugin,
-} from '../hostPlugins.js';
+} from '../clientPlugins.js';
 import { createMCPClientForConfig } from '../../mcp/clientFactory.js';
 import type { MCPConfig } from '../../config/mcpConfig.js';
 
@@ -52,8 +52,8 @@ afterEach(async () => {
 async function ready(token: string, url?: string) {
   const config = server(url);
   const paths = { pluginRoots: { fake: pluginRoot }, dataRoot };
-  const [parsed] = hostStdioServers([config], [plugin]);
-  await materializeHostStdioFiles({ server: parsed!, paths, token });
+  const [parsed] = clientStdioServers([config], [plugin]);
+  await materializeClientStdioFiles({ server: parsed!, paths, token });
   return verifyCoworkMcpServers(
     [config],
     { FAKE_TOKEN: token },
@@ -94,14 +94,14 @@ describe('Cowork stdio eval server readiness', () => {
 
   it('never passes the parent environment to the stdio process', async () => {
     const paths = { pluginRoots: { fake: pluginRoot }, dataRoot };
-    const [parsed] = hostStdioServers([server()], [plugin]);
-    await materializeHostStdioFiles({
+    const [parsed] = clientStdioServers([server()], [plugin]);
+    await materializeClientStdioFiles({
       server: parsed!,
       paths,
       token: 'good-token',
     });
     const client = await createMCPClientForConfig(
-      hostStdioReadinessConfig(parsed!, paths)
+      clientStdioReadinessConfig(parsed!, paths)
     );
     try {
       const result = await client.callTool({
@@ -197,8 +197,8 @@ describe('Cowork stdio eval server readiness', () => {
         files: { 'creds.json': { tokens: { access_token: '${bearerToken}' } } },
       },
     ];
-    const parsed = hostStdioServers(configs);
-    await materializeHostStdioFiles({
+    const parsed = clientStdioServers(configs);
+    await materializeClientStdioFiles({
       server: parsed[1]!,
       paths: { dataRoot },
       token: 'good-token',
@@ -242,9 +242,9 @@ describe('Cowork stdio eval server readiness', () => {
     });
   });
 
-  it('refuses to launch an unresolved host-only stdio server directly', async () => {
+  it('refuses to launch an unresolved built-in-only stdio server directly', async () => {
     await expect(createMCPClientForConfig(server())).rejects.toThrow(
-      'host-resolved eval fields'
+      'client-resolved eval fields'
     );
   });
 });

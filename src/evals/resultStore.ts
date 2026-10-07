@@ -115,7 +115,7 @@ export function isEvalResultStore(value: unknown): value is EvalResultStore {
 
 /**
  * Stored results omit raw responses unless a caller opts out. Every API that
- * persists results (eval runner, suite, reporter, run and server
+ * persists results (eval runner, eval, reporter, run and server
  * comparisons) uses this default.
  */
 export const REDACT_STORED_RESPONSES_BY_DEFAULT = true;
@@ -165,7 +165,7 @@ function stripResponses(value: unknown): void {
 
 /**
  * The one redaction policy for stored results: returns a JSON copy in which
- * every eval case result, wherever it is nested (runs, suite variants, reports,
+ * every eval case result, wherever it is nested (runs, eval variants, reports,
  * comparisons), has no raw `response`, no echoed exact-match
  * `expect.response`, and no `finalText` or event `output` in its traces.
  * These may hold data from the server under test. Everything else is kept,

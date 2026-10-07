@@ -7,7 +7,7 @@ import {
 } from './evalConfig.js';
 import {
   assertListedNamespaces,
-  normalizeSuiteControls,
+  normalizeEvalControls,
 } from './configValidation.js';
 
 /**
@@ -17,7 +17,7 @@ import {
  * replaces both, as a variant's settings replace the eval config's. An eval config that
  * extends nothing is returned as is, so its identity doesn't change.
  *
- * Plugins must be installed first; `namespaces` are the ones the suite loads.
+ * Plugins must be installed first; `namespaces` are the ones the eval loads.
  */
 export function resolveConfigExtends(
   evalConfig: EvalConfig,
@@ -42,7 +42,7 @@ export function resolveConfigExtends(
   // `run.trials` and friends are the eval config's too, so lift them to the
   // keys a config sets; otherwise they would conflict with the config's.
   const own = Object.fromEntries(
-    Object.entries(normalizeSuiteControls(evalConfig)).filter(
+    Object.entries(normalizeEvalControls(evalConfig)).filter(
       ([, value]) => value !== undefined
     )
   );

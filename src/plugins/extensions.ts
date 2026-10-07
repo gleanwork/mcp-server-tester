@@ -9,14 +9,14 @@ import {
 
 /**
  * The process-wide extension table: built-ins under bare names, plugin
- * extensions under `namespace/name`. Eval config validation checks that a suite
+ * extensions under `namespace/name`. Eval config validation checks that an eval
  * references only namespaces it lists, so one shared table is safe even when
  * a batch runs several eval configs in one process (ADR-0001).
  *
  * The table knows no built-ins itself. Each kind's lookup lives next to that
- * kind's built-ins (`getHost` in builtinHosts.ts, `getJudge` in
+ * kind's built-ins (`getClient` in builtinClients.ts, `getJudge` in
  * builtinJudges.ts, ...) and installs them on first use, so code that only
- * looks up judges never loads the desktop host drivers.
+ * looks up judges never loads the desktop client drivers.
  */
 interface ExtensionTableState {
   /** Installed plugins by namespace. */

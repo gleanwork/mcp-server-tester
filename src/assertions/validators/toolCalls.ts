@@ -1,7 +1,7 @@
 /**
  * Tool call validators for a client case's trace.
  *
- * These validators extract the tool call trace from an MCPHostSimulationResult
+ * These validators extract the tool call trace from an MstClientSimulationResult
  * and apply assertions against expected call lists and counts.
  */
 import type { ValidationResult } from './types.js';
@@ -113,21 +113,21 @@ export function matchesIdentity(
 }
 
 /**
- * Why host evidence can't support tool-call assertions, or undefined when it
- * can. Hosts that don't report evidence are treated as structured.
+ * Why client evidence can't support tool-call assertions, or undefined when it
+ * can. Clients that don't report evidence are treated as structured.
  */
-export function hostEvidenceProblem(
+export function clientEvidenceProblem(
   evidence: TraceEvidence | undefined
 ): string | undefined {
   return evidence === undefined || evidence === 'structured'
     ? undefined
-    : `Host evidence is ${evidence}; structured tool evidence is required.`;
+    : `Client evidence is ${evidence}; structured tool evidence is required.`;
 }
 
 function unverifiedEvidence(
   response: TraceResponse
 ): ValidationResult | undefined {
-  const problem = hostEvidenceProblem(response.evidence);
+  const problem = clientEvidenceProblem(response.evidence);
   if (problem === undefined) return undefined;
   return {
     pass: false,
@@ -192,9 +192,9 @@ export function matchToolCalls(
 }
 
 /**
- * Validates tool calls made during a host simulation.
+ * Validates tool calls made during a client simulation.
  *
- * @param response - Must be an MCPHostSimulationResult-compatible response
+ * @param response - Must be an MstClientSimulationResult-compatible response
  * @param assertion - Expected tool call specification
  */
 export function validateToolCalls(
@@ -205,7 +205,7 @@ export function validateToolCalls(
     return {
       pass: false,
       message:
-        'toolsTriggered assertion requires a host simulation response with structured tool calls',
+        'toolsTriggered assertion requires a client simulation response with structured tool calls',
     };
   }
 
@@ -305,9 +305,9 @@ export function validateToolCalls(
 }
 
 /**
- * Validates the number of tool calls made during a host simulation.
+ * Validates the number of tool calls made during a client simulation.
  *
- * @param response - Must be an MCPHostSimulationResult-compatible response
+ * @param response - Must be an MstClientSimulationResult-compatible response
  * @param options - Count constraints (min, max, exact)
  */
 export function validateToolCallCount(
@@ -318,7 +318,7 @@ export function validateToolCallCount(
     return {
       pass: false,
       message:
-        'toolCallCount assertion requires a host simulation response with structured tool calls',
+        'toolCallCount assertion requires a client simulation response with structured tool calls',
     };
   }
 

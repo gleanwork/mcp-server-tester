@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { basename, dirname, join } from 'node:path';
-import { isChatgptBuiltinServer } from '../externalHost/builtins/chatgptTrace.js';
+import { isChatgptBuiltinServer } from '../externalClient/builtins/chatgptTrace.js';
 import { defaultChatgptConfigHome } from './macController.js';
 import {
   installCodexConfig,
@@ -9,7 +9,7 @@ import {
   type CodexConfigInstallation,
   type CodexSetupConfig,
 } from '../codexSetup/config.js';
-import type { ExternalHostConfig } from '../externalHost/types.js';
+import type { ExternalClientConfig } from '../externalClient/types.js';
 import type { SemanticDesktopTelemetry } from '../cowork/driver.js';
 import {
   chatgptSurface,
@@ -25,7 +25,7 @@ import type {
   ChatgptPlatformProfile,
   LinuxChatgptReadiness,
 } from './linuxProfile.js';
-import { hostPluginMcpServers } from '../hostPlugins.js';
+import { clientPluginMcpServers } from '../clientPlugins.js';
 import type { McpServerReadiness } from '../mcpReadiness.js';
 import { preflightChatgptMcpServers } from './mcpPreflight.js';
 import { McpReadinessError } from '../mcpReadiness.js';
@@ -42,7 +42,7 @@ interface ChatgptLifecycleState {
 
 /** Linux owns config even without MCP servers: keyring login needs it. */
 function effectiveSetup(
-  config: ExternalHostConfig,
+  config: ExternalClientConfig,
   configPath: string | undefined
 ): CodexSetupConfig | undefined {
   if (!configPath) return config.codexSetup;
@@ -50,7 +50,7 @@ function effectiveSetup(
 }
 
 function sessionSettings(
-  config: ExternalHostConfig,
+  config: ExternalClientConfig,
   binding?: Record<string, unknown>
 ) {
   const configName =
@@ -62,7 +62,7 @@ function sessionSettings(
   const setup = codexSetup
     ? resolveCodexSetup(codexSetup, configName)
     : undefined;
-  const pluginLabels = hostPluginMcpServers(config.plugins ?? []).map(
+  const pluginLabels = clientPluginMcpServers(config.plugins ?? []).map(
     (target) => target.server
   );
   if (
@@ -70,14 +70,14 @@ function sessionSettings(
     pluginLabels.some(isChatgptBuiltinServer)
   )
     throw new Error(
-      'ChatGPT MCP server labels must not collide with built-in host tool namespaces.'
+      'ChatGPT MCP server labels must not collide with built-in tool namespaces.'
     );
   if (setup && basename(setup.configPath) !== 'config.toml')
     throw new Error(
       'ChatGPT loads CODEX_HOME/config.toml; configPath must end in config.toml.'
     );
   if (config.plugins?.length && !platform.createProfile)
-    throw new Error('ChatGPT host plugins require the Linux fresh profile.');
+    throw new Error('ChatGPT client plugins require the Linux fresh profile.');
   return {
     platform: platform.name,
     application,
@@ -102,7 +102,7 @@ export class ChatgptAppSession {
   #ready = false;
   #disposed = false;
   #launch?: {
-    config: ExternalHostConfig;
+    config: ExternalClientConfig;
     environment: Record<string, string>;
     platform: ReturnType<typeof chatgptPlatform>;
   };
@@ -138,7 +138,7 @@ export class ChatgptAppSession {
   }
 
   async prepare(
-    config: ExternalHostConfig,
+    config: ExternalClientConfig,
     binding?: Record<string, unknown>
   ): Promise<void> {
     if (this.#settings || this.#disposed)
@@ -309,7 +309,7 @@ export class ChatgptAppSession {
   }
 
   assertCompatible(
-    config: ExternalHostConfig,
+    config: ExternalClientConfig,
     binding?: Record<string, unknown>
   ): void {
     if (

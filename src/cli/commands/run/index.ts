@@ -2,10 +2,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import { localCredentialStore } from '../../../auth/grants/localStore.js';
 import { describeError } from '../../../utils/describeError.js';
-import {
-  runEvalSuite,
-  type RunEvalSuiteOptions,
-} from '../../../evals/runEvalSuite.js';
+import { runEval, type RunEvalOptions } from '../../../evals/runEval.js';
 
 export interface RunOptions {
   config: string;
@@ -31,7 +28,7 @@ function parseTrials(value: string | number): number {
 }
 
 export async function run(options: RunOptions): Promise<void> {
-  const suiteOptions: RunEvalSuiteOptions = {
+  const evalOptions: RunEvalOptions = {
     configPath: options.config,
     rootDir: options.rootDir,
     pluginPaths: options.plugins,
@@ -47,9 +44,9 @@ export async function run(options: RunOptions): Promise<void> {
       ? { credentialStore: localCredentialStore(path.resolve(options.store)) }
       : {}),
   };
-  let result: Awaited<ReturnType<typeof runEvalSuite>>;
+  let result: Awaited<ReturnType<typeof runEval>>;
   try {
-    result = await runEvalSuite(suiteOptions);
+    result = await runEval(evalOptions);
   } catch (error) {
     // A validation failure says which config it is in.
     if (error instanceof z.ZodError)
@@ -114,7 +111,7 @@ export async function run(options: RunOptions): Promise<void> {
 }
 
 type VariantSummary = Awaited<
-  ReturnType<typeof runEvalSuite>
+  ReturnType<typeof runEval>
 >['summary']['variants'][number];
 
 /** One row per variant: outcomes, calls, tokens, cost and time ("-" when unavailable). */
@@ -134,22 +131,22 @@ function printVariantTable(variants: VariantSummary[]): void {
   let estimated = false;
   const rows = variants.map((variant) => {
     const cost = value(variant, 'cost_usd_mean');
-    if (cost !== undefined && variant.costSource !== 'host') estimated = true;
+    if (cost !== undefined && variant.costSource !== 'client') estimated = true;
     const mcp = value(variant, 'mcp_call_count_mean');
-    const host = value(variant, 'host_event_count_mean');
+    const client = value(variant, 'builtin_event_count_mean');
     return [
       variant.name,
       `${variant.result?.passed ?? 0}/${variant.result?.total ?? 0}`,
       pct(value(variant, 'trial_pass_rate')),
       ...(judged ? [pct(value(variant, 'judge_pass_rate'))] : []),
-      mcp === undefined && host === undefined
+      mcp === undefined && client === undefined
         ? '-'
-        : `${num(mcp)} / ${num(host)}`,
+        : `${num(mcp)} / ${num(client)}`,
       num(value(variant, 'input_tokens_mean'), 0),
       num(value(variant, 'output_tokens_mean'), 0),
       cost === undefined
         ? '-'
-        : `$${cost.toFixed(4)}${variant.costSource === 'host' ? '' : '*'}`,
+        : `$${cost.toFixed(4)}${variant.costSource === 'client' ? '' : '*'}`,
       value(variant, 'duration_s_mean') === undefined
         ? '-'
         : `${num(value(variant, 'duration_s_mean'))}s`,
@@ -160,7 +157,7 @@ function printVariantTable(variants: VariantSummary[]): void {
     'Passed',
     'Trial pass',
     ...(judged ? ['Judge pass'] : []),
-    'MCP calls / host events',
+    'MCP calls / client events',
     'Input tokens',
     'Output tokens',
     'Cost',

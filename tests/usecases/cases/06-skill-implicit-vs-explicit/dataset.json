@@ -10,7 +10,7 @@
             {
               "name": "run",
               "kind": "skill",
-              "source": "host",
+              "source": "builtin",
               "required": true
             }
           ]

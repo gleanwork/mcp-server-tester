@@ -1,10 +1,10 @@
 /**
  * Case-by-case comparison of tool-metadata variants against a baseline run.
  *
- * Pure functions over completed eval runs: no I/O. `runVariantExperiment`
+ * Pure functions over completed eval runs: no I/O. `runToolOptimization`
  * uses `measureAgainstBaseline` to apply its regression check, and
  * `compareVariants` to build the report payload, so the numbers the
- * reporter shows are the numbers the experiment decided on.
+ * reporter shows are the numbers the optimization decided on.
  *
  * The statistics follow established practice for comparing two systems on
  * the same test cases:
@@ -40,10 +40,10 @@ import type {
 } from '../types/reporter.js';
 import type { EvalRunnerResult, ToolMetadataOverride } from './evalRunner.js';
 
-/** The tag that marks a case as held out, unless the experiment sets another. */
+/** The tag that marks a case as held out, unless the optimization sets another. */
 export const DEFAULT_HELD_OUT_TAG = 'held-out';
 
-/** The tag that marks a regression case, unless the experiment sets another. */
+/** The tag that marks a regression case, unless the optimization sets another. */
 export const DEFAULT_REGRESSION_TAG = 'regression';
 
 /**
@@ -254,7 +254,7 @@ export function worseCaseP(
  * from the exact sign-flip test. Fewer than two pairs can't support an
  * interval, so it spans every possible difference.
  *
- * @param variantsTried Variants the experiment tried; "better" needs
+ * @param variantsTried Variants the optimization tried; "better" needs
  *   `pBetter < CHANGE_ALPHA / variantsTried`. Defaults to 1.
  */
 export function pairedChange(
@@ -508,7 +508,7 @@ interface MeasureOptions {
   grouping: CaseGrouping;
   heldOutTag?: string;
   /**
-   * Variants the experiment tried. A change counts as clearly better only
+   * Variants the optimization tried. A change counts as clearly better only
    * when `pBetter < CHANGE_ALPHA / variantsTried`. @default 1
    */
   variantsTried?: number;
@@ -581,13 +581,13 @@ export function improvesCapabilityCases(
   return measurement.capability.change?.assessment === 'better';
 }
 
-/** One candidate run, as `runVariantExperiment` scored it. */
+/** One candidate run, as `runToolOptimization` scored it. */
 interface VariantRunInput {
   id: string;
   description?: string;
   tools: Record<string, ToolMetadataOverride>;
   result: EvalRunnerResult;
-  /** Whether the experiment judged this variant to fix what it should. */
+  /** Whether the optimization judged this variant to fix what it should. */
   fixes: boolean;
   disqualified: boolean;
 }
@@ -597,7 +597,7 @@ export interface CompareVariantsOptions {
   baseline: EvalRunnerResult;
   /** Every candidate that ran, in order. */
   candidates: VariantRunInput[];
-  /** The experiment's winner, if any. */
+  /** The optimization's winner, if any. */
   winnerId?: string;
   regressionCheck: RegressionCheck;
   grouping: CaseGrouping;
@@ -706,7 +706,7 @@ function statusOf(
 }
 
 /**
- * Builds the report payload for a variant experiment: every variant's results
+ * Builds the report payload for a tool optimization: every variant's results
  * on every case and trial, its group pass rates and changes from the
  * baseline, its failures, and where it landed.
  */

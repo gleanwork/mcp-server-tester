@@ -1,9 +1,9 @@
 /**
  * @gleanwork/mcp-server-tester/evals
  *
- * The evaluation framework: eval configs, suites and batches, extension definition types,
- * metrics, plugins, result stores, comparisons, variant experiments, and MCP
- * host simulation.
+ * The evaluation framework: eval configs, evals and batches, extension definition types,
+ * metrics, plugins, result stores, comparisons, tool optimizations, and MCP
+ * client simulation.
  *
  * @packageDocumentation
  */
@@ -20,17 +20,17 @@ export type {
   EvalRunComparisonResult,
   SaveEvalRunComparisonOptions,
   StoredEvalRunRef,
-  ExperimentMetric,
-  VariantExperimentReason,
+  OptimizationMetric,
+  ToolOptimizationReason,
   VariantRecommendation,
   VariantCandidateResult,
-  VariantExperimentRound,
+  ToolOptimizationRound,
   ProposeVariantsContext,
   VariantImprovementProposal,
-  VariantExperimentOptions,
-  VariantExperimentResult,
-  SuiteVariantExperimentOptions,
-  VariantExperimentSuite,
+  ToolOptimizationOptions,
+  ToolOptimizationResult,
+  EvalToolOptimizationOptions,
+  ToolOptimizationEval,
   BaselineMeasurement,
   RegressionCheck,
   VariantGroupStats,
@@ -63,15 +63,15 @@ export type {
   EvaluationBatchOptions,
   EvaluationBatchItem,
   EvaluationBatchResult,
-  EvaluationSuiteOptions,
-  EvaluationSuiteResult,
+  EvaluationRunOptions,
+  EvaluationRunResult,
   EvaluationSummary,
   ClientDefinition,
   ClientRunOptions,
   ClientBatchRequest,
   ClientRunResult,
   ClientRunInput,
-  ClientRunContext as EvaluationHostRunContext,
+  ClientRunContext as EvaluationClientRunContext,
   MetricDefinition,
   MetricKind,
   MetricValue,
@@ -92,11 +92,8 @@ export {
   resolveMetric,
 } from '../evals/metrics.js';
 export { buildEvalDataset } from '../evals/buildEvalDataset.js';
-export { runEvalSuite } from '../evals/runEvalSuite.js';
-export type {
-  RunEvalSuiteOptions,
-  RunEvalSuiteResult,
-} from '../evals/runEvalSuite.js';
+export { runEval } from '../evals/runEval.js';
+export type { RunEvalOptions, RunEvalResult } from '../evals/runEval.js';
 export { runEvalBatch } from '../evals/runEvalBatch.js';
 export type {
   EvalBatchItem,
@@ -131,11 +128,11 @@ export {
   loadStoredEvalRunnerResult,
   saveEvalRunComparison,
 } from '../evals/evalRunComparison.js';
-export { runVariantExperiment } from '../evals/variantExperiment.js';
+export { runToolOptimization } from '../evals/toolOptimization.js';
 export {
   isProviderAvailable,
   getMissingDependencyMessage,
-} from '../evals/mcpHost/index.js';
+} from '../evals/mstClient/index.js';
 export { buildToolSurface } from '../evals/toolSurface.js';
 export type {
   ListedServerTools,

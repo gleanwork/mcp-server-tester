@@ -13,7 +13,7 @@ export type {
   MCPConformanceCheck,
   MCPConformanceResultData,
   MCPServerCapabilitiesData,
-  MCPVariantExperimentData,
+  MCPToolOptimizationData,
   MCPComparisonData,
   VariantComparisonEntry,
   VariantComparisonCase,

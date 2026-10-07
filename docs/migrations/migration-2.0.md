@@ -21,15 +21,16 @@ This guide covers upgrading from 1.x (the last 1.x release is 1.1.1). Features f
 - [Custom judges are plugins](#custom-judges-are-plugins)
 - [Every judge runs the same way](#every-judge-runs-the-same-way)
 - [LLM calls: bearer tokens and streaming](#llm-calls-bearer-tokens-and-streaming)
-- [Server comparisons are suite variants](#server-comparisons-are-suite-variants)
+- [Server comparisons are variants](#server-comparisons-are-variants)
 - [The Claude Agent SDK is an optional peer dependency](#the-claude-agent-sdk-is-an-optional-peer-dependency)
 - [`getResponseSizeBytes` is no longer exported](#getresponsesizebytes-is-no-longer-exported)
-- [`runVariantExperiment` needs clear evidence to recommend a variant](#runvariantexperiment-needs-clear-evidence-to-recommend-a-variant)
+- [`runToolOptimization` needs clear evidence to recommend a variant](#runtooloptimization-needs-clear-evidence-to-recommend-a-variant)
 - [Client cases name a client and model, not `mcpHostConfig`](#client-cases-name-a-client-and-model-not-mcphostconfig)
 - [Direct cases are Playwright tests](#direct-cases-are-playwright-tests)
 - [The simulator and the external-host runtime are internal](#the-simulator-and-the-external-host-runtime-are-internal)
 - [Eval configs and variants](#eval-configs-and-variants)
 - [Result fields use the eval vocabulary](#result-fields-use-the-eval-vocabulary)
+- [Eval APIs and client contracts say eval, client and tool optimization](#eval-apis-and-client-contracts-say-eval-client-and-tool-optimization)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
 ---
@@ -71,14 +72,14 @@ Projects created with `npx @gleanwork/mcp-server-tester init` now depend on `@mo
 
 ## Imports moved to subpaths
 
-**Affects:** code that imports comparisons, baselines, result stores, variant experiments, or low-level OAuth from the package root. (`simulateMCPHost` is internal now: see [The simulator and the external-host runtime are internal](#the-simulator-and-the-external-host-runtime-are-internal).)
+**Affects:** code that imports comparisons, baselines, result stores, variant experiments (tool optimization in 2.0), or low-level OAuth from the package root. (`simulateMCPHost` is internal now: see [The simulator and the external-host runtime are internal](#the-simulator-and-the-external-host-runtime-are-internal).)
 
-The root now holds the core testing interface: fixtures, matchers and validators, the MCP client, config, datasets with `runEvalDataset` and `runEvalCase`, judges, conformance, and Agent Skills, with the types those use. Everything else moved to a subpath. Apart from the judge registry ([Custom judges are plugins](#custom-judges-are-plugins)) and [`getResponseSizeBytes`](#getresponsesizebytes-is-no-longer-exported), nothing was renamed or removed; only the import path changed.
+The root now holds the core testing interface: fixtures, matchers and validators, the MCP client, config, datasets with `runEvalDataset` and `runEvalCase`, judges, conformance, and Agent Skills, with the types those use. Everything else moved to a subpath. Apart from the judge registry ([Custom judges are plugins](#custom-judges-are-plugins)), [`getResponseSizeBytes`](#getresponsesizebytes-is-no-longer-exported) and the variant experiment names ([Eval APIs and client contracts say eval, client and tool optimization](#eval-apis-and-client-contracts-say-eval-client-and-tool-optimization)), nothing was renamed or removed; only the import path changed.
 
-| Subpath                              | What it holds                                                                                                                                                       |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@gleanwork/mcp-server-tester/evals` | The evaluation framework: eval configs, suites and batches, extension definition types, metrics, result stores, baselines and comparisons, and variant experiments. |
-| `@gleanwork/mcp-server-tester/auth`  | Low-level OAuth: discovery, token storage, and the client-credentials flow.                                                                                         |
+| Subpath                              | What it holds                                                                                                                                                    |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@gleanwork/mcp-server-tester/evals` | The evaluation framework: eval configs, evals and batches, extension definition types, metrics, result stores, baselines and comparisons, and tool optimization. |
+| `@gleanwork/mcp-server-tester/auth`  | Low-level OAuth: discovery, token storage, and the client-credentials flow.                                                                                      |
 
 ```typescript
 // Before (1.x)
@@ -92,7 +93,7 @@ import {
 import { loadEvalDataset } from '@gleanwork/mcp-server-tester';
 import {
   compareEvalRuns,
-  runVariantExperiment,
+  runToolOptimization,
 } from '@gleanwork/mcp-server-tester/evals';
 ```
 
@@ -106,7 +107,7 @@ If TypeScript reports that the package has no exported member, find the name bel
 
 These names moved:
 
-- **`@gleanwork/mcp-server-tester/evals`:** `compareEvalRuns`, `CompareEvalRunsOptions`, `createDefaultArtifactId`, `createEvalResultStore`, `createStoredEvalArtifact`, `defaultEnvironmentMetadata`, `EvalCaseComparison`, `EvalCaseComparisonOutcome`, `EvalResultStore`, `EvalResultStoreConfig`, `EvalResultStoreLike`, `EvalRunComparisonLabels`, `EvalRunComparisonResult`, `ExperimentMetric`, `FileEvalResultStore`, `FileEvalResultStoreConfig`, `GCSEvalResultStore`, `GCSEvalResultStoreConfig`, `getMissingDependencyMessage`, `isEvalResultStore`, `isProviderAvailable`, `ListStoredArtifactsOptions`, `loadBaseline`, `loadStoredEvalRunnerResult`, `ProposeVariantsContext`, `resolveEvalResultStore`, `runVariantExperiment`, `saveBaseline`, `SaveBaselineOptions`, `saveEvalRunComparison`, `SaveEvalRunComparisonOptions`, `StoredArtifactKind`, `StoredArtifactSummary`, `StoredEvalArtifact`, `StoredEvalArtifactMetadata`, `StoredEvalResultLoadOptions`, `StoredEvalResultRef`, `StoredEvalResultSaveOptions`, `StoredEvalRunRef`, `VariantCandidateResult`, `VariantExperimentOptions`, `VariantExperimentReason`, `VariantExperimentResult`, `VariantExperimentRound`, `VariantImprovementProposal`, `VariantRecommendation` (`runServerComparison` and `saveServerComparison` were removed instead; see [Server comparisons are suite variants](#server-comparisons-are-suite-variants).)
+- **`@gleanwork/mcp-server-tester/evals`:** `compareEvalRuns`, `CompareEvalRunsOptions`, `createDefaultArtifactId`, `createEvalResultStore`, `createStoredEvalArtifact`, `defaultEnvironmentMetadata`, `EvalCaseComparison`, `EvalCaseComparisonOutcome`, `EvalResultStore`, `EvalResultStoreConfig`, `EvalResultStoreLike`, `EvalRunComparisonLabels`, `EvalRunComparisonResult`, `FileEvalResultStore`, `FileEvalResultStoreConfig`, `GCSEvalResultStore`, `GCSEvalResultStoreConfig`, `getMissingDependencyMessage`, `isEvalResultStore`, `isProviderAvailable`, `ListStoredArtifactsOptions`, `loadBaseline`, `loadStoredEvalRunnerResult`, `OptimizationMetric` (was `ExperimentMetric`), `ProposeVariantsContext`, `resolveEvalResultStore`, `runToolOptimization` (was `runVariantExperiment`), `saveBaseline`, `SaveBaselineOptions`, `saveEvalRunComparison`, `SaveEvalRunComparisonOptions`, `StoredArtifactKind`, `StoredArtifactSummary`, `StoredEvalArtifact`, `StoredEvalArtifactMetadata`, `StoredEvalResultLoadOptions`, `StoredEvalResultRef`, `StoredEvalResultSaveOptions`, `StoredEvalRunRef`, `ToolOptimizationOptions` (was `VariantExperimentOptions`), `ToolOptimizationReason` (was `VariantExperimentReason`), `ToolOptimizationResult` (was `VariantExperimentResult`), `ToolOptimizationRound` (was `VariantExperimentRound`), `VariantCandidateResult`, `VariantImprovementProposal`, `VariantRecommendation` (`runServerComparison` and `saveServerComparison` were removed instead; see [Server comparisons are variants](#server-comparisons-are-variants).)
 - **`@gleanwork/mcp-server-tester/auth`:** `ClientCredentialsConfig`, `discoverAuthorizationServer`, `discoverProtectedResource`, `DiscoveryError`, `ENV_VAR_NAMES`, `hasValidTokens`, `loadTokens`, `loadTokensFromEnv`, `MCP_PROTOCOL_VERSION`, `performClientCredentialsFlow`, `ProtectedResourceDiscoveryResult`, `ProtectedResourceMetadata`, `StoredClientInfo`, `StoredOAuthState`, `StoredServerMetadata`
 
 ## `mcp.callTool()` returns protocol errors as error results
@@ -287,21 +288,21 @@ Rubric judges and custom judges now share one contract. A rubric is shorthand fo
 
 MST's LLM calls now resolve their endpoint and credential in one place (`src/llm/endpoint.ts`), so they can go through an LLM gateway. See [LLM Gateways](../llm-gateways.md).
 
-- **`ANTHROPIC_AUTH_TOKEN` is a gateway credential.** With `ANTHROPIC_BASE_URL` set, it is sent as `Authorization: Bearer`, ahead of `ANTHROPIC_API_KEY`; the SDK host used to send only `x-api-key`, and the judge sent both headers. Without a base URL override it is ignored, so a gateway token never reaches the public API; the judge's SDK used to send it there too. If it was your only Anthropic credential, set `ANTHROPIC_BASE_URL` (or `ANTHROPIC_API_KEY`): the `anthropic` judge now reports a missing key, and the SDK host's calls fail authentication.
+- **`ANTHROPIC_AUTH_TOKEN` is a gateway credential.** With `ANTHROPIC_BASE_URL` set, it is sent as `Authorization: Bearer`, ahead of `ANTHROPIC_API_KEY`; the SDK host used to send only `x-api-key`, and the judge sent both headers. Without a base URL override it is ignored, so a gateway token never reaches the public API; the judge's SDK used to send it there too. If it was your only Anthropic credential, set `ANTHROPIC_BASE_URL` (or `ANTHROPIC_API_KEY`): the `anthropic` judge now reports a missing key, and the `mst` client's calls fail authentication.
 - **An explicit `apiKeyEnvVar` reads only that variable.** This was already true for the SDK host; the judge used to pick up `ANTHROPIC_AUTH_TOKEN` from the environment as well.
 - **With a base URL override, `MST_LLM_AUTH_COMMAND` wins over `*_API_KEY` and `ANTHROPIC_AUTH_TOKEN`.** It is new, so this only matters once you set it.
 - **`ANTHROPIC_BASE_URL` takes either form.** The SDK host needed the AI SDK's form (ending in `/v1`) and the judge needed the API root (the official SDK's and Claude Code's form); each failed with 404 on the other. Both now accept both.
-- **The `anthropic` SDK host streams.** Its agent loop uses `streamText` instead of `generateText`. Tool calls, text, steps and usage are the same; an error part in the middle of a stream now fails the case.
-- **The `openai` SDK host sends `store: false` behind `OPENAI_BASE_URL`.** Multi-turn tool loops through a gateway failed with `Item with id 'rs_…' not found`, because the AI SDK refers to earlier Responses items by id. Calls to the public API are unchanged.
-- **Unknown dataset keys are errors.** A key MST doesn't define in a dataset, a case or its `expect` block fails loading. Examples are `regex` (use `matchesPattern`), `judge` (use `passesJudge`), and a misspelt `accuracyThreshold`. 1.x ignored such keys, so the setting or assertion never applied. The error names the case.
-- **SDK hosts don't report cost.** `usage.totalCostUsd` is undefined for the Vercel AI SDK host, which knows tokens but not prices; 1.x reported 0. The same holds for Claude CLI output without a cost. A suite can estimate cost with an eval config's `pricing`.
-- **Clearer SDK host errors.** Errors are classified by HTTP status as well as message text, so a 401 whose message doesn't say "401" still gets the authentication hint, and the hint now includes the provider's message: `authentication error (<provider message>)`. A plain-object stream error shows its `message` instead of `[object Object]`.
+- **The `mst` client streams Anthropic calls.** Its agent loop uses `streamText` instead of `generateText`. Tool calls, text, steps and usage are the same; an error part in the middle of a stream now fails the case.
+- **The `mst` client sends `store: false` to OpenAI behind `OPENAI_BASE_URL`.** Multi-turn tool loops through a gateway failed with `Item with id 'rs_…' not found`, because the AI SDK refers to earlier Responses items by id. Calls to the public API are unchanged.
+- **Unknown dataset keys are errors.** A key MST doesn't define in a dataset, a case or its `assertions` block fails loading. Examples are `regex` (use `matchesPattern`), `judge` (use `passesJudge`), and a misspelt `passThreshold`. 1.x ignored such keys, so the setting or assertion never applied. The error names the case.
+- **The `mst` client doesn't report cost.** `usage.totalCostUsd` is undefined for the `mst` client, which knows tokens but not prices; the 1.x SDK host reported 0. The same holds for `claude-code` output without a cost. An eval can estimate cost with its eval config's `pricing`.
+- **Clearer `mst` client errors.** Errors are classified by HTTP status as well as message text, so a 401 whose message doesn't say "401" still gets the authentication hint, and the hint now includes the provider's message: `authentication error (<provider message>)`. A plain-object stream error shows its `message` instead of `[object Object]`.
 
-## Server comparisons are suite variants
+## Server comparisons are variants
 
 **Affects:** code that calls `runServerComparison()` or `saveServerComparison()`, or reads `ServerComparisonResult`, `CaseComparisonResult` or `ComparisonOutcome`.
 
-`runServerComparison()` and `saveServerComparison()` are removed. A suite runs the same comparison as two variants, each with its own `servers`, and compares them on every metric, not only pass rate:
+`runServerComparison()` and `saveServerComparison()` are removed. An eval runs the same comparison as two variants, each with its own `servers`, and compares them on every metric, not only pass rate:
 
 ```json
 {
@@ -334,15 +335,12 @@ MST's LLM calls now resolve their endpoint and credential in one place (`src/llm
 }
 ```
 
-Run it with `mst run --config server-ab.json`, or `runEvalSuite({ configPath })` from code. The run summary's `variants` has each variant's metrics and results, and `variantDeltas` their changes against the first variant. For per-case outcomes, compare the two variants' results:
+Run it with `mst run --config server-ab.json`, or `runEval({ configPath })` from code. The run summary's `variants` has each variant's metrics and results, and `variantDeltas` their changes against the first variant. For per-case outcomes, compare the two variants' results:
 
 ```typescript
-import {
-  compareEvalRuns,
-  runEvalSuite,
-} from '@gleanwork/mcp-server-tester/evals';
+import { compareEvalRuns, runEval } from '@gleanwork/mcp-server-tester/evals';
 
-const { summary } = await runEvalSuite({ configPath: 'server-ab.json' });
+const { summary } = await runEval({ configPath: 'server-ab.json' });
 const [serverA, serverB] = summary.variants;
 const comparison = compareEvalRuns({
   baseline: serverA!.result!,
@@ -372,15 +370,15 @@ Without it, the judge fails with an error that names the package. The other judg
 
 It was the helper behind `validateSize`. Check a response's size with `validateSize(response, { maxBytes })` or `expect(response).toHaveToolResponseSize({ maxBytes })`.
 
-## `runVariantExperiment` needs clear evidence to recommend a variant
+## `runToolOptimization` needs clear evidence to recommend a variant
 
-**Affects:** code that calls `runVariantExperiment` and acts on `proposal.recommendation`, `winner`, `metricValue` or `delta`, or a `proposeVariants` callback that reads held-out cases.
+**Affects:** code that calls `runVariantExperiment` (now `runToolOptimization`) and acts on `proposal.recommendation`, `winner`, `metricValue` or `delta`, or a `proposeVariants` callback that reads held-out cases.
 
-Variant experiments now follow standard practice for comparing two systems on the same cases, so `'apply'` means the evidence supports it. See [How variants are judged](../mcp-host.md#how-variants-are-judged) for the method and its limits.
+Tool optimization now follows standard practice for comparing two systems on the same cases, so `'apply'` means the evidence supports it. See [How variants are judged](../mst-client.md#how-variants-are-judged) for the method and its limits.
 
-- **A recommendation needs a clear improvement.** `'apply'` now needs an exact paired sign-flip test on per-case results to give p below 0.025 divided by the number of variants tried. Before, any gain in the metric was enough. Small datasets and single-trial runs will report `'inconclusive'` more often; run several trials per case (`defaultLlmIterations` or `iterations`) to tell real gains from noise. There is no opt-out. Tool metrics use the same test on per-case precision, recall or F1.
+- **A recommendation needs a clear improvement.** `'apply'` now needs an exact paired sign-flip test on per-case results to give p below 0.025 divided by the number of variants tried. Before, any gain in the metric was enough. Small datasets and single-trial runs will report `'inconclusive'` more often; run several trials per case (`defaultTrials` or a case's `trials`) to tell real gains from noise. There is no opt-out. Tool metrics use the same test on per-case precision, recall or F1.
 - **`regressionCheck` defaults to `'significant'`.** One flaky trial on a working case no longer disqualifies a variant; a case or group that clearly got worse still does. Set `regressionCheck: 'any-case'` for the previous rule.
-- **Tag your regression cases.** Breakage is judged on cases tagged `regression` (or `regressionTag`). Without the tag, the experiment runs the baseline one extra time, only to decide which cases are regression cases, which costs one more run of the dataset.
+- **Tag your regression cases.** Breakage is judged on cases tagged `regression` (or `regressionTag`). Without the tag, the optimization runs the baseline one extra time, only to decide which cases are regression cases, which costs one more run of the dataset.
 - **`passRate` is the mean per-case pass rate.** It is now the mean of each case's share of trials passed, not the share of cases that passed every trial. With one trial per case the value is the same, except that a case whose trials all failed for infrastructure reasons is left out instead of counted as a failure. Every metric now leaves out held-out cases, so `metricValue`, `baselineValue` and `delta` change when the dataset has them.
 - **`proposeVariants` never sees held-out cases.** Every run in its context has them removed, so they stay a fair check on the winner.
 
@@ -390,7 +388,7 @@ New fields: candidates have `measurement`, `improvement` and `fixes`, and the re
 
 **Affects:** datasets with `mode: 'mcp_host'` or `mode: 'external_host'` cases, `mcpHostConfig` or `externalHost` on a case, the `mcpHostModel` option, and plugin clients that read `context.mcpHostConfig`.
 
-A case with `input` runs on the client under test, so it needs no `mode`. The run names the client and model once: `runEvalDataset` in a Playwright test, or the suite eval config. A case can set its own `client`, `model` and `clientOptions`. Outside a suite, cases run on the `mst` client, on the test's MCP connection; Claude Code, Cowork, ChatGPT and plugin clients run in suites (`mst run`). The old keys fail with a message naming what replaces them.
+A case with `input` runs on the client under test, so it needs no `mode`. The run names the client and model once: `runEvalDataset` in a Playwright test, or the eval config. A case can set its own `client`, `model` and `clientOptions`. Outside an eval config, cases run on the `mst` client, on the test's MCP connection; Claude Code, Cowork, ChatGPT and plugin clients run in evals (`mst run`). The old keys fail with a message naming what replaces them.
 
 ```json
 // Before
@@ -420,11 +418,11 @@ await runEvalDataset(
 
 - A case that needs its own model or options sets `model` and `clientOptions` (for example `"clientOptions": { "systemPrompt": "..." }`). They replace what the case inherits.
 - `provider` is inferred from the model id; set `clientOptions.provider` to override it (a gateway, or Vertex routing).
-- An `external_host` case runs in a suite with `client: 'chatgpt'`, or a plugin client.
-- `mcpHostConfig.cli` and `browser` (caller-authored CLI and browser hosts) have no replacement in a case; a plugin client can wrap a custom host.
+- An `external_host` case runs in an eval with `client: 'chatgpt'`, or a plugin client.
+- `mcpHostConfig.cli` and `browser` (caller-authored CLI and browser hosts) have no replacement in a case; a plugin client can wrap one.
 - `mcpHostModel` is now `model`, in options and in run metadata.
 - Results record the case's client and model as `request.client` and `request.model`, instead of `request.mcpHostConfig` and `request.externalHost`.
-- Plugin clients: `ClientRunContext.mcpHostConfig` is gone. A case's options arrive in the client config the suite resolves.
+- Plugin clients: `ClientRunContext.mcpHostConfig` is gone. A case's options arrive in the client config the eval resolves.
 - A case with `input` and a `toolName` or `request` fails validation: a case runs on the client or calls a tool directly, not both. Remove a placeholder `toolName` and `args` from client cases.
 - Direct cases are Playwright tests now: see [Direct cases are Playwright tests](#direct-cases-are-playwright-tests).
 
@@ -473,7 +471,7 @@ test('weather-london', async ({ mcp }) => {
 - A `request` case becomes `mcp.request(method, params, schema)` in a test; `mcp.skills` covers the skills methods. A JSON-RPC error rejects with its `code`. The built-in `SkillsListResult`-style schemas are gone with `assertions.schema`; use `validateSkillEntry()`.
 - `containsText`, `matchesPattern`, `passesJudge`, `toolsTriggered` and `toolCallCount` stay as eval assertions, on what the client did.
 - `mst generate` writes a Playwright spec (default `tests/generated.spec.ts`) instead of a dataset, and adds tests to a spec it wrote before. `mst init` scaffolds a tool test and a client-case dataset.
-- `executeCase` returns `kind: 'host'` or `'failed'`; `'direct'` fails. Results no longer carry `request.mode`. `JudgeCase.input.tool` is gone (judges see `input.prompt`).
+- `executeCase` returns `kind: 'completed'` or `'failed'`; `'direct'` fails. Results no longer carry `request.mode`. `JudgeCase.input.tool` is gone (judges see `input.prompt`).
 - `defaultTrials` and `defaultPassThreshold` now apply to every case.
 
 ## The simulator and the external-host runtime are internal
@@ -501,8 +499,8 @@ const result = await runEvalCase(
 );
 ```
 
-- The `mst` client's options (`provider`, `maxToolCalls`, `temperature`, `skills`, `systemPrompt`, ...) go in `clientOptions`. See [mst client options](../mcp-host.md#mst-client-options).
-- Browser and desktop hosts, and a caller-authored CLI host, have no replacement. A plugin client (`run` or `runBatch`) can drive any host and report its trace.
+- The `mst` client's options (`provider`, `maxToolCalls`, `temperature`, `skills`, `systemPrompt`, ...) go in `clientOptions`. See [mst client options](../mst-client.md#mst-client-options).
+- Browser and desktop hosts, and a caller-authored CLI host, have no replacement. A plugin client (`run` or `runBatch`) can drive any client application and report its trace.
 - A plugin client needs `run` or `runBatch`; `createConfig` is gone.
 - `buildEvalDataset(raw, evalConfig)` takes no host config, and `DatasetSourceContext` has no `hostConfig`.
 - The ChatGPT client still records what it saw on each result (now `clientMetadata`; see [Result fields use the eval vocabulary](#result-fields-use-the-eval-vocabulary)), and `./experimental/clients` still exports the types for it (`ClientMetadata` and the types it uses).
@@ -552,7 +550,7 @@ ADR 0002's vocabulary reaches the config: an eval config compares **variants**, 
 - **Config keys.** `arms` is now `variants`; `baseline: "<name>"` picks the baseline (default: the first variant). `toolOverrides` is now `tools`, holding the tool metadata itself (what was `toolOverrides.tools`): the variant's `name` identifies it, and its `description` describes it. A config-level `tools` applies to every variant that doesn't set its own. The old top-level `tools` string, which nothing read, is gone. Old keys fail with a message naming the replacement.
 - **CLI.** `mst run --config <path>` (or `-c`) and `--variant <name>`; `mst batch --configs` and `--config-dir`. The old flags fail with their replacement. The editor schema is `schema/eval-config.schema.json`, and the repo's examples name configs `eval.json`.
 - **Types and functions** (`./evals`): `EvalManifest` → `EvalConfig`, `EvalArm` → `EvalVariant`, `EvalManifestSchema` → `EvalConfigSchema`, `EvalManifestInput` → `EvalConfigInput`, `loadEvalManifest` → `loadEvalConfig`, `loadEvalManifestFromObject` → `loadEvalConfigFromObject`, `validateManifest` → `validateEvalConfig` (`ValidateManifestOptions` → `ValidateEvalConfigOptions`), `resolveManifestExtends` → `resolveConfigExtends`, `EvaluationArmResult` → `EvaluationVariantResult`. New: `ToolMetadata` and `variantToolMetadata(evalConfig, variant)`.
-- **Options.** `runEvalSuite({ configPath, variant, variants })` (were `manifestPath`, `arm`, `arms`), whose result has `evalConfig` (was `manifest`); `runEvalBatch({ configPaths, configDir })`. `runVariantExperiment({ suite: { configPath, baseVariant } })` (were `manifestPath`, `arm`).
+- **Options.** `runEval({ configPath, variant, variants })` (were `manifestPath`, `arm`, `arms`), whose result has `evalConfig` (was `manifest`); `runEvalBatch({ configPaths, configDir })`. `runToolOptimization({ evalConfig: { configPath, baseVariant } })` (was `runVariantExperiment({ suite: { manifestPath, arm } })`).
 - **Plugins.** A client's context is `{ evalConfig, variant, env }` (were `manifest`, `arm`); a dataset source's is `{ rootDir, configDir, evalConfig }`. A client that shows tool metadata itself declares `toolMetadata: true` (was `toolOverrides: true`) and reads it with `variantToolMetadata(context.evalConfig, context.variant)`.
 - **Results.** `results.json` names the run by `configId` and `configName`, lists `variants` (was `arms`) and `variantDeltas` (was `armDeltas`); each case result has `variant` (was `arm`), and `previousRun` has `sameConfig` and `variants`. A run doesn't find a previous run stored before this change.
 
@@ -604,20 +602,48 @@ The types follow:
 
 `toolName` is optional on `EvalCaseResult`: it is set only for a tool call a Playwright test made. `request.client` is always set; a case that names no client records `mst`.
 
-The `runEvalDataset`, `runEvalCase` and `runVariantExperiment` options `mcpHostModel` and `toolOverrideVariantId` are now `model` and `toolVariantId`; the old names fail with the new ones.
+The `runEvalDataset`, `runEvalCase` and `runToolOptimization` options `mcpHostModel` and `toolOverrideVariantId` are now `model` and `toolVariantId`; the old names fail with the new ones.
 
-Stored results are `schemaVersion: 2`, for result store artifacts and suite `results.json`. Results written by an earlier MST aren't read as if they were current:
+Stored results are `schemaVersion: 2`, for result store artifacts and an eval's `results.json`. Results written by an earlier MST aren't read as if they were current:
 
 - Loading one explicitly fails with the renames and "Rerun to write it again". That covers a stored artifact by ID, the latest stored baseline for a comparison, and a `loadBaseline()` file.
 - History (the previous run of an eval config, the reporter's trend) skips them.
 
 Rerun a baseline with 2.0 to compare against it.
 
+## Eval APIs and client contracts say eval, client and tool optimization
+
+**Affects:** code that calls `runEvalSuite` or `runVariantExperiment`, imports their types, writes a client plugin, reads tool-call traces, telemetry or failure kinds, names the `host_event_count` metric, or reads the reporter's tool optimization data.
+
+The eval APIs use the 2.0 vocabulary ([ADR 0002](../adr/0002-common-eval-vocabulary.md), [CONTEXT.md](../../CONTEXT.md)): an eval (not a suite) runs on a client (not a host), and a tool optimization (not a variant experiment) compares tool-metadata variants.
+
+| Before                                                                                               | 2.0                                                                             |
+| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `runEvalSuite`, `RunEvalSuiteOptions`, `RunEvalSuiteResult`                                          | `runEval`, `RunEvalOptions`, `RunEvalResult`                                    |
+| `EvaluationSuiteOptions`, `EvaluationSuiteResult`                                                    | `EvaluationRunOptions`, `EvaluationRunResult`                                   |
+| `EvaluationHostRunContext`                                                                           | `EvaluationClientRunContext`                                                    |
+| `runVariantExperiment`                                                                               | `runToolOptimization`                                                           |
+| `VariantExperimentOptions`, `...Result`, `...Round`, `...Reason`                                     | `ToolOptimizationOptions`, `...Result`, `...Round`, `...Reason`                 |
+| `SuiteVariantExperimentOptions` and its `suite` option                                               | `EvalToolOptimizationOptions` and its `evalConfig` option                       |
+| `VariantExperimentSuite`                                                                             | `ToolOptimizationEval`                                                          |
+| `ExperimentMetric`                                                                                   | `OptimizationMetric`                                                            |
+| `MCPHostCapabilities`                                                                                | `MCPClientCapabilities`                                                         |
+| `HostExecution`, `MCPHostSimulationResult`                                                           | `ClientExecution`, `MstClientSimulationResult`                                  |
+| `hostStdioServers`, `materializeHostStdioFiles`, `resolveHostStdioServer` (`./experimental/clients`) | `clientStdioServers`, `materializeClientStdioFiles`, `resolveClientStdioServer` |
+
+**Client plugins.** `ClientRunOptions.host` is `client`. An `executeCase` that completes returns `kind: 'completed'` (was `'host'`); returning `'host'` fails with the new kind.
+
+**Traces, telemetry and metrics.** A tool call or skill the client ran itself, not through an MCP server, has `source: 'builtin'` (was `'host'`), in traces and in a dataset's `toolsTriggered.calls[].source`; a dataset that says `'host'` fails with the new value. The metric `host_event_count` is `builtin_event_count` (its mean `builtin_event_count_mean`), and naming the old one fails with the new one. Telemetry counts `hostToolCallCount`, `hostToolErrorCount` and `hostToolDurationMs` are `builtinToolCallCount`, `builtinToolErrorCount` and `builtinToolDurationMs`. A variant's `costSource` is `'client'` (was `'host'`) when the client reported the cost. Failure kinds `host_run_failed`, `unsupported_host` and `host_session_metadata` are `client_run_failed`, `unsupported_client` and `client_session_metadata`.
+
+**Reporter.** The reporter's tool optimization data is `toolOptimization` (was `variantExperiment`), in the `mcp-tool-optimization` attachment (was `mcp-variant-experiment`).
+
+**Internals.** Modules moved with the names: `evals/runEvalSuite.ts` is `evals/runEval.ts`, `evals/variantExperiment.ts` is `evals/toolOptimization.ts`, `evals/mcpHost/` is `evals/mstClient/`, `evals/externalHost/` is `evals/externalClient/`, and the `*Host*` modules are `*Client*`. `docs/mcp-host.md` is [`docs/mst-client.md`](../mst-client.md).
+
 ## New in 2.0 (non-breaking)
 
-- An evaluation framework over datasets: eval configs, suites and batches (`mst run`, `mst batch`), variants, metrics, result stores, and plugins that add dataset sources, hosts, judges, metrics and result stores under their own namespace, and shared configs an eval config `extends`. It's in `@gleanwork/mcp-server-tester/evals`. See [Evaluation framework](../evaluation-framework.md).
-- Desktop hosts for suites: Claude Cowork (`cowork`) and the ChatGPT desktop app (`chatgpt`), driven through the desktop UI (Computer Use on macOS, AT-SPI on Linux). Their APIs are in `@gleanwork/mcp-server-tester/experimental/clients`, which may change between minor versions. See [Cowork](../cowork.md) and [ChatGPT desktop](../chatgpt-desktop.md).
-- A custom `executeCase` for `runEvalDataset()` and `runEvalCase()`, which returns a typed `CaseExecution` (`direct`, `host` or `failed`).
+- An evaluation framework over datasets: eval configs, evals and batches (`mst run`, `mst batch`), variants, metrics, result stores, and plugins that add dataset sources, clients, judges, metrics and result stores under their own namespace, and shared configs an eval config `extends`. It's in `@gleanwork/mcp-server-tester/evals`. See [Evaluation framework](../evaluation-framework.md).
+- Desktop clients for evals: Claude Cowork (`cowork`) and the ChatGPT desktop app (`chatgpt`), driven through the desktop UI (Computer Use on macOS, AT-SPI on Linux). Their APIs are in `@gleanwork/mcp-server-tester/experimental/clients`, which may change between minor versions. See [Cowork](../cowork.md) and [ChatGPT desktop](../chatgpt-desktop.md).
+- A custom `executeCase` for `runEvalDataset()` and `runEvalCase()`, which returns a typed `CaseExecution` (`completed` or `failed`).
 - LLM gateway support for the `mst` client and LLM judges: `ANTHROPIC_AUTH_TOKEN`, and `MST_LLM_AUTH_COMMAND` for short-lived tokens. See [LLM Gateways](../llm-gateways.md).
 - The CLI is also installed as `mst`. In a project that depends on the package, `npx mst <command>` and `npx mcp-server-tester <command>` run the same binary. Before the package is installed, run `init` as `npx @gleanwork/mcp-server-tester init`: `npx mcp-server-tester` and `npx mst` would download unrelated npm packages with those names. See [CLI](../cli.md).
 - `protocol` on `mcpConfig` (`'legacy'`, `'auto'`, or a revision like `'2026-07-28'`), the `mcpProtocol` fixture option, and `protocolMatrix()`. See [Protocol Versions](../protocol-versions.md). To run an existing project against both eras:

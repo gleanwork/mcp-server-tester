@@ -19,8 +19,8 @@ import {
   parseClaudeTrace,
   type ClaudeTrace,
   awaitingUserAnswer,
-} from './externalHost/builtins/claudeTrace.js';
-import { hostRunToExecution, simulationToHostRun } from './hostTrace.js';
+} from './externalClient/builtins/claudeTrace.js';
+import { clientRunToExecution, simulationToClientRun } from './clientTrace.js';
 
 export interface AuditCoworkNativeRunOptions {
   rawResultsPath: string;
@@ -100,7 +100,7 @@ export interface CoworkNativeAuditCase {
   toolCounts: {
     total: number;
     mcp: number;
-    host: number;
+    builtin: number;
     errors: number | null;
   } | null;
   validity: {
@@ -463,7 +463,7 @@ async function auditCase(
   const trace = await nativeTrace(resolve(options.nativeRoot), sessionId);
   if (object(saved.clientTelemetry).awaitingUser !== undefined) {
     // A headless run stopped on an unanswered AskUserQuestion. Verified only when
-    // the native transcript itself ends on that pending host call and the case
+    // the native transcript itself ends on that pending client call and the case
     // failed: a model outcome (quality failure), never a passing case.
     result.awaitingUser = true;
     const models = trace.telemetry.models;
@@ -529,15 +529,15 @@ async function auditCase(
   result.toolCounts = {
     total: trace.toolCalls.length,
     mcp: trace.toolCalls.filter((call) => call.source === 'mcp').length,
-    host: trace.toolCalls.filter((call) => call.source === 'host').length,
+    builtin: trace.toolCalls.filter((call) => call.source === 'builtin').length,
     errors: trace.telemetry.toolErrorCount ?? null,
   };
   if (trace.toolCalls.some((call) => call.output === undefined))
     result.issues.push('TOOL_OUTPUT_UNAVAILABLE');
   const response = object(saved.response);
   const replay = object(
-    hostRunToExecution(
-      simulationToHostRun(
+    clientRunToExecution(
+      simulationToClientRun(
         {
           success: !trace.isError && trace.finalAnswer !== undefined,
           response: trace.finalAnswer,

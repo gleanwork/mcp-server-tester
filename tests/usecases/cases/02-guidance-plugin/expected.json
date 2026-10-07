@@ -29,7 +29,7 @@
       "output_tokens_mean",
       "tool_count_mean",
       "mcp_call_count_mean",
-      "host_event_count_mean"
+      "builtin_event_count_mean"
     ]
   }
 }

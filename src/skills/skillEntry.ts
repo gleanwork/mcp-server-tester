@@ -140,12 +140,12 @@ export function validateSkillEntry(entry: SkillEntry): SkillEntryProblem[] {
     must(`resources does not list the skill's own ${entry.uri}`);
   if (entry.resources.length > SKILL_LIMITS.maxResources) {
     should(
-      `${entry.resources.length} resources exceeds the ${SKILL_LIMITS.maxResources}-file limit hosts must support`
+      `${entry.resources.length} resources exceeds the ${SKILL_LIMITS.maxResources}-file limit clients must support`
     );
   }
   if (total > SKILL_LIMITS.maxTotalBytes) {
     should(
-      `${total} bytes exceeds the ${SKILL_LIMITS.maxTotalBytes}-byte limit hosts must support`
+      `${total} bytes exceeds the ${SKILL_LIMITS.maxTotalBytes}-byte limit clients must support`
     );
   }
   return problems;

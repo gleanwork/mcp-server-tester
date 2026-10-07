@@ -11,7 +11,7 @@ import {
   resetPluginsForTests,
 } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
-import { runEvalSuite } from './runEvalSuite.js';
+import { runEval } from './runEval.js';
 import { loadEvalConfig, type EvalConfig } from './evalConfig.js';
 import { resolveConfigExtends } from './configExtends.js';
 import type { EvaluationSummary } from './evalFrameworkTypes.js';
@@ -22,7 +22,7 @@ import {
   type StoredEvalArtifact,
 } from './resultStore.js';
 
-vi.mock('./runEvalSuite.js', () => ({ runEvalSuite: vi.fn() }));
+vi.mock('./runEval.js', () => ({ runEval: vi.fn() }));
 
 // Temp plugin modules hand back the test's store through this global.
 const STORE_GLOBAL = '__mstBatchTestStore';
@@ -114,7 +114,7 @@ describe('runEvalBatch skipExisting', () => {
       results: { store: { type: 'file', dir: storeDir } },
     };
     await fs.writeFile(configPath, JSON.stringify(configInput));
-    vi.mocked(runEvalSuite).mockImplementation(async (options) => {
+    vi.mocked(runEval).mockImplementation(async (options) => {
       const evalConfig = loadEvalConfig(options.configPath, { rootDir });
       const summary = completedSummary(evalConfig);
       return {
@@ -160,7 +160,7 @@ describe('runEvalBatch skipExisting', () => {
         workers: Number.NaN,
       })
     ).rejects.toThrow(/workers must be a finite positive integer/);
-    expect(runEvalSuite).not.toHaveBeenCalled();
+    expect(runEval).not.toHaveBeenCalled();
   });
 
   it('supports eval config directories and disambiguates colliding output basenames', async () => {
@@ -185,7 +185,7 @@ describe('runEvalBatch skipExisting', () => {
     for (let i = 0; i < 3; i++) {
       expect(await run()).toMatchObject({ skipped: 1, failed: 0, passed: 0 });
     }
-    expect(runEvalSuite).not.toHaveBeenCalled();
+    expect(runEval).not.toHaveBeenCalled();
   });
 
   it('resumes completed failing evaluations, not only passing ones', async () => {
@@ -197,7 +197,7 @@ describe('runEvalBatch skipExisting', () => {
     artifact.data.variants[0]!.result!.failed = 1;
     await store.saveArtifact(artifact);
     expect((await run()).skipped).toBe(1);
-    expect(runEvalSuite).not.toHaveBeenCalled();
+    expect(runEval).not.toHaveBeenCalled();
   });
 
   it('reruns when skipExisting is disabled', async () => {
@@ -208,7 +208,7 @@ describe('runEvalBatch skipExisting', () => {
       skipExisting: false,
     });
     expect(result.skipped).toBe(0);
-    expect(runEvalSuite).toHaveBeenCalledOnce();
+    expect(runEval).toHaveBeenCalledOnce();
   });
 
   it('resumes through the configured store even without outputRoot', async () => {
@@ -219,7 +219,7 @@ describe('runEvalBatch skipExisting', () => {
       skipExisting: true,
     });
     expect(result.skipped).toBe(1);
-    expect(runEvalSuite).not.toHaveBeenCalled();
+    expect(runEval).not.toHaveBeenCalled();
   });
 
   it('uses a custom result store from a plugin object by configured type', async () => {
@@ -235,13 +235,13 @@ describe('runEvalBatch skipExisting', () => {
     await saveValidSummary();
     expect((await run({ plugins: [plugin] })).skipped).toBe(1);
     expect(create).toHaveBeenCalledWith({ type: 'test/custom' });
-    expect(runEvalSuite).not.toHaveBeenCalled();
+    expect(runEval).not.toHaveBeenCalled();
   });
 
-  it('passes plugin objects through to the suite it runs', async () => {
+  it('passes plugin objects through to the eval it runs', async () => {
     const plugin: Plugin = { meta: { name: 'passed', namespace: 'passed' } };
     await run({ plugins: [plugin], skipExisting: false });
-    expect(runEvalSuite).toHaveBeenCalledWith(
+    expect(runEval).toHaveBeenCalledWith(
       expect.objectContaining({ plugins: [plugin] })
     );
   });
@@ -257,7 +257,7 @@ describe('runEvalBatch skipExisting', () => {
     await saveValidSummary();
     expect((await run()).skipped).toBe(1);
     expect(loadedNamespaces()).toEqual(['batch']);
-    expect(runEvalSuite).not.toHaveBeenCalled();
+    expect(runEval).not.toHaveBeenCalled();
   });
 
   it('adds configured plugin paths to the eval config plugins', async () => {
@@ -280,7 +280,7 @@ describe('runEvalBatch skipExisting', () => {
     const result = await run({ pluginPaths: ['./cli-plugin.mjs'] });
     expect(result.skipped).toBe(1);
     expect(loadedNamespaces()).toEqual(['cli', 'mp']);
-    expect(runEvalSuite).not.toHaveBeenCalled();
+    expect(runEval).not.toHaveBeenCalled();
   });
 
   it('does not resume through a store from a plugin the eval config does not load', async () => {
@@ -298,7 +298,7 @@ describe('runEvalBatch skipExisting', () => {
     await saveValidSummary();
     expect((await run()).skipped).toBe(0);
     expect(create).not.toHaveBeenCalled();
-    expect(runEvalSuite).toHaveBeenCalledOnce();
+    expect(runEval).toHaveBeenCalledOnce();
   });
 
   describe('with a shared config', () => {
@@ -332,7 +332,7 @@ describe('runEvalBatch skipExisting', () => {
 
       expect((await run({ plugins: [plugin] })).skipped).toBe(1);
       expect(create).toHaveBeenCalledWith({ type: 'test/custom' });
-      expect(runEvalSuite).not.toHaveBeenCalled();
+      expect(runEval).not.toHaveBeenCalled();
     });
 
     it('reruns when a saved run predates the config', async () => {
@@ -342,7 +342,7 @@ describe('runEvalBatch skipExisting', () => {
 
       expect((await run({ plugins: [configPlugin(create)] })).skipped).toBe(0);
       expect(create).toHaveBeenCalled();
-      expect(runEvalSuite).toHaveBeenCalledOnce();
+      expect(runEval).toHaveBeenCalledOnce();
     });
   });
 
@@ -355,7 +355,7 @@ describe('runEvalBatch skipExisting', () => {
     await fs.writeFile(configPath, JSON.stringify(configInput));
     await saveValidSummary();
     expect((await run()).skipped).toBe(0);
-    expect(runEvalSuite).toHaveBeenCalledOnce();
+    expect(runEval).toHaveBeenCalledOnce();
   });
 
   it('reruns safely when a plugin store is not loaded', async () => {
@@ -365,7 +365,7 @@ describe('runEvalBatch skipExisting', () => {
     await fs.writeFile(configPath, JSON.stringify(configInput));
     await saveValidSummary();
     expect((await run()).skipped).toBe(0);
-    expect(runEvalSuite).toHaveBeenCalledOnce();
+    expect(runEval).toHaveBeenCalledOnce();
   });
 
   it('does not trust an existing results.json when no stored summary exists', async () => {
@@ -376,7 +376,7 @@ describe('runEvalBatch skipExisting', () => {
       JSON.stringify(completedSummary(loadEvalConfig(configPath, { rootDir })))
     );
     expect((await run()).skipped).toBe(0);
-    expect(runEvalSuite).toHaveBeenCalledOnce();
+    expect(runEval).toHaveBeenCalledOnce();
   });
 
   it('reruns without a configured result store', async () => {
@@ -384,7 +384,7 @@ describe('runEvalBatch skipExisting', () => {
     await fs.writeFile(configPath, JSON.stringify(configInput));
     await saveValidSummary();
     expect((await run()).skipped).toBe(0);
-    expect(runEvalSuite).toHaveBeenCalledOnce();
+    expect(runEval).toHaveBeenCalledOnce();
   });
 
   it.each(['content', 'id'])(
@@ -395,7 +395,7 @@ describe('runEvalBatch skipExisting', () => {
       else configInput.model = 'different-model';
       await fs.writeFile(configPath, JSON.stringify(configInput));
       expect((await run()).skipped).toBe(0);
-      expect(runEvalSuite).toHaveBeenCalledOnce();
+      expect(runEval).toHaveBeenCalledOnce();
     }
   );
 
@@ -406,7 +406,7 @@ describe('runEvalBatch skipExisting', () => {
       if (state === 'missing') await fs.rm(configPath);
       else await fs.writeFile(configPath, '{broken json');
       expect(await run()).toMatchObject({ skipped: 0, failed: 1 });
-      expect(runEvalSuite).toHaveBeenCalledOnce();
+      expect(runEval).toHaveBeenCalledOnce();
     }
   );
 
@@ -422,7 +422,7 @@ describe('runEvalBatch skipExisting', () => {
       if (state === 'missing') await fs.rm(artifactPath);
       else await fs.writeFile(artifactPath, '{broken json');
       expect((await run()).skipped).toBe(0);
-      expect(runEvalSuite).toHaveBeenCalledOnce();
+      expect(runEval).toHaveBeenCalledOnce();
     }
   );
 
@@ -504,7 +504,7 @@ describe('runEvalBatch skipExisting', () => {
     corrupt(artifact);
     await store.saveArtifact(artifact);
     expect((await run()).skipped).toBe(0);
-    expect(runEvalSuite).toHaveBeenCalledOnce();
+    expect(runEval).toHaveBeenCalledOnce();
   });
 
   it('finds an older matching summary when the latest belongs to another eval config', async () => {
@@ -519,7 +519,7 @@ describe('runEvalBatch skipExisting', () => {
     other.createdAt = '2026-09-10T01:00:00.000Z';
     await store.saveArtifact(other);
     expect((await run()).skipped).toBe(1);
-    expect(runEvalSuite).not.toHaveBeenCalled();
+    expect(runEval).not.toHaveBeenCalled();
   });
 
   it('does not treat dry runs as resumed executions', async () => {
@@ -531,7 +531,7 @@ describe('runEvalBatch skipExisting', () => {
       dryRun: true,
     });
     expect(result.skipped).toBe(0);
-    expect(runEvalSuite).toHaveBeenCalledWith(
+    expect(runEval).toHaveBeenCalledWith(
       expect.objectContaining({ dryRun: true })
     );
   });

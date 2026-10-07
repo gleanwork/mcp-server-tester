@@ -16,7 +16,7 @@ import {
   coworkPluginSettingsMatch,
   linuxCoworkPlatform,
 } from './linux.js';
-import type { MarketplacePlugin } from '../hostPlugins.js';
+import type { MarketplacePlugin } from '../clientPlugins.js';
 import {
   CoworkDriverError,
   CoworkHitlBudgetError,

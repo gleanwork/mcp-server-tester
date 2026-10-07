@@ -56,6 +56,14 @@ function result(
   };
 }
 
+describe('getMetric', () => {
+  it('names the replacement for a renamed metric', () => {
+    expect(() => getMetric('host_event_count')).toThrow(
+      'Metric "host_event_count" is now "builtin_event_count".'
+    );
+  });
+});
+
 describe('computeMetrics', () => {
   it('aggregates public plugin metrics by kind when no custom aggregate is provided', () => {
     installMetrics({
@@ -523,7 +531,7 @@ describe('per-trial metrics', () => {
     expect(aggregated).toEqual({ passed_rate: 0.5, trial_pass_rate: 0.75 });
   });
 
-  it('reports no trace metrics for a host with no evidence, and lists them as unavailable', () => {
+  it('reports no trace metrics for a client with no evidence, and lists them as unavailable', () => {
     const blind = iterated({
       trialResults: [{ pass: true, durationMs: 100, trace: trace(0, 'none') }],
     });
@@ -565,7 +573,7 @@ describe('per-trial metrics', () => {
                 name: 'search',
                 server: 'docs',
               },
-              { kind: 'tool_call', source: 'host', name: 'ToolSearch' },
+              { kind: 'tool_call', source: 'builtin', name: 'ToolSearch' },
             ],
           },
         },
@@ -577,7 +585,7 @@ describe('per-trial metrics', () => {
     });
   });
 
-  it('leaves out runs that failed on infrastructure, and counts host failures as unsuccessful', () => {
+  it('leaves out runs that failed on infrastructure, and counts client failures as unsuccessful', () => {
     const base = {
       datasetName: 'd',
       source: 'eval' as const,
@@ -594,8 +602,8 @@ describe('per-trial metrics', () => {
     const crash: EvalCaseResult = {
       ...base,
       id: 'crash',
-      error: 'Host execution failed.',
-      trace: { events: [], error: 'Host execution failed.' },
+      error: 'Client execution failed.',
+      trace: { events: [], error: 'Client execution failed.' },
     };
     const { aggregated } = computeMetrics(
       ['response_success', 'duration_s', 'trial_pass'],
@@ -627,7 +635,7 @@ describe('tool_search_hit', () => {
   type Event = NonNullable<EvalCaseResult['trace']>['events'][number];
   const search = (...names: Array<[string, string?]>): Event => ({
     kind: 'tool_search',
-    source: 'host',
+    source: 'builtin',
     name: 'ToolSearch',
     results: names.map(([name, server]) => ({
       name,

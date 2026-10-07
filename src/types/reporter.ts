@@ -19,7 +19,7 @@ import type {
 } from './index.js';
 import type { EvalResultStoreLike } from '../evals/resultStore.js';
 import type { TraceEvidence, Trace } from '../evals/evalFrameworkTypes.js';
-import type { ClientMetadata } from '../evals/externalHost/types.js';
+import type { ClientMetadata } from '../evals/externalClient/types.js';
 
 /**
  * Configuration options for MCP Eval Reporter
@@ -83,7 +83,7 @@ export interface MCPEvalReporterConfig {
 }
 
 /**
- * Experiment tracking metadata for an eval run
+ * Optimization tracking metadata for an eval run
  */
 export interface EvalRunMetadata {
   /** Git commit hash at time of run */
@@ -143,7 +143,7 @@ export interface MCPConformanceCheck {
 
   /**
    * Where the requirement comes from, e.g. a spec section or an official
-   * conformance suite requirement ID.
+   * conformance eval requirement ID.
    */
   specRef?: string;
 }
@@ -481,11 +481,11 @@ export interface EvalCaseResult {
   /** Evidence level retained in persisted comparisons after response redaction. */
   traceEvidence?: TraceEvidence;
   /**
-   * What the host did (host cases with one trial). With several
+   * What the client did (client cases with one trial). With several
    * trials, each one's trace is in `trialResults`.
    */
   trace?: Trace;
-  /** The suite variant that produced this result. */
+  /** The eval variant that produced this result. */
   variant?: string;
 
   /**
@@ -502,7 +502,7 @@ export interface EvalCaseResult {
   clientTelemetry?: Record<string, unknown>;
 
   /**
-   * External host trace and evidence metadata.
+   * External client trace and evidence metadata.
    * Populated for clients that drive a desktop app, such as ChatGPT.
    */
   clientMetadata?: ClientMetadata;
@@ -587,17 +587,17 @@ export interface MCPEvalRunData {
   serverCapabilities?: MCPServerCapabilitiesData[];
 
   /**
-   * Summary of a tool-metadata variant experiment (runVariantExperiment),
+   * Summary of a tool-metadata tool optimization (runToolOptimization),
    * present when the run was produced by one. The `results` above reflect the
-   * winning variant; this records how the experiment got there.
+   * winning variant; this records how the optimization got there.
    */
-  variantExperiment?: MCPVariantExperimentData;
+  toolOptimization?: MCPToolOptimizationData;
 }
 
 /**
- * Compact summary of a `runVariantExperiment` run, for the reporter UI.
+ * Compact summary of a `runToolOptimization` run, for the reporter UI.
  */
-export interface MCPVariantExperimentData {
+export interface MCPToolOptimizationData {
   /** Metric optimized: passRate | toolF1 | toolPrecision | toolRecall. */
   metric: string;
   /** Baseline metric value (0-1), before any variant. */
@@ -616,7 +616,7 @@ export interface MCPVariantExperimentData {
   winnerVariantId?: string;
   /** apply | reject | inconclusive */
   recommendation?: string;
-  /** Why the experiment stopped. */
+  /** Why the optimization stopped. */
   reason: string;
   /**
    * Case-by-case comparison of every variant against the baseline, computed
@@ -642,7 +642,7 @@ export type VariantCaseGroup = 'capability' | 'regression';
  *
  * - `declared`: cases with the regression tag are regression cases; every
  *   other case is a capability case.
- * - `grouping-run`: no case had the regression tag, so the experiment ran
+ * - `grouping-run`: no case had the regression tag, so the optimization ran
  *   the baseline once more, only to group cases: those that passed it are
  *   regression cases.
  */
@@ -764,7 +764,7 @@ export interface VariantToolMistake {
  * Where a variant landed.
  *
  * - `baseline`: the reference every variant is compared with.
- * - `recommended`: the experiment's winner.
+ * - `recommended`: the optimization's winner.
  * - `breaks`: disqualified for breaking cases that work today.
  * - `better`: better than the baseline, but not the winner.
  * - `worse`: worse than the baseline on cases that should now work.
@@ -787,7 +787,7 @@ export interface VariantComparisonEntry {
   /**
    * The two checks a winner must pass: clearly better than the baseline,
    * after adjusting for every variant tried, and not breaking
-   * `regression` cases under the experiment's rule.
+   * `regression` cases under the optimization's rule.
    */
   checks?: { fixes: boolean; keepsRegressions: boolean };
   capability: VariantGroupStats;

@@ -6,11 +6,11 @@ import type { Tool } from '@modelcontextprotocol/client';
 import { createFixtureExtensions } from '../mcp/fixtures/fixtureExtensions.js';
 
 const mocks = vi.hoisted(() => ({
-  simulateMCPHost: vi.fn(),
+  simulateMstClient: vi.fn(),
 }));
 
-vi.mock('./mcpHost/mcpHostSimulation.js', () => ({
-  simulateMCPHost: mocks.simulateMCPHost,
+vi.mock('./mstClient/simulation.js', () => ({
+  simulateMstClient: mocks.simulateMstClient,
 }));
 
 function createMockMCP(tools: Tool[]): MCPFixtureApi {
@@ -38,7 +38,7 @@ function createContext(mcp: MCPFixtureApi): EvalContext {
   };
 }
 
-function createHostDataset(): EvalDataset {
+function createClientDataset(): EvalDataset {
   return {
     name: 'tool-override-test',
     cases: [
@@ -57,7 +57,7 @@ function createHostDataset(): EvalDataset {
 
 describe('runEvalDataset toolOverrides', () => {
   beforeEach(() => {
-    mocks.simulateMCPHost.mockReset();
+    mocks.simulateMstClient.mockReset();
   });
 
   it('exposes overridden tool metadata to mcp_host runs and preserves untouched tools', async () => {
@@ -78,16 +78,18 @@ describe('runEvalDataset toolOverrides', () => {
     ]);
 
     let observedTools: Tool[] = [];
-    mocks.simulateMCPHost.mockImplementation(async (hostMcp: MCPFixtureApi) => {
-      observedTools = await hostMcp.listTools();
-      return {
-        success: true,
-        toolCalls: [{ name: 'search', arguments: { query: 'expense' } }],
-        response: 'Done',
-      };
-    });
+    mocks.simulateMstClient.mockImplementation(
+      async (clientMcp: MCPFixtureApi) => {
+        observedTools = await clientMcp.listTools();
+        return {
+          success: true,
+          toolCalls: [{ name: 'search', arguments: { query: 'expense' } }],
+          response: 'Done',
+        };
+      }
+    );
 
-    const dataset = createHostDataset();
+    const dataset = createClientDataset();
     const result = await runEvalDataset(
       {
         dataset,
@@ -149,18 +151,22 @@ describe('runEvalDataset toolOverrides', () => {
       },
     ]);
 
-    mocks.simulateMCPHost.mockImplementation(async (hostMcp: MCPFixtureApi) => {
-      await hostMcp.callTool('search', { query: 'expense policy' });
-      return {
-        success: true,
-        toolCalls: [{ name: 'search', arguments: { query: 'expense policy' } }],
-        response: 'Done',
-      };
-    });
+    mocks.simulateMstClient.mockImplementation(
+      async (clientMcp: MCPFixtureApi) => {
+        await clientMcp.callTool('search', { query: 'expense policy' });
+        return {
+          success: true,
+          toolCalls: [
+            { name: 'search', arguments: { query: 'expense policy' } },
+          ],
+          response: 'Done',
+        };
+      }
+    );
 
     await runEvalDataset(
       {
-        dataset: createHostDataset(),
+        dataset: createClientDataset(),
         toolOverrides: {
           id: 'search-schema-v2',
           tools: {
@@ -187,14 +193,16 @@ describe('runEvalDataset toolOverrides', () => {
       },
     ]);
 
-    mocks.simulateMCPHost.mockImplementation(async (hostMcp: MCPFixtureApi) => {
-      await hostMcp.listTools();
-      return { success: true, toolCalls: [], response: 'Done' };
-    });
+    mocks.simulateMstClient.mockImplementation(
+      async (clientMcp: MCPFixtureApi) => {
+        await clientMcp.listTools();
+        return { success: true, toolCalls: [], response: 'Done' };
+      }
+    );
 
     const result = await runEvalDataset(
       {
-        dataset: createHostDataset(),
+        dataset: createClientDataset(),
         toolOverrides: {
           id: 'bad-variant',
           tools: {
@@ -216,10 +224,10 @@ describe('runEvalDataset toolOverrides', () => {
 
 describe('runEvalDataset toolOverrides renames', () => {
   beforeEach(() => {
-    mocks.simulateMCPHost.mockReset();
+    mocks.simulateMstClient.mockReset();
   });
 
-  it('shows the host the new name and records calls under the original', async () => {
+  it('shows the client the new name and records calls under the original', async () => {
     const mcp = createMockMCP([
       {
         name: 'search',
@@ -228,19 +236,21 @@ describe('runEvalDataset toolOverrides renames', () => {
       },
     ]);
     let observed: string[] = [];
-    mocks.simulateMCPHost.mockImplementation(async (hostMcp: MCPFixtureApi) => {
-      observed = (await hostMcp.listTools()).map((tool) => tool.name);
-      await hostMcp.callTool('find_documents', { query: 'expense' });
-      return {
-        success: true,
-        toolCalls: [
-          { name: 'find_documents', arguments: { query: 'expense' } },
-        ],
-        response: 'Done',
-      };
-    });
+    mocks.simulateMstClient.mockImplementation(
+      async (clientMcp: MCPFixtureApi) => {
+        observed = (await clientMcp.listTools()).map((tool) => tool.name);
+        await clientMcp.callTool('find_documents', { query: 'expense' });
+        return {
+          success: true,
+          toolCalls: [
+            { name: 'find_documents', arguments: { query: 'expense' } },
+          ],
+          response: 'Done',
+        };
+      }
+    );
     // The dataset expects the original name: variants compare like for like.
-    const dataset = createHostDataset();
+    const dataset = createClientDataset();
 
     const result = await runEvalDataset(
       {

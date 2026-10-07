@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { awaitingUserAnswer } from './externalHost/builtins/claudeTrace.js';
+import { awaitingUserAnswer } from './externalClient/builtins/claudeTrace.js';
 
-const ask = { name: 'AskUserQuestion', source: 'host' };
+const ask = { name: 'AskUserQuestion', source: 'builtin' };
 
 describe('awaitingUserAnswer', () => {
-  it('detects a pending AskUserQuestion as the latest host call', () => {
+  it('detects a pending AskUserQuestion as the latest client call', () => {
     expect(
       awaitingUserAnswer({
         isComplete: false,

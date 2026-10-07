@@ -66,7 +66,7 @@ export function clientOf(
 /**
  * A variant's or case's change to the client it inherits: a different client,
  * model or options. Options of a different client than the inherited one
- * don't carry over (see `inheritHost`).
+ * don't carry over (see `inheritClient`).
  */
 export function clientPatchOf(
   level: ClientFields | undefined

@@ -31,7 +31,7 @@ npm test
 
 ```
                     ┌─────────────────────┐
-                    │   LLM Host E2E      │  ← Real LLM discovers & calls tools
+                    │   LLM Client E2E      │  ← Real LLM discovers & calls tools
                     │   (functional)      │     Requires API keys
                     ├─────────────────────┤
                     │   Data-Driven       │  ← JSON datasets + assertions
@@ -141,7 +141,7 @@ filesystem-server/
 
 ## Running LLM Tests
 
-LLM host tests require an Anthropic API key:
+LLM client tests require an Anthropic API key:
 
 ```bash
 ANTHROPIC_API_KEY=your-key npm test

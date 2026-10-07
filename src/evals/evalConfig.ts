@@ -33,7 +33,7 @@ export interface DatasetConfig extends TaggedConfig {
   recursive?: boolean;
 }
 
-/** A host implementation declaration. Host-specific options are plugin-owned. */
+/** A client implementation declaration. Client-specific options are plugin-owned. */
 export type ClientConfig = TaggedConfig;
 
 /** A judge, metric, or other named extension declaration. */
@@ -144,12 +144,12 @@ export interface EvalConfig {
   maxToolCalls?: number;
   /** Require HTTP server URLs to use an explicit /eval endpoint. */
   requireEvalEndpoint?: boolean;
-  /** USD per million tokens, by model: estimates cost for hosts that don't report it. */
+  /** USD per million tokens, by model: estimates cost for clients that don't report it. */
   pricing?: Record<string, ModelPricing>;
   /** Generation defaults for clients that call a model API (mst). */
   temperature?: number;
   maxTokens?: number;
-  /** Default share of a host case's trials that must pass (cases may set their own). */
+  /** Default share of a client case's trials that must pass (cases may set their own). */
   passThreshold?: number;
   [key: string]: unknown;
 }
@@ -288,7 +288,7 @@ export const EvalConfigSchema = z
     timeout: z.number().int().positive().optional(),
     maxToolCalls: z.number().int().nonnegative().optional(),
     requireEvalEndpoint: z.boolean().optional(),
-    /** Generation defaults for API hosts; the host validates their range. */
+    /** Generation defaults for API clients; the client validates their range. */
     temperature: z.number().optional(),
     maxTokens: z.number().optional(),
     passThreshold: z.number().min(0).max(1).optional(),
@@ -310,7 +310,7 @@ export const EvalConfigSchema = z
       .optional(),
     redactStoredResponses: z.boolean().optional(),
     /**
-     * USD per million tokens, by model, for hosts that report tokens but not
+     * USD per million tokens, by model, for clients that report tokens but not
      * cost. MST ships no prices: they change, and every estimate should be
      * traceable to a table someone chose.
      */

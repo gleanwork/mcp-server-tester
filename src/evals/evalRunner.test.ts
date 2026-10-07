@@ -20,23 +20,23 @@ import {
 } from './resultStore.js';
 import { createFixtureExtensions } from '../mcp/fixtures/fixtureExtensions.js';
 import type { CaseExecution } from './caseExecution.js';
-import { hostRunToExecution } from './hostTrace.js';
-import type * as SimulationModule from './mcpHost/mcpHostSimulation.js';
-import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
-import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
+import { clientRunToExecution } from './clientTrace.js';
+import type * as SimulationModule from './mstClient/simulation.js';
+import { simulateMstClient } from './mstClient/simulation.js';
+import type { MstClientSimulationResult } from './mstClient/types.js';
 
 // A stand-in for the mst client's model: it calls the connection's tool once
 // and answers with what the tool returned. A tool result shaped like a
 // simulation is taken as the client's whole run, so a test can set the calls.
-vi.mock('./mcpHost/mcpHostSimulation.js', async (original) => ({
+vi.mock('./mstClient/simulation.js', async (original) => ({
   ...(await original<typeof SimulationModule>()),
-  simulateMCPHost: vi.fn(
-    async (mcp: MCPFixtureApi): Promise<MCPHostSimulationResult> => {
+  simulateMstClient: vi.fn(
+    async (mcp: MCPFixtureApi): Promise<MstClientSimulationResult> => {
       const result = (await mcp.callTool('test-tool', {
         input: 'test',
       })) as unknown as Record<string, unknown>;
       if ('success' in result && 'toolCalls' in result)
-        return result as unknown as MCPHostSimulationResult;
+        return result as unknown as MstClientSimulationResult;
       const text = ((result.content as Array<{ text?: string }>) ?? [])
         .map((block) => block.text ?? '')
         .join('');
@@ -139,10 +139,10 @@ describe('runEvalCase', () => {
 
       const result = await runEvalCase(evalCase, context);
 
-      expect(simulateMCPHost).toHaveBeenCalledWith(
+      expect(simulateMstClient).toHaveBeenCalledWith(
         mcp,
         'test',
-        expect.objectContaining({ hostType: 'sdk' })
+        expect.objectContaining({ clientType: 'sdk' })
       );
       expect(result.id).toBe('test-case');
       expect(result.source).toBe('eval');
@@ -303,7 +303,7 @@ describe('runEvalCase', () => {
       expect(result.error).toContain('a case needs input');
     });
 
-    it('fails a case on a client other than mst, which runs in a suite', async () => {
+    it('fails a case on a client other than mst, which runs in an eval', async () => {
       const context = createContext();
       const evalCase = createEvalCase({
         input: 'test scenario',
@@ -314,7 +314,7 @@ describe('runEvalCase', () => {
       });
 
       expect(result.pass).toBe(false);
-      expect(result.error).toContain('Run "cowork" in a suite (mst run).');
+      expect(result.error).toContain('Run "cowork" in an eval (mst run).');
     });
 
     it("records the run's client and model on the result", async () => {
@@ -325,7 +325,7 @@ describe('runEvalCase', () => {
           client: 'mst',
           model: 'claude-haiku-4-5',
           executeCase: async () =>
-            hostRunToExecution({ finalText: 'ok', events: [] }, 'structured'),
+            clientRunToExecution({ finalText: 'ok', events: [] }, 'structured'),
         }
       );
       expect(result.request).toMatchObject({
@@ -516,7 +516,7 @@ describe('defaultJudgeReps', () => {
 
 describe('toolsTriggered and toolCallCount assertions in eval runner', () => {
   it('populates toolsTriggered assertion result when simulation result contains expected tool', async () => {
-    // callTool returns an object that itself has the MCPHostSimulationResult shape.
+    // callTool returns an object that itself has the MstClientSimulationResult shape.
     // After the fix, response = full callTool return value, so isSimulationResult
     // checks the top-level object directly.
     const mcp = createMockMCP();
@@ -611,10 +611,10 @@ describe('runEvalDataset defaultTrials', () => {
       }),
     ]);
 
-    // An in-memory host at the case-execution seam stands in for the LLM.
+    // An in-memory client at the case-execution seam stands in for the LLM.
     const executeCase = vi.fn(
       async (): Promise<CaseExecution> =>
-        hostRunToExecution({ finalText: 'ok', events: [] }, 'structured')
+        clientRunToExecution({ finalText: 'ok', events: [] }, 'structured')
     );
     const result = await runEvalDataset(
       { dataset, defaultTrials: 3, executeCase },
@@ -730,7 +730,7 @@ describe('runEvalDataset', () => {
         dataset: createDataset([createEvalCase({ id: 'case-1' })]),
         protocol: () => protocol,
         executeCase: async () =>
-          hostRunToExecution({ finalText: '', events: [] }, 'structured'),
+          clientRunToExecution({ finalText: '', events: [] }, 'structured'),
       },
       { ...createContext(), mcp: undefined }
     );
@@ -1689,7 +1689,7 @@ describe('multi-judge passesJudge', () => {
   });
 });
 
-describe('experiment metadata in EvalRunnerResult', () => {
+describe('optimization metadata in EvalRunnerResult', () => {
   function createDataset(cases: EvalCase[]): EvalDataset {
     return { name: 'metadata-test', cases };
   }

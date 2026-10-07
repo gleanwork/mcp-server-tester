@@ -114,13 +114,13 @@ Supported assertions:
 | `toolsTriggered` | The client called the expected tools                    |
 | `toolCallCount`  | The client made a number of tool calls in a range       |
 
-### LLM host mode
+### LLM client mode
 
-In LLM host mode, a real LLM receives your server's tool list and a natural language prompt, then decides which tools to call. This tests whether your tool names, descriptions, and input schemas are clear enough for autonomous use — a different question from whether the tools return correct output.
+In LLM client mode, a real LLM receives your server's tool list and a natural language prompt, then decides which tools to call. This tests whether your tool names, descriptions, and input schemas are clear enough for autonomous use — a different question from whether the tools return correct output.
 
 A case with `input` runs on the client. In a Playwright test, `runEvalDataset` names the client and model (`{ dataset, client: 'mst', model: 'claude-haiku-4-5' }`), and the `mst` client uses the test's MCP connection; a suite eval config names them with `client` and `model`. A case can set its own `client`, `model` and `clientOptions`.
 
-```json snippet=snippets/mcp-host-dataset.json
+```json snippet=snippets/mst-client-dataset.json
 {
   "id": "find-config",
   "input": "Find the application config file and return its contents",
@@ -137,7 +137,7 @@ A case with `input` runs on the client. In a Playwright test, `runEvalDataset` n
 }
 ```
 
-LLM host mode makes real API calls and produces non-deterministic results. Use `trials` to run a case multiple times and measure pass rate rather than expecting 100% on a single run. See the [LLM Host Guide](docs/mcp-host.md) for configuration and cost management.
+LLM client mode makes real API calls and produces non-deterministic results. Use `trials` to run a case multiple times and measure pass rate rather than expecting 100% on a single run. See the [LLM Client Guide](docs/mst-client.md) for configuration and cost management.
 
 ## Installation
 
@@ -155,7 +155,7 @@ LLM-as-judge with the default Anthropic judge needs the Anthropic SDK:
 npm install --save-dev @anthropic-ai/sdk
 ```
 
-The SDK host's packages (`ai` and the `@ai-sdk/*` providers) are optional dependencies, installed by default; add them yourself if you install with `--omit=optional`.
+The SDK client's packages (`ai` and the `@ai-sdk/*` providers) are optional dependencies, installed by default; add them yourself if you install with `--omit=optional`.
 
 ## Quick Start
 
@@ -193,16 +193,16 @@ export default defineConfig({
 For HTTP servers, set `transport: 'http'` and `serverUrl`. For servers that require OAuth, see the [Transports Guide](./docs/transports.md) and [CLI Guide](./docs/cli.md) for authentication setup, including CI/CD token management.
 
 Plain stdio is supported by Claude CLI, Vercel AI SDK, ChatGPT Work/Codex, and
-Cowork evaluation hosts, including Cowork on macOS and Linux. Cowork also
+Cowork evaluation clients, including Cowork on macOS and Linux. Cowork also
 supports private file-backed native proxies and mixed HTTP/stdio server sets.
-See [evaluation host transport support](./docs/transports.md#evaluation-host-support)
-for host-specific fields, environment rules, and setup ownership.
+See [evaluation client transport support](./docs/transports.md#evaluation-client-support)
+for client-specific fields, environment rules, and setup ownership.
 
 ## Documentation
 
 - [Quick Start](./docs/quickstart.md) — detailed setup and configuration
 - [Assertions](./docs/assertions.md) — all assertion types including snapshot sanitizers
-- [LLM Host Simulation](docs/mcp-host.md) — tool discoverability testing
+- [LLM Client Simulation](docs/mst-client.md) — tool discoverability testing
 - [LLM Gateways](./docs/llm-gateways.md) — routing MST's LLM calls through a gateway
 - [API Reference](./docs/api-reference.md)
 - [Transports](./docs/transports.md) — stdio and HTTP configuration, OAuth
@@ -216,7 +216,7 @@ for host-specific fields, environment rules, and setup ownership.
 
 ## AI Skills
 
-Install AI skills to help your coding assistant generate tests, eval datasets, and MCP host evals:
+Install AI skills to help your coding assistant generate tests, eval datasets, and client evals:
 
 ```bash
 npx skills add -g gleanwork/mcp-server-tester
@@ -224,12 +224,12 @@ npx skills add -g gleanwork/mcp-server-tester
 
 This installs skills globally so they're available across all your projects. Four skills are included:
 
-| Skill                 | Description                                                 |
-| --------------------- | ----------------------------------------------------------- |
-| `mcp-tester-guide`    | Framework reference — matchers, config, auth, anti-patterns |
-| `write-mcp-test`      | Generate Playwright tool tests                              |
-| `write-mcp-eval`      | Generate data-driven eval datasets                          |
-| `write-mcp-host-eval` | Generate LLM host simulation evals                          |
+| Skill                   | Description                                                 |
+| ----------------------- | ----------------------------------------------------------- |
+| `mcp-tester-guide`      | Framework reference — matchers, config, auth, anti-patterns |
+| `write-mcp-test`        | Generate Playwright tool tests                              |
+| `write-mcp-eval`        | Generate data-driven eval datasets                          |
+| `write-mcp-client-eval` | Generate LLM client simulation evals                        |
 
 Compatible with Claude Code, Cursor, Windsurf, Copilot, and [40+ other AI agents](https://github.com/nicepkg/nice-skills).
 
@@ -244,7 +244,7 @@ The `examples/` directory contains complete working examples:
 ## Eval configs
 
 For projects with multiple datasets, use an eval config. Dataset
-paths are shorthand for tagged file sources, while hosts, metrics, judges,
+paths are shorthand for tagged file sources, while clients, metrics, judges,
 result stores, and other extensions are built-ins or come from plugins
 (referenced as `namespace/name`):
 
@@ -293,12 +293,12 @@ npx mst batch \
   --dry-run
 ```
 
-Use `variants` to compare server sets or host configurations. A variant can override
+Use `variants` to compare server sets or client configurations. A variant can override
 servers, client, model, client options, tool maps, input templates, metrics, and judges.
 The canonical execution primitives remain `EvalDataset`, `EvalCase`,
 `MCPConfig`, and `runEvalDataset`.
 
-Plugins add dataset sources, hosts, judges, metrics and result stores. A plugin
+Plugins add dataset sources, clients, judges, metrics and result stores. A plugin
 is a plain default-exported object in ESLint's shape, and its extensions are
 referenced as `namespace/name`. See
 [Plugins](docs/evaluation-framework.md#plugins).
