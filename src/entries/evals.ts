@@ -161,3 +161,10 @@ export type {
   PreferredSide,
   PairwisePreference,
 } from '../judge/pairwiseContract.js';
+
+// Dry-run proxy: blocks writes to an HTTP MCP server a connector launches.
+export {
+  dryRunProxyServer,
+  PLANNED_WRITE_KEY,
+} from '../proxy/dryRunProxyServer.js';
+export type { DryRunProxyServerOptions } from '../proxy/dryRunProxyServer.js';
