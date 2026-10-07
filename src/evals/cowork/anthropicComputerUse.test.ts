@@ -6,6 +6,7 @@ import {
   ComputerUseDriverError,
   ComputerUseHitlBudgetError,
   runAnthropicComputerUseHitl,
+  runAnthropicComputerUseReset,
   runAnthropicComputerUseSubmission,
 } from './anthropicComputerUse.js';
 
@@ -416,3 +417,33 @@ it.each(['budget', 'action-error', 'submit'] as const)(
       );
   }
 );
+
+it('runs a reset in reset mode with a small budget, and requires reset_done', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'cu-reset-'));
+  onTestFinished(() => rm(directory, { recursive: true, force: true }));
+  await mkdir(join(directory, 'scripts'));
+  await writeFile(join(directory, 'package.json'), '{"type":"commonjs"}');
+  await writeFile(
+    join(directory, 'scripts/cowork_computer_use.py'),
+    `
+    const args = process.argv;
+    if (args[args.indexOf('--mode') + 1] !== 'reset') process.exit(3);
+    if (args[args.indexOf('--max-actions') + 1] !== '8') process.exit(4);
+    console.log(JSON.stringify({status: process.env.RESET_STATUS, action_count: 2, model: 'claude-sonnet-4-6'}));
+  `
+  );
+  const options = (status: string) => ({
+    deadlineAt: Date.now() + 10000,
+    env: {
+      MST_COWORK_DRIVER_ROOT: directory,
+      MST_COWORK_PYTHON: process.execPath,
+      RESET_STATUS: status,
+    },
+  });
+  await expect(
+    runAnthropicComputerUseReset(options('reset_done'))
+  ).resolves.toMatchObject({ status: 'reset_done', action_count: 2 });
+  await expect(
+    runAnthropicComputerUseReset(options('submitted'))
+  ).rejects.toThrow('Computer Use reset did not reach reset_done.');
+});

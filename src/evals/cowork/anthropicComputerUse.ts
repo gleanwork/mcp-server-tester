@@ -95,6 +95,30 @@ export async function runAnthropicComputerUseSubmission(
   return runComputerUseDriver(query, options, 'submit', 'submission');
 }
 
+/** What a reset run reports: the app has no task running and no prompt open. */
+export interface ComputerUseResetResult {
+  status: 'reset_done';
+  action_count: number;
+  model: string;
+  telemetry?: ComputerUseTelemetry;
+}
+
+/**
+ * After a failed case, stop a still-running task and decline any open
+ * permission prompt, so the next case's fresh task is independent. Never
+ * types or submits.
+ */
+export async function runAnthropicComputerUseReset(
+  options: ComputerUseOptions
+): Promise<ComputerUseResetResult> {
+  return runComputerUseDriver(
+    'Leave Cowork with no task running and no prompt open.',
+    { ...options, maxActions: options.maxActions ?? 8 },
+    'reset',
+    'reset'
+  );
+}
+
 export async function runAnthropicComputerUseHitl(
   options: ComputerUseOptions & { task?: string }
 ): Promise<ComputerUseHitlResult> {
@@ -119,12 +143,20 @@ function runComputerUseDriver(
   mode: 'hitl',
   label: string
 ): Promise<ComputerUseHitlResult>;
+function runComputerUseDriver(
+  query: string,
+  options: ComputerUseOptions,
+  mode: 'reset',
+  label: string
+): Promise<ComputerUseResetResult>;
 async function runComputerUseDriver(
   query: string,
   options: ComputerUseOptions,
-  mode: 'submit' | 'hitl',
+  mode: 'submit' | 'hitl' | 'reset',
   label: string
-): Promise<ComputerUseSubmissionResult | ComputerUseHitlResult> {
+): Promise<
+  ComputerUseSubmissionResult | ComputerUseHitlResult | ComputerUseResetResult
+> {
   if (options.deadlineAt <= Date.now())
     throw new Error(`Computer Use ${label} deadline exceeded; not retrying.`);
   const env = await driverEnvironment({
@@ -216,7 +248,12 @@ async function runComputerUseDriver(
     `Computer Use ${label} exited successfully (stdoutBytes=${stdout.length})`
   );
   const record = parseLastJsonLine(stdout);
-  const expectedStatus = mode === 'submit' ? 'submitted' : 'hitl_checked';
+  const expectedStatus =
+    mode === 'submit'
+      ? 'submitted'
+      : mode === 'reset'
+        ? 'reset_done'
+        : 'hitl_checked';
   if (record?.status !== expectedStatus) {
     throw new ComputerUseDriverError(
       `Computer Use ${label} did not reach ${expectedStatus}.`,
@@ -239,6 +276,7 @@ async function runComputerUseDriver(
     `Computer Use ${label} completed (actions=${common.action_count})`
   );
   if (mode === 'hitl') return { status: 'hitl_checked', ...common };
+  if (mode === 'reset') return { status: 'reset_done', ...common };
   const submission = asRecord(record.submission_action);
   if (submission?.action !== 'key' || submission.text !== 'enter') {
     throw new ComputerUseDriverError(
