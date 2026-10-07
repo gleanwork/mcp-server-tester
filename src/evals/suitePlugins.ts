@@ -42,7 +42,7 @@ export async function loadSuitePlugins(
 /** Extensions a dataset's cases name themselves: hosts and judges. */
 function datasetReferences(dataset: EvalDataset): string[] {
   const hosts = dataset.cases.flatMap((evalCase) =>
-    typeof evalCase.host?.type === 'string' ? [evalCase.host.type] : []
+    typeof evalCase.client === 'string' ? [evalCase.client] : []
   );
   const judges = dataset.cases.flatMap((evalCase) => {
     const configs = evalCase.assertions?.passesJudge;

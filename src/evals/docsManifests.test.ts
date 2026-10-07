@@ -1,7 +1,8 @@
 /**
  * Every JSON manifest and dataset in the README and the docs is one that
  * `mst run` accepts. Migration guides and ADRs are left out: their "before"
- * examples are old on purpose. Annotated references with comments are
+ * examples are old on purpose. So are design proposals (`docs/design/`),
+ * whose examples show keys that don't exist yet. Annotated references with comments are
  * fenced as `jsonc` and not checked.
  */
 import fs from 'node:fs';
@@ -29,6 +30,7 @@ function markdownFiles(): string[] {
         file.endsWith('.md') &&
         !file.startsWith('migrations') &&
         !file.startsWith('adr') &&
+        !file.startsWith('design') &&
         !path.basename(file).startsWith('migration-')
     )
     .map((file) => path.join('docs', file));

@@ -46,9 +46,17 @@ export function resolveManifestExtends(
       ([, value]) => value !== undefined
     )
   );
+  // `client` and `clientOptions` go together: a manifest that sets either
+  // replaces the shared config's client, so one client's options never
+  // apply to another.
+  const ownsClient = 'client' in own || 'clientOptions' in own;
   return Object.assign(
     {},
-    ...references.map(sharedConfig),
+    ...references.map(sharedConfig).map((config) => {
+      if (!ownsClient) return config;
+      const { client: _client, clientOptions: _options, ...rest } = config;
+      return rest;
+    }),
     own
   ) as EvalManifest;
 }
@@ -72,7 +80,7 @@ function sharedConfig(reference: string): Record<string, unknown> {
 /** The extension types a config names. */
 function configReferences(config: ParsedPluginConfig): string[] {
   return [
-    config.host?.type,
+    config.client,
     config.results?.store.type,
     ...(config.judges ?? []).map((judge) => judge.type),
     // A metric names its definition in `metric`, or by its `type`.

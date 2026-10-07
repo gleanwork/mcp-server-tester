@@ -22,6 +22,7 @@ import {
 import type { ClientDiagnostics, UsageMetrics } from '../types/index.js';
 import type { EvalCase } from './datasetTypes.js';
 import type { EvalArm, EvalManifest, ClientConfig } from './evalManifest.js';
+import { clientPatchOf } from './clientFields.js';
 import type {
   TraceEvent,
   TraceEvidence,
@@ -262,7 +263,9 @@ export function createSuiteCaseExecutor(
 ): (evalCase: EvalCase) => Promise<CaseExecution> {
   const { servers, manifest, arm, env, batchTraces } = options;
   return async (evalCase) => {
-    const declaration = evalCase.host ?? options.host;
+    // The suite resolves a case's own client in full (see runEvalSuite).
+    const declaration =
+      (clientPatchOf(evalCase) as ClientConfig | undefined) ?? options.host;
     if ((evalCase.mode ?? 'direct') === 'direct') {
       const selected =
         servers.length === 1

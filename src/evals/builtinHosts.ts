@@ -499,7 +499,7 @@ export function assertHostSupports(
       !definition.runBatch);
   if (options.toolOverrides !== undefined && !appliesOverrides) {
     throw new Error(
-      `${options.context}: host "${host.type}" can't apply toolOverrides; it would run with the original tools. ` +
+      `${options.context}: client "${host.type}" can't apply toolOverrides; it would run with the original tools. ` +
         'Use a client that shows tool variants to the model (mst), or one that connects to the servers it is given.'
     );
   }
@@ -508,7 +508,7 @@ export function assertHostSupports(
     (options.concurrency ?? 1) > definition.maxConcurrency
   ) {
     throw new Error(
-      `${options.context}: host "${host.type}" runs at most ${definition.maxConcurrency} case at a time; set concurrency to ${definition.maxConcurrency}.`
+      `${options.context}: client "${host.type}" runs at most ${definition.maxConcurrency} case at a time; set concurrency to ${definition.maxConcurrency}.`
     );
   }
   if (host.type === 'claude-code')

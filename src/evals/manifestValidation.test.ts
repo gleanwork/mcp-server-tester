@@ -11,6 +11,7 @@ import type {
   ResultStoreDefinition,
 } from './evalFrameworkTypes.js';
 import type { EvalManifest } from './evalManifest.js';
+import { clientPatchOf } from './clientFields.js';
 
 const schema = z.object({}).passthrough();
 
@@ -76,7 +77,7 @@ describe('manifest validation', () => {
         { transport: 'http', serverUrl: 'https://one.example', label: 'one' },
         { transport: 'http', serverUrl: 'https://two.example', label: 'two' },
       ],
-      host: { type: 'test/sdk' },
+      client: 'test/sdk',
       metrics: [{ type: 'test/passed' }],
       judges: [{ type: 'test/correctness' }],
       results: { store: { type: 'test/file' } },
@@ -188,7 +189,7 @@ describe('manifest validation', () => {
     const manifest: EvalManifest = {
       name: 'parsed',
       datasets: [{ type: 'test/custom', ignored: true }],
-      host: { type: 'test/custom' },
+      client: 'test/custom',
       metrics: [{ type: 'test/custom', name: 'alias' }],
       judges: [{ type: 'test/custom' }],
       results: { store: { type: 'test/custom' } },
@@ -196,7 +197,8 @@ describe('manifest validation', () => {
         { name: 'inherited' },
         {
           name: 'override',
-          host: { type: 'test/custom', count: 4 },
+          client: 'test/custom',
+          clientOptions: { count: 4 },
           metrics: [],
           judges: [],
         },
@@ -204,15 +206,18 @@ describe('manifest validation', () => {
     };
     const parsed = validateManifest(manifest);
     expect(parsed.datasets).toEqual([{ type: 'test/custom', count: 6 }]);
-    expect(parsed.host).toEqual({ type: 'test/custom', count: 6 });
+    expect(clientPatchOf(parsed)).toEqual({ type: 'test/custom', count: 6 });
     expect(parsed.metrics).toEqual([
       { type: 'test/custom', name: 'alias', count: 6 },
     ]);
     expect(parsed.judges).toEqual([{ type: 'test/custom', count: 6 }]);
     expect(parsed.results?.store).toEqual({ type: 'test/custom', count: 6 });
-    expect(parsed.arms?.[0]?.host).toEqual(parsed.host);
+    expect(clientPatchOf(parsed.arms?.[0])).toEqual(clientPatchOf(parsed));
     expect(parsed.arms?.[0]?.metrics).toEqual(parsed.metrics);
-    expect(parsed.arms?.[1]?.host).toEqual({ type: 'test/custom', count: 12 });
+    expect(clientPatchOf(parsed.arms?.[1])).toEqual({
+      type: 'test/custom',
+      count: 12,
+    });
     expect(parsed.arms?.[1]?.metrics).toEqual([]);
     expect(manifest.datasets[0]).toEqual({
       type: 'test/custom',
@@ -338,11 +343,18 @@ describe('manifest validation', () => {
       datasets: [{ type: 'test/file' }],
     };
     if (kind === 'dataset') manifest.datasets = [config];
-    if (kind === 'host') manifest.host = config;
+    if (kind === 'host') {
+      const { type, ...options } = config;
+      manifest.client = type;
+      manifest.clientOptions = options;
+    }
     if (kind === 'metric') manifest.metrics = [config];
     if (kind === 'judge') manifest.judges = [config];
     if (kind === 'store') manifest.results = { store: config };
-    if (kind === 'armHost') manifest.arms = [{ name: 'arm', host: config }];
+    if (kind === 'armHost') {
+      const { type, ...options } = config;
+      manifest.arms = [{ name: 'arm', client: type, clientOptions: options }];
+    }
     if (kind === 'armMetric')
       manifest.arms = [{ name: 'arm', metrics: [config] }];
     if (kind === 'armJudge')
@@ -368,7 +380,7 @@ describe('manifest validation', () => {
       name: 'effective',
       datasets: [{ type: 'test/file' }],
       maxToolCalls: 5,
-      arms: [{ name: 'arm', host: { type: 'test/limited' } }],
+      arms: [{ name: 'arm', client: 'test/limited' }],
     };
     expect(() => validateManifest(manifest)).toThrow(
       'Invalid host options "test/limited"'
@@ -377,18 +389,24 @@ describe('manifest validation', () => {
       ...manifest,
       maxToolCalls: 2,
     });
-    expect(parsed.arms?.[0]?.host).toEqual({
+    expect(clientPatchOf(parsed.arms?.[0])).toEqual({
       type: 'test/limited',
       maxToolCalls: 2,
       model: 'default',
     });
     expect(
-      validateManifest({
-        ...manifest,
-        arms: [
-          { name: 'arm', host: { type: 'test/limited', maxToolCalls: 1 } },
-        ],
-      }).arms?.[0]?.host?.maxToolCalls
+      clientPatchOf(
+        validateManifest({
+          ...manifest,
+          arms: [
+            {
+              name: 'arm',
+              client: 'test/limited',
+              clientOptions: { maxToolCalls: 1 },
+            },
+          ],
+        }).arms?.[0]
+      )?.maxToolCalls
     ).toBe(1);
   });
 
@@ -464,12 +482,15 @@ describe('settings a host would ignore', () => {
     'rejects toolOverrides for %s, which never shows them to the model',
     (type) => {
       installHosts();
-      const host = type === 'chatgpt' ? { type, model: 'gpt-5' } : { type };
+      const client =
+        type === 'chatgpt'
+          ? { client: type, model: 'gpt-5' }
+          : { client: type };
       expect(() =>
-        validateManifest(base({ host, toolOverrides: overrides }), {
+        validateManifest(base({ ...client, toolOverrides: overrides }), {
           namespaces: ['test'],
         })
-      ).toThrow(`The manifest: host "${type}" can't apply toolOverrides;`);
+      ).toThrow(`The manifest: client "${type}" can't apply toolOverrides;`);
     }
   );
 
@@ -478,7 +499,7 @@ describe('settings a host would ignore', () => {
     (type) => {
       installHosts();
       expect(() =>
-        validateManifest(base({ host: { type }, toolOverrides: overrides }), {
+        validateManifest(base({ client: type, toolOverrides: overrides }), {
           namespaces: ['test'],
         })
       ).not.toThrow();
@@ -488,14 +509,15 @@ describe('settings a host would ignore', () => {
   it('rejects toolOverrides on the arm that sets them, and accepts them for vercel-sdk', () => {
     installTestPlugin();
     const manifest = base({
-      host: { type: 'mst', provider: 'anthropic' },
+      client: 'mst',
+      clientOptions: { provider: 'anthropic' },
       arms: [
         { name: 'sdk', toolOverrides: overrides },
-        { name: 'desktop', host: { type: 'cowork' }, toolOverrides: overrides },
+        { name: 'desktop', client: 'cowork', toolOverrides: overrides },
       ],
     });
     expect(() => validateManifest(manifest, { namespaces: ['test'] })).toThrow(
-      `Arm "desktop": host "cowork" can't apply toolOverrides;`
+      `Arm "desktop": client "cowork" can't apply toolOverrides;`
     );
     expect(() =>
       validateManifest(
@@ -509,7 +531,7 @@ describe('settings a host would ignore', () => {
     expect(() =>
       validateManifest(
         base({
-          host: { type: 'claude-code' },
+          client: 'claude-code',
           servers: [
             {
               transport: 'http',
@@ -526,7 +548,9 @@ describe('settings a host would ignore', () => {
 
   it('rejects an option mst would drop', () => {
     expect(() =>
-      validateManifest(base({ host: { type: 'mst', reasoningEffort: 'high' } }))
+      validateManifest(
+        base({ client: 'mst', clientOptions: { reasoningEffort: 'high' } })
+      )
     ).toThrow(/Unrecognized key.*reasoningEffort/s);
   });
 
@@ -538,7 +562,9 @@ describe('settings a host would ignore', () => {
     expect(() =>
       validateManifest(
         base({
-          host: { type, ...extra, systemPrompt: 'Use find_skills first.' },
+          client: type,
+          ...extra,
+          clientOptions: { systemPrompt: 'Use find_skills first.' },
         })
       )
     ).not.toThrow();
@@ -553,7 +579,9 @@ describe('settings a host would ignore', () => {
       expect(() =>
         validateManifest(
           base({
-            host: { type, ...extra, systemPrompt: 'Use find_skills first.' },
+            client: type,
+            ...extra,
+            clientOptions: { systemPrompt: 'Use find_skills first.' },
           })
         )
       ).toThrow(/systemPrompt/);
@@ -577,43 +605,43 @@ describe('settings a host would ignore: defaults, inheritance, opt-in', () => {
       manifest({
         model: 'claude-sonnet-4-6',
         temperature: 0.2,
-        host: { type: 'mst' },
-        arms: [
-          { name: 'mst' },
-          { name: 'code', host: { type: 'claude-code' } },
-        ],
+        client: 'mst',
+        arms: [{ name: 'mst' }, { name: 'code', client: 'claude-code' }],
       })
     );
-    expect(validated.arms?.[0]?.host).toMatchObject({
+    expect(clientPatchOf(validated.arms?.[0])).toMatchObject({
       type: 'mst',
       model: 'claude-sonnet-4-6',
       temperature: 0.2,
     });
-    expect(validated.arms?.[1]?.host).toMatchObject({
+    expect(clientPatchOf(validated.arms?.[1])).toMatchObject({
       type: 'claude-code',
       model: 'claude-sonnet-4-6',
     });
-    expect(validated.arms?.[1]?.host).not.toHaveProperty('temperature');
+    expect(clientPatchOf(validated.arms?.[1])).not.toHaveProperty(
+      'temperature'
+    );
   });
 
   it('rejects a default that none of the hosts takes', () => {
     expect(() =>
-      validateManifest(
-        manifest({ temperature: 0.2, host: { type: 'claude-code' } })
-      )
+      validateManifest(manifest({ temperature: 0.2, client: 'claude-code' }))
     ).toThrow(
-      `The manifest sets "temperature", but none of its hosts (claude-code) takes it.`
+      `The manifest sets "temperature", but none of its clients (claude-code) takes it.`
     );
   });
 
   it("doesn't give an arm the options of a different host", () => {
     const validated = validateManifest(
       manifest({
-        host: { type: 'mst', provider: 'openai', apiKeyEnvVar: 'KEY' },
-        arms: [{ name: 'code', host: { type: 'claude-code' } }],
+        client: 'mst',
+        clientOptions: { provider: 'openai', apiKeyEnvVar: 'KEY' },
+        arms: [{ name: 'code', client: 'claude-code' }],
       })
     );
-    expect(validated.arms?.[0]?.host).not.toHaveProperty('apiKeyEnvVar');
+    expect(clientPatchOf(validated.arms?.[0])).not.toHaveProperty(
+      'apiKeyEnvVar'
+    );
   });
 
   it('accepts toolOverrides for a plugin host that applies them', () => {
@@ -628,7 +656,7 @@ describe('settings a host would ignore: defaults, inheritance, opt-in', () => {
     });
     expect(() =>
       validateManifest(
-        manifest({ host: { type: 'test/variants' }, toolOverrides: overrides }),
+        manifest({ client: 'test/variants', toolOverrides: overrides }),
         { namespaces: ['test'] }
       )
     ).not.toThrow();
@@ -645,12 +673,11 @@ describe('settings a host would ignore: defaults, inheritance, opt-in', () => {
       },
     });
     expect(() =>
-      validateManifest(
-        manifest({ host: { type: 'test/serial' }, concurrency: 4 }),
-        { namespaces: ['test'] }
-      )
+      validateManifest(manifest({ client: 'test/serial', concurrency: 4 }), {
+        namespaces: ['test'],
+      })
     ).toThrow(
-      'host "test/serial" runs at most 1 case at a time; set concurrency to 1.'
+      'client "test/serial" runs at most 1 case at a time; set concurrency to 1.'
     );
   });
 });

@@ -45,7 +45,8 @@ const options = () => ({ deadlineAt: Date.now() + 10000, env: session });
 const manifest: EvalManifest = {
   name: 'linux-contract',
   datasets: [],
-  host: { type: 'cowork', options: { computerUseProvider: 'linux-desktop' } },
+  client: 'cowork',
+  clientOptions: { options: { computerUseProvider: 'linux-desktop' } },
   servers: [
     {
       transport: 'http',

@@ -79,7 +79,7 @@ describe('a run is compared with the previous run of the same manifest', () => {
     const manifest = (name: string) => ({
       name,
       datasets: ['./cases.json'],
-      host: { type: 'base/fixed' },
+      client: 'base/fixed',
       // Relative to the manifest, not to rootDir.
       results: { store: { type: 'file', dir: './store' } },
     });
@@ -156,7 +156,7 @@ describe('a run is compared with the previous run of the same manifest', () => {
       JSON.stringify({
         name: 'm',
         datasets: ['./cases.json'],
-        host: { type: 'base/fixed' },
+        client: 'base/fixed',
         results: { store: { type: 'file', dir: './store' } },
       })
     );

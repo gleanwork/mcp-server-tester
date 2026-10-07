@@ -67,7 +67,8 @@ describe('canonical built-in dataset sources', () => {
           id: 'question',
           mode: 'host',
           input: 'Find policy',
-          host: { type: 'custom-host', option: true },
+          client: 'custom-host',
+          clientOptions: { option: true },
           trials: 3,
           assertions: {
             passesJudge: { judge: 'custom-quality', threshold: 0.8 },

@@ -84,7 +84,7 @@ async function fixture() {
   const manifestPath = path.join(rootDir, 'manifest.json');
   const manifest: EvalManifest = {
     name: 'storage-suite',
-    host: { type: `test/${hostName}` },
+    client: `test/${hostName}`,
     datasets: [{ type: 'file', path: './dataset.json' }],
     results: { store: { type: 'file', dir: storeDir } },
   };

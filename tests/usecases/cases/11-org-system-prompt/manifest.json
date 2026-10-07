@@ -2,8 +2,8 @@
   "name": "find-skills-org-prompt",
   "datasets": ["./dataset.json"],
   "servers": ["{{server aggregate agg}}"],
-  "host": {
-    "type": "usecase/model",
+  "client": "usecase/model",
+  "clientOptions": {
     "policy": [
       {
         "when": {
@@ -55,7 +55,7 @@
     },
     {
       "name": "org-prompt",
-      "host": {
+      "clientOptions": {
         "systemPrompt": "For any action in a connected app (tracker, chat, mail), call find_skills first and use the tools it returns."
       }
     }

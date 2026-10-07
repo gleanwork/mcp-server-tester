@@ -75,8 +75,8 @@ async function suite(arms?: unknown[]): Promise<string> {
           label: 'agg',
         },
       ],
-      host: {
-        type: 'usecase/model',
+      client: 'usecase/model',
+      clientOptions: {
         policy: [
           {
             steps: [

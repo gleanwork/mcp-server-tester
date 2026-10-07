@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { TaggedConfigSchema, type ClientConfig } from './evalManifest.js';
+import { clientFieldSchemas, type ClientFields } from './clientFields.js';
 import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
 import {
   GenerationOptions,
@@ -45,9 +45,7 @@ export interface EvalDirectRequest {
  * For 'mcp_host' mode: input and mcpHostConfig are required
  * For 'external_host' mode: input and externalHost are required
  */
-export interface EvalCase {
-  /** Optional per-case host override: a built-in or a plugin host. */
-  host?: ClientConfig;
+export interface EvalCase extends ClientFields {
   /**
    * Unique identifier for this test case
    */
@@ -545,7 +543,7 @@ export const EvalCaseSchema = z
     id: z.string().min(1, 'id must not be empty'),
     description: z.string().optional(),
     mode: z.enum(['direct', 'host', 'mcp_host', 'external_host']).optional(),
-    host: TaggedConfigSchema.optional(),
+    ...clientFieldSchemas,
     toolName: z.string().min(1, 'toolName must not be empty').optional(),
     args: z.record(z.string(), z.unknown()).optional(),
     request: EvalDirectRequestSchema.optional(),

@@ -2,8 +2,8 @@
   "name": "guidance-plugin-effect",
   "datasets": ["./dataset.json"],
   "servers": ["{{server aggregate agg}}"],
-  "host": {
-    "type": "usecase/model",
+  "client": "usecase/model",
+  "clientOptions": {
     "policy": [
       {
         "when": {
@@ -49,7 +49,7 @@
     },
     {
       "name": "with-guidance",
-      "host": {
+      "clientOptions": {
         "plugins": ["tool-guidance"]
       }
     }

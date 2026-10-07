@@ -508,7 +508,7 @@ describe('golden: runEvalSuite hosts', () => {
       JSON.stringify({
         name: 'golden',
         datasets: [{ type: source }],
-        host: { type },
+        client: type,
         servers: [],
         ...manifestExtra,
       })

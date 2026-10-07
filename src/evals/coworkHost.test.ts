@@ -82,7 +82,8 @@ const context: ClientRunContext = {
   manifest: {
     name: 'cowork',
     datasets: [],
-    host,
+    client: host.type,
+    clientOptions: { timeout: host.timeout, options: host.options },
     servers: [server],
     coworkSetup: { approveWriteTools: true },
   },

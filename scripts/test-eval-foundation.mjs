@@ -296,8 +296,10 @@ try {
     {
       name: 'patch',
       datasets: [{ type: 'foundation/source' }],
-      host: { type: 'foundation/host', model: 'base', count: 2 },
-      arms: [{ name: 'variant', host: { model: 'variant' } }],
+      client: 'foundation/host',
+      model: 'base',
+      clientOptions: { count: 2 },
+      arms: [{ name: 'variant', model: 'variant' }],
     },
     { skipDatasetValidation: true }
   );
@@ -308,20 +310,23 @@ try {
     () => validateManifest(manifest, { namespaces: [] }),
     /doesn't load the "foundation" plugin/
   );
-  assert.equal(resolved.host.count, 6);
-  assert.deepEqual(resolved.arms[0].host, {
-    type: 'foundation/host',
-    model: 'variant',
-    count: 6,
-  });
+  assert.equal(resolved.clientOptions.count, 6);
+  assert.deepEqual(
+    {
+      client: resolved.arms[0].client,
+      model: resolved.arms[0].model,
+      clientOptions: resolved.arms[0].clientOptions,
+    },
+    { client: 'foundation/host', model: 'variant', clientOptions: { count: 6 } }
+  );
   assert.throws(() =>
     validateManifest({
       ...manifest,
-      arms: [{ name: 'bad', host: { model: 17 } }],
+      arms: [{ name: 'bad', model: 17 }],
     })
   );
   console.log(
-    'PASS: partial arm hosts inherit the tag and validate the merged raw configuration once.'
+    'PASS: an arm that sets only its model inherits the client and options, validated once.'
   );
 
   const server = {

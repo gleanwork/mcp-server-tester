@@ -6,16 +6,16 @@
     {
       "name": "assistant",
       "servers": [],
-      "host": {
-        "type": "usecase/assistant",
+      "client": "usecase/assistant",
+      "clientOptions": {
         "answer": "An expired certificate on the payments gateway; the outage lasted 41 minutes."
       }
     },
     {
       "name": "desktop",
       "servers": ["{{server aggregate agg}}"],
-      "host": {
-        "type": "usecase/model",
+      "client": "usecase/model",
+      "clientOptions": {
         "policy": [
           {
             "steps": [
@@ -43,8 +43,8 @@
     {
       "name": "cli",
       "servers": ["{{server aggregate agg}}"],
-      "host": {
-        "type": "usecase/model",
+      "client": "usecase/model",
+      "clientOptions": {
         "policy": [
           {
             "steps": [

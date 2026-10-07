@@ -68,8 +68,8 @@ describe('pricing', () => {
       {
         extends: ['arms/prices'],
         arms: [
-          { name: 'a', host: { type: 'arms/tokens', model: 'model-a' } },
-          { name: 'b', host: { type: 'arms/tokens', model: 'model-b' } },
+          { name: 'a', client: 'arms/tokens', model: 'model-a' },
+          { name: 'b', client: 'arms/tokens', model: 'model-b' },
         ],
       },
       [
@@ -79,7 +79,8 @@ describe('pricing', () => {
           id: 'own-model',
           mode: 'host',
           input: 'q',
-          host: { type: 'arms/tokens', model: 'model-a' },
+          client: 'arms/tokens',
+          model: 'model-a',
         },
       ]
     );
@@ -102,7 +103,7 @@ describe('judge scores in the comparison', () => {
   it('reports per-judge score deltas between arms', async () => {
     const { summary } = await suite(
       {
-        host: { type: 'arms/tokens' },
+        client: 'arms/tokens',
         arms: [
           { name: 'low' },
           {

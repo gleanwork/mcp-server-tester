@@ -51,9 +51,9 @@ export type {
   EvalManifestInput,
   ExtensionConfig,
   ClientConfig,
-  ClientConfigPatch,
   TaggedConfig,
 } from '../evals/evalManifest.js';
+export type { ClientFields, ClientOptions } from '../evals/clientFields.js';
 export type {
   DatasetSource,
   DatasetSourceContext,

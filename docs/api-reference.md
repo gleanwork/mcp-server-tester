@@ -1409,7 +1409,7 @@ The `{ code, message, data? }` of the protocol error a result was made from, or 
 
 ### `EvalAssertions`
 
-```typescript snippet=src/evals/datasetTypes.ts#L228-L329
+```typescript snippet=src/evals/datasetTypes.ts#L226-L327
   /**
    * Exact response match (toMatchToolResponse)
    */
@@ -1516,7 +1516,7 @@ export interface EvalDataset {
 
 ### `EvalCase`
 
-````typescript snippet=src/evals/datasetTypes.ts#L41-L181
+````typescript snippet=src/evals/datasetTypes.ts#L41-L179
 /**
  * A single eval test case
  *
@@ -1524,9 +1524,7 @@ export interface EvalDataset {
  * For 'mcp_host' mode: input and mcpHostConfig are required
  * For 'external_host' mode: input and externalHost are required
  */
-export interface EvalCase {
-  /** Optional per-case host override: a built-in or a plugin host. */
-  host?: ClientConfig;
+export interface EvalCase extends ClientFields {
   /**
    * Unique identifier for this test case
    */

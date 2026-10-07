@@ -15,20 +15,23 @@ describe('EvalManifestSchema', () => {
     const base = {
       name: 'patch',
       datasets: ['cases.json'],
-      host: { type: 'sdk', model: 'base' },
+      client: 'sdk',
+      model: 'base',
     };
     const manifest = loadEvalManifestFromObject(
-      { ...base, arms: [{ name: 'candidate', host: { model: 'candidate' } }] },
+      { ...base, arms: [{ name: 'candidate', model: 'candidate' }] },
       { skipDatasetValidation: true }
     );
-    expect(manifest.arms?.[0]?.host).toEqual({ model: 'candidate' });
+    expect(manifest.arms?.[0]?.model).toBe('candidate');
     expect(() =>
-      EvalManifestSchema.parse({ ...base, host: { model: 'untagged' } })
-    ).toThrow();
+      EvalManifestSchema.parse({ ...base, host: { type: 'sdk' } })
+    ).toThrow(
+      '`host` is now `client` (the client’s name), `model` and `clientOptions` (its other options)'
+    );
     expect(() =>
       EvalManifestSchema.parse({
         ...base,
-        arms: [{ name: 'invalid', host: { type: '' } }],
+        arms: [{ name: 'invalid', client: '' }],
       })
     ).toThrow();
   });
@@ -88,7 +91,7 @@ describe('EvalManifestSchema', () => {
       definitions: { mcpConfig: unknown };
       properties: {
         servers: { items: unknown };
-        arms: { items: { properties: { host: { required?: string[] } } } };
+        arms: { items: { properties: { client: { required?: string[] } } } };
       };
     };
     expect(schema.definitions.mcpConfig).toEqual(
@@ -98,7 +101,7 @@ describe('EvalManifestSchema', () => {
       $ref: '#/definitions/mcpConfig',
     });
     expect(
-      schema.properties.arms.items.properties.host.required
+      schema.properties.arms.items.properties.client.required
     ).toBeUndefined();
   });
   const overrides: ToolOverrideVariant = {
@@ -218,13 +221,14 @@ describe('EvalManifestSchema', () => {
             label: 'prod',
           },
         ],
-        host: { type: 'sdk' },
+        client: 'sdk',
         arms: [
           { name: 'baseline' },
           {
             name: 'variant',
             servers: [],
-            host: { type: 'cli', model: 'test-model' },
+            client: 'cli',
+            model: 'test-model',
           },
         ],
         metrics: ['passed'],
@@ -299,7 +303,8 @@ describe('the editor schema', () => {
     ) as { properties: Record<string, unknown>; additionalProperties: unknown };
     const runtime = Object.keys(EvalManifestSchema.shape).filter(
       // Kept only so validation can explain what replaced them.
-      (key) => key !== 'profile' && !(key in RENAMED_MANIFEST_KEYS)
+      (key) =>
+        key !== 'profile' && key !== 'host' && !(key in RENAMED_MANIFEST_KEYS)
     );
     expect(Object.keys(editor.properties).sort()).toEqual(runtime.sort());
     expect(editor.additionalProperties).toBe(false);

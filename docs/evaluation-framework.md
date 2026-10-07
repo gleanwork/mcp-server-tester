@@ -14,7 +14,12 @@ runtime validation is provided by `EvalManifestSchema`.
 ```json
 {
   "name": "tool-selection-search",
-  "datasets": [{ "type": "file", "path": "evalsets/search.json" }],
+  "datasets": [
+    {
+      "type": "file",
+      "path": "evalsets/search.json"
+    }
+  ],
   "servers": [
     {
       "transport": "http",
@@ -22,11 +27,21 @@ runtime validation is provided by `EvalManifestSchema`.
       "label": "prod"
     }
   ],
-  "host": { "type": "mst", "provider": "anthropic" },
+  "client": "mst",
+  "clientOptions": {
+    "provider": "anthropic"
+  },
   "metrics": ["passed", "tool_count"],
-  "results": { "store": { "type": "file", "dir": ".mcp-test-results" } },
+  "results": {
+    "store": {
+      "type": "file",
+      "dir": ".mcp-test-results"
+    }
+  },
   "arms": [
-    { "name": "baseline" },
+    {
+      "name": "baseline"
+    },
     {
       "name": "variant",
       "servers": [
@@ -41,11 +56,11 @@ runtime validation is provided by `EvalManifestSchema`.
 }
 ```
 
-A key the schema doesn't define is an error, in a manifest and in a dataset, so a misspelling fails instead of being ignored. So is a setting the selected host can't honour, such as `toolOverrides` for a host that doesn't present tool variants. `--dry-run` reports all of these, including in datasets.
+A key the schema doesn't define is an error, in a manifest and in a dataset, so a misspelling fails instead of being ignored. So is a setting the selected client can't honour, such as `toolOverrides` for a client that doesn't present tool variants. `--dry-run` reports all of these, including in datasets.
 
 - **Run controls** (`trials`, `maxCases`, `concurrency`, `filterTags`, `passThreshold`) go at the top level or under `run`.
-- **Host defaults:** `model`, `provider`, `maxToolCalls`, `timeout`, `temperature` and `maxTokens` default each host option of that name, for the hosts that take it.
-- **Inheritance:** an arm or case host inherits the manifest host's options only when it's the same host type.
+- **Client defaults:** `model`, `provider`, `maxToolCalls`, `timeout`, `temperature` and `maxTokens` default each client option of that name, for the clients that take it.
+- **The client:** `client` names the client under test, `model` the model it uses, and `clientOptions` the client's other options. An arm or case may set any of the three; it inherits the manifest's `clientOptions` only when it uses the same client.
 
 A bare dataset path is shorthand for `{ "type": "file", "path": "..." }`. Relative dataset and plugin paths in a manifest resolve against the manifest's directory, then `rootDir` (`--root-dir`, the working directory by default). A `file` result store's `dir` is always relative to the manifest, so where results are written doesn't depend on the working directory. Plugin result stores resolve their own options.
 Every other pluggable block is a tagged object. `servers` is the complete MCP
@@ -297,7 +312,7 @@ export default {
 } satisfies Plugin;
 ```
 
-A manifest that loads the plugin selects the host with `{ "type": "my/assistant" }`.
+A manifest that loads the plugin selects the client with `"client": "my/assistant"`, and passes its options in `clientOptions`.
 
 - **The trace.** `run` returns a `ClientRunResult`: `finalText`, `events`, and optional `usage`, `error` and timing fields. Each event has a `kind` (`tool_call`, `skill`, `command`, `subagent` or `tool_search`), a `source` (`mcp` or `host`), a `name`, and optionally the MCP server label, arguments, output and ID. Record what the host did; don't reconstruct tool calls from the final text. A `tool_search` event (the host searching its tool catalog) lists the tools the search returned in `results`, each `{ name, server? }`. Type host-native actions as their kind rather than as calls to a host tool, so skill expectations and search metrics can read them.
 - **Evidence.** Declare `evidence: 'structured'` only for authoritative protocol or host-native traces. With `observed`, `none` or no declaration, tool-call and argument assertions can't pass; text and judge assertions still run.
@@ -323,12 +338,12 @@ A search's `results` come from `tool_reference` blocks in its result, or, withou
 
 ### System prompts
 
-`systemPrompt` adds text to a host's system prompt, such as an organisation's instructions. To measure what it changes, give one arm the prompt (an arm's host inherits the manifest's when it is the same host type):
+`systemPrompt` adds text to a host's system prompt, such as an organisation's instructions. To measure what it changes, give one arm the prompt (an arm inherits the manifest's `clientOptions` when it uses the same client):
 
 ```json
 "arms": [
   { "name": "no-prompt" },
-  { "name": "org-prompt", "host": { "systemPrompt": "For actions in a connected app, call find_skills first." } }
+  { "name": "org-prompt", "clientOptions": { "systemPrompt": "For actions in a connected app, call find_skills first." } }
 ]
 ```
 
@@ -372,7 +387,7 @@ does not replace them with a second case model.
 ## Arms
 
 An arm is a patch over the manifest defaults. Arms replace separate A/B and
-variant-experiment concepts. An arm may change its server set, host options,
+variant-experiment concepts. An arm may change its server set, client, model, client options,
 tool-name map, input template, metrics, or judges. A manifest without arms
 has one implicit `default` arm.
 
@@ -427,7 +442,7 @@ Most hosts report tokens but not cost. A manifest (or a plugin's shared config) 
 MST ships no prices; they change too often to bake in.
 
 - **Reported cost wins.** A host-reported cost is always used. Estimates are kept apart as `estimatedCostUsd` in each case's usage, `cost_usd` uses whichever there is, and the arm's `costSource` says which (`host`, `pricing` or `mixed`).
-- **Which model.** A case is priced at its own host's `model`, else a legacy `mcpHostConfig.model`, else the arm's or manifest's host `model` (including a host's default). A model the host picks at run time isn't known to MST, so set `host.model` to price it.
+- **Which model.** A case is priced at its own `model`, else a legacy `mcpHostConfig.model`, else the arm's or manifest's `model` (including a host's default). A model the client picks at run time isn't known to MST, so set `model` to price it.
 - **Auditable.** Each arm records the prices it used in `pricing`, and models it couldn't price in `unpricedModels`; `cost_usd` leaves their trials out.
 - **Shared configs.** A manifest's `pricing` replaces a shared config's whole table; the two aren't merged.
 

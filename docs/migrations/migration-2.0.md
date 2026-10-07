@@ -302,7 +302,8 @@ MST's LLM calls now resolve their endpoint and credential in one place (`src/llm
 {
   "name": "server-ab",
   "datasets": ["./evals/triggering.json"],
-  "host": { "type": "vercel-sdk", "provider": "anthropic" },
+  "client": "mst",
+  "model": "claude-sonnet-4-6",
   "arms": [
     {
       "name": "production",

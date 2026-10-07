@@ -51,15 +51,27 @@
         "$ref": "#/definitions/mcpConfig"
       }
     },
-    "host": {
+    "client": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The client under test: mst, claude-code, cowork, chatgpt, or a plugin's namespace/name. Default: claude-code."
+    },
+    "clientOptions": {
       "type": "object",
-      "required": ["type"],
       "additionalProperties": true,
-      "properties": {
-        "type": {
-          "type": "string",
-          "minLength": 1
-        }
+      "description": "The client's own options. Name the client with client and set the model with model, not here.",
+      "not": {
+        "anyOf": [
+          {
+            "required": ["type"]
+          },
+          {
+            "required": ["client"]
+          },
+          {
+            "required": ["model"]
+          }
+        ]
       }
     },
     "toolMap": {
@@ -92,15 +104,31 @@
           "servers": {
             "$ref": "#/properties/servers"
           },
-          "host": {
+          "client": {
+            "type": "string",
+            "minLength": 1,
+            "description": "This arm's client. A different client doesn't inherit the manifest's clientOptions."
+          },
+          "model": {
+            "type": "string",
+            "description": "The model this arm's client uses."
+          },
+          "clientOptions": {
             "type": "object",
-            "description": "Partial patch to the base host. The effective host must have a type.",
             "additionalProperties": true,
-            "properties": {
-              "type": {
-                "type": "string",
-                "minLength": 1
-              }
+            "description": "The client's own options. Name the client with client and set the model with model, not here.",
+            "not": {
+              "anyOf": [
+                {
+                  "required": ["type"]
+                },
+                {
+                  "required": ["client"]
+                },
+                {
+                  "required": ["model"]
+                }
+              ]
             }
           },
           "toolMap": {
@@ -158,7 +186,8 @@
       }
     },
     "model": {
-      "type": "string"
+      "type": "string",
+      "description": "The model the client uses: a default for every arm and case."
     },
     "provider": {
       "type": "string"
