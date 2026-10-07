@@ -38,8 +38,8 @@ async function withTimeout<T>(
 }
 
 /**
- * Connect to every configured server and list tools before any host prompt.
- * Shared by desktop hosts. Callers decide how to fail; this never throws for a
+ * Connect to every configured server and list tools before any client prompt.
+ * Shared by desktop clients. Callers decide how to fail; this never throws for a
  * server failure and never retries.
  */
 export async function checkMcpServers(
@@ -93,7 +93,7 @@ export async function checkMcpServers(
 }
 
 /**
- * The one readiness rule for every desktop host: the server connects and
+ * The one readiness rule for every desktop client: the server connects and
  * lists at least one tool (and at least its declared `minTools`, which
  * `checkMcpServers` already enforces). A server with no tools can't be
  * evaluated, so it fails before any prompt is sent.
@@ -116,17 +116,17 @@ export function describeMcpReadiness(
     .join(', ');
 }
 
-/** Some configured MCP server isn't ready, so nothing was sent to the host. */
+/** Some configured MCP server isn't ready, so nothing was sent to the client. */
 export class McpReadinessError extends Error {
   readonly servers: McpServerReadiness[];
 
   constructor(
-    host: string,
+    client: string,
     servers: McpServerReadiness[],
     submission: 'prompt' | 'task' = 'prompt'
   ) {
     super(
-      `${host} MCP preflight failed; no ${submission} was submitted. ${describeMcpReadiness(servers)}`
+      `${client} MCP preflight failed; no ${submission} was submitted. ${describeMcpReadiness(servers)}`
     );
     this.name = 'McpReadinessError';
     this.servers = servers;

@@ -11,7 +11,7 @@ import {
   runLinuxChatgptDesktop,
   type ChatgptPromptOpener,
 } from '../chatgpt/linux.js';
-import type { ExternalHostConfig } from '../externalHost/types.js';
+import type { ExternalClientConfig } from '../externalClient/types.js';
 import {
   createLinuxChatgptProfile,
   readLinuxChatgptEnvironment,
@@ -24,8 +24,8 @@ import {
   getChatgptApplicationController,
 } from './macController.js';
 
-/** Host options that differ by OS. Values are copied into ExternalHostConfig.options. */
-interface ChatgptHostOptions {
+/** Client options that differ by OS. Values are copied into ExternalClientConfig.options. */
+interface ChatgptClientOptions {
   computerUseProvider?: string;
   computerUseMaxActions?: number;
   desktopEnvironment?: Record<string, string>;
@@ -49,14 +49,14 @@ export interface ChatgptPlatform {
   /** Linux always owns an isolated profile, so CODEX_HOME is always explicit. */
   readonly isolatedConfigHome: boolean;
   readonly permissionNotice?: string;
-  hostOptions(
+  clientOptions(
     options: { computerUseProvider?: string; computerUseMaxActions?: number },
     environment: Record<string, string>
-  ): ChatgptHostOptions;
+  ): ChatgptClientOptions;
   /** Directory that holds the cross-process desktop lock. */
-  lockHome(config: ExternalHostConfig): string;
+  lockHome(config: ExternalClientConfig): string;
   application(
-    config: ExternalHostConfig,
+    config: ExternalClientConfig,
     binding?: Record<string, unknown>
   ): ChatgptApplication;
   /** macOS: control the user's installed app. */
@@ -69,7 +69,7 @@ export interface ChatgptPlatform {
   ): Promise<ChatgptPlatformProfile>;
   /** Optional native post-launch surface verification. */
   verifyReady?(
-    config: ExternalHostConfig,
+    config: ExternalClientConfig,
     openPrompt: ChatgptPromptOpener
   ): Promise<SemanticDesktopTelemetry>;
 }
@@ -80,7 +80,7 @@ export const MAC_CHATGPT_PLATFORM: ChatgptPlatform = {
   isolatedConfigHome: false,
   permissionNotice:
     '[mst:chatgpt] Anthropic Computer Use requires Screen Recording and Accessibility permission. Keep ChatGPT visible and the desktop idle.\n',
-  hostOptions(options) {
+  clientOptions(options) {
     return {
       computerUseProvider:
         options.computerUseProvider ?? 'anthropic-computer-use',
@@ -116,7 +116,7 @@ export const LINUX_CHATGPT_PLATFORM: ChatgptPlatform = {
   name: 'linux',
   driver: 'openai.chatgpt.agent.desktop-app.linux',
   isolatedConfigHome: true,
-  hostOptions(options, environment) {
+  clientOptions(options, environment) {
     return {
       computerUseProvider: options.computerUseProvider,
       computerUseMaxActions: options.computerUseMaxActions,
@@ -151,6 +151,6 @@ export const LINUX_CHATGPT_PLATFORM: ChatgptPlatform = {
   },
 };
 
-export function chatgptPlatform(config: ExternalHostConfig): ChatgptPlatform {
+export function chatgptPlatform(config: ExternalClientConfig): ChatgptPlatform {
   return isLinuxChatgpt(config) ? LINUX_CHATGPT_PLATFORM : MAC_CHATGPT_PLATFORM;
 }

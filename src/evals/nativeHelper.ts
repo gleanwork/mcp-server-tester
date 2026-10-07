@@ -6,9 +6,9 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 /**
- * Native helpers: the small Swift programs that desktop hosts compile and run
+ * Native helpers: the small Swift programs that desktop clients compile and run
  * to control a macOS application. This module owns how a helper is built, what
- * environment it sees and how its output is bounded, so every host applies one
+ * environment it sees and how its output is bounded, so every client applies one
  * policy. Receipt schemas and error wording stay with each controller.
  *
  * The Linux Python helpers do not use this module: Cowork's is one execFile

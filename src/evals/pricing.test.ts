@@ -71,7 +71,7 @@ describe('estimateCosts', () => {
     estimateCosts([unpriced], () => 'other-model', pricing);
     expect(reported.clientUsage).not.toHaveProperty('estimatedCostUsd');
     expect(unpriced.clientUsage).not.toHaveProperty('estimatedCostUsd');
-    expect(costSource([reported])).toBe('host');
+    expect(costSource([reported])).toBe('client');
     expect(costSource([unpriced])).toBeUndefined();
     estimateCosts([unpriced], () => 'priced', pricing);
     expect(costSource([reported, unpriced])).toBe('mixed');
@@ -79,7 +79,7 @@ describe('estimateCosts', () => {
 });
 
 describe('call counts', () => {
-  it('counts MCP calls and host-native events separately, per trial', () => {
+  it('counts MCP calls and client-native events separately, per trial', () => {
     const traced: EvalCaseResult = {
       ...result('t', undefined),
       trace: {
@@ -87,14 +87,14 @@ describe('call counts', () => {
         events: [
           { kind: 'tool_call', source: 'mcp', name: 'search', server: 'docs' },
           { kind: 'tool_call', source: 'mcp', name: 'read', server: 'docs' },
-          { kind: 'tool_call', source: 'host', name: 'ToolSearch' },
-          { kind: 'skill', source: 'host', name: 'summarize' },
+          { kind: 'tool_call', source: 'builtin', name: 'ToolSearch' },
+          { kind: 'skill', source: 'builtin', name: 'summarize' },
         ],
       },
     };
     expect(
-      computeMetrics(['mcp_call_count', 'host_event_count'], [traced])
+      computeMetrics(['mcp_call_count', 'builtin_event_count'], [traced])
         .aggregated
-    ).toEqual({ mcp_call_count_mean: 2, host_event_count_mean: 2 });
+    ).toEqual({ mcp_call_count_mean: 2, builtin_event_count_mean: 2 });
   });
 });

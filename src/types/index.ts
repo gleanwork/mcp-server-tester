@@ -15,7 +15,7 @@
  * - 'none': No authentication
  */
 export type AuthType = 'oauth' | 'api-token' | 'none';
-export type { ClientDiagnostics } from './hostDiagnostics.js';
+export type { ClientDiagnostics } from './clientDiagnostics.js';
 import type { UsageMetrics } from '../judge/judgeTypes.js';
 import type { JudgeSubScore } from '../judge/judgeContract.js';
 
@@ -50,16 +50,16 @@ export type ProtocolRevision =
  */
 export type ProtocolSetting = 'legacy' | 'auto' | ProtocolRevision;
 
-/** How the simulated (SDK) host offers Agent Skills to the model. */
+/** How the simulated (SDK) client offers Agent Skills to the model. */
 export type ClientSkillsMode = 'off' | 'catalog' | 'preload';
 
-/** One skill (or skill file) the simulated host loaded for the model. */
+/** One skill (or skill file) the simulated client loaded for the model. */
 export interface SkillLoad {
   /** Skill name (frontmatter `name`). */
   name: string;
   /** URI that was read: the skill's SKILL.md or a supporting file. */
   uri: string;
-  /** Host label of the server that served it. */
+  /** Client label of the server that served it. */
   server: string;
   /** 'skill' for SKILL.md loads, 'file' for supporting files. */
   kind: 'skill' | 'file';
@@ -211,7 +211,7 @@ export type {
   MCPConfig,
   StdioMCPConfig,
   HttpMCPConfig,
-  MCPHostCapabilities,
+  MCPClientCapabilities,
   MCPAuthConfig,
   MCPOAuthConfig,
   MCPClientCredentialsConfig,
@@ -265,17 +265,17 @@ export type {
   EvalRunComparisonResult,
   SaveEvalRunComparisonOptions,
   StoredEvalRunRef,
-  ExperimentMetric,
-  VariantExperimentReason,
+  OptimizationMetric,
+  ToolOptimizationReason,
   VariantRecommendation,
   VariantCandidateResult,
-  VariantExperimentRound,
+  ToolOptimizationRound,
   ProposeVariantsContext,
   VariantImprovementProposal,
-  VariantExperimentOptions,
-  VariantExperimentResult,
-  SuiteVariantExperimentOptions,
-  VariantExperimentSuite,
+  ToolOptimizationOptions,
+  ToolOptimizationResult,
+  EvalToolOptimizationOptions,
+  ToolOptimizationEval,
   BaselineMeasurement,
   RegressionCheck,
   VariantGroupStats,
@@ -284,7 +284,7 @@ export type {
   VariantGrouping,
   LLMProvider,
   LLMToolCall,
-  MCPHostSimulationResult,
+  MstClientSimulationResult,
 } from './evals.js';
 
 export type {

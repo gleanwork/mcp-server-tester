@@ -200,7 +200,7 @@ describe('installCodexPlugins', () => {
       'plugin_mcp_invalid',
     ],
     [
-      'an unexpanded host placeholder',
+      'an unexpanded client placeholder',
       {
         mcp: {
           mcpServers: {

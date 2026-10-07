@@ -232,7 +232,7 @@ describe('validateText', () => {
       expect(result.pass).toBe(true);
     });
 
-    it('should prefer host simulation final response over metadata JSON', () => {
+    it('should prefer client simulation final response over metadata JSON', () => {
       const response = {
         response: 'final answer text',
         clientMetadata: {

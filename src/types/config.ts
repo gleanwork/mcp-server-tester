@@ -2,7 +2,7 @@ export type {
   MCPConfig,
   StdioMCPConfig,
   HttpMCPConfig,
-  MCPHostCapabilities,
+  MCPClientCapabilities,
   MCPAuthConfig,
   MCPOAuthConfig,
   MCPClientCredentialsConfig,

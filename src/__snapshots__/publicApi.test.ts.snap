@@ -44,9 +44,9 @@ exports[`public API > ./evals 1`] = `
   "resolveEvalResultStore",
   "resolveMetric",
   "resolveResultStoreConfig",
+  "runEval",
   "runEvalBatch",
-  "runEvalSuite",
-  "runVariantExperiment",
+  "runToolOptimization",
   "saveBaseline",
   "saveEvalRunComparison",
   "validateEvalConfig",
@@ -58,13 +58,13 @@ exports[`public API > ./experimental/clients 1`] = `
 [
   "COWORK_STDIO_PLATFORMS",
   "auditCoworkNativeRun",
+  "clientStdioServers",
   "coworkManagedPluginSettings",
   "coworkMcpSettingsMatch",
   "coworkPluginMarketplace",
   "coworkPluginSettingsMatch",
-  "hostStdioServers",
-  "materializeHostStdioFiles",
-  "resolveHostStdioServer",
+  "materializeClientStdioFiles",
+  "resolveClientStdioServer",
 ]
 `;
 

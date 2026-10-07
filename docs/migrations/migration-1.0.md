@@ -141,7 +141,7 @@ const ollamaSimulator: MCPHostSimulator = {
 };
 ```
 
-See [docs/mcp-host.md](../mcp-host.md) for the `MCPHostSimulator` interface details.
+See [docs/mst-client.md](../mst-client.md) for the `MCPHostSimulator` interface details.
 
 ---
 

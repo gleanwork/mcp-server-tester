@@ -4,18 +4,18 @@ Complete API documentation for `@gleanwork/mcp-server-tester`.
 
 ## Entry points
 
-| Import from                                          | Contents                                                                                                                                         | Stability                                       |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------- |
-| `@gleanwork/mcp-server-tester`                       | Fixtures, matchers and validators, the MCP client, config, datasets with `runEvalDataset` and `runEvalCase`, judges, conformance, Agent Skills   | Stable                                          |
-| `@gleanwork/mcp-server-tester/fixtures/mcp`          | `test` and `assertions` with the MCP fixtures and matchers                                                                                       | Stable                                          |
-| `@gleanwork/mcp-server-tester/fixtures/mcpAuth`      | Auth fixtures                                                                                                                                    | Stable                                          |
-| `@gleanwork/mcp-server-tester/reporters/mcpReporter` | The MCP reporter                                                                                                                                 | Stable                                          |
-| `@gleanwork/mcp-server-tester/evals`                 | The evaluation framework: eval configs, suites and batches, extension definition types, metrics, result stores, comparisons, variant experiments | Stable                                          |
-| `@gleanwork/mcp-server-tester/auth`                  | Low-level OAuth: discovery, token storage, client credentials                                                                                    | Stable                                          |
-| `@gleanwork/mcp-server-tester/experimental/clients`  | Desktop-run metadata types, Cowork settings and audit, host plugins                                                                              | Experimental: may change between minor versions |
-| `@gleanwork/mcp-server-tester/types`                 | The root's shared types on their own, without runtime code                                                                                       | Stable                                          |
+| Import from                                          | Contents                                                                                                                                       | Stability                                       |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `@gleanwork/mcp-server-tester`                       | Fixtures, matchers and validators, the MCP client, config, datasets with `runEvalDataset` and `runEvalCase`, judges, conformance, Agent Skills | Stable                                          |
+| `@gleanwork/mcp-server-tester/fixtures/mcp`          | `test` and `assertions` with the MCP fixtures and matchers                                                                                     | Stable                                          |
+| `@gleanwork/mcp-server-tester/fixtures/mcpAuth`      | Auth fixtures                                                                                                                                  | Stable                                          |
+| `@gleanwork/mcp-server-tester/reporters/mcpReporter` | The MCP reporter                                                                                                                               | Stable                                          |
+| `@gleanwork/mcp-server-tester/evals`                 | The evaluation framework: eval configs, evals and batches, extension definition types, metrics, result stores, comparisons, tool optimizations | Stable                                          |
+| `@gleanwork/mcp-server-tester/auth`                  | Low-level OAuth: discovery, token storage, client credentials                                                                                  | Stable                                          |
+| `@gleanwork/mcp-server-tester/experimental/clients`  | Desktop-run metadata types, Cowork settings and audit, client plugins                                                                          | Experimental: may change between minor versions |
+| `@gleanwork/mcp-server-tester/types`                 | The root's shared types on their own, without runtime code                                                                                     | Stable                                          |
 
-The `./evals`, `./auth` and `./experimental/clients` subpaths are ESM only, and CommonJS code cannot `require` them. The ESM root and those three subpaths share one copy of the library, so anything registered through one is visible through the others. The CommonJS root is a separate copy; don't mix it with ESM imports of the subpaths. Optional desktop-host fields on root result types (such as `EvalCaseResult.externalHost`) are typed from `./experimental/clients` and share its stability.
+The `./evals`, `./auth` and `./experimental/clients` subpaths are ESM only, and CommonJS code cannot `require` them. The ESM root and those three subpaths share one copy of the library, so anything registered through one is visible through the others. The CommonJS root is a separate copy; don't mix it with ESM imports of the subpaths. Optional desktop-host fields on root result types (such as `EvalCaseResult.clientMetadata`) are typed from `./experimental/clients` and share its stability.
 
 ## Table of Contents
 
@@ -38,7 +38,7 @@ Plugins whose extensions this project's tests use, such as a judge referenced as
 
 ### `installPlugins(plugins)`
 
-Install plugin objects for code that calls validators or matchers outside `runEvalDataset`, `runEvalCase`, a suite, or the `mcp` fixture (all of which install the plugins you pass them). Validates every plugin first; installing the same plugin again is a no-op, and a different plugin claiming a loaded namespace throws. Returns the validated plugins.
+Install plugin objects for code that calls validators or matchers outside `runEvalDataset`, `runEvalCase`, an eval, or the `mcp` fixture (all of which install the plugins you pass them). Validates every plugin first; installing the same plugin again is a no-op, and a different plugin claiming a loaded namespace throws. Returns the validated plugins.
 
 ### `mcpClient: Client`
 
@@ -379,7 +379,7 @@ Run an eval dataset. Assertions are defined per-case in the dataset's `assertion
   - `stopOnFailure?: boolean` - Stop on first failure (default: `false`)
   - `onCaseComplete?: (result: EvalCaseResult) => void` - Callback after each case completes
   - `concurrency?: number` - Max parallel cases (default: `1` = sequential)
-  - `client?: string`, `model?: string`, `clientOptions?: ClientOptions` - The client cases run on, its model and options; a case's own fields change them. Outside a suite, cases run on `mst`, on the test's MCP connection (default client: `'mst'`)
+  - `client?: string`, `model?: string`, `clientOptions?: ClientOptions` - The client cases run on, its model and options; a case's own fields change them. Outside an eval, cases run on `mst`, on the test's MCP connection (default client: `'mst'`)
   - `defaultTrials?: number` - Default trial count for client cases (default: `1`)
   - `defaultPassThreshold?: number` - Default `passThreshold` for client cases that don't set one (default: `1`)
   - `defaultJudgeReps?: number` - Default judge evaluation count per case (default: `1`)
@@ -387,9 +387,9 @@ Run an eval dataset. Assertions are defined per-case in the dataset's `assertion
   - `saveResultsTo?: string` - Save run results to file for baseline comparison
   - `omitResponsesFromBaseline?: boolean` - Strip responses from saved baseline (default: `true`)
   - `baselineResultsFrom?: string` - Load baseline file for regression detection
-  - `toolOverrides?: ToolOverrideVariant` - Runtime tool metadata overrides for variant experiments
+  - `toolOverrides?: ToolOverrideVariant` - Runtime tool metadata overrides for tool optimizations
   - `judgeModel?: string` - Judge model identifier recorded in run metadata
-  - `reporting?: 'playwright' | 'none'` - `'none'` when the caller reports results itself (suites do): no suggestion to pass `testInfo` (default: `'playwright'`)
+  - `reporting?: 'playwright' | 'none'` - `'none'` when the caller reports results itself (evals do): no suggestion to pass `testInfo` (default: `'playwright'`)
 - `context: EvalContext`
   - `mcp: MCPFixtureApi` - MCP fixture API
   - `testInfo?: TestInfo` - Playwright test info (required for snapshot support)
@@ -656,7 +656,7 @@ export interface EvalRunnerResult {
   datasetToolF1?: number;
 
   /**
-   * Experiment tracking metadata captured at run time.
+   * Optimization tracking metadata captured at run time.
    */
   metadata?: EvalRunMetadata;
 
@@ -672,13 +672,13 @@ export interface EvalRunnerResult {
 }
 ```
 
-### `runVariantExperiment(options, context)` / `runVariantExperiment(suiteOptions)`
+### `runToolOptimization(options, context)` / `runToolOptimization(evalOptions)`
 
-Run a tool-metadata variant experiment: establish a baseline, inject each candidate variant via `toolOverrides`, compare against the baseline, rank by a metric, guard against regressions, and emit a structured improvement proposal. This is the high-level API that wraps the manual baseline → candidate → `compareEvalRuns` loop.
+Run a tool optimization: establish a baseline, give each candidate its tool metadata (`tools`), compare against the baseline, rank by a metric, guard against regressions, and emit a structured improvement proposal. This is the high-level API that wraps the manual baseline → candidate → `compareEvalRuns` loop.
 
 **Parameters:**
 
-- `options: VariantExperimentOptions`
+- `options: ToolOptimizationOptions`
   - `dataset: EvalDataset` - The dataset to run (never mutated)
   - `variants?: ToolOverrideVariant[]` - Static candidates tried in round 0
   - `proposeVariants?: (ctx: ProposeVariantsContext) => Promise<ToolOverrideVariant[]>` - Callback returning the next candidates from prior-round evidence; return `[]` to stop
@@ -686,25 +686,25 @@ Run a tool-metadata variant experiment: establish a baseline, inject each candid
   - `maxRounds?: number` - Round budget (default `1`)
   - `minImprovement?: number` - Stop when a round's best gain over the best so far is below this (default `0`); with `better: 'lower'` a gain is a decrease
   - `allowRegressions?: boolean` - Allow winners that break cases (default `false`)
-  - `regressionCheck?: 'significant' | 'any-case'` - How breakage is judged on regression cases. `'significant'` (default): they got worse as a group (exact paired sign-flip test, p < 0.025) or one did on its own (Fisher's exact test, Holm-corrected at 0.05). `'any-case'`: any case that passes with the baseline fails with the candidate. Either way, recommending needs a clear improvement: p < 0.025 / variants tried. See [How variants are judged](./mcp-host.md#how-variants-are-judged)
+  - `regressionCheck?: 'significant' | 'any-case'` - How breakage is judged on regression cases. `'significant'` (default): they got worse as a group (exact paired sign-flip test, p < 0.025) or one did on its own (Fisher's exact test, Holm-corrected at 0.05). `'any-case'`: any case that passes with the baseline fails with the candidate. Either way, recommending needs a clear improvement: p < 0.025 / variants tried. See [How variants are judged](./mst-client.md#how-variants-are-judged)
   - `regressionTag?: string` - Tag marking regression cases (default `'regression'`). When no case has it, the baseline runs once more, only to group cases
   - `heldOutTag?: string` - Tag marking held-out cases: left out of ranking and hidden from `proposeVariants` (default `'held-out'`)
   - Plus `runEvalDataset` passthrough: `client`, `model`, `clientOptions`, `defaultTrials`, `defaultJudgeReps`, `concurrency`, `filterTags`, `schemas`, `judgeModel`
 - `context: EvalContext` - `{ mcp, testInfo? }` from your test
 
-**Returns:** `VariantExperimentResult`
+**Returns:** `ToolOptimizationResult`
 
-- `baseline` - The baseline run: no tool variant on a dataset; on a suite, the base variant as configured (candidates replace its `tools`)
+- `baseline` - The baseline run: no tool variant on a dataset; on an eval, the base variant as configured (candidates replace its `tools`)
 - `grouping` - `'declared'` (from `regressionTag`) or `'grouping-run'`; `groupingBaseline` holds the extra run when one was needed
 - `rounds` - Every round's candidates with per-candidate `result`, `comparison`, `metricValue` and `metricDelta` (without held-out cases), `measurement` (per-group pass rates, changes with p-values and verdicts, and `brokenCaseIds`), `improvement` and `fixes` (the clearly-better call, adjusted for every variant tried), `disqualified`
 - `winner` - Best non-disqualified candidate across all rounds
 - `proposal` - `VariantImprovementProposal` with `recommendation: 'apply' | 'reject' | 'inconclusive'`, metric values, `toolChanges`, and improved/regressed case ids
-- `reason` - Why the experiment stopped: `'no-variants' | 'no-improvement' | 'max-rounds' | 'threshold-met'`
+- `reason` - Why the optimization stopped: `'no-variants' | 'no-improvement' | 'max-rounds' | 'threshold-met'`
 
 ```typescript
-import { runVariantExperiment } from '@gleanwork/mcp-server-tester/evals';
+import { runToolOptimization } from '@gleanwork/mcp-server-tester/evals';
 
-const result = await runVariantExperiment(
+const result = await runToolOptimization(
   {
     dataset,
     variants: [variant],
@@ -719,11 +719,11 @@ if (result.proposal?.recommendation === 'apply') {
 }
 ```
 
-**On a suite.** Pass `suite` instead of a dataset and context, and the candidates run as the eval config's variants, on any client that can show tool metadata: in-process for `mst`, through MST's tool proxy for plugin clients, `claude-code` and `cowork`. The base variant (`suite.baseVariant`, or the eval config's baseline) is the baseline; each candidate runs as a copy of it with the candidate's tool metadata as its `tools`.
+**On an eval config.** Pass `evalConfig` instead of a dataset and context, and the candidates run as the eval config's variants, on any client that can show tool metadata: in-process for `mst`, through MST's tool proxy for plugin clients, `claude-code` and `cowork`. The base variant (`evalConfig.baseVariant`, or the eval config's baseline) is the baseline; each candidate runs as a copy of it with the candidate's tool metadata as its `tools`.
 
 ```typescript
-const result = await runVariantExperiment({
-  suite: { configPath: './eval.json', baseVariant: 'control' },
+const result = await runToolOptimization({
+  evalConfig: { configPath: './eval.json', baseVariant: 'control' },
   variants: [conciseSearch, verboseSearch],
   metric: 'input_tokens_mean', // passRate, trialPassRate, or any numeric variant metric
   better: 'lower',
@@ -732,9 +732,9 @@ const result = await runVariantExperiment({
 
 - `metric` - `passRate` (default), `trialPassRate`, or any numeric key of a variant's `metrics`. A candidate that reports no value for it is disqualified, with `metricUnavailable: true`.
 - `better` - `'higher'` (default) or `'lower'`, for tokens, cost or time. Ranking, `minImprovement` and the recommendation follow it; `metricDelta` and `proposal.delta` stay candidate minus baseline.
-- `suite` also takes `rootDir`, `pluginPaths`, `plugins` and `secretsFile`, as `runEvalSuite` does. Static `variants` run in one suite with the baseline; later rounds run as their own suite. Variant ids must be unique and differ from the base variant's name. Each run is stored like any other run of the eval config.
+- `evalConfig` also takes `rootDir`, `pluginPaths`, `plugins` and `secretsFile`, as `runEval` does. Static `variants` run in one run with the baseline; later rounds run as their own runs. Variant ids must be unique and differ from the base variant's name. Each run is stored like any other run of the eval config.
 
-A candidate that breaks cases that work today is disqualified from winning unless `allowRegressions: true`; the best candidate tried is still surfaced in `proposal` with `recommendation: 'reject'` so an agent can see what broke. See [MCP Host Simulation](./mcp-host.md#driving-it-from-an-agent-runvariantexperiment) for the full agent-loop example.
+A candidate that breaks cases that work today is disqualified from winning unless `allowRegressions: true`; the best candidate tried is still surfaced in `proposal` with `recommendation: 'reject'` so an agent can see what broke. See [MCP Client Simulation](./mst-client.md#driving-it-from-an-agent-runtooloptimization) for the full agent-loop example.
 
 ### `runEvalCase(evalCase, context, options?)`
 
@@ -892,7 +892,7 @@ Validates the tool calls in a client case's trace. Only applicable to client cas
 
 **Parameters:**
 
-- `response: unknown` — Must be an `MCPHostSimulationResult`
+- `response: unknown` — Must be an `MstClientSimulationResult`
 - `assertion: ToolCallAssertion` — Expected tool call specification
 
 ```typescript
@@ -914,7 +914,7 @@ Validates the number of tool calls in a client case's trace. Only applicable to 
 
 **Parameters:**
 
-- `response: unknown` — Must be an `MCPHostSimulationResult`
+- `response: unknown` — Must be an `MstClientSimulationResult`
 - `options: ToolCallCountOptions` — `{ min?: number; max?: number; exact?: number }`
 
 ```typescript
@@ -929,7 +929,7 @@ Evaluates a response with a judge: the built-in `rubric` LLM judge or a plugin j
 
 - `response: unknown` — The response to evaluate
 - `config: JudgeValidatorConfig` — Judge configuration
-- `run?: JudgeRun` — `{ evalCase?, hostResponse?, evidence? }`, from which the judge's `{ case, trial }` input is built (see [Judge contract](./evaluation-framework.md#judge-contract)). Without it, the case is empty except for `expected.answer` (the `reference`).
+- `run?: JudgeRun` — `{ evalCase?, clientResponse?, evidence? }`, from which the judge's `{ case, trial }` input is built (see [Judge contract](./evaluation-framework.md#judge-contract)). Without it, the case is empty except for `expected.answer` (the `reference`).
 
 **`JudgeValidatorConfig`:**
 
@@ -1229,7 +1229,7 @@ const judge = createJudge({
 // Requires: OPENAI_API_KEY environment variable, or a gateway credential
 ```
 
-### LLM Host Diagnostic Utilities
+### LLM Client Diagnostic Utilities
 
 The following utilities are available for checking whether optional LLM provider packages are installed. They are useful for debugging provider configuration issues but are not part of the typical test-writing path.
 
@@ -1256,7 +1256,7 @@ const message = getMissingDependencyMessage('openai');
 // e.g. "Provider 'openai' requires the 'openai' package. Run: npm install openai"
 ```
 
-See [LLM Host Guide](./mcp-host.md) for full details on configuring the `mst` client.
+See [LLM Client Guide](./mst-client.md) for full details on configuring the `mst` client.
 
 ## Conformance Functions
 
@@ -1425,7 +1425,7 @@ export interface EvalAssertions {
   toolsTriggered?: {
     /** Expected tool calls */
     calls: Array<{
-      /** Tool or explicitly selected host event name. */
+      /** Tool or explicitly selected client event name. */
       name: string;
       kind?: TraceEvent['kind'];
       source?: TraceEvent['source'];
@@ -1465,7 +1465,7 @@ export interface EvalAssertions {
 /**
  * A single eval case: an input the client under test acts on, and what to
  * assert about what it did. The case runs on the `client`, `model` and
- * `clientOptions` it inherits from the suite (or the run), changed by its own.
+ * `clientOptions` it inherits from the eval (or the run), changed by its own.
  *
  * Direct tool calls aren't cases: write them as Playwright tests with
  * `mcp.callTool()` and the matchers.

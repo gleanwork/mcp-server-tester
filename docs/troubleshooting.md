@@ -123,7 +123,7 @@ In shared or multi-user environments, consider storing tokens in a secrets manag
 
 **Symptom:** Running a case on the `mst` client fails with an error such as `Unsupported provider: google` or `Cannot find module '@ai-sdk/google'`.
 
-**Cause:** LLM host providers are optional peer dependencies. The package declares them in `optionalDependencies`, but npm does not guarantee they are installed in all environments. The specific Vercel AI SDK adapter for the provider you selected is missing.
+**Cause:** LLM client providers are optional peer dependencies. The package declares them in `optionalDependencies`, but npm does not guarantee they are installed in all environments. The specific Vercel AI SDK adapter for the provider you selected is missing.
 
 **Fix:** Install the `ai` package and the adapter for your chosen provider:
 
@@ -138,4 +138,4 @@ In shared or multi-user environments, consider storing tokens in a secrets manag
 | `openrouter` | `npm install ai @openrouter/ai-sdk-provider` |
 | `xai`        | `npm install ai @ai-sdk/xai`                 |
 
-See [docs/mcp-host.md](./mcp-host.md) for the full provider table and required environment variables.
+See [docs/mst-client.md](./mst-client.md) for the full provider table and required environment variables.

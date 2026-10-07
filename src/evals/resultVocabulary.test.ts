@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { runEvalCase, runEvalDataset } from './evalRunner.js';
 import type { EvalContext } from './evalRunner.js';
-import { runVariantExperiment } from './variantExperiment.js';
+import { runToolOptimization } from './toolOptimization.js';
 import { olderResultsError } from './resultFormat.js';
 
 // The guards run before anything connects, so no MCP connection is needed.
@@ -29,14 +29,14 @@ describe('2.0 run option names', () => {
     ).rejects.toThrow('runEvalCase: `mcpHostModel` is now `model`.');
   });
 
-  it('runVariantExperiment rejects mcpHostModel', async () => {
+  it('runToolOptimization rejects mcpHostModel', async () => {
     await expect(
-      runVariantExperiment({
+      runToolOptimization({
         dataset,
         variants: [],
         mcpHostModel: 'x',
       } as never)
-    ).rejects.toThrow('runVariantExperiment: `mcpHostModel` is now `model`.');
+    ).rejects.toThrow('runToolOptimization: `mcpHostModel` is now `model`.');
   });
 });
 

@@ -412,7 +412,7 @@ Run each case multiple times and measure the pass rate:
 ```json
 {
   "name": "search-tool-evals",
-  "description": "Comprehensive eval suite for the search tool",
+  "description": "Comprehensive eval for the search tool",
   "cases": [
     {
       "id": "basic-query",

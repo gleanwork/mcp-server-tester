@@ -8,7 +8,7 @@ import {
   createMCPClientForConfig,
 } from '../mcp/clientFactory.js';
 import type { ClientRunResult } from './evalFrameworkTypes.js';
-import { prepareHostBatch } from './prepareHostBatch.js';
+import { prepareClientBatch } from './prepareClientBatch.js';
 import {
   settleProxiedTrace,
   startToolSurfaceProxy,
@@ -196,7 +196,7 @@ describe('settleProxiedTrace', () => {
     ).toMatchObject([{ name: 'find_skills', server: 'mcp-server' }]);
   });
 
-  it('fails a request that never listed tools, unless the host already failed', () => {
+  it('fails a request that never listed tools, unless the client already failed', () => {
     expect(
       settleProxiedTrace(
         { finalText: '', events: [] },
@@ -208,24 +208,24 @@ describe('settleProxiedTrace', () => {
     ).toContain('didn\'t see tool variant "v"');
     expect(
       settleProxiedTrace(
-        { finalText: '', events: [], error: 'host crashed' },
+        { finalText: '', events: [], error: 'client crashed' },
         stubProxy(false),
         false,
         two,
         'v'
       ).error
-    ).toBe('host crashed');
+    ).toBe('client crashed');
   });
 });
 
-describe('prepareHostBatch with a tool variant', () => {
+describe('prepareClientBatch with a tool variant', () => {
   const evalConfig = { name: 'm', datasets: [] };
   const servers: MCPConfig[] = [catalog('aggregate', 'agg')];
 
   it('gives each request its own proxy scope and settles each trace', async () => {
     const seen: string[] = [];
     const proxy = stubProxy();
-    const queues = await prepareHostBatch(
+    const queues = await prepareClientBatch(
       {
         schema: z.object({}),
         runBatch: async (requests) =>
@@ -254,8 +254,8 @@ describe('prepareHostBatch with a tool variant', () => {
     ]);
   });
 
-  it('fails each request whose host never listed tools', async () => {
-    const queues = await prepareHostBatch(
+  it('fails each request whose client never listed tools', async () => {
+    const queues = await prepareClientBatch(
       {
         schema: z.object({}),
         runBatch: async (requests) =>
@@ -279,7 +279,7 @@ describe('settleProxiedTrace tool searches', () => {
         events: [
           {
             kind: 'tool_search',
-            source: 'host',
+            source: 'builtin',
             name: 'ToolSearch',
             results: [{ name: 'find_more' }, { name: 'search', server: 'agg' }],
           },
@@ -297,10 +297,10 @@ describe('settleProxiedTrace tool searches', () => {
   });
 });
 
-describe('a batch host that connects to one server set for the batch', () => {
+describe('a batch client that connects to one server set for the batch', () => {
   const evalConfig = { name: 'm', datasets: [] };
 
-  /** Lists tools from each server, as a host or a readiness probe would. */
+  /** Lists tools from each server, as a client or a readiness probe would. */
   async function listFrom(servers: MCPConfig[]) {
     for (const config of servers) {
       const client = await createMCPClientForConfig(config);
@@ -320,7 +320,7 @@ describe('a batch host that connects to one server set for the batch', () => {
   ) {
     const proxy = await start([catalog('aggregate', 'agg')]);
     const seen: string[] = [];
-    const queues = await prepareHostBatch(
+    const queues = await prepareClientBatch(
       {
         schema: z.object({}),
         serversPerBatch: true,
@@ -348,7 +348,7 @@ describe('a batch host that connects to one server set for the batch', () => {
     return { queues: queues!, seen };
   }
 
-  it('serves the whole batch on one endpoint and checks once that the host listed tools', async () => {
+  it('serves the whole batch on one endpoint and checks once that the client listed tools', async () => {
     const { queues, seen } = await runBatchWith(async ({ servers, check }) => {
       expect(check[0]).not.toEqual(servers[0]);
       expect(check[0]).toMatchObject({ label: 'agg' });
@@ -360,7 +360,7 @@ describe('a batch host that connects to one server set for the batch', () => {
       for (const trace of queues.get(id)!) expect(trace.error).toBeUndefined();
   });
 
-  it("doesn't take MST's own check for the host listing tools", async () => {
+  it("doesn't take MST's own check for the client listing tools", async () => {
     const { queues } = await runBatchWith(async ({ check }) => {
       await listFrom(check);
     });

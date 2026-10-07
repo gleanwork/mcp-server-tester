@@ -1,16 +1,16 @@
-// Fixture plugin for the use-case suite: a deterministic "model" host that
-// drives real MCP servers, an assistant host with no tool evidence, and a
+// Fixture plugin for the use-case eval: a deterministic "model" client that
+// drives real MCP servers, an assistant client with no tool evidence, and a
 // keyword judge. Nothing here calls an LLM or the network.
 //
-// The model host follows a policy instead of reasoning. A policy is a list of
+// The model client follows a policy instead of reasoning. A policy is a list of
 // rules; the first rule whose `when` matches the case is its plan, and each
 // step of the plan either calls a visible MCP tool or emits a host-native
-// event. Because tools are chosen by the names and descriptions the host can
+// event. Because tools are chosen by the names and descriptions the client can
 // see, renaming or re-describing a tool changes what it does, as it would
 // for a real model.
 //
-// Every trace the host returns is appended to the JSONL file named by
-// USECASE_LEDGER, so tests can check MST's aggregates against what the host
+// Every trace the client returns is appended to the JSONL file named by
+// USECASE_LEDGER, so tests can check MST's aggregates against what the client
 // actually reported.
 import fs from 'node:fs';
 import {
@@ -159,7 +159,7 @@ async function connect(servers) {
         );
       } else {
         throw new Error(
-          `The use-case model host connects to stdio and http servers; got ${server.transport}.`
+          `The use-case model client connects to stdio and http servers; got ${server.transport}.`
         );
       }
       connections.push({ label: server.label, client, tools: [] });
@@ -188,7 +188,7 @@ async function runModel(request, config, connections) {
   for (const step of rule?.steps ?? []) {
     if (!runsOn(step.rate, request.trial)) continue;
     if ('skill' in step) {
-      events.push({ kind: 'skill', source: 'host', name: step.skill });
+      events.push({ kind: 'skill', source: 'builtin', name: step.skill });
       continue;
     }
     if ('toolSearch' in step) {
@@ -205,7 +205,7 @@ async function runModel(request, config, connections) {
       );
       events.push({
         kind: 'tool_search',
-        source: 'host',
+        source: 'builtin',
         name: 'ToolSearch',
         arguments: { query: step.toolSearch },
         results: searched.map(({ connection, tool }) => ({
@@ -228,7 +228,7 @@ async function runModel(request, config, connections) {
         kind: 'tool_call',
         source: 'mcp',
         name: tool.name,
-        // Like many hosts, name the server only when there is more than one;
+        // Like many clients, name the server only when there is more than one;
         // MST attributes single-server calls itself.
         ...(connections.length > 1 ? { server: connection.label } : {}),
         arguments: step.args,
@@ -334,7 +334,7 @@ export default {
     keywords: {
       schema: z.object({ keywords: z.array(z.string()).min(1) }).strict(),
       async evaluate({ trial }, options) {
-        // Judge the host's answer, never its trace.
+        // Judge the client's answer, never its trace.
         const answer = trial.text;
         if (!answer)
           throw new Error('usecase/keywords judges a text response.');

@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import type { Duplex } from 'node:stream';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
-import type { ExternalHostConfig } from '../externalHost/types.js';
+import type { ExternalClientConfig } from '../externalClient/types.js';
 import type { SemanticDesktopTelemetry } from '../cowork/driver.js';
 import {
   chatgptDesktopEnvironment,
@@ -134,7 +134,7 @@ const OPEN_REQUEST_LIMIT = 1024;
 
 export async function runLinuxChatgptDesktop(
   mode: 'prepare' | 'submit',
-  config: ExternalHostConfig,
+  config: ExternalClientConfig,
   deadlineAt: number,
   prompt?: string,
   openPrompt?: ChatgptPromptOpener

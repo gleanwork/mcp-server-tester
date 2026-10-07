@@ -11,7 +11,7 @@ import {
 import { ByToolTable } from './components/Dashboard/ByToolTable';
 import { FailureBreakdown } from './components/Dashboard/FailureBreakdown';
 import { TrendChart } from './components/Dashboard/TrendChart';
-import { VariantExperimentCard } from './components/Dashboard/VariantExperimentCard';
+import { ToolOptimizationCard } from './components/Dashboard/ToolOptimizationCard';
 import { ComparisonView } from './components/Comparison/ComparisonView';
 import { ResultsTable } from './components/Results/ResultsTable';
 import { DetailModal } from './components/Results/DetailModal';
@@ -60,8 +60,8 @@ function App() {
     [data.runData.results]
   );
 
-  const experiment = data.runData.variantExperiment;
-  const comparison = experiment?.comparison;
+  const optimization = data.runData.toolOptimization;
+  const comparison = optimization?.comparison;
 
   // A comparison opens on its answer. Otherwise default to Tests if
   // present (simpler → complex), then Evals, then Overview.
@@ -170,7 +170,7 @@ function App() {
             </div>
           )}
 
-          {activeTab === 'comparison' && experiment && comparison && (
+          {activeTab === 'comparison' && optimization && comparison && (
             <div
               role="tabpanel"
               id="comparison-panel"
@@ -179,7 +179,7 @@ function App() {
               className="contents"
             >
               <ErrorBoundary label="Comparison tab">
-                <ComparisonView experiment={experiment} data={comparison} />
+                <ComparisonView optimization={optimization} data={comparison} />
               </ErrorBoundary>
             </div>
           )}
@@ -198,9 +198,9 @@ function App() {
                   <MetricsCards results={evalResults} mode="eval" />
 
                   {/* Tool optimization summary, for reports without the Comparison tab */}
-                  {data.runData.variantExperiment && !comparison && (
-                    <VariantExperimentCard
-                      data={data.runData.variantExperiment}
+                  {data.runData.toolOptimization && !comparison && (
+                    <ToolOptimizationCard
+                      data={data.runData.toolOptimization}
                     />
                   )}
 

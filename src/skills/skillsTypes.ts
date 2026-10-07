@@ -13,7 +13,7 @@ import { z } from 'zod';
 /** Extension identifier servers declare in `capabilities.extensions`. */
 export const SKILLS_EXTENSION_ID = 'io.modelcontextprotocol/skills';
 
-/** Per-skill limits every conforming host must support (SEP-2640 §Limits). */
+/** Per-skill limits every conforming client must support (SEP-2640 §Limits). */
 export const SKILL_LIMITS = {
   maxResources: 512,
   maxTotalBytes: 16 * 1024 * 1024,

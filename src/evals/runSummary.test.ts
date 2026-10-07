@@ -27,13 +27,13 @@ import path from 'node:path';
 import { saveBaseline } from './baseline.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import { createFixtureExtensions } from '../mcp/fixtures/fixtureExtensions.js';
-import type * as SimulationModule from './mcpHost/mcpHostSimulation.js';
+import type * as SimulationModule from './mstClient/simulation.js';
 
 // A stand-in for the mst client's model: it calls the connection's tool once
 // and answers with the tool's text.
-vi.mock('./mcpHost/mcpHostSimulation.js', async (original) => ({
+vi.mock('./mstClient/simulation.js', async (original) => ({
   ...(await original<typeof SimulationModule>()),
-  simulateMCPHost: vi.fn(async (mcp: MCPFixtureApi) => {
+  simulateMstClient: vi.fn(async (mcp: MCPFixtureApi) => {
     const result = (await mcp.callTool('tool', {})) as {
       content?: Array<{ text?: string }>;
     };
@@ -131,7 +131,7 @@ describe('redactStoredResponses', () => {
             calls: [
               {
                 name: 'reply',
-                arguments: { response: 'host argument' },
+                arguments: { response: 'client argument' },
                 status: 'expected',
               },
             ],

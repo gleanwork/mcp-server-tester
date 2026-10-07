@@ -20,7 +20,7 @@ function load(evalConfig: Record<string, unknown>) {
 }
 
 describe('client, model and clientOptions', () => {
-  it('reject the old host key in an eval config, a variant and a case', () => {
+  it('reject the old client key in an eval config, a variant and a case', () => {
     expect(() => load({ host: { type: 'mst' } })).toThrow(HOST_IS_NOW);
     expect(() =>
       load({ variants: [{ name: 'a', host: { model: 'x' } }] })

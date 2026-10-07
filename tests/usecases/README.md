@@ -1,13 +1,13 @@
-# Use-case suite
+# Use-case eval
 
-Each directory in `cases/` is one comparison MST is built to run: tool triggering over time, tool-description variants, one aggregating server against several native servers, a host with and without a plugin, and so on. The suite runs every case through the `mst` CLI, as a user would, and checks the `results.json` it writes.
+Each directory in `cases/` is one comparison MST is built to run: tool triggering over time, tool-description variants, one aggregating server against several native servers, a client with and without a plugin, and so on. The runs every case through the `mst` CLI, as a user would, and checks the `results.json` it writes.
 
 ```bash
 npm run build
 npm run test:usecases
 ```
 
-The suite needs no network and no LLM. The CLI only sees `PATH`, `HOME` and the temp-directory variables from your environment, so API keys and proxy settings can't change a run. CI runs it on every pull request.
+The eval needs no network and no LLM. The CLI only sees `PATH`, `HOME` and the temp-directory variables from your environment, so API keys and proxy settings can't change a run. CI runs it on every pull request.
 
 ## How a case runs
 
@@ -22,16 +22,16 @@ The runner copies the directory to a temp directory, then fills in each `"{{serv
 `fixtures/plugin.mjs` provides:
 
 - **`usecase/model`**, a deterministic stand-in for a model. It connects to the variant's real MCP servers, lists their tools, and follows a `policy`:
-  - The first rule whose `when` matches is the case's plan. A rule can match on `input`, `inputStartsWith`, `instruction` (in the host's `systemPrompt`), a host `plugins` entry, or the `run` index.
+  - The first rule whose `when` matches is the case's plan. A rule can match on `input`, `inputStartsWith`, `instruction` (in the client's `systemPrompt`), a client `plugins` entry, or the `run` index.
   - Each step calls a visible tool chosen by `name`, `nameIncludes` or `description`, emits a host-native `skill` event, or runs a tool search.
   - A step's `rate` makes it run on that share of trials, deterministically.
 
-  Because tools are picked by what the host can see, renaming or re-describing a tool changes what it does.
+  Because tools are picked by what the client can see, renaming or re-describing a tool changes what it does.
 
   The model answers from the last tool output it read, so a trace can hold facts its answer leaves out. Token usage grows with the tool definitions and outputs.
 
-- **`usecase/assistant`**, a host with `evidence: "none"`: it returns an answer and no trace.
-- **`usecase/keywords`**, a judge that scores the share of keywords in the host's answer. It never reads the trace.
+- **`usecase/assistant`**, a client with `evidence: "none"`: it returns an answer and no trace.
+- **`usecase/keywords`**, a judge that scores the share of keywords in the client's answer. It never reads the trace.
 
 ## Checks
 
@@ -40,9 +40,9 @@ Each check is a `path` into `results.json`, with `equals` or `exists`.
 - A segment can select an array item with `[key=value]` (for example `variants[name=native]`) or an index (`[0]`). `length` counts items or keys.
 - Segments are split on `.` first, so a selector value can't contain a dot.
 
-`expected.json` is validated, so a misspelt field fails the suite instead of checking nothing.
+`expected.json` is validated, so a misspelt field fails the eval instead of checking nothing.
 
-The model host appends every trace it returns to a ledger. This catches aggregation errors without hand-computed constants:
+The model client appends every trace it returns to a ledger. This catches aggregation errors without hand-computed constants:
 
 - **`ledger.metrics`** recompute each variant's per-trial means from the ledger and compare them with MST's numbers.
 - **`ledger.deltas`** do the same for variant deltas.

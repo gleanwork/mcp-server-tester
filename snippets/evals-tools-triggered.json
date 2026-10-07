@@ -1,5 +1,5 @@
 {
-  "name": "llm-host-evals",
+  "name": "llm-client-evals",
   "cases": [
     {
       "id": "llm-triggers-search",

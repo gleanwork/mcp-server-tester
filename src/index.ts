@@ -13,7 +13,7 @@ export type {
   MCPConfig,
   StdioMCPConfig,
   HttpMCPConfig,
-  MCPHostCapabilities,
+  MCPClientCapabilities,
   MCPAuthConfig,
   MCPOAuthConfig,
   MCPClientCredentialsConfig,
@@ -77,7 +77,7 @@ export type {
   ToolOverrideVariant,
   LLMProvider,
   LLMToolCall,
-  MCPHostSimulationResult,
+  MstClientSimulationResult,
   JudgeConfig,
   Judge,
   JudgeResult,
@@ -175,7 +175,7 @@ export {
   loadEvalDataset,
   loadEvalDatasetFromObject,
 } from './evals/datasetLoader.js';
-// Types root APIs take or return: plugins and their judges, and the host
+// Types root APIs take or return: plugins and their judges, and the client
 // trace in tool-call assertions and case results.
 export type { Plugin, PluginMeta } from './plugins/plugin.js';
 export type { PluginConfig } from './evals/evalConfig.js';
@@ -191,14 +191,11 @@ export type {
 export { runEvalDataset, runEvalCase } from './evals/evalRunner.js';
 export type {
   CaseExecution,
-  HostExecution,
+  ClientExecution,
   FailedExecution,
   ClientResponse,
 } from './evals/caseExecution.js';
-export type {
-  ClientSkillsMode,
-  SkillLoad,
-} from './evals/mcpHost/mcpHostTypes.js';
+export type { ClientSkillsMode, SkillLoad } from './evals/mstClient/types.js';
 export { createJudge } from './judge/judgeClient.js';
 export {
   BUILT_IN_RUBRICS,

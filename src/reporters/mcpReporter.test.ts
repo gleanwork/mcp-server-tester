@@ -505,8 +505,8 @@ describe('MCPReporter.buildRunData()', () => {
     });
   });
 
-  describe('external host metadata', () => {
-    it('preserves external host trace metadata in run data', () => {
+  describe('external client metadata', () => {
+    it('preserves external client trace metadata in run data', () => {
       setResults(reporter, [
         makeResult({
           pass: true,

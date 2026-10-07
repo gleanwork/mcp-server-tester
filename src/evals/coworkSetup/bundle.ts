@@ -2,12 +2,12 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join, posix, resolve } from 'node:path';
 import { mcpServerLabel, type MCPConfig } from '../../config/mcpConfig.js';
 import {
-  hostStdioFileContents,
-  hostStdioServers,
-  resolveHostStdioCredentials,
-  resolveHostStdioServer,
+  clientStdioFileContents,
+  clientStdioServers,
+  resolveClientStdioCredentials,
+  resolveClientStdioServer,
   type MarketplacePlugin,
-} from '../hostPlugins.js';
+} from '../clientPlugins.js';
 import { transportServers, type EvalConfig } from '../evalConfig.js';
 import {
   createCoworkMcpPlan,
@@ -166,17 +166,17 @@ export function createCoworkBundlePlan(options: BundlePlanOptions) {
     )
       throw new Error(ERROR_MESSAGE);
   }
-  const stdio = hostStdioServers(labeled, options.plugins ?? []);
+  const stdio = clientStdioServers(labeled, options.plugins ?? []);
   if (servers.length + stdio.length !== declarations.length)
     throw new Error(ERROR_MESSAGE);
-  const tokens = resolveHostStdioCredentials(stdio, options.env ?? {});
+  const tokens = resolveClientStdioCredentials(stdio, options.env ?? {});
   // Mac marketplace installation roots are not known before Desktop starts.
   const paths = { dataRoot: join(options.runtimeDirectory, 'stdio') };
   const privateFiles: Array<{ name: string; content: string }> = [];
   const stdioDirectories: string[] = [];
   const launches = stdio.map((server) => {
-    const launch = resolveHostStdioServer(server, paths);
-    const files = hostStdioFileContents(server, paths, tokens[server.label]);
+    const launch = resolveClientStdioServer(server, paths);
+    const files = clientStdioFileContents(server, paths, tokens[server.label]);
     const names = Object.keys(files).map((name) => name.toLowerCase());
     if (new Set(names).size !== names.length) throw new Error(ERROR_MESSAGE);
     if (server.usesDataDir) stdioDirectories.push(`stdio/${server.label}`);

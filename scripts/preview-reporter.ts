@@ -35,7 +35,7 @@ const mockData: MCPEvalData = {
       datasetBreakdown: {
         'search-evals': 8,
         'document-evals': 6,
-        'llm-host-suite': 4,
+        'client-evals': 4,
       },
       graderBreakdown: {
         exact: 2,
@@ -288,10 +288,10 @@ const mockData: MCPEvalData = {
         tags: ['regression'],
         durationMs: 112,
       },
-      // LLM host mode — good precision & recall
+      // LLM client mode — good precision & recall
       {
         id: 'llm-host-search-scenario',
-        datasetName: 'llm-host-suite',
+        datasetName: 'client-evals',
         toolName: 'search',
         source: 'eval',
         pass: true,
@@ -401,10 +401,10 @@ const mockData: MCPEvalData = {
         tags: ['llm-host', 'high-priority'],
         durationMs: 5680,
       },
-      // LLM host mode — low recall (missed required tool)
+      // LLM client mode — low recall (missed required tool)
       {
         id: 'llm-host-create-scenario',
-        datasetName: 'llm-host-suite',
+        datasetName: 'client-evals',
         toolName: 'create_document',
         source: 'eval',
         pass: false,
@@ -439,10 +439,10 @@ const mockData: MCPEvalData = {
         tags: ['llm-host', 'regression'],
         durationMs: 3200,
       },
-      // LLM host mode — unexpected extra tool calls
+      // LLM client mode — unexpected extra tool calls
       {
         id: 'llm-host-multi-tool',
-        datasetName: 'llm-host-suite',
+        datasetName: 'client-evals',
         toolName: 'search',
         source: 'eval',
         pass: true,
@@ -483,10 +483,10 @@ const mockData: MCPEvalData = {
         tags: ['llm-host'],
         durationMs: 4100,
       },
-      // LLM host — judge fail
+      // LLM client — judge fail
       {
         id: 'llm-host-quality-fail',
-        datasetName: 'llm-host-suite',
+        datasetName: 'client-evals',
         toolName: 'search',
         source: 'eval',
         pass: false,

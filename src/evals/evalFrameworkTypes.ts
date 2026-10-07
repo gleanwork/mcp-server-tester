@@ -33,19 +33,19 @@ export interface DatasetSource {
   ): Promise<EvalDataset>;
 }
 
-/** Options supplied to a host implementation. */
+/** Options supplied to a client implementation. */
 export interface ClientRunOptions {
   dataset: EvalDataset;
   cases: EvalCase[];
   servers: MCPConfig[];
-  host: ClientConfig;
+  client: ClientConfig;
   evalConfig: EvalConfig;
   variant?: EvalVariant;
   dryRun?: boolean;
 }
 
 export interface ClientRunInput {
-  /** The case's input, sent to the host as its prompt. */
+  /** The case's input, sent to the client as its prompt. */
   prompt: string;
   servers: MCPConfig[];
   /**
@@ -62,7 +62,7 @@ export interface ClientRunInput {
 export interface ClientRunContext {
   evalConfig: EvalConfig;
   variant?: EvalVariant;
-  /** Runtime-only environment isolated per suite. */
+  /** Runtime-only environment isolated per eval. */
   env?: Record<string, string | undefined>;
 }
 
@@ -73,7 +73,7 @@ export interface TraceEvent {
    * runs, `subagent` starts, and `tool_search` catalog searches.
    */
   kind: 'tool_call' | 'skill' | 'command' | 'subagent' | 'tool_search';
-  source: 'mcp' | 'host';
+  source: 'mcp' | 'builtin';
   name: string;
   server?: string;
   arguments?: Record<string, unknown>;
@@ -89,7 +89,7 @@ export interface TraceEvent {
   results?: Array<{ name: string; server?: string }>;
 }
 
-/** One execution trace. Hosts never return evaluation scores. */
+/** One execution trace. Clients never return evaluation scores. */
 export interface ClientRunResult {
   diagnostics?: ClientDiagnostics;
   finalText: string;
@@ -104,15 +104,15 @@ export interface ClientRunResult {
 }
 
 /**
- * What a host did in one trial: the `ClientRunResult` it returned, without
+ * What a client did in one trial: the `ClientRunResult` it returned, without
  * telemetry and diagnostics, plus the evidence it declared. Case results keep
- * it for host cases (one per trial). In a suite, every MCP event names its
+ * it for client cases (one per trial). In an eval, every MCP event names its
  * `server` label. Stored results drop `finalText` and event `output`, which
  * can hold data from the server under test.
  */
 export type Trace = Pick<ClientRunResult, 'events' | 'usage' | 'error'> & {
   finalText?: string;
-  /** Declared evidence; absent for the legacy simulated host. */
+  /** Declared evidence; absent for the legacy simulated client. */
   evidence?: TraceEvidence;
 };
 
@@ -124,7 +124,7 @@ export interface ClientBatchRequest {
   config: ClientConfig;
 }
 
-/** Public host extension point. */
+/** Public client extension point. */
 export interface ClientDefinition {
   readonly schema: ZodType;
   /** Missing evidence declarations are treated as unverified. */
@@ -138,20 +138,20 @@ export interface ClientDefinition {
   readonly toolMetadata?: boolean;
   /**
    * For clients with `run` or `runBatch` that don't set `toolMetadata`: the
-   * client connects to the servers in `input.servers`, so the suite can serve
+   * client connects to the servers in `input.servers`, so the eval can serve
    * it a variant's tool metadata through a local MCP proxy (the default). Set
    * false for a client that connects elsewhere; an eval config that gives it
    * `tools` then fails validation.
    */
   readonly toolSurfaceProxy?: boolean;
   /**
-   * The host connects to one server set for its whole batch, the first
+   * The client connects to one server set for its whole batch, the first
    * request's `input.servers`, rather than to each request's. The proxy then
    * serves the batch on one endpoint, and checks once, for the batch, that
-   * the host listed the variant's tools.
+   * the client listed the variant's tools.
    */
   readonly serversPerBatch?: boolean;
-  /** The most cases the host can run at once; `concurrency` above it is an error. */
+  /** The most cases the client can run at once; `concurrency` above it is an error. */
   readonly maxConcurrency?: number;
   /** Ordered traces for all selected trials. The framework owns scores. */
   runBatch?(
@@ -230,7 +230,7 @@ export interface ResultStoreDefinition {
 }
 
 /** Options shared by an eval config runner implementation. */
-export interface EvaluationSuiteOptions {
+export interface EvaluationRunOptions {
   configPath: string;
   rootDir?: string;
   /** Plugin specifiers, added to the eval config's `plugins`. */
@@ -254,8 +254,8 @@ export interface EvaluationVariantResult {
   evidence?: TraceEvidence;
   /** Listed metrics with no value for this variant (unavailable, not zero). */
   unavailableMetrics?: string[];
-  /** Where `cost_usd` comes from: hosts, the eval config's `pricing`, or both. */
-  costSource?: 'host' | 'pricing' | 'mixed';
+  /** Where `cost_usd` comes from: clients, the eval config's `pricing`, or both. */
+  costSource?: 'client' | 'pricing' | 'mixed';
   /** The prices the variant's estimates used, by model, so they can be audited later. */
   pricing?: Record<string, ModelPricing>;
   /** Models whose usage had no reported cost and no price: `cost_usd` leaves them out. */
@@ -263,13 +263,13 @@ export interface EvaluationVariantResult {
   comparison?: Record<string, unknown>;
 }
 
-/** Stable summary shape written by a completed evaluation suite. */
+/** Stable summary shape written by a completed evaluation eval. */
 export interface RunTelemetry {
   cases: number;
   toolCalls: number;
   failedCases: number;
   totalClientUsage?: Partial<UsageMetrics>;
-  /** Judge model usage, from judges that report it. Separate from host usage. */
+  /** Judge model usage, from judges that report it. Separate from client usage. */
   totalJudgeUsage?: Partial<UsageMetrics>;
 }
 
@@ -322,8 +322,8 @@ export interface RunSummary {
 
 export type EvaluationSummary = RunSummary;
 
-/** Result contract for a suite implementation. */
-export interface EvaluationSuiteResult {
+/** Result contract for an eval implementation. */
+export interface EvaluationRunResult {
   evalConfig: EvalConfig;
   outputDir: string;
   datasets: Array<{
@@ -354,7 +354,7 @@ export interface EvaluationBatchOptions {
 export interface EvaluationBatchItem {
   configPath: string;
   outputDir?: string;
-  result?: EvaluationSuiteResult;
+  result?: EvaluationRunResult;
   error?: string;
   skipped?: boolean;
 }

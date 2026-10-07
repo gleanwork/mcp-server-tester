@@ -16,11 +16,11 @@ import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import type { EvalConfig } from '../evalConfig.js';
 import {
-  assertCoworkHostPlugins,
+  assertCoworkClientPlugins,
   coworkBlockedMcpEntries,
   coworkPluginMarketplace,
   type MarketplacePlugin,
-} from '../hostPlugins.js';
+} from '../clientPlugins.js';
 import {
   COWORK_SETTINGS_MAX_BYTES as LIMIT,
   createCoworkBundlePlan,
@@ -678,7 +678,7 @@ async function validateInstall(options: InstallOptions) {
   )
     fail();
   const plugins = options.plugins ?? [];
-  assertCoworkHostPlugins(plugins);
+  assertCoworkClientPlugins(plugins);
   const marketplaces = plugins.map(coworkPluginMarketplace);
   const blocked = coworkBlockedMcpEntries(plugins);
   const profileDirectory = resolve(options.profileDirectory);

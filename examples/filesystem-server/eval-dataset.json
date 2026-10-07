@@ -115,7 +115,7 @@
     "notes": [
       "This dataset tests the official Filesystem MCP server from Anthropic",
       "Direct mode tests specific file operations with known paths",
-      "LLM host mode tests tool discovery and natural language understanding",
+      "LLM client mode tests tool discovery and natural language understanding",
       "All files are created in temporary directories using fixturify-project",
       "No API keys required for direct mode tests",
       "LLM tests require ANTHROPIC_API_KEY environment variable"

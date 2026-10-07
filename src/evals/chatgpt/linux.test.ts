@@ -5,10 +5,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { NativeChatgptDriverError, runLinuxChatgptDesktop } from './linux.js';
 import { validateLinuxChatgptConfig } from '../chatgptSetup/linuxProfile.js';
 import { linuxEnvironment } from './linuxEnvironment.fixture.js';
-import type { ExternalHostConfig } from '../externalHost/types.js';
+import type { ExternalClientConfig } from '../externalClient/types.js';
 
 let root: string;
-let config: ExternalHostConfig;
+let config: ExternalClientConfig;
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'mst-chatgpt-native-'));
   config = {

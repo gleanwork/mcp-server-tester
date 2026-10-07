@@ -20,7 +20,7 @@ interface Call {
 }
 
 // Polls wait on freshly spawned Node children; the 1s default is too tight
-// under full-suite load. They return as soon as the condition holds.
+// under full-eval load. They return as soon as the condition holds.
 const SPAWN = { timeout: 10_000 };
 
 async function fakeApp(handoffExit = 0, mainExitsImmediately = false) {

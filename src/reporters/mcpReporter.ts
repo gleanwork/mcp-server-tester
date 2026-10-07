@@ -16,7 +16,7 @@ import type {
   MCPEvalHistoricalSummary,
   MCPConformanceResultData,
   MCPServerCapabilitiesData,
-  MCPVariantExperimentData,
+  MCPToolOptimizationData,
   EvalCaseResult,
 } from '../types/reporter.js';
 import type { UsageMetrics } from '../types/index.js';
@@ -70,7 +70,7 @@ export default class MCPReporter implements Reporter {
   private allResults: Array<EvalCaseResult> = [];
   private conformanceChecks: Array<MCPConformanceResultData> = [];
   private serverCapabilities: Array<MCPServerCapabilitiesData> = [];
-  private variantExperiment: MCPVariantExperimentData | undefined;
+  private toolOptimization: MCPToolOptimizationData | undefined;
 
   constructor(options: MCPEvalReporterConfig = {}) {
     this.config = {
@@ -180,7 +180,7 @@ export default class MCPReporter implements Reporter {
         ))
       );
 
-    let sawExperiment = false;
+    let sawOptimization = false;
     let sawToolList = false;
 
     for (const attachment of received) {
@@ -190,9 +190,9 @@ export default class MCPReporter implements Reporter {
           // (Playwright is the source of truth).
           this.allResults.push(...attachment.data.caseResults);
           break;
-        case 'variantExperiment':
-          if (!sawExperiment) this.variantExperiment = attachment.data;
-          sawExperiment = true;
+        case 'toolOptimization':
+          if (!sawOptimization) this.toolOptimization = attachment.data;
+          sawOptimization = true;
           break;
         case 'conformance': {
           const { data } = attachment;
@@ -373,7 +373,7 @@ export default class MCPReporter implements Reporter {
         this.serverCapabilities.length > 0
           ? this.serverCapabilities
           : undefined,
-      variantExperiment: this.variantExperiment,
+      toolOptimization: this.toolOptimization,
     };
   }
 

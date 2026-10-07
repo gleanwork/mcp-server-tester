@@ -11,7 +11,7 @@ import { removedKeys, renamedKeys } from './renamedKeys.js';
 /**
  * A single eval case: an input the client under test acts on, and what to
  * assert about what it did. The case runs on the `client`, `model` and
- * `clientOptions` it inherits from the suite (or the run), changed by its own.
+ * `clientOptions` it inherits from the eval (or the run), changed by its own.
  *
  * Direct tool calls aren't cases: write them as Playwright tests with
  * `mcp.callTool()` and the matchers.
@@ -172,7 +172,7 @@ export interface EvalAssertions {
   toolsTriggered?: {
     /** Expected tool calls */
     calls: Array<{
-      /** Tool or explicitly selected host event name. */
+      /** Tool or explicitly selected client event name. */
       name: string;
       kind?: TraceEvent['kind'];
       source?: TraceEvent['source'];
@@ -293,7 +293,14 @@ export const EvalAssertionsSchema = z
                   'tool_search',
                 ])
                 .optional(),
-              source: z.enum(['mcp', 'host']).optional(),
+              source: z
+                .enum(['mcp', 'builtin'], {
+                  error: (issue) =>
+                    issue.input === 'host'
+                      ? "`source: 'host'` is now `source: 'builtin'` (the client's built-in tools)"
+                      : undefined,
+                })
+                .optional(),
               server: z.string().min(1).optional(),
               arguments: z.record(z.string(), z.unknown()).optional(),
               required: z.boolean().optional(),
@@ -351,9 +358,9 @@ export const EvalCaseSchema = z
       request:
         'direct requests are Playwright tests: call `mcp.request(method, params, schema)` in a test and assert on its result',
       mcpHostConfig:
-        'set the client and model with `client`, `model` and `clientOptions`, on the case, the suite, or runEvalDataset',
+        'set the client and model with `client`, `model` and `clientOptions`, on the case, the eval, or runEvalDataset',
       externalHost:
-        "run the case in a suite with `client: 'chatgpt'` or a plugin client",
+        "run the case in an eval with `client: 'chatgpt'` or a plugin client",
     }),
     metadata: z.record(z.string(), z.unknown()).optional(),
     trials: z.number().int().min(1).optional(),

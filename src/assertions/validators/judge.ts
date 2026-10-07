@@ -103,7 +103,7 @@ export async function validateJudge(
 
 /**
  * The name results give the judge an assertion runs (`correctness`,
- * `acme/completeness`), or undefined when it names none. Suite eval configs
+ * `acme/completeness`), or undefined when it names none. Eval configs
  * match case overrides on it.
  */
 export function judgeNameOf(config: JudgeValidatorConfig): string | undefined {

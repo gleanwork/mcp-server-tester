@@ -88,7 +88,7 @@ describe('pinned Mac bundle provisioning (native execution mocked)', () => {
     expect(macCoworkAppVersion('2.3.4', {})).toBe('2.3.4');
     for (const value of ['latest', '../Claude', '1.2', '1.2.3\n'])
       expect(() => macCoworkAppVersion(value, {})).toThrow(
-        'Invalid host.options.appVersion'
+        'Invalid clientOptions.appVersion'
       );
     expect(() =>
       macCoworkAppVersion(version, { MST_COWORK_APP_PATH: '/app' })
@@ -96,7 +96,7 @@ describe('pinned Mac bundle provisioning (native execution mocked)', () => {
     // The old environment pin fails loudly rather than silently unpinning.
     expect(() =>
       macCoworkAppVersion(undefined, { MST_COWORK_APP_VERSION: version })
-    ).toThrow('host.options.appVersion');
+    ).toThrow('clientOptions.appVersion');
   });
   it('reads an exact installed version and rejects anything else', async () => {
     execute.mockResolvedValueOnce({ stdout: '2.19675.1\n' });

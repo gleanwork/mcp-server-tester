@@ -84,10 +84,10 @@ export interface CodexExecutionPolicy {
 }
 
 /**
- * Bundled host tools to turn off, for hosts where they compete with the MCP
+ * Bundled built-in tools to turn off, for clients where they compete with the MCP
  * server under test. Renders only `enabled = false` and `web_search`.
  */
-export interface CodexHostToolPolicy {
+export interface CodexBuiltinToolPolicy {
   /** Bundled plugin IDs, e.g. `unified-computer-use@openai-bundled`. */
   disabledPlugins: readonly string[];
   webSearch: 'disabled';
@@ -185,7 +185,7 @@ export function renderCodexConfig(
       : renderHttpServer(server);
   });
   const content = [
-    '# Managed by MCP Server Tester. Restored after the host run.',
+    '# Managed by MCP Server Tester. Restored after the client run.',
     ...blocks,
   ].join('\n\n');
   if (Buffer.byteLength(content, 'utf8') > MAX_CONFIG_BYTES) {
@@ -205,7 +205,7 @@ export interface CodexConfigInstallOptions {
   /** Rendered as top-level `approval_policy` and `sandbox_mode`. */
   executionPolicy?: CodexExecutionPolicy;
   /** Rendered as `[plugins."<id>"] enabled = false` and `web_search`. */
-  hostToolPolicy?: CodexHostToolPolicy;
+  builtinToolPolicy?: CodexBuiltinToolPolicy;
 }
 
 export async function installCodexConfig(
@@ -242,7 +242,7 @@ export async function installCodexConfig(
       policy.sandboxMode !== 'danger-full-access')
   )
     throw new Error('Invalid Codex execution policy.');
-  const tools = options.hostToolPolicy;
+  const tools = options.builtinToolPolicy;
   if (
     tools !== undefined &&
     (tools.webSearch !== 'disabled' ||
@@ -254,7 +254,7 @@ export async function installCodexConfig(
         FEATURE_PATTERN.test(name)
       ))
   )
-    throw new Error('Invalid Codex host tool policy.');
+    throw new Error('Invalid Codex built-in tool policy.');
   const resolved = resolveCodexSetup(setup, options.configName);
   const target = resolved.configPath;
   const lock = `${target}${LOCK_SUFFIX}`;
@@ -370,7 +370,7 @@ export async function restoreCodexConfig(
     }
     // The desktop app writes its own built-in servers and per-chat preferences.
     // Only the lifecycle owner, after stopping the app, may opt into archiving
-    // those bytes. Never silently discard either user or host changes.
+    // those bytes. Never silently discard either user or client changes.
     const archivePath = `${journal.targetPath}.mst-runtime-${journal.transactionId}`;
     await writeFile(archivePath, current, { mode: 0o600, flag: 'wx' });
     process.stderr.write(

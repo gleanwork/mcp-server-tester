@@ -3,10 +3,10 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  requireIdenticalHostSettings,
+  requireIdenticalClientSettings,
   runDesktopBatch,
   type DesktopCaseOutcome,
-  type DesktopHostAdapter,
+  type DesktopClientAdapter,
 } from './desktopBatch.js';
 import type {
   ClientBatchRequest,
@@ -38,10 +38,10 @@ const ok = (text: string): DesktopCaseOutcome => ({
   continuation: 'allowed',
 });
 
-/** A fake desktop host that records its lifecycle. */
-function fakeHost(
-  overrides: Partial<DesktopHostAdapter<{ id: string }>> = {}
-): DesktopHostAdapter<{ id: string }> & { events: string[] } {
+/** A fake desktop client that records its lifecycle. */
+function fakeClient(
+  overrides: Partial<DesktopClientAdapter<{ id: string }>> = {}
+): DesktopClientAdapter<{ id: string }> & { events: string[] } {
   const events: string[] = [];
   return {
     events,
@@ -76,13 +76,13 @@ const exists = (file: string) =>
 
 describe('runDesktopBatch', () => {
   it('prepares, runs every case, disposes and releases the lease', async () => {
-    const host = fakeHost();
-    const results = await runDesktopBatch(host, requests(2));
+    const client = fakeClient();
+    const results = await runDesktopBatch(client, requests(2));
     expect(results.map((result) => result.finalText)).toEqual([
       'case-1',
       'case-2',
     ]);
-    expect(host.events).toEqual([
+    expect(client.events).toEqual([
       'prepare',
       'case 1',
       'case 2',
@@ -97,15 +97,15 @@ describe('runDesktopBatch', () => {
   });
 
   it('does nothing for an empty batch', async () => {
-    const host = fakeHost();
-    expect(await runDesktopBatch(host, [])).toEqual([]);
-    expect(host.events).toEqual([]);
+    const client = fakeClient();
+    expect(await runDesktopBatch(client, [])).toEqual([]);
+    expect(client.events).toEqual([]);
   });
 
   it('refuses a second batch while the desktop is leased', async () => {
     let release: () => void = () => {};
     const first = runDesktopBatch(
-      fakeHost({
+      fakeClient({
         async prepare() {
           await new Promise<void>((resolve) => {
             release = resolve;
@@ -120,7 +120,7 @@ describe('runDesktopBatch', () => {
       pid: number;
     };
     expect(lease.pid).toBe(process.pid);
-    await expect(runDesktopBatch(fakeHost(), requests(1))).rejects.toThrow(
+    await expect(runDesktopBatch(fakeClient(), requests(1))).rejects.toThrow(
       'Fake desktop is locked by another run or an interrupted run'
     );
     release();
@@ -128,9 +128,9 @@ describe('runDesktopBatch', () => {
   });
 
   it('resets after a case that left the app unknown', async () => {
-    const host = fakeHost({
+    const client = fakeClient({
       async runCase(_session, request, index) {
-        host.events.push(`case ${index + 1}`);
+        client.events.push(`case ${index + 1}`);
         return index === 0
           ? {
               result: { finalText: '', events: [], error: 'boom' },
@@ -139,8 +139,8 @@ describe('runDesktopBatch', () => {
           : ok(request.caseId);
       },
     });
-    const results = await runDesktopBatch(host, requests(2));
-    expect(host.events).toEqual([
+    const results = await runDesktopBatch(client, requests(2));
+    expect(client.events).toEqual([
       'prepare',
       'case 1',
       'reset before 2',
@@ -151,9 +151,9 @@ describe('runDesktopBatch', () => {
   });
 
   it('submits nothing more when the app cannot be reset', async () => {
-    const host = fakeHost({
+    const client = fakeClient({
       async runCase(_session, _request, index) {
-        host.events.push(`case ${index + 1}`);
+        client.events.push(`case ${index + 1}`);
         return {
           result: { finalText: '', events: [], error: 'boom' },
           continuation: 'reset',
@@ -163,8 +163,8 @@ describe('runDesktopBatch', () => {
         throw new Error(`reset refused with ${SECRET}`);
       },
     });
-    const results = await runDesktopBatch(host, requests(3));
-    expect(host.events).toEqual(['prepare', 'case 1', 'dispose session']);
+    const results = await runDesktopBatch(client, requests(3));
+    expect(client.events).toEqual(['prepare', 'case 1', 'dispose session']);
     for (const result of results.slice(1)) {
       expect(result.error).toMatch(
         /^Not submitted because the Fake app could not be reset after an earlier failed case: /
@@ -179,7 +179,7 @@ describe('runDesktopBatch', () => {
 
   it('stops submitting when a platform has no reset', async () => {
     const results = await runDesktopBatch(
-      fakeHost({
+      fakeClient({
         reset: undefined,
         async runCase() {
           return {
@@ -198,7 +198,7 @@ describe('runDesktopBatch', () => {
   it('refuses to attribute one native session to two cases', async () => {
     const claims: boolean[] = [];
     await runDesktopBatch(
-      fakeHost({
+      fakeClient({
         async runCase(_session, request, _index, ledger) {
           claims.push(ledger.claim('native-1'));
           return ok(request.caseId);
@@ -211,7 +211,7 @@ describe('runDesktopBatch', () => {
 
   it('redacts every case error', async () => {
     const results = await runDesktopBatch(
-      fakeHost({
+      fakeClient({
         async runCase() {
           return {
             result: {
@@ -229,17 +229,17 @@ describe('runDesktopBatch', () => {
   });
 
   it('disposes the prepared session when readiness fails, and throws redacted', async () => {
-    const host = fakeHost({
+    const client = fakeClient({
       async ready() {
         throw new Error(`MCP not ready (${SECRET})`);
       },
     });
-    const failure = await runDesktopBatch(host, requests(2)).catch(
+    const failure = await runDesktopBatch(client, requests(2)).catch(
       (error: unknown) => error
     );
     expect(String(failure)).toContain('MCP not ready');
     expect(String(failure)).not.toContain(SECRET);
-    expect(host.events).toEqual(['prepare', 'dispose session']);
+    expect(client.events).toEqual(['prepare', 'dispose session']);
     expect(await exists(leasePath())).toBe(false);
   });
 
@@ -248,7 +248,7 @@ describe('runDesktopBatch', () => {
       { label: 'acme', status: 'connected', toolCount: 0, elapsedMs: 1 },
     ]);
     const failure = await runDesktopBatch(
-      fakeHost({
+      fakeClient({
         async ready() {
           throw readiness;
         },
@@ -261,7 +261,7 @@ describe('runDesktopBatch', () => {
 
   it('keeps results and the lease when cleanup fails', async () => {
     const results: ClientRunResult[] = await runDesktopBatch(
-      fakeHost({
+      fakeClient({
         async dispose() {
           throw new Error('restore failed');
         },
@@ -279,7 +279,7 @@ describe('runDesktopBatch', () => {
 
   it('reports both an execution failure and a cleanup failure', async () => {
     const failure = await runDesktopBatch(
-      fakeHost({
+      fakeClient({
         async runCase() {
           throw new Error('driver crashed');
         },
@@ -296,9 +296,9 @@ describe('runDesktopBatch', () => {
     ]);
   });
 
-  it('adds host lifecycle telemetry to every result', async () => {
+  it('adds client lifecycle telemetry to every result', async () => {
     const results = await runDesktopBatch(
-      fakeHost({ batchTelemetry: () => ({ setupMs: 12 }) }),
+      fakeClient({ batchTelemetry: () => ({ setupMs: 12 }) }),
       requests(2)
     );
     expect(results.map((result) => result.telemetry?.batchLifecycle)).toEqual([
@@ -308,13 +308,13 @@ describe('runDesktopBatch', () => {
   });
 });
 
-describe('requireIdenticalHostSettings', () => {
-  it('accepts identical settings and names the host otherwise', () => {
+describe('requireIdenticalClientSettings', () => {
+  it('accepts identical settings and names the client otherwise', () => {
     expect(() =>
-      requireIdenticalHostSettings('Fake', [{ a: 1 }, { a: 1 }])
+      requireIdenticalClientSettings('Fake', [{ a: 1 }, { a: 1 }])
     ).not.toThrow();
     expect(() =>
-      requireIdenticalHostSettings('Fake', [{ a: 1 }, { a: 2 }])
-    ).toThrow('Fake batch requires identical host settings for all cases.');
+      requireIdenticalClientSettings('Fake', [{ a: 1 }, { a: 2 }])
+    ).toThrow('Fake batch requires identical client settings for all cases.');
   });
 });

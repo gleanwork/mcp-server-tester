@@ -20,7 +20,7 @@ interface RecommendationProps {
   data: MCPComparisonData;
   /** What the variants changed, e.g. "description". */
   what: string;
-  /** The metric the experiment optimized. */
+  /** The metric the optimization optimized. */
   metric: string;
   onShowUnsteady: () => void;
 }

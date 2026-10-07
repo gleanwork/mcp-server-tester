@@ -356,7 +356,7 @@ describe('measureAgainstBaseline', () => {
 });
 
 /**
- * Calibration: simulated experiments where the truth is known. These pin the
+ * Calibration: simulated optimizations where the truth is known. These pin the
  * error rates the report's assessments imply, so a change to the statistics
  * can't quietly start overstating results.
  */

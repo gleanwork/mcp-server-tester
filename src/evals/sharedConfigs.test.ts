@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { runEvalSuite } from './runEvalSuite.js';
+import { runEval } from './runEval.js';
 import { configIdentity } from './configIdentity.js';
 import { resolveConfigExtends } from './configExtends.js';
 import { loadEvalConfig } from './evalConfig.js';
@@ -19,8 +19,8 @@ afterEach(async () => {
   );
 });
 
-/** A suite directory with one file dataset and the given eval config. */
-async function suiteDir(evalConfig: Record<string, unknown>): Promise<string> {
+/** An eval directory with one file dataset and the given eval config. */
+async function evalDir(evalConfig: Record<string, unknown>): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'shared-configs-'));
   dirs.push(dir);
   await fs.writeFile(
@@ -36,13 +36,13 @@ async function suiteDir(evalConfig: Record<string, unknown>): Promise<string> {
 
 describe('eval config identity', () => {
   it('is unchanged for an eval config without extends', async () => {
-    const dir = await suiteDir({
+    const dir = await evalDir({
       name: 'identity',
       datasets: ['./cases.json'],
       judges: [{ type: 'rubric', rubric: 'correctness' }],
       trials: 2,
     });
-    const { summary } = await runEvalSuite({
+    const { summary } = await runEval({
       configPath: path.join(dir, 'eval.json'),
       rootDir: dir,
       dryRun: true,
@@ -58,7 +58,7 @@ describe('eval config identity', () => {
   });
 });
 
-/** A plugin with an echo host, a fixed-score judge and the given configs. */
+/** A plugin with an echo client, a fixed-score judge and the given configs. */
 function acme(configs: Plugin['configs'], namespace = 'acme'): Plugin {
   return {
     meta: { name: `${namespace}-plugin`, namespace },
@@ -84,9 +84,9 @@ function acme(configs: Plugin['configs'], namespace = 'acme'): Plugin {
 async function dryRun(
   evalConfig: Record<string, unknown>,
   plugins: Plugin[]
-): Promise<Awaited<ReturnType<typeof runEvalSuite>>> {
-  const dir = await suiteDir(evalConfig);
-  return runEvalSuite({
+): Promise<Awaited<ReturnType<typeof runEval>>> {
+  const dir = await evalDir(evalConfig);
+  return runEval({
     configPath: path.join(dir, 'eval.json'),
     rootDir: dir,
     plugins,
@@ -155,7 +155,7 @@ describe('shared configs', () => {
     ]);
   });
 
-  it("identifies a suite by its resolved settings, so a changed config isn't a saved run", async () => {
+  it("identifies an eval by its resolved settings, so a changed config isn't a saved run", async () => {
     const evalConfig = {
       name: 'identity',
       extends: ['acme/recommended'],
@@ -171,7 +171,7 @@ describe('shared configs', () => {
     expect(first.summary.contentHash).not.toBe(second.summary.contentHash);
 
     // The hash is the resolved eval config's, the one a batch resume compares.
-    const dir = await suiteDir(evalConfig);
+    const dir = await evalDir(evalConfig);
     const resolved = resolveConfigExtends(
       loadEvalConfig(path.join(dir, 'eval.json'), { rootDir: dir }),
       ['acme']
@@ -181,13 +181,13 @@ describe('shared configs', () => {
     );
   });
 
-  it('runs a suite whose host and judge come from a config', async () => {
-    const dir = await suiteDir({
+  it('runs an eval whose client and judge come from a config', async () => {
+    const dir = await evalDir({
       name: 'run',
       extends: ['acme/recommended'],
       datasets: ['./cases.json'],
     });
-    const result = await runEvalSuite({
+    const result = await runEval({
       configPath: path.join(dir, 'eval.json'),
       rootDir: dir,
       plugins: [

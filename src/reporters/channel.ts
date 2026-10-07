@@ -13,14 +13,14 @@ import type {
   EvalCaseResult,
   MCPConformanceResultData,
   MCPServerCapabilitiesData,
-  MCPVariantExperimentData,
+  MCPToolOptimizationData,
 } from '../types/reporter.js';
 import type { AuthType } from '../types/index.js';
 
 /** Attachment names the reporter reads. Tool calls append the tool name. */
 const REPORTER_ATTACHMENT_NAMES = {
   evalResults: 'mcp-test-results',
-  variantExperiment: 'mcp-variant-experiment',
+  toolOptimization: 'mcp-tool-optimization',
   conformance: 'mcp-conformance-checks',
   listTools: 'mcp-list-tools',
   toolCall: 'mcp-call-',
@@ -28,7 +28,7 @@ const REPORTER_ATTACHMENT_NAMES = {
 
 const JSON_CONTENT_TYPE = 'application/json';
 
-/** Case results from runEvalDataset() or a variant experiment's surfaced run. */
+/** Case results from runEvalDataset() or a tool optimization's surfaced run. */
 interface EvalResultsPayload {
   caseResults: EvalCaseResult[];
 }
@@ -65,7 +65,7 @@ export interface ToolCallPayload {
 /** Everything that travels over the channel, discriminated by `kind`. */
 export type ReporterAttachment =
   | { kind: 'evalResults'; data: EvalResultsPayload }
-  | { kind: 'variantExperiment'; data: MCPVariantExperimentData }
+  | { kind: 'toolOptimization'; data: MCPToolOptimizationData }
   | { kind: 'conformance'; data: ConformancePayload }
   | { kind: 'listTools'; data: ListToolsPayload }
   | { kind: 'toolCall'; data: ToolCallPayload };
@@ -87,7 +87,7 @@ const PAYLOAD_SCHEMAS = {
       })
     ),
   }),
-  variantExperiment: z.looseObject({
+  toolOptimization: z.looseObject({
     metric: z.string(),
     baselineValue: z.number(),
     bestValue: z.number(),
@@ -123,12 +123,12 @@ const PAYLOAD_SCHEMAS = {
 } satisfies Record<Kind, z.ZodType>;
 
 /**
- * Eval results and experiments can be large, so they're written compact;
+ * Eval results and optimizations can be large, so they're written compact;
  * everything else is pretty-printed for Playwright's HTML report.
  */
 const COMPACT_KINDS: ReadonlySet<Kind> = new Set([
   'evalResults',
-  'variantExperiment',
+  'toolOptimization',
 ]);
 
 function attachmentName(attachment: ReporterAttachment): string {

@@ -1,5 +1,5 @@
 /**
- * The batch rules every desktop host (Cowork, ChatGPT) follows, in one place:
+ * The batch rules every desktop client (Cowork, ChatGPT) follows, in one place:
  *
  * - one desktop per run, claimed with a cross-process lease file;
  * - cases run one at a time, each self-contained: a case that leaves the app
@@ -10,7 +10,7 @@
  * - cleanup always runs; if it fails, the lease is kept for inspection and
  *   every result says so.
  *
- * A host supplies only how to prepare its desktop, run one case, reset, and
+ * A client supplies only how to prepare its desktop, run one case, reset, and
  * clean up.
  */
 import { mkdir, open, unlink } from 'node:fs/promises';
@@ -20,10 +20,10 @@ import type {
   ClientRunResult,
 } from './evalFrameworkTypes.js';
 import {
-  redactHostError,
-  redactHostSecrets,
-  redactedHostError,
-} from './hostSecrets.js';
+  redactClientError,
+  redactClientSecrets,
+  redactedClientError,
+} from './clientSecrets.js';
 
 /** How a case left the app. */
 export type DesktopContinuation =
@@ -46,14 +46,14 @@ interface NativeSessionLedger {
   claim(sessionId: string): boolean;
 }
 
-export interface DesktopHostAdapter<Session> {
-  /** Host name in messages, e.g. 'Cowork'. */
+export interface DesktopClientAdapter<Session> {
+  /** Client name in messages, e.g. 'Cowork'. */
   readonly name: string;
   /** The desktop lease file (one run per desktop, across processes). */
   readonly lease: { directory: string; file: string };
   /** Every error this batch surfaces is redacted against these values. */
   readonly secrets: readonly string[];
-  /** How the host says it returned the app to a fresh state, for messages. */
+  /** How the client says it returned the app to a fresh state, for messages. */
   readonly resetVerb: 'reset' | 'restarted';
   /** Sets up the desktop (settings, app launch). */
   prepare(): Promise<Session>;
@@ -62,7 +62,7 @@ export interface DesktopHostAdapter<Session> {
    * `isMcpServerReady` rule) for servers that only become resolvable after
    * `prepare`. Runs before the first case; a failure
    * stops the batch with nothing submitted, and the session is still disposed.
-   * Hosts that can check readiness before touching the desktop (ChatGPT, before
+   * Clients that can check readiness before touching the desktop (ChatGPT, before
    * it stops the user's app) run the same gate inside `prepare` instead.
    */
   ready?(session: Session): Promise<void>;
@@ -84,7 +84,7 @@ export interface DesktopHostAdapter<Session> {
 }
 
 async function claimLease(
-  adapter: Pick<DesktopHostAdapter<unknown>, 'name' | 'lease'>
+  adapter: Pick<DesktopClientAdapter<unknown>, 'name' | 'lease'>
 ) {
   await mkdir(adapter.lease.directory, { recursive: true, mode: 0o700 });
   const path = join(adapter.lease.directory, adapter.lease.file);
@@ -124,12 +124,12 @@ function surfaceable(
 ): unknown {
   if (
     error instanceof Error &&
-    redactHostError(error, secrets, fallback) === error.message &&
+    redactClientError(error, secrets, fallback) === error.message &&
     (error.stack === undefined ||
-      redactHostSecrets(error.stack, secrets) === error.stack)
+      redactClientSecrets(error.stack, secrets) === error.stack)
   )
     return error;
-  return redactedHostError(error, secrets, fallback);
+  return redactedClientError(error, secrets, fallback);
 }
 
 function notSubmitted(message: string): ClientRunResult {
@@ -145,13 +145,13 @@ function notSubmitted(message: string): ClientRunResult {
 
 /** Runs a desktop batch under the rules above. */
 export async function runDesktopBatch<Session>(
-  adapter: DesktopHostAdapter<Session>,
+  adapter: DesktopClientAdapter<Session>,
   requests: ClientBatchRequest[]
 ): Promise<ClientRunResult[]> {
   if (!requests.length) return [];
   const secrets = [...adapter.secrets];
   const redact = (error: unknown, fallback: string): string =>
-    redactHostError(error, secrets, fallback);
+    redactClientError(error, secrets, fallback);
   const lease = await claimLease(adapter);
 
   const results: ClientRunResult[] = [];
@@ -211,7 +211,7 @@ export async function runDesktopBatch<Session>(
       await adapter.dispose(session);
     } catch (error) {
       cleanupFailed = true;
-      const message = `${adapter.name} batch cleanup failed; desktop lock retained for inspection: ${redact(error, redactHostSecrets(String(error), secrets))}`;
+      const message = `${adapter.name} batch cleanup failed; desktop lock retained for inspection: ${redact(error, redactClientSecrets(String(error), secrets))}`;
       for (const result of results) {
         result.error = [result.error, message].filter(Boolean).join(' ');
         result.telemetry = {
@@ -223,9 +223,9 @@ export async function runDesktopBatch<Session>(
     } finally {
       const lifecycle = adapter.batchTelemetry?.(session);
       for (const [index, result] of results.entries()) {
-        // Nothing the host reports leaves unredacted.
+        // Nothing the client reports leaves unredacted.
         if (result.error)
-          result.error = redactHostSecrets(result.error, secrets);
+          result.error = redactClientSecrets(result.error, secrets);
         result.telemetry = {
           ...result.telemetry,
           ...(lifecycle ? { batchLifecycle: lifecycle } : {}),
@@ -258,14 +258,14 @@ export async function runDesktopBatch<Session>(
   return results;
 }
 
-/** Throws unless every host config in a batch is the same. */
-export function requireIdenticalHostSettings(
-  host: string,
+/** Throws unless every client config in a batch is the same. */
+export function requireIdenticalClientSettings(
+  client: string,
   configs: readonly unknown[]
 ): void {
   const first = JSON.stringify(configs[0]);
   if (configs.some((config) => JSON.stringify(config) !== first))
     throw new Error(
-      `${host} batch requires identical host settings for all cases.`
+      `${client} batch requires identical client settings for all cases.`
     );
 }

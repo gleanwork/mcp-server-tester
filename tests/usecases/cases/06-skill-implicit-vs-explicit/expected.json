@@ -28,6 +28,6 @@
     }
   ],
   "ledger": {
-    "metrics": ["tool_count_mean", "host_event_count_mean"]
+    "metrics": ["tool_count_mean", "builtin_event_count_mean"]
   }
 }

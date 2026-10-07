@@ -1,9 +1,9 @@
 import type { EvalCaseResult } from '../types/reporter.js';
-import type { ClientMetadata } from './externalHost/types.js';
+import type { ClientMetadata } from './externalClient/types.js';
 import {
   CLAUDE_NO_MATCHING_SESSION_MESSAGE,
   CLAUDE_SESSION_TIMEOUT_MESSAGE,
-} from './externalHost/builtins/claudeSessions.js';
+} from './externalClient/builtins/claudeSessions.js';
 
 /**
  * Returns true when the error message appears to be caused by network or
@@ -43,7 +43,7 @@ export function isInfrastructureError(err: unknown): boolean {
     msg.includes(CLAUDE_NO_MATCHING_SESSION_MESSAGE.toLowerCase()) ||
     msg.includes(CLAUDE_SESSION_TIMEOUT_MESSAGE.toLowerCase()) ||
     msg.includes('failed to submit prompt to claude') ||
-    msg.includes('failed to submit prompt to desktop host') ||
+    msg.includes('failed to submit prompt to desktop client') ||
     // Prompt/context overflow — LLM couldn't run, not a tool discoverability failure
     msg.includes('prompt is too long') ||
     msg.includes('context length exceeded') ||
@@ -56,14 +56,14 @@ export function isInfrastructureError(err: unknown): boolean {
   );
 }
 
-function isExternalHostInfrastructureFailure(
+function isExternalClientInfrastructureFailure(
   clientMetadata: ClientMetadata | undefined
 ): boolean {
   return clientMetadata?.failureKind !== undefined;
 }
 
 /**
- * Whether a run failed on infrastructure (a network failure, a host that
+ * Whether a run failed on infrastructure (a network failure, a client that
  * couldn't start) rather than on its assertions. Such runs are left out of
  * the pass rate and of per-trial metrics.
  */
@@ -71,7 +71,7 @@ export function isInfrastructureFailure(
   result: Pick<EvalCaseResult, 'error' | 'clientDiagnostics' | 'clientMetadata'>
 ): boolean {
   return (
-    isExternalHostInfrastructureFailure(result.clientMetadata) ||
+    isExternalClientInfrastructureFailure(result.clientMetadata) ||
     (result.error != null &&
       (result.clientDiagnostics?.failureKind !== undefined ||
         isInfrastructureError(result.error)))

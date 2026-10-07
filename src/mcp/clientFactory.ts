@@ -16,7 +16,7 @@ import {
   validateMCPConfig,
   isStdioConfig,
   isHttpConfig,
-  usesHostResolvedFields,
+  usesClientResolvedFields,
 } from '../config/mcpConfig.js';
 import { debugClient, debugHttp } from '../debug.js';
 import type { ProtocolSetting } from '../types/index.js';
@@ -349,10 +349,10 @@ async function connect(
     isProtocolRevision(protocol) && protocol !== '2024-11-05';
   // Create appropriate transport and connect
   if (isStdioConfig(validatedConfig)) {
-    // Unresolved `${...}` placeholders, `files`, or `auth` belong to a host.
-    if (usesHostResolvedFields(validatedConfig))
+    // Unresolved `${...}` placeholders, `files`, or `auth` belong to a client.
+    if (usesClientResolvedFields(validatedConfig))
       throw new Error(
-        'This stdio MCP server declares host-resolved eval fields (url, auth, files, or ${url}/${dataDir}/${pluginRoot:...}); only a host that supports them (Linux Cowork) can launch it.'
+        'This stdio MCP server declares client-resolved eval fields (url, auth, files, or ${url}/${dataDir}/${pluginRoot:...}); only a client that supports them (Linux Cowork) can launch it.'
       );
     const inherit = validatedConfig.inheritEnv !== false;
     const env = validatedConfig.env

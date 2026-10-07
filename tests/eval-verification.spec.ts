@@ -13,7 +13,7 @@ import {
   type EvalCase,
   type MCPFixtureApi,
 } from '../src/index.js';
-import { hostRunToExecution } from '../src/evals/hostTrace.js';
+import { clientRunToExecution } from '../src/evals/clientTrace.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
@@ -38,7 +38,7 @@ function scriptedClient(mcp: MCPFixtureApi) {
     const text = (result.content as Array<{ text?: string }>)
       .map((block) => block.text ?? '')
       .join('');
-    return hostRunToExecution(
+    return clientRunToExecution(
       {
         finalText: text,
         events: [{ kind: 'tool_call', source: 'mcp', name, arguments: args }],

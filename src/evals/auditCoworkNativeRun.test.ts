@@ -14,8 +14,8 @@ import {
   auditCoworkNativeRun,
   type CoworkNativeAuditIssue,
 } from './auditCoworkNativeRun.js';
-import { parseClaudeTrace } from './externalHost/builtins/claudeTrace.js';
-import { hostRunToExecution, simulationToHostRun } from './hostTrace.js';
+import { parseClaudeTrace } from './externalClient/builtins/claudeTrace.js';
+import { clientRunToExecution, simulationToClientRun } from './clientTrace.js';
 
 const sessionId = 'local_11111111-1111-4111-8111-111111111111';
 const cliSessionId = '22222222-2222-4222-8222-222222222222';
@@ -129,9 +129,9 @@ async function fixture(
     correlation: 'exact-initial-prompt',
     computerUse: { durationMs: 999 },
   };
-  const replay = hostRunToExecution(
+  const replay = clientRunToExecution(
     {
-      ...simulationToHostRun(
+      ...simulationToClientRun(
         {
           success: true,
           response: trace.finalAnswer,
@@ -219,7 +219,7 @@ describe('auditCoworkNativeRun', () => {
       sessionId,
       model,
       evidencePassed: true,
-      toolCounts: { total: 2, mcp: 1, host: 1, errors: 0 },
+      toolCounts: { total: 2, mcp: 1, builtin: 1, errors: 0 },
       validity: {
         auditParsed: true,
         transcriptParsed: true,
@@ -362,7 +362,7 @@ describe('auditCoworkNativeRun', () => {
     [
       'provenance',
       (saved) => {
-        records(saved.response.events)[0]!.source = 'host';
+        records(saved.response.events)[0]!.source = 'builtin';
       },
       'EVENTS_MISMATCH',
     ],
@@ -524,7 +524,7 @@ describe('auditCoworkNativeRun', () => {
     expect(report.cases[0]?.issues).toContain('PARSE_WARNINGS');
   });
 
-  it('rejects native host errors and incomplete traces', async () => {
+  it('rejects native client errors and incomplete traces', async () => {
     const f = await fixture({
       modifyResult: (result) => {
         result.is_error = true;

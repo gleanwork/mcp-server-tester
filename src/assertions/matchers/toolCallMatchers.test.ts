@@ -1,8 +1,8 @@
 import { describe, it, expect as vitestExpect } from 'vitest';
 import { expect as mcpExpect } from './index.js';
-import type { MCPHostSimulationResult } from '../../evals/mcpHost/mcpHostTypes.js';
+import type { MstClientSimulationResult } from '../../evals/mstClient/types.js';
 
-function makeResult(names: string[]): MCPHostSimulationResult {
+function makeResult(names: string[]): MstClientSimulationResult {
   return {
     success: true,
     toolCalls: names.map((name) => ({ name, arguments: {} })),

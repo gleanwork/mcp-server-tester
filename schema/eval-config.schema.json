@@ -96,7 +96,7 @@
     },
     "inputTemplate": {
       "type": "string",
-      "description": "Wraps each case's input before the host sees it: `{{input}}` is replaced by the input."
+      "description": "Wraps each case's input before the client sees it: `{{input}}` is replaced by the input."
     },
     "variants": {
       "type": "array",
@@ -218,7 +218,7 @@
     "trials": {
       "type": "integer",
       "minimum": 1,
-      "description": "Default number of trials per host case; cases may set their own."
+      "description": "Default number of trials per client case; cases may set their own."
     },
     "maxCases": {
       "type": "integer",
@@ -239,7 +239,7 @@
       "type": "number",
       "minimum": 0,
       "maximum": 1,
-      "description": "Default share of a host case's trials that must pass; cases may set their own."
+      "description": "Default share of a client case's trials that must pass; cases may set their own."
     },
     "filterTags": {
       "type": "array",
@@ -257,7 +257,7 @@
         "trials": {
           "type": "integer",
           "minimum": 1,
-          "description": "Default number of trials per host case."
+          "description": "Default number of trials per client case."
         },
         "maxCases": {
           "type": "integer",
@@ -278,17 +278,17 @@
           "type": "number",
           "minimum": 0,
           "maximum": 1,
-          "description": "Default share of a host case's trials that must pass."
+          "description": "Default share of a client case's trials that must pass."
         }
       }
     },
     "temperature": {
       "type": "number",
-      "description": "Generation default for API hosts."
+      "description": "Generation default for API clients."
     },
     "maxTokens": {
       "type": "number",
-      "description": "Generation default for API hosts."
+      "description": "Generation default for API clients."
     },
     "redactStoredResponses": {
       "type": "boolean",
@@ -308,7 +308,7 @@
     },
     "pricing": {
       "type": "object",
-      "description": "USD per million tokens, by model, for hosts that report tokens but not cost.",
+      "description": "USD per million tokens, by model, for clients that report tokens but not cost.",
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,

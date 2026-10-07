@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { validateToolCalls, validateToolCallCount } from './toolCalls.js';
-import type { MCPHostSimulationResult } from '../../evals/mcpHost/mcpHostTypes.js';
+import type { MstClientSimulationResult } from '../../evals/mstClient/types.js';
 
 function makeResult(
   toolCalls: Array<{ name: string; arguments?: Record<string, unknown> }>
-): MCPHostSimulationResult {
+): MstClientSimulationResult {
   return {
     success: true,
     toolCalls: toolCalls.map((c) => ({ ...c, arguments: c.arguments ?? {} })),
@@ -19,7 +19,7 @@ describe('validateToolCalls', () => {
       {
         success: true,
         toolCalls: [],
-        events: [{ kind: 'skill', source: 'host', name: 'research' }],
+        events: [{ kind: 'skill', source: 'builtin', name: 'research' }],
       },
     ],
   ])(
@@ -32,7 +32,7 @@ describe('validateToolCalls', () => {
   );
 
   it.each([
-    { source: 'host' as const },
+    { source: 'builtin' as const },
     { server: 'other' },
     { kind: 'skill' as const },
   ])('matches identity, not just a same-named event: %j', (mismatch) => {
@@ -57,7 +57,7 @@ describe('validateToolCalls', () => {
 
   it('rejects unexpected events outside the explicitly requested kind', () => {
     const events = [
-      { name: 'research', kind: 'skill', source: 'host' },
+      { name: 'research', kind: 'skill', source: 'builtin' },
       { name: 'unexpected', kind: 'tool_call', source: 'mcp' },
     ];
     expect(
@@ -98,7 +98,7 @@ describe('validateToolCalls', () => {
     const events = [
       {
         kind: 'skill',
-        source: 'host',
+        source: 'builtin',
         name: 'research',
         arguments: { topic: 'docs' },
       },
@@ -122,7 +122,7 @@ describe('validateToolCalls', () => {
           {
             name: 'research',
             kind: 'skill',
-            source: 'host',
+            source: 'builtin',
             arguments: { topic: 'docs' },
           },
           { name: 'search', source: 'mcp', server: 'agg' },
@@ -323,12 +323,12 @@ describe('validateToolCalls', () => {
     });
   });
 
-  it('returns error when response is not an MCPHostSimulationResult', () => {
+  it('returns error when response is not an MstClientSimulationResult', () => {
     const v = validateToolCalls('not a simulation result', {
       calls: [{ name: 'search' }],
     });
     expect(v.pass).toBe(false);
-    expect(v.message).toContain('host simulation response');
+    expect(v.message).toContain('client simulation response');
   });
 });
 
@@ -435,9 +435,9 @@ describe('validateToolCallCount', () => {
     expect(v.details).toEqual({ actual: 3, max: 2 });
   });
 
-  it('returns error when response is not an MCPHostSimulationResult', () => {
+  it('returns error when response is not an MstClientSimulationResult', () => {
     const v = validateToolCallCount('not a simulation result', { exact: 1 });
     expect(v.pass).toBe(false);
-    expect(v.message).toContain('host simulation response');
+    expect(v.message).toContain('client simulation response');
   });
 });

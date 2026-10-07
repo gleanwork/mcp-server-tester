@@ -47,15 +47,15 @@ describe('ChatGPT server translation', () => {
     ['files', { files: { 'a.json': {} } }],
     ['auth', { auth: { accessTokenEnv: 'TOKEN' } }],
     ['minTools', { minTools: 4 }],
-  ])('rejects a host-resolved stdio eval server with %s', (_kind, change) => {
+  ])('rejects a client-resolved stdio eval server with %s', (_kind, change) => {
     expect(() =>
       chatgptServers(
         [{ transport: 'stdio', label: 'eval', command: 'node', ...change }],
         {}
       )
-    ).toThrow('ChatGPT does not support host-resolved stdio eval servers');
+    ).toThrow('ChatGPT does not support client-resolved stdio eval servers');
   });
-  it('rejects configured servers impersonating built-in host namespaces', () => {
+  it('rejects configured servers impersonating built-in client namespaces', () => {
     expect(() =>
       chatgptServers(
         [{ transport: 'stdio', label: 'cua_repl', command: 'node' }],

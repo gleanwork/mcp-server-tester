@@ -22,7 +22,7 @@ function baseExtensions(): Required<TestExtensions> {
     schema,
     load: async () => ({ name: 'file', cases: [] }),
   };
-  const host: ClientDefinition = {
+  const client: ClientDefinition = {
     schema,
     run: async () => ({ finalText: '', events: [] }),
   };
@@ -43,7 +43,7 @@ function baseExtensions(): Required<TestExtensions> {
   };
   return {
     datasetSources: { file: datasetSource },
-    clients: { sdk: host },
+    clients: { sdk: client },
     judges: { correctness: judge },
     pairwiseJudges: {},
     metrics: { passed: metric },
@@ -88,8 +88,8 @@ describe('eval config validation', () => {
     expect(() => validateEvalConfig(evalConfig)).not.toThrow();
   });
 
-  it.each(['dataset', 'host', 'judge'] as const)(
-    'rejects a %s reference to a namespace the suite does not load',
+  it.each(['dataset', 'client', 'judge'] as const)(
+    'rejects a %s reference to a namespace the eval does not load',
     (kind) => {
       installTestPlugin({
         datasetSources: {
@@ -105,10 +105,10 @@ describe('eval config validation', () => {
         datasets: [{ type: 'test/file' }],
       };
       if (kind === 'dataset') evalConfig.datasets = [{ type: 'test/x' }];
-      if (kind === 'host') evalConfig.host = { type: 'test/x' };
+      if (kind === 'client') evalConfig.client = 'test/x';
       if (kind === 'judge') evalConfig.judges = [{ type: 'test/x' }];
 
-      // The plugin is installed process-wide, but this suite didn't list it.
+      // The plugin is installed process-wide, but this eval didn't list it.
       expect(() => validateEvalConfig(evalConfig, { namespaces: [] })).toThrow(
         /references "test\/[a-z]+", but doesn't load the "test" plugin/
       );
@@ -301,13 +301,13 @@ describe('eval config validation', () => {
 
   it.each([
     'dataset',
-    'host',
+    'client',
     'metric',
     'judge',
     'store',
-    'armHost',
-    'armMetric',
-    'armJudge',
+    'variantClient',
+    'variantMetric',
+    'variantJudge',
   ] as const)('rejects invalid plugin %s options', (kind) => {
     const required = z.object({ required: z.number() });
     installTestPlugin({
@@ -351,7 +351,7 @@ describe('eval config validation', () => {
       datasets: [{ type: 'test/file' }],
     };
     if (kind === 'dataset') evalConfig.datasets = [config];
-    if (kind === 'host') {
+    if (kind === 'client') {
       const { type, ...options } = config;
       evalConfig.client = type;
       evalConfig.clientOptions = options;
@@ -359,22 +359,22 @@ describe('eval config validation', () => {
     if (kind === 'metric') evalConfig.metrics = [config];
     if (kind === 'judge') evalConfig.judges = [config];
     if (kind === 'store') evalConfig.results = { store: config };
-    if (kind === 'armHost') {
+    if (kind === 'variantClient') {
       const { type, ...options } = config;
       evalConfig.variants = [
         { name: 'variant', client: type, clientOptions: options },
       ];
     }
-    if (kind === 'armMetric')
+    if (kind === 'variantMetric')
       evalConfig.variants = [{ name: 'variant', metrics: [config] }];
-    if (kind === 'armJudge')
+    if (kind === 'variantJudge')
       evalConfig.variants = [{ name: 'variant', judges: [config] }];
     expect(() => validateEvalConfig(evalConfig)).toThrow(
       /Invalid .* options "test\/strict"/
     );
   });
 
-  it('validates effective top-level host options in variant overrides', () => {
+  it('validates effective top-level client options in variant overrides', () => {
     installTestPlugin({
       clients: {
         limited: {
@@ -393,7 +393,7 @@ describe('eval config validation', () => {
       variants: [{ name: 'variant', client: 'test/limited' }],
     };
     expect(() => validateEvalConfig(evalConfig)).toThrow(
-      'Invalid host options "test/limited"'
+      'Invalid client options "test/limited"'
     );
     const parsed = validateEvalConfig({
       ...evalConfig,
@@ -464,7 +464,7 @@ describe('eval config validation', () => {
   });
 });
 
-describe('settings a host would ignore', () => {
+describe('settings a client would ignore', () => {
   const overrides = { search: { description: 'Find it.' } };
   const base = (extra: Record<string, unknown>): EvalConfig => ({
     name: 'loud',
@@ -472,7 +472,7 @@ describe('settings a host would ignore', () => {
     ...extra,
   });
 
-  function installHosts() {
+  function installClients() {
     installTestPlugin({
       clients: {
         runner: { schema, run: async () => ({ finalText: '', events: [] }) },
@@ -488,7 +488,7 @@ describe('settings a host would ignore', () => {
   it.each(['chatgpt', 'test/elsewhere'])(
     'rejects tool metadata for %s, which never shows it to the model',
     (type) => {
-      installHosts();
+      installClients();
       const client =
         type === 'chatgpt'
           ? { client: type, model: 'gpt-5' }
@@ -506,7 +506,7 @@ describe('settings a host would ignore', () => {
   it.each(['claude-code', 'test/runner'])(
     'accepts tool metadata for %s, served through the tool proxy',
     (type) => {
-      installHosts();
+      installClients();
       expect(() =>
         validateEvalConfig(base({ client: type, tools: overrides }), {
           namespaces: ['test'],
@@ -611,7 +611,7 @@ describe('settings a host would ignore', () => {
   );
 });
 
-describe('settings a host would ignore: defaults, inheritance, opt-in', () => {
+describe('settings a client would ignore: defaults, inheritance, opt-in', () => {
   const overrides = { search: { description: 'Find it.' } };
   const evalConfig = (extra: Record<string, unknown>): EvalConfig => ({
     name: 'loud',
@@ -642,7 +642,7 @@ describe('settings a host would ignore: defaults, inheritance, opt-in', () => {
     );
   });
 
-  it('rejects a default that none of the hosts takes', () => {
+  it('rejects a default that none of the clients takes', () => {
     expect(() =>
       validateEvalConfig(
         evalConfig({ temperature: 0.2, client: 'claude-code' })
@@ -652,7 +652,7 @@ describe('settings a host would ignore: defaults, inheritance, opt-in', () => {
     );
   });
 
-  it("doesn't give a variant the options of a different host", () => {
+  it("doesn't give a variant the options of a different client", () => {
     const validated = validateEvalConfig(
       evalConfig({
         client: 'mst',
@@ -683,7 +683,7 @@ describe('settings a host would ignore: defaults, inheritance, opt-in', () => {
     ).not.toThrow();
   });
 
-  it('rejects a concurrency the host cannot run', () => {
+  it('rejects a concurrency the client cannot run', () => {
     installTestPlugin({
       clients: {
         serial: {

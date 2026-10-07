@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { runEvalSuite } from './runEvalSuite.js';
+import { runEval } from './runEval.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 
@@ -57,7 +57,7 @@ afterEach(async () => {
 });
 
 const suite = (options: { cases?: string[]; trials?: number } = {}) =>
-  runEvalSuite({
+  runEval({
     configPath: path.join(dir, 'eval.json'),
     rootDir: dir,
     plugins: [plugin],
@@ -94,7 +94,7 @@ describe('mst run --case / --trials', () => {
 
   it('checks named cases on a dry run too', async () => {
     await expect(
-      runEvalSuite({
+      runEval({
         configPath: path.join(dir, 'eval.json'),
         rootDir: dir,
         plugins: [plugin],

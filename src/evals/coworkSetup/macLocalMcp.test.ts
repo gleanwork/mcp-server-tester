@@ -345,7 +345,7 @@ describe('Mac local MCP transaction', () => {
     await restoreMacLocalMcp(directory);
     await expect(fs.stat(config)).rejects.toMatchObject({ code: 'ENOENT' });
   });
-  it('fails before writes for missing credentials, duplicate names, reserved labels and host-resolved launches', async () => {
+  it('fails before writes for missing credentials, duplicate names, reserved labels and client-resolved launches', async () => {
     await expect(preflightMacLocalMcp([remote], {})).rejects.toThrow();
     for (const servers of [
       [remote, remote],

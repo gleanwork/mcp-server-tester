@@ -1,13 +1,13 @@
 /**
- * The use-case suite: each directory under cases/ is one comparison MST is
+ * The use-case eval: each directory under cases/ is one comparison MST is
  * built to run (see README.md). The test copies it to a temp directory,
  * runs it through the `mst` CLI with the fixture plugin, and checks the
  * results.json it writes.
  *
  * Checks marked with a `gap` describe what MST should report but doesn't
- * yet; they run as expected failures, so fixing a gap fails the suite until
+ * yet; they run as expected failures, so fixing a gap fails the eval until
  * its `gap` is removed. Ledger checks compare each variant's metrics with the
- * usage and events the fixture host actually returned.
+ * usage and events the fixture client actually returned.
  */
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -29,7 +29,7 @@ const LEDGER_METRICS = [
   'output_tokens_mean',
   'tool_count_mean',
   'mcp_call_count_mean',
-  'host_event_count_mean',
+  'builtin_event_count_mean',
 ] as const;
 type LedgerMetric = (typeof LEDGER_METRICS)[number];
 
@@ -73,7 +73,7 @@ const ExpectedSchema = z
           )
           .default([]),
         gaps: z.record(z.string(), z.string()).default({}),
-        /** Variants whose host returns no trace, so the ledger has nothing to compare. */
+        /** Variants whose client returns no trace, so the ledger has nothing to compare. */
         noTrace: z.array(z.string()).default([]),
       })
       .strict()
@@ -286,8 +286,9 @@ function ledgerMean(
           .length;
       case 'mcp_call_count_mean':
         return entry.events.filter((event) => event.source === 'mcp').length;
-      case 'host_event_count_mean':
-        return entry.events.filter((event) => event.source === 'host').length;
+      case 'builtin_event_count_mean':
+        return entry.events.filter((event) => event.source === 'builtin')
+          .length;
     }
   };
   return trials.reduce((sum, entry) => sum + value(entry), 0) / trials.length;
@@ -314,7 +315,7 @@ function tracedVariants(outcome: Outcome, noTrace: string[]): VariantResult[] {
 
 if (!fs.existsSync(CLI)) {
   throw new Error(
-    `The use-case suite runs the built CLI. Run \`npm run build\` first (missing ${CLI}).`
+    `The use-case runs the built CLI. Run \`npm run build\` first (missing ${CLI}).`
   );
 }
 
@@ -403,8 +404,8 @@ for (const name of caseDirs) {
       const gap = ledger?.gaps[metric];
       gapped(gap)(
         gap
-          ? `variant ${metric} matches the host ledger (gap: ${gap})`
-          : `variant ${metric} matches the host ledger`,
+          ? `variant ${metric} matches the client ledger (gap: ${gap})`
+          : `variant ${metric} matches the client ledger`,
         track(gap, () => {
           for (const variant of tracedVariants(outcome, ledger!.noTrace)) {
             const truth = ledgerMean(
@@ -431,8 +432,8 @@ for (const name of caseDirs) {
       const gap = ledger?.gaps[delta.key];
       gapped(gap)(
         gap
-          ? `variantDeltas.*.${delta.key} matches the host ledger (gap: ${gap})`
-          : `variantDeltas.*.${delta.key} matches the host ledger`,
+          ? `variantDeltas.*.${delta.key} matches the client ledger (gap: ${gap})`
+          : `variantDeltas.*.${delta.key} matches the client ledger`,
         track(gap, () => {
           const [baseline, ...others] = tracedVariants(
             outcome,

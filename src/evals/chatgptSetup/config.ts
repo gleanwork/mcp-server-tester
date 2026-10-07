@@ -1,9 +1,9 @@
 import {
-  usesHostResolvedFields,
+  usesClientResolvedFields,
   type MCPConfig,
 } from '../../config/mcpConfig.js';
 import type { CodexMcpServerConfig } from '../codexSetup/config.js';
-import { isChatgptBuiltinServer } from '../externalHost/builtins/chatgptTrace.js';
+import { isChatgptBuiltinServer } from '../externalClient/builtins/chatgptTrace.js';
 
 /** Adapt resolved V2 servers without writing HTTP credentials into config.toml. */
 export function chatgptServers(
@@ -25,16 +25,16 @@ export function chatgptServers(
         );
       if (isChatgptBuiltinServer(label))
         throw new Error(
-          `ChatGPT MCP server label ${label} is reserved for a built-in host tool.`
+          `ChatGPT MCP server label ${label} is reserved for a built-in tool.`
         );
       labels.add(label);
-      // Codex cannot resolve host placeholders or write private files.
+      // Codex cannot resolve client placeholders or write private files.
       if (
         server.transport === 'stdio' &&
-        (usesHostResolvedFields(server) || server.minTools !== undefined)
+        (usesClientResolvedFields(server) || server.minTools !== undefined)
       )
         throw new Error(
-          `ChatGPT does not support host-resolved stdio eval servers (${label}: url, auth, files, minTools, or \${...} placeholders). Use plugins[].mcp to point a plugin's own server at the eval endpoint.`
+          `ChatGPT does not support client-resolved stdio eval servers (${label}: url, auth, files, minTools, or \${...} placeholders). Use plugins[].mcp to point a plugin's own server at the eval endpoint.`
         );
       if (server.transport === 'stdio')
         return {

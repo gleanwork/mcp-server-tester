@@ -1,7 +1,7 @@
 import type { TraceEvent } from './evalFrameworkTypes.js';
-import type { LLMToolCall } from './mcpHost/mcpHostTypes.js';
+import type { LLMToolCall } from './mstClient/types.js';
 
-/** A tool a host's tool search surfaced. */
+/** A tool a client's tool search surfaced. */
 export type SurfacedTool = NonNullable<TraceEvent['results']>[number];
 
 // An MCP tool name in text, as Claude Code writes them.
@@ -64,11 +64,11 @@ export function surfacedTools(output: string | undefined): SurfacedTool[] {
  * Types a Claude Code host-native tool call (Claude CLI, Cowork) as the event
  * it is: `Skill` loads a skill, `SlashCommand` runs a command, `Task` and
  * `Agent` start a subagent, and `ToolSearch` searches the tool catalog. MCP
- * calls and other host tools stay tool calls. Call it once the call's result
+ * calls and other built-in tools stay tool calls. Call it once the call's result
  * is attached, since a tool search's results come from it.
  */
 export function typeClaudeCodeCall(call: LLMToolCall): LLMToolCall {
-  if (call.source !== 'host' || call.kind !== undefined) return call;
+  if (call.source !== 'builtin' || call.kind !== undefined) return call;
   const input = call.arguments ?? {};
   switch (call.name) {
     case 'Skill': {

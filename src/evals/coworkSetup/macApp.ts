@@ -22,7 +22,7 @@ const Feed = z.object({
 });
 
 /**
- * The Claude Desktop version a session runs: `host.options.appVersion` when the
+ * The Claude Desktop version a session runs: `clientOptions.appVersion` when the
  * eval config pins one, otherwise whatever is installed. MST has no default pin.
  */
 export function macCoworkAppVersion(
@@ -31,16 +31,16 @@ export function macCoworkAppVersion(
 ): string | undefined {
   if (env.MST_COWORK_APP_VERSION !== undefined)
     throw new Error(
-      'MST_COWORK_APP_VERSION was removed; pin a version with host.options.appVersion in the eval config.'
+      'MST_COWORK_APP_VERSION was removed; pin a version with clientOptions.appVersion in the eval config.'
     );
   if (appVersion === undefined) return undefined;
   if (!VERSION.test(appVersion))
     throw new Error(
-      'Invalid host.options.appVersion; expected an exact x.y.z version.'
+      'Invalid clientOptions.appVersion; expected an exact x.y.z version.'
     );
   if (env.MST_COWORK_APP_PATH)
     throw new Error(
-      'Set host.options.appVersion or MST_COWORK_APP_PATH, not both.'
+      'Set clientOptions.appVersion or MST_COWORK_APP_PATH, not both.'
     );
   return appVersion;
 }

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { EvalConfig } from './evalConfig.js';
 
-/** Identity of the normalized eval config used to persist and resume a suite. */
+/** Identity of the normalized eval config used to persist and resume an eval. */
 export function configIdentity(evalConfig: EvalConfig): {
   configId: string;
   contentHash: string;

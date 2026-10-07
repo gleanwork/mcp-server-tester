@@ -1,9 +1,9 @@
 # Evaluation framework contract
 
 `mcp-server-tester` is the generic evaluation engine. Organization-specific
-schemas, judges, hosts, dataset loaders, and result destinations are plugins.
+schemas, judges, clients, dataset loaders, and result destinations are plugins.
 A developer should be able to run a complete evaluation with local datasets,
-built-in hosts and judges, and a local result store.
+built-in clients and judges, and a local result store.
 
 ## Eval config
 
@@ -64,12 +64,12 @@ A key the schema doesn't define is an error, in an eval config and in a dataset,
 
 A bare dataset path is shorthand for `{ "type": "file", "path": "..." }`. Relative dataset and plugin paths in an eval config resolve against the eval config's directory, then `rootDir` (`--root-dir`, the working directory by default). A `file` result store's `dir` is always relative to the eval config, so where results are written doesn't depend on the working directory. Plugin result stores resolve their own options.
 Every other pluggable block is a tagged object. `servers` is the complete MCP
-server set under test; an empty set is valid for hosts that provide their own
+server set under test; an empty set is valid for clients that provide their own
 capabilities.
 
 ## Plugins
 
-Dataset sources, hosts, judges, metrics and result stores are extensions. Each one owns its tagged-config schema; core doesn't know organization-specific options. ADR [0001](adr/0001-eslint-style-declarative-plugins.md) records why plugins take this shape.
+Dataset sources, clients, judges, metrics and result stores are extensions. Each one owns its tagged-config schema; core doesn't know organization-specific options. ADR [0001](adr/0001-eslint-style-declarative-plugins.md) records why plugins take this shape.
 
 A plugin is a plain object, the default export of its module or package, in the shape [ESLint plugins](https://eslint.org/docs/latest/extend/plugins) use. MST reads it; a plugin never calls into MST to register.
 
@@ -88,7 +88,7 @@ const plugin: Plugin = {
       evaluate: async ({ case: c, trial }, options) => ({ score: 1 }),
     },
   },
-  // Also: hosts, metrics, resultStores.
+  // Also: clients, metrics, resultStores.
   configs: {
     recommended: {
       judges: ['acme/completeness'],
@@ -102,14 +102,14 @@ export default plugin;
 
 - **Names.** Each map key names an extension within the plugin's namespace. Eval configs and datasets reference it as `namespace/name`, such as `{ "type": "acme/legacy" }` or `passesJudge: { "judge": "acme/completeness" }`. Built-ins (`file`, `claude-code`, `rubric`, `passed`, ...) use bare names, which plugins can't take.
 - **Namespace.** `meta.namespace` is required: lowercase, optionally scoped as `@scope/name`. Two different plugins can't share a namespace. Loading the same plugin again is a no-op, including a rebuilt object with the same name, version, extension definitions and configs. A plugin factory that builds differently configured copies needs a namespace per copy. A package's CommonJS and ESM builds are different objects too, so load a plugin one way; publishing plugins as ESM avoids the question.
-- **Loading.** An eval config lists plugin specifiers in `plugins`. Each one resolves relative to the eval config's directory, then `rootDir` (`--root-dir`, the working directory by default), then as a package name, resolved as `import` resolves it. `--plugins` and the `pluginPaths` / `plugins` options of `runEvalSuite` and `runEvalBatch` add to that list. Code that runs datasets directly passes plugin objects: `runEvalDataset({ dataset, plugins: [plugin] }, ctx)`, or `test.use({ mcpPlugins: [plugin] })` in Playwright. Code that calls validators or matchers on its own installs them with `installPlugins([plugin])`.
-- **Scope.** An eval config may only reference namespaces of plugins it loads, even if another suite in the same process (a batch) loaded more. The same check applies to the hosts and judges its datasets name. `runEvalDataset`, `runEvalCase` and the fixtures have no eval config, so they resolve against every plugin installed in the process.
+- **Loading.** An eval config lists plugin specifiers in `plugins`. Each one resolves relative to the eval config's directory, then `rootDir` (`--root-dir`, the working directory by default), then as a package name, resolved as `import` resolves it. `--plugins` and the `pluginPaths` / `plugins` options of `runEval` and `runEvalBatch` add to that list. Code that runs datasets directly passes plugin objects: `runEvalDataset({ dataset, plugins: [plugin] }, ctx)`, or `test.use({ mcpPlugins: [plugin] })` in Playwright. Code that calls validators or matchers on its own installs them with `installPlugins([plugin])`.
+- **Scope.** An eval config may only reference namespaces of plugins it loads, even if another eval in the same process (a batch) loaded more. The same check applies to the clients and judges its datasets name. `runEvalDataset`, `runEvalCase` and the fixtures have no eval config, so they resolve against every plugin installed in the process.
 - **Contracts.** Each extension has a Zod `schema` for its options and the functions its kind needs: `load` (dataset sources), `run` or `runBatch` (clients), `evaluate` (judges), `kind` and `compute` (metrics), and `create` (result stores). MST validates the plugin when it loads, and names the plugin and extension in any error.
-- **Shared configs.** `configs` holds named eval config settings a suite can opt into. A suite that loads the plugin applies one with `"extends": ["acme/recommended"]`:
+- **Shared configs.** `configs` holds named eval config settings an eval can opt into. An eval that loads the plugin applies one with `"extends": ["acme/recommended"]`:
 
   ```json
   {
-    "name": "acme-suite",
+    "name": "acme-eval",
     "plugins": ["@acme/mst-plugin"],
     "extends": ["acme/recommended"],
     "datasets": ["./cases.json"],
@@ -117,7 +117,7 @@ export default plugin;
   }
   ```
 
-  A config is typed `PluginConfig` and can set any documented eval config key except `name`, `datasets`, `variants`, `plugins` and `extends`. Other keys, including `run`, are rejected when an eval config extends the config; until then MST only checks that it's an object. Configs apply in order, then the eval config's own settings, including its `run` controls. Each top-level key is replaced, never merged: here the eval config's `trials` replaces the config's, and an eval config `judges` list would replace the config's list rather than add to it. A config may use only its own plugin's extensions and built-ins, and can't extend other configs. MST has no built-in configs. A suite's `contentHash` is computed with its configs applied, so `runEvalBatch` doesn't resume a saved run after a config changes. Code that validates an eval config itself applies `extends` first with `resolveConfigExtends` (from `./evals`).
+  A config is typed `PluginConfig` and can set any documented eval config key except `name`, `datasets`, `variants`, `plugins` and `extends`. Other keys, including `run`, are rejected when an eval config extends the config; until then MST only checks that it's an object. Configs apply in order, then the eval config's own settings, including its `run` controls. Each top-level key is replaced, never merged: here the eval config's `trials` replaces the config's, and an eval config `judges` list would replace the config's list rather than add to it. A config may use only its own plugin's extensions and built-ins, and can't extend other configs. MST has no built-in configs. An eval's `contentHash` is computed with its configs applied, so `runEvalBatch` doesn't resume a saved run after a config changes. Code that validates an eval config itself applies `extends` first with `resolveConfigExtends` (from `./evals`).
 
 - **Judges.** A judge's `evaluate({ case, trial }, options)` returns a score: `score` from 0 to 1 ([Judge contract](#judge-contract)). MST parses `options` with the judge's schema, calls `evaluate` once per `reps`, and compares the mean score with the assertion's `threshold`. The schema sees only the judge's own options, never `threshold`, `reference`, `reps` or an eval config entry's `type` and `name`. The built-in `rubric` judge has the same contract, and an eval config can list it: `judges: [{ "type": "rubric", "rubric": "correctness" }]`.
 
@@ -130,8 +130,8 @@ A judge is called as `evaluate({ case, trial }, options)`, once per `reps`:
 - `case` (`JudgeCase`) is the case as written in the dataset, the same for every run:
   `id`, `input` (`prompt`), `expected`, `tags`, `metadata`.
 - `trial` (`JudgeTrial`) is one observed run: `response` (what validators grade),
-  `text`, `events` (tool calls and other host events), `messages` (when the host
-  reports them), `evidence`, and host `usage`.
+  `text`, `events` (tool calls and other client events), `messages` (when the client
+  reports them), `evidence`, and client `usage`.
 - `options` is the judge's own settings, parsed by its `schema`.
 
 The threshold is not in the input. MST compares the mean score with it,
@@ -177,8 +177,8 @@ A judge returns a `JudgeScore`. Only `score` (0 to 1) is required:
 A score or sub-score outside 0 to 1 is an error, not a result. When every
 judge of a case skips, the judge assertion passes.
 
-Judge usage is kept apart from host usage: `judgeUsage` on each case and
-trial, `totalJudgeUsage` on the run and suite telemetry, and the
+Judge usage is kept apart from client usage: `judgeUsage` on each case and
+trial, `totalJudgeUsage` on the run and eval telemetry, and the
 `judge_cost_usd`, `judge_input_tokens`, and `judge_output_tokens` metrics.
 The built-in `rubric` judge reports its usage the same way.
 
@@ -210,13 +210,13 @@ const plugin = {
 };
 ```
 
-`baseline` and `candidate` are `JudgeTrial`s, so a judge reads text, host
+`baseline` and `candidate` are `JudgeTrial`s, so a judge reads text, client
 events (tool calls and their output), and evidence the same way a pointwise
 judge does.
 
 `comparePairwise({ baseline, candidate, judges, cases? })` runs the listed
 judges on every case both runs have, matched by id. The runs can be two variants
-of one suite, a run and a stored baseline, or runs made on separate machines.
+of one eval, a run and a stored baseline, or runs made on separate machines.
 Pass `cases` (dataset cases by id) when judges need ground truth that results
 do not carry.
 
@@ -233,7 +233,7 @@ do not carry.
 
 ### Dataset sources
 
-The built-in `file`, `dir` and `gcs` sources read canonical `EvalDataset` JSON only. They don't infer assertions from a first case, attach hosts or add judges, and they reject fields they don't know, on every case. A minimal dataset needs a name, a case ID and an input:
+The built-in `file`, `dir` and `gcs` sources read canonical `EvalDataset` JSON only. They don't infer assertions from a first case, attach clients or add judges, and they reject fields they don't know, on every case. A minimal dataset needs a name, a case ID and an input:
 
 ```json
 {
@@ -314,17 +314,17 @@ export default {
 
 An eval config that loads the plugin selects the client with `"client": "my/assistant"`, and passes its options in `clientOptions`.
 
-- **The trace.** `run` returns a `ClientRunResult`: `finalText`, `events`, and optional `usage`, `error` and timing fields. Each event has a `kind` (`tool_call`, `skill`, `command`, `subagent` or `tool_search`), a `source` (`mcp` or `host`), a `name`, and optionally the MCP server label, arguments, output and ID. Record what the host did; don't reconstruct tool calls from the final text. A `tool_search` event (the host searching its tool catalog) lists the tools the search returned in `results`, each `{ name, server? }`. Type host-native actions as their kind rather than as calls to a host tool, so skill assertions and search metrics can read them.
-- **Evidence.** Declare `evidence: 'structured'` only for authoritative protocol or host-native traces. With `observed`, `none` or no declaration, tool-call and argument assertions can't pass; text and judge assertions still run.
+- **The trace.** `run` returns a `ClientRunResult`: `finalText`, `events`, and optional `usage`, `error` and timing fields. Each event has a `kind` (`tool_call`, `skill`, `command`, `subagent` or `tool_search`), a `source` (`mcp` or `builtin`), a `name`, and optionally the MCP server label, arguments, output and ID. Record what the host did; don't reconstruct tool calls from the final text. A `tool_search` event (the host searching its tool catalog) lists the tools the search returned in `results`, each `{ name, server? }`. Type client-native actions as their kind rather than as calls to a host tool, so skill assertions and search metrics can read them.
+- **Evidence.** Declare `evidence: 'structured'` only for authoritative protocol or client-native traces. With `observed`, `none` or no declaration, tool-call and argument assertions can't pass; text and judge assertions still run.
 - **Servers.** Events keep their MCP server labels. With more than one server, tool assertions use label-qualified names, or the eval config's `toolMap` from canonical to native names.
-- **In results.** Each host case result keeps the trace as `trace`, a `Trace`: the `ClientRunResult` your host returned, without telemetry and diagnostics, plus its evidence. On a one-server variant, MCP events that name no server get that server's label. A case with several trials has no `trace` of its own; each entry in `trialResults` has the trace of that trial. In a suite, every case result also names its `variant`. Stored results drop `finalText` and each event's `output`, the same way they drop `response`; events, servers, arguments and usage stay.
-- **Batches.** A host with `runBatch` gets one request per trial of each host case in the dataset, and returns one trace per request, in order. A batch host can't mix host types, and its cases need unique IDs.
-- **Tool variants.** A host that connects to the servers in `input.servers` gets a variant's tool metadata (`tools`) with no work of its own: the suite gives it `http` server configs for a local MCP proxy that applies the variant, so the host must speak Streamable HTTP (see [Tool variants on every host](#tool-variants-on-every-host)). A client that shows tool metadata itself sets `toolMetadata: true`; `variantToolMetadata(context.evalConfig, context.variant)` from `./evals` gives the variant's (its own `tools`, else the config's), and `buildToolSurface(listed, metadata)` applies it with MST's rules (keys, renames, collisions), and `resolve(name, server)` maps a presented name back to the original tool. Record a renamed tool's calls under `originalName`, with the model's name in `rawName`, as MST's hosts do. A batch host that connects to one server set for the whole batch (the first request's `input.servers`) sets `serversPerBatch: true`, and the batch shares one proxy endpoint. A proxied request also carries `input.checkServers`: the same servers on an endpoint for the host's own checks, such as a readiness probe, so that traffic isn't taken for the model seeing the variant. A host that connects elsewhere (hosted connectors, say) sets `toolSurfaceProxy: false`; an eval config that gives it `tools` then fails validation.
+- **In results.** Each client case result keeps the trace as `trace`, a `Trace`: the `ClientRunResult` your client returned, without telemetry and diagnostics, plus its evidence. On a one-server variant, MCP events that name no server get that server's label. A case with several trials has no `trace` of its own; each entry in `trialResults` has the trace of that trial. In an eval, every case result also names its `variant`. Stored results drop `finalText` and each event's `output`, the same way they drop `response`; events, servers, arguments and usage stay.
+- **Batches.** A client with `runBatch` gets one request per trial of each client case in the dataset, and returns one trace per request, in order. A batch client can't mix client types, and its cases need unique IDs.
+- **Tool variants.** A client that connects to the servers in `input.servers` gets a variant's tool metadata (`tools`) with no work of its own: the run gives it `http` server configs for a local MCP proxy that applies the variant, so the host must speak Streamable HTTP (see [Tool variants on every host](#tool-variants-on-every-client)). A client that shows tool metadata itself sets `toolMetadata: true`; `variantToolMetadata(context.evalConfig, context.variant)` from `./evals` gives the variant's (its own `tools`, else the config's), and `buildToolSurface(listed, metadata)` applies it with MST's rules (keys, renames, collisions), and `resolve(name, server)` maps a presented name back to the original tool. Record a renamed tool's calls under `originalName`, with the model's name in `rawName`, as MST's hosts do. A batch host that connects to one server set for the whole batch (the first request's `input.servers`) sets `serversPerBatch: true`, and the batch shares one proxy endpoint. A proxied request also carries `input.checkServers`: the same servers on an endpoint for the host's own checks, such as a readiness probe, so that traffic isn't taken for the model seeing the variant. A host that connects elsewhere (hosted connectors, say) sets `toolSurfaceProxy: false`; an eval config that gives it `tools` then fails validation.
 - **What it honours.** `maxConcurrency` caps the eval config's `concurrency`.
 
-### Claude Code host-native events
+### Claude Code client-native events
 
-The Claude CLI and Cowork hosts read Claude Code transcripts, where skills, commands, subagents and tool search are calls to host tools. They are recorded as typed events:
+The Claude CLI and Cowork clients read Claude Code transcripts, where skills, commands, subagents and tool search are calls to built-in tools. They are recorded as typed events:
 
 | Claude Code tool | Event                                                  |
 | ---------------- | ------------------------------------------------------ |
@@ -333,11 +333,11 @@ The Claude CLI and Cowork hosts read Claude Code transcripts, where skills, comm
 | `Task`, `Agent`  | `subagent`, named for the subagent type                |
 | `ToolSearch`     | `tool_search`, with the tools it returned in `results` |
 
-A search's `results` come from `tool_reference` blocks in its result, or, without them, from `mcp__<server>__<tool>` names in its text. This format is inferred rather than taken from recorded `ToolSearch` traces; if `tool_search_hit_rate` reads 0 where searches clearly worked, check the search's `output` in the trace. Other host tools (`Bash`, `Read`) stay tool calls with `source: 'host'`.
+A search's `results` come from `tool_reference` blocks in its result, or, without them, from `mcp__<server>__<tool>` names in its text. This format is inferred rather than taken from recorded `ToolSearch` traces; if `tool_search_hit_rate` reads 0 where searches clearly worked, check the search's `output` in the trace. Other built-in tools (`Bash`, `Read`) stay tool calls with `source: 'client'`.
 
 ### System prompts
 
-`systemPrompt` adds text to a host's system prompt, such as an organisation's instructions. To measure what it changes, give one variant the prompt (a variant inherits the eval config's `clientOptions` when it uses the same client):
+`systemPrompt` adds text to a client's system prompt, such as an organisation's instructions. To measure what it changes, give one variant the prompt (a variant inherits the eval config's `clientOptions` when it uses the same client):
 
 ```json
 "variants": [
@@ -352,14 +352,14 @@ A search's `results` come from `tool_reference` blocks in its result, or, withou
 
 A plugin client that can apply one declares `systemPrompt` in its schema. A case's own `clientOptions.systemPrompt` replaces the one it inherits, and is a validation error for a client that can't apply one.
 
-### Tool variants on every host
+### Tool variants on every client
 
 A variant's tool metadata (`tools`: descriptions, input schemas, renames) reaches every client:
 
 - **`mst`** applies the variant in-process.
-- **Hosts that connect to their servers** (plugin hosts, `claude-code`, `cowork`) get them through a local MCP proxy. The suite starts it on first use and gives each host request its own loopback Streamable HTTP endpoints, one per server, with the servers' labels and timeouts. The proxy presents the variant's tools and sends calls to a renamed tool to the original. Other requests (resources, prompts, skills) pass through; notifications, such as list changes and progress, don't.
+- **Clients that connect to their servers** (plugin clients, `claude-code`, `cowork`) get them through a local MCP proxy. The run starts it on first use and gives each client request its own loopback Streamable HTTP endpoints, one per server, with the servers' labels and timeouts. The proxy presents the variant's tools and sends calls to a renamed tool to the original. Other requests (resources, prompts, skills) pass through; notifications, such as list changes and progress, don't.
 - **One connection per server for the variant.** The proxy connects to each server once and shares that connection across the variant's cases, where a client without tool metadata may connect per case. A server that keeps per-connection state sees one connection for a variant with tool metadata.
-- **A request whose host never lists the proxied tools fails.** Otherwise the run would report results for a variant the model never saw. Cowork sets up its servers once per batch, so it lists them once: the batch shares one endpoint, and the check is for the batch. MST's own readiness probe uses a separate endpoint and doesn't count.
+- **A request whose client never lists the proxied tools fails.** Otherwise the run would report results for a variant the model never saw. Cowork sets up its servers once per batch, so it lists them once: the batch shares one endpoint, and the check is for the batch. MST's own readiness probe uses a separate endpoint and doesn't count.
 - **Calls are recorded under the tools' original names**, so a dataset's assertions read the same in every variant, with the model's name in `rawName`.
 
 The ChatGPT desktop client opts out until it is verified with the proxy, so an eval config that gives it `tools` fails validation.
@@ -368,7 +368,7 @@ The ChatGPT desktop client opts out until it is verified with the proxy, so an e
 
 ```text
 EvalConfig
-  -> load the suite's plugins (built-ins are always available)
+  -> load the eval's plugins (built-ins are always available)
   -> validate tagged blocks, extension names and namespaces, schemas, and server labels
   -> resolve DatasetSource entries into EvalDataset values
   -> derive one or more variants from the eval config (baseline first)
@@ -380,13 +380,13 @@ EvalConfig
 ```
 
 `EvalDataset`, `EvalCase`, `MCPConfig`, and `runEvalDataset` remain
-the canonical case and execution primitives. The suite layer composes them; it
+the canonical case and execution primitives. The eval layer composes them; it
 does not replace them with a second case model.
 
 ## Variants
 
 A variant is a patch over the eval config defaults. Variants replace separate A/B and
-variant-experiment concepts. A variant may change its server set, client, model, client options,
+variant-optimization concepts. A variant may change its server set, client, model, client options,
 tool-name map, input template, metrics, or judges. An eval config without variants
 has one implicit `default` variant.
 
@@ -395,12 +395,12 @@ more than one entry so traces and metrics can attribute MCP calls correctly.
 
 ## Metrics
 
-Every variant in the run summary has `metrics`. They include, when the host reports them:
+Every variant in the run summary has `metrics`. They include, when the client reports them:
 
 - `passed_rate`: the share of cases that passed.
 - `trial_pass_rate`: the share of trials that passed, averaged over cases.
-- `tool_count_mean`, `mcp_call_count_mean` and `host_event_count_mean`: per trial, every tool call; MCP tool calls; and host-native events (host tools, skills, commands, subagents, tool searches). A host tool call counts in both `tool_count` and `host_event_count`; a typed host event (a skill load, command, subagent or tool search) counts only in `host_event_count`; a skill an MCP server serves counts in neither.
-- `tool_search_hit_rate`, for hosts that search their tool catalog: the share of trials where an MCP call was to a tool an earlier search returned. It doesn't check that the tool was the one the case expected; `toolsTriggered` does.
+- `tool_count_mean`, `mcp_call_count_mean` and `builtin_event_count_mean`: per trial, every tool call; MCP tool calls; and the client's own events (built-in tools, skills, commands, subagents, tool searches). A built-in tool call counts in both `tool_count` and `builtin_event_count`; another built-in event (a skill load, command, subagent or tool search) counts only in `builtin_event_count`; a skill an MCP server serves counts in neither.
+- `tool_search_hit_rate`, for clients that search their tool catalog: the share of trials where an MCP call was to a tool an earlier search returned. It doesn't check that the tool was the one the case expected; `toolsTriggered` does.
 - `input_tokens_mean`, `output_tokens_mean` and `cost_usd_mean`: usage and cost per trial.
 - `duration_s_mean`: time per trial.
 - `judge_pass_rate` and `judge_score`, for cases with judges.
@@ -409,28 +409,28 @@ A trial is one run of a case: one trial, or the case itself when it runs once. A
 
 An eval config's or variant's `metrics` list adds more. Built-in names:
 
-| Metric                                                                                                 | Reports                                                                            |
-| ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
-| `passed`, `trial_pass`                                                                                 | The share of cases, and of trials, that passed.                                    |
-| `tool_count`, `mcp_call_count`, `host_event_count`, `first_tool`, `is_no_action`                       | Tool calls and host-native events in the trace. MCP calls are named `server.tool`. |
-| `input_tokens`, `input_tokens_uncached`, `output_tokens`, `cache_read_tokens`, `cache_creation_tokens` | Host token usage. `input_tokens` includes cache reads and writes.                  |
-| `cost_usd`                                                                                             | Host-reported cost, or an estimate from the eval config's `pricing`.               |
-| `duration_s`, `duration_api_s`                                                                         | Wall time, and API time when the host reports it.                                  |
-| `response_success`, `response_len`, `response_words`                                                   | Trials without a host error, and the answer's length.                              |
-| `skill_loaded`, `skill_before_tool`, `skill_verification_failed`                                       | Agent Skills loads.                                                                |
-| `tool_search_hit`                                                                                      | Trials where a tool search returned a tool the trial then called.                  |
-| `judge_pass`, `judge_score`, `judge_name`, `judge_pass_for`, `judge_score_for`                         | Judge scores, from the case's last trial.                                          |
+| Metric                                                                                                 | Reports                                                                              |
+| ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| `passed`, `trial_pass`                                                                                 | The share of cases, and of trials, that passed.                                      |
+| `tool_count`, `mcp_call_count`, `builtin_event_count`, `first_tool`, `is_no_action`                    | Tool calls and client-native events in the trace. MCP calls are named `server.tool`. |
+| `input_tokens`, `input_tokens_uncached`, `output_tokens`, `cache_read_tokens`, `cache_creation_tokens` | Client token usage. `input_tokens` includes cache reads and writes.                  |
+| `cost_usd`                                                                                             | Client-reported cost, or an estimate from the eval config's `pricing`.               |
+| `duration_s`, `duration_api_s`                                                                         | Wall time, and API time when the client reports it.                                  |
+| `response_success`, `response_len`, `response_words`                                                   | Trials without a client error, and the answer's length.                              |
+| `skill_loaded`, `skill_before_tool`, `skill_verification_failed`                                       | Agent Skills loads.                                                                  |
+| `tool_search_hit`                                                                                      | Trials where a tool search returned a tool the trial then called.                    |
+| `judge_pass`, `judge_score`, `judge_name`, `judge_pass_for`, `judge_score_for`                         | Judge scores, from the case's last trial.                                            |
 
-- **Per trial.** Usage, timing, tool and answer metrics are measured per trial. A case's value is the mean over its trials, and a variant's is the mean over its cases (`<name>_mean`, or `<name>_rate` for shares). `first_tool` lists the first tool of each case's first trial. Runs that failed on infrastructure, such as a network error or a host that couldn't start, aren't trials, as they don't count toward accuracy.
-- **Unavailable, not zero.** A metric with no value for any case is left out of `metrics`; if the eval config lists it, it's also in the variant's `unavailableMetrics`. A host that reports no cost has no `cost_usd` unless the eval config prices its model. A host whose evidence is `none` has no tool metrics.
+- **Per trial.** Usage, timing, tool and answer metrics are measured per trial. A case's value is the mean over its trials, and a variant's is the mean over its cases (`<name>_mean`, or `<name>_rate` for shares). `first_tool` lists the first tool of each case's first trial. Runs that failed on infrastructure, such as a network error or a client that couldn't start, aren't trials, as they don't count toward accuracy.
+- **Unavailable, not zero.** A metric with no value for any case is left out of `metrics`; if the eval config lists it, it's also in the variant's `unavailableMetrics`. A client that reports no cost has no `cost_usd` unless the eval config prices its model. A client whose evidence is `none` has no tool metrics.
 - **Evidence.** A variant's `evidence` is the weakest among its cases (`none`, then `observed`, then `structured`). With `observed`, tool metrics come from a best-effort trace; compare them only between variants with the same evidence.
 - **Deltas.** `variantDeltas` compares each variant with the first: `passRate`, `trialPassRate` and their deltas, and `metricDeltas`, the change in every numeric metric both variants report (`metricDeltas.input_tokens_mean`, say), with `judge_score` per judge.
-- **In the CLI.** `mst run` prints a row per variant: cases passed, trial pass rate, judge pass rate when there are judges, MCP calls and host events, tokens, cost and time.
+- **In the CLI.** `mst run` prints a row per variant: cases passed, trial pass rate, judge pass rate when there are judges, MCP calls and client events, tokens, cost and time.
 - **Run totals.** The summary's top-level `total`, `passed`, `failed` and `passRate` count every variant; its other metrics are the first variant's.
 
 ### Pricing
 
-Most hosts report tokens but not cost. An eval config (or a plugin's shared config) can price them, in USD per million tokens, by the model each case runs:
+Most clients report tokens but not cost. An eval config (or a plugin's shared config) can price them, in USD per million tokens, by the model each case runs:
 
 ```json
 "pricing": {
@@ -440,7 +440,7 @@ Most hosts report tokens but not cost. An eval config (or a plugin's shared conf
 
 MST ships no prices; they change too often to bake in.
 
-- **Reported cost wins.** A host-reported cost is always used. Estimates are kept apart as `estimatedCostUsd` in each case's usage, `cost_usd` uses whichever there is, and the variant's `costSource` says which (`host`, `pricing` or `mixed`).
+- **Reported cost wins.** A cost the client reports is always used. Estimates are kept apart as `estimatedCostUsd` in each case's usage, `cost_usd` uses whichever there is, and the variant's `costSource` says which (`client`, `pricing` or `mixed`).
 - **Which model.** A case is priced at its own `model`, else the variant's or eval config's `model` (including a client's default). A model the client picks at run time isn't known to MST, so set `model` to price it.
 - **Auditable.** Each variant records the prices it used in `pricing`, and models it couldn't price in `unpricedModels`; `cost_usd` leaves their trials out.
 - **Shared configs.** An eval config's `pricing` replaces a shared config's whole table; the two aren't merged.

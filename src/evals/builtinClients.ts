@@ -1,0 +1,702 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { z } from 'zod';
+import { MCPConfigSchema, type MCPConfig } from '../config/mcpConfig.js';
+import { usesToolSurfaceProxy } from './toolSurfaceProxy.js';
+import {
+  buildToolSurface,
+  registerPresentedTools,
+  withOriginalToolNames,
+  type ListedServerTools,
+} from './toolSurface.js';
+import {
+  GenerationOptions,
+  ProviderSchema,
+  SystemPromptOption,
+  clientEnvironment,
+  type ClientEnvironment,
+} from './mstClient/clientOptions.js';
+import {
+  createMCPClientForConfig,
+  closeMCPClient,
+} from '../mcp/clientFactory.js';
+import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
+import { callToolNormalized } from '../mcp/callTool.js';
+import { DEFAULT_PROTOCOL_SETTING, getProtocolInfo } from '../mcp/protocol.js';
+import { createFixtureExtensions } from '../mcp/fixtures/fixtureExtensions.js';
+import type { Client } from '@modelcontextprotocol/client';
+import { simulateMstClient } from './mstClient/simulation.js';
+import type {
+  ClientRunInput,
+  ClientRunContext,
+  ClientRunResult,
+} from './evalFrameworkTypes.js';
+import type { ClientConfig } from './evalConfig.js';
+import { variantToolMetadata } from './evalConfig.js';
+import type { ClientDefinition } from './evalFrameworkTypes.js';
+import { extensionLookup } from '../plugins/extensions.js';
+import { simulationToClientRun } from './clientTrace.js';
+import type { MstClientConfig } from './mstClient/types.js';
+import { COWORK_CLIENT } from './coworkClient.js';
+import { CHATGPT_CLIENT, CHATGPT_LINUX_CLIENT } from './chatgptClient.js';
+
+/** A stand-in client for clients that manage their own connections. */
+function missingClient(): Client {
+  return new Proxy({} as Client, {
+    get() {
+      throw new Error('No MCP client for this client.');
+    },
+  });
+}
+
+async function runBuiltinClient(
+  input: ClientRunInput,
+  clientConfig: ClientConfig,
+  context: ClientRunContext,
+  factory: (options: BuiltinClientOptions) => MstClientConfig
+): Promise<ClientRunResult> {
+  const startedAt = Date.now();
+  // Runtime values are fallbacks; the client's own env wins.
+  const env: ClientEnvironment = {
+    ...clientEnvironment(input, context),
+    ...(clientConfig.env as ClientEnvironment | undefined),
+  };
+  const options = { ...input, host: clientConfig, ...context };
+  if (!input.prompt) throw new Error('Clients require an input.');
+  const prompt = input.prompt;
+  const config = {
+    ...factory({ ...options.host, servers: options.servers, env }),
+    env,
+  };
+  const clients: Array<Awaited<ReturnType<typeof createMCPClientForConfig>>> =
+    [];
+  let configDir: string | undefined;
+  let claudeConfigDir: string | undefined;
+  const controller = new AbortController();
+  const timeout =
+    config.timeout ??
+    (config.clientType === 'cli' ? config.cli?.timeout : undefined);
+  const timeoutError = new Error(
+    `${config.clientType === 'cli' ? 'CLI' : 'SDK'} client timed out after ${timeout} ms.`
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const closing = new Map<(typeof clients)[number], Promise<void>>();
+
+  function closeOwnedClient(client: (typeof clients)[number]): Promise<void> {
+    let pending = closing.get(client);
+    if (!pending) {
+      pending = closeMCPClient(client);
+      closing.set(client, pending);
+      // Cleanup can finish after the deadline, but must not reject unobserved.
+      void pending.catch(() => {});
+    }
+    if (controller.signal.aborted) {
+      // Bypass a stalled session DELETE. Only this client's clients are closed;
+      // the shared graceful-close policy and caller-owned fixtures are unchanged.
+      void client.close().catch(() => {});
+    }
+    return pending;
+  }
+
+  const expired = new Promise<never>((_, reject) => {
+    if (timeout === undefined) return;
+    function expire() {
+      controller.abort(timeoutError);
+      for (const client of clients) void closeOwnedClient(client);
+      reject(timeoutError);
+    }
+    const remaining = timeout - (Date.now() - startedAt);
+    if (remaining <= 0) expire();
+    else timer = setTimeout(expire, remaining);
+  });
+
+  function checkDeadline() {
+    if (timeout !== undefined && Date.now() - startedAt >= timeout) {
+      controller.abort(timeoutError);
+    }
+    controller.signal.throwIfAborted();
+  }
+
+  async function execute(): Promise<ClientRunResult> {
+    try {
+      checkDeadline();
+      // CLI clients manage their own server connections.
+      if (config.clientType !== 'cli') {
+        for (const server of options.servers) {
+          const client = await createMCPClientForConfig(server);
+          clients.push(client);
+          // A connection that settles late is still owned and closed in finally.
+          checkDeadline();
+        }
+      }
+      const routes = new Map<
+        string,
+        { client: (typeof clients)[number]; name: string; original: string }
+      >();
+      const overrides = variantToolMetadata(
+        options.evalConfig,
+        options.variant
+      );
+      const mcp: MCPFixtureApi = {
+        get client() {
+          if (!clients[0]) throw new Error('No MCP client for this client.');
+          return clients[0];
+        },
+        authType: 'none',
+        get protocol() {
+          return clients[0]
+            ? getProtocolInfo(clients[0])
+            : {
+                requested: DEFAULT_PROTOCOL_SETTING,
+                negotiated: null,
+                era: null,
+              };
+        },
+        // Resource and skills helpers address the first server.
+        ...createFixtureExtensions(clients[0] ?? missingClient()),
+        getServerInfo: () => null,
+        async listTools() {
+          const listed: ListedServerTools[] = [];
+          for (const [index, client] of clients.entries()) {
+            const result = await client.listTools();
+            listed.push({
+              server: options.servers[index]!.label,
+              tools: result.tools,
+            });
+          }
+          const surface = buildToolSurface(listed, overrides);
+          routes.clear();
+          return surface.tools.map(({ server, originalName, tool }) => {
+            const qualify = (toolName: string) =>
+              clients.length > 1 ? `${server}.${toolName}` : toolName;
+            const index = listed.findIndex((item) => item.server === server);
+            routes.set(qualify(tool.name), {
+              client: clients[index]!,
+              name: originalName,
+              original: qualify(originalName),
+            });
+            return { ...tool, name: qualify(tool.name) };
+          });
+        },
+        async callTool(name, args) {
+          if (!routes.size) await this.listTools();
+          const route = routes.get(name);
+          if (!route) throw new Error(`Unknown MCP tool: ${name}`);
+          return callToolNormalized(route.client, {
+            name: route.name,
+            arguments: args,
+          });
+        },
+      };
+      if (config.cli) {
+        const position = config.cli.args.indexOf('--mcp-config');
+        if (position >= 0 && config.cli.args[position + 1]?.startsWith('{')) {
+          configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp_config_'));
+          const file = path.join(configDir, 'mcp.json');
+          fs.writeFileSync(file, config.cli.args[position + 1]!, {
+            mode: 0o600,
+          });
+          config.cli = { ...config.cli, args: [...config.cli.args] };
+          config.cli.args[position + 1] = file;
+        }
+        // Claude Code loads the operator's skills, plugins and settings from
+        // its config directory. An empty one per run keeps them out of the
+        // results. Only an explicit CLAUDE_CONFIG_DIR (the client's env)
+        // opts out; one inherited from the shell doesn't.
+        const explicitConfigDir = (
+          clientConfig.env as ClientEnvironment | undefined
+        )?.CLAUDE_CONFIG_DIR;
+        if (
+          clientConfig.type === 'claude-code' &&
+          (clientConfig as { isolate?: boolean }).isolate !== false &&
+          explicitConfigDir === undefined
+        ) {
+          claudeConfigDir = fs.mkdtempSync(
+            path.join(os.tmpdir(), 'mst-claude-')
+          );
+          config.cli = {
+            ...config.cli,
+            env: { ...config.cli.env, CLAUDE_CONFIG_DIR: claudeConfigDir },
+          };
+        }
+      }
+      if (overrides && config.clientType === 'cli')
+        throw new Error(
+          'CLI description overrides require a client plugin that exposes overridden tools.'
+        );
+      checkDeadline();
+      registerPresentedTools(mcp, (name) => routes.get(name)?.original);
+      const response = withOriginalToolNames(
+        await simulateMstClient(
+          mcp,
+          prompt,
+          config,
+          timeout === undefined ? undefined : controller.signal
+        ),
+        mcp
+      );
+      return simulationToClientRun(response, input.servers);
+    } finally {
+      await Promise.allSettled(clients.map(closeOwnedClient));
+    }
+  }
+
+  try {
+    if (
+      config.clientType === 'cli' &&
+      config.cli?.claudeMcpServers !== undefined
+    ) {
+      // The Claude process runner settles on this controller's abort. Do not
+      // race away its partial trace/diagnostics at the same deadline.
+      void expired.catch(() => {});
+      return await execute();
+    }
+    const result = await Promise.race([execute(), expired]);
+    checkDeadline();
+    return result;
+  } catch (error) {
+    if (error === timeoutError)
+      return { finalText: '', events: [], error: timeoutError.message };
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    // A killed CLI can still be exiting; retry rather than fail the result.
+    if (configDir)
+      fs.rmSync(configDir, { recursive: true, force: true, maxRetries: 3 });
+    if (claudeConfigDir)
+      fs.rmSync(claudeConfigDir, {
+        recursive: true,
+        force: true,
+        maxRetries: 3,
+      });
+  }
+}
+
+export interface BuiltinClientOptions {
+  env?: ClientEnvironment;
+  temperature?: number;
+  maxTokens?: number;
+  apiKeyEnvVar?: string;
+  systemPrompt?: string;
+  /** The mst client's Agent Skills mode. */
+  skills?: 'off' | 'catalog' | 'preload';
+  model?: string;
+  maxToolCalls?: number;
+  timeout?: number;
+  provider?: string;
+  server?: MCPConfig;
+  servers?: MCPConfig[];
+  apiToken?: string;
+  pluginDir?: string;
+  pluginMcpUrl?: string;
+  mcpServers?: Record<string, Record<string, unknown>>;
+}
+
+/**
+ * Built-in client configs. Organization-specific plugin wiring stays
+ * outside the framework and is provided through generic plugin options.
+ */
+const SdkClientSchema = z
+  .object({
+    type: z.literal('mst').optional(),
+    ...GenerationOptions,
+    provider: ProviderSchema.optional(),
+    apiKeyEnvVar: z.string().min(1).optional(),
+    systemPrompt: SystemPromptOption,
+    /** Offer the server's Agent Skills: as a catalog the model loads from, or preloaded. */
+    skills: z.enum(['off', 'catalog', 'preload']).optional(),
+    env: z.record(z.string(), z.string().optional()).optional(),
+    server: MCPConfigSchema.optional(),
+    servers: z.array(MCPConfigSchema).optional(),
+  })
+  .strict();
+const CliClientSchema = z
+  .object({
+    type: z.literal('claude-code').optional(),
+    model: GenerationOptions.model,
+    timeout: GenerationOptions.timeout,
+    systemPrompt: SystemPromptOption,
+    provider: z.enum(['anthropic', 'vertex', 'vertex-anthropic']).optional(),
+    apiToken: z.string().optional(),
+    pluginDir: z.string().optional(),
+    pluginMcpUrl: z.string().optional(),
+    /**
+     * Run Claude Code with an empty config directory (the default), so the
+     * operator's skills, plugins and settings don't affect results. Set false
+     * to use your own, for example to sign in with a claude.ai account.
+     */
+    isolate: z.boolean().optional(),
+    env: z.record(z.string(), z.string().optional()).optional(),
+    server: MCPConfigSchema.optional(),
+    servers: z.array(MCPConfigSchema).optional(),
+  })
+  .strict();
+let builtinClients: Record<string, ClientDefinition> | undefined;
+
+/** Built-in clients by name, including aliases. */
+function builtinClientDefinitions(): Readonly<
+  Record<string, ClientDefinition>
+> {
+  if (builtinClients) return builtinClients;
+  const clients: Record<string, ClientDefinition> = {};
+  for (const [name, factory] of Object.entries(BUILTIN_CLIENTS)) {
+    clients[name] = {
+      schema: name === 'mst' ? SdkClientSchema : CliClientSchema,
+      evidence: 'structured',
+      // The SDK client presents tool variants; the CLI only sees its servers.
+      ...(name === 'mst' ? { toolMetadata: true } : {}),
+      run: (input, config, context) =>
+        runBuiltinClient(input, config, context, factory),
+    };
+  }
+  return (builtinClients = {
+    ...clients,
+    // One ChatGPT client; the desktop driver follows the platform, as Cowork's does.
+    chatgpt:
+      process.platform === 'linux' ? CHATGPT_LINUX_CLIENT : CHATGPT_CLIENT,
+    cowork: COWORK_CLIENT,
+  });
+}
+
+/**
+ * Earlier names for built-in clients (ADR 0002). They are errors, not
+ * aliases: each names its replacement.
+ */
+const RENAMED_CLIENTS: Readonly<Record<string, string>> = {
+  'vercel-sdk': 'mst',
+  'anthropic-api': 'mst',
+  'claude-cli': 'claude-code',
+  'chatgpt-mac': 'chatgpt',
+  'chatgpt-linux': 'chatgpt',
+  cowork_cu: 'cowork',
+  'anthropic.claude.cowork.desktop-app.macos': 'cowork',
+  'openai.chatgpt.agent.desktop-app.macos': 'chatgpt',
+  'openai.chatgpt.agent.desktop-app.linux': 'chatgpt',
+};
+
+const clientDefinitions = extensionLookup('clients', builtinClientDefinitions);
+
+/**
+ * A client reference, checked: a renamed built-in fails naming its
+ * replacement; anything else is returned unchanged.
+ */
+export function resolveClientName(reference: string): string {
+  if (Object.hasOwn(RENAMED_CLIENTS, reference))
+    throw new Error(
+      `Client "${reference}" is now "${RENAMED_CLIENTS[reference]}".`
+    );
+  return reference;
+}
+
+/** The client `reference` names: a built-in, or `namespace/name` from a plugin. */
+export function getClient(reference: string): ClientDefinition {
+  return clientDefinitions.get(resolveClientName(reference));
+}
+
+/**
+ * The simulator settings the mst or claude-code client resolves its options
+ * to: its defaults (such as the model) included. Throws for other clients.
+ */
+export function getBuiltinClientConfig(
+  name: string,
+  options: BuiltinClientOptions = {}
+): MstClientConfig {
+  const config = builtinClientDefaults(name, options);
+  if (!config)
+    throw new Error(
+      `Client "${name}" doesn't run on MST's simulator (mst, claude-code).`
+    );
+  return config;
+}
+
+/** As getBuiltinClientConfig, or undefined for a client that isn't simulated. */
+export function builtinClientDefaults(
+  name: string,
+  options: BuiltinClientOptions = {}
+): MstClientConfig | undefined {
+  const factory = Object.hasOwn(BUILTIN_CLIENTS, name)
+    ? BUILTIN_CLIENTS[name]
+    : undefined;
+  return factory?.(options);
+}
+
+const BUILTIN_CLIENTS: Record<
+  string,
+  (options: BuiltinClientOptions) => MstClientConfig
+> = {
+  'claude-code': claudeCliClient,
+  mst: vercelSdkClient,
+};
+
+/**
+ * The API that serves `model`, from its id: the mst client infers it, so an
+ * eval names only the model. `provider` overrides it (for example a gateway or
+ * Vertex routing).
+ */
+export function providerForModel(
+  model: string | undefined
+): MstClientConfig['provider'] | undefined {
+  if (!model) return undefined;
+  if (/^claude-.*@/.test(model)) return 'vertex-anthropic';
+  if (/^claude-/.test(model)) return 'anthropic';
+  if (/^(gpt-|o\d|chatgpt-)/.test(model)) return 'openai';
+  if (/^gemini-/.test(model)) return 'google';
+  if (/^(mistral|ministral|codestral|magistral)/.test(model)) return 'mistral';
+  if (/^deepseek-/.test(model)) return 'deepseek';
+  if (/^grok-/.test(model)) return 'xai';
+  return undefined;
+}
+
+function vercelSdkClient(options: BuiltinClientOptions): MstClientConfig {
+  SdkClientSchema.parse(options);
+  return {
+    timeout: options.timeout,
+    temperature: options.temperature,
+    maxTokens: options.maxTokens,
+    apiKeyEnvVar: options.apiKeyEnvVar,
+    env: options.env,
+    clientType: 'sdk',
+    provider:
+      (options.provider as MstClientConfig['provider']) ??
+      providerForModel(options.model) ??
+      'anthropic',
+    model: options.model ?? 'claude-sonnet-4-20250514',
+    maxToolCalls: options.maxToolCalls ?? 5,
+    ...(options.systemPrompt !== undefined
+      ? { systemPrompt: options.systemPrompt }
+      : {}),
+    ...(options.skills !== undefined && options.skills !== 'off'
+      ? { skills: options.skills }
+      : {}),
+  };
+}
+
+/**
+ * Settings a client can't honour, checked before anything runs (dry runs
+ * included), so a run never reports results for a configuration the client
+ * ignored. Throws with the first problem; `context` names the eval config,
+ * variant or case.
+ */
+export function assertClientSupports(
+  clientConfig: { type: string },
+  options: {
+    servers: MCPConfig[];
+    tools?: unknown;
+    concurrency?: number;
+    context: string;
+  }
+): void {
+  const definition = getClient(clientConfig.type);
+  const showsToolMetadata =
+    definition.toolMetadata === true || usesToolSurfaceProxy(definition);
+  if (options.tools !== undefined && !showsToolMetadata) {
+    throw new Error(
+      `${options.context}: client "${clientConfig.type}" can't show tool metadata (\`tools\`); it would run with the servers' own. ` +
+        'Use a client that shows it to the model (mst), or one that connects to the servers it is given.'
+    );
+  }
+  if (
+    definition.maxConcurrency !== undefined &&
+    (options.concurrency ?? 1) > definition.maxConcurrency
+  ) {
+    throw new Error(
+      `${options.context}: client "${clientConfig.type}" runs at most ${definition.maxConcurrency} case at a time; set concurrency to ${definition.maxConcurrency}.`
+    );
+  }
+  if (clientConfig.type === 'claude-code')
+    assertClaudeCliServers(options.servers, false, options.context);
+}
+
+/**
+ * Connection policy claude-cli can't forward to its MCP servers. Unresolved
+ * `accessTokenEnv` is only known once secrets resolve, at run time.
+ */
+function assertClaudeCliServers(
+  servers: MCPConfig[],
+  resolved: boolean,
+  context = 'claude-code'
+): void {
+  for (const server of servers) {
+    if (server.transport !== 'http') continue;
+    const unsupported = [
+      server.auth?.clientCredentials && 'clientCredentials',
+      server.auth?.oauth && 'oauth',
+      resolved &&
+        server.auth?.accessTokenEnv &&
+        !server.auth.accessToken &&
+        'unresolved accessTokenEnv',
+      server.tls && 'tls/mTLS',
+      server.proxy && 'proxy',
+      server.retryAttempts !== undefined && 'retryAttempts',
+      server.connectTimeoutMs !== undefined && 'connectTimeoutMs',
+      server.requestTimeoutMs !== undefined && 'requestTimeoutMs',
+      server.callTimeoutMs !== undefined && 'callTimeoutMs',
+      server.capabilities && 'capabilities',
+    ].filter(Boolean);
+    if (unsupported.length)
+      throw new Error(
+        `${context}: claude-code can't forward ${unsupported.join(', ')} for ${server.label ?? server.serverUrl}. Remove ${unsupported.length > 1 ? 'them' : 'it'}, or use vercel-sdk or anthropic-api.`
+      );
+  }
+}
+
+function claudeCliClient(options: BuiltinClientOptions): MstClientConfig {
+  CliClientSchema.parse(options);
+  const env = { ...process.env, ...options.env };
+  assertClaudeCliServers(
+    [...(options.servers ?? []), ...(options.server ? [options.server] : [])],
+    true
+  );
+  const provider =
+    options.provider === 'vertex-anthropic'
+      ? 'vertex'
+      : (options.provider ?? 'anthropic');
+
+  const server = options.server;
+  const defaultServerUrl =
+    server?.transport === 'http' ? server.serverUrl : env.MCP_SERVER_URL;
+  const apiToken =
+    options.apiToken ??
+    (server?.transport === 'http' ? server.auth?.accessToken : undefined) ??
+    env.MCP_ACCESS_TOKEN ??
+    '';
+  const pluginDir = options.pluginDir ?? env.MCP_PLUGIN_DIR ?? '';
+
+  const mcpServers: Record<string, unknown> = server
+    ? server.transport === 'http'
+      ? {
+          [server.label ?? 'mcp-server']: {
+            type: 'http',
+            url: server.serverUrl,
+            headers: {
+              ...server.headers,
+              ...(apiToken ? { Authorization: `Bearer ${apiToken}` } : {}),
+            },
+          },
+        }
+      : {
+          [server.label ?? 'mcp-server']: {
+            command: server.command,
+            args: server.args,
+            cwd: server.cwd,
+            env: server.env,
+          },
+        }
+    : defaultServerUrl
+      ? {
+          'mcp-server': {
+            type: 'http',
+            url: defaultServerUrl,
+            headers: apiToken
+              ? { Authorization: `Bearer ${apiToken}` }
+              : undefined,
+          },
+        }
+      : {};
+
+  if (pluginDir) {
+    const dataDir =
+      env.MCP_PLUGIN_DATA_DIR ??
+      path.join(os.homedir(), '.mcp-server-tester', 'plugins');
+    const serverUrl = options.pluginMcpUrl ?? env.MCP_PLUGIN_SERVER_URL ?? '';
+    fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dataDir, 'mcp-server-url.json'),
+      `${JSON.stringify({ serverUrl }, null, 2)}\n`
+    );
+    if (serverUrl) {
+      mcpServers['plugin'] = {
+        command: 'bash',
+        args: [path.join(pluginDir, 'start.sh')],
+        env: {
+          MCP_PLUGIN_SERVER_URL: serverUrl,
+          ENABLE_HITL: 'false',
+          CLAUDE_PLUGIN_DATA: dataDir,
+        },
+        alwaysLoad: env.MCP_PLUGIN_ALWAYS_LOAD !== '0',
+      };
+    }
+  }
+
+  if (options.servers) {
+    for (const key of Object.keys(mcpServers)) delete mcpServers[key];
+    for (const entry of options.servers) {
+      const label = entry.label ?? 'mcp-server';
+      mcpServers[label] =
+        entry.transport === 'http'
+          ? {
+              type: 'http',
+              url: entry.serverUrl,
+              headers: {
+                ...entry.headers,
+                ...(entry.auth?.accessToken
+                  ? { Authorization: `Bearer ${entry.auth.accessToken}` }
+                  : {}),
+              },
+            }
+          : {
+              command: entry.command,
+              args: entry.args,
+              cwd: entry.cwd,
+              env: entry.env,
+            };
+    }
+  }
+  const mcpConfigFile = JSON.stringify({ mcpServers });
+
+  const model = options.model ?? 'claude-sonnet-4-20250514';
+  const baseArgs = [
+    '-p',
+    '{{prompt}}',
+    '--model',
+    model,
+    '--output-format',
+    'stream-json',
+    '--verbose',
+    '--mcp-config',
+    mcpConfigFile,
+    '--strict-mcp-config',
+    '--permission-mode',
+    'bypassPermissions',
+    // Added to Claude Code's own system prompt, which stays.
+    ...(options.systemPrompt !== undefined
+      ? ['--append-system-prompt', '{{systemPrompt}}']
+      : []),
+  ];
+
+  return {
+    clientType: 'cli',
+    timeout: options.timeout,
+    provider: (provider === 'vertex'
+      ? 'vertex-anthropic'
+      : provider) as MstClientConfig['provider'],
+    mcpServers: mcpServers as Record<string, Record<string, unknown>>,
+    model,
+    ...(options.systemPrompt !== undefined
+      ? { systemPrompt: options.systemPrompt }
+      : {}),
+    cli: {
+      command: 'claude',
+      claudeMcpServers: Object.keys(mcpServers),
+      args: baseArgs,
+      outputFormat: 'stream-json',
+      timeout: options.timeout ?? 180_000,
+      env: {
+        ...env,
+        MCP_CONNECTION_NONBLOCKING: 'false',
+        MCP_CONNECT_TIMEOUT_MS: env.MCP_CONNECT_TIMEOUT_MS ?? '30000',
+        CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+        CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1',
+        ...(provider === 'vertex'
+          ? {
+              ANTHROPIC_API_KEY: undefined,
+              CLAUDE_CODE_USE_VERTEX: '1',
+              ANTHROPIC_VERTEX_PROJECT_ID:
+                env.ANTHROPIC_VERTEX_PROJECT_ID ?? env.GOOGLE_VERTEX_PROJECT,
+            }
+          : { CLAUDE_CODE_USE_VERTEX: undefined }),
+      },
+    },
+  };
+}

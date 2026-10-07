@@ -1,5 +1,5 @@
 import type { EvalConfig } from '../evalConfig.js';
-import type { MarketplacePlugin, ClientStdioPaths } from '../hostPlugins.js';
+import type { MarketplacePlugin, ClientStdioPaths } from '../clientPlugins.js';
 import type {
   CoworkDriverOptions,
   CoworkDriverProvider,
@@ -8,10 +8,10 @@ import type {
 } from './driver.js';
 
 /** The desktop application a session runs, recorded with each case result. */
-interface CoworkHostApp {
+interface CoworkClientApp {
   name: string;
   version: string;
-  /** `pinned`: the eval config's `host.options.appVersion`; else the installed app. */
+  /** `pinned`: the eval config's `clientOptions.appVersion`; else the installed app. */
   source: 'installed' | 'pinned';
 }
 
@@ -23,7 +23,7 @@ export interface CoworkPlatform {
     evalConfig: EvalConfig;
     env: Record<string, string | undefined>;
     model?: string;
-    /** Validated host plugins; Cowork installs them via allowedPluginMarketplaces. */
+    /** Validated client plugins; Cowork installs them via allowedPluginMarketplaces. */
     plugins?: readonly MarketplacePlugin[];
     /** Caller-owned runtime paths for a prepared Linux desktop. */
     stdioPaths?: ClientStdioPaths;
@@ -33,7 +33,7 @@ export interface CoworkPlatform {
     /** macOS returns the installed, caller-owned or pinned application path. */
     appPath?: string;
     /** macOS returns the application it runs. */
-    app?: CoworkHostApp;
+    app?: CoworkClientApp;
     /** macOS returns transaction-owned paths after installing its private profile. */
     stdioPaths?: ClientStdioPaths;
     dispose(): Promise<void>;

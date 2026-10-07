@@ -5,14 +5,14 @@ import {
   surfacedTools,
   typeClaudeCodeCall,
 } from './claudeCodeEvents.js';
-import { simulationTrace } from './hostTrace.js';
-import { parseStreamJson } from './mcpHost/adapters/cli/parsers.js';
-import type { LLMToolCall } from './mcpHost/mcpHostTypes.js';
+import { simulationTrace } from './clientTrace.js';
+import { parseStreamJson } from './mstClient/adapters/cli/parsers.js';
+import type { LLMToolCall } from './mstClient/types.js';
 
 function host(name: string, input: Record<string, unknown>, output?: string) {
   return {
     name,
-    source: 'host' as const,
+    source: 'builtin' as const,
     rawName: name,
     arguments: input,
     id: 'call-1',
@@ -45,7 +45,7 @@ describe('surfacedTools', () => {
 });
 
 describe('typeClaudeCodeCall', () => {
-  it('types Claude Code host tools as the events they are', () => {
+  it('types Claude Code built-in tools as the events they are', () => {
     expect(typeClaudeCodeCall(host('Skill', { skill: 'pdf' }))).toMatchObject({
       kind: 'skill',
       name: 'pdf',
@@ -79,7 +79,7 @@ describe('typeClaudeCodeCall', () => {
     });
   });
 
-  it('leaves MCP calls, other host tools and incomplete calls alone', () => {
+  it('leaves MCP calls, other built-in tools and incomplete calls alone', () => {
     const mcp: LLMToolCall = {
       name: 'Skill',
       source: 'mcp',
@@ -155,10 +155,10 @@ describe('Claude CLI stream-json', () => {
     expect(simulationTrace(result).events).toMatchObject([
       {
         kind: 'tool_search',
-        source: 'host',
+        source: 'builtin',
         results: [{ server: 'agg', name: 'find_skills' }],
       },
-      { kind: 'skill', source: 'host', name: 'triage' },
+      { kind: 'skill', source: 'builtin', name: 'triage' },
       { kind: 'tool_call', source: 'mcp', server: 'agg', name: 'find_skills' },
     ]);
   });
@@ -219,7 +219,7 @@ describe('Claude Code event edge cases', () => {
       events: [
         {
           kind: 'tool_search',
-          source: 'host',
+          source: 'builtin',
           name: 'ToolSearch',
           results: [],
         },

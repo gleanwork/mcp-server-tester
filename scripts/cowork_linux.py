@@ -2,7 +2,7 @@
 """Bounded AT-SPI actions against an already prepared Linux Cowork desktop.
 
 This module does not provision, authenticate, launch a desktop session, or collect
-answers. The MST host binds and reads native sessions. JSON input arrives on stdin;
+answers. The MST client binds and reads native sessions. JSON input arrives on stdin;
 stdout contains only an allowlisted receipt, never prompt or accessibility text.
 """
 from __future__ import annotations

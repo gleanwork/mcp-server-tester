@@ -38,7 +38,7 @@ describe('canonical built-in dataset sources', () => {
   for (const type of ['file', 'dir', 'gcs'] as const) {
     describe(type, () => {
       async function load(raw: unknown) {
-        // The suite expands dir into paths; this exercises each entry's loader.
+        // The eval expands dir into paths; this exercises each entry's loader.
         const source =
           type === 'gcs'
             ? { type, uri: 'gs://datasets/cases.json' }
@@ -62,7 +62,7 @@ describe('canonical built-in dataset sources', () => {
           expect(gcs.download).toHaveBeenCalledTimes(1);
         }
       });
-      it('preserves canonical host mode, per-case host, trials and judges', async () => {
+      it('preserves canonical client mode, per-case client, trials and judges', async () => {
         const case_ = {
           id: 'question',
           input: 'Find policy',

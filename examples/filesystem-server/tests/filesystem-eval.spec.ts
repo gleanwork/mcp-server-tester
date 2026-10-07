@@ -251,7 +251,7 @@ test.describe('Evals on a model (E2E)', () => {
   });
 });
 
-test.describe('Eval: LLM Host Mode', () => {
+test.describe('Eval: LLM Client Mode', () => {
   // Every case runs on the client it names (mst).
   const llmCases = evalDataset.cases;
 

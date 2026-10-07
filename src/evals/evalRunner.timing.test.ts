@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { hostRunToExecution } from './hostTrace.js';
+import { clientRunToExecution } from './clientTrace.js';
 import { runEvalCase, runEvalDataset } from './evalRunner.js';
 import type { CaseExecution } from './caseExecution.js';
 
@@ -19,7 +19,7 @@ describe('pre-executed trial timing', () => {
     const executeCase = vi.fn(async (): Promise<CaseExecution> => {
       advance(3);
       return {
-        ...hostRunToExecution({ finalText: 'OK', events: [] }, 'structured'),
+        ...clientRunToExecution({ finalText: 'OK', events: [] }, 'structured'),
         preExecutionDurationMs: durations.shift(),
       };
     });
@@ -81,7 +81,7 @@ describe('pre-executed trial timing', () => {
       {
         async executeCase() {
           advance(25);
-          return hostRunToExecution(
+          return clientRunToExecution(
             { finalText: 'OK', events: [] },
             'structured'
           );

@@ -24,7 +24,7 @@ export interface PricingOutcome {
 }
 
 /**
- * Give each trial whose host reported tokens but no cost an estimate, at the
+ * Give each trial whose client reported tokens but no cost an estimate, at the
  * price of the model it ran (`modelOf`). A multi-trial case's usage is
  * re-summed from its trials, so it agrees with them.
  */
@@ -63,10 +63,10 @@ export function estimateCosts(
   return { applied, unpriced: [...unpriced].sort() };
 }
 
-/** Where a variant's cost comes from: the hosts, the eval config's pricing, or both. */
+/** Where a variant's cost comes from: the clients, the eval config's pricing, or both. */
 export function costSource(
   results: EvalCaseResult[]
-): 'host' | 'pricing' | 'mixed' | undefined {
+): 'client' | 'pricing' | 'mixed' | undefined {
   // The trials metrics count: infrastructure failures aren't trials.
   const usages = results.flatMap((result) =>
     result.trialResults?.length
@@ -83,7 +83,7 @@ export function costSource(
   return reported && estimated
     ? 'mixed'
     : reported
-      ? 'host'
+      ? 'client'
       : estimated
         ? 'pricing'
         : undefined;

@@ -237,7 +237,7 @@ The old `toolCallExpectation.ts` module validated tool calls via `evalCase.metad
 }
 ```
 
-The `expect.toolsTriggered` approach also supports `order: "strict"`, `exclusive: true`, and partial argument matching. See [docs/mcp-host.md](../mcp-host.md) for full details.
+The `expect.toolsTriggered` approach also supports `order: "strict"`, `exclusive: true`, and partial argument matching. See [docs/mst-client.md](../mst-client.md) for full details.
 
 ---
 

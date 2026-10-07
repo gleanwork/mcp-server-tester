@@ -22,7 +22,7 @@ function expectInvalid(servers: MCPConfig[]): void {
 
 describe('createCoworkMcpPlan', () => {
   // Bundle/transaction tests assert exact managed settings, server sets and
-  // approval policies. Keep this suite focused on canonical validation.
+  // approval policies. Keep this eval focused on canonical validation.
   it('never reads header values, tokens, or environment references while planning', () => {
     const readSecret = vi.fn((): never => {
       throw new Error('synthetic-secret-was-read');

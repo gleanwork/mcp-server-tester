@@ -106,7 +106,7 @@ function perTrial(
 
 /**
  * A trial's tool calls, each named `server.tool` when an MCP call names its
- * server; null when the host declares no evidence of them or the trial has
+ * server; null when the client declares no evidence of them or the trial has
  * no record of them. A result without a trace (stored before traces were
  * recorded) falls back to its response.
  */
@@ -131,15 +131,18 @@ function trialToolCalls(
 }
 
 /**
- * A trial's events from one source: MCP tool calls, or everything the host
- * did natively. Null without a trace, or when the host declares no evidence.
+ * A trial's events from one source: MCP tool calls, or everything the client
+ * did natively. Null without a trace, or when the client declares no evidence.
  */
-function traceEventCount(trial: Trial, source: 'mcp' | 'host'): number | null {
+function traceEventCount(
+  trial: Trial,
+  source: 'mcp' | 'builtin'
+): number | null {
   if (!trial.trace || trial.trace.evidence === 'none') return null;
   return trial.trace.events.filter(
     (event) =>
       event.source === source &&
-      (source === 'host' || event.kind === 'tool_call')
+      (source === 'builtin' || event.kind === 'tool_call')
   ).length;
 }
 
@@ -465,7 +468,7 @@ export const BUILT_IN_METRICS: Readonly<Record<string, MetricDefinition>> =
       (result) => perTrial(result, (trial) => trial.pass),
       fractionRateAggregation
     ),
-    // Per case: the share of its trials that ran without a host error.
+    // Per case: the share of its trials that ran without a client error.
     response_success: metric(
       'continuous',
       (result) =>
@@ -501,7 +504,7 @@ export const BUILT_IN_METRICS: Readonly<Record<string, MetricDefinition>> =
       meanAggregation,
       'USD'
     ),
-    // Judge usage is per trial too, apart from host usage.
+    // Judge usage is per trial too, apart from client usage.
     judge_cost_usd: metric(
       'continuous',
       (result) => judgeUsagePerTrial(result, 'totalCostUsd'),
@@ -580,9 +583,10 @@ export const BUILT_IN_METRICS: Readonly<Record<string, MetricDefinition>> =
       meanAggregation,
       'calls'
     ),
-    host_event_count: metric(
+    builtin_event_count: metric(
       'continuous',
-      (result) => perTrial(result, (trial) => traceEventCount(trial, 'host')),
+      (result) =>
+        perTrial(result, (trial) => traceEventCount(trial, 'builtin')),
       meanAggregation,
       'calls'
     ),
@@ -672,8 +676,16 @@ globalMetrics[BUILT_INS_KEY] = BUILT_IN_METRICS;
 
 const metrics = extensionLookup('metrics', () => BUILT_IN_METRICS);
 
+/** Metric names renamed in 2.0: naming the old one fails with the new one. */
+const RENAMED_METRICS: Record<string, string> = {
+  host_event_count: 'builtin_event_count',
+};
+
 /** The metric `reference` names: a built-in, or `namespace/name` from a plugin. */
+
 export function getMetric(reference: string): MetricDefinition {
+  const renamed = RENAMED_METRICS[reference];
+  if (renamed) throw new Error(`Metric "${reference}" is now "${renamed}".`);
   return metrics.get(reference);
 }
 

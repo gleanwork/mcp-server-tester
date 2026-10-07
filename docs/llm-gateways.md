@@ -71,15 +71,15 @@ The Computer Use planner gets one credential for exactly one endpoint: MST resol
 
 Cowork's own inference is configured in Claude Desktop, not by these settings. MST stages `ANTHROPIC_API_KEY` for it, unless managed preferences already set the inference provider (for example, a gateway); see [Cowork inference](./cowork.md#inference).
 
-The `anthropic-agent-sdk` judge and CLI hosts run their own processes, which read their own configuration.
+The `anthropic-agent-sdk` judge and CLI clients run their own processes, which read their own configuration.
 
-## Why the Anthropic SDK host streams
+## Why the Anthropic SDK client streams
 
-The `anthropic` SDK host runs its agent loop with streaming (`streamText`) rather than `generateText`. Gateways usually pass streamed Messages responses through unchanged, but some rebuild non-streaming responses with empty fields (`"citations": null`, an empty `caller` object) that the AI SDK's response schema rejects. Streaming avoids that, and is how interactive clients call the API anyway. A provider error part in the middle of a stream fails the case, the same as a thrown error.
+The `anthropic` SDK client runs its agent loop with streaming (`streamText`) rather than `generateText`. Gateways usually pass streamed Messages responses through unchanged, but some rebuild non-streaming responses with empty fields (`"citations": null`, an empty `caller` object) that the AI SDK's response schema rejects. Streaming avoids that, and is how interactive clients call the API anyway. A provider error part in the middle of a stream fails the case, the same as a thrown error.
 
-## Why the OpenAI SDK host sends `store: false` to a gateway
+## Why the OpenAI SDK client sends `store: false` to a gateway
 
-In a tool loop, the AI SDK refers back to the previous turn's Responses items by id, which only works if OpenAI stored them. Gateways and proxies usually don't (`Item with id 'rs_…' not found. Items are not persisted when store is set to false`). Behind an `OPENAI_BASE_URL` override the SDK host sends `store: false`, so the items are sent inline. Calls to the public API keep OpenAI's default.
+In a tool loop, the AI SDK refers back to the previous turn's Responses items by id, which only works if OpenAI stored them. Gateways and proxies usually don't (`Item with id 'rs_…' not found. Items are not persisted when store is set to false`). Behind an `OPENAI_BASE_URL` override the SDK client sends `store: false`, so the items are sent inline. Calls to the public API keep OpenAI's default.
 
 ## Troubleshooting
 
