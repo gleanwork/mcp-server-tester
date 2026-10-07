@@ -8,7 +8,7 @@ import {
   resolveHostStdioServer,
   type MarketplacePlugin,
 } from '../hostPlugins.js';
-import type { EvalConfig } from '../evalConfig.js';
+import { transportServers, type EvalConfig } from '../evalConfig.js';
 import {
   createCoworkMcpPlan,
   resolveCoworkMcpHeaders,
@@ -36,9 +36,10 @@ function selectSetup(
       ? undefined
       : variants.find((variant) => variant.name === variantName);
   if (variantName !== undefined && !variant) throw new Error(ERROR_MESSAGE);
-  const servers =
+  const declared =
     variant?.servers === undefined ? evalConfig.servers : variant.servers;
-  if (servers === undefined) throw new Error(ERROR_MESSAGE);
+  if (declared === undefined) throw new Error(ERROR_MESSAGE);
+  const servers = transportServers(declared, 'Cowork');
   return {
     servers,
     setup: resolveCoworkSetupConfig(

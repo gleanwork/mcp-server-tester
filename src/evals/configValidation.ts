@@ -20,12 +20,27 @@ import {
   parseExtensionOptions,
   parseExtensionReference,
 } from '../plugins/plugin.js';
-import type {
-  EvalConfig,
-  ExtensionConfig,
-  ClientConfig,
-  TaggedConfig,
+import {
+  isConnectorServer,
+  type EvalConfig,
+  type EvalServerConfig,
+  type ExtensionConfig,
+  type ClientConfig,
+  type TaggedConfig,
 } from './evalConfig.js';
+import type { MCPConfig } from '../config/mcpConfig.js';
+
+/**
+ * The servers a host must support. A connector server is checked once `mst
+ * run` has expanded it (to the entry its connector launches).
+ */
+function declaredTransports(
+  servers: readonly EvalServerConfig[] | undefined
+): MCPConfig[] {
+  return (servers ?? []).filter(
+    (server): server is MCPConfig => !isConnectorServer(server)
+  );
+}
 import { judgeOwnOptions } from '../judge/evaluateJudge.js';
 
 /**
@@ -329,7 +344,7 @@ export function validateEvalConfig(
     : undefined;
   if (!evalConfig.variants?.length && host) {
     assertHostSupports(host, {
-      servers: evalConfig.servers ?? [],
+      servers: declaredTransports(evalConfig.servers),
       tools: evalConfig.tools,
       concurrency: evalConfig.concurrency,
       context: 'The eval config',
@@ -346,7 +361,7 @@ export function validateEvalConfig(
     if (patch && variantHost) variantHosts.push(variantHost);
     if (variantHost) {
       assertHostSupports(variantHost, {
-        servers: servers ?? [],
+        servers: declaredTransports(servers),
         tools: variant.tools ?? evalConfig.tools,
         concurrency: evalConfig.concurrency,
         context: `Variant "${variant.name}"`,

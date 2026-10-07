@@ -42,6 +42,43 @@ export interface ExtensionConfig extends TaggedConfig {
 }
 
 /**
+ * A server named by a plugin connector instead of a transport. `mst run`
+ * expands it (see `expandConnectorServers`); `mst auth` signs in to it.
+ */
+export interface ConnectorServerConfig {
+  /** `namespace/name` of a plugin connector. */
+  connector: string;
+  /** The server's label. Default: the connector's name. */
+  label?: string;
+  /** Overrides the connector's endpoint. */
+  url?: string;
+}
+
+/** A server in an eval config: a transport, or a connector. */
+export type EvalServerConfig = MCPConfig | ConnectorServerConfig;
+
+/** Whether `server` names a connector. */
+export function isConnectorServer(
+  server: EvalServerConfig
+): server is ConnectorServerConfig {
+  return 'connector' in server && !('transport' in server);
+}
+
+/** The servers a client gets: connector entries must be expanded first. */
+export function transportServers(
+  servers: readonly EvalServerConfig[] | undefined,
+  context = 'This client'
+): MCPConfig[] {
+  return (servers ?? []).map((server) => {
+    if (isConnectorServer(server))
+      throw new Error(
+        `${context} got connector server "${server.connector}" before it was expanded.`
+      );
+    return server;
+  });
+}
+
+/**
  * The tool metadata a variant shows its client, by the tool's name on its
  * server: a new name, description or input schema.
  */
@@ -55,7 +92,7 @@ export type ToolMetadata = Record<string, ToolMetadataOverride>;
 export interface EvalVariant extends ClientFields {
   name: string;
   description?: string;
-  servers?: MCPConfig[];
+  servers?: EvalServerConfig[];
   toolMap?: Record<string, string[]>;
   /** The tool metadata this variant shows its client. */
   tools?: ToolMetadata;
@@ -69,7 +106,7 @@ export interface EvalVariant extends ClientFields {
 export interface EvalConfig {
   name: string;
   datasets: DatasetConfig[];
-  servers?: MCPConfig[];
+  servers?: EvalServerConfig[];
   /**
    * The client under test: `mst`, `claude-code`, `cowork`, `chatgpt`, or a
    * plugin's `namespace/name`. @default 'claude-code'
@@ -142,7 +179,30 @@ const TaggedConfigSchema = z.object({ type: z.string().min(1) }).passthrough();
 const DatasetConfigSchema = z.union([z.string().min(1), TaggedConfigSchema]);
 const ExtensionConfigSchema = z.union([z.string().min(1), TaggedConfigSchema]);
 
-const ServerConfigSchema = MCPConfigSchema;
+/**
+ * A server an eval config names by connector (`{ "connector": "acme/slack" }`)
+ * instead of by transport. `mst run` expands it into the connector's server
+ * entry with a fresh token; `mst auth` signs in to it.
+ */
+const ConnectorServerSchema = z
+  .object({
+    connector: z
+      .string()
+      .regex(
+        /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*$/,
+        'A connector is `namespace/name`.'
+      ),
+    /** The server's label. Default: the connector's name. */
+    label: z
+      .string()
+      .regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/)
+      .optional(),
+    /** Overrides the connector's endpoint. */
+    url: z.string().url().optional(),
+  })
+  .strict();
+
+const ServerConfigSchema = z.union([MCPConfigSchema, ConnectorServerSchema]);
 
 const ToolMapSchema = z.record(z.string(), z.array(z.string()));
 

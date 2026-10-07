@@ -23,6 +23,7 @@ import {
   type EvalConfig,
   type ClientConfig,
   type ModelPricing,
+  transportServers,
 } from './evalConfig.js';
 import {
   DEFAULT_CLIENT,
@@ -83,6 +84,13 @@ import {
   redactStoredResponses,
 } from './resultStore.js';
 import packageJson from '../../package.json' with { type: 'json' };
+import {
+  expandConnectorServers,
+  startConnectorCredentials,
+  type ConnectorCredentials,
+} from './connectorServers.js';
+import { localCredentialStore } from '../auth/grants/localStore.js';
+import type { CredentialStore } from '../auth/grants/types.js';
 
 export interface RunEvalSuiteOptions {
   configPath: string;
@@ -107,6 +115,11 @@ export interface RunEvalSuiteOptions {
     | EvalVariant[]
     | ((configVariants: readonly EvalVariant[]) => EvalVariant[]);
   redactStoredResponses?: boolean;
+  /**
+   * Where connector servers' grants are (`mst auth` puts them there).
+   * Default: `mst/credential-store/local`.
+   */
+  credentialStore?: CredentialStore;
 }
 
 export interface RunEvalSuiteResult {
@@ -253,7 +266,7 @@ function assertCaseHosts(
         assertHostSupports(
           parseHostConfig(inheritHost(declaration, casePatch), rawConfig),
           {
-            servers: variant.servers ?? evalConfig.servers ?? [],
+            servers: transportServers(variant.servers ?? evalConfig.servers),
             tools: variant.tools ?? evalConfig.tools,
             concurrency: evalConfig.concurrency,
             context: `Case "${evalCase.id}" in variant "${variant.name}"`,
@@ -479,8 +492,12 @@ export async function runEvalSuite(
           : options.variants!,
     };
   }
+  // Identity is the config as written: connector names, not machine paths.
   const identity = configIdentity(rawConfig);
-  let evalConfig = rawConfig;
+  // Connector servers become the entries their connectors launch. Paths and
+  // env names only; tokens arrive when the run starts.
+  const connectors = await expandConnectorServers(rawConfig);
+  let evalConfig = connectors.evalConfig;
 
   evalConfig = validateEvalConfig(
     {
@@ -489,6 +506,7 @@ export async function runEvalSuite(
     },
     { namespaces }
   );
+
   const executionId = randomUUID();
   const outputDir = path.join(
     options.outputDir ??
@@ -545,232 +563,254 @@ export async function runEvalSuite(
   const allDatasets: RunEvalSuiteResult['datasets'] = [];
   const allResults: EvalCaseResult[] = [];
   const sourceVariant = variants[0] ?? { name: 'default' };
-  const sourceServers = (
-    options.mcpConfig
-      ? [options.mcpConfig]
-      : (sourceVariant.servers ?? evalConfig.servers ?? [])
-  ).map((server) => resolveServerSecrets(server, env));
-  sourceServers.forEach((server) => assertEvalEndpoint(server, evalConfig));
-  const sourceHost = resolveHost(evalConfig, sourceVariant, sourceServers, env);
-  const canonicalDatasets = await Promise.all(
-    datasets.map(async (source) => ({
-      source,
-      dataset: await getDatasetSource(source.type).load(source, {
-        rootDir,
-        configDir,
-        evalConfig: sourceConfig,
-      }),
-    }))
-  );
-  for (const { dataset } of canonicalDatasets)
-    assertDatasetNamespaces(dataset, namespaces);
-  // Before any variant runs: a case host that can't honour its variant fails now,
-  // not after earlier variants have run.
-  assertCaseHosts(
-    evalConfig,
-    rawConfig,
-    variants,
-    canonicalDatasets.map(({ dataset }) => dataset)
-  );
-
-  for (const variant of variants) {
-    const servers = options.mcpConfig
-      ? [options.mcpConfig]
-      : (variant.servers ?? evalConfig.servers ?? []);
-    const resolvedServers = servers.map((server) =>
-      resolveServerSecrets(server, env)
-    );
-    resolvedServers.forEach((server) => assertEvalEndpoint(server, evalConfig));
-    // The first variant's client was resolved before the datasets loaded (to
-    // check its servers); reuse it rather than resolve it twice.
-    const host =
-      variant === sourceVariant
-        ? sourceHost
-        : resolveHost(evalConfig, variant, resolvedServers, env);
-    const effectiveConfig: EvalConfig = {
-      ...evalConfig,
-      ...variant,
-      host: host.declaration,
-      coworkSetup: resolveCoworkSetupConfig(
-        evalConfig.coworkSetup,
-        variant.coworkSetup
-      ),
-      name: evalConfig.name,
-      datasets: evalConfig.datasets,
-    };
-    const sourceResults: Array<{
-      name: string;
-      result: EvalRunnerResult;
-    }> = [];
-    const appliedPricing: Record<string, ModelPricing> = {};
-    const unpricedModels = new Set<string>();
-    const rawVariant = rawConfig.variants?.find(
-      (candidate) => candidate.name === variant.name
-    ) ?? { name: variant.name };
-    const rawDeclaration = inheritHost(
-      clientOf(rawConfig),
-      clientPatchOf(rawVariant) ?? {}
-    );
-    const client =
-      host.definition.run || host.definition.runBatch
-        ? undefined
-        : resolvedServers.length === 1
-          ? await createMCPClientForConfig(resolvedServers[0]!)
-          : undefined;
-    const mcp = client
-      ? createMCPFixture(client, undefined, { authType: 'api-token' })
-      : undefined;
-    // Started on first use, for hosts that connect to their servers themselves.
-    const toolMetadata = variantToolMetadata(evalConfig, variant);
-    let proxy: Promise<ToolSurfaceProxy> | undefined;
-    const toolVariant = toolMetadata
-      ? {
-          id: toolMetadata.id,
-          proxy: () =>
-            (proxy ??= startToolSurfaceProxy(resolvedServers, toolMetadata)),
-        }
-      : undefined;
-
-    try {
-      for (const { source, dataset } of canonicalDatasets) {
-        const executionDataset = selectEvalCases(dataset, evalConfig);
-        const template = variant.inputTemplate ?? evalConfig.inputTemplate;
-        const effectiveDataset: EvalDataset = {
-          ...executionDataset,
-          cases: executionDataset.cases.map((evalCase) => ({
-            ...evalCase,
-            // A case's own client, resolved in full on the case itself.
-            ...(clientPatchOf(evalCase)
-              ? clientFieldsOf(
-                  parseHostConfig(
-                    inheritHost(rawDeclaration, clientPatchOf(evalCase)!),
-                    rawConfig
-                  )
-                )
-              : {}),
-            ...(effectiveConfig.judges?.length
-              ? {
-                  assertions: EvalAssertionsSchema.parse({
-                    ...evalCase.assertions,
-                    passesJudge: mergeSuiteJudges(
-                      evalCase,
-                      effectiveConfig.judges,
-                      (rawVariant.judges ?? rawConfig.judges ?? []) as Array<
-                        Record<string, unknown>
-                      >
-                    ),
-                  }),
-                }
-              : {}),
-            ...(template && evalCase.input
-              ? {
-                  input: template.replaceAll('{{input}}', evalCase.input),
-                }
-              : {}),
-          })),
-        };
-        const sourceConfig = source;
-        const runHost =
-          typeof host.definition.run === 'function' ||
-          typeof host.definition.runBatch === 'function';
-        if (!runHost && effectiveDataset.cases.length > 0)
-          throw new Error(
-            `Client "${host.declaration.type}" has neither run() nor runBatch(), so it can't run cases.`
-          );
-        // The model each case runs on prices its usage and labels its result:
-        // a case client's own, or the variant client's (including its default).
-        const variantModel =
-          host.declaration.model ??
-          (host.config as { model?: unknown } | undefined)?.model;
-        const batchStartTime = Date.now();
-        const batchTraces = await prepareHostBatch(
-          host.definition,
-          effectiveDataset.cases,
-          host.declaration,
-          resolvedServers,
-          { evalConfig: effectiveConfig, variant, env },
-          toolVariant
-        );
-        // Batch execution (including shared setup/cleanup) precedes the runner's
-        // wall clock. Count its elapsed time once, not the sum of request times.
-        const batchDurationMs = batchTraces ? Date.now() - batchStartTime : 0;
-        const result = await runEvalDataset(
-          {
-            dataset: effectiveDataset,
-            client: host.declaration.type,
-            ...(typeof variantModel === 'string'
-              ? { model: variantModel }
-              : {}),
-            // The suite reports its own results (results.json).
-            reporting: 'none',
-            concurrency: evalConfig.concurrency ?? 1,
-            defaultTrials: evalConfig.trials,
-            defaultPassThreshold: evalConfig.passThreshold,
-            toolOverrides: toolMetadata,
-            toolMap: variant.toolMap ?? evalConfig.toolMap,
-            ...(runHost
-              ? {
-                  executeCase: createSuiteCaseExecutor({
-                    servers: resolvedServers,
-                    host: host.declaration,
-                    evalConfig: effectiveConfig,
-                    variant,
-                    env,
-                    batchTraces,
-                    toolVariant,
-                  }),
-                }
-              : {}),
-          },
-          { mcp }
-        );
-        result.durationMs += batchDurationMs;
-        allDatasets.push({
-          source: sourceConfig,
-          dataset: executionDataset,
-          result,
-        });
-        for (const caseResult of result.caseResults)
-          caseResult.variant = variant.name;
-        // Price usage the client reported without a cost, at the model each
-        // case ran (a case client doesn't take the variant's model).
-        const caseModels = new Map(
-          effectiveDataset.cases.map((evalCase) => [
-            evalCase.id,
-            clientPatchOf(evalCase) ? evalCase.model : variantModel,
-          ])
-        );
-        const priced = estimateCosts(
-          result.caseResults,
-          (caseResult) => {
-            const model = caseModels.get(caseResult.id);
-            return typeof model === 'string' ? model : undefined;
-          },
-          evalConfig.pricing
-        );
-        Object.assign(appliedPricing, priced.applied);
-        for (const model of priced.unpriced) unpricedModels.add(model);
-        // The run's totals include the estimates.
-        result.totalClientUsage = result.caseResults.reduce<
-          UsageMetrics | undefined
-        >(
-          (sum, caseResult) => sumUsage(sum, caseResult.clientUsage),
-          undefined
-        );
-        sourceResults.push({ name: executionDataset.name, result });
-        allResults.push(...result.caseResults);
-      }
-    } finally {
-      if (client) await closeMCPClient(client);
-      if (proxy) await (await proxy.catch(() => undefined))?.close();
+  // Before any client starts: a fresh token for every connector server, kept
+  // fresh until the run ends.
+  const credentials: ConnectorCredentials = await startConnectorCredentials(
+    connectors,
+    options.credentialStore ?? localCredentialStore(),
+    {
+      configPath: options.configPath,
+      variants: variants.map((variant) => variant.name),
     }
+  );
+  try {
+    Object.assign(env, credentials.env);
+    const sourceServers = (
+      options.mcpConfig
+        ? [options.mcpConfig]
+        : transportServers(sourceVariant.servers ?? evalConfig.servers)
+    ).map((server) => resolveServerSecrets(server, env));
+    sourceServers.forEach((server) => assertEvalEndpoint(server, evalConfig));
+    const sourceHost = resolveHost(
+      evalConfig,
+      sourceVariant,
+      sourceServers,
+      env
+    );
+    const canonicalDatasets = await Promise.all(
+      datasets.map(async (source) => ({
+        source,
+        dataset: await getDatasetSource(source.type).load(source, {
+          rootDir,
+          configDir,
+          evalConfig: sourceConfig,
+        }),
+      }))
+    );
+    for (const { dataset } of canonicalDatasets)
+      assertDatasetNamespaces(dataset, namespaces);
+    // Before any variant runs: a case host that can't honour its variant fails now,
+    // not after earlier variants have run.
+    assertCaseHosts(
+      evalConfig,
+      rawConfig,
+      variants,
+      canonicalDatasets.map(({ dataset }) => dataset)
+    );
 
-    const summary = summarizeVariant(variant, servers, sourceResults);
-    if (Object.keys(appliedPricing).length > 0)
-      summary.pricing = appliedPricing;
-    if (unpricedModels.size > 0)
-      summary.unpricedModels = [...unpricedModels].sort();
-    variantResults.push(summary);
+    for (const variant of variants) {
+      const servers = options.mcpConfig
+        ? [options.mcpConfig]
+        : transportServers(variant.servers ?? evalConfig.servers);
+      const resolvedServers = servers.map((server) =>
+        resolveServerSecrets(server, env)
+      );
+      resolvedServers.forEach((server) =>
+        assertEvalEndpoint(server, evalConfig)
+      );
+      // The first variant's client was resolved before the datasets loaded (to
+      // check its servers); reuse it rather than resolve it twice.
+      const host =
+        variant === sourceVariant
+          ? sourceHost
+          : resolveHost(evalConfig, variant, resolvedServers, env);
+      const effectiveConfig: EvalConfig = {
+        ...evalConfig,
+        ...variant,
+        host: host.declaration,
+        coworkSetup: resolveCoworkSetupConfig(
+          evalConfig.coworkSetup,
+          variant.coworkSetup
+        ),
+        name: evalConfig.name,
+        datasets: evalConfig.datasets,
+      };
+      const sourceResults: Array<{
+        name: string;
+        result: EvalRunnerResult;
+      }> = [];
+      const appliedPricing: Record<string, ModelPricing> = {};
+      const unpricedModels = new Set<string>();
+      const rawVariant = rawConfig.variants?.find(
+        (candidate) => candidate.name === variant.name
+      ) ?? { name: variant.name };
+      const rawDeclaration = inheritHost(
+        clientOf(rawConfig),
+        clientPatchOf(rawVariant) ?? {}
+      );
+      const client =
+        host.definition.run || host.definition.runBatch
+          ? undefined
+          : resolvedServers.length === 1
+            ? await createMCPClientForConfig(resolvedServers[0]!)
+            : undefined;
+      const mcp = client
+        ? createMCPFixture(client, undefined, { authType: 'api-token' })
+        : undefined;
+      // Started on first use, for hosts that connect to their servers themselves.
+      const toolMetadata = variantToolMetadata(evalConfig, variant);
+      let proxy: Promise<ToolSurfaceProxy> | undefined;
+      const toolVariant = toolMetadata
+        ? {
+            id: toolMetadata.id,
+            proxy: () =>
+              (proxy ??= startToolSurfaceProxy(resolvedServers, toolMetadata)),
+          }
+        : undefined;
+
+      try {
+        for (const { source, dataset } of canonicalDatasets) {
+          const executionDataset = selectEvalCases(dataset, evalConfig);
+          const template = variant.inputTemplate ?? evalConfig.inputTemplate;
+          const effectiveDataset: EvalDataset = {
+            ...executionDataset,
+            cases: executionDataset.cases.map((evalCase) => ({
+              ...evalCase,
+              // A case's own client, resolved in full on the case itself.
+              ...(clientPatchOf(evalCase)
+                ? clientFieldsOf(
+                    parseHostConfig(
+                      inheritHost(rawDeclaration, clientPatchOf(evalCase)!),
+                      rawConfig
+                    )
+                  )
+                : {}),
+              ...(effectiveConfig.judges?.length
+                ? {
+                    assertions: EvalAssertionsSchema.parse({
+                      ...evalCase.assertions,
+                      passesJudge: mergeSuiteJudges(
+                        evalCase,
+                        effectiveConfig.judges,
+                        (rawVariant.judges ?? rawConfig.judges ?? []) as Array<
+                          Record<string, unknown>
+                        >
+                      ),
+                    }),
+                  }
+                : {}),
+              ...(template && evalCase.input
+                ? {
+                    input: template.replaceAll('{{input}}', evalCase.input),
+                  }
+                : {}),
+            })),
+          };
+          const sourceConfig = source;
+          const runHost =
+            typeof host.definition.run === 'function' ||
+            typeof host.definition.runBatch === 'function';
+          if (!runHost && effectiveDataset.cases.length > 0)
+            throw new Error(
+              `Client "${host.declaration.type}" has neither run() nor runBatch(), so it can't run cases.`
+            );
+          // The model each case runs on prices its usage and labels its result:
+          // a case client's own, or the variant client's (including its default).
+          const variantModel =
+            host.declaration.model ??
+            (host.config as { model?: unknown } | undefined)?.model;
+          const batchStartTime = Date.now();
+          const batchTraces = await prepareHostBatch(
+            host.definition,
+            effectiveDataset.cases,
+            host.declaration,
+            resolvedServers,
+            { evalConfig: effectiveConfig, variant, env },
+            toolVariant
+          );
+          // Batch execution (including shared setup/cleanup) precedes the runner's
+          // wall clock. Count its elapsed time once, not the sum of request times.
+          const batchDurationMs = batchTraces ? Date.now() - batchStartTime : 0;
+          const result = await runEvalDataset(
+            {
+              dataset: effectiveDataset,
+              client: host.declaration.type,
+              ...(typeof variantModel === 'string'
+                ? { model: variantModel }
+                : {}),
+              // The suite reports its own results (results.json).
+              reporting: 'none',
+              concurrency: evalConfig.concurrency ?? 1,
+              defaultTrials: evalConfig.trials,
+              defaultPassThreshold: evalConfig.passThreshold,
+              toolOverrides: toolMetadata,
+              toolMap: variant.toolMap ?? evalConfig.toolMap,
+              ...(runHost
+                ? {
+                    executeCase: createSuiteCaseExecutor({
+                      servers: resolvedServers,
+                      host: host.declaration,
+                      evalConfig: effectiveConfig,
+                      variant,
+                      env,
+                      batchTraces,
+                      toolVariant,
+                    }),
+                  }
+                : {}),
+            },
+            { mcp }
+          );
+          result.durationMs += batchDurationMs;
+          allDatasets.push({
+            source: sourceConfig,
+            dataset: executionDataset,
+            result,
+          });
+          for (const caseResult of result.caseResults)
+            caseResult.variant = variant.name;
+          // Price usage the client reported without a cost, at the model each
+          // case ran (a case client doesn't take the variant's model).
+          const caseModels = new Map(
+            effectiveDataset.cases.map((evalCase) => [
+              evalCase.id,
+              clientPatchOf(evalCase) ? evalCase.model : variantModel,
+            ])
+          );
+          const priced = estimateCosts(
+            result.caseResults,
+            (caseResult) => {
+              const model = caseModels.get(caseResult.id);
+              return typeof model === 'string' ? model : undefined;
+            },
+            evalConfig.pricing
+          );
+          Object.assign(appliedPricing, priced.applied);
+          for (const model of priced.unpriced) unpricedModels.add(model);
+          // The run's totals include the estimates.
+          result.totalClientUsage = result.caseResults.reduce<
+            UsageMetrics | undefined
+          >(
+            (sum, caseResult) => sumUsage(sum, caseResult.clientUsage),
+            undefined
+          );
+          sourceResults.push({ name: executionDataset.name, result });
+          allResults.push(...result.caseResults);
+        }
+      } finally {
+        if (client) await closeMCPClient(client);
+        if (proxy) await (await proxy.catch(() => undefined))?.close();
+      }
+
+      const summary = summarizeVariant(variant, servers, sourceResults);
+      if (Object.keys(appliedPricing).length > 0)
+        summary.pricing = appliedPricing;
+      if (unpricedModels.size > 0)
+        summary.unpricedModels = [...unpricedModels].sort();
+      variantResults.push(summary);
+    }
+  } finally {
+    await credentials.stop();
   }
 
   const variantMetrics = variantResults.map((variant, index) => {
