@@ -510,8 +510,7 @@ describe('MCPReporter.buildRunData()', () => {
       setResults(reporter, [
         makeResult({
           pass: true,
-          toolName: 'external_host',
-          externalHost: {
+          clientMetadata: {
             driver: {
               provider: 'anthropic',
               product: 'claude',
@@ -521,8 +520,8 @@ describe('MCPReporter.buildRunData()', () => {
             },
             driverSlug: 'anthropic.claude.cowork.desktop-app.macos',
             displayName: 'Claude Cowork Desktop',
-            hostName: 'Claude Cowork Desktop',
-            hostType: 'desktop',
+            clientName: 'Claude Cowork Desktop',
+            clientType: 'desktop',
             capabilitiesUsed: [
               'control',
               'input',
@@ -530,7 +529,7 @@ describe('MCPReporter.buildRunData()', () => {
               'trace',
               'normalize',
             ],
-            traceSource: 'host-local-transcript',
+            traceSource: 'client-local-transcript',
             traceConfidence: 'high',
             traceLimitations: ['fixture limitation'],
             artifacts: [
@@ -552,11 +551,11 @@ describe('MCPReporter.buildRunData()', () => {
             },
             evidence: {
               finalAnswer: {
-                source: 'host-local-transcript',
+                source: 'client-local-transcript',
                 confidence: 'high',
               },
               toolCalls: {
-                source: 'host-local-transcript',
+                source: 'client-local-transcript',
                 confidence: 'high',
               },
             },
@@ -566,10 +565,10 @@ describe('MCPReporter.buildRunData()', () => {
 
       const data = callBuildRunData(reporter, 100);
 
-      expect(data.results[0]?.externalHost).toMatchObject({
+      expect(data.results[0]?.clientMetadata).toMatchObject({
         driverSlug: 'anthropic.claude.cowork.desktop-app.macos',
-        hostName: 'Claude Cowork Desktop',
-        traceSource: 'host-local-transcript',
+        clientName: 'Claude Cowork Desktop',
+        traceSource: 'client-local-transcript',
         traceConfidence: 'high',
         session: { id: 'local_123', requestId: 'req_123' },
       });

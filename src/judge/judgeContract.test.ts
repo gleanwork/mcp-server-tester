@@ -335,7 +335,7 @@ describe('judge output', () => {
       totalCostUsd: 0.002,
     });
     expect(result.totalJudgeUsage).toEqual(caseResult.judgeUsage);
-    expect(result.totalHostUsage).toBeUndefined();
+    expect(result.totalClientUsage).toBeUndefined();
   });
 
   it('fails the judge expectation on an invalid output', async () => {

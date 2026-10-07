@@ -17,11 +17,13 @@ function computeByTool(results: EvalCaseResult[]): ToolStats[] {
   const byTool = new Map<string, EvalCaseResult[]>();
 
   for (const result of results) {
-    const existing = byTool.get(result.toolName);
+    // Eval cases have no tool; they group under the client they ran on.
+    const key = result.toolName ?? result.request?.client ?? 'eval';
+    const existing = byTool.get(key);
     if (existing) {
       existing.push(result);
     } else {
-      byTool.set(result.toolName, [result]);
+      byTool.set(key, [result]);
     }
   }
 

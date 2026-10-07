@@ -584,7 +584,7 @@ export function createVercelOrchestrator(): MCPHostSimulator {
         const llmDurationMs = totalDurationMs - mcpDurationMs;
 
         const usage = result.usage;
-        const hostUsage: UsageMetrics | undefined = usage
+        const clientUsage: UsageMetrics | undefined = usage
           ? {
               inputTokens: usage.inputTokens ?? 0,
               outputTokens: usage.outputTokens ?? 0,
@@ -633,7 +633,7 @@ export function createVercelOrchestrator(): MCPHostSimulator {
           llmDurationMs,
           mcpDurationMs,
           conversationHistory,
-          usage: hostUsage,
+          usage: clientUsage,
           ...skillsTrace(allToolCalls, skills),
         };
       } catch (err) {

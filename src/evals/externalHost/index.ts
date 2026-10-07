@@ -2,7 +2,7 @@ export type {
   EvidenceSource,
   ExternalHostCorrelationMetadata,
   ExternalHostFailureKind,
-  ExternalHostMetadata,
+  ClientMetadata,
   ExternalHostSession,
   ExternalHostTelemetry,
   ExternalHostType,

@@ -178,8 +178,8 @@ resource-only server may legitimately expose no tools. Tool expectations remain
 the responsibility of the eval assertions. MST does not alter the input,
 model, tool search, tool exposure, or assertions.
 
-`hostDiagnostics.claudeStartup` records server names/statuses, tool names,
-model/version, and startup timing. `hostDiagnostics.failureKind` distinguishes
+`clientDiagnostics.claudeStartup` records server names/statuses, tool names,
+model/version, and startup timing. `clientDiagnostics.failureKind` distinguishes
 startup, timeout, process, and output failures. Each `iterationResults` entry
 retains its own diagnostics, and infrastructure failures keep the framework's
 existing separate accuracy accounting. Credentials, MCP config bodies, and raw

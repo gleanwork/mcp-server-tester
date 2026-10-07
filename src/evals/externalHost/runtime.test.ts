@@ -51,9 +51,9 @@ describe('external host runtime', () => {
 
     expect(result).toMatchObject({
       success: false,
-      externalHost: {
+      clientMetadata: {
         driverSlug: 'openai.chatgpt.chat.browser.web',
-        hostType: 'browser',
+        clientType: 'browser',
         failureKind: 'unsupported_host',
         correlation: {
           strategy: 'none',

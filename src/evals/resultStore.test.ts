@@ -97,6 +97,51 @@ describe('FileEvalResultStore', () => {
     expect(summaries.map((s) => s.id)).toEqual(['new']);
   });
 
+  it('fails clearly on an artifact from an earlier MST and leaves it out of listings', async () => {
+    const { mkdir, writeFile } = await import('fs/promises');
+    await mkdir(join(tmpDir, 'eval-runs'), { recursive: true });
+    const older = {
+      schemaVersion: 1,
+      kind: 'eval-runner-result',
+      id: 'older',
+      createdAt: '2026-05-22T12:00:00.000Z',
+      metadata: {},
+      data: {},
+    };
+    await writeFile(
+      join(tmpDir, 'eval-runs', 'older.json'),
+      JSON.stringify(older)
+    );
+    await writeFile(
+      join(tmpDir, 'eval-runs', 'latest.json'),
+      JSON.stringify(older)
+    );
+    await store.saveArtifact(
+      createStoredEvalArtifact({
+        kind: 'eval-runner-result',
+        id: 'current',
+        data: {},
+      })
+    );
+    // saveArtifact rewrites latest.json; put the older one back.
+    await writeFile(
+      join(tmpDir, 'eval-runs', 'latest.json'),
+      JSON.stringify(older)
+    );
+
+    await expect(
+      store.loadArtifact('eval-runner-result', 'older')
+    ).rejects.toThrow(
+      "Stored eval-runner-result 'older' was written by an earlier MST. 2.0 renamed result fields (mcpHostTrace → toolCallTrace"
+    );
+    await expect(
+      store.loadLatestArtifact('eval-runner-result')
+    ).rejects.toThrow('Rerun to write it again.');
+    expect(
+      (await store.listArtifacts('eval-runner-result')).map((s) => s.id)
+    ).toEqual(['current']);
+  });
+
   it('round-trips comparison artifacts', async () => {
     const artifact = createStoredEvalArtifact({
       kind: 'eval-run-comparison',

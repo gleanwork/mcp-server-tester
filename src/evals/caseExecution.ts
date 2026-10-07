@@ -20,7 +20,7 @@ import type {
   Trace,
 } from './evalFrameworkTypes.js';
 import type {
-  ExternalHostMetadata,
+  ClientMetadata,
   ExternalHostSimulationResult,
 } from './externalHost/types.js';
 import { getBuiltinHostConfig, getHost } from './builtinHosts.js';
@@ -39,7 +39,7 @@ import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
 export type ClientResponse = MCPHostSimulationResult & {
   events?: TraceEvent[];
   evidence?: TraceEvidence;
-  externalHost?: ExternalHostMetadata;
+  clientMetadata?: ClientMetadata;
 };
 
 interface ExecutionBase {
@@ -63,7 +63,7 @@ export interface HostExecution extends ExecutionBase {
   usage?: UsageMetrics;
   telemetry?: Record<string, unknown>;
   diagnostics?: ClientDiagnostics;
-  externalHost?: ExternalHostMetadata;
+  clientMetadata?: ClientMetadata;
 }
 
 /** Execution threw before producing a result. */
@@ -116,8 +116,8 @@ function simulationExecution(
     ...(error !== undefined ? { error } : {}),
     usage: result.usage,
     ...(result.diagnostics ? { diagnostics: result.diagnostics } : {}),
-    ...('externalHost' in result && result.externalHost
-      ? { externalHost: result.externalHost }
+    ...('clientMetadata' in result && result.clientMetadata
+      ? { clientMetadata: result.clientMetadata }
       : {}),
   };
 }

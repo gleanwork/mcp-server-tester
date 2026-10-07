@@ -117,13 +117,13 @@ function unsupportedHostResult(
     success: false as const,
     toolCalls: [],
     error,
-    externalHost: {
+    clientMetadata: {
       driver,
       driverSlug,
       displayName: config.name ?? driverSlug,
-      hostName: config.name ?? driverSlug,
-      hostType: config.hostType ?? hostTypeFromDriver(driver),
-      hostVariant: config.variant,
+      clientName: config.name ?? driverSlug,
+      clientType: config.hostType ?? hostTypeFromDriver(driver),
+      clientVariant: config.variant,
       capabilitiesUsed: [],
       traceSource: 'none',
       traceConfidence: 'unknown',

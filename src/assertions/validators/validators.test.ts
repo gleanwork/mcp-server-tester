@@ -235,7 +235,7 @@ describe('validateText', () => {
     it('should prefer host simulation final response over metadata JSON', () => {
       const response = {
         response: 'final answer text',
-        externalHost: {
+        clientMetadata: {
           traceLimitations: ['metadata-only text'],
         },
       };

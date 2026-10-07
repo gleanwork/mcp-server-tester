@@ -26,7 +26,7 @@ function result(
   pass: boolean,
   options: {
     calls?: string[];
-    usage?: EvalCaseResult['hostUsage'];
+    usage?: EvalCaseResult['clientUsage'];
     judge?: { name: string; pass: boolean; score: number };
     response?: EvalCaseResult['response'];
   } = {}
@@ -52,7 +52,7 @@ function result(
       : {},
     authType: 'none',
     durationMs: 1000,
-    hostUsage: options.usage,
+    clientUsage: options.usage,
   };
 }
 
@@ -468,24 +468,28 @@ describe('per-trial metrics', () => {
   ): EvalCaseResult => ({
     id: 'multi',
     datasetName: 'd',
-    toolName: 'mcp_host',
     source: 'eval',
     pass: false,
     expectations: {},
     durationMs: 999,
     // The case keeps the last iteration's response and the summed usage.
     response: { toolCalls: [] },
-    hostUsage: usage(600),
+    clientUsage: usage(600),
     assertionPassRate: 0.5,
     iterationResults: [
-      { pass: true, durationMs: 100, trace: trace(2), hostUsage: usage(100) },
-      { pass: false, durationMs: 300, trace: trace(1), hostUsage: usage(300) },
+      { pass: true, durationMs: 100, trace: trace(2), clientUsage: usage(100) },
+      {
+        pass: false,
+        durationMs: 300,
+        trace: trace(1),
+        clientUsage: usage(300),
+      },
       // Infrastructure failures don't count, as for accuracy.
       {
         pass: false,
         durationMs: 0,
         isInfrastructureError: true,
-        hostUsage: usage(200),
+        clientUsage: usage(200),
       },
     ],
     ...overrides,
@@ -578,7 +582,6 @@ describe('per-trial metrics', () => {
   it('leaves out runs that failed on infrastructure, and counts host failures as unsuccessful', () => {
     const base = {
       datasetName: 'd',
-      toolName: 'mcp_host',
       source: 'eval' as const,
       pass: false,
       expectations: {},

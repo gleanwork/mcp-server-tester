@@ -442,7 +442,7 @@ fail the configured-MCP measurement without a restart. Host tool calls remain di
 MCP calls; unexpected or unattributed MCP servers fail measurement, and
 `requireMcpCalls` requires a call on the configured server selection.
 
-Linux controller accounting is in `externalHost.nativeController`, with
+Linux controller accounting is in `clientMetadata.nativeController`, with
 `provider: 'linux-atspi'`, the selected surface, and planner/cost marked
 `not-applicable`. It is separate from native model usage and from macOS
-`externalHost.computerUse` planner accounting.
+`clientMetadata.computerUse` planner accounting.

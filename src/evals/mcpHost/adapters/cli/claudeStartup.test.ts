@@ -133,9 +133,11 @@ describe('Claude Code MCP startup', () => {
     expect(row.infrastructureErrorCount).toBe(1);
     expect(row.assertionPassRate).toBe(1);
     expect(
-      row.iterationResults?.map((r) => r.hostDiagnostics?.claudeStartup?.status)
+      row.iterationResults?.map(
+        (r) => r.clientDiagnostics?.claudeStartup?.status
+      )
     ).toEqual(['failed', 'ready']);
-    expect(row.iterationResults?.[0]?.hostDiagnostics?.failureKind).toBe(
+    expect(row.iterationResults?.[0]?.clientDiagnostics?.failureKind).toBe(
       'startup'
     );
   });

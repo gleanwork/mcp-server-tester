@@ -8,7 +8,7 @@ import {
   type GradedExecution,
 } from './expectations.js';
 import type { ClientResponse } from './caseExecution.js';
-import type { ExternalHostMetadata } from './externalHost/types.js';
+import type { ClientMetadata } from './externalHost/types.js';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 
@@ -32,14 +32,12 @@ const mapped: ClientResponse = {
   ],
 };
 
-function external(
-  overrides: Partial<ExternalHostMetadata> = {}
-): ExternalHostMetadata {
+function external(overrides: Partial<ClientMetadata> = {}): ClientMetadata {
   return {
-    traceSource: 'host-local-transcript',
+    traceSource: 'client-local-transcript',
     traceConfidence: 'high',
     ...overrides,
-  } as ExternalHostMetadata;
+  } as ClientMetadata;
 }
 
 const toolExpect = {
@@ -85,7 +83,7 @@ describe('evaluateExpectations', () => {
     expect(outcome.toolPrecision).toBe(0.5);
     expect(outcome.toolRecall).toBe(0.5);
     // Matched on mapped names, shown with the host's own names.
-    expect(outcome.mcpHostTrace).toEqual({
+    expect(outcome.toolCallTrace).toEqual({
       calls: [
         {
           name: 'native_weather',
@@ -118,7 +116,7 @@ describe('evaluateExpectations', () => {
     expect(outcome.expectations.textContains?.pass).toBe(true);
     expect(outcome.toolPrecision).toBeUndefined();
     expect(outcome.toolRecall).toBeUndefined();
-    expect(outcome.mcpHostTrace).toBeUndefined();
+    expect(outcome.toolCallTrace).toBeUndefined();
   });
 
   it('lists a required call made with the wrong arguments as missed', async () => {
@@ -142,7 +140,7 @@ describe('evaluateExpectations', () => {
     expect(outcome.toolRecall).toBe(0);
     // Precision counts the call by identity; recall misses it on arguments.
     expect(outcome.toolPrecision).toBe(0.5);
-    expect(outcome.mcpHostTrace).toEqual({
+    expect(outcome.toolCallTrace).toEqual({
       calls: [
         {
           name: 'native_weather',
@@ -172,7 +170,7 @@ describe('evaluateExpectations', () => {
   it("grades on the client's evidence, not external trace metadata", async () => {
     const outcome = await evaluateExpectations(
       { assertions: toolExpect },
-      { ...graded, externalHost: external({ traceConfidence: 'low' }) }
+      { ...graded, clientMetadata: external({ traceConfidence: 'low' }) }
     );
     expect(outcome.expectations.toolCallCount?.pass).toBe(true);
     expect(outcome.toolPrecision).toBe(0.5);

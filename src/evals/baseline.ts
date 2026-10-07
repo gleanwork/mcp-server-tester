@@ -1,3 +1,4 @@
+import { assertCurrentRunResult } from './resultFormat.js';
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { dirname } from 'path';
 import type { EvalRunnerResult } from './evalRunner.js';
@@ -53,5 +54,7 @@ export async function loadBaseline(
   filePath: string
 ): Promise<EvalRunnerResult> {
   const raw = await readFile(filePath, 'utf8');
-  return JSON.parse(raw) as EvalRunnerResult;
+  const result: unknown = JSON.parse(raw);
+  assertCurrentRunResult(result, `Baseline ${filePath}`);
+  return result as EvalRunnerResult;
 }

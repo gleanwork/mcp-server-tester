@@ -19,7 +19,7 @@ import type {
 } from './index.js';
 import type { EvalResultStoreLike } from '../evals/resultStore.js';
 import type { TraceEvidence, Trace } from '../evals/evalFrameworkTypes.js';
-import type { ExternalHostMetadata } from '../evals/externalHost/types.js';
+import type { ClientMetadata } from '../evals/externalHost/types.js';
 
 /**
  * Configuration options for MCP Eval Reporter
@@ -93,9 +93,9 @@ export interface EvalRunMetadata {
   /** Package version from package.json */
   packageVersion: string;
   /** Runtime tool override variant identifier, when one was used */
-  toolOverrideVariantId?: string;
+  toolVariantId?: string;
   /** The model client cases ran on, when the run named it. */
-  mcpHostModel?: string;
+  model?: string;
   /** Judge model identifier (if judge was used) */
   judgeModel?: string;
   /**
@@ -258,7 +258,7 @@ export interface IterationResult {
    * Captures what was actually called so you can distinguish "LLM didn't call the tool"
    * from "LLM called the wrong tool" from "tool was called but assertion failed".
    */
-  mcpHostTrace?: {
+  toolCallTrace?: {
     calls: Array<{
       name: string;
       arguments: Record<string, unknown>;
@@ -267,21 +267,21 @@ export interface IterationResult {
     missed: Array<{ name: string }>;
   };
   /** Sanitized client evidence for this specific trial. */
-  hostDiagnostics?: ClientDiagnostics;
+  clientDiagnostics?: ClientDiagnostics;
   /** Evidence level retained even when raw responses are redacted. */
-  hostEvidence?: TraceEvidence;
-  /** What the host did in this iteration (host cases). */
+  traceEvidence?: TraceEvidence;
+  /** What the client did in this trial. */
   trace?: Trace;
   /** Token usage from the client's model calls in this trial */
-  hostUsage?: UsageMetrics;
+  clientUsage?: UsageMetrics;
   /** Token usage of this iteration's judges, from judges that report it. */
   judgeUsage?: Partial<UsageMetrics>;
-  /** Skills the simulated host loaded in this iteration (skills enabled). */
+  /** Skills the `mst` client loaded in this trial (skills enabled). */
   skillLoads?: SkillLoad[];
-  /** Native numeric host measurements, retained after response redaction. */
-  hostTelemetry?: Record<string, unknown>;
-  /** External host metadata for this iteration */
-  externalHost?: ExternalHostMetadata;
+  /** The client's native numeric measurements, retained after response redaction. */
+  clientTelemetry?: Record<string, unknown>;
+  /** How a desktop client was driven and observed in this trial. */
+  clientMetadata?: ClientMetadata;
 }
 
 /**
@@ -292,13 +292,13 @@ export interface EvalCaseRequest {
   /** Human-readable description of the case */
   description?: string;
   /** Runtime tool override variant identifier, when one was used */
-  toolOverrideVariantId?: string;
+  toolVariantId?: string;
 
   /** Number of iterations configured for this case */
-  iterations?: number;
+  trials?: number;
 
   /** Accuracy threshold configured for this case */
-  accuracyThreshold?: number;
+  passThreshold?: number;
 
   /** Judge repetitions configured for this case */
   judgeReps?: number;
@@ -307,14 +307,14 @@ export interface EvalCaseRequest {
   tags?: string[];
 
   /** Configured expectation block, sanitized for reporter output */
-  expect?: Record<string, unknown>;
+  assertions?: Record<string, unknown>;
 
   /** Tool arguments, for a tool call the reporter tracked in a Playwright test */
   args?: Record<string, unknown>;
 
   // Client case fields
   /** The input sent to the client as its prompt */
-  scenario?: string;
+  input?: string;
   /** Golden/reference answer associated with the case, when supplied. */
   reference?: string;
   /** The client the case ran on, when the run or the case named it. */
@@ -338,9 +338,10 @@ export interface EvalCaseResult {
   datasetName: string;
 
   /**
-   * MCP tool name that was called
+   * The MCP tool a Playwright test called, for a tool call the reporter
+   * tracked. Eval case results don't have one: see `request.client`.
    */
-  toolName: string;
+  toolName?: string;
 
   /**
    * Source of this result
@@ -353,7 +354,7 @@ export interface EvalCaseResult {
   pass: boolean;
 
   /**
-   * Request data from the eval case input (tool args, scenario, LLM config).
+   * What the case asked for: its input, client, model and assertions.
    * Populated so results are self-contained for debugging without the original dataset.
    */
   request?: EvalCaseRequest;
@@ -461,7 +462,7 @@ export interface EvalCaseResult {
    * Ordered trace of tool calls the client made.
    * Only populated when the eval case uses toolsTriggered expectations.
    */
-  mcpHostTrace?: {
+  toolCallTrace?: {
     /** The ordered sequence of tool calls made by the LLM */
     calls: Array<{
       name: string;
@@ -475,10 +476,10 @@ export interface EvalCaseResult {
     }>;
   };
 
-  /** Sanitized host evidence; each iteration retains its own diagnostics. */
-  hostDiagnostics?: ClientDiagnostics;
+  /** Sanitized client evidence; each trial retains its own diagnostics. */
+  clientDiagnostics?: ClientDiagnostics;
   /** Evidence level retained in persisted comparisons after response redaction. */
-  hostEvidence?: TraceEvidence;
+  traceEvidence?: TraceEvidence;
   /**
    * What the host did (host cases with one iteration). With several
    * iterations, each one's trace is in `iterationResults`.
@@ -491,20 +492,20 @@ export interface EvalCaseResult {
    * Aggregate token usage from the client's model calls for this case.
    * Summed across all trials. Only populated for client cases.
    */
-  hostUsage?: UsageMetrics;
+  clientUsage?: UsageMetrics;
   /**
    * Token usage of the case's judges, from judges that report it.
    * Summed across all iterations.
    */
   judgeUsage?: Partial<UsageMetrics>;
   /** Native single-iteration measurements; multi-iteration values live in iterationResults. */
-  hostTelemetry?: Record<string, unknown>;
+  clientTelemetry?: Record<string, unknown>;
 
   /**
    * External host trace and evidence metadata.
    * Populated for clients that drive a desktop app, such as ChatGPT.
    */
-  externalHost?: ExternalHostMetadata;
+  clientMetadata?: ClientMetadata;
 }
 
 /**
@@ -567,7 +568,7 @@ export interface MCPEvalRunData {
     /**
      * Aggregate token usage from every client case's model calls in this run.
      */
-    totalHostUsage?: UsageMetrics;
+    totalClientUsage?: UsageMetrics;
   };
 
   /**

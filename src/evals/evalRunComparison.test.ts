@@ -19,7 +19,6 @@ function createCase(id: string, pass: boolean): EvalCaseResult {
   return {
     id,
     datasetName: 'comparison-test',
-    toolName: 'mcp_host',
     source: 'eval',
     pass,
     expectations: {},
@@ -146,7 +145,7 @@ describe('compareEvalRuns', () => {
       metadata: {
         timestamp: '2026-05-19T00:00:00.000Z',
         packageVersion: '1.0.0',
-        toolOverrideVariantId: 'search-description-v2',
+        toolVariantId: 'search-description-v2',
       },
     });
 
@@ -189,7 +188,7 @@ describe('compareEvalRuns', () => {
         metadata: {
           timestamp: '2026-05-22T00:00:00.000Z',
           packageVersion: '1.0.0',
-          toolOverrideVariantId: 'variant-a',
+          toolVariantId: 'variant-a',
         },
       })
     );
@@ -199,7 +198,7 @@ describe('compareEvalRuns', () => {
     // Artifact-level metadata is the storage envelope (set via
     // createStoredEvalArtifact's metadata option). EvalRunnerResult is the
     // runtime data and lives under loaded.data.
-    expect(loaded.metadata.toolOverrideVariantId).toBe('variant-a');
+    expect(loaded.metadata.toolVariantId).toBe('variant-a');
     expect(loaded.data.caseResults).toHaveLength(1);
     expect(
       compareEvalRuns({ baseline: loaded.data, candidate: loaded.data }).cases

@@ -20,7 +20,7 @@ function formatResponsePreview(response: unknown): string {
 }
 
 function getExternalHostEvidenceRows(
-  externalHost: NonNullable<EvalCaseResult['externalHost']>
+  clientMetadata: NonNullable<EvalCaseResult['clientMetadata']>
 ) {
   const labels = {
     finalAnswer: 'Final answer',
@@ -32,8 +32,8 @@ function getExternalHostEvidenceRows(
 
   return keys
     .map((key) => {
-      const evidence = externalHost.evidence?.[key];
-      const source = evidence?.source ?? externalHost.sources?.[key];
+      const evidence = clientMetadata.evidence?.[key];
+      const source = evidence?.source ?? clientMetadata.sources?.[key];
       const confidence = evidence?.confidence;
 
       if (!source && !confidence) {
@@ -44,7 +44,7 @@ function getExternalHostEvidenceRows(
         key,
         label: labels[key],
         source: source ?? 'unknown',
-        confidence: confidence ?? externalHost.traceConfidence,
+        confidence: confidence ?? clientMetadata.traceConfidence,
       };
     })
     .filter((row): row is NonNullable<typeof row> => row !== undefined);
@@ -119,7 +119,7 @@ function usageForResult(
 ): Record<string, unknown> | undefined {
   const responseUsage = responseRecord(result).usage;
   return (
-    (result.hostUsage as unknown as Record<string, unknown> | undefined) ??
+    (result.clientUsage as unknown as Record<string, unknown> | undefined) ??
     (isRecord(responseUsage) ? responseUsage : undefined)
   );
 }
@@ -209,10 +209,10 @@ function getVerdictSummary(result: EvalCaseResult): {
     };
   }
 
-  if (result.externalHost?.failureKind) {
+  if (result.clientMetadata?.failureKind) {
     return {
       category: 'Host or automation failure',
-      reason: `The driver failed before producing trustworthy eval evidence: ${result.externalHost.failureKind}.`,
+      reason: `The driver failed before producing trustworthy eval evidence: ${result.clientMetadata.failureKind}.`,
     };
   }
 
@@ -239,15 +239,15 @@ function getVerdictSummary(result: EvalCaseResult): {
 }
 
 function evidenceSummary(
-  externalHost: NonNullable<EvalCaseResult['externalHost']> | undefined,
+  clientMetadata: NonNullable<EvalCaseResult['clientMetadata']> | undefined,
   key: 'finalAnswer' | 'toolCalls' | 'usage' | 'cost'
 ): string {
-  if (!externalHost) {
+  if (!clientMetadata) {
     return 'not reported';
   }
-  const evidence = externalHost.evidence?.[key];
-  const source = evidence?.source ?? externalHost.sources?.[key];
-  const confidence = evidence?.confidence ?? externalHost.traceConfidence;
+  const evidence = clientMetadata.evidence?.[key];
+  const source = evidence?.source ?? clientMetadata.sources?.[key];
+  const confidence = evidence?.confidence ?? clientMetadata.traceConfidence;
 
   if (!source) {
     return 'not reported';
@@ -325,12 +325,12 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
   const iterations = result.iterationResults!;
   const displayRate = result.assertionPassRate;
   const infraErrorRate = result.infrastructureErrorRate;
-  const externalHostEvidenceRows = result.externalHost
-    ? getExternalHostEvidenceRows(result.externalHost)
+  const externalHostEvidenceRows = result.clientMetadata
+    ? getExternalHostEvidenceRows(result.clientMetadata)
     : [];
   const hostToolCalls = resultToolCalls(result);
   const skillLoads = resultSkillLoads(result);
-  const hostUsage = usageForResult(result);
+  const clientUsage = usageForResult(result);
   const answer = finalAnswer(result);
   const llmDurationMs = numberField(responseRecord(result), 'llmDurationMs');
   const mcpDurationMs = numberField(responseRecord(result), 'mcpDurationMs');
@@ -477,21 +477,21 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                   {result.project}
                 </span>
               )}
-              {result.externalHost && (
+              {result.clientMetadata && (
                 <>
                   <span className="px-2 py-1 rounded text-xs font-medium bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300">
-                    {result.externalHost.hostName}
+                    {result.clientMetadata.clientName}
                   </span>
                   <span
                     className={`px-2 py-1 rounded text-xs font-medium ${
-                      result.externalHost.traceConfidence === 'high'
+                      result.clientMetadata.traceConfidence === 'high'
                         ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-                        : result.externalHost.traceConfidence === 'medium'
+                        : result.clientMetadata.traceConfidence === 'medium'
                           ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
                           : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
                     }`}
                   >
-                    {result.externalHost.traceConfidence} trace
+                    {result.clientMetadata.traceConfidence} trace
                   </span>
                 </>
               )}
@@ -516,7 +516,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                   className={`rounded-md border p-4 ${
                     result.pass
                       ? 'border-green-500/30 bg-green-500/10'
-                      : result.externalHost?.failureKind || result.error
+                      : result.clientMetadata?.failureKind || result.error
                         ? 'border-orange-500/30 bg-orange-500/10'
                         : 'border-red-500/30 bg-red-500/10'
                   }`}
@@ -537,47 +537,50 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                   </p>
                 </div>
 
-                {result.externalHost && (
+                {result.clientMetadata && (
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
                     <InfoField
                       label="Driver"
                       value={
                         <>
                           <span className="font-medium">
-                            {result.externalHost.displayName}
+                            {result.clientMetadata.displayName}
                           </span>
                           <p className="font-mono text-xs text-muted-foreground break-all mt-1">
-                            {result.externalHost.driverSlug}
+                            {result.clientMetadata.driverSlug}
                           </p>
                         </>
                       }
                     />
                     <InfoField
                       label="Trace"
-                      value={`${result.externalHost.traceSource} · ${result.externalHost.traceConfidence}`}
+                      value={`${result.clientMetadata.traceSource} · ${result.clientMetadata.traceConfidence}`}
                     />
                     <InfoField
                       label="Correlation"
                       value={
-                        result.externalHost.correlation.includedInPrompt
-                          ? `${result.externalHost.correlation.strategy} in prompt`
-                          : result.externalHost.correlation.strategy
+                        result.clientMetadata.correlation.includedInPrompt
+                          ? `${result.clientMetadata.correlation.strategy} in prompt`
+                          : result.clientMetadata.correlation.strategy
                       }
                     />
                     <InfoField
                       label="Final Answer Source"
                       value={evidenceSummary(
-                        result.externalHost,
+                        result.clientMetadata,
                         'finalAnswer'
                       )}
                     />
                     <InfoField
                       label="Tool Evidence"
-                      value={evidenceSummary(result.externalHost, 'toolCalls')}
+                      value={evidenceSummary(
+                        result.clientMetadata,
+                        'toolCalls'
+                      )}
                     />
                     <InfoField
                       label="Usage Evidence"
-                      value={evidenceSummary(result.externalHost, 'usage')}
+                      value={evidenceSummary(result.clientMetadata, 'usage')}
                     />
                   </div>
                 )}
@@ -587,9 +590,9 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
             {/* Setup and configuration — show what the eval was configured to run */}
             {result.request &&
               (result.request.args ||
-                result.request.scenario ||
+                result.request.input ||
                 result.request.description ||
-                result.request.expect) && (
+                result.request.assertions) && (
                 <CollapsibleSection
                   title="Setup & Configuration"
                   defaultOpen={false}
@@ -613,15 +616,15 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                       <InfoField
                         label="Iterations"
                         value={
-                          result.request.iterations ??
+                          result.request.trials ??
                           result.iterationResults?.length ??
                           1
                         }
                       />
-                      {result.request.accuracyThreshold !== undefined && (
+                      {result.request.passThreshold !== undefined && (
                         <InfoField
                           label="Accuracy Threshold"
-                          value={`${(result.request.accuracyThreshold * 100).toFixed(0)}%`}
+                          value={`${(result.request.passThreshold * 100).toFixed(0)}%`}
                         />
                       )}
                       {result.request.judgeReps !== undefined && (
@@ -650,13 +653,13 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                         )}
                     </div>
 
-                    {result.request.scenario && (
+                    {result.request.input && (
                       <div>
                         <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
                           Scenario
                         </h4>
                         <p className="text-sm bg-muted p-3 rounded-md">
-                          {result.request.scenario}
+                          {result.request.input}
                         </p>
                       </div>
                     )}
@@ -676,12 +679,12 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                       </div>
                     )}
 
-                    {result.request.expect && (
+                    {result.request.assertions && (
                       <div>
                         <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
                           Configured Expectations
                         </h4>
-                        <JsonBlock value={result.request.expect} />
+                        <JsonBlock value={result.request.assertions} />
                       </div>
                     )}
 
@@ -753,7 +756,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
               </CollapsibleSection>
             )}
 
-            {result.externalHost && (
+            {result.clientMetadata && (
               <CollapsibleSection
                 title="Host Outcomes & Evidence"
                 defaultOpen={true}
@@ -784,7 +787,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                         Input Tokens
                       </div>
                       <div className="text-lg font-semibold">
-                        {formatNumber(numberField(hostUsage, 'inputTokens'))}
+                        {formatNumber(numberField(clientUsage, 'inputTokens'))}
                       </div>
                     </div>
                     <div className="rounded-md bg-muted p-3">
@@ -792,13 +795,13 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                         Output Tokens
                       </div>
                       <div className="text-lg font-semibold">
-                        {formatNumber(numberField(hostUsage, 'outputTokens'))}
+                        {formatNumber(numberField(clientUsage, 'outputTokens'))}
                       </div>
                     </div>
                     <div className="rounded-md bg-muted p-3">
                       <div className="text-xs text-muted-foreground">Cost</div>
                       <div className="text-lg font-semibold">
-                        {formatCost(numberField(hostUsage, 'totalCostUsd'))}
+                        {formatCost(numberField(clientUsage, 'totalCostUsd'))}
                       </div>
                     </div>
                   </div>
@@ -869,7 +872,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                     </div>
                   )}
 
-                  {hostUsage && (
+                  {clientUsage && (
                     <div>
                       <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
                         Usage & Durations
@@ -878,17 +881,19 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                         <InfoField
                           label="Total Cost"
                           value={formatCost(
-                            numberField(hostUsage, 'totalCostUsd')
+                            numberField(clientUsage, 'totalCostUsd')
                           )}
                         />
                         <InfoField
                           label="Host Duration"
-                          value={formatMs(numberField(hostUsage, 'durationMs'))}
+                          value={formatMs(
+                            numberField(clientUsage, 'durationMs')
+                          )}
                         />
                         <InfoField
                           label="API Duration"
                           value={formatMs(
-                            numberField(hostUsage, 'durationApiMs')
+                            numberField(clientUsage, 'durationApiMs')
                           )}
                         />
                         <InfoField
@@ -903,21 +908,26 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                           label="Reporter Duration"
                           value={formatMs(result.durationMs)}
                         />
-                        {numberField(hostUsage, 'cacheReadInputTokens') !==
+                        {numberField(clientUsage, 'cacheReadInputTokens') !==
                           undefined && (
                           <InfoField
                             label="Cache Read Tokens"
                             value={formatNumber(
-                              numberField(hostUsage, 'cacheReadInputTokens')
+                              numberField(clientUsage, 'cacheReadInputTokens')
                             )}
                           />
                         )}
-                        {numberField(hostUsage, 'cacheCreationInputTokens') !==
-                          undefined && (
+                        {numberField(
+                          clientUsage,
+                          'cacheCreationInputTokens'
+                        ) !== undefined && (
                           <InfoField
                             label="Cache Write Tokens"
                             value={formatNumber(
-                              numberField(hostUsage, 'cacheCreationInputTokens')
+                              numberField(
+                                clientUsage,
+                                'cacheCreationInputTokens'
+                              )
                             )}
                           />
                         )}
@@ -931,26 +941,26 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                       value={
                         <>
                           <p className="font-medium">
-                            {result.externalHost.displayName}
-                            {result.externalHost.hostVariant
-                              ? ` / ${result.externalHost.hostVariant}`
+                            {result.clientMetadata.displayName}
+                            {result.clientMetadata.clientVariant
+                              ? ` / ${result.clientMetadata.clientVariant}`
                               : ''}
                           </p>
                           <p className="font-mono text-xs text-muted-foreground break-all mt-1">
-                            {result.externalHost.driverSlug}
+                            {result.clientMetadata.driverSlug}
                           </p>
                         </>
                       }
                     />
                     <InfoField
                       label="Evidence"
-                      value={`${result.externalHost.traceSource} · ${result.externalHost.traceConfidence}`}
+                      value={`${result.clientMetadata.traceSource} · ${result.clientMetadata.traceConfidence}`}
                     />
                     <InfoField
                       label="Session"
                       value={
                         <code className="text-xs break-all">
-                          {result.externalHost.session.id ?? 'unknown'}
+                          {result.clientMetadata.session.id ?? 'unknown'}
                         </code>
                       }
                     />
@@ -958,7 +968,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                       label="Request"
                       value={
                         <code className="text-xs break-all">
-                          {result.externalHost.session.requestId ?? 'unknown'}
+                          {result.clientMetadata.session.requestId ?? 'unknown'}
                         </code>
                       }
                     />
@@ -966,7 +976,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                       label="Run Marker"
                       value={
                         <code className="text-xs break-all">
-                          {result.externalHost.session.runMarker}
+                          {result.clientMetadata.session.runMarker}
                         </code>
                       }
                     />
@@ -975,23 +985,23 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                       value={
                         <>
                           <code className="text-xs">
-                            {result.externalHost.correlation.strategy}
+                            {result.clientMetadata.correlation.strategy}
                           </code>
                           <p className="text-xs text-muted-foreground mt-1">
                             prompt marker{' '}
-                            {result.externalHost.correlation.includedInPrompt
+                            {result.clientMetadata.correlation.includedInPrompt
                               ? 'included'
                               : 'not included'}
                           </p>
                         </>
                       }
                     />
-                    {result.externalHost.session.cliSessionId && (
+                    {result.clientMetadata.session.cliSessionId && (
                       <InfoField
                         label="CLI Session"
                         value={
                           <code className="text-xs break-all">
-                            {result.externalHost.session.cliSessionId}
+                            {result.clientMetadata.session.cliSessionId}
                           </code>
                         }
                       />
@@ -1003,7 +1013,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                       Capabilities
                     </h4>
                     <div className="flex flex-wrap gap-2">
-                      {result.externalHost.capabilitiesUsed.map(
+                      {result.clientMetadata.capabilitiesUsed.map(
                         (capability) => (
                           <span
                             key={capability}
@@ -1034,20 +1044,20 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                     </div>
                   )}
 
-                  {result.externalHost.failureKind && (
+                  {result.clientMetadata.failureKind && (
                     <div className="rounded-md bg-orange-500/10 text-orange-700 dark:text-orange-300 p-3 text-sm">
-                      Host failure: {result.externalHost.failureKind}
+                      Host failure: {result.clientMetadata.failureKind}
                     </div>
                   )}
 
-                  {result.externalHost.traceLimitations &&
-                    result.externalHost.traceLimitations.length > 0 && (
+                  {result.clientMetadata.traceLimitations &&
+                    result.clientMetadata.traceLimitations.length > 0 && (
                       <div>
                         <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
                           Limitations
                         </h4>
                         <ul className="space-y-1 text-sm text-muted-foreground">
-                          {result.externalHost.traceLimitations.map(
+                          {result.clientMetadata.traceLimitations.map(
                             (limitation, i) => (
                               <li key={i}>{limitation}</li>
                             )
@@ -1056,13 +1066,13 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                       </div>
                     )}
 
-                  {result.externalHost.artifacts.length > 0 && (
+                  {result.clientMetadata.artifacts.length > 0 && (
                     <div>
                       <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
                         Artifacts
                       </h4>
                       <div className="space-y-2">
-                        {result.externalHost.artifacts.map((artifact, i) => (
+                        {result.clientMetadata.artifacts.map((artifact, i) => (
                           <div
                             key={i}
                             className="rounded-md bg-muted p-3 text-xs"
@@ -1091,9 +1101,9 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
             {/* Tool Calls — for llm_host eval cases with tool call expectations */}
             {result.source === 'eval' && result.toolPrecision !== undefined && (
               <CollapsibleSection title="Tool Calls" defaultOpen={true}>
-                {result.mcpHostTrace ? (
+                {result.toolCallTrace ? (
                   <div className="space-y-1">
-                    {result.mcpHostTrace.calls.map((call, i) => (
+                    {result.toolCallTrace.calls.map((call, i) => (
                       <div
                         key={i}
                         className={`flex items-start gap-2 text-xs p-2 rounded ${
@@ -1119,7 +1129,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                         </span>
                       </div>
                     ))}
-                    {result.mcpHostTrace.missed.map((missed, i) => (
+                    {result.toolCallTrace.missed.map((missed, i) => (
                       <div
                         key={`missed-${i}`}
                         className="flex items-center gap-2 text-xs p-2 rounded bg-yellow-50 dark:bg-yellow-950"
@@ -1175,12 +1185,12 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                         <th className="text-left py-2 pr-4 font-medium">
                           Duration
                         </th>
-                        {iterations.some((r) => r.mcpHostTrace) && (
+                        {iterations.some((r) => r.toolCallTrace) && (
                           <th className="text-left py-2 pr-4 font-medium">
                             Tools called
                           </th>
                         )}
-                        {iterations.some((r) => r.externalHost) && (
+                        {iterations.some((r) => r.clientMetadata) && (
                           <th className="text-left py-2 pr-4 font-medium">
                             Host trace
                           </th>
@@ -1217,11 +1227,11 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                           <td className="py-2 pr-4 text-muted-foreground">
                             {iter.durationMs.toFixed(0)}ms
                           </td>
-                          {iterations.some((r) => r.mcpHostTrace) && (
+                          {iterations.some((r) => r.toolCallTrace) && (
                             <td className="py-2 pr-4">
-                              {iter.mcpHostTrace ? (
+                              {iter.toolCallTrace ? (
                                 <span className="flex flex-wrap gap-1 items-center">
-                                  {iter.mcpHostTrace.calls.map((c, j) => (
+                                  {iter.toolCallTrace.calls.map((c, j) => (
                                     <code
                                       key={j}
                                       className={`text-xs px-1.5 py-0.5 rounded ${
@@ -1238,7 +1248,7 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                                       {c.name}
                                     </code>
                                   ))}
-                                  {iter.mcpHostTrace.missed.map((m, j) => (
+                                  {iter.toolCallTrace.missed.map((m, j) => (
                                     <code
                                       key={`missed-${j}`}
                                       className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground line-through"
@@ -1247,8 +1257,8 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                                       {m.name}
                                     </code>
                                   ))}
-                                  {iter.mcpHostTrace.calls.length === 0 &&
-                                    iter.mcpHostTrace.missed.length === 0 && (
+                                  {iter.toolCallTrace.calls.length === 0 &&
+                                    iter.toolCallTrace.missed.length === 0 && (
                                       <span className="text-xs text-muted-foreground">
                                         no tools called
                                       </span>
@@ -1261,16 +1271,16 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                               )}
                             </td>
                           )}
-                          {iterations.some((r) => r.externalHost) && (
+                          {iterations.some((r) => r.clientMetadata) && (
                             <td className="py-2 pr-4">
-                              {iter.externalHost ? (
+                              {iter.clientMetadata ? (
                                 <span
                                   className="text-xs text-muted-foreground"
-                                  title={iter.externalHost.traceSource}
+                                  title={iter.clientMetadata.traceSource}
                                 >
-                                  {iter.externalHost.driverSlug ??
-                                    iter.externalHost.hostName}{' '}
-                                  · {iter.externalHost.traceConfidence}
+                                  {iter.clientMetadata.driverSlug ??
+                                    iter.clientMetadata.clientName}{' '}
+                                  · {iter.clientMetadata.traceConfidence}
                                 </span>
                               ) : (
                                 <span className="text-xs text-muted-foreground">

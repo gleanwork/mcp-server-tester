@@ -63,10 +63,10 @@ const metadata = {
   },
   driverSlug: 'openai.chatgpt.agent.desktop-app.macos',
   displayName: 'ChatGPT',
-  hostName: 'ChatGPT',
-  hostType: 'desktop' as const,
+  clientName: 'ChatGPT',
+  clientType: 'desktop' as const,
   capabilitiesUsed: [],
-  traceSource: 'host-local-transcript' as const,
+  traceSource: 'client-local-transcript' as const,
   traceConfidence: 'high' as const,
   artifacts: [],
   session: { runMarker: 'marker', id: 'session', turnId: 'turn' },
@@ -87,7 +87,7 @@ beforeEach(async () => {
     .mockImplementation(async () => ({
       success: true,
       response: 'answer',
-      externalHost: {
+      clientMetadata: {
         ...metadata,
         session: {
           ...metadata.session,
@@ -259,7 +259,7 @@ describe('ChatGPT V2 batch host', () => {
       success: true,
       response: 'answer',
       toolCalls: [],
-      externalHost: metadata,
+      clientMetadata: metadata,
     });
     const batch = [...requests(), { ...requests()[0]!, caseId: 'three' }];
     const traces = await CHATGPT_HOST.runBatch!(batch, context);
@@ -278,7 +278,7 @@ describe('ChatGPT V2 batch host', () => {
       true
     );
     expect(traces[0]!.finalText).toBe('answer');
-    expect(traces[0]!.telemetry?.externalHost).toBeDefined();
+    expect(traces[0]!.telemetry?.clientMetadata).toBeDefined();
     await expect(
       access(join(home.value, '.mcp-server-tester/chatgpt-desktop.lock'))
     ).resolves.toBeUndefined();
@@ -352,7 +352,7 @@ describe('ChatGPT V2 batch host', () => {
     });
     expect(JSON.stringify(traces)).not.toContain('fixture-secret');
     expect(traces[0]!.usage?.totalCostUsd).toBeUndefined();
-    expect(traces[0]!.telemetry?.externalHost).toMatchObject({
+    expect(traces[0]!.telemetry?.clientMetadata).toMatchObject({
       session: { id: 'session', turnId: 'turn' },
     });
     expect(hostRunToExecution(traces[0]!, 'structured').response).toMatchObject(
@@ -377,7 +377,7 @@ describe('ChatGPT V2 batch host', () => {
       success: true,
       response: 'answer',
       toolCalls: [],
-      externalHost: {
+      clientMetadata: {
         ...metadata,
         telemetry: { inputTokens: 10, cacheReadInputTokens: 6 },
       },
@@ -396,7 +396,7 @@ describe('ChatGPT V2 batch host', () => {
       inputTokens: 4,
       cacheReadInputTokens: 6,
     });
-    expect(trace!.telemetry?.externalHost).toMatchObject({
+    expect(trace!.telemetry?.clientMetadata).toMatchObject({
       telemetry: { inputTokens: 10 },
     });
   });
@@ -404,7 +404,7 @@ describe('ChatGPT V2 batch host', () => {
     vi.mocked(runExternalHostScenario).mockResolvedValueOnce({
       success: true,
       response: 'plausible answer',
-      externalHost: metadata,
+      clientMetadata: metadata,
       toolCalls: [
         {
           name: 'search',
@@ -432,7 +432,7 @@ describe('ChatGPT V2 batch host', () => {
       .mockResolvedValueOnce({
         success: true,
         response: 'Cannot access the desktop app',
-        externalHost: metadata,
+        clientMetadata: metadata,
         toolCalls: [
           {
             name: 'js',
@@ -447,7 +447,7 @@ describe('ChatGPT V2 batch host', () => {
       .mockResolvedValueOnce({
         success: true,
         response: 'answer via another plugin',
-        externalHost: {
+        clientMetadata: {
           ...metadata,
           session: { ...metadata.session, id: 'second', turnId: 'second-turn' },
         },
@@ -506,7 +506,7 @@ describe('ChatGPT V2 batch host', () => {
     vi.mocked(runExternalHostScenario).mockResolvedValueOnce({
       success: true,
       response: 'answer',
-      externalHost: metadata,
+      clientMetadata: metadata,
       toolCalls: [
         {
           name: 'js',
@@ -533,7 +533,7 @@ describe('ChatGPT V2 batch host', () => {
       success: true,
       response: 'answer',
       toolCalls: [],
-      externalHost: metadata,
+      clientMetadata: metadata,
       usage: {
         inputTokens: 1,
         outputTokens: 1,
@@ -574,7 +574,7 @@ describe('ChatGPT V2 batch host', () => {
       success: false,
       error: 'surface_mismatch',
       toolCalls: [],
-      externalHost: metadata,
+      clientMetadata: metadata,
     });
     lifecycle.restart.mockRejectedValueOnce(new Error('app_exited'));
     const traces = await CHATGPT_HOST.runBatch!(requests(), context);
@@ -596,7 +596,7 @@ describe('ChatGPT V2 batch host', () => {
     vi.mocked(runExternalHostScenario).mockResolvedValueOnce({
       success: true,
       response: 'answer',
-      externalHost: metadata,
+      clientMetadata: metadata,
       toolCalls: [
         { name: 'search', source: 'mcp', server: 'acme_mcp', arguments: {} },
       ],
@@ -681,7 +681,7 @@ describe('ChatGPT V2 batch host', () => {
     vi.mocked(runExternalHostScenario).mockResolvedValueOnce({
       success: true,
       response: 'no tools',
-      externalHost: metadata,
+      clientMetadata: metadata,
       toolCalls: [],
     });
     const batch = requests().slice(0, 1);
@@ -732,7 +732,7 @@ describe('ChatGPT V2 batch host', () => {
       success: false,
       error: 'upstream 401 for fixture-secret using env-api-key-value',
       toolCalls: [],
-      externalHost: metadata,
+      clientMetadata: metadata,
     });
     lifecycle.restart.mockRejectedValueOnce(
       new Error('restart saw fixture-secret')

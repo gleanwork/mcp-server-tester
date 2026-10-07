@@ -284,7 +284,7 @@ describe('V2 Cowork host', () => {
     expect(mocks.setup).toHaveBeenCalledWith(
       expect.objectContaining({ appVersion: '1.52386.6' })
     );
-    expect(result!.telemetry?.hostApp).toEqual(app);
+    expect(result!.telemetry?.clientApp).toEqual(app);
   });
   it('takes its options directly, not nested under options', () => {
     expect(
@@ -1279,7 +1279,7 @@ describe('V2 Cowork host', () => {
     expect(summary.results).toHaveLength(2);
     expect(summary.results.map((r) => r.pass)).toEqual([true, false]);
     expect(mocks.submit).toHaveBeenCalledTimes(2);
-    expect(summary.telemetry?.totalHostUsage).toMatchObject({
+    expect(summary.telemetry?.totalClientUsage).toMatchObject({
       inputTokens: 20,
       outputTokens: 8,
       totalCostUsd: 0.02,

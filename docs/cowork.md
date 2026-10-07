@@ -36,7 +36,7 @@ missing. It does not wait for a case timeout.
 
 By default, MST runs the installed `/Applications/Claude.app`, whatever its
 version, and records that version with every case result as
-`hostTelemetry.hostApp`:
+`clientTelemetry.clientApp`:
 
 ```json
 { "name": "Claude Desktop", "version": "2.19675.1", "source": "installed" }
@@ -68,7 +68,7 @@ variable is rejected with a message pointing to `appVersion`.
 Pinned or not, the version must not change during a run. MST requests disabled
 app updates in its evaluation profile and rechecks the version before accepting
 run completion; a changed bundle fails the run. Compare runs on the same
-`hostApp.version`: a newer Claude Desktop can change results.
+`clientApp.version`: a newer Claude Desktop can change results.
 
 MST does not replace `/Applications/Claude.app` or write managed preferences.
 It uses the existing signed-in `Claude-3p` profile. A managed configuration can
@@ -190,7 +190,7 @@ Organization restrictions can still require approval. Keep vendor servers behind
 the caller's dry-run proxy. Delayed native tool requests trigger at most three further
 approval inspections within the original per-case action budget; prompts are
 never resubmitted. Follow-up usage is recorded under
-`hostTelemetry.computerUse.hitlFollowups`.
+`clientTelemetry.computerUse.hitlFollowups`.
 
 For the host application's login-backed OOTB connectors, use its
 `nativeConnectors` selector and existing dry-run proxy entries alongside your
@@ -266,7 +266,7 @@ desktop offers no Skip all approvals mode, so under `approveWriteTools` HITL
 approves that card; read-only runs refuse it. More than one candidate action
 fails closed.
 
-`hostTelemetry.computerUse` records `driver: "linux-desktop"`, observed semantic
+`clientTelemetry.computerUse` records `driver: "linux-desktop"`, observed semantic
 actions, and elapsed time. Planner tokens and planner cost are **not applicable**,
 not synthetic zero-usage Anthropic calls. Native usage and cost retain their own scope.
 
@@ -298,8 +298,8 @@ if (!report.evidencePassed) {
 }
 ```
 
-The input is MST schema-v1 `raw-results.json`, including `results` and `variants`.
-Each case must have a unique ID and `hostTelemetry.nativeSessionId`. Retain this
+The input is MST schema-v2 `raw-results.json` (written by MST 2.0), including `results` and `variants`.
+Each case must have a unique ID and `clientTelemetry.nativeSessionId`. Retain this
 archive layout, including the actual saved tool-output bytes:
 
 ```text
@@ -402,7 +402,7 @@ it. If the reset fails, the remaining cases are not submitted. Per-case snapshot
 repeated identical prompts. Use a dedicated desktop: do not manually create or
 switch tasks during evaluation.
 
-Results include `hostUsage`, `hostTelemetry`, and `telemetry.totalHostUsage`.
+Results include `clientUsage`, `clientTelemetry`, and `telemetry.totalClientUsage`.
 These describe native Claude execution, not the separate Computer Use planner's
 API cost. A test assertion or judge failure is distinct from a driver failure.
 

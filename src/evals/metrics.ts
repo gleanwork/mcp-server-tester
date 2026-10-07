@@ -65,7 +65,7 @@ function caseTrials(caseResult: EvalCaseResult): Trial[] {
       .map((iteration) => ({
         pass: iteration.pass,
         trace: iteration.trace,
-        usage: iteration.hostUsage,
+        usage: iteration.clientUsage,
         judgeUsage: iteration.judgeUsage,
         durationMs: iteration.durationMs,
         error: iteration.error,
@@ -77,7 +77,7 @@ function caseTrials(caseResult: EvalCaseResult): Trial[] {
     {
       pass: caseResult.pass,
       trace: caseResult.trace,
-      usage: caseResult.hostUsage,
+      usage: caseResult.clientUsage,
       judgeUsage: caseResult.judgeUsage,
       durationMs: caseResult.durationMs,
       error: caseResult.error,

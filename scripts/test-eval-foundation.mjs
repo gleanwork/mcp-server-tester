@@ -285,10 +285,10 @@ try {
   assert.equal(observed.failed, 1);
   assert.equal(observed.datasetToolPrecision, undefined);
   assert.equal(observed.datasetToolRecall, undefined);
-  assert.equal(observed.caseResults[0].hostEvidence, 'observed');
+  assert.equal(observed.caseResults[0].traceEvidence, 'observed');
   const stored = await store.loadArtifact('eval-runner-result', 'observed');
   assert.equal(stored.data.caseResults[0].response, undefined);
-  assert.equal(stored.data.caseResults[0].hostEvidence, 'observed');
+  assert.equal(stored.data.caseResults[0].traceEvidence, 'observed');
   console.log(
     'PASS: observed evidence contributes no verified precision/recall and remains labeled after redaction.'
   );

@@ -11,7 +11,7 @@ const caseResult: EvalCaseResult = {
   toolName: 'search',
   source: 'eval',
   pass: false,
-  request: { scenario: 'Find the design doc' },
+  request: { input: 'Find the design doc' },
   response: { response: 'I could not find it' },
   expectations: {
     judge: { pass: false, score: 0.2, details: 'score 0.2: incomplete' },

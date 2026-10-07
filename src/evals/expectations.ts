@@ -18,7 +18,7 @@ import type {
 import type { ClientResponse } from './caseExecution.js';
 import type { TraceEvidence } from './evalFrameworkTypes.js';
 import type { JudgeCaseSource } from '../judge/judgeContract.js';
-import type { ExternalHostMetadata } from './externalHost/types.js';
+import type { ClientMetadata } from './externalHost/types.js';
 import type { EvalExpectationResult } from '../types/index.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import {
@@ -46,7 +46,7 @@ export interface GradedExecution {
   /** Normalized client evidence. Absent for clients that don't report it. */
   evidence?: TraceEvidence;
   /** External host metadata, whose trace source decides tool-evidence quality. */
-  externalHost?: ExternalHostMetadata;
+  clientMetadata?: ClientMetadata;
 }
 
 export interface ExpectationOutcome {
@@ -58,7 +58,7 @@ export interface ExpectationOutcome {
    * Expected, unexpected and missed calls, when `toolsTriggered` was graded
    * on sufficient evidence and the case ran on a host.
    */
-  mcpHostTrace?: EvalCaseResult['mcpHostTrace'];
+  toolCallTrace?: EvalCaseResult['toolCallTrace'];
 }
 
 /**
@@ -201,7 +201,7 @@ function isToolCall(entry: { kind?: string }): boolean {
 function toolTraceView(
   expectation: NonNullable<EvalAssertions['toolsTriggered']>,
   graded: GradedExecution & { hostResponse: ClientResponse }
-): NonNullable<EvalCaseResult['mcpHostTrace']> {
+): NonNullable<EvalCaseResult['toolCallTrace']> {
   // Match on the mapped response the validator graded.
   const mapped = graded.response as ClientResponse;
   const match = matchToolCalls(mapped.events ?? mapped.toolCalls, expectation);
@@ -272,7 +272,7 @@ export async function evaluateExpectations(
       outcome.toolPrecision = validation.metrics?.precision;
       outcome.toolRecall = validation.metrics?.recall;
       if (graded.hostResponse)
-        outcome.mcpHostTrace = toolTraceView(expectBlock.toolsTriggered, {
+        outcome.toolCallTrace = toolTraceView(expectBlock.toolsTriggered, {
           ...graded,
           hostResponse: graded.hostResponse,
         });

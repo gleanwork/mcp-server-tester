@@ -54,7 +54,7 @@ function completedSummary(evalConfig: EvalConfig): EvaluationSummary {
     },
   ];
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     configId: evalConfig.name,
     contentHash: createHash('sha256')
       .update(JSON.stringify(evalConfig))

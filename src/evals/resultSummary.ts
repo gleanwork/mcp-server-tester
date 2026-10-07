@@ -21,7 +21,7 @@ function compactCase(result: EvalCaseResult): Record<string, unknown> {
     dataset: result.datasetName,
     pass: result.pass,
     error: result.error,
-    scenario: result.request?.scenario ?? '',
+    scenario: result.request?.input ?? '',
     judges: judge
       ? {
           pass: judge.pass,

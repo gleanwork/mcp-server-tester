@@ -14,7 +14,7 @@ import {
 } from './variantComparison.js';
 import type { CaseGrouping } from './variantComparison.js';
 
-type Trace = NonNullable<IterationResult['mcpHostTrace']>;
+type Trace = NonNullable<IterationResult['toolCallTrace']>;
 
 interface CaseSpec {
   id: string;
@@ -31,12 +31,12 @@ function caseResult(spec: CaseSpec): EvalCaseResult {
   const iterations: IterationResult[] = spec.trials.map((pass, i) => ({
     pass,
     durationMs: 1,
-    ...(spec.traces?.[i] ? { mcpHostTrace: spec.traces[i] } : {}),
+    ...(spec.traces?.[i] ? { toolCallTrace: spec.traces[i] } : {}),
     ...(spec.error?.[i] ? { error: spec.error[i] } : {}),
     ...(spec.infra?.[i] ? { isInfrastructureError: true } : {}),
     ...(spec.tokens !== undefined
       ? {
-          hostUsage: {
+          clientUsage: {
             inputTokens: spec.tokens,
             outputTokens: 0,
             durationMs: 0,
@@ -52,19 +52,18 @@ function caseResult(spec: CaseSpec): EvalCaseResult {
   return {
     id: spec.id,
     datasetName: 'ds',
-    toolName: 'mcp_host',
     source: 'eval',
     pass: rate === 1,
     expectations: {},
     durationMs: 1,
     tags: spec.tags,
     request: {
-      scenario: `Prompt for ${spec.id}`,
-      expect: { toolsTriggered: { calls: [{ name: 'search' }] } },
+      input: `Prompt for ${spec.id}`,
+      assertions: { toolsTriggered: { calls: [{ name: 'search' }] } },
     },
     ...(iterations.length > 1 ? { iterationResults: iterations } : {}),
-    ...(iterations.length === 1 && iterations[0]!.mcpHostTrace
-      ? { mcpHostTrace: iterations[0]!.mcpHostTrace }
+    ...(iterations.length === 1 && iterations[0]!.toolCallTrace
+      ? { toolCallTrace: iterations[0]!.toolCallTrace }
       : {}),
   };
 }

@@ -41,7 +41,7 @@ Pick the metric before proposing anything:
 | `toolPrecision` | The LLM calls _extra_ tools — descriptions over-trigger or overlap.  |
 | `toolF1`        | Balance both.                                                        |
 
-Diagnose first: run the dataset once, read `caseResults[].mcpHostTrace` (calls marked `unexpected`, tools in `missed`) to see _which_ tools mis-trigger and _why_.
+Diagnose first: run the dataset once, read `caseResults[].toolCallTrace` (calls marked `unexpected`, tools in `missed`) to see _which_ tools mis-trigger and _why_.
 
 ## Step 2 — Propose variants from evidence, not vibes
 
@@ -159,7 +159,7 @@ Pair it with the human-readable summary: what changed, why it worked (tie back t
 ## Checklist
 
 - [ ] Metric chosen from observed failure mode, not defaulted blindly
-- [ ] Diagnosed `mcpHostTrace` before proposing variants
+- [ ] Diagnosed `toolCallTrace` before proposing variants
 - [ ] Variant `id`s are stable and `description`s state the hypothesis
 - [ ] `defaultTrials` >= 5 (non-determinism; 10 for decisions that matter)
 - [ ] Dataset and server source untouched

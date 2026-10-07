@@ -19,11 +19,11 @@
       "equals": 5
     },
     {
-      "path": "variants[name=native].result.caseResults[0].mcpHostTrace.calls.length",
+      "path": "variants[name=native].result.caseResults[0].toolCallTrace.calls.length",
       "equals": 5
     },
     {
-      "path": "variants[name=native].result.caseResults[0].mcpHostTrace.calls[0].name",
+      "path": "variants[name=native].result.caseResults[0].toolCallTrace.calls[0].name",
       "equals": "github.search_issues"
     },
     {

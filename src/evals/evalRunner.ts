@@ -1,3 +1,4 @@
+import { rejectRenamedOptions } from './renamedKeys.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import { simulationTrace } from './hostTrace.js';
 import {
@@ -199,7 +200,7 @@ export interface EvalRunnerResult {
   /**
    * Aggregate token usage from every client case's model calls.
    */
-  totalHostUsage?: UsageMetrics;
+  totalClientUsage?: UsageMetrics;
 
   /**
    * Aggregate token usage of judges across all cases, from judges that report it.
@@ -422,7 +423,7 @@ export interface EvalCaseOptions {
   /**
    * Runtime tool override variant id for reporter/debug metadata.
    */
-  toolOverrideVariantId?: string;
+  toolVariantId?: string;
 }
 
 function createToolOverrideMCP(
@@ -541,6 +542,12 @@ function didCasePass(
   );
 }
 
+/** Run options renamed in 2.0: passing the old name fails with the new one. */
+const RENAMED_RUN_OPTIONS = {
+  mcpHostModel: 'model',
+  toolOverrideVariantId: 'toolVariantId',
+} as const;
+
 /**
  * Builds the request metadata from an eval case for inclusion in results.
  */
@@ -548,20 +555,20 @@ function buildRequest(
   evalCase: EvalCase,
   run: EvalCaseOptions
 ): EvalCaseRequest {
-  const toolOverrideVariantId = run.toolOverrideVariantId;
+  const toolVariantId = run.toolVariantId;
   const request: EvalCaseRequest = {};
   if (evalCase.description) request.description = evalCase.description;
-  if (toolOverrideVariantId !== undefined) {
-    request.toolOverrideVariantId = toolOverrideVariantId;
+  if (toolVariantId !== undefined) {
+    request.toolVariantId = toolVariantId;
   }
-  if (evalCase.trials !== undefined) request.iterations = evalCase.trials;
+  if (evalCase.trials !== undefined) request.trials = evalCase.trials;
   if (evalCase.passThreshold !== undefined) {
-    request.accuracyThreshold = evalCase.passThreshold;
+    request.passThreshold = evalCase.passThreshold;
   }
   if (evalCase.judgeReps !== undefined) request.judgeReps = evalCase.judgeReps;
   if (evalCase.tags) request.tags = evalCase.tags;
   if (evalCase.assertions) {
-    request.expect = sanitizeReporterValue(evalCase.assertions) as Record<
+    request.assertions = sanitizeReporterValue(evalCase.assertions) as Record<
       string,
       unknown
     >;
@@ -574,9 +581,10 @@ function buildRequest(
     (evalCase.client === undefined || evalCase.client === run.client
       ? run.model
       : undefined);
-  if (client !== undefined) request.client = client;
+  // A case that names no client runs on mst (see playwrightClientOf).
+  request.client = client ?? 'mst';
   if (model !== undefined) request.model = model;
-  request.scenario = evalCase.input;
+  request.input = evalCase.input;
   if (evalCase.expected?.answer !== undefined) {
     const answer = evalCase.expected.answer;
     request.reference =
@@ -690,7 +698,7 @@ async function runSingleIteration(
     (hostResponse && !hostResponse.success
       ? (hostResponse.error ?? 'Host execution failed.')
       : undefined);
-  const externalHost = host?.externalHost ?? hostResponse?.externalHost;
+  const clientMetadata = host?.clientMetadata ?? hostResponse?.clientMetadata;
 
   let outcome: ExpectationOutcome = { expectations: {} };
   if (!error && evalCase.assertions) {
@@ -702,20 +710,19 @@ async function runSingleIteration(
           : response,
         hostResponse,
         evidence,
-        externalHost,
+        clientMetadata,
       }
     );
   }
 
-  const hostUsage = host?.usage ?? hostResponse?.usage;
+  const clientUsage = host?.usage ?? hostResponse?.usage;
   const judgeUsage = caseJudgeUsage(outcome.expectations.judge);
-  const hostDiagnostics = host?.diagnostics ?? hostResponse?.diagnostics;
+  const clientDiagnostics = host?.diagnostics ?? hostResponse?.diagnostics;
 
   // Build result - use test context for authType and project (Playwright is source of truth)
   return {
     id: evalCase.id,
     datasetName: options.datasetName ?? 'single-case',
-    toolName: 'mcp_host',
     source: 'eval',
     pass: didCasePass(error, outcome.expectations),
     request: buildRequest(evalCase, options),
@@ -731,14 +738,14 @@ async function runSingleIteration(
     tags: evalCase.tags,
     toolPrecision: outcome.toolPrecision,
     toolRecall: outcome.toolRecall,
-    mcpHostTrace: outcome.mcpHostTrace,
-    hostEvidence: evidence,
+    toolCallTrace: outcome.toolCallTrace,
+    traceEvidence: evidence,
     ...(host ? { trace: caseTrace(host, evidence, error) } : {}),
-    ...(hostDiagnostics ? { hostDiagnostics } : {}),
-    hostUsage,
+    ...(clientDiagnostics ? { clientDiagnostics } : {}),
+    clientUsage,
     ...(judgeUsage !== undefined && { judgeUsage }),
-    hostTelemetry: host?.telemetry,
-    externalHost,
+    clientTelemetry: host?.telemetry,
+    clientMetadata,
   };
 }
 
@@ -767,6 +774,7 @@ export async function runEvalCase(
   context: EvalContext,
   options: EvalCaseOptions = {}
 ): Promise<EvalCaseResult> {
+  rejectRenamedOptions(options, RENAMED_RUN_OPTIONS, 'runEvalCase');
   if (options.plugins) installPlugins(options.plugins);
   const iterations = evalCase.trials ?? 1;
 
@@ -790,18 +798,18 @@ export async function runEvalCase(
         durationMs: result.durationMs,
         error: result.error,
         isInfrastructureError: infraError,
-        mcpHostTrace: result.mcpHostTrace,
-        hostEvidence: result.hostEvidence,
+        toolCallTrace: result.toolCallTrace,
+        traceEvidence: result.traceEvidence,
         ...(result.trace ? { trace: result.trace } : {}),
-        ...(result.hostDiagnostics
-          ? { hostDiagnostics: result.hostDiagnostics }
+        ...(result.clientDiagnostics
+          ? { clientDiagnostics: result.clientDiagnostics }
           : {}),
-        hostUsage: result.hostUsage,
+        clientUsage: result.clientUsage,
         ...(result.judgeUsage !== undefined && {
           judgeUsage: result.judgeUsage,
         }),
-        hostTelemetry: result.hostTelemetry,
-        externalHost: result.externalHost,
+        clientTelemetry: result.clientTelemetry,
+        clientMetadata: result.clientMetadata,
         ...iterationSkillLoads(result.response),
       });
     } catch (err) {
@@ -834,7 +842,6 @@ export async function runEvalCase(
     : {
         id: evalCase.id,
         datasetName: options.datasetName ?? 'single-case',
-        toolName: 'mcp_host',
         source: 'eval',
         pass: false,
         error: iterationResults[0]?.error,
@@ -846,8 +853,8 @@ export async function runEvalCase(
         request: buildRequest(evalCase, options),
       };
 
-  const totalHostUsage = iterationResults.reduce(
-    (acc, r) => sumUsage(acc, r.hostUsage),
+  const totalClientUsage = iterationResults.reduce(
+    (acc, r) => sumUsage(acc, r.clientUsage),
     undefined as UsageMetrics | undefined
   );
 
@@ -860,9 +867,9 @@ export async function runEvalCase(
     iterationResults,
     infrastructureErrorCount: infraErrors.length,
     durationMs: iterationResults.reduce((sum, r) => sum + r.durationMs, 0),
-    hostUsage: totalHostUsage,
+    clientUsage: totalClientUsage,
     judgeUsage: sumJudgeUsage(iterationResults.map((r) => r.judgeUsage)),
-    hostTelemetry: undefined,
+    clientTelemetry: undefined,
   };
 }
 
@@ -964,6 +971,7 @@ export async function runEvalDataset(
   options: EvalRunnerOptions,
   context: EvalContext
 ): Promise<EvalRunnerResult> {
+  rejectRenamedOptions(options, RENAMED_RUN_OPTIONS, 'runEvalDataset');
   const {
     dataset,
     stopOnFailure = false,
@@ -981,7 +989,7 @@ export async function runEvalDataset(
     toolOverrides,
     judgeModel,
   } = options;
-  const mcpHostModel = options.model;
+  const model = options.model;
   if (options.plugins) installPlugins(options.plugins);
 
   const startTime = Date.now();
@@ -1064,7 +1072,7 @@ export async function runEvalDataset(
       executeCase: options.executeCase,
       toolMap: options.toolMap,
       datasetName: dataset.name,
-      toolOverrideVariantId: toolOverrides?.id,
+      toolVariantId: toolOverrides?.id,
     });
 
     if (onCaseComplete) {
@@ -1098,15 +1106,15 @@ export async function runEvalDataset(
     timestamp: new Date().toISOString(),
     packageVersion: packageJson.version,
     ...(toolOverrides !== undefined && {
-      toolOverrideVariantId: toolOverrides.id,
+      toolVariantId: toolOverrides.id,
     }),
-    ...(mcpHostModel !== undefined && { mcpHostModel }),
+    ...(model !== undefined && { model }),
     ...(judgeModel !== undefined && { judgeModel }),
     ...protocolMetadata(context, options.protocol),
   };
 
-  const runHostUsage = caseResults.reduce(
-    (acc, r) => sumUsage(acc, r.hostUsage),
+  const runClientUsage = caseResults.reduce(
+    (acc, r) => sumUsage(acc, r.clientUsage),
     undefined as UsageMetrics | undefined
   );
 
@@ -1119,7 +1127,7 @@ export async function runEvalDataset(
     caseResults,
     durationMs: Date.now() - startTime,
     metadata,
-    totalHostUsage: runHostUsage,
+    totalClientUsage: runClientUsage,
     ...(runJudgeUsage !== undefined && { totalJudgeUsage: runJudgeUsage }),
   };
 
@@ -1175,16 +1183,16 @@ export async function runEvalDataset(
   }
 
   // Aggregate tool precision/recall/F1 across cases that have those metrics
-  const mcpHostCases = caseResults.filter(
+  const toolCallCases = caseResults.filter(
     (r) => r.toolPrecision !== undefined || r.toolRecall !== undefined
   );
-  if (mcpHostCases.length > 0) {
+  if (toolCallCases.length > 0) {
     const avgPrec =
-      mcpHostCases.reduce((s, r) => s + (r.toolPrecision ?? 0), 0) /
-      mcpHostCases.length;
+      toolCallCases.reduce((s, r) => s + (r.toolPrecision ?? 0), 0) /
+      toolCallCases.length;
     const avgRecall =
-      mcpHostCases.reduce((s, r) => s + (r.toolRecall ?? 0), 0) /
-      mcpHostCases.length;
+      toolCallCases.reduce((s, r) => s + (r.toolRecall ?? 0), 0) /
+      toolCallCases.length;
     result.datasetToolPrecision = avgPrec;
     result.datasetToolRecall = avgRecall;
     result.datasetToolF1 =
@@ -1206,9 +1214,9 @@ export async function runEvalDataset(
         metadata: {
           datasetName: dataset.name,
           ...(toolOverrides?.id !== undefined && {
-            toolOverrideVariantId: toolOverrides.id,
+            toolVariantId: toolOverrides.id,
           }),
-          ...(mcpHostModel !== undefined && { mcpHostModel }),
+          ...(model !== undefined && { model }),
           ...(judgeModel !== undefined && { judgeModel }),
           ...(gitHash !== undefined && { gitHash }),
           ...storedProtocolMetadata(metadata.protocol),

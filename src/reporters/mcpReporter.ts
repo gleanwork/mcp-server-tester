@@ -344,8 +344,8 @@ export default class MCPReporter implements Reporter {
 
     const failed = total - passed;
 
-    const totalHostUsage = this.allResults.reduce(
-      (acc, r) => sumUsage(acc, r.hostUsage),
+    const totalClientUsage = this.allResults.reduce(
+      (acc, r) => sumUsage(acc, r.clientUsage),
       undefined as UsageMetrics | undefined
     );
 
@@ -364,7 +364,7 @@ export default class MCPReporter implements Reporter {
         passRate: passRate({ passed, total }),
         datasetBreakdown,
         expectationBreakdown,
-        totalHostUsage,
+        totalClientUsage,
       },
       results: this.allResults,
       conformanceChecks:
