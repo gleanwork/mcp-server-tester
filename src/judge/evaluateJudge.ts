@@ -1,6 +1,6 @@
 /**
  * The one way a judge runs, for every caller (matchers, validators, eval
- * expectations and suite manifests) and every judge (the built-in `rubric`
+ * expectations and suite eval configs) and every judge (the built-in `rubric`
  * judge and plugin judges).
  */
 import type { ValidationResult } from '../assertions/validators/types.js';

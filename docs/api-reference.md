@@ -4,16 +4,16 @@ Complete API documentation for `@gleanwork/mcp-server-tester`.
 
 ## Entry points
 
-| Import from                                          | Contents                                                                                                                                       | Stability                                       |
-| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| `@gleanwork/mcp-server-tester`                       | Fixtures, matchers and validators, the MCP client, config, datasets with `runEvalDataset` and `runEvalCase`, judges, conformance, Agent Skills | Stable                                          |
-| `@gleanwork/mcp-server-tester/fixtures/mcp`          | `test` and `assertions` with the MCP fixtures and matchers                                                                                     | Stable                                          |
-| `@gleanwork/mcp-server-tester/fixtures/mcpAuth`      | Auth fixtures                                                                                                                                  | Stable                                          |
-| `@gleanwork/mcp-server-tester/reporters/mcpReporter` | The MCP reporter                                                                                                                               | Stable                                          |
-| `@gleanwork/mcp-server-tester/evals`                 | The evaluation framework: manifests, suites and batches, extension definition types, metrics, result stores, comparisons, variant experiments  | Stable                                          |
-| `@gleanwork/mcp-server-tester/auth`                  | Low-level OAuth: discovery, token storage, client credentials                                                                                  | Stable                                          |
-| `@gleanwork/mcp-server-tester/experimental/clients`  | Desktop-run metadata types, Cowork settings and audit, host plugins                                                                            | Experimental: may change between minor versions |
-| `@gleanwork/mcp-server-tester/types`                 | The root's shared types on their own, without runtime code                                                                                     | Stable                                          |
+| Import from                                          | Contents                                                                                                                                         | Stability                                       |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------- |
+| `@gleanwork/mcp-server-tester`                       | Fixtures, matchers and validators, the MCP client, config, datasets with `runEvalDataset` and `runEvalCase`, judges, conformance, Agent Skills   | Stable                                          |
+| `@gleanwork/mcp-server-tester/fixtures/mcp`          | `test` and `assertions` with the MCP fixtures and matchers                                                                                       | Stable                                          |
+| `@gleanwork/mcp-server-tester/fixtures/mcpAuth`      | Auth fixtures                                                                                                                                    | Stable                                          |
+| `@gleanwork/mcp-server-tester/reporters/mcpReporter` | The MCP reporter                                                                                                                                 | Stable                                          |
+| `@gleanwork/mcp-server-tester/evals`                 | The evaluation framework: eval configs, suites and batches, extension definition types, metrics, result stores, comparisons, variant experiments | Stable                                          |
+| `@gleanwork/mcp-server-tester/auth`                  | Low-level OAuth: discovery, token storage, client credentials                                                                                    | Stable                                          |
+| `@gleanwork/mcp-server-tester/experimental/clients`  | Desktop-run metadata types, Cowork settings and audit, host plugins                                                                              | Experimental: may change between minor versions |
+| `@gleanwork/mcp-server-tester/types`                 | The root's shared types on their own, without runtime code                                                                                       | Stable                                          |
 
 The `./evals`, `./auth` and `./experimental/clients` subpaths are ESM only, and CommonJS code cannot `require` them. The ESM root and those three subpaths share one copy of the library, so anything registered through one is visible through the others. The CommonJS root is a separate copy; don't mix it with ESM imports of the subpaths. Optional desktop-host fields on root result types (such as `EvalCaseResult.externalHost`) are typed from `./experimental/clients` and share its stability.
 
@@ -694,7 +694,7 @@ Run a tool-metadata variant experiment: establish a baseline, inject each candid
 
 **Returns:** `VariantExperimentResult`
 
-- `baseline` - The baseline run: no tool variant on a dataset; on a suite, the base arm as configured (variants replace its `toolOverrides`)
+- `baseline` - The baseline run: no tool variant on a dataset; on a suite, the base variant as configured (candidates replace its `tools`)
 - `grouping` - `'declared'` (from `regressionTag`) or `'grouping-run'`; `groupingBaseline` holds the extra run when one was needed
 - `rounds` - Every round's candidates with per-candidate `result`, `comparison`, `metricValue` and `metricDelta` (without held-out cases), `measurement` (per-group pass rates, changes with p-values and verdicts, and `brokenCaseIds`), `improvement` and `fixes` (the clearly-better call, adjusted for every variant tried), `disqualified`
 - `winner` - Best non-disqualified candidate across all rounds
@@ -719,20 +719,20 @@ if (result.proposal?.recommendation === 'apply') {
 }
 ```
 
-**On a suite.** Pass `suite` instead of a dataset and context, and the variants run as arms of the manifest, on any host that can take tool variants: in-process for the SDK hosts, through MST's tool proxy for plugin hosts and `claude-code`. The base arm (`suite.arm`, or the manifest's first arm) is the baseline; each variant runs as a copy of it with the variant as its `toolOverrides`.
+**On a suite.** Pass `suite` instead of a dataset and context, and the candidates run as the eval config's variants, on any client that can show tool metadata: in-process for `mst`, through MST's tool proxy for plugin clients, `claude-code` and `cowork`. The base variant (`suite.baseVariant`, or the eval config's baseline) is the baseline; each candidate runs as a copy of it with the candidate's tool metadata as its `tools`.
 
 ```typescript
 const result = await runVariantExperiment({
-  suite: { manifestPath: './eval-manifest.json', arm: 'control' },
+  suite: { configPath: './eval.json', baseVariant: 'control' },
   variants: [conciseSearch, verboseSearch],
-  metric: 'input_tokens_mean', // passRate, trialPassRate, or any numeric arm metric
+  metric: 'input_tokens_mean', // passRate, trialPassRate, or any numeric variant metric
   better: 'lower',
 });
 ```
 
-- `metric` - `passRate` (default), `trialPassRate`, or any numeric key of an arm's `metrics`. A candidate that reports no value for it is disqualified, with `metricUnavailable: true`.
+- `metric` - `passRate` (default), `trialPassRate`, or any numeric key of a variant's `metrics`. A candidate that reports no value for it is disqualified, with `metricUnavailable: true`.
 - `better` - `'higher'` (default) or `'lower'`, for tokens, cost or time. Ranking, `minImprovement` and the recommendation follow it; `metricDelta` and `proposal.delta` stay candidate minus baseline.
-- `suite` also takes `rootDir`, `pluginPaths`, `plugins` and `secretsFile`, as `runEvalSuite` does. Static `variants` run in one suite with the baseline; later rounds run as their own suite. Variant ids must be unique and differ from the base arm's name. Each run is stored like any other run of the manifest.
+- `suite` also takes `rootDir`, `pluginPaths`, `plugins` and `secretsFile`, as `runEvalSuite` does. Static `variants` run in one suite with the baseline; later rounds run as their own suite. Variant ids must be unique and differ from the base variant's name. Each run is stored like any other run of the eval config.
 
 A candidate that breaks cases that work today is disqualified from winning unless `allowRegressions: true`; the best candidate tried is still surfaced in `proposal` with `recommendation: 'reject'` so an agent can see what broke. See [MCP Host Simulation](./mcp-host.md#driving-it-from-an-agent-runvariantexperiment) for the full agent-loop example.
 

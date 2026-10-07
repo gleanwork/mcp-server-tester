@@ -1,13 +1,14 @@
+import { rejectRenamedOptions } from './renamedKeys.js';
 import crypto from 'node:crypto';
 import { describeError } from '../utils/describeError.js';
 import { resolveStorePaths } from './builtinResultStores.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import { loadEvalManifest, type EvalManifest } from './evalManifest.js';
-import { resolveResultStoreConfig } from './manifestValidation.js';
-import { manifestIdentity } from './manifestIdentity.js';
-import { resolveManifestExtends } from './manifestExtends.js';
+import { loadEvalConfig, type EvalConfig } from './evalConfig.js';
+import { resolveResultStoreConfig } from './configValidation.js';
+import { configIdentity } from './configIdentity.js';
+import { resolveConfigExtends } from './configExtends.js';
 import type { Plugin } from '../plugins/plugin.js';
 import { loadSuitePlugins } from './suitePlugins.js';
 import { runEvalSuite, type RunEvalSuiteOptions } from './runEvalSuite.js';
@@ -51,12 +52,14 @@ const CompletedResultSchema = z.object({
 });
 const CompletedSummarySchema = z.object({
   schemaVersion: z.literal(1),
-  manifestId: z.string(),
+  configId: z.string(),
   contentHash: z.string(),
-  manifestName: z.string(),
+  configName: z.string(),
   timestamp: z.iso.datetime(),
   durationMs: z.number().nonnegative(),
-  arms: z.array(z.object({ name: z.string(), result: CompletedResultSchema })),
+  variants: z.array(
+    z.object({ name: z.string(), result: CompletedResultSchema })
+  ),
   metrics: z.object({
     total: z.number().int().nonnegative(),
     passed: z.number().int().nonnegative(),
@@ -70,7 +73,7 @@ const StoredSummarySchema = z.object({
   id: z.string().min(1),
   createdAt: z.iso.datetime(),
   metadata: z.object({
-    labels: z.object({ manifestId: z.string(), contentHash: z.string() }),
+    labels: z.object({ configId: z.string(), contentHash: z.string() }),
   }),
   data: CompletedSummarySchema,
 });
@@ -78,30 +81,34 @@ const StoredSummarySchema = z.object({
 function isMatchingCompletedSummary(
   artifact: unknown,
   artifactId: string,
-  manifest: EvalManifest
+  evalConfig: EvalConfig
 ): boolean {
   const parsed = StoredSummarySchema.safeParse(artifact);
   if (!parsed.success) return false;
   const { data: summary, metadata } = parsed.data;
-  const identity = manifestIdentity(manifest);
+  const identity = configIdentity(evalConfig);
   if (
     parsed.data.id !== artifactId ||
-    metadata.labels.manifestId !== identity.manifestId ||
+    metadata.labels.configId !== identity.configId ||
     metadata.labels.contentHash !== identity.contentHash ||
-    summary.manifestId !== identity.manifestId ||
+    summary.configId !== identity.configId ||
     summary.contentHash !== identity.contentHash ||
-    summary.manifestName !== manifest.name
+    summary.configName !== evalConfig.name
   )
     return false;
-  const expectedArms = manifest.arms?.length
-    ? manifest.arms.map((arm) => arm.name)
+  const expectedVariants = evalConfig.variants?.length
+    ? evalConfig.variants.map((variant) => variant.name)
     : ['default'];
   if (
-    summary.arms.length !== expectedArms.length ||
-    summary.arms.some((arm, index) => arm.name !== expectedArms[index])
+    summary.variants.length !== expectedVariants.length ||
+    summary.variants.some(
+      (variant, index) => variant.name !== expectedVariants[index]
+    )
   )
     return false;
-  const results = summary.arms.flatMap((arm) => arm.result.caseResults);
+  const results = summary.variants.flatMap(
+    (variant) => variant.result.caseResults
+  );
   if (
     results.length !== summary.results.length ||
     results.some(
@@ -113,7 +120,7 @@ function isMatchingCompletedSummary(
     return false;
   return [
     { ...summary.metrics, caseResults: summary.results },
-    ...summary.arms.map((arm) => arm.result),
+    ...summary.variants.map((variant) => variant.result),
   ].every(
     (result) =>
       result.total === result.caseResults.length &&
@@ -123,41 +130,41 @@ function isMatchingCompletedSummary(
 }
 
 async function hasMatchingSavedResult(
-  manifestPath: string,
+  configPath: string,
   rootDir: string,
   pluginPaths?: string[],
   plugins?: readonly Plugin[]
 ): Promise<boolean> {
   try {
-    const loaded = loadEvalManifest(manifestPath, { rootDir });
+    const loaded = loadEvalConfig(configPath, { rootDir });
     // A shared config may supply the store, so resolve before deciding.
     if (!loaded.results?.store && !loaded.extends?.length) return false;
     const namespaces = await loadSuitePlugins({
-      manifestPath,
-      manifest: loaded,
+      configPath,
+      evalConfig: loaded,
       rootDir,
       pluginPaths,
       plugins,
     });
     // Identified as runEvalSuite identifies it: with its shared configs applied.
-    const manifest = resolveManifestExtends(loaded, namespaces);
-    if (!manifest.results?.store) return false;
-    // Another manifest in this batch may have loaded a plugin this one doesn't list.
+    const evalConfig = resolveConfigExtends(loaded, namespaces);
+    if (!evalConfig.results?.store) return false;
+    // Another eval config in this batch may have loaded a plugin this one doesn't list.
     const { definition, config } = resolveResultStoreConfig(
-      manifest.results.store,
+      evalConfig.results.store,
       { namespaces }
     );
-    // Relative store paths resolve like the suite's: manifest directory, then rootDir.
+    // Relative store paths resolve like the suite's: eval config directory, then rootDir.
     const store = definition.create(
       resolveStorePaths(config, {
-        manifestDir: path.dirname(path.resolve(manifestPath)),
+        configDir: path.dirname(path.resolve(configPath)),
         rootDir,
       })
     );
-    const identity = manifestIdentity(manifest);
+    const identity = configIdentity(evalConfig);
     for (const candidate of await store.listArtifacts('eval-run-summary')) {
       if (
-        candidate.metadata?.labels?.manifestId !== identity.manifestId ||
+        candidate.metadata?.labels?.configId !== identity.configId ||
         candidate.metadata?.labels?.contentHash !== identity.contentHash
       )
         continue;
@@ -166,7 +173,7 @@ async function hasMatchingSavedResult(
           isMatchingCompletedSummary(
             await store.loadArtifact('eval-run-summary', candidate.id),
             candidate.id,
-            manifest
+            evalConfig
           )
         )
           return true;
@@ -180,31 +187,32 @@ async function hasMatchingSavedResult(
   return false;
 }
 
-function resolveManifestPaths(
+function resolveConfigPaths(
   options: RunEvalBatchOptions,
   rootDir: string
 ): Promise<string[]> {
-  if (options.manifestPaths?.length)
-    return Promise.resolve(options.manifestPaths);
-  if (!options.manifestDir)
+  if (options.configPaths?.length) return Promise.resolve(options.configPaths);
+  if (!options.configDir)
     return Promise.reject(
-      new Error('At least one manifest path or manifest directory is required.')
+      new Error(
+        'At least one eval config path or eval config directory is required.'
+      )
     );
-  return fs.readdir(path.resolve(rootDir, options.manifestDir)).then((names) =>
+  return fs.readdir(path.resolve(rootDir, options.configDir)).then((names) =>
     names
       .filter((name) => name.endsWith('.json'))
       .sort()
-      .map((name) => path.resolve(rootDir, options.manifestDir!, name))
+      .map((name) => path.resolve(rootDir, options.configDir!, name))
   );
 }
 
 function outputDirectory(
   outputRoot: string | undefined,
-  manifestPath: string,
+  configPath: string,
   rootDir: string
 ): string | undefined {
   if (!outputRoot) return undefined;
-  const absolute = path.resolve(rootDir, manifestPath);
+  const absolute = path.resolve(rootDir, configPath);
   const stem = path.basename(absolute, path.extname(absolute));
   const hash = crypto
     .createHash('sha256')
@@ -214,39 +222,44 @@ function outputDirectory(
   return path.join(outputRoot, `${stem}-${hash}`);
 }
 
-/** Run multiple manifests with bounded process-level concurrency. */
+/** Run multiple eval configs with bounded process-level concurrency. */
 export async function runEvalBatch(
   options: RunEvalBatchOptions
 ): Promise<RunEvalBatchResult> {
+  rejectRenamedOptions(
+    options,
+    { manifestPaths: 'configPaths', manifestDir: 'configDir' },
+    'runEvalBatch'
+  );
   const rootDir = options.rootDir ?? process.cwd();
-  const manifestPaths = await resolveManifestPaths(options, rootDir);
+  const configPaths = await resolveConfigPaths(options, rootDir);
   if (
     !Number.isFinite(options.workers ?? 1) ||
     !Number.isInteger(options.workers ?? 1) ||
     (options.workers ?? 1) < 1
   )
     throw new Error('workers must be a finite positive integer.');
-  const tasks = manifestPaths.map(
-    (manifestPath) => async (): Promise<EvalBatchItem> => {
+  const tasks = configPaths.map(
+    (configPath) => async (): Promise<EvalBatchItem> => {
       try {
         const outputDir = outputDirectory(
           options.outputRoot,
-          manifestPath,
+          configPath,
           rootDir
         );
         if (
           options.skipExisting &&
           !options.dryRun &&
           (await hasMatchingSavedResult(
-            manifestPath,
+            configPath,
             rootDir,
             options.pluginPaths,
             options.plugins
           ))
         )
-          return { manifestPath, outputDir, skipped: true };
+          return { configPath, outputDir, skipped: true };
         const suiteOptions: RunEvalSuiteOptions = {
-          manifestPath,
+          configPath,
           rootDir,
           pluginPaths: options.pluginPaths,
           plugins: options.plugins,
@@ -255,13 +268,13 @@ export async function runEvalBatch(
           dryRun: options.dryRun,
         };
         return {
-          manifestPath,
+          configPath,
           outputDir,
           result: await runEvalSuite(suiteOptions),
         };
       } catch (error) {
         return {
-          manifestPath,
+          configPath,
           error: describeError(error),
         };
       }

@@ -298,7 +298,7 @@ describe('golden: runEvalSuite hosts', () => {
   async function suite(
     kind: 'run' | 'runBatch',
     variant = '',
-    manifestExtra: Record<string, unknown> = {},
+    configExtra: Record<string, unknown> = {},
     cases: EvalCase[] = [
       {
         id: 'suite-host',
@@ -342,18 +342,18 @@ describe('golden: runEvalSuite hosts', () => {
     });
     // The suite installs its own copy of the test plugin, with this host.
     resetPluginsForTests();
-    const manifestPath = path.join(dir, 'manifest.json');
+    const configPath = path.join(dir, 'eval.json');
     await fs.writeFile(
-      manifestPath,
+      configPath,
       JSON.stringify({
         name: 'golden',
         datasets: [{ type: source }],
         client: type,
         servers: [],
-        ...manifestExtra,
+        ...configExtra,
       })
     );
-    return runEvalSuite({ manifestPath, outputDir: dir, plugins: [plugin] });
+    return runEvalSuite({ configPath, outputDir: dir, plugins: [plugin] });
   }
 
   it.each(['run', 'runBatch'] as const)('%s host', async (kind) => {
@@ -361,12 +361,12 @@ describe('golden: runEvalSuite hosts', () => {
     expect(stable(result.summary.results)).toMatchSnapshot();
   });
 
-  it('manifest judges merge with case judges', async () => {
+  it('eval config judges merge with case judges', async () => {
     const evaluate = vi.fn(
       async (input: JudgeInput, _options: Record<string, unknown>) => ({
         // As before: the response object, not its text, so it scores 0.
         score: String(input.trial.response).includes('sunny') ? 1 : 0,
-        reasoning: 'manifest judge',
+        reasoning: 'eval config judge',
       })
     );
     const result = await suite(
@@ -375,7 +375,7 @@ describe('golden: runEvalSuite hosts', () => {
       {
         judges: [
           {
-            type: 'test/golden-manifest-judge',
+            type: 'test/golden-config-judge',
             reference: 'suite ref',
             count: 2,
           },
@@ -389,7 +389,7 @@ describe('golden: runEvalSuite hosts', () => {
           assertions: {
             passesJudge: [
               {
-                judge: 'test/golden-manifest-judge',
+                judge: 'test/golden-config-judge',
                 reference: 'case ref',
                 options: { count: 3 },
               },
@@ -399,7 +399,7 @@ describe('golden: runEvalSuite hosts', () => {
         },
       ],
       {
-        'golden-manifest-judge': {
+        'golden-config-judge': {
           schema: z.object({}).passthrough(),
           evaluate,
         },
@@ -415,7 +415,7 @@ describe('golden: runEvalSuite hosts', () => {
     expect(
       stable({
         results: result.summary.results,
-        manifestJudgeCalls: evaluate.mock.calls.map(([call, options]) => [
+        configJudgeCalls: evaluate.mock.calls.map(([call, options]) => [
           call.trial.response,
           call.case.expected.answer,
           options,
@@ -424,7 +424,7 @@ describe('golden: runEvalSuite hosts', () => {
       })
     ).toMatchSnapshot();
   });
-  it('a manifest declares two rubric judges and a case overrides one', async () => {
+  it('an eval config declares two rubric judges and a case overrides one', async () => {
     calls.length = 0;
     vi.mocked(createJudge).mockReset();
     // correctness scores 0.6 against the case's 0.9; conciseness 0.8 against 0.7.

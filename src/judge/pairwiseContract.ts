@@ -11,7 +11,7 @@
  *
  * A pairwise verdict is a preference, not a score against a threshold, so it
  * is kept apart from pointwise judges: pointwise judges decide whether a case
- * passes; pairwise judges decide which arm did better.
+ * passes; pairwise judges decide which variant did better.
  */
 
 import type { ZodType } from 'zod';

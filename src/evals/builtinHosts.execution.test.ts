@@ -17,7 +17,7 @@ async function run(host: ClientDefinition, options: ClientRunOptions) {
   const trace = await host.run!(
     { prompt: options.cases[0]!.input, servers: options.servers },
     options.host,
-    { manifest: options.manifest, arm: options.arm }
+    { evalConfig: options.evalConfig, variant: options.variant }
   );
   return hostRunToExecution(trace, host.evidence ?? 'none', options.servers);
 }
@@ -36,7 +36,7 @@ function options(): ClientRunOptions {
     cases: [case_],
     servers: [{ transport: 'http', serverUrl: 'https://example.com' }],
     host: { type: 'mst', model: 'selected' },
-    manifest: { name: 'test', datasets: [] },
+    evalConfig: { name: 'test', datasets: [] },
   };
 }
 beforeEach(() => {
@@ -60,7 +60,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllEnvs());
 describe('built-in host execution', () => {
-  it('exposes different descriptions to SDK arms and retains the selected model', async () => {
+  it('exposes different descriptions to SDK variants and retains the selected model', async () => {
     const descriptions: string[] = [];
     vi.mocked(simulateMCPHost).mockImplementation(
       async (mcp, _scenario, config) => {
@@ -73,12 +73,9 @@ describe('built-in host execution', () => {
     await run(host, options());
     await run(host, {
       ...options(),
-      arm: {
+      variant: {
         name: 'variant',
-        toolOverrides: {
-          id: 'changed',
-          tools: { search: { description: 'variant description' } },
-        },
+        tools: { search: { description: 'variant description' } },
       },
     });
     expect(descriptions).toEqual(['original', 'variant description']);

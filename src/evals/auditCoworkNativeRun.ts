@@ -663,18 +663,18 @@ export async function auditCoworkNativeRun(
       raw.schemaVersion !== 1 ||
       !Array.isArray(raw.results) ||
       raw.results.length > 1000 ||
-      !Array.isArray(raw.arms) ||
-      raw.arms.length > 1000
+      !Array.isArray(raw.variants) ||
+      raw.variants.length > 1000
     )
       throw new AuditFailure('INVALID_RESULTS');
     report.observedCases = raw.results.length;
     if (report.observedCases !== options.expectedCases)
       report.issues.push('CASE_COUNT_MISMATCH');
-    const armCases = raw.arms.flatMap((arm) => {
-      const value = object(object(arm).result).caseResults;
+    const variantCases = raw.variants.flatMap((variant) => {
+      const value = object(object(variant).result).caseResults;
       return Array.isArray(value) ? (value as unknown[]) : [];
     });
-    if (!same(raw.results, armCases))
+    if (!same(raw.results, variantCases))
       report.issues.push('ARM_RESULTS_MISMATCH');
     const ids = new Map<string, CoworkNativeAuditCase>();
     const sessions = new Map<string, CoworkNativeAuditCase>();
@@ -696,17 +696,17 @@ export async function auditCoworkNativeRun(
         }
         ids.set(saved.id, result);
       }
-      const arm = object(
-        raw.arms.find((arm) => {
-          const cases = object(object(arm).result).caseResults;
+      const variant = object(
+        raw.variants.find((variant) => {
+          const cases = object(object(variant).result).caseResults;
           return (
             Array.isArray(cases) &&
             cases.some((entry) => object(entry).id === saved.id)
           );
         })
       );
-      const servers: MCPConfig[] = Array.isArray(arm.servers)
-        ? arm.servers.map((server) => ({
+      const servers: MCPConfig[] = Array.isArray(variant.servers)
+        ? variant.servers.map((server) => ({
             transport: 'http',
             serverUrl: 'https://invalid.local',
             ...(typeof object(server).label === 'string'

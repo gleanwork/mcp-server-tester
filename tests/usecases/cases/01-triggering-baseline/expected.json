@@ -9,11 +9,11 @@
       "equals": 0.5
     },
     {
-      "path": "arms[name=default].metrics.passed_rate",
+      "path": "variants[name=default].metrics.passed_rate",
       "equals": 0.5
     },
     {
-      "path": "arms[name=default].metrics.trial_pass_rate",
+      "path": "variants[name=default].metrics.trial_pass_rate",
       "equals": 0.8
     },
     {
@@ -25,31 +25,31 @@
       "equals": -0.5
     },
     {
-      "path": "arms[name=default].result.caseResults[0].iterationResults.length",
+      "path": "variants[name=default].result.caseResults[0].iterationResults.length",
       "equals": 10
     },
     {
-      "path": "arms[name=default].result.caseResults[0].iterationResults[0].trace.events[0].server",
+      "path": "variants[name=default].result.caseResults[0].iterationResults[0].trace.events[0].server",
       "equals": "agg"
     },
     {
-      "path": "arms[name=default].result.caseResults[0].trace",
+      "path": "variants[name=default].result.caseResults[0].trace",
       "exists": false
     },
     {
-      "path": "previousRun.sameManifest",
+      "path": "previousRun.sameConfig",
       "equals": true
     },
     {
-      "path": "previousRun.arms.default.regressed",
+      "path": "previousRun.variants.default.regressed",
       "equals": ["billing-owner"]
     },
     {
-      "path": "previousRun.arms.default.improved",
+      "path": "previousRun.variants.default.improved",
       "equals": []
     },
     {
-      "path": "previousRun.arms.default.trialPassRateDelta",
+      "path": "previousRun.variants.default.trialPassRateDelta",
       "equals": -0.1
     }
   ],

@@ -79,7 +79,7 @@ const server = {
   auth: { accessTokenEnv: 'ACME_API_TOKEN' },
 };
 const context: ClientRunContext = {
-  manifest: {
+  evalConfig: {
     name: 'cowork',
     datasets: [],
     client: host.type,
@@ -97,8 +97,8 @@ const context: ClientRunContext = {
 };
 const readOnlyContext: ClientRunContext = {
   ...context,
-  manifest: {
-    ...context.manifest,
+  evalConfig: {
+    ...context.evalConfig,
     coworkSetup: { approveWriteTools: false },
   },
 };
@@ -197,8 +197,8 @@ describe('V2 Cowork host', () => {
       );
       const results = await COWORK_HOST.runBatch!([requests()[0]!], {
         ...context,
-        manifest: {
-          ...context.manifest,
+        evalConfig: {
+          ...context.evalConfig,
           coworkSetup:
             approveWriteTools === undefined ? undefined : { approveWriteTools },
         },
@@ -217,7 +217,7 @@ describe('V2 Cowork host', () => {
         );
         expect(options.task).toContain('query one');
       }
-      expect(mocks.setup.mock.calls[0]![0].manifest.coworkSetup).toEqual({
+      expect(mocks.setup.mock.calls[0]![0].evalConfig.coworkSetup).toEqual({
         approveWriteTools: false,
       });
       expect(results[0]!.telemetry).toMatchObject({
@@ -230,7 +230,7 @@ describe('V2 Cowork host', () => {
     const results = await COWORK_HOST.runBatch!(requests(), context);
     expect(mocks.setup).toHaveBeenCalledWith(
       expect.objectContaining({
-        manifest: expect.objectContaining({
+        evalConfig: expect.objectContaining({
           coworkSetup: { approveWriteTools: true },
         }),
       })
@@ -260,7 +260,7 @@ describe('V2 Cowork host', () => {
     expect(mocks.dispose).toHaveBeenCalledOnce();
   });
 
-  it('passes a manifest app pin to setup and records the app on each case', async () => {
+  it('passes an eval config app pin to setup and records the app on each case', async () => {
     const app = {
       name: 'Claude Desktop',
       version: '1.52386.6',
@@ -668,7 +668,7 @@ describe('V2 Cowork host', () => {
       }));
     const stdioContext = {
       ...context,
-      manifest: { ...context.manifest, servers: [evalServer] },
+      evalConfig: { ...context.evalConfig, servers: [evalServer] },
       env: { FAKE_TOKEN: 'secret-fake-token' },
     };
 
@@ -799,7 +799,7 @@ describe('V2 Cowork host', () => {
         expect(results.every((result) => !result.error)).toBe(true);
         expect(selected.prepare).toHaveBeenCalledWith(
           expect.objectContaining({
-            manifest: expect.objectContaining({ servers }),
+            evalConfig: expect.objectContaining({ servers }),
           })
         );
         expect(mocks.readiness).toHaveBeenCalledWith(
@@ -927,7 +927,7 @@ describe('V2 Cowork host', () => {
     it('uses session-owned paths for readiness before submitting any prompt', async () => {
       const results = await COWORK_HOST.runBatch!(batch(), {
         ...stdioContext,
-        manifest: readOnlyContext.manifest,
+        evalConfig: readOnlyContext.evalConfig,
       });
       expect(results.every((result) => !result.error)).toBe(true);
       expect(mocks.setup.mock.calls[0]![0]).not.toHaveProperty('stdioPaths');
@@ -1192,11 +1192,11 @@ describe('V2 Cowork host', () => {
         ],
       })
     );
-    const manifestPath = path.join(dir, 'manifest.json');
+    const configPath = path.join(dir, 'eval.json');
     await fs.writeFile(
-      manifestPath,
+      configPath,
       JSON.stringify({
-        ...context.manifest,
+        ...context.evalConfig,
         maxCases: 2,
         datasets: [{ type: 'file', path: './cases.json' }],
       })
@@ -1204,7 +1204,7 @@ describe('V2 Cowork host', () => {
     const secretsFile = path.join(dir, 'test-env.json');
     await fs.writeFile(secretsFile, JSON.stringify(context.env));
     const batch = await runEvalBatch({
-      manifestPaths: [manifestPath],
+      configPaths: [configPath],
       rootDir: dir,
       secretsFile,
       outputRoot: path.join(dir, 'out'),

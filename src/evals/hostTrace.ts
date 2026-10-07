@@ -10,7 +10,7 @@ import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
 import type { HostExecution } from './caseExecution.js';
 
 /**
- * On a one-server arm, an MCP event that names no server came from that
+ * On a one-server variant, an MCP event that names no server came from that
  * server; give it the server's label so every call is attributable.
  */
 function attributed(events: TraceEvent[], servers: MCPConfig[]): TraceEvent[] {

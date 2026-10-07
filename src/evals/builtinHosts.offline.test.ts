@@ -42,7 +42,13 @@ function run(
   return getHost('mst').run!(
     input,
     { type: 'mst', provider: 'openai', ...config },
-    { manifest: { name: 'offline', datasets: [], toolOverrides } }
+    {
+      evalConfig: {
+        name: 'offline',
+        datasets: [],
+        ...(toolOverrides ? { tools: toolOverrides.tools } : {}),
+      },
+    }
   );
 }
 beforeEach(() => {
@@ -125,7 +131,7 @@ describe('SDK host through the real AI SDK', () => {
         env: { OPENAI_API_KEY: 'host' },
       };
       const context = {
-        manifest: { name: 'offline', datasets: [] },
+        evalConfig: { name: 'offline', datasets: [] },
         env: { OPENAI_API_KEY: 'context' },
       };
       const before = structuredClone({ input, host, context });

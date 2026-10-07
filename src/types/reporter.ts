@@ -484,8 +484,8 @@ export interface EvalCaseResult {
    * iterations, each one's trace is in `iterationResults`.
    */
   trace?: Trace;
-  /** The suite arm that produced this result. */
-  arm?: string;
+  /** The suite variant that produced this result. */
+  variant?: string;
 
   /**
    * Aggregate token usage from the client's model calls for this case.

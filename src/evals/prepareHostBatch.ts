@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { EvalCase } from './datasetTypes.js';
-import type { ClientConfig } from './evalManifest.js';
+import type { ClientConfig } from './evalConfig.js';
 import { clientPatchOf } from './clientFields.js';
 import type {
   ClientDefinition,
@@ -37,10 +37,10 @@ export async function prepareHostBatch(
       (clientPatchOf(c) as ClientConfig | undefined) ?? config;
     if (declaration.type !== config.type)
       throw new Error(
-        'A batch host dataset cannot mix host types. Use separate manifests.'
+        'A batch host dataset cannot mix host types. Use separate eval configs.'
       );
     queues.set(c.id, []);
-    const trials = c.trials ?? context.manifest.trials ?? 1;
+    const trials = c.trials ?? context.evalConfig.trials ?? 1;
     for (let trial = 0; trial < trials; trial++) {
       const scope = randomUUID();
       scopes.push(scope);

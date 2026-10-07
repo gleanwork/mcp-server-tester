@@ -43,14 +43,14 @@ async function suite(caseOverrides: Record<string, unknown> = {}) {
     })
   );
   await fs.writeFile(
-    path.join(dir, 'manifest.json'),
+    path.join(dir, 'eval.json'),
     JSON.stringify({
       name: 'skills-help',
       datasets: ['./cases.json'],
       servers: [{ transport: 'http', serverUrl: 'https://example.com/mcp' }],
       client: 'mst',
       clientOptions: { provider: 'anthropic' },
-      arms: [
+      variants: [
         { name: 'off' },
         { name: 'explicit-off', clientOptions: { skills: 'off' } },
         { name: 'catalog', clientOptions: { skills: 'catalog' } },
@@ -59,16 +59,16 @@ async function suite(caseOverrides: Record<string, unknown> = {}) {
     })
   );
   return runEvalSuite({
-    manifestPath: path.join(dir, 'manifest.json'),
+    configPath: path.join(dir, 'eval.json'),
     rootDir: dir,
   });
 }
 
-describe('skills modes as suite arms', () => {
-  it("passes each arm's vercel-sdk skills mode to the SDK host", async () => {
+describe('skills modes as suite variants', () => {
+  it("passes each variant's vercel-sdk skills mode to the SDK host", async () => {
     const { summary } = await suite();
 
-    expect(summary.arms.map((arm) => arm.name)).toEqual([
+    expect(summary.variants.map((variant) => variant.name)).toEqual([
       'off',
       'explicit-off',
       'catalog',

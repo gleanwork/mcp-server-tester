@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { runEvalSuite } from './runEvalSuite.js';
-import { resolveManifestPath } from './evalManifest.js';
+import { resolveConfigPath } from './evalConfig.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 
@@ -23,22 +23,22 @@ async function tempDir(): Promise<string> {
 }
 
 describe('resolveManifestPath', () => {
-  it('looks next to the manifest, then in rootDir, and defaults to the manifest', async () => {
-    const manifestDir = await tempDir();
+  it('looks next to the eval config, then in rootDir, and defaults to the eval config', async () => {
+    const configDir = await tempDir();
     const rootDir = await tempDir();
-    await fs.writeFile(path.join(manifestDir, 'here.json'), '{}');
+    await fs.writeFile(path.join(configDir, 'here.json'), '{}');
     await fs.writeFile(path.join(rootDir, 'there.json'), '{}');
-    const dirsOf = { manifestDir, rootDir };
-    expect(resolveManifestPath('here.json', dirsOf)).toBe(
-      path.join(manifestDir, 'here.json')
+    const dirsOf = { configDir, rootDir };
+    expect(resolveConfigPath('here.json', dirsOf)).toBe(
+      path.join(configDir, 'here.json')
     );
-    expect(resolveManifestPath('there.json', dirsOf)).toBe(
+    expect(resolveConfigPath('there.json', dirsOf)).toBe(
       path.join(rootDir, 'there.json')
     );
-    expect(resolveManifestPath('store', dirsOf)).toBe(
-      path.join(manifestDir, 'store')
+    expect(resolveConfigPath('store', dirsOf)).toBe(
+      path.join(configDir, 'store')
     );
-    expect(resolveManifestPath('/abs/x', dirsOf)).toBe('/abs/x');
+    expect(resolveConfigPath('/abs/x', dirsOf)).toBe('/abs/x');
   });
 });
 
@@ -59,8 +59,8 @@ function plugin(pass: () => Set<string>): Plugin {
   };
 }
 
-describe('a run is compared with the previous run of the same manifest', () => {
-  it('finds it in the result store, ignoring other manifests that share the store', async () => {
+describe('a run is compared with the previous run of the same eval config', () => {
+  it('finds it in the result store, ignoring other eval configs that share the store', async () => {
     const root = await tempDir();
     const suite = path.join(root, 'suite');
     await fs.mkdir(suite);
@@ -75,26 +75,26 @@ describe('a run is compared with the previous run of the same manifest', () => {
         })),
       })
     );
-    const manifest = (name: string) => ({
+    const evalConfig = (name: string) => ({
       name,
       datasets: ['./cases.json'],
       client: 'base/fixed',
-      // Relative to the manifest, not to rootDir.
+      // Relative to the eval config, not to rootDir.
       results: { store: { type: 'file', dir: './store' } },
     });
     await fs.writeFile(
       path.join(suite, 'one.json'),
-      JSON.stringify(manifest('one'))
+      JSON.stringify(evalConfig('one'))
     );
     await fs.writeFile(
       path.join(suite, 'two.json'),
-      JSON.stringify(manifest('two'))
+      JSON.stringify(evalConfig('two'))
     );
     let passing = new Set(['a', 'b']);
     const host = plugin(() => passing);
     const run = (file: string) =>
       runEvalSuite({
-        manifestPath: path.join(suite, file),
+        configPath: path.join(suite, file),
         rootDir: root,
         outputDir: path.join(root, 'out'),
         plugins: [host],
@@ -102,7 +102,7 @@ describe('a run is compared with the previous run of the same manifest', () => {
 
     const first = await run('one.json');
     expect(first.summary.previousRun).toBeUndefined();
-    // Another manifest's run, in between, is not a baseline for `one`.
+    // Another eval config's run, in between, is not a baseline for `one`.
     passing = new Set();
     await run('two.json');
     passing = new Set(['a']);
@@ -111,10 +111,10 @@ describe('a run is compared with the previous run of the same manifest', () => {
     expect(second.summary.previousRun).toEqual({
       runId: first.summary.runId,
       timestamp: first.summary.timestamp,
-      sameManifest: true,
+      sameConfig: true,
       passRate: 1,
       passRateDelta: -0.5,
-      arms: {
+      variants: {
         default: {
           passRateDelta: -0.5,
           trialPassRateDelta: -0.5,
@@ -128,7 +128,7 @@ describe('a run is compared with the previous run of the same manifest', () => {
     await expect(fs.stat(path.join(suite, 'store'))).resolves.toBeTruthy();
   });
 
-  it('keeps a store next to the manifest even if rootDir has one, and survives a corrupt summary', async () => {
+  it('keeps a store next to the eval config even if rootDir has one, and survives a corrupt summary', async () => {
     const root = await tempDir();
     const suite = path.join(root, 'suite');
     await fs.mkdir(suite);
@@ -161,7 +161,7 @@ describe('a run is compared with the previous run of the same manifest', () => {
     const host = plugin(() => new Set(['a']));
     const run = () =>
       runEvalSuite({
-        manifestPath: path.join(suite, 'm.json'),
+        configPath: path.join(suite, 'm.json'),
         rootDir: root,
         outputDir: path.join(root, 'out'),
         plugins: [host],

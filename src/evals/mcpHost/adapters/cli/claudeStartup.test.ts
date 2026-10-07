@@ -59,7 +59,7 @@ function host(body: string, timeout = 10_000) {
       },
     },
     { type: 'claude-code', timeout },
-    { manifest: { name: 'offline', datasets: [] } }
+    { evalConfig: { name: 'offline', datasets: [] } }
   );
 }
 

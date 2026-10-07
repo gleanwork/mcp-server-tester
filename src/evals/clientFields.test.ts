@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { clientFieldsOf, clientOf, clientPatchOf } from './clientFields.js';
-import { loadEvalManifestFromObject } from './evalManifest.js';
+import { loadEvalConfigFromObject } from './evalConfig.js';
 import { validateEvalCase } from './datasetTypes.js';
-import { resolveManifestExtends } from './manifestExtends.js';
-import { validateManifest } from './manifestValidation.js';
+import { resolveConfigExtends } from './configExtends.js';
+import { validateEvalConfig } from './configValidation.js';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
 
 const HOST_IS_NOW =
@@ -12,19 +12,19 @@ const HOST_IS_NOW =
 
 afterEach(() => resetPluginsForTests());
 
-function load(manifest: Record<string, unknown>) {
-  return loadEvalManifestFromObject(
-    { name: 'm', datasets: ['./cases.json'], ...manifest },
+function load(evalConfig: Record<string, unknown>) {
+  return loadEvalConfigFromObject(
+    { name: 'm', datasets: ['./cases.json'], ...evalConfig },
     { skipDatasetValidation: true }
   );
 }
 
 describe('client, model and clientOptions', () => {
-  it('reject the old host key in a manifest, an arm and a case', () => {
+  it('reject the old host key in an eval config, a variant and a case', () => {
     expect(() => load({ host: { type: 'mst' } })).toThrow(HOST_IS_NOW);
-    expect(() => load({ arms: [{ name: 'a', host: { model: 'x' } }] })).toThrow(
-      HOST_IS_NOW
-    );
+    expect(() =>
+      load({ variants: [{ name: 'a', host: { model: 'x' } }] })
+    ).toThrow(HOST_IS_NOW);
     expect(() =>
       validateEvalCase({ id: 'c', input: 'hi', host: { type: 'mst' } })
     ).toThrow(HOST_IS_NOW);
@@ -55,30 +55,30 @@ describe('client, model and clientOptions', () => {
     );
   });
 
-  it("give an arm its own model, and drop another client's options", () => {
-    const validated = validateManifest(
+  it("give a variant its own model, and drop another client's options", () => {
+    const validated = validateEvalConfig(
       load({
         client: 'mst',
         model: 'claude-sonnet-4-6',
         clientOptions: { temperature: 0.2 },
-        arms: [
+        variants: [
           { name: 'haiku', model: 'claude-haiku-4-5' },
           { name: 'code', client: 'claude-code' },
         ],
       })
     );
-    expect(validated.arms?.[0]).toMatchObject({
+    expect(validated.variants?.[0]).toMatchObject({
       client: 'mst',
       model: 'claude-haiku-4-5',
       clientOptions: { temperature: 0.2 },
     });
-    expect(validated.arms?.[1]?.client).toBe('claude-code');
-    expect(validated.arms?.[1]?.clientOptions ?? {}).not.toHaveProperty(
+    expect(validated.variants?.[1]?.client).toBe('claude-code');
+    expect(validated.variants?.[1]?.clientOptions ?? {}).not.toHaveProperty(
       'temperature'
     );
   });
 
-  it("replace a shared config's client when the manifest sets one", () => {
+  it("replace a shared config's client when the eval config sets one", () => {
     installPlugins([
       {
         meta: { name: 'acme-plugin', namespace: 'acme' },
@@ -99,16 +99,16 @@ describe('client, model and clientOptions', () => {
       },
     ]);
     const base = { name: 'm', datasets: [], extends: ['acme/recommended'] };
-    expect(resolveManifestExtends(base, ['acme'])).toMatchObject({
+    expect(resolveConfigExtends(base, ['acme'])).toMatchObject({
       client: 'acme/echo',
       clientOptions: { region: 'eu' },
       trials: 3,
     });
-    const own = resolveManifestExtends(
+    const own = resolveConfigExtends(
       { ...base, clientOptions: { timeout: 5 } },
       ['acme']
     );
-    // The manifest's options don't land on the shared config's client.
+    // The eval config's options don't land on the shared config's client.
     expect(own.client).toBeUndefined();
     expect(own.clientOptions).toEqual({ timeout: 5 });
     expect(own.trials).toBe(3);

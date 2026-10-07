@@ -121,7 +121,7 @@ export interface StdioMCPConfig {
    */
   transport: 'stdio';
 
-  /** Optional label used when a manifest targets multiple servers. */
+  /** Optional label used when an eval config targets multiple servers. */
   label?: string;
 
   /**
@@ -214,7 +214,7 @@ export interface HttpMCPConfig {
    */
   transport: 'http';
 
-  /** Optional label used when a manifest targets multiple servers. */
+  /** Optional label used when an eval config targets multiple servers. */
   label?: string;
 
   /**

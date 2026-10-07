@@ -4,9 +4,9 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { runEvalSuite } from './runEvalSuite.js';
-import { manifestIdentity } from './manifestIdentity.js';
-import { resolveManifestExtends } from './manifestExtends.js';
-import { loadEvalManifest } from './evalManifest.js';
+import { configIdentity } from './configIdentity.js';
+import { resolveConfigExtends } from './configExtends.js';
+import { loadEvalConfig } from './evalConfig.js';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
 import { assertPlugin, type Plugin } from '../plugins/plugin.js';
 
@@ -19,8 +19,8 @@ afterEach(async () => {
   );
 });
 
-/** A suite directory with one file dataset and the given manifest. */
-async function suiteDir(manifest: Record<string, unknown>): Promise<string> {
+/** A suite directory with one file dataset and the given eval config. */
+async function suiteDir(evalConfig: Record<string, unknown>): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'shared-configs-'));
   dirs.push(dir);
   await fs.writeFile(
@@ -30,12 +30,12 @@ async function suiteDir(manifest: Record<string, unknown>): Promise<string> {
       cases: [{ id: 'one', input: 'Say hello' }],
     })
   );
-  await fs.writeFile(path.join(dir, 'manifest.json'), JSON.stringify(manifest));
+  await fs.writeFile(path.join(dir, 'eval.json'), JSON.stringify(evalConfig));
   return dir;
 }
 
-describe('manifest identity', () => {
-  it('is unchanged for a manifest without extends', async () => {
+describe('eval config identity', () => {
+  it('is unchanged for an eval config without extends', async () => {
     const dir = await suiteDir({
       name: 'identity',
       datasets: ['./cases.json'],
@@ -43,15 +43,15 @@ describe('manifest identity', () => {
       trials: 2,
     });
     const { summary } = await runEvalSuite({
-      manifestPath: path.join(dir, 'manifest.json'),
+      configPath: path.join(dir, 'eval.json'),
       rootDir: dir,
       dryRun: true,
     });
     expect({
-      manifestId: summary.manifestId,
+      configId: summary.configId,
       contentHash: summary.contentHash,
     }).toEqual({
-      manifestId: 'identity',
+      configId: 'identity',
       contentHash:
         'ffb64e7252b1d335266b8f5d27a02801c62ffea003a6e1e6e724419fa6c231d4',
     });
@@ -82,12 +82,12 @@ function acme(configs: Plugin['configs'], namespace = 'acme'): Plugin {
 }
 
 async function dryRun(
-  manifest: Record<string, unknown>,
+  evalConfig: Record<string, unknown>,
   plugins: Plugin[]
 ): Promise<Awaited<ReturnType<typeof runEvalSuite>>> {
-  const dir = await suiteDir(manifest);
+  const dir = await suiteDir(evalConfig);
   return runEvalSuite({
-    manifestPath: path.join(dir, 'manifest.json'),
+    configPath: path.join(dir, 'eval.json'),
     rootDir: dir,
     plugins,
     dryRun: true,
@@ -95,8 +95,8 @@ async function dryRun(
 }
 
 describe('shared configs', () => {
-  it('applies a config under the manifest, which wins per key', async () => {
-    const { manifest } = await dryRun(
+  it('applies a config under the eval config, which wins per key', async () => {
+    const { evalConfig } = await dryRun(
       {
         name: 'extends',
         extends: ['acme/recommended'],
@@ -114,7 +114,7 @@ describe('shared configs', () => {
         }),
       ]
     );
-    expect(manifest).toMatchObject({
+    expect(evalConfig).toMatchObject({
       client: 'acme/echo',
       judges: [{ type: 'acme/fixed', score: 1 }],
       trials: 3,
@@ -136,8 +136,10 @@ describe('shared configs', () => {
       },
       [plugin]
     );
-    expect(later.manifest.judges).toEqual([{ type: 'acme/fixed', score: 0.9 }]);
-    expect(later.manifest.timeout).toBe(10);
+    expect(later.evalConfig.judges).toEqual([
+      { type: 'acme/fixed', score: 0.9 },
+    ]);
+    expect(later.evalConfig.timeout).toBe(10);
 
     const own = await dryRun(
       {
@@ -148,33 +150,33 @@ describe('shared configs', () => {
       },
       [plugin]
     );
-    expect(own.manifest.judges).toEqual([
+    expect(own.evalConfig.judges).toEqual([
       expect.objectContaining({ type: 'rubric', rubric: 'correctness' }),
     ]);
   });
 
   it("identifies a suite by its resolved settings, so a changed config isn't a saved run", async () => {
-    const manifest = {
+    const evalConfig = {
       name: 'identity',
       extends: ['acme/recommended'],
       datasets: ['./cases.json'],
     };
-    const first = await dryRun(manifest, [
+    const first = await dryRun(evalConfig, [
       acme({ recommended: { trials: 2 } }),
     ]);
     resetPluginsForTests();
-    const second = await dryRun(manifest, [
+    const second = await dryRun(evalConfig, [
       acme({ recommended: { trials: 5 } }),
     ]);
     expect(first.summary.contentHash).not.toBe(second.summary.contentHash);
 
-    // The hash is the resolved manifest's, the one a batch resume compares.
-    const dir = await suiteDir(manifest);
-    const resolved = resolveManifestExtends(
-      loadEvalManifest(path.join(dir, 'manifest.json'), { rootDir: dir }),
+    // The hash is the resolved eval config's, the one a batch resume compares.
+    const dir = await suiteDir(evalConfig);
+    const resolved = resolveConfigExtends(
+      loadEvalConfig(path.join(dir, 'eval.json'), { rootDir: dir }),
       ['acme']
     );
-    expect(manifestIdentity(resolved).contentHash).toBe(
+    expect(configIdentity(resolved).contentHash).toBe(
       second.summary.contentHash
     );
   });
@@ -186,7 +188,7 @@ describe('shared configs', () => {
       datasets: ['./cases.json'],
     });
     const result = await runEvalSuite({
-      manifestPath: path.join(dir, 'manifest.json'),
+      configPath: path.join(dir, 'eval.json'),
       rootDir: dir,
       plugins: [
         acme({
@@ -213,7 +215,7 @@ describe('shared configs', () => {
       'MST has no built-in configs. Name a plugin\'s config: "namespace/recommended"',
     ],
     [
-      'a plugin the manifest does not load',
+      'a plugin the eval config does not load',
       { extends: ['other/recommended'] },
       [acme({ recommended: {} })],
       `references "other/recommended", but doesn't load the "other" plugin`,
@@ -225,7 +227,7 @@ describe('shared configs', () => {
       'Plugin "acme-plugin" has no config "strict". Available: base, recommended.',
     ],
     [
-      "a key that is the manifest's own",
+      "a key that is the eval config's own",
       { extends: ['acme/recommended'] },
       [acme({ recommended: { datasets: ['x.json'] } as never })],
       `Shared config "acme/recommended" can't set "datasets"`,
@@ -240,7 +242,7 @@ describe('shared configs', () => {
       'the same config twice',
       { extends: ['acme/recommended', 'acme/recommended'] },
       [acme({ recommended: {} })],
-      'The manifest extends "acme/recommended" more than once.',
+      'The eval config extends "acme/recommended" more than once.',
     ],
     [
       "another plugin's metric",
@@ -265,8 +267,8 @@ describe('shared configs', () => {
     ).rejects.toThrow(message);
   });
 
-  it("lets the manifest's run controls win over a config's", async () => {
-    const { manifest } = await dryRun(
+  it("lets the eval config's run controls win over a config's", async () => {
+    const { evalConfig } = await dryRun(
       {
         name: 'run-controls',
         extends: ['acme/recommended'],
@@ -275,11 +277,11 @@ describe('shared configs', () => {
       },
       [acme({ recommended: { trials: 3, concurrency: 2 } })]
     );
-    expect(manifest).toMatchObject({ trials: 5, concurrency: 2 });
+    expect(evalConfig).toMatchObject({ trials: 5, concurrency: 2 });
   });
 
   it('lets a config use built-ins', async () => {
-    const { manifest } = await dryRun(
+    const { evalConfig } = await dryRun(
       {
         name: 'builtins',
         extends: ['acme/recommended'],
@@ -294,7 +296,7 @@ describe('shared configs', () => {
         }),
       ]
     );
-    expect(manifest.metrics).toEqual([
+    expect(evalConfig.metrics).toEqual([
       expect.objectContaining({ type: 'passed' }),
     ]);
   });
@@ -333,7 +335,7 @@ describe('plugin configs', () => {
         },
       }),
     ]);
-    const resolved = resolveManifestExtends(
+    const resolved = resolveConfigExtends(
       { name: 'm', datasets: [], extends: ['acme/recommended'] },
       ['acme']
     );

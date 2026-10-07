@@ -9,7 +9,7 @@ import {
   loadStoredEvalRunnerResult,
   runEvalBatch,
   runEvalSuite,
-  type EvalManifest,
+  type EvalConfig,
   type EvaluationSummary,
   type ClientDefinition,
   type ResultStoreDefinition,
@@ -50,7 +50,7 @@ async function fixture() {
     async (_input, _config, context) => ({
       finalText: 'PRIVATE_RESPONSE_MARKER',
       events: Array.from(
-        { length: context.arm?.name === 'candidate' ? 2 : 1 },
+        { length: context.variant?.name === 'candidate' ? 2 : 1 },
         () => ({
           kind: 'tool_call' as const,
           source: 'mcp' as const,
@@ -80,15 +80,15 @@ async function fixture() {
     })
   );
   const storeDir = path.join(rootDir, 'store');
-  const manifestPath = path.join(rootDir, 'manifest.json');
-  const manifest: EvalManifest = {
+  const configPath = path.join(rootDir, 'eval.json');
+  const evalConfig: EvalConfig = {
     name: 'storage-suite',
     client: `test/${hostName}`,
     datasets: [{ type: 'file', path: './dataset.json' }],
     results: { store: { type: 'file', dir: storeDir } },
   };
-  await fs.writeFile(manifestPath, JSON.stringify(manifest));
-  return { rootDir, manifestPath, manifest, storeDir, run };
+  await fs.writeFile(configPath, JSON.stringify(evalConfig));
+  return { rootDir, configPath, evalConfig, storeDir, run };
 }
 
 describe('suite storage through public APIs', () => {
@@ -120,17 +120,17 @@ describe('suite storage through public APIs', () => {
           throw new Error('Plugin-owned name must not route to another store');
         },
       };
-      f.manifest.results = {
+      f.evalConfig.results = {
         store: {
           type,
           name: alias,
           ...(directory === 'explicit' ? { dir: f.storeDir } : {}),
         },
       };
-      await fs.writeFile(f.manifestPath, JSON.stringify(f.manifest));
+      await fs.writeFile(f.configPath, JSON.stringify(f.evalConfig));
 
       const first = await runEvalSuite({
-        manifestPath: f.manifestPath,
+        configPath: f.configPath,
         rootDir: f.rootDir,
         plugins: [testPlugin],
       });
@@ -141,7 +141,7 @@ describe('suite storage through public APIs', () => {
       });
       expect(f.run).toHaveBeenCalledTimes(1);
       const resumed = await runEvalBatch({
-        manifestPaths: [f.manifestPath],
+        configPaths: [f.configPath],
         rootDir: f.rootDir,
         skipExisting: true,
         plugins: [testPlugin],
@@ -158,14 +158,14 @@ describe('suite storage through public APIs', () => {
         'eval-run-summary',
         path.basename(first.outputDir)
       );
-      expect(saved.data.manifestId).toBe(first.summary.manifestId);
+      expect(saved.data.configId).toBe(first.summary.configId);
       expect(saved.data.contentHash).toBe(first.summary.contentHash);
       expect(await store.listArtifacts('eval-run-summary')).toHaveLength(1);
 
-      f.manifest.name = 'changed-storage-suite';
-      await fs.writeFile(f.manifestPath, JSON.stringify(f.manifest));
+      f.evalConfig.name = 'changed-storage-suite';
+      await fs.writeFile(f.configPath, JSON.stringify(f.evalConfig));
       const changed = await runEvalBatch({
-        manifestPaths: [f.manifestPath],
+        configPaths: [f.configPath],
         rootDir: f.rootDir,
         skipExisting: true,
         plugins: [testPlugin],
@@ -179,41 +179,41 @@ describe('suite storage through public APIs', () => {
   it.each([
     {
       label: 'default redaction',
-      manifestRedact: undefined,
+      configRedact: undefined,
       apiRedact: undefined,
       redact: true,
     },
     {
-      label: 'manifest opt-out',
-      manifestRedact: false,
+      label: 'eval config opt-out',
+      configRedact: false,
       apiRedact: undefined,
       redact: false,
     },
     {
       label: 'API opt-out',
-      manifestRedact: true,
+      configRedact: true,
       apiRedact: false,
       redact: false,
     },
     {
       label: 'API enforcement',
-      manifestRedact: false,
+      configRedact: false,
       apiRedact: true,
       redact: true,
     },
   ])(
-    'roundtrips persisted per-arm pointers with $label',
-    async ({ manifestRedact, apiRedact, redact }) => {
+    'roundtrips persisted per-variant pointers with $label',
+    async ({ configRedact, apiRedact, redact }) => {
       const f = await fixture();
-      f.manifest.arms = [{ name: 'baseline' }, { name: 'candidate' }];
-      f.manifest.trials = 2;
-      f.manifest.redactStoredResponses = manifestRedact;
-      await fs.writeFile(f.manifestPath, JSON.stringify(f.manifest));
+      f.evalConfig.variants = [{ name: 'baseline' }, { name: 'candidate' }];
+      f.evalConfig.trials = 2;
+      f.evalConfig.redactStoredResponses = configRedact;
+      await fs.writeFile(f.configPath, JSON.stringify(f.evalConfig));
       // Exercise unique per-ID artifacts; shared latest.json atomicity is out of scope.
       const runs = await Promise.all(
         Array.from({ length: 2 }, () =>
           runEvalSuite({
-            manifestPath: f.manifestPath,
+            configPath: f.configPath,
             rootDir: f.rootDir,
             plugins: [testPlugin],
             redactStoredResponses: apiRedact,
@@ -251,12 +251,12 @@ describe('suite storage through public APIs', () => {
         ]);
         expect(saved.data).toEqual(local);
         expect(saved.metadata.labels).toMatchObject({
-          manifestId: result.summary.manifestId,
+          configId: result.summary.configId,
           contentHash: result.summary.contentHash,
         });
         const artifacts = [];
-        for (const arm of local.arms) {
-          const pointers = local.caseArtifactPointers![arm.name]!;
+        for (const variant of local.variants) {
+          const pointers = local.caseArtifactPointers![variant.name]!;
           expect(pointers).toHaveLength(1);
           allPointers.push(...pointers);
           const artifact = await loadStoredEvalRunnerResult(store, {
@@ -265,11 +265,11 @@ describe('suite storage through public APIs', () => {
           expect(artifact.kind).toBe('eval-runner-result');
           expect(artifact.id).toBe(pointers[0]);
           expect(artifact.metadata.labels).toMatchObject({
-            arm: arm.name,
-            manifestId: local.manifestId,
+            variant: variant.name,
+            configId: local.configId,
             contentHash: local.contentHash,
           });
-          expect(artifact.data).toEqual(arm.result);
+          expect(artifact.data).toEqual(variant.result);
           expect(artifact.data.caseResults).toHaveLength(1);
           expect(artifact.data.caseResults[0]?.iterationResults).toHaveLength(
             2
@@ -302,7 +302,7 @@ describe('suite storage through public APIs', () => {
       expect(await store.listArtifacts('eval-runner-result')).toHaveLength(4);
       expect(await store.listArtifacts('eval-run-summary')).toHaveLength(2);
       const resumed = await runEvalBatch({
-        manifestPaths: [f.manifestPath],
+        configPaths: [f.configPath],
         rootDir: f.rootDir,
         skipExisting: true,
         plugins: [testPlugin],

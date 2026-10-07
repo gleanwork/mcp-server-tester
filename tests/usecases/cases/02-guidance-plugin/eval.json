@@ -43,7 +43,7 @@
     "output_tokens",
     "cost_usd"
   ],
-  "arms": [
+  "variants": [
     {
       "name": "descriptions-only"
     },

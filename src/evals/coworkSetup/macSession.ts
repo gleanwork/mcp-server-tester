@@ -12,7 +12,7 @@ import {
 } from 'node:fs/promises';
 import { homedir, tmpdir, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { EvalManifest } from '../evalManifest.js';
+import type { EvalConfig } from '../evalConfig.js';
 import {
   hostStdioServers,
   resolveHostStdioServer,
@@ -129,7 +129,7 @@ async function privateBytes(file: string): Promise<Buffer> {
  * explicit recovery; it is never stolen, automatically expired, or force-cleared.
  */
 export async function prepareMacCoworkSession(options: {
-  manifest: EvalManifest;
+  evalConfig: EvalConfig;
   env: Record<string, string | undefined>;
   profileDirectory?: string;
   model?: string;
@@ -150,8 +150,9 @@ export async function prepareMacCoworkSession(options: {
   try {
     if (process.platform !== 'darwin') throw new Error(ERROR);
     // Snapshot caller input so later mutation cannot change the preflighted setup.
-    const manifest = structuredClone(options.manifest);
-    if (manifest.arms !== undefined || !options.env) throw new Error(ERROR);
+    const evalConfig = structuredClone(options.evalConfig);
+    if (evalConfig.variants !== undefined || !options.env)
+      throw new Error(ERROR);
     const env = { ...options.env };
     // Without an explicit pin, run the installed (or caller-owned) app.
     const pinnedVersion = macCoworkAppVersion(options.appVersion, env);
@@ -178,10 +179,10 @@ export async function prepareMacCoworkSession(options: {
       `mst-cowork-session-${randomUUID()}`
     );
     const localMcpDirectory = `${stagingDirectory}-mcp`;
-    if (!manifest.servers) throw new Error(ERROR);
+    if (!evalConfig.servers) throw new Error(ERROR);
     const plugins = structuredClone(options.plugins ?? []);
     const stdioPaths = { dataRoot: join(stagingDirectory, 'stdio') };
-    const labeledServers = manifest.servers.map((server, index) => ({
+    const labeledServers = evalConfig.servers.map((server, index) => ({
       ...server,
       label: mcpServerLabel(server, index),
     }));
@@ -210,8 +211,8 @@ export async function prepareMacCoworkSession(options: {
     if (localServers.length !== labeledServers.length) throw new Error(ERROR);
     await preflightMacLocalMcp(localServers, env);
     const installOptions = {
-      manifest: {
-        ...manifest,
+      evalConfig: {
+        ...evalConfig,
         servers: labeledServers.filter(
           (server) => server.transport === 'stdio'
         ),
@@ -377,7 +378,7 @@ export async function prepareMacCoworkSession(options: {
       transaction = await installMacCoworkSettings(installOptions);
       // Even an empty eval must isolate personal developer servers.
       await installMacLocalMcp(localMcpDirectory, localServers, env);
-      if (resolveCoworkSetupConfig(manifest.coworkSetup).approveWriteTools) {
+      if (resolveCoworkSetupConfig(evalConfig.coworkSetup).approveWriteTools) {
         await configureMacToolDefaults(
           localMcpDirectory,
           labeledServers.map((server) => server.label)
@@ -399,7 +400,7 @@ export async function prepareMacCoworkSession(options: {
         version,
         source: pinnedApp ? 'pinned' : 'installed',
       },
-      serverCount: manifest.servers?.length ?? 0,
+      serverCount: evalConfig.servers?.length ?? 0,
       stdioPaths,
       dispose() {
         // Concurrent/repeated callers share one cleanup, including its failure.

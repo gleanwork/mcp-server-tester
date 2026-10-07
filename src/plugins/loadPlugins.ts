@@ -5,7 +5,7 @@ import { moduleResolve } from 'import-meta-resolve';
 import { assertPlugin, type Plugin } from './plugin.js';
 
 export interface LoadPluginsOptions {
-  /** Where relative specifiers resolve first (a manifest's directory). */
+  /** Where relative specifiers resolve first (an eval config's directory). */
   baseDir?: string;
   /** Where they resolve next (the working directory). Defaults to cwd. */
   fallbackDir?: string;
@@ -81,7 +81,7 @@ function isPathSpecifier(specifier: string): boolean {
   return /^\.\.?(?:[/\\]|$)/.test(specifier);
 }
 
-/** Manifest directory, then working directory, then package (ADR-0001). */
+/** Eval config directory, then working directory, then package (ADR-0001). */
 function resolveEntry(specifier: string, options: LoadPluginsOptions): string {
   const dirs = [
     ...new Set([

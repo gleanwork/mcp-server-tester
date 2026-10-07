@@ -30,18 +30,15 @@
     "output_tokens",
     "cost_usd"
   ],
-  "arms": [
+  "variants": [
     {
       "name": "baseline"
     },
     {
       "name": "description-v2",
-      "toolOverrides": {
-        "id": "v2",
-        "tools": {
-          "find_skills": {
-            "description": "Find skills and tools for connected apps: create tracker tickets, post chat messages, share files."
-          }
+      "tools": {
+        "find_skills": {
+          "description": "Find skills and tools for connected apps: create tracker tickets, post chat messages, share files."
         }
       }
     }

@@ -4,14 +4,14 @@ set +x
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-has_manifest=false
+has_config=false
 for arg in "$@"; do
   case "$arg" in
-    --manifests|--manifests=*|--manifest-dir|--manifest-dir=*) has_manifest=true;;
+    --configs|--configs=*|--config-dir|--config-dir=*) has_config=true;;
   esac
 done
-if [[ "$has_manifest" == false ]]; then
-  echo 'Provide --manifests <path> or --manifest-dir <directory>; no default evaluation is bundled.' >&2
+if [[ "$has_config" == false ]]; then
+  echo 'Provide --configs <path> or --config-dir <directory>; no default eval is bundled.' >&2
   exit 2
 fi
 if [[ "$(uname -s)" != Darwin ]]; then

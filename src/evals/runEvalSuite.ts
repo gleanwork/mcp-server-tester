@@ -1,5 +1,6 @@
-import { manifestIdentity } from './manifestIdentity.js';
-import { resolveManifestExtends } from './manifestExtends.js';
+import { rejectRenamedOptions } from './renamedKeys.js';
+import { configIdentity } from './configIdentity.js';
+import { resolveConfigExtends } from './configExtends.js';
 import { resolveCoworkSetupConfig } from './coworkSetup/options.js';
 import { sumUsage } from '../utils/usageUtils.js';
 import { sumJudgeUsage } from '../judge/judgeContract.js';
@@ -14,13 +15,14 @@ import { createMCPFixture } from '../mcp/fixtures/mcpFixture.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import { isHttpConfig, usesHostResolvedFields } from '../config/mcpConfig.js';
 import {
-  loadEvalManifest,
+  variantToolMetadata,
+  loadEvalConfig,
   type DatasetConfig,
-  type EvalArm,
-  type EvalManifest,
+  type EvalVariant,
+  type EvalConfig,
   type ClientConfig,
   type ModelPricing,
-} from './evalManifest.js';
+} from './evalConfig.js';
 import {
   DEFAULT_CLIENT,
   clientFieldsOf,
@@ -28,7 +30,7 @@ import {
   clientPatchOf,
 } from './clientFields.js';
 import type {
-  EvaluationArmResult,
+  EvaluationVariantResult,
   EvaluationSummary,
   ClientDefinition,
   TraceEvidence,
@@ -65,9 +67,9 @@ import { compareWithPrevious, findPreviousRun } from './runBaseline.js';
 import { costSource, estimateCosts } from './pricing.js';
 import {
   parseHostConfig,
-  validateManifest,
+  validateEvalConfig,
   inheritHost,
-} from './manifestValidation.js';
+} from './configValidation.js';
 import {
   computeMetrics,
   type MetricSpec,
@@ -82,28 +84,32 @@ import {
 import packageJson from '../../package.json' with { type: 'json' };
 
 export interface RunEvalSuiteOptions {
-  manifestPath: string;
+  configPath: string;
   rootDir?: string;
-  /** Plugin specifiers from the CLI, added to the manifest's `plugins`. */
+  /** Plugin specifiers from the CLI, added to the eval config's `plugins`. */
   pluginPaths?: string[];
-  /** Plugin objects, added to the manifest's `plugins`. */
+  /** Plugin objects, added to the eval config's `plugins`. */
   plugins?: readonly Plugin[];
   outputDir?: string;
   secretsFile?: string;
   mcpConfig?: MCPConfig;
   dryRun?: boolean;
-  arm?: string;
+  variant?: string;
   /**
-   * Arms to run instead of the manifest's, validated the same way: a list,
-   * or a function of the manifest's arms (after shared configs apply). For
-   * experiments that generate arms, such as runVariantExperiment's suite mode.
+   * Variants to run instead of the eval config's, validated the same way: a
+   * list, or a function of the eval config's variants (after shared configs
+   * apply), baseline first. The first variant given is the baseline: the
+   * config's `baseline` doesn't apply. For experiments that generate variants,
+   * such as runVariantExperiment's suite mode.
    */
-  arms?: EvalArm[] | ((manifestArms: readonly EvalArm[]) => EvalArm[]);
+  variants?:
+    | EvalVariant[]
+    | ((configVariants: readonly EvalVariant[]) => EvalVariant[]);
   redactStoredResponses?: boolean;
 }
 
 export interface RunEvalSuiteResult {
-  manifest: EvalManifest;
+  evalConfig: EvalConfig;
   outputDir: string;
   datasets: Array<{
     source: DatasetConfig;
@@ -173,8 +179,8 @@ function resolveServerSecrets(
   return { ...server, auth: { ...auth, accessToken: token } };
 }
 
-function assertEvalEndpoint(server: MCPConfig, manifest: EvalManifest): void {
-  if (!manifest.requireEvalEndpoint) return;
+function assertEvalEndpoint(server: MCPConfig, evalConfig: EvalConfig): void {
+  if (!evalConfig.requireEvalEndpoint) return;
   // A host-resolved stdio server declares the endpoint it targets as `url`.
   const endpoint = isHttpConfig(server) ? server.serverUrl : server.url;
   if (endpoint === undefined) return;
@@ -186,25 +192,28 @@ function assertEvalEndpoint(server: MCPConfig, manifest: EvalManifest): void {
   }
 }
 
-function selectedArms(manifest: EvalManifest, name?: string): EvalArm[] {
-  const arms = manifest.arms?.length
-    ? manifest.arms
-    : [{ name: 'default' } satisfies EvalArm];
-  if (!name) return arms;
-  const arm = arms.find((candidate) => candidate.name === name);
-  if (!arm) throw new Error(`Evaluation arm "${name}" was not found.`);
-  return [arm];
+function selectedVariants(
+  evalConfig: EvalConfig,
+  name?: string
+): EvalVariant[] {
+  const variants = evalConfig.variants?.length
+    ? evalConfig.variants
+    : [{ name: 'default' } satisfies EvalVariant];
+  if (!name) return variants;
+  const variant = variants.find((candidate) => candidate.name === name);
+  if (!variant) throw new Error(`Evaluation variant "${name}" was not found.`);
+  return [variant];
 }
 
 function resolveHost(
-  manifest: EvalManifest,
-  arm: EvalArm,
+  evalConfig: EvalConfig,
+  variant: EvalVariant,
   servers: MCPConfig[],
   env: HostEnvironment
 ) {
   // Validated levels hold their resolved client, model included.
-  const declaration = (clientPatchOf(arm) ??
-    clientPatchOf(manifest) ?? { type: DEFAULT_CLIENT }) as ClientConfig;
+  const declaration = (clientPatchOf(variant) ??
+    clientPatchOf(evalConfig) ?? { type: DEFAULT_CLIENT }) as ClientConfig;
   const definition: ClientDefinition = getHost(declaration.type);
   const config = builtinClientDefaults(declaration.type, {
     ...declaration,
@@ -219,34 +228,34 @@ function resolveHost(
 }
 
 /**
- * Every case that names its own host, in every arm: that host can honour the
- * arm's servers, tool variants and concurrency. Checked before anything runs.
+ * Every case that names its own host, in every variant: that host can honour the
+ * variant's servers, tool variants and concurrency. Checked before anything runs.
  */
 function assertCaseHosts(
-  manifest: EvalManifest,
-  rawManifest: EvalManifest,
-  arms: EvalArm[],
+  evalConfig: EvalConfig,
+  rawConfig: EvalConfig,
+  variants: EvalVariant[],
   datasets: EvalDataset[]
 ): void {
-  for (const arm of arms) {
-    const rawArm = rawManifest.arms?.find(
-      (candidate) => candidate.name === arm.name
+  for (const variant of variants) {
+    const rawVariant = rawConfig.variants?.find(
+      (candidate) => candidate.name === variant.name
     );
     const declaration = inheritHost(
-      clientOf(rawManifest),
-      clientPatchOf(rawArm) ?? {}
+      clientOf(rawConfig),
+      clientPatchOf(rawVariant) ?? {}
     );
     for (const dataset of datasets) {
       for (const evalCase of dataset.cases) {
         const casePatch = clientPatchOf(evalCase);
         if (!casePatch) continue;
         assertHostSupports(
-          parseHostConfig(inheritHost(declaration, casePatch), rawManifest),
+          parseHostConfig(inheritHost(declaration, casePatch), rawConfig),
           {
-            servers: arm.servers ?? manifest.servers ?? [],
-            toolOverrides: arm.toolOverrides ?? manifest.toolOverrides,
-            concurrency: manifest.concurrency,
-            context: `Case "${evalCase.id}" in arm "${arm.name}"`,
+            servers: variant.servers ?? evalConfig.servers ?? [],
+            tools: variant.tools ?? evalConfig.tools,
+            concurrency: evalConfig.concurrency,
+            context: `Case "${evalCase.id}" in variant "${variant.name}"`,
           }
         );
       }
@@ -254,16 +263,16 @@ function assertCaseHosts(
   }
 }
 
-/** The arm's share of passing trials, averaged over its cases. */
-function trialPassRate(arm: EvaluationArmResult): number | undefined {
-  const value = arm.metrics?.trial_pass_rate;
+/** The variant's share of passing trials, averaged over its cases. */
+function trialPassRate(variant: EvaluationVariantResult): number | undefined {
+  const value = variant.metrics?.trial_pass_rate;
   return typeof value === 'number' ? value : undefined;
 }
 
 const EVIDENCE_STRENGTH: TraceEvidence[] = ['none', 'observed', 'structured'];
 
-/** The weakest evidence among an arm's cases: what its trace metrics rest on. */
-function armEvidence(results: EvalCaseResult[]): TraceEvidence | undefined {
+/** The weakest evidence among a variant's cases: what its trace metrics rest on. */
+function variantEvidence(results: EvalCaseResult[]): TraceEvidence | undefined {
   const levels = results
     .map((result) => result.hostEvidence)
     .filter((level): level is TraceEvidence => level !== undefined);
@@ -271,8 +280,8 @@ function armEvidence(results: EvalCaseResult[]): TraceEvidence | undefined {
 }
 
 /**
- * What every arm reports, whatever the manifest lists: outcomes, calls,
- * tokens, cost and time. A manifest's `metrics` add to these.
+ * What every variant reports, whatever the eval config lists: outcomes, calls,
+ * tokens, cost and time. An eval config's `metrics` add to these.
  */
 const CORE_METRICS = [
   'passed',
@@ -298,18 +307,18 @@ function isNumberRecord(value: unknown): value is Record<string, number> {
   );
 }
 
-/** Every numeric metric both arms report, as arm minus baseline (per judge for scores). */
+/** Every numeric metric both variants report, as variant minus baseline (per judge for scores). */
 function metricDeltas(
-  arm: EvaluationArmResult,
-  baseline: EvaluationArmResult
+  variant: EvaluationVariantResult,
+  baseline: EvaluationVariantResult
 ): Record<string, number | Record<string, number>> {
   const deltas: Record<string, number | Record<string, number>> = {};
-  for (const [key, value] of Object.entries(arm.metrics ?? {})) {
+  for (const [key, value] of Object.entries(variant.metrics ?? {})) {
     const before = baseline.metrics?.[key];
     if (typeof value === 'number' && typeof before === 'number') {
       deltas[key] = value - before;
     } else if (isNumberRecord(value) && isNumberRecord(before)) {
-      // Per-judge scores: a delta for each judge both arms ran.
+      // Per-judge scores: a delta for each judge both variants ran.
       const shared = Object.keys(value).filter((name) => name in before);
       if (shared.length > 0)
         deltas[key] = Object.fromEntries(
@@ -320,19 +329,19 @@ function metricDeltas(
   return deltas;
 }
 
-function buildArmDeltas(
-  arms: EvaluationArmResult[]
+function buildVariantDeltas(
+  variants: EvaluationVariantResult[]
 ): Record<string, Record<string, unknown>> {
-  const baseline = arms[0]?.result;
+  const baseline = variants[0]?.result;
   if (!baseline || baseline.total === 0) return {};
   const baselineRate = passRate(baseline);
-  const baselineTrialRate = trialPassRate(arms[0]!);
+  const baselineTrialRate = trialPassRate(variants[0]!);
   return Object.fromEntries(
-    arms.slice(1).map((arm) => {
-      const rate = arm.result ? passRate(arm.result) : 0;
-      const trials = trialPassRate(arm);
+    variants.slice(1).map((variant) => {
+      const rate = variant.result ? passRate(variant.result) : 0;
+      const trials = trialPassRate(variant);
       return [
-        arm.name,
+        variant.name,
         {
           passRate: rate,
           passRateDelta: rate - baselineRate,
@@ -342,8 +351,8 @@ function buildArmDeltas(
                 trialPassRateDelta: trials - baselineTrialRate,
               }
             : {}),
-          metricDeltas: metricDeltas(arm, arms[0]!),
-          baseline: arms[0]?.name,
+          metricDeltas: metricDeltas(variant, variants[0]!),
+          baseline: variants[0]?.name,
         },
       ];
     })
@@ -371,11 +380,11 @@ function redactServerForReport(server: MCPConfig): MCPConfig {
   };
 }
 
-function summarizeArm(
-  arm: EvalArm,
+function summarizeVariant(
+  variant: EvalVariant,
   servers: MCPConfig[],
   results: Array<{ name: string; result: EvalRunnerResult }>
-): EvaluationArmResult {
+): EvaluationVariantResult {
   const caseResults: EvalCaseResult[] = [];
   let totalHostUsage: UsageMetrics | undefined;
   for (const { result } of results) {
@@ -388,7 +397,7 @@ function summarizeArm(
     results.map(({ result }) => result.totalJudgeUsage)
   );
   return {
-    name: arm.name,
+    name: variant.name,
     servers: servers.map(redactServerForReport),
     result: {
       caseResults,
@@ -408,10 +417,15 @@ function summarizeArm(
 export async function runEvalSuite(
   options: RunEvalSuiteOptions
 ): Promise<RunEvalSuiteResult> {
+  rejectRenamedOptions(
+    options,
+    { manifestPath: 'configPath', arm: 'variant', arms: 'variants' },
+    'runEvalSuite'
+  );
   const suiteStartTime = Date.now();
   const rootDir = options.rootDir ?? process.cwd();
-  const manifestDir = path.dirname(path.resolve(options.manifestPath));
-  const loadedManifest = loadEvalManifest(options.manifestPath, { rootDir });
+  const configDir = path.dirname(path.resolve(options.configPath));
+  const loadedConfig = loadEvalConfig(options.configPath, { rootDir });
   const ambientEnv = Object.fromEntries(
     Object.entries(process.env).filter(
       (entry): entry is [string, string] => typeof entry[1] === 'string'
@@ -429,47 +443,64 @@ export async function runEvalSuite(
   };
 
   const namespaces = await loadSuitePlugins({
-    manifestPath: options.manifestPath,
-    manifest: loadedManifest,
+    configPath: options.configPath,
+    evalConfig: loadedConfig,
     rootDir,
     pluginPaths: options.pluginPaths,
     plugins: options.plugins,
   });
-  // The manifest with its shared configs applied, before parsing: what the
-  // suite is identified by, and the raw settings arms and cases merge with.
-  const resolvedManifest = resolveManifestExtends(loadedManifest, namespaces);
-  const rawManifest: EvalManifest =
-    options.arms === undefined
-      ? resolvedManifest
-      : {
-          ...resolvedManifest,
-          arms:
-            typeof options.arms === 'function'
-              ? options.arms(resolvedManifest.arms ?? [])
-              : options.arms,
-        };
-  const identity = manifestIdentity(rawManifest);
-  let manifest = rawManifest;
+  // The eval config with its shared configs applied, before parsing: what the
+  // suite is identified by, and the raw settings variants and cases merge with.
+  const resolvedConfig = resolveConfigExtends(loadedConfig, namespaces);
+  const rawConfig: EvalConfig =
+    options.variants === undefined ? resolvedConfig : replaceVariants();
+  // Generated variants are listed baseline first, so the config's own
+  // `baseline` (which may name none of them) gives way.
+  function replaceVariants(): EvalConfig {
+    const { baseline, ...rest } = resolvedConfig;
+    const configVariants = resolvedConfig.variants ?? [];
+    const index =
+      baseline === undefined
+        ? -1
+        : configVariants.findIndex((variant) => variant.name === baseline);
+    const ordered =
+      index < 0
+        ? configVariants
+        : [
+            configVariants[index]!,
+            ...configVariants.filter((_, i) => i !== index),
+          ];
+    return {
+      ...rest,
+      variants:
+        typeof options.variants === 'function'
+          ? options.variants(ordered)
+          : options.variants!,
+    };
+  }
+  const identity = configIdentity(rawConfig);
+  let evalConfig = rawConfig;
 
-  manifest = validateManifest(
+  evalConfig = validateEvalConfig(
     {
-      ...manifest,
-      client: manifest.client ?? DEFAULT_CLIENT,
+      ...evalConfig,
+      client: evalConfig.client ?? DEFAULT_CLIENT,
     },
     { namespaces }
   );
   const executionId = randomUUID();
   const outputDir = path.join(
-    options.outputDir ?? path.join(rootDir, '.mcp-test-results', manifest.name),
+    options.outputDir ??
+      path.join(rootDir, '.mcp-test-results', evalConfig.name),
     executionId
   );
-  const arms = selectedArms(manifest, options.arm);
-  const datasets = manifest.datasets;
+  const variants = selectedVariants(evalConfig, options.variant);
+  const datasets = evalConfig.datasets;
 
-  // Datasets load with the suite's selection controls removed: each arm
+  // Datasets load with the suite's selection controls removed: each variant
   // selects its own cases below.
-  const sourceManifest: EvalManifest = {
-    ...manifest,
+  const sourceConfig: EvalConfig = {
+    ...evalConfig,
     maxCases: undefined,
     filterTags: undefined,
     run: undefined,
@@ -481,15 +512,15 @@ export async function runEvalSuite(
       datasets.map((source) =>
         getDatasetSource(source.type).load(source, {
           rootDir,
-          manifestDir,
-          manifest: sourceManifest,
+          configDir,
+          evalConfig: sourceConfig,
         })
       )
     );
     for (const dataset of loaded) assertDatasetNamespaces(dataset, namespaces);
-    assertCaseHosts(manifest, rawManifest, arms, loaded);
+    assertCaseHosts(evalConfig, rawConfig, variants, loaded);
     return {
-      manifest,
+      evalConfig,
       outputDir,
       datasets: datasets.map((source, index) => ({
         source,
@@ -500,71 +531,71 @@ export async function runEvalSuite(
         ...identity,
         timestamp: new Date().toISOString(),
         durationMs: 0,
-        manifestName: manifest.name,
-        arms: [],
+        configName: evalConfig.name,
+        variants: [],
         metrics: {},
-        armDeltas: {},
+        variantDeltas: {},
         results: [],
       },
     };
   }
 
-  const armResults: EvaluationArmResult[] = [];
+  const variantResults: EvaluationVariantResult[] = [];
   const allDatasets: RunEvalSuiteResult['datasets'] = [];
   const allResults: EvalCaseResult[] = [];
-  const sourceArm = arms[0] ?? { name: 'default' };
+  const sourceVariant = variants[0] ?? { name: 'default' };
   const sourceServers = (
     options.mcpConfig
       ? [options.mcpConfig]
-      : (sourceArm.servers ?? manifest.servers ?? [])
+      : (sourceVariant.servers ?? evalConfig.servers ?? [])
   ).map((server) => resolveServerSecrets(server, env));
-  sourceServers.forEach((server) => assertEvalEndpoint(server, manifest));
-  const sourceHost = resolveHost(manifest, sourceArm, sourceServers, env);
+  sourceServers.forEach((server) => assertEvalEndpoint(server, evalConfig));
+  const sourceHost = resolveHost(evalConfig, sourceVariant, sourceServers, env);
   const canonicalDatasets = await Promise.all(
     datasets.map(async (source) => ({
       source,
       dataset: await getDatasetSource(source.type).load(source, {
         rootDir,
-        manifestDir,
-        manifest: sourceManifest,
+        configDir,
+        evalConfig: sourceConfig,
       }),
     }))
   );
   for (const { dataset } of canonicalDatasets)
     assertDatasetNamespaces(dataset, namespaces);
-  // Before any arm runs: a case host that can't honour its arm fails now,
-  // not after earlier arms have run.
+  // Before any variant runs: a case host that can't honour its variant fails now,
+  // not after earlier variants have run.
   assertCaseHosts(
-    manifest,
-    rawManifest,
-    arms,
+    evalConfig,
+    rawConfig,
+    variants,
     canonicalDatasets.map(({ dataset }) => dataset)
   );
 
-  for (const arm of arms) {
+  for (const variant of variants) {
     const servers = options.mcpConfig
       ? [options.mcpConfig]
-      : (arm.servers ?? manifest.servers ?? []);
+      : (variant.servers ?? evalConfig.servers ?? []);
     const resolvedServers = servers.map((server) =>
       resolveServerSecrets(server, env)
     );
-    resolvedServers.forEach((server) => assertEvalEndpoint(server, manifest));
-    // The first arm's client was resolved before the datasets loaded (to
+    resolvedServers.forEach((server) => assertEvalEndpoint(server, evalConfig));
+    // The first variant's client was resolved before the datasets loaded (to
     // check its servers); reuse it rather than resolve it twice.
     const host =
-      arm === sourceArm
+      variant === sourceVariant
         ? sourceHost
-        : resolveHost(manifest, arm, resolvedServers, env);
-    const effectiveManifest: EvalManifest = {
-      ...manifest,
-      ...arm,
+        : resolveHost(evalConfig, variant, resolvedServers, env);
+    const effectiveConfig: EvalConfig = {
+      ...evalConfig,
+      ...variant,
       host: host.declaration,
       coworkSetup: resolveCoworkSetupConfig(
-        manifest.coworkSetup,
-        arm.coworkSetup
+        evalConfig.coworkSetup,
+        variant.coworkSetup
       ),
-      name: manifest.name,
-      datasets: manifest.datasets,
+      name: evalConfig.name,
+      datasets: evalConfig.datasets,
     };
     const sourceResults: Array<{
       name: string;
@@ -572,12 +603,12 @@ export async function runEvalSuite(
     }> = [];
     const appliedPricing: Record<string, ModelPricing> = {};
     const unpricedModels = new Set<string>();
-    const rawArm = rawManifest.arms?.find(
-      (candidate) => candidate.name === arm.name
-    ) ?? { name: arm.name };
+    const rawVariant = rawConfig.variants?.find(
+      (candidate) => candidate.name === variant.name
+    ) ?? { name: variant.name };
     const rawDeclaration = inheritHost(
-      clientOf(rawManifest),
-      clientPatchOf(rawArm) ?? {}
+      clientOf(rawConfig),
+      clientPatchOf(rawVariant) ?? {}
     );
     const client =
       host.definition.run || host.definition.runBatch
@@ -589,20 +620,20 @@ export async function runEvalSuite(
       ? createMCPFixture(client, undefined, { authType: 'api-token' })
       : undefined;
     // Started on first use, for hosts that connect to their servers themselves.
-    const variant = arm.toolOverrides ?? manifest.toolOverrides;
+    const toolMetadata = variantToolMetadata(evalConfig, variant);
     let proxy: Promise<ToolSurfaceProxy> | undefined;
-    const toolVariant = variant
+    const toolVariant = toolMetadata
       ? {
-          id: variant.id,
+          id: toolMetadata.id,
           proxy: () =>
-            (proxy ??= startToolSurfaceProxy(resolvedServers, variant)),
+            (proxy ??= startToolSurfaceProxy(resolvedServers, toolMetadata)),
         }
       : undefined;
 
     try {
       for (const { source, dataset } of canonicalDatasets) {
-        const executionDataset = selectEvalCases(dataset, manifest);
-        const template = arm.inputTemplate ?? manifest.inputTemplate;
+        const executionDataset = selectEvalCases(dataset, evalConfig);
+        const template = variant.inputTemplate ?? evalConfig.inputTemplate;
         const effectiveDataset: EvalDataset = {
           ...executionDataset,
           cases: executionDataset.cases.map((evalCase) => ({
@@ -612,18 +643,18 @@ export async function runEvalSuite(
               ? clientFieldsOf(
                   parseHostConfig(
                     inheritHost(rawDeclaration, clientPatchOf(evalCase)!),
-                    rawManifest
+                    rawConfig
                   )
                 )
               : {}),
-            ...(effectiveManifest.judges?.length
+            ...(effectiveConfig.judges?.length
               ? {
                   assertions: EvalAssertionsSchema.parse({
                     ...evalCase.assertions,
                     passesJudge: mergeSuiteJudges(
                       evalCase,
-                      effectiveManifest.judges,
-                      (rawArm.judges ?? rawManifest.judges ?? []) as Array<
+                      effectiveConfig.judges,
+                      (rawVariant.judges ?? rawConfig.judges ?? []) as Array<
                         Record<string, unknown>
                       >
                     ),
@@ -646,8 +677,8 @@ export async function runEvalSuite(
             `Client "${host.declaration.type}" has neither run() nor runBatch(), so it can't run cases.`
           );
         // The model each case runs on prices its usage and labels its result:
-        // a case client's own, or the arm client's (including its default).
-        const armModel =
+        // a case client's own, or the variant client's (including its default).
+        const variantModel =
           host.declaration.model ??
           (host.config as { model?: unknown } | undefined)?.model;
         const batchStartTime = Date.now();
@@ -656,7 +687,7 @@ export async function runEvalSuite(
           effectiveDataset.cases,
           host.declaration,
           resolvedServers,
-          { manifest: effectiveManifest, arm, env },
+          { evalConfig: effectiveConfig, variant, env },
           toolVariant
         );
         // Batch execution (including shared setup/cleanup) precedes the runner's
@@ -666,21 +697,23 @@ export async function runEvalSuite(
           {
             dataset: effectiveDataset,
             client: host.declaration.type,
-            ...(typeof armModel === 'string' ? { model: armModel } : {}),
+            ...(typeof variantModel === 'string'
+              ? { model: variantModel }
+              : {}),
             // The suite reports its own results (results.json).
             reporting: 'none',
-            concurrency: manifest.concurrency ?? 1,
-            defaultTrials: manifest.trials,
-            defaultPassThreshold: manifest.passThreshold,
-            toolOverrides: arm.toolOverrides ?? manifest.toolOverrides,
-            toolMap: arm.toolMap ?? manifest.toolMap,
+            concurrency: evalConfig.concurrency ?? 1,
+            defaultTrials: evalConfig.trials,
+            defaultPassThreshold: evalConfig.passThreshold,
+            toolOverrides: toolMetadata,
+            toolMap: variant.toolMap ?? evalConfig.toolMap,
             ...(runHost
               ? {
                   executeCase: createSuiteCaseExecutor({
                     servers: resolvedServers,
                     host: host.declaration,
-                    manifest: effectiveManifest,
-                    arm,
+                    evalConfig: effectiveConfig,
+                    variant,
                     env,
                     batchTraces,
                     toolVariant,
@@ -696,13 +729,14 @@ export async function runEvalSuite(
           dataset: executionDataset,
           result,
         });
-        for (const caseResult of result.caseResults) caseResult.arm = arm.name;
+        for (const caseResult of result.caseResults)
+          caseResult.variant = variant.name;
         // Price usage the client reported without a cost, at the model each
-        // case ran (a case client doesn't take the arm's model).
+        // case ran (a case client doesn't take the variant's model).
         const caseModels = new Map(
           effectiveDataset.cases.map((evalCase) => [
             evalCase.id,
-            clientPatchOf(evalCase) ? evalCase.model : armModel,
+            clientPatchOf(evalCase) ? evalCase.model : variantModel,
           ])
         );
         const priced = estimateCosts(
@@ -711,7 +745,7 @@ export async function runEvalSuite(
             const model = caseModels.get(caseResult.id);
             return typeof model === 'string' ? model : undefined;
           },
-          manifest.pricing
+          evalConfig.pricing
         );
         Object.assign(appliedPricing, priced.applied);
         for (const model of priced.unpriced) unpricedModels.add(model);
@@ -727,17 +761,17 @@ export async function runEvalSuite(
       if (proxy) await (await proxy.catch(() => undefined))?.close();
     }
 
-    const summary = summarizeArm(arm, servers, sourceResults);
+    const summary = summarizeVariant(variant, servers, sourceResults);
     if (Object.keys(appliedPricing).length > 0)
       summary.pricing = appliedPricing;
     if (unpricedModels.size > 0)
       summary.unpricedModels = [...unpricedModels].sort();
-    armResults.push(summary);
+    variantResults.push(summary);
   }
 
-  const armMetrics = armResults.map((arm, index) => {
-    const listed = (arms[index]?.metrics ??
-      manifest.metrics ??
+  const variantMetrics = variantResults.map((variant, index) => {
+    const listed = (variants[index]?.metrics ??
+      evalConfig.metrics ??
       []) as MetricSpec[];
     const listedNames = new Set(
       listed.map((spec) => resolveMetric(spec).outName)
@@ -746,35 +780,35 @@ export async function runEvalSuite(
       ...CORE_METRICS.filter((core) => !listedNames.has(core)),
       ...listed,
     ];
-    return computeMetrics(specs, arm.result?.caseResults ?? []);
+    return computeMetrics(specs, variant.result?.caseResults ?? []);
   });
-  armResults.forEach((arm, index) => {
-    const caseResults = arm.result?.caseResults ?? [];
-    arm.metrics = armMetrics[index]!.aggregated;
-    const evidence = armEvidence(caseResults);
-    if (evidence !== undefined) arm.evidence = evidence;
+  variantResults.forEach((variant, index) => {
+    const caseResults = variant.result?.caseResults ?? [];
+    variant.metrics = variantMetrics[index]!.aggregated;
+    const evidence = variantEvidence(caseResults);
+    if (evidence !== undefined) variant.evidence = evidence;
     // Core metrics are reported when they apply; only listed ones are missed.
     const listed = new Set(
-      ((arms[index]?.metrics ?? manifest.metrics ?? []) as MetricSpec[]).map(
-        (spec) => resolveMetric(spec).outName
-      )
+      (
+        (variants[index]?.metrics ?? evalConfig.metrics ?? []) as MetricSpec[]
+      ).map((spec) => resolveMetric(spec).outName)
     );
-    const unavailable = armMetrics[index]!.unavailable.filter((name) =>
+    const unavailable = variantMetrics[index]!.unavailable.filter((name) =>
       listed.has(name)
     );
-    if (unavailable.length > 0) arm.unavailableMetrics = unavailable;
+    if (unavailable.length > 0) variant.unavailableMetrics = unavailable;
     const source = costSource(caseResults);
-    if (source) arm.costSource = source;
+    if (source) variant.costSource = source;
   });
-  // Top-level metrics describe the baseline arm. Comparison-arm metrics remain
-  // attached to their arm, avoiding case-id collisions across arms.
-  const computedMetrics = armMetrics[0]?.aggregated ?? {};
+  // Top-level metrics describe the baseline variant. Comparison-variant metrics remain
+  // attached to their variant, avoiding case-id collisions across variants.
+  const computedMetrics = variantMetrics[0]?.aggregated ?? {};
   let totalHostUsage: UsageMetrics | undefined;
-  for (const arm of armResults) {
-    totalHostUsage = sumUsage(totalHostUsage, arm.result?.totalHostUsage);
+  for (const variant of variantResults) {
+    totalHostUsage = sumUsage(totalHostUsage, variant.result?.totalHostUsage);
   }
   const totalJudgeUsage = sumJudgeUsage(
-    armResults.map((arm) => arm.result?.totalJudgeUsage)
+    variantResults.map((variant) => variant.result?.totalJudgeUsage)
   );
   const telemetry: RunTelemetry = {
     cases: allResults.length,
@@ -788,8 +822,8 @@ export async function runEvalSuite(
     ...identity,
     timestamp: new Date().toISOString(),
     durationMs: Date.now() - suiteStartTime,
-    manifestName: manifest.name,
-    arms: armResults,
+    configName: evalConfig.name,
+    variants: variantResults,
     metrics: {
       total: allResults.length,
       passed: allResults.filter((result) => result.pass).length,
@@ -801,22 +835,22 @@ export async function runEvalSuite(
       ...computedMetrics,
     },
     telemetry,
-    armDeltas: buildArmDeltas(armResults),
+    variantDeltas: buildVariantDeltas(variantResults),
     results: allResults,
   };
 
   summary.runId = executionId;
-  const store = manifest.results?.store
-    ? getResultStore(manifest.results.store.type).create(
-        resolveStorePaths(manifest.results.store, { manifestDir, rootDir })
+  const store = evalConfig.results?.store
+    ? getResultStore(evalConfig.results.store.type).create(
+        resolveStorePaths(evalConfig.results.store, { configDir, rootDir })
       )
     : undefined;
   // The comparison is a convenience: it must never cost the run its results.
   try {
     const previous = await findPreviousRun({
-      manifestId: summary.manifestId,
+      configId: summary.configId,
       runId: executionId,
-      arms: summary.arms.map((arm) => arm.name),
+      variants: summary.variants.map((variant) => variant.name),
       store,
       outputRoot: path.dirname(outputDir),
     });
@@ -829,39 +863,39 @@ export async function runEvalSuite(
 
   const redact =
     options.redactStoredResponses ??
-    (manifest.redactStoredResponses as boolean | undefined) ??
+    (evalConfig.redactStoredResponses as boolean | undefined) ??
     REDACT_STORED_RESPONSES_BY_DEFAULT;
   const storedSummary = redact
     ? redactStoredResponses(summary)
     : structuredClone(summary);
   await fs.mkdir(outputDir, { recursive: true });
   if (store) {
-    // Manifest validation already parsed defaults and transforms once.
+    // Eval config validation already parsed defaults and transforms once.
     const metadata = {
-      datasetName: manifest.name,
+      datasetName: evalConfig.name,
       // The MST that produced the results, next to the suite's content hash.
       packageVersion: packageJson.version,
       labels: {
-        manifestId: summary.manifestId,
+        configId: summary.configId,
         contentHash: summary.contentHash,
       },
     };
     summary.caseArtifactPointers = {};
-    for (const [index, arm] of storedSummary.arms.entries()) {
-      const id = `${executionId}-arm-${index}`;
+    for (const [index, variant] of storedSummary.variants.entries()) {
+      const id = `${executionId}-variant-${index}`;
       await store.saveArtifact(
         createStoredEvalArtifact({
           kind: 'eval-runner-result',
           id,
-          data: arm.result,
+          data: variant.result,
           metadata: {
             ...metadata,
-            labels: { ...metadata.labels, arm: arm.name },
+            labels: { ...metadata.labels, variant: variant.name },
           },
           createdAt: summary.timestamp,
         })
       );
-      summary.caseArtifactPointers[arm.name] = [id];
+      summary.caseArtifactPointers[variant.name] = [id];
     }
     // Pointers are populated after redaction/cloning; retain them in both copies.
     storedSummary.caseArtifactPointers = summary.caseArtifactPointers;
@@ -879,5 +913,5 @@ export async function runEvalSuite(
     path.join(outputDir, 'results.json'),
     `${JSON.stringify(storedSummary, null, 2)}\n`
   );
-  return { manifest, outputDir, datasets: allDatasets, summary };
+  return { evalConfig, outputDir, datasets: allDatasets, summary };
 }

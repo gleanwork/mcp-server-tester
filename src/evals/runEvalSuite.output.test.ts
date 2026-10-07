@@ -25,7 +25,7 @@ afterEach(async () => {
 });
 
 describe('suite output', () => {
-  it('prints no reporter hint, and the iterations warning once across arms', async () => {
+  it('prints no reporter hint, and the iterations warning once across variants', async () => {
     vi.mocked(createMCPClientForConfig).mockResolvedValue({
       listTools: vi.fn(async () => ({ tools: [] })),
     } as unknown as Awaited<ReturnType<typeof createMCPClientForConfig>>);
@@ -45,19 +45,19 @@ describe('suite output', () => {
       })
     );
     await fs.writeFile(
-      path.join(dir, 'manifest.json'),
+      path.join(dir, 'eval.json'),
       JSON.stringify({
         name: 'output',
         datasets: ['./cases.json'],
         servers: [{ transport: 'http', serverUrl: 'https://example.com/mcp' }],
         client: 'mst',
         clientOptions: { provider: 'anthropic' },
-        arms: [{ name: 'a' }, { name: 'b' }],
+        variants: [{ name: 'a' }, { name: 'b' }],
       })
     );
 
     await runEvalSuite({
-      manifestPath: path.join(dir, 'manifest.json'),
+      configPath: path.join(dir, 'eval.json'),
       rootDir: dir,
     });
 

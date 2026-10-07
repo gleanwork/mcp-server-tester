@@ -21,11 +21,11 @@ import {
   parseExtensionReference,
 } from '../plugins/plugin.js';
 import type {
-  EvalManifest,
+  EvalConfig,
   ExtensionConfig,
   ClientConfig,
   TaggedConfig,
-} from './evalManifest.js';
+} from './evalConfig.js';
 import { judgeOwnOptions } from '../judge/evaluateJudge.js';
 
 /**
@@ -35,7 +35,7 @@ import { judgeOwnOptions } from '../judge/evaluateJudge.js';
  * this a suite could pass only because another one loaded the plugin
  * (ADR-0001).
  */
-interface ManifestLookups {
+interface ConfigLookups {
   datasetSource(reference: string): DatasetSource;
   host(reference: string): ClientDefinition;
   metric(reference: string): MetricDefinition;
@@ -43,7 +43,7 @@ interface ManifestLookups {
   resultStore(reference: string): ResultStoreDefinition;
 }
 
-function manifestLookups(namespaces?: readonly string[]): ManifestLookups {
+function configLookups(namespaces?: readonly string[]): ConfigLookups {
   function scoped<T>(get: (reference: string) => T) {
     return (reference: string): T => {
       if (namespaces) assertListedNamespaces([reference], namespaces);
@@ -62,14 +62,12 @@ function manifestLookups(namespaces?: readonly string[]): ManifestLookups {
 /** Resolve by implementation type and retain parsed defaults/transforms for consumers. */
 export function resolveResultStoreConfig(
   config: ExtensionConfig,
-  options: ValidateManifestOptions = {}
+  options: ValidateEvalConfigOptions = {}
 ): {
   definition: ResultStoreDefinition;
   config: ExtensionConfig;
 } {
-  const definition = manifestLookups(options.namespaces).resultStore(
-    config.type
-  );
+  const definition = configLookups(options.namespaces).resultStore(config.type);
   return {
     definition,
     config: parseConfig(config, definition, 'result store options'),
@@ -106,16 +104,19 @@ const SuiteControlsSchema = z
   .strict();
 
 /** Canonical top-level controls, with explicit support for the run namespace. */
-export function normalizeSuiteControls(manifest: EvalManifest): EvalManifest {
-  if (manifest.profile !== undefined) {
+export function normalizeSuiteControls(evalConfig: EvalConfig): EvalConfig {
+  if (evalConfig.profile !== undefined) {
     throw new Error(
       'Evaluation profile is not supported; use explicit host and run controls.'
     );
   }
-  const nested = SuiteControlsSchema.parse(manifest.run ?? {});
+  const nested = SuiteControlsSchema.parse(evalConfig.run ?? {});
   const top = SuiteControlsSchema.parse(
     Object.fromEntries(
-      Object.keys(SuiteControlsSchema.shape).map((key) => [key, manifest[key]])
+      Object.keys(SuiteControlsSchema.shape).map((key) => [
+        key,
+        evalConfig[key],
+      ])
     )
   );
   for (const key of Object.keys(nested) as Array<keyof typeof nested>) {
@@ -129,7 +130,7 @@ export function normalizeSuiteControls(manifest: EvalManifest): EvalManifest {
     }
   }
   return {
-    ...manifest,
+    ...evalConfig,
     ...nested,
     ...Object.fromEntries(
       Object.entries(top).filter(([, value]) => value !== undefined)
@@ -139,7 +140,7 @@ export function normalizeSuiteControls(manifest: EvalManifest): EvalManifest {
 
 function parseMetrics(
   configs: ExtensionConfig[] | undefined,
-  lookups: ManifestLookups
+  lookups: ConfigLookups
 ): ExtensionConfig[] | undefined {
   // resolveMetric runs the spec's `metric` key when it has one, so validate that.
   return configs?.map((config) =>
@@ -155,7 +156,7 @@ function parseMetrics(
 
 function parseJudges(
   configs: ExtensionConfig[] | undefined,
-  lookups: ManifestLookups
+  lookups: ConfigLookups
 ): ExtensionConfig[] | undefined {
   return configs?.map((config) => {
     // The judge's schema sees only its own options; the assertion keys
@@ -173,7 +174,7 @@ function parseJudges(
   });
 }
 
-/** Manifest settings that default every host's option of the same name. */
+/** Eval config settings that default every host's option of the same name. */
 const HOST_DEFAULTS = [
   'model',
   'provider',
@@ -194,13 +195,13 @@ function takesOption(schema: ZodType, key: string): boolean {
 }
 
 /**
- * A host's options with the manifest's defaults filled in, for the options
+ * A host's options with the eval config's defaults filled in, for the options
  * its schema takes (a shared `provider` doesn't reach a host that has none).
  */
 export function parseHostConfig(
   config: ClientConfig,
-  defaults?: EvalManifest,
-  lookups: ManifestLookups = manifestLookups()
+  defaults?: EvalConfig,
+  lookups: ConfigLookups = configLookups()
 ): ClientConfig {
   const definition = lookups.host(config.type);
   // A deprecated name is recorded as the current one.
@@ -219,7 +220,7 @@ export function parseHostConfig(
   return parseConfig(options, definition, 'host options');
 }
 
-/** An arm's (or case's) client: the base client's options apply only to the same client. */
+/** A variant's (or case's) client: the base client's options apply only to the same client. */
 export function inheritHost(
   base: ClientConfig | undefined,
   patch: Partial<ClientConfig>
@@ -231,30 +232,30 @@ export function inheritHost(
   return { ...inherited, ...patch, type } as ClientConfig;
 }
 
-/** A manifest default no host of the run takes would silently do nothing. */
+/** An eval config default no host of the run takes would silently do nothing. */
 function assertDefaultsUsed(
-  manifest: EvalManifest,
+  evalConfig: EvalConfig,
   hosts: ClientConfig[],
-  lookups: ManifestLookups
+  lookups: ConfigLookups
 ): void {
   for (const key of HOST_DEFAULTS) {
-    if (manifest[key] === undefined || hosts.length === 0) continue;
+    if (evalConfig[key] === undefined || hosts.length === 0) continue;
     const used = hosts.some((host) =>
       takesOption(lookups.host(host.type).schema, key)
     );
     if (!used)
       throw new Error(
-        `The manifest sets "${key}", but none of its clients (${[...new Set(hosts.map((host) => host.type))].join(', ')}) takes it.`
+        `The eval config sets "${key}", but none of its clients (${[...new Set(hosts.map((host) => host.type))].join(', ')}) takes it.`
       );
   }
 }
 
 function effectiveHost(
-  manifest: EvalManifest,
+  evalConfig: EvalConfig,
   host: ClientConfig | undefined,
-  lookups: ManifestLookups
+  lookups: ConfigLookups
 ): ClientConfig | undefined {
-  return host ? parseHostConfig(host, manifest, lookups) : undefined;
+  return host ? parseHostConfig(host, evalConfig, lookups) : undefined;
 }
 
 function validateLabels(
@@ -276,7 +277,7 @@ function validateLabels(
 export function assertListedNamespaces(
   references: readonly string[],
   namespaces: readonly string[],
-  context = 'The manifest'
+  context = 'The eval config'
 ): void {
   for (const reference of references) {
     const { namespace } = parseExtensionReference(reference);
@@ -288,7 +289,7 @@ export function assertListedNamespaces(
   }
 }
 
-export interface ValidateManifestOptions {
+export interface ValidateEvalConfigOptions {
   /**
    * Namespaces of the plugins this suite loads. When given, references to any
    * other namespace are rejected.
@@ -297,88 +298,108 @@ export interface ValidateManifestOptions {
 }
 
 /**
- * Validate a manifest against the schemas of the extensions it names and return
- * parsed options, including effective arm inheritance. Callers must use the returned manifest to retain defaults and
- * transforms. The input is not mutated, and each effective config is parsed once. Apply a manifest's `extends`
- * first, with `resolveManifestExtends`; `runEvalSuite` does both.
+ * Validate an eval config against the schemas of the extensions it names and return
+ * parsed options, including effective variant inheritance. Callers must use the returned eval config to retain defaults and
+ * transforms. The input is not mutated, and each effective config is parsed once. Apply an eval config's `extends`
+ * first, with `resolveConfigExtends`; `runEvalSuite` does both.
  */
-export function validateManifest(
-  manifest: EvalManifest,
-  options: ValidateManifestOptions = {}
-): EvalManifest {
-  manifest = normalizeSuiteControls(manifest);
-  const lookups = manifestLookups(options.namespaces);
-  validateLabels(manifest.servers ?? [], 'the manifest');
-  const datasets = manifest.datasets.map((config) =>
+export function validateEvalConfig(
+  evalConfig: EvalConfig,
+  options: ValidateEvalConfigOptions = {}
+): EvalConfig {
+  evalConfig = normalizeSuiteControls(evalConfig);
+  const lookups = configLookups(options.namespaces);
+  validateLabels(evalConfig.servers ?? [], 'the eval config');
+  const datasets = evalConfig.datasets.map((config) =>
     parseConfig(config, lookups.datasetSource(config.type), 'dataset options')
   );
-  const base = clientOf(manifest);
-  const host = effectiveHost(manifest, base, lookups);
-  const metrics = parseMetrics(manifest.metrics, lookups);
-  const judges = parseJudges(manifest.judges, lookups);
-  const results = manifest.results
+  const base = clientOf(evalConfig);
+  const host = effectiveHost(evalConfig, base, lookups);
+  const metrics = parseMetrics(evalConfig.metrics, lookups);
+  const judges = parseJudges(evalConfig.judges, lookups);
+  const results = evalConfig.results
     ? {
-        ...manifest.results,
+        ...evalConfig.results,
         store: parseConfig(
-          manifest.results.store,
-          lookups.resultStore(manifest.results.store.type),
+          evalConfig.results.store,
+          lookups.resultStore(evalConfig.results.store.type),
           'result store options'
         ),
       }
     : undefined;
-  if (!manifest.arms?.length && host) {
+  if (!evalConfig.variants?.length && host) {
     assertHostSupports(host, {
-      servers: manifest.servers ?? [],
-      toolOverrides: manifest.toolOverrides,
-      concurrency: manifest.concurrency,
-      context: 'The manifest',
+      servers: evalConfig.servers ?? [],
+      tools: evalConfig.tools,
+      concurrency: evalConfig.concurrency,
+      context: 'The eval config',
     });
   }
-  const armHosts: ClientConfig[] = [];
-  const arms = manifest.arms?.map((arm) => {
-    const servers = arm.servers ?? manifest.servers;
-    validateLabels(servers ?? [], `arm "${arm.name}"`);
-    const patch = clientPatchOf(arm);
-    const armHost = patch
-      ? effectiveHost(manifest, inheritHost(base, patch), lookups)
+  const variantHosts: ClientConfig[] = [];
+  const variants = evalConfig.variants?.map((variant) => {
+    const servers = variant.servers ?? evalConfig.servers;
+    validateLabels(servers ?? [], `variant "${variant.name}"`);
+    const patch = clientPatchOf(variant);
+    const variantHost = patch
+      ? effectiveHost(evalConfig, inheritHost(base, patch), lookups)
       : host;
-    if (patch && armHost) armHosts.push(armHost);
-    if (armHost) {
-      assertHostSupports(armHost, {
+    if (patch && variantHost) variantHosts.push(variantHost);
+    if (variantHost) {
+      assertHostSupports(variantHost, {
         servers: servers ?? [],
-        toolOverrides: arm.toolOverrides ?? manifest.toolOverrides,
-        concurrency: manifest.concurrency,
-        context: `Arm "${arm.name}"`,
+        tools: variant.tools ?? evalConfig.tools,
+        concurrency: evalConfig.concurrency,
+        context: `Variant "${variant.name}"`,
       });
     }
     return {
-      ...arm,
+      ...variant,
       servers,
-      ...(armHost ? clientFieldsOf(armHost) : {}),
-      metrics: arm.metrics ? parseMetrics(arm.metrics, lookups) : metrics,
-      judges: arm.judges ? parseJudges(arm.judges, lookups) : judges,
+      ...(variantHost ? clientFieldsOf(variantHost) : {}),
+      metrics: variant.metrics
+        ? parseMetrics(variant.metrics, lookups)
+        : metrics,
+      judges: variant.judges ? parseJudges(variant.judges, lookups) : judges,
     };
   });
   assertDefaultsUsed(
-    manifest,
+    evalConfig,
     [
-      ...(manifest.arms?.length &&
-      manifest.arms.every((arm) => clientPatchOf(arm))
+      ...(evalConfig.variants?.length &&
+      evalConfig.variants.every((variant) => clientPatchOf(variant))
         ? []
         : host
           ? [host]
           : []),
-      ...armHosts,
+      ...variantHosts,
     ],
     lookups
   );
   return {
-    ...manifest,
+    ...evalConfig,
     datasets,
     ...(host ? clientFieldsOf(host) : {}),
     metrics,
     judges,
     results,
-    arms,
+    variants: baselineFirst(variants, evalConfig.baseline),
   };
+}
+
+/**
+ * The variants with the baseline first: the one `baseline` names, else the
+ * first. Comparisons read the baseline as the first variant.
+ */
+function baselineFirst<T extends { name: string }>(
+  variants: T[] | undefined,
+  baseline: string | undefined
+): T[] | undefined {
+  if (baseline === undefined) return variants;
+  const index =
+    variants?.findIndex((variant) => variant.name === baseline) ?? -1;
+  if (index < 0)
+    throw new Error(
+      `baseline "${baseline}" names no variant${variants?.length ? `; the variants are ${variants.map((variant) => `"${variant.name}"`).join(', ')}` : ': the eval config has none'}.`
+    );
+  return [variants![index]!, ...variants!.filter((_, i) => i !== index)];
 }

@@ -4,9 +4,9 @@ import {
   EvalDatasetSchema,
   type EvalDataset,
 } from './datasetTypes.js';
-import type { EvalManifest } from './evalManifest.js';
+import type { EvalConfig } from './evalConfig.js';
 import { loadEvalDatasetFromObject } from './datasetLoader.js';
-import { normalizeSuiteControls } from './manifestValidation.js';
+import { normalizeSuiteControls } from './configValidation.js';
 
 // Source ingestion must not silently discard noncanonical fields. In particular,
 // dropping an assertion field can turn an intended failure into a passing case.
@@ -17,13 +17,13 @@ const SourceDatasetSchema = EvalDatasetSchema.extend({
 });
 
 /**
- * Validate a canonical EvalDataset and apply the manifest case limit.
+ * Validate a canonical EvalDataset and apply the eval config case limit.
  * Sources never attach a client or manufacture assertions. Use an opt-in
  * dataset source adapter to migrate other formats before canonical validation.
  */
 export function buildEvalDataset(
   raw: unknown,
-  manifest: EvalManifest
+  evalConfig: EvalConfig
 ): EvalDataset {
   const result = SourceDatasetSchema.safeParse(raw);
   if (!result.success) {
@@ -39,15 +39,15 @@ export function buildEvalDataset(
     );
   }
   const dataset = loadEvalDatasetFromObject(result.data);
-  return selectEvalCases(dataset, manifest);
+  return selectEvalCases(dataset, evalConfig);
 }
 
 /** Apply the same tag selection and case cap to built-in and plugin datasets. */
 export function selectEvalCases(
   dataset: EvalDataset,
-  manifest: EvalManifest
+  evalConfig: EvalConfig
 ): EvalDataset {
-  const controls = normalizeSuiteControls(manifest);
+  const controls = normalizeSuiteControls(evalConfig);
   const tags = controls.filterTags as string[] | undefined;
   const cases = tags?.length
     ? dataset.cases.filter((evalCase) =>

@@ -30,7 +30,7 @@ vi.mock('node:os', async (original) => ({
 vi.mock('./externalHost/runtime.js', () => ({
   runExternalHostScenario: vi.fn(),
 }));
-const context = { manifest: { name: 'test', datasets: [], concurrency: 1 } };
+const context = { evalConfig: { name: 'test', datasets: [], concurrency: 1 } };
 const config = {
   type: 'chatgpt',
   model: 'test-chatgpt-model',
@@ -703,7 +703,7 @@ describe('ChatGPT V2 batch host', () => {
   it('rejects concurrency and mixed model configurations', async () => {
     await expect(
       CHATGPT_HOST.runBatch!(requests(), {
-        manifest: { ...context.manifest, concurrency: 2 },
+        evalConfig: { ...context.evalConfig, concurrency: 2 },
       })
     ).rejects.toThrow('concurrency 1');
     const mixed = requests();

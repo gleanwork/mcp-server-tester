@@ -17,7 +17,7 @@ afterEach(async () => {
 
 /** A host that reports 1M input and 100k output tokens, and no cost. */
 const plugin: Plugin = {
-  meta: { name: 'arm-comparison', namespace: 'arms' },
+  meta: { name: 'variant-comparison', namespace: 'variants' },
   clients: {
     tokens: {
       schema: z
@@ -44,19 +44,23 @@ const plugin: Plugin = {
   },
 };
 
-async function suite(manifest: Record<string, unknown>, cases: unknown[]) {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'arm-comparison-'));
+async function suite(evalConfig: Record<string, unknown>, cases: unknown[]) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'variant-comparison-'));
   dirs.push(dir);
   await fs.writeFile(
     path.join(dir, 'cases.json'),
     JSON.stringify({ name: 'cases', cases })
   );
   await fs.writeFile(
-    path.join(dir, 'manifest.json'),
-    JSON.stringify({ name: 'arms', datasets: ['./cases.json'], ...manifest })
+    path.join(dir, 'eval.json'),
+    JSON.stringify({
+      name: 'variants',
+      datasets: ['./cases.json'],
+      ...evalConfig,
+    })
   );
   return runEvalSuite({
-    manifestPath: path.join(dir, 'manifest.json'),
+    configPath: path.join(dir, 'eval.json'),
     rootDir: dir,
     plugins: [plugin],
   });
@@ -66,30 +70,30 @@ describe('pricing', () => {
   it('prices each case at the model it ran, records the prices, and lists unpriced models', async () => {
     const { summary } = await suite(
       {
-        extends: ['arms/prices'],
-        arms: [
-          { name: 'a', client: 'arms/tokens', model: 'model-a' },
-          { name: 'b', client: 'arms/tokens', model: 'model-b' },
+        extends: ['variants/prices'],
+        variants: [
+          { name: 'a', client: 'variants/tokens', model: 'model-a' },
+          { name: 'b', client: 'variants/tokens', model: 'model-b' },
         ],
       },
       [
-        { id: 'arm-model', input: 'q' },
+        { id: 'variant-model', input: 'q' },
         {
-          // Its own host: priced at its model, not the arm's.
+          // Its own host: priced at its model, not the variant's.
           id: 'own-model',
           input: 'q',
-          client: 'arms/tokens',
+          client: 'variants/tokens',
           model: 'model-a',
         },
       ]
     );
-    const [a, b] = summary.arms;
+    const [a, b] = summary.variants;
     // 1M input at $2 and 100k output at $10 per million: $3 a trial.
     expect(a!.metrics?.cost_usd_mean).toBeCloseTo(3, 9);
     expect(a!.costSource).toBe('pricing');
     expect(a!.pricing).toEqual({ 'model-a': { input: 2, output: 10 } });
     expect(a!.unpricedModels).toBeUndefined();
-    // Arm b's own case is unpriced; only the case host's model has a price.
+    // Variant b's own case is unpriced; only the case host's model has a price.
     expect(b!.metrics?.cost_usd_mean).toBeCloseTo(3, 9);
     expect(b!.unpricedModels).toEqual(['model-b']);
     // Totals include estimates; the run total is unknown while usage is unpriced.
@@ -99,32 +103,34 @@ describe('pricing', () => {
 });
 
 describe('judge scores in the comparison', () => {
-  it('reports per-judge score deltas between arms', async () => {
+  it('reports per-judge score deltas between variants', async () => {
     const { summary } = await suite(
       {
-        client: 'arms/tokens',
-        arms: [
+        client: 'variants/tokens',
+        variants: [
           { name: 'low' },
           {
             name: 'high',
-            judges: [{ type: 'arms/score', name: 'quality', value: 0.9 }],
+            judges: [{ type: 'variants/score', name: 'quality', value: 0.9 }],
           },
         ],
-        judges: [{ type: 'arms/score', name: 'quality', value: 0.4 }],
+        judges: [{ type: 'variants/score', name: 'quality', value: 0.4 }],
       },
       [{ id: 'one', input: 'q' }]
     );
-    const delta = summary.armDeltas.high as {
+    const delta = summary.variantDeltas.high as {
       metricDeltas: Record<string, unknown>;
     };
-    expect(summary.arms[0]!.metrics?.judge_score).toEqual({
-      'arms/score': 0.4,
+    expect(summary.variants[0]!.metrics?.judge_score).toEqual({
+      'variants/score': 0.4,
     });
-    expect(summary.arms[1]!.metrics?.judge_score).toEqual({
-      'arms/score': 0.9,
+    expect(summary.variants[1]!.metrics?.judge_score).toEqual({
+      'variants/score': 0.9,
     });
     expect(
-      (delta.metricDeltas.judge_score as Record<string, number>)['arms/score']
+      (delta.metricDeltas.judge_score as Record<string, number>)[
+        'variants/score'
+      ]
     ).toBeCloseTo(0.5, 9);
   });
 });

@@ -8,7 +8,7 @@ import {
   resolveMetric,
   type MetricDefinition,
 } from './metrics.js';
-import { validateManifest } from './manifestValidation.js';
+import { validateEvalConfig } from './configValidation.js';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
 import { getMetric } from './metrics.js';
 
@@ -195,7 +195,7 @@ describe('computeMetrics', () => {
         compute: (_row, options) => Number(options?.weight),
       },
     });
-    const parsed = validateManifest({
+    const parsed = validateEvalConfig({
       name: 'metrics',
       datasets: [],
       metrics: [{ type: 'test/weighted-parsed', name: 'alias' }],
@@ -221,12 +221,12 @@ describe('computeMetrics', () => {
   });
 
   it('accepts tagged top-level judge options with default output names', () => {
-    const manifest = validateManifest({
+    const evalConfig = validateEvalConfig({
       name: 'metrics',
       datasets: [],
       metrics: [{ type: 'judge_score_for', judge: 'quality' }],
     });
-    const metrics = computeMetrics(manifest.metrics ?? [], [
+    const metrics = computeMetrics(evalConfig.metrics ?? [], [
       result('one', true, {
         judge: { name: 'quality', pass: true, score: 0.7 },
       }),
@@ -250,7 +250,7 @@ describe('computeMetrics', () => {
     expect(metrics.perCase.direct!.response_words).toBe(3);
   });
 
-  it('aggregates duplicate IDs independently across datasets and repeated arms', () => {
+  it('aggregates duplicate IDs independently across datasets and repeated variants', () => {
     const cases = [
       result('shared', true),
       { ...result('shared', false), datasetName: 'other' },
@@ -298,7 +298,7 @@ describe('computeMetrics', () => {
       compute: (_case, params) => Number(params?.factor),
     };
     installMetrics({ 'plugin-metric': definition });
-    const parsed = validateManifest({
+    const parsed = validateEvalConfig({
       name: 'metrics',
       datasets: [],
       metrics: [{ type: 'test/plugin-metric', name: 'alias', params: {} }],
@@ -336,7 +336,7 @@ describe('computeMetrics', () => {
   });
 
   it('validates parameterized built-ins and output aliases through the same lookup', () => {
-    const parsed = validateManifest({
+    const parsed = validateEvalConfig({
       name: 'metrics',
       datasets: [],
       metrics: [
@@ -355,7 +355,7 @@ describe('computeMetrics', () => {
       ]).perCase.one?.quality_score
     ).toBe(0.7);
     expect(() =>
-      validateManifest({
+      validateEvalConfig({
         name: 'metrics',
         datasets: [],
         metrics: [{ type: 'judge_score_for' }],

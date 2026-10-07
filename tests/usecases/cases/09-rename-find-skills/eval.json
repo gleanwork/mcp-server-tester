@@ -26,18 +26,15 @@
     "output_tokens",
     "cost_usd"
   ],
-  "arms": [
+  "variants": [
     {
       "name": "baseline"
     },
     {
       "name": "renamed",
-      "toolOverrides": {
-        "id": "renamed",
-        "tools": {
-          "find_skills": {
-            "name": "find_more_skills_and_tools"
-          }
+      "tools": {
+        "find_skills": {
+          "name": "find_more_skills_and_tools"
         }
       }
     }

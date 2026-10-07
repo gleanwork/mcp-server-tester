@@ -14,7 +14,7 @@ import {
 } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { z } from 'zod';
-import type { EvalManifest } from '../evalManifest.js';
+import type { EvalConfig } from '../evalConfig.js';
 import {
   assertCoworkHostPlugins,
   coworkBlockedMcpEntries,
@@ -613,11 +613,11 @@ async function recover(
 type InstallOptions = {
   profileDirectory: string;
   stagingDirectory: string;
-  manifest: EvalManifest;
+  evalConfig: EvalConfig;
   model?: string;
   /** Installed through a pinned, required allowedPluginMarketplaces entry. */
   plugins?: readonly MarketplacePlugin[];
-  arm?: string;
+  variant?: string;
   managedPreferencePaths: string[];
   /** Explicit runtime credentials only; never falls back to process.env. */
   env?: Record<string, string | undefined>;
@@ -703,8 +703,8 @@ async function validateInstall(options: InstallOptions) {
   }
   const { plan, settings, privateFiles, stdioDirectories, serverLabels } =
     createCoworkBundlePlan({
-      manifest: options.manifest,
-      arm: options.arm,
+      evalConfig: options.evalConfig,
+      variant: options.variant,
       runtimeDirectory: directory,
       plugins,
       env,
@@ -916,8 +916,8 @@ export async function installMacCoworkSettings(
     await saveJournal(lock, journal);
     journalSaved = true;
     const bundle = await prepareCoworkMcpBundle({
-      manifest: options.manifest,
-      arm: options.arm,
+      evalConfig: options.evalConfig,
+      variant: options.variant,
       directory,
       runtimeDirectory: directory,
       plugins: options.plugins,

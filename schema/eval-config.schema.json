@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://github.com/gleanwork/mcp-server-tester/schema/eval-manifest.schema.json",
-  "title": "MCP evaluation manifest",
-  "description": "Organization-neutral evaluation manifest. Pluggable blocks resolve through the tester registries.",
+  "$id": "https://github.com/gleanwork/mcp-server-tester/schema/eval-config.schema.json",
+  "title": "MCP eval config",
+  "description": "An eval config: what to evaluate and how. Pluggable blocks resolve through the tester's extensions.",
   "type": "object",
   "required": ["name", "datasets"],
   "additionalProperties": false,
@@ -83,14 +83,15 @@
         }
       }
     },
-    "toolOverrides": {
-      "$ref": "#/definitions/toolOverrideVariant"
+    "tools": {
+      "$ref": "#/definitions/toolMetadata",
+      "description": "Tool metadata every variant shows its client, unless it sets its own."
     },
     "inputTemplate": {
       "type": "string",
       "description": "Wraps each case's input before the host sees it: `{{input}}` is replaced by the input."
     },
-    "arms": {
+    "variants": {
       "type": "array",
       "items": {
         "type": "object",
@@ -101,17 +102,21 @@
             "type": "string",
             "minLength": 1
           },
+          "description": {
+            "type": "string",
+            "description": "What this variant changes."
+          },
           "servers": {
             "$ref": "#/properties/servers"
           },
           "client": {
             "type": "string",
             "minLength": 1,
-            "description": "This arm's client. A different client doesn't inherit the manifest's clientOptions."
+            "description": "This variant's client. A different client doesn't inherit the eval config's clientOptions."
           },
           "model": {
             "type": "string",
-            "description": "The model this arm's client uses."
+            "description": "The model this variant's client uses."
           },
           "clientOptions": {
             "type": "object",
@@ -134,12 +139,13 @@
           "toolMap": {
             "$ref": "#/properties/toolMap"
           },
-          "toolOverrides": {
-            "$ref": "#/definitions/toolOverrideVariant"
+          "tools": {
+            "$ref": "#/definitions/toolMetadata",
+            "description": "The tool metadata this variant shows its client."
           },
           "inputTemplate": {
             "type": "string",
-            "description": "This arm's input template: `{{input}}` is replaced by the case's input."
+            "description": "This variant's input template: `{{input}}` is replaced by the case's input."
           },
           "metrics": {
             "type": "array",
@@ -154,7 +160,13 @@
             }
           }
         }
-      }
+      },
+      "description": "The setups the eval compares. The baseline is the first, unless `baseline` names another."
+    },
+    "baseline": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The variant the others are compared with. Default: the first."
     },
     "metrics": {
       "type": "array",
@@ -187,7 +199,7 @@
     },
     "model": {
       "type": "string",
-      "description": "The model the client uses: a default for every arm and case."
+      "description": "The model the client uses: a default for every variant and case."
     },
     "provider": {
       "type": "string"
@@ -212,9 +224,6 @@
     "maxToolCalls": {
       "type": "integer",
       "minimum": 0
-    },
-    "tools": {
-      "type": "string"
     },
     "requireEvalEndpoint": {
       "type": "boolean"
@@ -284,7 +293,7 @@
         "type": "string",
         "minLength": 1
       },
-      "description": "Shared configs (namespace/name) from listed plugins, applied in order under the manifest."
+      "description": "Shared configs (namespace/name) from listed plugins, applied in order under the eval config's own settings."
     },
     "coworkSetup": {
       "type": "object",
@@ -614,41 +623,6 @@
         }
       ]
     },
-    "toolOverrideVariant": {
-      "type": "object",
-      "required": ["id", "tools"],
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "description": {
-          "type": "string"
-        },
-        "tools": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "name": {
-                "type": "string",
-                "pattern": "^[A-Za-z0-9_.-]{1,128}$",
-                "description": "Replacement tool name. Calls reach the original tool and are recorded under its original name."
-              },
-              "description": {
-                "type": "string"
-              },
-              "inputSchema": {
-                "type": "object",
-                "additionalProperties": true
-              }
-            }
-          }
-        }
-      }
-    },
     "extension": {
       "oneOf": [
         {
@@ -667,6 +641,28 @@
           }
         }
       ]
+    },
+    "toolMetadata": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]{1,128}$",
+            "description": "Replacement tool name. Calls reach the original tool and are recorded under its original name."
+          },
+          "description": {
+            "type": "string"
+          },
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "description": "Tool metadata a variant shows its client instead of the servers' own: a new name, description or input schema, keyed by the tool's name on its server. Calls are still recorded under the original names."
     }
   }
 }

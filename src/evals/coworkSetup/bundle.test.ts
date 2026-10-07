@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HttpMCPConfig, StdioMCPConfig } from '../../config/mcpConfig.js';
-import type { EvalManifest } from '../evalManifest.js';
+import type { EvalConfig } from '../evalConfig.js';
 import { prepareCoworkMcpBundle } from './bundle.js';
 
 vi.mock('node:fs/promises', async (importOriginal) => {
@@ -26,12 +26,12 @@ function http(overrides: Partial<HttpMCPConfig> = {}): HttpMCPConfig {
     ...overrides,
   };
 }
-function manifest(overrides: Partial<EvalManifest> = {}): EvalManifest {
+function evalConfig(overrides: Partial<EvalConfig> = {}): EvalConfig {
   return { name: 'synthetic', datasets: [], servers: [http()], ...overrides };
 }
 function options(overrides: Partial<Options> = {}): Options {
   return {
-    manifest: manifest(),
+    evalConfig: evalConfig(),
     directory,
     runtimeDirectory: directory,
     env: { SYNTHETIC_COWORK_TOKEN: TOKEN },
@@ -118,7 +118,7 @@ describe('prepareCoworkMcpBundle', () => {
       const runtimeDirectory = join(root, 'runtime');
       const result = await prepareCoworkMcpBundle(
         options({
-          manifest: manifest({
+          evalConfig: evalConfig({
             servers,
             coworkSetup: { approveWriteTools: true },
           }),
@@ -176,7 +176,7 @@ describe('prepareCoworkMcpBundle', () => {
     if (kind === 'http-label-case') servers.push(http({ label: 'native' }));
     if (kind === 'plugin-root') server.command = '${pluginRoot:acme}/proxy';
     await expectRejected({
-      manifest: manifest({ servers }),
+      evalConfig: evalConfig({ servers }),
       env: kind === 'missing-token' ? {} : options().env,
       plugins: [
         {
@@ -195,12 +195,12 @@ describe('prepareCoworkMcpBundle', () => {
     [true, false, false],
     [false, true, true],
   ] as const)(
-    'applies base=%s arm=%s approval only to the selected server',
+    'applies base=%s variant=%s approval only to the selected server',
     async (base, override, approved) => {
-      const input = manifest({
+      const input = evalConfig({
         coworkSetup:
           base === undefined ? undefined : { approveWriteTools: base },
-        arms: [
+        variants: [
           {
             name: 'selected',
             servers: [http({ label: 'selected' })],
@@ -212,7 +212,7 @@ describe('prepareCoworkMcpBundle', () => {
         ],
       });
       const result = await prepareCoworkMcpBundle(
-        options({ manifest: input, arm: 'selected' })
+        options({ evalConfig: input, variant: 'selected' })
       );
       expect(await readJson(result.settingsPath)).toEqual({
         managedMcpServers: [
@@ -251,7 +251,7 @@ describe('prepareCoworkMcpBundle', () => {
       }),
     ];
     const result = await prepareCoworkMcpBundle(
-      options({ manifest: manifest({ servers }) })
+      options({ evalConfig: evalConfig({ servers }) })
     );
     expect(result).toEqual({
       directory,
@@ -321,18 +321,18 @@ describe('prepareCoworkMcpBundle', () => {
 
   it.each([
     { servers: [] },
-    { servers: [http()], arms: [{ name: 'empty', servers: [] }] },
-    { arms: [{ name: 'empty', servers: [] }] },
+    { servers: [http()], variants: [{ name: 'empty', servers: [] }] },
+    { variants: [{ name: 'empty', servers: [] }] },
   ])('accepts explicit empty server lists: %j', async (configuration) => {
-    const input = manifest({
+    const input = evalConfig({
       ...configuration,
       coworkSetup: { approveWriteTools: true },
     });
     if (!Object.hasOwn(configuration, 'servers')) delete input.servers;
     const result = await prepareCoworkMcpBundle(
       options({
-        manifest: input,
-        arm: configuration.arms ? 'empty' : undefined,
+        evalConfig: input,
+        variant: configuration.variants ? 'empty' : undefined,
         env: {},
       })
     );
@@ -347,8 +347,8 @@ describe('prepareCoworkMcpBundle', () => {
   it.each(['base', 'inherit', 'replace'])(
     'resolves %s canonical servers',
     async (selection) => {
-      const input = manifest({
-        arms: [
+      const input = evalConfig({
+        variants: [
           { name: 'inherit' },
           {
             name: 'replace',
@@ -358,8 +358,8 @@ describe('prepareCoworkMcpBundle', () => {
       });
       const result = await prepareCoworkMcpBundle(
         options({
-          manifest: input,
-          arm: selection === 'base' ? undefined : selection,
+          evalConfig: input,
+          variant: selection === 'base' ? undefined : selection,
         })
       );
       expect(await readJson(result.settingsPath)).toMatchObject({
@@ -371,38 +371,43 @@ describe('prepareCoworkMcpBundle', () => {
   );
 
   it.each([
-    { manifest: manifest({ servers: undefined }) },
+    { evalConfig: evalConfig({ servers: undefined }) },
     {
-      manifest: manifest({ servers: undefined, arms: [{ name: 'inherit' }] }),
-      arm: 'inherit',
+      evalConfig: evalConfig({
+        servers: undefined,
+        variants: [{ name: 'inherit' }],
+      }),
+      variant: 'inherit',
     },
-    { arm: 'no-match' },
+    { variant: 'no-match' },
     {
-      manifest: manifest({
-        arms: [{ name: 'same' }, { name: 'same', servers: [] }],
+      evalConfig: evalConfig({
+        variants: [{ name: 'same' }, { name: 'same', servers: [] }],
       }),
     },
     {
-      manifest: manifest({ arms: [{ name: 'same' }, { name: 'same' }] }),
-      arm: 'same',
+      evalConfig: evalConfig({
+        variants: [{ name: 'same' }, { name: 'same' }],
+      }),
+      variant: 'same',
     },
-    { manifest: manifest({ servers: [http(), http()] }) },
+    { evalConfig: evalConfig({ servers: [http(), http()] }) },
     {
-      manifest: manifest({
+      evalConfig: evalConfig({
         coworkSetup: { approveWriteTools: 'true' } as unknown as NonNullable<
-          EvalManifest['coworkSetup']
+          EvalConfig['coworkSetup']
         >,
       }),
     },
     { env: {} },
     { env: { SYNTHETIC_COWORK_TOKEN: 'synthetic\r\nInjected: yes' } },
     {
-      manifest: manifest({
+      evalConfig: evalConfig({
         servers: [http({ headers: { 'X-Bad': 'synthetic\nsecret' } })],
       }),
     },
     {
-      manifest: manifest({
+      evalConfig: evalConfig({
         servers: [http({ headers: { 'X-Large': 'x'.repeat(65536) } })],
       }),
     },
@@ -524,7 +529,9 @@ describe('generated runtime helper', () => {
     };
     await prepareCoworkMcpBundle(
       options({
-        manifest: manifest({ servers: [http({ auth: undefined, headers })] }),
+        evalConfig: evalConfig({
+          servers: [http({ auth: undefined, headers })],
+        }),
       })
     );
     expectHeaders(headers);

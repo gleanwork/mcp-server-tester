@@ -9,7 +9,7 @@ export const CoworkSetupConfigSchema = z
 
 export type CoworkSetupConfig = z.infer<typeof CoworkSetupConfigSchema>;
 
-/** Arm settings inherit defaults; an explicit false cancels a parent opt-in. */
+/** Variant settings inherit defaults; an explicit false cancels a parent opt-in. */
 export function resolveCoworkSetupConfig(
   defaults?: CoworkSetupConfig,
   override?: CoworkSetupConfig
@@ -18,12 +18,12 @@ export function resolveCoworkSetupConfig(
     const base = CoworkSetupConfigSchema.parse(
       defaults === undefined ? {} : defaults
     );
-    const arm = CoworkSetupConfigSchema.parse(
+    const variant = CoworkSetupConfigSchema.parse(
       override === undefined ? {} : override
     );
     return {
       approveWriteTools:
-        arm.approveWriteTools ?? base.approveWriteTools ?? false,
+        variant.approveWriteTools ?? base.approveWriteTools ?? false,
     };
   } catch {
     throw new Error('Invalid Cowork setup options.');

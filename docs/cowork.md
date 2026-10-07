@@ -44,7 +44,7 @@ version, and records that version with every case result as
 
 MST has no built-in version. To run an exact version instead, for example to
 reproduce an earlier result or to keep a series of runs on one version, pin it
-in the manifest:
+in the eval config:
 
 ```json
 {
@@ -135,7 +135,7 @@ an eval-endpoint search tool and a login-backed GitHub `get_me` call.
 ## Run on macOS from a source checkout
 
 ```bash
-COWORK_ENV_FILE=/absolute/path/to/existing.env ./scripts/run-cowork.sh --manifests /absolute/path/to/manifest.json
+COWORK_ENV_FILE=/absolute/path/to/existing.env ./scripts/run-cowork.sh --configs /absolute/path/to/eval.json
 ```
 
 This prepares a local Python environment, builds MST, and runs the supplied
@@ -144,7 +144,7 @@ must have Accessibility and Screen Recording permission. Credentials remain in
 the existing dotenv file or exported environment; the runner never rewrites or
 shell-sources that file. Node loads dotenv before plugins/custom judges start.
 
-An explicit `--manifests` or `--manifest-dir` is required; no default evaluation is
+An explicit `--configs` or `--config-dir` is required; no default evaluation is
 bundled. Use the normal file/GCS dataset sources and plugins. Configure custom
 judges according to their plugin's requirements.
 `--dry-run` checks configuration, not GUI execution or model behavior.
@@ -201,7 +201,7 @@ expired credentials fail preflight rather than silently dropping a connector.
 ## Run an installed release
 
 ```bash
-node --env-file=/absolute/path/to/existing.env node_modules/@gleanwork/mcp-server-tester/dist/cli/index.js batch --manifests /absolute/path/to/manifest.json --workers 1
+node --env-file=/absolute/path/to/existing.env node_modules/@gleanwork/mcp-server-tester/dist/cli/index.js batch --configs /absolute/path/to/eval.json --workers 1
 ```
 
 The release bundles the CU script and pinned Python requirements. Resolution does
@@ -238,7 +238,7 @@ resolves the Python driver independently of the working directory.
 
 The driver reads `/etc/claude-desktop/managed-settings.json` (or the absolute
 `MST_COWORK_SETTINGS_FILE`) and fails if its model, MCP servers, or wildcard
-approval policy disagree with the manifest. Other `policy-only` entries must
+approval policy disagree with the eval config. Other `policy-only` entries must
 block all tools (`{"*": "blocked"}`). With host `plugins`,
 `allowedPluginMarketplaces` must contain exactly one entry per plugin that
 matches `coworkPluginMarketplace(plugin)`; without `plugins`, it must be absent
@@ -298,7 +298,7 @@ if (!report.evidencePassed) {
 }
 ```
 
-The input is MST schema-v1 `raw-results.json`, including `results` and `arms`.
+The input is MST schema-v1 `raw-results.json`, including `results` and `variants`.
 Each case must have a unique ID and `hostTelemetry.nativeSessionId`. Retain this
 archive layout, including the actual saved tool-output bytes:
 
@@ -552,11 +552,11 @@ interception is a host/catalog policy responsibility, not a stdio guarantee.
 
 MST validates the full server set before changing the app or profile. HTTP,
 plain stdio, and private-file-backed proxies all use the local Developer MCP
-surface, not the managed profile's MCP list. Even an empty manifest temporarily
+surface, not the managed profile's MCP list. Even an empty eval config temporarily
 replaces the user's local MCP list. The profile transaction owns inference
 settings and private stdio files: directories use mode 0700 and JSON files use
 mode 0600. Credentials are resolved from the supplied runtime environment, not
-embedded in the manifest or public app configuration.
+embedded in the eval config or public app configuration.
 
 Setup returns transaction-owned `stdioPaths`, which the shared readiness check
 uses after installation. Do not supply Linux-only `pluginRoots` or

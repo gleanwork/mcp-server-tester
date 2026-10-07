@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
+import { variantToolMetadata } from './evalConfig.js';
 import type {
   ClientBatchRequest,
   ClientDefinition,
@@ -77,11 +78,11 @@ async function runBatch(
   platform: ChatgptPlatform
 ): Promise<ClientRunResult[]> {
   if (!requests.length) return [];
-  if ((context.manifest.concurrency ?? 1) !== 1)
+  if ((context.evalConfig.concurrency ?? 1) !== 1)
     throw new Error('ChatGPT desktop requires concurrency 1.');
-  if (context.arm?.toolOverrides || context.manifest.toolOverrides)
+  if (variantToolMetadata(context.evalConfig, context.variant))
     throw new Error(
-      'ChatGPT desktop does not support tool description overrides.'
+      'ChatGPT desktop does not support tool metadata (`tools`).'
     );
   const configs = requests.map((request) => Schema.parse(request.config));
   if (requests.some((request) => !request.input.prompt.trim()))

@@ -52,11 +52,11 @@ export default {meta:{name:'local-plugin',version:'1.0.0',namespace:'local'},cli
       })),
     })
   );
-  const manifestDir = path.join(dir, 'manifests');
-  await fs.mkdir(manifestDir);
+  const configDir = path.join(dir, 'eval configs');
+  await fs.mkdir(configDir);
   const paths = [];
   for (let i = 0; i < 4; i++) {
-    const file = path.join(manifestDir, `run-${i}.json`);
+    const file = path.join(configDir, `run-${i}.json`);
     paths.push(file);
     await fs.writeFile(
       file,
@@ -84,8 +84,8 @@ export default {meta:{name:'local-plugin',version:'1.0.0',namespace:'local'},cli
   }
   const batchArgs = [
     'batch',
-    '--manifest-dir',
-    manifestDir,
+    '--config-dir',
+    configDir,
     '--workers',
     '4',
     '--output-root',
@@ -93,25 +93,25 @@ export default {meta:{name:'local-plugin',version:'1.0.0',namespace:'local'},cli
   ];
   assert.match(cli(batchArgs), /4 passed, 0 failed, 0 skipped/);
   console.log(
-    'PASS: 4 concurrent manifests × 5 cases, concurrency=8, real local stdio MCP server.'
+    'PASS: 4 concurrent eval configs × 5 cases, concurrency=8, real local stdio MCP server.'
   );
   assert.match(cli([...batchArgs, '--skip-existing']), /4 skipped/);
   console.log('PASS: resume skipped four matching completed results.');
-  const manifest = JSON.parse(await fs.readFile(paths[0], 'utf8'));
-  manifest.model = 'changed-identity';
-  await fs.writeFile(paths[0], JSON.stringify(manifest));
+  const evalConfig = JSON.parse(await fs.readFile(paths[0], 'utf8'));
+  evalConfig.model = 'changed-identity';
+  await fs.writeFile(paths[0], JSON.stringify(evalConfig));
   assert.match(
     cli([...batchArgs, '--skip-existing']),
     /1 passed, 0 failed, 3 skipped/
   );
   console.log(
-    'PASS: a changed manifest reran; three matching runs remained skipped.'
+    'PASS: a changed eval config reran; three matching runs remained skipped.'
   );
   const dataset = JSON.parse(await fs.readFile(datasetPath, 'utf8'));
   dataset.cases[0].assertions.containsText = 'deliberately impossible';
   await fs.writeFile(datasetPath, JSON.stringify(dataset));
   const failedRun = cli(
-    ['run', '--manifest', paths[0], '--output-dir', path.join(dir, 'failure')],
+    ['run', '--config', paths[0], '--output-dir', path.join(dir, 'failure')],
     1
   );
   const summaryPath = /^Output: (.+)$/m.exec(failedRun)?.[1];

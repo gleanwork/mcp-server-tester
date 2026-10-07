@@ -331,7 +331,7 @@ export function Recommendation({
     });
   }
   // passRate is judged on capability cases, the tool metrics on every case;
-  // an arm metric has no per-case test.
+  // a variant metric has no per-case test.
   const tested =
     metric === 'passRate'
       ? data.cases.filter((c) => c.group === 'capability').length

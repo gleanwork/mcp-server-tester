@@ -1,12 +1,12 @@
 import path from 'node:path';
-import type { ManifestDirs } from './evalManifest.js';
+import type { ConfigDirs } from './evalConfig.js';
 import { z } from 'zod';
 import {
   FileEvalResultStore,
   GCSEvalResultStore,
   type EvalResultStore,
 } from './resultStore.js';
-import type { ExtensionConfig } from './evalManifest.js';
+import type { ExtensionConfig } from './evalConfig.js';
 import type { ResultStoreDefinition } from './evalFrameworkTypes.js';
 import { extensionLookup } from '../plugins/extensions.js';
 
@@ -56,19 +56,19 @@ export function getResultStore(reference: string): ResultStoreDefinition {
 
 /**
  * A result store config with a `file` store's relative `dir` resolved
- * against the manifest's directory. Unlike an input, where a store writes
+ * against the eval config's directory. Unlike an input, where a store writes
  * mustn't depend on what happens to exist in the working directory.
  */
 export function resolveStorePaths<T extends { type: string; dir?: unknown }>(
   config: T,
-  dirs: ManifestDirs
+  dirs: ConfigDirs
 ): T {
   return config.type === 'file' &&
     typeof config.dir === 'string' &&
     !path.isAbsolute(config.dir)
     ? {
         ...config,
-        dir: path.resolve(dirs.manifestDir ?? dirs.rootDir ?? '.', config.dir),
+        dir: path.resolve(dirs.configDir ?? dirs.rootDir ?? '.', config.dir),
       }
     : config;
 }

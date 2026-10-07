@@ -32,3 +32,17 @@ export function removedKeys<const T extends Record<string, string>>(
     ])
   ) as { [K in keyof T]: z.ZodOptional<z.ZodNever> };
 }
+
+/**
+ * Throw for an option 2.0 renamed (ADR 0002) that a JavaScript caller still
+ * passes, naming its replacement, rather than ignoring it or failing later.
+ */
+export function rejectRenamedOptions(
+  options: object,
+  renames: Readonly<Record<string, string>>,
+  where: string
+): void {
+  for (const [from, to] of Object.entries(renames))
+    if (Object.hasOwn(options, from))
+      throw new Error(`${where}: \`${from}\` is now \`${to}\`.`);
+}

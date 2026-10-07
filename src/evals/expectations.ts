@@ -5,7 +5,7 @@
  * It owns the rules every execution path shares:
  * - whether the evidence can support tool-call assertions (decided once, here);
  * - the tool-trace view reported next to `toolsTriggered`;
- * - how judge settings resolve (case defaults, suite manifest judges).
+ * - how judge settings resolve (case defaults, suite eval config judges).
  *
  * Validators stay pure leaves: this module decides what to grade and with
  * which settings, then calls them.
@@ -93,9 +93,9 @@ export function resolveJudges(
 }
 
 /**
- * The case's `passesJudge` list with a suite manifest's judges merged in.
- * A case entry naming a manifest judge overrides that judge's settings;
- * other case entries are kept. `rawJudges` are the manifest entries before
+ * The case's `passesJudge` list with a suite eval config's judges merged in.
+ * A case entry naming an eval config judge overrides that judge's settings;
+ * other case entries are kept. `rawJudges` are the eval config entries before
  * parsing, so the judge's own schema sees its inputs once.
  */
 export function mergeSuiteJudges(
@@ -109,7 +109,7 @@ export function mergeSuiteJudges(
       ? [evalCase.assertions.passesJudge]
       : [];
   // `rawJudges[i]` is `judges[i]` before parsing. A case entry overrides a
-  // manifest judge when results would give both the same name, so two
+  // eval config judge when results would give both the same name, so two
   // rubric judges (`correctness`, `conciseness`) stay distinct.
   const names = judges.map((judge, i) =>
     judgeNameOf({

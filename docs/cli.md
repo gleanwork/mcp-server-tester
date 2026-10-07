@@ -12,8 +12,8 @@ Before the package is installed (for example, running `init` in a new directory)
 - [generate - Generate Eval Dataset](#generate---generate-playwright-tests)
 - [login - OAuth Authentication](#login---oauth-authentication)
 - [token - Export Tokens for CI/CD](#token---export-tokens-for-cicd)
-- [run - Run an Evaluation Manifest](#run---run-an-evaluation-manifest)
-- [batch - Run Several Manifests](#batch---run-several-manifests)
+- [run - Run an Eval Config](#run---run-an-eval-config)
+- [batch - Run Several Eval Configs](#batch---run-several-eval-configs)
 - [open - Open the Reporter](#open---open-the-reporter)
 - [cowork setup - Prepare Cowork](#cowork-setup---prepare-cowork)
 
@@ -671,54 +671,54 @@ npx mst token https://api.example.com/mcp
 # Run 'mst login https://api.example.com/mcp' to authenticate first.
 ```
 
-## `run` - Run an Evaluation Manifest
+## `run` - Run an Eval Config
 
-Runs a manifest's arms and writes the run summary. See [Evaluation framework](./evaluation-framework.md) for the manifest format.
-
-### Usage
-
-```bash
-npx mst run --manifest ./eval-manifest.json [options]
-```
-
-### Options
-
-| Option                  | Description                                                                                                                                                                                                                                  |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `-m, --manifest <path>` | The manifest to run (required).                                                                                                                                                                                                              |
-| `--arm <name>`          | Run one arm.                                                                                                                                                                                                                                 |
-| `--plugins <paths...>`  | Plugin modules to load before the run, as well as the manifest's own `plugins`.                                                                                                                                                              |
-| `--output-dir <dir>`    | Where to write runs: each run goes in `<dir>/<run id>/`. Default: `.mcp-test-results/<manifest name>` under the root.                                                                                                                        |
-| `--root-dir <dir>`      | Fallback for relative manifest paths, and the default results location. Default: `.`.                                                                                                                                                        |
-| `--secrets-file <path>` | A JSON or dotenv-style file of environment values for the run (API keys, `auth.accessTokenEnv` tokens, stdio server environments), kept out of the manifest. A relative path resolves against the root; its values override the environment. |
-| `--dry-run`             | Validate the manifest, its plugins and datasets without running anything.                                                                                                                                                                    |
-
-`run` prints a row per arm (cases passed, trial pass rate, MCP calls, host events, tokens, cost, time) and, when there is one, the change since the previous run of the same manifest and arm. It writes `results.json` in the output directory and exits 1 when any case failed. `--dry-run` prints the manifest's name, output directory, datasets and arms as JSON.
-
-## `batch` - Run Several Manifests
+Runs an eval config's variants and writes the run summary. See [Evaluation framework](./evaluation-framework.md) for the eval config format.
 
 ### Usage
 
 ```bash
-npx mst batch --manifest-dir ./manifests [options]
-npx mst batch --manifests a.json b.json [options]
+npx mst run --config ./eval.json [options]
 ```
 
 ### Options
 
-| Option                   | Description                                                                                                                                         |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--manifests <paths...>` | Manifest files to run.                                                                                                                              |
-| `--manifest-dir <dir>`   | Run every top-level `.json` manifest in a directory, in name order. `--manifests` wins when both are given.                                         |
-| `--workers <number>`     | How many manifests run at once. Default: 1.                                                                                                         |
-| `--skip-existing`        | Skip a manifest whose result store (`results.store`) already has a completed run of the same resolved manifest. Without a store nothing is skipped. |
-| `--output-root <dir>`    | Put each manifest's runs under `<dir>/<file stem>-<hash>/`.                                                                                         |
-| `--plugins <paths...>`   | Plugin modules to load before the batch.                                                                                                            |
-| `--root-dir <dir>`       | Fallback for relative manifest paths, and the default results location.                                                                             |
-| `--secrets-file <path>`  | A JSON or dotenv-style file of environment values for the run, as for `run`.                                                                        |
-| `--dry-run`              | Validate every manifest without running anything.                                                                                                   |
+| Option                  | Description                                                                                                                                                                                                                                     |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-c, --config <path>`   | The eval config to run (required).                                                                                                                                                                                                              |
+| `--variant <name>`      | Run one variant.                                                                                                                                                                                                                                |
+| `--plugins <paths...>`  | Plugin modules to load before the run, as well as the eval config's own `plugins`.                                                                                                                                                              |
+| `--output-dir <dir>`    | Where to write runs: each run goes in `<dir>/<run id>/`. Default: `.mcp-test-results/<config name>` under the root.                                                                                                                             |
+| `--root-dir <dir>`      | Fallback for relative eval config paths, and the default results location. Default: `.`.                                                                                                                                                        |
+| `--secrets-file <path>` | A JSON or dotenv-style file of environment values for the run (API keys, `auth.accessTokenEnv` tokens, stdio server environments), kept out of the eval config. A relative path resolves against the root; its values override the environment. |
+| `--dry-run`             | Validate the eval config, its plugins and datasets without running anything.                                                                                                                                                                    |
 
-`batch` prints each manifest's outcome and a total, and exits 1 when any manifest failed.
+`run` prints a row per variant (cases passed, trial pass rate, MCP calls, host events, tokens, cost, time) and, when there is one, the change since the previous run of the same eval config and variant. It writes `results.json` in the output directory and exits 1 when any case failed. `--dry-run` prints the eval config's name, output directory, datasets and variants as JSON.
+
+## `batch` - Run Several Eval Configs
+
+### Usage
+
+```bash
+npx mst batch --config-dir ./configs [options]
+npx mst batch --configs a.json b.json [options]
+```
+
+### Options
+
+| Option                  | Description                                                                                                                                                |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--configs <paths...>`  | Eval config files to run.                                                                                                                                  |
+| `--config-dir <dir>`    | Run every top-level `.json` eval config in a directory, in name order. `--configs` wins when both are given.                                               |
+| `--workers <number>`    | How many eval configs run at once. Default: 1.                                                                                                             |
+| `--skip-existing`       | Skip an eval config whose result store (`results.store`) already has a completed run of the same resolved eval config. Without a store nothing is skipped. |
+| `--output-root <dir>`   | Put each eval config's runs under `<dir>/<file stem>-<hash>/`.                                                                                             |
+| `--plugins <paths...>`  | Plugin modules to load before the batch.                                                                                                                   |
+| `--root-dir <dir>`      | Fallback for relative eval config paths, and the default results location.                                                                                 |
+| `--secrets-file <path>` | A JSON or dotenv-style file of environment values for the run, as for `run`.                                                                               |
+| `--dry-run`             | Validate every eval config without running anything.                                                                                                       |
+
+`batch` prints each eval config's outcome and a total, and exits 1 when any eval config failed.
 
 ## `open` - Open the Reporter
 

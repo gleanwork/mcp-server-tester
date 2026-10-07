@@ -118,7 +118,7 @@ Supported assertions:
 
 In LLM host mode, a real LLM receives your server's tool list and a natural language prompt, then decides which tools to call. This tests whether your tool names, descriptions, and input schemas are clear enough for autonomous use — a different question from whether the tools return correct output.
 
-A case with `input` runs on the client. In a Playwright test, `runEvalDataset` names the client and model (`{ dataset, client: 'mst', model: 'claude-haiku-4-5' }`), and the `mst` client uses the test's MCP connection; a suite manifest names them with `client` and `model`. A case can set its own `client`, `model` and `clientOptions`.
+A case with `input` runs on the client. In a Playwright test, `runEvalDataset` names the client and model (`{ dataset, client: 'mst', model: 'claude-haiku-4-5' }`), and the `mst` client uses the test's MCP connection; a suite eval config names them with `client` and `model`. A case can set its own `client`, `model` and `clientOptions`.
 
 ```json snippet=snippets/mcp-host-dataset.json
 {
@@ -241,9 +241,9 @@ The `examples/` directory contains complete working examples:
 - [sqlite-server/](./examples/sqlite-server) — Test suite for a SQLite MCP server: 11 Playwright tests, 14 eval dataset cases.
 - [basic-playwright-usage/](./examples/basic-playwright-usage) — Minimal Playwright patterns.
 
-## Evaluation manifests
+## Eval configs
 
-For projects with multiple datasets, use an evaluation manifest. Dataset
+For projects with multiple datasets, use an eval config. Dataset
 paths are shorthand for tagged file sources, while hosts, metrics, judges,
 result stores, and other extensions are built-ins or come from plugins
 (referenced as `namespace/name`):
@@ -278,22 +278,22 @@ result stores, and other extensions are built-ins or come from plugins
 }
 ```
 
-Run one manifest or a bounded batch:
+Run one eval config or a bounded batch:
 
 ```bash
 npx mst run \
-  --manifest eval-manifest.json \
+  --config eval.json \
   --plugins ./plugins \
   --dry-run
 
 npx mst batch \
-  --manifest-dir manifests \
+  --config-dir configs \
   --workers 4 \
   --skip-existing \
   --dry-run
 ```
 
-Use `arms` to compare server sets or host configurations. An arm can override
+Use `variants` to compare server sets or host configurations. A variant can override
 servers, client, model, client options, tool maps, input templates, metrics, and judges.
 The canonical execution primitives remain `EvalDataset`, `EvalCase`,
 `MCPConfig`, and `runEvalDataset`.
@@ -303,7 +303,7 @@ is a plain default-exported object in ESLint's shape, and its extensions are
 referenced as `namespace/name`. See
 [Plugins](docs/evaluation-framework.md#plugins).
 Secrets remain environment-variable or plugin-owned runtime inputs and do not
-belong in committed manifests.
+belong in committed eval configs.
 
 ## Known Limitations
 

@@ -69,7 +69,7 @@ function run(timeout: number) {
       servers: [{ transport: 'http', serverUrl, label: 'local' }],
     },
     { type: 'mst', provider: 'openai', timeout },
-    { manifest: { name: 'offline', datasets: [] } }
+    { evalConfig: { name: 'offline', datasets: [] } }
   );
 }
 
@@ -200,7 +200,7 @@ describe('SDK host owned lifecycle deadline', () => {
     const pending = getHost('mst').run!(
       { prompt: 'hello', servers: [] },
       { type: 'mst', provider: 'openai', timeout: 200 },
-      { manifest: { name: 'offline', datasets: [] } }
+      { evalConfig: { name: 'offline', datasets: [] } }
     ).finally(() => {
       settled = true;
     });
@@ -280,7 +280,7 @@ describe('SDK host owned lifecycle deadline', () => {
           ],
         },
         { type: 'mst', provider: 'openai', timeout: 50 },
-        { manifest: { name: 'offline', datasets: [] } }
+        { evalConfig: { name: 'offline', datasets: [] } }
       );
       expect(result.error).toContain('timed out');
       await vi.waitFor(() => expect(fs.existsSync(closed)).toBe(true), {

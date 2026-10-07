@@ -2,7 +2,7 @@
   "name": "assistant-sxs",
   "datasets": ["./dataset.json"],
   "metrics": ["passed", "tool_count", "judge_pass", "cost_usd"],
-  "arms": [
+  "variants": [
     {
       "name": "assistant",
       "servers": [],

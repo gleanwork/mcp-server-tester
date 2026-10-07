@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { afterEach, describe, expect, it } from 'vitest';
-import { validateManifest } from './manifestValidation.js';
+import { validateEvalConfig } from './configValidation.js';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 import type {
@@ -10,7 +10,7 @@ import type {
   MetricDefinition,
   ResultStoreDefinition,
 } from './evalFrameworkTypes.js';
-import type { EvalManifest } from './evalManifest.js';
+import type { EvalConfig } from './evalConfig.js';
 import { clientPatchOf } from './clientFields.js';
 
 const schema = z.object({}).passthrough();
@@ -38,7 +38,7 @@ function baseExtensions(): Required<TestExtensions> {
   const resultStore: ResultStoreDefinition = {
     schema,
     create: () => {
-      throw new Error('not used in manifest validation');
+      throw new Error('not used in eval config validation');
     },
   };
   return {
@@ -67,10 +67,10 @@ function installTestPlugin(extra: TestExtensions = {}): void {
 
 afterEach(() => resetPluginsForTests());
 
-describe('manifest validation', () => {
-  it('validates all manifest references and labeled server sets', () => {
+describe('eval config validation', () => {
+  it('validates all eval config references and labeled server sets', () => {
     installTestPlugin();
-    const manifest: EvalManifest = {
+    const evalConfig: EvalConfig = {
       name: 'search',
       datasets: [{ type: 'test/file', path: './search.json' }],
       servers: [
@@ -81,10 +81,10 @@ describe('manifest validation', () => {
       metrics: [{ type: 'test/passed' }],
       judges: [{ type: 'test/correctness' }],
       results: { store: { type: 'test/file' } },
-      arms: [{ name: 'baseline', servers: [] }],
+      variants: [{ name: 'baseline', servers: [] }],
     };
 
-    expect(() => validateManifest(manifest)).not.toThrow();
+    expect(() => validateEvalConfig(evalConfig)).not.toThrow();
   });
 
   it.each(['dataset', 'host', 'judge'] as const)(
@@ -99,49 +99,49 @@ describe('manifest validation', () => {
         },
         judges: { x: { schema, evaluate: async () => ({ score: 1 }) } },
       });
-      const manifest: EvalManifest = {
+      const evalConfig: EvalConfig = {
         name: 'namespaces',
         datasets: [{ type: 'test/file' }],
       };
-      if (kind === 'dataset') manifest.datasets = [{ type: 'test/x' }];
-      if (kind === 'host') manifest.host = { type: 'test/x' };
-      if (kind === 'judge') manifest.judges = [{ type: 'test/x' }];
+      if (kind === 'dataset') evalConfig.datasets = [{ type: 'test/x' }];
+      if (kind === 'host') evalConfig.host = { type: 'test/x' };
+      if (kind === 'judge') evalConfig.judges = [{ type: 'test/x' }];
 
       // The plugin is installed process-wide, but this suite didn't list it.
-      expect(() => validateManifest(manifest, { namespaces: [] })).toThrow(
+      expect(() => validateEvalConfig(evalConfig, { namespaces: [] })).toThrow(
         /references "test\/[a-z]+", but doesn't load the "test" plugin/
       );
-      expect(() => validateManifest(manifest, { namespaces: [] })).toThrow(
+      expect(() => validateEvalConfig(evalConfig, { namespaces: [] })).toThrow(
         `doesn't load the "test" plugin`
       );
       expect(() =>
-        validateManifest(manifest, { namespaces: ['test'] })
+        validateEvalConfig(evalConfig, { namespaces: ['test'] })
       ).not.toThrow();
     }
   );
 
   it("validates the metric a spec's metric key names, against its own schema", () => {
     installTestPlugin();
-    const manifest: EvalManifest = {
+    const evalConfig: EvalConfig = {
       name: 'metric-key',
       datasets: [{ type: 'file', path: './search.json' }],
       metrics: [{ type: 'passed', metric: 'test/missing' }],
     };
 
-    expect(() => validateManifest(manifest, { namespaces: ['test'] })).toThrow(
-      'Metric "test/missing" is not available.'
-    );
+    expect(() =>
+      validateEvalConfig(evalConfig, { namespaces: ['test'] })
+    ).toThrow('Metric "test/missing" is not available.');
   });
 
   it('checks the metric a metric spec names, not only its type', () => {
-    const manifest: EvalManifest = {
+    const evalConfig: EvalConfig = {
       name: 'metric-key',
       datasets: [{ type: 'file', path: './search.json' }],
       // resolveMetric prefers `metric` over `type`.
       metrics: [{ type: 'passed', metric: 'test/hits' }],
     };
 
-    expect(() => validateManifest(manifest, { namespaces: [] })).toThrow(
+    expect(() => validateEvalConfig(evalConfig, { namespaces: [] })).toThrow(
       `references "test/hits", but doesn't load the "test" plugin`
     );
   });
@@ -188,14 +188,14 @@ describe('manifest validation', () => {
         },
       },
     });
-    const manifest: EvalManifest = {
+    const evalConfig: EvalConfig = {
       name: 'parsed',
       datasets: [{ type: 'test/custom', ignored: true }],
       client: 'test/custom',
       metrics: [{ type: 'test/custom', name: 'alias' }],
       judges: [{ type: 'test/custom' }],
       results: { store: { type: 'test/custom' } },
-      arms: [
+      variants: [
         { name: 'inherited' },
         {
           name: 'override',
@@ -206,7 +206,7 @@ describe('manifest validation', () => {
         },
       ],
     };
-    const parsed = validateManifest(manifest);
+    const parsed = validateEvalConfig(evalConfig);
     expect(parsed.datasets).toEqual([{ type: 'test/custom', count: 6 }]);
     expect(clientPatchOf(parsed)).toEqual({ type: 'test/custom', count: 6 });
     expect(parsed.metrics).toEqual([
@@ -214,14 +214,14 @@ describe('manifest validation', () => {
     ]);
     expect(parsed.judges).toEqual([{ type: 'test/custom', count: 6 }]);
     expect(parsed.results?.store).toEqual({ type: 'test/custom', count: 6 });
-    expect(clientPatchOf(parsed.arms?.[0])).toEqual(clientPatchOf(parsed));
-    expect(parsed.arms?.[0]?.metrics).toEqual(parsed.metrics);
-    expect(clientPatchOf(parsed.arms?.[1])).toEqual({
+    expect(clientPatchOf(parsed.variants?.[0])).toEqual(clientPatchOf(parsed));
+    expect(parsed.variants?.[0]?.metrics).toEqual(parsed.metrics);
+    expect(clientPatchOf(parsed.variants?.[1])).toEqual({
       type: 'test/custom',
       count: 12,
     });
-    expect(parsed.arms?.[1]?.metrics).toEqual([]);
-    expect(manifest.datasets[0]).toEqual({
+    expect(parsed.variants?.[1]?.metrics).toEqual([]);
+    expect(evalConfig.datasets[0]).toEqual({
       type: 'test/custom',
       ignored: true,
     });
@@ -229,17 +229,17 @@ describe('manifest validation', () => {
 
   it('accepts the built-in rubric judge and checks its options', () => {
     installTestPlugin();
-    const manifest: EvalManifest = {
+    const evalConfig: EvalConfig = {
       name: 'rubric-judges',
       datasets: [{ type: 'test/file' }],
       judges: [{ type: 'rubric', rubric: 'correctness', threshold: 0.8 }],
     };
-    expect(validateManifest(manifest).judges).toEqual([
+    expect(validateEvalConfig(evalConfig).judges).toEqual([
       { type: 'rubric', rubric: 'correctness', threshold: 0.8 },
     ]);
     expect(() =>
-      validateManifest({
-        ...manifest,
+      validateEvalConfig({
+        ...evalConfig,
         judges: [{ type: 'rubric', rubric: 'not-a-rubric' }],
       })
     ).toThrow(/Invalid judge options "rubric"/);
@@ -256,7 +256,7 @@ describe('manifest validation', () => {
         },
       },
     });
-    const manifest: EvalManifest = {
+    const evalConfig: EvalConfig = {
       name: 'judge-settings',
       datasets: [{ type: 'test/file' }],
       judges: [
@@ -267,7 +267,7 @@ describe('manifest validation', () => {
           reference: 'base-gold',
         },
       ],
-      arms: [
+      variants: [
         { name: 'inherited' },
         {
           name: 'override',
@@ -276,21 +276,26 @@ describe('manifest validation', () => {
               type: 'test/policy',
               count: 4,
               threshold: 0,
-              reference: 'arm-gold',
+              reference: 'variant-gold',
             },
           ],
         },
       ],
     };
-    const parsed = validateManifest(manifest);
+    const parsed = validateEvalConfig(evalConfig);
     expect(parsed.judges).toEqual([
       { type: 'test/policy', count: 6, threshold: 0.9, reference: 'base-gold' },
     ]);
-    expect(parsed.arms?.[0]?.judges).toEqual(parsed.judges);
-    expect(parsed.arms?.[1]?.judges).toEqual([
-      { type: 'test/policy', count: 12, threshold: 0, reference: 'arm-gold' },
+    expect(parsed.variants?.[0]?.judges).toEqual(parsed.judges);
+    expect(parsed.variants?.[1]?.judges).toEqual([
+      {
+        type: 'test/policy',
+        count: 12,
+        threshold: 0,
+        reference: 'variant-gold',
+      },
     ]);
-    expect(manifest.judges?.[0]?.count).toBe(2);
+    expect(evalConfig.judges?.[0]?.count).toBe(2);
   });
 
   it.each([
@@ -340,33 +345,35 @@ describe('manifest validation', () => {
       },
     });
     const config = { type: 'test/strict', required: 'invalid' };
-    const manifest: EvalManifest = {
+    const evalConfig: EvalConfig = {
       name: 'invalid-options',
       datasets: [{ type: 'test/file' }],
     };
-    if (kind === 'dataset') manifest.datasets = [config];
+    if (kind === 'dataset') evalConfig.datasets = [config];
     if (kind === 'host') {
       const { type, ...options } = config;
-      manifest.client = type;
-      manifest.clientOptions = options;
+      evalConfig.client = type;
+      evalConfig.clientOptions = options;
     }
-    if (kind === 'metric') manifest.metrics = [config];
-    if (kind === 'judge') manifest.judges = [config];
-    if (kind === 'store') manifest.results = { store: config };
+    if (kind === 'metric') evalConfig.metrics = [config];
+    if (kind === 'judge') evalConfig.judges = [config];
+    if (kind === 'store') evalConfig.results = { store: config };
     if (kind === 'armHost') {
       const { type, ...options } = config;
-      manifest.arms = [{ name: 'arm', client: type, clientOptions: options }];
+      evalConfig.variants = [
+        { name: 'variant', client: type, clientOptions: options },
+      ];
     }
     if (kind === 'armMetric')
-      manifest.arms = [{ name: 'arm', metrics: [config] }];
+      evalConfig.variants = [{ name: 'variant', metrics: [config] }];
     if (kind === 'armJudge')
-      manifest.arms = [{ name: 'arm', judges: [config] }];
-    expect(() => validateManifest(manifest)).toThrow(
+      evalConfig.variants = [{ name: 'variant', judges: [config] }];
+    expect(() => validateEvalConfig(evalConfig)).toThrow(
       /Invalid .* options "test\/strict"/
     );
   });
 
-  it('validates effective top-level host options in arm overrides', () => {
+  it('validates effective top-level host options in variant overrides', () => {
     installTestPlugin({
       clients: {
         limited: {
@@ -378,36 +385,36 @@ describe('manifest validation', () => {
         },
       },
     });
-    const manifest: EvalManifest = {
+    const evalConfig: EvalConfig = {
       name: 'effective',
       datasets: [{ type: 'test/file' }],
       maxToolCalls: 5,
-      arms: [{ name: 'arm', client: 'test/limited' }],
+      variants: [{ name: 'variant', client: 'test/limited' }],
     };
-    expect(() => validateManifest(manifest)).toThrow(
+    expect(() => validateEvalConfig(evalConfig)).toThrow(
       'Invalid host options "test/limited"'
     );
-    const parsed = validateManifest({
-      ...manifest,
+    const parsed = validateEvalConfig({
+      ...evalConfig,
       maxToolCalls: 2,
     });
-    expect(clientPatchOf(parsed.arms?.[0])).toEqual({
+    expect(clientPatchOf(parsed.variants?.[0])).toEqual({
       type: 'test/limited',
       maxToolCalls: 2,
       model: 'default',
     });
     expect(
       clientPatchOf(
-        validateManifest({
-          ...manifest,
-          arms: [
+        validateEvalConfig({
+          ...evalConfig,
+          variants: [
             {
-              name: 'arm',
+              name: 'variant',
               client: 'test/limited',
               clientOptions: { maxToolCalls: 1 },
             },
           ],
-        }).arms?.[0]
+        }).variants?.[0]
       )?.maxToolCalls
     ).toBe(1);
   });
@@ -415,19 +422,19 @@ describe('manifest validation', () => {
   it('rejects an unknown extension or duplicate server label', () => {
     installTestPlugin();
     expect(() =>
-      validateManifest({
+      validateEvalConfig({
         name: 'invalid',
         datasets: [{ type: 'missing' }],
       })
     ).toThrow('Dataset source "missing" is not available');
     expect(() =>
-      validateManifest({
+      validateEvalConfig({
         name: 'invalid',
         datasets: [{ type: 'test/missing' }],
       })
     ).toThrow('Dataset source "test/missing" is not available');
     expect(() =>
-      validateManifest({
+      validateEvalConfig({
         name: 'unloaded',
         datasets: [{ type: 'other/file' }],
       })
@@ -436,7 +443,7 @@ describe('manifest validation', () => {
     );
 
     expect(() =>
-      validateManifest({
+      validateEvalConfig({
         name: 'duplicate-labels',
         datasets: [{ type: 'test/file' }],
         servers: [
@@ -457,11 +464,8 @@ describe('manifest validation', () => {
 });
 
 describe('settings a host would ignore', () => {
-  const overrides = {
-    id: 'v2',
-    tools: { search: { description: 'Find it.' } },
-  };
-  const base = (extra: Record<string, unknown>): EvalManifest => ({
+  const overrides = { search: { description: 'Find it.' } };
+  const base = (extra: Record<string, unknown>): EvalConfig => ({
     name: 'loud',
     datasets: [{ type: 'file', path: 'x.json' }],
     ...extra,
@@ -481,7 +485,7 @@ describe('settings a host would ignore', () => {
   }
 
   it.each(['chatgpt', 'test/elsewhere'])(
-    'rejects toolOverrides for %s, which never shows them to the model',
+    'rejects tool metadata for %s, which never shows it to the model',
     (type) => {
       installHosts();
       const client =
@@ -489,52 +493,56 @@ describe('settings a host would ignore', () => {
           ? { client: type, model: 'gpt-5' }
           : { client: type };
       expect(() =>
-        validateManifest(base({ ...client, toolOverrides: overrides }), {
+        validateEvalConfig(base({ ...client, tools: overrides }), {
           namespaces: ['test'],
         })
-      ).toThrow(`The manifest: client "${type}" can't apply toolOverrides;`);
+      ).toThrow(
+        `The eval config: client "${type}" can't show tool metadata (\`tools\`);`
+      );
     }
   );
 
   it.each(['claude-code', 'test/runner'])(
-    'accepts toolOverrides for %s, served through the tool-variant proxy',
+    'accepts tool metadata for %s, served through the tool proxy',
     (type) => {
       installHosts();
       expect(() =>
-        validateManifest(base({ client: type, toolOverrides: overrides }), {
+        validateEvalConfig(base({ client: type, tools: overrides }), {
           namespaces: ['test'],
         })
       ).not.toThrow();
     }
   );
 
-  it('accepts toolOverrides for cowork, served through the tool-variant proxy', () => {
+  it('accepts tool metadata for cowork, served through the tool proxy', () => {
     expect(() =>
-      validateManifest(base({ client: 'cowork', toolOverrides: overrides }))
+      validateEvalConfig(base({ client: 'cowork', tools: overrides }))
     ).not.toThrow();
   });
 
-  it('rejects toolOverrides on the arm that sets them, and accepts them for mst', () => {
+  it('rejects tool metadata on the variant that sets it, and accepts it for mst', () => {
     installTestPlugin();
-    const manifest = base({
+    const evalConfig = base({
       client: 'mst',
       clientOptions: { provider: 'anthropic' },
-      arms: [
-        { name: 'sdk', toolOverrides: overrides },
+      variants: [
+        { name: 'sdk', tools: overrides },
         {
           name: 'desktop',
           client: 'chatgpt',
           model: 'gpt-5',
-          toolOverrides: overrides,
+          tools: overrides,
         },
       ],
     });
-    expect(() => validateManifest(manifest, { namespaces: ['test'] })).toThrow(
-      `Arm "desktop": client "chatgpt" can't apply toolOverrides;`
+    expect(() =>
+      validateEvalConfig(evalConfig, { namespaces: ['test'] })
+    ).toThrow(
+      `Variant "desktop": client "chatgpt" can't show tool metadata (\`tools\`);`
     );
     expect(() =>
-      validateManifest(
-        { ...manifest, arms: [manifest.arms![0]!] },
+      validateEvalConfig(
+        { ...evalConfig, variants: [evalConfig.variants![0]!] },
         { namespaces: ['test'] }
       )
     ).not.toThrow();
@@ -542,7 +550,7 @@ describe('settings a host would ignore', () => {
 
   it('rejects connection policy claude-code would drop, before anything runs', () => {
     expect(() =>
-      validateManifest(
+      validateEvalConfig(
         base({
           client: 'claude-code',
           servers: [
@@ -555,13 +563,13 @@ describe('settings a host would ignore', () => {
         })
       )
     ).toThrow(
-      "The manifest: claude-code can't forward proxy for https://mcp.example.com."
+      "The eval config: claude-code can't forward proxy for https://mcp.example.com."
     );
   });
 
   it('rejects an option mst would drop', () => {
     expect(() =>
-      validateManifest(
+      validateEvalConfig(
         base({ client: 'mst', clientOptions: { reasoningEffort: 'high' } })
       )
     ).toThrow(/Unrecognized key.*reasoningEffort/s);
@@ -573,7 +581,7 @@ describe('settings a host would ignore', () => {
     ['claude-code', {}],
   ])('accepts a systemPrompt for %s', (type, extra) => {
     expect(() =>
-      validateManifest(
+      validateEvalConfig(
         base({
           client: type,
           ...extra,
@@ -590,7 +598,7 @@ describe('settings a host would ignore', () => {
     'rejects a systemPrompt for %s, which has no way to apply it',
     (type, extra) => {
       expect(() =>
-        validateManifest(
+        validateEvalConfig(
           base({
             client: type,
             ...extra,
@@ -603,73 +611,72 @@ describe('settings a host would ignore', () => {
 });
 
 describe('settings a host would ignore: defaults, inheritance, opt-in', () => {
-  const overrides = {
-    id: 'v2',
-    tools: { search: { description: 'Find it.' } },
-  };
-  const manifest = (extra: Record<string, unknown>): EvalManifest => ({
+  const overrides = { search: { description: 'Find it.' } };
+  const evalConfig = (extra: Record<string, unknown>): EvalConfig => ({
     name: 'loud',
     datasets: [{ type: 'file', path: 'x.json' }],
     ...extra,
   });
 
   it('gives a shared default only to the clients that take it', () => {
-    const validated = validateManifest(
-      manifest({
+    const validated = validateEvalConfig(
+      evalConfig({
         model: 'claude-sonnet-4-6',
         temperature: 0.2,
         client: 'mst',
-        arms: [{ name: 'mst' }, { name: 'code', client: 'claude-code' }],
+        variants: [{ name: 'mst' }, { name: 'code', client: 'claude-code' }],
       })
     );
-    expect(clientPatchOf(validated.arms?.[0])).toMatchObject({
+    expect(clientPatchOf(validated.variants?.[0])).toMatchObject({
       type: 'mst',
       model: 'claude-sonnet-4-6',
       temperature: 0.2,
     });
-    expect(clientPatchOf(validated.arms?.[1])).toMatchObject({
+    expect(clientPatchOf(validated.variants?.[1])).toMatchObject({
       type: 'claude-code',
       model: 'claude-sonnet-4-6',
     });
-    expect(clientPatchOf(validated.arms?.[1])).not.toHaveProperty(
+    expect(clientPatchOf(validated.variants?.[1])).not.toHaveProperty(
       'temperature'
     );
   });
 
   it('rejects a default that none of the hosts takes', () => {
     expect(() =>
-      validateManifest(manifest({ temperature: 0.2, client: 'claude-code' }))
+      validateEvalConfig(
+        evalConfig({ temperature: 0.2, client: 'claude-code' })
+      )
     ).toThrow(
-      `The manifest sets "temperature", but none of its clients (claude-code) takes it.`
+      `The eval config sets "temperature", but none of its clients (claude-code) takes it.`
     );
   });
 
-  it("doesn't give an arm the options of a different host", () => {
-    const validated = validateManifest(
-      manifest({
+  it("doesn't give a variant the options of a different host", () => {
+    const validated = validateEvalConfig(
+      evalConfig({
         client: 'mst',
         clientOptions: { provider: 'openai', apiKeyEnvVar: 'KEY' },
-        arms: [{ name: 'code', client: 'claude-code' }],
+        variants: [{ name: 'code', client: 'claude-code' }],
       })
     );
-    expect(clientPatchOf(validated.arms?.[0])).not.toHaveProperty(
+    expect(clientPatchOf(validated.variants?.[0])).not.toHaveProperty(
       'apiKeyEnvVar'
     );
   });
 
-  it('accepts toolOverrides for a plugin host that applies them', () => {
+  it('accepts tool metadata for a plugin client that shows it', () => {
     installTestPlugin({
       clients: {
         variants: {
           schema,
-          toolOverrides: true,
+          toolMetadata: true,
           run: async () => ({ finalText: '', events: [] }),
         },
       },
     });
     expect(() =>
-      validateManifest(
-        manifest({ client: 'test/variants', toolOverrides: overrides }),
+      validateEvalConfig(
+        evalConfig({ client: 'test/variants', tools: overrides }),
         { namespaces: ['test'] }
       )
     ).not.toThrow();
@@ -686,9 +693,12 @@ describe('settings a host would ignore: defaults, inheritance, opt-in', () => {
       },
     });
     expect(() =>
-      validateManifest(manifest({ client: 'test/serial', concurrency: 4 }), {
-        namespaces: ['test'],
-      })
+      validateEvalConfig(
+        evalConfig({ client: 'test/serial', concurrency: 4 }),
+        {
+          namespaces: ['test'],
+        }
+      )
     ).toThrow(
       'client "test/serial" runs at most 1 case at a time; set concurrency to 1.'
     );

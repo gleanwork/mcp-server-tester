@@ -4,34 +4,35 @@ import { MCPConfigSchema } from '../config/mcpConfig.js';
 import { describe, expect, it } from 'vitest';
 import type { ToolOverrideVariant } from '../types/index.js';
 import {
-  EvalManifestSchema,
-  RENAMED_MANIFEST_KEYS,
-  loadEvalManifestFromObject,
+  EvalConfigSchema,
+  RENAMED_CONFIG_KEYS,
+  loadEvalConfigFromObject,
   resolveDatasetPaths,
-} from './evalManifest.js';
+  variantToolMetadata,
+} from './evalConfig.js';
 
-describe('EvalManifestSchema', () => {
-  it('accepts partial arm host options without weakening the base host tag', () => {
+describe('EvalConfigSchema', () => {
+  it('accepts partial variant host options without weakening the base host tag', () => {
     const base = {
       name: 'patch',
       datasets: ['cases.json'],
       client: 'sdk',
       model: 'base',
     };
-    const manifest = loadEvalManifestFromObject(
-      { ...base, arms: [{ name: 'candidate', model: 'candidate' }] },
+    const evalConfig = loadEvalConfigFromObject(
+      { ...base, variants: [{ name: 'candidate', model: 'candidate' }] },
       { skipDatasetValidation: true }
     );
-    expect(manifest.arms?.[0]?.model).toBe('candidate');
+    expect(evalConfig.variants?.[0]?.model).toBe('candidate');
     expect(() =>
-      EvalManifestSchema.parse({ ...base, host: { type: 'sdk' } })
+      EvalConfigSchema.parse({ ...base, host: { type: 'sdk' } })
     ).toThrow(
       '`host` is now `client` (the client’s name), `model` and `clientOptions` (its other options)'
     );
     expect(() =>
-      EvalManifestSchema.parse({
+      EvalConfigSchema.parse({
         ...base,
-        arms: [{ name: 'invalid', client: '' }],
+        variants: [{ name: 'invalid', client: '' }],
       })
     ).toThrow();
   });
@@ -66,16 +67,16 @@ describe('EvalManifestSchema', () => {
     { transport: 'stdio', command: 'node', args: [17] },
     { transport: 'stdio', command: 'node', env: { PORT: 17 } },
   ])(
-    'uses canonical transport validation on defaults and arms: %j',
+    'uses canonical transport validation on defaults and variants: %j',
     (server) => {
       const base = { name: 'invalid', datasets: ['cases.json'] };
       expect(() =>
-        EvalManifestSchema.parse({ ...base, servers: [server] })
+        EvalConfigSchema.parse({ ...base, servers: [server] })
       ).toThrow();
       expect(() =>
-        EvalManifestSchema.parse({
+        EvalConfigSchema.parse({
           ...base,
-          arms: [{ name: 'candidate', servers: [server] }],
+          variants: [{ name: 'candidate', servers: [server] }],
         })
       ).toThrow();
     }
@@ -84,14 +85,16 @@ describe('EvalManifestSchema', () => {
   it('keeps editor transport schema synchronized with canonical MCPConfigSchema', () => {
     const schema = JSON.parse(
       fs.readFileSync(
-        new URL('../../schema/eval-manifest.schema.json', import.meta.url),
+        new URL('../../schema/eval-config.schema.json', import.meta.url),
         'utf8'
       )
     ) as {
       definitions: { mcpConfig: unknown };
       properties: {
         servers: { items: unknown };
-        arms: { items: { properties: { client: { required?: string[] } } } };
+        variants: {
+          items: { properties: { client: { required?: string[] } } };
+        };
       };
     };
     expect(schema.definitions.mcpConfig).toEqual(
@@ -101,7 +104,7 @@ describe('EvalManifestSchema', () => {
       $ref: '#/definitions/mcpConfig',
     });
     expect(
-      schema.properties.arms.items.properties.client.required
+      schema.properties.variants.items.properties.client.required
     ).toBeUndefined();
   });
   const overrides: ToolOverrideVariant = {
@@ -118,24 +121,70 @@ describe('EvalManifestSchema', () => {
     },
   };
 
-  it('accepts shared tool override variants and multi-name mappings on defaults and arms', () => {
+  it('accepts tool metadata and multi-name mappings on the config and its variants', () => {
     const toolMap = { search: ['search', 'search_v2'], removed: [] };
-    const manifest = loadEvalManifestFromObject(
+    const evalConfig = loadEvalConfigFromObject(
       {
         name: 'variants',
         datasets: ['cases.json'],
         toolMap,
-        toolOverrides: overrides,
+        tools: overrides.tools,
         inputTemplate: '{{input}}',
-        arms: [{ name: 'candidate', toolMap, toolOverrides: overrides }],
+        variants: [
+          {
+            name: 'candidate',
+            description: overrides.description,
+            toolMap,
+            tools: overrides.tools,
+          },
+        ],
       },
       { skipDatasetValidation: true }
     );
-    expect(manifest.toolOverrides).toEqual(overrides);
-    expect(manifest.arms?.[0]?.toolOverrides).toEqual(overrides);
-    expect(manifest.toolMap).toEqual(toolMap);
-    expect(manifest.arms?.[0]?.toolMap).toEqual(toolMap);
+    expect(evalConfig.tools).toEqual(overrides.tools);
+    expect(evalConfig.variants?.[0]?.tools).toEqual(overrides.tools);
+    expect(variantToolMetadata(evalConfig, evalConfig.variants?.[0])).toEqual({
+      ...overrides,
+      id: 'candidate',
+    });
+    expect(variantToolMetadata(evalConfig)).toEqual({
+      id: 'variants',
+      tools: overrides.tools,
+    });
+    expect(evalConfig.toolMap).toEqual(toolMap);
+    expect(evalConfig.variants?.[0]?.toolMap).toEqual(toolMap);
   });
+
+  it.each([
+    [{ arms: [{ name: 'a' }] }, ['arms'], '`arms` is now `variants`'],
+    [
+      { toolOverrides: { id: 'x', tools: {} } },
+      ['toolOverrides'],
+      '`toolOverrides` is gone: set the tool metadata itself in `tools`',
+    ],
+    [
+      { variants: [{ name: 'a', toolOverrides: { id: 'x', tools: {} } }] },
+      ['variants', 0, 'toolOverrides'],
+      '`toolOverrides` is gone',
+    ],
+    [{ tools: 'search' }, ['tools'], '`tools` is tool metadata'],
+  ])(
+    'rejects the old config key %j, naming its replacement',
+    (old, where, message) => {
+      const result = EvalConfigSchema.safeParse({
+        name: 'old',
+        datasets: ['cases.json'],
+        ...old,
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues).toEqual([
+        expect.objectContaining({
+          path: where,
+          message: expect.stringContaining(message),
+        }),
+      ]);
+    }
+  );
 
   it.each([
     { toolMap: { search: 'search_v2' } },
@@ -151,56 +200,51 @@ describe('EvalManifestSchema', () => {
       toolOverrides: { id: 'variant', tools: { search: { description: 123 } } },
     },
   ])(
-    'rejects invalid mappings/overrides consistently on defaults and arms',
+    'rejects invalid mappings/overrides consistently on defaults and variants',
     (fields) => {
       const base = { name: 'invalid', datasets: ['cases.json'] };
-      expect(() => EvalManifestSchema.parse({ ...base, ...fields })).toThrow();
+      expect(() => EvalConfigSchema.parse({ ...base, ...fields })).toThrow();
       expect(() =>
-        EvalManifestSchema.parse({
+        EvalConfigSchema.parse({
           ...base,
-          arms: [{ name: 'candidate', ...fields }],
+          variants: [{ name: 'candidate', ...fields }],
         })
       ).toThrow();
     }
   );
 
-  it('shares override definitions and array-valued maps in the editor schema', () => {
+  it('shares the tool metadata definition and array-valued maps in the editor schema', () => {
     const schema = JSON.parse(
       fs.readFileSync(
-        new URL('../../schema/eval-manifest.schema.json', import.meta.url),
+        new URL('../../schema/eval-config.schema.json', import.meta.url),
         'utf8'
       )
     ) as {
       properties: {
         toolMap: unknown;
-        toolOverrides: unknown;
-        arms: {
-          items: { properties: { toolMap: unknown; toolOverrides: unknown } };
+        tools: { $ref: string };
+        variants: {
+          items: { properties: { toolMap: unknown; tools: { $ref: string } } };
         };
       };
-      definitions: { toolOverrideVariant: { required: string[] } };
+      definitions: { toolMetadata: { type: string } };
     };
     expect(schema.properties.toolMap).toEqual({
       type: 'object',
       additionalProperties: { type: 'array', items: { type: 'string' } },
     });
-    expect(schema.properties.arms.items.properties.toolMap).toEqual({
+    expect(schema.properties.variants.items.properties.toolMap).toEqual({
       $ref: '#/properties/toolMap',
     });
-    expect(schema.properties.toolOverrides).toEqual({
-      $ref: '#/definitions/toolOverrideVariant',
-    });
-    expect(schema.properties.arms.items.properties.toolOverrides).toEqual(
-      schema.properties.toolOverrides
+    expect(schema.properties.tools.$ref).toBe('#/definitions/toolMetadata');
+    expect(schema.properties.variants.items.properties.tools.$ref).toBe(
+      '#/definitions/toolMetadata'
     );
-    expect(schema.definitions.toolOverrideVariant.required).toEqual([
-      'id',
-      'tools',
-    ]);
+    expect(schema.definitions.toolMetadata.type).toBe('object');
   });
   it('normalizes a result store shorthand to a tagged store, and leaves a tagged one as is', () => {
     const load = (store: unknown) =>
-      loadEvalManifestFromObject(
+      loadEvalConfigFromObject(
         { name: 'm', datasets: ['x.json'], results: { store } },
         { skipDatasetValidation: true }
       ).results;
@@ -210,7 +254,7 @@ describe('EvalManifestSchema', () => {
   });
 
   it('normalizes file paths to tagged file dataset sources', () => {
-    const manifest = loadEvalManifestFromObject(
+    const evalConfig = loadEvalConfigFromObject(
       {
         name: 'search',
         datasets: ['evalsets/search.json'],
@@ -222,7 +266,7 @@ describe('EvalManifestSchema', () => {
           },
         ],
         client: 'sdk',
-        arms: [
+        variants: [
           { name: 'baseline' },
           {
             name: 'variant',
@@ -238,21 +282,21 @@ describe('EvalManifestSchema', () => {
       { skipDatasetValidation: true }
     );
 
-    expect(manifest.datasets).toEqual([
+    expect(evalConfig.datasets).toEqual([
       { type: 'file', path: 'evalsets/search.json' },
     ]);
-    expect(manifest.arms?.map((arm) => arm.name)).toEqual([
+    expect(evalConfig.variants?.map((variant) => variant.name)).toEqual([
       'baseline',
       'variant',
     ]);
-    expect(resolveDatasetPaths(manifest, '/workspace')).toEqual([
+    expect(resolveDatasetPaths(evalConfig, '/workspace')).toEqual([
       '/workspace/evalsets/search.json',
     ]);
   });
 
-  it('accepts a local manifest with an empty server set', () => {
+  it('accepts a local eval config with an empty server set', () => {
     expect(
-      EvalManifestSchema.parse({
+      EvalConfigSchema.parse({
         name: 'host-only',
         datasets: [{ type: 'file', path: './cases.json' }],
         servers: [],
@@ -262,7 +306,7 @@ describe('EvalManifestSchema', () => {
 
   it('requires a tagged source for non-shorthand extension blocks', () => {
     expect(() =>
-      EvalManifestSchema.parse({
+      EvalConfigSchema.parse({
         name: 'invalid',
         datasets: [{ path: './cases.json' }],
       })
@@ -270,9 +314,9 @@ describe('EvalManifestSchema', () => {
   });
 });
 
-describe('strict manifests', () => {
+describe('strict eval configs', () => {
   const load = (extra: Record<string, unknown>) =>
-    loadEvalManifestFromObject(
+    loadEvalConfigFromObject(
       { name: 'm', datasets: ['x.json'], ...extra },
       { skipDatasetValidation: true }
     );
@@ -294,17 +338,20 @@ describe('strict manifests', () => {
 });
 
 describe('the editor schema', () => {
-  it('declares the same top-level keys as EvalManifestSchema, and no others', () => {
+  it('declares the same top-level keys as EvalConfigSchema, and no others', () => {
     const editor = JSON.parse(
       fs.readFileSync(
-        new URL('../../schema/eval-manifest.schema.json', import.meta.url),
+        new URL('../../schema/eval-config.schema.json', import.meta.url),
         'utf8'
       )
     ) as { properties: Record<string, unknown>; additionalProperties: unknown };
-    const runtime = Object.keys(EvalManifestSchema.shape).filter(
+    const runtime = Object.keys(EvalConfigSchema.shape).filter(
       // Kept only so validation can explain what replaced them.
       (key) =>
-        key !== 'profile' && key !== 'host' && !(key in RENAMED_MANIFEST_KEYS)
+        key !== 'profile' &&
+        key !== 'host' &&
+        key !== 'toolOverrides' &&
+        !(key in RENAMED_CONFIG_KEYS)
     );
     expect(Object.keys(editor.properties).sort()).toEqual(runtime.sort());
     expect(editor.additionalProperties).toBe(false);

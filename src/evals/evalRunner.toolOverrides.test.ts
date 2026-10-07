@@ -241,7 +241,7 @@ describe('runEvalDataset toolOverrides renames', () => {
         response: 'Done',
       };
     });
-    // The dataset expects the original name: arms compare like for like.
+    // The dataset expects the original name: variants compare like for like.
     const dataset = createHostDataset();
 
     const result = await runEvalDataset(

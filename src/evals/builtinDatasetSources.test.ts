@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getDatasetSource } from './builtinDatasetSources.js';
-import type { EvalManifest } from './evalManifest.js';
+import type { EvalConfig } from './evalConfig.js';
 
 const gcs = vi.hoisted(() => ({
   download: vi.fn(),
@@ -26,7 +26,7 @@ vi.mock('@google-cloud/storage', () => ({
 
 describe('canonical built-in dataset sources', () => {
   let rootDir: string;
-  const manifest: EvalManifest = { name: 'source-tests', datasets: [] };
+  const evalConfig: EvalConfig = { name: 'source-tests', datasets: [] };
   beforeEach(async () => {
     rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dataset-source-'));
     vi.clearAllMocks();
@@ -48,7 +48,7 @@ describe('canonical built-in dataset sources', () => {
           JSON.stringify(raw)
         );
         gcs.download.mockResolvedValue([Buffer.from(JSON.stringify(raw))]);
-        return getDatasetSource(type).load(source, { rootDir, manifest });
+        return getDatasetSource(type).load(source, { rootDir, evalConfig });
       }
       it('loads a minimal case with no assertions or client', async () => {
         const raw = {

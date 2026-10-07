@@ -3,19 +3,19 @@
   "exitCode": 1,
   "checks": [
     {
-      "path": "arms[name=baseline].metrics.passed_rate",
+      "path": "variants[name=baseline].metrics.passed_rate",
       "equals": 0
     },
     {
-      "path": "arms[name=description-v2].metrics.passed_rate",
+      "path": "variants[name=description-v2].metrics.passed_rate",
       "equals": 1
     },
     {
-      "path": "arms[name=baseline].metrics.tool_search_hit_rate",
+      "path": "variants[name=baseline].metrics.tool_search_hit_rate",
       "equals": 0
     },
     {
-      "path": "arms[name=description-v2].metrics.tool_search_hit_rate",
+      "path": "variants[name=description-v2].metrics.tool_search_hit_rate",
       "equals": 1
     }
   ]

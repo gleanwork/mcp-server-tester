@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { buildEvalDataset } from './buildEvalDataset.js';
-import type { EvalManifest } from './evalManifest.js';
+import type { EvalConfig } from './evalConfig.js';
 
-const manifest: EvalManifest = {
+const evalConfig: EvalConfig = {
   name: 'test',
   datasets: [{ type: 'file', path: 'x.json' }],
 };
@@ -10,9 +10,9 @@ const manifest: EvalManifest = {
 describe('buildEvalDataset canonical ingestion', () => {
   it('accepts minimal cases without expectations or a client, and rejects a case without input', () => {
     const raw = { name: 'canonical', cases: [{ id: 'a', input: 'Find it' }] };
-    expect(buildEvalDataset(raw, manifest).cases).toEqual(raw.cases);
+    expect(buildEvalDataset(raw, evalConfig).cases).toEqual(raw.cases);
     expect(() =>
-      buildEvalDataset({ name: 'canonical', cases: [{ id: 'b' }] }, manifest)
+      buildEvalDataset({ name: 'canonical', cases: [{ id: 'b' }] }, evalConfig)
     ).toThrow(/input/);
   });
 
@@ -33,7 +33,7 @@ describe('buildEvalDataset canonical ingestion', () => {
         name: 'canonical',
         cases: [{ ...case_, trials: 2, passThreshold: 0.75 }],
       },
-      { ...manifest, trials: 9, client: 'different-host' }
+      { ...evalConfig, trials: 9, client: 'different-host' }
     );
     expect(dataset.cases[0]).toEqual({
       ...case_,
@@ -42,7 +42,7 @@ describe('buildEvalDataset canonical ingestion', () => {
     });
   });
 
-  it('preserves explicit custom judge assertions without applying manifest policy', () => {
+  it('preserves explicit custom judge assertions without applying eval config policy', () => {
     const case_ = {
       id: 'a',
       input: 'Find it',
@@ -54,7 +54,7 @@ describe('buildEvalDataset canonical ingestion', () => {
       buildEvalDataset(
         { name: 'canonical', cases: [case_] },
         {
-          ...manifest,
+          ...evalConfig,
           judges: [{ type: 'another-judge' }],
         }
       ).cases[0]
@@ -72,7 +72,7 @@ describe('buildEvalDataset canonical ingestion', () => {
     { id: 'a', toolName: 'search', tool: 'other' },
   ])('rejects legacy inputs clearly without a source adapter: $id', (case_) => {
     expect(() =>
-      buildEvalDataset({ name: 'legacy', cases: [case_] }, manifest)
+      buildEvalDataset({ name: 'legacy', cases: [case_] }, evalConfig)
     ).toThrow(/canonical EvalDataset.*explicit dataset source adapter/);
   });
 
@@ -80,7 +80,7 @@ describe('buildEvalDataset canonical ingestion', () => {
     expect(
       buildEvalDataset(
         { name: 'question', cases: [{ id: 'a', input: 'find policy' }] },
-        manifest
+        evalConfig
       ).cases
     ).toEqual([{ id: 'a', input: 'find policy' }]);
   });
@@ -99,7 +99,7 @@ describe('buildEvalDataset canonical ingestion', () => {
             },
           ],
         },
-        { ...manifest, maxCases: 1 }
+        { ...evalConfig, maxCases: 1 }
       )
     ).toThrow(/expected_tool/);
   });
@@ -108,11 +108,11 @@ describe('buildEvalDataset canonical ingestion', () => {
     expect(() =>
       buildEvalDataset(
         { name: 'bad', cases: [{ id: 'a', input: 123 }] },
-        manifest
+        evalConfig
       )
     ).toThrow(/input/);
     expect(() =>
-      buildEvalDataset({ name: 'empty', cases: [] }, manifest)
+      buildEvalDataset({ name: 'empty', cases: [] }, evalConfig)
     ).toThrow(/at least one case/);
   });
 
@@ -127,7 +127,7 @@ describe('buildEvalDataset canonical ingestion', () => {
     };
     expect(
       buildEvalDataset(raw, {
-        ...manifest,
+        ...evalConfig,
         filterTags: ['wanted'],
         run: { maxCases: 1 },
       }).cases.map((entry) => entry.id)
@@ -145,7 +145,7 @@ describe('buildEvalDataset canonical ingestion', () => {
             { id: 'b', input: 'Find it' },
           ],
         },
-        { ...manifest, maxCases: 1 }
+        { ...evalConfig, maxCases: 1 }
       ).cases.map((case_) => case_.id)
     ).toEqual(['a']);
   });
@@ -159,7 +159,7 @@ describe('dataset errors', () => {
           name: 'search',
           cases: [{ id: 'a', input: 'x', assertions: { regex: ['x'] } }],
         },
-        manifest
+        evalConfig
       )
     ).toThrow(
       /Dataset "search" isn't a canonical EvalDataset[\s\S]*case "a" assertions: Unrecognized key: "regex" \(did you mean "matchesPattern"\?\)/

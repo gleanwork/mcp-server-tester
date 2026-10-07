@@ -28,7 +28,7 @@ process arguments. Run ChatGPT evaluations from an environment that holds only
 the credentials the run needs. Narrowing the helper to an allowlist is planned,
 once it is confirmed on a real Mac that ChatGPT still launches and signs in.
 
-Example Linux client settings (in an eval manifest):
+Example Linux client settings (in an eval config):
 
 ```json
 {
@@ -116,7 +116,7 @@ macOS is unchanged.
 
 Host plugins (Linux only): a fresh profile has no plugins, so the model has no
 skills that point it at the MCP server. The host config has two independent
-parts: MCP servers (the manifest `servers`, which may be empty) and
+parts: MCP servers (the eval config `servers`, which may be empty) and
 `plugins`. MST has no plugin-specific code. The caller supplies each plugin
 and, optionally, a declarative override for each of the plugin's own MCP
 servers:

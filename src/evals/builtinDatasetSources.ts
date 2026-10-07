@@ -1,8 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import { resolveManifestPath } from './evalManifest.js';
-import type { DatasetConfig } from './evalManifest.js';
+import { resolveConfigPath } from './evalConfig.js';
+import type { DatasetConfig } from './evalConfig.js';
 import type {
   DatasetSource,
   DatasetSourceContext,
@@ -30,10 +30,10 @@ async function loadFileDataset(
   context: DatasetSourceContext
 ): Promise<EvalDataset> {
   const source = FileDatasetSchema.parse(config);
-  const filePath = resolveManifestPath(source.path, context);
+  const filePath = resolveConfigPath(source.path, context);
   return buildEvalDataset(
     JSON.parse(await fs.readFile(filePath, 'utf8')) as unknown,
-    context.manifest
+    context.evalConfig
   );
 }
 
@@ -66,7 +66,7 @@ async function loadGCSDataset(
     .download();
   return buildEvalDataset(
     JSON.parse(buffer.toString('utf8')) as unknown,
-    context.manifest
+    context.evalConfig
   );
 }
 
@@ -75,7 +75,7 @@ async function loadDirectoryDataset(
   context: DatasetSourceContext
 ): Promise<EvalDataset> {
   const source = FileDatasetSchema.parse(config);
-  const directory = resolveManifestPath(source.path, context);
+  const directory = resolveConfigPath(source.path, context);
   if (!(await fs.stat(directory)).isDirectory())
     return loadFileDataset(config, context);
   async function collect(dir: string): Promise<string[]> {
@@ -103,8 +103,8 @@ async function loadDirectoryDataset(
         { type: 'file', path: filePath },
         {
           ...context,
-          manifest: {
-            ...context.manifest,
+          evalConfig: {
+            ...context.evalConfig,
             maxCases: undefined,
             filterTags: undefined,
             run: undefined,
@@ -118,7 +118,7 @@ async function loadDirectoryDataset(
       name: path.basename(directory),
       cases: datasets.flatMap((dataset) => dataset.cases),
     },
-    context.manifest
+    context.evalConfig
   );
 }
 

@@ -1,7 +1,7 @@
 /**
  * @gleanwork/mcp-server-tester/evals
  *
- * The evaluation framework: manifests, suites and batches, extension definition types,
+ * The evaluation framework: eval configs, suites and batches, extension definition types,
  * metrics, plugins, result stores, comparisons, variant experiments, and MCP
  * host simulation.
  *
@@ -39,25 +39,27 @@ export type {
   VariantGrouping,
 } from '../types/index.js';
 export {
-  EvalManifestSchema,
-  loadEvalManifest,
-  loadEvalManifestFromObject,
+  EvalConfigSchema,
+  loadEvalConfig,
+  loadEvalConfigFromObject,
   resolveDatasetPaths,
-} from '../evals/evalManifest.js';
+  variantToolMetadata,
+} from '../evals/evalConfig.js';
 export type {
   DatasetConfig,
-  EvalArm,
-  EvalManifest,
-  EvalManifestInput,
+  EvalVariant,
+  EvalConfig,
+  EvalConfigInput,
   ExtensionConfig,
   ClientConfig,
   TaggedConfig,
-} from '../evals/evalManifest.js';
+  ToolMetadata,
+} from '../evals/evalConfig.js';
 export type { ClientFields, ClientOptions } from '../evals/clientFields.js';
 export type {
   DatasetSource,
   DatasetSourceContext,
-  EvaluationArmResult,
+  EvaluationVariantResult,
   EvaluationBatchOptions,
   EvaluationBatchItem,
   EvaluationBatchResult,
@@ -80,10 +82,10 @@ export type {
 } from '../evals/evalFrameworkTypes.js';
 export {
   resolveResultStoreConfig,
-  validateManifest,
-} from '../evals/manifestValidation.js';
-export { resolveManifestExtends } from '../evals/manifestExtends.js';
-export type { ValidateManifestOptions } from '../evals/manifestValidation.js';
+  validateEvalConfig,
+} from '../evals/configValidation.js';
+export { resolveConfigExtends } from '../evals/configExtends.js';
+export type { ValidateEvalConfigOptions } from '../evals/configValidation.js';
 export {
   BUILT_IN_METRICS,
   computeMetrics,

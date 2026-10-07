@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getHost, providerForModel } from './builtinHosts.js';
-import { validateManifest } from './manifestValidation.js';
+import { validateEvalConfig } from './configValidation.js';
 import { CHATGPT_HOST, CHATGPT_LINUX_HOST } from './chatgptHost.js';
 
 describe('built-in client names', () => {
@@ -26,7 +26,7 @@ describe('built-in client names', () => {
 
   it('an unknown client lists only the canonical names', () => {
     expect(() =>
-      validateManifest({
+      validateEvalConfig({
         name: 'm',
         datasets: [{ type: 'file', path: 'x.json' }],
         client: 'sdk',

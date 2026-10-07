@@ -26,29 +26,23 @@
     "output_tokens",
     "cost_usd"
   ],
-  "arms": [
+  "variants": [
     {
       "name": "baseline"
     },
     {
       "name": "concise",
-      "toolOverrides": {
-        "id": "concise",
-        "tools": {
-          "search": {
-            "description": "Search company knowledge."
-          }
+      "tools": {
+        "search": {
+          "description": "Search company knowledge."
         }
       }
     },
     {
       "name": "verbose",
-      "toolOverrides": {
-        "id": "verbose",
-        "tools": {
-          "search": {
-            "description": "Search across all connected sources: documents, tickets, chat and mail."
-          }
+      "tools": {
+        "search": {
+          "description": "Search across all connected sources: documents, tickets, chat and mail."
         }
       }
     }

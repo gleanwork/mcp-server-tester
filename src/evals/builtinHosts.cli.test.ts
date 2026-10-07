@@ -65,7 +65,7 @@ console.log(JSON.stringify({ type: 'result', result: JSON.stringify({ env, stric
       },
     };
     const context: ClientRunContext = {
-      manifest: { name: 'offline', datasets: [] },
+      evalConfig: { name: 'offline', datasets: [] },
       env: { HOST_ENV_SHARED: 'context' },
     };
     const before = structuredClone({ input, host, context });
@@ -119,7 +119,7 @@ setTimeout(() => process.exit(0), 30000);
       const pending = getHost('claude-code').run!(
         { prompt: 'hello', servers: [], env: { PATH: directory } },
         { type: 'claude-code', timeout: deadlineMs },
-        { manifest: { name: 'offline', datasets: [] } }
+        { evalConfig: { name: 'offline', datasets: [] } }
       );
       await vi.waitFor(() => expect(fs.existsSync(marker)).toBe(true), {
         timeout: deadlineMs,
@@ -161,7 +161,7 @@ console.log(JSON.stringify({ type: 'result', result: at < 0 ? 'none' : process.a
     const result = await getHost('claude-code').run!(
       { prompt: 'hello', servers: [], env: { PATH: directory } },
       { type: 'claude-code', systemPrompt: prompt },
-      { manifest: { name: 'offline', datasets: [] } }
+      { evalConfig: { name: 'offline', datasets: [] } }
     );
     expect(result.error).toBeUndefined();
     expect(result.finalText).toBe(prompt);
@@ -187,7 +187,7 @@ console.log(JSON.stringify({ type: 'result', result: JSON.stringify(seen) }));
     const result = await getHost('claude-code').run!(
       { prompt: 'hello', servers: [], env: { PATH: directory } },
       { type: 'claude-code', ...host },
-      { manifest: { name: 'offline', datasets: [] } }
+      { evalConfig: { name: 'offline', datasets: [] } }
     );
     expect(result.error).toBeUndefined();
     return JSON.parse(result.finalText) as {
@@ -210,7 +210,7 @@ console.log(JSON.stringify({ type: 'result', result: JSON.stringify(seen) }));
     const result = await getHost('claude-code').run!(
       { prompt: 'hello', servers: [], env: { PATH: directory } },
       { type: 'claude-code' },
-      { manifest: { name: 'offline', datasets: [] } }
+      { evalConfig: { name: 'offline', datasets: [] } }
     );
     const seen = JSON.parse(result.finalText) as { dir: string };
     expect(path.basename(seen.dir)).toMatch(/^mst-claude-/);

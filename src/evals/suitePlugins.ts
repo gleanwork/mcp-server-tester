@@ -1,34 +1,34 @@
 import path from 'node:path';
 import type { EvalDataset } from './datasetTypes.js';
-import type { EvalManifest } from './evalManifest.js';
-import { assertListedNamespaces } from './manifestValidation.js';
+import type { EvalConfig } from './evalConfig.js';
+import { assertListedNamespaces } from './configValidation.js';
 import { installPlugins } from '../plugins/extensions.js';
 import { loadPlugins } from '../plugins/loadPlugins.js';
 import type { Plugin } from '../plugins/plugin.js';
 
 export interface SuitePluginSources {
-  manifestPath: string;
-  manifest: EvalManifest;
-  /** The working directory: the fallback for manifest specifiers, and where CLI specifiers resolve. */
+  configPath: string;
+  evalConfig: EvalConfig;
+  /** The working directory: the fallback for eval config specifiers, and where CLI specifiers resolve. */
   rootDir: string;
-  /** From the CLI (`--plugins`); added to the manifest's own list. */
+  /** From the CLI (`--plugins`); added to the eval config's own list. */
   pluginPaths?: readonly string[];
   /** Plugin objects passed in code. */
   plugins?: readonly Plugin[];
 }
 
 /**
- * Load and install every plugin a suite uses: the manifest's `plugins`
- * (relative to the manifest, then `rootDir`, then as packages), CLI paths, and
+ * Load and install every plugin a suite uses: the eval config's `plugins`
+ * (relative to the eval config, then `rootDir`, then as packages), CLI paths, and
  * objects passed in code. Returns the namespaces the suite may reference.
  */
 export async function loadSuitePlugins(
   sources: SuitePluginSources
 ): Promise<string[]> {
-  const manifestDir = path.dirname(path.resolve(sources.manifestPath));
+  const configDir = path.dirname(path.resolve(sources.configPath));
   const plugins = installPlugins([
-    ...(await loadPlugins(sources.manifest.plugins ?? [], {
-      baseDir: manifestDir,
+    ...(await loadPlugins(sources.evalConfig.plugins ?? [], {
+      baseDir: configDir,
       fallbackDir: sources.rootDir,
     })),
     ...(await loadPlugins(sources.pluginPaths ?? [], {

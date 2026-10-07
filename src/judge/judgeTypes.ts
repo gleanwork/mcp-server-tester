@@ -35,7 +35,7 @@ export interface UsageMetrics {
   totalCostUsd?: number;
 
   /**
-   * Cost in USD estimated from the manifest's `pricing`, when the host
+   * Cost in USD estimated from the eval config's `pricing`, when the host
    * reported none. Kept apart from `totalCostUsd` so a report never passes
    * an estimate off as a bill.
    */

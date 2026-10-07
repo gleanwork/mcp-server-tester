@@ -6,7 +6,7 @@
  *
  * Checks marked with a `gap` describe what MST should report but doesn't
  * yet; they run as expected failures, so fixing a gap fails the suite until
- * its `gap` is removed. Ledger checks compare each arm's metrics with the
+ * its `gap` is removed. Ledger checks compare each variant's metrics with the
  * usage and events the fixture host actually returned.
  */
 import { spawnSync } from 'node:child_process';
@@ -50,13 +50,13 @@ type Check = z.infer<typeof CheckSchema>;
 const ExpectedSchema = z
   .object({
     title: z.string(),
-    /** Run the manifest this many times; later runs see earlier results. */
+    /** Run the eval this many times; later runs see earlier results. */
     runs: z.number().int().positive().default(1),
     /** Exit code of the last run. */
     exitCode: z.number().int().default(0),
     /** Exit codes of every run, when they differ. */
     exitCodes: z.array(z.number().int()).optional(),
-    /** The manifest can't run yet; every check is an expected failure. */
+    /** The eval can't run yet; every check is an expected failure. */
     runGap: z.string().optional(),
     /** What the CLI must print while the run gap stands. */
     runGapError: z.string().optional(),
@@ -64,7 +64,7 @@ const ExpectedSchema = z
     ledger: z
       .object({
         metrics: z.array(z.enum(LEDGER_METRICS)).default([]),
-        /** Arm deltas recomputed from the ledger: delta key and the metric it compares. */
+        /** Variant deltas recomputed from the ledger: delta key and the metric it compares. */
         deltas: z
           .array(
             z
@@ -73,7 +73,7 @@ const ExpectedSchema = z
           )
           .default([]),
         gaps: z.record(z.string(), z.string()).default({}),
-        /** Arms whose host returns no trace, so the ledger has nothing to compare. */
+        /** Variants whose host returns no trace, so the ledger has nothing to compare. */
         noTrace: z.array(z.string()).default([]),
       })
       .strict()
@@ -90,7 +90,7 @@ const ExpectedSchema = z
 type Expected = z.infer<typeof ExpectedSchema>;
 
 interface LedgerEntry {
-  arm: string;
+  variant: string;
   caseId: string | null;
   trial: number | null;
   usage?: { inputTokens: number; outputTokens: number };
@@ -175,8 +175,8 @@ function runCase(caseDir: string, runs: number): Outcome {
       [
         CLI,
         'run',
-        '--manifest',
-        'manifest.json',
+        '--config',
+        'eval.json',
         '--plugins',
         PLUGIN,
         '--root-dir',
@@ -213,7 +213,7 @@ function runCase(caseDir: string, runs: number): Outcome {
 
 /**
  * Resolve a dotted path. A segment may select from an array with
- * `[key=value]` (for example `arms[name=native]`) or an index `[0]`;
+ * `[key=value]` (for example `variants[name=native]`) or an index `[0]`;
  * `length` gives an array's length or an object's key count. Segments are
  * split on `.` first, so selector values can't contain dots.
  */
@@ -268,7 +268,7 @@ function assertCheck(results: unknown, check: Check): void {
   }
 }
 
-/** Per-trial mean of a ledger metric over one arm's traces, or null with none. */
+/** Per-trial mean of a ledger metric over one variant's traces, or null with none. */
 function ledgerMean(
   entries: LedgerEntry[],
   metric: LedgerMetric
@@ -293,23 +293,23 @@ function ledgerMean(
   return trials.reduce((sum, entry) => sum + value(entry), 0) / trials.length;
 }
 
-interface ArmResult {
+interface VariantResult {
   name: string;
   metrics: Record<string, unknown>;
 }
 
-/** The arms that must have ledger truth: every reported arm with a trace. */
-function tracedArms(outcome: Outcome, noTrace: string[]): ArmResult[] {
-  const arms = (outcome.results?.arms ?? []) as ArmResult[];
-  expect(arms.length, 'arms in results.json').toBeGreaterThan(0);
-  const reported = new Set(arms.map((arm) => arm.name));
+/** The variants that must have ledger truth: every reported variant with a trace. */
+function tracedVariants(outcome: Outcome, noTrace: string[]): VariantResult[] {
+  const variants = (outcome.results?.variants ?? []) as VariantResult[];
+  expect(variants.length, 'variants in results.json').toBeGreaterThan(0);
+  const reported = new Set(variants.map((variant) => variant.name));
   for (const entry of outcome.ledger) {
     expect(
-      reported.has(entry.arm),
-      `ledger arm "${entry.arm}" is reported`
+      reported.has(entry.variant),
+      `ledger variant "${entry.variant}" is reported`
     ).toBe(true);
   }
-  return arms.filter((arm) => !noTrace.includes(arm.name));
+  return variants.filter((variant) => !noTrace.includes(variant.name));
 }
 
 if (!fs.existsSync(CLI)) {
@@ -384,7 +384,7 @@ for (const name of caseDirs) {
       const anchor = anchorOf(check.path);
       if (check.gap && anchor && !blocked) {
         // A gap check must fail for its own reason, not because what it
-        // hangs off (an arm, a delta) went missing.
+        // hangs off (a variant, a delta) went missing.
         it(
           `${anchor} exists (for: ${label})`,
           track(undefined, () => {
@@ -403,21 +403,25 @@ for (const name of caseDirs) {
       const gap = ledger?.gaps[metric];
       gapped(gap)(
         gap
-          ? `arm ${metric} matches the host ledger (gap: ${gap})`
-          : `arm ${metric} matches the host ledger`,
+          ? `variant ${metric} matches the host ledger (gap: ${gap})`
+          : `variant ${metric} matches the host ledger`,
         track(gap, () => {
-          for (const arm of tracedArms(outcome, ledger!.noTrace)) {
+          for (const variant of tracedVariants(outcome, ledger!.noTrace)) {
             const truth = ledgerMean(
-              outcome.ledger.filter((entry) => entry.arm === arm.name),
+              outcome.ledger.filter((entry) => entry.variant === variant.name),
               metric
             );
-            expect(truth, `ledger has traces for ${arm.name}`).not.toBeNull();
-            expect(arm.metrics[metric], `${arm.name}.${metric}`).toBeTypeOf(
-              'number'
-            );
             expect(
-              arm.metrics[metric] as number,
-              `${arm.name}.${metric}`
+              truth,
+              `ledger has traces for ${variant.name}`
+            ).not.toBeNull();
+            expect(
+              variant.metrics[metric],
+              `${variant.name}.${metric}`
+            ).toBeTypeOf('number');
+            expect(
+              variant.metrics[metric] as number,
+              `${variant.name}.${metric}`
             ).toBeCloseTo(truth!, 9);
           }
         })
@@ -427,27 +431,31 @@ for (const name of caseDirs) {
       const gap = ledger?.gaps[delta.key];
       gapped(gap)(
         gap
-          ? `armDeltas.*.${delta.key} matches the host ledger (gap: ${gap})`
-          : `armDeltas.*.${delta.key} matches the host ledger`,
+          ? `variantDeltas.*.${delta.key} matches the host ledger (gap: ${gap})`
+          : `variantDeltas.*.${delta.key} matches the host ledger`,
         track(gap, () => {
-          const [baseline, ...others] = tracedArms(outcome, ledger!.noTrace);
-          const mean = (arm: ArmResult) =>
+          const [baseline, ...others] = tracedVariants(
+            outcome,
+            ledger!.noTrace
+          );
+          const mean = (variant: VariantResult) =>
             ledgerMean(
-              outcome.ledger.filter((entry) => entry.arm === arm.name),
+              outcome.ledger.filter((entry) => entry.variant === variant.name),
               delta.metric
             )!;
-          for (const arm of others) {
+          for (const variant of others) {
             const reported = resolve(
               outcome.results,
-              `armDeltas.${arm.name}.${delta.key}`
-            );
-            expect(reported, `armDeltas.${arm.name}.${delta.key}`).toBeTypeOf(
-              'number'
+              `variantDeltas.${variant.name}.${delta.key}`
             );
             expect(
+              reported,
+              `variantDeltas.${variant.name}.${delta.key}`
+            ).toBeTypeOf('number');
+            expect(
               reported as number,
-              `armDeltas.${arm.name}.${delta.key}`
-            ).toBeCloseTo(mean(arm) - mean(baseline!), 9);
+              `variantDeltas.${variant.name}.${delta.key}`
+            ).toBeCloseTo(mean(variant) - mean(baseline!), 9);
           }
         })
       );

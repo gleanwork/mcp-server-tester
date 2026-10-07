@@ -79,6 +79,15 @@ describe('assertPlugin', () => {
   it.each([
     ['datasetSources', { schema }, 'datasetSources.x needs a load function'],
     ['clients', { schema }, 'clients.x needs a run or runBatch function'],
+    [
+      'clients',
+      {
+        schema,
+        run: async () => ({ finalText: '', events: [] }),
+        toolOverrides: true,
+      },
+      'clients.x: `toolOverrides` is now `toolMetadata`',
+    ],
     ['judges', { schema }, 'judges.x needs an evaluate function'],
     [
       'metrics',
