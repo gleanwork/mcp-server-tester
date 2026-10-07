@@ -49,3 +49,6 @@ EVAL-CHECKLIST.md
 DOCS-EVAL-CHECKLIST.md
 .worktrees/
 .omc/
+
+# Example run output
+examples/find-skills-optimization/.mst/

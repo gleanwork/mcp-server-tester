@@ -1,0 +1,20 @@
+[
+  {
+    "id": "find-skills-actions",
+    "description": "Say what find_skills is for (actions in connected apps), name the apps, and send knowledge questions to search.",
+    "tools": {
+      "find_skills": {
+        "description": "Find the skills that take actions in the user's connected apps: create or update tracker tickets, post in chat, send email, schedule meetings, create documents, share files and add tasks. Call it whenever the user asks you to do something in one of those apps, before saying you can't. Not for finding information: use search for company knowledge."
+      }
+    }
+  },
+  {
+    "id": "find-skills-discovery",
+    "description": "Frame find_skills as discovery: it lists what can be done, and returns the skill to use.",
+    "tools": {
+      "find_skills": {
+        "description": "List the skills (actions) available in the user's connected apps, such as the tracker, chat, email, calendar, documents, files and tasks. Use it when the user asks you to act in one of those apps, or asks what you can do there. Returns the names of the skills to use. Company documents are found with search, not with this tool."
+      }
+    }
+  }
+]

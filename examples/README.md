@@ -19,11 +19,12 @@ Complete working examples demonstrating how to use `@gleanwork/mcp-server-tester
 
 ## Examples
 
-| Example                                             | Description                           | Complexity |
-| --------------------------------------------------- | ------------------------------------- | ---------- |
-| [basic-playwright-usage](./basic-playwright-usage/) | Minimal starter (~60 lines)           | ⭐         |
-| [filesystem-server](./filesystem-server/)           | **Canonical example** - all patterns  | ⭐⭐⭐     |
-| [sqlite-server](./sqlite-server/)                   | Database testing with custom fixtures | ⭐⭐       |
+| Example                                                 | Description                                     | Complexity |
+| ------------------------------------------------------- | ----------------------------------------------- | ---------- |
+| [basic-playwright-usage](./basic-playwright-usage/)     | Minimal starter (~60 lines)                     | ⭐         |
+| [filesystem-server](./filesystem-server/)               | **Canonical example** - all patterns            | ⭐⭐⭐     |
+| [sqlite-server](./sqlite-server/)                       | Database testing with custom fixtures           | ⭐⭐       |
+| [find-skills-optimization](./find-skills-optimization/) | Optimize a tool description on `mst` and Cowork | ⭐⭐       |
 
 ## Quick Start
 

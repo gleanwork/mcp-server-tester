@@ -1,0 +1,152 @@
+{
+  "name": "find-skills",
+  "description": "When should a model call find_skills? Capability cases ask for an action in a connected app, which only a skill can do. Regression cases ask for company knowledge, which search and read_document answer; find_skills must not be called there.",
+  "cases": [
+    {
+      "id": "tracker-create",
+      "tags": ["capability"],
+      "input": "Create a tracker ticket for the checkout outage and assign it to the billing team.",
+      "assertions": {
+        "toolsTriggered": {
+          "calls": [{ "name": "find_skills", "required": true }]
+        }
+      }
+    },
+    {
+      "id": "tracker-update",
+      "tags": ["capability"],
+      "input": "Mark ticket inc-482 as resolved in the tracker.",
+      "assertions": {
+        "toolsTriggered": {
+          "calls": [{ "name": "find_skills", "required": true }]
+        }
+      }
+    },
+    {
+      "id": "chat-post",
+      "tags": ["capability"],
+      "input": "Post a short update about the checkout outage in the #payments chat channel.",
+      "assertions": {
+        "toolsTriggered": {
+          "calls": [{ "name": "find_skills", "required": true }]
+        }
+      }
+    },
+    {
+      "id": "mail-send",
+      "tags": ["capability"],
+      "input": "Email the billing team a two-line summary of the checkout outage postmortem.",
+      "assertions": {
+        "toolsTriggered": {
+          "calls": [{ "name": "find_skills", "required": true }]
+        }
+      }
+    },
+    {
+      "id": "calendar-create",
+      "tags": ["capability"],
+      "input": "Schedule a 30-minute checkout outage review with the billing team next Tuesday at 10am.",
+      "assertions": {
+        "toolsTriggered": {
+          "calls": [{ "name": "find_skills", "required": true }]
+        }
+      }
+    },
+    {
+      "id": "docs-create",
+      "tags": ["capability"],
+      "input": "Create a new document called Q4 planning notes.",
+      "assertions": {
+        "toolsTriggered": {
+          "calls": [{ "name": "find_skills", "required": true }]
+        }
+      }
+    },
+    {
+      "id": "what-can-you-do",
+      "tags": ["capability"],
+      "input": "Which of my connected apps can you take actions in, and what can you do there?",
+      "assertions": {
+        "toolsTriggered": {
+          "calls": [{ "name": "find_skills", "required": true }]
+        }
+      }
+    },
+    {
+      "id": "files-share",
+      "tags": ["capability", "held-out"],
+      "input": "Share the Q3 planning notes file with the finance team.",
+      "assertions": {
+        "toolsTriggered": {
+          "calls": [{ "name": "find_skills", "required": true }]
+        }
+      }
+    },
+    {
+      "id": "tasks-add",
+      "tags": ["capability", "held-out"],
+      "input": "Add a task to my to-do list to renew the payments gateway TLS certificate.",
+      "assertions": {
+        "toolsTriggered": {
+          "calls": [{ "name": "find_skills", "required": true }]
+        }
+      }
+    },
+    {
+      "id": "search-planning",
+      "tags": ["regression"],
+      "input": "Find our Q3 planning notes in the company documents.",
+      "assertions": {
+        "toolsTriggered": {
+          "calls": [
+            { "name": "search", "required": true },
+            { "name": "read_document", "required": false }
+          ],
+          "exclusive": true
+        }
+      }
+    },
+    {
+      "id": "search-outage",
+      "tags": ["regression"],
+      "input": "What do our company documents say about the checkout outage?",
+      "assertions": {
+        "toolsTriggered": {
+          "calls": [
+            { "name": "search", "required": true },
+            { "name": "read_document", "required": false }
+          ],
+          "exclusive": true
+        }
+      }
+    },
+    {
+      "id": "read-postmortem",
+      "tags": ["regression"],
+      "input": "Open document inc-482 and tell me how many minutes payments failed.",
+      "assertions": {
+        "toolsTriggered": {
+          "calls": [
+            { "name": "read_document", "required": true },
+            { "name": "search", "required": false }
+          ],
+          "exclusive": true
+        }
+      }
+    },
+    {
+      "id": "who-owns-fix",
+      "tags": ["regression"],
+      "input": "According to the checkout outage postmortem, which team owns the fix?",
+      "assertions": {
+        "toolsTriggered": {
+          "calls": [
+            { "name": "search", "required": false },
+            { "name": "read_document", "required": true }
+          ],
+          "exclusive": true
+        }
+      }
+    }
+  ]
+}

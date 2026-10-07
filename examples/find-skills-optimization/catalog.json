@@ -1,0 +1,20 @@
+{
+  "name": "company",
+  "tools": [
+    {
+      "name": "search",
+      "description": "Search company documents.",
+      "response": "Top results for \"{query}\": [doc-17] Q3 planning notes (Files); [inc-482] Checkout outage postmortem (Tracker); [msg-9] #payments thread on the outage (Chat)."
+    },
+    {
+      "name": "read_document",
+      "description": "Read a document by id.",
+      "response": "inc-482 Checkout outage postmortem. Impact: 41 minutes of failed payments. Cause: an expired TLS certificate on the payments gateway. Owner: billing team."
+    },
+    {
+      "name": "find_skills",
+      "description": "Find skills.",
+      "response": "Skills for \"{query}\": tracker.create_ticket, tracker.update_ticket, chat.post_message, mail.send, calendar.create_event, files.share, docs.create, tasks.add. Each skill takes the user's request in plain language."
+    }
+  ]
+}
