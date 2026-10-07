@@ -55,7 +55,7 @@
     "cost_usd",
     "judge_pass"
   ],
-  "arms": [
+  "variants": [
     {
       "name": "native-connectors",
       "servers": [

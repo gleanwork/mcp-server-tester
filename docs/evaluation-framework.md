@@ -5,11 +5,11 @@ schemas, judges, hosts, dataset loaders, and result destinations are plugins.
 A developer should be able to run a complete evaluation with local datasets,
 built-in hosts and judges, and a local result store.
 
-## Manifest
+## Eval config
 
 The editor-facing contract lives in
-[`schema/eval-manifest.schema.json`](../schema/eval-manifest.schema.json), and
-runtime validation is provided by `EvalManifestSchema`.
+[`schema/eval-config.schema.json`](../schema/eval-config.schema.json), and
+runtime validation is provided by `EvalConfigSchema`.
 
 ```json
 {
@@ -38,7 +38,7 @@ runtime validation is provided by `EvalManifestSchema`.
       "dir": ".mcp-test-results"
     }
   },
-  "arms": [
+  "variants": [
     {
       "name": "baseline"
     },
@@ -56,13 +56,13 @@ runtime validation is provided by `EvalManifestSchema`.
 }
 ```
 
-A key the schema doesn't define is an error, in a manifest and in a dataset, so a misspelling fails instead of being ignored. So is a setting the selected client can't honour, such as `toolOverrides` for a client that doesn't present tool variants. `--dry-run` reports all of these, including in datasets.
+A key the schema doesn't define is an error, in an eval config and in a dataset, so a misspelling fails instead of being ignored. So is a setting the selected client can't honour, such as `tools` (tool metadata) for a client that doesn't present tool variants. `--dry-run` reports all of these, including in datasets.
 
 - **Run controls** (`trials`, `maxCases`, `concurrency`, `filterTags`, `passThreshold`) go at the top level or under `run`.
 - **Client defaults:** `model`, `provider`, `maxToolCalls`, `timeout`, `temperature` and `maxTokens` default each client option of that name, for the clients that take it.
-- **The client:** `client` names the client under test, `model` the model it uses, and `clientOptions` the client's other options. An arm or case may set any of the three; it inherits the manifest's `clientOptions` only when it uses the same client.
+- **The client:** `client` names the client under test, `model` the model it uses, and `clientOptions` the client's other options. A variant or case may set any of the three; it inherits the eval config's `clientOptions` only when it uses the same client.
 
-A bare dataset path is shorthand for `{ "type": "file", "path": "..." }`. Relative dataset and plugin paths in a manifest resolve against the manifest's directory, then `rootDir` (`--root-dir`, the working directory by default). A `file` result store's `dir` is always relative to the manifest, so where results are written doesn't depend on the working directory. Plugin result stores resolve their own options.
+A bare dataset path is shorthand for `{ "type": "file", "path": "..." }`. Relative dataset and plugin paths in an eval config resolve against the eval config's directory, then `rootDir` (`--root-dir`, the working directory by default). A `file` result store's `dir` is always relative to the eval config, so where results are written doesn't depend on the working directory. Plugin result stores resolve their own options.
 Every other pluggable block is a tagged object. `servers` is the complete MCP
 server set under test; an empty set is valid for hosts that provide their own
 capabilities.
@@ -100,12 +100,12 @@ const plugin: Plugin = {
 export default plugin;
 ```
 
-- **Names.** Each map key names an extension within the plugin's namespace. Manifests and datasets reference it as `namespace/name`, such as `{ "type": "acme/legacy" }` or `passesJudge: { "judge": "acme/completeness" }`. Built-ins (`file`, `claude-code`, `rubric`, `passed`, ...) use bare names, which plugins can't take.
+- **Names.** Each map key names an extension within the plugin's namespace. Eval configs and datasets reference it as `namespace/name`, such as `{ "type": "acme/legacy" }` or `passesJudge: { "judge": "acme/completeness" }`. Built-ins (`file`, `claude-code`, `rubric`, `passed`, ...) use bare names, which plugins can't take.
 - **Namespace.** `meta.namespace` is required: lowercase, optionally scoped as `@scope/name`. Two different plugins can't share a namespace. Loading the same plugin again is a no-op, including a rebuilt object with the same name, version, extension definitions and configs. A plugin factory that builds differently configured copies needs a namespace per copy. A package's CommonJS and ESM builds are different objects too, so load a plugin one way; publishing plugins as ESM avoids the question.
-- **Loading.** A manifest lists plugin specifiers in `plugins`. Each one resolves relative to the manifest's directory, then `rootDir` (`--root-dir`, the working directory by default), then as a package name, resolved as `import` resolves it. `--plugins` and the `pluginPaths` / `plugins` options of `runEvalSuite` and `runEvalBatch` add to that list. Code that runs datasets directly passes plugin objects: `runEvalDataset({ dataset, plugins: [plugin] }, ctx)`, or `test.use({ mcpPlugins: [plugin] })` in Playwright. Code that calls validators or matchers on its own installs them with `installPlugins([plugin])`.
-- **Scope.** A manifest may only reference namespaces of plugins it loads, even if another suite in the same process (a batch) loaded more. The same check applies to the hosts and judges its datasets name. `runEvalDataset`, `runEvalCase` and the fixtures have no manifest, so they resolve against every plugin installed in the process.
+- **Loading.** An eval config lists plugin specifiers in `plugins`. Each one resolves relative to the eval config's directory, then `rootDir` (`--root-dir`, the working directory by default), then as a package name, resolved as `import` resolves it. `--plugins` and the `pluginPaths` / `plugins` options of `runEvalSuite` and `runEvalBatch` add to that list. Code that runs datasets directly passes plugin objects: `runEvalDataset({ dataset, plugins: [plugin] }, ctx)`, or `test.use({ mcpPlugins: [plugin] })` in Playwright. Code that calls validators or matchers on its own installs them with `installPlugins([plugin])`.
+- **Scope.** An eval config may only reference namespaces of plugins it loads, even if another suite in the same process (a batch) loaded more. The same check applies to the hosts and judges its datasets name. `runEvalDataset`, `runEvalCase` and the fixtures have no eval config, so they resolve against every plugin installed in the process.
 - **Contracts.** Each extension has a Zod `schema` for its options and the functions its kind needs: `load` (dataset sources), `run` or `runBatch` (clients), `evaluate` (judges), `kind` and `compute` (metrics), and `create` (result stores). MST validates the plugin when it loads, and names the plugin and extension in any error.
-- **Shared configs.** `configs` holds named manifest settings a suite can opt into. A suite that loads the plugin applies one with `"extends": ["acme/recommended"]`:
+- **Shared configs.** `configs` holds named eval config settings a suite can opt into. A suite that loads the plugin applies one with `"extends": ["acme/recommended"]`:
 
   ```json
   {
@@ -117,11 +117,11 @@ export default plugin;
   }
   ```
 
-  A config is typed `PluginConfig` and can set any documented manifest key except `name`, `datasets`, `arms`, `plugins` and `extends`. Other keys, including `run`, are rejected when a manifest extends the config; until then MST only checks that it's an object. Configs apply in order, then the manifest's own settings, including its `run` controls. Each top-level key is replaced, never merged: here the manifest's `trials` replaces the config's, and a manifest `judges` list would replace the config's list rather than add to it. A config may use only its own plugin's extensions and built-ins, and can't extend other configs. MST has no built-in configs. A suite's `contentHash` is computed with its configs applied, so `runEvalBatch` doesn't resume a saved run after a config changes. Code that validates a manifest itself applies `extends` first with `resolveManifestExtends` (from `./evals`).
+  A config is typed `PluginConfig` and can set any documented eval config key except `name`, `datasets`, `variants`, `plugins` and `extends`. Other keys, including `run`, are rejected when an eval config extends the config; until then MST only checks that it's an object. Configs apply in order, then the eval config's own settings, including its `run` controls. Each top-level key is replaced, never merged: here the eval config's `trials` replaces the config's, and an eval config `judges` list would replace the config's list rather than add to it. A config may use only its own plugin's extensions and built-ins, and can't extend other configs. MST has no built-in configs. A suite's `contentHash` is computed with its configs applied, so `runEvalBatch` doesn't resume a saved run after a config changes. Code that validates an eval config itself applies `extends` first with `resolveConfigExtends` (from `./evals`).
 
-- **Judges.** A judge's `evaluate({ case, trial }, options)` returns a verdict with `score` from 0 to 1 ([Judge contract](#judge-contract)). MST parses `options` with the judge's schema, calls `evaluate` once per `reps`, and compares the mean score with the assertion's `threshold`. The schema sees only the judge's own options, never `threshold`, `reference`, `reps` or a manifest entry's `type` and `name`. The built-in `rubric` judge has the same contract, and a manifest can list it: `judges: [{ "type": "rubric", "rubric": "correctness" }]`.
+- **Judges.** A judge's `evaluate({ case, trial }, options)` returns a verdict with `score` from 0 to 1 ([Judge contract](#judge-contract)). MST parses `options` with the judge's schema, calls `evaluate` once per `reps`, and compares the mean score with the assertion's `threshold`. The schema sees only the judge's own options, never `threshold`, `reference`, `reps` or an eval config entry's `type` and `name`. The built-in `rubric` judge has the same contract, and an eval config can list it: `judges: [{ "type": "rubric", "rubric": "correctness" }]`.
 
-Plugins load before manifest validation, so validation can check every reference and schema.
+Plugins load before eval config validation, so validation can check every reference and schema.
 
 ### Judge contract
 
@@ -188,7 +188,7 @@ A pairwise judge compares two runs of the same case, a baseline and a
 candidate, and says which is better. It is a separate extension kind,
 `pairwiseJudges`, because a preference is not a score against a threshold:
 pointwise judges decide whether a case passes, pairwise judges decide which
-arm did better.
+variant did better.
 
 ```ts
 const plugin = {
@@ -215,7 +215,7 @@ events (tool calls and their output), and evidence the same way a pointwise
 judge does.
 
 `comparePairwise({ baseline, candidate, judges, cases? })` runs the listed
-judges on every case both runs have, matched by id. The runs can be two arms
+judges on every case both runs have, matched by id. The runs can be two variants
 of one suite, a run and a stored baseline, or runs made on separate machines.
 Pass `cases` (dataset cases by id) when judges need ground truth that results
 do not carry.
@@ -267,7 +267,7 @@ export default {
         // readMyFormat and convertToCanonical are your own reader and converter.
         const raw = await readMyFormat(
           path,
-          context.manifestDir ?? context.rootDir
+          context.configDir ?? context.rootDir
         );
         return loadEvalDatasetFromObject(convertToCanonical(raw));
       },
@@ -276,7 +276,7 @@ export default {
 } satisfies Plugin;
 ```
 
-A manifest that loads the plugin declares `{ "type": "my/format", "path": "..." }` in `datasets`. Select the format in the declaration rather than inferring it from a first case, and fail on fields the source can't map instead of dropping them.
+An eval config that loads the plugin declares `{ "type": "my/format", "path": "..." }` in `datasets`. Select the format in the declaration rather than inferring it from a first case, and fail on fields the source can't map instead of dropping them.
 
 ### Clients
 
@@ -312,15 +312,15 @@ export default {
 } satisfies Plugin;
 ```
 
-A manifest that loads the plugin selects the client with `"client": "my/assistant"`, and passes its options in `clientOptions`.
+An eval config that loads the plugin selects the client with `"client": "my/assistant"`, and passes its options in `clientOptions`.
 
 - **The trace.** `run` returns a `ClientRunResult`: `finalText`, `events`, and optional `usage`, `error` and timing fields. Each event has a `kind` (`tool_call`, `skill`, `command`, `subagent` or `tool_search`), a `source` (`mcp` or `host`), a `name`, and optionally the MCP server label, arguments, output and ID. Record what the host did; don't reconstruct tool calls from the final text. A `tool_search` event (the host searching its tool catalog) lists the tools the search returned in `results`, each `{ name, server? }`. Type host-native actions as their kind rather than as calls to a host tool, so skill expectations and search metrics can read them.
 - **Evidence.** Declare `evidence: 'structured'` only for authoritative protocol or host-native traces. With `observed`, `none` or no declaration, tool-call and argument assertions can't pass; text and judge assertions still run.
-- **Servers.** Events keep their MCP server labels. With more than one server, tool assertions use label-qualified names, or the manifest's `toolMap` from canonical to native names.
-- **In results.** Each host case result keeps the trace as `trace`, a `Trace`: the `ClientRunResult` your host returned, without telemetry and diagnostics, plus its evidence. On a one-server arm, MCP events that name no server get that server's label. A case with several trials has no `trace` of its own; each entry in `iterationResults` has the trace of that trial. In a suite, every case result also names its `arm`. Stored results drop `finalText` and each event's `output`, the same way they drop `response`; events, servers, arguments and usage stay.
+- **Servers.** Events keep their MCP server labels. With more than one server, tool assertions use label-qualified names, or the eval config's `toolMap` from canonical to native names.
+- **In results.** Each host case result keeps the trace as `trace`, a `Trace`: the `ClientRunResult` your host returned, without telemetry and diagnostics, plus its evidence. On a one-server variant, MCP events that name no server get that server's label. A case with several trials has no `trace` of its own; each entry in `iterationResults` has the trace of that trial. In a suite, every case result also names its `variant`. Stored results drop `finalText` and each event's `output`, the same way they drop `response`; events, servers, arguments and usage stay.
 - **Batches.** A host with `runBatch` gets one request per trial of each host case in the dataset, and returns one trace per request, in order. A batch host can't mix host types, and its cases need unique IDs.
-- **Tool variants.** A host that connects to the servers in `input.servers` gets an arm's `toolOverrides` with no work of its own: the suite gives it `http` server configs for a local MCP proxy that applies the variant, so the host must speak Streamable HTTP (see [Tool variants on every host](#tool-variants-on-every-host)). A host that applies variants itself sets `toolOverrides: true` and reads them from `context.arm`. `buildToolSurface(listed, variant)` from `./evals` applies a variant with MST's rules (keys, renames, collisions), and `resolve(name, server)` maps a presented name back to the original tool. Record a renamed tool's calls under `originalName`, with the model's name in `rawName`, as MST's hosts do. A batch host that connects to one server set for the whole batch (the first request's `input.servers`) sets `serversPerBatch: true`, and the batch shares one proxy endpoint. A proxied request also carries `input.checkServers`: the same servers on an endpoint for the host's own checks, such as a readiness probe, so that traffic isn't taken for the model seeing the variant. A host that connects elsewhere (hosted connectors, say) sets `toolSurfaceProxy: false`; a manifest that gives it `toolOverrides` then fails validation.
-- **What it honours.** `maxConcurrency` caps the manifest's `concurrency`.
+- **Tool variants.** A host that connects to the servers in `input.servers` gets a variant's tool metadata (`tools`) with no work of its own: the suite gives it `http` server configs for a local MCP proxy that applies the variant, so the host must speak Streamable HTTP (see [Tool variants on every host](#tool-variants-on-every-host)). A client that shows tool metadata itself sets `toolMetadata: true`; `variantToolMetadata(context.evalConfig, context.variant)` from `./evals` gives the variant's (its own `tools`, else the config's), and `buildToolSurface(listed, metadata)` applies it with MST's rules (keys, renames, collisions), and `resolve(name, server)` maps a presented name back to the original tool. Record a renamed tool's calls under `originalName`, with the model's name in `rawName`, as MST's hosts do. A batch host that connects to one server set for the whole batch (the first request's `input.servers`) sets `serversPerBatch: true`, and the batch shares one proxy endpoint. A proxied request also carries `input.checkServers`: the same servers on an endpoint for the host's own checks, such as a readiness probe, so that traffic isn't taken for the model seeing the variant. A host that connects elsewhere (hosted connectors, say) sets `toolSurfaceProxy: false`; an eval config that gives it `tools` then fails validation.
+- **What it honours.** `maxConcurrency` caps the eval config's `concurrency`.
 
 ### Claude Code host-native events
 
@@ -337,10 +337,10 @@ A search's `results` come from `tool_reference` blocks in its result, or, withou
 
 ### System prompts
 
-`systemPrompt` adds text to a host's system prompt, such as an organisation's instructions. To measure what it changes, give one arm the prompt (an arm inherits the manifest's `clientOptions` when it uses the same client):
+`systemPrompt` adds text to a host's system prompt, such as an organisation's instructions. To measure what it changes, give one variant the prompt (a variant inherits the eval config's `clientOptions` when it uses the same client):
 
 ```json
-"arms": [
+"variants": [
   { "name": "no-prompt" },
   { "name": "org-prompt", "clientOptions": { "systemPrompt": "For actions in a connected app, call find_skills first." } }
 ]
@@ -354,48 +354,48 @@ A plugin client that can apply one declares `systemPrompt` in its schema. A case
 
 ### Tool variants on every host
 
-An arm's `toolOverrides` (descriptions, input schemas, renames) reach every host:
+A variant's tool metadata (`tools`: descriptions, input schemas, renames) reaches every client:
 
 - **`mst`** applies the variant in-process.
 - **Hosts that connect to their servers** (plugin hosts, `claude-code`, `cowork`) get them through a local MCP proxy. The suite starts it on first use and gives each host request its own loopback Streamable HTTP endpoints, one per server, with the servers' labels and timeouts. The proxy presents the variant's tools and sends calls to a renamed tool to the original. Other requests (resources, prompts, skills) pass through; notifications, such as list changes and progress, don't.
-- **One connection per server for the arm.** The proxy connects to each server once and shares that connection across the arm's cases, where a host without a variant may connect per case. A server that keeps per-connection state sees one connection in a variant arm.
+- **One connection per server for the variant.** The proxy connects to each server once and shares that connection across the variant's cases, where a client without tool metadata may connect per case. A server that keeps per-connection state sees one connection for a variant with tool metadata.
 - **A request whose host never lists the proxied tools fails.** Otherwise the run would report results for a variant the model never saw. Cowork sets up its servers once per batch, so it lists them once: the batch shares one endpoint, and the check is for the batch. MST's own readiness probe uses a separate endpoint and doesn't count.
-- **Calls are recorded under the tools' original names**, so a dataset's expectations read the same in every arm, with the model's name in `rawName`.
+- **Calls are recorded under the tools' original names**, so a dataset's expectations read the same in every variant, with the model's name in `rawName`.
 
-The ChatGPT desktop client opts out until it is verified with the proxy, so a manifest that gives it `toolOverrides` fails validation.
+The ChatGPT desktop client opts out until it is verified with the proxy, so an eval config that gives it `tools` fails validation.
 
 ## Execution lifecycle
 
 ```text
-EvalManifest
+EvalConfig
   -> load the suite's plugins (built-ins are always available)
   -> validate tagged blocks, extension names and namespaces, schemas, and server labels
   -> resolve DatasetSource entries into EvalDataset values
-  -> derive one or more arms from the manifest
-  -> run each arm through its Host (built-in or plugin) with its MCPConfig[] server set
+  -> derive one or more variants from the eval config (baseline first)
+  -> run each variant through its client (built-in or plugin) with its MCPConfig[] server set
   -> compute metrics and judges
-  -> write per-arm results through the ResultStore
-  -> save a RunSummary with manifest identity, content hash, arm aggregates,
-     pairwise arm deltas, and per-case artifact pointers
+  -> write per-variant results through the ResultStore
+  -> save a RunSummary with the config's identity, content hash, variant aggregates,
+     deltas from the baseline, and per-case artifact pointers
 ```
 
 `EvalDataset`, `EvalCase`, `MCPConfig`, and `runEvalDataset` remain
 the canonical case and execution primitives. The suite layer composes them; it
 does not replace them with a second case model.
 
-## Arms
+## Variants
 
-An arm is a patch over the manifest defaults. Arms replace separate A/B and
-variant-experiment concepts. An arm may change its server set, client, model, client options,
-tool-name map, input template, metrics, or judges. A manifest without arms
-has one implicit `default` arm.
+A variant is a patch over the eval config defaults. Variants replace separate A/B and
+variant-experiment concepts. A variant may change its server set, client, model, client options,
+tool-name map, input template, metrics, or judges. An eval config without variants
+has one implicit `default` variant.
 
 Each `MCPConfig` may have a `label`. Labels are required when a server set has
 more than one entry so traces and metrics can attribute MCP calls correctly.
 
 ## Metrics
 
-Every arm in the run summary has `metrics`. They include, when the host reports them:
+Every variant in the run summary has `metrics`. They include, when the host reports them:
 
 - `passed_rate`: the share of cases that passed.
 - `trial_pass_rate`: the share of trials that passed, averaged over cases.
@@ -405,32 +405,32 @@ Every arm in the run summary has `metrics`. They include, when the host reports 
 - `duration_s_mean`: time per trial.
 - `judge_pass_rate` and `judge_score`, for cases with judges.
 
-A trial is one run of a case: one trial, or the case itself when it runs once. A case passes when its trials reach its `passThreshold` (1 by default), so two arms whose cases pass 60% and 100% of the time report a `passed_rate` of 0 and 1. `trial_pass_rate` reports 0.6 and 1.
+A trial is one run of a case: one trial, or the case itself when it runs once. A case passes when its trials reach its `passThreshold` (1 by default), so two variants whose cases pass 60% and 100% of the time report a `passed_rate` of 0 and 1. `trial_pass_rate` reports 0.6 and 1.
 
-A manifest's or arm's `metrics` list adds more. Built-in names:
+An eval config's or variant's `metrics` list adds more. Built-in names:
 
 | Metric                                                                                                 | Reports                                                                            |
 | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
 | `passed`, `trial_pass`                                                                                 | The share of cases, and of trials, that passed.                                    |
 | `tool_count`, `mcp_call_count`, `host_event_count`, `first_tool`, `is_no_action`                       | Tool calls and host-native events in the trace. MCP calls are named `server.tool`. |
 | `input_tokens`, `input_tokens_uncached`, `output_tokens`, `cache_read_tokens`, `cache_creation_tokens` | Host token usage. `input_tokens` includes cache reads and writes.                  |
-| `cost_usd`                                                                                             | Host-reported cost, or an estimate from the manifest's `pricing`.                  |
+| `cost_usd`                                                                                             | Host-reported cost, or an estimate from the eval config's `pricing`.               |
 | `duration_s`, `duration_api_s`                                                                         | Wall time, and API time when the host reports it.                                  |
 | `response_success`, `response_len`, `response_words`                                                   | Trials without a host error, and the answer's length.                              |
 | `skill_loaded`, `skill_before_tool`, `skill_verification_failed`                                       | Agent Skills loads.                                                                |
 | `tool_search_hit`                                                                                      | Trials where a tool search returned a tool the trial then called.                  |
 | `judge_pass`, `judge_score`, `judge_name`, `judge_pass_for`, `judge_score_for`                         | Judge verdicts, from the case's last trial.                                        |
 
-- **Per trial.** Usage, timing, tool and answer metrics are measured per trial. A case's value is the mean over its trials, and an arm's is the mean over its cases (`<name>_mean`, or `<name>_rate` for shares). `first_tool` lists the first tool of each case's first trial. Runs that failed on infrastructure, such as a network error or a host that couldn't start, aren't trials, as they don't count toward accuracy.
-- **Unavailable, not zero.** A metric with no value for any case is left out of `metrics`; if the manifest lists it, it's also in the arm's `unavailableMetrics`. A host that reports no cost has no `cost_usd` unless the manifest prices its model. A host whose evidence is `none` has no tool metrics.
-- **Evidence.** An arm's `evidence` is the weakest among its cases (`none`, then `observed`, then `structured`). With `observed`, tool metrics come from a best-effort trace; compare them only between arms with the same evidence.
-- **Deltas.** `armDeltas` compares each arm with the first: `passRate`, `trialPassRate` and their deltas, and `metricDeltas`, the change in every numeric metric both arms report (`metricDeltas.input_tokens_mean`, say), with `judge_score` per judge.
-- **In the CLI.** `mst run` prints a row per arm: cases passed, trial pass rate, judge pass rate when there are judges, MCP calls and host events, tokens, cost and time.
-- **Run totals.** The summary's top-level `total`, `passed`, `failed` and `passRate` count every arm; its other metrics are the first arm's.
+- **Per trial.** Usage, timing, tool and answer metrics are measured per trial. A case's value is the mean over its trials, and a variant's is the mean over its cases (`<name>_mean`, or `<name>_rate` for shares). `first_tool` lists the first tool of each case's first trial. Runs that failed on infrastructure, such as a network error or a host that couldn't start, aren't trials, as they don't count toward accuracy.
+- **Unavailable, not zero.** A metric with no value for any case is left out of `metrics`; if the eval config lists it, it's also in the variant's `unavailableMetrics`. A host that reports no cost has no `cost_usd` unless the eval config prices its model. A host whose evidence is `none` has no tool metrics.
+- **Evidence.** A variant's `evidence` is the weakest among its cases (`none`, then `observed`, then `structured`). With `observed`, tool metrics come from a best-effort trace; compare them only between variants with the same evidence.
+- **Deltas.** `variantDeltas` compares each variant with the first: `passRate`, `trialPassRate` and their deltas, and `metricDeltas`, the change in every numeric metric both variants report (`metricDeltas.input_tokens_mean`, say), with `judge_score` per judge.
+- **In the CLI.** `mst run` prints a row per variant: cases passed, trial pass rate, judge pass rate when there are judges, MCP calls and host events, tokens, cost and time.
+- **Run totals.** The summary's top-level `total`, `passed`, `failed` and `passRate` count every variant; its other metrics are the first variant's.
 
 ### Pricing
 
-Most hosts report tokens but not cost. A manifest (or a plugin's shared config) can price them, in USD per million tokens, by the model each case runs:
+Most hosts report tokens but not cost. An eval config (or a plugin's shared config) can price them, in USD per million tokens, by the model each case runs:
 
 ```json
 "pricing": {
@@ -440,16 +440,16 @@ Most hosts report tokens but not cost. A manifest (or a plugin's shared config) 
 
 MST ships no prices; they change too often to bake in.
 
-- **Reported cost wins.** A host-reported cost is always used. Estimates are kept apart as `estimatedCostUsd` in each case's usage, `cost_usd` uses whichever there is, and the arm's `costSource` says which (`host`, `pricing` or `mixed`).
-- **Which model.** A case is priced at its own `model`, else the arm's or manifest's `model` (including a client's default). A model the client picks at run time isn't known to MST, so set `model` to price it.
-- **Auditable.** Each arm records the prices it used in `pricing`, and models it couldn't price in `unpricedModels`; `cost_usd` leaves their trials out.
-- **Shared configs.** A manifest's `pricing` replaces a shared config's whole table; the two aren't merged.
+- **Reported cost wins.** A host-reported cost is always used. Estimates are kept apart as `estimatedCostUsd` in each case's usage, `cost_usd` uses whichever there is, and the variant's `costSource` says which (`host`, `pricing` or `mixed`).
+- **Which model.** A case is priced at its own `model`, else the variant's or eval config's `model` (including a client's default). A model the client picks at run time isn't known to MST, so set `model` to price it.
+- **Auditable.** Each variant records the prices it used in `pricing`, and models it couldn't price in `unpricedModels`; `cost_usd` leaves their trials out.
+- **Shared configs.** An eval config's `pricing` replaces a shared config's whole table; the two aren't merged.
 
 ### Compared with the previous run
 
-Every run has a `runId`. Its summary's `previousRun` compares it with the previous run of the same manifest that ran the same arms, when there is one:
+Every run has a `runId`. Its summary's `previousRun` compares it with the previous run of the same eval config that ran the same variants, when there is one:
 
-- **Which run.** The manifest's `name` identifies it, so two manifests with the same name share a history. With a result store, the previous run is the store's newest summary for that manifest. Without one, it's the newest earlier `results.json` in the output directory (`--output-dir`, by default `.mcp-test-results/<name>/`).
+- **Which run.** The eval config's `name` identifies it, so two eval configs with the same name share a history. With a result store, the previous run is the store's newest summary for that eval config. Without one, it's the newest earlier `results.json` in the output directory (`--output-dir`, by default `.mcp-test-results/<name>/`).
 - **Output.** `mst run` prints the change and the regressed, improved, added and removed cases.
 - **Best effort.** A previous run that can't be read is skipped with a warning; it never fails the run.
 
@@ -457,10 +457,10 @@ Every run has a `runId`. Its summary's `previousRun` compares it with the previo
 "previousRun": {
   "runId": "4c1f…",
   "timestamp": "2026-10-03T18:02:11.000Z",
-  "sameManifest": true,
+  "sameConfig": true,
   "passRate": 1,
   "passRateDelta": -0.5,
-  "arms": {
+  "variants": {
     "default": {
       "passRateDelta": -0.5,
       "trialPassRateDelta": -0.1,
@@ -473,28 +473,28 @@ Every run has a `runId`. Its summary's `previousRun` compares it with the previo
 }
 ```
 
-`sameManifest` is false when the manifest changed between the runs, so a difference may come from the configuration rather than the server. Datasets aren't part of that hash.
+`sameConfig` is false when the eval config changed between the runs, so a difference may come from the configuration rather than the server. Datasets aren't part of that hash.
 
 ## CLI
 
 ```bash
 npx mst run \
-  --manifest ./eval-manifest.json \
+  --config ./eval.json \
   --plugins ./plugins \
-  --arm variant \
+  --variant concise \
   --dry-run
 
 npx mst batch \
-  --manifest-dir ./manifests \
+  --config-dir ./configs \
   --workers 4 \
   --skip-existing \
   --dry-run
 ```
 
-`--dry-run` validates the manifests and loads their plugins without running
-anything; `run --dry-run` prints the manifest name, datasets and arms as JSON.
-Without it, `run` runs the manifest's arms and `batch` runs each listed
-manifest.
+`--dry-run` validates the eval configs and loads their plugins without running
+anything; `run --dry-run` prints the eval config name, datasets and variants as JSON.
+Without it, `run` runs the eval config's variants and `batch` runs each listed
+eval config.
 
 ## Ownership boundary
 
@@ -502,4 +502,4 @@ The framework owns generic loading, extension lookup, execution, metrics,
 result storage, and summaries. Consumers own organization-specific datasets,
 judges, connector configuration, secrets, schedules, CI, and deployment.
 Secrets remain environment-variable or plugin-owned runtime inputs; they do not
-belong in committed manifests.
+belong in committed eval configs.

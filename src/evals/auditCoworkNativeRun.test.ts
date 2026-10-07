@@ -158,7 +158,7 @@ async function fixture(
   const raw = {
     schemaVersion: 1,
     results: [saved],
-    arms: [{ servers: [], result: { caseResults: [saved] } }],
+    variants: [{ servers: [], result: { caseResults: [saved] } }],
   };
   const rawResultsPath = join(root, 'raw-results.json');
   async function save() {
@@ -480,7 +480,7 @@ describe('auditCoworkNativeRun', () => {
       issues: ['CASE_COUNT_MISMATCH'],
     });
     f.raw.results.length = 0;
-    f.raw.arms[0]!.result.caseResults.length = 0;
+    f.raw.variants[0]!.result.caseResults.length = 0;
     expect(await f.audit()).toMatchObject({
       observedCases: 0,
       qualityPassed: null,
@@ -492,7 +492,7 @@ describe('auditCoworkNativeRun', () => {
   it('rejects duplicate case IDs and native sessions on every affected case', async () => {
     const f = await fixture();
     f.raw.results.push(f.saved);
-    f.raw.arms[0]!.result.caseResults.push(f.saved);
+    f.raw.variants[0]!.result.caseResults.push(f.saved);
     const report = await f.audit(2);
     for (const entry of report.cases)
       expect(entry.issues).toEqual([
@@ -504,7 +504,7 @@ describe('auditCoworkNativeRun', () => {
 
   it('rejects inconsistent duplicate result envelopes', async () => {
     const f = await fixture();
-    f.raw.arms[0]!.result.caseResults = [];
+    f.raw.variants[0]!.result.caseResults = [];
     expect((await f.audit()).issues).toContain('ARM_RESULTS_MISMATCH');
   });
 

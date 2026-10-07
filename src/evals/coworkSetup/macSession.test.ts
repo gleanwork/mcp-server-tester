@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { EvalManifest } from '../evalManifest.js';
+import type { EvalConfig } from '../evalConfig.js';
 import { hostStdioServers, resolveHostStdioServer } from '../hostPlugins.js';
 import {
   COWORK_SETTINGS_MAX_BYTES as LIMIT,
@@ -55,7 +55,7 @@ const actualOs = await vi.importActual<typeof os>('node:os');
 const actualFs = await vi.importActual<typeof fs>('node:fs/promises');
 const actualMacApp = await vi.importActual<typeof MacApp>('./macApp.js');
 const SOURCE = '11111111-2222-3333-4444-555555555555';
-// A manifest pin (host.options.appVersion) and the installed app's version.
+// An eval config pin (host.options.appVersion) and the installed app's version.
 const PIN = '1.52386.6';
 const INSTALLED = '2.19675.1';
 const ORIGINAL =
@@ -90,7 +90,7 @@ const controller = {
     running = true;
   }),
 };
-function manifest(): EvalManifest {
+function evalConfig(): EvalConfig {
   return {
     name: 'synthetic',
     datasets: [],
@@ -109,7 +109,7 @@ function prepare(
   overrides: Partial<Parameters<typeof prepareMacCoworkSession>[0]> = {}
 ) {
   return prepareMacCoworkSession({
-    manifest: manifest(),
+    evalConfig: evalConfig(),
     env,
     profileDirectory,
     ...overrides,
@@ -202,7 +202,7 @@ afterEach(async () => {
   await fs.rm(root, { recursive: true, force: true });
 });
 
-function nativeManifest(): EvalManifest {
+function nativeManifest(): EvalConfig {
   return {
     name: 'native',
     datasets: [],
@@ -221,7 +221,7 @@ function nativeManifest(): EvalManifest {
 }
 
 // Four individually valid stdio declarations can exceed the aggregate read cap.
-function sizedNativeManifest(bytes: number): EvalManifest {
+function sizedNativeManifest(bytes: number): EvalConfig {
   const servers = Array.from({ length: 4 }, (_, index) => ({
     transport: 'stdio' as const,
     label: `Native${index}`,
@@ -230,7 +230,7 @@ function sizedNativeManifest(bytes: number): EvalManifest {
   }));
   const input = { name: 'bounded', datasets: [], servers };
   const { settingsBytes } = createCoworkBundlePlan({
-    manifest: input,
+    evalConfig: input,
     runtimeDirectory: join(root, 'unused'),
   });
   const launches = hostStdioServers(servers).map((server) =>
@@ -259,7 +259,7 @@ async function expectNoSessionMutation(original = ORIGINAL): Promise<void> {
 
 describe('automatic Mac Cowork session (no native execution)', () => {
   it('rejects oversized stdio journal inventory before controller, lease, or writes', async () => {
-    const input: EvalManifest = {
+    const input: EvalConfig = {
       name: 'large-inventory',
       datasets: [],
       servers: Array.from({ length: 750 }, (_, index) => ({
@@ -275,7 +275,7 @@ describe('automatic Mac Cowork session (no native execution)', () => {
       })),
     };
     const plan = createCoworkBundlePlan({
-      manifest: input,
+      evalConfig: input,
       runtimeDirectory: join(root, `mst-cowork-session-${SOURCE}`),
     });
     expect(plan.privateFiles).toHaveLength(6000);
@@ -283,7 +283,7 @@ describe('automatic Mac Cowork session (no native execution)', () => {
     const mkdir = vi.spyOn(fs, 'mkdir');
     const writeFile = vi.spyOn(fs, 'writeFile');
     const open = vi.spyOn(fs, 'open');
-    await expect(prepare({ manifest: input })).rejects.toThrow(ERROR);
+    await expect(prepare({ evalConfig: input })).rejects.toThrow(ERROR);
     expect(mkdir).not.toHaveBeenCalled();
     expect(writeFile).not.toHaveBeenCalled();
     expect(
@@ -321,7 +321,7 @@ describe('automatic Mac Cowork session (no native execution)', () => {
     const input = sizedNativeManifest(LIMIT + 1);
     const mkdir = vi.spyOn(fs, 'mkdir');
     const writeFile = vi.spyOn(fs, 'writeFile');
-    await expect(prepare({ manifest: input })).rejects.toThrow(ERROR);
+    await expect(prepare({ evalConfig: input })).rejects.toThrow(ERROR);
     expect(mkdir).not.toHaveBeenCalled();
     expect(writeFile).not.toHaveBeenCalled();
     await expectNoSessionMutation();
@@ -336,8 +336,8 @@ describe('automatic Mac Cowork session (no native execution)', () => {
         blockMcpServers: ['PluginNative'],
       },
     ];
-    const input = { ...manifest(), servers: [] };
-    const session = await prepare({ manifest: input, model, plugins });
+    const input = { ...evalConfig(), servers: [] };
+    const session = await prepare({ evalConfig: input, model, plugins });
     const meta = await json(join(profileDirectory, '_meta.json'));
     const profile = await fs.readFile(
       join(profileDirectory, `${String(meta.appliedId)}.json`)
@@ -352,7 +352,7 @@ describe('automatic Mac Cowork session (no native execution)', () => {
     const writeFile = vi.spyOn(fs, 'writeFile');
     await expect(
       prepare({
-        manifest: input,
+        evalConfig: input,
         model: 'x'.repeat(LIMIT - overhead + 1),
         plugins,
       })
@@ -375,7 +375,7 @@ describe('automatic Mac Cowork session (no native execution)', () => {
             env: { ONLY: 'declared' },
           },
         ];
-      const session = await prepare({ manifest: input });
+      const session = await prepare({ evalConfig: input });
       const directory = await stage();
       expect(session.stdioPaths).toEqual({
         dataRoot: join(directory, 'stdio'),
@@ -428,7 +428,7 @@ describe('automatic Mac Cowork session (no native execution)', () => {
     vi.stubEnv('MCP_KEY', env.MCP_KEY);
     await expect(
       prepare({
-        manifest: nativeManifest(),
+        evalConfig: nativeManifest(),
         env: { ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY },
       })
     ).rejects.toThrow(ERROR);
@@ -436,7 +436,7 @@ describe('automatic Mac Cowork session (no native execution)', () => {
   });
 
   it('retains the lease and journal if private stdio files changed', async () => {
-    const session = await prepare({ manifest: nativeManifest() });
+    const session = await prepare({ evalConfig: nativeManifest() });
     const file = join(await stage(), 'stdio/Native/headers.json');
     await fs.writeFile(file, 'changed');
     await expect(session.dispose()).rejects.toThrow(CLEANUP_ERROR);
@@ -653,7 +653,7 @@ describe('automatic Mac Cowork session (no native execution)', () => {
     'reserved-label-case',
     'helper-label-case-collision',
   ])('rejects unsafe %s before mutation', async (kind) => {
-    const input = manifest();
+    const input = evalConfig();
     let explicitEnv = env;
     if (kind === 'source')
       await fs.writeFile(
@@ -704,7 +704,7 @@ describe('automatic Mac Cowork session (no native execution)', () => {
         auth: { accessTokenEnv: 'MCP_KEY' },
       });
     await expect(
-      prepare({ manifest: input, env: explicitEnv })
+      prepare({ evalConfig: input, env: explicitEnv })
     ).rejects.toThrow(ERROR);
     expect(getMacCoworkController).not.toHaveBeenCalled();
     expect(events).toEqual([]);
@@ -714,7 +714,7 @@ describe('automatic Mac Cowork session (no native execution)', () => {
   it.each(['Search', 'Native'])(
     'rejects a case-insensitive blocked %s declaration before transport splitting',
     async (label) => {
-      const input = manifest();
+      const input = evalConfig();
       input.servers!.push({
         transport: 'stdio',
         label: 'Native',
@@ -722,7 +722,7 @@ describe('automatic Mac Cowork session (no native execution)', () => {
       });
       await expect(
         prepare({
-          manifest: input,
+          evalConfig: input,
           plugins: [
             {
               name: 'workflows',
@@ -745,7 +745,7 @@ describe('automatic Mac Cowork session (no native execution)', () => {
     async (approved) => {
       const input = nativeManifest();
       input.coworkSetup = { approveWriteTools: approved };
-      const session = await prepare({ manifest: input });
+      const session = await prepare({ evalConfig: input });
       if (approved)
         expect(configureMacToolDefaults).toHaveBeenCalledWith(
           `${await stage()}-mcp`,
@@ -794,7 +794,7 @@ describe('automatic Mac Cowork session (no native execution)', () => {
       if (result.status === 'fulfilled') await result.value.dispose();
     await clean();
   });
-  it.each([manifest(), nativeManifest(), { ...manifest(), servers: [] }])(
+  it.each([evalConfig(), nativeManifest(), { ...evalConfig(), servers: [] }])(
     'rolls back a failed launch and restores personal MCP (#%#)',
     async (input) => {
       controller.start.mockImplementationOnce(async () => {
@@ -802,7 +802,7 @@ describe('automatic Mac Cowork session (no native execution)', () => {
         running = true;
         throw new Error(env.MCP_KEY);
       });
-      await expect(prepare({ manifest: input })).rejects.toThrow(ERROR);
+      await expect(prepare({ evalConfig: input })).rejects.toThrow(ERROR);
       expect(events).toEqual(['stop', 'failed-start', 'stop', 'start']);
       expect(running).toBe(true);
       await clean();

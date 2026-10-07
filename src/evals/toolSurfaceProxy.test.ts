@@ -219,7 +219,7 @@ describe('settleProxiedTrace', () => {
 });
 
 describe('prepareHostBatch with a tool variant', () => {
-  const manifest = { name: 'm', datasets: [] };
+  const evalConfig = { name: 'm', datasets: [] };
   const servers: MCPConfig[] = [catalog('aggregate', 'agg')];
 
   it('gives each request its own proxy scope and settles each trace', async () => {
@@ -242,7 +242,7 @@ describe('prepareHostBatch with a tool variant', () => {
       ],
       { type: 'test/batch' },
       servers,
-      { manifest },
+      { evalConfig },
       { id: 'v', proxy: async () => proxy }
     );
     expect(new Set(seen).size).toBe(3);
@@ -264,7 +264,7 @@ describe('prepareHostBatch with a tool variant', () => {
       [{ id: 'a', input: 'x' }],
       { type: 'test/batch' },
       servers,
-      { manifest },
+      { evalConfig },
       { id: 'v', proxy: async () => stubProxy(false) }
     );
     expect(queues?.get('a')?.[0]?.error).toContain('tool variant "v"');
@@ -298,7 +298,7 @@ describe('settleProxiedTrace tool searches', () => {
 });
 
 describe('a batch host that connects to one server set for the batch', () => {
-  const manifest = { name: 'm', datasets: [] };
+  const evalConfig = { name: 'm', datasets: [] };
 
   /** Lists tools from each server, as a host or a readiness probe would. */
   async function listFrom(servers: MCPConfig[]) {
@@ -342,7 +342,7 @@ describe('a batch host that connects to one server set for the batch', () => {
       ],
       { type: 'test/batch' },
       [catalog('aggregate', 'agg')],
-      { manifest },
+      { evalConfig },
       { id: 'v2', proxy: async () => proxy }
     );
     return { queues: queues!, seen };

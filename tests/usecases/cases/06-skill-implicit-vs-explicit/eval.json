@@ -27,7 +27,7 @@
   },
   "trials": 10,
   "metrics": ["passed", "tool_count"],
-  "arms": [
+  "variants": [
     {
       "name": "implicit"
     },

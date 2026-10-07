@@ -1,5 +1,5 @@
 /**
- * Every JSON manifest and dataset in the README and the docs is one that
+ * Every JSON eval config and dataset in the README and the docs is one that
  * `mst run` accepts. Migration guides and ADRs are left out: their "before"
  * examples are old on purpose. So are design proposals (`docs/design/`),
  * whose examples show keys that don't exist yet. Annotated references with comments are
@@ -10,11 +10,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { buildEvalDataset } from './buildEvalDataset.js';
-import {
-  loadEvalManifestFromObject,
-  type EvalManifest,
-} from './evalManifest.js';
-import { validateManifest } from './manifestValidation.js';
+import { loadEvalConfigFromObject, type EvalConfig } from './evalConfig.js';
+import { validateEvalConfig } from './configValidation.js';
 
 const ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -37,8 +34,8 @@ function markdownFiles(): string[] {
   return ['README.md', ...docs];
 }
 
-/** A whole manifest (`datasets`) or dataset (`cases`), by its top-level keys. */
-type Kind = 'manifest' | 'dataset';
+/** A whole eval config (`datasets`) or dataset (`cases`), by its top-level keys. */
+type Kind = 'eval config' | 'dataset';
 
 interface Example {
   kind: Kind;
@@ -89,16 +86,17 @@ for (const file of markdownFiles()) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
     const keys = value as Record<string, unknown>;
     if (typeof keys.name !== 'string') continue;
-    if ('datasets' in keys) examples.push({ kind: 'manifest', where, value });
+    if ('datasets' in keys)
+      examples.push({ kind: 'eval config', where, value });
     else if (Array.isArray(keys.cases))
       examples.push({ kind: 'dataset', where, value });
   }
 }
 
-describe('manifest and dataset examples in the docs', () => {
+describe('eval config and dataset examples in the docs', () => {
   it('finds both kinds, and every whole example parses', () => {
     expect(
-      examples.filter((example) => example.kind === 'manifest').length
+      examples.filter((example) => example.kind === 'eval config').length
     ).toBeGreaterThan(3);
     expect(
       examples.filter((example) => example.kind === 'dataset').length
@@ -113,13 +111,13 @@ describe('manifest and dataset examples in the docs', () => {
         buildEvalDataset(value, {
           name: 'docs',
           datasets: [],
-        } as EvalManifest)
+        } as EvalConfig)
       ).not.toThrow();
       return;
     }
-    const manifest = loadEvalManifestFromObject(value, {
+    const evalConfig = loadEvalConfigFromObject(value, {
       skipDatasetValidation: true,
     });
-    expect(() => validateManifest(manifest)).not.toThrow();
+    expect(() => validateEvalConfig(evalConfig)).not.toThrow();
   });
 });

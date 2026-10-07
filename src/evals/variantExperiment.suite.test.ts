@@ -39,7 +39,7 @@ afterEach(async () => {
   );
 });
 
-async function suite(arms?: unknown[]): Promise<string> {
+async function suite(variants?: unknown[]): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'variant-suite-'));
   dirs.push(dir);
   await fs.writeFile(
@@ -58,7 +58,7 @@ async function suite(arms?: unknown[]): Promise<string> {
     })
   );
   await fs.writeFile(
-    path.join(dir, 'manifest.json'),
+    path.join(dir, 'eval.json'),
     JSON.stringify({
       name: 'description-variants',
       datasets: ['./cases.json'],
@@ -88,17 +88,17 @@ async function suite(arms?: unknown[]): Promise<string> {
         ],
       },
       metrics: ['passed', 'input_tokens'],
-      ...(arms ? { arms } : {}),
+      ...(variants ? { variants } : {}),
     })
   );
-  return path.join(dir, 'manifest.json');
+  return path.join(dir, 'eval.json');
 }
 
 describe('runVariantExperiment on a suite', () => {
-  it('runs variants as arms and ranks the one that passes first', async () => {
-    const manifestPath = await suite();
+  it('runs candidates as variants and ranks the one that passes first', async () => {
+    const configPath = await suite();
     const result = await runVariantExperiment({
-      suite: { manifestPath, rootDir: path.dirname(manifestPath) },
+      suite: { configPath, rootDir: path.dirname(configPath) },
       variants: [concise, verbose],
     });
 
@@ -121,9 +121,9 @@ describe('runVariantExperiment on a suite', () => {
   }, 60_000);
 
   it('optimizes a metric where lower is better', async () => {
-    const manifestPath = await suite();
+    const configPath = await suite();
     const result = await runVariantExperiment({
-      suite: { manifestPath, rootDir: path.dirname(manifestPath) },
+      suite: { configPath, rootDir: path.dirname(configPath) },
       variants: [concise, verbose],
       metric: 'input_tokens_mean',
       better: 'lower',
@@ -139,36 +139,62 @@ describe('runVariantExperiment on a suite', () => {
     expect(result.proposal!.delta).toBeLessThan(0);
   }, 60_000);
 
-  it('builds on a named arm', async () => {
-    const manifestPath = await suite([{ name: 'control' }, { name: 'other' }]);
+  it('builds on a named variant', async () => {
+    const configPath = await suite([{ name: 'control' }, { name: 'other' }]);
     const result = await runVariantExperiment({
       suite: {
-        manifestPath,
-        arm: 'control',
-        rootDir: path.dirname(manifestPath),
+        configPath,
+        baseVariant: 'control',
+        rootDir: path.dirname(configPath),
       },
       variants: [verbose],
     });
-    expect(result.baseline.caseResults[0]?.arm).toBe('control');
-    expect(result.winner?.result.caseResults[0]?.arm).toBe('verbose');
+    expect(result.baseline.caseResults[0]?.variant).toBe('control');
+    expect(result.winner?.result.caseResults[0]?.variant).toBe('verbose');
   }, 60_000);
 
-  it('rejects an unknown base arm and clashing ids before running anything', async () => {
-    const manifestPath = await suite([{ name: 'control' }]);
-    const rootDir = path.dirname(manifestPath);
+  it("builds on the config's baseline, which the candidates replace", async () => {
+    const configPath = await suite([{ name: 'other' }, { name: 'control' }]);
+    const config = JSON.parse(await fs.readFile(configPath, 'utf8'));
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({ ...config, baseline: 'control' })
+    );
+    const result = await runVariantExperiment({
+      suite: { configPath, rootDir: path.dirname(configPath) },
+      variants: [verbose],
+    });
+    expect(result.baseline.caseResults[0]?.variant).toBe('control');
+    expect(result.winner?.result.caseResults[0]?.variant).toBe('verbose');
+  }, 60_000);
+
+  it('names the replacement for a renamed suite option', async () => {
     await expect(
       runVariantExperiment({
-        suite: { manifestPath, arm: 'missing', rootDir },
+        suite: { configPath: 'x.json', arm: 'control' } as never,
         variants: [verbose],
       })
-    ).rejects.toThrow('The manifest has no arm named "missing".');
+    ).rejects.toThrow(
+      'runVariantExperiment suite: `arm` is now `baseVariant`.'
+    );
+  });
+
+  it('rejects an unknown base variant and clashing ids before running anything', async () => {
+    const configPath = await suite([{ name: 'control' }]);
+    const rootDir = path.dirname(configPath);
     await expect(
       runVariantExperiment({
-        suite: { manifestPath, arm: 'control', rootDir },
+        suite: { configPath, baseVariant: 'missing', rootDir },
+        variants: [verbose],
+      })
+    ).rejects.toThrow('The eval config has no variant named "missing".');
+    await expect(
+      runVariantExperiment({
+        suite: { configPath, baseVariant: 'control', rootDir },
         variants: [{ ...verbose, id: 'control' }],
       })
     ).rejects.toThrow(
-      "Variant ids must be unique and differ from the base arm's name"
+      "Candidate ids must be unique and differ from the base variant's name"
     );
     await expect(
       fs.access(path.join(rootDir, '.mcp-test-results'))
@@ -176,10 +202,10 @@ describe('runVariantExperiment on a suite', () => {
   }, 60_000);
 
   it('runs proposed variants round by round until a round stops improving', async () => {
-    const manifestPath = await suite();
+    const configPath = await suite();
     const seen: Array<{ round: number; baseline: number }> = [];
     const result = await runVariantExperiment({
-      suite: { manifestPath, rootDir: path.dirname(manifestPath) },
+      suite: { configPath, rootDir: path.dirname(configPath) },
       metric: 'input_tokens_mean',
       better: 'lower',
       maxRounds: 3,
@@ -198,23 +224,64 @@ describe('runVariantExperiment on a suite', () => {
   }, 60_000);
 });
 
-describe('runEvalSuite arms', () => {
-  it('replaces the manifest arms with a list, or a function of them', async () => {
-    const manifestPath = await suite([{ name: 'a' }, { name: 'b' }]);
-    const rootDir = path.dirname(manifestPath);
+describe('runEvalSuite variants', () => {
+  it('runs the baseline first, as `baseline` names it', async () => {
+    const configPath = await suite([{ name: 'a' }, { name: 'b' }]);
+    const config = JSON.parse(await fs.readFile(configPath, 'utf8'));
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({ ...config, baseline: 'b' })
+    );
+    const result = await runEvalSuite({
+      configPath,
+      rootDir: path.dirname(configPath),
+      dryRun: true,
+    });
+    expect(result.evalConfig.variants?.map((variant) => variant.name)).toEqual([
+      'b',
+      'a',
+    ]);
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({ ...config, baseline: 'missing' })
+    );
+    await expect(
+      runEvalSuite({
+        configPath,
+        rootDir: path.dirname(configPath),
+        dryRun: true,
+      })
+    ).rejects.toThrow(
+      'baseline "missing" names no variant; the variants are "a", "b".'
+    );
+  }, 60_000);
+
+  it('names the replacement for a renamed option', async () => {
+    await expect(
+      runEvalSuite({ manifestPath: 'x.json' } as never)
+    ).rejects.toThrow('runEvalSuite: `manifestPath` is now `configPath`.');
+  });
+
+  it('replaces the config variants with a list, or a function of them', async () => {
+    const configPath = await suite([{ name: 'a' }, { name: 'b' }]);
+    const rootDir = path.dirname(configPath);
     const listed = await runEvalSuite({
-      manifestPath,
+      configPath,
       rootDir,
       dryRun: true,
-      arms: [{ name: 'x' }],
+      variants: [{ name: 'x' }],
     });
-    expect(listed.manifest.arms?.map((arm) => arm.name)).toEqual(['x']);
+    expect(listed.evalConfig.variants?.map((variant) => variant.name)).toEqual([
+      'x',
+    ]);
     const derived = await runEvalSuite({
-      manifestPath,
+      configPath,
       rootDir,
       dryRun: true,
-      arms: (arms) => [...arms].reverse(),
+      variants: (variants) => [...variants].reverse(),
     });
-    expect(derived.manifest.arms?.map((arm) => arm.name)).toEqual(['b', 'a']);
+    expect(derived.evalConfig.variants?.map((variant) => variant.name)).toEqual(
+      ['b', 'a']
+    );
   }, 60_000);
 });

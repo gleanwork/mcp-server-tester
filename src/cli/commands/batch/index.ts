@@ -6,8 +6,8 @@ import {
 } from '../../../evals/runEvalBatch.js';
 
 export interface BatchOptions {
-  manifests?: string[];
-  manifestDir?: string;
+  configs?: string[];
+  configDir?: string;
   rootDir?: string;
   outputRoot?: string;
   workers?: number;
@@ -17,26 +17,28 @@ export interface BatchOptions {
   dryRun?: boolean;
 }
 
-async function resolveManifestPaths(options: BatchOptions): Promise<string[]> {
-  if (options.manifests?.length) return options.manifests;
-  if (!options.manifestDir) {
-    throw new Error('Provide --manifests or --manifest-dir.');
+async function resolveConfigPaths(options: BatchOptions): Promise<string[]> {
+  if (options.configs?.length) return options.configs;
+  if (!options.configDir) {
+    throw new Error('Provide --configs or --config-dir.');
   }
   const names = (
-    await fs.readdir(options.manifestDir).catch((error: unknown) => {
+    await fs.readdir(options.configDir).catch((error: unknown) => {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT')
-        throw new Error(`Manifest directory not found: ${options.manifestDir}`);
+        throw new Error(
+          `Eval config directory not found: ${options.configDir}`
+        );
       throw error;
     })
   )
     .filter((name) => name.endsWith('.json'))
     .sort();
-  return names.map((name) => path.join(options.manifestDir!, name));
+  return names.map((name) => path.join(options.configDir!, name));
 }
 
 export async function batch(options: BatchOptions): Promise<void> {
   const batchOptions: RunEvalBatchOptions = {
-    manifestPaths: await resolveManifestPaths(options),
+    configPaths: await resolveConfigPaths(options),
     rootDir: options.rootDir,
     outputRoot: options.outputRoot,
     workers: options.workers,
@@ -47,15 +49,15 @@ export async function batch(options: BatchOptions): Promise<void> {
   };
   const result = await runEvalBatch(batchOptions);
   for (const item of result.items) {
-    if (item.skipped) console.log(`${item.manifestPath}: skipped`);
-    else if (item.error) console.error(`${item.manifestPath}: ${item.error}`);
+    if (item.skipped) console.log(`${item.configPath}: skipped`);
+    else if (item.error) console.error(`${item.configPath}: ${item.error}`);
     else {
       const metrics = item.result?.summary.metrics as {
         passed?: number;
         total?: number;
       };
       console.log(
-        `${item.manifestPath}: ${metrics.passed ?? 0}/${metrics.total ?? 0} passed`
+        `${item.configPath}: ${metrics.passed ?? 0}/${metrics.total ?? 0} passed`
       );
     }
   }

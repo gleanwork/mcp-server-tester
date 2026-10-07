@@ -8,14 +8,14 @@ import type {
   ResultStoreDefinition,
 } from '../evals/evalFrameworkTypes.js';
 import type { PairwiseJudgeDefinition } from '../judge/pairwiseContract.js';
-import type { PluginConfig } from '../evals/evalManifest.js';
+import type { PluginConfig } from '../evals/evalConfig.js';
 
 /** Identifies a plugin. `namespace` prefixes its extensions: `namespace/name`. */
 export interface PluginMeta {
   /** The plugin's package name, used in error messages. */
   readonly name: string;
   readonly version?: string;
-  /** Lowercase; `@scope/name` is allowed. Manifests reference `namespace/extension`. */
+  /** Lowercase; `@scope/name` is allowed. Eval configs reference `namespace/extension`. */
   readonly namespace: string;
 }
 
@@ -34,7 +34,7 @@ export interface Plugin {
   readonly metrics?: Readonly<Record<string, MetricDefinition>>;
   readonly resultStores?: Readonly<Record<string, ResultStoreDefinition>>;
   /**
-   * Shared manifest settings. A manifest that lists this plugin applies one
+   * Shared eval config settings. An eval config that lists this plugin applies one
    * with `extends: ["namespace/name"]`. A config may use only this plugin's
    * extensions and built-ins.
    */
@@ -109,6 +109,8 @@ function extensionProblem(
   const required = REQUIRED_FUNCTIONS[kind];
   if (!required.some((fn) => typeof definition[fn] === 'function'))
     return `${label} needs ${describeFunctions(required)}`;
+  if (kind === 'clients' && 'toolOverrides' in definition)
+    return `${label}: \`toolOverrides\` is now \`toolMetadata\``;
   if (
     kind === 'metrics' &&
     !(typeof definition.kind === 'string' && definition.kind in METRIC_KINDS)
@@ -164,7 +166,7 @@ export function assertPlugin(value: unknown, source: string): Plugin {
         fail(
           `config name "${name}" must start with a letter or digit and use only letters, digits, ".", "_" or "-"`
         );
-      // The manifest schema checks a config's settings when a manifest extends it.
+      // The eval config schema checks a config's settings when an eval config extends it.
       if (!isRecord(config)) fail(`configs.${name} must be an object`);
     }
   }

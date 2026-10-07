@@ -3,83 +3,83 @@
   "exitCode": 0,
   "checks": [
     {
-      "path": "arms[name=aggregate].metrics.passed_rate",
+      "path": "variants[name=aggregate].metrics.passed_rate",
       "equals": 1
     },
     {
-      "path": "arms[name=native].metrics.passed_rate",
+      "path": "variants[name=native].metrics.passed_rate",
       "equals": 1
     },
     {
-      "path": "arms[name=aggregate].metrics.tool_count_mean",
+      "path": "variants[name=aggregate].metrics.tool_count_mean",
       "equals": 2
     },
     {
-      "path": "arms[name=native].metrics.tool_count_mean",
+      "path": "variants[name=native].metrics.tool_count_mean",
       "equals": 5
     },
     {
-      "path": "arms[name=native].result.caseResults[0].mcpHostTrace.calls.length",
+      "path": "variants[name=native].result.caseResults[0].mcpHostTrace.calls.length",
       "equals": 5
     },
     {
-      "path": "arms[name=native].result.caseResults[0].mcpHostTrace.calls[0].name",
+      "path": "variants[name=native].result.caseResults[0].mcpHostTrace.calls[0].name",
       "equals": "github.search_issues"
     },
     {
-      "path": "arms[name=aggregate].result.caseResults[0].trace.events[1].server",
+      "path": "variants[name=aggregate].result.caseResults[0].trace.events[1].server",
       "equals": "agg"
     },
     {
-      "path": "arms[name=aggregate].result.caseResults[0].trace.events[1].name",
+      "path": "variants[name=aggregate].result.caseResults[0].trace.events[1].name",
       "equals": "read_document"
     },
     {
-      "path": "arms[name=native].result.caseResults[0].trace.events[0].server",
+      "path": "variants[name=native].result.caseResults[0].trace.events[0].server",
       "equals": "github"
     },
     {
-      "path": "arms[name=native].result.caseResults[0].trace.events[0].output",
+      "path": "variants[name=native].result.caseResults[0].trace.events[0].output",
       "exists": false
     },
     {
-      "path": "arms[name=native].result.caseResults[0].trace.finalText",
+      "path": "variants[name=native].result.caseResults[0].trace.finalText",
       "exists": false
     },
     {
-      "path": "arms[name=native].result.caseResults[0].trace.usage.inputTokens",
+      "path": "variants[name=native].result.caseResults[0].trace.usage.inputTokens",
       "exists": true
     },
     {
-      "path": "arms[name=native].metrics.cost_usd_mean",
+      "path": "variants[name=native].metrics.cost_usd_mean",
       "exists": true
     },
     {
-      "path": "results[0].arm",
+      "path": "results[0].variant",
       "equals": "aggregate"
     },
     {
-      "path": "results[1].arm",
+      "path": "results[1].variant",
       "equals": "native"
     },
     {
-      "path": "arms[name=aggregate].metrics.cost_usd_mean",
+      "path": "variants[name=aggregate].metrics.cost_usd_mean",
       "equals": 0.002256
     },
     {
-      "path": "arms[name=native].metrics.cost_usd_mean",
+      "path": "variants[name=native].metrics.cost_usd_mean",
       "equals": 0.008211
     },
     {
-      "path": "arms[name=native].costSource",
+      "path": "variants[name=native].costSource",
       "equals": "pricing"
     },
     {
-      "path": "armDeltas.native.metricDeltas.mcp_call_count_mean",
+      "path": "variantDeltas.native.metricDeltas.mcp_call_count_mean",
       "equals": 3
     },
     {
-      "path": "arms[name=native].pricing.claude-sonnet-4-5",
+      "path": "variants[name=native].pricing.claude-sonnet-4-5",
       "equals": {
         "input": 3,
         "output": 15

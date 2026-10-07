@@ -8,7 +8,7 @@ import {
   resolveHostStdioServer,
   type MarketplacePlugin,
 } from '../hostPlugins.js';
-import type { EvalManifest } from '../evalManifest.js';
+import type { EvalConfig } from '../evalConfig.js';
 import {
   createCoworkMcpPlan,
   resolveCoworkMcpHeaders,
@@ -22,23 +22,29 @@ const MAX_CREDENTIAL_BYTES = 64 * 1024;
 export const COWORK_SETTINGS_MAX_BYTES = 1024 * 1024;
 
 function selectSetup(
-  manifest: EvalManifest,
-  armName?: string
+  evalConfig: EvalConfig,
+  variantName?: string
 ): { servers: MCPConfig[]; setup: CoworkSetupConfig } {
-  const arms = manifest.arms ?? [];
-  if (new Set(arms.map((arm) => arm.name)).size !== arms.length) {
+  const variants = evalConfig.variants ?? [];
+  if (
+    new Set(variants.map((variant) => variant.name)).size !== variants.length
+  ) {
     throw new Error(ERROR_MESSAGE);
   }
-  const arm =
-    armName === undefined
+  const variant =
+    variantName === undefined
       ? undefined
-      : arms.find((arm) => arm.name === armName);
-  if (armName !== undefined && !arm) throw new Error(ERROR_MESSAGE);
-  const servers = arm?.servers === undefined ? manifest.servers : arm.servers;
+      : variants.find((variant) => variant.name === variantName);
+  if (variantName !== undefined && !variant) throw new Error(ERROR_MESSAGE);
+  const servers =
+    variant?.servers === undefined ? evalConfig.servers : variant.servers;
   if (servers === undefined) throw new Error(ERROR_MESSAGE);
   return {
     servers,
-    setup: resolveCoworkSetupConfig(manifest.coworkSetup, arm?.coworkSetup),
+    setup: resolveCoworkSetupConfig(
+      evalConfig.coworkSetup,
+      variant?.coworkSetup
+    ),
   };
 }
 
@@ -125,8 +131,8 @@ COWORK_HEADERS_PY
 }
 
 type BundlePlanOptions = {
-  manifest: EvalManifest;
-  arm?: string;
+  evalConfig: EvalConfig;
+  variant?: string;
   runtimeDirectory: string;
   env?: Record<string, string | undefined>;
   plugins?: readonly MarketplacePlugin[];
@@ -137,8 +143,8 @@ type BundlePlanOptions = {
  */
 export function createCoworkBundlePlan(options: BundlePlanOptions) {
   const { servers: declarations, setup } = selectSetup(
-    options.manifest,
-    options.arm
+    options.evalConfig,
+    options.variant
   );
   const labeled = declarations.map((server, index) => ({
     ...server,

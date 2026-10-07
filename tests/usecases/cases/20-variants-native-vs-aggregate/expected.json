@@ -3,59 +3,59 @@
   "exitCode": 1,
   "checks": [
     {
-      "path": "arms.length",
+      "path": "variants.length",
       "equals": 5
     },
     {
-      "path": "armDeltas.length",
+      "path": "variantDeltas.length",
       "equals": 4
     },
     {
-      "path": "arms[name=native-connectors].metrics.judge_pass_rate",
+      "path": "variants[name=native-connectors].metrics.judge_pass_rate",
       "equals": 0
     },
     {
-      "path": "arms[name=aggregate-mcp-gateway].metrics.judge_pass_rate",
+      "path": "variants[name=aggregate-mcp-gateway].metrics.judge_pass_rate",
       "equals": 1
     },
     {
-      "path": "arms[name=aggregate-mcp-native-connectors].metrics.judge_pass_rate",
+      "path": "variants[name=aggregate-mcp-native-connectors].metrics.judge_pass_rate",
       "equals": 1
     },
     {
-      "path": "arms[name=aggregate-plugin-gateway].metrics.judge_pass_rate",
+      "path": "variants[name=aggregate-plugin-gateway].metrics.judge_pass_rate",
       "equals": 0.5
     },
     {
-      "path": "arms[name=aggregate-plugin-native-connectors].metrics.judge_pass_rate",
+      "path": "variants[name=aggregate-plugin-native-connectors].metrics.judge_pass_rate",
       "equals": 0
     },
     {
-      "path": "arms[name=native-connectors].metrics.tool_count_mean",
+      "path": "variants[name=native-connectors].metrics.tool_count_mean",
       "equals": 4
     },
     {
-      "path": "arms[name=aggregate-mcp-gateway].metrics.tool_count_mean",
+      "path": "variants[name=aggregate-mcp-gateway].metrics.tool_count_mean",
       "equals": 3
     },
     {
-      "path": "arms[name=aggregate-mcp-native-connectors].metrics.tool_count_mean",
+      "path": "variants[name=aggregate-mcp-native-connectors].metrics.tool_count_mean",
       "equals": 6
     },
     {
-      "path": "arms[name=aggregate-plugin-gateway].metrics.tool_count_mean",
+      "path": "variants[name=aggregate-plugin-gateway].metrics.tool_count_mean",
       "equals": 2
     },
     {
-      "path": "arms[name=aggregate-plugin-native-connectors].metrics.tool_count_mean",
+      "path": "variants[name=aggregate-plugin-native-connectors].metrics.tool_count_mean",
       "equals": 5
     },
     {
-      "path": "arms[name=aggregate-mcp-gateway].metrics.cost_usd_mean",
+      "path": "variants[name=aggregate-mcp-gateway].metrics.cost_usd_mean",
       "exists": true
     },
     {
-      "path": "arms[name=aggregate-mcp-gateway].costSource",
+      "path": "variants[name=aggregate-mcp-gateway].costSource",
       "equals": "pricing"
     }
   ],

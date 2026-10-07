@@ -261,25 +261,25 @@ describe('resolveJudges', () => {
 });
 
 describe('mergeSuiteJudges', () => {
-  it('lets a case override a manifest judge and keeps its other judges', () => {
+  it('lets a case override an eval config judge and keeps its other judges', () => {
     const merged = mergeSuiteJudges(
       {
         expected: { answer: 'canonical' },
         assertions: {
           passesJudge: [
-            { judge: 'manifest', reference: 'case', options: { count: 3 } },
+            { judge: 'config', reference: 'case', options: { count: 3 } },
             { judge: 'case-only', threshold: 0.5 },
           ],
         },
       },
-      [{ type: 'manifest', reference: 'suite', count: 2 }],
-      [{ type: 'manifest', reference: 'suite', count: 2, raw: true }]
+      [{ type: 'config', reference: 'suite', count: 2 }],
+      [{ type: 'config', reference: 'suite', count: 2, raw: true }]
     );
     expect(merged).toEqual([
       { judge: 'case-only', threshold: 0.5 },
       {
-        type: 'manifest',
-        judge: 'manifest',
+        type: 'config',
+        judge: 'config',
         count: 2,
         reference: 'case',
         // Only the judge's own options: no routing or assertion keys.
@@ -288,7 +288,7 @@ describe('mergeSuiteJudges', () => {
     ]);
   });
 
-  it('keeps two manifest rubric judges distinct and overrides only the one a case names', () => {
+  it('keeps two eval config rubric judges distinct and overrides only the one a case names', () => {
     const raw = [
       { type: 'rubric', rubric: 'correctness' },
       { type: 'rubric', rubric: 'conciseness', threshold: 0.6 },
@@ -326,7 +326,7 @@ describe('mergeSuiteJudges', () => {
     ]);
   });
 
-  it('falls back from the manifest reference to expected.answer', () => {
+  it('falls back from the eval config reference to expected.answer', () => {
     const [withSuiteRef] = mergeSuiteJudges(
       { expected: { answer: 'canonical' }, assertions: {} },
       [{ type: 'j', reference: 'suite' }],

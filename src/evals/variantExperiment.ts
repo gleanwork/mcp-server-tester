@@ -1,3 +1,4 @@
+import { rejectRenamedOptions } from './renamedKeys.js';
 import { runEvalDataset } from './evalRunner.js';
 import type {
   EvalContext,
@@ -17,8 +18,8 @@ import type {
 } from '../types/reporter.js';
 import type { ZodType } from 'zod';
 import { attachReporterData } from '../reporters/channel.js';
-import type { EvalArm } from './evalManifest.js';
-import type { EvaluationArmResult } from './evalFrameworkTypes.js';
+import type { EvalVariant } from './evalConfig.js';
+import type { EvaluationVariantResult } from './evalFrameworkTypes.js';
 import type { Plugin } from '../plugins/plugin.js';
 import { runEvalSuite } from './runEvalSuite.js';
 import {
@@ -55,7 +56,7 @@ export type ExperimentMetric =
   | 'toolPrecision'
   | 'toolRecall';
 
-/** A dataset metric, or (in suite mode) any numeric arm metric. */
+/** A dataset metric, or (in suite mode) any numeric variant metric. */
 type MetricName = ExperimentMetric | (string & {});
 
 const EXPERIMENT_METRICS = new Set<string>([
@@ -115,7 +116,7 @@ export interface VariantCandidateResult {
    * True when the candidate is clearly better than the baseline after
    * adjusting for every variant tried: the metric improved (up, or down with
    * `better: 'lower'`), and for a dataset metric its paired per-case change
-   * passes the sign-flip test at `0.025 / variantsTried`. An arm metric has
+   * passes the sign-flip test at `0.025 / variantsTried`. A variant metric has
    * no per-case scores, so its improvement is taken as is. Final once the
    * experiment ends.
    */
@@ -128,7 +129,7 @@ export interface VariantCandidateResult {
    */
   disqualified: boolean;
   /**
-   * The candidate reported no value for the metric (a suite arm can lack
+   * The candidate reported no value for the metric (a suite variant can lack
    * one, such as `cost_usd` from an unpriced host); `metricValue` is then the
    * baseline's.
    */
@@ -275,14 +276,15 @@ export interface VariantExperimentOptions {
 
 /** Where a suite-mode experiment runs. */
 export interface VariantExperimentSuite {
-  /** The manifest whose datasets, servers, host and judges the experiment uses. */
-  manifestPath: string;
+  /** The eval config whose datasets, servers, client and judges the experiment uses. */
+  configPath: string;
   /**
-   * The arm variants build on, which is also the baseline: each variant runs
-   * as a copy of it with the variant as its `toolOverrides`. Default: the
-   * manifest's first arm, or the manifest's own settings when it has none.
+   * The config's variant the candidates build on, which is also the
+   * baseline: each candidate runs as a copy of it with the candidate's tool
+   * metadata as its `tools`. Default: the config's baseline (its first
+   * variant), or the config's own settings when it has none.
    */
-  arm?: string;
+  baseVariant?: string;
   rootDir?: string;
   pluginPaths?: string[];
   plugins?: readonly Plugin[];
@@ -290,9 +292,9 @@ export interface VariantExperimentSuite {
 }
 
 /**
- * Options for {@link runVariantExperiment} on a suite: variants run as arms,
- * on any host that can take tool variants (in-process or through MST's tool
- * proxy), and any numeric arm metric can be the target.
+ * Options for {@link runVariantExperiment} on a suite: candidates run as the
+ * config's variants, on any client that can show tool metadata (in-process or
+ * through MST's tool proxy), and any numeric variant metric can be the target.
  */
 export interface SuiteVariantExperimentOptions extends Pick<
   VariantExperimentOptions,
@@ -307,8 +309,8 @@ export interface SuiteVariantExperimentOptions extends Pick<
 > {
   suite: VariantExperimentSuite;
   /**
-   * The arm metric to optimize: `passRate`, `trialPassRate`, or any numeric
-   * key of an arm's `metrics`, such as `tool_search_hit_rate` or
+   * The variant metric to optimize: `passRate`, `trialPassRate`, or any numeric
+   * key of a variant's `metrics`, such as `tool_search_hit_rate` or
    * `input_tokens_mean`.
    * @default 'passRate'
    */
@@ -322,8 +324,8 @@ export interface VariantExperimentResult {
   /** Metric that was optimized. */
   metric: MetricName;
   /**
-   * The baseline run: no tool variant on a dataset; on a suite, the base
-   * arm as configured, including its own `toolOverrides` (variants replace
+   * The baseline run: no tool metadata on a dataset; on a suite, the base
+   * variant as configured, including its own `tools` (candidates replace
    * them).
    */
   baseline: EvalRunnerResult;
@@ -384,6 +386,11 @@ export async function runVariantExperiment(
   context?: EvalContext
 ): Promise<VariantExperimentResult> {
   if ('suite' in options) {
+    rejectRenamedOptions(
+      options.suite,
+      { manifestPath: 'configPath', arm: 'baseVariant' },
+      'runVariantExperiment suite'
+    );
     return experiment(
       options,
       options.metric ?? 'passRate',
@@ -443,54 +450,68 @@ interface ExperimentRunner {
   withBaseline: boolean;
 }
 
-/** Each call runs one suite whose arms are the base arm and/or variants of it. */
+/** Each call runs one suite whose variants are the base variant and/or candidates built on it. */
 function suiteRunner(options: SuiteVariantExperimentOptions): RunVariants {
   const { suite } = options;
   const metric = options.metric ?? 'passRate';
   return async (variants) => {
     const { summary } = await runEvalSuite({
-      manifestPath: suite.manifestPath,
+      configPath: suite.configPath,
       rootDir: suite.rootDir,
       pluginPaths: suite.pluginPaths,
       plugins: suite.plugins,
       secretsFile: suite.secretsFile,
-      arms: (manifestArms) => {
+      variants: (configVariants) => {
         const base =
-          suite.arm === undefined
-            ? (manifestArms[0] ?? { name: 'default' })
-            : manifestArms.find((arm) => arm.name === suite.arm);
+          suite.baseVariant === undefined
+            ? (configVariants[0] ?? { name: 'default' })
+            : configVariants.find(
+                (candidate) => candidate.name === suite.baseVariant
+              );
         if (!base)
-          throw new Error(`The manifest has no arm named "${suite.arm}".`);
+          throw new Error(
+            `The eval config has no variant named "${suite.baseVariant}".`
+          );
         const names = new Set<string>();
-        return variants.map((variant) => {
-          const arm: EvalArm = variant
-            ? { ...base, name: variant.id, toolOverrides: variant }
+        return variants.map((candidate) => {
+          const variant: EvalVariant = candidate
+            ? {
+                ...base,
+                name: candidate.id,
+                ...(candidate.description !== undefined
+                  ? { description: candidate.description }
+                  : {}),
+                tools: candidate.tools,
+              }
             : base;
-          if (names.has(arm.name) || (variant && variant.id === base.name))
+          if (
+            names.has(variant.name) ||
+            (candidate && candidate.id === base.name)
+          )
             throw new Error(
-              `Variant ids must be unique and differ from the base arm's name; "${arm.name}" repeats.`
+              `Candidate ids must be unique and differ from the base variant's name; "${variant.name}" repeats.`
             );
-          names.add(arm.name);
-          return arm;
+          names.add(variant.name);
+          return variant;
         });
       },
     });
-    return summary.arms.map((arm) => ({
-      result: arm.result!,
-      value: armMetric(arm, metric),
+    return summary.variants.map((variant) => ({
+      result: variant.result!,
+      value: variantMetric(variant, metric),
     }));
   };
 }
 
-/** An arm's value for a suite-mode metric, if it reports one. */
-function armMetric(
-  arm: EvaluationArmResult,
+/** A variant's value for a suite-mode metric, if it reports one. */
+function variantMetric(
+  variant: EvaluationVariantResult,
   metric: string
 ): number | undefined {
   if (metric === 'passRate')
-    return arm.result ? meanCasePassRate(arm.result) : undefined;
+    return variant.result ? meanCasePassRate(variant.result) : undefined;
   const key = metric === 'trialPassRate' ? 'trial_pass_rate' : metric;
-  const value = arm.metrics?.[key];
+  const value = variant.metrics?.[key];
   return typeof value === 'number' ? value : undefined;
 }
 
@@ -536,7 +557,7 @@ async function experiment(
       `Metric '${metric}' is unavailable for the baseline. For a dataset, ` +
         `the tool metrics need client cases with toolsTriggered ` +
         `assertions; for a suite, use passRate, trialPassRate or a numeric ` +
-        `metric the base arm reports (tool F1, precision and recall are ` +
+        `metric the base variant reports (tool F1, precision and recall are ` +
         `dataset metrics).`
     );
   }
@@ -680,7 +701,7 @@ async function experiment(
 
 /**
  * A run's value for `metric`. Dataset metrics are computed without held-out
- * cases; an arm metric (suite mode) is the arm's own value.
+ * cases; a variant metric (suite mode) is the variant's own value.
  */
 function metricOf(
   run: ExperimentRun,
@@ -914,7 +935,7 @@ function judgeImprovement(
       ? candidate.metricDelta < 0
       : candidate.metricDelta > 0;
   if (!isExperimentMetric(rules.metric)) {
-    // An arm metric has no per-case scores to test, so its gain stands.
+    // A variant metric has no per-case scores to test, so its gain stands.
     candidate.improvement = pairedNone();
     candidate.fixes = improved;
     return;

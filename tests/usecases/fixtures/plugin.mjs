@@ -292,7 +292,7 @@ export default {
               pools.set(key, await connect(request.input.servers));
             const result = await runModel(request, config, pools.get(key));
             record({
-              arm: context.arm?.name ?? 'default',
+              variant: context.variant?.name ?? 'default',
               caseId: request.caseId,
               trial: request.trial,
               usage: result.usage,
@@ -321,7 +321,7 @@ export default {
           durationMs: 100,
         };
         record({
-          arm: context.arm?.name ?? 'default',
+          variant: context.variant?.name ?? 'default',
           caseId: null,
           trial: null,
           events: [],

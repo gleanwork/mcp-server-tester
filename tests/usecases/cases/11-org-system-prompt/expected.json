@@ -3,15 +3,15 @@
   "exitCode": 1,
   "checks": [
     {
-      "path": "arms[name=no-prompt].metrics.passed_rate",
+      "path": "variants[name=no-prompt].metrics.passed_rate",
       "equals": 0
     },
     {
-      "path": "arms[name=org-prompt].metrics.passed_rate",
+      "path": "variants[name=org-prompt].metrics.passed_rate",
       "equals": 1
     },
     {
-      "path": "armDeltas.org-prompt.passRateDelta",
+      "path": "variantDeltas.org-prompt.passRateDelta",
       "equals": 1
     }
   ],

@@ -146,7 +146,7 @@ async function runBatch(
     throw new Error('Cowork cases require a non-empty input.');
   requireIdenticalHostSettings('Cowork', configs);
   const config = configs[0]!;
-  const coworkSetup = resolveCoworkSetupConfig(context.manifest.coworkSetup);
+  const coworkSetup = resolveCoworkSetupConfig(context.evalConfig.coworkSetup);
   const approvalTask = `Approve ${coworkSetup.approveWriteTools ? 'read and write' : 'read-only'} calls only using one-time or current-task approval. Never select persistent or always-allow approval, or change settings.`;
   const plugins = config.plugins ?? [];
   // Fail before any desktop action if Cowork cannot apply a plugin as declared.
@@ -206,9 +206,9 @@ async function runBatch(
   const platform =
     selectedPlatform ?? (await getCoworkPlatform(config.computerUseProvider));
   const dataDir = platform.dataDirectory(config);
-  // Pass only the selected arm. Setup intentionally rejects multi-arm manifests.
-  const { arms: _arms, ...manifest } = context.manifest;
-  const managedManifest = { ...manifest, coworkSetup, servers };
+  // Pass only the selected variant. Setup intentionally rejects multi-variant eval configs.
+  const { variants: _variants, ...evalConfig } = context.evalConfig;
+  const managedConfig = { ...evalConfig, coworkSetup, servers };
   type Session = Awaited<ReturnType<CoworkPlatform['prepare']>> | undefined;
   const secrets = hostSecretValues(env, servers);
   const safeError = (error: unknown): string =>
@@ -229,7 +229,7 @@ async function runBatch(
       async prepare() {
         if (env.MST_COWORK_RECOVER === '1') await platform.recover();
         const session = await platform.prepare({
-          manifest: managedManifest,
+          evalConfig: managedConfig,
           env,
           model: config.model,
           ...(config.appVersion ? { appVersion: config.appVersion } : {}),

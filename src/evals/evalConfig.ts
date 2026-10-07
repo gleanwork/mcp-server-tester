@@ -1,10 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { renamedKeys } from './renamedKeys.js';
+import { removedKeys, renamedKeys } from './renamedKeys.js';
 import { clientFieldSchemas, type ClientFields } from './clientFields.js';
 import { MCPConfigSchema, type MCPConfig } from '../config/mcpConfig.js';
-import type { ToolOverrideVariant } from '../types/index.js';
+import type {
+  ToolMetadataOverride,
+  ToolOverrideVariant,
+} from '../types/index.js';
 import {
   CoworkSetupConfigSchema,
   type CoworkSetupConfig,
@@ -24,7 +27,7 @@ export interface TaggedConfig {
   [key: string]: unknown;
 }
 
-/** A dataset source declaration in an evaluation manifest. */
+/** A dataset source declaration in an eval config. */
 export interface DatasetConfig extends TaggedConfig {
   path?: string;
   recursive?: boolean;
@@ -39,22 +42,31 @@ export interface ExtensionConfig extends TaggedConfig {
 }
 
 /**
- * One comparison arm. Unspecified values inherit from the manifest; a
- * different `client` doesn't inherit the manifest's `clientOptions`.
+ * The tool metadata a variant shows its client, by the tool's name on its
+ * server: a new name, description or input schema.
  */
-export interface EvalArm extends ClientFields {
+export type ToolMetadata = Record<string, ToolMetadataOverride>;
+
+/**
+ * One setup the eval tests. Unspecified values inherit from the eval
+ * config; a different `client` doesn't inherit the config's
+ * `clientOptions`.
+ */
+export interface EvalVariant extends ClientFields {
   name: string;
+  description?: string;
   servers?: MCPConfig[];
   toolMap?: Record<string, string[]>;
-  toolOverrides?: ToolOverrideVariant;
+  /** The tool metadata this variant shows its client. */
+  tools?: ToolMetadata;
   inputTemplate?: string;
   metrics?: ExtensionConfig[];
   judges?: ExtensionConfig[];
   coworkSetup?: CoworkSetupConfig;
 }
 
-/** A complete, organization-neutral evaluation manifest. */
-export interface EvalManifest {
+/** An eval config: what to evaluate and how. */
+export interface EvalConfig {
   name: string;
   datasets: DatasetConfig[];
   servers?: MCPConfig[];
@@ -66,9 +78,13 @@ export interface EvalManifest {
   /** The client's own options, such as Cowork's `appVersion`. */
   clientOptions?: Record<string, unknown>;
   toolMap?: Record<string, string[]>;
-  toolOverrides?: ToolOverrideVariant;
+  /** Tool metadata every variant shows its client, unless it sets its own. */
+  tools?: ToolMetadata;
   inputTemplate?: string;
-  arms?: EvalArm[];
+  /** The setups the eval compares. Without any, one variant runs the config as written. */
+  variants?: EvalVariant[];
+  /** The variant the others are compared with. @default the first */
+  baseline?: string;
   metrics?: ExtensionConfig[];
   judges?: ExtensionConfig[];
   coworkSetup?: CoworkSetupConfig;
@@ -78,10 +94,10 @@ export interface EvalManifest {
   plugins?: string[];
   /**
    * Shared configs (`namespace/name`) from listed plugins, applied in order
-   * under the manifest's own settings.
+   * under the eval config's own settings.
    */
   extends?: string[];
-  /** The model the client uses: a default for every arm and case. */
+  /** The model the client uses: a default for every variant and case. */
   model?: string;
   provider?: string;
   concurrency?: number;
@@ -89,7 +105,6 @@ export interface EvalManifest {
   maxCases?: number;
   timeout?: number;
   maxToolCalls?: number;
-  tools?: string;
   /** Require HTTP server URLs to use an explicit /eval endpoint. */
   requireEvalEndpoint?: boolean;
   /** USD per million tokens, by model: estimates cost for hosts that don't report it. */
@@ -100,6 +115,26 @@ export interface EvalManifest {
   /** Default share of a host case's trials that must pass (cases may set their own). */
   passThreshold?: number;
   [key: string]: unknown;
+}
+
+/**
+ * The tool metadata a variant shows its client (its own `tools`, else the
+ * config's), as the runtime's tool variant, identified by the variant's name.
+ * Undefined when neither sets any.
+ */
+export function variantToolMetadata(
+  evalConfig: Pick<EvalConfig, 'name' | 'tools'>,
+  variant?: Pick<EvalVariant, 'name' | 'tools' | 'description'>
+): ToolOverrideVariant | undefined {
+  const tools = variant?.tools ?? evalConfig.tools;
+  if (!tools) return undefined;
+  return {
+    id: variant?.name ?? evalConfig.name,
+    ...(variant?.tools && variant.description !== undefined
+      ? { description: variant.description }
+      : {}),
+    tools,
+  };
 }
 
 const TaggedConfigSchema = z.object({ type: z.string().min(1) }).passthrough();
@@ -118,62 +153,68 @@ const InputTemplateSchema = z
     message: '`{{scenario}}` is now `{{input}}`',
   });
 
-// The runtime runner owns the canonical type; share its manifest validation
-// between defaults and arms rather than introducing a second override model.
-const ToolOverrideVariantSchema = z
-  .object({
-    id: z.string().min(1),
-    description: z.string().optional(),
-    tools: z.record(
-      z.string(),
-      z
-        .object({
-          name: z
-            .string()
-            .regex(/^[A-Za-z0-9_.-]{1,128}$/, 'Not a valid MCP tool name.')
-            .optional(),
-          description: z.string().optional(),
-          inputSchema: z.record(z.string(), z.unknown()).optional(),
-        })
-        .strict()
-    ),
-  })
-  .strict() satisfies z.ZodType<ToolOverrideVariant>;
+// One schema for a variant's tool metadata and the config's default.
+const ToolMetadataSchema = z.record(
+  z.string(),
+  z
+    .object({
+      name: z
+        .string()
+        .regex(/^[A-Za-z0-9_.-]{1,128}$/, 'Not a valid MCP tool name.')
+        .optional(),
+      description: z.string().optional(),
+      inputSchema: z.record(z.string(), z.unknown()).optional(),
+    })
+    .strict(),
+  {
+    error: (issue) =>
+      typeof issue.input === 'string'
+        ? "`tools` is tool metadata: a new name, description or input schema per tool, keyed by the tool's name"
+        : undefined,
+  }
+) satisfies z.ZodType<ToolMetadata>;
 
-const EvalArmSchema = z
+const TOOL_OVERRIDES_MOVED =
+  "set the tool metadata itself in `tools`, keyed by tool name (what was `toolOverrides.tools`); the variant's name identifies it";
+
+const EvalVariantSchema = z
   .object({
     name: z.string().min(1),
+    description: z.string().optional(),
     servers: z.array(ServerConfigSchema).optional(),
     ...clientFieldSchemas,
     toolMap: ToolMapSchema.optional(),
-    toolOverrides: ToolOverrideVariantSchema.optional(),
+    tools: ToolMetadataSchema.optional(),
     inputTemplate: InputTemplateSchema.optional(),
     metrics: z.array(ExtensionConfigSchema).optional(),
     judges: z.array(ExtensionConfigSchema).optional(),
     coworkSetup: CoworkSetupConfigSchema.optional(),
     ...renamedKeys({ scenarioTemplate: 'inputTemplate' }),
+    ...removedKeys({ toolOverrides: TOOL_OVERRIDES_MOVED }),
   })
   .strict();
 
 /** Eval config keys that 2.0 renamed (ADR 0002); each fails naming its replacement. */
-export const RENAMED_MANIFEST_KEYS = {
+export const RENAMED_CONFIG_KEYS = {
   scenarioTemplate: 'inputTemplate',
   iterations: 'trials',
   accuracyThreshold: 'passThreshold',
+  arms: 'variants',
 } as const;
 
-export const EvalManifestSchema = z
+export const EvalConfigSchema = z
   .object({
-    /** The editor schema a manifest file may point to. */
+    /** The editor schema an eval config file may point to. */
     $schema: z.string().optional(),
     name: z.string().min(1),
     datasets: z.array(DatasetConfigSchema).min(1),
     servers: z.array(ServerConfigSchema).optional(),
     ...clientFieldSchemas,
     toolMap: ToolMapSchema.optional(),
-    toolOverrides: ToolOverrideVariantSchema.optional(),
+    tools: ToolMetadataSchema.optional(),
     inputTemplate: InputTemplateSchema.optional(),
-    arms: z.array(EvalArmSchema).optional(),
+    variants: z.array(EvalVariantSchema).optional(),
+    baseline: z.string().min(1).optional(),
     metrics: z.array(ExtensionConfigSchema).optional(),
     judges: z.array(ExtensionConfigSchema).optional(),
     coworkSetup: CoworkSetupConfigSchema.optional(),
@@ -186,7 +227,6 @@ export const EvalManifestSchema = z
     maxCases: z.number().int().positive().optional(),
     timeout: z.number().int().positive().optional(),
     maxToolCalls: z.number().int().nonnegative().optional(),
-    tools: z.string().optional(),
     requireEvalEndpoint: z.boolean().optional(),
     /** Generation defaults for API hosts; the host validates their range. */
     temperature: z.number().optional(),
@@ -229,34 +269,35 @@ export const EvalManifestSchema = z
       .optional(),
     /** Removed; kept so validation can say what replaced it. */
     profile: z.unknown().optional(),
-    ...renamedKeys(RENAMED_MANIFEST_KEYS),
+    ...renamedKeys(RENAMED_CONFIG_KEYS),
+    ...removedKeys({ toolOverrides: TOOL_OVERRIDES_MOVED }),
   })
   // Unknown keys are mistakes (a misspelt control would be silently ignored).
   .strict();
 
-export type EvalManifestInput = z.input<typeof EvalManifestSchema>;
+export type EvalConfigInput = z.input<typeof EvalConfigSchema>;
 
-/** Keys that belong to the manifest itself; a shared config can't set them. */
-const MANIFEST_OWN_KEYS = [
+/** Keys that belong to the eval config itself; a shared config can't set them. */
+const CONFIG_OWN_KEYS = [
   'name',
   'datasets',
-  'arms',
+  'variants',
+  'baseline',
   'plugins',
   'extends',
 ] as const;
 
 /**
- * The manifest settings a plugin shares in `configs`. A manifest applies one
+ * The eval config settings a plugin shares in `configs`. An eval config applies one
  * with `extends: ["namespace/name"]`. Unknown keys are rejected.
  */
-const PluginConfigSchema = EvalManifestSchema.pick({
+const PluginConfigSchema = EvalConfigSchema.pick({
   servers: true,
   client: true,
   model: true,
   clientOptions: true,
   host: true,
   toolMap: true,
-  toolOverrides: true,
   inputTemplate: true,
   metrics: true,
   judges: true,
@@ -276,7 +317,7 @@ const PluginConfigSchema = EvalManifestSchema.pick({
   maxTokens: true,
 }).strict();
 
-/** A plugin's shared config: any manifest setting but its name, datasets, arms, plugins and extends. */
+/** A plugin's shared config: any eval config setting but its name, datasets, variants, plugins and extends. */
 export type PluginConfig = z.input<typeof PluginConfigSchema>;
 
 /** A parsed shared config: judge, metric and store shorthands are tagged configs. */
@@ -295,10 +336,14 @@ export function parsePluginConfig(
   label: string
 ): ParsedPluginConfig {
   if (value && typeof value === 'object') {
-    const own = MANIFEST_OWN_KEYS.filter((key) => key in value);
+    const own = CONFIG_OWN_KEYS.filter((key) => key in value);
+    if ('arms' in value)
+      throw new Error(
+        `${label}: \`arms\` is now \`variants\`, which a shared config can't set.`
+      );
     if (own.length > 0) {
       throw new Error(
-        `${label} can't set ${own.map((key) => `"${key}"`).join(', ')}: a manifest's ${MANIFEST_OWN_KEYS.join(', ')} are its own.`
+        `${label} can't set ${own.map((key) => `"${key}"`).join(', ')}: an eval config's ${CONFIG_OWN_KEYS.join(', ')} are its own.`
       );
     }
   }
@@ -324,7 +369,7 @@ function normalizeExtension(value: string | TaggedConfig): ExtensionConfig {
   return typeof value === 'string' ? { type: value } : value;
 }
 
-function normalizeManifest(value: EvalManifestInput): EvalManifest {
+function normalizeConfig(value: EvalConfigInput): EvalConfig {
   return {
     ...value,
     datasets: value.datasets.map(normalizeDataset),
@@ -333,33 +378,30 @@ function normalizeManifest(value: EvalManifestInput): EvalManifest {
     results: value.results
       ? { ...value.results, store: normalizeExtension(value.results.store) }
       : undefined,
-    arms: value.arms?.map((arm) => ({
-      ...arm,
-      metrics: arm.metrics?.map(normalizeExtension),
-      judges: arm.judges?.map(normalizeExtension),
+    variants: value.variants?.map((variant) => ({
+      ...variant,
+      metrics: variant.metrics?.map(normalizeExtension),
+      judges: variant.judges?.map(normalizeExtension),
     })),
-  } as EvalManifest;
+  } as EvalConfig;
 }
 
-/** Where a manifest's relative paths are looked up. */
-export interface ManifestDirs {
-  /** The manifest's own directory: relative paths resolve here first. */
-  manifestDir?: string;
-  /** The run's root (`--root-dir`): the fallback for paths not found by the manifest. */
+/** Where an eval config's relative paths are looked up. */
+export interface ConfigDirs {
+  /** The eval config's own directory: relative paths resolve here first. */
+  configDir?: string;
+  /** The run's root (`--root-dir`): the fallback for paths not found by the eval config. */
   rootDir?: string;
 }
 
 /**
- * An input a manifest names (a dataset, a plugin): relative to the
- * manifest's directory, then to `rootDir`, whichever has it; the manifest's
+ * An input an eval config names (a dataset, a plugin): relative to the
+ * eval config's directory, then to `rootDir`, whichever has it; the eval config's
  * directory when neither does, so the error names the expected place.
  */
-export function resolveManifestPath(
-  target: string,
-  dirs: ManifestDirs
-): string {
+export function resolveConfigPath(target: string, dirs: ConfigDirs): string {
   if (path.isAbsolute(target)) return target;
-  const candidates = [dirs.manifestDir, dirs.rootDir]
+  const candidates = [dirs.configDir, dirs.rootDir]
     .filter((dir): dir is string => dir !== undefined)
     .map((dir) => path.resolve(dir, target));
   return (
@@ -371,67 +413,67 @@ export function resolveManifestPath(
 
 /** Resolve paths for the built-in file and directory dataset sources. */
 export function resolveDatasetPaths(
-  manifest: EvalManifest,
+  evalConfig: EvalConfig,
   rootDir = process.cwd(),
-  manifestDir?: string
+  configDir?: string
 ): string[] {
-  return manifest.datasets.flatMap((dataset) => {
+  return evalConfig.datasets.flatMap((dataset) => {
     if (dataset.type !== 'file' && dataset.type !== 'dir') return [];
     if (typeof dataset.path !== 'string') {
       throw new Error(`Dataset source "${dataset.type}" requires a path.`);
     }
-    return [resolveManifestPath(dataset.path, { manifestDir, rootDir })];
+    return [resolveConfigPath(dataset.path, { configDir, rootDir })];
   });
 }
 
-export interface LoadEvalManifestOptions {
+export interface LoadEvalConfigOptions {
   rootDir?: string;
-  /** The manifest's directory; `loadEvalManifest` sets it from the path. */
-  manifestDir?: string;
+  /** The eval config's directory; `loadEvalConfig` sets it from the path. */
+  configDir?: string;
   skipDatasetValidation?: boolean;
 }
 
-export function loadEvalManifestFromObject(
+export function loadEvalConfigFromObject(
   value: unknown,
-  options: LoadEvalManifestOptions = {}
-): EvalManifest {
-  const manifest = normalizeManifest(EvalManifestSchema.parse(value));
-  if (options.skipDatasetValidation) return manifest;
+  options: LoadEvalConfigOptions = {}
+): EvalConfig {
+  const evalConfig = normalizeConfig(EvalConfigSchema.parse(value));
+  if (options.skipDatasetValidation) return evalConfig;
 
   for (const datasetPath of resolveDatasetPaths(
-    manifest,
+    evalConfig,
     options.rootDir,
-    options.manifestDir
+    options.configDir
   )) {
     if (!fs.existsSync(datasetPath)) {
       throw new Error(`Dataset path not found: ${datasetPath}`);
     }
   }
-  return manifest;
+  return evalConfig;
 }
 
-export function loadEvalManifest(
-  manifestPath: string,
-  options: LoadEvalManifestOptions = {}
-): EvalManifest {
-  const absolutePath = path.isAbsolute(manifestPath)
-    ? manifestPath
-    : path.resolve(process.cwd(), manifestPath);
+export function loadEvalConfig(
+  configPath: string,
+  options: LoadEvalConfigOptions = {}
+): EvalConfig {
+  const absolutePath = path.isAbsolute(configPath)
+    ? configPath
+    : path.resolve(process.cwd(), configPath);
   if (!fs.existsSync(absolutePath)) {
-    throw new Error(`Evaluation manifest not found: ${absolutePath}`);
+    throw new Error(`Eval config not found: ${absolutePath}`);
   }
   let raw: unknown;
   try {
     raw = JSON.parse(fs.readFileSync(absolutePath, 'utf8'));
   } catch (error) {
     throw new Error(
-      `Evaluation manifest ${absolutePath} isn't valid JSON: ${(error as Error).message}`,
+      `Eval config ${absolutePath} isn't valid JSON: ${(error as Error).message}`,
       { cause: error }
     );
   }
-  return loadEvalManifestFromObject(raw, {
+  return loadEvalConfigFromObject(raw, {
     ...options,
     rootDir: options.rootDir ?? path.dirname(absolutePath),
-    manifestDir: path.dirname(absolutePath),
+    configDir: path.dirname(absolutePath),
   });
 }

@@ -32,7 +32,8 @@ import type {
   ClientRunContext,
   ClientRunResult,
 } from './evalFrameworkTypes.js';
-import type { ClientConfig } from './evalManifest.js';
+import type { ClientConfig } from './evalConfig.js';
+import { variantToolMetadata } from './evalConfig.js';
 import type { ClientDefinition } from './evalFrameworkTypes.js';
 import { extensionLookup } from '../plugins/extensions.js';
 import { simulationToHostRun } from './hostTrace.js';
@@ -133,8 +134,10 @@ async function runBuiltinHost(
         string,
         { client: (typeof clients)[number]; name: string; original: string }
       >();
-      const overrides =
-        options.arm?.toolOverrides ?? options.manifest.toolOverrides;
+      const overrides = variantToolMetadata(
+        options.evalConfig,
+        options.variant
+      );
       const mcp: MCPFixtureApi = {
         get client() {
           if (!clients[0]) throw new Error('No MCP client for this host.');
@@ -339,7 +342,7 @@ function builtinHostDefinitions(): Readonly<Record<string, ClientDefinition>> {
       schema: name === 'mst' ? SdkHostSchema : CliHostSchema,
       evidence: 'structured',
       // The SDK host presents tool variants; the CLI only sees its servers.
-      ...(name === 'mst' ? { toolOverrides: true } : {}),
+      ...(name === 'mst' ? { toolMetadata: true } : {}),
       run: (input, config, context) =>
         runBuiltinHost(input, config, context, factory),
     };
@@ -468,25 +471,25 @@ function vercelSdkHost(options: BuiltinHostOptions): MCPHostConfig {
 /**
  * Settings a host can't honour, checked before anything runs (dry runs
  * included), so a run never reports results for a configuration the host
- * ignored. Throws with the first problem; `context` names the manifest, arm
- * or case.
+ * ignored. Throws with the first problem; `context` names the eval config,
+ * variant or case.
  */
 export function assertHostSupports(
   host: { type: string },
   options: {
     servers: MCPConfig[];
-    toolOverrides?: unknown;
+    tools?: unknown;
     concurrency?: number;
     context: string;
   }
 ): void {
   const definition = getHost(host.type);
-  const appliesOverrides =
-    definition.toolOverrides === true || usesToolSurfaceProxy(definition);
-  if (options.toolOverrides !== undefined && !appliesOverrides) {
+  const showsToolMetadata =
+    definition.toolMetadata === true || usesToolSurfaceProxy(definition);
+  if (options.tools !== undefined && !showsToolMetadata) {
     throw new Error(
-      `${options.context}: client "${host.type}" can't apply toolOverrides; it would run with the original tools. ` +
-        'Use a client that shows tool variants to the model (mst), or one that connects to the servers it is given.'
+      `${options.context}: client "${host.type}" can't show tool metadata (\`tools\`); it would run with the servers' own. ` +
+        'Use a client that shows it to the model (mst), or one that connects to the servers it is given.'
     );
   }
   if (

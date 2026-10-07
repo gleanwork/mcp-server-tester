@@ -6,12 +6,12 @@ import type { ClientDiagnostics, UsageMetrics } from '../types/index.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import type {
   DatasetConfig,
-  EvalArm,
-  EvalManifest,
+  EvalVariant,
+  EvalConfig,
   ExtensionConfig,
   ClientConfig,
   ModelPricing,
-} from './evalManifest.js';
+} from './evalConfig.js';
 import type { EvalResultStore } from './resultStore.js';
 import type { EvalRunnerResult } from './evalRunner.js';
 import type { JudgeInput, JudgeVerdict } from '../judge/judgeContract.js';
@@ -19,9 +19,9 @@ import type { JudgeInput, JudgeVerdict } from '../judge/judgeContract.js';
 /** Context provided to a dataset source implementation. */
 export interface DatasetSourceContext {
   rootDir: string;
-  /** The manifest's directory; relative paths resolve here before `rootDir`. */
-  manifestDir?: string;
-  manifest: EvalManifest;
+  /** The eval config's directory; relative paths resolve here before `rootDir`. */
+  configDir?: string;
+  evalConfig: EvalConfig;
 }
 
 /** Public dataset-source extension point. */
@@ -39,8 +39,8 @@ export interface ClientRunOptions {
   cases: EvalCase[];
   servers: MCPConfig[];
   host: ClientConfig;
-  manifest: EvalManifest;
-  arm?: EvalArm;
+  evalConfig: EvalConfig;
+  variant?: EvalVariant;
   dryRun?: boolean;
 }
 
@@ -60,8 +60,8 @@ export interface ClientRunInput {
 }
 
 export interface ClientRunContext {
-  manifest: EvalManifest;
-  arm?: EvalArm;
+  evalConfig: EvalConfig;
+  variant?: EvalVariant;
   /** Runtime-only environment isolated per suite. */
   env?: Record<string, string | undefined>;
 }
@@ -130,17 +130,18 @@ export interface ClientDefinition {
   /** Missing evidence declarations are treated as unverified. */
   readonly evidence?: TraceEvidence;
   /**
-   * The host shows the model an arm's `toolOverrides` (read from
-   * `context.arm` or `context.manifest`). Without it, a manifest that sets
-   * them for this host fails validation.
+   * The client shows the model a variant's tool metadata (`tools`, read from
+   * `context.variant` or `context.evalConfig`) itself. Without it, an eval
+   * config that sets `tools` for this client fails validation, unless the
+   * client gets them through MST's proxy (see `toolSurfaceProxy`).
    */
-  readonly toolOverrides?: boolean;
+  readonly toolMetadata?: boolean;
   /**
-   * For hosts with `run` or `runBatch` that don't set `toolOverrides`: the
-   * host connects to the servers in `input.servers`, so the suite can serve
-   * it an arm's tool variant through a local MCP proxy (the default). Set
-   * false for a host that connects elsewhere; a manifest that gives it
-   * `toolOverrides` then fails validation.
+   * For clients with `run` or `runBatch` that don't set `toolMetadata`: the
+   * client connects to the servers in `input.servers`, so the suite can serve
+   * it a variant's tool metadata through a local MCP proxy (the default). Set
+   * false for a client that connects elsewhere; an eval config that gives it
+   * `tools` then fails validation.
    */
   readonly toolSurfaceProxy?: boolean;
   /**
@@ -228,34 +229,34 @@ export interface ResultStoreDefinition {
   create(config: ExtensionConfig): EvalResultStore;
 }
 
-/** Options shared by a manifest runner implementation. */
+/** Options shared by an eval config runner implementation. */
 export interface EvaluationSuiteOptions {
-  manifestPath: string;
+  configPath: string;
   rootDir?: string;
-  /** Plugin specifiers, added to the manifest's `plugins`. */
+  /** Plugin specifiers, added to the eval config's `plugins`. */
   pluginPaths?: string[];
-  /** Plugin objects, added to the manifest's `plugins`. */
+  /** Plugin objects, added to the eval config's `plugins`. */
   plugins?: readonly Plugin[];
   outputDir?: string;
   secretsFile?: string;
   dryRun?: boolean;
-  arm?: string;
+  variant?: string;
 }
 
-/** Per-arm result metadata. */
-export interface EvaluationArmResult {
+/** Per-variant result metadata. */
+export interface EvaluationVariantResult {
   name: string;
   servers: MCPConfig[];
   result?: EvalRunnerResult;
   /** Outcomes, calls, tokens, cost and time, plus the listed metrics. */
   metrics?: Record<string, unknown>;
-  /** The weakest evidence among the arm's cases. */
+  /** The weakest evidence among the variant's cases. */
   evidence?: TraceEvidence;
-  /** Listed metrics with no value for this arm (unavailable, not zero). */
+  /** Listed metrics with no value for this variant (unavailable, not zero). */
   unavailableMetrics?: string[];
-  /** Where `cost_usd` comes from: hosts, the manifest's `pricing`, or both. */
+  /** Where `cost_usd` comes from: hosts, the eval config's `pricing`, or both. */
   costSource?: 'host' | 'pricing' | 'mixed';
-  /** The prices the arm's estimates used, by model, so they can be audited later. */
+  /** The prices the variant's estimates used, by model, so they can be audited later. */
   pricing?: Record<string, ModelPricing>;
   /** Models whose usage had no reported cost and no price: `cost_usd` leaves them out. */
   unpricedModels?: string[];
@@ -272,8 +273,8 @@ export interface RunTelemetry {
   totalJudgeUsage?: Partial<UsageMetrics>;
 }
 
-/** How one arm changed since the previous run of the same manifest. */
-export interface PreviousRunArm {
+/** How one variant changed since the previous run of the same eval config. */
+export interface PreviousRunVariant {
   passRateDelta: number;
   trialPassRateDelta?: number;
   /** Case IDs that passed before and fail now. */
@@ -286,34 +287,34 @@ export interface PreviousRunArm {
   removed: string[];
 }
 
-/** This run compared with the previous run of the same manifest. */
+/** This run compared with the previous run of the same eval config. */
 export interface PreviousRunComparison {
   /** The previous run's `runId`. */
   runId: string;
   timestamp: string;
-  /** Whether the manifest was unchanged (`contentHash`; datasets aren't hashed). */
-  sameManifest: boolean;
+  /** Whether the eval config was unchanged (`contentHash`; datasets aren't hashed). */
+  sameConfig: boolean;
   passRate: number;
   passRateDelta: number;
-  /** Arms present in both runs, by name. */
-  arms: Record<string, PreviousRunArm>;
+  /** Variants present in both runs, by name. */
+  variants: Record<string, PreviousRunVariant>;
 }
 
 export interface RunSummary {
   /** This run's ID: its result store artifact ID and output directory name. */
   runId?: string;
-  /** This run compared with the previous run of the same manifest, if there is one. */
+  /** This run compared with the previous run of the same eval config, if there is one. */
   previousRun?: PreviousRunComparison;
   schemaVersion: 1;
-  manifestId: string;
+  configId: string;
   contentHash: string;
   timestamp: string;
   durationMs: number;
-  manifestName: string;
-  arms: EvaluationArmResult[];
+  configName: string;
+  variants: EvaluationVariantResult[];
   metrics: Record<string, unknown>;
   telemetry?: RunTelemetry;
-  armDeltas: Record<string, Record<string, unknown>>;
+  variantDeltas: Record<string, Record<string, unknown>>;
   caseArtifactPointers?: Record<string, string[]>;
   results: EvalCaseResult[];
 }
@@ -322,7 +323,7 @@ export type EvaluationSummary = RunSummary;
 
 /** Result contract for a suite implementation. */
 export interface EvaluationSuiteResult {
-  manifest: EvalManifest;
+  evalConfig: EvalConfig;
   outputDir: string;
   datasets: Array<{
     source: DatasetConfig;
@@ -332,25 +333,25 @@ export interface EvaluationSuiteResult {
   summary: EvaluationSummary;
 }
 
-/** Options for running multiple evaluation manifests. */
+/** Options for running multiple eval configs. */
 export interface EvaluationBatchOptions {
-  /** Explicit paths take precedence over manifestDir when nonempty. */
-  manifestPaths?: string[];
-  manifestDir?: string;
+  /** Explicit paths take precedence over configDir when nonempty. */
+  configPaths?: string[];
+  configDir?: string;
   rootDir?: string;
   outputRoot?: string;
   workers?: number;
   skipExisting?: boolean;
   secretsFile?: string;
-  /** Plugin specifiers, added to each manifest's `plugins`. */
+  /** Plugin specifiers, added to each eval config's `plugins`. */
   pluginPaths?: string[];
-  /** Plugin objects, added to each manifest's `plugins`. */
+  /** Plugin objects, added to each eval config's `plugins`. */
   plugins?: readonly Plugin[];
   dryRun?: boolean;
 }
 
 export interface EvaluationBatchItem {
-  manifestPath: string;
+  configPath: string;
   outputDir?: string;
   result?: EvaluationSuiteResult;
   error?: string;

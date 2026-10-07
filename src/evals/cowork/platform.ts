@@ -1,4 +1,4 @@
-import type { EvalManifest } from '../evalManifest.js';
+import type { EvalConfig } from '../evalConfig.js';
 import type { MarketplacePlugin, ClientStdioPaths } from '../hostPlugins.js';
 import type {
   CoworkDriverOptions,
@@ -11,7 +11,7 @@ import type {
 interface CoworkHostApp {
   name: string;
   version: string;
-  /** `pinned`: the manifest's `host.options.appVersion`; else the installed app. */
+  /** `pinned`: the eval config's `host.options.appVersion`; else the installed app. */
   source: 'installed' | 'pinned';
 }
 
@@ -20,7 +20,7 @@ interface CoworkHostApp {
 export interface CoworkPlatform {
   dataDirectory(options: { dataDir?: string }): string;
   prepare(options: {
-    manifest: EvalManifest;
+    evalConfig: EvalConfig;
     env: Record<string, string | undefined>;
     model?: string;
     /** Validated host plugins; Cowork installs them via allowedPluginMarketplaces. */

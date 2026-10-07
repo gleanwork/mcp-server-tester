@@ -12,8 +12,8 @@ import {
 } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 import { runEvalSuite } from './runEvalSuite.js';
-import { loadEvalManifest, type EvalManifest } from './evalManifest.js';
-import { resolveManifestExtends } from './manifestExtends.js';
+import { loadEvalConfig, type EvalConfig } from './evalConfig.js';
+import { resolveConfigExtends } from './configExtends.js';
 import type { EvaluationSummary } from './evalFrameworkTypes.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import {
@@ -41,7 +41,7 @@ function storePluginSource(namespace: string): string {
   };`;
 }
 
-function completedSummary(manifest: EvalManifest): EvaluationSummary {
+function completedSummary(evalConfig: EvalConfig): EvaluationSummary {
   const caseResults: EvalCaseResult[] = [
     {
       id: 'case-1',
@@ -55,14 +55,14 @@ function completedSummary(manifest: EvalManifest): EvaluationSummary {
   ];
   return {
     schemaVersion: 1,
-    manifestId: manifest.name,
+    configId: evalConfig.name,
     contentHash: createHash('sha256')
-      .update(JSON.stringify(manifest))
+      .update(JSON.stringify(evalConfig))
       .digest('hex'),
-    manifestName: manifest.name,
+    configName: evalConfig.name,
     timestamp: '2026-09-10T00:00:00.000Z',
     durationMs: 1,
-    arms: [
+    variants: [
       {
         name: 'default',
         servers: [],
@@ -70,7 +70,7 @@ function completedSummary(manifest: EvalManifest): EvaluationSummary {
       },
     ],
     metrics: { total: 1, passed: 1, failed: 0 },
-    armDeltas: {},
+    variantDeltas: {},
     results: caseResults,
   };
 }
@@ -84,7 +84,7 @@ function summaryArtifact(
     data: summary,
     metadata: {
       labels: {
-        manifestId: summary.manifestId,
+        configId: summary.configId,
         contentHash: summary.contentHash,
       },
     },
@@ -94,31 +94,31 @@ function summaryArtifact(
 
 describe('runEvalBatch skipExisting', () => {
   let rootDir: string;
-  let manifestPath: string;
+  let configPath: string;
   let storeDir: string;
   let outputRoot: string;
   let store: FileEvalResultStore;
-  let manifestInput: Record<string, unknown>;
+  let configInput: Record<string, unknown>;
 
   beforeEach(async () => {
     vi.clearAllMocks();
     rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'batch-resume-'));
-    manifestPath = path.join(rootDir, 'manifest.json');
+    configPath = path.join(rootDir, 'eval.json');
     storeDir = path.join(rootDir, 'store');
     outputRoot = path.join(rootDir, 'output');
     store = new FileEvalResultStore({ provider: 'file', dir: storeDir });
     globals[STORE_GLOBAL] = store;
-    manifestInput = {
+    configInput = {
       name: 'resume-test',
       datasets: [{ type: 'test-source' }],
       results: { store: { type: 'file', dir: storeDir } },
     };
-    await fs.writeFile(manifestPath, JSON.stringify(manifestInput));
+    await fs.writeFile(configPath, JSON.stringify(configInput));
     vi.mocked(runEvalSuite).mockImplementation(async (options) => {
-      const manifest = loadEvalManifest(options.manifestPath, { rootDir });
-      const summary = completedSummary(manifest);
+      const evalConfig = loadEvalConfig(options.configPath, { rootDir });
+      const summary = completedSummary(evalConfig);
       return {
-        manifest,
+        evalConfig,
         summary,
         outputDir: options.outputDir ?? rootDir,
         datasets: [],
@@ -136,7 +136,7 @@ describe('runEvalBatch skipExisting', () => {
     StoredEvalArtifact<EvaluationSummary>
   > {
     const artifact = summaryArtifact(
-      completedSummary(loadEvalManifest(manifestPath, { rootDir }))
+      completedSummary(loadEvalConfig(configPath, { rootDir }))
     );
     await store.saveArtifact(artifact);
     return artifact;
@@ -144,7 +144,7 @@ describe('runEvalBatch skipExisting', () => {
 
   async function run(options: Partial<RunEvalBatchOptions> = {}) {
     return runEvalBatch({
-      manifestPaths: [manifestPath],
+      configPaths: [configPath],
       rootDir,
       outputRoot,
       skipExisting: true,
@@ -152,10 +152,10 @@ describe('runEvalBatch skipExisting', () => {
     });
   }
 
-  it('rejects invalid worker counts before scheduling any manifest', async () => {
+  it('rejects invalid worker counts before scheduling any eval config', async () => {
     await expect(
       runEvalBatch({
-        manifestPaths: [manifestPath],
+        configPaths: [configPath],
         rootDir,
         workers: Number.NaN,
       })
@@ -163,21 +163,15 @@ describe('runEvalBatch skipExisting', () => {
     expect(runEvalSuite).not.toHaveBeenCalled();
   });
 
-  it('supports manifest directories and disambiguates colliding output basenames', async () => {
+  it('supports eval config directories and disambiguates colliding output basenames', async () => {
     const first = path.join(rootDir, 'one', 'same.json');
     const second = path.join(rootDir, 'two', 'same.json');
     await fs.mkdir(path.dirname(first), { recursive: true });
     await fs.mkdir(path.dirname(second), { recursive: true });
-    await fs.writeFile(
-      first,
-      JSON.stringify({ ...manifestInput, name: 'one' })
-    );
-    await fs.writeFile(
-      second,
-      JSON.stringify({ ...manifestInput, name: 'two' })
-    );
+    await fs.writeFile(first, JSON.stringify({ ...configInput, name: 'one' }));
+    await fs.writeFile(second, JSON.stringify({ ...configInput, name: 'two' }));
     const result = await runEvalBatch({
-      manifestPaths: [first, second],
+      configPaths: [first, second],
       rootDir,
       outputRoot,
       workers: 2,
@@ -199,8 +193,8 @@ describe('runEvalBatch skipExisting', () => {
     artifact.data.results[0]!.pass = false;
     artifact.data.metrics.passed = 0;
     artifact.data.metrics.failed = 1;
-    artifact.data.arms[0]!.result!.passed = 0;
-    artifact.data.arms[0]!.result!.failed = 1;
+    artifact.data.variants[0]!.result!.passed = 0;
+    artifact.data.variants[0]!.result!.failed = 1;
     await store.saveArtifact(artifact);
     expect((await run()).skipped).toBe(1);
     expect(runEvalSuite).not.toHaveBeenCalled();
@@ -209,7 +203,7 @@ describe('runEvalBatch skipExisting', () => {
   it('reruns when skipExisting is disabled', async () => {
     await saveValidSummary();
     const result = await runEvalBatch({
-      manifestPaths: [manifestPath],
+      configPaths: [configPath],
       rootDir,
       skipExisting: false,
     });
@@ -220,7 +214,7 @@ describe('runEvalBatch skipExisting', () => {
   it('resumes through the configured store even without outputRoot', async () => {
     await saveValidSummary();
     const result = await runEvalBatch({
-      manifestPaths: [manifestPath],
+      configPaths: [configPath],
       rootDir,
       skipExisting: true,
     });
@@ -236,8 +230,8 @@ describe('runEvalBatch skipExisting', () => {
         custom: { schema: z.object({ type: z.string() }), create },
       },
     };
-    manifestInput.results = { store: { type: 'test/custom' } };
-    await fs.writeFile(manifestPath, JSON.stringify(manifestInput));
+    configInput.results = { store: { type: 'test/custom' } };
+    await fs.writeFile(configPath, JSON.stringify(configInput));
     await saveValidSummary();
     expect((await run({ plugins: [plugin] })).skipped).toBe(1);
     expect(create).toHaveBeenCalledWith({ type: 'test/custom' });
@@ -252,36 +246,36 @@ describe('runEvalBatch skipExisting', () => {
     );
   });
 
-  it('loads manifest plugins before checking the configured result store', async () => {
+  it('loads eval config plugins before checking the configured result store', async () => {
     await fs.writeFile(
       path.join(rootDir, 'plugin.mjs'),
       storePluginSource('batch')
     );
-    manifestInput.plugins = ['./plugin.mjs'];
-    manifestInput.results = { store: { type: 'batch/store' } };
-    await fs.writeFile(manifestPath, JSON.stringify(manifestInput));
+    configInput.plugins = ['./plugin.mjs'];
+    configInput.results = { store: { type: 'batch/store' } };
+    await fs.writeFile(configPath, JSON.stringify(configInput));
     await saveValidSummary();
     expect((await run()).skipped).toBe(1);
     expect(loadedNamespaces()).toEqual(['batch']);
     expect(runEvalSuite).not.toHaveBeenCalled();
   });
 
-  it('adds configured plugin paths to the manifest plugins', async () => {
-    const manifestDir = path.join(rootDir, 'suite');
-    await fs.mkdir(manifestDir);
+  it('adds configured plugin paths to the eval config plugins', async () => {
+    const configDir = path.join(rootDir, 'suite');
+    await fs.mkdir(configDir);
     await fs.writeFile(
-      path.join(manifestDir, 'manifest-plugin.mjs'),
-      `export default { meta: { name: 'manifest-plugin', namespace: 'mp' } };`
+      path.join(configDir, 'config-plugin.mjs'),
+      `export default { meta: { name: 'config-plugin', namespace: 'mp' } };`
     );
-    // Resolves against rootDir, not the manifest's directory.
+    // Resolves against rootDir, not the eval config's directory.
     await fs.writeFile(
       path.join(rootDir, 'cli-plugin.mjs'),
       storePluginSource('cli')
     );
-    manifestPath = path.join(manifestDir, 'manifest.json');
-    manifestInput.plugins = ['./manifest-plugin.mjs'];
-    manifestInput.results = { store: { type: 'cli/store' } };
-    await fs.writeFile(manifestPath, JSON.stringify(manifestInput));
+    configPath = path.join(configDir, 'eval.json');
+    configInput.plugins = ['./config-plugin.mjs'];
+    configInput.results = { store: { type: 'cli/store' } };
+    await fs.writeFile(configPath, JSON.stringify(configInput));
     await saveValidSummary();
     const result = await run({ pluginPaths: ['./cli-plugin.mjs'] });
     expect(result.skipped).toBe(1);
@@ -289,7 +283,7 @@ describe('runEvalBatch skipExisting', () => {
     expect(runEvalSuite).not.toHaveBeenCalled();
   });
 
-  it('does not resume through a store from a plugin the manifest does not load', async () => {
+  it('does not resume through a store from a plugin the eval config does not load', async () => {
     const create = vi.fn(() => store);
     installPlugins([
       {
@@ -299,8 +293,8 @@ describe('runEvalBatch skipExisting', () => {
         },
       },
     ]);
-    manifestInput.results = { store: { type: 'elsewhere/custom' } };
-    await fs.writeFile(manifestPath, JSON.stringify(manifestInput));
+    configInput.results = { store: { type: 'elsewhere/custom' } };
+    await fs.writeFile(configPath, JSON.stringify(configInput));
     await saveValidSummary();
     expect((await run()).skipped).toBe(0);
     expect(create).not.toHaveBeenCalled();
@@ -321,17 +315,17 @@ describe('runEvalBatch skipExisting', () => {
     }
 
     beforeEach(async () => {
-      delete manifestInput.results;
-      manifestInput.extends = ['test/recommended'];
-      await fs.writeFile(manifestPath, JSON.stringify(manifestInput));
+      delete configInput.results;
+      configInput.extends = ['test/recommended'];
+      await fs.writeFile(configPath, JSON.stringify(configInput));
     });
 
     it('resumes through the store the config supplies, identified with the config applied', async () => {
       const create = vi.fn(() => store);
       const plugin = configPlugin(create);
       installPlugins([plugin]);
-      const resolved = resolveManifestExtends(
-        loadEvalManifest(manifestPath, { rootDir }),
+      const resolved = resolveConfigExtends(
+        loadEvalConfig(configPath, { rootDir }),
         ['test']
       );
       await store.saveArtifact(summaryArtifact(completedSummary(resolved)));
@@ -343,7 +337,7 @@ describe('runEvalBatch skipExisting', () => {
 
     it('reruns when a saved run predates the config', async () => {
       const create = vi.fn(() => store);
-      // Saved under the manifest without its config: a different identity.
+      // Saved under the eval config without its config: a different identity.
       await saveValidSummary();
 
       expect((await run({ plugins: [configPlugin(create)] })).skipped).toBe(0);
@@ -357,62 +351,60 @@ describe('runEvalBatch skipExisting', () => {
       path.join(rootDir, 'broken-plugin.mjs'),
       `throw new Error('plugin load failed');`
     );
-    manifestInput.plugins = ['./broken-plugin.mjs'];
-    await fs.writeFile(manifestPath, JSON.stringify(manifestInput));
+    configInput.plugins = ['./broken-plugin.mjs'];
+    await fs.writeFile(configPath, JSON.stringify(configInput));
     await saveValidSummary();
     expect((await run()).skipped).toBe(0);
     expect(runEvalSuite).toHaveBeenCalledOnce();
   });
 
   it('reruns safely when a plugin store is not loaded', async () => {
-    manifestInput.results = {
+    configInput.results = {
       store: { type: 'missing/unavailable-plugin-store' },
     };
-    await fs.writeFile(manifestPath, JSON.stringify(manifestInput));
+    await fs.writeFile(configPath, JSON.stringify(configInput));
     await saveValidSummary();
     expect((await run()).skipped).toBe(0);
     expect(runEvalSuite).toHaveBeenCalledOnce();
   });
 
   it('does not trust an existing results.json when no stored summary exists', async () => {
-    const outputDir = path.join(outputRoot, 'manifest');
+    const outputDir = path.join(outputRoot, 'config');
     await fs.mkdir(outputDir, { recursive: true });
     await fs.writeFile(
       path.join(outputDir, 'results.json'),
-      JSON.stringify(
-        completedSummary(loadEvalManifest(manifestPath, { rootDir }))
-      )
+      JSON.stringify(completedSummary(loadEvalConfig(configPath, { rootDir })))
     );
     expect((await run()).skipped).toBe(0);
     expect(runEvalSuite).toHaveBeenCalledOnce();
   });
 
   it('reruns without a configured result store', async () => {
-    delete manifestInput.results;
-    await fs.writeFile(manifestPath, JSON.stringify(manifestInput));
+    delete configInput.results;
+    await fs.writeFile(configPath, JSON.stringify(configInput));
     await saveValidSummary();
     expect((await run()).skipped).toBe(0);
     expect(runEvalSuite).toHaveBeenCalledOnce();
   });
 
   it.each(['content', 'id'])(
-    'reruns when manifest %s changes',
+    'reruns when eval config %s changes',
     async (change) => {
       await saveValidSummary();
-      if (change === 'id') manifestInput.name = 'renamed-manifest';
-      else manifestInput.model = 'different-model';
-      await fs.writeFile(manifestPath, JSON.stringify(manifestInput));
+      if (change === 'id') configInput.name = 'renamed-config';
+      else configInput.model = 'different-model';
+      await fs.writeFile(configPath, JSON.stringify(configInput));
       expect((await run()).skipped).toBe(0);
       expect(runEvalSuite).toHaveBeenCalledOnce();
     }
   );
 
   it.each(['missing', 'corrupt'])(
-    'does not skip a %s current manifest',
+    'does not skip a %s current eval config',
     async (state) => {
       await saveValidSummary();
-      if (state === 'missing') await fs.rm(manifestPath);
-      else await fs.writeFile(manifestPath, '{broken json');
+      if (state === 'missing') await fs.rm(configPath);
+      else await fs.writeFile(configPath, '{broken json');
       expect(await run()).toMatchObject({ skipped: 0, failed: 1 });
       expect(runEvalSuite).toHaveBeenCalledOnce();
     }
@@ -438,9 +430,9 @@ describe('runEvalBatch skipExisting', () => {
     [string, (artifact: StoredEvalArtifact<EvaluationSummary>) => void]
   > = [
     [
-      'summary manifest ID',
+      'summary eval config ID',
       (artifact) => {
-        artifact.data.manifestId = 'wrong';
+        artifact.data.configId = 'wrong';
       },
     ],
     [
@@ -450,9 +442,9 @@ describe('runEvalBatch skipExisting', () => {
       },
     ],
     [
-      'metadata manifest ID',
+      'metadata eval config ID',
       (artifact) => {
-        artifact.metadata.labels!.manifestId = 'wrong';
+        artifact.metadata.labels!.configId = 'wrong';
       },
     ],
     [
@@ -470,15 +462,15 @@ describe('runEvalBatch skipExisting', () => {
     [
       'dry-run summary',
       (artifact) => {
-        artifact.data.arms = [];
+        artifact.data.variants = [];
         artifact.data.metrics = {};
         artifact.data.results = [];
       },
     ],
     [
-      'incomplete arms',
+      'incomplete variants',
       (artifact) => {
-        artifact.data.arms[0]!.result = undefined;
+        artifact.data.variants[0]!.result = undefined;
       },
     ],
     [
@@ -488,9 +480,9 @@ describe('runEvalBatch skipExisting', () => {
       },
     ],
     [
-      'inconsistent arm counts',
+      'inconsistent variant counts',
       (artifact) => {
-        artifact.data.arms[0]!.result!.passed = 0;
+        artifact.data.variants[0]!.result!.passed = 0;
       },
     ],
     [
@@ -500,9 +492,9 @@ describe('runEvalBatch skipExisting', () => {
       },
     ],
     [
-      'wrong arm',
+      'wrong variant',
       (artifact) => {
-        artifact.data.arms[0]!.name = 'other';
+        artifact.data.variants[0]!.name = 'other';
       },
     ],
   ];
@@ -515,11 +507,11 @@ describe('runEvalBatch skipExisting', () => {
     expect(runEvalSuite).toHaveBeenCalledOnce();
   });
 
-  it('finds an older matching summary when the latest belongs to another manifest', async () => {
+  it('finds an older matching summary when the latest belongs to another eval config', async () => {
     await saveValidSummary();
     const other = summaryArtifact(
       completedSummary({
-        ...loadEvalManifest(manifestPath, { rootDir }),
+        ...loadEvalConfig(configPath, { rootDir }),
         name: 'another',
       })
     );
@@ -533,7 +525,7 @@ describe('runEvalBatch skipExisting', () => {
   it('does not treat dry runs as resumed executions', async () => {
     await saveValidSummary();
     const result = await runEvalBatch({
-      manifestPaths: [manifestPath],
+      configPaths: [configPath],
       rootDir,
       skipExisting: true,
       dryRun: true,

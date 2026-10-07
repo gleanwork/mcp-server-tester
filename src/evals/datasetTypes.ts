@@ -108,7 +108,7 @@ export interface EvalCase extends ClientFields {
 export interface JudgeExpectConfig {
   /** Plugin options, validated by the judge's schema. */
   options?: Record<string, unknown>;
-  /** Flat plugin policy fields are also accepted for manifest integration. */
+  /** Flat plugin policy fields are also accepted for eval config integration. */
   [key: string]: unknown;
   /**
    * The judge to run: the built-in `rubric`, or `namespace/name` from a

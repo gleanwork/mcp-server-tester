@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { loadEvalManifestFromObject } from '../evalManifest.js';
+import { loadEvalConfigFromObject } from '../evalConfig.js';
 import { resolveCoworkSetupConfig, type CoworkSetupConfig } from './options.js';
 
-const baseManifest = {
+const baseConfig = {
   name: 'setup',
   datasets: [{ type: 'fixture' }],
   servers: [],
@@ -46,22 +46,22 @@ describe('Cowork setup approval options', () => {
         );
       }
       for (const input of [
-        { ...baseManifest, coworkSetup: value },
-        { ...baseManifest, arms: [{ name: 'invalid', coworkSetup: value }] },
+        { ...baseConfig, coworkSetup: value },
+        { ...baseConfig, variants: [{ name: 'invalid', coworkSetup: value }] },
       ]) {
         expect(() =>
-          loadEvalManifestFromObject(input, { skipDatasetValidation: true })
+          loadEvalConfigFromObject(input, { skipDatasetValidation: true })
         ).toThrow();
       }
     }
   );
 
-  it('preserves typed manifest and arm settings through normalization', () => {
-    const loaded = loadEvalManifestFromObject(
+  it('preserves typed eval config and variant settings through normalization', () => {
+    const loaded = loadEvalConfigFromObject(
       {
-        ...baseManifest,
+        ...baseConfig,
         coworkSetup: { approveWriteTools: true },
-        arms: [
+        variants: [
           {
             name: 'default-approvals',
             coworkSetup: { approveWriteTools: false },
@@ -72,6 +72,8 @@ describe('Cowork setup approval options', () => {
       { skipDatasetValidation: true }
     );
     expect(loaded.coworkSetup).toEqual({ approveWriteTools: true });
-    expect(loaded.arms?.[0]?.coworkSetup).toEqual({ approveWriteTools: false });
+    expect(loaded.variants?.[0]?.coworkSetup).toEqual({
+      approveWriteTools: false,
+    });
   });
 });

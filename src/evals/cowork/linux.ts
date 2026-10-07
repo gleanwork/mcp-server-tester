@@ -272,7 +272,7 @@ export const linuxCoworkPlatform: CoworkPlatform = {
       'Claude-3p',
       'local-agent-mode-sessions'
     ),
-  async prepare({ manifest, env, model, plugins = [], stdioPaths = {} }) {
+  async prepare({ evalConfig, env, model, plugins = [], stdioPaths = {} }) {
     const settingsFile =
       env.MST_COWORK_SETTINGS_FILE ??
       '/etc/claude-desktop/managed-settings.json';
@@ -287,13 +287,13 @@ export const linuxCoworkPlatform: CoworkPlatform = {
         throw new Error('model');
       if (!coworkPluginSettingsMatch(settings, plugins))
         throw new Error('plugins');
-      const servers = manifest.servers ?? [];
+      const servers = evalConfig.servers ?? [];
       if (
         !coworkMcpSettingsMatch(settings, {
           servers,
           plugins,
           paths: stdioPaths,
-          approveWriteTools: manifest.coworkSetup?.approveWriteTools === true,
+          approveWriteTools: evalConfig.coworkSetup?.approveWriteTools === true,
         })
       )
         throw new Error('servers');

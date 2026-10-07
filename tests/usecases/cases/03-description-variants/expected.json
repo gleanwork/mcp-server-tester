@@ -3,15 +3,15 @@
   "exitCode": 1,
   "checks": [
     {
-      "path": "arms[name=baseline].metrics.passed_rate",
+      "path": "variants[name=baseline].metrics.passed_rate",
       "equals": 0
     },
     {
-      "path": "arms[name=concise].metrics.passed_rate",
+      "path": "variants[name=concise].metrics.passed_rate",
       "equals": 0
     },
     {
-      "path": "arms[name=verbose].metrics.passed_rate",
+      "path": "variants[name=verbose].metrics.passed_rate",
       "equals": 1
     }
   ],

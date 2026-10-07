@@ -13,7 +13,7 @@ The suite needs no network and no LLM. The CLI only sees `PATH`, `HOME` and the 
 
 A case directory holds:
 
-- `manifest.json`: an ordinary evaluation manifest.
+- `eval.json`: an ordinary eval config.
 - `dataset.json`: the cases it runs.
 - `expected.json`: what the results must show.
 
@@ -21,7 +21,7 @@ The runner copies the directory to a temp directory, then fills in each `"{{serv
 
 `fixtures/plugin.mjs` provides:
 
-- **`usecase/model`**, a deterministic stand-in for a model. It connects to the arm's real MCP servers, lists their tools, and follows a `policy`:
+- **`usecase/model`**, a deterministic stand-in for a model. It connects to the variant's real MCP servers, lists their tools, and follows a `policy`:
   - The first rule whose `when` matches is the case's plan. A rule can match on `input`, `inputStartsWith`, `instruction` (in the host's `systemPrompt`), a host `plugins` entry, or the `run` index.
   - Each step calls a visible tool chosen by `name`, `nameIncludes` or `description`, emits a host-native `skill` event, or runs a tool search.
   - A step's `rate` makes it run on that share of trials, deterministically.
@@ -37,26 +37,26 @@ The runner copies the directory to a temp directory, then fills in each `"{{serv
 
 Each check is a `path` into `results.json`, with `equals` or `exists`.
 
-- A segment can select an array item with `[key=value]` (for example `arms[name=native]`) or an index (`[0]`). `length` counts items or keys.
+- A segment can select an array item with `[key=value]` (for example `variants[name=native]`) or an index (`[0]`). `length` counts items or keys.
 - Segments are split on `.` first, so a selector value can't contain a dot.
 
 `expected.json` is validated, so a misspelt field fails the suite instead of checking nothing.
 
 The model host appends every trace it returns to a ledger. This catches aggregation errors without hand-computed constants:
 
-- **`ledger.metrics`** recompute each arm's per-trial means from the ledger and compare them with MST's numbers.
-- **`ledger.deltas`** do the same for arm deltas.
-- **Arm names:** every arm in the ledger must appear in the results, and every reported arm must have ledger traces, unless it's listed in `ledger.noTrace`.
+- **`ledger.metrics`** recompute each variant's per-trial means from the ledger and compare them with MST's numbers.
+- **`ledger.deltas`** do the same for variant deltas.
+- **Variant names:** every variant in the ledger must appear in the results, and every reported variant must have ledger traces, unless it's listed in `ledger.noTrace`.
 
 ## Gaps
 
 A check with a `gap` is something MST should report but doesn't yet. Its text names what's missing and the plan step that adds it.
 
 - **Expected failures:** a gap check runs as an expected failure (`it.fails`). When a change makes it pass, the suite fails until you delete the `gap`, so gaps can't close silently.
-- **Guarded:** a gap check under an arm or delta also asserts that the arm or delta exists, so it can't pass just because something it depends on went missing.
+- **Guarded:** a gap check under a variant or delta also asserts that the variant or delta exists, so it can't pass just because something it depends on went missing.
 - **Whole cases:** `runGap` marks a case that can't run yet. `runGapError` is a pattern the CLI's output must match, so the case can't stay blocked for an unrelated reason.
 
 ## Adding a case
 
-1. Create `cases/<nn>-<slug>/` with a manifest, a dataset and `expected.json`. Its fields are `title`, `exitCode` (or `exitCodes`), `checks`, and optionally `runs` and `ledger`.
+1. Create `cases/<nn>-<slug>/` with an eval config, a dataset and `expected.json`. Its fields are `title`, `exitCode` (or `exitCodes`), `checks`, and optionally `runs` and `ledger`.
 2. Run `npm run test:usecases`. Every check either passes, or is a gap with a reason.

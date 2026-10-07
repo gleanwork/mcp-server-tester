@@ -22,7 +22,7 @@ import {
   CoworkHitlBudgetError,
   CoworkUserQuestionError,
 } from './driver.js';
-import type { EvalManifest } from '../evalManifest.js';
+import type { EvalConfig } from '../evalConfig.js';
 import type { MCPConfig } from '../../config/mcpConfig.js';
 
 const child = vi.hoisted(() => ({
@@ -42,7 +42,7 @@ const session = {
   ANTHROPIC_API_KEY: 'do-not-forward-secret',
 };
 const options = () => ({ deadlineAt: Date.now() + 10000, env: session });
-const manifest: EvalManifest = {
+const evalConfig: EvalConfig = {
   name: 'linux-contract',
   datasets: [],
   client: 'cowork',
@@ -105,7 +105,7 @@ async function prepare(
   const file = join(directory, 'settings.json');
   await writeFile(file, JSON.stringify(value));
   return linuxCoworkPlatform.prepare({
-    manifest,
+    evalConfig,
     model: 'test-model',
     env: { ...session, MST_COWORK_SETTINGS_FILE: file },
     ...(plugins ? { plugins } : {}),
@@ -222,7 +222,7 @@ describe('caller-owned Linux Cowork desktop', () => {
       ],
     },
   ])(
-    'fails before UI when prepared settings do not match the manifest',
+    'fails before UI when prepared settings do not match the eval config',
     async (value) => {
       await expect(prepare(value)).rejects.toThrow('settings do not match');
       expect(child.exec).not.toHaveBeenCalled();
@@ -235,14 +235,14 @@ describe('caller-owned Linux Cowork desktop', () => {
     await symlink(file, link);
     await expect(
       linuxCoworkPlatform.prepare({
-        manifest,
+        evalConfig,
         env: { ...session, MST_COWORK_SETTINGS_FILE: link },
       })
     ).rejects.toThrow('settings do not match');
     await writeFile(file, ' '.repeat(1024 * 1024 + 1));
     await expect(
       linuxCoworkPlatform.prepare({
-        manifest,
+        evalConfig,
         env: { ...session, MST_COWORK_SETTINGS_FILE: file },
       })
     ).rejects.toThrow('settings do not match');
@@ -468,7 +468,7 @@ describe('Linux Cowork plugins with a stdio eval server', () => {
     const file = join(directory, 'settings.json');
     await writeFile(file, JSON.stringify(value));
     return linuxCoworkPlatform.prepare({
-      manifest: { ...manifest, servers: [evalServer] },
+      evalConfig: { ...evalConfig, servers: [evalServer] },
       model: 'test-model',
       env: { ...session, ...env, MST_COWORK_SETTINGS_FILE: file },
       plugins: [fake],

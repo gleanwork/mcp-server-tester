@@ -18,8 +18,8 @@ export interface SurfaceTool {
 }
 
 /**
- * An arm's tools as the host presents them: the servers' tools with the
- * arm's tool variant (renames, descriptions, input schemas) applied.
+ * A variant's tools as the client presents them: the servers' tools with the
+ * variant's tool metadata (renames, descriptions, input schemas) applied.
  *
  * Every host builds its tool list from a surface, so a variant means the same
  * thing on every host. Hosts still choose how to qualify names across
@@ -159,7 +159,7 @@ export function registerPresentedTools(
 /**
  * Records a host's tool calls through a presented surface under the tools'
  * original names, so expectations and comparisons read the same names in
- * every arm. `rawName` keeps the name the model used.
+ * every variant. `rawName` keeps the name the model used.
  */
 export function withOriginalToolNames<
   T extends {

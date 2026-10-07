@@ -3,7 +3,7 @@ import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { EvalManifest } from '../evalManifest.js';
+import type { EvalConfig } from '../evalConfig.js';
 import type * as ManagedPreferencesModule from './macManagedPreferences.js';
 import {
   installMacCoworkSettings,
@@ -72,7 +72,7 @@ function stage(name: string): string {
 function profile(id: string): string {
   return join(profileDirectory, `${id}.json`);
 }
-function manifest(labels = ['Search']): EvalManifest {
+function evalConfig(labels = ['Search']): EvalConfig {
   return {
     name: 'synthetic',
     datasets: [],
@@ -90,7 +90,7 @@ function options(overrides: Partial<Options> = {}): Options {
     stagingDirectory,
     env: { ...ENV },
     managedPreferencePaths: [join(root, 'managed.plist')],
-    manifest: manifest(),
+    evalConfig: evalConfig(),
     ...overrides,
   };
 }
@@ -164,7 +164,7 @@ afterEach(async () => {
   await actual.rm(root, { recursive: true, force: true });
 });
 
-function stdioManifest(): EvalManifest {
+function stdioManifest(): EvalConfig {
   return {
     name: 'native',
     datasets: [],
@@ -187,9 +187,9 @@ describe('Mac Cowork settings transaction', () => {
     'recovers native stdio with mixed HTTP=%s and restores exact source bytes',
     async (mixed) => {
       const input = stdioManifest();
-      if (mixed) input.servers!.push(...manifest().servers!);
+      if (mixed) input.servers!.push(...evalConfig().servers!);
       const installed = await installMacCoworkSettings(
-        options({ manifest: input })
+        options({ evalConfig: input })
       );
       expect(await text(profile(installed.id))).not.toContain(MCP_TOKEN);
       expect(await readJson(stage('stdio/Native/headers.json'))).toEqual({
@@ -207,7 +207,7 @@ describe('Mac Cowork settings transaction', () => {
   );
 
   it('tracks and removes an empty private stdio working directory', async () => {
-    const input: EvalManifest = {
+    const input: EvalConfig = {
       name: 'plain',
       datasets: [],
       servers: [
@@ -215,7 +215,7 @@ describe('Mac Cowork settings transaction', () => {
       ],
     };
     const installed = await installMacCoworkSettings(
-      options({ manifest: input })
+      options({ evalConfig: input })
     );
     expect(await fs.readdir(stage('stdio/server-1'))).toEqual([]);
     await installed.restore();
@@ -235,7 +235,7 @@ describe('Mac Cowork settings transaction', () => {
     'foreign-journal-directory',
   ])('fails closed on stdio %s tampering', async (kind) => {
     const installed = await installMacCoworkSettings(
-      options({ manifest: stdioManifest() })
+      options({ evalConfig: stdioManifest() })
     );
     const before = await text(meta);
     const file = stage('stdio/Native/headers.json');
@@ -289,7 +289,7 @@ describe('Mac Cowork settings transaction', () => {
     'retains and recovers the journal after stdio %s cleanup failure',
     async (kind) => {
       const installed = await installMacCoworkSettings(
-        options({ manifest: stdioManifest() })
+        options({ evalConfig: stdioManifest() })
       );
       if (kind === 'unlink')
         vi.mocked(fs.unlink).mockImplementation(async (file) => {
@@ -322,7 +322,7 @@ describe('Mac Cowork settings transaction', () => {
         await actual.writeFile(...args);
       }
     );
-    await rejectInstall({ manifest: stdioManifest() });
+    await rejectInstall({ evalConfig: stdioManifest() });
     await expectClean();
   });
 
@@ -388,13 +388,13 @@ describe('Mac Cowork settings transaction', () => {
     await restoreMacCoworkSettings(profileDirectory);
     await expectClean();
   });
-  it.each([manifest(), stdioManifest()])(
+  it.each([evalConfig(), stdioManifest()])(
     'rejects a blocked plugin server that shadows an eval server label (#%#)',
     async (input) => {
       await expect(
         installMacCoworkSettings(
           options({
-            manifest: input,
+            evalConfig: input,
             plugins: [
               {
                 name: 'acme',
@@ -415,7 +415,7 @@ describe('Mac Cowork settings transaction', () => {
       [],
       ['a', 'b', 'c', 'd', 'e', 'f'],
     ]) {
-      const input = manifest(labels);
+      const input = evalConfig(labels);
       const approved = labels.length === 2;
       input.coworkSetup = { approveWriteTools: approved };
       const env = {
@@ -425,7 +425,7 @@ describe('Mac Cowork settings transaction', () => {
         ),
       };
       const installed = await installMacCoworkSettings(
-        options({ manifest: input, env })
+        options({ evalConfig: input, env })
       );
       const configured = await readJson<Profile>(profile(installed.id));
       expect(configured.managedMcpServers).toEqual(
@@ -591,11 +591,11 @@ describe('Mac Cowork settings transaction', () => {
     await expectClean();
   });
 
-  it('selects an explicit empty arm', async () => {
-    const input = manifest();
-    input.arms = [{ name: 'empty', servers: [] }];
+  it('selects an explicit empty variant', async () => {
+    const input = evalConfig();
+    input.variants = [{ name: 'empty', servers: [] }];
     const result = await installMacCoworkSettings(
-      options({ manifest: input, arm: 'empty' })
+      options({ evalConfig: input, variant: 'empty' })
     );
     expect((await readJson(profile(result.id))).managedMcpServers).toEqual([]);
     await result.restore();

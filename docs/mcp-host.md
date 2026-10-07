@@ -127,7 +127,7 @@ The case passes if `search` was triggered in at least 4 of 5 runs (80% accuracy)
 
 ## mst Client Options
 
-The `mst` client takes its options in `clientOptions`, on the run (`runEvalDataset`), a suite manifest, or a case:
+The `mst` client takes its options in `clientOptions`, on the run (`runEvalDataset`), a suite eval config, or a case:
 
 | Option         | Meaning                                                                                                                                          |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -154,13 +154,13 @@ await runEvalDataset(
 );
 ```
 
-**Skills:** with `skills: 'catalog'` the SDK host lists the server's [Agent Skills](./skills.md) in the system prompt and gives the model `read_skill` and `read_resource` tools; `'preload'` puts every `SKILL.md` in the prompt. Skills the model loads (and that pass verification) appear as `kind: 'skill'` entries for `toolsTriggered`, not as tool calls; preloaded skills do not. To measure whether skills help, compare suite arms that differ in the `mst` host's `skills` mode; see [Agent Skills](./skills.md#measuring-whether-skills-help).
+**Skills:** with `skills: 'catalog'` the SDK host lists the server's [Agent Skills](./skills.md) in the system prompt and gives the model `read_skill` and `read_resource` tools; `'preload'` puts every `SKILL.md` in the prompt. Skills the model loads (and that pass verification) appear as `kind: 'skill'` entries for `toolsTriggered`, not as tool calls; preloaded skills do not. To measure whether skills help, compare suite variants that differ in the `mst` host's `skills` mode; see [Agent Skills](./skills.md#measuring-whether-skills-help).
 
 **Protocol:** in a Playwright test the `mst` client uses the test's MCP connection, so it follows `mcpConfig.protocol`. Claude Code, Cowork and ChatGPT open their own connections. See [Protocol Versions](./protocol-versions.md).
 
 ## Claude Code isolation
 
-Claude Code loads skills, plugins and settings from its config directory (`~/.claude` by default), so a run would otherwise depend on whoever runs it: their skills, plugins and settings shape what the model does and add to its input tokens. The built-in `claude-code` host gives each run an empty `CLAUDE_CONFIG_DIR`, removed afterwards, even when your shell exports one. The MCP servers under test come from the manifest as before.
+Claude Code loads skills, plugins and settings from its config directory (`~/.claude` by default), so a run would otherwise depend on whoever runs it: their skills, plugins and settings shape what the model does and add to its input tokens. The built-in `claude-code` host gives each run an empty `CLAUDE_CONFIG_DIR`, removed afterwards, even when your shell exports one. The MCP servers under test come from the eval config as before.
 
 That also leaves out your `settings.json`: its `env` block (a region, a base URL, a gateway) and `apiKeyHelper` don't apply. Authentication comes from the environment instead: `provider: 'vertex'` (Google Application Default Credentials) or an Anthropic API key. To run with your own configuration, for example to sign in with a claude.ai account, set `isolate: false` on the host; a `CLAUDE_CONFIG_DIR` in the host's or case's `env` is used as given.
 
@@ -278,9 +278,9 @@ console.log(`Tool F1 delta: ${comparison.deltaToolF1 ?? 'n/a'}`);
 console.log(`Improved cases: ${comparison.improvedCases.length}`);
 ```
 
-`toolOverrides.tools` is keyed by a tool's name on its server; in a suite with several servers, `server.tool` picks one (a qualified key wins over a bare one). An override can replace a tool's `name`, `description` and `inputSchema`. A key that matches no tool or several is an error, and so is a rename that isn't a valid tool name or takes a name another tool on the same server has.
+`toolOverrides.tools` (in an eval config, a variant's `tools`) is keyed by a tool's name on its server; with several servers, `server.tool` picks one (a qualified key wins over a bare one). An override can replace a tool's `name`, `description` and `inputSchema`. A key that matches no tool or several is an error, and so is a rename that isn't a valid tool name or takes a name another tool on the same server has.
 
-A renamed tool's calls reach the original tool and are recorded under its original name, so a dataset's expectations read the same in every arm; the trace's `rawName` keeps the name the model used:
+A renamed tool's calls reach the original tool and are recorded under its original name, so a dataset's expectations read the same in every variant; the trace's `rawName` keeps the name the model used:
 
 ```json
 {
@@ -289,7 +289,7 @@ A renamed tool's calls reach the original tool and are recorded under its origin
 }
 ```
 
-In a suite, an arm's `toolOverrides` reach every host, including plugin hosts and `claude-code`, through a local MCP proxy; see [Tool variants on every host](./evaluation-framework.md#tool-variants-on-every-host). Mocked responses and dataset rewriting are out of scope.
+In a suite, a variant's tool metadata (`tools`) reach every host, including plugin hosts and `claude-code`, through a local MCP proxy; see [Tool variants on every host](./evaluation-framework.md#tool-variants-on-every-host). Mocked responses and dataset rewriting are out of scope.
 
 For a complete runnable harness — including building a structured next-variant proposal from the comparison — see [`snippets/runtime-tool-override-experiment.ts`](../snippets/runtime-tool-override-experiment.ts).
 
@@ -304,7 +304,7 @@ The manual loop above — run baseline, inject a variant, `compareEvalRuns`, bui
 
 The library owns the experiment mechanics; your `proposeVariants` callback owns the judgment of which variant to try next. `runVariantExperiment` never edits your MCP server source or dataset — it returns a proposal for you (or an agent) to act on.
 
-To run the experiment on a real host instead of the SDK host, give it a manifest: `runVariantExperiment({ suite: { manifestPath }, variants })`. See the [API reference](./api-reference.md#runvariantexperimentoptions-context--runvariantexperimentsuiteoptions).
+To run the experiment on a real host instead of the SDK host, give it an eval config: `runVariantExperiment({ suite: { configPath }, variants })`. See the [API reference](./api-reference.md#runvariantexperimentoptions-context--runvariantexperimentsuiteoptions).
 
 ```typescript snippet=snippets/variant-experiment.ts
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';

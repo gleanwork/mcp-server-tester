@@ -27,7 +27,7 @@ const hostCase: EvalCase = {
   id: 'host',
   input: 'query',
 };
-const manifest = { name: 'm', datasets: [] };
+const evalConfig = { name: 'm', datasets: [] };
 
 beforeEach(() => vi.mocked(simulateMCPHost).mockReset());
 
@@ -180,7 +180,7 @@ describe('createSuiteCaseExecutor', () => {
     const execute = createSuiteCaseExecutor({
       servers: [],
       host: { type },
-      manifest,
+      evalConfig,
       batchTraces: new Map([['host', [trace]]]),
     });
     await expect(execute(hostCase)).resolves.toMatchObject({
@@ -203,7 +203,7 @@ describe('createSuiteCaseExecutor', () => {
     const execute = createSuiteCaseExecutor({
       servers: [],
       host: { type },
-      manifest,
+      evalConfig,
     });
     await expect(execute(hostCase)).resolves.toMatchObject({
       kind: 'host',
@@ -212,7 +212,7 @@ describe('createSuiteCaseExecutor', () => {
     expect(run).toHaveBeenCalledWith(
       { prompt: 'query', servers: [], env: undefined },
       { type },
-      { manifest, arm: undefined, env: undefined }
+      { evalConfig, variant: undefined, env: undefined }
     );
   });
 
@@ -235,12 +235,9 @@ describe('createSuiteCaseExecutor', () => {
         close: async () => {},
       };
     }
-    const variantManifest = {
-      ...manifest,
-      toolOverrides: {
-        id: 'renamed',
-        tools: { find_skills: { name: 'find_more' } },
-      },
+    const variantConfig = {
+      ...evalConfig,
+      tools: { find_skills: { name: 'find_more' } },
     };
 
     it('runs a proxied host on per-case proxy servers without the variant', async () => {
@@ -264,7 +261,7 @@ describe('createSuiteCaseExecutor', () => {
       const execute = createSuiteCaseExecutor({
         servers,
         host: { type },
-        manifest: variantManifest,
+        evalConfig: variantConfig,
         toolVariant: { id: 'renamed', proxy: async () => proxy },
       });
       const execution = await execute(hostCase);
@@ -272,10 +269,10 @@ describe('createSuiteCaseExecutor', () => {
       const [input, , context] = run.mock.calls[0] as unknown as [
         { servers: Array<{ serverUrl: string }> },
         unknown,
-        { manifest: Record<string, unknown> },
+        { evalConfig: Record<string, unknown> },
       ];
       expect(input.servers[0]?.serverUrl).toMatch(/^http:\/\/127\.0\.0\.1:1\//);
-      expect(context.manifest).not.toHaveProperty('toolOverrides');
+      expect(context.evalConfig).not.toHaveProperty('tools');
       expect(
         execution.kind === 'host' ? execution.trace?.events : undefined
       ).toMatchObject([
@@ -292,7 +289,7 @@ describe('createSuiteCaseExecutor', () => {
       const execute = createSuiteCaseExecutor({
         servers,
         host: { type },
-        manifest: variantManifest,
+        evalConfig: variantConfig,
         toolVariant: { id: 'renamed', proxy: async () => stubProxy(false) },
       });
       await expect(execute(hostCase)).resolves.toMatchObject({
@@ -307,14 +304,14 @@ describe('createSuiteCaseExecutor', () => {
       const type = installTestHost('native-variant-host', {
         schema: z.object({ type: z.string() }),
         evidence: 'structured',
-        toolOverrides: true,
+        toolMetadata: true,
         run,
       });
       const proxy = vi.fn(async () => stubProxy(true));
       const execute = createSuiteCaseExecutor({
         servers,
         host: { type },
-        manifest: variantManifest,
+        evalConfig: variantConfig,
         toolVariant: { id: 'renamed', proxy },
       });
       await execute(hostCase);
@@ -322,7 +319,7 @@ describe('createSuiteCaseExecutor', () => {
       expect(run).toHaveBeenCalledWith(
         expect.objectContaining({ servers }),
         { type },
-        expect.objectContaining({ manifest: variantManifest })
+        expect.objectContaining({ evalConfig: variantConfig })
       );
     });
   });

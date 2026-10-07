@@ -261,7 +261,7 @@ describe('per-scenario host traces', () => {
               await host.run!(
                 { prompt: evalCase.input, servers: [] },
                 { type: 'scenario-only' },
-                { manifest: { name: 'test', datasets: [] } }
+                { evalConfig: { name: 'test', datasets: [] } }
               ),
               evidence
             ),
@@ -357,7 +357,7 @@ describe('server attribution at the runner boundary', () => {
     ...(label ? { label } : {}),
   });
 
-  it('names the server of MCP events on a one-server arm', () => {
+  it('names the server of MCP events on a one-server variant', () => {
     const labeled = hostRunToExecution(
       { finalText: '', events },
       'structured',
@@ -376,7 +376,7 @@ describe('server attribution at the runner boundary', () => {
     expect(unlabeled.trace?.events[0]?.server).toBe('server-1');
   });
 
-  it('does not guess the server when an arm has several', () => {
+  it('does not guess the server when a variant has several', () => {
     const execution = hostRunToExecution(
       { finalText: '', events },
       'structured',

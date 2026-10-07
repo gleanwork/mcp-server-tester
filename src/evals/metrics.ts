@@ -491,7 +491,7 @@ export const BUILT_IN_METRICS: Readonly<Record<string, MetricDefinition>> =
     ),
     // Usage, timing and tool counts are per trial: a case's value is the
     // mean over its trials.
-    // Reported cost, or the estimate from the manifest's pricing.
+    // Reported cost, or the estimate from the eval config's pricing.
     cost_usd: metric(
       'continuous',
       (result) =>
@@ -746,7 +746,7 @@ export function computeMetrics(
     for (const item of resolved)
       values[item.outName] = item.metric.compute(caseResult, item.params);
     // Preserve legacy keys for unique IDs. Qualify collisions by dataset and
-    // occurrence (also distinguishes repeated cases from different arms).
+    // occurrence (also distinguishes repeated cases from different variants).
     let key = caseResult.id;
     if (idCounts.get(key)! > 1) {
       let occurrence = 0;

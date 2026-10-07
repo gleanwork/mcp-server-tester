@@ -68,7 +68,7 @@ test('search returns results', async ({ mcp }) => {
 
 A real LLM receives your tools and a natural-language input, then decides which tools to call. You assert that it made the right choices.
 
-A case with `input` runs on the client. In a Playwright test, `runEvalDataset` names the client and model (`{ dataset, client: 'mst', model: 'claude-haiku-4-5' }`), and the `mst` client uses the test's MCP connection; a suite manifest names them with `client` and `model`. A case can set its own `client`, `model` and `clientOptions`.
+A case with `input` runs on the client. In a Playwright test, `runEvalDataset` names the client and model (`{ dataset, client: 'mst', model: 'claude-haiku-4-5' }`), and the `mst` client uses the test's MCP connection; a suite eval config names them with `client` and `model`. A case can set its own `client`, `model` and `clientOptions`.
 
 ```json snippet=snippets/evals-tools-triggered.json
 {
@@ -786,7 +786,7 @@ test('manual baseline management', async ({ mcp }, testInfo) => {
 
 ## Comparing servers (A/B testing)
 
-To compare two MCP servers, or two configurations of one, run the same dataset as two arms of a suite, each with its own `servers`:
+To compare two MCP servers, or two configurations of one, run the same dataset as two variants of a suite, each with its own `servers`:
 
 ```json
 {
@@ -796,7 +796,7 @@ To compare two MCP servers, or two configurations of one, run the same dataset a
   "clientOptions": {
     "provider": "anthropic"
   },
-  "arms": [
+  "variants": [
     {
       "name": "production",
       "servers": [
@@ -821,7 +821,7 @@ To compare two MCP servers, or two configurations of one, run the same dataset a
 }
 ```
 
-`mst run --manifest server-ab.json` runs both arms with the same host and prints a row per arm: cases passed, trial pass rate, MCP calls and host events, tokens, cost and time. The run summary's `armDeltas` holds each metric's change against the first arm, and with `trials` set, `trial_pass_rate` shows differences that case pass/fail hides. An arm can also differ by host, tool variants (`toolOverrides`), input template or judges. See [Arms](./evaluation-framework.md#arms) and [Metrics](./evaluation-framework.md#metrics).
+`mst run --config server-ab.json` runs both variants with the same host and prints a row per variant: cases passed, trial pass rate, MCP calls and host events, tokens, cost and time. The run summary's `variantDeltas` holds each metric's change against the first variant, and with `trials` set, `trial_pass_rate` shows differences that case pass/fail hides. A variant can also differ by host, tool variants (`toolOverrides`), input template or judges. See [Variants](./evaluation-framework.md#variants) and [Metrics](./evaluation-framework.md#metrics).
 
 ---
 

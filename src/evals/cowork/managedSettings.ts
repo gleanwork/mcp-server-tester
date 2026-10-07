@@ -161,7 +161,7 @@ type Managed = {
 
 /**
  * Check `managedMcpServers`, `allowedMcpServers`, and
- * `allowManagedMcpServersOnly` against the manifest servers and plugins:
+ * `allowManagedMcpServersOnly` against the eval config servers and plugins:
  *
  * - HTTP servers: `{name: label, transport: "http", url}` as before.
  * - Stdio eval servers: exactly `coworkManagedPluginSettings(...)` entries

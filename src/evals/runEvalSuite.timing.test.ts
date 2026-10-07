@@ -73,9 +73,9 @@ async function fixture(
   await fs.mkdir(root, { recursive: true });
   const dir = await fs.mkdtemp(path.join(root, 'suite-timing-'));
   dirs.push(dir);
-  const manifestPath = path.join(dir, 'manifest.json');
+  const configPath = path.join(dir, 'eval.json');
   await fs.writeFile(
-    manifestPath,
+    configPath,
     JSON.stringify({
       name: 'timing',
       client: type,
@@ -84,11 +84,11 @@ async function fixture(
       ...extra,
     })
   );
-  return { manifestPath, rootDir: dir, source, plugins: [testPlugin] };
+  return { configPath, rootDir: dir, source, plugins: [testPlugin] };
 }
 
 describe('suite wall-clock timing', () => {
-  it('counts batch setup and cleanup once across cases, iterations, datasets and arms', async () => {
+  it('counts batch setup and cleanup once across cases, iterations, datasets and variants', async () => {
     const judgeKey = `timing-judge-${sequence++}`;
     testPlugin.judges[judgeKey] = {
       schema: z.object({}).passthrough(),
@@ -121,14 +121,14 @@ describe('suite wall-clock timing', () => {
       {
         trials: 3,
         judges: [{ type: judgeName }],
-        arms: [{ name: 'baseline' }, { name: 'comparison' }],
+        variants: [{ name: 'baseline' }, { name: 'comparison' }],
       }
     );
-    const manifest = JSON.parse(
-      await fs.readFile(f.manifestPath, 'utf8')
+    const evalConfig = JSON.parse(
+      await fs.readFile(f.configPath, 'utf8')
     ) as Record<string, unknown>;
-    manifest.datasets = [{ type: f.source }, { type: f.source }];
-    await fs.writeFile(f.manifestPath, JSON.stringify(manifest));
+    evalConfig.datasets = [{ type: f.source }, { type: f.source }];
+    await fs.writeFile(f.configPath, JSON.stringify(evalConfig));
 
     const result = await runEvalSuite(f);
 
@@ -147,9 +147,9 @@ describe('suite wall-clock timing', () => {
         [32, 42, 2],
       ]);
     }
-    expect(result.summary.arms.map((arm) => arm.result?.durationMs)).toEqual([
-      220, 220,
-    ]);
+    expect(
+      result.summary.variants.map((variant) => variant.result?.durationMs)
+    ).toEqual([220, 220]);
     expect(result.summary.durationMs).toBe(454); // 14 source preparation + 440 execution.
   });
 
@@ -171,7 +171,7 @@ describe('suite wall-clock timing', () => {
     ).toEqual([30, 30]);
     expect(result.summary.results[0]?.durationMs).toBe(60);
     expect(result.datasets[0]?.result?.durationMs).toBe(60);
-    expect(result.summary.arms[0]?.result?.durationMs).toBe(60);
+    expect(result.summary.variants[0]?.result?.durationMs).toBe(60);
     expect(result.summary.durationMs).toBe(67);
   });
 });

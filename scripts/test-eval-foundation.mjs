@@ -14,8 +14,8 @@ import {
   expect as playwrightExpect,
 } from '../dist/index.js';
 import {
-  validateManifest,
-  loadEvalManifestFromObject,
+  validateEvalConfig,
+  loadEvalConfigFromObject,
   FileEvalResultStore,
 } from '../dist/evals.js';
 
@@ -293,41 +293,41 @@ try {
     'PASS: observed evidence contributes no verified precision/recall and remains labeled after redaction.'
   );
 
-  const manifest = loadEvalManifestFromObject(
+  const evalConfig = loadEvalConfigFromObject(
     {
       name: 'patch',
       datasets: [{ type: 'foundation/source' }],
       client: 'foundation/host',
       model: 'base',
       clientOptions: { count: 2 },
-      arms: [{ name: 'variant', model: 'variant' }],
+      variants: [{ name: 'variant', model: 'variant' }],
     },
     { skipDatasetValidation: true }
   );
-  const resolved = validateManifest(manifest, {
+  const resolved = validateEvalConfig(evalConfig, {
     namespaces: ['foundation'],
   });
   assert.throws(
-    () => validateManifest(manifest, { namespaces: [] }),
+    () => validateEvalConfig(evalConfig, { namespaces: [] }),
     /doesn't load the "foundation" plugin/
   );
   assert.equal(resolved.clientOptions.count, 6);
   assert.deepEqual(
     {
-      client: resolved.arms[0].client,
-      model: resolved.arms[0].model,
-      clientOptions: resolved.arms[0].clientOptions,
+      client: resolved.variants[0].client,
+      model: resolved.variants[0].model,
+      clientOptions: resolved.variants[0].clientOptions,
     },
     { client: 'foundation/host', model: 'variant', clientOptions: { count: 6 } }
   );
   assert.throws(() =>
-    validateManifest({
-      ...manifest,
-      arms: [{ name: 'bad', model: 17 }],
+    validateEvalConfig({
+      ...evalConfig,
+      variants: [{ name: 'bad', model: 17 }],
     })
   );
   console.log(
-    'PASS: an arm that sets only its model inherits the client and options, validated once.'
+    'PASS: a variant that sets only its model inherits the client and options, validated once.'
   );
 
   const server = {
@@ -336,7 +336,7 @@ try {
     label: 'agg',
   };
   const config = validateMCPConfig(server);
-  const suite = loadEvalManifestFromObject(
+  const suite = loadEvalConfigFromObject(
     {
       name: 'config',
       datasets: [{ type: 'foundation/source' }],
@@ -347,7 +347,7 @@ try {
   assert.deepEqual(suite.servers[0], config);
   assert.equal(config.label, 'agg');
   assert.throws(() =>
-    loadEvalManifestFromObject(
+    loadEvalConfigFromObject(
       {
         name: 'invalid',
         datasets: [{ type: 'foundation/source' }],

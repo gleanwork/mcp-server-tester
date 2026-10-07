@@ -163,7 +163,7 @@ function stripResponses(value: unknown): void {
 
 /**
  * The one redaction policy for stored results: returns a JSON copy in which
- * every eval case result, wherever it is nested (runs, suite arms, reports,
+ * every eval case result, wherever it is nested (runs, suite variants, reports,
  * comparisons), has no raw `response`, no echoed exact-match
  * `expect.response`, and no `finalText` or event `output` in its traces.
  * These may hold data from the server under test. Everything else is kept,

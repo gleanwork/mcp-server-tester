@@ -82,7 +82,7 @@ export interface ToolMetadataOverride {
   /**
    * Replacement tool name shown to MCP hosts. Calls to it reach the original
    * tool and are recorded under the original name, so a dataset's
-   * expectations read the same in every arm; the trace's `rawName` keeps the
+   * expectations read the same in every variant; the trace's `rawName` keeps the
    * name the model used.
    */
   name?: string;
@@ -246,7 +246,7 @@ export interface EvalRunnerOptions {
 
   /**
    * Protocol to record in run metadata when `context.mcp` is absent (for
-   * example manifest suites that connect per case). A function is read when
+   * example eval config suites that connect per case). A function is read when
    * the run finishes.
    */
   protocol?: MCPProtocolInfo | (() => MCPProtocolInfo | undefined);
@@ -1035,7 +1035,7 @@ export async function runEvalDataset(
     // warning is only for a count chosen too small to be reliable.
     {
       const effectiveIterations = withTrialDefaults.trials ?? 1;
-      // Once per case and count: a suite runs the same case in every arm.
+      // Once per case and count: a suite runs the same case in every variant.
       const warning = `${evalCase.id}\u0000${effectiveIterations}`;
       if (
         effectiveIterations > 1 &&

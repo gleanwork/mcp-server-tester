@@ -7,32 +7,32 @@ import {
 } from '../../../evals/runEvalSuite.js';
 
 export interface RunOptions {
-  manifest: string;
+  config: string;
   plugins?: string[];
   rootDir?: string;
   dryRun?: boolean;
-  arm?: string;
+  variant?: string;
   outputDir?: string;
   secretsFile?: string;
 }
 
 export async function run(options: RunOptions): Promise<void> {
   const suiteOptions: RunEvalSuiteOptions = {
-    manifestPath: options.manifest,
+    configPath: options.config,
     rootDir: options.rootDir,
     pluginPaths: options.plugins,
     outputDir: options.outputDir,
     secretsFile: options.secretsFile,
     dryRun: options.dryRun,
-    arm: options.arm,
+    variant: options.variant,
   };
   let result: Awaited<ReturnType<typeof runEvalSuite>>;
   try {
     result = await runEvalSuite(suiteOptions);
   } catch (error) {
-    // A validation failure says which manifest it is in.
+    // A validation failure says which config it is in.
     if (error instanceof z.ZodError)
-      throw new Error(`${options.manifest}: ${describeError(error)}`, {
+      throw new Error(`${options.config}: ${describeError(error)}`, {
         cause: error,
       });
     throw error;
@@ -42,10 +42,12 @@ export async function run(options: RunOptions): Promise<void> {
     process.stdout.write(
       `${JSON.stringify(
         {
-          name: result.manifest.name,
+          name: result.evalConfig.name,
           outputDir: result.outputDir,
           datasets: result.datasets.map((item) => item.source),
-          arms: result.manifest.arms?.map((arm) => arm.name) ?? ['default'],
+          variants: result.evalConfig.variants?.map(
+            (variant) => variant.name
+          ) ?? ['default'],
         },
         null,
         2
@@ -60,80 +62,80 @@ export async function run(options: RunOptions): Promise<void> {
     total?: number;
     passRate?: number;
   };
-  console.log(`\nEval complete: ${result.manifest.name}`);
+  console.log(`\nEval complete: ${result.evalConfig.name}`);
   console.log(
     `Results: ${metrics.passed ?? 0}/${metrics.total ?? 0} passed (${((metrics.passRate ?? 0) * 100).toFixed(1)}%)`
   );
-  printArmTable(result.summary.arms);
+  printVariantTable(result.summary.variants);
   const previous = result.summary.previousRun;
   if (previous) {
     const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
     console.log(
       `Previous run ${previous.runId} (${previous.timestamp}): pass rate ${pct(previous.passRate)} -> ${pct(metrics.passRate ?? 0)}` +
-        (previous.sameManifest ? '' : ' (the manifest changed since)')
+        (previous.sameConfig ? '' : ' (the eval config changed since)')
     );
     const list = (label: string, items: string[]) =>
       items.length === 0
         ? ''
         : `${items.length} ${label} (${items.slice(0, 5).join(', ')}${items.length > 5 ? `, +${items.length - 5} more` : ''})`;
-    for (const [arm, change] of Object.entries(previous.arms)) {
+    for (const [variant, change] of Object.entries(previous.variants)) {
       const parts = [
         list('regressed', change.regressed),
         list('improved', change.improved),
         list('added', change.added),
         list('removed', change.removed),
       ].filter(Boolean);
-      if (parts.length) console.log(`  ${arm}: ${parts.join('; ')}`);
+      if (parts.length) console.log(`  ${variant}: ${parts.join('; ')}`);
     }
   }
   console.log(`Output: ${path.join(result.outputDir, 'results.json')}`);
   if ((metrics.failed ?? 0) > 0) process.exitCode = 1;
 }
 
-type ArmSummary = Awaited<
+type VariantSummary = Awaited<
   ReturnType<typeof runEvalSuite>
->['summary']['arms'][number];
+>['summary']['variants'][number];
 
-/** One row per arm: outcomes, calls, tokens, cost and time ("-" when unavailable). */
-function printArmTable(arms: ArmSummary[]): void {
-  if (arms.length === 0) return;
-  const value = (arm: ArmSummary, key: string) => {
-    const v = arm.metrics?.[key];
+/** One row per variant: outcomes, calls, tokens, cost and time ("-" when unavailable). */
+function printVariantTable(variants: VariantSummary[]): void {
+  if (variants.length === 0) return;
+  const value = (variant: VariantSummary, key: string) => {
+    const v = variant.metrics?.[key];
     return typeof v === 'number' ? v : undefined;
   };
   const num = (v: number | undefined, digits = 1) =>
     v === undefined ? '-' : v.toFixed(digits);
   const pct = (v: number | undefined) =>
     v === undefined ? '-' : `${(v * 100).toFixed(0)}%`;
-  const judged = arms.some(
-    (arm) => value(arm, 'judge_pass_rate') !== undefined
+  const judged = variants.some(
+    (variant) => value(variant, 'judge_pass_rate') !== undefined
   );
   let estimated = false;
-  const rows = arms.map((arm) => {
-    const cost = value(arm, 'cost_usd_mean');
-    if (cost !== undefined && arm.costSource !== 'host') estimated = true;
-    const mcp = value(arm, 'mcp_call_count_mean');
-    const host = value(arm, 'host_event_count_mean');
+  const rows = variants.map((variant) => {
+    const cost = value(variant, 'cost_usd_mean');
+    if (cost !== undefined && variant.costSource !== 'host') estimated = true;
+    const mcp = value(variant, 'mcp_call_count_mean');
+    const host = value(variant, 'host_event_count_mean');
     return [
-      arm.name,
-      `${arm.result?.passed ?? 0}/${arm.result?.total ?? 0}`,
-      pct(value(arm, 'trial_pass_rate')),
-      ...(judged ? [pct(value(arm, 'judge_pass_rate'))] : []),
+      variant.name,
+      `${variant.result?.passed ?? 0}/${variant.result?.total ?? 0}`,
+      pct(value(variant, 'trial_pass_rate')),
+      ...(judged ? [pct(value(variant, 'judge_pass_rate'))] : []),
       mcp === undefined && host === undefined
         ? '-'
         : `${num(mcp)} / ${num(host)}`,
-      num(value(arm, 'input_tokens_mean'), 0),
-      num(value(arm, 'output_tokens_mean'), 0),
+      num(value(variant, 'input_tokens_mean'), 0),
+      num(value(variant, 'output_tokens_mean'), 0),
       cost === undefined
         ? '-'
-        : `$${cost.toFixed(4)}${arm.costSource === 'host' ? '' : '*'}`,
-      value(arm, 'duration_s_mean') === undefined
+        : `$${cost.toFixed(4)}${variant.costSource === 'host' ? '' : '*'}`,
+      value(variant, 'duration_s_mean') === undefined
         ? '-'
-        : `${num(value(arm, 'duration_s_mean'))}s`,
+        : `${num(value(variant, 'duration_s_mean'))}s`,
     ];
   });
   const header = [
-    'Arm',
+    'Variant',
     'Passed',
     'Trial pass',
     ...(judged ? ['Judge pass'] : []),

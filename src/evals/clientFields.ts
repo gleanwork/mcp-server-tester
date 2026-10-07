@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { TaggedConfig } from './evalManifest.js';
+import type { TaggedConfig } from './evalConfig.js';
 
 /** The client a run uses when nothing names one. */
 export const DEFAULT_CLIENT = 'claude-code';
@@ -8,7 +8,7 @@ export const DEFAULT_CLIENT = 'claude-code';
 export type ClientOptions = Record<string, unknown>;
 
 /**
- * How a manifest, arm or case names the client under test: the client, the
+ * How an eval config, variant or case names the client under test: the client, the
  * model it uses, and the client's own options.
  */
 export interface ClientFields {
@@ -51,9 +51,9 @@ export const clientFieldSchemas = {
 };
 
 /**
- * The client a manifest declares, as the name and options MST resolves.
- * The manifest's `model` is a default every client may take, so it isn't
- * part of the declaration. Undefined when the manifest names no client.
+ * The client an eval config declares, as the name and options MST resolves.
+ * The eval config's `model` is a default every client may take, so it isn't
+ * part of the declaration. Undefined when the eval config names no client.
  */
 export function clientOf(
   level: Pick<ClientFields, 'client' | 'clientOptions'> | undefined
@@ -64,7 +64,7 @@ export function clientOf(
 }
 
 /**
- * An arm's or case's change to the client it inherits: a different client,
+ * A variant's or case's change to the client it inherits: a different client,
  * model or options. Options of a different client than the inherited one
  * don't carry over (see `inheritHost`).
  */

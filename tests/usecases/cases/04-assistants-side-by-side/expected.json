@@ -3,31 +3,31 @@
   "exitCode": 1,
   "checks": [
     {
-      "path": "arms[name=assistant].metrics.judge_pass_rate",
+      "path": "variants[name=assistant].metrics.judge_pass_rate",
       "equals": 1
     },
     {
-      "path": "arms[name=desktop].metrics.judge_pass_rate",
+      "path": "variants[name=desktop].metrics.judge_pass_rate",
       "equals": 1
     },
     {
-      "path": "arms[name=cli].metrics.judge_pass_rate",
+      "path": "variants[name=cli].metrics.judge_pass_rate",
       "equals": 0
     },
     {
-      "path": "arms[name=assistant].metrics.cost_usd_mean",
+      "path": "variants[name=assistant].metrics.cost_usd_mean",
       "exists": false
     },
     {
-      "path": "arms[name=assistant].evidence",
+      "path": "variants[name=assistant].evidence",
       "equals": "none"
     },
     {
-      "path": "arms[name=assistant].metrics.tool_count_mean",
+      "path": "variants[name=assistant].metrics.tool_count_mean",
       "exists": false
     },
     {
-      "path": "arms[name=assistant].unavailableMetrics",
+      "path": "variants[name=assistant].unavailableMetrics",
       "exists": true
     }
   ]

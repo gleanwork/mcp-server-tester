@@ -11,7 +11,7 @@ import type { MCPConfig } from '../config/mcpConfig.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import type { ClientDiagnostics, UsageMetrics } from '../types/index.js';
 import type { EvalCase } from './datasetTypes.js';
-import type { EvalArm, EvalManifest, ClientConfig } from './evalManifest.js';
+import type { EvalVariant, EvalConfig, ClientConfig } from './evalConfig.js';
 import { clientPatchOf, type ClientFields } from './clientFields.js';
 import type {
   TraceEvent,
@@ -175,16 +175,16 @@ export async function executeEvalCase(
   }
 }
 
-/** Everything a suite needs to run one case of one arm. */
+/** Everything a suite needs to run one case of one variant. */
 export interface SuiteCaseExecutorOptions {
   servers: MCPConfig[];
   host: ClientConfig;
-  manifest: EvalManifest;
-  arm?: EvalArm;
+  evalConfig: EvalConfig;
+  variant?: EvalVariant;
   env?: Record<string, string | undefined>;
   /** Traces from a batch host, consumed once per case iteration. */
   batchTraces?: Map<string, ClientRunResult[]>;
-  /** The arm's tool variant, which `proxy` serves to hosts that connect to their servers. */
+  /** The variant's tool metadata, which `proxy` serves to clients that connect to their servers. */
   toolVariant?: { id: string; proxy: () => Promise<ToolSurfaceProxy> };
 }
 
@@ -195,7 +195,7 @@ export interface SuiteCaseExecutorOptions {
 export function createSuiteCaseExecutor(
   options: SuiteCaseExecutorOptions
 ): (evalCase: EvalCase) => Promise<CaseExecution> {
-  const { servers, manifest, arm, env, batchTraces } = options;
+  const { servers, evalConfig, variant, env, batchTraces } = options;
   return async (evalCase) => {
     // The suite resolves a case's own client in full (see runEvalSuite).
     const declaration =
@@ -216,7 +216,7 @@ export function createSuiteCaseExecutor(
       throw new Error(
         `Host ${declaration.type} must expose run() for per-case dispatch.`
       );
-    const context = { manifest, arm, env };
+    const context = { evalConfig, variant, env };
     if (options.toolVariant && usesToolSurfaceProxy(definition)) {
       const proxy = await options.toolVariant.proxy();
       const scope = randomUUID();

@@ -2,51 +2,51 @@ import { getSharedConfig } from '../plugins/extensions.js';
 import { parseExtensionReference } from '../plugins/plugin.js';
 import {
   parsePluginConfig,
-  type EvalManifest,
+  type EvalConfig,
   type ParsedPluginConfig,
-} from './evalManifest.js';
+} from './evalConfig.js';
 import {
   assertListedNamespaces,
   normalizeSuiteControls,
-} from './manifestValidation.js';
+} from './configValidation.js';
 
 /**
- * Apply the shared configs a manifest `extends`, in order, under the
- * manifest's own settings. Each top-level key is replaced, never merged: a
- * later config's `judges` replaces an earlier one's, and the manifest's
- * replaces both, as an arm's settings replace the manifest's. A manifest that
+ * Apply the shared configs an eval config `extends`, in order, under the
+ * eval config's own settings. Each top-level key is replaced, never merged: a
+ * later config's `judges` replaces an earlier one's, and the eval config's
+ * replaces both, as a variant's settings replace the eval config's. An eval config that
  * extends nothing is returned as is, so its identity doesn't change.
  *
  * Plugins must be installed first; `namespaces` are the ones the suite loads.
  */
-export function resolveManifestExtends(
-  manifest: EvalManifest,
+export function resolveConfigExtends(
+  evalConfig: EvalConfig,
   namespaces: readonly string[]
-): EvalManifest {
-  const references = manifest.extends ?? [];
-  if (references.length === 0) return manifest;
+): EvalConfig {
+  const references = evalConfig.extends ?? [];
+  if (references.length === 0) return evalConfig;
   const repeated = references.find(
     (reference, index) => references.indexOf(reference) !== index
   );
   if (repeated !== undefined) {
-    throw new Error(`The manifest extends "${repeated}" more than once.`);
+    throw new Error(`The eval config extends "${repeated}" more than once.`);
   }
   for (const reference of references) {
     if (parseExtensionReference(reference).namespace === undefined) {
       throw new Error(
-        `The manifest extends "${reference}", but MST has no built-in configs. Name a plugin's config: "namespace/${reference}".`
+        `The eval config extends "${reference}", but MST has no built-in configs. Name a plugin's config: "namespace/${reference}".`
       );
     }
   }
   assertListedNamespaces(references, namespaces);
-  // `run.trials` and friends are the manifest's too, so lift them to the
+  // `run.trials` and friends are the eval config's too, so lift them to the
   // keys a config sets; otherwise they would conflict with the config's.
   const own = Object.fromEntries(
-    Object.entries(normalizeSuiteControls(manifest)).filter(
+    Object.entries(normalizeSuiteControls(evalConfig)).filter(
       ([, value]) => value !== undefined
     )
   );
-  // `client` and `clientOptions` go together: a manifest that sets either
+  // `client` and `clientOptions` go together: an eval config that sets either
   // replaces the shared config's client, so one client's options never
   // apply to another.
   const ownsClient = 'client' in own || 'clientOptions' in own;
@@ -58,7 +58,7 @@ export function resolveManifestExtends(
       return rest;
     }),
     own
-  ) as EvalManifest;
+  ) as EvalConfig;
 }
 
 /** A shared config, parsed, after checking it uses only its own plugin. */

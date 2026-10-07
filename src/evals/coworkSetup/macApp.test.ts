@@ -83,7 +83,7 @@ afterEach(async () => {
   await fs.rm(root, { recursive: true, force: true });
 });
 describe('pinned Mac bundle provisioning (native execution mocked)', () => {
-  it('has no default pin: only the manifest pins a version', () => {
+  it('has no default pin: only the eval config pins a version', () => {
     expect(macCoworkAppVersion(undefined, {})).toBeUndefined();
     expect(macCoworkAppVersion('2.3.4', {})).toBe('2.3.4');
     for (const value of ['latest', '../Claude', '1.2', '1.2.3\n'])

@@ -127,10 +127,22 @@ describe('mst CLI', () => {
       cases: [{ id: 'a', toolName: 'search', args: {} }],
     });
 
-    it('a missing manifest is one line, with no stack trace', async () => {
-      const result = await runBin('run', '--manifest', 'missing.json');
+    it.each([
+      [['run', '--manifest', 'x.json'], '--manifest is now --config'],
+      [['run', '-c', 'x.json', '--arm', 'a'], '--arm is now --variant'],
+      [['batch', '--manifests', 'x.json'], '--manifests is now --configs'],
+      [['batch', '--manifest-dir', 'd'], '--manifest-dir is now --config-dir'],
+      [['run'], "required option '-c, --config <path>' not specified"],
+    ])('%j fails naming the replacement', async (args, message) => {
+      const result = await runBin(...args);
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain(message);
+    });
+
+    it('a missing eval config is one line, with no stack trace', async () => {
+      const result = await runBin('run', '--config', 'missing.json');
       expect(result.exitCode).toBe(1);
-      expect(result.stderr).toMatch(/^mst: Evaluation manifest not found: /);
+      expect(result.stderr).toMatch(/^mst: Eval config not found: /);
       expect(result.stderr).not.toMatch(/\n\s+at /);
     });
 
@@ -143,12 +155,7 @@ describe('mst CLI', () => {
           hostt: { type: 'mst' },
         }),
       });
-      const result = await runBin(
-        'run',
-        '--manifest',
-        'typo.json',
-        '--dry-run'
-      );
+      const result = await runBin('run', '--config', 'typo.json', '--dry-run');
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toContain('mst: typo.json: Invalid configuration:');
       expect(result.stderr).toContain('Unrecognized key: "hostt"');
@@ -158,14 +165,14 @@ describe('mst CLI', () => {
 
     it('broken JSON names the file', async () => {
       await project.write({ 'broken.json': '{ name: ' });
-      const result = await runBin('run', '--manifest', 'broken.json');
+      const result = await runBin('run', '--config', 'broken.json');
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toMatch(
-        /^mst: Evaluation manifest .*broken\.json isn't valid JSON: /
+        /^mst: Eval config .*broken\.json isn't valid JSON: /
       );
     });
 
-    it('batch names each failing manifest, and a missing directory', async () => {
+    it('batch names each failing eval config, and a missing directory', async () => {
       await project.write({
         'cases.json': cases,
         'typo.json': JSON.stringify({
@@ -176,22 +183,22 @@ describe('mst CLI', () => {
       });
       const result = await runBin(
         'batch',
-        '--manifests',
+        '--configs',
         'typo.json',
         '--dry-run'
       );
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toContain('typo.json: Invalid configuration:');
       expect(result.stderr).not.toContain('ZodError');
-      const missing = await runBin('batch', '--manifest-dir', 'nowhere');
+      const missing = await runBin('batch', '--config-dir', 'nowhere');
       expect(missing.exitCode).toBe(1);
       expect(missing.stderr).toMatch(
-        /^mst: Manifest directory not found: nowhere/
+        /^mst: Eval config directory not found: nowhere/
       );
     });
 
     it('DEBUG=mcp-server-tester:cli shows the stack', async () => {
-      const result = await runBin('run', '--manifest', 'missing.json', {
+      const result = await runBin('run', '--config', 'missing.json', {
         env: { DEBUG: 'mcp-server-tester:cli' },
       });
       expect(result.exitCode).toBe(1);
@@ -207,12 +214,7 @@ describe('mst CLI', () => {
           client: 'sdk',
         }),
       });
-      const result = await runBin(
-        'run',
-        '--manifest',
-        'host.json',
-        '--dry-run'
-      );
+      const result = await runBin('run', '--config', 'host.json', '--dry-run');
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toMatch(
         /^mst: Client "sdk" is not available. Available: chatgpt, claude-code, cowork, mst./

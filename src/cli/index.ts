@@ -2,7 +2,7 @@
  * CLI entry point for @gleanwork/mcp-server-tester
  */
 
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { init } from './commands/init/index.js';
 import { generate } from './commands/generate/index.js';
 import { login } from './commands/login/index.js';
@@ -15,6 +15,22 @@ import packageJson from '../../package.json' with { type: 'json' };
 import { inspect } from 'node:util';
 import { debugCli } from '../debug.js';
 import { describeError } from '../utils/describeError.js';
+
+/** Flags 2.0 renamed (ADR 0002), recognized only to say what replaced them. */
+const REMOVED_FLAGS: Record<string, string> = {};
+
+function removedFlag(flags: string, replacement: string): Option {
+  const option = new Option(flags).hideHelp();
+  REMOVED_FLAGS[option.attributeName()] =
+    `${option.long} is now ${replacement}`;
+  return option;
+}
+
+function rejectRemovedFlags(options: Record<string, unknown>): undefined {
+  for (const [name, message] of Object.entries(REMOVED_FLAGS))
+    if (options[name] !== undefined) throw new Error(message);
+  return undefined;
+}
 
 const program = new Command();
 
@@ -77,52 +93,60 @@ program
 // Run command
 program
   .command('run')
-  .description('Run an evaluation manifest')
-  .requiredOption(
-    '-m, --manifest <path>',
-    'Path to an evaluation manifest JSON'
-  )
+  .description('Run an eval config')
+  .option('-c, --config <path>', 'Path to an eval config JSON')
   .option('--plugins <paths...>', 'Plugin modules to load before the run')
-  .option('--arm <name>', 'Run one named manifest arm')
+  .option('--variant <name>', "Run one of the config's variants")
   .option('--output-dir <dir>', 'Directory for run artifacts')
   .option('--secrets-file <path>', 'JSON or dotenv-style runtime secrets file')
   .option(
     '--root-dir <dir>',
-    'Fallback directory for relative manifest paths; default location for results',
+    'Fallback directory for relative config paths; default location for results',
     '.'
   )
-  .option('--dry-run', 'Validate the manifest and plugins without executing')
-  .action(run);
+  .option('--dry-run', 'Validate the config and plugins without executing')
+  .addOption(removedFlag('-m, --manifest <path>', '--config'))
+  .addOption(removedFlag('--arm <name>', '--variant'))
+  .action((options: Record<string, unknown>) => {
+    rejectRemovedFlags(options);
+    if (typeof options.config !== 'string')
+      throw new Error("required option '-c, --config <path>' not specified");
+    return run(options as unknown as Parameters<typeof run>[0]);
+  });
 
 // Batch command
 program
   .command('batch')
-  .description('Run multiple evaluation manifests')
-  .option('--manifests <paths...>', 'Evaluation manifest files')
-  .option('--manifest-dir <dir>', 'Directory containing evaluation manifests')
+  .description('Run several eval configs')
+  .option('--configs <paths...>', 'Eval config files')
+  .option('--config-dir <dir>', 'Directory of eval configs')
   .option('--plugins <paths...>', 'Plugin modules to load before the batch')
   .option(
     '--root-dir <dir>',
-    'Fallback directory for relative manifest paths; default location for results',
+    'Fallback directory for relative config paths; default location for results',
     '.'
   )
   .option('--output-root <dir>', 'Root directory for evaluation results')
   .option('--secrets-file <path>', 'JSON or dotenv-style runtime secrets file')
-  .option('--workers <number>', 'Maximum number of parallel manifest runs')
-  .option('--skip-existing', 'Skip manifests with an existing result')
-  .option('--dry-run', 'Validate manifests without executing evaluations')
-  .action((options) =>
-    batch({
-      manifests: options.manifests,
-      manifestDir: options.manifestDir,
-      plugins: options.plugins,
-      rootDir: options.rootDir,
-      outputRoot: options.outputRoot,
-      secretsFile: options.secretsFile,
-      workers: options.workers ? Number(options.workers) : undefined,
-      skipExisting: options.skipExisting,
-      dryRun: options.dryRun,
-    })
+  .option('--workers <number>', 'Maximum number of configs run in parallel')
+  .option('--skip-existing', 'Skip configs with an existing result')
+  .option('--dry-run', 'Validate configs without executing evaluations')
+  .addOption(removedFlag('--manifests <paths...>', '--configs'))
+  .addOption(removedFlag('--manifest-dir <dir>', '--config-dir'))
+  .action(
+    (options) =>
+      rejectRemovedFlags(options) ??
+      batch({
+        configs: options.configs,
+        configDir: options.configDir,
+        plugins: options.plugins,
+        rootDir: options.rootDir,
+        outputRoot: options.outputRoot,
+        secretsFile: options.secretsFile,
+        workers: options.workers ? Number(options.workers) : undefined,
+        skipExisting: options.skipExisting,
+        dryRun: options.dryRun,
+      })
   );
 
 // Cowork setup command

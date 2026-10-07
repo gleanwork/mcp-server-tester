@@ -3,7 +3,7 @@
  *
  * Given a baseline run and a candidate run of the same cases, calls each
  * pairwise judge on every case both runs have, and aggregates a win rate.
- * Runs come from anywhere: two arms of one suite, a run and a stored
+ * Runs come from anywhere: two variants of one suite, a run and a stored
  * baseline, or two runs made on separate machines.
  */
 
@@ -33,7 +33,7 @@ export function getPairwiseJudge(reference: string): PairwiseJudgeDefinition {
   return pairwiseJudges.get(reference);
 }
 
-/** One pairwise judge to run, as a manifest lists it. */
+/** One pairwise judge to run, as an eval config lists it. */
 export interface PairwiseJudgeSpec {
   type: string;
   options?: Record<string, unknown>;

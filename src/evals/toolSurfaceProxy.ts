@@ -54,11 +54,11 @@ interface ToolSurfaceProxyActivity {
 }
 
 /**
- * Serves an arm's servers with its tool variant applied, for hosts that
+ * Serves a variant's servers with its tool variant applied, for hosts that
  * connect to servers themselves (plugin hosts, the Claude CLI). Each upstream
  * server gets a loopback Streamable HTTP endpoint with the same label; each
  * host request gets its own scope, so the suite can tell whether the host saw
- * the variant. The proxy holds one connection to each server for the arm.
+ * the variant. The proxy holds one connection to each server for the variant.
  */
 export interface ToolSurfaceProxy {
   /** Server configs for one host request, pointing at the proxy. */
@@ -94,7 +94,7 @@ interface Upstream {
 }
 
 /**
- * Connects to the arm's servers, applies the variant, and listens on
+ * Connects to the variant's servers, applies the variant, and listens on
  * 127.0.0.1. Throws, after closing what it opened, if a server can't be
  * reached or the variant doesn't fit the servers' tools.
  */
@@ -185,7 +185,7 @@ export async function startToolSurfaceProxy(
           transport: 'http',
           serverUrl: `http://127.0.0.1:${port}/${token}/${encodeURIComponent(scope)}/${index}/mcp`,
           ...(config.label !== undefined ? { label: config.label } : {}),
-          // The host keeps the server's timeouts, as in an arm without a variant.
+          // The client keeps the server's timeouts, as without tool metadata.
           ...(config.requestTimeoutMs !== undefined
             ? { requestTimeoutMs: config.requestTimeoutMs }
             : {}),
@@ -375,13 +375,13 @@ async function serveNode(
 }
 
 /**
- * Whether the suite gives a host an arm's tool variant through the proxy:
+ * Whether the suite gives a client a variant's tool metadata through the proxy:
  * hosts that run cases themselves and don't apply variants, unless they opt
  * out with `toolSurfaceProxy: false`.
  */
 export function usesToolSurfaceProxy(definition: ClientDefinition): boolean {
   return (
-    definition.toolOverrides !== true &&
+    definition.toolMetadata !== true &&
     definition.toolSurfaceProxy !== false &&
     (typeof definition.run === 'function' ||
       typeof definition.runBatch === 'function')
@@ -392,10 +392,10 @@ export function usesToolSurfaceProxy(definition: ClientDefinition): boolean {
 export function withoutToolVariant(
   context: ClientRunContext
 ): ClientRunContext {
-  const { toolOverrides: _manifestVariant, ...manifest } = context.manifest;
-  if (!context.arm) return { ...context, manifest };
-  const { toolOverrides: _armVariant, ...arm } = context.arm;
-  return { ...context, manifest, arm };
+  const { tools: _configTools, ...evalConfig } = context.evalConfig;
+  if (!context.variant) return { ...context, evalConfig };
+  const { tools: _variantTools, ...variant } = context.variant;
+  return { ...context, evalConfig, variant };
 }
 
 /**

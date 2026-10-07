@@ -1,7 +1,7 @@
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { UsageMetrics } from '../types/index.js';
 import { sumUsage } from '../utils/usageUtils.js';
-import type { ModelPricing } from './evalManifest.js';
+import type { ModelPricing } from './evalConfig.js';
 
 /** USD for one trial's usage at `price` (per million tokens). */
 function costOf(usage: UsageMetrics, price: ModelPricing): number {
@@ -15,7 +15,7 @@ function costOf(usage: UsageMetrics, price: ModelPricing): number {
   );
 }
 
-/** What pricing an arm's usage did and didn't get. */
+/** What pricing a variant's usage did and didn't get. */
 export interface PricingOutcome {
   /** The prices applied, by model: the record that makes an estimate auditable. */
   applied: Record<string, ModelPricing>;
@@ -63,7 +63,7 @@ export function estimateCosts(
   return { applied, unpriced: [...unpriced].sort() };
 }
 
-/** Where an arm's cost comes from: the hosts, the manifest's pricing, or both. */
+/** Where a variant's cost comes from: the hosts, the eval config's pricing, or both. */
 export function costSource(
   results: EvalCaseResult[]
 ): 'host' | 'pricing' | 'mixed' | undefined {
