@@ -73,7 +73,6 @@ async function fixture() {
       cases: [
         {
           id: 'search-case',
-          mode: 'host',
           input: 'Find documents',
           assertions: { toolCallCount: { min: 1, max: 1 } },
         },

@@ -51,9 +51,7 @@ export function getToolProtocolError(
 /**
  * Converts a {@link ProtocolError} into an error-shaped tool result.
  */
-export function protocolErrorToToolResult(
-  error: ProtocolError
-): CallToolResult {
+function protocolErrorToToolResult(error: ProtocolError): CallToolResult {
   const protocolError: ToolProtocolError = {
     code: error.code,
     message: error.message,

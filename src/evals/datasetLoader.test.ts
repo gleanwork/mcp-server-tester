@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { loadEvalDatasetFromObject } from './datasetLoader.js';
-import { z } from 'zod';
 
 describe('datasetLoader', () => {
   describe('loadEvalDatasetFromObject', () => {
@@ -10,8 +9,7 @@ describe('datasetLoader', () => {
         cases: [
           {
             id: 'case-1',
-            toolName: 'get_weather',
-            args: { city: 'London' },
+            input: 'Use get_weather',
           },
         ],
       };
@@ -21,33 +19,6 @@ describe('datasetLoader', () => {
       expect(dataset.name).toBe('test-dataset');
       expect(dataset.cases).toHaveLength(1);
       expect(dataset.cases[0]?.id).toBe('case-1');
-    });
-
-    it('should attach schemas to dataset', () => {
-      const data = {
-        name: 'test-dataset',
-        cases: [
-          {
-            id: 'case-1',
-            toolName: 'test',
-            args: {},
-            assertions: { schema: 'test-schema' },
-          },
-        ],
-      };
-
-      const TestSchema = z.object({
-        result: z.string(),
-      });
-
-      const dataset = loadEvalDatasetFromObject(data, {
-        schemas: {
-          'test-schema': TestSchema,
-        },
-      });
-
-      expect(dataset.schemas).toBeDefined();
-      expect(dataset.schemas?.['test-schema']).toBe(TestSchema);
     });
 
     it('should validate dataset by default', () => {
@@ -79,8 +50,7 @@ describe('datasetLoader', () => {
         cases: [
           {
             id: 'case-1',
-            toolName: 'test',
-            args: {},
+            input: 'Use test',
           },
         ],
         metadata: {
@@ -97,75 +67,6 @@ describe('datasetLoader', () => {
         author: 'test-author',
       });
     });
-
-    it('should handle multiple schemas', () => {
-      const data = {
-        name: 'test-dataset',
-        cases: [
-          {
-            id: 'case-1',
-            toolName: 'test',
-            args: {},
-            assertions: { schema: 'schema-a' },
-          },
-          {
-            id: 'case-2',
-            toolName: 'test',
-            args: {},
-            assertions: { schema: 'schema-b' },
-          },
-        ],
-      };
-
-      const SchemaA = z.object({ a: z.string() });
-      const SchemaB = z.object({ b: z.number() });
-
-      const dataset = loadEvalDatasetFromObject(data, {
-        schemas: {
-          'schema-a': SchemaA,
-          'schema-b': SchemaB,
-        },
-      });
-
-      expect(dataset.schemas?.['schema-a']).toBe(SchemaA);
-      expect(dataset.schemas?.['schema-b']).toBe(SchemaB);
-    });
-
-    it('should handle empty schemas object', () => {
-      const data = {
-        name: 'test-dataset',
-        cases: [
-          {
-            id: 'case-1',
-            toolName: 'test',
-            args: {},
-          },
-        ],
-      };
-
-      const dataset = loadEvalDatasetFromObject(data, {
-        schemas: {},
-      });
-
-      expect(dataset.schemas).toEqual({});
-    });
-
-    it('should default to empty schemas when not provided', () => {
-      const data = {
-        name: 'test-dataset',
-        cases: [
-          {
-            id: 'case-1',
-            toolName: 'test',
-            args: {},
-          },
-        ],
-      };
-
-      const dataset = loadEvalDatasetFromObject(data);
-
-      expect(dataset.schemas).toEqual({});
-    });
   });
 });
 
@@ -177,8 +78,7 @@ describe('strict expectations', () => {
         cases: [
           {
             id: 'one',
-            toolName: 'search',
-            args: {},
+            input: 'Use search',
             assertions: { regex: ['found'] },
           },
         ],
@@ -190,7 +90,7 @@ describe('strict expectations', () => {
 describe('strict cases', () => {
   const dataset = (case_: Record<string, unknown>) => ({
     name: 'typos',
-    cases: [{ id: 'one', toolName: 'search', args: {}, ...case_ }],
+    cases: [{ id: 'one', input: 'Find it', ...case_ }],
   });
 
   it.each([
@@ -199,11 +99,6 @@ describe('strict cases', () => {
       'a rubric option',
       { assertions: { passesJudge: { rubric: 'correctness', treshold: 0.9 } } },
       /treshold/,
-    ],
-    [
-      'a size bound',
-      { assertions: { responseSize: { maxByte: 10 } } },
-      /maxByte/,
     ],
     [
       'a call expectation',

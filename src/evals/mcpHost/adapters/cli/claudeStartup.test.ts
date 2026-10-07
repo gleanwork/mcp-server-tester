@@ -115,7 +115,7 @@ describe('Claude Code MCP startup', () => {
       {
         dataset: {
           name: 'startup',
-          cases: [{ id: 'case', mode: 'host', input: 'scenario', trials: 2 }],
+          cases: [{ id: 'case', input: 'scenario', trials: 2 }],
         },
         executeCase: async () => {
           const event = attempt++ === 0 ? { ...init, mcp_servers: [] } : init;

@@ -1,11 +1,20 @@
 {
-  "id": "comprehensive-test",
-  "toolName": "get_city_info",
-  "args": { "city": "London" },
+  "id": "london-city-info",
+  "input": "Tell me about London: its population and main features",
+  "expected": {
+    "answer": "London has about 8.9M people and is known for its museums and transport."
+  },
   "assertions": {
-    "schema": "city-info",
-    "containsText": ["London", "Population"],
-    "matchesPattern": ["^## City Information", "Population: [\\d.]+M"],
+    "containsText": ["London"],
+    "matchesPattern": ["[\\d.]+\\s?M"],
+    "toolsTriggered": {
+      "calls": [
+        {
+          "name": "get_city_info",
+          "required": true
+        }
+      ]
+    },
     "passesJudge": {
       "rubric": "correctness",
       "threshold": 0.7

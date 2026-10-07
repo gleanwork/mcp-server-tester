@@ -15,7 +15,7 @@ The extension works in both protocol eras: servers declare it in `capabilities.e
 
 - [Reading skills in tests](#reading-skills-in-tests)
 - [Conformance](#conformance)
-- [Eval datasets](#eval-datasets)
+- [Checking skills methods in a test](#checking-skills-methods-in-a-test)
 - [Skills in evals](#skills-in-evals)
 - [Measuring whether skills help](#measuring-whether-skills-help)
 
@@ -80,32 +80,35 @@ await runConformanceChecks(mcp, { skills: false }); // turn the skills checks of
 
 `runCrossEraChecks()` also checks that skill entries are identical in every era.
 
-## Eval datasets
+## Checking skills methods in a test
 
-Direct cases can call skills methods instead of a tool with `request` (direct mode only; set `request` or `toolName`, not both; in a multi-server suite, `request.server` picks the server by label). Built-in schemas `SkillEntry`, `SkillsListResult`, and `SkillsGetResult` enforce the SEP-2640 entry rules without registering anything:
+`mcp.skills` covers the skills methods, and `mcp.request()` sends one raw, for asserting on its result or its JSON-RPC error:
 
-```json
-{
-  "name": "docs-skills",
-  "cases": [
-    {
-      "id": "list-is-valid",
-      "request": { "method": "skills/list", "params": {} },
-      "assertions": {
-        "schema": "SkillsListResult",
-        "containsText": "weather-report"
-      }
-    },
-    {
-      "id": "unknown-skill",
-      "request": {
-        "method": "skills/get",
-        "params": { "uri": "skill://nope/SKILL.md" }
-      },
-      "assertions": { "isError": "MCP error -32602" }
-    }
-  ]
-}
+```typescript
+import { z } from 'zod';
+import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
+import { validateSkillEntry } from '@gleanwork/mcp-server-tester';
+
+test('skills are valid SEP-2640 entries', async ({ mcp }) => {
+  const skills = await mcp.skills.list();
+  expect(skills.map((entry) => entry.frontmatter.name)).toContain(
+    'weather-report'
+  );
+  for (const entry of skills)
+    expect(
+      validateSkillEntry(entry).filter((p) => p.severity === 'must')
+    ).toEqual([]);
+});
+
+test('an unknown skill is an invalid-params error', async ({ mcp }) => {
+  await expect(
+    mcp.request(
+      'skills/get',
+      { uri: 'skill://nope/SKILL.md' },
+      z.looseObject({})
+    )
+  ).rejects.toMatchObject({ code: -32602 });
+});
 ```
 
 ## Skills in evals

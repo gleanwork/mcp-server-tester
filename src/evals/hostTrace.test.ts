@@ -71,7 +71,7 @@ describe('per-scenario host traces', () => {
       {
         dataset: {
           name: 'combined-evidence',
-          cases: [{ id: 'one', mode: 'host', input: 'query' }],
+          cases: [{ id: 'one', input: 'query' }],
         },
         executeCase: async () => execution,
       },
@@ -135,7 +135,6 @@ describe('per-scenario host traces', () => {
             cases: [
               {
                 id: 'one',
-                mode: 'host',
                 input: 'research',
                 assertions: {
                   toolsTriggered: {
@@ -188,7 +187,6 @@ describe('per-scenario host traces', () => {
           cases: [
             {
               id: 'one',
-              mode: 'host',
               input: 'search',
               assertions: { toolsTriggered: { calls: [{ name: 'search' }] } },
             },
@@ -247,7 +245,6 @@ describe('per-scenario host traces', () => {
             cases: [
               {
                 id: 'one',
-                mode: 'host',
                 input: 'EXPECTED',
                 trials: 3,
                 assertions: {
@@ -262,7 +259,7 @@ describe('per-scenario host traces', () => {
           executeCase: async (evalCase) =>
             hostRunToExecution(
               await host.run!(
-                { prompt: evalCase.input!, servers: [] },
+                { prompt: evalCase.input, servers: [] },
                 { type: 'scenario-only' },
                 { manifest: { name: 'test', datasets: [] } }
               ),

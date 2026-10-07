@@ -1,13 +1,6 @@
 import { test, expect } from '../src/fixtures/mcp.js';
 import { runConformanceChecks } from '../src/spec/conformanceChecks.js';
-import { loadEvalDataset } from '../src/evals/datasetLoader.js';
-import { runEvalDataset } from '../src/evals/evalRunner.js';
 import { z } from 'zod';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 test.describe('MCP Server Tests', () => {
   test('should connect to MCP server and get server info', async ({ mcp }) => {
@@ -39,39 +32,47 @@ test.describe('MCP Server Tests', () => {
     expect(result.raw.tools.map((t) => t.name)).toContain('get_weather');
   });
 
-  test('should run eval dataset', async ({ mcp }) => {
-    // Define schemas for validation
-    const WeatherResponseSchema = z.object({
-      city: z.string(),
-      temperature: z.number(),
-      conditions: z.string(),
+  // Tool checks are Playwright tests: call the tool, assert with the matchers.
+  const WeatherResponseSchema = z.object({
+    city: z.string(),
+    temperature: z.number(),
+    conditions: z.string(),
+  });
+
+  for (const city of ['London', 'Tokyo']) {
+    test(`get_weather for ${city} matches its schema`, async ({ mcp }) => {
+      const result = await mcp.callTool('get_weather', { city });
+      expect(result).toMatchToolSchema(WeatherResponseSchema);
     });
+  }
 
-    // Load dataset - schemas are provided via options
-    const dataset = await loadEvalDataset(
-      join(__dirname, '../data/eval_dataset.json'),
-      {
-        schemas: {
-          'weather-response': WeatherResponseSchema,
-        },
-      }
-    );
+  test('calculate adds two numbers', async ({ mcp }) => {
+    const result = await mcp.callTool('calculate', {
+      operation: 'add',
+      a: 10,
+      b: 20,
+    });
+    expect(result).toContainToolText('30');
+  });
 
-    // Run evals - eval runner now uses expect blocks in each case
-    // Schemas can be passed via options for cases that reference them
-    const result = await runEvalDataset(
-      {
-        dataset,
-        schemas: {
-          'weather-response': WeatherResponseSchema,
-        },
-      },
-      { mcp }
-    );
-
-    // Mock server supports get_weather, calculate, and get_city_info tools
-    // All cases should pass now with text-based expectations
-    expect(result.passed).toBeGreaterThanOrEqual(4);
+  // The mock indents its markdown, so line patterns allow leading space.
+  test('get_city_info answers in sectioned markdown', async ({ mcp }) => {
+    const result = await mcp.callTool('get_city_info', { city: 'London' });
+    expect(result).toContainToolText([
+      '## City Information',
+      '**City:** London',
+      '### Features',
+      '- Public Transportation',
+    ]);
+    expect(result).toMatchToolPattern([
+      /^## City Information/m,
+      /\*\*City:\*\* \w+/,
+      /\*\*Population:\*\* [\d.]+M/,
+      /^\s*### Features/m,
+      /^\s*- [\w\s]+/m,
+      /Temperature: \d+°C/,
+      /\d{4}-\d{2}-\d{2}/,
+    ]);
   });
 
   test('echo tool returns expected text (toContainToolText)', async ({

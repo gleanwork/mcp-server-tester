@@ -37,12 +37,9 @@
   "definitions": {
     "EvalCase": {
       "type": "object",
-      "required": ["id"],
+      "required": ["id", "input"],
       "additionalProperties": false,
-      "not": {
-        "required": ["toolName", "request"]
-      },
-      "description": "A single eval test case. A case with input runs on the client under test, which picks the tools; a direct case calls a tool (toolName + args) or sends any MCP request (request).",
+      "description": "A single eval case: an input the client under test acts on, and assertions about what it did. Direct tool calls are Playwright tests (mcp.callTool() with the matchers), not cases.",
       "properties": {
         "id": {
           "type": "string",
@@ -53,50 +50,14 @@
           "type": "string",
           "description": "Human-readable description of what this test case validates"
         },
-        "mode": {
-          "type": "string",
-          "enum": ["direct", "host"],
-          "description": "How the case runs: 'host' on the client under test, 'direct' as a tool call or MCP request. Inferred: a case with input runs on the client."
-        },
-        "toolName": {
-          "type": "string",
-          "minLength": 1,
-          "description": "The MCP tool a direct case calls. Set either toolName (with args) or request."
-        },
-        "args": {
-          "type": "object",
-          "description": "The arguments a direct case calls toolName with.",
-          "additionalProperties": true
-        },
-        "request": {
-          "type": "object",
-          "required": ["method"],
-          "additionalProperties": false,
-          "description": "Direct-mode alternative to toolName: send any MCP request (e.g. skills/get, resources/read) and assert on its JSON result. JSON-RPC errors become error results for expect.isError. Mutually exclusive with toolName. Built-in schemas for expect.schema: SkillEntry, SkillsListResult, SkillsGetResult, DiscoverResult.",
-          "properties": {
-            "method": {
-              "type": "string",
-              "minLength": 1,
-              "examples": ["skills/list", "skills/get", "resources/read"]
-            },
-            "params": {
-              "type": "object",
-              "additionalProperties": true
-            },
-            "server": {
-              "type": "string",
-              "minLength": 1,
-              "description": "Server label, when a manifest targets several servers."
-            }
-          }
-        },
         "input": {
           "type": "string",
-          "description": "The user's request the client acts on, sent as its prompt. A case with input runs on the client.",
+          "description": "The user's request the client acts on, sent as its prompt.",
           "examples": [
             "Find recent docs about the example MCP server",
             "Who leads the developer platform team?"
-          ]
+          ],
+          "minLength": 1
         },
         "client": {
           "type": "string",
@@ -167,23 +128,6 @@
       "additionalProperties": false,
       "description": "Expectations to validate against the tool response. Multiple fields can be combined — all must pass.",
       "properties": {
-        "response": {
-          "description": "Exact expected response (deep-equal match). Corresponds to toMatchToolResponse().",
-          "examples": [
-            {
-              "content": [
-                {
-                  "type": "text",
-                  "text": "hello"
-                }
-              ]
-            }
-          ]
-        },
-        "schema": {
-          "type": "string",
-          "description": "Name of a Zod schema (registered in EvalDataset.schemas) to validate the response against. Corresponds to toMatchToolSchema()."
-        },
         "containsText": {
           "oneOf": [
             {
@@ -214,43 +158,8 @@
           ],
           "description": "Regular expression pattern(s) that must match the response text. All provided patterns must match. Corresponds to toMatchToolPattern()."
         },
-        "snapshot": {
-          "type": "string",
-          "description": "Snapshot name for comparison. The response is compared against the saved snapshot file. Corresponds to toMatchToolSnapshot()."
-        },
-        "snapshotSanitizers": {
-          "type": "array",
-          "description": "Sanitizers to apply to the response before snapshot comparison, normalising variable data such as timestamps and IDs.",
-          "items": {
-            "$ref": "#/definitions/SnapshotSanitizer"
-          }
-        },
-        "isError": {
-          "oneOf": [
-            {
-              "type": "boolean",
-              "description": "true = expect any error; false = expect no error"
-            },
-            {
-              "type": "string",
-              "description": "Expect an error whose message contains this substring"
-            },
-            {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "minItems": 1,
-              "description": "Expect an error whose message contains all of these substrings"
-            }
-          ],
-          "description": "Error expectation. Corresponds to toBeToolError()."
-        },
         "passesJudge": {
           "$ref": "#/definitions/PassesJudge"
-        },
-        "responseSize": {
-          "$ref": "#/definitions/ResponseSize"
         },
         "toolsTriggered": {
           "$ref": "#/definitions/ToolsTriggered"
@@ -345,23 +254,6 @@
         }
       }
     },
-    "ResponseSize": {
-      "type": "object",
-      "additionalProperties": false,
-      "description": "Validates that the response text is within acceptable byte bounds. Corresponds to toHaveToolResponseSize().",
-      "properties": {
-        "maxBytes": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Maximum allowed size of the response in bytes (UTF-8)"
-        },
-        "minBytes": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Minimum required size of the response in bytes (UTF-8)"
-        }
-      }
-    },
     "ToolsTriggered": {
       "type": "object",
       "required": ["calls"],
@@ -433,50 +325,6 @@
           "description": "Exact number of tool calls required. Mutually exclusive with min/max."
         }
       }
-    },
-    "SnapshotSanitizer": {
-      "description": "Sanitizer applied before snapshot comparison. Can be a built-in name, a regex sanitizer, or a field removal sanitizer.",
-      "oneOf": [
-        {
-          "type": "string",
-          "enum": ["timestamp", "uuid", "iso-date", "objectId", "jwt"],
-          "description": "Built-in sanitizer. 'timestamp': Unix timestamps (ms and s). 'uuid': UUIDs v1–v5. 'iso-date': ISO 8601 strings. 'objectId': MongoDB ObjectIds. 'jwt': JWT tokens."
-        },
-        {
-          "type": "object",
-          "required": ["pattern"],
-          "additionalProperties": false,
-          "description": "Custom regex sanitizer — replaces all matches of 'pattern' with 'replacement'",
-          "properties": {
-            "pattern": {
-              "type": "string",
-              "description": "Regular expression pattern string to match against the serialised response"
-            },
-            "replacement": {
-              "type": "string",
-              "default": "[SANITIZED]",
-              "description": "Replacement string for matched text. Defaults to '[SANITIZED]'."
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": ["remove"],
-          "additionalProperties": false,
-          "description": "Field removal sanitizer — removes named fields from response objects before comparison",
-          "properties": {
-            "remove": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "minItems": 1,
-              "description": "Field paths to remove. Supports dot notation for nested fields (e.g. 'meta.createdAt').",
-              "examples": [["createdAt", "updatedAt"], ["meta.requestId"]]
-            }
-          }
-        }
-      ]
     }
   }
 }

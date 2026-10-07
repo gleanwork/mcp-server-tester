@@ -3,7 +3,6 @@
   "cases": [
     {
       "id": "postmortem",
-      "mode": "host",
       "input": "Find the checkout outage postmortem",
       "assertions": {
         "toolsTriggered": {

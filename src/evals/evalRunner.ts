@@ -7,11 +7,7 @@ import {
 import type { Trace } from './evalFrameworkTypes.js';
 import { installPlugins } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
-import {
-  isClientCase,
-  type EvalDataset,
-  type EvalCase,
-} from './datasetTypes.js';
+import type { EvalDataset, EvalCase } from './datasetTypes.js';
 import type { ClientOptions } from './clientFields.js';
 import {
   checkedExecution,
@@ -22,14 +18,13 @@ import {
   type ClientResponse,
 } from './caseExecution.js';
 import type { TraceEvent } from './evalFrameworkTypes.js';
-import type { TestInfo, Expect } from '@playwright/test';
+import type { TestInfo } from '@playwright/test';
 import {
   buildToolSurface,
   registerPresentedTools,
   type ToolSurface,
 } from './toolSurface.js';
 import type { Tool } from '@modelcontextprotocol/client';
-import type { ZodType } from 'zod';
 import {
   evaluateExpectations,
   type ExpectationOutcome,
@@ -76,12 +71,6 @@ export interface EvalContext {
    * When provided, eval results will be attached to the test for the MCP reporter
    */
   testInfo?: TestInfo;
-
-  /**
-   * Optional Playwright expect function for snapshot testing
-   * Required for snapshot expectations to work properly
-   */
-  expect?: Expect;
 }
 
 export type { EvalCaseResult } from '../types/reporter.js';
@@ -272,23 +261,6 @@ export interface EvalRunnerOptions {
   executeCase?: (evalCase: EvalCase) => Promise<CaseExecution>;
 
   /**
-   * Schema registry for schema validation by name
-   *
-   * Maps schema names to Zod schemas for use with expect.schema
-   *
-   * @example
-   * ```typescript
-   * {
-   *   schemas: {
-   *     WeatherResponse: z.object({ temperature: z.number() }),
-   *     ErrorResponse: z.object({ error: z.string() }),
-   *   }
-   * }
-   * ```
-   */
-  schemas?: Record<string, ZodType>;
-
-  /**
    * Whether to stop on first failure
    * @default false
    */
@@ -307,8 +279,7 @@ export interface EvalRunnerOptions {
   concurrency?: number;
 
   /**
-   * Default trial count for client cases that don't set `trials`. Has no
-   * effect on direct cases (which are deterministic and always run once).
+   * Default trial count for cases that don't set `trials`.
    *
    * Set to 10 for standard runs or 20 for release gates. Individual cases can
    * still override this with their own `trials` field.
@@ -449,11 +420,6 @@ export interface EvalCaseOptions {
   datasetName?: string;
 
   /**
-   * Schema registry for schema validation by name
-   */
-  schemas?: Record<string, ZodType>;
-
-  /**
    * Runtime tool override variant id for reporter/debug metadata.
    */
   toolOverrideVariantId?: string;
@@ -479,8 +445,8 @@ function createToolOverrideMCP(
       name: string,
       args: TArgs
     ) {
-      // Hosts list tools before calling them, so a renamed tool resolves.
-      // Direct cases call the server's own names and skip the listing.
+      // Clients list tools before calling them, so a renamed tool resolves;
+      // a name the surface doesn't know goes to the server unchanged.
       const entry = surface?.resolve(name);
       return mcp.callTool(entry?.originalName ?? name, args);
     },
@@ -583,9 +549,7 @@ function buildRequest(
   run: EvalCaseOptions
 ): EvalCaseRequest {
   const toolOverrideVariantId = run.toolOverrideVariantId;
-  const request: EvalCaseRequest = {
-    mode: evalCase.mode ?? 'direct',
-  };
+  const request: EvalCaseRequest = {};
   if (evalCase.description) request.description = evalCase.description;
   if (toolOverrideVariantId !== undefined) {
     request.toolOverrideVariantId = toolOverrideVariantId;
@@ -603,24 +567,20 @@ function buildRequest(
     >;
   }
 
-  if (isClientCase(evalCase)) {
-    const client = evalCase.client ?? run.client;
-    // A case's own client doesn't take the run's model.
-    const model =
-      evalCase.model ??
-      (evalCase.client === undefined || evalCase.client === run.client
-        ? run.model
-        : undefined);
-    if (client !== undefined) request.client = client;
-    if (model !== undefined) request.model = model;
-    if (evalCase.input) request.scenario = evalCase.input;
-    if (evalCase.expected?.answer !== undefined) {
-      const answer = evalCase.expected.answer;
-      request.reference =
-        typeof answer === 'string' ? answer : JSON.stringify(answer);
-    }
-  } else {
-    if (evalCase.args) request.args = evalCase.args;
+  const client = evalCase.client ?? run.client;
+  // A case's own client doesn't take the run's model.
+  const model =
+    evalCase.model ??
+    (evalCase.client === undefined || evalCase.client === run.client
+      ? run.model
+      : undefined);
+  if (client !== undefined) request.client = client;
+  if (model !== undefined) request.model = model;
+  request.scenario = evalCase.input;
+  if (evalCase.expected?.answer !== undefined) {
+    const answer = evalCase.expected.answer;
+    request.reference =
+      typeof answer === 'string' ? answer : JSON.stringify(answer);
   }
 
   return request;
@@ -743,8 +703,7 @@ async function runSingleIteration(
         hostResponse,
         evidence,
         externalHost,
-      },
-      { schemas: options.schemas, playwrightExpect: context.expect }
+      }
     );
   }
 
@@ -756,10 +715,7 @@ async function runSingleIteration(
   return {
     id: evalCase.id,
     datasetName: options.datasetName ?? 'single-case',
-    toolName:
-      evalCase.input != null
-        ? 'mcp_host'
-        : (evalCase.toolName ?? evalCase.request?.method ?? 'unknown'),
+    toolName: 'mcp_host',
     source: 'eval',
     pass: didCasePass(error, outcome.expectations),
     request: buildRequest(evalCase, options),
@@ -878,10 +834,7 @@ export async function runEvalCase(
     : {
         id: evalCase.id,
         datasetName: options.datasetName ?? 'single-case',
-        toolName:
-          evalCase.input != null
-            ? 'mcp_host'
-            : (evalCase.toolName ?? evalCase.request?.method ?? 'unknown'),
+        toolName: 'mcp_host',
         source: 'eval',
         pass: false,
         error: iterationResults[0]?.error,
@@ -1013,7 +966,6 @@ export async function runEvalDataset(
 ): Promise<EvalRunnerResult> {
   const {
     dataset,
-    schemas,
     stopOnFailure = false,
     concurrency = 1,
     defaultTrials,
@@ -1038,12 +990,6 @@ export async function runEvalDataset(
       ? { ...context, mcp: createToolOverrideMCP(context.mcp, toolOverrides) }
       : context;
 
-  // Merge schemas from dataset and options
-  const allSchemas = {
-    ...dataset.schemas,
-    ...schemas,
-  };
-
   // Filter cases by tag if filterTags is set (non-empty array)
   const casesToRun =
     filterTags && filterTags.length > 0
@@ -1052,9 +998,7 @@ export async function runEvalDataset(
 
   // Preflight cost warning: estimate the number of LLM judge API calls this run will make
   const estimatedJudgeCalls = casesToRun.reduce((sum, c) => {
-    const effectiveIterations = isClientCase(c)
-      ? (c.trials ?? defaultTrials ?? 1)
-      : (c.trials ?? 1);
+    const effectiveIterations = c.trials ?? defaultTrials ?? 1;
     if (c.assertions?.passesJudge == null) return sum;
     const judges = Array.isArray(c.assertions.passesJudge)
       ? c.assertions.passesJudge
@@ -1074,18 +1018,13 @@ export async function runEvalDataset(
 
   // Build task factories for all cases
   const tasks = casesToRun.map((evalCase) => async () => {
-    // Apply defaultTrials to client cases that don't set trials. Direct
-    // cases are deterministic: they always run once.
-    const hostDriven = isClientCase(evalCase);
+    // Apply defaultTrials and defaultPassThreshold to cases that don't set them.
     const withTrialDefaults = {
       ...evalCase,
-      ...(hostDriven &&
-      evalCase.trials === undefined &&
-      defaultTrials !== undefined
+      ...(evalCase.trials === undefined && defaultTrials !== undefined
         ? { trials: defaultTrials }
         : {}),
-      ...(hostDriven &&
-      evalCase.passThreshold === undefined &&
+      ...(evalCase.passThreshold === undefined &&
       defaultPassThreshold !== undefined
         ? { passThreshold: defaultPassThreshold }
         : {}),
@@ -1094,7 +1033,7 @@ export async function runEvalDataset(
     // Warn when a client case runs several trials, but fewer than the
     // guide's minimum. One trial (the default) is a valid smoke test, so the
     // warning is only for a count chosen too small to be reliable.
-    if (hostDriven) {
+    {
       const effectiveIterations = withTrialDefaults.trials ?? 1;
       // Once per case and count: a suite runs the same case in every arm.
       const warning = `${evalCase.id}\u0000${effectiveIterations}`;
@@ -1125,7 +1064,6 @@ export async function runEvalDataset(
       executeCase: options.executeCase,
       toolMap: options.toolMap,
       datasetName: dataset.name,
-      schemas: allSchemas,
       toolOverrideVariantId: toolOverrides?.id,
     });
 

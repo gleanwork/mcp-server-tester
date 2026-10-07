@@ -190,7 +190,6 @@ describe('SDK host with skills', () => {
           cases: [
             {
               id: 'uses-skill',
-              mode: 'host',
               input: 'What is the weather in London?',
               assertions: { toolsTriggered: SKILL_THEN_TOOL },
             },

@@ -128,7 +128,7 @@ Plugins load before manifest validation, so validation can check every reference
 A judge is called as `evaluate({ case, trial }, options)`, once per `reps`:
 
 - `case` (`JudgeCase`) is the case as written in the dataset, the same for every run:
-  `id`, `input` (`prompt`, or `tool` for a direct case), `expected`, `tags`, `metadata`.
+  `id`, `input` (`prompt`), `expected`, `tags`, `metadata`.
 - `trial` (`JudgeTrial`) is one observed run: `response` (what validators grade),
   `text`, `events` (tool calls and other host events), `messages` (when the host
   reports them), `evidence`, and host `usage`.
@@ -233,12 +233,12 @@ do not carry.
 
 ### Dataset sources
 
-The built-in `file`, `dir` and `gcs` sources read canonical `EvalDataset` JSON only. They don't infer expectations from a first case, attach hosts or add judges, and they reject fields they don't know, on every case. A minimal direct dataset needs a name, a case ID and a tool name:
+The built-in `file`, `dir` and `gcs` sources read canonical `EvalDataset` JSON only. They don't infer expectations from a first case, attach hosts or add judges, and they reject fields they don't know, on every case. A minimal dataset needs a name, a case ID and an input:
 
 ```json
 {
   "name": "search-regression",
-  "cases": [{ "id": "search", "toolName": "search" }]
+  "cases": [{ "id": "search", "input": "Find the Q3 planning doc" }]
 }
 ```
 
@@ -380,7 +380,7 @@ EvalManifest
      pairwise arm deltas, and per-case artifact pointers
 ```
 
-`EvalDataset`, `EvalCase`, `EvalMode`, `MCPConfig`, and `runEvalDataset` remain
+`EvalDataset`, `EvalCase`, `MCPConfig`, and `runEvalDataset` remain
 the canonical case and execution primitives. The suite layer composes them; it
 does not replace them with a second case model.
 

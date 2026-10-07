@@ -16,9 +16,9 @@ That's the gap evals fill.
 
 **The two things evals measure for MCP servers:**
 
-1. **Does the tool work?** — Call it directly with known inputs and check the output. This is deterministic. Run it once.
+1. **Does the tool work?** — Call it directly with known inputs and check the output. This is deterministic, so it's a Playwright test: run it once.
 
-2. **Will an LLM discover and use the tool correctly?** — Put a real LLM in front of your tools and give it a realistic input. Measure how often it triggers the right tool. This is probabilistic. Run it many times.
+2. **Will an LLM discover and use the tool correctly?** — Put a real client and model in front of your tools and give it a realistic input. Measure how often it triggers the right tool. This is probabilistic, so it's an eval: run it many times.
 
 ---
 
@@ -30,9 +30,9 @@ Every eval case has three parts:
 Input  →  Trial  →  Assertions
 ```
 
-**Input**: What the case gives the host. In direct mode this is tool arguments (`{ query: "MCP server testing" }`). In LLM host mode this is the user's request ("Find recent docs about MCP testing").
+**Input**: What the case gives the client: the user's request ("Find recent docs about MCP testing").
 
-**Trial**: One attempt at the case. In direct mode this is a single tool call. In LLM host mode this is an LLM receiving your tools and deciding which ones to call.
+**Trial**: One attempt at the case: the client and its model receive your tools and the input, and decide which tools to call.
 
 **Assertions**: The pass/fail checks on each trial. Did the response contain expected text? Did the LLM call the right tool? Was the call count in the expected range?
 
@@ -40,49 +40,31 @@ The eval runner runs each case's trials, potentially dozens of them, and reports
 
 ---
 
-## Two Modes
+## Tests and Evals
 
-### Direct Mode
+### Tool checks are Playwright tests
 
-You call a tool yourself with explicit arguments. The result is checked against your assertions.
+Call a tool yourself with explicit arguments and assert on its response with MST's matchers:
 
-```json
-{
-  "id": "search-returns-results",
-  "mode": "direct",
-  "toolName": "search",
-  "args": { "query": "MCP server testing" },
-  "assertions": {
-    "isError": false,
-    "responseSize": { "minBytes": 100 }
-  }
-}
+```typescript
+import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
+
+test('search returns results', async ({ mcp }) => {
+  const result = await mcp.callTool('search', { query: 'MCP server testing' });
+  expect(result).not.toBeToolError();
+  expect(result).toHaveToolResponseSize({ minBytes: 100 });
+});
 ```
 
 **When to use it:** Smoke tests. Verifying your tools are connected, responding, and returning the right shape of data. Regression detection when you change tool implementations.
 
-**How many trials:** 1. Tool responses are deterministic (or close enough). Running a search 10 times doesn't tell you more than running it once.
+**How many runs:** 1. Tool responses are deterministic (or close enough). Running a search 10 times doesn't tell you more than running it once.
 
-**What you're testing:** The tool itself, not how well it's described.
-
-Direct cases can also send any MCP request instead of calling a tool, which is useful for resources and extensions such as [Agent Skills](./skills.md):
-
-```json
-{
-  "id": "skill-entry-valid",
-  "request": {
-    "method": "skills/get",
-    "params": { "uri": "skill://docs/SKILL.md" }
-  },
-  "assertions": { "schema": "SkillsGetResult" }
-}
-```
-
-`request` replaces `toolName` and `args`: set one or the other, and only on direct-mode cases. In a manifest suite with several servers, add `"server": "<label>"` to `request` to pick one. A JSON-RPC error becomes an error result, so `isError` works the same way it does for tools. The schemas `SkillEntry`, `SkillsListResult`, `SkillsGetResult`, and `DiscoverResult` are built in.
+**What you're testing:** The tool itself, not how well it's described. `mcp.request(method, params, schema)` sends any other MCP request, such as `skills/get` or `resources/read`. See the [Expectations Guide](./expectations.md) for every matcher, and `mst generate` to record tests from real calls.
 
 ---
 
-### LLM Host Mode
+### Evals: a Client and Its Model
 
 A real LLM receives your tools and a natural-language input, then decides which tools to call. You assert that it made the right choices.
 
@@ -210,33 +192,13 @@ This tests that your tools don't _over-trigger_ for questions that don't need th
 
 ## The Assertion Types
 
-### `isError`
-
-Does the response indicate failure?
-
-```json
-{ "isError": false }
-```
-
-Use this in direct mode to verify tool calls succeed.
-
 ### `containsText`
 
-Does the response text include expected substrings?
+Does the client's answer include expected substrings?
 
 ```json
 { "containsText": ["temperature", "London"] }
 ```
-
-### `responseSize`
-
-Is the response within expected size bounds?
-
-```json
-{ "responseSize": { "minBytes": 100 } }
-```
-
-Useful for smoke tests — a 0-byte response means something went wrong.
 
 ### `toolsTriggered`
 
@@ -433,10 +395,7 @@ Compare the pass rates per case. To decide whether a variant really is better (p
       "id": "unique-case-id",
       "description": "Human-readable description",
 
-      "toolName": "search", // a direct case: toolName + args, or request
-      "args": { "query": "hello" }, // required with toolName
-
-      // Or a client case instead: the client acts on the input
+      // The client acts on the input
       "input": "Find recent documents about X",
       // Optional: the run (runEvalDataset or a suite) names the client and
       // model; a case can set its own
@@ -444,14 +403,13 @@ Compare the pass rates per case. To decide whether a variant really is better (p
       "model": "claude-haiku-4-5@20251001", // Vertex, from the @ in the id
       "clientOptions": { "maxToolCalls": 5 },
 
-      // Multiple trials (mainly for client cases):
+      // Multiple trials:
       "trials": 10, // or use defaultTrials in the runner
       "passThreshold": 0.8, // fraction that must pass (0–1)
 
       "assertions": {
-        "isError": false,
         "containsText": ["expected", "text"],
-        "responseSize": { "minBytes": 100 },
+        "matchesPattern": ["\\d+ results"],
         "toolsTriggered": {
           "calls": [{ "name": "search", "required": true }],
           "order": "any",
@@ -689,7 +647,7 @@ default. Set `redactStoredResponses: false` when the stored results should
 include full responses (`omitResponsesFromBaseline` controls baseline files
 written to a path). Every API that stores results (the runner, suites, the
 reporter's result store, run and server comparisons, baseline files) removes
-each case's raw `response`, echoed `assertions.response`, and each host trace's
+each case's raw `response`, and each host trace's
 answer text (`finalText`) and tool outputs (event `output`) by default, the
 same way. Events, servers, arguments and usage are kept.
 
@@ -869,9 +827,9 @@ To compare two MCP servers, or two configurations of one, run the same dataset a
 
 ## Where to Go From Here
 
-1. **Start with direct mode** — Build smoke tests for every tool before adding LLM host cases. You need to know the tools work before testing whether they're discoverable.
+1. **Start with tool checks** — Write a Playwright test for every tool before adding eval cases. You need to know the tools work before testing whether they're discoverable.
 
-2. **Add 2–3 LLM host cases per tool** — Focus on the inputs most representative of how real users actually ask questions.
+2. **Add 2–3 eval cases per tool** — Focus on the inputs most representative of how real users actually ask questions.
 
 3. **Set `defaultTrials: 10`** — This is the minimum for meaningful accuracy numbers.
 

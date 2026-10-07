@@ -44,7 +44,6 @@ function createHostDataset(): EvalDataset {
     cases: [
       {
         id: 'search-discovery',
-        mode: 'host',
         input: 'Find the expense policy',
         assertions: {
           toolsTriggered: {
@@ -213,44 +212,6 @@ describe('runEvalDataset toolOverrides', () => {
     expect(result.failed).toBe(1);
     expect(result.caseResults[0]?.error).toContain(
       'toolOverrides variant "bad-variant" overrides unknown tool "missing_tool".'
-    );
-  });
-
-  it('keeps direct mode calls working when toolOverrides are present', async () => {
-    const mcp = createMockMCP([
-      {
-        name: 'search',
-        description: 'Search',
-        inputSchema: { type: 'object' },
-      },
-    ]);
-    const dataset: EvalDataset = {
-      name: 'direct-override-test',
-      cases: [
-        { id: 'direct-search', toolName: 'search', args: { query: 'x' } },
-      ],
-    };
-
-    const result = await runEvalDataset(
-      {
-        dataset,
-        toolOverrides: {
-          id: 'search-description-v2',
-          tools: {
-            search: {
-              description: 'Search internal documents.',
-            },
-          },
-        },
-      },
-      createContext(mcp)
-    );
-
-    expect(result.failed).toBe(0);
-    expect(mcp.callTool).toHaveBeenCalledWith('search', { query: 'x' });
-    expect(mcp.listTools).not.toHaveBeenCalled();
-    expect(result.caseResults[0]?.request?.toolOverrideVariantId).toBe(
-      'search-description-v2'
     );
   });
 });

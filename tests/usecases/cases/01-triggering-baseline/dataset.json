@@ -3,7 +3,6 @@
   "cases": [
     {
       "id": "planning-docs",
-      "mode": "host",
       "input": "Find recent docs about planning",
       "assertions": {
         "toolsTriggered": {
@@ -18,7 +17,6 @@
     },
     {
       "id": "billing-owner",
-      "mode": "host",
       "input": "Who owns the billing service?",
       "assertions": {
         "toolsTriggered": {

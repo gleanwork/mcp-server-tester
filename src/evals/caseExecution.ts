@@ -1,26 +1,16 @@
 /**
  * Case execution: the one place an eval case runs.
  *
- * Every path (a direct tool call or MCP request, the mst client on the
- * test's connection, or a suite's client) produces a `CaseExecution`. The
+ * Every path (the mst client on a Playwright test's connection, or a suite's
+ * client) produces a `CaseExecution`. The
  * runner reads its explicit fields and never inspects `response` to guess how
  * a case ran. Hosts and adapters produce traces; the runner owns every verdict.
  */
 import { randomUUID } from 'node:crypto';
-import { ProtocolError, type Client } from '@modelcontextprotocol/client';
-import { z } from 'zod';
 import type { MCPConfig } from '../config/mcpConfig.js';
-import { protocolErrorToToolResult } from '../mcp/callTool.js';
-import {
-  closeMCPClient,
-  createMCPClientForConfig,
-} from '../mcp/clientFactory.js';
-import {
-  createMCPFixture,
-  type MCPFixtureApi,
-} from '../mcp/fixtures/mcpFixture.js';
+import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import type { ClientDiagnostics, UsageMetrics } from '../types/index.js';
-import { isClientCase, type EvalCase } from './datasetTypes.js';
+import type { EvalCase } from './datasetTypes.js';
 import type { EvalArm, EvalManifest, ClientConfig } from './evalManifest.js';
 import { clientPatchOf, type ClientFields } from './clientFields.js';
 import type {
@@ -45,9 +35,6 @@ import {
 import { simulateMCPHost } from './mcpHost/mcpHostSimulation.js';
 import type { MCPHostSimulationResult } from './mcpHost/mcpHostTypes.js';
 
-/** Accepts any JSON-RPC result object (validated later by expectations). */
-const AnyResultSchema = z.looseObject({});
-
 /** The host payload validators and reports read: the simulation shape. */
 export type ClientResponse = MCPHostSimulationResult & {
   events?: TraceEvent[];
@@ -60,12 +47,6 @@ interface ExecutionBase {
   error?: string;
   /** Host time spent before the runner's timer started (batch traces). */
   preExecutionDurationMs?: number;
-}
-
-/** A direct tool call or MCP request. `response` is the raw result. */
-export interface DirectExecution extends ExecutionBase {
-  kind: 'direct';
-  response: unknown;
 }
 
 /** An LLM or desktop host run, adapted to the simulation-shaped response. */
@@ -92,15 +73,15 @@ export interface FailedExecution extends ExecutionBase {
   error: string;
 }
 
-/** How one iteration of a case ran. */
-export type CaseExecution = DirectExecution | HostExecution | FailedExecution;
+/** How one trial of a case ran. */
+export type CaseExecution = HostExecution | FailedExecution;
 
-const EXECUTION_KINDS = new Set<unknown>(['direct', 'host', 'failed']);
+const EXECUTION_KINDS = new Set<unknown>(['host', 'failed']);
 
 /**
  * Reject a custom executor's result that lacks a known `kind`. A pre-2.0
- * `{ response }` must fail loudly: read as direct, a host trace would silently
- * skip evidence gating and tool-name mapping.
+ * `{ response }`, or a `direct` execution, must fail loudly rather than be
+ * graded as something it isn't.
  */
 export function checkedExecution(value: unknown): CaseExecution {
   const kind =
@@ -110,13 +91,9 @@ export function checkedExecution(value: unknown): CaseExecution {
   if (EXECUTION_KINDS.has(kind)) return value as CaseExecution;
   return failedExecution(
     new Error(
-      "executeCase must return a CaseExecution with kind 'direct', 'host', or 'failed'. See the 2.0 migration guide."
+      "executeCase must return a CaseExecution with kind 'host' or 'failed'. See the 2.0 migration guide."
     )
   );
-}
-
-function directExecution(response: unknown): DirectExecution {
-  return { kind: 'direct', response };
 }
 
 export function failedExecution(error: unknown): FailedExecution {
@@ -170,8 +147,8 @@ export function playwrightClientOf(
 }
 
 /**
- * Run a case against the fixture: a direct tool call or request, or the mst
- * client on the test's connection. Failures become a `failed` execution.
+ * Run a case on the mst client, on the Playwright test's connection.
+ * Failures become a `failed` execution.
  */
 export async function executeEvalCase(
   evalCase: EvalCase,
@@ -179,55 +156,19 @@ export async function executeEvalCase(
   client?: ClientFields
 ): Promise<CaseExecution> {
   try {
-    if (isClientCase(evalCase)) {
-      if (!mcp) throw new Error('The mst client requires an MCP connection.');
-      if (!evalCase.input)
-        throw new Error(`Eval case ${evalCase.id}: a client case needs input`);
-      const config = getBuiltinHostConfig(
-        'mst',
-        playwrightClientOf(evalCase, client)
-      );
-      const simulation = withOriginalToolNames(
-        await simulateMCPHost(mcp, evalCase.input, config),
-        mcp
-      );
-      if (simulation.success) return simulationExecution(simulation);
-      throw new Error(simulation.error || 'The mst client failed.');
-    }
-    if (evalCase.request) {
-      if (evalCase.toolName)
-        throw new Error(
-          `Eval case ${evalCase.id}: request and toolName are mutually exclusive`
-        );
-      if (!mcp) throw new Error('Direct requests require an MCP connection.');
-      try {
-        return directExecution(
-          await mcp.request(
-            evalCase.request.method,
-            evalCase.request.params,
-            AnyResultSchema
-          )
-        );
-      } catch (error) {
-        // A JSON-RPC error is a result to assert on (expect.isError), exactly as
-        // protocol errors from tools/call are.
-        if (error instanceof ProtocolError)
-          return directExecution(protocolErrorToToolResult(error));
-        throw error;
-      }
-    }
-    if (!evalCase.toolName)
-      throw new Error(
-        `Eval case ${evalCase.id}: toolName or request is required for direct mode`
-      );
-    if (!evalCase.args)
-      throw new Error(
-        `Eval case ${evalCase.id}: args is required for direct mode`
-      );
-    if (!mcp) throw new Error('Direct tool calls require an MCP connection.');
-    return directExecution(
-      await mcp.callTool(evalCase.toolName, evalCase.args)
+    if (!mcp) throw new Error('The mst client requires an MCP connection.');
+    if (!evalCase.input)
+      throw new Error(`Eval case ${evalCase.id}: a case needs input`);
+    const config = getBuiltinHostConfig(
+      'mst',
+      playwrightClientOf(evalCase, client)
     );
+    const simulation = withOriginalToolNames(
+      await simulateMCPHost(mcp, evalCase.input, config),
+      mcp
+    );
+    if (simulation.success) return simulationExecution(simulation);
+    throw new Error(simulation.error || 'The mst client failed.');
   } catch (error) {
     // Simulation errors are already enriched by the adapter; pass them through.
     return failedExecution(error);
@@ -243,16 +184,13 @@ export interface SuiteCaseExecutorOptions {
   env?: Record<string, string | undefined>;
   /** Traces from a batch host, consumed once per case iteration. */
   batchTraces?: Map<string, ClientRunResult[]>;
-  /** Called with each per-case direct connection, e.g. to record its protocol. */
-  onDirectConnection?: (client: Client) => void;
   /** The arm's tool variant, which `proxy` serves to hosts that connect to their servers. */
   toolVariant?: { id: string; proxy: () => Promise<ToolSurfaceProxy> };
 }
 
 /**
- * The suite's per-case executor for hosts with `run()` or `runBatch()`.
- * Direct cases open a short-lived connection to the selected server; host
- * cases consume a batch trace or call the host's `run()`.
+ * The suite's per-case executor for clients with `run()` or `runBatch()`:
+ * a case consumes a batch trace or calls the client's `run()`.
  */
 export function createSuiteCaseExecutor(
   options: SuiteCaseExecutorOptions
@@ -262,43 +200,6 @@ export function createSuiteCaseExecutor(
     // The suite resolves a case's own client in full (see runEvalSuite).
     const declaration =
       (clientPatchOf(evalCase) as ClientConfig | undefined) ?? options.host;
-    if (!isClientCase(evalCase)) {
-      const selected =
-        servers.length === 1
-          ? servers[0]
-          : servers.find(
-              (server) =>
-                server.label &&
-                (evalCase.request
-                  ? evalCase.request.server === server.label
-                  : evalCase.toolName?.startsWith(`${server.label}.`))
-            );
-      if (!selected)
-        throw new Error(
-          'Direct cases require one server, a label-qualified tool name, or request.server.'
-        );
-      if (
-        evalCase.request?.server !== undefined &&
-        evalCase.request.server !== selected.label
-      )
-        throw new Error(
-          `request.server "${evalCase.request.server}" does not match the manifest's server${selected.label ? ` "${selected.label}"` : ''}.`
-        );
-      const client = await createMCPClientForConfig(selected);
-      options.onDirectConnection?.(client);
-      try {
-        const toolName =
-          selected.label && evalCase.toolName?.startsWith(`${selected.label}.`)
-            ? evalCase.toolName.slice(selected.label.length + 1)
-            : evalCase.toolName;
-        return await executeEvalCase(
-          { ...evalCase, toolName },
-          createMCPFixture(client)
-        );
-      } finally {
-        await closeMCPClient(client);
-      }
-    }
     const definition = getHost(declaration.type);
     if (batchTraces) {
       const trace = batchTraces.get(evalCase.id)?.shift();

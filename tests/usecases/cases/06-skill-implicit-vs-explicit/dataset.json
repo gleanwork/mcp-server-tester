@@ -3,7 +3,6 @@
   "cases": [
     {
       "id": "summarize-thread",
-      "mode": "host",
       "input": "Summarize the discussion in the design thread from this week",
       "assertions": {
         "toolsTriggered": {

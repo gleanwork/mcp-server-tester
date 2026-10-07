@@ -359,19 +359,12 @@ Load an eval dataset from a JSON file.
 
 - `path: string` - Path to dataset JSON file
 - `options?: object`
-  - `schemas?: Record<string, ZodSchema>` - Zod schemas for validation
+  - `validate?: boolean` - Validate the dataset against the schema (default: `true`)
 
 **Returns:** `Promise<EvalDataset>`
 
 ```typescript
-const dataset = await loadEvalDataset('./data/evals.json', {
-  schemas: {
-    'weather-response': z.object({
-      city: z.string(),
-      temperature: z.number(),
-    }),
-  },
-});
+const dataset = await loadEvalDataset('./data/evals.json');
 ```
 
 ### `runEvalDataset(options, context)`
@@ -383,7 +376,6 @@ Run an eval dataset. Expectations are defined per-case in the dataset's `asserti
 - `options: EvalRunnerOptions`
   - `dataset: EvalDataset` - Dataset to run
   - `plugins?: readonly Plugin[]` - Plugins whose extensions (for example `acme/completeness` judges) the cases use
-  - `schemas?: Record<string, ZodType>` - Schema registry for `assertions.schema` validation by name
   - `stopOnFailure?: boolean` - Stop on first failure (default: `false`)
   - `onCaseComplete?: (result: EvalCaseResult) => void` - Callback after each case completes
   - `concurrency?: number` - Max parallel cases (default: `1` = sequential)
@@ -594,7 +586,10 @@ await saveEvalRunComparison({ store, comparison, id: 'candidate-comparison' });
 
 **Result Structure:**
 
-```typescript snippet=src/evals/evalRunner.ts#L140-L219
+```typescript snippet=src/evals/evalRunner.ts#L126-L208
+/**
+ * Overall result of running an eval dataset
+ */
 export interface EvalRunnerResult {
   /**
    * Total number of cases
@@ -755,7 +750,7 @@ Run a single eval case. Useful when you want fine-grained control over individua
 - `options?: EvalCaseOptions`
   - `plugins?: readonly Plugin[]` - Plugins whose extensions the case uses
   - `datasetName?: string` - Dataset name for the result (default: `'single-case'`)
-  - `schemas?: Record<string, ZodType>` - Schema registry for named schema validation
+  - `client?: string`, `model?: string`, `clientOptions?: ClientOptions` - The client the case runs on, as for `runEvalDataset`
 
 **Returns:** `Promise<EvalCaseResult>`
 
@@ -766,12 +761,11 @@ test('single eval case', async ({ mcp }, testInfo) => {
   const result = await runEvalCase(
     {
       id: 'search-check',
-      mode: 'direct',
-      toolName: 'search',
-      args: { query: 'planning' },
-      assertions: { textContains: ['result'] },
+      input: 'Find the planning docs',
+      assertions: { toolsTriggered: { calls: [{ name: 'search' }] } },
     },
-    { mcp, testInfo }
+    { mcp, testInfo },
+    { client: 'mst', model: 'claude-haiku-4-5' }
   );
 
   expect(result.pass).toBe(true);
@@ -1011,19 +1005,6 @@ test('exact response', async ({ mcp }) => {
   const result = await mcp.callTool('calculate', { a: 2, b: 3 });
   expect(result).toMatchToolResponse({ result: 5 });
 });
-```
-
-For eval datasets, use the `assertions.response` field:
-
-```json
-{
-  "id": "calc-test",
-  "toolName": "calculate",
-  "args": { "a": 2, "b": 3 },
-  "assertions": {
-    "response": { "result": 5 }
-  }
-}
 ```
 
 ### `toContainToolText(text | text[])`
@@ -1412,7 +1393,7 @@ The `{ code, message, data? }` of the protocol error a result was made from, or 
 
 ### `EvalAssertions`
 
-```typescript snippet=src/evals/datasetTypes.ts#L188-L289
+```typescript snippet=src/evals/datasetTypes.ts#L144-L206
 /**
  * Unified expectation block for eval cases
  *
@@ -1420,42 +1401,14 @@ The `{ code, message, data? }` of the protocol error a result was made from, or 
  */
 export interface EvalAssertions {
   /**
-   * Exact response match (toMatchToolResponse)
-   */
-  response?: unknown;
-
-  /**
-   * Name of schema to validate against (toMatchToolSchema)
-   */
-  schema?: string;
-
-  /**
-   * Text substring(s) that must be present (toContainToolText)
+   * Text substring(s) the client's answer must contain (toContainToolText)
    */
   containsText?: string | string[];
 
   /**
-   * Regex pattern(s) that must match (toMatchToolPattern)
+   * Regex pattern(s) the client's answer must match (toMatchToolPattern)
    */
   matchesPattern?: string | string[];
-
-  /**
-   * Snapshot name for comparison (toMatchToolSnapshot)
-   */
-  snapshot?: string;
-
-  /**
-   * Snapshot sanitizers to apply
-   */
-  snapshotSanitizers?: SnapshotSanitizer[];
-
-  /**
-   * Error expectation (toBeToolError)
-   * - true: expects any error
-   * - false: expects no error
-   * - string: expects error containing this message
-   */
-  isError?: boolean | string | string[];
 
   /**
    * LLM-as-judge evaluation (toPassToolJudge)
@@ -1466,19 +1419,8 @@ export interface EvalAssertions {
   passesJudge?: JudgeExpectConfig | JudgeExpectConfig[];
 
   /**
-   * Response size validation (toHaveToolResponseSize)
-   */
-  responseSize?: {
-    /** Maximum allowed size in bytes */
-    maxBytes?: number;
-    /** Minimum required size in bytes */
-    minBytes?: number;
-  };
-
-  /**
-   * Asserts which tools the LLM called during a host simulation.
-   * Only meaningful for client cases with high-confidence
-   * structured tool evidence — direct mode has no tool call trace.
+   * Asserts which tools the client called. Needs structured tool evidence
+   * (a client that reports what it called).
    */
   toolsTriggered?: {
     /** Expected tool calls */
@@ -1503,8 +1445,8 @@ export interface EvalAssertions {
   };
 
   /**
-   * Asserts the number of tool calls made during a host simulation.
-   * External-host runs require high-confidence structured tool evidence.
+   * Asserts the number of tool calls the client made. Needs structured tool
+   * evidence.
    */
   toolCallCount?: {
     /** Minimum number of tool calls */
@@ -1519,13 +1461,14 @@ export interface EvalAssertions {
 
 ### `EvalCase`
 
-````typescript snippet=src/evals/datasetTypes.ts#L33-L147
+````typescript snippet=src/evals/datasetTypes.ts#L11-L103
 /**
- * A single eval test case.
+ * A single eval case: an input the client under test acts on, and what to
+ * assert about what it did. The case runs on the `client`, `model` and
+ * `clientOptions` it inherits from the suite (or the run), changed by its own.
  *
- * A case with `input` runs on the client under test: the `client`, `model`
- * and `clientOptions` it inherits from the suite (or the run), changed by its
- * own. A direct case has `toolName` and `args`, or `request`, instead.
+ * Direct tool calls aren't cases: write them as Playwright tests with
+ * `mcp.callTool()` and the matchers.
  */
 export interface EvalCase extends ClientFields {
   /**
@@ -1539,34 +1482,11 @@ export interface EvalCase extends ClientFields {
   description?: string;
 
   /**
-   * How the case runs: `'host'` on the client, `'direct'` as a tool call or
-   * request. Inferred: a case with `input` runs on the client.
-   */
-  mode?: EvalMode;
-
-  /** The MCP tool a direct case calls. */
-  toolName?: string;
-
-  /** The arguments a direct case calls `toolName` with. */
-  args?: Record<string, unknown>;
-
-  /**
-   * Direct mode alternative to `toolName`: send any MCP request (for example
-   * `skills/get` or `resources/read`) and run the expectations against its
-   * JSON result. A JSON-RPC error becomes an error result, so `expect.isError`
-   * works as it does for tools. Mutually exclusive with `toolName`.
-   *
-   * @example { "method": "skills/get", "params": { "uri": "skill://docs/SKILL.md" } }
-   */
-  request?: EvalDirectRequest;
-
-  /**
-   * The user's request the client acts on, sent as its prompt. A case with
-   * `input` runs on the client.
+   * The user's request the client acts on, sent as its prompt.
    *
    * @example "Get the weather for London and tell me if I need an umbrella"
    */
-  input?: string;
+  input: string;
 
   /** Additional metadata for this test case. */
   metadata?: Record<string, unknown>;

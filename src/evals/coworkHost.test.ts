@@ -1147,8 +1147,8 @@ describe('V2 Cowork host', () => {
   });
   it('expands iterations once and rejects duplicate IDs before UI', async () => {
     const cases = [
-      { id: 'first', mode: 'host' as const, input: 'one', trials: 2 },
-      { id: 'second', mode: 'host' as const, input: 'two' },
+      { id: 'first', input: 'one', trials: 2 },
+      { id: 'second', input: 'two' },
     ];
     const queues = await prepareHostBatch(
       COWORK_HOST,
@@ -1180,17 +1180,15 @@ describe('V2 Cowork host', () => {
         cases: [
           {
             id: 'one',
-            mode: 'host',
             input: 'one',
             assertions: { toolCallCount: { min: 1 } },
           },
           {
             id: 'two',
-            mode: 'host',
             input: 'two',
             assertions: { toolCallCount: { min: 2 } },
           },
-          { id: 'excluded', mode: 'host', input: 'excluded' },
+          { id: 'excluded', input: 'excluded' },
         ],
       })
     );

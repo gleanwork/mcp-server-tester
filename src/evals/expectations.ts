@@ -1,6 +1,6 @@
 /**
- * The expectation evaluator: turns an eval case's `expect` block and what the
- * case produced into expectation results.
+ * The expectation evaluator: turns an eval case's `assertions` and what the
+ * client did into expectation results.
  *
  * It owns the rules every execution path shares:
  * - whether the evidence can support tool-call assertions (decided once, here);
@@ -10,8 +10,6 @@
  * Validators stay pure leaves: this module decides what to grade and with
  * which settings, then calls them.
  */
-import type { Expect } from '@playwright/test';
-import type { ZodType } from 'zod';
 import type {
   EvalCase,
   EvalAssertions,
@@ -23,14 +21,9 @@ import type { JudgeCaseSource } from '../judge/judgeContract.js';
 import type { ExternalHostMetadata } from './externalHost/types.js';
 import type { EvalExpectationResult } from '../types/index.js';
 import type { EvalCaseResult } from '../types/reporter.js';
-import { BUILTIN_RESULT_SCHEMAS } from './builtinResultSchemas.js';
 import {
-  validateResponse,
-  validateSchema,
   validateText,
   validatePattern,
-  validateError,
-  validateSize,
   validateToolCalls,
   validateToolCallCount,
   validateJudge,
@@ -41,30 +34,19 @@ import {
   matchesIdentity,
   matchToolCalls,
 } from '../assertions/validators/toolCalls.js';
-import {
-  playwrightSnapshotStore,
-  validateSnapshot,
-} from '../assertions/validators/snapshot.js';
 import { judgeOwnOptions } from '../judge/evaluateJudge.js';
 import { judgeNameOf } from '../assertions/validators/judge.js';
 
 /** What a case produced, in the form the evaluator grades. */
 export interface GradedExecution {
-  /** What validators grade: a direct result, or the host response with native tool names mapped. */
+  /** What validators grade: the client's response with native tool names mapped. */
   response: unknown;
-  /** The host response as reported; the tool trace shows its names. Absent for direct cases. */
+  /** The client's response as reported; the tool trace shows its names. */
   hostResponse?: ClientResponse;
-  /** Normalized host evidence. Absent for direct cases and hosts that don't report it. */
+  /** Normalized client evidence. Absent for clients that don't report it. */
   evidence?: TraceEvidence;
   /** External host metadata, whose trace source decides tool-evidence quality. */
   externalHost?: ExternalHostMetadata;
-}
-
-export interface ExpectationOptions {
-  /** Named schemas for `expect.schema`, checked before the built-in schemas. */
-  schemas?: Record<string, ZodType>;
-  /** Playwright `expect`, required for `expect.snapshot`. */
-  playwrightExpect?: Expect;
 }
 
 export interface ExpectationOutcome {
@@ -206,36 +188,6 @@ async function evaluateJudges(
   };
 }
 
-async function evaluateSnapshot(
-  response: unknown,
-  expectBlock: EvalAssertions & { snapshot: string },
-  playwrightExpect: Expect | undefined
-): Promise<EvalExpectationResult> {
-  if (!playwrightExpect)
-    return {
-      pass: false,
-      details: 'Snapshot testing requires expect in context',
-    };
-  try {
-    const validation = await validateSnapshot(response, expectBlock.snapshot, {
-      sanitizers: expectBlock.snapshotSanitizers,
-      store: playwrightSnapshotStore(playwrightExpect),
-    });
-    return {
-      pass: validation.pass,
-      details: validation.pass
-        ? `Matches snapshot "${expectBlock.snapshot}"`
-        : validation.message,
-    };
-  } catch (err) {
-    // An invalid sanitizer is reported on the expectation, not thrown.
-    return {
-      pass: false,
-      details: err instanceof Error ? err.message : String(err),
-    };
-  }
-}
-
 function isToolCall(entry: { kind?: string }): boolean {
   return (entry.kind ?? 'tool_call') === 'tool_call';
 }
@@ -277,35 +229,14 @@ function toolTraceView(
  * support them; every other expectation is graded normally.
  */
 export async function evaluateExpectations(
-  evalCase: Pick<EvalCase, 'mode' | 'assertions' | 'judgeReps'> &
+  evalCase: Pick<EvalCase, 'assertions' | 'judgeReps'> &
     JudgeCaseSource & { assertions: EvalAssertions },
-  graded: GradedExecution,
-  options: ExpectationOptions = {}
+  graded: GradedExecution
 ): Promise<ExpectationOutcome> {
   const expectBlock = evalCase.assertions;
   const { response } = graded;
   const results: EvalCaseResult['expectations'] = {};
   const outcome: ExpectationOutcome = { expectations: results };
-
-  if (expectBlock.response !== undefined) {
-    const validation = validateResponse(response, expectBlock.response);
-    results.exact = { pass: validation.pass, details: validation.message };
-  }
-
-  if (expectBlock.schema !== undefined) {
-    const schema =
-      options.schemas?.[expectBlock.schema] ??
-      BUILTIN_RESULT_SCHEMAS[expectBlock.schema];
-    if (!schema) {
-      results.schema = {
-        pass: false,
-        details: `Schema "${expectBlock.schema}" not found in schemas registry`,
-      };
-    } else {
-      const validation = validateSchema(response, schema);
-      results.schema = { pass: validation.pass, details: validation.message };
-    }
-  }
 
   if (expectBlock.containsText !== undefined) {
     const validation = validateText(response, expectBlock.containsText);
@@ -318,16 +249,6 @@ export async function evaluateExpectations(
   if (expectBlock.matchesPattern !== undefined) {
     const validation = validatePattern(response, expectBlock.matchesPattern);
     results.regex = { pass: validation.pass, details: validation.message };
-  }
-
-  if (expectBlock.isError !== undefined) {
-    const validation = validateError(response, expectBlock.isError);
-    results.error = { pass: validation.pass, details: validation.message };
-  }
-
-  if (expectBlock.responseSize !== undefined) {
-    const validation = validateSize(response, expectBlock.responseSize);
-    results.size = { pass: validation.pass, details: validation.message };
   }
 
   const gap =
@@ -380,13 +301,6 @@ export async function evaluateExpectations(
       hostResponse: graded.hostResponse,
       evidence: graded.evidence,
     });
-
-  if (expectBlock.snapshot !== undefined)
-    results.snapshot = await evaluateSnapshot(
-      response,
-      { ...expectBlock, snapshot: expectBlock.snapshot },
-      options.playwrightExpect
-    );
 
   return outcome;
 }

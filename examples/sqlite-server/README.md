@@ -6,7 +6,7 @@ This example demonstrates testing the [SQLite MCP Server](https://github.com/joh
 
 - ✅ Testing a real, official MCP server (not a mock)
 - ✅ Using `fixturify-project` + `better-sqlite3` for database fixtures
-- ✅ Both **direct mode** (specific SQL queries) and **LLM host mode** (natural language)
+- ✅ Tool tests (specific SQL queries), written by hand and data-driven from `tool-checks.json`
 - ✅ Database operations: queries, schema inspection, joins
 - ✅ Schema validation with Zod
 - ✅ Programmatic database creation and seeding
@@ -35,16 +35,10 @@ Note: The SQLite MCP server (`mcp-server-sqlite-npx`) is run via `npx -y` and do
 
 ## Running Tests
 
-### Run all tests (direct mode only)
+### Run all tests
 
 ```bash
 npm test
-```
-
-### Run with LLM host mode tests (requires API key)
-
-```bash
-ANTHROPIC_API_KEY=your-key-here npm test
 ```
 
 ### Run in UI mode
@@ -127,27 +121,22 @@ test.extend({
 
 ## Test Cases
 
-### Direct Mode Tests
+### Tool Tests (tool-checks.json)
 
-Direct SQL queries to specific tools:
+Each entry calls one tool, and the spec turns it into a Playwright test:
 
 ```json
 {
-  "id": "query-all-users",
-  "mode": "direct",
-  "toolName": "query",
-  "args": {
-    "sql": "SELECT * FROM users"
-  },
-  "assertions": {
-    "schema": "queryResult"
-  }
+  "name": "should query all users",
+  "tool": "read_query",
+  "args": { "query": "SELECT * FROM users" },
+  "containsText": ["alice@example.com"]
 }
 ```
 
-### LLM Host Mode Tests
+### Eval Cases
 
-Natural language inputs where the LLM chooses which tool and constructs the query:
+This example has no evals; see the [filesystem example](../filesystem-server/) for some. An eval case gives a model a natural-language input, and the model chooses which tool to call and constructs the query:
 
 ```json
 {
@@ -208,7 +197,7 @@ sqlite-server/
 ├── README.md           # This file
 ├── package.json        # Dependencies and scripts
 ├── playwright.config.ts # Playwright configuration
-├── eval-dataset.json   # Test cases (direct + LLM host)
+├── tool-checks.json    # Data-driven tool tests
 ├── schemas/
 │   └── queryResultSchema.ts # Zod schemas for validation
 └── tests/
@@ -241,14 +230,6 @@ Make sure previous test runs completed properly. Clean temp directories:
 rm -rf /tmp/sqlite-test-*
 ```
 
-### LLM tests skipped
-
-LLM host mode tests require an Anthropic API key:
-
-```bash
-export ANTHROPIC_API_KEY="your-key"
-```
-
 ### Build errors with better-sqlite3
 
 better-sqlite3 is a native module. If you encounter build errors:
@@ -259,7 +240,4 @@ npm rebuild better-sqlite3
 
 ## Cost Considerations
 
-- **Direct mode**: Free, no API costs
-- **LLM host mode**: Incurs API costs per test run (Anthropic Claude: ~$0.003 per 1K tokens)
-
-For cost-effective testing, use direct mode for most tests and LLM host mode for critical user journeys only.
+Tool tests make no model calls, so they cost nothing to run. Evals call a model's API on every trial: use them for critical user journeys.

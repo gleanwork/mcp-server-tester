@@ -8,16 +8,8 @@ const manifest: EvalManifest = {
 };
 
 describe('buildEvalDataset canonical ingestion', () => {
-  it('accepts minimal direct cases without mode, args, expectations, or a host', () => {
-    const raw = { name: 'canonical', cases: [{ id: 'a', toolName: 'search' }] };
-    expect(buildEvalDataset(raw, undefined, manifest).cases).toEqual(raw.cases);
-  });
-
-  it('accepts direct request cases, and rejects direct cases with neither target', () => {
-    const raw = {
-      name: 'canonical',
-      cases: [{ id: 'a', request: { method: 'skills/list' } }],
-    };
+  it('accepts minimal cases without expectations or a client, and rejects a case without input', () => {
+    const raw = { name: 'canonical', cases: [{ id: 'a', input: 'Find it' }] };
     expect(buildEvalDataset(raw, undefined, manifest).cases).toEqual(raw.cases);
     expect(() =>
       buildEvalDataset(
@@ -25,25 +17,21 @@ describe('buildEvalDataset canonical ingestion', () => {
         undefined,
         manifest
       )
-    ).toThrow(/toolName or request/);
+    ).toThrow(/input/);
   });
 
   it.each([
-    { id: 'a', toolName: 'search', args: { query: 'policy' } },
-    { id: 'a', mode: 'direct', toolName: 'search', args: {} },
     {
       id: 'a',
-      mode: 'host',
       input: 'Find policy',
       client: 'custom-host',
       clientOptions: { option: true },
     },
     {
       id: 'a',
-      mode: 'host',
       input: 'Find policy',
     },
-  ])('preserves canonical mode and case host override: $mode', (case_) => {
+  ])('preserves a case and its own client: $client', (case_) => {
     const dataset = buildEvalDataset(
       {
         name: 'canonical',
@@ -62,7 +50,7 @@ describe('buildEvalDataset canonical ingestion', () => {
   it('preserves explicit custom judge assertions without applying manifest policy', () => {
     const case_ = {
       id: 'a',
-      toolName: 'search',
+      input: 'Find it',
       assertions: {
         passesJudge: { judge: 'my-judge', reference: 'answer', threshold: 0.7 },
       },
@@ -80,7 +68,6 @@ describe('buildEvalDataset canonical ingestion', () => {
     { id: 'a', tool: 'search', assertions: { isError: false } },
     {
       id: 'a',
-      mode: 'host',
       input: 'find policy',
       expected_tool: 'search',
     },
@@ -107,10 +94,9 @@ describe('buildEvalDataset canonical ingestion', () => {
         {
           name: 'mixed',
           cases: [
-            { id: 'good', toolName: 'search' },
+            { id: 'good', input: 'Find it' },
             {
               id: 'legacy',
-              mode: 'host',
               input: 'Find policy',
               expected_tool: 'search',
             },
@@ -125,11 +111,11 @@ describe('buildEvalDataset canonical ingestion', () => {
   it('reports invalid canonical cases and empty datasets', () => {
     expect(() =>
       buildEvalDataset(
-        { name: 'bad', cases: [{ id: 'a', toolName: 123 }] },
+        { name: 'bad', cases: [{ id: 'a', input: 123 }] },
         undefined,
         manifest
       )
-    ).toThrow(/toolName/);
+    ).toThrow(/input/);
     expect(() =>
       buildEvalDataset({ name: 'empty', cases: [] }, undefined, manifest)
     ).toThrow(/at least one case/);
@@ -139,9 +125,9 @@ describe('buildEvalDataset canonical ingestion', () => {
     const raw = {
       name: 'tagged',
       cases: [
-        { id: 'skip', toolName: 'search', tags: ['other'] },
-        { id: 'keep', toolName: 'search', tags: ['wanted'] },
-        { id: 'limit', toolName: 'search', tags: ['wanted'] },
+        { id: 'skip', input: 'Find it', tags: ['other'] },
+        { id: 'keep', input: 'Find it', tags: ['wanted'] },
+        { id: 'limit', input: 'Find it', tags: ['wanted'] },
       ],
     };
     expect(
@@ -160,8 +146,8 @@ describe('buildEvalDataset canonical ingestion', () => {
         {
           name: 'canonical',
           cases: [
-            { id: 'a', toolName: 'search' },
-            { id: 'b', toolName: 'search' },
+            { id: 'a', input: 'Find it' },
+            { id: 'b', input: 'Find it' },
           ],
         },
         undefined,
@@ -177,9 +163,7 @@ describe('dataset errors', () => {
       buildEvalDataset(
         {
           name: 'search',
-          cases: [
-            { id: 'a', toolName: 't', args: {}, assertions: { regex: ['x'] } },
-          ],
+          cases: [{ id: 'a', input: 'x', assertions: { regex: ['x'] } }],
         },
         undefined,
         manifest

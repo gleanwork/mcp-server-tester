@@ -28,7 +28,7 @@ test('server exposes required tools', async ({ mcp }) => {
 });
 ```
 
-Playwright tests are fast, deterministic, and designed for CI. Use them for regression testing, schema validation, and protocol conformance. The framework includes built-in conformance checks for the MCP spec.
+Playwright tests are fast, deterministic, and designed for CI. Use them for regression testing, schema validation, and protocol conformance. The framework includes built-in conformance checks for the MCP spec. `mst generate` records tool calls as a spec file you can edit (see [CLI](docs/cli.md)).
 
 Available matchers:
 
@@ -48,7 +48,7 @@ Available matchers:
 
 ## Eval Datasets
 
-Eval datasets let you define test cases as JSON files and run them with `runEvalDataset()`. Each case specifies a tool call and one or more assertions.
+Eval datasets define cases as JSON: an `input` the client under test acts on, and assertions about what it did. Run them with `runEvalDataset()` in a Playwright test, on the `mst` client, or with `mst run` on any client (Claude Code, Cowork, ChatGPT). Checks on a single tool's response belong in Playwright tests, above.
 
 ```json snippet=snippets/eval-dataset.json
 {
@@ -56,23 +56,34 @@ Eval datasets let you define test cases as JSON files and run them with `runEval
   "cases": [
     {
       "id": "read-config",
-      "toolName": "read_file",
-      "args": {
-        "path": "/tmp/config.json"
-      },
+      "input": "What version is set in the app's config file?",
       "assertions": {
-        "schema": "file-content",
-        "containsText": ["version", "name"]
+        "toolsTriggered": {
+          "calls": [
+            {
+              "name": "read_file",
+              "required": true
+            }
+          ]
+        },
+        "containsText": "1.0.0"
       }
     },
     {
-      "id": "read-readme",
-      "toolName": "read_file",
-      "args": {
-        "path": "/tmp/README.md"
-      },
+      "id": "summarize-readme",
+      "input": "Summarize the README in two sentences",
       "assertions": {
-        "snapshot": "readme-snapshot"
+        "toolsTriggered": {
+          "calls": [
+            {
+              "name": "read_file",
+              "required": true
+            }
+          ]
+        },
+        "passesJudge": {
+          "rubric": "groundedness"
+        }
       }
     }
   ]
@@ -82,27 +93,26 @@ Eval datasets let you define test cases as JSON files and run them with `runEval
 ```typescript snippet=snippets/run-eval-dataset.ts
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
 import { loadEvalDataset, runEvalDataset } from '@gleanwork/mcp-server-tester';
-import { z } from 'zod';
 
 test('file operations eval', async ({ mcp }, testInfo) => {
-  const dataset = await loadEvalDataset('./data/evals.json', {
-    schemas: { 'file-content': z.object({ content: z.string() }) },
-  });
-  const result = await runEvalDataset({ dataset }, { mcp, testInfo });
+  const dataset = await loadEvalDataset('./data/evals.json');
+  const result = await runEvalDataset(
+    { dataset, client: 'mst', model: 'claude-haiku-4-5', defaultTrials: 5 },
+    { mcp, testInfo }
+  );
   expect(result.passed).toBe(result.total);
 });
 ```
 
-Supported assertion types:
+Supported assertions:
 
-| Type             | Description                                     |
-| ---------------- | ----------------------------------------------- |
-| `containsText`   | Response includes expected substrings           |
-| `schema`         | Response validates against a Zod schema         |
-| `regex`          | Response matches a pattern                      |
-| `snapshot`       | Response matches a saved baseline               |
-| `judge`          | LLM evaluates response quality against a rubric |
-| `toolsTriggered` | LLM called the expected tools (LLM host mode)   |
+| Assertion        | Description                                             |
+| ---------------- | ------------------------------------------------------- |
+| `containsText`   | The client's answer includes expected substrings        |
+| `matchesPattern` | The client's answer matches a pattern                   |
+| `passesJudge`    | A judge scores the answer against a rubric or reference |
+| `toolsTriggered` | The client called the expected tools                    |
+| `toolCallCount`  | The client made a number of tool calls in a range       |
 
 ### LLM host mode
 
@@ -217,7 +227,7 @@ This installs skills globally so they're available across all your projects. Fou
 | Skill                 | Description                                                 |
 | --------------------- | ----------------------------------------------------------- |
 | `mcp-tester-guide`    | Framework reference — matchers, config, auth, anti-patterns |
-| `write-mcp-test`      | Generate direct-mode Playwright tests                       |
+| `write-mcp-test`      | Generate Playwright tool tests                              |
 | `write-mcp-eval`      | Generate data-driven eval datasets                          |
 | `write-mcp-host-eval` | Generate LLM host simulation evals                          |
 
@@ -286,7 +296,7 @@ npx mst batch \
 Use `arms` to compare server sets or host configurations. An arm can override
 servers, client, model, client options, tool maps, input templates, metrics, and judges.
 The canonical execution primitives remain `EvalDataset`, `EvalCase`,
-`EvalMode`, `MCPConfig`, and `runEvalDataset`.
+`MCPConfig`, and `runEvalDataset`.
 
 Plugins add dataset sources, hosts, judges, metrics and result stores. A plugin
 is a plain default-exported object in ESLint's shape, and its extensions are

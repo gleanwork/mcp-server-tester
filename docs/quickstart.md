@@ -2,22 +2,23 @@
 
 This guide covers detailed setup and configuration for `@gleanwork/mcp-server-tester`.
 
-## Before You Start: Two Testing Modes
+## Before You Start: Tests and Evals
 
-There are two ways to test an MCP server with this library — choose before you write your first test:
+There are two ways to test an MCP server with this library:
 
-| Kind                 | What it tests                                                      | When to use                                                         |
-| -------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------- |
-| **Direct**           | You call a tool with specific args and assert on the output        | Regression tests, CI, smoke checks — fast and deterministic         |
-| **Client** (`input`) | A client and its model receive your tools and decide which to call | Testing tool discoverability — requires 10+ trials, costs API money |
+| Kind               | What it tests                                                      | When to use                                                         |
+| ------------------ | ------------------------------------------------------------------ | ------------------------------------------------------------------- |
+| **Test**           | You call a tool with specific args and assert on the output        | Regression tests, CI, smoke checks — fast and deterministic         |
+| **Eval** (`input`) | A client and its model receive your tools and decide which to call | Testing tool discoverability — requires 10+ trials, costs API money |
 
-Start with direct mode. Add LLM host mode when you need to validate that your tool descriptions work for real users.
+Start with tests. Add evals when you need to validate that your tool descriptions work for real users.
 
 ## Table of Contents
 
 - [CLI Initialization](#cli-initialization)
 - [Manual Setup](#manual-setup)
 - [Using MCP Fixtures](#using-mcp-fixtures)
+- [Recording Tool Tests](#recording-tool-tests)
 - [Creating Eval Datasets](#creating-eval-datasets)
 - [Running Evals](#running-evals)
 
@@ -112,11 +113,9 @@ Available fixtures:
 
 See the [API Reference](./api-reference.md) for complete fixture documentation.
 
-## Creating Eval Datasets
+## Recording Tool Tests
 
-### Using the Interactive Generator (Recommended)
-
-The easiest way to create datasets is using the interactive generator:
+The interactive generator calls your server's tools and writes each call as a Playwright test:
 
 ```bash
 npx mst generate
@@ -145,20 +144,20 @@ Suggested expectations:
   Regex patterns:
     - \d+
 
-? Test case ID: weather-london
+? Test name: weather-london
 ? Add text contains expectations? Yes
 ? Add regex expectations? Yes
-✓ Added test case "weather-london"
+✓ Added test "weather-london"
 
-? Add another test case? No
-✓ Dataset saved to data/dataset.json
+? Add another test? No
+✓ Spec saved to tests/generated.spec.ts
 ```
 
 See the [CLI Guide](./cli.md) for more details on the `generate` command.
 
-### Manual Dataset Creation
+## Creating Eval Datasets
 
-Create a dataset file manually (e.g., `data/evals.json`):
+An eval case gives the client under test an input, and asserts on what it did. Create a dataset file (e.g., `data/evals.json`):
 
 ```json
 {
@@ -166,40 +165,40 @@ Create a dataset file manually (e.g., `data/evals.json`):
   "cases": [
     {
       "id": "london-weather",
-      "toolName": "get_weather",
-      "args": { "city": "London" },
+      "input": "What's the weather like in London today?",
       "assertions": {
-        "schema": "weather-response",
-        "containsText": ["London", "temperature"]
+        "toolsTriggered": {
+          "calls": [
+            {
+              "name": "get_weather",
+              "required": true
+            }
+          ]
+        },
+        "containsText": "London"
       }
     }
   ]
 }
 ```
 
-Expectations are declared per-case in the `assertions` block. The `schema` field names a Zod schema registered when loading the dataset. See the [Expectations Guide](./expectations.md) for all available fields.
+Assertions are declared per case in the `assertions` block: which tools the client called (`toolsTriggered`, `toolCallCount`), its answer (`containsText`, `matchesPattern`), and judges (`passesJudge`). See the [Evals Guide](./evals-guide.md).
 
 ## Running Evals
 
-Use the `runEvalDataset` function in your tests:
+Use `runEvalDataset` in a test, naming the client and model. In a Playwright test the `mst` client runs the model against the test's MCP connection (it calls the model's API, so set its key, such as `ANTHROPIC_API_KEY`):
 
 ```typescript snippet=snippets/quickstart-eval-runner.ts
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
 import { loadEvalDataset, runEvalDataset } from '@gleanwork/mcp-server-tester';
-import { z } from 'zod';
 
 test('run weather evals', async ({ mcp }, testInfo) => {
-  const WeatherSchema = z.object({
-    city: z.string(),
-    temperature: z.number(),
-    conditions: z.string(),
-  });
+  const dataset = await loadEvalDataset('./data/evals.json');
 
-  const dataset = await loadEvalDataset('./data/evals.json', {
-    schemas: { 'weather-response': WeatherSchema },
-  });
-
-  const result = await runEvalDataset({ dataset }, { mcp, testInfo });
+  const result = await runEvalDataset(
+    { dataset, client: 'mst', model: 'claude-haiku-4-5', defaultTrials: 5 },
+    { mcp, testInfo }
+  );
 
   expect(result.passed).toBe(result.total);
 });

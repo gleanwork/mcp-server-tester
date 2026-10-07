@@ -14,8 +14,7 @@ describe('assertDatasetNamespaces', () => {
         cases: [
           {
             id: 'a',
-            toolName: 't',
-            args: {},
+            input: 'x',
             assertions: { passesJudge: { judge: 'other/x' } },
           },
         ],

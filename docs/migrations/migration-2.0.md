@@ -26,6 +26,7 @@ This guide covers upgrading from 1.x (the last 1.x release is 1.1.1). Features f
 - [`getResponseSizeBytes` is no longer exported](#getresponsesizebytes-is-no-longer-exported)
 - [`runVariantExperiment` needs clear evidence to recommend a variant](#runvariantexperiment-needs-clear-evidence-to-recommend-a-variant)
 - [Client cases name a client and model, not `mcpHostConfig`](#client-cases-name-a-client-and-model-not-mcphostconfig)
+- [Direct cases are Playwright tests](#direct-cases-are-playwright-tests)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
 ---
@@ -422,7 +423,55 @@ await runEvalDataset(
 - Results record the case's client and model as `request.client` and `request.model`, instead of `request.mcpHostConfig` and `request.externalHost`.
 - Plugin clients: `ClientRunContext.mcpHostConfig` is gone. A case's options arrive in the client config the suite resolves.
 - A case with `input` and a `toolName` or `request` fails validation: a case runs on the client or calls a tool directly, not both. Remove a placeholder `toolName` and `args` from client cases.
-- Direct cases are unchanged for now.
+- Direct cases are Playwright tests now: see [Direct cases are Playwright tests](#direct-cases-are-playwright-tests).
+
+## Direct cases are Playwright tests
+
+**Affects:** datasets with direct cases (`toolName` and `args`, or `request`), `mode` on a case, the `response`, `schema`, `snapshot`, `snapshotSanitizers`, `isError` and `responseSize` assertions, the `schemas` options of `loadEvalDataset` and `runEvalDataset`, `EvalContext.expect`, custom executors that return `kind: 'direct'`, and `mst generate`.
+
+An eval case is now always an `input` the client acts on. A check on a single tool's response is a Playwright test: call the tool and assert with the matcher that replaces each assertion. The old keys fail with a message naming the replacement.
+
+```json
+// Before: a direct case
+{
+  "id": "weather-london",
+  "toolName": "get_weather",
+  "args": { "city": "London" },
+  "assertions": {
+    "schema": "weather",
+    "containsText": "London",
+    "isError": false
+  }
+}
+```
+
+```typescript
+// Now: a Playwright test
+test('weather-london', async ({ mcp }) => {
+  const result = await mcp.callTool('get_weather', { city: 'London' });
+  expect(result).not.toBeToolError();
+  expect(result).toMatchToolSchema(WeatherSchema);
+  expect(result).toContainToolText('London');
+});
+```
+
+| Removed assertion | Matcher                                     |
+| ----------------- | ------------------------------------------- |
+| `response`        | `toMatchToolResponse(expected)`             |
+| `schema`          | `toMatchToolSchema(zodSchema)`              |
+| `snapshot`        | `toMatchToolSnapshot(name, sanitizers?)`    |
+| `isError`         | `toBeToolError()` / `.not.toBeToolError()`  |
+| `responseSize`    | `toHaveToolResponseSize({ minBytes, ... })` |
+| `containsText`    | `toContainToolText(text)`                   |
+| `matchesPattern`  | `toMatchToolPattern(patterns)`              |
+| `passesJudge`     | `toPassToolJudge(rubric, options?)`         |
+
+- To keep tool checks in JSON, loop over the file in a spec and make each entry a `test()`; the [filesystem example](../../examples/filesystem-server/) does this with `tool-checks.json`.
+- A `request` case becomes `mcp.request(method, params, schema)` in a test; `mcp.skills` covers the skills methods. A JSON-RPC error rejects with its `code`. The built-in `SkillsListResult`-style schemas are gone with `assertions.schema`; use `validateSkillEntry()`.
+- `containsText`, `matchesPattern`, `passesJudge`, `toolsTriggered` and `toolCallCount` stay as eval assertions, on what the client did.
+- `mst generate` writes a Playwright spec (default `tests/generated.spec.ts`) instead of a dataset, and adds tests to a spec it wrote before. `mst init` scaffolds a tool test and a client-case dataset.
+- `executeCase` returns `kind: 'host'` or `'failed'`; `'direct'` fails. Results no longer carry `request.mode`. `JudgeCase.input.tool` is gone (judges see `input.prompt`).
+- `defaultTrials` and `defaultPassThreshold` now apply to every case.
 
 ## New in 2.0 (non-breaking)
 
@@ -444,5 +493,4 @@ await runEvalDataset(
 
 - `runCrossEraChecks()` to check a server serves every era the same.
 - `mcp.skills`, skills conformance checks, and a `skills` option on the `mst` client, for comparing modes as arms. See [Agent Skills](../skills.md).
-- Direct eval cases with `request` instead of `toolName`, and built-in schemas for skills and discover results.
 - Eval run metadata records the protocol (`metadata.protocol`, stored `protocolVersion` / `protocolEra`).

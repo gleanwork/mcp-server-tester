@@ -74,10 +74,7 @@ EvalDataset (root)
     └── EvalCase
         ├── id                 (string, required)
         ├── description        (string)
-        ├── mode               ("direct" | "host"; inferred: a case with input runs on the client)
-        ├── toolName           (string)  — a direct case's tool
-        ├── args               (object)  — a direct case's arguments
-        ├── input              (string)  — the prompt a client case sends
+        ├── input              (string, required)  — the prompt the client acts on
         ├── client             (string)  — the client, inherited from the suite or run
         ├── model              (string)  — the model the client uses
         ├── clientOptions      (object)  — the client's own options
@@ -88,13 +85,8 @@ EvalDataset (root)
         ├── tags               (string[])
         ├── metadata           (object)
         └── assertions         (EvalAssertions)
-            ├── response           — exact match
-            ├── schema             — named Zod schema
-            ├── containsText       — substring(s)
-            ├── matchesPattern     — regex(es)
-            ├── snapshot           — snapshot name
-            ├── snapshotSanitizers — SnapshotSanitizer[]
-            ├── isError            — boolean | string | string[]
+            ├── containsText       — substring(s) of the client's answer
+            ├── matchesPattern     — regex(es) the answer matches
             ├── passesJudge
             │   ├── rubric         (string, required)
             │   ├── reference
@@ -107,17 +99,14 @@ EvalDataset (root)
             │   ├── temperature    (number 0–1)
             │   ├── maxBudgetUsd   (number)
             │   └── maxToolOutputSize (integer)
-            ├── responseSize
-            │   ├── maxBytes       (integer)
-            │   └── minBytes       (integer)
-            ├── toolsTriggered     — client cases only
+            ├── toolsTriggered
             │   ├── calls[]
             │   │   ├── name       (string, required)
             │   │   ├── arguments  (object, partial match)
             │   │   └── required   (boolean, default true)
             │   ├── order          ("strict" | "any", default "any")
             │   └── exclusive      (boolean, default false)
-            └── toolCallCount      — client cases only
+            └── toolCallCount
                 ├── min            (integer)
                 ├── max            (integer)
                 └── exact          (integer)
@@ -146,6 +135,5 @@ The schema is hand-maintained alongside the TypeScript types in:
 
 - `src/evals/datasetTypes.ts` — Zod schemas and TypeScript interfaces
 - `src/evals/mcpHost/mcpHostTypes.ts` — the `LLMProvider` union
-- `src/assertions/validators/types.ts` — `SnapshotSanitizer` types
 
 If you add a new provider, a new expectation field, or change an existing type, update `schema/eval-dataset.schema.json` to match.

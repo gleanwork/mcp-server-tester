@@ -44,15 +44,10 @@ import { createSuiteCaseExecutor } from './caseExecution.js';
 import { mergeSuiteJudges } from './expectations.js';
 import { prepareHostBatch } from './prepareHostBatch.js';
 import type { EvalRunnerResult } from './evalRunner.js';
-import {
-  EvalAssertionsSchema,
-  isClientCase,
-  type EvalDataset,
-} from './datasetTypes.js';
+import { EvalAssertionsSchema, type EvalDataset } from './datasetTypes.js';
 import { selectEvalCases } from './buildEvalDataset.js';
 import type { EvalCaseResult } from '../types/reporter.js';
-import type { MCPProtocolInfo, UsageMetrics } from '../types/index.js';
-import { getProtocolInfo } from '../mcp/protocol.js';
+import type { UsageMetrics } from '../types/index.js';
 import type { Plugin } from '../plugins/plugin.js';
 import { assertDatasetNamespaces, loadSuitePlugins } from './suitePlugins.js';
 import { getDatasetSource } from './builtinDatasetSources.js';
@@ -644,7 +639,7 @@ export async function runEvalSuite(
         const runHost =
           typeof host.definition.run === 'function' ||
           typeof host.definition.runBatch === 'function';
-        if (!runHost && effectiveDataset.cases.some(isClientCase))
+        if (!runHost && effectiveDataset.cases.length > 0)
           throw new Error(
             `Client "${host.declaration.type}" has neither run() nor runBatch(), so it can't run cases.`
           );
@@ -665,9 +660,6 @@ export async function runEvalSuite(
         // Batch execution (including shared setup/cleanup) precedes the runner's
         // wall clock. Count its elapsed time once, not the sum of request times.
         const batchDurationMs = batchTraces ? Date.now() - batchStartTime : 0;
-        // Direct cases connect per case; record what those connections
-        // negotiated so the run's metadata carries its protocol.
-        let directProtocol: MCPProtocolInfo | undefined;
         const result = await runEvalDataset(
           {
             dataset: effectiveDataset,
@@ -675,7 +667,6 @@ export async function runEvalSuite(
             ...(typeof armModel === 'string' ? { model: armModel } : {}),
             // The suite reports its own results (results.json).
             reporting: 'none',
-            protocol: () => directProtocol,
             concurrency: manifest.concurrency ?? 1,
             defaultTrials: manifest.trials,
             defaultPassThreshold: manifest.passThreshold,
@@ -691,9 +682,6 @@ export async function runEvalSuite(
                     env,
                     batchTraces,
                     toolVariant,
-                    onDirectConnection: (client) => {
-                      directProtocol ??= getProtocolInfo(client);
-                    },
                   }),
                 }
               : {}),

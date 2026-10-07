@@ -1,5 +1,4 @@
 import { readFile } from 'fs/promises';
-import { type z } from 'zod';
 import {
   type EvalDataset,
   type SerializedEvalDataset,
@@ -10,13 +9,6 @@ import {
  * Options for loading an eval dataset
  */
 export interface LoadDatasetOptions {
-  /**
-   * Optional schema definitions to attach to the dataset
-   *
-   * Keys are the names cases refer to in `expect.schema`
-   */
-  schemas?: Record<string, z.ZodSchema>;
-
   /**
    * Whether to validate the loaded dataset
    * @default true
@@ -34,34 +26,15 @@ export interface LoadDatasetOptions {
  * @throws {z.ZodError} If validation fails
  *
  * @example
- * const dataset = await loadEvalDataset('./data/my-evals.json', {
- *   schemas: {
- *     'weather-response': WeatherResponseSchema,
- *   },
- * });
+ * const dataset = await loadEvalDataset('./data/my-evals.json');
  */
 export async function loadEvalDataset(
   filePath: string,
   options: LoadDatasetOptions = {}
 ): Promise<EvalDataset> {
-  const { schemas, validate = true } = options;
-
   try {
     const fileContents = await readFile(filePath, 'utf-8');
-    const rawData: unknown = JSON.parse(fileContents);
-
-    // Validate if requested
-    const serializedDataset: SerializedEvalDataset = validate
-      ? validateEvalDataset(rawData)
-      : (rawData as SerializedEvalDataset);
-
-    // Create full dataset with schemas
-    const dataset: EvalDataset = {
-      ...serializedDataset,
-      schemas: schemas ?? {},
-    };
-
-    return dataset;
+    return loadEvalDatasetFromObject(JSON.parse(fileContents), options);
   } catch (error) {
     if (error instanceof SyntaxError) {
       throw new Error(
@@ -85,31 +58,16 @@ export async function loadEvalDataset(
  * @example
  * const dataset = loadEvalDatasetFromObject({
  *   name: 'my-test-dataset',
- *   cases: [
- *     {
- *       id: 'case-1',
- *       toolName: 'get_weather',
- *       args: { city: 'London' },
- *     },
- *   ],
+ *   cases: [{ id: 'weather', input: 'What is the weather in London?' }],
  * });
  */
 export function loadEvalDatasetFromObject(
   data: unknown,
   options: LoadDatasetOptions = {}
 ): EvalDataset {
-  const { schemas, validate = true } = options;
-
-  // Validate if requested
+  const { validate = true } = options;
   const serializedDataset: SerializedEvalDataset = validate
     ? validateEvalDataset(data)
     : (data as SerializedEvalDataset);
-
-  // Create full dataset with schemas
-  const dataset: EvalDataset = {
-    ...serializedDataset,
-    schemas: schemas ?? {},
-  };
-
-  return dataset;
+  return { ...serializedDataset };
 }

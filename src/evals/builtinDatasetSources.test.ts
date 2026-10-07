@@ -50,10 +50,10 @@ describe('canonical built-in dataset sources', () => {
         gcs.download.mockResolvedValue([Buffer.from(JSON.stringify(raw))]);
         return getDatasetSource(type).load(source, { rootDir, manifest });
       }
-      it('loads minimal direct JSON with no mode, expect, args, or host', async () => {
+      it('loads a minimal case with no assertions or client', async () => {
         const raw = {
           name: 'canonical',
-          cases: [{ id: 'search', toolName: 'search' }],
+          cases: [{ id: 'search', input: 'Find it' }],
         };
         expect((await load(raw)).cases).toEqual(raw.cases);
         if (type === 'gcs') {
@@ -65,7 +65,6 @@ describe('canonical built-in dataset sources', () => {
       it('preserves canonical host mode, per-case host, iterations and judges', async () => {
         const case_ = {
           id: 'question',
-          mode: 'host',
           input: 'Find policy',
           client: 'custom-host',
           clientOptions: { option: true },

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { hostRunToExecution } from './hostTrace.js';
 import { runEvalCase, runEvalDataset } from './evalRunner.js';
 import type { CaseExecution } from './caseExecution.js';
 
@@ -18,8 +19,7 @@ describe('pre-executed iteration timing', () => {
     const executeCase = vi.fn(async (): Promise<CaseExecution> => {
       advance(3);
       return {
-        kind: 'direct',
-        response: 'OK',
+        ...hostRunToExecution({ finalText: 'OK', events: [] }, 'structured'),
         preExecutionDurationMs: durations.shift(),
       };
     });
@@ -28,8 +28,8 @@ describe('pre-executed iteration timing', () => {
         dataset: {
           name: 'timing',
           cases: [
-            { id: 'a', mode: 'host', input: 'A', trials: 2 },
-            { id: 'b', mode: 'host', input: 'B', trials: 2 },
+            { id: 'a', input: 'A', trials: 2 },
+            { id: 'b', input: 'B', trials: 2 },
           ],
         },
         executeCase,
@@ -54,7 +54,7 @@ describe('pre-executed iteration timing', () => {
     'preserves failed-case timing with pre-execution time %s',
     async (duration) => {
       const result = await runEvalCase(
-        { id: 'failed', mode: 'host', input: 'A' },
+        { id: 'failed', input: 'A' },
         {},
         {
           async executeCase() {
@@ -76,12 +76,15 @@ describe('pre-executed iteration timing', () => {
 
   it('measures ordinary live execution without a pre-execution duration', async () => {
     const result = await runEvalCase(
-      { id: 'live', mode: 'host', input: 'A', trials: 2 },
+      { id: 'live', input: 'A', trials: 2 },
       {},
       {
         async executeCase() {
           advance(25);
-          return { kind: 'direct', response: 'OK' };
+          return hostRunToExecution(
+            { finalText: 'OK', events: [] },
+            'structured'
+          );
         },
       }
     );

@@ -9,18 +9,16 @@ This is the **canonical example** showing all testing patterns organized into th
 ### Unit/Integration Testing (no LLM required)
 
 1. **Protocol Conformance** - Validate MCP protocol compliance
-2. **Direct API Testing** - Call tools directly with assertions
-3. **Inline Eval Cases** - Define eval cases in code with expectations
+2. **Tool Tests** - Call tools directly and assert with the matchers
 
-### Data-Driven Testing (JSON datasets)
+### Data-Driven Testing (JSON)
 
-4. **Eval Dataset (Batch)** - Run all cases from JSON together
-5. **Individual Eval Cases** - Generate one test per JSON case
+3. **Tool checks** - One test per entry in `tool-checks.json`
 
 ### End-to-End / Functional Testing (requires LLM API keys)
 
-6. **LLM Host Simulation** - Test real MCP usage with LLM tool discovery
-7. **LLM Host from JSON** - Data-driven LLM host tests
+4. **LLM Host Simulation** - Test real MCP usage with LLM tool discovery
+5. **Evals** - One test per case in `eval-dataset.json`, on a model
 
 ## Quick Start
 
@@ -61,26 +59,32 @@ test('reads a file', async ({ mcp }) => {
 });
 ```
 
-### 2. Inline Eval Cases (Code-Defined)
+### 2. Data-Driven Tool Tests (JSON)
 
-Define eval cases in code with expectations - no JSON needed:
+`tool-checks.json` keeps tool calls and what they must return; the spec turns each into a test:
+
+```json
+{
+  "name": "should read readme.txt file",
+  "tool": "read_file",
+  "args": { "path": "readme.txt" },
+  "containsText": "Hello World",
+  "isError": false
+}
+```
 
 ```typescript
-test('validates config with inline case', async ({ mcp }) => {
-  const result = await runEvalCase(
-    {
-      id: 'inline-config-check',
-      toolName: 'read_file',
-      args: { path: 'config.json' },
-      assertions: {
-        containsText: ['version', '1.0.0'],
-      },
-    },
-    { mcp }
-  );
+import toolChecks from '../tool-checks.json' with { type: 'json' };
 
-  expect(result.pass).toBe(true);
-});
+for (const check of toolChecks.checks) {
+  test(check.name, async ({ mcp }) => {
+    const result = await mcp.callTool(check.tool, check.args);
+    if (check.isError === false) expect(result).not.toBeToolError();
+    if (check.containsText)
+      expect(result).toContainToolText(check.containsText);
+    // ...one matcher per field: see tests/filesystem-eval.spec.ts
+  });
+}
 ```
 
 ### 3. LLM Host Simulation (E2E Functional)
@@ -108,29 +112,19 @@ test('LLM discovers and lists directory contents', async ({ mcp }) => {
 });
 ```
 
-### 4. Data-Driven Tests (JSON)
+### 4. Evals (JSON)
 
-Define test cases in JSON for maintainability:
-
-```json
-{
-  "id": "should read readme.txt file",
-  "mode": "direct",
-  "toolName": "read_file",
-  "args": { "path": "readme.txt" },
-  "assertions": {
-    "containsText": "Hello World",
-    "isError": false
-  }
-}
-```
+`eval-dataset.json` holds eval cases: an input a model acts on, and assertions about what it did:
 
 ```typescript
-const dataset = await loadEvalDataset('./eval-dataset.json');
-
-const result = await runEvalDataset({ dataset }, { mcp, testInfo, expect });
-
-expect(result.passed).toBe(result.total);
+test('a model picks the right tools', async ({ mcp }, testInfo) => {
+  const dataset = await loadEvalDataset('./eval-dataset.json');
+  const result = await runEvalDataset(
+    { dataset, client: 'mst', model: 'claude-sonnet-4-5' },
+    { mcp, testInfo }
+  );
+  expect(result.passed).toBe(result.total);
+});
 ```
 
 ## Project Structure
@@ -141,7 +135,8 @@ filesystem-server/
 │   └── filesystem-eval.spec.ts  # All 8 test patterns
 ├── schemas/
 │   └── fileContentSchema.ts     # Zod schemas for validation
-├── eval-dataset.json            # 13 test cases (8 direct, 5 LLM)
+├── eval-dataset.json            # 5 eval cases, run on a model
+├── tool-checks.json             # 8 data-driven tool tests
 ├── package.json
 ├── playwright.config.ts
 └── README.md

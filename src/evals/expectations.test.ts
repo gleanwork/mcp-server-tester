@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import type { Expect } from '@playwright/test';
 import {
   evaluateExpectations,
   mergeSuiteJudges,
@@ -78,7 +77,7 @@ describe('evaluateExpectations', () => {
 
   it('grades tool calls, metrics and the trace view on structured evidence', async () => {
     const outcome = await evaluateExpectations(
-      { mode: 'host', assertions: toolExpect },
+      { assertions: toolExpect },
       graded
     );
     expect(outcome.expectations.toolsTriggered?.pass).toBe(false);
@@ -102,7 +101,6 @@ describe('evaluateExpectations', () => {
   it('fails every tool expectation with the gap and grades the rest', async () => {
     const outcome = await evaluateExpectations(
       {
-        mode: 'host',
         assertions: { ...toolExpect, containsText: 'sunny' },
       },
       { ...graded, evidence: 'observed' }
@@ -126,7 +124,6 @@ describe('evaluateExpectations', () => {
   it('lists a required call made with the wrong arguments as missed', async () => {
     const outcome = await evaluateExpectations(
       {
-        mode: 'host',
         assertions: {
           toolsTriggered: {
             calls: [
@@ -160,7 +157,7 @@ describe('evaluateExpectations', () => {
 
   it('fails a lone toolCallCount expectation on an evidence gap', async () => {
     const outcome = await evaluateExpectations(
-      { mode: 'host', assertions: { toolCallCount: { max: 5 } } },
+      { assertions: { toolCallCount: { max: 5 } } },
       { ...graded, evidence: 'observed' }
     );
     expect(outcome.expectations).toEqual({
@@ -174,39 +171,16 @@ describe('evaluateExpectations', () => {
 
   it("grades on the client's evidence, not external trace metadata", async () => {
     const outcome = await evaluateExpectations(
-      { mode: 'host', assertions: toolExpect },
+      { assertions: toolExpect },
       { ...graded, externalHost: external({ traceConfidence: 'low' }) }
     );
     expect(outcome.expectations.toolCallCount?.pass).toBe(true);
     expect(outcome.toolPrecision).toBe(0.5);
   });
 
-  it('builds no trace view for direct responses', async () => {
-    const outcome = await evaluateExpectations(
-      {
-        mode: 'direct',
-        assertions: { toolsTriggered: toolExpect.toolsTriggered },
-      },
-      { response: mapped }
-    );
-    expect(outcome.toolPrecision).toBe(0.5);
-    expect(outcome.mcpHostTrace).toBeUndefined();
-  });
-
-  it('reports a schema that is not registered', async () => {
-    const outcome = await evaluateExpectations(
-      { mode: 'direct', assertions: { schema: 'Missing' } },
-      { response: {} }
-    );
-    expect(outcome.expectations.schema).toEqual({
-      pass: false,
-      details: 'Schema "Missing" not found in schemas registry',
-    });
-  });
-
   it('reports an empty judge list as 0/0 judges passed', async () => {
     const outcome = await evaluateExpectations(
-      { mode: 'direct', assertions: { passesJudge: [] } },
+      { assertions: { passesJudge: [] } },
       { response: 'x' }
     );
     expect(outcome.expectations.judge).toEqual({
@@ -236,7 +210,6 @@ describe('evaluateExpectations', () => {
     installPlugins([plugin]);
     const outcome = await evaluateExpectations(
       {
-        mode: 'direct',
         expected: { answer: 'canonical' },
         assertions: { passesJudge: { judge: 'test/expectations-test-judge' } },
       },
@@ -247,76 +220,6 @@ describe('evaluateExpectations', () => {
       judgeName: 'test/expectations-test-judge',
     });
     expect(seen).toEqual([{ candidate: 'answer', reference: 'canonical' }]);
-  });
-
-  /** A Playwright-like expect whose toMatchSnapshot compares with saved text. */
-  function snapshotExpect(saved: Record<string, string>): Expect {
-    function stub(content: unknown) {
-      return {
-        async toMatchSnapshot(name: string) {
-          if (saved[name] !== content)
-            throw new Error(
-              `Snapshot "${name}" mismatched: ${String(content)}`
-            );
-        },
-      };
-    }
-    return stub as unknown as Expect;
-  }
-
-  it('grades a snapshot expectation through the Playwright store', async () => {
-    const playwrightExpect = snapshotExpect({ weather: 'id [UUID]' });
-    const response = 'id 123e4567-e89b-12d3-a456-426614174000';
-    const matches = await evaluateExpectations(
-      {
-        mode: 'direct',
-        assertions: { snapshot: 'weather', snapshotSanitizers: ['uuid'] },
-      },
-      { response },
-      { playwrightExpect }
-    );
-    expect(matches.expectations.snapshot).toEqual({
-      pass: true,
-      details: 'Matches snapshot "weather"',
-    });
-    const differs = await evaluateExpectations(
-      { mode: 'direct', assertions: { snapshot: 'weather' } },
-      { response },
-      { playwrightExpect }
-    );
-    expect(differs.expectations.snapshot).toEqual({
-      pass: false,
-      details: `Snapshot "weather" mismatched: ${response}`,
-    });
-  });
-
-  it('reports an invalid snapshot sanitizer on the expectation', async () => {
-    const outcome = await evaluateExpectations(
-      {
-        mode: 'direct',
-        assertions: {
-          snapshot: 'weather',
-          snapshotSanitizers: [{ pattern: '(' }],
-        },
-      },
-      { response: 'x' },
-      { playwrightExpect: snapshotExpect({}) }
-    );
-    expect(outcome.expectations.snapshot).toEqual({
-      pass: false,
-      details: 'invalid regex pattern "(" in snapshot sanitizer',
-    });
-  });
-
-  it('fails a snapshot expectation without Playwright expect', async () => {
-    const outcome = await evaluateExpectations(
-      { mode: 'direct', assertions: { snapshot: 'weather' } },
-      { response: 'x' }
-    );
-    expect(outcome.expectations.snapshot).toEqual({
-      pass: false,
-      details: 'Snapshot testing requires expect in context',
-    });
   });
 });
 

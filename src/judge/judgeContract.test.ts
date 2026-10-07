@@ -4,6 +4,7 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import { hostRunToExecution } from '../evals/hostTrace.js';
 import { z } from 'zod';
 import { runEvalDataset } from '../evals/evalRunner.js';
 import { validateEvalDataset } from '../evals/datasetTypes.js';
@@ -49,11 +50,15 @@ function judge(
 
 async function run(
   cases: Array<Record<string, unknown>>,
-  response: unknown = 'the answer'
+  answer = 'the answer'
 ) {
   const dataset = validateEvalDataset({ name: 'contract', cases });
   return runEvalDataset(
-    { dataset, executeCase: async () => ({ kind: 'direct', response }) },
+    {
+      dataset,
+      executeCase: async () =>
+        hostRunToExecution({ finalText: answer, events: [] }, 'structured'),
+    },
     {}
   );
 }
@@ -81,12 +86,6 @@ describe('buildJudgeCase', () => {
       tags: ['t'],
       metadata: { owner: 'x' },
     });
-  });
-
-  it('maps a direct case to its tool call', () => {
-    expect(
-      buildJudgeCase({ toolName: 'search', args: { q: 'x' } }).input
-    ).toEqual({ tool: { name: 'search', args: { q: 'x' } } });
   });
 
   it('prefers a judge reference over expected.answer', () => {
@@ -214,7 +213,6 @@ describe('judge input', () => {
     const result = await run([
       {
         id: 'with-input',
-        mode: 'host',
         input: 'Summarize the plan',
         expected: {
           answer: 'Three phases',
@@ -239,7 +237,7 @@ describe('judge input', () => {
       metadata: {},
     });
     expect(input.trial).toMatchObject({
-      response: 'the answer',
+      response: { response: 'the answer' },
       text: 'the answer',
     });
     // The threshold stays with the framework; options hold the judge's settings.
@@ -265,13 +263,11 @@ describe('judge input', () => {
     const result = await run([
       {
         id: 'none',
-        mode: 'host',
         input: 'q',
         assertions: { passesJudge: { judge: 'needs/judge' } },
       },
       {
         id: 'some',
-        mode: 'host',
         input: 'q',
         expected: { criteria: { c: 'x' } },
         assertions: { passesJudge: { judge: 'needs/judge' } },
@@ -316,7 +312,6 @@ describe('judge output', () => {
     const result = await run([
       {
         id: 'rich',
-        mode: 'host',
         input: 'q',
         assertions: { passesJudge: { judge: 'rich/judge', threshold: 0.9 } },
       },
@@ -348,7 +343,6 @@ describe('judge output', () => {
     const result = await run([
       {
         id: 'bad',
-        mode: 'host',
         input: 'q',
         assertions: { passesJudge: { judge: 'bad/judge' } },
       },
@@ -381,13 +375,11 @@ describe('judge output', () => {
     const result = await run([
       {
         id: 'no-criteria',
-        mode: 'host',
         input: 'q',
         assertions: { passesJudge },
       },
       {
         id: 'with-criteria',
-        mode: 'host',
         input: 'q',
         expected: { criteria: { c: 'x' } },
         assertions: { passesJudge },
@@ -486,7 +478,6 @@ describe('judge output', () => {
     await run([
       {
         id: 'a',
-        mode: 'host',
         input: 'q',
         expected: { answer: 'new' },
         assertions: { passesJudge: { judge: 'answer/judge' } },
@@ -503,7 +494,6 @@ describe('judge output', () => {
     const result = await run([
       {
         id: 'iterated',
-        mode: 'host',
         input: 'q',
         trials: 3,
         assertions: { passesJudge: { judge: 'iter/judge' } },
@@ -532,7 +522,6 @@ describe('judge output', () => {
     const result = await run([
       {
         id: 'only-skip',
-        mode: 'host',
         input: 'q',
         assertions: { passesJudge: { judge: 'skip/judge' } },
       },

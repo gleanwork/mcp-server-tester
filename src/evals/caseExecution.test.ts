@@ -25,7 +25,6 @@ vi.mock('./mcpHost/mcpHostSimulation.js', async (original) => ({
 const mcp = { authType: 'none' } as MCPFixtureApi;
 const hostCase: EvalCase = {
   id: 'host',
-  mode: 'host',
   input: 'query',
 };
 const manifest = { name: 'm', datasets: [] };
@@ -109,20 +108,19 @@ describe('executeEvalCase', () => {
 
   it('reports a missing connection as a failed execution', async () => {
     await expect(
-      executeEvalCase({ id: 'd', toolName: 't', args: {} }, undefined)
+      executeEvalCase({ id: 'd', input: 'query' }, undefined)
     ).resolves.toMatchObject({
       kind: 'failed',
-      error: 'Direct tool calls require an MCP connection.',
+      error: 'The mst client requires an MCP connection.',
     });
   });
 });
 
 describe('custom executeCase results', () => {
-  it('fails a pre-2.0 untyped result loudly instead of reading it as direct', async () => {
+  it('fails a pre-2.0 untyped result loudly', async () => {
     const result = await runEvalCase(
       {
         id: 'legacy',
-        mode: 'host',
         input: 'query',
         assertions: { toolsTriggered: { calls: [{ name: 'search' }] } },
       },
@@ -137,8 +135,23 @@ describe('custom executeCase results', () => {
     );
     expect(result.pass).toBe(false);
     expect(result.error).toContain(
-      "executeCase must return a CaseExecution with kind 'direct', 'host', or 'failed'"
+      "executeCase must return a CaseExecution with kind 'host' or 'failed'"
     );
+  });
+
+  it("fails a 'direct' execution, which 2.0 removed", async () => {
+    const result = await runEvalCase(
+      { id: 'direct', input: 'query', assertions: { containsText: 'ok' } },
+      {},
+      {
+        executeCase: (async () => ({
+          kind: 'direct',
+          response: { content: [{ type: 'text', text: 'ok' }] },
+        })) as never,
+      }
+    );
+    expect(result.pass).toBe(false);
+    expect(result.error).toContain("kind 'host' or 'failed'");
   });
 });
 
@@ -312,21 +325,5 @@ describe('createSuiteCaseExecutor', () => {
         expect.objectContaining({ manifest: variantManifest })
       );
     });
-  });
-
-  it('requires a routable server for direct cases', async () => {
-    const execute = createSuiteCaseExecutor({
-      servers: [
-        { transport: 'stdio', command: 'a', label: 'a' },
-        { transport: 'stdio', command: 'b', label: 'b' },
-      ],
-      host: { type: 'unused' },
-      manifest,
-    });
-    await expect(
-      execute({ id: 'd', toolName: 'unqualified', args: {} })
-    ).rejects.toThrow(
-      'Direct cases require one server, a label-qualified tool name, or request.server.'
-    );
   });
 });

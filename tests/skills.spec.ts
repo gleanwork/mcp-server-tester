@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import { test, expect } from '../src/fixtures/mcp.js';
-import { runEvalDataset } from '../src/evals/evalRunner.js';
 
 /**
  * The fixture's resources, extension-request, and skills helpers, in every
@@ -60,55 +59,19 @@ test.describe('Fixture: discovery, resources, and skills', () => {
     expect(style.verified).toBe(true);
   });
 
-  test('eval datasets can target skills methods directly', async ({
+  test('an unknown skill is an invalid-params JSON-RPC error', async ({
     mcp,
-  }, testInfo) => {
-    const result = await runEvalDataset(
-      {
-        dataset: {
-          name: 'skills-requests',
-          cases: [
-            {
-              id: 'skills-list-valid',
-              request: { method: 'skills/list', params: {} },
-              assertions: {
-                schema: 'SkillsListResult',
-                containsText: 'weather-report',
-              },
-            },
-            {
-              id: 'skills-get-valid',
-              request: {
-                method: 'skills/get',
-                params: { uri: 'skill://weather-report/SKILL.md' },
-              },
-              assertions: { schema: 'SkillsGetResult' },
-            },
-            {
-              id: 'skills-get-unknown',
-              request: {
-                method: 'skills/get',
-                params: { uri: 'skill://nope/SKILL.md' },
-              },
-              assertions: { isError: 'MCP error -32602' },
-            },
-            {
-              id: 'skill-md-readable',
-              request: {
-                method: 'resources/read',
-                params: { uri: 'skill://weather-report/SKILL.md' },
-              },
-              assertions: { containsText: '# Weather report' },
-            },
-          ],
-        },
-      },
-      { mcp, testInfo }
+  }) => {
+    await expect(
+      mcp.request(
+        'skills/get',
+        { uri: 'skill://nope/SKILL.md' },
+        z.looseObject({})
+      )
+    ).rejects.toMatchObject({ code: -32602 });
+    await expect(mcp.skills.get('skill://nope/SKILL.md')).rejects.toThrow(
+      'Unknown skill: skill://nope/SKILL.md'
     );
-
-    const failures = result.caseResults.filter((c) => !c.pass);
-    expect(failures, JSON.stringify(failures, null, 2)).toEqual([]);
-    expect(result.metadata?.protocol).toEqual(mcp.protocol);
   });
 
   test('skills.read() reports a mismatch against a stale entry', async ({

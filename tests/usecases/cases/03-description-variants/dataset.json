@@ -3,7 +3,6 @@
   "cases": [
     {
       "id": "cross-source",
-      "mode": "host",
       "input": "Find everything about the checkout outage",
       "assertions": {
         "toolsTriggered": {

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { validateEvalDataset } from '../../evals/datasetTypes.js';
 import {
   getPlaywrightConfigTemplate,
   getTestFileTemplate,
@@ -270,6 +271,15 @@ describe('CLI template generators', () => {
       });
 
       expect(() => JSON.parse(dataset)).not.toThrow();
+    });
+
+    it('is a valid eval dataset', () => {
+      const dataset = getDatasetTemplate({
+        projectName: 'my-tests',
+        transport: 'stdio',
+      });
+
+      expect(() => validateEvalDataset(JSON.parse(dataset))).not.toThrow();
     });
 
     it('includes an example case', () => {

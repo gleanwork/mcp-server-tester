@@ -1,73 +1,7 @@
 {
   "name": "Filesystem MCP Server Evaluation",
-  "description": "Comprehensive evaluation suite for the official Filesystem MCP server, demonstrating both direct and LLM host testing modes",
+  "description": "Eval cases: requests a model should handle with this server's tools.",
   "cases": [
-    {
-      "id": "should read readme.txt file (NEW expect block)",
-      "description": "Direct API call to read readme.txt - using NEW expect block format",
-      "mode": "direct",
-      "toolName": "read_file",
-      "args": {
-        "path": "readme.txt"
-      },
-      "assertions": {
-        "containsText": "Hello World",
-        "isError": false
-      }
-    },
-    {
-      "id": "should read and validate config.json structure (NEW expect block)",
-      "description": "Read config.json and validate structure - using NEW expect block format",
-      "mode": "direct",
-      "toolName": "read_file",
-      "args": {
-        "path": "config.json"
-      },
-      "assertions": {
-        "containsText": ["version", "1.0.0", "features"],
-        "matchesPattern": "\\d+\\.\\d+\\.\\d+"
-      }
-    },
-    {
-      "id": "should list files in docs directory (NEW expect block)",
-      "description": "List files in the docs directory - using NEW expect block format",
-      "mode": "direct",
-      "toolName": "list_directory",
-      "args": {
-        "path": "docs"
-      },
-      "assertions": {
-        "containsText": ["guide.md", "api.md"],
-        "isError": false,
-        "responseSize": {
-          "maxBytes": 10000
-        }
-      }
-    },
-    {
-      "id": "should read nested file in subdirectory",
-      "description": "Read a file in a subdirectory",
-      "mode": "direct",
-      "toolName": "read_file",
-      "args": {
-        "path": "docs/guide.md"
-      },
-      "assertions": {
-        "containsText": ["# User Guide", "guide"]
-      }
-    },
-    {
-      "id": "should list root directory contents",
-      "description": "List all files and directories at root",
-      "mode": "direct",
-      "toolName": "list_directory",
-      "args": {
-        "path": "."
-      },
-      "assertions": {
-        "containsText": ["readme.txt", "config.json", "docs", "data"]
-      }
-    },
     {
       "id": "should discover docs directory",
       "description": "LLM discovers and lists files in docs directory",
@@ -172,44 +106,6 @@
             }
           ]
         }
-      }
-    },
-    {
-      "id": "should exactly match readme content",
-      "description": "Exact match validation for readme.txt content",
-      "mode": "direct",
-      "toolName": "read_file",
-      "args": {
-        "path": "readme.txt"
-      },
-      "assertions": {
-        "response": {
-          "content": "Hello World"
-        }
-      }
-    },
-    {
-      "id": "should match readme snapshot",
-      "description": "Snapshot test for readme.txt file content",
-      "mode": "direct",
-      "toolName": "read_file",
-      "args": {
-        "path": "readme.txt"
-      },
-      "assertions": {
-        "snapshot": "readme-content.txt"
-      }
-    },
-    {
-      "id": "should match config structure snapshot",
-      "description": "Snapshot test for config.json structure",
-      "mode": "direct",
-      "toolName": "read_file",
-      "args": {
-        "path": "config.json"
-      },
-      "assertions": {
-        "snapshot": "config-structure.json"
       }
     }
   ],

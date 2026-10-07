@@ -1,0 +1,202 @@
+{
+  "$comment": "Tool checks: each runs as a Playwright test that calls the tool and asserts on its response (see tests/*.spec.ts).",
+  "name": "SQLite MCP Server Evaluation",
+  "checks": [
+    {
+      "name": "should query all users",
+      "description": "Direct query to get all users",
+      "tool": "read_query",
+      "args": {
+        "query": "SELECT * FROM users ORDER BY id"
+      },
+      "containsText": ["Alice", "Bob", "Charlie", "Diana"]
+    },
+    {
+      "name": "should count total users",
+      "description": "Count total number of users",
+      "tool": "read_query",
+      "args": {
+        "query": "SELECT COUNT(*) as count FROM users"
+      },
+      "containsText": "4"
+    },
+    {
+      "name": "should list all database tables",
+      "description": "List all tables in the database",
+      "tool": "list_tables",
+      "args": {},
+      "containsText": ["users", "posts"]
+    },
+    {
+      "name": "should describe users table schema",
+      "description": "Get schema for users table",
+      "tool": "describe_table",
+      "args": {
+        "table_name": "users"
+      },
+      "containsText": ["id", "name", "email", "role", "INTEGER", "TEXT"]
+    },
+    {
+      "name": "should query admin users",
+      "description": "Query users with admin role",
+      "tool": "read_query",
+      "args": {
+        "query": "SELECT name, role FROM users WHERE role = 'admin'"
+      },
+      "containsText": ["Alice", "admin"]
+    },
+    {
+      "name": "should join users and posts tables",
+      "description": "JOIN query to get posts with user names",
+      "tool": "read_query",
+      "args": {
+        "query": "SELECT u.name, p.title FROM users u JOIN posts p ON u.id = p.user_id WHERE p.published = 1"
+      },
+      "containsText": ["Alice", "Bob", "Charlie"]
+    },
+    {
+      "name": "should count published posts",
+      "description": "Count published posts",
+      "tool": "read_query",
+      "args": {
+        "query": "SELECT COUNT(*) as count FROM posts WHERE published = 1"
+      },
+      "containsText": "4"
+    },
+    {
+      "name": "should count posts per user",
+      "description": "Count posts per user",
+      "tool": "read_query",
+      "args": {
+        "query": "SELECT u.name, COUNT(p.id) as post_count FROM users u LEFT JOIN posts p ON u.id = p.user_id GROUP BY u.id ORDER BY post_count DESC"
+      },
+      "containsText": ["Bob", "Alice", "Charlie"]
+    },
+    {
+      "name": "should describe posts table schema",
+      "description": "Get schema for posts table",
+      "tool": "describe_table",
+      "args": {
+        "table_name": "posts"
+      },
+      "containsText": ["id", "user_id", "title", "published", "content"]
+    },
+    {
+      "name": "should query only published posts",
+      "description": "Query only published posts",
+      "tool": "read_query",
+      "args": {
+        "query": "SELECT title, published FROM posts WHERE published = 1 ORDER BY id"
+      },
+      "containsText": [
+        "Getting Started",
+        "Database Best Practices",
+        "Performance Tuning"
+      ]
+    },
+    {
+      "name": "should find moderator users",
+      "description": "Find users with moderator role",
+      "tool": "read_query",
+      "args": {
+        "query": "SELECT name, email FROM users WHERE role = 'moderator'"
+      },
+      "containsText": ["Bob", "bob@example.com"]
+    },
+    {
+      "name": "should get all posts by Alice",
+      "description": "Get all posts by Alice",
+      "tool": "read_query",
+      "args": {
+        "query": "SELECT title, published FROM posts WHERE user_id = 1 ORDER BY id"
+      },
+      "containsText": ["Getting Started", "Draft: Advanced Topics"]
+    },
+    {
+      "name": "should calculate published vs draft ratio",
+      "description": "Calculate published vs draft posts ratio",
+      "tool": "read_query",
+      "args": {
+        "query": "SELECT SUM(CASE WHEN published = 1 THEN 1 ELSE 0 END) as published, SUM(CASE WHEN published = 0 THEN 1 ELSE 0 END) as drafts FROM posts"
+      },
+      "containsText": ["published", "drafts"]
+    },
+    {
+      "name": "should handle invalid SQL syntax gracefully",
+      "description": "Handle invalid SQL syntax gracefully",
+      "tool": "read_query",
+      "args": {
+        "query": "SELECT * FORM users"
+      },
+      "isError": true
+    },
+    {
+      "name": "should handle non-existent table query",
+      "description": "Query non-existent table returns empty",
+      "tool": "describe_table",
+      "args": {
+        "table_name": "nonexistent_table"
+      },
+      "containsText": "[]"
+    },
+    {
+      "name": "should exactly match user count",
+      "description": "Exact match validation for user count",
+      "tool": "read_query",
+      "args": {
+        "query": "SELECT COUNT(*) as count FROM users"
+      },
+      "containsText": ["count", "4"]
+    },
+    {
+      "name": "should introspect database tables",
+      "description": "Schema introspection - list all tables",
+      "tool": "list_tables",
+      "args": {},
+      "containsText": ["users", "posts"]
+    },
+    {
+      "name": "should show detailed users table structure",
+      "description": "Schema introspection - detailed users table structure",
+      "tool": "describe_table",
+      "args": {
+        "table_name": "users"
+      },
+      "containsText": [
+        "id",
+        "name",
+        "email",
+        "role",
+        "created_at",
+        "INTEGER",
+        "TEXT"
+      ]
+    },
+    {
+      "name": "should match users list snapshot",
+      "description": "Snapshot test for all users query result",
+      "tool": "read_query",
+      "args": {
+        "query": "SELECT * FROM users ORDER BY id"
+      },
+      "snapshot": "users-list.json",
+      "sanitizers": ["timestamp"]
+    },
+    {
+      "name": "should match posts with users snapshot",
+      "description": "Snapshot test for posts with user information",
+      "tool": "read_query",
+      "args": {
+        "query": "SELECT posts.id, posts.title, users.name as author FROM posts JOIN users ON posts.user_id = users.id ORDER BY posts.id"
+      },
+      "snapshot": "posts-with-users.json"
+    },
+    {
+      "name": "should match table list snapshot",
+      "description": "Snapshot test for database table listing",
+      "tool": "list_tables",
+      "args": {},
+      "snapshot": "table-list.json"
+    }
+  ]
+}

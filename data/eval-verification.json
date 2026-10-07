@@ -1,57 +1,50 @@
 {
   "name": "eval-enhancement-verification",
-  "description": "Verifies multi-iteration accuracy, concurrency, and the new eval runner features. Direct-mode cases run against any MCP server with the mock stdio server.",
+  "description": "Verifies trials, pass thresholds, concurrency and tool-call assertions end to end against the mock stdio server. tests/eval-verification.spec.ts runs the cases on a scripted client that calls the server's real tools.",
   "cases": [
     {
       "id": "multi-iter-echo-always-passes",
-      "description": "Multi-iteration: 3 runs, all should pass. Echo tool returns 'Echo: hello' in content.",
-      "mode": "direct",
-      "toolName": "echo",
-      "args": {
-        "message": "hello"
-      },
+      "description": "3 trials, all pass. The echo tool answers 'Echo: hello'.",
+      "input": "echo hello",
       "trials": 3,
       "passThreshold": 1.0,
       "assertions": {
-        "containsText": "hello"
+        "containsText": "hello",
+        "toolsTriggered": { "calls": [{ "name": "echo", "required": true }] }
       }
     },
     {
       "id": "multi-iter-calculate-addition",
-      "description": "Multi-iteration: 5 runs of a deterministic calculation (7+3=10). Calculate tool returns 'Result: 10' in content.",
-      "mode": "direct",
-      "toolName": "calculate",
-      "args": {
-        "operation": "add",
-        "a": 7,
-        "b": 3
-      },
+      "description": "5 trials of a deterministic calculation (7+3=10).",
+      "input": "add 7 3",
       "trials": 5,
       "passThreshold": 0.8,
       "assertions": {
-        "containsText": "10"
+        "containsText": "10",
+        "toolsTriggered": {
+          "calls": [
+            {
+              "name": "calculate",
+              "arguments": { "operation": "add", "a": 7, "b": 3 },
+              "required": true
+            }
+          ]
+        },
+        "toolCallCount": { "exact": 1 }
       }
     },
     {
       "id": "single-iter-baseline",
-      "description": "Single-iteration baseline (no accuracy field expected). Verifies backward compatibility.",
-      "mode": "direct",
-      "toolName": "echo",
-      "args": {
-        "message": "baseline"
-      },
+      "description": "One trial: no pass-rate fields expected.",
+      "input": "echo baseline",
       "assertions": {
         "containsText": "baseline"
       }
     },
     {
       "id": "multi-iter-low-threshold",
-      "description": "Multi-iteration: 3 runs with 50% accuracy threshold. Always passes since echo is deterministic.",
-      "mode": "direct",
-      "toolName": "echo",
-      "args": {
-        "message": "threshold-test"
-      },
+      "description": "3 trials with a 50% threshold.",
+      "input": "echo threshold-test",
       "trials": 3,
       "passThreshold": 0.5,
       "assertions": {

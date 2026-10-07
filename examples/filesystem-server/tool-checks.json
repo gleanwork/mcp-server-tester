@@ -1,0 +1,86 @@
+{
+  "$comment": "Tool checks: each runs as a Playwright test that calls the tool and asserts on its response (see tests/*.spec.ts).",
+  "name": "Filesystem MCP Server Evaluation",
+  "checks": [
+    {
+      "name": "should read readme.txt file (NEW expect block)",
+      "description": "Direct API call to read readme.txt - using NEW expect block format",
+      "tool": "read_file",
+      "args": {
+        "path": "readme.txt"
+      },
+      "containsText": "Hello World",
+      "isError": false
+    },
+    {
+      "name": "should read and validate config.json structure (NEW expect block)",
+      "description": "Read config.json and validate structure - using NEW expect block format",
+      "tool": "read_file",
+      "args": {
+        "path": "config.json"
+      },
+      "containsText": ["version", "1.0.0", "features"],
+      "matchesPattern": "\\d+\\.\\d+\\.\\d+"
+    },
+    {
+      "name": "should list files in docs directory (NEW expect block)",
+      "description": "List files in the docs directory - using NEW expect block format",
+      "tool": "list_directory",
+      "args": {
+        "path": "docs"
+      },
+      "containsText": ["guide.md", "api.md"],
+      "isError": false,
+      "responseSize": {
+        "maxBytes": 10000
+      }
+    },
+    {
+      "name": "should read nested file in subdirectory",
+      "description": "Read a file in a subdirectory",
+      "tool": "read_file",
+      "args": {
+        "path": "docs/guide.md"
+      },
+      "containsText": ["# User Guide", "guide"]
+    },
+    {
+      "name": "should list root directory contents",
+      "description": "List all files and directories at root",
+      "tool": "list_directory",
+      "args": {
+        "path": "."
+      },
+      "containsText": ["readme.txt", "config.json", "docs", "data"]
+    },
+    {
+      "name": "should exactly match readme content",
+      "description": "Exact match validation for readme.txt content",
+      "tool": "read_file",
+      "args": {
+        "path": "readme.txt"
+      },
+      "response": {
+        "content": "Hello World"
+      }
+    },
+    {
+      "name": "should match readme snapshot",
+      "description": "Snapshot test for readme.txt file content",
+      "tool": "read_file",
+      "args": {
+        "path": "readme.txt"
+      },
+      "snapshot": "readme-content.txt"
+    },
+    {
+      "name": "should match config structure snapshot",
+      "description": "Snapshot test for config.json structure",
+      "tool": "read_file",
+      "args": {
+        "path": "config.json"
+      },
+      "snapshot": "config-structure.json"
+    }
+  ]
+}

@@ -1,17 +1,22 @@
-import { test as base, expect } from '@playwright/test';
+import { test as base } from '@playwright/test';
 import { Project } from 'fixturify-project';
 import Database from 'better-sqlite3';
 import path from 'node:path';
-import type { MCPConfig, MCPFixtureApi } from '@gleanwork/mcp-server-tester';
+import type {
+  MCPConfig,
+  MCPFixtureApi,
+  SnapshotSanitizer,
+} from '@gleanwork/mcp-server-tester';
 import {
   createMCPClientForConfig,
   createMCPFixture,
   closeMCPClient,
-  loadEvalDataset,
-  runEvalDataset,
   runConformanceChecks,
   extractText,
+  // Playwright's expect, extended with MCP tool matchers
+  expect,
 } from '@gleanwork/mcp-server-tester';
+import toolChecks from '../tool-checks.json' with { type: 'json' };
 import {
   QueryResultSchema,
   TableListSchema,
@@ -198,40 +203,49 @@ test.describe('Protocol Conformance', () => {
   });
 });
 
+/** One entry in tool-checks.json: a tool call and what its response must show. */
+interface ToolCheck {
+  name: string;
+  description?: string;
+  tool: string;
+  args: Record<string, unknown>;
+  containsText?: string | string[];
+  matchesPattern?: string | string[];
+  isError?: boolean | string | string[];
+  responseSize?: { maxBytes?: number; minBytes?: number };
+  response?: unknown;
+  snapshot?: string;
+  sanitizers?: SnapshotSanitizer[];
+}
+
 /**
- * Main test suite: Run all eval cases from dataset
+ * Data-driven tool checks: each entry in tool-checks.json is a Playwright
+ * test that calls the tool and asserts on its response with the matchers.
  */
-test('Run SQLite MCP Server evaluation dataset', async ({ mcp }, testInfo) => {
-  // Load the evaluation dataset
-  const dataset = await loadEvalDataset(
-    path.join(import.meta.dirname, '..', 'eval-dataset.json'),
-    {
-      schemas: {
-        queryResult: QueryResultSchema,
-        tableList: TableListSchema,
-        tableDescription: TableDescriptionSchema,
-      },
-    }
-  );
-
-  // Run evals - the runner uses validators internally based on the 'expect' block
-  const result = await runEvalDataset(
-    {
-      dataset,
-      schemas: {
-        queryResult: QueryResultSchema,
-        tableList: TableListSchema,
-        tableDescription: TableDescriptionSchema,
-      },
-    },
-    { mcp, testInfo, expect }
-  );
-
-  // For now, we expect all direct mode tests to pass
-  const directModeTests = dataset.cases.filter(
-    (c) => c.mode === 'direct' || !c.mode
-  );
-  expect(result.passed).toBeGreaterThanOrEqual(directModeTests.length);
+test.describe('Tool checks (tool-checks.json)', () => {
+  for (const check of toolChecks.checks as ToolCheck[]) {
+    test(check.name, async ({ mcp }) => {
+      const result = await mcp.callTool(check.tool, check.args);
+      if (check.isError === false) expect(result).not.toBeToolError();
+      else if (check.isError !== undefined)
+        expect(result).toBeToolError(
+          check.isError === true ? undefined : check.isError
+        );
+      if (check.containsText)
+        expect(result).toContainToolText(check.containsText);
+      if (check.matchesPattern)
+        expect(result).toMatchToolPattern(check.matchesPattern);
+      if (check.responseSize)
+        expect(result).toHaveToolResponseSize(check.responseSize);
+      if (check.response !== undefined)
+        expect(result).toMatchToolResponse(check.response);
+      if (check.snapshot)
+        await expect(result).toMatchToolSnapshot(
+          check.snapshot,
+          check.sanitizers
+        );
+    });
+  }
 });
 
 /**

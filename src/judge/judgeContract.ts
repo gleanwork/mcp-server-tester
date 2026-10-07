@@ -24,12 +24,10 @@ export interface JudgeMessage {
   toolCallId?: string;
 }
 
-/** What the case asked. One of `prompt` or `tool` is set for a dataset case. */
+/** What the case asked. */
 export interface JudgeCaseInput {
-  /** The natural-language scenario given to a host. */
+  /** The case's input, given to the client as its prompt. */
   prompt?: string;
-  /** The tool call of a direct case. */
-  tool?: { name: string; args?: Record<string, unknown> };
 }
 
 /**
@@ -55,15 +53,15 @@ export interface JudgeCase {
 
 /** One observed run of the case. */
 export interface JudgeTrial {
-  /** What the validators grade: a direct result, or the host response. */
+  /** What the validators grade: the client's response, or a tool result (toPassToolJudge). */
   response: unknown;
   /** The response text. */
   text: string;
-  /** Tool calls and other host events, in order. Empty for direct cases. */
+  /** Tool calls and other client events, in order. Empty for a tool result. */
   events: TraceEvent[];
   /** Conversation turns, when the host reports them. */
   messages?: JudgeMessage[];
-  /** How the trace was observed. Absent for direct cases. */
+  /** How the trace was observed. Absent for a tool result. */
   evidence?: TraceEvidence;
   /** Host model usage for this run. */
   usage?: Partial<UsageMetrics>;
@@ -122,9 +120,6 @@ export interface JudgeCaseSource {
   id?: string;
   /** The case's input, which the judge sees as `input.prompt`. */
   input?: string;
-  toolName?: string;
-  args?: Record<string, unknown>;
-  request?: { method: string; params?: Record<string, unknown> };
   expected?: Record<string, unknown>;
   tags?: string[];
   metadata?: Record<string, unknown>;
@@ -155,15 +150,10 @@ export function buildJudgeCase(
   const answer = reference !== undefined ? reference : expected.answer;
   if (answer !== undefined) expected.answer = answer;
   else delete expected.answer;
-  const toolName = source?.toolName ?? source?.request?.method;
-  const args = source?.args ?? source?.request?.params;
   return {
     ...(source?.id !== undefined && { id: source.id }),
     input: {
       ...(source?.input !== undefined && { prompt: source.input }),
-      ...(toolName !== undefined && {
-        tool: { name: toolName, ...(args !== undefined && { args }) },
-      }),
     },
     expected,
     tags: [...(source?.tags ?? [])],

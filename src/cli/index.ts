@@ -38,10 +38,14 @@ program
 program
   .command('generate')
   .alias('gen')
-  .description('Generate eval dataset by interacting with MCP server')
+  .description("Generate Playwright tests by calling your MCP server's tools")
   .option('-c, --config <path>', 'Path to MCP config')
-  .option('-o, --output <path>', 'Output dataset path', 'data/dataset.json')
-  .option('-s, --snapshot', 'Use Playwright snapshot testing for all cases')
+  .option(
+    '-o, --output <path>',
+    'Spec file to write or add to',
+    'tests/generated.spec.ts'
+  )
+  .option('-s, --snapshot', 'Compare every response with a saved snapshot')
   .action(generate);
 
 // Login command

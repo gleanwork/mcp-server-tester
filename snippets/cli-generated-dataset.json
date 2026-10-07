@@ -1,10 +1,19 @@
 {
-  "name": "example-evals",
+  "name": "example-eval-dataset",
   "cases": [
     {
-      "id": "example-1",
-      "toolName": "example_tool",
-      "args": { "input": "test" }
+      "id": "example-case-1",
+      "input": "Replace with something a user would ask",
+      "assertions": {
+        "toolsTriggered": {
+          "calls": [
+            {
+              "name": "your_tool_name",
+              "required": true
+            }
+          ]
+        }
+      }
     }
   ]
 }

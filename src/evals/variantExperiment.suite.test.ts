@@ -49,7 +49,6 @@ async function suite(arms?: unknown[]): Promise<string> {
       cases: [
         {
           id: 'cross-source',
-          mode: 'host',
           input: 'Find everything about the checkout outage',
           assertions: {
             toolsTriggered: { calls: [{ name: 'search', required: true }] },

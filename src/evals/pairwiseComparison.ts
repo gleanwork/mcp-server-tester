@@ -122,8 +122,6 @@ function caseSource(
   return {
     id: result.id,
     ...(request?.scenario !== undefined && { input: request.scenario }),
-    ...(request?.args !== undefined && { args: request.args }),
-    ...(result.toolName && { toolName: result.toolName }),
     ...(request?.reference !== undefined && {
       expected: { answer: request.reference },
     }),

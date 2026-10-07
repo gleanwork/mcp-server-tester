@@ -143,7 +143,6 @@ async function fixture(
 }
 const scenario: EvalCase = {
   id: 'same',
-  mode: 'host',
   input: 'Find documents',
 };
 
@@ -233,7 +232,7 @@ describe('suite review regressions', () => {
       schema: z.object({ type: z.string() }),
       load: async () => ({
         name: 'shared',
-        cases: [{ id: 'case', mode: 'host', input: 'hello' }],
+        cases: [{ id: 'case', input: 'hello' }],
       }),
     });
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'suite-arms-'));
@@ -286,7 +285,7 @@ describe('suite review regressions', () => {
           sourceConfigs.push(context.hostConfig);
           return {
             name: 'cli-source',
-            cases: [{ id: 'case', mode: 'host', input: 'Find documents' }],
+            cases: [{ id: 'case', input: 'Find documents' }],
           };
         },
       });
@@ -635,7 +634,6 @@ describe('suite review regressions', () => {
       [
         {
           ...scenario,
-          mode: 'host',
           client: alternate.type,
           model: 'case-model',
         },
@@ -1027,7 +1025,7 @@ describe('suite plugins', () => {
             schema: ${acceptAll},
             load: async () => ({
               name: 'from-manifest-plugin',
-              cases: [{ id: 'case', mode: 'host', input: 'hello' }],
+              cases: [{ id: 'case', input: 'hello' }],
             }),
           },
         },
@@ -1086,48 +1084,4 @@ describe('suite plugins', () => {
     expect(f.run).not.toHaveBeenCalled();
     expect(evaluate).not.toHaveBeenCalled();
   });
-});
-
-describe('direct request cases in multi-server suites', () => {
-  const mock = path.resolve(
-    path.dirname(new URL(import.meta.url).pathname),
-    '../../tests/mocks/dualEraServer.ts'
-  );
-  const server = (label: string) => ({
-    transport: 'stdio' as const,
-    label,
-    command: process.execPath,
-    args: ['--import', 'tsx', mock],
-    quiet: true,
-  });
-
-  it('routes request cases by request.server and rejects unknown labels', async () => {
-    const f = await fixture(
-      [
-        {
-          id: 'routed',
-          request: { method: 'skills/list', params: {}, server: 'b' },
-          assertions: {
-            schema: 'SkillsListResult',
-            containsText: 'weather-report',
-          },
-        },
-        {
-          id: 'unknown-label',
-          request: { method: 'skills/list', server: 'nope' },
-          assertions: { schema: 'SkillsListResult' },
-        },
-      ],
-      { servers: [server('a'), server('b')] }
-    );
-    const result = await runSuite({
-      manifestPath: f.manifestPath,
-      rootDir: f.dir,
-    });
-    const byId = Object.fromEntries(
-      result.summary.results.map((entry) => [entry.id, entry])
-    );
-    expect(byId.routed?.pass).toBe(true);
-    expect(byId['unknown-label']?.pass).toBe(false);
-  }, 60_000);
 });
