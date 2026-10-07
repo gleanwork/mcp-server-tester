@@ -79,7 +79,7 @@ describe('simulateMCPHost', () => {
   it('throws when provider is missing for sdk host type', async () => {
     const mcp = createMockMCP();
     await expect(simulateMCPHost(mcp, 'scenario', {})).rejects.toThrow(
-      'mcpHostConfig.provider is required'
+      'provider is required for the mst client'
     );
   });
 });
@@ -165,16 +165,5 @@ describe("systemPrompt on hosts that can't apply it", () => {
         },
       })
     ).rejects.toThrow(/placeholder but no systemPrompt is set/);
-  });
-
-  it('rejects it for browser and desktop hosts', async () => {
-    for (const hostType of ['browser', 'desktop'] as const) {
-      await expect(
-        simulateMCPHost(createMockMCP(), 'x', {
-          hostType,
-          systemPrompt: 'Use find_skills first.',
-        })
-      ).rejects.toThrow(`systemPrompt isn't supported for '${hostType}' hosts`);
-    }
   });
 });

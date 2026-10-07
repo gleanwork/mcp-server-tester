@@ -3,17 +3,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import {
-  extractAccessibilityResponse,
-  looksLikeClaudeChatSurface,
-} from './claudeAccessibility.js';
-import {
   findMatchingClaudeSessions,
   getClaudeDataDir,
   snapshotClaudeSessions,
   waitForClaudeTrace,
 } from './claudeSessions.js';
 import { parseClaudeTrace, type SessionCandidate } from './claudeTrace.js';
-import { buildClaudeTraceMetadata } from './claudeTraceMetadata.js';
 
 const COWORK_DRIVER = {
   provider: 'anthropic',
@@ -53,7 +48,7 @@ function toolUseEvent(id: string, name: string, timestamp?: string) {
   };
 }
 
-describe('anthropicClaude trace parsing', () => {
+describe('Claude local-agent trace parsing', () => {
   it.each(['partial', 'conflicting'] as const)(
     'preserves transcript ordering with %s audit coverage and audit-only results',
     async (coverage) => {
@@ -790,87 +785,6 @@ describe('anthropicClaude trace parsing', () => {
     expect(trace.transcriptParsed).toBe(false);
   });
 
-  it('only marks evidence fields high confidence when the parsed trace supports them', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'claude-evidence-'));
-    const sessionId = 'local_evidence';
-    const sessionDir = join(root, sessionId);
-    await mkdir(sessionDir, { recursive: true });
-    const metadataPath = join(root, `${sessionId}.json`);
-    await writeFile(
-      metadataPath,
-      JSON.stringify({
-        sessionId,
-        initialMessage: 'marker MCP_SERVER_TESTER_EVIDENCE',
-      }),
-      'utf-8'
-    );
-    await writeJsonl(join(sessionDir, 'audit.jsonl'), [
-      {
-        type: 'result',
-        result: 'final answer',
-        total_cost_usd: 0.01,
-        usage: { input_tokens: 1, output_tokens: 2 },
-      },
-    ]);
-
-    const trace = await parseClaudeTrace({
-      id: sessionId,
-      metadataPath,
-      sessionDir,
-      statMtimeMs: Date.now(),
-      metadata: {
-        sessionId,
-        initialMessage: 'marker MCP_SERVER_TESTER_EVIDENCE',
-      },
-    });
-    const metadata = buildClaudeTraceMetadata({
-      config: {
-        driver: COWORK_DRIVER,
-        name: 'Claude Cowork Desktop',
-      },
-      context: {
-        runId: 'run',
-        caseId: 'case',
-        scenario: 'scenario',
-        submittedScenario: 'scenario',
-        marker: 'MCP_SERVER_TESTER_EVIDENCE',
-        correlation: {
-          strategy: 'prompt_marker',
-          marker: 'MCP_SERVER_TESTER_EVIDENCE',
-          includedInPrompt: true,
-        },
-        timeoutMs: 1000,
-        startedAtMs: Date.now(),
-      },
-      driver: COWORK_DRIVER,
-      displayName: 'Claude Cowork Desktop',
-      artifacts: [],
-      trace,
-      limitations: [],
-    });
-
-    expect(metadata.evidence?.finalAnswer).toEqual({
-      source: 'host-local-transcript',
-      confidence: 'high',
-    });
-    expect(metadata.evidence?.toolCalls).toEqual({
-      source: 'none',
-      confidence: 'unknown',
-    });
-    expect(metadata.evidence?.usage).toEqual({
-      source: 'host-local-transcript',
-      confidence: 'high',
-    });
-    expect(metadata.evidence?.cost).toEqual({
-      source: 'host-local-transcript',
-      confidence: 'high',
-    });
-    expect(metadata.traceConfidence).toBe('high');
-    expect(metadata.traceLimitations?.join('\n')).toContain(
-      'Tool-call evidence is unavailable'
-    );
-  });
-
   it('allows capability-local Claude data directory options to override driver-wide options', () => {
     expect(
       getClaudeDataDir(
@@ -1368,49 +1282,6 @@ describe('anthropicClaude trace parsing', () => {
 
     expect(matches).toHaveLength(1);
     expect(matches[0]?.finalAnswer).toBe('plain prompt done');
-  });
-
-  it('extracts final answer from accessibility fallback text', () => {
-    expect(
-      extractAccessibilityResponse(
-        [
-          'You said: Please reply with exactly: external host integration acknowledged.',
-          '[eval-run-marker:MCP_SERVER_TESTER_TEST]',
-          'Claude responded: external host integration acknowledged.',
-          'Write a message...',
-        ].join('\n')
-      )
-    ).toBe('external host integration acknowledged.');
-  });
-
-  it('extracts final answer from comma-separated accessibility fallback text', () => {
-    expect(
-      extractAccessibilityResponse(
-        'You said: prompt [eval-run-marker:MCP_SERVER_TESTER_TEST], Claude responded: external host integration acknowledged., Write a message...'
-      )
-    ).toBe('external host integration acknowledged.');
-  });
-
-  it('recognizes the regular Claude Chat surface from visible controls', () => {
-    expect(
-      looksLikeClaudeChatSurface(
-        [
-          'New chat',
-          'Projects',
-          'Artifacts',
-          'Ask your org',
-          'Write a message...',
-        ].join('\n')
-      )
-    ).toBe(true);
-  });
-
-  it('does not classify a local-agent surface from generic composer text alone', () => {
-    expect(
-      looksLikeClaudeChatSurface(
-        ['Claude Code', 'Session', 'Write a message...'].join('\n')
-      )
-    ).toBe(false);
   });
 });
 

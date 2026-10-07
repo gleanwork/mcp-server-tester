@@ -24,7 +24,7 @@ function baseExtensions(): Required<TestExtensions> {
   };
   const host: ClientDefinition = {
     schema,
-    createConfig: () => ({ hostType: 'sdk' }),
+    run: async () => ({ finalText: '', events: [] }),
   };
   const judge: JudgeDefinition = {
     schema,
@@ -94,7 +94,9 @@ describe('manifest validation', () => {
         datasetSources: {
           x: { schema, load: async () => ({ name: 'x', cases: [] }) },
         },
-        clients: { x: { schema, createConfig: () => ({ hostType: 'sdk' }) } },
+        clients: {
+          x: { schema, run: async () => ({ finalText: '', events: [] }) },
+        },
         judges: { x: { schema, evaluate: async () => ({ score: 1 }) } },
       });
       const manifest: EvalManifest = {
@@ -161,7 +163,7 @@ describe('manifest validation', () => {
       clients: {
         custom: {
           schema: optionsSchema,
-          createConfig: () => ({ hostType: 'sdk' }),
+          run: async () => ({ finalText: '', events: [] }),
         },
       },
       judges: {
@@ -312,7 +314,7 @@ describe('manifest validation', () => {
       clients: {
         strict: {
           schema: required,
-          createConfig: () => ({ hostType: 'sdk' }),
+          run: async () => ({ finalText: '', events: [] }),
         },
       },
       metrics: {
@@ -372,7 +374,7 @@ describe('manifest validation', () => {
             maxToolCalls: z.number().max(2),
             model: z.string().default('default'),
           }),
-          createConfig: () => ({ hostType: 'sdk' }),
+          run: async () => ({ finalText: '', events: [] }),
         },
       },
     });

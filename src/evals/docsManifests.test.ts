@@ -110,7 +110,7 @@ describe('manifest and dataset examples in the docs', () => {
     if (kind === 'dataset') {
       // The loader `mst run` uses, with its case rules.
       expect(() =>
-        buildEvalDataset(value, undefined, {
+        buildEvalDataset(value, {
           name: 'docs',
           datasets: [],
         } as EvalManifest)

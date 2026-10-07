@@ -10,13 +10,9 @@ const manifest: EvalManifest = {
 describe('buildEvalDataset canonical ingestion', () => {
   it('accepts minimal cases without expectations or a client, and rejects a case without input', () => {
     const raw = { name: 'canonical', cases: [{ id: 'a', input: 'Find it' }] };
-    expect(buildEvalDataset(raw, undefined, manifest).cases).toEqual(raw.cases);
+    expect(buildEvalDataset(raw, manifest).cases).toEqual(raw.cases);
     expect(() =>
-      buildEvalDataset(
-        { name: 'canonical', cases: [{ id: 'b' }] },
-        undefined,
-        manifest
-      )
+      buildEvalDataset({ name: 'canonical', cases: [{ id: 'b' }] }, manifest)
     ).toThrow(/input/);
   });
 
@@ -37,7 +33,6 @@ describe('buildEvalDataset canonical ingestion', () => {
         name: 'canonical',
         cases: [{ ...case_, trials: 2, passThreshold: 0.75 }],
       },
-      { provider: 'anthropic', model: 'manifest-model' },
       { ...manifest, trials: 9, client: 'different-host' }
     );
     expect(dataset.cases[0]).toEqual({
@@ -56,10 +51,13 @@ describe('buildEvalDataset canonical ingestion', () => {
       },
     };
     expect(
-      buildEvalDataset({ name: 'canonical', cases: [case_] }, undefined, {
-        ...manifest,
-        judges: [{ type: 'another-judge' }],
-      }).cases[0]
+      buildEvalDataset(
+        { name: 'canonical', cases: [case_] },
+        {
+          ...manifest,
+          judges: [{ type: 'another-judge' }],
+        }
+      ).cases[0]
     ).toEqual(case_);
   });
 
@@ -74,7 +72,7 @@ describe('buildEvalDataset canonical ingestion', () => {
     { id: 'a', toolName: 'search', tool: 'other' },
   ])('rejects legacy inputs clearly without a source adapter: $id', (case_) => {
     expect(() =>
-      buildEvalDataset({ name: 'legacy', cases: [case_] }, undefined, manifest)
+      buildEvalDataset({ name: 'legacy', cases: [case_] }, manifest)
     ).toThrow(/canonical EvalDataset.*explicit dataset source adapter/);
   });
 
@@ -82,7 +80,6 @@ describe('buildEvalDataset canonical ingestion', () => {
     expect(
       buildEvalDataset(
         { name: 'question', cases: [{ id: 'a', input: 'find policy' }] },
-        undefined,
         manifest
       ).cases
     ).toEqual([{ id: 'a', input: 'find policy' }]);
@@ -102,7 +99,6 @@ describe('buildEvalDataset canonical ingestion', () => {
             },
           ],
         },
-        undefined,
         { ...manifest, maxCases: 1 }
       )
     ).toThrow(/expected_tool/);
@@ -112,12 +108,11 @@ describe('buildEvalDataset canonical ingestion', () => {
     expect(() =>
       buildEvalDataset(
         { name: 'bad', cases: [{ id: 'a', input: 123 }] },
-        undefined,
         manifest
       )
     ).toThrow(/input/);
     expect(() =>
-      buildEvalDataset({ name: 'empty', cases: [] }, undefined, manifest)
+      buildEvalDataset({ name: 'empty', cases: [] }, manifest)
     ).toThrow(/at least one case/);
   });
 
@@ -131,7 +126,7 @@ describe('buildEvalDataset canonical ingestion', () => {
       ],
     };
     expect(
-      buildEvalDataset(raw, undefined, {
+      buildEvalDataset(raw, {
         ...manifest,
         filterTags: ['wanted'],
         run: { maxCases: 1 },
@@ -150,7 +145,6 @@ describe('buildEvalDataset canonical ingestion', () => {
             { id: 'b', input: 'Find it' },
           ],
         },
-        undefined,
         { ...manifest, maxCases: 1 }
       ).cases.map((case_) => case_.id)
     ).toEqual(['a']);
@@ -165,7 +159,6 @@ describe('dataset errors', () => {
           name: 'search',
           cases: [{ id: 'a', input: 'x', assertions: { regex: ['x'] } }],
         },
-        undefined,
         manifest
       )
     ).toThrow(

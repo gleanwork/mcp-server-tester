@@ -51,7 +51,11 @@ import type { UsageMetrics } from '../types/index.js';
 import type { Plugin } from '../plugins/plugin.js';
 import { assertDatasetNamespaces, loadSuitePlugins } from './suitePlugins.js';
 import { getDatasetSource } from './builtinDatasetSources.js';
-import { assertHostSupports, getHost } from './builtinHosts.js';
+import {
+  assertHostSupports,
+  builtinClientDefaults,
+  getHost,
+} from './builtinHosts.js';
 import {
   startToolSurfaceProxy,
   type ToolSurfaceProxy,
@@ -202,7 +206,7 @@ function resolveHost(
   const declaration = (clientPatchOf(arm) ??
     clientPatchOf(manifest) ?? { type: DEFAULT_CLIENT }) as ClientConfig;
   const definition: ClientDefinition = getHost(declaration.type);
-  const config = definition.createConfig?.({
+  const config = builtinClientDefaults(declaration.type, {
     ...declaration,
     servers,
     server: servers[0],
@@ -523,7 +527,6 @@ export async function runEvalSuite(
         rootDir,
         manifestDir,
         manifest: sourceManifest,
-        hostConfig: sourceHost.config,
       }),
     }))
   );
@@ -546,9 +549,8 @@ export async function runEvalSuite(
       resolveServerSecrets(server, env)
     );
     resolvedServers.forEach((server) => assertEvalEndpoint(server, manifest));
-    // The first arm's resolved host was already needed to load the shared
-    // datasets. Reuse it for that arm so source loading does not invoke a
-    // stateful host factory twice or create a configuration that is discarded.
+    // The first arm's client was resolved before the datasets loaded (to
+    // check its servers); reuse it rather than resolve it twice.
     const host =
       arm === sourceArm
         ? sourceHost

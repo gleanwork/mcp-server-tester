@@ -6,7 +6,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import { runEvalSuite, type RunEvalSuiteOptions } from './runEvalSuite.js';
-import { getBuiltinHostConfig } from './builtinHosts.js';
 import {
   installPlugins,
   loadedNamespaces,
@@ -16,7 +15,6 @@ import type { Plugin } from '../plugins/plugin.js';
 import type { EvalCase, EvalDataset } from './datasetTypes.js';
 import type {
   DatasetSource,
-  DatasetSourceContext,
   ClientDefinition,
   ClientRunOptions,
   ClientRunInput,
@@ -215,53 +213,8 @@ describe('suite review regressions', () => {
     ).rejects.toThrow('SUITE_DUMMY_TOKEN');
   });
 
-  it('reuses the source host configuration for the first comparison arm', async () => {
-    const configurations: Record<string, unknown>[] = [];
-    const hostType = addHost(`arm-host-${sequence++}`, {
-      schema: z.object({ type: z.string(), model: z.string() }).passthrough(),
-      createConfig(options = {}) {
-        configurations.push(options);
-        return {
-          hostType: 'sdk',
-          model: options.model as string | undefined,
-        };
-      },
-      run: async () => ({ finalText: 'OK', events: [] }),
-    });
-    const sourceType = addDatasetSource(`arm-source-${sequence++}`, {
-      schema: z.object({ type: z.string() }),
-      load: async () => ({
-        name: 'shared',
-        cases: [{ id: 'case', input: 'hello' }],
-      }),
-    });
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'suite-arms-'));
-    dirs.push(dir);
-    const manifestPath = path.join(dir, 'manifest.json');
-    await fs.writeFile(
-      manifestPath,
-      JSON.stringify({
-        name: 'arm-configs',
-        datasets: [{ type: sourceType }],
-        client: hostType,
-        model: 'base',
-        arms: [
-          { name: 'base-arm' },
-          { name: 'variant-arm', client: hostType, model: 'variant' },
-        ],
-      })
-    );
-
-    await runSuite({ manifestPath, rootDir: dir });
-
-    expect(configurations.map((options) => options.model)).toEqual([
-      'base',
-      'variant',
-    ]);
-  });
-
   it.each(['manifest', 'override'] as const)(
-    'resolves %s server credentials before creating the source CLI config',
+    'resolves %s server credentials for the client, and stores none',
     async (serverSource) => {
       vi.stubEnv('SUITE_DUMMY_TOKEN', undefined);
       vi.stubEnv('SUITE_DUMMY_HOST_KEY', undefined);
@@ -272,17 +225,11 @@ describe('suite review regressions', () => {
       }));
       const name = addHost(`source-cli-${sequence++}`, {
         schema: z.object({}),
-        createConfig(options) {
-          const { type: _type, ...hostOptions } = options ?? {};
-          return getBuiltinHostConfig('claude-code', hostOptions);
-        },
         run,
       });
-      const sourceConfigs: DatasetSourceContext['hostConfig'][] = [];
       const source = addDatasetSource(`source-cli-data-${sequence++}`, {
         schema: z.object({}),
-        async load(_config, context) {
-          sourceConfigs.push(context.hostConfig);
+        async load() {
           return {
             name: 'cli-source',
             cases: [{ id: 'case', input: 'Find documents' }],
@@ -312,13 +259,6 @@ describe('suite review regressions', () => {
         ...(serverSource === 'override' ? { mcpConfig: server } : {}),
       });
       expect(result.summary.results[0]?.pass).toBe(true);
-      expect(sourceConfigs).toHaveLength(1);
-      expect(sourceConfigs[0]?.mcpServers?.protected).toMatchObject({
-        headers: { Authorization: 'Bearer source-dummy' },
-      });
-      expect(sourceConfigs[0]?.cli?.env?.SUITE_DUMMY_HOST_KEY).toBe(
-        'source-host'
-      );
       expect(run.mock.calls[0]?.[0].servers[0]).toEqual({
         ...server,
         auth: { accessToken: 'source-dummy' },
@@ -331,57 +271,6 @@ describe('suite review regressions', () => {
       );
       expect(saved).not.toContain('source-dummy');
       expect(saved).not.toContain('source-host');
-    }
-  );
-
-  it.each(['claude-code', 'mst'])(
-    'preserves declared %s environment in dataset source context',
-    async (type) => {
-      vi.stubEnv('HOST_ENV_SHARED', 'ambient');
-      vi.stubEnv('HOST_ENV_SUITE_ONLY', undefined);
-      vi.stubEnv('HOST_ENV_DECLARED_ONLY', undefined);
-      vi.stubEnv('MCP_PLUGIN_DIR', undefined);
-      const sourceConfigs: DatasetSourceContext['hostConfig'][] = [];
-      const source = addDatasetSource(`host-env-source-${sequence++}`, {
-        schema: z.object({}),
-        async load(_config, context) {
-          sourceConfigs.push(context.hostConfig);
-          return { name: 'host-env', cases: [] };
-        },
-      });
-      const declaredEnv = {
-        HOST_ENV_SHARED: 'declared',
-        HOST_ENV_DECLARED_ONLY: 'host-only',
-      };
-      const f = await fixture([], {
-        datasets: [{ type: source }],
-        client: type,
-        clientOptions: { env: declaredEnv },
-      });
-      const secretsFile = path.join(f.dir, 'secrets.env');
-      await fs.writeFile(
-        secretsFile,
-        'HOST_ENV_SHARED=suite\nHOST_ENV_SUITE_ONLY=suite-only'
-      );
-      const result = await runSuite({
-        manifestPath: f.manifestPath,
-        rootDir: f.dir,
-        secretsFile,
-      });
-      expect(sourceConfigs).toHaveLength(1);
-      const sourceConfig = sourceConfigs[0];
-      expect(sourceConfig?.cli?.env ?? sourceConfig?.env).toMatchObject({
-        HOST_ENV_SHARED: 'declared',
-        HOST_ENV_DECLARED_ONLY: 'host-only',
-        HOST_ENV_SUITE_ONLY: 'suite-only',
-      });
-      expect(result.manifest.clientOptions?.env).toEqual(declaredEnv);
-      expect(JSON.parse(await fs.readFile(f.manifestPath, 'utf8'))).toEqual(
-        f.manifest
-      );
-      expect(process.env.HOST_ENV_SHARED).toBe('ambient');
-      expect(process.env.HOST_ENV_SUITE_ONLY).toBeUndefined();
-      expect(process.env.HOST_ENV_DECLARED_ONLY).toBeUndefined();
     }
   );
 

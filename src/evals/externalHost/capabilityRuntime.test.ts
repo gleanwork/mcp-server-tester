@@ -205,17 +205,17 @@ describe('external host capability runtime', () => {
     const loaded = loadExternalHostConfig({
       driver: TEST_DRIVER,
       capabilities: {
-        control: { uses: 'builtin:platform.macos' },
+        control: { uses: 'builtin:openai.chatgpt.appLifecycle' },
         input: {
-          uses: 'builtin:desktop.macos.accessibilitySubmit',
+          uses: 'builtin:openai.chatgpt.nativeSubmit',
           provides: ['completion', 'trace', 'normalize'],
         },
       },
     });
 
     expect(loaded.loadedCapabilities.map((c) => c.implementation.id)).toEqual([
-      'builtin:platform.macos',
-      'builtin:desktop.macos.accessibilitySubmit',
+      'builtin:openai.chatgpt.appLifecycle',
+      'builtin:openai.chatgpt.nativeSubmit',
     ]);
   });
 });

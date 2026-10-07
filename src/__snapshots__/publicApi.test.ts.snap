@@ -29,7 +29,6 @@ exports[`public API > ./evals 1`] = `
   "createEvalResultStore",
   "createStoredEvalArtifact",
   "defaultEnvironmentMetadata",
-  "getBuiltinHostConfig",
   "getMissingDependencyMessage",
   "getPairwiseJudge",
   "isEvalResultStore",
@@ -48,7 +47,6 @@ exports[`public API > ./evals 1`] = `
   "runVariantExperiment",
   "saveBaseline",
   "saveEvalRunComparison",
-  "simulateMCPHost",
   "validateManifest",
 ]
 `;
@@ -61,16 +59,9 @@ exports[`public API > ./experimental/clients 1`] = `
   "coworkMcpSettingsMatch",
   "coworkPluginMarketplace",
   "coworkPluginSettingsMatch",
-  "driverToSlug",
-  "getExternalHostConfigJsonSchema",
-  "getExternalHostReference",
   "hostStdioServers",
-  "listExternalHostDriverReferences",
   "materializeHostStdioFiles",
-  "normalizeHostDriver",
-  "parseDriverSlug",
   "resolveHostStdioServer",
-  "runExternalHostScenario",
 ]
 `;
 

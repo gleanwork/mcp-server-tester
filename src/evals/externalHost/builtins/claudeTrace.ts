@@ -675,18 +675,6 @@ export function metadataTimestampMs(
   return Number.NaN;
 }
 
-export function metadataTimestampString(
-  value: string | number | undefined
-): string | undefined {
-  if (typeof value === 'string') {
-    return value;
-  }
-  if (typeof value === 'number') {
-    return new Date(value).toISOString();
-  }
-  return undefined;
-}
-
 /**
  * The bound native task's latest host tool call is an unanswered
  * AskUserQuestion: Claude is waiting for a person. A headless run cannot

@@ -32,7 +32,7 @@ export const MACOS_DESKTOP_CAPABILITIES: ExternalHostCapabilityImplementation[] 
     },
   ];
 
-export async function runAppleScript(
+async function runAppleScript(
   script: string,
   options: { timeoutMs?: number; maxBuffer?: number } = {}
 ): Promise<string> {
@@ -55,44 +55,6 @@ function writeMacosClipboard(value: string): Promise<void> {
     });
     child.stdin?.end(value);
   });
-}
-
-export async function readMacosAccessibilityText(
-  appName: string
-): Promise<string> {
-  const script = `
-on collectText(theElement)
-  set output to {}
-  try
-    tell application "System Events" to set elementRole to role of theElement
-    tell application "System Events" to set elementValue to value of theElement
-    if (elementRole is "AXStaticText" or elementRole is "AXTextArea") and elementValue is not missing value then set end of output to (elementValue as text)
-  end try
-  try
-    tell application "System Events" to set uiChildren to UI elements of theElement
-    repeat with childElement in uiChildren
-      set output to output & my collectText(childElement)
-    end repeat
-  end try
-  return output
-end collectText
-
-tell application "System Events" to tell process ${JSON.stringify(appName)}
-  set textItems to my collectText(front window)
-end tell
-set AppleScript's text item delimiters to linefeed
-return textItems as text
-`;
-  return runAppleScript(script);
-}
-
-export async function readMacosFrontWindowContents(
-  appName: string
-): Promise<string> {
-  const script = `tell application "System Events" to tell process ${JSON.stringify(
-    appName
-  )} to get entire contents of front window`;
-  return runAppleScript(script);
 }
 
 async function requireMacosCapability({

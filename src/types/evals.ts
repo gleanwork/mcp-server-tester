@@ -56,12 +56,7 @@ export type {
 export type { SaveBaselineOptions } from '../evals/baseline.js';
 
 export type {
-  HostType,
-  CLIOutputFormat,
-  CLIConfig,
   LLMProvider,
-  MCPHostConfig,
   LLMToolCall,
   MCPHostSimulationResult,
-  MCPHostSimulator,
 } from '../evals/mcpHost/index.js';

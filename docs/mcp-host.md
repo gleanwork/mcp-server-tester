@@ -125,49 +125,38 @@ The case passes if `search` was triggered in at least 4 of 5 runs (80% accuracy)
 "toolCallCount": { "min": 1, "max": 3 }
 ```
 
-## MCPHostConfig Options
+## mst Client Options
+
+The `mst` client takes its options in `clientOptions`, on the run (`runEvalDataset`), a suite manifest, or a case:
+
+| Option         | Meaning                                                                                                                                          |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `model`        | The model (set at the top level, next to `client`). The API is inferred from the id                                                              |
+| `provider`     | The API, when the model id doesn't say: `openai`, `anthropic`, `google`, `vertex-anthropic`, `mistral`, `azure`, `deepseek`, `openrouter`, `xai` |
+| `maxToolCalls` | Most tool-call steps (default 5)                                                                                                                 |
+| `temperature`  | Sampling temperature (0–1)                                                                                                                       |
+| `maxTokens`    | Most response tokens                                                                                                                             |
+| `timeout`      | Deadline in milliseconds                                                                                                                         |
+| `apiKeyEnvVar` | The environment variable that holds the API key, instead of the provider's default                                                               |
+| `skills`       | Offer the server's Agent Skills: `'off'` (default), `'catalog'` or `'preload'`                                                                   |
+| `systemPrompt` | Added to the model's system prompt (organisation instructions, say)                                                                              |
+| `env`          | Environment for the run (never written to `process.env`)                                                                                         |
 
 ```typescript
-interface MCPHostConfig {
-  hostType?: 'sdk' | 'cli' | 'browser' | 'desktop'; // Host type (default: 'sdk')
-  provider?: LLMProvider; // Required for 'sdk', ignored for 'cli'
-  model?: string; // Model name (provider-specific default if omitted)
-  maxToolCalls?: number; // Max tool call steps (default: 10)
-  temperature?: number; // LLM temperature (default: 0)
-  maxTokens?: number; // Max response tokens
-  apiKeyEnvVar?: string; // Override default env var name
-  skills?: 'off' | 'catalog' | 'preload'; // Offer the server's Agent Skills (SDK host; default 'off')
-  systemPrompt?: string; // Added to the host's system prompt (SDK host; a CLI host takes it through a {{systemPrompt}} placeholder in cli.args)
-  cli?: CLIConfig; // Required for 'cli' host type
-}
-
-type LLMProvider =
-  | 'openai'
-  | 'anthropic'
-  | 'google'
-  | 'vertex-anthropic'
-  | 'mistral'
-  | 'azure'
-  | 'deepseek'
-  | 'openrouter'
-  | 'xai';
-
-interface CLIConfig {
-  command: string; // CLI command (e.g., 'claude', 'codex')
-  args: string[]; // Arguments — use '{{prompt}}' as prompt placeholder
-  outputFormat?: 'text' | 'json' | 'stream-json'; // How to parse stdout (default: 'stream-json')
-  timeout?: number; // Command timeout in ms (default: 120000)
-}
+await runEvalDataset(
+  {
+    dataset,
+    client: 'mst',
+    model: 'claude-haiku-4-5',
+    clientOptions: { maxToolCalls: 8, temperature: 0 },
+  },
+  { mcp, testInfo }
+);
 ```
-
-**Host types:**
-
-- **`sdk`** (default) — Programmatic via Vercel AI SDK. Reuses the framework's MCP connection. Requires `provider`.
-- **`cli`** — CLI-based hosts (e.g., Claude Code, Codex). Spawns a process with its own MCP connection. Requires `cli`.
 
 **Skills:** with `skills: 'catalog'` the SDK host lists the server's [Agent Skills](./skills.md) in the system prompt and gives the model `read_skill` and `read_resource` tools; `'preload'` puts every `SKILL.md` in the prompt. Skills the model loads (and that pass verification) appear as `kind: 'skill'` entries for `toolsTriggered`, not as tool calls; preloaded skills do not. To measure whether skills help, compare suite arms that differ in the `mst` host's `skills` mode; see [Agent Skills](./skills.md#measuring-whether-skills-help).
 
-**Protocol:** the SDK host uses the test's MCP connection, so it follows `mcpConfig.protocol`. CLI and external hosts open their own connections. See [Protocol Versions](./protocol-versions.md).
+**Protocol:** in a Playwright test the `mst` client uses the test's MCP connection, so it follows `mcpConfig.protocol`. Claude Code, Cowork and ChatGPT open their own connections. See [Protocol Versions](./protocol-versions.md).
 
 ## Claude Code isolation
 

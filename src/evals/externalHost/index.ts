@@ -1,36 +1,14 @@
-export { runExternalHostScenario } from './runtime.js';
-export {
-  getBuiltinDriverConfig,
-  listBuiltinDriverSlugs,
-} from './builtinDrivers.js';
-export {
-  CLAUDE_COWORK_DESKTOP_MACOS_DRIVER,
-  driverToSlug,
-  normalizeHostDriver,
-  parseDriverSlug,
-} from './driverIdentity.js';
-export {
-  getExternalHostConfigJsonSchema,
-  getExternalHostReference,
-  listExternalHostDriverReferences,
-} from './schema.js';
-export type { ExternalHostDriverReference } from './schema.js';
 export type {
   EvidenceSource,
-  ExternalHostCapabilityBinding,
-  ExternalHostCapabilitiesConfig,
-  ExternalHostConfig,
+  ExternalHostCorrelationMetadata,
   ExternalHostFailureKind,
   ExternalHostMetadata,
-  ExternalHostRunResult,
   ExternalHostSession,
-  ExternalHostSimulationResult,
+  ExternalHostTelemetry,
   ExternalHostType,
   HostArtifact,
   HostCapability,
-  HostDriverConfig,
   HostDriverId,
-  ClientRunContext,
   ObservationConfidence,
   TraceSource,
 } from './types.js';

@@ -27,6 +27,7 @@ This guide covers upgrading from 1.x (the last 1.x release is 1.1.1). Features f
 - [`runVariantExperiment` needs clear evidence to recommend a variant](#runvariantexperiment-needs-clear-evidence-to-recommend-a-variant)
 - [Client cases name a client and model, not `mcpHostConfig`](#client-cases-name-a-client-and-model-not-mcphostconfig)
 - [Direct cases are Playwright tests](#direct-cases-are-playwright-tests)
+- [The simulator and the external-host runtime are internal](#the-simulator-and-the-external-host-runtime-are-internal)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
 ---
@@ -68,14 +69,14 @@ Projects created with `npx @gleanwork/mcp-server-tester init` now depend on `@mo
 
 ## Imports moved to subpaths
 
-**Affects:** code that imports comparisons, baselines, result stores, variant experiments, `simulateMCPHost`, or low-level OAuth from the package root.
+**Affects:** code that imports comparisons, baselines, result stores, variant experiments, or low-level OAuth from the package root. (`simulateMCPHost` is internal now: see [The simulator and the external-host runtime are internal](#the-simulator-and-the-external-host-runtime-are-internal).)
 
 The root now holds the core testing interface: fixtures, matchers and validators, the MCP client, config, datasets with `runEvalDataset` and `runEvalCase`, judges, conformance, and Agent Skills, with the types those use. Everything else moved to a subpath. Apart from the judge registry ([Custom judges are plugins](#custom-judges-are-plugins)) and [`getResponseSizeBytes`](#getresponsesizebytes-is-no-longer-exported), nothing was renamed or removed; only the import path changed.
 
-| Subpath                              | What it holds                                                                                                                                                                         |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@gleanwork/mcp-server-tester/evals` | The evaluation framework: manifests, suites and batches, extension definition types, metrics, result stores, baselines and comparisons, variant experiments, and MCP host simulation. |
-| `@gleanwork/mcp-server-tester/auth`  | Low-level OAuth: discovery, token storage, and the client-credentials flow.                                                                                                           |
+| Subpath                              | What it holds                                                                                                                                                    |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@gleanwork/mcp-server-tester/evals` | The evaluation framework: manifests, suites and batches, extension definition types, metrics, result stores, baselines and comparisons, and variant experiments. |
+| `@gleanwork/mcp-server-tester/auth`  | Low-level OAuth: discovery, token storage, and the client-credentials flow.                                                                                      |
 
 ```typescript
 // Before (1.x)
@@ -103,7 +104,7 @@ If TypeScript reports that the package has no exported member, find the name bel
 
 These names moved:
 
-- **`@gleanwork/mcp-server-tester/evals`:** `compareEvalRuns`, `CompareEvalRunsOptions`, `createDefaultArtifactId`, `createEvalResultStore`, `createStoredEvalArtifact`, `defaultEnvironmentMetadata`, `EvalCaseComparison`, `EvalCaseComparisonOutcome`, `EvalResultStore`, `EvalResultStoreConfig`, `EvalResultStoreLike`, `EvalRunComparisonLabels`, `EvalRunComparisonResult`, `ExperimentMetric`, `FileEvalResultStore`, `FileEvalResultStoreConfig`, `GCSEvalResultStore`, `GCSEvalResultStoreConfig`, `getMissingDependencyMessage`, `isEvalResultStore`, `isProviderAvailable`, `ListStoredArtifactsOptions`, `loadBaseline`, `loadStoredEvalRunnerResult`, `ProposeVariantsContext`, `resolveEvalResultStore`, `runVariantExperiment`, `saveBaseline`, `SaveBaselineOptions`, `saveEvalRunComparison`, `SaveEvalRunComparisonOptions`, `simulateMCPHost`, `StoredArtifactKind`, `StoredArtifactSummary`, `StoredEvalArtifact`, `StoredEvalArtifactMetadata`, `StoredEvalResultLoadOptions`, `StoredEvalResultRef`, `StoredEvalResultSaveOptions`, `StoredEvalRunRef`, `VariantCandidateResult`, `VariantExperimentOptions`, `VariantExperimentReason`, `VariantExperimentResult`, `VariantExperimentRound`, `VariantImprovementProposal`, `VariantRecommendation` (`runServerComparison` and `saveServerComparison` were removed instead; see [Server comparisons are suite arms](#server-comparisons-are-suite-arms).)
+- **`@gleanwork/mcp-server-tester/evals`:** `compareEvalRuns`, `CompareEvalRunsOptions`, `createDefaultArtifactId`, `createEvalResultStore`, `createStoredEvalArtifact`, `defaultEnvironmentMetadata`, `EvalCaseComparison`, `EvalCaseComparisonOutcome`, `EvalResultStore`, `EvalResultStoreConfig`, `EvalResultStoreLike`, `EvalRunComparisonLabels`, `EvalRunComparisonResult`, `ExperimentMetric`, `FileEvalResultStore`, `FileEvalResultStoreConfig`, `GCSEvalResultStore`, `GCSEvalResultStoreConfig`, `getMissingDependencyMessage`, `isEvalResultStore`, `isProviderAvailable`, `ListStoredArtifactsOptions`, `loadBaseline`, `loadStoredEvalRunnerResult`, `ProposeVariantsContext`, `resolveEvalResultStore`, `runVariantExperiment`, `saveBaseline`, `SaveBaselineOptions`, `saveEvalRunComparison`, `SaveEvalRunComparisonOptions`, `StoredArtifactKind`, `StoredArtifactSummary`, `StoredEvalArtifact`, `StoredEvalArtifactMetadata`, `StoredEvalResultLoadOptions`, `StoredEvalResultRef`, `StoredEvalResultSaveOptions`, `StoredEvalRunRef`, `VariantCandidateResult`, `VariantExperimentOptions`, `VariantExperimentReason`, `VariantExperimentResult`, `VariantExperimentRound`, `VariantImprovementProposal`, `VariantRecommendation` (`runServerComparison` and `saveServerComparison` were removed instead; see [Server comparisons are suite arms](#server-comparisons-are-suite-arms).)
 - **`@gleanwork/mcp-server-tester/auth`:** `ClientCredentialsConfig`, `discoverAuthorizationServer`, `discoverProtectedResource`, `DiscoveryError`, `ENV_VAR_NAMES`, `hasValidTokens`, `loadTokens`, `loadTokensFromEnv`, `MCP_PROTOCOL_VERSION`, `performClientCredentialsFlow`, `ProtectedResourceDiscoveryResult`, `ProtectedResourceMetadata`, `StoredClientInfo`, `StoredOAuthState`, `StoredServerMetadata`
 
 ## `mcp.callTool()` returns protocol errors as error results
@@ -473,10 +474,42 @@ test('weather-london', async ({ mcp }) => {
 - `executeCase` returns `kind: 'host'` or `'failed'`; `'direct'` fails. Results no longer carry `request.mode`. `JudgeCase.input.tool` is gone (judges see `input.prompt`).
 - `defaultTrials` and `defaultPassThreshold` now apply to every case.
 
+## The simulator and the external-host runtime are internal
+
+**Affects:** code that calls `simulateMCPHost()` or `getBuiltinHostConfig()` from `./evals`; the `MCPHostConfig`, `HostType`, `CLIConfig`, `CLIOutputFormat` and `MCPHostSimulator` types; browser and desktop hosts (`hostType: 'browser' | 'desktop'`); the external-host runtime in `./experimental/clients` (`runExternalHostScenario`, driver identity helpers, `getExternalHostConfigJsonSchema` and the driver references, and the external-host config and capability types); plugin clients with `createConfig`; dataset sources that read `context.hostConfig`; and `buildEvalDataset(raw, hostConfig, manifest)`.
+
+These were the machinery behind the `mst`, `claude-code` and `chatgpt` clients. With `mcp_host` and `external_host` cases gone, the clients are the interface:
+
+```typescript
+// Before
+const result = await simulateMCPHost(mcp, 'What files are in docs?', {
+  provider: 'anthropic',
+  model: 'claude-sonnet-4-5',
+});
+
+// Now: a case on the mst client
+const result = await runEvalCase(
+  {
+    id: 'list-docs',
+    input: 'What files are in docs?',
+    assertions: { toolsTriggered: { calls: [{ name: 'list_directory' }] } },
+  },
+  { mcp },
+  { client: 'mst', model: 'claude-sonnet-4-5' }
+);
+```
+
+- The `mst` client's options (`provider`, `maxToolCalls`, `temperature`, `skills`, `systemPrompt`, ...) go in `clientOptions`. See [mst client options](../mcp-host.md#mst-client-options).
+- Browser and desktop hosts, and a caller-authored CLI host, have no replacement. A plugin client (`run` or `runBatch`) can drive any host and report its trace.
+- A plugin client needs `run` or `runBatch`; `createConfig` is gone.
+- `buildEvalDataset(raw, manifest)` takes no host config, and `DatasetSourceContext` has no `hostConfig`.
+- The ChatGPT client still records what it saw on each result's `externalHost`, and `./experimental/clients` still exports the types for it (`ExternalHostMetadata` and the types it uses).
+- The external-host drivers for the Claude desktop chat and Cowork surfaces (driven through Accessibility) are gone; the `cowork` client covers Cowork.
+
 ## New in 2.0 (non-breaking)
 
 - An evaluation framework over datasets: manifests, suites and batches (`mst run`, `mst batch`), arms, metrics, result stores, and plugins that add dataset sources, hosts, judges, metrics and result stores under their own namespace, and shared configs a manifest `extends`. It's in `@gleanwork/mcp-server-tester/evals`. See [Evaluation framework](../evaluation-framework.md).
-- Desktop hosts for suites: Claude Cowork (`cowork`) and the ChatGPT desktop app (`chatgpt-mac`, `chatgpt-linux`), driven through the desktop UI (Computer Use on macOS, AT-SPI on Linux). Their APIs are in `@gleanwork/mcp-server-tester/experimental/hosts`, which may change between minor versions. See [Cowork](../cowork.md) and [ChatGPT desktop](../chatgpt-desktop.md).
+- Desktop hosts for suites: Claude Cowork (`cowork`) and the ChatGPT desktop app (`chatgpt`), driven through the desktop UI (Computer Use on macOS, AT-SPI on Linux). Their APIs are in `@gleanwork/mcp-server-tester/experimental/clients`, which may change between minor versions. See [Cowork](../cowork.md) and [ChatGPT desktop](../chatgpt-desktop.md).
 - A custom `executeCase` for `runEvalDataset()` and `runEvalCase()`, which returns a typed `CaseExecution` (`direct`, `host` or `failed`).
 - LLM gateway support for the `mst` client and LLM judges: `ANTHROPIC_AUTH_TOKEN`, and `MST_LLM_AUTH_COMMAND` for short-lived tokens. See [LLM Gateways](../llm-gateways.md).
 - The CLI is also installed as `mst`. In a project that depends on the package, `npx mst <command>` and `npx mcp-server-tester <command>` run the same binary. Before the package is installed, run `init` as `npx @gleanwork/mcp-server-tester init`: `npx mcp-server-tester` and `npx mst` would download unrelated npm packages with those names. See [CLI](../cli.md).

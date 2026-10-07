@@ -17,7 +17,7 @@ This is the **canonical example** showing all testing patterns organized into th
 
 ### End-to-End / Functional Testing (requires LLM API keys)
 
-4. **LLM Host Simulation** - Test real MCP usage with LLM tool discovery
+4. **Evals on a model** - Single cases on the `mst` client, written in code
 5. **Evals** - One test per case in `eval-dataset.json`, on a model
 
 ## Quick Start
@@ -87,28 +87,25 @@ for (const check of toolChecks.checks) {
 }
 ```
 
-### 3. LLM Host Simulation (E2E Functional)
+### 3. Evals on a Model (E2E Functional)
 
-Test how MCP servers are **really used** - an LLM discovers tools and decides how to use them:
+Test how MCP servers are **really used**: a model gets the tools and an input, and decides which to call. `runEvalCase` runs one case on the `mst` client:
 
 ```typescript
-test('LLM discovers and lists directory contents', async ({ mcp }) => {
-  // Simulate real MCP usage: natural language → LLM → tool calls
-  const result = await simulateMCPHost(
-    mcp,
-    'What files are in the docs directory?',
-    { provider: 'anthropic', model: 'claude-sonnet-4-20250514', temperature: 0 }
+test('a model discovers and lists directory contents', async ({ mcp }) => {
+  const result = await runEvalCase(
+    {
+      id: 'list-docs',
+      input: 'What files are in the docs directory?',
+      assertions: {
+        toolsTriggered: { calls: [{ name: 'list_directory' }] },
+        containsText: ['guide', 'api'],
+      },
+    },
+    { mcp },
+    { client: 'mst', model: 'claude-sonnet-4-5' }
   );
-
-  expect(result.success).toBe(true);
-  expect(result.toolCalls.length).toBeGreaterThan(0);
-
-  // Validate the LLM chose the right tool
-  const listDirCall = result.toolCalls.find((c) => c.name === 'list_directory');
-  expect(listDirCall).toBeDefined();
-
-  // Validate the response
-  expect(result.response).toContain('guide');
+  expect(result.pass, result.error).toBe(true);
 });
 ```
 

@@ -107,9 +107,9 @@ Configuration is read from `project.use.mcpConfig` in playwright.config.ts. The 
 The public API is tiered. Each name is exported from exactly one of these entry points (`./types` additionally re-exports the root's shared types without runtime code):
 
 - `.` (`src/index.ts`) - The core testing interface: fixtures, matchers and validators, MCP client, config, datasets with `runEvalDataset`/`runEvalCase`, judges, conformance, skills, and their types
-- `./evals` (`src/entries/evals.ts`) - The evaluation framework: manifests, suites/batches, extension definition types, metrics, result stores, comparisons, variant experiments, `simulateMCPHost`
+- `./evals` (`src/entries/evals.ts`) - The evaluation framework: manifests, suites/batches, extension definition types, metrics, result stores, comparisons, variant experiments
 - `./auth` (`src/entries/auth.ts`) - Low-level OAuth: discovery, token storage, client credentials
-- `./experimental/clients` (`src/entries/experimentalClients.ts`) - Desktop/external hosts, Cowork settings and audit, host plugins (may change between minors)
+- `./experimental/clients` (`src/entries/experimentalClients.ts`) - Desktop-run metadata types, Cowork settings and audit, host plugins (may change between minors)
 - `./fixtures/mcp`, `./fixtures/mcpAuth`, `./reporters/mcpReporter` - Playwright fixtures and the reporter
 
 The subpaths are ESM only and share chunks with the ESM root (tsup `splitting`), so module state (the extension table, classes) is one instance across them. The CommonJS root and the fixtures/reporter bundles are separate copies; only `Symbol.for` state (the extension table and the plugin-load cache) is shared with those. New public names go in the narrowest tier that fits. `npm run knip` (in CI) fails on files, exports or dependencies nothing uses, so delete dead code rather than leaving it exported. `src/publicApi.test.ts` pins each entry point's runtime exports: after a deliberate change, update it with `npx vitest run src/publicApi.test.ts -u` and note any removal in the migration guides. Tests count as users, so an export only a test imports is not flagged.
@@ -179,14 +179,9 @@ Custom sanitizers:
 
 Update snapshots: `npx playwright test --update-snapshots`
 
-### MCP Host Simulation
+### The mst and claude-code Clients
 
-`simulateMCPHost()` orchestrates LLM + MCP tool calls via the Vercel AI SDK. The LLM receives all available tools and a input, then decides which tools to call.
-
-Two host types:
-
-- **`sdk`** (default): Programmatic via Vercel AI SDK. Reuses the test's MCP connection. Requires `provider`.
-- **`cli`**: CLI-based hosts (e.g., Claude Code). Spawns a process with its own MCP connection. Requires `cli` config with `command`, `args` (use `{{prompt}}` placeholder), and `outputFormat`.
+`simulateMCPHost()` (internal, in `src/evals/mcpHost/`) runs the `mst` and `claude-code` clients: the `sdk` path drives a model through the Vercel AI SDK over the test's MCP connection; the `cli` path spawns Claude Code with its own connection. Tests and evals reach it only through `runEvalDataset`/`runEvalCase` or a suite. The external-host runtime in `src/evals/externalHost/` is likewise internal to the ChatGPT client; `./experimental/clients` exports only the metadata types results carry.
 
 Provider packages are dynamically imported — install `ai` + `@ai-sdk/<provider>` (e.g., `npm install ai @ai-sdk/anthropic`).
 

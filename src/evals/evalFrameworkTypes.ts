@@ -12,7 +12,6 @@ import type {
   ClientConfig,
   ModelPricing,
 } from './evalManifest.js';
-import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
 import type { EvalResultStore } from './resultStore.js';
 import type { EvalRunnerResult } from './evalRunner.js';
 import type { JudgeInput, JudgeVerdict } from '../judge/judgeContract.js';
@@ -23,8 +22,6 @@ export interface DatasetSourceContext {
   /** The manifest's directory; relative paths resolve here before `rootDir`. */
   manifestDir?: string;
   manifest: EvalManifest;
-  /** Resolved built-in host config for legacy dataset normalization. */
-  hostConfig?: MCPHostConfig;
 }
 
 /** Public dataset-source extension point. */
@@ -130,14 +127,12 @@ export interface ClientBatchRequest {
 /** Public host extension point. */
 export interface ClientDefinition {
   readonly schema: ZodType;
-  createConfig?(options?: Record<string, unknown>): MCPHostConfig;
   /** Missing evidence declarations are treated as unverified. */
   readonly evidence?: TraceEvidence;
   /**
    * The host shows the model an arm's `toolOverrides` (read from
    * `context.arm` or `context.manifest`). Without it, a manifest that sets
-   * them for this host fails validation. Hosts with only `createConfig` run
-   * through MST's SDK host, which applies them.
+   * them for this host fails validation.
    */
   readonly toolOverrides?: boolean;
   /**

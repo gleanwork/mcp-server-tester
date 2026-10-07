@@ -275,7 +275,7 @@ describe('SDK host through the real AI SDK', () => {
     });
   });
   it('passes a claude-cli systemPrompt with --append-system-prompt', () => {
-    const config = getHost('claude-code').createConfig!({
+    const config = getBuiltinHostConfig('claude-code', {
       systemPrompt: 'Use find_skills first.',
     });
     const args = config.cli!.args;
@@ -284,7 +284,7 @@ describe('SDK host through the real AI SDK', () => {
       '{{systemPrompt}}'
     );
     expect(config.systemPrompt).toBe('Use find_skills first.');
-    expect(getHost('claude-code').createConfig!({}).cli!.args).not.toContain(
+    expect(getBuiltinHostConfig('claude-code', {}).cli!.args).not.toContain(
       '--append-system-prompt'
     );
   });
@@ -381,7 +381,7 @@ describe('vercel-sdk skills', () => {
     ['preload', 'preload'],
     ['off', undefined],
   ] as const)('skills: %s gives the SDK host skills %s', (skills, expected) => {
-    const config = getHost('mst').createConfig!({
+    const config = getBuiltinHostConfig('mst', {
       provider: 'anthropic',
       skills,
     });
