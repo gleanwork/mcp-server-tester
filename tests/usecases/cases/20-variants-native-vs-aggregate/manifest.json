@@ -1,9 +1,9 @@
 {
   "name": "variants-native-vs-aggregate",
   "datasets": ["./dataset.json"],
-  "host": {
-    "type": "usecase/model",
-    "model": "claude-sonnet-4-5",
+  "client": "usecase/model",
+  "model": "claude-sonnet-4-5",
+  "clientOptions": {
     "policy": [
       {
         "when": {
@@ -82,7 +82,7 @@
     {
       "name": "aggregate-plugin-gateway",
       "servers": ["{{server aggregate agg}}", "{{server gateway gateway}}"],
-      "host": {
+      "clientOptions": {
         "plugins": ["aggregate-plugin"]
       }
     },
@@ -95,7 +95,7 @@
         "{{server chat chat}}",
         "{{server mail mail}}"
       ],
-      "host": {
+      "clientOptions": {
         "plugins": ["aggregate-plugin"]
       }
     }

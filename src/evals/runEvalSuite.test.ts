@@ -134,7 +134,7 @@ async function fixture(
   const manifest = {
     name: 'review',
     datasets: [{ type: source }],
-    host: { type },
+    client: type,
     servers: [],
     ...extra,
   };
@@ -245,10 +245,11 @@ describe('suite review regressions', () => {
       JSON.stringify({
         name: 'arm-configs',
         datasets: [{ type: sourceType }],
-        host: { type: hostType, model: 'base' },
+        client: hostType,
+        model: 'base',
         arms: [
           { name: 'base-arm' },
-          { name: 'variant-arm', host: { type: hostType, model: 'variant' } },
+          { name: 'variant-arm', client: hostType, model: 'variant' },
         ],
       })
     );
@@ -298,7 +299,7 @@ describe('suite review regressions', () => {
       };
       const f = await fixture([], {
         datasets: [{ type: source }],
-        host: { type: name },
+        client: name,
         servers: serverSource === 'manifest' ? [server] : [],
       });
       const secretsFile = path.join(f.dir, 'secrets.env');
@@ -356,7 +357,8 @@ describe('suite review regressions', () => {
       };
       const f = await fixture([], {
         datasets: [{ type: source }],
-        host: { type, env: declaredEnv },
+        client: type,
+        clientOptions: { env: declaredEnv },
       });
       const secretsFile = path.join(f.dir, 'secrets.env');
       await fs.writeFile(
@@ -375,7 +377,7 @@ describe('suite review regressions', () => {
         HOST_ENV_DECLARED_ONLY: 'host-only',
         HOST_ENV_SUITE_ONLY: 'suite-only',
       });
-      expect(result.manifest.host?.env).toEqual(declaredEnv);
+      expect(result.manifest.clientOptions?.env).toEqual(declaredEnv);
       expect(JSON.parse(await fs.readFile(f.manifestPath, 'utf8'))).toEqual(
         f.manifest
       );
@@ -437,13 +439,12 @@ describe('suite review regressions', () => {
       }),
       run,
     });
-    const f = await fixture(
-      [{ ...scenario, host: { type: name, model: 'case' } }],
-      {
-        host: { type: name, count: 2, model: 'base' },
-        arms: [{ name: 'a', host: { model: 'arm' } }],
-      }
-    );
+    const f = await fixture([{ ...scenario, client: name, model: 'case' }], {
+      client: name,
+      model: 'base',
+      clientOptions: { count: 2 },
+      arms: [{ name: 'a', model: 'arm' }],
+    });
     await runSuite({ manifestPath: f.manifestPath, rootDir: f.dir });
     expect(run).toHaveBeenCalledWith(
       expect.anything(),
@@ -470,17 +471,18 @@ describe('suite review regressions', () => {
     const f = await fixture(
       [
         { ...scenario, id: 'baseline' },
-        { ...scenario, id: 'patched', host: { type: name, model: 'case' } },
+        { ...scenario, id: 'patched', client: name, model: 'case' },
       ],
       {
-        host: { type: name, count: 2 },
+        client: name,
+        clientOptions: { count: 2 },
         model: 'suite',
         provider: 'openai',
         timeout: 123,
         maxToolCalls: 0,
         arms: [
           { name: 'inherited' },
-          { name: 'override', host: { timeout: 321 } },
+          { name: 'override', clientOptions: { timeout: 321 } },
         ],
       }
     );
@@ -635,7 +637,8 @@ describe('suite review regressions', () => {
         {
           ...scenario,
           mode: 'host',
-          host: { type: alternate.type, model: 'case-model' },
+          client: alternate.type,
+          model: 'case-model',
         },
       ],
       { trials: 2 }
@@ -784,20 +787,15 @@ describe('suite review regressions', () => {
     const f = await fixture([
       { ...scenario, assertions: { containsText: 'EXPECTED' } },
     ]);
-    f.manifest.host = {
-      type: f.type,
-      model: 'base',
-      retained: 'yes',
-    } as typeof f.manifest.host;
     await fs.writeFile(
       f.manifestPath,
       JSON.stringify({
         ...f.manifest,
+        client: f.type,
+        model: 'base',
+        clientOptions: { retained: 'yes' },
         metrics: ['passed'],
-        arms: [
-          { name: 'a' },
-          { name: 'b', host: { type: f.type, model: 'variant' } },
-        ],
+        arms: [{ name: 'a' }, { name: 'b', client: f.type, model: 'variant' }],
       })
     );
     f.run.mockImplementation(async (options) => ({
@@ -1055,7 +1053,7 @@ describe('suite plugins', () => {
         name: 'cli-and-manifest-plugins',
         plugins: ['./manifest-plugin.mjs'],
         datasets: [{ type: 'mp/cases' }],
-        host: { type: 'cli/echo' },
+        client: 'cli/echo',
       })
     );
 

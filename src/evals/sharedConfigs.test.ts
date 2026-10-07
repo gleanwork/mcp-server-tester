@@ -106,7 +106,7 @@ describe('shared configs', () => {
       [
         acme({
           recommended: {
-            host: { type: 'acme/echo' },
+            client: 'acme/echo',
             judges: ['acme/fixed'],
             trials: 2,
             maxToolCalls: 4,
@@ -115,7 +115,7 @@ describe('shared configs', () => {
       ]
     );
     expect(manifest).toMatchObject({
-      host: { type: 'acme/echo' },
+      client: 'acme/echo',
       judges: [{ type: 'acme/fixed', score: 1 }],
       trials: 3,
       maxToolCalls: 4,
@@ -191,7 +191,7 @@ describe('shared configs', () => {
       plugins: [
         acme({
           recommended: {
-            host: { type: 'acme/echo' },
+            client: 'acme/echo',
             judges: [{ type: 'acme/fixed', score: 0.9 }],
           },
         }),

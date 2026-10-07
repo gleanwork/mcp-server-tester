@@ -7,6 +7,7 @@ import type {
   ResultStoreDefinition,
 } from './evalFrameworkTypes.js';
 import { getDatasetSource } from './builtinDatasetSources.js';
+import { clientFieldsOf, clientOf, clientPatchOf } from './clientFields.js';
 import {
   assertHostSupports,
   getHost,
@@ -218,7 +219,7 @@ export function parseHostConfig(
   return parseConfig(options, definition, 'host options');
 }
 
-/** An arm's (or case's) host: the base host's options apply only to the same host. */
+/** An arm's (or case's) client: the base client's options apply only to the same client. */
 export function inheritHost(
   base: ClientConfig | undefined,
   patch: Partial<ClientConfig>
@@ -243,7 +244,7 @@ function assertDefaultsUsed(
     );
     if (!used)
       throw new Error(
-        `The manifest sets "${key}", but none of its hosts (${[...new Set(hosts.map((host) => host.type))].join(', ')}) takes it.`
+        `The manifest sets "${key}", but none of its clients (${[...new Set(hosts.map((host) => host.type))].join(', ')}) takes it.`
       );
   }
 }
@@ -311,7 +312,8 @@ export function validateManifest(
   const datasets = manifest.datasets.map((config) =>
     parseConfig(config, lookups.datasetSource(config.type), 'dataset options')
   );
-  const host = effectiveHost(manifest, manifest.host, lookups);
+  const base = clientOf(manifest);
+  const host = effectiveHost(manifest, base, lookups);
   const metrics = parseMetrics(manifest.metrics, lookups);
   const judges = parseJudges(manifest.judges, lookups);
   const results = manifest.results
@@ -332,12 +334,15 @@ export function validateManifest(
       context: 'The manifest',
     });
   }
+  const armHosts: ClientConfig[] = [];
   const arms = manifest.arms?.map((arm) => {
     const servers = arm.servers ?? manifest.servers;
     validateLabels(servers ?? [], `arm "${arm.name}"`);
-    const armHost = arm.host
-      ? effectiveHost(manifest, inheritHost(manifest.host, arm.host), lookups)
+    const patch = clientPatchOf(arm);
+    const armHost = patch
+      ? effectiveHost(manifest, inheritHost(base, patch), lookups)
       : host;
+    if (patch && armHost) armHosts.push(armHost);
     if (armHost) {
       assertHostSupports(armHost, {
         servers: servers ?? [],
@@ -349,7 +354,7 @@ export function validateManifest(
     return {
       ...arm,
       servers,
-      host: armHost,
+      ...(armHost ? clientFieldsOf(armHost) : {}),
       metrics: arm.metrics ? parseMetrics(arm.metrics, lookups) : metrics,
       judges: arm.judges ? parseJudges(arm.judges, lookups) : judges,
     };
@@ -357,14 +362,23 @@ export function validateManifest(
   assertDefaultsUsed(
     manifest,
     [
-      ...(manifest.arms?.length && manifest.arms.every((arm) => arm.host)
+      ...(manifest.arms?.length &&
+      manifest.arms.every((arm) => clientPatchOf(arm))
         ? []
         : host
           ? [host]
           : []),
-      ...(arms ?? []).flatMap((arm) => (arm.host ? [arm.host] : [])),
+      ...armHosts,
     ],
     lookups
   );
-  return { ...manifest, datasets, host, metrics, judges, results, arms };
+  return {
+    ...manifest,
+    datasets,
+    ...(host ? clientFieldsOf(host) : {}),
+    metrics,
+    judges,
+    results,
+    arms,
+  };
 }

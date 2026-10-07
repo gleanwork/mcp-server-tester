@@ -848,7 +848,10 @@ To compare two MCP servers, or two configurations of one, run the same dataset a
 {
   "name": "server-ab",
   "datasets": ["./evals/triggering.json"],
-  "host": { "type": "mst", "provider": "anthropic" },
+  "client": "mst",
+  "clientOptions": {
+    "provider": "anthropic"
+  },
   "arms": [
     {
       "name": "production",

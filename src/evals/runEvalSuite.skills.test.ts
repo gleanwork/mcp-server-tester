@@ -50,12 +50,13 @@ async function suite(caseOverrides: Record<string, unknown> = {}) {
       name: 'skills-help',
       datasets: ['./cases.json'],
       servers: [{ transport: 'http', serverUrl: 'https://example.com/mcp' }],
-      host: { type: 'mst', provider: 'anthropic' },
+      client: 'mst',
+      clientOptions: { provider: 'anthropic' },
       arms: [
         { name: 'off' },
-        { name: 'explicit-off', host: { skills: 'off' } },
-        { name: 'catalog', host: { skills: 'catalog' } },
-        { name: 'preload', host: { skills: 'preload' } },
+        { name: 'explicit-off', clientOptions: { skills: 'off' } },
+        { name: 'catalog', clientOptions: { skills: 'catalog' } },
+        { name: 'preload', clientOptions: { skills: 'preload' } },
       ],
     })
   );

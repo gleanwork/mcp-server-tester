@@ -48,8 +48,8 @@ in the manifest:
 
 ```json
 {
-  "host": {
-    "type": "cowork",
+  "client": "cowork",
+  "clientOptions": {
     "options": {
       "computerUseProvider": "anthropic-computer-use",
       "appVersion": "1.52386.6"
@@ -104,7 +104,7 @@ Two separate model clients run during a macOS case:
   profile: MST then requires no key, stages no inference credential, and sets no
   provider in the profile. If those managed preferences change during setup, the
   run fails closed.
-- **The Computer Use planner** (`host.options.computerUseModel`). It uses MST's
+- **The Computer Use planner** (`clientOptions.options.computerUseModel`). It uses MST's
   [LLM gateway settings](./llm-gateways.md): `ANTHROPIC_BASE_URL` with
   `MST_LLM_AUTH_COMMAND` or `ANTHROPIC_AUTH_TOKEN`, else `ANTHROPIC_API_KEY`
   against the public API. The gateway must accept the Computer Use beta tool.
@@ -151,10 +151,10 @@ bundled. Use the normal file/GCS dataset sources and plugins. Configure custom
 judges according to their plugin's requirements.
 `--dry-run` checks configuration, not GUI execution or model behavior.
 
-Use host `cowork` (`cowork_cu` and `anthropic.claude.cowork.desktop-app.macos` still work, with a deprecation warning). `host.model` selects the Cowork
-inference model; `host.options.computerUseModel` independently selects the planner.
+Use client `cowork` (`cowork_cu` and `anthropic.claude.cowork.desktop-app.macos` still work, with a deprecation warning). `model` selects the Cowork
+inference model; `clientOptions.options.computerUseModel` independently selects the planner.
 The inference provider is `anthropic`. On macOS the desktop driver selector is
-`host.options.computerUseProvider: "anthropic-computer-use"`.
+`clientOptions.options.computerUseProvider: "anthropic-computer-use"`.
 
 MST applies a fixed inference model list with discovery disabled. On macOS,
 managed settings can override that profile. The submission driver therefore
@@ -162,7 +162,7 @@ selects and verifies the requested model in Cowork's visible model picker before
 entering the prompt. If the exact model is unavailable or cannot be confirmed,
 the case stops without submission; it never substitutes another model. Native
 telemetry must still report the requested exact model ID; a mismatch or missing
-model evidence fails the case. Omitting `host.model` preserves the existing
+model evidence fails the case. Omitting `model` preserves the existing
 application default.
 Configure `servers` with HTTP endpoints and literal or environment-backed bearer
 credentials, or stdio commands with declared `env` values. Every macOS batch owns
@@ -225,7 +225,7 @@ when installing the normal published package.
 
 ## Attach to a prepared Linux desktop
 
-Use `host.type: "cowork"` and `host.options.computerUseProvider: "linux-desktop"`
+Use `client: "cowork"` and `clientOptions.options.computerUseProvider: "linux-desktop"`
 with the normal `batch` command. `computerUseModel` is rejected for this backend:
 there is no LLM desktop planner. If omitted, the driver defaults to the native
 backend for the current OS. Cross-platform provider combinations fail before UI
@@ -431,7 +431,7 @@ desktop and removed the file. An interrupted run leaves it behind in the same wa
 
 The config has two independent parts:
 
-- `host.plugins[]` installs plugins (their skills). On Cowork, a plugin can
+- `clientOptions.plugins[]` installs plugins (their skills). On Cowork, a plugin can
   also block its own MCP servers with `blockMcpServers`.
 - `servers[]` is the MCP server set under test. Both plain stdio and
   host-resolved stdio entries are supported on macOS and Linux, alongside HTTP.
@@ -440,8 +440,8 @@ The config has two independent parts:
 
 ```json
 {
-  "host": {
-    "type": "cowork",
+  "client": "cowork",
+  "clientOptions": {
     "options": {
       "computerUseProvider": "linux-desktop",
       "pluginRoots": {
@@ -467,7 +467,9 @@ The config has two independent parts:
       "command": "/usr/bin/node",
       "args": ["${pluginRoot:acme}/mcp/start.mjs"],
       "url": "https://mcp.example.com/eval",
-      "auth": { "accessTokenEnv": "ACME_API_TOKEN" },
+      "auth": {
+        "accessTokenEnv": "ACME_API_TOKEN"
+      },
       "minTools": 4,
       "env": {
         "ACME_MCP_SERVER_URL": "${url}",
@@ -476,7 +478,10 @@ The config has two independent parts:
       },
       "files": {
         "mcp-credentials.json": {
-          "tokens": { "access_token": "${bearerToken}", "token_type": "Bearer" }
+          "tokens": {
+            "access_token": "${bearerToken}",
+            "token_type": "Bearer"
+          }
         }
       }
     }

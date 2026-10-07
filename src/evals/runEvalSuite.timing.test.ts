@@ -78,7 +78,7 @@ async function fixture(
     manifestPath,
     JSON.stringify({
       name: 'timing',
-      host: { type },
+      client: type,
       datasets: [{ type: source }],
       servers: [],
       ...extra,

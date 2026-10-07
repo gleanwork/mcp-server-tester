@@ -25,7 +25,7 @@ describe('assertDatasetNamespaces', () => {
       'a case host',
       dataset({
         cases: [
-          { id: 'a', input: 's', host: { type: 'other/desk' } },
+          { id: 'a', input: 's', client: 'other/desk' },
         ] as EvalDataset['cases'],
       }),
     ],
@@ -39,7 +39,7 @@ describe('assertDatasetNamespaces', () => {
   it('allows built-in references', () => {
     const value = dataset({
       cases: [
-        { id: 'a', input: 's', host: { type: 'claude-code' } },
+        { id: 'a', input: 's', client: 'claude-code' },
       ] as EvalDataset['cases'],
     });
     expect(() => assertDatasetNamespaces(value, [])).not.toThrow();

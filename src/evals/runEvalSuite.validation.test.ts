@@ -26,7 +26,8 @@ async function dryRun(
     JSON.stringify({
       name: 'validation',
       datasets: ['./cases.json'],
-      host: { type: 'mst', provider: 'anthropic' },
+      client: 'mst',
+      clientOptions: { provider: 'anthropic' },
       ...manifest,
     })
   );
@@ -59,7 +60,7 @@ describe('a dry run checks datasets too', () => {
             id: 'desktop',
             mode: 'host',
             input: 'Find it',
-            host: { type: 'cowork' },
+            client: 'cowork',
           },
         ],
         {
@@ -70,7 +71,7 @@ describe('a dry run checks datasets too', () => {
         }
       )
     ).rejects.toThrow(
-      `Case "desktop" in arm "default": host "cowork" can't apply toolOverrides`
+      `Case "desktop" in arm "default": client "cowork" can't apply toolOverrides`
     );
   });
 });
@@ -88,8 +89,8 @@ describe('a case systemPrompt the suite would lose', () => {
           },
         ],
         {
-          host: {
-            type: 'mst',
+          client: 'mst',
+          clientOptions: {
             provider: 'anthropic',
             systemPrompt: 'Arm prompt.',
           },
@@ -111,7 +112,7 @@ describe('a case systemPrompt the suite would lose', () => {
             mcpHostConfig: { systemPrompt: 'Case prompt.' },
           },
         ],
-        { host: { type: 'cowork' } }
+        { client: 'cowork' }
       )
     ).rejects.toThrow(
       'Case "org" in arm "default" sets mcpHostConfig.systemPrompt, which host "cowork" can\'t apply.'

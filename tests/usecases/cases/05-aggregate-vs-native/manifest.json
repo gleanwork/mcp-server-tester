@@ -1,9 +1,9 @@
 {
   "name": "aggregate-vs-native",
   "datasets": ["./dataset.json"],
-  "host": {
-    "type": "usecase/model",
-    "model": "claude-sonnet-4-5",
+  "client": "usecase/model",
+  "model": "claude-sonnet-4-5",
+  "clientOptions": {
     "policy": [
       {
         "steps": [

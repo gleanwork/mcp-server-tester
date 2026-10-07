@@ -29,7 +29,7 @@ describe('built-in client names', () => {
       validateManifest({
         name: 'm',
         datasets: [{ type: 'file', path: 'x.json' }],
-        host: { type: 'sdk' },
+        client: 'sdk',
       })
     ).toThrow(
       'Client "sdk" is not available. Available: chatgpt, claude-code, cowork, mst.'

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { EvalCase } from './datasetTypes.js';
 import type { ClientConfig } from './evalManifest.js';
+import { clientPatchOf } from './clientFields.js';
 import type {
   ClientDefinition,
   ClientRunContext,
@@ -36,7 +37,9 @@ export async function prepareHostBatch(
       );
     if (queues.has(c.id))
       throw new Error('Batch host case IDs must be unique within a dataset.');
-    const declaration = c.host ?? config;
+    // The suite resolves a case's own client in full (see runEvalSuite).
+    const declaration =
+      (clientPatchOf(c) as ClientConfig | undefined) ?? config;
     if (declaration.type !== config.type)
       throw new Error(
         'A batch host dataset cannot mix host types. Use separate manifests.'

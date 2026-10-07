@@ -204,7 +204,7 @@ describe('mst CLI', () => {
         'host.json': JSON.stringify({
           name: 'm',
           datasets: ['./cases.json'],
-          host: { type: 'sdk' },
+          client: 'sdk',
         }),
       });
       const result = await runBin(

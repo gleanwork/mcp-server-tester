@@ -239,7 +239,12 @@ result stores, and other extensions are built-ins or come from plugins
 ```json
 {
   "name": "tool-selection-search",
-  "datasets": [{ "type": "file", "path": "evalsets/search.json" }],
+  "datasets": [
+    {
+      "type": "file",
+      "path": "evalsets/search.json"
+    }
+  ],
   "servers": [
     {
       "transport": "http",
@@ -247,9 +252,17 @@ result stores, and other extensions are built-ins or come from plugins
       "label": "prod"
     }
   ],
-  "host": { "type": "mst", "provider": "anthropic" },
+  "client": "mst",
+  "clientOptions": {
+    "provider": "anthropic"
+  },
   "metrics": ["passed", "tool_count"],
-  "results": { "store": { "type": "file", "dir": ".mcp-test-results" } }
+  "results": {
+    "store": {
+      "type": "file",
+      "dir": ".mcp-test-results"
+    }
+  }
 }
 ```
 
@@ -269,7 +282,7 @@ npx mst batch \
 ```
 
 Use `arms` to compare server sets or host configurations. An arm can override
-servers, host options, tool maps, input templates, metrics, and judges.
+servers, client, model, client options, tool maps, input templates, metrics, and judges.
 The canonical execution primitives remain `EvalDataset`, `EvalCase`,
 `EvalMode`, `MCPConfig`, and `runEvalDataset`.
 

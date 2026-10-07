@@ -11,8 +11,8 @@
   "toolMap": {
     "company_search": ["agg.search"]
   },
-  "host": {
-    "type": "usecase/model",
+  "client": "usecase/model",
+  "clientOptions": {
     "policy": [
       {
         "when": {
@@ -90,13 +90,13 @@
     },
     {
       "name": "aggregate-plugin",
-      "host": {
+      "clientOptions": {
         "plugins": ["aggregate-plugin"]
       }
     },
     {
       "name": "aggregate-mcp-org-instructions",
-      "host": {
+      "clientOptions": {
         "systemPrompt": "Use company search first for company knowledge."
       }
     }

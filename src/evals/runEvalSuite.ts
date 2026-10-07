@@ -21,6 +21,12 @@ import {
   type ClientConfig,
   type ModelPricing,
 } from './evalManifest.js';
+import {
+  DEFAULT_CLIENT,
+  clientFieldsOf,
+  clientOf,
+  clientPatchOf,
+} from './clientFields.js';
 import type {
   EvaluationArmResult,
   EvaluationSummary,
@@ -194,10 +200,9 @@ function resolveHost(
   servers: MCPConfig[],
   env: HostEnvironment
 ) {
-  const declaration: ClientConfig = {
-    ...(arm.host ?? manifest.host ?? { type: 'claude-code' }),
-    type: arm.host?.type ?? manifest.host?.type ?? 'claude-code',
-  };
+  // Validated levels hold their resolved client, model included.
+  const declaration = (clientPatchOf(arm) ??
+    clientPatchOf(manifest) ?? { type: DEFAULT_CLIENT }) as ClientConfig;
   const definition: ClientDefinition = getHost(declaration.type);
   const config = definition.createConfig?.({
     ...declaration,
@@ -225,10 +230,14 @@ function assertCaseHosts(
     const rawArm = rawManifest.arms?.find(
       (candidate) => candidate.name === arm.name
     );
-    const declaration = inheritHost(rawManifest.host, rawArm?.host ?? {});
+    const declaration = inheritHost(
+      clientOf(rawManifest),
+      clientPatchOf(rawArm) ?? {}
+    );
     for (const dataset of datasets) {
       for (const evalCase of dataset.cases) {
-        const caseHost = inheritHost(declaration, evalCase.host ?? {}) as {
+        const casePatch = clientPatchOf(evalCase);
+        const caseHost = inheritHost(declaration, casePatch ?? {}) as {
           type?: string;
           skills?: unknown;
           systemPrompt?: unknown;
@@ -258,9 +267,9 @@ function assertCaseHosts(
             `Case "${evalCase.id}" in arm "${arm.name}" sets mcpHostConfig.skills, which would override the host's skills: set skills on the host or the case, not both.`
           );
         }
-        if (!evalCase.host) continue;
+        if (!casePatch) continue;
         assertHostSupports(
-          parseHostConfig(inheritHost(declaration, evalCase.host), rawManifest),
+          parseHostConfig(inheritHost(declaration, casePatch), rawManifest),
           {
             servers: arm.servers ?? manifest.servers ?? [],
             toolOverrides: arm.toolOverrides ?? manifest.toolOverrides,
@@ -473,7 +482,7 @@ export async function runEvalSuite(
   manifest = validateManifest(
     {
       ...manifest,
-      host: manifest.host ?? { type: 'claude-code' },
+      client: manifest.client ?? DEFAULT_CLIENT,
     },
     { namespaces }
   );
@@ -596,7 +605,10 @@ export async function runEvalSuite(
     const rawArm = rawManifest.arms?.find(
       (candidate) => candidate.name === arm.name
     ) ?? { name: arm.name };
-    const rawDeclaration = inheritHost(rawManifest.host, rawArm.host ?? {});
+    const rawDeclaration = inheritHost(
+      clientOf(rawManifest),
+      clientPatchOf(rawArm) ?? {}
+    );
     const client =
       host.definition.run || host.definition.runBatch
         ? undefined
@@ -625,13 +637,14 @@ export async function runEvalSuite(
           ...executionDataset,
           cases: executionDataset.cases.map((evalCase) => ({
             ...evalCase,
-            ...(evalCase.host
-              ? {
-                  host: parseHostConfig(
-                    inheritHost(rawDeclaration, evalCase.host),
+            // A case's own client, resolved in full on the case itself.
+            ...(clientPatchOf(evalCase)
+              ? clientFieldsOf(
+                  parseHostConfig(
+                    inheritHost(rawDeclaration, clientPatchOf(evalCase)!),
                     rawManifest
-                  ),
-                }
+                  )
+                )
               : {}),
             ...(effectiveManifest.judges?.length
               ? {
@@ -719,8 +732,8 @@ export async function runEvalSuite(
         const caseModels = new Map(
           effectiveDataset.cases.map((evalCase) => [
             evalCase.id,
-            evalCase.host
-              ? evalCase.host.model
+            clientPatchOf(evalCase)
+              ? evalCase.model
               : (evalCase.mcpHostConfig?.model ?? armModel),
           ])
         );

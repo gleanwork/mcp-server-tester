@@ -161,14 +161,33 @@ Models often skip skills they could use, and a matching tool can win over the sk
   "name": "skills-help",
   "datasets": ["./evals/weather.json"],
   "servers": [
-    { "transport": "stdio", "command": "node", "args": ["server.js"] }
+    {
+      "transport": "stdio",
+      "command": "node",
+      "args": ["server.js"]
+    }
   ],
-  "host": { "type": "mst", "provider": "anthropic" },
+  "client": "mst",
+  "clientOptions": {
+    "provider": "anthropic"
+  },
   "metrics": ["skill_loaded", "skill_before_tool", "skill_verification_failed"],
   "arms": [
-    { "name": "off" },
-    { "name": "catalog", "host": { "skills": "catalog" } },
-    { "name": "preload", "host": { "skills": "preload" } }
+    {
+      "name": "off"
+    },
+    {
+      "name": "catalog",
+      "clientOptions": {
+        "skills": "catalog"
+      }
+    },
+    {
+      "name": "preload",
+      "clientOptions": {
+        "skills": "preload"
+      }
+    }
   ]
 }
 ```

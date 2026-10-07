@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { renamedKeys } from './renamedKeys.js';
+import { clientFieldSchemas, type ClientFields } from './clientFields.js';
 import { MCPConfigSchema, type MCPConfig } from '../config/mcpConfig.js';
 import type { ToolOverrideVariant } from '../types/index.js';
 import {
@@ -32,19 +33,18 @@ export interface DatasetConfig extends TaggedConfig {
 /** A host implementation declaration. Host-specific options are plugin-owned. */
 export type ClientConfig = TaggedConfig;
 
-/** An arm may patch options while inheriting the base host's type. */
-export type ClientConfigPatch = Partial<ClientConfig>;
-
 /** A judge, metric, or other named extension declaration. */
 export interface ExtensionConfig extends TaggedConfig {
   name?: string;
 }
 
-/** One comparison arm. Unspecified values inherit from the manifest. */
-export interface EvalArm {
+/**
+ * One comparison arm. Unspecified values inherit from the manifest; a
+ * different `client` doesn't inherit the manifest's `clientOptions`.
+ */
+export interface EvalArm extends ClientFields {
   name: string;
   servers?: MCPConfig[];
-  host?: ClientConfigPatch;
   toolMap?: Record<string, string[]>;
   toolOverrides?: ToolOverrideVariant;
   inputTemplate?: string;
@@ -58,7 +58,13 @@ export interface EvalManifest {
   name: string;
   datasets: DatasetConfig[];
   servers?: MCPConfig[];
-  host?: ClientConfig;
+  /**
+   * The client under test: `mst`, `claude-code`, `cowork`, `chatgpt`, or a
+   * plugin's `namespace/name`. @default 'claude-code'
+   */
+  client?: string;
+  /** The client's own options, such as Cowork's `appVersion`. */
+  clientOptions?: Record<string, unknown>;
   toolMap?: Record<string, string[]>;
   toolOverrides?: ToolOverrideVariant;
   inputTemplate?: string;
@@ -75,6 +81,7 @@ export interface EvalManifest {
    * under the manifest's own settings.
    */
   extends?: string[];
+  /** The model the client uses: a default for every arm and case. */
   model?: string;
   provider?: string;
   concurrency?: number;
@@ -95,15 +102,12 @@ export interface EvalManifest {
   [key: string]: unknown;
 }
 
-export const TaggedConfigSchema = z
-  .object({ type: z.string().min(1) })
-  .passthrough();
+const TaggedConfigSchema = z.object({ type: z.string().min(1) }).passthrough();
 
 const DatasetConfigSchema = z.union([z.string().min(1), TaggedConfigSchema]);
 const ExtensionConfigSchema = z.union([z.string().min(1), TaggedConfigSchema]);
 
 const ServerConfigSchema = MCPConfigSchema;
-const HostConfigPatchSchema = TaggedConfigSchema.partial();
 
 const ToolMapSchema = z.record(z.string(), z.array(z.string()));
 
@@ -140,7 +144,7 @@ const EvalArmSchema = z
   .object({
     name: z.string().min(1),
     servers: z.array(ServerConfigSchema).optional(),
-    host: HostConfigPatchSchema.optional(),
+    ...clientFieldSchemas,
     toolMap: ToolMapSchema.optional(),
     toolOverrides: ToolOverrideVariantSchema.optional(),
     inputTemplate: InputTemplateSchema.optional(),
@@ -165,7 +169,7 @@ export const EvalManifestSchema = z
     name: z.string().min(1),
     datasets: z.array(DatasetConfigSchema).min(1),
     servers: z.array(ServerConfigSchema).optional(),
-    host: TaggedConfigSchema.optional(),
+    ...clientFieldSchemas,
     toolMap: ToolMapSchema.optional(),
     toolOverrides: ToolOverrideVariantSchema.optional(),
     inputTemplate: InputTemplateSchema.optional(),
@@ -176,7 +180,6 @@ export const EvalManifestSchema = z
     results: z.object({ store: ExtensionConfigSchema }).strict().optional(),
     plugins: z.array(z.string().min(1)).optional(),
     extends: z.array(z.string().min(1)).optional(),
-    model: z.string().optional(),
     provider: z.string().optional(),
     concurrency: z.number().int().positive().optional(),
     trials: z.number().int().positive().optional(),
@@ -248,6 +251,9 @@ const MANIFEST_OWN_KEYS = [
  */
 const PluginConfigSchema = EvalManifestSchema.pick({
   servers: true,
+  client: true,
+  model: true,
+  clientOptions: true,
   host: true,
   toolMap: true,
   toolOverrides: true,
@@ -256,7 +262,6 @@ const PluginConfigSchema = EvalManifestSchema.pick({
   judges: true,
   coworkSetup: true,
   results: true,
-  model: true,
   provider: true,
   concurrency: true,
   trials: true,

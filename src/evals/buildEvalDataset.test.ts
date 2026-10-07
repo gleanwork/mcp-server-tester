@@ -35,7 +35,8 @@ describe('buildEvalDataset canonical ingestion', () => {
       id: 'a',
       mode: 'host',
       input: 'Find policy',
-      host: { type: 'custom-host', option: true },
+      client: 'custom-host',
+      clientOptions: { option: true },
     },
     {
       id: 'a',
@@ -56,7 +57,7 @@ describe('buildEvalDataset canonical ingestion', () => {
         cases: [{ ...case_, trials: 2, passThreshold: 0.75 }],
       },
       { provider: 'anthropic', model: 'manifest-model' },
-      { ...manifest, trials: 9, host: { type: 'different-host' } }
+      { ...manifest, trials: 9, client: 'different-host' }
     );
     expect(dataset.cases[0]).toEqual({
       ...case_,

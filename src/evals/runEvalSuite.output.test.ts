@@ -50,7 +50,8 @@ describe('suite output', () => {
         name: 'output',
         datasets: ['./cases.json'],
         servers: [{ transport: 'http', serverUrl: 'https://example.com/mcp' }],
-        host: { type: 'mst', provider: 'anthropic' },
+        client: 'mst',
+        clientOptions: { provider: 'anthropic' },
         arms: [{ name: 'a' }, { name: 'b' }],
       })
     );
