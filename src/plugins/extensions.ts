@@ -33,6 +33,7 @@ const KIND_LABELS: Record<ExtensionKind, string> = {
   pairwiseJudges: 'Pairwise judge',
   metrics: 'Metric',
   resultStores: 'Result store',
+  connectors: 'Connector',
 };
 
 // Shared across the CommonJS and ESM copies of this package. Versioned so a
@@ -55,6 +56,7 @@ function emptyState(): ExtensionTableState {
       pairwiseJudges: new Map(),
       metrics: new Map(),
       resultStores: new Map(),
+      connectors: new Map(),
     },
   };
 }

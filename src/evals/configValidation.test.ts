@@ -48,6 +48,7 @@ function baseExtensions(): Required<TestExtensions> {
     pairwiseJudges: {},
     metrics: { passed: metric },
     resultStores: { file: resultStore },
+    connectors: {},
   };
 }
 
