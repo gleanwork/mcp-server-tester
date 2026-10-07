@@ -175,7 +175,7 @@ cowork-aggregated-vs-native
               acme/pairwise-judge/preference (each variant vs aggregated)
   env         local (macOS) · 1 shard
   results     .mcp-test-results/cowork-aggregated-vs-native/
-  total       450 trials · 900 pairwise preferences
+  total       450 trials · 100 pairwise preferences
   credentials 2 of 8 servers need `mst auth` (gmail, gcal)
 ```
 
@@ -340,7 +340,7 @@ npx mst open --results acme/result-store/eval-results --latest cowork-aggregated
 
 The report has the same sections for every eval:
 
-- **Result:** which variants are clearly better, clearly worse, or within noise.
+- **Result:** which variants are better, worse, or unclear compared with the baseline.
 - **Variants compared:** the summary table above. _Show statistics_ adds confidence intervals, p-values and pass^k.
 - **What differs:** each variant's setup next to the baseline's.
 - **Case by case:** every trial, with its trace, each grader's score, and the pairwise preference against the baseline.
