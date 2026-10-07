@@ -49,7 +49,11 @@ import { mergeSuiteJudges } from './grading.js';
 import { prepareHostBatch } from './prepareHostBatch.js';
 import type { EvalRunnerResult } from './evalRunner.js';
 import { EvalAssertionsSchema, type EvalDataset } from './datasetTypes.js';
-import { selectEvalCases } from './buildEvalDataset.js';
+import {
+  assertNamedCases,
+  narrowEvalCases,
+  type CaseNarrowing,
+} from './buildEvalDataset.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { UsageMetrics } from '../types/index.js';
 import type { Plugin } from '../plugins/plugin.js';
@@ -104,6 +108,10 @@ export interface RunEvalSuiteOptions {
   mcpConfig?: MCPConfig;
   dryRun?: boolean;
   variant?: string;
+  /** Case ids to run, instead of the config's selection (`--case`). */
+  cases?: CaseNarrowing['cases'];
+  /** Trials per case, instead of the config's or the case's (`--trials`). */
+  trials?: number;
   /**
    * Variants to run instead of the eval config's, validated the same way: a
    * list, or a function of the eval config's variants (after shared configs
@@ -537,6 +545,7 @@ export async function runEvalSuite(
       )
     );
     for (const dataset of loaded) assertDatasetNamespaces(dataset, namespaces);
+    assertNamedCases(loaded, options.cases);
     assertCaseHosts(evalConfig, rawConfig, variants, loaded);
     return {
       evalConfig,
@@ -563,6 +572,26 @@ export async function runEvalSuite(
   const allDatasets: RunEvalSuiteResult['datasets'] = [];
   const allResults: EvalCaseResult[] = [];
   const sourceVariant = variants[0] ?? { name: 'default' };
+  const canonicalDatasets = await Promise.all(
+    datasets.map(async (source) => ({
+      source,
+      dataset: await getDatasetSource(source.type).load(source, {
+        rootDir,
+        configDir,
+        evalConfig: sourceConfig,
+      }),
+    }))
+  );
+  for (const { dataset } of canonicalDatasets)
+    assertDatasetNamespaces(dataset, namespaces);
+  assertNamedCases(
+    canonicalDatasets.map(({ dataset }) => dataset),
+    options.cases
+  );
+  const narrowing: CaseNarrowing = {
+    cases: options.cases,
+    trials: options.trials,
+  };
   // Before any client starts: a fresh token for every connector server, kept
   // fresh until the run ends.
   const credentials: ConnectorCredentials = await startConnectorCredentials(
@@ -587,18 +616,6 @@ export async function runEvalSuite(
       sourceServers,
       env
     );
-    const canonicalDatasets = await Promise.all(
-      datasets.map(async (source) => ({
-        source,
-        dataset: await getDatasetSource(source.type).load(source, {
-          rootDir,
-          configDir,
-          evalConfig: sourceConfig,
-        }),
-      }))
-    );
-    for (const { dataset } of canonicalDatasets)
-      assertDatasetNamespaces(dataset, namespaces);
     // Before any variant runs: a case host that can't honour its variant fails now,
     // not after earlier variants have run.
     assertCaseHosts(
@@ -670,7 +687,12 @@ export async function runEvalSuite(
 
       try {
         for (const { source, dataset } of canonicalDatasets) {
-          const executionDataset = selectEvalCases(dataset, evalConfig);
+          const executionDataset = narrowEvalCases(
+            dataset,
+            evalConfig,
+            narrowing
+          );
+          if (executionDataset.cases.length === 0) continue;
           const template = variant.inputTemplate ?? evalConfig.inputTemplate;
           const effectiveDataset: EvalDataset = {
             ...executionDataset,

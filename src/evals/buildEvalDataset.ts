@@ -43,7 +43,7 @@ export function buildEvalDataset(
 }
 
 /** Apply the same tag selection and case cap to built-in and plugin datasets. */
-export function selectEvalCases(
+function selectEvalCases(
   dataset: EvalDataset,
   evalConfig: EvalConfig
 ): EvalDataset {
@@ -58,6 +58,53 @@ export function selectEvalCases(
     ...dataset,
     cases: controls.maxCases ? cases.slice(0, controls.maxCases) : cases,
   };
+}
+
+/**
+ * A run narrowed from the command line (`mst run --case <id>... --trials <n>`).
+ * Named cases replace the config's tag selection and case cap.
+ */
+export interface CaseNarrowing {
+  cases?: readonly string[];
+  trials?: number;
+}
+
+/** The config's selection, or the named cases, with `trials` on every case. */
+export function narrowEvalCases(
+  dataset: EvalDataset,
+  evalConfig: EvalConfig,
+  narrowing: CaseNarrowing = {}
+): EvalDataset {
+  const ids = narrowing.cases?.length ? new Set(narrowing.cases) : undefined;
+  const selected = ids
+    ? dataset.cases.filter((evalCase) => ids.has(evalCase.id))
+    : selectEvalCases(dataset, evalConfig).cases;
+  return {
+    ...dataset,
+    cases:
+      narrowing.trials === undefined
+        ? selected
+        : selected.map((evalCase) => ({
+            ...evalCase,
+            trials: narrowing.trials,
+          })),
+  };
+}
+
+/** Fail before anything runs when a named case is in no dataset. */
+export function assertNamedCases(
+  datasets: readonly EvalDataset[],
+  cases: readonly string[] | undefined
+): void {
+  if (!cases?.length) return;
+  const known = new Set(
+    datasets.flatMap((dataset) => dataset.cases.map((evalCase) => evalCase.id))
+  );
+  const missing = cases.filter((id) => !known.has(id));
+  if (missing.length)
+    throw new Error(
+      `No case ${missing.map((id) => `"${id}"`).join(', ')} in the config's datasets. Cases: ${[...known].join(', ')}`
+    );
 }
 
 /** Keys people reach for that MST spells differently. */
