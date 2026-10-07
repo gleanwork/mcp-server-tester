@@ -40,15 +40,8 @@ describe('buildEvalDataset canonical ingestion', () => {
     },
     {
       id: 'a',
-      mode: 'mcp_host',
+      mode: 'host',
       input: 'Find policy',
-      mcpHostConfig: { provider: 'openai', model: 'case-model' },
-    },
-    {
-      id: 'a',
-      mode: 'external_host',
-      input: 'Find policy',
-      externalHost: { driver: 'custom-driver' },
     },
   ])('preserves canonical mode and case host override: $mode', (case_) => {
     const dataset = buildEvalDataset(
@@ -85,10 +78,9 @@ describe('buildEvalDataset canonical ingestion', () => {
   it.each([
     { id: 'a', input: 'find policy', expected_tool: 'search' },
     { id: 'a', tool: 'search', assertions: { isError: false } },
-    { id: 'a', input: 'find policy' },
     {
       id: 'a',
-      mode: 'mcp_host',
+      mode: 'host',
       input: 'find policy',
       expected_tool: 'search',
     },
@@ -97,6 +89,16 @@ describe('buildEvalDataset canonical ingestion', () => {
     expect(() =>
       buildEvalDataset({ name: 'legacy', cases: [case_] }, undefined, manifest)
     ).toThrow(/canonical EvalDataset.*explicit dataset source adapter/);
+  });
+
+  it('reads a case with input as a client case', () => {
+    expect(
+      buildEvalDataset(
+        { name: 'question', cases: [{ id: 'a', input: 'find policy' }] },
+        undefined,
+        manifest
+      ).cases
+    ).toEqual([{ id: 'a', input: 'find policy' }]);
   });
 
   it('validates every case, even after maxCases and a canonical first case', () => {

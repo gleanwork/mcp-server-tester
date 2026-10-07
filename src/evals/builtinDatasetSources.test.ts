@@ -79,7 +79,6 @@ describe('canonical built-in dataset sources', () => {
         ).toEqual(case_);
       });
       it.each([
-        { id: 'question', input: 'What is our policy?' },
         { id: 'selection', input: 'Find policy', expected_tool: 'search' },
         { id: 'call', tool: 'search', assertions: { isError: false } },
       ])(

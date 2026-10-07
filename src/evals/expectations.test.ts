@@ -55,53 +55,17 @@ const toolExpect = {
 
 describe('toolEvidenceGap', () => {
   it('accepts hosts that report no evidence and structured evidence', () => {
-    expect(toolEvidenceGap({ mode: 'mcp_host' }, {})).toBeUndefined();
-    expect(
-      toolEvidenceGap({ mode: 'mcp_host' }, { evidence: 'structured' })
-    ).toBeUndefined();
+    expect(toolEvidenceGap({})).toBeUndefined();
+    expect(toolEvidenceGap({ evidence: 'structured' })).toBeUndefined();
   });
 
   it('explains observed and missing evidence', () => {
-    expect(toolEvidenceGap({ mode: 'host' }, { evidence: 'observed' })).toBe(
+    expect(toolEvidenceGap({ evidence: 'observed' })).toBe(
       'Host evidence is observed; structured tool evidence is required.'
     );
-    expect(toolEvidenceGap({ mode: 'host' }, { evidence: 'none' })).toBe(
+    expect(toolEvidenceGap({ evidence: 'none' })).toBe(
       'Host evidence is none; structured tool evidence is required.'
     );
-  });
-
-  it('prefers the external trace-source explanation over host evidence', () => {
-    const gap = toolEvidenceGap(
-      { mode: 'external_host' },
-      {
-        evidence: 'observed',
-        externalHost: external({
-          traceSource: 'screenshot',
-          traceConfidence: 'low',
-        }),
-      }
-    );
-    expect(gap).toMatch(/^External host trace source screenshot \(low/);
-  });
-
-  it('judges external trace quality only for external_host cases', () => {
-    const lowTrace = external({ traceConfidence: 'low' });
-    expect(
-      toolEvidenceGap({ mode: 'mcp_host' }, { externalHost: lowTrace })
-    ).toBeUndefined();
-  });
-
-  it('uses per-field tool evidence when the host reports it', () => {
-    const graded = {
-      externalHost: external({
-        traceSource: 'screenshot',
-        traceConfidence: 'low',
-        evidence: {
-          toolCalls: { source: 'mcp-proxy', confidence: 'high' },
-        },
-      } as Partial<ExternalHostMetadata>),
-    };
-    expect(toolEvidenceGap({ mode: 'external_host' }, graded)).toBeUndefined();
   });
 });
 
@@ -114,7 +78,7 @@ describe('evaluateExpectations', () => {
 
   it('grades tool calls, metrics and the trace view on structured evidence', async () => {
     const outcome = await evaluateExpectations(
-      { mode: 'mcp_host', assertions: toolExpect },
+      { mode: 'host', assertions: toolExpect },
       graded
     );
     expect(outcome.expectations.toolsTriggered?.pass).toBe(false);
@@ -133,16 +97,6 @@ describe('evaluateExpectations', () => {
       ],
       missed: [{ name: 'forecast' }],
     });
-  });
-
-  it('keeps metrics for a failing external_host assertion on structured evidence', async () => {
-    const outcome = await evaluateExpectations(
-      { mode: 'external_host', assertions: toolExpect },
-      { ...graded, externalHost: external() }
-    );
-    expect(outcome.expectations.toolsTriggered?.pass).toBe(false);
-    expect(outcome.toolPrecision).toBe(0.5);
-    expect(outcome.mcpHostTrace).toBeDefined();
   });
 
   it('fails every tool expectation with the gap and grades the rest', async () => {
@@ -172,7 +126,7 @@ describe('evaluateExpectations', () => {
   it('lists a required call made with the wrong arguments as missed', async () => {
     const outcome = await evaluateExpectations(
       {
-        mode: 'mcp_host',
+        mode: 'host',
         assertions: {
           toolsTriggered: {
             calls: [
@@ -204,40 +158,6 @@ describe('evaluateExpectations', () => {
     });
   });
 
-  it('applies the external trace explanation to both tool expectations', async () => {
-    const outcome = await evaluateExpectations(
-      { mode: 'external_host', assertions: toolExpect },
-      {
-        ...graded,
-        evidence: 'observed',
-        externalHost: external({
-          traceSource: 'screenshot',
-          traceConfidence: 'low',
-        }),
-      }
-    );
-    for (const key of ['toolsTriggered', 'toolCallCount'] as const) {
-      expect(outcome.expectations[key]?.pass).toBe(false);
-      expect(outcome.expectations[key]?.details).toMatch(
-        /^External host trace source screenshot \(low confidence\)/
-      );
-    }
-    expect(outcome.toolPrecision).toBeUndefined();
-    expect(outcome.toolRecall).toBeUndefined();
-    expect(outcome.mcpHostTrace).toBeUndefined();
-  });
-
-  it('applies host evidence when the external trace is structured', async () => {
-    const outcome = await evaluateExpectations(
-      { mode: 'external_host', assertions: toolExpect },
-      { ...graded, evidence: 'none', externalHost: external() }
-    );
-    expect(outcome.expectations.toolsTriggered?.details).toBe(
-      'Host evidence is none; structured tool evidence is required.'
-    );
-    expect(outcome.mcpHostTrace).toBeUndefined();
-  });
-
   it('fails a lone toolCallCount expectation on an evidence gap', async () => {
     const outcome = await evaluateExpectations(
       { mode: 'host', assertions: { toolCallCount: { max: 5 } } },
@@ -252,24 +172,13 @@ describe('evaluateExpectations', () => {
     });
   });
 
-  it('ignores external trace quality outside external_host mode', async () => {
+  it("grades on the client's evidence, not external trace metadata", async () => {
     const outcome = await evaluateExpectations(
-      { mode: 'mcp_host', assertions: toolExpect },
+      { mode: 'host', assertions: toolExpect },
       { ...graded, externalHost: external({ traceConfidence: 'low' }) }
     );
     expect(outcome.expectations.toolCallCount?.pass).toBe(true);
     expect(outcome.toolPrecision).toBe(0.5);
-  });
-
-  it('grades an external_host case without trace metadata on host evidence alone', async () => {
-    // Not produced by the runtime (metadata is required); pinned so the
-    // behaviour can't change silently.
-    const outcome = await evaluateExpectations(
-      { mode: 'external_host', assertions: toolExpect },
-      graded
-    );
-    expect(outcome.toolPrecision).toBe(0.5);
-    expect(outcome.mcpHostTrace).toBeDefined();
   });
 
   it('builds no trace view for direct responses', async () => {

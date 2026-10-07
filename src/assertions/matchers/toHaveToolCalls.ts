@@ -1,7 +1,7 @@
 /**
  * toHaveToolCalls Matcher
  *
- * Validates which tools the LLM called during a mcp_host simulation.
+ * Validates which tools a client called.
  */
 
 import { validateToolCalls } from '../validators/toolCalls.js';

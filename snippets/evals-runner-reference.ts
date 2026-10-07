@@ -8,8 +8,12 @@ test('my evals', async ({ mcp }, testInfo) => {
     {
       dataset,
 
-      // Apply 10 iterations to all mcp_host cases
-      // that don't specify iterations explicitly
+      // The client the cases run on and its model. A case can set its
+      // own client, model and clientOptions.
+      client: 'mst',
+      model: 'claude-haiku-4-5',
+
+      // Run every client case 10 times, unless it sets its own trials
       defaultTrials: 10,
 
       // Run up to 3 cases at once (careful with rate limits)

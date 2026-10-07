@@ -67,8 +67,6 @@ export interface ClientRunContext {
   arm?: EvalArm;
   /** Runtime-only environment isolated per suite. */
   env?: Record<string, string | undefined>;
-  /** Optional compatibility settings for existing SDK/CLI case configurations. */
-  mcpHostConfig?: MCPHostConfig;
 }
 
 export type TraceEvidence = 'structured' | 'observed' | 'none';

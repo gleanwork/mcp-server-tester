@@ -33,84 +33,64 @@ function isProcessAlive(pid: number): boolean {
 }
 
 describe('CLI host with a local process', () => {
-  it.each(['generated', 'legacy'] as const)(
-    'preserves environment precedence in an actual %s CLI command without mutation',
-    async (command) => {
-      vi.stubEnv('HOST_ENV_SHARED', 'ambient');
-      vi.stubEnv('HOST_ENV_REMOVED', 'ambient');
-      vi.stubEnv('MCP_PLUGIN_DIR', undefined);
-      fs.writeFileSync(
-        path.join(directory, 'claude'),
-        `#!${process.execPath}
+  it('preserves environment precedence in an actual CLI command without mutation', async () => {
+    vi.stubEnv('HOST_ENV_SHARED', 'ambient');
+    vi.stubEnv('HOST_ENV_REMOVED', 'ambient');
+    vi.stubEnv('MCP_PLUGIN_DIR', undefined);
+    fs.writeFileSync(
+      path.join(directory, 'claude'),
+      `#!${process.execPath}
 const keys = ['HOST_ENV_SHARED', 'HOST_ENV_HOST_WINS', 'HOST_ENV_SUITE_ONLY', 'HOST_ENV_REMOVED', 'CLAUDE_CODE_DISABLE_AUTO_MEMORY', 'CLAUDE_CODE_DISABLE_CLAUDE_MDS'];
 const env = Object.fromEntries(keys.map(key => [key, process.env[key] ?? null]));
 console.log(JSON.stringify({ type: 'result', result: JSON.stringify({ env, strict: process.argv.includes('--strict-mcp-config') }) }));
 `
-      );
-      const input = {
-        prompt: 'hello',
-        servers: [],
-        env: {
-          PATH: directory,
-          HOST_ENV_SHARED: 'suite',
-          HOST_ENV_HOST_WINS: 'suite',
-          HOST_ENV_SUITE_ONLY: 'suite-only',
-        },
-      };
-      const host = {
-        type: 'claude-code',
-        env: {
-          HOST_ENV_SHARED: 'host',
-          HOST_ENV_HOST_WINS: 'host',
-          HOST_ENV_REMOVED: undefined,
-          CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
-        },
-      };
-      const context: ClientRunContext = {
-        manifest: { name: 'offline', datasets: [] },
-        env: { HOST_ENV_SHARED: 'context' },
-        mcpHostConfig: {
-          env: {
-            HOST_ENV_SHARED: 'case',
-            CLAUDE_CODE_DISABLE_CLAUDE_MDS: '0',
-          },
-          ...(command === 'legacy'
-            ? {
-                cli: {
-                  command: path.join(directory, 'claude'),
-                  args: [],
-                  outputFormat: 'stream-json',
-                  env: { HOST_ENV_SHARED: 'cli-case' },
-                },
-              }
-            : {}),
-        },
-      };
-      const before = structuredClone({ input, host, context });
-      const result = await getHost('claude-code').run!(input, host, context);
-      expect(result.error).toBeUndefined();
-      const observed: {
-        env: Record<string, string | null>;
-        strict: boolean;
-      } = JSON.parse(result.finalText ?? '');
-      expect(observed.env).toMatchObject({
-        HOST_ENV_SHARED: command === 'legacy' ? 'cli-case' : 'case',
-        HOST_ENV_HOST_WINS: 'host',
+    );
+    const input = {
+      prompt: 'hello',
+      servers: [],
+      env: {
+        PATH: directory,
+        HOST_ENV_SHARED: 'suite',
+        HOST_ENV_HOST_WINS: 'suite',
         HOST_ENV_SUITE_ONLY: 'suite-only',
-        HOST_ENV_REMOVED: null,
-      });
-      if (command === 'generated') {
-        expect(observed.strict).toBe(true);
-        expect(observed.env).toMatchObject({
-          CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
-          CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1',
-        });
-      }
-      expect({ input, host, context }).toEqual(before);
-      expect(process.env.HOST_ENV_SHARED).toBe('ambient');
-      expect(process.env.HOST_ENV_REMOVED).toBe('ambient');
-    }
-  );
+      },
+    };
+    const host = {
+      type: 'claude-code',
+      env: {
+        HOST_ENV_SHARED: 'host',
+        HOST_ENV_HOST_WINS: 'host',
+        HOST_ENV_REMOVED: undefined,
+        CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+      },
+    };
+    const context: ClientRunContext = {
+      manifest: { name: 'offline', datasets: [] },
+      env: { HOST_ENV_SHARED: 'context' },
+    };
+    const before = structuredClone({ input, host, context });
+    const result = await getHost('claude-code').run!(input, host, context);
+    expect(result.error).toBeUndefined();
+    const observed: {
+      env: Record<string, string | null>;
+      strict: boolean;
+    } = JSON.parse(result.finalText ?? '');
+    // The client's own env wins over the suite's and the runtime's.
+    expect(observed.env).toMatchObject({
+      HOST_ENV_SHARED: 'host',
+      HOST_ENV_HOST_WINS: 'host',
+      HOST_ENV_SUITE_ONLY: 'suite-only',
+      HOST_ENV_REMOVED: null,
+    });
+    expect(observed.strict).toBe(true);
+    expect(observed.env).toMatchObject({
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+      CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1',
+    });
+    expect({ input, host, context }).toEqual(before);
+    expect(process.env.HOST_ENV_SHARED).toBe('ambient');
+    expect(process.env.HOST_ENV_REMOVED).toBe('ambient');
+  });
 
   it('bounds the CLI lifecycle, removes its config and stops only its owned child', async () => {
     // The fake CLI must boot Node and write its marker before the host deadline.
@@ -165,92 +145,6 @@ setTimeout(() => process.exit(0), 30000);
         process.kill(ownedPid, 'SIGKILL');
     }
   }, 15_000);
-
-  it('keeps the supplied host deadline when legacy CLI arguments replace the generated config', async () => {
-    const pending = getHost('claude-code').run!(
-      { prompt: 'hello', servers: [] },
-      { type: 'claude-code', timeout: 50 },
-      {
-        manifest: { name: 'offline', datasets: [] },
-        mcpHostConfig: {
-          cli: {
-            command: process.execPath,
-            args: [
-              '-e',
-              'setTimeout(() => console.log(JSON.stringify({ success: true, toolCalls: [], response: "late" })), 150)',
-            ],
-            outputFormat: 'json',
-            timeout: 1000,
-          },
-        },
-      }
-    );
-    expect((await pending).error).toContain('timed out');
-  });
-
-  it('retains an immediate legacy CLI timeout of zero', async () => {
-    const result = await getHost('claude-code').run!(
-      { prompt: 'hello', servers: [] },
-      { type: 'claude-code' },
-      {
-        manifest: { name: 'offline', datasets: [] },
-        mcpHostConfig: {
-          cli: { command: process.execPath, args: [], timeout: 0 },
-        },
-      }
-    );
-    expect(result.error).toContain('timed out after 0 ms');
-  });
-
-  it.each([{ temperature: 0.4 }, { maxTokens: 123 }, { maxToolCalls: 0 }])(
-    'explicitly rejects unsupported legacy CLI generation settings %j',
-    async (mcpHostConfig) => {
-      await expect(
-        getHost('claude-code').run!(
-          { prompt: 'hello', servers: [] },
-          { type: 'claude-code' },
-          { manifest: { name: 'offline', datasets: [] }, mcpHostConfig }
-        )
-      ).rejects.toThrow();
-    }
-  );
-
-  it('applies the legacy case model before constructing generated CLI arguments', async () => {
-    const result = await getHost('claude-code').run!(
-      { prompt: 'hello', servers: [], env: { PATH: directory } },
-      { type: 'claude-code', model: 'suite-model' },
-      {
-        manifest: { name: 'offline', datasets: [] },
-        mcpHostConfig: { model: 'legacy-model' },
-      }
-    );
-    expect(result.error).toBeUndefined();
-    expect(result.finalText).toBe('legacy-model');
-  });
-
-  it('preserves explicit legacy command arguments instead of rewriting them', async () => {
-    const result = await getHost('claude-code').run!(
-      { prompt: 'hello', servers: [] },
-      { type: 'claude-code', model: 'suite-model' },
-      {
-        manifest: { name: 'offline', datasets: [] },
-        mcpHostConfig: {
-          model: 'legacy-model',
-          cli: {
-            command: process.execPath,
-            args: [
-              '-e',
-              'console.log(JSON.stringify({ success: true, toolCalls: [], response: process.argv[1] }))',
-              '{{prompt}}',
-            ],
-            outputFormat: 'json',
-          },
-        },
-      }
-    );
-    expect(result.error).toBeUndefined();
-    expect(result.finalText).toBe('hello');
-  });
 });
 
 describe('claude-cli systemPrompt', () => {

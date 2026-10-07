@@ -101,14 +101,16 @@ describe('datasetTypes', () => {
       expect(() => validateEvalCase(evalCase)).toThrow(ZodError);
     });
 
-    it('should accept eval case without toolName (for mcp_host mode)', () => {
+    it('accepts a client case: input, no toolName', () => {
       const evalCase = {
         id: 'test-1',
-        mode: 'mcp_host' as const,
         input: 'Get the weather for London',
+        client: 'mst',
+        model: 'claude-haiku-4-5',
+        clientOptions: { systemPrompt: 'Be brief.' },
       };
 
-      expect(() => validateEvalCase(evalCase)).not.toThrow();
+      expect(validateEvalCase(evalCase)).toEqual(evalCase);
     });
 
     it('should reject eval case with empty toolName', () => {
@@ -121,76 +123,38 @@ describe('datasetTypes', () => {
       expect(() => validateEvalCase(evalCase)).toThrow(ZodError);
     });
 
-    it('should accept eval case without args (for mcp_host mode)', () => {
-      const evalCase = {
-        id: 'test-1',
-        mode: 'mcp_host' as const,
-        input: 'Get the weather for London',
-      };
+    it.each([
+      ['mode', 'mcp_host', "`mode: 'mcp_host'` is gone"],
+      ['mode', 'external_host', "`mode: 'external_host'` is gone"],
+      ['mcpHostConfig', { provider: 'openai' }, '`mcpHostConfig` is gone'],
+      ['externalHost', { driver: 'x' }, '`externalHost` is gone'],
+    ])(
+      'rejects the removed %s %j with what replaces it',
+      (key, value, message) => {
+        const result = EvalCaseSchema.safeParse({
+          id: 'old',
+          input: 'Get the weather for London',
+          [key]: value,
+        });
+        expect(result.success).toBe(false);
+        expect(result.error?.issues).toEqual([
+          expect.objectContaining({
+            path: [key],
+            message: expect.stringContaining(message),
+          }),
+        ]);
+      }
+    );
 
-      expect(() => validateEvalCase(evalCase)).not.toThrow();
-    });
-
-    it('should accept external_host eval case configuration', () => {
-      const evalCase = {
-        id: 'external-1',
-        mode: 'external_host' as const,
-        input: 'Reply with exactly hello',
-        externalHost: {
-          driver: {
-            provider: 'anthropic',
-            product: 'claude',
-            surface: 'cowork',
-            runtime: 'desktop-app',
-            platform: 'macos',
-          },
-          name: 'Claude Cowork Desktop',
-          timeoutMs: 120000,
-          capabilities: {
-            control: [
-              { uses: 'builtin:platform.macos' },
-              { uses: 'builtin:anthropic.claude.coworkSurface' },
-            ],
-            input: {
-              uses: 'builtin:desktop.macos.accessibilitySubmit',
-              with: { createNewConversation: false },
-            },
-            completion: {
-              uses: 'builtin:anthropic.claude.localAgentTrace',
-              provides: ['trace'],
-            },
-            normalize: {
-              uses: 'builtin:anthropic.claude.localAgentNormalize',
-            },
-          },
-          correlation: {
-            strategy: 'prompt_marker',
-            includeInPrompt: false,
-            promptTemplate: 'trace: {{marker}}',
-          },
-          options: {
-            appName: 'Claude',
-            newConversationShortcut: 'cmd+n',
-          },
-        },
-      };
-
-      const result = validateEvalCase(evalCase);
-
-      expect(result).toEqual(evalCase);
-    });
-
-    it('should reject external_host configuration without a driver', () => {
-      const evalCase = {
-        id: 'external-1',
-        mode: 'external_host' as const,
-        input: 'Reply with exactly hello',
-        externalHost: {
-          name: 'Claude Cowork Desktop',
-        },
-      };
-
-      expect(() => validateEvalCase(evalCase)).toThrow(ZodError);
+    it('rejects a case that has both input and a toolName', () => {
+      const result = EvalCaseSchema.safeParse({
+        id: 'both',
+        input: 'Get the weather',
+        toolName: 'get_weather',
+        args: {},
+      });
+      expect(result.success).toBe(false);
+      expect(JSON.stringify(result.error?.issues)).toContain('not both');
     });
 
     it('should accept eval case with complex args', () => {
@@ -440,9 +404,7 @@ describe('datasetTypes', () => {
         cases: [
           {
             id: 'tool-trigger-test',
-            mode: 'mcp_host',
             input: 'Search for documents',
-            mcpHostConfig: { provider: 'openai' },
             assertions: {
               toolsTriggered: {
                 calls: [{ name: 'search', required: true }],
@@ -518,7 +480,7 @@ describe('datasetTypes', () => {
   });
 
   describe('LLMProvider expansion', () => {
-    it('should accept new provider values in mcpHostConfig', () => {
+    it('accepts every provider in a case clientOptions', () => {
       const providers = [
         'openai',
         'anthropic',
@@ -536,9 +498,8 @@ describe('datasetTypes', () => {
             cases: [
               {
                 id: 'c',
-                mode: 'mcp_host',
                 input: 's',
-                mcpHostConfig: { provider },
+                clientOptions: { provider },
               },
             ],
           })
@@ -699,13 +660,13 @@ describe('request cases', () => {
   it('rejects request outside direct mode', () => {
     const result = EvalCaseSchema.safeParse({
       id: 'host-request',
-      mode: 'mcp_host',
+      mode: 'host',
       input: 'x',
       request: { method: 'skills/list' },
     });
     expect(result.success).toBe(false);
     expect(JSON.stringify(result.error?.issues)).toContain(
-      'only valid for direct-mode cases'
+      'only valid for direct cases'
     );
   });
 

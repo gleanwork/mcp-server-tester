@@ -148,7 +148,7 @@ It checks that every protocol connects (`cross_era_connect`), that tools, tool d
 
 Eval runs record the protocol they used in `result.metadata.protocol`, and stored artifacts carry `protocolVersion` and `protocolEra`. `compareEvalRuns()` returns `warnings` when the baseline and candidate used different eras or revisions, because a pass-rate change may then come from the protocol rather than the change you are testing.
 
-`mcp_host` evals use the test's connection, so they follow `protocol`. External hosts (Claude Code, Cowork, ChatGPT) open their own connections and are not affected by it.
+In a Playwright test, the `mst` client uses the test's connection, so it follows `protocol`. Claude Code, Cowork and ChatGPT open their own connections and are not affected by it.
 
 ## Errors you may see
 

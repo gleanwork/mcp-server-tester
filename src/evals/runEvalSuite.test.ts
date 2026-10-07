@@ -143,9 +143,8 @@ async function fixture(
 }
 const scenario: EvalCase = {
   id: 'same',
-  mode: 'mcp_host',
+  mode: 'host',
   input: 'Find documents',
-  mcpHostConfig: { provider: 'anthropic' },
 };
 
 describe('suite review regressions', () => {

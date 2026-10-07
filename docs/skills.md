@@ -7,7 +7,7 @@ MST can:
 - read and verify skills from tests (`mcp.skills`)
 - check that a server follows SEP-2640 (`runConformanceChecks`)
 - assert on skills methods in eval datasets (`request` cases)
-- run `mcp_host` evals where the model can load skills, and measure whether skills help (`mcpHostConfig.skills`, or suite arms with the `mst` host's `skills`)
+- run evals where the model can load skills, and measure whether skills help (the `mst` client's `skills` option, or suite arms that set it)
 
 The extension works in both protocol eras: servers declare it in `capabilities.extensions`, which MST reads from `initialize` (legacy) or `server/discover` (2026-07-28).
 
@@ -16,7 +16,7 @@ The extension works in both protocol eras: servers declare it in `capabilities.e
 - [Reading skills in tests](#reading-skills-in-tests)
 - [Conformance](#conformance)
 - [Eval datasets](#eval-datasets)
-- [Skills in mcp_host evals](#skills-in-mcp_host-evals)
+- [Skills in evals](#skills-in-evals)
 - [Measuring whether skills help](#measuring-whether-skills-help)
 
 ## Reading skills in tests
@@ -108,9 +108,9 @@ Direct cases can call skills methods instead of a tool with `request` (direct mo
 }
 ```
 
-## Skills in mcp_host evals
+## Skills in evals
 
-Set `mcpHostConfig.skills` to let the simulated host offer the server's skills to the model (SDK host only):
+Set the `mst` client's `skills` option (`clientOptions.skills`) to let it offer the server's skills to the model:
 
 | `skills`          | What the model gets                                                                                                                                                    |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -131,9 +131,10 @@ Loading a skill is not an MCP tool call. Loads are reported in `skillLoads`, and
 ```json
 {
   "id": "weather-uses-skill",
-  "mode": "mcp_host",
   "input": "Write me a short weather report for London",
-  "mcpHostConfig": { "provider": "anthropic", "skills": "catalog" },
+  "client": "mst",
+  "model": "claude-haiku-4-5",
+  "clientOptions": { "skills": "catalog" },
   "trials": 5,
   "passThreshold": 0.8,
   "assertions": {
@@ -192,4 +193,4 @@ Models often skip skills they could use, and a matching tool can win over the sk
 }
 ```
 
-`mst run` reports each arm's pass and trial pass rates and the skill metrics, and `armDeltas` compares each mode with `off`. Leave `mcpHostConfig.skills` off the cases: a case setting would override the arm's, so the suite rejects the combination. Skills come from the first of an arm's servers. Use `trials` for stable rates, and try more than one model: skill adherence varies a lot between models.
+`mst run` reports each arm's pass and trial pass rates and the skill metrics, and `armDeltas` compares each mode with `off`. Leave `clientOptions.skills` off the cases: a case's own setting replaces the arm's, so every arm would run the case's mode. Skills come from the first of an arm's servers. Use `trials` for stable rates, and try more than one model: skill adherence varies a lot between models.

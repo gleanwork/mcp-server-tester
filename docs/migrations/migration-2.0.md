@@ -25,6 +25,7 @@ This guide covers upgrading from 1.x (the last 1.x release is 1.1.1). Features f
 - [The Claude Agent SDK is an optional peer dependency](#the-claude-agent-sdk-is-an-optional-peer-dependency)
 - [`getResponseSizeBytes` is no longer exported](#getresponsesizebytes-is-no-longer-exported)
 - [`runVariantExperiment` needs clear evidence to recommend a variant](#runvariantexperiment-needs-clear-evidence-to-recommend-a-variant)
+- [Client cases name a client and model, not `mcpHostConfig`](#client-cases-name-a-client-and-model-not-mcphostconfig)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
 ---
@@ -381,12 +382,54 @@ Variant experiments now follow standard practice for comparing two systems on th
 
 New fields: candidates have `measurement`, `improvement` and `fixes`, and the result has `grouping` and, when an extra run was needed, `groupingBaseline`.
 
+## Client cases name a client and model, not `mcpHostConfig`
+
+**Affects:** datasets with `mode: 'mcp_host'` or `mode: 'external_host'` cases, `mcpHostConfig` or `externalHost` on a case, the `mcpHostModel` option, and plugin clients that read `context.mcpHostConfig`.
+
+A case with `input` runs on the client under test, so it needs no `mode`. The run names the client and model once: `runEvalDataset` in a Playwright test, or the suite manifest. A case can set its own `client`, `model` and `clientOptions`. Outside a suite, cases run on the `mst` client, on the test's MCP connection; Claude Code, Cowork, ChatGPT and plugin clients run in suites (`mst run`). The old keys fail with a message naming what replaces them.
+
+```json
+// Before
+{
+  "id": "find-config",
+  "mode": "mcp_host",
+  "input": "Find the config file",
+  "mcpHostConfig": { "provider": "anthropic", "model": "claude-sonnet-4-5", "maxToolCalls": 8 }
+}
+
+// Now: the case says what it tests
+{ "id": "find-config", "input": "Find the config file" }
+```
+
+```typescript
+// The run names the client and model; clientOptions carry the rest
+await runEvalDataset(
+  {
+    dataset,
+    client: 'mst',
+    model: 'claude-sonnet-4-5',
+    clientOptions: { maxToolCalls: 8 },
+  },
+  { mcp, testInfo }
+);
+```
+
+- A case that needs its own model or options sets `model` and `clientOptions` (for example `"clientOptions": { "systemPrompt": "..." }`). They replace what the case inherits.
+- `provider` is inferred from the model id; set `clientOptions.provider` to override it (a gateway, or Vertex routing).
+- An `external_host` case runs in a suite with `client: 'chatgpt'`, or a plugin client.
+- `mcpHostConfig.cli` and `browser` (caller-authored CLI and browser hosts) have no replacement in a case; a plugin client can wrap a custom host.
+- `mcpHostModel` is now `model`; the run metadata still records it as `mcpHostModel`.
+- Results record the case's client and model as `request.client` and `request.model`, instead of `request.mcpHostConfig` and `request.externalHost`.
+- Plugin clients: `ClientRunContext.mcpHostConfig` is gone. A case's options arrive in the client config the suite resolves.
+- A case with `input` and a `toolName` or `request` fails validation: a case runs on the client or calls a tool directly, not both. Remove a placeholder `toolName` and `args` from client cases.
+- Direct cases are unchanged for now.
+
 ## New in 2.0 (non-breaking)
 
 - An evaluation framework over datasets: manifests, suites and batches (`mst run`, `mst batch`), arms, metrics, result stores, and plugins that add dataset sources, hosts, judges, metrics and result stores under their own namespace, and shared configs a manifest `extends`. It's in `@gleanwork/mcp-server-tester/evals`. See [Evaluation framework](../evaluation-framework.md).
-- Desktop hosts for suites: Claude Cowork (`cowork`) and the ChatGPT desktop app (`chatgpt-mac`, `chatgpt-linux`), driven through the desktop UI (Computer Use on macOS, AT-SPI on Linux). External-host cases (`mode: 'external_host'`) run a scenario through another host's driver. Their APIs are in `@gleanwork/mcp-server-tester/experimental/hosts`, which may change between minor versions. See [Cowork](../cowork.md) and [ChatGPT desktop](../chatgpt-desktop.md).
+- Desktop hosts for suites: Claude Cowork (`cowork`) and the ChatGPT desktop app (`chatgpt-mac`, `chatgpt-linux`), driven through the desktop UI (Computer Use on macOS, AT-SPI on Linux). Their APIs are in `@gleanwork/mcp-server-tester/experimental/hosts`, which may change between minor versions. See [Cowork](../cowork.md) and [ChatGPT desktop](../chatgpt-desktop.md).
 - A custom `executeCase` for `runEvalDataset()` and `runEvalCase()`, which returns a typed `CaseExecution` (`direct`, `host` or `failed`).
-- LLM gateway support for the `mcp_host` SDK host and LLM judges: `ANTHROPIC_AUTH_TOKEN`, and `MST_LLM_AUTH_COMMAND` for short-lived tokens. See [LLM Gateways](../llm-gateways.md).
+- LLM gateway support for the `mst` client and LLM judges: `ANTHROPIC_AUTH_TOKEN`, and `MST_LLM_AUTH_COMMAND` for short-lived tokens. See [LLM Gateways](../llm-gateways.md).
 - The CLI is also installed as `mst`. In a project that depends on the package, `npx mst <command>` and `npx mcp-server-tester <command>` run the same binary. Before the package is installed, run `init` as `npx @gleanwork/mcp-server-tester init`: `npx mcp-server-tester` and `npx mst` would download unrelated npm packages with those names. See [CLI](../cli.md).
 - `protocol` on `mcpConfig` (`'legacy'`, `'auto'`, or a revision like `'2026-07-28'`), the `mcpProtocol` fixture option, and `protocolMatrix()`. See [Protocol Versions](../protocol-versions.md). To run an existing project against both eras:
 
@@ -400,6 +443,6 @@ New fields: candidates have `measurement`, `improvement` and `fixes`, and the re
   ```
 
 - `runCrossEraChecks()` to check a server serves every era the same.
-- `mcp.skills`, skills conformance checks, and `mcpHostConfig.skills`, with a `skills` option on the `vercel-sdk` suite host for comparing modes as arms. See [Agent Skills](../skills.md).
+- `mcp.skills`, skills conformance checks, and a `skills` option on the `mst` client, for comparing modes as arms. See [Agent Skills](../skills.md).
 - Direct eval cases with `request` instead of `toolName`, and built-in schemas for skills and discover results.
 - Eval run metadata records the protocol (`metadata.protocol`, stored `protocolVersion` / `protocolEra`).

@@ -1,6 +1,6 @@
 # LLM Gateways
 
-MST's own LLM calls (the `mcp_host` SDK host and LLM judges) can go through an LLM gateway: a proxy that serves the Anthropic Messages or OpenAI APIs at its own URL, usually with its own short-lived tokens. Point MST at it with environment variables; no config changes are needed.
+MST's own LLM calls (the `mst` client and LLM judges) can go through an LLM gateway: a proxy that serves the Anthropic Messages or OpenAI APIs at its own URL, usually with its own short-lived tokens. Point MST at it with environment variables; no config changes are needed.
 
 ## Configuration
 
@@ -31,7 +31,7 @@ npx playwright test
 
 `ANTHROPIC_BASE_URL` means the same as it does for the official Anthropic SDKs and Claude Code, so a value set for those works here. The AI SDK on its own expects the `/v1` form; MST accepts either and sends each SDK the form it needs.
 
-The command runs through the shell with MST's environment, and must print only the token on stdout. Its token is cached per command and environment for `MST_LLM_AUTH_COMMAND_TTL_MS`, so a case with its own `mcpHostConfig.env` runs the command again. If it fails, the LLM call fails with its exit status; neither its stdout nor its stderr is included in the error (either could contain the token), so run it in a terminal to see what went wrong.
+The command runs through the shell with MST's environment, and must print only the token on stdout. Its token is cached per command and environment for `MST_LLM_AUTH_COMMAND_TTL_MS`, so a case with its own `clientOptions.env` runs the command again. If it fails, the LLM call fails with its exit status; neither its stdout nor its stderr is included in the error (either could contain the token), so run it in a terminal to see what went wrong.
 
 ### Gateways configured for Claude Code
 
@@ -46,7 +46,7 @@ export MST_LLM_AUTH_COMMAND=<the apiKeyHelper value>
 
 For Anthropic-shaped calls, the first that applies wins:
 
-1. `apiKeyEnvVar` from `mcpHostConfig` or the judge config. When set, no other credential is read; the key still goes to `ANTHROPIC_BASE_URL` if that is set.
+1. `apiKeyEnvVar` from the `mst` client's options or the judge config. When set, no other credential is read; the key still goes to `ANTHROPIC_BASE_URL` if that is set.
 2. `MST_LLM_AUTH_COMMAND`, sent as `Authorization: Bearer`, **only when `ANTHROPIC_BASE_URL` is set**.
 3. `ANTHROPIC_AUTH_TOKEN`, sent as `Authorization: Bearer`, **only when `ANTHROPIC_BASE_URL` is set**.
 4. `ANTHROPIC_API_KEY`, sent as `x-api-key`.
@@ -55,14 +55,14 @@ OpenAI-shaped calls use `apiKeyEnvVar`, then `MST_LLM_AUTH_COMMAND` (only when `
 
 The auth command is MST's own setting, so it wins over keys that happen to be in the environment. Gateway credentials (the auth command and `ANTHROPIC_AUTH_TOKEN`) are only sent to a base URL override, so a gateway token can't reach a provider's public API by accident. They go to every overridden base URL, though: if `OPENAI_BASE_URL` points at a different proxy than your gateway, give that provider its own key with `apiKeyEnvVar`. Without an override, calls go to the provider's public API (`https://api.anthropic.com`, `https://api.openai.com/v1`).
 
-A case's `mcpHostConfig.env` takes part in this too, so a dataset can set `MST_LLM_AUTH_COMMAND`, which MST runs through a shell. Treat datasets from elsewhere like code, as you already must for CLI hosts.
+A case's `clientOptions.env` takes part in this too, so a dataset can set `MST_LLM_AUTH_COMMAND`, which MST runs through a shell. Treat datasets from elsewhere like code.
 
 ## What reads these settings
 
 | Consumer                                     | Anthropic | OpenAI | Notes                                                                                                  |
 | -------------------------------------------- | --------- | ------ | ------------------------------------------------------------------------------------------------------ |
-| `mcp_host` SDK host, `provider: 'anthropic'` | Yes       |        | Streams its responses (see below).                                                                     |
-| `mcp_host` SDK host, `provider: 'openai'`    |           | Yes    | Uses the Responses API; sends `store: false` behind a base URL override (see below).                   |
+| `mst` client, `provider: 'anthropic'`        | Yes       |        | Streams its responses (see below).                                                                     |
+| `mst` client, `provider: 'openai'`           |           | Yes    | Uses the Responses API; sends `store: false` behind a base URL override (see below).                   |
 | `anthropic` judge                            | Yes       |        |                                                                                                        |
 | `openai` judge                               |           | Yes    | Uses non-streaming Chat Completions, which some gateways don't serve. Use the `anthropic` judge there. |
 | Computer Use planner (Cowork, ChatGPT macOS) | Yes       |        | The gateway must accept the Computer Use beta tool.                                                    |

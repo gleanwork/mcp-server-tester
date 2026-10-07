@@ -190,17 +190,23 @@ describe('SDK host with skills', () => {
           cases: [
             {
               id: 'uses-skill',
-              mode: 'mcp_host',
+              mode: 'host',
               input: 'What is the weather in London?',
-              mcpHostConfig: {
-                provider: 'openai',
-                ...(skills ? { skills } : {}),
-              },
               assertions: { toolsTriggered: SKILL_THEN_TOOL },
             },
           ],
         };
-        const result = await runEvalDataset({ dataset }, { mcp });
+        const result = await runEvalDataset(
+          {
+            dataset,
+            client: 'mst',
+            clientOptions: {
+              provider: 'openai',
+              ...(skills ? { skills } : {}),
+            },
+          },
+          { mcp }
+        );
         return computeMetrics(
           [
             'passed',

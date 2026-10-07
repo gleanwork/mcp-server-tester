@@ -44,9 +44,8 @@ function createHostDataset(): EvalDataset {
     cases: [
       {
         id: 'search-discovery',
-        mode: 'mcp_host',
+        mode: 'host',
         input: 'Find the expense policy',
-        mcpHostConfig: { provider: 'openai', model: 'gpt-4o' },
         assertions: {
           toolsTriggered: {
             calls: [{ name: 'search', required: true }],

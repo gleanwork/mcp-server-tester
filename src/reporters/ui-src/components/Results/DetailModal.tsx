@@ -334,7 +334,6 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
   const answer = finalAnswer(result);
   const llmDurationMs = numberField(responseRecord(result), 'llmDurationMs');
   const mcpDurationMs = numberField(responseRecord(result), 'mcpDurationMs');
-  const externalHostConfig = result.request?.externalHost;
   const verdict = getVerdictSummary(result);
 
   return (
@@ -589,7 +588,6 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
             {result.request &&
               (result.request.args ||
                 result.request.scenario ||
-                result.request.externalHost ||
                 result.request.description ||
                 result.request.expect) && (
                 <CollapsibleSection
@@ -671,204 +669,18 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                       </div>
                     )}
 
-                    {result.request.mcpHostConfig && (
+                    {(result.request.client || result.request.model) && (
                       <div className="flex gap-2">
-                        <span className="px-2 py-1 rounded text-xs font-medium bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">
-                          {result.request.mcpHostConfig.provider}
-                        </span>
-                        {result.request.mcpHostConfig.model && (
-                          <span className="px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
-                            {result.request.mcpHostConfig.model}
+                        {result.request.client && (
+                          <span className="px-2 py-1 rounded text-xs font-medium bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">
+                            {result.request.client}
                           </span>
                         )}
-                      </div>
-                    )}
-
-                    {externalHostConfig && (
-                      <div className="space-y-3">
-                        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          External Host Driver
-                        </h4>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <InfoField
-                            label="Driver Slug"
-                            value={
-                              <code className="text-xs break-all">
-                                {externalHostConfig.driverSlug ??
-                                  (typeof externalHostConfig.driver === 'string'
-                                    ? externalHostConfig.driver
-                                    : 'external host')}
-                              </code>
-                            }
-                          />
-                          <InfoField
-                            label="Display Name"
-                            value={
-                              externalHostConfig.name ??
-                              result.externalHost?.displayName ??
-                              'external host'
-                            }
-                          />
-                          {typeof externalHostConfig.driver === 'object' && (
-                            <>
-                              <InfoField
-                                label="Provider / Product"
-                                value={`${externalHostConfig.driver.provider} / ${externalHostConfig.driver.product}`}
-                              />
-                              <InfoField
-                                label="Surface / Runtime"
-                                value={`${externalHostConfig.driver.surface} / ${externalHostConfig.driver.runtime}`}
-                              />
-                              {externalHostConfig.driver.platform && (
-                                <InfoField
-                                  label="Platform"
-                                  value={externalHostConfig.driver.platform}
-                                />
-                              )}
-                              {externalHostConfig.driver.channel && (
-                                <InfoField
-                                  label="Channel"
-                                  value={externalHostConfig.driver.channel}
-                                />
-                              )}
-                            </>
-                          )}
-                          {externalHostConfig.hostType && (
-                            <InfoField
-                              label="Host Type"
-                              value={externalHostConfig.hostType}
-                            />
-                          )}
-                          {externalHostConfig.variant && (
-                            <InfoField
-                              label="Variant"
-                              value={externalHostConfig.variant}
-                            />
-                          )}
-                          {externalHostConfig.timeoutMs !== undefined && (
-                            <InfoField
-                              label="Timeout"
-                              value={formatMs(externalHostConfig.timeoutMs)}
-                            />
-                          )}
-                          {externalHostConfig.usesBuiltInDefaults !==
-                            undefined && (
-                            <InfoField
-                              label="Built-in Defaults"
-                              value={
-                                externalHostConfig.usesBuiltInDefaults
-                                  ? 'applied'
-                                  : 'not applied'
-                              }
-                            />
-                          )}
-                          {externalHostConfig.correlation && (
-                            <InfoField
-                              label="Correlation"
-                              value={
-                                <div className="space-y-1">
-                                  <code className="text-xs">
-                                    {externalHostConfig.correlation.strategy ??
-                                      'none'}
-                                  </code>
-                                  {externalHostConfig.correlation
-                                    .includeInPrompt !== undefined && (
-                                    <p className="text-xs text-muted-foreground">
-                                      prompt marker:{' '}
-                                      {externalHostConfig.correlation
-                                        .includeInPrompt
-                                        ? 'included'
-                                        : 'not included'}
-                                    </p>
-                                  )}
-                                  {externalHostConfig.correlation
-                                    .promptTemplate && (
-                                    <p className="text-xs text-muted-foreground break-all">
-                                      template:{' '}
-                                      {
-                                        externalHostConfig.correlation
-                                          .promptTemplate
-                                      }
-                                    </p>
-                                  )}
-                                </div>
-                              }
-                            />
-                          )}
-                        </div>
-
-                        {externalHostConfig.capabilities &&
-                          Object.keys(externalHostConfig.capabilities).length >
-                            0 && (
-                            <div>
-                              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-                                Capability Bindings
-                              </h4>
-                              <div className="overflow-x-auto rounded-md border">
-                                <table className="w-full text-xs">
-                                  <thead className="bg-muted text-muted-foreground">
-                                    <tr>
-                                      <th className="text-left p-2 font-medium">
-                                        Capability
-                                      </th>
-                                      <th className="text-left p-2 font-medium">
-                                        Implementation
-                                      </th>
-                                      <th className="text-left p-2 font-medium">
-                                        Provides
-                                      </th>
-                                      <th className="text-left p-2 font-medium">
-                                        Options
-                                      </th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {Object.entries(
-                                      externalHostConfig.capabilities
-                                    ).flatMap(([capability, bindings]) =>
-                                      bindings.map((binding, index) => (
-                                        <tr
-                                          key={`${capability}-${index}`}
-                                          className="border-t"
-                                        >
-                                          <td className="p-2 font-mono">
-                                            {capability}
-                                          </td>
-                                          <td className="p-2 font-mono break-all">
-                                            {binding.uses}
-                                          </td>
-                                          <td className="p-2">
-                                            {binding.provides?.join(', ') ??
-                                              '-'}
-                                          </td>
-                                          <td className="p-2">
-                                            {binding.with ? (
-                                              <pre className="font-mono whitespace-pre-wrap">
-                                                {jsonPreview(binding.with)}
-                                              </pre>
-                                            ) : (
-                                              '-'
-                                            )}
-                                          </td>
-                                        </tr>
-                                      ))
-                                    )}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </div>
-                          )}
-
-                        {externalHostConfig.options &&
-                          Object.keys(externalHostConfig.options).length >
-                            0 && (
-                            <div>
-                              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
-                                Driver Options
-                              </h4>
-                              <JsonBlock value={externalHostConfig.options} />
-                            </div>
-                          )}
+                        {result.request.model && (
+                          <span className="px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                            {result.request.model}
+                          </span>
+                        )}
                       </div>
                     )}
 

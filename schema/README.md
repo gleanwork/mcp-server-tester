@@ -12,7 +12,7 @@ This directory contains a [JSON Schema (draft-07)](https://json-schema.org/draft
 
 When you point your editor at this schema, you get:
 
-- **Autocomplete** for all field names (`mode`, `mcpHostConfig.provider`, `assertions.toolsTriggered`, etc.)
+- **Autocomplete** for all field names (`input`, `client`, `model`, `assertions.toolsTriggered`, etc.)
 - **Inline documentation** from field descriptions displayed on hover
 - **Validation errors** for incorrect types, missing required fields, and invalid enum values (e.g. an unknown LLM provider)
 
@@ -74,21 +74,20 @@ EvalDataset (root)
     └── EvalCase
         ├── id                 (string, required)
         ├── description        (string)
-        ├── mode               ("direct" | "mcp_host", default "direct")
-        ├── toolName           (string)  — required for direct mode
-        ├── args               (object)  — required for direct mode
-        ├── input           (string)  — required for mcp_host mode
-        ├── mcpHostConfig      (MCPHostConfig)
-        │   ├── provider       (enum of 10 providers, required)
-        │   ├── model          (string)
-        │   ├── apiKeyEnvVar   (string)
-        │   ├── maxTokens      (integer)
-        │   ├── temperature    (number 0–1)
-        │   └── maxToolCalls   (integer)
-        ├── trials         (integer >= 1, default 1)
-        ├── accuracyThreshold  (number 0–1, default 1.0)
+        ├── mode               ("direct" | "host"; inferred: a case with input runs on the client)
+        ├── toolName           (string)  — a direct case's tool
+        ├── args               (object)  — a direct case's arguments
+        ├── input              (string)  — the prompt a client case sends
+        ├── client             (string)  — the client, inherited from the suite or run
+        ├── model              (string)  — the model the client uses
+        ├── clientOptions      (object)  — the client's own options
+        ├── trials             (integer >= 1, default 1)
+        ├── passThreshold      (number 0–1, default 1.0)
+        ├── judgeReps          (integer >= 1, default 1)
+        ├── expected           (object: answer, criteria, other ground truth)
+        ├── tags               (string[])
         ├── metadata           (object)
-        └── expect             (EvalAssertions)
+        └── assertions         (EvalAssertions)
             ├── response           — exact match
             ├── schema             — named Zod schema
             ├── containsText       — substring(s)
@@ -111,14 +110,14 @@ EvalDataset (root)
             ├── responseSize
             │   ├── maxBytes       (integer)
             │   └── minBytes       (integer)
-            ├── toolsTriggered     — mcp_host only
+            ├── toolsTriggered     — client cases only
             │   ├── calls[]
             │   │   ├── name       (string, required)
             │   │   ├── arguments  (object, partial match)
             │   │   └── required   (boolean, default true)
             │   ├── order          ("strict" | "any", default "any")
             │   └── exclusive      (boolean, default false)
-            └── toolCallCount      — mcp_host only
+            └── toolCallCount      — client cases only
                 ├── min            (integer)
                 ├── max            (integer)
                 └── exact          (integer)
@@ -126,7 +125,7 @@ EvalDataset (root)
 
 ## Supported LLM providers
 
-The `mcpHostConfig.provider` field accepts any of these values:
+The mst client infers the API from `model`. Its `clientOptions.provider` overrides that, and accepts any of these values:
 
 | Value              | Notes                                                                                                                                                 |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -146,7 +145,7 @@ The `mcpHostConfig.provider` field accepts any of these values:
 The schema is hand-maintained alongside the TypeScript types in:
 
 - `src/evals/datasetTypes.ts` — Zod schemas and TypeScript interfaces
-- `src/evals/mcpHost/mcpHostTypes.ts` — `LLMProvider` union and `MCPHostConfig`
+- `src/evals/mcpHost/mcpHostTypes.ts` — the `LLMProvider` union
 - `src/assertions/validators/types.ts` — `SnapshotSanitizer` types
 
 If you add a new provider, a new expectation field, or change an existing type, update `schema/eval-dataset.schema.json` to match.

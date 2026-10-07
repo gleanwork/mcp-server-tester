@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   EvalCaseSchema,
   EvalDatasetSchema,
+  isClientCase,
   type EvalDataset,
 } from './datasetTypes.js';
 import type { EvalManifest } from './evalManifest.js';
@@ -15,7 +16,7 @@ const SourceDatasetSchema = EvalDatasetSchema.extend({
   cases: z
     .array(
       EvalCaseSchema.strict().superRefine((case_, context) => {
-        if ((case_.mode ?? 'direct') === 'direct') {
+        if (!isClientCase(case_)) {
           if (!case_.toolName && !case_.request) {
             context.addIssue({
               code: 'custom',
@@ -27,7 +28,7 @@ const SourceDatasetSchema = EvalDatasetSchema.extend({
           context.addIssue({
             code: 'custom',
             path: ['input'],
-            message: 'Host cases require input.',
+            message: 'Client cases require input.',
           });
         }
       })

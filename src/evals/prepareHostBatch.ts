@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { EvalCase } from './datasetTypes.js';
+import { isClientCase, type EvalCase } from './datasetTypes.js';
 import type { ClientConfig } from './evalManifest.js';
 import { clientPatchOf } from './clientFields.js';
 import type {
@@ -30,11 +30,7 @@ export async function prepareHostBatch(
   const requests: ClientBatchRequest[] = [];
   const queues = new Map<string, ClientRunResult[]>();
   for (const c of cases) {
-    if ((c.mode ?? 'direct') === 'direct') continue;
-    if (c.mode === 'external_host')
-      throw new Error(
-        'Batch hosts require V2 host cases, not legacy external_host cases.'
-      );
+    if (!isClientCase(c)) continue;
     if (queues.has(c.id))
       throw new Error('Batch host case IDs must be unique within a dataset.');
     // The suite resolves a case's own client in full (see runEvalSuite).

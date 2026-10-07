@@ -99,11 +99,11 @@ EvalRunnerResult (.passed, .failed, .caseResults, .durationMs)
 HTML report (ui-dist/)
 ```
 
-### LLM Host Eval Case (mode: "mcp_host")
+### Client Eval Case (the mst client in a Playwright test)
 
 ```
-EvalCase { mode: "mcp_host", input, mcpHostConfig, expect.toolsTriggered }
-   ↓  evalRunner.ts: detects mcp_host mode
+EvalCase { input, assertions.toolsTriggered }, run { client: "mst", model }
+   ↓  caseExecution.ts: a case with input runs on the client
    ↓  mcpHost/mcpHostSimulation.ts: simulateMCPHost()
    ↓  mcpHost/adapters/vercel.ts: createVercelOrchestrator()
       - Lists MCP tools via mcp.listTools()
@@ -178,9 +178,9 @@ The framework is built to help users write Playwright tests for MCP servers. Usi
 
 Playwright's test runner is process-heavy and starts real browser workers. Unit tests for pure logic (validators, config parsing, OAuth utilities) don't need that overhead. Vitest's ESM-native, watch-friendly runner is a better fit, and it supports the same `assertions` assertions. The two test runners co-exist: `npm test` runs Vitest, `npm run test:playwright` runs Playwright.
 
-### Why two modes (direct vs. mcp_host)?
+### Why tests and evals (direct vs. client cases)?
 
-Direct mode tests are deterministic: you specify exact inputs and assert exact outputs. They are fast, cheap, and suitable for CI regression gates. LLM host mode tests are non-deterministic: they validate whether a real LLM can discover and invoke the right tools given only natural language and the tool's description. The two modes answer different questions — direct mode validates correctness, LLM host mode validates discoverability — and they need to be run and interpreted differently (direct: once per CI run; LLM host: N trials, measure accuracy).
+Direct tool calls are deterministic: you specify exact inputs and assert exact outputs. They are fast, cheap, and suitable for CI regression gates. Client cases are non-deterministic: a client and its model get a natural-language input and decide which tools to call, given only their descriptions. The two answer different questions (direct calls validate correctness, client cases validate discoverability) and they need to be run and interpreted differently (direct: once per CI run; client cases: N trials, measure the pass rate).
 
 ### Why a separate assertions/validators layer?
 

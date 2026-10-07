@@ -86,18 +86,15 @@ Direct cases can also send any MCP request instead of calling a tool, which is u
 
 A real LLM receives your tools and a natural-language input, then decides which tools to call. You assert that it made the right choices.
 
+A case with `input` runs on the client. In a Playwright test, `runEvalDataset` names the client and model (`{ dataset, client: 'mst', model: 'claude-haiku-4-5' }`), and the `mst` client uses the test's MCP connection; a suite manifest names them with `client` and `model`. A case can set its own `client`, `model` and `clientOptions`.
+
 ```json snippet=snippets/evals-tools-triggered.json
 {
   "name": "llm-host-evals",
   "cases": [
     {
       "id": "llm-triggers-search",
-      "mode": "mcp_host",
       "input": "Find recent internal documents about the MCP server rollout",
-      "mcpHostConfig": {
-        "provider": "vertex-anthropic",
-        "model": "claude-3-5-haiku@20241022"
-      },
       "passThreshold": 0.8,
       "assertions": {
         "toolsTriggered": {
@@ -280,12 +277,7 @@ Did an LLM evaluator (judge) say the response was good? This is for quality, not
   "cases": [
     {
       "id": "search-quality-check",
-      "mode": "mcp_host",
       "input": "Find recent internal documents about the Q4 planning process",
-      "mcpHostConfig": {
-        "provider": "vertex-anthropic",
-        "model": "claude-3-5-haiku@20241022"
-      },
       "passThreshold": 0.7,
       "assertions": {
         "passesJudge": {
@@ -314,12 +306,7 @@ Assertions compose. A case passes only if _all_ assertions pass. This lets you b
   "cases": [
     {
       "id": "search-combined",
-      "mode": "mcp_host",
       "input": "Find recent internal documents about the Q4 planning process",
-      "mcpHostConfig": {
-        "provider": "vertex-anthropic",
-        "model": "claude-3-5-haiku@20241022"
-      },
       "passThreshold": 0.7,
       "assertions": {
         "toolsTriggered": {
@@ -391,35 +378,31 @@ FAIL  llm-meeting-lookup       (accuracy: 60%)  — 6/10 trials passed  ← need
 
 ## A/B Testing Tool Descriptions
 
-The killer use case for LLM host evals is testing whether a description change actually helps. The framework supports this through Playwright projects.
-
-Create two projects in `playwright.config.ts`, each pointing at the same MCP server but with different system prompt additions:
+The killer use case for client evals is testing whether a description change actually helps. Run the same dataset with the server's descriptions and with a variant (`toolOverrides`), which MST shows the model in place of the server's own, without changing the server:
 
 ```typescript
-projects: [
+const run = {
+  dataset,
+  client: 'mst',
+  model: 'claude-haiku-4-5',
+  defaultTrials: 10,
+};
+const baseline = await runEvalDataset(run, { mcp, testInfo });
+const candidate = await runEvalDataset(
   {
-    name: 'baseline',
-    use: {
-      mcpConfig: { transport: 'http', serverUrl: '...' },
-    },
-  },
-  {
-    name: 'with-skill',
-    use: {
-      mcpConfig: {
-        transport: 'http',
-        serverUrl: '...',
-        // After adding a skill to the LLM host config
-      },
-      mcpHostConfig: {
-        provider: 'anthropic',
+    ...run,
+    toolOverrides: {
+      id: 'clearer-search',
+      tools: {
+        search: { description: 'Search company documents by keyword.' },
       },
     },
   },
-];
+  { mcp, testInfo }
+);
 ```
 
-Run both and compare accuracy per tool. The reporter groups results by project, making the comparison straightforward.
+Compare the pass rates per case. To decide whether a variant really is better (paired per case, with a significance test and a regression check), use `runVariantExperiment`: see [Runtime Tool Override Experiments](./mcp-host.md#runtime-tool-override-experiments).
 
 ---
 
@@ -450,19 +433,18 @@ Run both and compare accuracy per tool. The reporter groups results by project, 
       "id": "unique-case-id",
       "description": "Human-readable description",
 
-      "mode": "direct", // or "mcp_host"
-      "toolName": "search", // direct mode: toolName + args, or request
+      "toolName": "search", // a direct case: toolName + args, or request
       "args": { "query": "hello" }, // required with toolName
 
-      // For mcp_host mode instead:
+      // Or a client case instead: the client acts on the input
       "input": "Find recent documents about X",
-      "mcpHostConfig": {
-        "provider": "vertex-anthropic", // or "openai", "anthropic", etc.
-        "model": "claude-3-5-haiku@20241022",
-        "maxToolCalls": 5,
-      },
+      // Optional: the run (runEvalDataset or a suite) names the client and
+      // model; a case can set its own
+      "client": "mst",
+      "model": "claude-haiku-4-5@20251001", // Vertex, from the @ in the id
+      "clientOptions": { "maxToolCalls": 5 },
 
-      // Multiple trials (mainly for mcp_host):
+      // Multiple trials (mainly for client cases):
       "trials": 10, // or use defaultTrials in the runner
       "passThreshold": 0.8, // fraction that must pass (0–1)
 
@@ -501,8 +483,12 @@ test('my evals', async ({ mcp }, testInfo) => {
     {
       dataset,
 
-      // Apply 10 iterations to all mcp_host cases
-      // that don't specify iterations explicitly
+      // The client the cases run on and its model. A case can set its
+      // own client, model and clientOptions.
+      client: 'mst',
+      model: 'claude-haiku-4-5',
+
+      // Run every client case 10 times, unless it sets its own trials
       defaultTrials: 10,
 
       // Run up to 3 cases at once (careful with rate limits)

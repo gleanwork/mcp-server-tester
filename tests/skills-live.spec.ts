@@ -32,13 +32,9 @@ test.describe('Live skills eval (opt-in)', () => {
       cases: [
         {
           id: 'weather-report',
-          mode: 'mcp_host',
+          mode: 'host',
           input:
             'Write me a short weather report for London and Paris, following any house style you have for weather reports.',
-          mcpHostConfig: {
-            provider: 'anthropic',
-            model: process.env.MST_LIVE_SKILLS_MODEL,
-          },
           trials: ITERATIONS,
           passThreshold: 0.6,
           assertions: {
@@ -59,15 +55,12 @@ test.describe('Live skills eval (opt-in)', () => {
     for (const mode of ['off', 'catalog', 'preload'] as const) {
       const result = await runEvalDataset(
         {
-          dataset: {
-            ...dataset,
-            cases: dataset.cases.map((evalCase) => ({
-              ...evalCase,
-              mcpHostConfig: {
-                ...evalCase.mcpHostConfig!,
-                ...(mode === 'off' ? {} : { skills: mode }),
-              },
-            })),
+          dataset,
+          client: 'mst',
+          model: process.env.MST_LIVE_SKILLS_MODEL,
+          clientOptions: {
+            provider: 'anthropic',
+            ...(mode === 'off' ? {} : { skills: mode }),
           },
         },
         { mcp, testInfo }

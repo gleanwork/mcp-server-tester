@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { createSuiteCaseExecutor, executeEvalCase } from './caseExecution.js';
+import {
+  createSuiteCaseExecutor,
+  executeEvalCase,
+  playwrightClientOf,
+} from './caseExecution.js';
 import { runEvalCase } from './evalRunner.js';
 import type { EvalCase } from './datasetTypes.js';
 import type {
@@ -21,9 +25,8 @@ vi.mock('./mcpHost/mcpHostSimulation.js', async (original) => ({
 const mcp = { authType: 'none' } as MCPFixtureApi;
 const hostCase: EvalCase = {
   id: 'host',
-  mode: 'mcp_host',
+  mode: 'host',
   input: 'query',
-  mcpHostConfig: { provider: 'anthropic' },
 };
 const manifest = { name: 'm', datasets: [] };
 
@@ -57,30 +60,51 @@ describe('executeEvalCase', () => {
     });
   });
 
-  it('keeps Claude CLI startup diagnostics on failure', async () => {
-    const diagnostics = { failureKind: 'startup' as const };
+  it("runs on the run's mst client, with the case's own fields over it", async () => {
     vi.mocked(simulateMCPHost).mockResolvedValue({
-      success: false,
+      success: true,
+      response: 'answer',
       toolCalls: [],
-      error: 'MCP connection failed',
-      diagnostics,
     });
-    const execution = await executeEvalCase(
+    await executeEvalCase(
+      { ...hostCase, clientOptions: { systemPrompt: 'Case prompt.' } },
+      mcp,
       {
-        ...hostCase,
-        mcpHostConfig: {
-          hostType: 'cli',
-          cli: { command: 'claude', args: [], claudeMcpServers: ['acme'] },
-        },
-      },
-      mcp
+        client: 'mst',
+        model: 'gpt-5',
+        clientOptions: { systemPrompt: 'Run prompt.', maxToolCalls: 9 },
+      }
     );
-    expect(execution).toMatchObject({
-      kind: 'host',
-      error: 'MCP connection failed',
-      diagnostics,
-      response: { success: false },
+    expect(simulateMCPHost).toHaveBeenCalledWith(
+      mcp,
+      'query',
+      expect.objectContaining({
+        hostType: 'sdk',
+        provider: 'openai',
+        model: 'gpt-5',
+        systemPrompt: 'Case prompt.',
+        maxToolCalls: 9,
+      })
+    );
+  });
+
+  it('fails a case on another client, which runs in a suite', async () => {
+    await expect(
+      executeEvalCase({ ...hostCase, client: 'claude-code' }, mcp)
+    ).resolves.toMatchObject({
+      kind: 'failed',
+      error: expect.stringContaining('Run "claude-code" in a suite (mst run).'),
     });
+    expect(simulateMCPHost).not.toHaveBeenCalled();
+  });
+
+  it("doesn't carry the run's options to a case's own client", () => {
+    expect(
+      playwrightClientOf(
+        { ...hostCase, client: 'mst', model: 'claude-haiku-4-5' },
+        { client: 'acme/other', model: 'x', clientOptions: { region: 'eu' } }
+      )
+    ).toEqual({ model: 'claude-haiku-4-5' });
   });
 
   it('reports a missing connection as a failed execution', async () => {
@@ -175,7 +199,7 @@ describe('createSuiteCaseExecutor', () => {
     expect(run).toHaveBeenCalledWith(
       { prompt: 'query', servers: [], env: undefined },
       { type },
-      expect.objectContaining({ mcpHostConfig: hostCase.mcpHostConfig })
+      { manifest, arm: undefined, env: undefined }
     );
   });
 

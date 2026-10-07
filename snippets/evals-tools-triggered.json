@@ -3,12 +3,7 @@
   "cases": [
     {
       "id": "llm-triggers-search",
-      "mode": "mcp_host",
       "input": "Find recent internal documents about the MCP server rollout",
-      "mcpHostConfig": {
-        "provider": "vertex-anthropic",
-        "model": "claude-3-5-haiku@20241022"
-      },
       "passThreshold": 0.8,
       "assertions": {
         "toolsTriggered": {

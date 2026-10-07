@@ -351,7 +351,7 @@ A search's `results` come from `tool_reference` blocks in its result, or, withou
 - **`claude-code`** passes it with `--append-system-prompt`, so Claude Code's own system prompt stays.
 - **Cowork and ChatGPT** take organisation instructions from the app, not from MST, so `systemPrompt` is a validation error for them.
 
-A plugin host that can apply one declares `systemPrompt` in its schema. A case's `mcpHostConfig.systemPrompt` is an error when the arm's host sets one (it would replace the arm's) or can't apply one. A legacy CLI `mcpHostConfig` takes it through a `{{systemPrompt}}` placeholder in `cli.args`, such as `"--append-system-prompt", "{{systemPrompt}}"`; browser and desktop hosts reject it.
+A plugin client that can apply one declares `systemPrompt` in its schema. A case's own `clientOptions.systemPrompt` replaces the one it inherits, and is a validation error for a client that can't apply one.
 
 ### Tool variants on every host
 
@@ -442,7 +442,7 @@ Most hosts report tokens but not cost. A manifest (or a plugin's shared config) 
 MST ships no prices; they change too often to bake in.
 
 - **Reported cost wins.** A host-reported cost is always used. Estimates are kept apart as `estimatedCostUsd` in each case's usage, `cost_usd` uses whichever there is, and the arm's `costSource` says which (`host`, `pricing` or `mixed`).
-- **Which model.** A case is priced at its own `model`, else a legacy `mcpHostConfig.model`, else the arm's or manifest's `model` (including a host's default). A model the client picks at run time isn't known to MST, so set `model` to price it.
+- **Which model.** A case is priced at its own `model`, else the arm's or manifest's `model` (including a client's default). A model the client picks at run time isn't known to MST, so set `model` to price it.
 - **Auditable.** Each arm records the prices it used in `pricing`, and models it couldn't price in `unpricedModels`; `cost_usd` leaves their trials out.
 - **Shared configs.** A manifest's `pricing` replaces a shared config's whole table; the two aren't merged.
 

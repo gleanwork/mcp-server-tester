@@ -539,33 +539,50 @@ describe('runEvalCase', () => {
     });
   });
 
-  describe('mcp_host mode', () => {
+  describe('client cases', () => {
     it('should fail when scenario is missing', async () => {
       const context = createContext();
       const evalCase = createEvalCase({
-        mode: 'mcp_host',
+        mode: 'host',
         input: undefined,
-        mcpHostConfig: { provider: 'openai', model: 'gpt-4' },
       });
 
       const result = await runEvalCase(evalCase, context);
 
       expect(result.pass).toBe(false);
-      expect(result.error).toContain('input is required');
+      expect(result.error).toContain('a client case needs input');
     });
 
-    it('should fail when mcpHostConfig is missing', async () => {
+    it('fails a case on a client other than mst, which runs in a suite', async () => {
       const context = createContext();
       const evalCase = createEvalCase({
-        mode: 'mcp_host',
+        mode: 'host',
         input: 'test scenario',
-        mcpHostConfig: undefined,
       });
 
-      const result = await runEvalCase(evalCase, context);
+      const result = await runEvalCase(evalCase, context, {
+        client: 'cowork',
+      });
 
       expect(result.pass).toBe(false);
-      expect(result.error).toContain('mcpHostConfig is required');
+      expect(result.error).toContain('Run "cowork" in a suite (mst run).');
+    });
+
+    it("records the run's client and model on the result", async () => {
+      const result = await runEvalCase(
+        createEvalCase({ mode: 'host', input: 'test scenario' }),
+        createContext(),
+        {
+          client: 'mst',
+          model: 'claude-haiku-4-5',
+          executeCase: async () =>
+            hostRunToExecution({ finalText: 'ok', events: [] }, 'structured'),
+        }
+      );
+      expect(result.request).toMatchObject({
+        client: 'mst',
+        model: 'claude-haiku-4-5',
+      });
     });
   });
 });
@@ -836,14 +853,13 @@ describe('runEvalDataset defaultTrials', () => {
     return { name: 'test-dataset', cases };
   }
 
-  it('applies defaultTrials to mcp_host cases without explicit iterations', async () => {
+  it('applies defaultTrials to client cases without explicit trials', async () => {
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'ok' }] });
     const dataset = createDataset([
       createEvalCase({
         id: 'llm-case',
-        mode: 'mcp_host',
+        mode: 'host',
         input: 'test scenario',
-        mcpHostConfig: { provider: 'anthropic' },
         // no iterations field — should use defaultTrials
       }),
     ]);
@@ -1611,7 +1627,7 @@ describe('evals guide iteration count guardrail warnings', () => {
     return { name: 'test-dataset', cases };
   }
 
-  it('warns when a mcp_host case has fewer than 10 iterations (explicit)', async () => {
+  it('warns when a client case has fewer than 10 trials (explicit)', async () => {
     const consoleSpy = vi
       .spyOn(console, 'warn')
       .mockImplementation(() => undefined);
@@ -1619,9 +1635,8 @@ describe('evals guide iteration count guardrail warnings', () => {
     const dataset = createDataset([
       createEvalCase({
         id: 'low-iter-case',
-        mode: 'mcp_host',
+        mode: 'host',
         input: 'find something',
-        mcpHostConfig: { provider: 'openai' },
         trials: 3,
       }),
     ]);
@@ -1632,7 +1647,7 @@ describe('evals guide iteration count guardrail warnings', () => {
     );
 
     expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining('running 3 trials in mcp_host mode')
+      expect.stringContaining('running 3 trials may not')
     );
     expect(consoleSpy).toHaveBeenCalledWith(
       expect.stringContaining('Consider 10+ trials')
@@ -1644,7 +1659,7 @@ describe('evals guide iteration count guardrail warnings', () => {
     consoleSpy.mockRestore();
   });
 
-  it('does not warn when a mcp_host case uses a single iteration (default smoke-test pattern)', async () => {
+  it('does not warn when a client case runs one trial (default smoke-test pattern)', async () => {
     const consoleSpy = vi
       .spyOn(console, 'warn')
       .mockImplementation(() => undefined);
@@ -1652,9 +1667,8 @@ describe('evals guide iteration count guardrail warnings', () => {
     const dataset = createDataset([
       createEvalCase({
         id: 'default-iter-case',
-        mode: 'mcp_host',
+        mode: 'host',
         input: 'find something',
-        mcpHostConfig: { provider: 'openai' },
       }),
     ]);
 
@@ -1670,7 +1684,7 @@ describe('evals guide iteration count guardrail warnings', () => {
     consoleSpy.mockRestore();
   });
 
-  it('does not warn when a mcp_host case has 10 or more iterations', async () => {
+  it('does not warn when a client case has 10 or more trials', async () => {
     const consoleSpy = vi
       .spyOn(console, 'warn')
       .mockImplementation(() => undefined);
@@ -1678,9 +1692,8 @@ describe('evals guide iteration count guardrail warnings', () => {
     const dataset = createDataset([
       createEvalCase({
         id: 'sufficient-iter-case',
-        mode: 'mcp_host',
+        mode: 'host',
         input: 'find something',
-        mcpHostConfig: { provider: 'openai' },
         trials: 10,
       }),
     ]);
@@ -1729,9 +1742,8 @@ describe('evals guide iteration count guardrail warnings', () => {
     const dataset = createDataset([
       createEvalCase({
         id: 'default-raised-case',
-        mode: 'mcp_host',
+        mode: 'host',
         input: 'find something',
-        mcpHostConfig: { provider: 'openai' },
         // No explicit iterations — defaultTrials will apply
       }),
     ]);
@@ -2024,19 +2036,19 @@ describe('experiment metadata in EvalRunnerResult', () => {
     ).toBe(true);
   });
 
-  it('includes mcpHostModel in metadata when provided', async () => {
+  it("records the run's model in metadata", async () => {
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const dataset = createDataset([createEvalCase({ id: 'case-1' })]);
 
     const result = await runEvalDataset(
-      { dataset, mcpHostModel: 'claude-opus-4-20250514' },
+      { dataset, model: 'claude-opus-4-20250514' },
       createContext(mcp)
     );
 
     expect(result.metadata!.mcpHostModel).toBe('claude-opus-4-20250514');
   });
 
-  it('omits mcpHostModel and judgeModel from metadata when not provided', async () => {
+  it('omits the model and judgeModel from metadata when not provided', async () => {
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const dataset = createDataset([createEvalCase({ id: 'case-1' })]);
 

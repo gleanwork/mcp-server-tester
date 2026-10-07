@@ -1,8 +1,8 @@
 /**
  * Case execution: the one place an eval case runs.
  *
- * Every path (a direct tool call or MCP request, the simulated mcp_host, an
- * external host, or a suite host) produces a `CaseExecution`. The
+ * Every path (a direct tool call or MCP request, the mst client on the
+ * test's connection, or a suite's client) produces a `CaseExecution`. The
  * runner reads its explicit fields and never inspects `response` to guess how
  * a case ran. Hosts and adapters produce traces; the runner owns every verdict.
  */
@@ -20,21 +20,20 @@ import {
   type MCPFixtureApi,
 } from '../mcp/fixtures/mcpFixture.js';
 import type { ClientDiagnostics, UsageMetrics } from '../types/index.js';
-import type { EvalCase } from './datasetTypes.js';
+import { isClientCase, type EvalCase } from './datasetTypes.js';
 import type { EvalArm, EvalManifest, ClientConfig } from './evalManifest.js';
-import { clientPatchOf } from './clientFields.js';
+import { clientPatchOf, type ClientFields } from './clientFields.js';
 import type {
   TraceEvent,
   TraceEvidence,
   ClientRunResult,
   Trace,
 } from './evalFrameworkTypes.js';
-import { runExternalHostScenario } from './externalHost/runtime.js';
 import type {
   ExternalHostMetadata,
   ExternalHostSimulationResult,
 } from './externalHost/types.js';
-import { getHost } from './builtinHosts.js';
+import { getBuiltinHostConfig, getHost } from './builtinHosts.js';
 import { hostRunToExecution, simulationTrace } from './hostTrace.js';
 import { withOriginalToolNames } from './toolSurface.js';
 import {
@@ -147,56 +146,53 @@ function simulationExecution(
 }
 
 /**
- * Run a case against the fixture: a direct tool call or request, the simulated
- * mcp_host, or an external host. Failures become a `failed` execution.
+ * The client a case runs on outside a suite: its own `client`, `model` and
+ * `clientOptions` over the run's. Only `mst` runs there, on the test's MCP
+ * connection; other clients connect to servers themselves, which a suite
+ * configures. A different client's options don't carry over.
+ */
+export function playwrightClientOf(
+  evalCase: EvalCase,
+  run: ClientFields | undefined
+): { model?: string } & Record<string, unknown> {
+  const client = evalCase.client ?? run?.client ?? 'mst';
+  if (client !== 'mst')
+    throw new Error(
+      `Case "${evalCase.id}" uses client "${client}". Outside a suite, cases run on the mst client, on the test's MCP connection. Run "${client}" in a suite (mst run).`
+    );
+  const inherits = (run?.client ?? 'mst') === 'mst';
+  const model = evalCase.model ?? (inherits ? run?.model : undefined);
+  return {
+    ...(inherits ? run?.clientOptions : undefined),
+    ...evalCase.clientOptions,
+    ...(model !== undefined ? { model } : {}),
+  };
+}
+
+/**
+ * Run a case against the fixture: a direct tool call or request, or the mst
+ * client on the test's connection. Failures become a `failed` execution.
  */
 export async function executeEvalCase(
   evalCase: EvalCase,
-  mcp: MCPFixtureApi | undefined
+  mcp: MCPFixtureApi | undefined,
+  client?: ClientFields
 ): Promise<CaseExecution> {
-  const mode = evalCase.mode || 'direct';
   try {
-    if (mode === 'mcp_host' || mode === 'host') {
-      if (!mcp) throw new Error('This host requires an MCP connection.');
+    if (isClientCase(evalCase)) {
+      if (!mcp) throw new Error('The mst client requires an MCP connection.');
       if (!evalCase.input)
-        throw new Error(
-          `Eval case ${evalCase.id}: input is required for mcp_host mode`
-        );
-      if (!evalCase.mcpHostConfig)
-        throw new Error(
-          `Eval case ${evalCase.id}: mcpHostConfig is required for mcp_host mode`
-        );
+        throw new Error(`Eval case ${evalCase.id}: a client case needs input`);
+      const config = getBuiltinHostConfig(
+        'mst',
+        playwrightClientOf(evalCase, client)
+      );
       const simulation = withOriginalToolNames(
-        await simulateMCPHost(mcp, evalCase.input, evalCase.mcpHostConfig),
+        await simulateMCPHost(mcp, evalCase.input, config),
         mcp
       );
       if (simulation.success) return simulationExecution(simulation);
-      const error = simulation.error || 'MCP host simulation failed';
-      // Claude CLI startup failures keep their diagnostics in the response.
-      if (evalCase.mcpHostConfig.cli?.claudeMcpServers !== undefined)
-        return simulationExecution(simulation, error);
-      throw new Error(error);
-    }
-    if (mode === 'external_host') {
-      if (!evalCase.input)
-        throw new Error(
-          `Eval case ${evalCase.id}: input is required for external_host mode`
-        );
-      if (!evalCase.externalHost)
-        throw new Error(
-          `Eval case ${evalCase.id}: externalHost is required for external_host mode`
-        );
-      const result = await runExternalHostScenario(
-        evalCase.input,
-        evalCase.externalHost,
-        { caseId: evalCase.id }
-      );
-      return simulationExecution(
-        result,
-        result.success
-          ? undefined
-          : result.error || 'External host simulation failed'
-      );
+      throw new Error(simulation.error || 'The mst client failed.');
     }
     if (evalCase.request) {
       if (evalCase.toolName)
@@ -266,7 +262,7 @@ export function createSuiteCaseExecutor(
     // The suite resolves a case's own client in full (see runEvalSuite).
     const declaration =
       (clientPatchOf(evalCase) as ClientConfig | undefined) ?? options.host;
-    if ((evalCase.mode ?? 'direct') === 'direct') {
+    if (!isClientCase(evalCase)) {
       const selected =
         servers.length === 1
           ? servers[0]
@@ -319,12 +315,7 @@ export function createSuiteCaseExecutor(
       throw new Error(
         `Host ${declaration.type} must expose run() for per-case dispatch.`
       );
-    const context = {
-      manifest,
-      arm,
-      env,
-      mcpHostConfig: evalCase.mcpHostConfig,
-    };
+    const context = { manifest, arm, env };
     if (options.toolVariant && usesToolSurfaceProxy(definition)) {
       const proxy = await options.toolVariant.proxy();
       const scope = randomUUID();
