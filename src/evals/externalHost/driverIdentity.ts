@@ -4,22 +4,6 @@ import type {
   HostDriverId,
 } from './types.js';
 
-export const CLAUDE_CHAT_DESKTOP_MACOS_DRIVER: HostDriverId = {
-  provider: 'anthropic',
-  product: 'claude',
-  surface: 'chat',
-  runtime: 'desktop-app',
-  platform: 'macos',
-};
-
-export const CLAUDE_COWORK_DESKTOP_MACOS_DRIVER: HostDriverId = {
-  provider: 'anthropic',
-  product: 'claude',
-  surface: 'cowork',
-  runtime: 'desktop-app',
-  platform: 'macos',
-};
-
 export const OPENAI_CHATGPT_AGENT_DESKTOP_MACOS_DRIVER: HostDriverId = {
   provider: 'openai',
   product: 'chatgpt',
@@ -46,7 +30,7 @@ export function driverToSlug(driver: HostDriverId): string {
     .join('.');
 }
 
-export function parseDriverSlug(slug: string): HostDriverId {
+function parseDriverSlug(slug: string): HostDriverId {
   const [provider, product, surface, runtime, platform, ...rest] =
     slug.split('.');
 

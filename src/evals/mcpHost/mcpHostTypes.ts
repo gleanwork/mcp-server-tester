@@ -18,11 +18,9 @@ import type { TraceEvent } from '../evalFrameworkTypes.js';
  * Host type for MCP host simulation.
  *
  * - 'sdk': Programmatic via Vercel AI SDK (default). The framework's MCP connection is reused.
- * - 'cli': CLI-based hosts (e.g., Claude Code, Codex). Spawns a process with its own MCP connection.
- * - 'browser': Web-based hosts (e.g., claude.ai). Uses Playwright and a user script.
- * - 'desktop': Desktop-style hosts driven through the browser adapter.
+ * - 'cli': CLI-based hosts (Claude Code). Spawns a process with its own MCP connection.
  */
-export type HostType = 'sdk' | 'cli' | 'browser' | 'desktop';
+type HostType = 'sdk' | 'cli';
 
 /**
  * LLM provider for SDK-based host simulation.
@@ -63,7 +61,7 @@ export type LLMProvider =
  * - 'stream-json': NDJSON (one JSON object per line). Used by Claude Code (`--output-format stream-json`).
  * - 'json': Single JSON object on stdout.
  */
-export type CLIOutputFormat = 'stream-json' | 'json';
+type CLIOutputFormat = 'stream-json' | 'json';
 
 /**
  * Configuration for a CLI host process.
@@ -122,62 +120,6 @@ export interface CLIConfig {
   timeout?: number;
 }
 
-/**
- * A cookie to inject into the browser context before running the script.
- * Matches the shape expected by Playwright's `BrowserContext.addCookies()`.
- */
-interface BrowserCookie {
-  name: string;
-  value: string;
-  url?: string;
-  domain?: string;
-  path?: string;
-  expires?: number;
-  httpOnly?: boolean;
-  secure?: boolean;
-  sameSite?: 'Strict' | 'Lax' | 'None';
-  partitionKey?: string;
-}
-
-/**
- * Configuration for a browser-based host.
- *
- * Uses Playwright to launch a Chromium instance, inject auth state,
- * and execute a user-provided script that drives a web-based MCP host
- * (e.g., claude.ai).
- */
-export interface BrowserConfig {
-  /**
-   * Path to the browser script (resolved relative to cwd).
-   * The script must default-export an async function
-   * `(page: Page, scenario: string) => Promise<MCPHostSimulationResult>`.
-   */
-  script: string;
-
-  /**
-   * Timeout in milliseconds for the browser script.
-   * @default 120000 (2 minutes)
-   */
-  timeout?: number;
-
-  /**
-   * Whether to launch in headless mode.
-   * @default true
-   */
-  headless?: boolean;
-
-  /**
-   * Path to a Playwright storage state JSON file (cookies + localStorage).
-   * Resolved relative to cwd.
-   */
-  storageState?: string;
-
-  /**
-   * Extra cookies to inject into the browser context.
-   */
-  cookies?: BrowserCookie[];
-}
-
 export type { ClientSkillsMode, SkillLoad } from '../../types/index.js';
 
 /**
@@ -192,9 +134,7 @@ export interface MCPHostConfig {
    * Host type for the simulation.
    *
    * - 'sdk': Programmatic via Vercel AI SDK (default). The framework's MCP connection is reused.
-   * - 'cli': CLI-based hosts (e.g., Claude Code, Codex). Spawns a process with its own MCP connection.
-   * - 'browser': Web-based hosts driven by a Playwright script.
-   * - 'desktop': Desktop-style hosts driven through the browser adapter.
+   * - 'cli': CLI-based hosts (Claude Code). Spawns a process with its own MCP connection.
    *
    * @default 'sdk'
    */
@@ -234,7 +174,6 @@ export interface MCPHostConfig {
    * instructions. The SDK host puts it in the model's system prompt; a CLI
    * host gets it through a `{{systemPrompt}}` placeholder in `cli.args`
    * (the claude-code client adds `--append-system-prompt {{systemPrompt}}`).
-   * Browser and desktop hosts reject it.
    */
   systemPrompt?: string;
 
@@ -273,11 +212,6 @@ export interface MCPHostConfig {
    * mcpServers JSON shape and may point at safe local proxies.
    */
   mcpServers?: Record<string, Record<string, unknown>>;
-
-  /**
-   * Browser host configuration (required for 'browser' host type).
-   */
-  browser?: BrowserConfig;
 }
 
 /**

@@ -68,7 +68,7 @@ const TOP_LEVEL_KEYS = new Set<string>(['meta', 'configs', ...EXTENSION_KINDS]);
 /** The functions an extension of each kind must provide (any one of them). */
 const REQUIRED_FUNCTIONS: Record<ExtensionKind, readonly string[]> = {
   datasetSources: ['load'],
-  clients: ['run', 'runBatch', 'createConfig'],
+  clients: ['run', 'runBatch'],
   judges: ['evaluate'],
   pairwiseJudges: ['compare'],
   metrics: ['compute'],

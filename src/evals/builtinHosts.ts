@@ -337,7 +337,6 @@ function builtinHostDefinitions(): Readonly<Record<string, ClientDefinition>> {
   for (const [name, factory] of Object.entries(BUILTIN_HOSTS)) {
     hosts[name] = {
       schema: name === 'mst' ? SdkHostSchema : CliHostSchema,
-      createConfig: (options) => factory(options ?? {}),
       evidence: 'structured',
       // The SDK host presents tool variants; the CLI only sees its servers.
       ...(name === 'mst' ? { toolOverrides: true } : {}),
@@ -388,21 +387,31 @@ export function getHost(reference: string): ClientDefinition {
   return hosts.get(resolveHostName(reference));
 }
 
+/**
+ * The simulator settings the mst or claude-code client resolves its options
+ * to: its defaults (such as the model) included. Throws for other clients.
+ */
 export function getBuiltinHostConfig(
   name: string,
   options: BuiltinHostOptions = {}
 ): MCPHostConfig {
-  const definition = builtinHostDefinitions()[name];
-  if (!definition) {
-    const available = Object.keys(builtinHostDefinitions()).sort().join(', ');
+  const config = builtinClientDefaults(name, options);
+  if (!config)
     throw new Error(
-      `Client "${name}" is not available. Available: ${available}.`
+      `Client "${name}" doesn't run on MST's simulator (mst, claude-code).`
     );
-  }
-  const createConfig = definition.createConfig?.bind(definition);
-  if (!createConfig)
-    throw new Error(`Host ${name} does not expose a legacy config factory.`);
-  return createConfig(options as unknown as Record<string, unknown>);
+  return config;
+}
+
+/** As getBuiltinHostConfig, or undefined for a client that isn't simulated. */
+export function builtinClientDefaults(
+  name: string,
+  options: BuiltinHostOptions = {}
+): MCPHostConfig | undefined {
+  const factory = Object.hasOwn(BUILTIN_HOSTS, name)
+    ? BUILTIN_HOSTS[name]
+    : undefined;
+  return factory?.(options);
 }
 
 const BUILTIN_HOSTS: Record<
@@ -473,11 +482,7 @@ export function assertHostSupports(
 ): void {
   const definition = getHost(host.type);
   const appliesOverrides =
-    definition.toolOverrides === true ||
-    usesToolSurfaceProxy(definition) ||
-    (definition.createConfig !== undefined &&
-      !definition.run &&
-      !definition.runBatch);
+    definition.toolOverrides === true || usesToolSurfaceProxy(definition);
   if (options.toolOverrides !== undefined && !appliesOverrides) {
     throw new Error(
       `${options.context}: client "${host.type}" can't apply toolOverrides; it would run with the original tools. ` +

@@ -116,7 +116,7 @@ installPlugins([
           model: z.string(),
           count: z.number().transform((value) => value * 3),
         }),
-        createConfig: () => ({ hostType: 'sdk' }),
+        run: async () => ({ finalText: '', events: [] }),
       },
     },
   },

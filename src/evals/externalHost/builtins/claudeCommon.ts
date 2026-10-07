@@ -1,7 +1,6 @@
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
-export const DEFAULT_APP_NAME = 'Claude';
 export const POLL_INTERVAL_MS = 750;
 
 export function formatError(err: unknown): string {

@@ -23,7 +23,6 @@ import {
   // Extended expect with MCP tool matchers
   expect,
 } from '@gleanwork/mcp-server-tester';
-import { simulateMCPHost } from '@gleanwork/mcp-server-tester/evals';
 import { ConfigFileSchema } from '../schemas/fileContentSchema.js';
 import path from 'path';
 
@@ -216,54 +215,39 @@ function hasApiKey(provider: string): boolean {
   return false;
 }
 
-test.describe('LLM Host Simulation (E2E)', () => {
-  test('LLM discovers and lists directory contents', async ({ mcp }) => {
-    if (!hasApiKey('anthropic')) {
-      test.skip(true, 'ANTHROPIC_API_KEY not set');
-      return;
-    }
+test.describe('Evals on a model (E2E)', () => {
+  // The mst client: a model gets the tools and the input, and picks the calls.
+  const client = { client: 'mst', model: 'claude-sonnet-4-5' } as const;
 
-    const result = await simulateMCPHost(
-      mcp,
-      'What files are in the docs directory?',
+  test('a model discovers and lists directory contents', async ({ mcp }) => {
+    test.skip(!hasApiKey('anthropic'), 'ANTHROPIC_API_KEY not set');
+    const result = await runEvalCase(
       {
-        provider: 'anthropic',
-        model: 'claude-sonnet-4-20250514',
-        temperature: 0,
-      }
+        id: 'list-docs',
+        input: 'What files are in the docs directory?',
+        assertions: {
+          toolsTriggered: { calls: [{ name: 'list_directory' }] },
+          containsText: ['guide', 'api'],
+        },
+      },
+      { mcp },
+      client
     );
-
-    expect(result.success).toBe(true);
-    expect(result.toolCalls.length).toBeGreaterThan(0);
-
-    const listDirCall = result.toolCalls.find(
-      (c) => c.name === 'list_directory'
-    );
-    expect(listDirCall).toBeDefined();
-
-    expect(result.response).toContain('guide');
-    expect(result.response).toContain('api');
+    expect(result.pass, result.error).toBe(true);
   });
 
-  test('LLM reads file and extracts information', async ({ mcp }) => {
-    if (!hasApiKey('anthropic')) {
-      test.skip(true, 'ANTHROPIC_API_KEY not set');
-      return;
-    }
-
-    const result = await simulateMCPHost(
-      mcp,
-      'Read the config.json file and tell me the version number.',
+  test('a model reads a file and extracts information', async ({ mcp }) => {
+    test.skip(!hasApiKey('anthropic'), 'ANTHROPIC_API_KEY not set');
+    const result = await runEvalCase(
       {
-        provider: 'anthropic',
-        model: 'claude-sonnet-4-20250514',
-        temperature: 0,
-      }
+        id: 'config-version',
+        input: 'Read the config.json file and tell me the version number.',
+        assertions: { toolCallCount: { min: 1 }, containsText: '1.0.0' },
+      },
+      { mcp },
+      client
     );
-
-    expect(result.success).toBe(true);
-    expect(result.toolCalls.length).toBeGreaterThan(0);
-    expect(result.response).toContain('1.0.0');
+    expect(result.pass, result.error).toBe(true);
   });
 });
 

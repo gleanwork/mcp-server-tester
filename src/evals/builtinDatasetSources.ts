@@ -33,7 +33,6 @@ async function loadFileDataset(
   const filePath = resolveManifestPath(source.path, context);
   return buildEvalDataset(
     JSON.parse(await fs.readFile(filePath, 'utf8')) as unknown,
-    context.hostConfig,
     context.manifest
   );
 }
@@ -67,7 +66,6 @@ async function loadGCSDataset(
     .download();
   return buildEvalDataset(
     JSON.parse(buffer.toString('utf8')) as unknown,
-    context.hostConfig,
     context.manifest
   );
 }
@@ -120,7 +118,6 @@ async function loadDirectoryDataset(
       name: path.basename(directory),
       cases: datasets.flatMap((dataset) => dataset.cases),
     },
-    undefined,
     context.manifest
   );
 }

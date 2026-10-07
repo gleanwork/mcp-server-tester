@@ -5,7 +5,6 @@ import {
   type EvalDataset,
 } from './datasetTypes.js';
 import type { EvalManifest } from './evalManifest.js';
-import type { MCPHostConfig } from './mcpHost/mcpHostTypes.js';
 import { loadEvalDatasetFromObject } from './datasetLoader.js';
 import { normalizeSuiteControls } from './manifestValidation.js';
 
@@ -19,13 +18,11 @@ const SourceDatasetSchema = EvalDatasetSchema.extend({
 
 /**
  * Validate a canonical EvalDataset and apply the manifest case limit.
- * The host argument is retained for API compatibility; sources never infer a
- * mode, attach a host, or manufacture assertions. Use an opt-in dataset source
- * adapter to migrate other formats before canonical validation.
+ * Sources never attach a client or manufacture assertions. Use an opt-in
+ * dataset source adapter to migrate other formats before canonical validation.
  */
 export function buildEvalDataset(
   raw: unknown,
-  _hostConfig: MCPHostConfig | undefined,
   manifest: EvalManifest
 ): EvalDataset {
   const result = SourceDatasetSchema.safeParse(raw);

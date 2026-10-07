@@ -26,7 +26,6 @@ import type {
 } from './mcpHostTypes.js';
 import { createVercelOrchestrator } from './adapters/vercel.js';
 import { runCLIHost } from './adapters/cli/index.js';
-import { runBrowserHost } from './adapters/browser/runner.js';
 import { ProviderSchema } from './hostOptions.js';
 
 // Single orchestrator instance shared across all providers.
@@ -42,32 +41,14 @@ const allProviders: readonly LLMProvider[] = ProviderSchema.options;
  * schemas, testing discoverability and parameter clarity at the level a real
  * user (via Claude Desktop, ChatGPT, etc.) would experience.
  *
- * @param mcp - MCP fixture API (used by SDK hosts; ignored by CLI/browser hosts which establish their own connections)
+ * Internal to the mst and claude-code clients: tests and evals reach it
+ * through `runEvalDataset` / `runEvalCase` or a suite.
+ *
+ * @param mcp - MCP fixture API (used by the SDK host; ignored by the CLI host, which establishes its own connections)
  * @param scenario - Natural language prompt describing what the LLM should do
  * @param config - MCP host configuration (provider, model, temperature, etc.)
  * @returns Simulation result with tool calls, final response, and latency data
  *
- * @example
- * ```typescript
- * // SDK host (default) — uses the framework's existing MCP connection
- * const result = await simulateMCPHost(mcp,
- *   "Find recent documents about MCP testing frameworks",
- *   { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' }
- * );
- *
- * // CLI host — spawns a CLI process with its own MCP connection
- * const result = await simulateMCPHost(mcp,
- *   "Find recent documents about MCP testing frameworks",
- *   {
- *     hostType: 'cli',
- *     provider: 'anthropic',
- *     cli: {
- *       command: 'claude',
- *       args: ['-p', '{{prompt}}', '--output-format', 'stream-json', '--verbose'],
- *     },
- *   }
- * );
- * ```
  */
 export async function simulateMCPHost(
   mcp: MCPFixtureApi,
@@ -79,22 +60,14 @@ export async function simulateMCPHost(
 
   if (hostType !== 'sdk' && config.skills && config.skills !== 'off') {
     throw new Error(
-      `mcpHostConfig.skills is only supported for the SDK host; '${hostType}' hosts manage skills themselves.`
+      `skills is only supported for the mst client; '${hostType}' hosts manage skills themselves.`
     );
-  }
-
-  if (config.systemPrompt !== undefined) {
-    if (hostType === 'browser' || hostType === 'desktop') {
-      throw new Error(
-        `mcpHostConfig.systemPrompt isn't supported for '${hostType}' hosts.`
-      );
-    }
   }
 
   if (hostType === 'cli') {
     if (!config.cli) {
       throw new Error(
-        `mcpHostConfig.cli is required when hostType is 'cli'. ` +
+        `cli is required when hostType is 'cli'. ` +
           `Provide { command } with a shell command containing {{prompt}}.`
       );
     }
@@ -132,19 +105,10 @@ export async function simulateMCPHost(
     );
   }
 
-  if (hostType === 'browser' || hostType === 'desktop') {
-    if (!config.browser) {
-      throw new Error(
-        `mcpHostConfig.browser is required when hostType is '${hostType}'.`
-      );
-    }
-    return runBrowserHost(config.browser, scenario);
-  }
-
   // Default: SDK host via Vercel AI SDK
   if (!config.provider) {
     throw new Error(
-      `mcpHostConfig.provider is required for 'sdk' host type. ` +
+      `provider is required for the mst client. ` +
         `Supported: ${allProviders.join(', ')}`
     );
   }

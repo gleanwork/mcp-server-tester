@@ -90,7 +90,6 @@ export {
   resolveMetric,
 } from '../evals/metrics.js';
 export { buildEvalDataset } from '../evals/buildEvalDataset.js';
-export { getBuiltinHostConfig } from '../evals/builtinHosts.js';
 export { runEvalSuite } from '../evals/runEvalSuite.js';
 export type {
   RunEvalSuiteOptions,
@@ -132,7 +131,6 @@ export {
 } from '../evals/evalRunComparison.js';
 export { runVariantExperiment } from '../evals/variantExperiment.js';
 export {
-  simulateMCPHost,
   isProviderAvailable,
   getMissingDependencyMessage,
 } from '../evals/mcpHost/index.js';

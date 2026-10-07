@@ -284,14 +284,9 @@ export type {
   PairedChange,
   ChangeAssessment,
   VariantGrouping,
-  HostType,
-  CLIOutputFormat,
-  CLIConfig,
   LLMProvider,
-  MCPHostConfig,
   LLMToolCall,
   MCPHostSimulationResult,
-  MCPHostSimulator,
 } from './evals.js';
 
 export type {

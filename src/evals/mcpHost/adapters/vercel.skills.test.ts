@@ -178,7 +178,7 @@ describe('SDK host with skills', () => {
           skills: 'catalog',
           cli: { command: 'true', args: [] },
         })
-      ).rejects.toThrow(/only supported for the SDK host/);
+      ).rejects.toThrow(/only supported for the mst client/);
     });
   }, 30_000);
 

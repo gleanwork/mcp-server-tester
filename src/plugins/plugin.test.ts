@@ -78,11 +78,7 @@ describe('assertPlugin', () => {
 
   it.each([
     ['datasetSources', { schema }, 'datasetSources.x needs a load function'],
-    [
-      'clients',
-      { schema },
-      'clients.x needs a run, runBatch or createConfig function',
-    ],
+    ['clients', { schema }, 'clients.x needs a run or runBatch function'],
     ['judges', { schema }, 'judges.x needs an evaluate function'],
     [
       'metrics',

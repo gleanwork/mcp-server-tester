@@ -1,8 +1,8 @@
 /**
  * @gleanwork/mcp-server-tester/experimental/clients
  *
- * Experimental desktop clients: the external-host runtime and capability
- * types, Cowork settings and native-run audit, and marketplace plugins.
+ * Experimental desktop clients: the desktop-run metadata results carry,
+ * Cowork settings and native-run audit, and marketplace plugins.
  * Expect breaking changes between minor versions.
  *
  * @packageDocumentation
@@ -39,32 +39,23 @@ export type {
   ClientStdioPaths,
   ClientStdioServer,
 } from '../evals/hostPlugins.js';
-export {
-  driverToSlug,
-  normalizeHostDriver,
-  parseDriverSlug,
-  getExternalHostConfigJsonSchema,
-  getExternalHostReference,
-  listExternalHostDriverReferences,
-  runExternalHostScenario,
-} from '../evals/externalHost/index.js';
+// What a desktop client (ChatGPT) records about a run, on each result's
+// `externalHost`.
 export type {
   EvidenceSource,
-  ExternalHostCapabilityBinding,
-  ExternalHostCapabilitiesConfig,
-  ExternalHostConfig,
-  ExternalHostDriverReference,
+  ExternalHostCorrelationMetadata,
   ExternalHostFailureKind,
   ExternalHostMetadata,
-  ExternalHostRunResult,
   ExternalHostSession,
-  ExternalHostSimulationResult,
+  ExternalHostTelemetry,
   ExternalHostType,
   HostArtifact,
   HostCapability,
-  HostDriverConfig,
   HostDriverId,
-  ClientRunContext,
   ObservationConfidence,
   TraceSource,
 } from '../evals/externalHost/index.js';
+export type {
+  ComputerUseTelemetry,
+  SemanticDesktopTelemetry,
+} from '../evals/cowork/driver.js';
