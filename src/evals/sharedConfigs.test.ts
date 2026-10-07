@@ -7,6 +7,7 @@ import { runEval } from './runEval.js';
 import { configIdentity } from './configIdentity.js';
 import { resolveConfigExtends } from './configExtends.js';
 import { loadEvalConfig } from './evalConfig.js';
+import { validateEvalConfig } from './configValidation.js';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
 import { assertPlugin, type Plugin } from '../plugins/plugin.js';
 
@@ -263,7 +264,7 @@ describe('shared configs', () => {
       [
         acme({
           recommended: {
-            servers: [{ connector: 'beta/connector/slack' }],
+            servers: { slack: { connector: 'beta/connector/slack' } },
           },
         }),
         acme({}, 'beta'),
@@ -362,5 +363,58 @@ describe('plugin configs', () => {
       metrics: [{ type: 'passed' }],
       results: { store: { type: 'file' } },
     });
+  });
+});
+
+describe('servers from a shared config', () => {
+  const shared = {
+    servers: {
+      prod: { transport: 'http', serverUrl: 'https://prod.example/mcp' },
+      next: { transport: 'http', serverUrl: 'https://next.example/mcp' },
+    },
+  };
+
+  it("lets a variant name a shared config's server by label", async () => {
+    installPlugins([acme({ servers: shared } as Plugin['configs'])]);
+    const dir = await evalDir({
+      name: 'shared-servers',
+      datasets: ['./cases.json'],
+      plugins: [],
+      extends: ['acme/config/servers'],
+      variants: [{ name: 'candidate', servers: ['next'] }],
+    });
+    const loaded = loadEvalConfig(path.join(dir, 'eval.json'));
+    const resolved = validateEvalConfig(
+      resolveConfigExtends(loaded, ['acme']),
+      { namespaces: ['acme'] }
+    );
+    expect(resolved.variants?.[0]?.servers).toEqual([
+      {
+        transport: 'http',
+        serverUrl: 'https://next.example/mcp',
+        label: 'next',
+      },
+    ]);
+  });
+
+  it("replaces a shared config's servers with the eval config's own", async () => {
+    installPlugins([acme({ servers: shared } as Plugin['configs'])]);
+    const dir = await evalDir({
+      name: 'own-servers',
+      datasets: ['./cases.json'],
+      extends: ['acme/config/servers'],
+      servers: {
+        local: { transport: 'http', serverUrl: 'https://local.example/mcp' },
+      },
+      variants: [{ name: 'candidate', servers: ['next'] }],
+    });
+    const loaded = loadEvalConfig(path.join(dir, 'eval.json'));
+    expect(() =>
+      validateEvalConfig(resolveConfigExtends(loaded, ['acme']), {
+        namespaces: ['acme'],
+      })
+    ).toThrow(
+      'Variant "candidate" names server "next", which the eval config doesn\'t define. Its servers are: local.'
+    );
   });
 });

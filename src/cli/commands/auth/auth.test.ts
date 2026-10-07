@@ -57,11 +57,11 @@ export default {
   },
   configs: {
     servers: {
-      servers: [
-        { connector: 'acme/connector/jira' },
-        { connector: 'acme/connector/gmail' },
-        { connector: 'acme/connector/gcal' },
-      ],
+      servers: {
+        jira: { connector: 'acme/connector/jira' },
+        gmail: { connector: 'acme/connector/gmail' },
+        gcal: { connector: 'acme/connector/gcal' },
+      },
     },
   },
 };`;
@@ -76,11 +76,7 @@ export default {
       variants: [
         {
           name: 'native',
-          servers: [
-            { connector: 'acme/connector/jira' },
-            { connector: 'acme/connector/gmail' },
-            { connector: 'acme/connector/gcal' },
-          ],
+          servers: ['jira', 'gmail', 'gcal'],
         },
       ],
     })

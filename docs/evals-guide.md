@@ -792,6 +792,16 @@ To compare two MCP servers, or two configurations of one, run the same dataset a
 {
   "name": "server-ab",
   "datasets": ["./evals/triggering.json"],
+  "servers": {
+    "prod": {
+      "transport": "http",
+      "serverUrl": "https://mcp.example.com/mcp"
+    },
+    "next": {
+      "transport": "http",
+      "serverUrl": "https://staging.example.com/mcp"
+    }
+  },
   "client": "mst",
   "clientOptions": {
     "provider": "anthropic"
@@ -799,29 +809,17 @@ To compare two MCP servers, or two configurations of one, run the same dataset a
   "variants": [
     {
       "name": "production",
-      "servers": [
-        {
-          "transport": "http",
-          "serverUrl": "https://mcp.example.com/mcp",
-          "label": "prod"
-        }
-      ]
+      "servers": ["prod"]
     },
     {
       "name": "candidate",
-      "servers": [
-        {
-          "transport": "http",
-          "serverUrl": "https://staging.example.com/mcp",
-          "label": "next"
-        }
-      ]
+      "servers": ["next"]
     }
   ]
 }
 ```
 
-`mst run --config server-ab.json` runs both variants with the same client and prints a row per variant: cases passed, trial pass rate, MCP calls and client events, tokens, cost and time. The run summary's `variantDeltas` holds each metric's change against the first variant, and with `trials` set, `trial_pass_rate` shows differences that case pass/fail hides. A variant can also differ by client, tool variants (`toolOverrides`), input template or judges. See [Variants](./evaluation-framework.md#variants) and [Metrics](./evaluation-framework.md#metrics).
+`mst run --config server-ab.json` runs both variants with the same client and prints a row per variant: cases passed, trial pass rate, MCP calls and client events, tokens, cost and time. The run summary's `variantDeltas` holds each metric's change against the first variant, and with `trials` set, `trial_pass_rate` shows differences that case pass/fail hides. A variant can also differ by client, tool metadata (`tools`), input template or judges. A variant names its servers by label from the top-level `servers` map, and one that names none uses them all. See [Variants](./evaluation-framework.md#variants) and [Metrics](./evaluation-framework.md#metrics).
 
 ---
 

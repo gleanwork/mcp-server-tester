@@ -1,6 +1,13 @@
 {
   "name": "aggregate-vs-native",
   "datasets": ["./dataset.json"],
+  "servers": {
+    "agg": "{{server aggregate}}",
+    "github": "{{server github}}",
+    "tracker": "{{server tracker}}",
+    "chat": "{{server chat}}",
+    "mail": "{{server mail}}"
+  },
   "client": "usecase/client/model",
   "model": "claude-sonnet-4-5",
   "clientOptions": {
@@ -38,7 +45,7 @@
   "variants": [
     {
       "name": "aggregate",
-      "servers": ["{{server aggregate agg}}"],
+      "servers": ["agg"],
       "toolMap": {
         "search": ["agg.search"],
         "read": ["agg.read_document"]
@@ -46,12 +53,7 @@
     },
     {
       "name": "native",
-      "servers": [
-        "{{server github github}}",
-        "{{server tracker tracker}}",
-        "{{server chat chat}}",
-        "{{server mail mail}}"
-      ],
+      "servers": ["github", "tracker", "chat", "mail"],
       "toolMap": {
         "search": [
           "github.search_issues",

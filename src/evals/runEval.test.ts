@@ -138,7 +138,7 @@ async function fixture(
     name: 'review',
     datasets: [{ type: source }],
     client: type,
-    servers: [],
+    servers: {},
     ...extra,
   };
   await fs.writeFile(configPath, JSON.stringify(evalConfig));
@@ -153,13 +153,13 @@ describe('eval review regressions', () => {
   it('isolates secrets files across dry, sequential, and concurrent evals', async () => {
     vi.stubEnv('SUITE_DUMMY_TOKEN', undefined);
     const f = await fixture([scenario], {
-      servers: [
-        {
+      servers: {
+        'server-1': {
           transport: 'http',
           serverUrl: 'https://example.com/eval',
           auth: { accessTokenEnv: 'SUITE_DUMMY_TOKEN' },
         },
-      ],
+      },
     });
     const first = path.join(f.dir, 'first.env');
     const second = path.join(f.dir, 'second.json');
@@ -247,10 +247,11 @@ describe('eval review regressions', () => {
         serverUrl: 'https://example.com/eval',
         auth: { accessTokenEnv: 'SUITE_DUMMY_TOKEN' },
       };
+      const { label, ...unlabelled } = server;
       const f = await fixture([], {
         datasets: [{ type: source }],
         client: name,
-        servers: serverSource === 'config' ? [server] : [],
+        servers: serverSource === 'config' ? { [label]: unlabelled } : {},
       });
       const secretsFile = path.join(f.dir, 'secrets.env');
       await fs.writeFile(
@@ -766,22 +767,20 @@ describe('eval review regressions', () => {
   it('passes complete labeled server sets but only persists allowlisted unresolved descriptions', async () => {
     vi.stubEnv('REVIEW_TOKEN', 'dummy-secret-do-not-save');
     const f = await fixture([scenario], {
-      servers: [
-        {
+      servers: {
+        one: {
           transport: 'http',
-          label: 'one',
           serverUrl: 'https://example.com/eval',
           headers: { 'X-Secret': 'header-secret' },
           auth: { accessTokenEnv: 'REVIEW_TOKEN' },
         },
-        {
+        two: {
           transport: 'stdio',
-          label: 'two',
           command: 'test',
           args: ['arg-secret'],
           env: { KEY: 'env-secret' },
         },
-      ],
+      },
     });
     const result = await runEvalConfig({
       configPath: f.configPath,
@@ -812,12 +811,15 @@ describe('eval review regressions', () => {
       auth: { accessTokenEnv: 'FAKE_TOKEN' },
       env: { FAKE_MCP_URL: '${url}' },
     };
+    const { label, ...unlabelled } = evalServer;
     const f = await fixture([scenario], {
-      servers: [evalServer],
+      servers: { [label]: unlabelled },
       requireEvalEndpoint: true,
     });
     const bad = await fixture([scenario], {
-      servers: [{ ...evalServer, url: 'https://example.com/mcp/default' }],
+      servers: {
+        [label]: { ...unlabelled, url: 'https://example.com/mcp/default' },
+      },
       requireEvalEndpoint: true,
     });
     await runEvalConfig({ configPath: f.configPath, rootDir: f.dir });

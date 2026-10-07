@@ -164,13 +164,13 @@ Models often skip skills they could use, and a matching tool can win over the sk
 {
   "name": "skills-help",
   "datasets": ["./evals/weather.json"],
-  "servers": [
-    {
+  "servers": {
+    "server-1": {
       "transport": "stdio",
       "command": "node",
       "args": ["server.js"]
     }
-  ],
+  },
   "client": "mst",
   "clientOptions": {
     "provider": "anthropic"

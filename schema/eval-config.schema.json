@@ -45,9 +45,9 @@
       }
     },
     "servers": {
-      "type": "array",
-      "description": "The MCP server set under test. Each entry is an MCPConfig, or a plugin connector (`{ \"connector\": \"<namespace>/connector/<name>\" }`) that `mst auth` signs in to.",
-      "items": {
+      "type": "object",
+      "description": "The MCP servers under test, keyed by label: { \"acme\": { \"transport\": \"http\", ... } }. An entry is an MCPConfig or a plugin connector ({ \"connector\": \"<namespace>/connector/<name>\" }) that `mst auth` signs in to. Variants pick servers by label. An entry doesn't set \"label\": the key is its label.",
+      "additionalProperties": {
         "anyOf": [
           {
             "$ref": "#/definitions/mcpConfig"
@@ -56,6 +56,9 @@
             "$ref": "#/definitions/connectorServer"
           }
         ]
+      },
+      "propertyNames": {
+        "minLength": 1
       }
     },
     "client": {
@@ -114,7 +117,13 @@
             "description": "What this variant changes."
           },
           "servers": {
-            "$ref": "#/properties/servers"
+            "type": "array",
+            "description": "Labels of the eval config's servers this variant uses. Omitted: every server; []: none.",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
           },
           "client": {
             "type": "string",

@@ -97,7 +97,15 @@ export type ToolMetadata = Record<string, ToolMetadataOverride>;
 export interface EvalVariant extends ClientFields {
   name: string;
   description?: string;
+  /**
+   * The variant's servers. An eval config file names them by label
+   * (`"servers": ["acme"]`), which loading keeps in `serverLabels`;
+   * `validateEvalConfig` resolves those labels into this list. Omitted: every
+   * server of the eval config.
+   */
   servers?: EvalServerConfig[];
+  /** The labels of the eval config's servers this variant uses, as written in the file. */
+  serverLabels?: string[];
   toolMap?: Record<string, string[]>;
   /** The tool metadata this variant shows its client. */
   tools?: ToolMetadata;
@@ -111,6 +119,10 @@ export interface EvalVariant extends ClientFields {
 export interface EvalConfig {
   name: string;
   datasets: DatasetConfig[];
+  /**
+   * The servers under test, each with its `label`. An eval config file
+   * writes them as a map keyed by label: `"servers": { "acme": { ... } }`.
+   */
   servers?: EvalServerConfig[];
   /**
    * The client under test: `mst`, `claude-code`, `cowork`, `chatgpt`, or a
@@ -221,6 +233,60 @@ const ConnectorServerSchema = z
 
 const ServerConfigSchema = z.union([MCPConfigSchema, ConnectorServerSchema]);
 
+const SERVERS_ARE_A_MAP =
+  '`servers` is a map keyed by label: { "acme": { "transport": "http", ... } }; variants pick servers by label: "servers": ["acme"]. See docs/migrations/migration-2.0.md#servers-are-a-map-keyed-by-label';
+
+/**
+ * Top-level `servers`: a map keyed by label, read into labelled configs.
+ * The key is the label, so an entry may not set one.
+ */
+const ServerMapSchema = z
+  .record(
+    z.string().min(1, { error: 'a server label (the map key) is empty' }),
+    ServerConfigSchema,
+    {
+      error: (issue) =>
+        Array.isArray(issue.input) ? SERVERS_ARE_A_MAP : undefined,
+    }
+  )
+  .superRefine((servers, context) => {
+    for (const [label, server] of Object.entries(servers)) {
+      // A connector's label names its token env var, so it is an identifier.
+      if ('connector' in server && !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(label))
+        context.addIssue({
+          code: 'custom',
+          path: [label],
+          message: `a connector server's label starts with a letter and has only letters, digits, "_" and "-": "${label}"`,
+        });
+      if (server.label !== undefined)
+        context.addIssue({
+          code: 'custom',
+          path: [label, 'label'],
+          message: `the key is the server's label; remove "label" from "${label}"`,
+        });
+    }
+  })
+  .transform((servers): EvalServerConfig[] =>
+    Object.entries(servers).map(([label, server]) => ({ ...server, label }))
+  );
+
+/** A variant's `servers`: labels of the eval config's servers. */
+const SERVER_LABEL = (issue: { input?: unknown }) =>
+  typeof issue.input === 'object' && issue.input !== null
+    ? "define this server under the eval config's top-level `servers`, keyed by its label, and list the label here"
+    : 'a server label';
+const ServerLabelsSchema = z.array(
+  z.string({ error: SERVER_LABEL }).min(1, { error: SERVER_LABEL }),
+  {
+    error: (issue) =>
+      typeof issue.input === 'object' && issue.input !== null
+        ? 'a variant names its servers by label: "servers": ["acme"]'
+        : typeof issue.input === 'string'
+          ? `a variant lists its servers' labels: "servers": ["${issue.input}"]`
+          : undefined,
+  }
+);
+
 const ToolMapSchema = z.record(z.string(), z.array(z.string()));
 
 /** A variant's input template: `{{input}}` is replaced by the case's input. */
@@ -258,7 +324,7 @@ const EvalVariantSchema = z
   .object({
     name: z.string().min(1),
     description: z.string().optional(),
-    servers: z.array(ServerConfigSchema).optional(),
+    servers: ServerLabelsSchema.optional(),
     ...clientFieldSchemas,
     toolMap: ToolMapSchema.optional(),
     tools: ToolMetadataSchema.optional(),
@@ -269,7 +335,10 @@ const EvalVariantSchema = z
     ...renamedKeys({ scenarioTemplate: 'inputTemplate' }),
     ...removedKeys({ toolOverrides: TOOL_OVERRIDES_MOVED }),
   })
-  .strict();
+  .strict()
+  .transform(({ servers, ...variant }) =>
+    servers === undefined ? variant : { ...variant, serverLabels: servers }
+  );
 
 /** Eval config keys that 2.0 renamed (ADR 0002); each fails naming its replacement. */
 export const RENAMED_CONFIG_KEYS = {
@@ -285,7 +354,7 @@ export const EvalConfigSchema = z
     $schema: z.string().optional(),
     name: z.string().min(1),
     datasets: z.array(DatasetConfigSchema).min(1),
-    servers: z.array(ServerConfigSchema).optional(),
+    servers: ServerMapSchema.optional(),
     ...clientFieldSchemas,
     toolMap: ToolMapSchema.optional(),
     tools: ToolMetadataSchema.optional(),
@@ -446,7 +515,7 @@ function normalizeExtension(value: string | TaggedConfig): ExtensionConfig {
   return typeof value === 'string' ? { type: value } : value;
 }
 
-function normalizeConfig(value: EvalConfigInput): EvalConfig {
+function normalizeConfig(value: z.output<typeof EvalConfigSchema>): EvalConfig {
   return {
     ...value,
     datasets: value.datasets.map(normalizeDataset),

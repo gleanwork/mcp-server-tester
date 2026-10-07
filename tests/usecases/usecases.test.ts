@@ -113,11 +113,14 @@ interface Outcome {
 /** Variables the CLI sees: nothing from the developer's shell beyond these. */
 const ENV_ALLOWLIST = ['PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'SystemRoot'];
 
-/** Replace each `"{{server <catalog> <label>}}"` with a stdio server entry. */
+/**
+ * Replace each `"{{server <catalog>}}"` with a stdio server entry. Servers
+ * are keyed by label, so the entry carries none.
+ */
 function render(source: string, file: string): string {
   const rendered = source.replace(
-    /"\{\{server ([\w-]+) ([\w-]+)\}\}"/g,
-    (_, catalog: string, label: string) =>
+    /"\{\{server ([\w-]+)\}\}"/g,
+    (_, catalog: string) =>
       JSON.stringify({
         transport: 'stdio',
         command: process.execPath,
@@ -125,7 +128,6 @@ function render(source: string, file: string): string {
           path.join(FIXTURES, 'catalogServer.mjs'),
           path.join(FIXTURES, 'catalogs', `${catalog}.json`),
         ],
-        label,
       })
   );
   const leftover = /\{\{server[^}]*\}\}/.exec(rendered);

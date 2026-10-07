@@ -5,7 +5,7 @@ import { resolveCoworkSetupConfig, type CoworkSetupConfig } from './options.js';
 const baseConfig = {
   name: 'setup',
   datasets: [{ type: 'fixture' }],
-  servers: [],
+  servers: {},
 };
 
 describe('Cowork setup approval options', () => {

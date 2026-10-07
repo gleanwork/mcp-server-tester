@@ -63,9 +63,13 @@ export default {meta:{name:'local-plugin',version:'1.0.0',namespace:'local'},cli
       JSON.stringify({
         name: `local-${i}`,
         datasets: [datasetPath],
-        servers: [
-          { transport: 'stdio', command: process.execPath, args: [serverPath] },
-        ],
+        servers: {
+          'server-1': {
+            transport: 'stdio',
+            command: process.execPath,
+            args: [serverPath],
+          },
+        },
         client: 'local/client/echo',
         concurrency: 8,
         plugins: [pluginPath],

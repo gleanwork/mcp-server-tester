@@ -63,17 +63,16 @@ async function evalRun(variants?: unknown[]): Promise<string> {
       name: 'description-variants',
       datasets: ['./cases.json'],
       plugins: [path.join(FIXTURES, 'plugin.mjs')],
-      servers: [
-        {
+      servers: {
+        agg: {
           transport: 'stdio',
           command: process.execPath,
           args: [
             path.join(FIXTURES, 'catalogServer.mjs'),
             path.join(FIXTURES, 'catalogs', 'aggregate.json'),
           ],
-          label: 'agg',
         },
-      ],
+      },
       client: 'usecase/client/model',
       clientOptions: {
         policy: [

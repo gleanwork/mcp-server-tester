@@ -349,7 +349,7 @@ describe('golden: runEval clients', () => {
         name: 'golden',
         datasets: [{ type: source }],
         client: type,
-        servers: [],
+        servers: {},
         ...configExtra,
       })
     );

@@ -143,19 +143,15 @@ describe('connector servers in a run', () => {
     await store.put('acme.slack', grant({ accessToken: 'slack-token' }));
     await store.put('acme.google', grant({ accessToken: 'google-token' }));
     const configPath = await writeSuite({
+      servers: {
+        glean: { connector: 'acme/connector/glean' },
+        slack: { connector: 'acme/connector/slack' },
+        gmail: { connector: 'acme/connector/gmail' },
+        drive: { connector: 'acme/connector/gdrive' },
+      },
       variants: [
-        {
-          name: 'aggregated',
-          servers: [{ connector: 'acme/connector/glean' }],
-        },
-        {
-          name: 'native',
-          servers: [
-            { connector: 'acme/connector/slack' },
-            { connector: 'acme/connector/gmail' },
-            { connector: 'acme/connector/gdrive', label: 'drive' },
-          ],
-        },
+        { name: 'aggregated', servers: ['glean'] },
+        { name: 'native', servers: ['slack', 'gmail', 'drive'] },
       ],
     });
     const { summary } = await runEval({
@@ -202,10 +198,10 @@ describe('connector servers in a run', () => {
   it('fails before any client starts when a grant is missing', async () => {
     await store.put('acme.slack', grant());
     const configPath = await writeSuite({
-      servers: [
-        { connector: 'acme/connector/slack' },
-        { connector: 'acme/connector/gmail' },
-      ],
+      servers: {
+        slack: { connector: 'acme/connector/slack' },
+        gmail: { connector: 'acme/connector/gmail' },
+      },
     });
     const error = await runEval({
       configPath,
@@ -223,7 +219,7 @@ describe('connector servers in a run', () => {
 
   it('dry-runs without tokens', async () => {
     const configPath = await writeSuite({
-      servers: [{ connector: 'acme/connector/slack' }],
+      servers: { slack: { connector: 'acme/connector/slack' } },
     });
     await expect(
       runEval({
@@ -238,7 +234,7 @@ describe('connector servers in a run', () => {
 
   it('rejects an unknown connector', async () => {
     const configPath = await writeSuite({
-      servers: [{ connector: 'acme/connector/jira' }],
+      servers: { jira: { connector: 'acme/connector/jira' } },
     });
     await expect(
       runEval({
@@ -258,7 +254,7 @@ describe('startConnectorCredentials', () => {
       {
         name: 'x',
         datasets: [{ type: 'file', path: 'unused' }],
-        servers: [{ connector: 'acme/connector/slack' }],
+        servers: { slack: { connector: 'acme/connector/slack' } },
       },
       { skipDatasetValidation: true }
     );
@@ -341,10 +337,13 @@ describe('variant selection', () => {
   it('needs only the grants the selected variants use', async () => {
     await store.put('acme.slack', grant({ accessToken: 'slack-token' }));
     const configPath = await writeSuite({
-      servers: [{ connector: 'acme/connector/glean' }],
+      servers: {
+        glean: { connector: 'acme/connector/glean' },
+        slack: { connector: 'acme/connector/slack' },
+      },
       variants: [
-        { name: 'aggregated' },
-        { name: 'native', servers: [{ connector: 'acme/connector/slack' }] },
+        { name: 'aggregated', servers: ['glean'] },
+        { name: 'native', servers: ['slack'] },
       ],
     });
     // Glean is not signed in, but the native variant doesn't use it.
@@ -358,7 +357,7 @@ describe('variant selection', () => {
       variant: 'native',
     });
     expect(seen).toHaveLength(1);
-    // The aggregated variant inherits the config's servers, so it needs Glean.
+    // The aggregated variant lists Glean, so it needs Glean.
     await expect(
       runEval({
         configPath,

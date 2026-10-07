@@ -434,7 +434,7 @@ The config has two independent parts:
 
 - `clientOptions.plugins[]` installs plugins (their skills). On Cowork, a plugin can
   also block its own MCP servers with `blockMcpServers`.
-- `servers[]` is the MCP server set under test. Both plain stdio and
+- `servers` is the MCP servers under test, keyed by label. Both plain stdio and
   client-resolved stdio entries are supported on macOS and Linux, alongside HTTP.
   A client-resolved entry can launch a native proxy with private credential files
   or, on Linux, resolve a file from a declared plugin.
@@ -459,10 +459,9 @@ The config has two independent parts:
       }
     ]
   },
-  "servers": [
-    {
+  "servers": {
+    "acme-eval": {
       "transport": "stdio",
-      "label": "acme-eval",
       "command": "/usr/bin/node",
       "args": ["${pluginRoot:acme}/mcp/start.mjs"],
       "url": "https://mcp.example.com/eval",
@@ -484,29 +483,32 @@ The config has two independent parts:
         }
       }
     }
-  ]
+  }
 }
 ```
 
 ### Stdio eval servers
 
-Cowork accepts plain stdio `servers[]` entries without a URL, plugin, or proxy:
+Cowork accepts plain stdio `servers` entries without a URL, plugin, or proxy:
 
 ```json
 {
-  "transport": "stdio",
-  "label": "local-tools",
-  "command": "/usr/local/bin/node",
-  "args": ["server.mjs"],
-  "cwd": "/opt/mcp/local-tools",
-  "env": { "NODE_ENV": "test" },
-  "inheritEnv": false
+  "servers": {
+    "local-tools": {
+      "transport": "stdio",
+      "command": "/usr/local/bin/node",
+      "args": ["server.mjs"],
+      "cwd": "/opt/mcp/local-tools",
+      "env": { "NODE_ENV": "test" },
+      "inheritEnv": false
+    }
+  }
 }
 ```
 
-Use paths that exist on the desktop client. `command` is required; `label`,
-`args`, `env`, and `cwd` are optional. A missing label becomes `server-<index>`
-using the one-based position in `servers[]`. `cwd` must resolve to an absolute
+Use paths that exist on the desktop client. `command` is required;
+`args`, `env`, and `cwd` are optional, and the key (`local-tools`) is the
+server's label. `cwd` must resolve to an absolute
 path. Desktop has no `cwd` field, so MST converts it to a fixed `/bin/sh` wrapper
 with cwd, command, and arguments passed as separate argv values, never
 interpolated into shell source. `inheritEnv: true` is unsupported: declare all
@@ -731,5 +733,5 @@ server a custom endpoint, credential, or data directory:
   `isLocalDevMcpEnabled` is not false and the organization feature flag allows
   it. `allowManagedMcpServersOnly` is not an input to that check.
 
-So declare the eval server as a stdio `servers[]` entry that runs the plugin's
+So declare the eval server as a stdio `servers` entry that runs the plugin's
 adapter, and block the plugin's own server with `blockMcpServers`.

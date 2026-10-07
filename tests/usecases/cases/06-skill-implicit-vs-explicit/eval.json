@@ -1,7 +1,7 @@
 {
   "name": "skill-triggering",
   "datasets": ["./dataset.json"],
-  "servers": [],
+  "servers": {},
   "client": "usecase/client/model",
   "clientOptions": {
     "policy": [

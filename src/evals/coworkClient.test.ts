@@ -1264,10 +1264,13 @@ describe('V2 Cowork client', () => {
       })
     );
     const configPath = path.join(dir, 'eval.json');
+    // A file keys its servers by label.
+    const { label, ...fileServer } = server;
     await fs.writeFile(
       configPath,
       JSON.stringify({
         ...context.evalConfig,
+        servers: { [label]: fileServer },
         maxCases: 2,
         datasets: [{ type: 'file', path: './cases.json' }],
       })
