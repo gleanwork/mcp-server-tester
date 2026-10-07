@@ -41,8 +41,9 @@ import {
 } from './cowork/driver.js';
 import { mcpServerLabel } from '../config/mcpConfig.js';
 
-const OptionsSchema = z
+const CoworkSchema = z
   .object({
+    type: z.string(),
     computerUseProvider: z
       .enum(['anthropic-computer-use', 'linux-desktop'])
       .default(() =>
@@ -77,6 +78,21 @@ const OptionsSchema = z
       .optional(),
     /** Linux: absolute private (0700) root; a server's `${dataDir}` is `<root>/<label>`. */
     mcpDataRoot: z.string().min(2).max(4096).optional(),
+    timeout: z.number().int().positive().default(900_000),
+    model: z
+      .string()
+      .regex(/^[A-Za-z0-9._:-]+$/)
+      .optional(),
+    provider: z.literal('anthropic').optional(),
+    env: z.record(z.string(), z.string()).optional(),
+    /** Host-owned: installed through managed allowedPluginMarketplaces. */
+    plugins: MarketplacePluginsSchema.optional(),
+    options: z
+      .never({
+        message:
+          '`clientOptions.options` is gone: set its keys in `clientOptions` directly (`clientOptions.appVersion`, not `clientOptions.options.appVersion`).',
+      })
+      .optional(),
   })
   .strict()
   .superRefine((options, context) => {
@@ -109,21 +125,6 @@ const OptionsSchema = z
           'appVersion requires anthropic-computer-use; linux-desktop runs the prepared desktop.',
       });
   });
-const CoworkSchema = z
-  .object({
-    type: z.string(),
-    options: OptionsSchema.default(() => OptionsSchema.parse({})),
-    timeout: z.number().int().positive().default(900_000),
-    model: z
-      .string()
-      .regex(/^[A-Za-z0-9._:-]+$/)
-      .optional(),
-    provider: z.literal('anthropic').optional(),
-    env: z.record(z.string(), z.string()).optional(),
-    /** Host-owned: installed through managed allowedPluginMarketplaces. */
-    plugins: MarketplacePluginsSchema.optional(),
-  })
-  .strict();
 /** Platforms with managed stdio setup, readiness, and cleanup support. */
 export const COWORK_STDIO_PLATFORMS = ['darwin', 'linux'] as const;
 
@@ -153,18 +154,14 @@ async function runBatch(
   const servers = requests[0]!.input.servers;
   // Validate declarations before desktop actions. macOS resolves host-resolved
   // paths inside its leased setup transaction; Linux uses prepared runtime paths.
-  const mac = config.options.computerUseProvider === 'anthropic-computer-use';
+  const mac = config.computerUseProvider === 'anthropic-computer-use';
   const stdioServers = hostStdioServers(servers, plugins);
   let stdioPaths = {
-    ...(config.options.pluginRoots
-      ? { pluginRoots: config.options.pluginRoots }
-      : {}),
-    ...(config.options.mcpDataRoot
-      ? { dataRoot: config.options.mcpDataRoot }
-      : {}),
+    ...(config.pluginRoots ? { pluginRoots: config.pluginRoots } : {}),
+    ...(config.mcpDataRoot ? { dataRoot: config.mcpDataRoot } : {}),
   };
   if (
-    config.options.computerUseProvider !== 'linux-desktop' &&
+    config.computerUseProvider !== 'linux-desktop' &&
     stdioServers.some((server) => server.pluginRoots.length)
   )
     throw new MarketplacePluginError(
@@ -172,12 +169,12 @@ async function runBatch(
       stdioServers.find((server) => server.pluginRoots.length)!.label
     );
   const referenced = new Set(stdioServers.flatMap((s) => s.pluginRoots));
-  const unknownRoot = Object.keys(config.options.pluginRoots ?? {}).find(
+  const unknownRoot = Object.keys(config.pluginRoots ?? {}).find(
     (name) => !referenced.has(name)
   );
   if (
     unknownRoot ||
-    (config.options.mcpDataRoot && !stdioServers.some((s) => s.usesDataDir))
+    (config.mcpDataRoot && !stdioServers.some((s) => s.usesDataDir))
   )
     throw new MarketplacePluginError(
       'mcp_server_invalid',
@@ -198,16 +195,15 @@ async function runBatch(
   });
   const env = { ...process.env, ...context.env, ...config.env };
   if (
-    config.options.computerUseProvider === 'anthropic-computer-use' &&
+    config.computerUseProvider === 'anthropic-computer-use' &&
     !hasLLMCredential('anthropic', { env })
   )
     throw new Error(
       'Cowork Computer Use needs ANTHROPIC_API_KEY, or ANTHROPIC_BASE_URL with MST_LLM_AUTH_COMMAND or ANTHROPIC_AUTH_TOKEN for an LLM gateway.'
     );
   const platform =
-    selectedPlatform ??
-    (await getCoworkPlatform(config.options.computerUseProvider));
-  const dataDir = platform.dataDirectory(config.options);
+    selectedPlatform ?? (await getCoworkPlatform(config.computerUseProvider));
+  const dataDir = platform.dataDirectory(config);
   // Pass only the selected arm. Setup intentionally rejects multi-arm manifests.
   const { arms: _arms, ...manifest } = context.manifest;
   const managedManifest = { ...manifest, coworkSetup, servers };
@@ -234,12 +230,10 @@ async function runBatch(
           manifest: managedManifest,
           env,
           model: config.model,
-          ...(config.options.appVersion
-            ? { appVersion: config.options.appVersion }
-            : {}),
+          ...(config.appVersion ? { appVersion: config.appVersion } : {}),
           ...(plugins.length ? { plugins } : {}),
           ...(stdioServers.length &&
-          config.options.computerUseProvider === 'linux-desktop'
+          config.computerUseProvider === 'linux-desktop'
             ? { stdioPaths }
             : {}),
         });
@@ -334,8 +328,8 @@ async function runBatch(
         try {
           const submission = await platform.submit(request.input.prompt, {
             deadlineAt,
-            maxActions: config.options.computerUseMaxActions,
-            model: config.options.computerUseModel,
+            maxActions: config.computerUseMaxActions,
+            model: config.computerUseModel,
             ...(mac && config.model ? { targetModel: config.model } : {}),
             env,
             ...(session?.appPath ? { appPath: session.appPath } : {}),
@@ -395,8 +389,8 @@ async function runBatch(
           } else {
             const hitl = await platform.handleHitl({
               deadlineAt: deadlineAt,
-              maxActions: config.options.hitlMaxActions,
-              model: config.options.computerUseModel,
+              maxActions: config.hitlMaxActions,
+              model: config.computerUseModel,
               env,
               ...(session?.appPath ? { appPath: session.appPath } : {}),
               approveWriteTools: coworkSetup.approveWriteTools,
@@ -504,7 +498,7 @@ async function runBatch(
                     if (
                       hitlError ||
                       inspections >= 3 ||
-                      hitlActions >= config.options.hitlMaxActions ||
+                      hitlActions >= config.hitlMaxActions ||
                       Date.now() < nextInspection ||
                       !pending.toolCalls.some(
                         (call) => call.output === undefined
@@ -520,8 +514,8 @@ async function runBatch(
                     try {
                       const followup = await platform.handleHitl({
                         deadlineAt: Math.min(deadlineAt, Date.now() + 60_000),
-                        maxActions: config.options.hitlMaxActions - hitlActions,
-                        model: config.options.computerUseModel,
+                        maxActions: config.hitlMaxActions - hitlActions,
+                        model: config.computerUseModel,
                         env,
                         ...(session?.appPath
                           ? { appPath: session.appPath }

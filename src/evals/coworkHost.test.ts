@@ -70,7 +70,7 @@ const dirs: string[] = [];
 const host = {
   type: 'cowork',
   timeout: 900_000,
-  options: { computerUseProvider: 'anthropic-computer-use' },
+  computerUseProvider: 'anthropic-computer-use',
 };
 const server = {
   transport: 'http' as const,
@@ -83,7 +83,10 @@ const context: ClientRunContext = {
     name: 'cowork',
     datasets: [],
     client: host.type,
-    clientOptions: { timeout: host.timeout, options: host.options },
+    clientOptions: {
+      timeout: host.timeout,
+      computerUseProvider: host.computerUseProvider,
+    },
     servers: [server],
     coworkSetup: { approveWriteTools: true },
   },
@@ -266,7 +269,7 @@ describe('V2 Cowork host', () => {
     mocks.setup.mockResolvedValueOnce({ app, dispose: mocks.dispose });
     const pinned = {
       ...host,
-      options: { ...host.options, appVersion: '1.52386.6' },
+      appVersion: '1.52386.6',
     };
     const [result] = await COWORK_HOST.runBatch!(
       [{ ...requests()[0]!, config: pinned }],
@@ -277,11 +280,25 @@ describe('V2 Cowork host', () => {
     );
     expect(result!.telemetry?.hostApp).toEqual(app);
   });
+  it('takes its options directly, not nested under options', () => {
+    expect(
+      COWORK_HOST.schema.parse({ type: 'cowork', appVersion: '1.52386.6' })
+    ).toMatchObject({ appVersion: '1.52386.6' });
+    expect(() =>
+      COWORK_HOST.schema.parse({
+        type: 'cowork',
+        options: { appVersion: '1.52386.6' },
+      })
+    ).toThrow(
+      '`clientOptions.options` is gone: set its keys in `clientOptions` directly'
+    );
+  });
   it('rejects an app pin for the prepared Linux desktop', () => {
     expect(() =>
       COWORK_HOST.schema.parse({
         type: 'cowork',
-        options: { computerUseProvider: 'linux-desktop', appVersion: '1.2.3' },
+        computerUseProvider: 'linux-desktop',
+        appVersion: '1.2.3',
       })
     ).toThrow('appVersion requires anthropic-computer-use');
   });
@@ -303,15 +320,13 @@ describe('V2 Cowork host', () => {
   it('selects the semantic Linux driver without requiring a planner API key', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
     expect(COWORK_HOST.schema.parse({ type: 'cowork' })).toMatchObject({
-      options: { computerUseProvider: 'linux-desktop' },
+      computerUseProvider: 'linux-desktop',
     });
     expect(
       COWORK_HOST.schema.safeParse({
         type: 'cowork',
-        options: {
-          computerUseProvider: 'linux-desktop',
-          computerUseModel: 'unused-model',
-        },
+        computerUseProvider: 'linux-desktop',
+        computerUseModel: 'unused-model',
       }).success
     ).toBe(false);
     const prepared = createCoworkHost({
@@ -323,7 +338,7 @@ describe('V2 Cowork host', () => {
     });
     const batch = requests().map((r) => ({
       ...r,
-      config: { ...host, options: { computerUseProvider: 'linux-desktop' } },
+      config: { ...host, computerUseProvider: 'linux-desktop' },
     }));
     const result = await prepared.runBatch!(batch, { ...context, env: {} });
     expect(result.every((r) => !r.error)).toBe(true);
@@ -483,7 +498,7 @@ describe('V2 Cowork host', () => {
       config: {
         ...host,
         model: 'native-model',
-        options: { ...host.options, computerUseModel: 'planner-model' },
+        computerUseModel: 'planner-model',
       },
     }));
     const result = await COWORK_HOST.runBatch!(batch, readOnlyContext);
@@ -608,12 +623,10 @@ describe('V2 Cowork host', () => {
     };
     const linuxHost = (options: Record<string, unknown> = {}) => ({
       ...host,
-      options: {
-        computerUseProvider: 'linux-desktop',
-        pluginRoots: { fake: '/opt/plugins/fake' },
-        mcpDataRoot: '/run/mcp-data',
-        ...options,
-      },
+      computerUseProvider: 'linux-desktop',
+      pluginRoots: { fake: '/opt/plugins/fake' },
+      mcpDataRoot: '/run/mcp-data',
+      ...options,
       plugins: [fake],
     });
     const platform = () => ({
@@ -717,8 +730,8 @@ describe('V2 Cowork host', () => {
       ],
     ])('rejects before any UI %s', async (_kind, config, code) => {
       vi.spyOn(process, 'platform', 'get').mockReturnValue(
-        (config as { options: { computerUseProvider?: string } }).options
-          .computerUseProvider === 'linux-desktop'
+        (config as { computerUseProvider?: string }).computerUseProvider ===
+          'linux-desktop'
           ? 'linux'
           : 'darwin'
       );
@@ -748,12 +761,10 @@ describe('V2 Cowork host', () => {
           ...r,
           config: {
             ...host,
-            options: {
-              computerUseProvider:
-                platformName === 'linux'
-                  ? 'linux-desktop'
-                  : 'anthropic-computer-use',
-            },
+            computerUseProvider:
+              platformName === 'linux'
+                ? 'linux-desktop'
+                : 'anthropic-computer-use',
           },
           input: { ...r.input, servers },
         }));
