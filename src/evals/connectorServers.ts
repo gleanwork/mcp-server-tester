@@ -10,9 +10,9 @@
  * environment variable (for a direct HTTP connection).
  */
 import { randomUUID } from 'node:crypto';
-import { mkdir, open, realpath, rename, rm } from 'node:fs/promises';
+import { mkdir, open, realpath, rename } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { validateMCPConfig, type MCPConfig } from '../config/mcpConfig.js';
 import {
   getConnector,
@@ -27,6 +27,12 @@ import {
 } from '../auth/grants/grants.js';
 import type { CredentialStore } from '../auth/grants/types.js';
 import type { FetchFn } from '../auth/grants/oauthHttp.js';
+import {
+  TOKEN_DIRECTORY_PREFIX,
+  claimTokenDirectory,
+  releaseTokenDirectory,
+  sweepStaleTokenDirectories,
+} from './tokenDirectories.js';
 import {
   isConnectorServer,
   type ConnectorServerConfig,
@@ -121,7 +127,7 @@ export async function expandConnectorServers(
     return { evalConfig, uses, slots: [], grantsByVariant: new Map() };
   const tokenDirectory =
     options.tokenDirectory ??
-    join(await realpath(tmpdir()), `mst-run-tokens-${randomUUID()}`);
+    join(await realpath(tmpdir()), `${TOKEN_DIRECTORY_PREFIX}${randomUUID()}`);
   const targets = new Map(grantTargets(uses).map((t) => [t.key, t]));
   const slots = new Map<string, CredentialSlot>();
   const slotFor = (use: ConnectorUse): CredentialSlot | undefined => {
@@ -285,7 +291,7 @@ export async function startConnectorCredentials(
     timers.clear();
     await Promise.allSettled([...renewing]);
     if (expansion.tokenDirectory)
-      await rm(expansion.tokenDirectory, { recursive: true, force: true });
+      await releaseTokenDirectory(expansion.tokenDirectory);
   };
 
   // A variant without servers of its own uses the config's (key '').
@@ -329,8 +335,15 @@ export async function startConnectorCredentials(
 
   // A fresh private directory at the path the expanded servers name. Not
   // recursive: the random name must not exist yet.
-  if (slots.some((slot) => slot.file))
-    await mkdir(expansion.tokenDirectory!, { mode: 0o700 });
+  if (slots.some((slot) => slot.file)) {
+    const directory = expansion.tokenDirectory!;
+    // Token files from runs that were killed before they could remove them.
+    for (const stale of await sweepStaleTokenDirectories(dirname(directory)))
+      log(`Removed token files left by an earlier run: ${stale}`);
+    await mkdir(directory, { mode: 0o700 });
+    // Removed on Ctrl-C, SIGTERM or exit even if stop() is never reached.
+    await claimTokenDirectory(directory);
+  }
 
   async function deliver(slot: CredentialSlot, token: string): Promise<void> {
     delivered.add(token);

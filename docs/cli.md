@@ -715,7 +715,7 @@ npx mst auth revoke --config ./eval.json --server <labels...>
 | `--store <dir>`        | Where grants are kept. Default: `$MST_CREDENTIALS_DIR`, else `~/.mcp-server-tester/grants`. |
 | `--plugins <paths...>` | Plugin modules to load, as well as the eval config's own `plugins`.                         |
 
-Grants are 0600 files in a 0700 directory. Refresh tokens stay there; access tokens reach a run only through private files it deletes when it ends, or run-private environment variables. Neither appears in results, logs or the client's settings. If a run needs a server that is not signed in, it stops before any client starts and prints the `mst auth` command to run.
+Grants are 0600 files in a 0700 directory. Refresh tokens stay there; access tokens reach a run only through private files it deletes when it ends (also on Ctrl-C, SIGTERM or SIGHUP; files left by a run that was killed outright are removed by the next run), or run-private environment variables. Neither appears in results, logs or the client's settings. If a run needs a server that is not signed in, it stops before any client starts and prints the `mst auth` command to run.
 
 ## `run` - Run an Eval Config
 
