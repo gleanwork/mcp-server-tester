@@ -5,7 +5,7 @@ import {
   type LLMEndpointOptions,
 } from '../llm/endpoint.js';
 
-/** Output token budget for a judge verdict, unless configured. */
+/** Output token budget for a judge score, unless configured. */
 export const DEFAULT_JUDGE_MAX_TOKENS = 1000;
 /** Judges are deterministic unless configured otherwise. */
 export const DEFAULT_JUDGE_TEMPERATURE = 0;

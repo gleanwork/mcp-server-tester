@@ -39,7 +39,7 @@ export interface EvalCase extends ClientFields {
 
   /**
    * Number of trials (independent runs) of this case. When > 1,
-   * `EvalCaseResult.assertionPassRate` is the share of trials that passed, and
+   * `EvalCaseResult.passRate` is the share of trials that passed, and
    * `pass` is decided by `passThreshold`.
    * @default 1
    */
@@ -142,7 +142,7 @@ export interface JudgeExpectConfig {
 }
 
 /**
- * Unified expectation block for eval cases
+ * A case's assertions
  *
  * Mirrors the Playwright matcher API for consistency.
  */

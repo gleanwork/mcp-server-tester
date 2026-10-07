@@ -185,8 +185,8 @@ Response preview:
   "conditions": "Sunny"
 }
 
-# Step 4: Auto-suggested expectations
-Suggested expectations:
+# Step 4: Auto-suggested assertions
+Suggested assertions:
   Text contains:
     - "London"
     - "temperature"
@@ -195,8 +195,8 @@ Suggested expectations:
 
 # Step 5: Configure the test
 ? Test name: weather-london
-? Add text contains expectations? Yes
-? Add regex expectations? Yes
+? Add text contains assertions? Yes
+? Add regex assertions? Yes
 ✓ Added test "weather-london"
 
 # Step 6: Continue or finish
@@ -214,7 +214,7 @@ The generator connects to your actual MCP server to:
 - Call tools with your arguments
 - Show real responses
 
-#### 2. Smart Expectation Suggestions
+#### 2. Smart Assertion Suggestions
 
 Based on the response format, the generator suggests:
 
@@ -223,7 +223,7 @@ Based on the response format, the generator suggests:
 
 #### 3. Response Preview
 
-See the actual tool response before creating expectations:
+See the actual tool response before creating assertions:
 
 ```
 Response preview:
@@ -739,5 +739,5 @@ Initialises or validates the empty Claude third-party profile that the Cowork ho
 ## Next Steps
 
 - See the [Quick Start Guide](./quickstart.md) for using generated datasets
-- Check the [Expectations Guide](./expectations.md) for customizing validations
+- Check the [Assertions Guide](./assertions.md) for customizing validations
 - Explore [Examples](../examples) for real-world dataset patterns

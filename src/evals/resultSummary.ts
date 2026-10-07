@@ -15,7 +15,7 @@ function compactCase(result: EvalCaseResult): Record<string, unknown> {
       ? (response as { response?: unknown }).response
       : undefined;
   const responseText = typeof responseValue === 'string' ? responseValue : '';
-  const judge = result.expectations?.judge;
+  const judge = result.scores?.judge;
   return {
     id: result.id,
     dataset: result.datasetName,

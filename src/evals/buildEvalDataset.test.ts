@@ -8,7 +8,7 @@ const evalConfig: EvalConfig = {
 };
 
 describe('buildEvalDataset canonical ingestion', () => {
-  it('accepts minimal cases without expectations or a client, and rejects a case without input', () => {
+  it('accepts minimal cases without assertions or a client, and rejects a case without input', () => {
     const raw = { name: 'canonical', cases: [{ id: 'a', input: 'Find it' }] };
     expect(buildEvalDataset(raw, evalConfig).cases).toEqual(raw.cases);
     expect(() =>

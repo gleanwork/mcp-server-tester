@@ -175,7 +175,7 @@ cowork-aggregated-vs-native
               acme/pairwise-judge/preference (each variant vs aggregated)
   env         local (macOS) · 1 shard
   results     .mcp-test-results/cowork-aggregated-vs-native/
-  total       450 trials · 900 pairwise verdicts
+  total       450 trials · 900 pairwise preferences
   credentials 2 of 8 servers need `mst auth` (gmail, gcal)
 ```
 
@@ -295,7 +295,7 @@ Runs are written locally by default:
 .mcp-test-results/cowork-aggregated-vs-native/runs/<run-id>/
 ├── run.json        # config, resolved datasets and judges, environment, phase status
 ├── traces/         # one trace per trial
-├── grades/         # one verdict per grader per trial; pairwise verdicts per case
+├── grades/         # one score per grader per trial; pairwise preferences per case
 ├── results.json    # traces and grades joined
 ├── summary.json    # per-variant metrics and comparisons
 └── report/
@@ -343,5 +343,5 @@ The report has the same sections for every eval:
 - **Result:** which variants are clearly better, clearly worse, or within noise.
 - **Variants compared:** the summary table above. _Show statistics_ adds confidence intervals, p-values and pass^k.
 - **What differs:** each variant's setup next to the baseline's.
-- **Case by case:** every trial, with its trace, each grader's verdict, and the pairwise verdict against the baseline.
+- **Case by case:** every trial, with its trace, each grader's score, and the pairwise preference against the baseline.
 - **Why trials failed:** failed trials grouped by cause.

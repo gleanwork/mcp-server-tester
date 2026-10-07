@@ -60,7 +60,7 @@ test('search returns results', async ({ mcp }) => {
 
 **How many runs:** 1. Tool responses are deterministic (or close enough). Running a search 10 times doesn't tell you more than running it once.
 
-**What you're testing:** The tool itself, not how well it's described. `mcp.request(method, params, schema)` sends any other MCP request, such as `skills/get` or `resources/read`. See the [Expectations Guide](./expectations.md) for every matcher, and `mst generate` to record tests from real calls.
+**What you're testing:** The tool itself, not how well it's described. `mcp.request(method, params, schema)` sends any other MCP request, such as `skills/get` or `resources/read`. See the [Assertions Guide](./assertions.md) for every matcher, and `mst generate` to record tests from real calls.
 
 ---
 
@@ -107,15 +107,15 @@ The most important thing to understand about LLM host evals is that a single run
 
 Suppose you run your eval once and the LLM calls the right tool. Did you write a good tool description? Maybe. Did you get lucky? Also maybe. You can't tell from one sample.
 
-**Accuracy** is the fraction of runs where every assertion passed:
+**Pass rate** is the fraction of trials where every assertion passed:
 
 ```
-accuracy = passing_iterations / total_iterations
+pass_rate = passing_trials / total_trials
 ```
 
-If your eval runs 10 times and the LLM picks the right tool 8 times, your accuracy is 0.8 (80%).
+If your eval runs 10 times and the LLM picks the right tool 8 times, your pass rate is 0.8 (80%).
 
-**AccuracyThreshold** is the minimum accuracy needed to consider the eval "passed":
+**`passThreshold`** is the minimum pass rate needed to consider the eval "passed":
 
 ```json
 "passThreshold": 0.8
@@ -297,7 +297,7 @@ This case only passes if: the LLM called `search`, made between 1 and 5 tool cal
 
 ---
 
-## How to Think About Accuracy Thresholds
+## How to Think About Pass Thresholds
 
 `passThreshold` is not a number to pick arbitrarily. It's a decision about acceptable failure rates.
 
@@ -321,20 +321,20 @@ If your description is genuinely good, you should comfortably exceed this thresh
 When your eval runs, the reporter shows:
 
 ```
-PASS  llm-search-phrasing-a  (accuracy: 90%)  — 9/10 trials passed
-PASS  llm-people-search     (accuracy: 100%) — 10/10 trials passed
-FAIL  llm-meeting-lookup       (accuracy: 60%)  — 6/10 trials passed  ← needs work
+PASS  llm-search-phrasing-a  (pass rate: 90%)  — 9/10 trials passed
+PASS  llm-people-search     (pass rate: 100%) — 10/10 trials passed
+FAIL  llm-meeting-lookup       (pass rate: 60%)  — 6/10 trials passed  ← needs work
 ```
 
-**100% accuracy:** Your tool description is crystal clear for this input phrasing. The LLM always knows exactly what to do.
+**100% pass rate:** Your tool description is crystal clear for this input phrasing. The LLM always knows exactly what to do.
 
-**80–90% accuracy:** The description works well. Small wording improvements might push it higher, but it's production-ready.
+**80–90% pass rate:** The description works well. Small wording improvements might push it higher, but it's production-ready.
 
-**60–79% accuracy:** The description is ambiguous or competing with other tool descriptions. Worth investigating — look at which trials failed and what tools the LLM called instead.
+**60–79% pass rate:** The description is ambiguous or competing with other tool descriptions. Worth investigating — look at which trials failed and what tools the LLM called instead.
 
 **Below 60%:** The LLM is guessing. Something is fundamentally unclear about the tool's purpose, or a competing tool is attracting these queries.
 
-**How to debug low accuracy:** Look at the trial-level breakdown in the detail view. If the LLM consistently picks `search` when you wanted `people_search`, the distinction between the two tools isn't clear enough in their descriptions.
+**How to debug a low pass rate:** Look at the trial-level breakdown in the detail view. If the LLM consistently picks `search` when you wanted `people_search`, the distinction between the two tools isn't clear enough in their descriptions.
 
 ---
 
@@ -376,11 +376,11 @@ Compare the pass rates per case. To decide whether a variant really is better (p
 
 **Ignoring selectivity.** "Will `search` be called for this input?" is only half the question. "Will `people_search` be called _instead of_ `search` when it should be?" is equally important.
 
-**Setting threshold to 1.0 everywhere.** If your CI requires 100% accuracy, any LLM non-determinism will cause flaky failures. Reserve 1.0 for cases you're confident are genuinely always correct. Use 0.8–0.9 for most cases.
+**Setting threshold to 1.0 everywhere.** If your CI requires a 100% pass rate, any LLM non-determinism will cause flaky failures. Reserve 1.0 for cases you're confident are genuinely always correct. Use 0.8–0.9 for most cases.
 
 **Not varying phrasings.** One input per tool gives you one data point. If that input happens to use a keyword from the tool description, you may be measuring nothing.
 
-**Forgetting that accuracy reflects your description, not the LLM.** When accuracy is low, the instinct is to blame the model. Usually the issue is the tool description. Try rewriting the description before switching models.
+**Forgetting that the pass rate reflects your description, not the LLM.** When the pass rate is low, the instinct is to blame the model. Usually the issue is the tool description. Try rewriting the description before switching models.
 
 ---
 
@@ -456,8 +456,8 @@ test('my evals', async ({ mcp }, testInfo) => {
   );
 
   // result.passed / result.total gives overall pass rate
-  // result.caseResults[i].accuracy gives per-case accuracy
-  // result.caseResults[i].iterationResults gives per-run breakdown
+  // result.caseResults[i].passRate gives the share of trials that passed
+  // result.caseResults[i].trialResults gives each trial
 });
 ```
 
@@ -831,8 +831,8 @@ To compare two MCP servers, or two configurations of one, run the same dataset a
 
 2. **Add 2–3 eval cases per tool** — Focus on the inputs most representative of how real users actually ask questions.
 
-3. **Set `defaultTrials: 10`** — This is the minimum for meaningful accuracy numbers.
+3. **Set `defaultTrials: 10`** — This is the minimum for meaningful pass rates.
 
-4. **Review failing cases first** — Low accuracy on a tool is a signal to rewrite its description, not to lower the threshold.
+4. **Review failing cases first** — A low pass rate on a tool is a signal to rewrite its description, not to lower the threshold.
 
 5. **Run before and after description changes** — Evals earn their keep as a diff tool. The output of a single run is interesting. The delta between two runs is actionable.

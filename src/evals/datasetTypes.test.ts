@@ -9,7 +9,7 @@ import {
 import { ZodError } from 'zod';
 
 describe('datasetTypes', () => {
-  it('retains event identity and named judge policy in serialized expectations', () => {
+  it('retains event identity and named judge policy in serialized assertions', () => {
     const input = {
       id: 'identity',
       input: 'research',
@@ -176,7 +176,7 @@ describe('datasetTypes', () => {
       expect(() => validateEvalDataset(raw)).toThrow();
     });
 
-    it('should reject accuracyThreshold outside 0-1', () => {
+    it('should reject passThreshold outside 0-1', () => {
       const raw = {
         name: 'test',
         cases: [{ id: 'bad', input: 'add', passThreshold: 1.5 }],

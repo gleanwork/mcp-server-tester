@@ -5,7 +5,7 @@
  */
 
 import { validateToolCalls } from '../validators/toolCalls.js';
-import type { ToolCallExpectation } from '../validators/toolCalls.js';
+import type { ToolCallAssertion } from '../validators/toolCalls.js';
 
 /**
  * Creates the toHaveToolCalls matcher function
@@ -13,9 +13,9 @@ import type { ToolCallExpectation } from '../validators/toolCalls.js';
 export function toHaveToolCalls(
   this: { isNot: boolean },
   received: unknown,
-  expectation: ToolCallExpectation
+  assertion: ToolCallAssertion
 ) {
-  const result = validateToolCalls(received, expectation);
+  const result = validateToolCalls(received, assertion);
 
   return {
     pass: result.pass,

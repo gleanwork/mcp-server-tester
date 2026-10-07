@@ -38,7 +38,7 @@ npm run format:check        # Check formatting
 - **`skills/`** - Agent Skills over MCP (SEP-2640): wire schemas, entry validation, and a skills client (the SDK has no skills API yet)
 - **`auth/`** - OAuth 2.1 with PKCE (`PlaywrightOAuthClientProvider`) and static token utilities
 - **`assertions/`** - Unified assertion architecture (see below)
-- **`evals/`** - Dataset types, loader, and runner (uses validators internally). `evals/caseExecution.ts` is the only place a case runs: every path (the `mst` client on a Playwright test's connection, a suite's client, a custom `executeCase`) returns a typed `CaseExecution` (`host` or `failed`), and the runner reads its fields instead of inspecting `response`. `caseExecution.golden.test.ts` pins the resulting `EvalCaseResult` for every path. `evals/expectations.ts` grades a case's `assertions` block: it decides once whether the evidence can support tool-call assertions (`toolEvidenceGap`), builds the `toolCallTrace` view, resolves judge settings (including suite eval config judges), then calls the validators. Desktop hosts (Cowork, ChatGPT) run batches through `evals/desktopBatch.ts` (lease, per-case reset policy, native-session ledger, redaction, cleanup) and share one MCP readiness rule (`isMcpServerReady` in `evals/mcpReadiness.ts`); a new desktop host supplies only prepare, one case, reset and dispose. macOS Swift controllers build and run through `evals/nativeHelper.ts`, which owns their environment policy
+- **`evals/`** - Dataset types, loader, and runner (uses validators internally). `evals/caseExecution.ts` is the only place a case runs: every path (the `mst` client on a Playwright test's connection, a suite's client, a custom `executeCase`) returns a typed `CaseExecution` (`host` or `failed`), and the runner reads its fields instead of inspecting `response`. `caseExecution.golden.test.ts` pins the resulting `EvalCaseResult` for every path. `evals/grading.ts` grades a case's `assertions` block: it decides once whether the evidence can support tool-call assertions (`toolEvidenceGap`), builds the `toolCallTrace` view, resolves judge settings (including suite eval config judges), then calls the validators. Desktop hosts (Cowork, ChatGPT) run batches through `evals/desktopBatch.ts` (lease, per-case reset policy, native-session ledger, redaction, cleanup) and share one MCP readiness rule (`isMcpServerReady` in `evals/mcpReadiness.ts`); a new desktop host supplies only prepare, one case, reset and dispose. macOS Swift controllers build and run through `evals/nativeHelper.ts`, which owns their environment policy
 - **`llm/`** - `resolveLLMEndpoint()`: the one place MST's own LLM calls (SDK host, judges) get their base URL and credential, including gateway bearer tokens and `MST_LLM_AUTH_COMMAND`. New LLM consumers resolve through it rather than reading `*_API_KEY` themselves. See `docs/llm-gateways.md`
 - **`judge/`** - LLM-as-a-judge via Claude Agent SDK
 - **`plugins/`** - ESLint-style plugins: the `Plugin` shape and validation (`plugin.ts`), the process-wide extension table keyed by `namespace/name`, where each kind's lookup (next to its built-ins) adds them under bare names (`extensions.ts`), and the loader (`loadPlugins.ts`). `evals/suitePlugins.ts` loads a suite's plugins and checks it only references namespaces it loads. Domain terms are in `CONTEXT.md`; decisions in `docs/adr/`
@@ -84,7 +84,7 @@ if (!result.pass) console.log(result.message);
 | `toPassToolJudge(rubric, options?)`      | Response passes LLM-as-judge evaluation |
 | `toHaveToolResponseSize(options)`        | Response size is within bounds          |
 | `toSatisfyToolPredicate(fn, desc?)`      | Response satisfies custom predicate     |
-| `toHaveToolCalls(expectation)`           | The client called the expected tools    |
+| `toHaveToolCalls(assertion)`             | The client called the expected tools    |
 | `toHaveToolCallCount(options)`           | The client made N tool calls            |
 
 ### Playwright Fixtures (`src/fixtures/mcp.ts`)
@@ -116,7 +116,7 @@ The subpaths are ESM only and share chunks with the ESM root (tsup `splitting`),
 
 ### Trials and Pass Rate
 
-Eval cases can be run multiple times to compute accuracy (win rate):
+Eval cases can run several trials to compute a pass rate:
 
 ```json
 {
@@ -132,8 +132,8 @@ Eval cases can be run multiple times to compute accuracy (win rate):
 }
 ```
 
-- `trials`: Run case N times (default: 1). When > 1, result has `assertionPassRate` (0-1) and `iterationResults[]`
-- `passThreshold`: Minimum accuracy to pass (default: 1.0)
+- `trials`: Run case N times (default: 1). When > 1, result has `passRate` (0-1) and `trialResults[]`
+- `passThreshold`: Minimum share of trials that must pass (default: 1.0)
 
 ### Concurrency
 
@@ -159,7 +159,7 @@ await runEvalDataset(
 }
 ```
 
-Validators: `validateToolCalls(response, expectation)`, `validateToolCallCount(response, options)`
+Validators: `validateToolCalls(response, assertion)`, `validateToolCallCount(response, options)`
 
 ### Tests and Evals
 
@@ -185,7 +185,7 @@ Update snapshots: `npx playwright test --update-snapshots`
 
 Provider packages are dynamically imported — install `ai` + `@ai-sdk/<provider>` (e.g., `npm install ai @ai-sdk/anthropic`).
 
-Multiple trials: set `trials` and `passThreshold` on an eval case. The runner executes N times, computes `assertionPassRate` (0–1), and passes if rate >= threshold.
+Multiple trials: set `trials` and `passThreshold` on an eval case. The runner executes N times, computes `passRate` (0–1), and passes if rate >= threshold.
 
 ### Fixture Composition
 
@@ -227,18 +227,18 @@ Custom judges come from plugins: a plugin's `judges: { completeness: { schema, e
 
 Types are organized in a canonical hierarchy to prevent duplication and drift:
 
-- **`src/types/index.ts`** - Core shared types: `AuthType`, `ResultSource`, `ExpectationType`, `EvalExpectationResult`
+- **`src/types/index.ts`** - Core shared types: `AuthType`, `ResultSource`, `GraderType`, `GraderScore`
 - **`src/types/reporter.ts`** - Reporter-specific types: `MCPEvalRunData`, `EvalCaseResult`, `MCPConformanceResultData`, `MCPServerCapabilitiesData`
 
 ### Import Guidelines
 
 1. **For new code**: Always import from `src/types/` first
 2. **For existing modules**: Import from their own domain, which re-exports from canonical source
-3. **Never define** `AuthType`, `ExpectationType`, or other core types inline - import them
+3. **Never define** `AuthType`, `GraderType`, or other core types inline - import them
 
 ```typescript
 // Correct: Import from canonical source
-import type { AuthType, ExpectationType } from '../types/index.js';
+import type { AuthType, GraderType } from '../types/index.js';
 
 // Correct: Import from domain module (which re-exports)
 import type { EvalCaseResult } from '../types/reporter.js';
@@ -298,11 +298,11 @@ Add it to the kind's built-in record, keyed by its bare name: `builtinDatasetSou
 2. Export from `src/assertions/validators/index.ts`
 3. Add unit tests in `src/assertions/validators/validators.test.ts`, or in `myValidator.test.ts` when they need their own fixtures (as `snapshot.test.ts`, `judge.test.ts` and `toolCalls.test.ts` do)
 
-### New Expectation Type (eval datasets)
+### New Assertion Type (eval datasets)
 
 1. Write the validator (see above)
-2. Add the field to `EvalAssertionsSchema` in `src/evals/datasetTypes.ts`, and its result key to `ExpectationType` in `src/types/index.ts`
-3. Add one branch to `evaluateExpectations()` in `src/evals/expectations.ts`, and a case to `src/evals/expectations.test.ts`
+2. Add the field to `EvalAssertionsSchema` in `src/evals/datasetTypes.ts`, and its result key to `GraderType` in `src/types/index.ts`
+3. Add one branch to `gradeTrial()` in `src/evals/grading.ts`, and a case to `src/evals/grading.test.ts`
 
 ### New Matcher
 

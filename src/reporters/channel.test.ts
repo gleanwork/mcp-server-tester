@@ -46,7 +46,7 @@ const caseResult: EvalCaseResult = {
   toolName: 'get_weather',
   source: 'eval',
   pass: true,
-  expectations: {},
+  scores: {},
   durationMs: 5,
 };
 
@@ -346,7 +346,7 @@ describe('MCPReporter reading the channel', () => {
   it('rejects eval results the report would fail to aggregate', async () => {
     const run = await report([
       {
-        title: 'no expectations',
+        title: 'no assertions',
         attachments: [
           {
             name: 'mcp-test-results',

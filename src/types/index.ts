@@ -100,9 +100,9 @@ export interface MCPProtocolInfo {
 export type ResultSource = 'eval' | 'test';
 
 /**
- * Known expectation types supported by the framework
+ * Grader types: the assertion types and `passesJudge`
  */
-export type ExpectationType =
+export type GraderType =
   | 'exact'
   | 'schema'
   | 'textContains'
@@ -115,11 +115,11 @@ export type ExpectationType =
   | 'toolCallCount';
 
 /**
- * Result of an expectation check
+ * A grader's score for one trial
  */
-export interface EvalExpectationResult {
+export interface GraderScore {
   /**
-   * Whether the expectation passed
+   * Whether the grader passed
    */
   pass: boolean;
 
@@ -129,28 +129,28 @@ export interface EvalExpectationResult {
   details?: string;
 
   /**
-   * Judge score (0-1). Populated for passesJudge expectations.
+   * Judge score (0-1). Populated for passesJudge assertions.
    */
   score?: number;
 
   /**
-   * Judge reasoning. Populated for passesJudge expectations.
+   * Judge reasoning. Populated for passesJudge assertions.
    */
   reasoning?: string;
 
   /**
    * Judge name — rubric name (e.g. 'correctness') or custom judge name.
-   * Populated for passesJudge expectations.
+   * Populated for passesJudge assertions.
    */
   judgeName?: string;
 
   /**
-   * Judge provider used. Populated for passesJudge expectations.
+   * Judge provider used. Populated for passesJudge assertions.
    */
   judgeProvider?: string;
 
   /**
-   * Judge model used. Populated for passesJudge expectations.
+   * Judge model used. Populated for passesJudge assertions.
    */
   judgeModel?: string;
 
@@ -171,20 +171,18 @@ export interface EvalExpectationResult {
    * Each entry contains the individual judge's result.
    * Only populated when passesJudge is an array with 2+ entries.
    */
-  judgeResults?: EvalExpectationResult[];
+  judgeResults?: GraderScore[];
 }
 
 /**
- * Map of expectation type to result
+ * Map of grader type to score
  */
-export type ExpectationResultMap = Partial<
-  Record<ExpectationType, EvalExpectationResult>
->;
+export type GraderScoreMap = Partial<Record<GraderType, GraderScore>>;
 
 /**
- * Breakdown of expectation types used in a run
+ * How many cases used each grader type in a run
  */
-export type ExpectationBreakdown = Partial<Record<ExpectationType, number>>;
+export type GraderBreakdown = Partial<Record<GraderType, number>>;
 
 export {
   SnapshotSanitizers,
@@ -204,7 +202,7 @@ export {
   type SnapshotValidatorOptions,
   type TextValidatorOptions,
   type ToolCallCountOptions,
-  type ToolCallExpectation,
+  type ToolCallAssertion,
   type ToolPredicate,
   type ValidationResult,
 } from './assertions.js';
@@ -318,7 +316,7 @@ export type {
   EvalCaseRequest,
   EvalCaseResult,
   EvalRunMetadata,
-  IterationResult,
+  TrialResult,
   MCPEvalRunData,
   MCPEvalHistoricalSummary,
   MCPConformanceResultData,

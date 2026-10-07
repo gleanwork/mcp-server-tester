@@ -1,6 +1,6 @@
 /**
  * The one way a judge runs, for every caller (matchers, validators, eval
- * expectations and suite eval configs) and every judge (the built-in `rubric`
+ * assertions and suite eval configs) and every judge (the built-in `rubric`
  * judge and plugin judges).
  */
 import type { ValidationResult } from '../assertions/validators/types.js';
@@ -10,10 +10,10 @@ import { getJudge } from './builtinJudges.js';
 import {
   buildJudgeCase,
   buildJudgeTrial,
-  checkJudgeVerdict,
+  checkJudgeScore,
   missingRequirement,
   sumJudgeUsage,
-  type CheckedJudgeVerdict,
+  type CheckedJudgeScore,
   type JudgeCaseSource,
   type JudgeInput,
 } from './judgeContract.js';
@@ -77,10 +77,10 @@ const HIGH_VARIANCE = 0.2;
  * path in its `requires` is missing, it is not called and the result is
  * skipped. A rep that skips ends the run as skipped. Otherwise the mean score
  * is reported; pass is the mean score against the threshold, or the majority
- * of the reps' verdicts when the judge returns its own `pass`.
+ * of the reps' pass/fail when the judge returns its own `pass`.
  *
  * A judge that can't score (unknown judge, bad options, a throw, an invalid
- * verdict) is an error, marked with `details.error`, not a verdict.
+ * score) is an error, marked with `details.error`, not a score.
  */
 export async function evaluateJudge(
   response: unknown,
@@ -103,11 +103,11 @@ export async function evaluateJudge(
     if (missing !== undefined)
       return judgeSkipped(label, `no ${missing}`, undefined);
 
-    const verdicts: CheckedJudgeVerdict[] = [];
+    const repScores: CheckedJudgeScore[] = [];
     for (let i = 0; i < reps; i++) {
-      let verdict: CheckedJudgeVerdict;
+      let repScore: CheckedJudgeScore;
       try {
-        verdict = checkJudgeVerdict(
+        repScore = checkJudgeScore(
           await judge.evaluate(input, options),
           threshold
         );
@@ -117,27 +117,27 @@ export async function evaluateJudge(
           label
         );
       }
-      verdicts.push(verdict);
-      if (verdict.skipped)
+      repScores.push(repScore);
+      if (repScore.skipped)
         return judgeSkipped(
           label,
-          verdict.reasoning,
-          sumJudgeUsage(verdicts.map((v) => v.usage))
+          repScore.reasoning,
+          sumJudgeUsage(repScores.map((v) => v.usage))
         );
     }
-    const last = verdicts.at(-1);
+    const last = repScores.at(-1);
     if (!last)
       return judgeError(`Judge "${label}" error: no scores collected`, label);
 
-    const scores = verdicts.map((v) => v.score);
+    const scores = repScores.map((v) => v.score);
     const score = mean(scores);
     // A judge that decides pass/fail itself wins by majority over the reps;
     // otherwise the mean score meets the threshold or not.
-    const ownVerdict = verdicts.some((v) => v.judgePass !== undefined);
-    const passed = ownVerdict
-      ? verdicts.filter((v) => v.pass).length * 2 > verdicts.length
+    const judgeDecides = repScores.some((v) => v.judgePass !== undefined);
+    const passed = judgeDecides
+      ? repScores.filter((v) => v.pass).length * 2 > repScores.length
       : score >= threshold;
-    const usage = sumJudgeUsage(verdicts.map((v) => v.usage));
+    const usage = sumJudgeUsage(repScores.map((v) => v.usage));
     const spread = reps > 1 ? scoreSpread(scores, score) : undefined;
     const repNote =
       reps > 1
@@ -219,7 +219,7 @@ function scoreSpread(scores: number[], mean: number): number {
 }
 
 /**
- * A failure that is not a verdict: the judge couldn't score the response.
+ * A failure that is not a score: the judge couldn't score the response.
  * `details.error` lets matchers fail it with or without `.not`.
  */
 export function judgeError(

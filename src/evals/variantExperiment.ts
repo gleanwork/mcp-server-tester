@@ -47,7 +47,7 @@ import type {
  *   this is the share of cases that passed.
  * - `toolF1` / `toolPrecision` / `toolRecall`: dataset-level tool-call metrics,
  *   only available when the dataset has client cases with `toolsTriggered`
- *   expectations. Choosing one of these when no such cases exist throws a clear
+ *   assertions. Choosing one of these when no such cases exist throws a clear
  *   error rather than silently ranking on nothing.
  */
 export type ExperimentMetric =

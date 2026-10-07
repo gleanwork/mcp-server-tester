@@ -170,7 +170,7 @@ describe('runEvalCase', () => {
       const result = await runEvalCase(evalCase, context);
 
       expect(result.pass).toBe(true);
-      expect(result.expectations.textContains?.pass).toBe(true);
+      expect(result.scores.textContains?.pass).toBe(true);
     });
 
     it('should fail when expect.containsText does not match', async () => {
@@ -185,7 +185,7 @@ describe('runEvalCase', () => {
       const result = await runEvalCase(evalCase, context);
 
       expect(result.pass).toBe(false);
-      expect(result.expectations.textContains?.pass).toBe(false);
+      expect(result.scores.textContains?.pass).toBe(false);
     });
 
     it('should validate expect.matchesPattern', async () => {
@@ -200,10 +200,10 @@ describe('runEvalCase', () => {
       const result = await runEvalCase(evalCase, context);
 
       expect(result.pass).toBe(true);
-      expect(result.expectations.regex?.pass).toBe(true);
+      expect(result.scores.regex?.pass).toBe(true);
     });
 
-    it('should validate multiple expectations together', async () => {
+    it('should validate multiple assertions together', async () => {
       const mcp = createMockMCP({
         content: [{ type: 'text', text: 'Order #12345 confirmed for John' }],
       });
@@ -218,11 +218,11 @@ describe('runEvalCase', () => {
       const result = await runEvalCase(evalCase, context);
 
       expect(result.pass).toBe(true);
-      expect(result.expectations.textContains?.pass).toBe(true);
-      expect(result.expectations.regex?.pass).toBe(true);
+      expect(result.scores.textContains?.pass).toBe(true);
+      expect(result.scores.regex?.pass).toBe(true);
     });
 
-    it('should fail if any expectation fails', async () => {
+    it('should fail if any assertion fails', async () => {
       const mcp = createMockMCP({
         content: [{ type: 'text', text: 'Order confirmed' }],
       });
@@ -237,8 +237,8 @@ describe('runEvalCase', () => {
       const result = await runEvalCase(evalCase, context);
 
       expect(result.pass).toBe(false);
-      expect(result.expectations.textContains?.pass).toBe(true);
-      expect(result.expectations.regex?.pass).toBe(false);
+      expect(result.scores.textContains?.pass).toBe(true);
+      expect(result.scores.regex?.pass).toBe(false);
     });
 
     it('should track duration', async () => {
@@ -270,7 +270,7 @@ describe('runEvalCase', () => {
       expect(result.datasetName).toBe('single-case');
     });
 
-    it('should not run expectations when tool call errors', async () => {
+    it('should not run assertions when tool call errors', async () => {
       const mcp = createMockMCP();
       (mcp.callTool as ReturnType<typeof vi.fn>).mockRejectedValue(
         new Error('Tool failed')
@@ -285,8 +285,8 @@ describe('runEvalCase', () => {
 
       expect(result.error).toContain('Tool failed');
       expect(result.pass).toBe(false);
-      // Expectations should be empty since tool call failed
-      expect(result.expectations.textContains).toBeUndefined();
+      // Scores should be empty since tool call failed
+      expect(result.scores.textContains).toBeUndefined();
     });
   });
 
@@ -336,8 +336,8 @@ describe('runEvalCase', () => {
   });
 });
 
-describe('multi-iteration cases', () => {
-  it('should compute accuracy when iterations > 1', async () => {
+describe('multi-trial cases', () => {
+  it('should compute the pass rate when trials > 1', async () => {
     let callCount = 0;
     const mcp = createMockMCP();
     // Alternate pass/fail: callTool returns 'hello' on odd calls, 'nope' on even
@@ -359,20 +359,20 @@ describe('multi-iteration cases', () => {
 
     const result = await runEvalCase(evalCase, createContext(mcp));
 
-    expect(result.assertionPassRate).toBeDefined();
-    expect(result.assertionPassRate).toBe(0.5); // 2 of 4 pass
+    expect(result.passRate).toBeDefined();
+    expect(result.passRate).toBe(0.5); // 2 of 4 pass
     expect(result.pass).toBe(true); // 0.5 >= 0.5 threshold
-    expect(result.iterationResults).toHaveLength(4);
-    expect(result.iterationResults?.filter((r) => r.pass)).toHaveLength(2);
+    expect(result.trialResults).toHaveLength(4);
+    expect(result.trialResults?.filter((r) => r.pass)).toHaveLength(2);
     // Wilson CI: 2/4 passes should produce a wide interval within [0,1]
-    expect(result.assertionPassRateCI).toBeDefined();
-    expect(result.assertionPassRateCI!.lower).toBeGreaterThanOrEqual(0);
-    expect(result.assertionPassRateCI!.upper).toBeLessThanOrEqual(1);
-    expect(result.assertionPassRateCI!.lower).toBeLessThan(0.5);
-    expect(result.assertionPassRateCI!.upper).toBeGreaterThan(0.5);
+    expect(result.passRateCI).toBeDefined();
+    expect(result.passRateCI!.lower).toBeGreaterThanOrEqual(0);
+    expect(result.passRateCI!.upper).toBeLessThanOrEqual(1);
+    expect(result.passRateCI!.lower).toBeLessThan(0.5);
+    expect(result.passRateCI!.upper).toBeGreaterThan(0.5);
   });
 
-  it('should fail when accuracy is below threshold', async () => {
+  it('should fail when the pass rate is below the threshold', async () => {
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'wrong' }] });
     const evalCase = createEvalCase({
       trials: 3,
@@ -381,19 +381,19 @@ describe('multi-iteration cases', () => {
     });
 
     const result = await runEvalCase(evalCase, createContext(mcp));
-    expect(result.assertionPassRate).toBe(0);
+    expect(result.passRate).toBe(0);
     expect(result.pass).toBe(false);
   });
 
-  it('should not set assertionPassRate for single-iteration cases', async () => {
+  it('should not set passRate for single-trial cases', async () => {
     const evalCase = createEvalCase();
     const result = await runEvalCase(evalCase, createContext());
-    expect(result.assertionPassRate).toBeUndefined();
-    expect(result.assertionPassRateCI).toBeUndefined();
-    expect(result.iterationResults).toBeUndefined();
+    expect(result.passRate).toBeUndefined();
+    expect(result.passRateCI).toBeUndefined();
+    expect(result.trialResults).toBeUndefined();
   });
 
-  it('excludes infrastructure errors from accuracy computation', async () => {
+  it('excludes infrastructure errors from the pass rate computation', async () => {
     let callCount = 0;
     const mcp = createMockMCP();
     // First call throws ECONNRESET (infrastructure error), second passes
@@ -418,13 +418,13 @@ describe('multi-iteration cases', () => {
     const result = await runEvalCase(evalCase, createContext(mcp));
 
     // The infrastructure error is excluded from the denominator
-    // Only 1 assertion result (the second iteration), and it passes → assertionPassRate = 1.0
+    // Only 1 assertion result (the second trial), and it passes → passRate = 1.0
     expect(result.infrastructureErrorCount).toBe(1);
-    expect(result.assertionPassRate).toBe(1.0);
+    expect(result.passRate).toBe(1.0);
     expect(result.pass).toBe(true);
-    expect(result.iterationResults).toHaveLength(2);
-    expect(result.iterationResults?.[0]?.isInfrastructureError).toBe(true);
-    expect(result.iterationResults?.[1]?.isInfrastructureError).toBe(false);
+    expect(result.trialResults).toHaveLength(2);
+    expect(result.trialResults?.[0]?.isInfrastructureError).toBe(true);
+    expect(result.trialResults?.[1]?.isInfrastructureError).toBe(false);
   });
 
   it('classifies prompt-too-long errors as infrastructure errors', async () => {
@@ -446,10 +446,10 @@ describe('multi-iteration cases', () => {
 
     const result = await runEvalCase(evalCase, createContext(mcp));
 
-    expect(result.iterationResults?.[0]?.isInfrastructureError).toBe(true);
-    expect(result.iterationResults?.[1]?.isInfrastructureError).toBe(false);
+    expect(result.trialResults?.[0]?.isInfrastructureError).toBe(true);
+    expect(result.trialResults?.[1]?.isInfrastructureError).toBe(false);
     // Excluded from denominator: 1 assertion result, 1 pass
-    expect(result.assertionPassRate).toBe(1.0);
+    expect(result.passRate).toBe(1.0);
     expect(result.infrastructureErrorCount).toBe(1);
   });
 });
@@ -462,7 +462,7 @@ describe('judgeReps behavior in eval runner', () => {
     // Instead, we verify the end-to-end behavior: when judgeReps=2 and scores average
     // to >= threshold, the case passes; without the loop it would fail.
 
-    // Use a simple containsText expectation as a proxy: judgeReps only affects
+    // Use a simple containsText assertion as a proxy: judgeReps only affects
     // judge assertions. Here we verify that judgeReps is accepted without error.
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const evalCase = createEvalCase({
@@ -514,8 +514,8 @@ describe('defaultJudgeReps', () => {
   });
 });
 
-describe('toolsTriggered and toolCallCount expectations in eval runner', () => {
-  it('populates toolsTriggered expectation result when simulation result contains expected tool', async () => {
+describe('toolsTriggered and toolCallCount assertions in eval runner', () => {
+  it('populates toolsTriggered assertion result when simulation result contains expected tool', async () => {
     // callTool returns an object that itself has the MCPHostSimulationResult shape.
     // After the fix, response = full callTool return value, so isSimulationResult
     // checks the top-level object directly.
@@ -535,8 +535,8 @@ describe('toolsTriggered and toolCallCount expectations in eval runner', () => {
     });
 
     const result = await runEvalCase(evalCase, createContext(mcp));
-    expect(result.expectations.toolsTriggered).toBeDefined();
-    expect(result.expectations.toolsTriggered?.pass).toBe(true);
+    expect(result.scores.toolsTriggered).toBeDefined();
+    expect(result.scores.toolsTriggered?.pass).toBe(true);
   });
 
   it('fails toolsTriggered when required tool was not called', async () => {
@@ -556,7 +556,7 @@ describe('toolsTriggered and toolCallCount expectations in eval runner', () => {
     });
 
     const result = await runEvalCase(evalCase, createContext(mcp));
-    expect(result.expectations.toolsTriggered?.pass).toBe(false);
+    expect(result.scores.toolsTriggered?.pass).toBe(false);
     expect(result.pass).toBe(false);
   });
 
@@ -570,8 +570,8 @@ describe('toolsTriggered and toolCallCount expectations in eval runner', () => {
     });
 
     const result = await runEvalCase(evalCase, createContext(mcp));
-    expect(result.expectations.toolsTriggered?.pass).toBe(false);
-    expect(result.expectations.toolsTriggered?.details).toContain(
+    expect(result.scores.toolsTriggered?.pass).toBe(false);
+    expect(result.scores.toolsTriggered?.details).toContain(
       "Expected tool 'search' to be called"
     );
   });
@@ -592,7 +592,7 @@ describe('toolsTriggered and toolCallCount expectations in eval runner', () => {
     });
 
     const result = await runEvalCase(evalCase, createContext(mcp));
-    expect(result.expectations.toolCallCount?.pass).toBe(true);
+    expect(result.scores.toolCallCount?.pass).toBe(true);
   });
 });
 
@@ -607,7 +607,7 @@ describe('runEvalDataset defaultTrials', () => {
       createEvalCase({
         id: 'llm-case',
         input: 'test scenario',
-        // no iterations field — should use defaultTrials
+        // no trials field — should use defaultTrials
       }),
     ]);
 
@@ -621,15 +621,15 @@ describe('runEvalDataset defaultTrials', () => {
       createContext(mcp)
     );
     expect(executeCase).toHaveBeenCalledTimes(3);
-    expect(result.caseResults[0]!.iterationResults).toHaveLength(3);
-    expect(result.caseResults[0]!.assertionPassRate).toBe(1);
+    expect(result.caseResults[0]!.trialResults).toHaveLength(3);
+    expect(result.caseResults[0]!.passRate).toBe(1);
   });
 
-  it('case-level iterations override defaultTrials', async () => {
+  it('case-level trials override defaultTrials', async () => {
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const dataset = createDataset([
       createEvalCase({
-        id: 'direct-with-iterations',
+        id: 'direct-with-trials',
         trials: 3,
         passThreshold: 1.0,
         assertions: { containsText: 'hello' },
@@ -642,7 +642,7 @@ describe('runEvalDataset defaultTrials', () => {
     );
 
     // Case-level trials: 3 wins over defaultTrials: 10
-    expect(result.caseResults[0]!.iterationResults).toHaveLength(3);
+    expect(result.caseResults[0]!.trialResults).toHaveLength(3);
   });
 });
 
@@ -1110,7 +1110,7 @@ describe('saveResultsTo and baselineResultsFrom', () => {
               datasetName: dataset.name,
               toolName: 'test-tool',
               source: 'eval',
-              expectations: {},
+              scores: {},
               durationMs: 1,
             },
           ],
@@ -1317,9 +1317,9 @@ describe('saveResultsTo and baselineResultsFrom', () => {
   });
 });
 
-describe('evals guide iteration count guardrail warnings', () => {
+describe('evals guide trial count guardrail warnings', () => {
   // The warning is emitted before any case runs; don't run the real
-  // simulator (and its provider import) for every iteration.
+  // simulator (and its provider import) for every trial.
   async function notExecuted() {
     return { kind: 'failed' as const, response: undefined, error: 'not run' };
   }
@@ -1417,7 +1417,7 @@ describe('evals guide iteration count guardrail warnings', () => {
       createEvalCase({
         id: 'default-raised-case',
         input: 'find something',
-        // No explicit iterations — defaultTrials will apply
+        // No explicit trials — defaultTrials will apply
       }),
     ]);
 
@@ -1578,10 +1578,10 @@ describe('multi-judge passesJudge', () => {
 
     const result = await runEvalCaseMocked(evalCase, createContext(mcp));
 
-    expect(result.expectations.judge).toBeDefined();
-    expect(result.expectations.judge!.pass).toBe(true);
-    expect(result.expectations.judge!.judgeResults).toHaveLength(2);
-    expect(result.expectations.judge!.details).toContain('2/2');
+    expect(result.scores.judge).toBeDefined();
+    expect(result.scores.judge!.pass).toBe(true);
+    expect(result.scores.judge!.judgeResults).toHaveLength(2);
+    expect(result.scores.judge!.details).toContain('2/2');
 
     vi.restoreAllMocks();
   });
@@ -1622,11 +1622,11 @@ describe('multi-judge passesJudge', () => {
 
     const result = await runEvalCaseMocked(evalCase, createContext(mcp));
 
-    expect(result.expectations.judge!.pass).toBe(false);
-    expect(result.expectations.judge!.judgeResults).toHaveLength(2);
-    expect(result.expectations.judge!.judgeResults![0]!.pass).toBe(true);
-    expect(result.expectations.judge!.judgeResults![1]!.pass).toBe(false);
-    expect(result.expectations.judge!.details).toContain('1/2');
+    expect(result.scores.judge!.pass).toBe(false);
+    expect(result.scores.judge!.judgeResults).toHaveLength(2);
+    expect(result.scores.judge!.judgeResults![0]!.pass).toBe(true);
+    expect(result.scores.judge!.judgeResults![1]!.pass).toBe(false);
+    expect(result.scores.judge!.details).toContain('1/2');
     expect(result.pass).toBe(false);
 
     vi.restoreAllMocks();
@@ -1650,9 +1650,9 @@ describe('multi-judge passesJudge', () => {
 
     const result = await runEvalCaseMocked(evalCase, createContext(mcp));
 
-    expect(result.expectations.judge!.pass).toBe(true);
-    expect(result.expectations.judge!.judgeResults).toBeUndefined();
-    expect(result.expectations.judge!.score).toBe(0.85);
+    expect(result.scores.judge!.pass).toBe(true);
+    expect(result.scores.judge!.judgeResults).toBeUndefined();
+    expect(result.scores.judge!.score).toBe(0.85);
 
     vi.restoreAllMocks();
   });
@@ -1681,7 +1681,7 @@ describe('multi-judge passesJudge', () => {
 
     const result = await runEvalCaseMocked(evalCase, createContext(mcp));
 
-    const judgeResults = result.expectations.judge!.judgeResults!;
+    const judgeResults = result.scores.judge!.judgeResults!;
     expect(judgeResults[0]!.judgeName).toBe('correctness');
     expect(judgeResults[1]!.judgeName).toBe('domain-relevance');
 

@@ -30,7 +30,11 @@ async function getMockClient() {
   return (mod as any).default;
 }
 
-const VERDICT = JSON.stringify({ pass: true, score: 1.0, reasoning: 'OK' });
+const JUDGE_OUTPUT = JSON.stringify({
+  pass: true,
+  score: 1.0,
+  reasoning: 'OK',
+});
 
 function makeResponse(text: string, inputTokens = 100, outputTokens = 50) {
   return {
@@ -76,7 +80,7 @@ describe('anthropicJudge', () => {
   });
 
   it('sends the API key alone, so the SDK does not add a bearer header', async () => {
-    (await getMockCreate()).mockResolvedValue(makeResponse(VERDICT));
+    (await getMockCreate()).mockResolvedValue(makeResponse(JUDGE_OUTPUT));
 
     await createAnthropicJudge({}).evaluate('candidate', null, 'rubric');
 
@@ -90,7 +94,7 @@ describe('anthropicJudge', () => {
   it('sends ANTHROPIC_AUTH_TOKEN as a bearer token to the base URL override', async () => {
     process.env.ANTHROPIC_AUTH_TOKEN = 'gateway-token';
     process.env.ANTHROPIC_BASE_URL = 'https://gateway.example/anthropic';
-    (await getMockCreate()).mockResolvedValue(makeResponse(VERDICT));
+    (await getMockCreate()).mockResolvedValue(makeResponse(JUDGE_OUTPUT));
 
     await createAnthropicJudge({}).evaluate('candidate', null, 'rubric');
 
@@ -105,7 +109,7 @@ describe('anthropicJudge', () => {
     delete process.env.ANTHROPIC_API_KEY;
     process.env.ANTHROPIC_BASE_URL = 'https://gateway.example/anthropic';
     process.env.MST_LLM_AUTH_COMMAND = `node -e "process.stdout.write('judge-command-token')"`;
-    (await getMockCreate()).mockResolvedValue(makeResponse(VERDICT));
+    (await getMockCreate()).mockResolvedValue(makeResponse(JUDGE_OUTPUT));
 
     await createAnthropicJudge({}).evaluate('candidate', null, 'rubric');
 

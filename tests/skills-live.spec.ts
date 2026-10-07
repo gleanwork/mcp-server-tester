@@ -14,7 +14,7 @@ import type { EvalDataset } from '../src/evals/datasetTypes.js';
 const enabled =
   process.env.MST_LIVE_SKILLS_EVAL === '1' && !!process.env.ANTHROPIC_API_KEY;
 
-const ITERATIONS = Number(process.env.MST_LIVE_SKILLS_ITERATIONS ?? '5');
+const TRIALS = Number(process.env.MST_LIVE_SKILLS_TRIALS ?? '5');
 
 test.describe('Live skills eval (opt-in)', () => {
   test.skip(!enabled, 'set MST_LIVE_SKILLS_EVAL=1 and ANTHROPIC_API_KEY');
@@ -34,7 +34,7 @@ test.describe('Live skills eval (opt-in)', () => {
           id: 'weather-report',
           input:
             'Write me a short weather report for London and Paris, following any house style you have for weather reports.',
-          trials: ITERATIONS,
+          trials: TRIALS,
           passThreshold: 0.6,
           assertions: {
             toolsTriggered: {
@@ -80,7 +80,7 @@ test.describe('Live skills eval (opt-in)', () => {
     });
     console.log('Skills comparison:', JSON.stringify(summary, null, 2));
 
-    // The strict skill-first expectation needs the model to load the skill:
+    // The strict skill-first assertion needs the model to load the skill:
     // impossible with skills off, and preloads are not model loads.
     expect(summary.off?.passed_rate).toBe(0);
     expect(summary.preload?.passed_rate).toBe(0);

@@ -14,7 +14,7 @@ Use MCP host simulation when you need to verify:
 For most regression testing, use tool tests (`mcp.callTool()` with the matchers). Reserve MCP host simulation for:
 
 - New tool description development and tuning
-- Evaluating tool calling accuracy across inputs
+- Measuring how reliably the model picks the right tools across inputs
 - Pre-release validation of tool schemas
 
 ## Supported Providers
@@ -77,11 +77,11 @@ test('LLM triggers the right tool', async ({ mcp }, testInfo) => {
 
 ## Trials and Pass Rate
 
-LLM responses are non-deterministic. Run each case multiple times and measure accuracy:
+LLM responses are non-deterministic. Run several trials of each case and measure the pass rate:
 
 ```json snippet=snippets/mcp-host-trials.json
 {
-  "id": "search-accuracy",
+  "id": "search-reliability",
   "input": "Find documents about MCP testing",
   "trials": 5,
   "passThreshold": 0.8,
@@ -98,7 +98,7 @@ LLM responses are non-deterministic. Run each case multiple times and measure ac
 }
 ```
 
-The case passes if `search` was triggered in at least 4 of 5 runs (80% accuracy).
+The case passes if `search` was triggered in at least 4 of 5 runs (a pass rate of 80%).
 
 ## Tool Call Assertions
 
@@ -174,15 +174,15 @@ configured overall host deadline still includes startup and is not extended.
 Before accepting a run, MST checks Claude's `system/init` event for every
 configured MCP server. Missing, pending, failed, or unauthenticated servers cause
 a host infrastructure failure. The actual tool catalog is recorded; a connected
-resource-only server may legitimately expose no tools. Tool expectations remain
+resource-only server may legitimately expose no tools. Tool assertions remain
 the responsibility of the eval assertions. MST does not alter the input,
 model, tool search, tool exposure, or assertions.
 
 `clientDiagnostics.claudeStartup` records server names/statuses, tool names,
 model/version, and startup timing. `clientDiagnostics.failureKind` distinguishes
-startup, timeout, process, and output failures. Each `iterationResults` entry
+startup, timeout, process, and output failures. Each `trialResults` entry
 retains its own diagnostics, and infrastructure failures keep the framework's
-existing separate accuracy accounting. Credentials, MCP config bodies, and raw
+existing separate pass-rate accounting. Credentials, MCP config bodies, and raw
 stderr are not included in diagnostics. Existing result redaction still applies
 to retained conversation/tool traces.
 
@@ -280,7 +280,7 @@ console.log(`Improved cases: ${comparison.improvedCases.length}`);
 
 `toolOverrides.tools` (in an eval config, a variant's `tools`) is keyed by a tool's name on its server; with several servers, `server.tool` picks one (a qualified key wins over a bare one). An override can replace a tool's `name`, `description` and `inputSchema`. A key that matches no tool or several is an error, and so is a rename that isn't a valid tool name or takes a name another tool on the same server has.
 
-A renamed tool's calls reach the original tool and are recorded under its original name, so a dataset's expectations read the same in every variant; the trace's `rawName` keeps the name the model used:
+A renamed tool's calls reach the original tool and are recorded under its original name, so a dataset's assertions read the same in every variant; the trace's `rawName` keeps the name the model used:
 
 ```json
 {
@@ -439,7 +439,7 @@ A recommendation should mean the evidence supports it, so `runVariantExperiment`
 **What these checks can't tell you:**
 
 - "No clear breakage" means the tests found none, not that none happened. With 5 trials per case, one case breaking outright can be caught on its own only when there are at most 12 regression cases; the report says when your run is too small. Breakage spread across cases is caught by the group test.
-- With one trial per case, only large changes show up as clear. In simulation, a variant that fixed most failing cases was recommended 30% of the time with 1 trial per case, 87% with 5 and 97% with 10. Use `defaultLlmIterations` or per-case `iterations` of 5 or more.
+- With one trial per case, only large changes show up as clear. In simulation, a variant that fixed most failing cases was recommended 30% of the time with 1 trial per case, 87% with 5 and 97% with 10. Use `defaultLlmIterations` or per-case `trials` of 5 or more.
 - Cases are treated as independent. Near-duplicate prompts count as separate evidence and make results look surer than they are. Miller recommends clustered standard errors for grouped questions; they aren't supported yet.
 
 Seeded simulations in `src/evals/variantComparison.test.ts` pin these error rates. A variant identical to the baseline is called clearly better less than 5% of the time and broken less than 7.5% of the time, while a real improvement is still found more than 75% of the time.

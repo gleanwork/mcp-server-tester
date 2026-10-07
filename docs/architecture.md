@@ -29,9 +29,9 @@ This separation is intentional: validators can be used programmatically without 
 
 The dataset-driven evaluation engine. Key files:
 
-- `datasetTypes.ts` — Zod schemas for `EvalDataset`, `EvalCase`, and all expectation block types.
+- `datasetTypes.ts` — Zod schemas for `EvalDataset`, `EvalCase`, and all assertion block types.
 - `datasetLoader.ts` — reads and validates JSON datasets from disk.
-- `evalRunner.ts` — `runEvalDataset()` iterates cases, calls the MCP server (or the LLM host simulator), validates results against each case's expectation block, and returns `EvalRunnerResult`. Supports multi-trial accuracy tracking and configurable concurrency.
+- `evalRunner.ts` — `runEvalDataset()` iterates cases, calls the MCP server (or the LLM host simulator), validates results against each case's assertion block, and returns `EvalRunnerResult`. Supports multi-trial accuracy tracking and configurable concurrency.
 - `baseline.ts` — saves and loads pass/fail baselines for tracking regressions across runs.
 - `resultStore.ts` — persists eval runs, reporter runs, and comparison artifacts to local files or GCS using a shared JSON envelope.
 - `mcpHost/` — LLM host simulation (see data flow below).
@@ -67,7 +67,7 @@ The CLI, installed as `mst` and as `mcp-server-tester` (the same binary). `index
 
 Canonical shared type definitions, kept here to prevent drift between modules:
 
-- `index.ts` — core types: `AuthType`, `ResultSource`, `ExpectationType`, `EvalExpectationResult`.
+- `index.ts` — core types: `AuthType`, `ResultSource`, `GraderType`, `GraderScore`.
 - `reporter.ts` — reporter-specific types: `MCPEvalRunData`, `EvalCaseResult`, `MCPConformanceResultData`.
 
 `src/reporters/ui-src/types.ts` re-exports all types directly from the canonical backend sources (`src/types/index.ts` and `src/types/reporter.ts`) — no manual sync is required.
@@ -106,7 +106,7 @@ EvalCase { input, assertions.toolsTriggered }, run { client: "mst", model }
 MCPHostSimulationResult (.toolCallsMade[], .success, .finalText)
    ↓  validators/: validateToolCalls(), validateToolCallCount()
 ValidationResult
-   ↓  evalRunner.ts: rolled into EvalCaseResult (with optional accuracy over N trials)
+   ↓  evalRunner.ts: rolled into EvalCaseResult (with a pass rate over N trials)
 EvalRunnerResult
 ```
 

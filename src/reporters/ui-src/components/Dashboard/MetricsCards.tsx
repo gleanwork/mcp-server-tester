@@ -5,7 +5,7 @@ import { rateColorClass } from '../../utils';
 
 interface MetricsCardsProps {
   results: EvalCaseResult[];
-  /** Controls which supplemental cards appear. 'overview' = totals only; 'eval' = accuracy + tool + regressions; 'test' = totals only */
+  /** Controls which supplemental cards appear. 'overview' = totals only; 'eval' = pass rate + tool + regressions; 'test' = totals only */
   mode?: 'overview' | 'eval' | 'test';
 }
 
@@ -14,8 +14,8 @@ interface MetricsSummary {
   passed: number;
   failed: number;
   passRate: number;
-  avgAccuracy?: number; // mean accuracy across multi-iteration cases
-  totalIterations?: number; // total iterations run
+  avgPassRate?: number; // mean trial pass rate across multi-trial cases
+  totalTrials?: number; // total trials run
 }
 
 function computeMetrics(results: EvalCaseResult[]): MetricsSummary {
@@ -23,19 +23,15 @@ function computeMetrics(results: EvalCaseResult[]): MetricsSummary {
   const failed = results.filter((r) => !r.pass).length;
   const total = results.length;
 
-  const multiIterResults = results.filter(
-    (r) => r.assertionPassRate !== undefined
-  );
-  const avgAccuracy =
-    multiIterResults.length > 0
-      ? multiIterResults.reduce(
-          (sum, r) => sum + (r.assertionPassRate ?? 0),
-          0
-        ) / multiIterResults.length
+  const multiTrialResults = results.filter((r) => r.passRate !== undefined);
+  const avgPassRate =
+    multiTrialResults.length > 0
+      ? multiTrialResults.reduce((sum, r) => sum + (r.passRate ?? 0), 0) /
+        multiTrialResults.length
       : undefined;
 
-  const totalIterations = results.reduce(
-    (sum, r) => sum + (r.iterationResults?.length ?? 1),
+  const totalTrials = results.reduce(
+    (sum, r) => sum + (r.trialResults?.length ?? 1),
     0
   );
 
@@ -44,8 +40,8 @@ function computeMetrics(results: EvalCaseResult[]): MetricsSummary {
     passed,
     failed,
     passRate: total > 0 ? passed / total : 0,
-    avgAccuracy,
-    totalIterations,
+    avgPassRate,
+    totalTrials,
   };
 }
 
@@ -179,18 +175,18 @@ export function MetricsCards({
       </div>
 
       {/* Eval-specific stats */}
-      {showEvalCards && overall.avgAccuracy !== undefined && (
+      {showEvalCards && overall.avgPassRate !== undefined && (
         <>
           <Divider />
           <div className="flex items-baseline gap-1.5 text-sm">
             <span
-              className={`font-semibold tabular-nums ${rateColorClass(overall.avgAccuracy)}`}
+              className={`font-semibold tabular-nums ${rateColorClass(overall.avgPassRate)}`}
             >
-              {(overall.avgAccuracy * 100).toFixed(1)}%
+              {(overall.avgPassRate * 100).toFixed(1)}%
             </span>
             <span className="text-muted-foreground">avg pass rate</span>
             <span className="text-xs text-muted-foreground">
-              ({overall.totalIterations} iterations)
+              ({overall.totalTrials} trials)
             </span>
           </div>
         </>
@@ -291,25 +287,25 @@ function SourceBreakdownCard({
               {(metrics.passRate * 100).toFixed(1)}%
             </span>
           </div>
-          {metrics.avgAccuracy !== undefined && (
+          {metrics.avgPassRate !== undefined && (
             <div className="flex flex-col items-center">
               <span className="text-xs text-muted-foreground uppercase">
                 Avg Pass Rate
               </span>
               <span
-                className={`font-bold ${rateColorClass(metrics.avgAccuracy)}`}
+                className={`font-bold ${rateColorClass(metrics.avgPassRate)}`}
               >
-                {(metrics.avgAccuracy * 100).toFixed(1)}%
+                {(metrics.avgPassRate * 100).toFixed(1)}%
               </span>
             </div>
           )}
-          {metrics.totalIterations !== undefined &&
-            metrics.totalIterations > metrics.total && (
+          {metrics.totalTrials !== undefined &&
+            metrics.totalTrials > metrics.total && (
               <div className="flex flex-col items-center">
                 <span className="text-xs text-muted-foreground uppercase">
-                  Iterations
+                  Trials
                 </span>
-                <span className="font-bold">{metrics.totalIterations}</span>
+                <span className="font-bold">{metrics.totalTrials}</span>
               </div>
             )}
           <div className="flex flex-col items-center">

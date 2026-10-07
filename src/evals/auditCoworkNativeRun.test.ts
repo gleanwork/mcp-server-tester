@@ -153,7 +153,7 @@ async function fixture(
     clientUsage: JSON.parse(JSON.stringify(trace.usage)) as RecordValue,
     clientTelemetry: JSON.parse(JSON.stringify(telemetry)) as RecordValue,
     traceEvidence: 'structured',
-    expectations: { judge: { pass: true } },
+    scores: { judge: { pass: true } },
   };
   const raw = {
     schemaVersion: 2,
@@ -257,7 +257,7 @@ describe('auditCoworkNativeRun', () => {
   it('keeps failed judge quality separate from verified evidence', async () => {
     const f = await fixture();
     f.saved.pass = false;
-    f.saved.expectations.judge.pass = false;
+    f.saved.scores.judge.pass = false;
     expect(await f.audit()).toMatchObject({
       qualityPassed: false,
       evidencePassed: true,

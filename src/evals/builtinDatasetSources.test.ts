@@ -62,7 +62,7 @@ describe('canonical built-in dataset sources', () => {
           expect(gcs.download).toHaveBeenCalledTimes(1);
         }
       });
-      it('preserves canonical host mode, per-case host, iterations and judges', async () => {
+      it('preserves canonical host mode, per-case host, trials and judges', async () => {
         const case_ = {
           id: 'question',
           input: 'Find policy',

@@ -83,7 +83,7 @@ const PAYLOAD_SCHEMAS = {
       z.looseObject({
         id: z.string(),
         pass: z.boolean(),
-        expectations: z.looseObject({}),
+        scores: z.looseObject({}),
       })
     ),
   }),

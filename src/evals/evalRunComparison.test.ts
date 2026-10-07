@@ -21,7 +21,7 @@ function createCase(id: string, pass: boolean): EvalCaseResult {
     datasetName: 'comparison-test',
     source: 'eval',
     pass,
-    expectations: {},
+    scores: {},
     durationMs: 1,
   };
 }

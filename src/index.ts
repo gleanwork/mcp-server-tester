@@ -42,7 +42,7 @@ export type {
   SnapshotStore,
   SnapshotMatchOptions,
   SnapshotValidatorOptions,
-  ToolCallExpectation,
+  ToolCallAssertion,
   ToolCallCountOptions,
   JudgeValidatorConfig,
   JudgeMatcherOptions,
@@ -55,10 +55,10 @@ export type {
   ProtocolProbeOptions,
   MCPProtocolInfo,
   ResultSource,
-  ExpectationType,
-  EvalExpectationResult,
-  ExpectationBreakdown,
-  ExpectationResultMap,
+  GraderType,
+  GraderScore,
+  GraderBreakdown,
+  GraderScoreMap,
   EvalCase,
   EvalDataset,
   EvalAssertions,
@@ -69,7 +69,7 @@ export type {
   EvalContext,
   EvalCaseResult,
   EvalRunMetadata,
-  IterationResult,
+  TrialResult,
   EvalRunnerResult,
   EvalRunnerOptions,
   EvalCaseOptions,
@@ -176,7 +176,7 @@ export {
   loadEvalDatasetFromObject,
 } from './evals/datasetLoader.js';
 // Types root APIs take or return: plugins and their judges, and the host
-// trace in tool-call expectations and case results.
+// trace in tool-call assertions and case results.
 export type { Plugin, PluginMeta } from './plugins/plugin.js';
 export type { PluginConfig } from './evals/evalConfig.js';
 // For code that calls validators or matchers outside a runner or the fixture.
@@ -186,7 +186,7 @@ export type {
   TraceEvidence,
   Trace,
   JudgeDefinition,
-  JudgeVerdict,
+  JudgeScore,
 } from './evals/evalFrameworkTypes.js';
 export { runEvalDataset, runEvalCase } from './evals/evalRunner.js';
 export type {

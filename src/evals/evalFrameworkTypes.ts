@@ -14,7 +14,7 @@ import type {
 } from './evalConfig.js';
 import type { EvalResultStore } from './resultStore.js';
 import type { EvalRunnerResult } from './evalRunner.js';
-import type { JudgeInput, JudgeVerdict } from '../judge/judgeContract.js';
+import type { JudgeInput, JudgeScore } from '../judge/judgeContract.js';
 
 /** Context provided to a dataset source implementation. */
 export interface DatasetSourceContext {
@@ -89,7 +89,7 @@ export interface TraceEvent {
   results?: Array<{ name: string; server?: string }>;
 }
 
-/** One execution trace. Hosts never return evaluation verdicts. */
+/** One execution trace. Hosts never return evaluation scores. */
 export interface ClientRunResult {
   diagnostics?: ClientDiagnostics;
   finalText: string;
@@ -106,7 +106,7 @@ export interface ClientRunResult {
 /**
  * What a host did in one trial: the `ClientRunResult` it returned, without
  * telemetry and diagnostics, plus the evidence it declared. Case results keep
- * it for host cases (one per iteration). In a suite, every MCP event names its
+ * it for host cases (one per trial). In a suite, every MCP event names its
  * `server` label. Stored results drop `finalText` and event `output`, which
  * can hold data from the server under test.
  */
@@ -153,7 +153,7 @@ export interface ClientDefinition {
   readonly serversPerBatch?: boolean;
   /** The most cases the host can run at once; `concurrency` above it is an error. */
   readonly maxConcurrency?: number;
-  /** Ordered traces for all selected iterations. The framework owns verdicts. */
+  /** Ordered traces for all selected trials. The framework owns scores. */
   runBatch?(
     requests: ClientBatchRequest[],
     context: ClientRunContext
@@ -196,7 +196,7 @@ export interface MetricDefinition {
   ): { key: string; value: unknown } | undefined;
 }
 
-export type { JudgeVerdict } from '../judge/judgeContract.js';
+export type { JudgeScore } from '../judge/judgeContract.js';
 
 /**
  * Public judge extension point. Built-in judges (`rubric`) and plugin judges
@@ -220,7 +220,7 @@ export interface JudgeDefinition {
   evaluate: (
     input: JudgeInput,
     options: Record<string, unknown>
-  ) => Promise<JudgeVerdict>;
+  ) => Promise<JudgeScore>;
 }
 
 /** Public result-store extension point. */

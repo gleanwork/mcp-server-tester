@@ -41,7 +41,7 @@ function responseObject(caseResult: EvalCaseResult): Record<string, unknown> {
     : {};
 }
 
-/** One run of a case: an iteration, or the case itself when it runs once. */
+/** One run of a case: a trial, or the case itself when it runs once. */
 interface Trial {
   pass: boolean;
   trace?: Trace;
@@ -56,19 +56,19 @@ interface Trial {
 
 /**
  * A case's trials: the runs that didn't fail on infrastructure (they are left
- * out, as from accuracy).
+ * out, as from the pass rate).
  */
 function caseTrials(caseResult: EvalCaseResult): Trial[] {
-  if (caseResult.iterationResults?.length) {
-    return caseResult.iterationResults
-      .filter((iteration) => !iteration.isInfrastructureError)
-      .map((iteration) => ({
-        pass: iteration.pass,
-        trace: iteration.trace,
-        usage: iteration.clientUsage,
-        judgeUsage: iteration.judgeUsage,
-        durationMs: iteration.durationMs,
-        error: iteration.error,
+  if (caseResult.trialResults?.length) {
+    return caseResult.trialResults
+      .filter((trial) => !trial.isInfrastructureError)
+      .map((trial) => ({
+        pass: trial.pass,
+        trace: trial.trace,
+        usage: trial.clientUsage,
+        judgeUsage: trial.judgeUsage,
+        durationMs: trial.durationMs,
+        error: trial.error,
         isCase: false,
       }));
   }
@@ -88,7 +88,7 @@ function caseTrials(caseResult: EvalCaseResult): Trial[] {
 
 /**
  * A case's value for a per-trial measurement: the mean over the trials that
- * have one, or null when none does. With equal iterations per case, the mean
+ * have one, or null when none does. With equal trials per case, the mean
  * over cases is the mean over all trials.
  */
 function perTrial(
@@ -204,17 +204,17 @@ export function countTrialToolCalls(results: EvalCaseResult[]): number {
 type SkillLoadRecord = Record<string, unknown>;
 
 /**
- * Skill loads per attempt (one entry per iteration, or one for a single run),
+ * Skill loads per attempt (one entry per trial, or one for a single run),
  * or null when skills were not enabled.
  */
 function skillLoadsPerAttempt(
   caseResult: EvalCaseResult
 ): SkillLoadRecord[][] | null {
-  const iterations = (caseResult.iterationResults ?? [])
-    .map((iteration) => iteration.skillLoads)
+  const trials = (caseResult.trialResults ?? [])
+    .map((trial) => trial.skillLoads)
     .filter((loads): loads is NonNullable<typeof loads> => loads !== undefined);
-  if (iterations.length > 0) {
-    return iterations as unknown as SkillLoadRecord[][];
+  if (trials.length > 0) {
+    return trials as unknown as SkillLoadRecord[][];
   }
   const loads = responseObject(caseResult).skillLoads;
   return Array.isArray(loads) ? [loads as SkillLoadRecord[]] : null;
@@ -284,9 +284,7 @@ function responseText(caseResult: EvalCaseResult): string {
 function allJudgeEntries(
   caseResult: EvalCaseResult
 ): Array<Record<string, unknown>> {
-  const judge = caseResult.expectations?.judge as
-    | Record<string, unknown>
-    | undefined;
+  const judge = caseResult.scores?.judge as Record<string, unknown> | undefined;
   if (!judge) return [];
   const nested = judge.judgeResults;
   if (Array.isArray(nested)) {
@@ -298,7 +296,7 @@ function allJudgeEntries(
   return [judge];
 }
 
-/** Judge results that graded the case. Skipped judges have no verdict or score. */
+/** Judge results that graded the case. Skipped judges have no pass/fail or score. */
 function judgeEntries(
   caseResult: EvalCaseResult
 ): Array<Record<string, unknown>> {
@@ -347,10 +345,10 @@ function judgeScores(caseResult: EvalCaseResult): Record<string, number> {
 function judgePass(caseResult: EvalCaseResult): boolean | null {
   const entries = judgeEntries(caseResult);
   if (entries.length === 0) return null;
-  const verdicts = entries
+  const passes = entries
     .map((entry) => entry.pass)
     .filter((value): value is boolean => typeof value === 'boolean');
-  return verdicts.length > 0 ? verdicts.every(Boolean) : null;
+  return passes.length > 0 ? passes.every(Boolean) : null;
 }
 
 function meanAggregation(
@@ -461,7 +459,7 @@ export const BUILT_IN_METRICS: Readonly<Record<string, MetricDefinition>> =
     judge_score_for: parameterizedJudgeMetric('judge_score_for'),
     passed: metric('binary', (result) => result.pass, rateAggregation),
     // Per case: the share of its trials that passed. The case passes when
-    // that share reaches its accuracy threshold; `trial_pass_rate` keeps it.
+    // that share reaches its pass threshold; `trial_pass_rate` keeps it.
     trial_pass: metric(
       'continuous',
       (result) => perTrial(result, (trial) => trial.pass),
@@ -604,7 +602,7 @@ export const BUILT_IN_METRICS: Readonly<Record<string, MetricDefinition>> =
       (result) => perTrial(result, toolSearchHit),
       fractionRateAggregation
     ),
-    // Per case: the fraction of attempts (iterations) where it held.
+    // Per case: the fraction of attempts (trials) where it held.
     skill_loaded: metric(
       'continuous',
       (result) =>

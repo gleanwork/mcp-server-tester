@@ -59,9 +59,9 @@ function formatCost(value: number): string {
   return `$${value.toFixed(value === 0 ? 2 : 4)}`;
 }
 
-function failedExpectationTypes(result: EvalCaseResult): string[] {
-  return Object.entries(result.expectations ?? {})
-    .filter(([, expectation]) => expectation !== undefined && !expectation.pass)
+function failedGraderTypes(result: EvalCaseResult): string[] {
+  return Object.entries(result.scores ?? {})
+    .filter(([, assertion]) => assertion !== undefined && !assertion.pass)
     .map(([type]) => type);
 }
 
@@ -71,14 +71,14 @@ function failureLabel(result: EvalCaseResult): string | undefined {
   }
 
   if (result.clientMetadata?.failureKind) {
-    return `host: ${result.clientMetadata.failureKind}`;
+    return `client: ${result.clientMetadata.failureKind}`;
   }
 
   if (result.error) {
     return 'execution error';
   }
 
-  const failedAssertions = failedExpectationTypes(result);
+  const failedAssertions = failedGraderTypes(result);
   if (failedAssertions.length > 0) {
     return `assertion: ${failedAssertions.join(', ')}`;
   }
@@ -102,9 +102,9 @@ function ResultRow({
   const showRegressed = result.baselinePass === true && result.pass === false;
   const showFixed = result.baselinePass === false && result.pass === true;
 
-  const iterDots = result.iterationResults ?? [];
-  const cappedDots = iterDots.slice(0, 10);
-  const hasMore = iterDots.length > 10;
+  const trialDots = result.trialResults ?? [];
+  const cappedDots = trialDots.slice(0, 10);
+  const hasMore = trialDots.length > 10;
   const observedToolCallCount = toolCallCount(result);
   const usage = usageRecord(result);
   const inputTokens = numberField(usage, 'inputTokens') ?? 0;
@@ -166,52 +166,52 @@ function ResultRow({
         </span>
       )}
 
-      {result.assertionPassRate !== undefined && (
+      {result.passRate !== undefined && (
         <span
           className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold shrink-0 ${
-            result.assertionPassRate >= 0.8
+            result.passRate >= 0.8
               ? 'bg-green-500/15 text-green-700 dark:text-green-400'
-              : result.assertionPassRate >= 0.5
+              : result.passRate >= 0.5
                 ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
                 : 'bg-red-500/15 text-red-700 dark:text-red-400'
           }`}
           title={
-            result.assertionPassRateCI
-              ? `${result.iterationResults?.filter((r) => r.pass).length ?? '?'}/${result.iterationResults?.length ?? '?'} iterations passed — 95% CI [${(result.assertionPassRateCI.lower * 100).toFixed(0)}%, ${(result.assertionPassRateCI.upper * 100).toFixed(0)}%]`
-              : `${result.iterationResults?.filter((r) => r.pass).length ?? '?'}/${result.iterationResults?.length ?? '?'} iterations passed`
+            result.passRateCI
+              ? `${result.trialResults?.filter((r) => r.pass).length ?? '?'}/${result.trialResults?.length ?? '?'} trials passed — 95% CI [${(result.passRateCI.lower * 100).toFixed(0)}%, ${(result.passRateCI.upper * 100).toFixed(0)}%]`
+              : `${result.trialResults?.filter((r) => r.pass).length ?? '?'}/${result.trialResults?.length ?? '?'} trials passed`
           }
         >
-          {(result.assertionPassRate * 100).toFixed(0)}%
-          {result.assertionPassRateCI && (
+          {(result.passRate * 100).toFixed(0)}%
+          {result.passRateCI && (
             <span className="opacity-60 font-normal">
-              {` ±${Math.round(((result.assertionPassRateCI.upper - result.assertionPassRateCI.lower) / 2) * 100)}%`}
+              {` ±${Math.round(((result.passRateCI.upper - result.passRateCI.lower) / 2) * 100)}%`}
             </span>
           )}
           <span className="opacity-60 font-normal">
-            {result.iterationResults
-              ? ` ${result.iterationResults.filter((r) => r.pass).length}/${result.iterationResults.length}`
+            {result.trialResults
+              ? ` ${result.trialResults.filter((r) => r.pass).length}/${result.trialResults.length}`
               : ''}
           </span>
         </span>
       )}
 
-      {iterDots.length > 0 && (
+      {trialDots.length > 0 && (
         <span
           className="inline-flex items-center gap-0.5 shrink-0 font-mono text-sm"
-          title={`${iterDots.length} iterations`}
+          title={`${trialDots.length} trials`}
         >
-          {cappedDots.map((iter, i) => (
+          {cappedDots.map((trial, i) => (
             <span
               key={i}
               className={
-                iter.isInfrastructureError
+                trial.isInfrastructureError
                   ? 'text-gray-400'
-                  : iter.pass
+                  : trial.pass
                     ? 'text-green-500'
                     : 'text-red-500'
               }
             >
-              {iter.isInfrastructureError ? '○' : '●'}
+              {trial.isInfrastructureError ? '○' : '●'}
             </span>
           ))}
           {hasMore && <span className="text-muted-foreground text-xs">+</span>}
@@ -239,7 +239,7 @@ function ResultRow({
         <>
           <span
             className="inline-flex items-center px-2 py-0.5 rounded text-xs shrink-0 bg-teal-500/15 text-teal-700 dark:text-teal-300"
-            title={`External host: ${result.clientMetadata.driverSlug}`}
+            title={`Client driver: ${result.clientMetadata.driverSlug}`}
           >
             {result.clientMetadata.driver.provider}/
             {result.clientMetadata.driver.product}
@@ -268,7 +268,7 @@ function ResultRow({
           </span>
           <span
             className="inline-flex items-center px-2 py-0.5 rounded text-xs shrink-0 bg-muted text-muted-foreground"
-            title="Observed tool calls in the normalized host trace"
+            title="Observed tool calls in the normalized client trace"
           >
             {observedToolCallCount} tool
             {observedToolCallCount === 1 ? '' : 's'}
@@ -276,7 +276,7 @@ function ResultRow({
           {totalTokens > 0 && (
             <span
               className="inline-flex items-center px-2 py-0.5 rounded text-xs shrink-0 bg-muted text-muted-foreground"
-              title="Input + output tokens reported by the host trace"
+              title="Input + output tokens reported by the client trace"
             >
               {totalTokens.toLocaleString()} tokens
             </span>
@@ -284,7 +284,7 @@ function ResultRow({
           {totalCostUsd !== undefined && (
             <span
               className="inline-flex items-center px-2 py-0.5 rounded text-xs shrink-0 bg-muted text-muted-foreground"
-              title="Cost reported by the host trace"
+              title="Cost reported by the client trace"
             >
               {formatCost(totalCostUsd)}
             </span>
@@ -294,17 +294,16 @@ function ResultRow({
 
       <span className="shrink-0">
         {isEval ? (
-          <BarChart3
-            size={16}
-            className="text-blue-600 dark:text-blue-400"
-            title="Eval Dataset"
-          />
+          <span title="Eval case">
+            <BarChart3 size={16} className="text-blue-600 dark:text-blue-400" />
+          </span>
         ) : (
-          <FlaskConical
-            size={16}
-            className="text-purple-600 dark:text-purple-400"
-            title="Test Suite"
-          />
+          <span title="Playwright test">
+            <FlaskConical
+              size={16}
+              className="text-purple-600 dark:text-purple-400"
+            />
+          </span>
         )}
       </span>
 
@@ -411,7 +410,7 @@ export function ResultsTable({
         return (
           r.id.toLowerCase().includes(lowerQuery) ||
           r.datasetName.toLowerCase().includes(lowerQuery) ||
-          searchIndex[index].includes(lowerQuery)
+          searchIndex[index]?.includes(lowerQuery)
         );
       });
     }
@@ -650,10 +649,10 @@ export function ResultsTable({
       </div>
 
       {filteredResults.some(
-        (r) => r.iterationResults && r.iterationResults.length > 0
+        (r) => r.trialResults && r.trialResults.length > 0
       ) && (
         <div className="flex items-center gap-3 px-4 py-1.5 bg-muted/30 border-b text-xs text-muted-foreground">
-          <span>Iterations:</span>
+          <span>Trials:</span>
           <span className="flex items-center gap-1">
             <span className="text-green-500">●</span> pass
           </span>

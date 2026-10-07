@@ -1,4 +1,3 @@
-import React from 'react';
 import type { VariantToolChange } from '../../types';
 
 type Piece = { kind: 'same' | 'removed' | 'added'; text: string };

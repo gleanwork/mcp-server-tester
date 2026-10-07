@@ -23,6 +23,6 @@ test('my evals', async ({ mcp }, testInfo) => {
   );
 
   // result.passed / result.total gives overall pass rate
-  // result.caseResults[i].accuracy gives per-case accuracy
-  // result.caseResults[i].iterationResults gives per-run breakdown
+  // result.caseResults[i].passRate gives the share of trials that passed
+  // result.caseResults[i].trialResults gives each trial
 });

@@ -136,4 +136,4 @@ The schema is hand-maintained alongside the TypeScript types in:
 - `src/evals/datasetTypes.ts` — Zod schemas and TypeScript interfaces
 - `src/evals/mcpHost/mcpHostTypes.ts` — the `LLMProvider` union
 
-If you add a new provider, a new expectation field, or change an existing type, update `schema/eval-dataset.schema.json` to match.
+If you add a new provider, a new assertion field, or change an existing type, update `schema/eval-dataset.schema.json` to match.

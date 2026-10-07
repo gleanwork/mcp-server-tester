@@ -26,10 +26,7 @@ import {
   type ToolSurface,
 } from './toolSurface.js';
 import type { Tool } from '@modelcontextprotocol/client';
-import {
-  evaluateExpectations,
-  type ExpectationOutcome,
-} from './expectations.js';
+import { gradeTrial, type GradingOutcome } from './grading.js';
 import type {
   MCPProtocolInfo,
   SkillLoad,
@@ -38,7 +35,7 @@ import type {
 import type {
   EvalCaseResult,
   EvalCaseRequest,
-  IterationResult,
+  TrialResult,
   EvalRunMetadata,
 } from '../types/reporter.js';
 import { saveBaseline, loadBaseline } from './baseline.js';
@@ -83,7 +80,7 @@ export interface ToolMetadataOverride {
   /**
    * Replacement tool name shown to MCP hosts. Calls to it reach the original
    * tool and are recorded under the original name, so a dataset's
-   * expectations read the same in every variant; the trace's `rawName` keeps the
+   * assertions read the same in every variant; the trace's `rawName` keeps the
    * name the model used.
    */
   name?: string;
@@ -174,14 +171,14 @@ export interface EvalRunnerResult {
 
   /**
    * Average tool precision across all client cases that have a
-   * `toolsTriggered` expectation (precision = fraction of called tools
+   * `toolsTriggered` assertion (precision = fraction of called tools
    * that were expected). Only present when at least one such case ran.
    */
   datasetToolPrecision?: number;
 
   /**
    * Average tool recall across all client cases that have a
-   * `toolsTriggered` expectation (recall = fraction of required tools
+   * `toolsTriggered` assertion (recall = fraction of required tools
    * that were actually called). Only present when at least one such case ran.
    */
   datasetToolRecall?: number;
@@ -257,7 +254,7 @@ export interface EvalRunnerOptions {
 
   /**
    * Optional case executor, replacing the fixture. Returns how the case ran;
-   * the runner still owns all verdicts.
+   * the runner still owns all scores.
    */
   executeCase?: (evalCase: EvalCase) => Promise<CaseExecution>;
 
@@ -309,7 +306,7 @@ export interface EvalRunnerOptions {
   /**
    * Default number of judge evaluations for cases that do not specify
    * `judgeReps` explicitly. Applies to any case with a `passesJudge`
-   * expectation. Per-case `judgeReps` overrides this.
+   * assertion. Per-case `judgeReps` overrides this.
    *
    * @default 1 (single judge run)
    */
@@ -413,7 +410,7 @@ export interface EvalCaseOptions {
   /** Plugins whose extensions (for example `acme/completeness` judges) the case uses. */
   plugins?: readonly Plugin[];
   toolMap?: Record<string, string[]>;
-  /** Case executor called once per iteration; assertions remain runner-owned. */
+  /** Case executor called once per trial; assertions remain runner-owned. */
   executeCase?: (evalCase: EvalCase) => Promise<CaseExecution>;
   /**
    * Dataset name for the result (defaults to 'single-case')
@@ -494,10 +491,8 @@ function mapToolNames(
   };
 }
 
-/** Skill loads to keep per iteration (responses are not kept). */
-function iterationSkillLoads(
-  response: unknown
-): Pick<IterationResult, 'skillLoads'> {
+/** Skill loads to keep per trial (responses are not kept). */
+function trialSkillLoads(response: unknown): Pick<TrialResult, 'skillLoads'> {
   const loads = (response as { skillLoads?: unknown } | null | undefined)
     ?.skillLoads;
   return Array.isArray(loads) ? { skillLoads: loads as SkillLoad[] } : {};
@@ -528,17 +523,15 @@ function storedProtocolMetadata(
 }
 
 /**
- * Determines if a case passed based on error and expectation results
+ * Whether a trial passed: no error, and every grader passed.
  */
 function didCasePass(
   error: string | undefined,
-  expectations: EvalCaseResult['expectations']
+  scores: EvalCaseResult['scores']
 ): boolean {
   return (
     !error &&
-    Object.values(expectations).every(
-      (result) => result === undefined || result.pass
-    )
+    Object.values(scores).every((result) => result === undefined || result.pass)
   );
 }
 
@@ -639,8 +632,8 @@ function normalizeEvidence(
 }
 
 /**
- * Runs a single iteration of an eval case (the atomic unit of work).
- * Extracted from runEvalCase to support multi-iteration accuracy loops.
+ * Runs a single trial of an eval case (the atomic unit of work).
+ * Extracted from runEvalCase to support multi-trial pass rate loops.
  */
 /**
  * The trace a host case result keeps: the execution's (or one derived from
@@ -663,7 +656,7 @@ function caseTrace(
   };
 }
 
-async function runSingleIteration(
+async function runTrial(
   evalCase: EvalCase,
   context: EvalContext,
   options: EvalCaseOptions
@@ -700,9 +693,9 @@ async function runSingleIteration(
       : undefined);
   const clientMetadata = host?.clientMetadata ?? hostResponse?.clientMetadata;
 
-  let outcome: ExpectationOutcome = { expectations: {} };
+  let outcome: GradingOutcome = { scores: {} };
   if (!error && evalCase.assertions) {
-    outcome = await evaluateExpectations(
+    outcome = await gradeTrial(
       { ...evalCase, assertions: evalCase.assertions },
       {
         response: hostResponse
@@ -716,7 +709,7 @@ async function runSingleIteration(
   }
 
   const clientUsage = host?.usage ?? hostResponse?.usage;
-  const judgeUsage = caseJudgeUsage(outcome.expectations.judge);
+  const judgeUsage = caseJudgeUsage(outcome.scores.judge);
   const clientDiagnostics = host?.diagnostics ?? hostResponse?.diagnostics;
 
   // Build result - use test context for authType and project (Playwright is source of truth)
@@ -724,15 +717,15 @@ async function runSingleIteration(
     id: evalCase.id,
     datasetName: options.datasetName ?? 'single-case',
     source: 'eval',
-    pass: didCasePass(error, outcome.expectations),
+    pass: didCasePass(error, outcome.scores),
     request: buildRequest(evalCase, options),
     response,
     error,
-    expectations: outcome.expectations,
+    scores: outcome.scores,
     authType: context.mcp?.authType,
     project: context.mcp?.project,
     // Only pre-executed traces need extra time. Live execution is already
-    // included in this iteration's wall clock.
+    // included in this trial's wall clock.
     durationMs:
       Date.now() - startTime + (execution.preExecutionDurationMs ?? 0),
     tags: evalCase.tags,
@@ -751,7 +744,7 @@ async function runSingleIteration(
 
 /**
  * Runs a single eval case and returns the result.
- * When `evalCase.iterations > 1`, runs the case N times and returns accuracy.
+ * When `evalCase.trials > 1`, runs the case N times and returns the pass rate.
  *
  * @param evalCase - The eval case to run
  * @param context - Context containing mcp, testInfo, expect
@@ -776,24 +769,24 @@ export async function runEvalCase(
 ): Promise<EvalCaseResult> {
   rejectRenamedOptions(options, RENAMED_RUN_OPTIONS, 'runEvalCase');
   if (options.plugins) installPlugins(options.plugins);
-  const iterations = evalCase.trials ?? 1;
+  const trials = evalCase.trials ?? 1;
 
-  if (iterations === 1) {
-    return runSingleIteration(evalCase, context, options);
+  if (trials === 1) {
+    return runTrial(evalCase, context, options);
   }
 
-  // Multi-iteration: run N times and compute accuracy
-  const iterationResults: IterationResult[] = [];
+  // Multi-trial: run N times and compute the pass rate
+  const trialResults: TrialResult[] = [];
   let lastResult: EvalCaseResult | null = null;
 
-  for (let i = 0; i < iterations; i++) {
+  for (let i = 0; i < trials; i++) {
     try {
-      const result = await runSingleIteration(evalCase, context, options);
+      const result = await runTrial(evalCase, context, options);
       lastResult = result;
       // Check whether the tool call itself failed due to infrastructure (the
       // error is surfaced as result.error since executeEvalCase swallows throws)
       const infraError = isInfrastructureFailure(result);
-      iterationResults.push({
+      trialResults.push({
         pass: result.pass,
         durationMs: result.durationMs,
         error: result.error,
@@ -810,12 +803,12 @@ export async function runEvalCase(
         }),
         clientTelemetry: result.clientTelemetry,
         clientMetadata: result.clientMetadata,
-        ...iterationSkillLoads(result.response),
+        ...trialSkillLoads(result.response),
       });
     } catch (err) {
-      // runSingleIteration should not throw, but guard defensively
+      // runTrial should not throw, but guard defensively
       const errorMessage = err instanceof Error ? err.message : String(err);
-      iterationResults.push({
+      trialResults.push({
         pass: false,
         durationMs: 0,
         error: errorMessage,
@@ -824,18 +817,16 @@ export async function runEvalCase(
     }
   }
 
-  const infraErrors = iterationResults.filter((r) => r.isInfrastructureError);
-  const assertionResults = iterationResults.filter(
-    (r) => !r.isInfrastructureError
-  );
+  const infraErrors = trialResults.filter((r) => r.isInfrastructureError);
+  const assertionResults = trialResults.filter((r) => !r.isInfrastructureError);
   const passCount = assertionResults.filter((r) => r.pass).length;
-  const assertionPassRate =
+  const passRate =
     assertionResults.length > 0 ? passCount / assertionResults.length : 0;
-  const infrastructureErrorRate = infraErrors.length / iterations;
+  const infrastructureErrorRate = infraErrors.length / trials;
   const threshold = evalCase.passThreshold ?? 1.0;
 
-  // Fall back to a synthetic result if all iterations threw infrastructure
-  // errors. Each iteration's trace is in iterationResults; none is the case's.
+  // Fall back to a synthetic result if all trials threw infrastructure
+  // errors. Each trial's trace is in trialResults; none is the case's.
   const { trace: _lastTrace, ...lastWithoutTrace } = lastResult ?? {};
   const baseResult: EvalCaseResult = lastResult
     ? (lastWithoutTrace as EvalCaseResult)
@@ -844,8 +835,8 @@ export async function runEvalCase(
         datasetName: options.datasetName ?? 'single-case',
         source: 'eval',
         pass: false,
-        error: iterationResults[0]?.error,
-        expectations: {},
+        error: trialResults[0]?.error,
+        scores: {},
         authType: context.mcp?.authType,
         project: context.mcp?.project,
         durationMs: 0,
@@ -853,22 +844,22 @@ export async function runEvalCase(
         request: buildRequest(evalCase, options),
       };
 
-  const totalClientUsage = iterationResults.reduce(
+  const totalClientUsage = trialResults.reduce(
     (acc, r) => sumUsage(acc, r.clientUsage),
     undefined as UsageMetrics | undefined
   );
 
   return {
     ...baseResult,
-    pass: assertionPassRate >= threshold,
-    assertionPassRate,
-    assertionPassRateCI: wilsonCI(passCount, assertionResults.length),
+    pass: passRate >= threshold,
+    passRate: passRate,
+    passRateCI: wilsonCI(passCount, assertionResults.length),
     infrastructureErrorRate,
-    iterationResults,
+    trialResults: trialResults,
     infrastructureErrorCount: infraErrors.length,
-    durationMs: iterationResults.reduce((sum, r) => sum + r.durationMs, 0),
+    durationMs: trialResults.reduce((sum, r) => sum + r.durationMs, 0),
     clientUsage: totalClientUsage,
-    judgeUsage: sumJudgeUsage(iterationResults.map((r) => r.judgeUsage)),
+    judgeUsage: sumJudgeUsage(trialResults.map((r) => r.judgeUsage)),
     clientTelemetry: undefined,
   };
 }
@@ -965,7 +956,7 @@ async function getGitHash(): Promise<string | undefined> {
 // ponytail: warn once per process, not per call — the message is identical and
 // runVariantExperiment / scripted loops call this many times.
 let warnedNoTestInfo = false;
-const warnedLowIterations = new Set<string>();
+const warnedLowTrials = new Set<string>();
 
 export async function runEvalDataset(
   options: EvalRunnerOptions,
@@ -1006,7 +997,7 @@ export async function runEvalDataset(
 
   // Preflight cost warning: estimate the number of LLM judge API calls this run will make
   const estimatedJudgeCalls = casesToRun.reduce((sum, c) => {
-    const effectiveIterations = c.trials ?? defaultTrials ?? 1;
+    const effectiveTrials = c.trials ?? defaultTrials ?? 1;
     if (c.assertions?.passesJudge == null) return sum;
     const judges = Array.isArray(c.assertions.passesJudge)
       ? c.assertions.passesJudge
@@ -1015,7 +1006,7 @@ export async function runEvalDataset(
       (r, j) => r + (j.reps ?? c.judgeReps ?? defaultJudgeReps ?? 1),
       0
     );
-    return sum + effectiveIterations * totalReps;
+    return sum + effectiveTrials * totalReps;
   }, 0);
 
   if (estimatedJudgeCalls > 50) {
@@ -1042,17 +1033,17 @@ export async function runEvalDataset(
     // guide's minimum. One trial (the default) is a valid smoke test, so the
     // warning is only for a count chosen too small to be reliable.
     {
-      const effectiveIterations = withTrialDefaults.trials ?? 1;
+      const effectiveTrials = withTrialDefaults.trials ?? 1;
       // Once per case and count: a suite runs the same case in every variant.
-      const warning = `${evalCase.id}\u0000${effectiveIterations}`;
+      const warning = `${evalCase.id}\u0000${effectiveTrials}`;
       if (
-        effectiveIterations > 1 &&
-        effectiveIterations < 10 &&
-        !warnedLowIterations.has(warning)
+        effectiveTrials > 1 &&
+        effectiveTrials < 10 &&
+        !warnedLowTrials.has(warning)
       ) {
-        warnedLowIterations.add(warning);
+        warnedLowTrials.add(warning);
         console.warn(
-          `[mcp-server-tester] Eval case "${evalCase.id}": running ${effectiveIterations} trials ` +
+          `[mcp-server-tester] Eval case "${evalCase.id}": running ${effectiveTrials} trials ` +
             `may not be statistically reliable. Consider 10+ trials for pass rates you can trust.`
         );
       }

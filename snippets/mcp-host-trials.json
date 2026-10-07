@@ -1,5 +1,5 @@
 {
-  "id": "search-accuracy",
+  "id": "search-reliability",
   "input": "Find documents about MCP testing",
   "trials": 5,
   "passThreshold": 0.8,

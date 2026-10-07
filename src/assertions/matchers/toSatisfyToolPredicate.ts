@@ -54,7 +54,7 @@ export async function toSatisfyToolPredicate(
     predicateDescription
   );
   // A crash is not a "false": fail in both directions. Returning the
-  // failing verdict for either direction keeps Playwright's formatting.
+  // failing result for either direction keeps Playwright's formatting.
   if (result.details?.error !== undefined)
     return { pass: this.isNot, message: () => result.message };
   return {

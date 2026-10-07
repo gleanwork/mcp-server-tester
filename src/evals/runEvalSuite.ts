@@ -44,7 +44,7 @@ import {
 import { runEvalDataset } from './evalRunner.js';
 import { passRate } from './evalRunComparison.js';
 import { createSuiteCaseExecutor } from './caseExecution.js';
-import { mergeSuiteJudges } from './expectations.js';
+import { mergeSuiteJudges } from './grading.js';
 import { prepareHostBatch } from './prepareHostBatch.js';
 import type { EvalRunnerResult } from './evalRunner.js';
 import { EvalAssertionsSchema, type EvalDataset } from './datasetTypes.js';

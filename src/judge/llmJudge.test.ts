@@ -25,11 +25,11 @@ function fakeCompletion(
   return Object.assign(complete, { requests });
 }
 
-const verdict = JSON.stringify({ pass: true, score: 0.8, reasoning: 'ok' });
+const judgeOutput = JSON.stringify({ pass: true, score: 0.8, reasoning: 'ok' });
 
 describe('createLLMJudge', () => {
   it('sends every provider the same system prompt and user prompt', async () => {
-    const complete = fakeCompletion(verdict);
+    const complete = fakeCompletion(judgeOutput);
     await createLLMJudge(complete).evaluate({ a: 1 }, 'ref', 'Be accurate');
     expect(complete.requests).toEqual([
       {
@@ -39,8 +39,8 @@ describe('createLLMJudge', () => {
     ]);
   });
 
-  it('returns the parsed verdict with the candidate size', async () => {
-    const result = await createLLMJudge(fakeCompletion(verdict)).evaluate(
+  it('returns the parsed result with the candidate size', async () => {
+    const result = await createLLMJudge(fakeCompletion(judgeOutput)).evaluate(
       'candidate',
       null,
       'rubric'
@@ -55,7 +55,7 @@ describe('createLLMJudge', () => {
   });
 
   it('fails without calling the provider when the candidate is too large', async () => {
-    const complete = fakeCompletion(verdict);
+    const complete = fakeCompletion(judgeOutput);
     const result = await createLLMJudge(complete, {
       maxToolOutputSize: 4,
     }).evaluate('candidate', null, 'rubric');
@@ -72,7 +72,7 @@ describe('createLLMJudge', () => {
 
   it('defaults usage the provider does not report', async () => {
     const result = await createLLMJudge(
-      fakeCompletion(verdict, { inputTokens: 12, outputTokens: undefined })
+      fakeCompletion(judgeOutput, { inputTokens: 12, outputTokens: undefined })
     ).evaluate('candidate', null, 'rubric');
     expect(result.usage).toMatchObject({
       inputTokens: 12,
@@ -84,7 +84,7 @@ describe('createLLMJudge', () => {
 
   it('keeps usage the provider reports, including its own duration', async () => {
     const result = await createLLMJudge(
-      fakeCompletion(verdict, {
+      fakeCompletion(judgeOutput, {
         inputTokens: 1,
         outputTokens: 2,
         totalCostUsd: 0.01,
@@ -102,7 +102,7 @@ describe('createLLMJudge', () => {
   });
 
   it('judges an undefined candidate as the text "undefined"', async () => {
-    const complete = fakeCompletion(verdict);
+    const complete = fakeCompletion(judgeOutput);
     const result = await createLLMJudge(complete, {
       maxToolOutputSize: 100,
     }).evaluate(undefined, null, 'rubric');
@@ -144,9 +144,11 @@ describe('buildJudgePrompt', () => {
 
 describe('parseJudgeResponse', () => {
   it('reads plain and fenced JSON', () => {
-    expect(parseJudgeResponse(verdict).score).toBe(0.8);
-    expect(parseJudgeResponse('```json\n' + verdict + '\n```').score).toBe(0.8);
-    expect(parseJudgeResponse('```\n' + verdict + '\n```').score).toBe(0.8);
+    expect(parseJudgeResponse(judgeOutput).score).toBe(0.8);
+    expect(parseJudgeResponse('```json\n' + judgeOutput + '\n```').score).toBe(
+      0.8
+    );
+    expect(parseJudgeResponse('```\n' + judgeOutput + '\n```').score).toBe(0.8);
   });
 
   it('keeps fences inside the reasoning', () => {
@@ -161,15 +163,15 @@ describe('parseJudgeResponse', () => {
     );
   });
 
-  it('reads a fenced verdict followed by prose', () => {
+  it('reads fenced JSON followed by prose', () => {
     expect(
-      parseJudgeResponse('```json\n' + verdict + '\n```\nHope that helps.')
+      parseJudgeResponse('```json\n' + judgeOutput + '\n```\nHope that helps.')
         .score
     ).toBe(0.8);
   });
 
   it('reads JSON embedded in prose', () => {
-    expect(parseJudgeResponse(`Here you go: ${verdict} Thanks.`).pass).toBe(
+    expect(parseJudgeResponse(`Here you go: ${judgeOutput} Thanks.`).pass).toBe(
       true
     );
   });
@@ -186,7 +188,7 @@ describe('parseJudgeResponse', () => {
     );
   });
 
-  it('rejects JSON without the verdict fields', () => {
+  it('rejects JSON without the score fields', () => {
     expect(() => parseJudgeResponse('{"pass": true}')).toThrow(
       'Judge returned invalid response'
     );

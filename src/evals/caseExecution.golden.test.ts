@@ -1,8 +1,8 @@
 /**
  * Characterization tests: the EvalCaseResult each execution path produces.
  *
- * These pin the runner's observable output (verdicts, `response`, evidence,
- * `toolCallTrace`, usage, errors, iteration accounting) across the
+ * These pin the runner's observable output (scores, `response`, evidence,
+ * `toolCallTrace`, usage, errors, trial accounting) across the
  * case-execution refactor. A snapshot change here is a behaviour change and
  * must be deliberate.
  */
@@ -198,7 +198,7 @@ describe('golden: the mst client (dataset API)', () => {
     expect(stable(await runEvalCase(hostCase, context()))).toMatchSnapshot();
   });
 
-  it('iterations exclude infrastructure errors from accuracy', async () => {
+  it('trials exclude infrastructure errors from the pass rate', async () => {
     vi.mocked(simulateMCPHost)
       .mockResolvedValueOnce(simulation)
       .mockRejectedValueOnce(new Error('read ECONNRESET'))
@@ -597,7 +597,7 @@ describe('golden: rubric judges', () => {
     expect(stable({ result, calls })).toMatchSnapshot();
   });
 
-  it('a judge client error fails the expectation', async () => {
+  it('a judge client error fails the assertion', async () => {
     scriptLLMJudge([new Error('rate limited')]);
     const result = await runEvalCase(
       {

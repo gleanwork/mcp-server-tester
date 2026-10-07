@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import { BarChart3 } from 'lucide-react';
 import type { EvalCaseResult } from '../../types';
 import { rateColorClass, formatMs } from '../../utils';

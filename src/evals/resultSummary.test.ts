@@ -13,7 +13,7 @@ const caseResult: EvalCaseResult = {
   pass: false,
   request: { input: 'Find the design doc' },
   response: { response: 'I could not find it' },
-  expectations: {
+  scores: {
     judge: { pass: false, score: 0.2, details: 'score 0.2: incomplete' },
   },
   authType: 'none',

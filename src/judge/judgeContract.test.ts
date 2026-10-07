@@ -14,11 +14,11 @@ import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
 import {
   buildJudgeCase,
   buildJudgeTrial,
-  checkJudgeVerdict,
+  checkJudgeScore,
   missingRequirement,
   sumJudgeUsage,
   type JudgeInput,
-  type JudgeVerdict,
+  type JudgeScore,
 } from './judgeContract.js';
 
 afterEach(() => resetPluginsForTests());
@@ -29,7 +29,7 @@ function judge(
   evaluate: (
     input: JudgeInput,
     options: Record<string, unknown>
-  ) => Promise<JudgeVerdict>,
+  ) => Promise<JudgeScore>,
   requires?: string[]
 ) {
   const fn = vi.fn(evaluate);
@@ -161,34 +161,32 @@ describe('missingRequirement', () => {
   });
 });
 
-describe('checkJudgeVerdict', () => {
+describe('checkJudgeScore', () => {
   it('derives pass from the threshold when the judge gives none', () => {
-    expect(checkJudgeVerdict({ score: 0.6 }, 0.5).pass).toBe(true);
-    expect(checkJudgeVerdict({ score: 0.4 }, 0.5).pass).toBe(false);
+    expect(checkJudgeScore({ score: 0.6 }, 0.5).pass).toBe(true);
+    expect(checkJudgeScore({ score: 0.4 }, 0.5).pass).toBe(false);
   });
 
-  it("keeps the judge's own verdict over the threshold", () => {
-    expect(checkJudgeVerdict({ score: 0.9, pass: false }, 0.5).pass).toBe(
-      false
-    );
-    expect(checkJudgeVerdict({ score: 0.1, pass: true }, 0.5).pass).toBe(true);
+  it("keeps the judge's own `pass` over the threshold", () => {
+    expect(checkJudgeScore({ score: 0.9, pass: false }, 0.5).pass).toBe(false);
+    expect(checkJudgeScore({ score: 0.1, pass: true }, 0.5).pass).toBe(true);
   });
 
   it('accepts a skip without a valid score', () => {
     expect(
-      checkJudgeVerdict({ score: Number.NaN, skipped: true }, 0.5)
+      checkJudgeScore({ score: Number.NaN, skipped: true }, 0.5)
     ).toMatchObject({ pass: true, skipped: true });
   });
 
   it.each([
-    [null, 'no verdict object'],
+    [null, 'no score object'],
     [{ score: Number.NaN }, 'not a number'],
     [{ score: 1.5 }, 'not between 0 and 1'],
     [{ score: 1, pass: 'yes' }, '`pass` that is not a boolean'],
     [{ score: 1, subScores: { a: { score: 2 } } }, 'sub-score "a"'],
     [{ score: 1, subScores: [] }, '`subScores` that is not an object'],
   ])('rejects invalid output %j', (output, message) => {
-    expect(() => checkJudgeVerdict(output, 0.5)).toThrow(message);
+    expect(() => checkJudgeScore(output, 0.5)).toThrow(message);
   });
 });
 
@@ -274,12 +272,12 @@ describe('judge input', () => {
       },
     ]);
     expect(evaluate).toHaveBeenCalledTimes(1);
-    expect(result.caseResults[0]!.expectations.judge).toMatchObject({
+    expect(result.caseResults[0]!.scores.judge).toMatchObject({
       skipped: true,
       pass: true,
       details: 'Judge "needs/judge" skipped: no case.expected.criteria',
     });
-    expect(result.caseResults[1]!.expectations.judge).toMatchObject({
+    expect(result.caseResults[1]!.scores.judge).toMatchObject({
       score: 1,
     });
   });
@@ -307,7 +305,7 @@ describe('judge output', () => {
       usage: { inputTokens: 100, outputTokens: 10, totalCostUsd: 0.002 },
       model: 'judge-model',
       provider: 'judge-provider',
-      metadata: { verdict: 'PARTIAL' },
+      metadata: { label: 'PARTIAL' },
     }));
     const result = await run([
       {
@@ -317,9 +315,9 @@ describe('judge output', () => {
       },
     ]);
     const caseResult = result.caseResults[0]!;
-    // The judge's verdict wins over score 0.5 < threshold 0.9.
+    // The judge's own `pass` wins over score 0.5 < threshold 0.9.
     expect(caseResult.pass).toBe(true);
-    expect(caseResult.expectations.judge).toMatchObject({
+    expect(caseResult.scores.judge).toMatchObject({
       pass: true,
       score: 0.5,
       judgeName: 'rich/judge',
@@ -327,7 +325,7 @@ describe('judge output', () => {
       judgeProvider: 'judge-provider',
       subScores: { concise: { score: 0, reasoning: 'too long' } },
       usage: { inputTokens: 100, totalCostUsd: 0.002 },
-      metadata: { verdict: 'PARTIAL' },
+      metadata: { label: 'PARTIAL' },
     });
     expect(caseResult.judgeUsage).toEqual({
       inputTokens: 100,
@@ -338,7 +336,7 @@ describe('judge output', () => {
     expect(result.totalClientUsage).toBeUndefined();
   });
 
-  it('fails the judge expectation on an invalid output', async () => {
+  it('fails the judge assertion on an invalid output', async () => {
     judge('bad', async () => ({ score: 7 }));
     const result = await run([
       {
@@ -348,7 +346,7 @@ describe('judge output', () => {
       },
     ]);
     expect(result.passed).toBe(0);
-    expect(result.caseResults[0]!.expectations.judge?.details).toContain(
+    expect(result.caseResults[0]!.scores.judge?.details).toContain(
       'between 0 and 1'
     );
   });
@@ -387,11 +385,11 @@ describe('judge output', () => {
     ]);
     const [skippedCase, gradedCase] = result.caseResults;
     expect(skippedCase!.pass).toBe(true);
-    expect(skippedCase!.expectations.judge).toMatchObject({
+    expect(skippedCase!.scores.judge).toMatchObject({
       pass: true,
       details: '1/1 judges passed (1 skipped)',
     });
-    const skippedEntry = skippedCase!.expectations.judge?.judgeResults?.find(
+    const skippedEntry = skippedCase!.scores.judge?.judgeResults?.find(
       (entry) => entry.judgeName === 'needs-criteria/judge'
     );
     expect(skippedEntry).toMatchObject({ skipped: true, pass: true });
@@ -426,11 +424,11 @@ describe('judge output', () => {
     });
   });
 
-  it('decides a judge-owned verdict by majority over reps and sums usage', async () => {
-    const verdicts = [true, false, true];
+  it('decides a judge-owned score by majority over reps and sums usage', async () => {
+    const passes = [true, false, true];
     const evaluate = judge('vote', async () => ({
       score: 0.1,
-      pass: verdicts.shift()!,
+      pass: passes.shift()!,
       usage: { inputTokens: 5, outputTokens: 1 },
     }));
     const result = await validateJudge('x', {
@@ -447,9 +445,9 @@ describe('judge output', () => {
     });
   });
 
-  it('fails a judge-owned verdict on a tie', async () => {
-    const verdicts = [true, false];
-    judge('tie', async () => ({ score: 1, pass: verdicts.shift()! }));
+  it('fails a judge-owned score on a tie', async () => {
+    const passes = [true, false];
+    judge('tie', async () => ({ score: 1, pass: passes.shift()! }));
     const result = await validateJudge('x', { judge: 'tie/judge', reps: 2 });
     expect(result.pass).toBe(false);
   });
@@ -486,7 +484,7 @@ describe('judge output', () => {
     expect(evaluate.mock.calls[0]![0].case.expected.answer).toBe('new');
   });
 
-  it('reports judge usage per trial over iterations', async () => {
+  it('reports judge usage per trial over trials', async () => {
     judge('iter', async () => ({
       score: 1,
       usage: { inputTokens: 10, outputTokens: 2, totalCostUsd: 0.01 },
@@ -500,7 +498,7 @@ describe('judge output', () => {
       },
     ]);
     const caseResult = result.caseResults[0]!;
-    expect(caseResult.iterationResults?.map((i) => i.judgeUsage)).toEqual([
+    expect(caseResult.trialResults?.map((i) => i.judgeUsage)).toEqual([
       { inputTokens: 10, outputTokens: 2, totalCostUsd: 0.01 },
       { inputTokens: 10, outputTokens: 2, totalCostUsd: 0.01 },
       { inputTokens: 10, outputTokens: 2, totalCostUsd: 0.01 },
@@ -527,7 +525,7 @@ describe('judge output', () => {
       },
     ]);
     expect(result.caseResults[0]!.pass).toBe(true);
-    expect(result.caseResults[0]!.expectations.judge).toMatchObject({
+    expect(result.caseResults[0]!.scores.judge).toMatchObject({
       skipped: true,
       pass: true,
     });

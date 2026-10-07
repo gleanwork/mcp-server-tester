@@ -202,7 +202,7 @@ describe('shared configs', () => {
     expect(
       result.summary.results.map((entry) => ({
         pass: entry.pass,
-        judge: entry.expectations.judge?.pass,
+        judge: entry.scores.judge?.pass,
       }))
     ).toEqual([{ pass: true, judge: true }]);
   });

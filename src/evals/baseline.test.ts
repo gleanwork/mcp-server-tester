@@ -18,7 +18,10 @@ describe('baselines from an earlier MST', () => {
     ['the mcp_host placeholder', { toolName: 'mcp_host' }],
     ['a renamed field', { hostUsage: { inputTokens: 1 } }],
     ['request.scenario', { request: { scenario: 'hi' } }],
-    ['a renamed trial field', { iterationResults: [{ mcpHostTrace: {} }] }],
+    ['a renamed trial field', { trialResults: [{ mcpHostTrace: {} }] }],
+    ['iterationResults', { iterationResults: [] }],
+    ['expectations', { expectations: {} }],
+    ['assertionPassRate', { assertionPassRate: 1 }],
   ])('fails clearly on %s', async (_label, fields) => {
     const { writeFile } = await import('fs/promises');
     const file = join(dir, 'baseline.json');
@@ -28,9 +31,7 @@ describe('baselines from an earlier MST', () => {
         total: 1,
         passed: 1,
         failed: 0,
-        caseResults: [
-          { id: 'a', pass: true, source: 'eval', expectations: {}, ...fields },
-        ],
+        caseResults: [{ id: 'a', pass: true, source: 'eval', ...fields }],
       })
     );
     await expect(loadBaseline(file)).rejects.toThrow(
@@ -53,7 +54,7 @@ const makeResult = (
       toolName: 'tool',
       source: 'eval',
       durationMs: 100,
-      expectations: {},
+      scores: {},
     },
     {
       id: 'b',
@@ -62,7 +63,7 @@ const makeResult = (
       toolName: 'tool',
       source: 'eval',
       durationMs: 200,
-      expectations: {},
+      scores: {},
     },
   ],
   durationMs: 300,

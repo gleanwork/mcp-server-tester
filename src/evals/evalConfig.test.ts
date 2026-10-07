@@ -327,7 +327,7 @@ describe('strict eval configs', () => {
     );
   });
 
-  it('accepts run controls, including the default accuracy threshold', () => {
+  it('accepts run controls, including the default pass threshold', () => {
     expect(load({ run: { trials: 5, passThreshold: 0.8 } }).run).toEqual({
       trials: 5,
       passThreshold: 0.8,

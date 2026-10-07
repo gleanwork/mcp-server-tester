@@ -158,7 +158,7 @@ export function registerPresentedTools(
 
 /**
  * Records a host's tool calls through a presented surface under the tools'
- * original names, so expectations and comparisons read the same names in
+ * original names, so assertions and comparisons read the same names in
  * every variant. `rawName` keeps the name the model used.
  */
 export function withOriginalToolNames<

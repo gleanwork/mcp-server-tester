@@ -129,7 +129,7 @@ Set the `mst` client's `skills` option (`clientOptions.skills`) to let it offer 
 - Relative paths resolve against the most recently loaded skill's directory.
 - A file that fails verification is returned to the model as an error instead of its content.
 
-Loading a skill is not an MCP tool call. Loads are reported in `skillLoads`, and each `SKILL.md` the model loads (and that passes verification) becomes a `skill` event in order with tool calls, so `toolsTriggered` can assert it. Preloaded skills are in context without the model choosing them, so they produce no events: a `kind: 'skill'` expectation cannot pass in `'preload'` mode. The same expectation works for external hosts that report skill use, such as Claude Code:
+Loading a skill is not an MCP tool call. Loads are reported in `skillLoads`, and each `SKILL.md` the model loads (and that passes verification) becomes a `skill` event in order with tool calls, so `toolsTriggered` can assert it. Preloaded skills are in context without the model choosing them, so they produce no events: a `kind: 'skill'` assertion cannot pass in `'preload'` mode. The same assertion works for external hosts that report skill use, such as Claude Code:
 
 ```json
 {

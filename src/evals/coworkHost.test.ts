@@ -1210,7 +1210,7 @@ describe('V2 Cowork host', () => {
       COWORK_HOST.runBatch!(requests(), context)
     ).resolves.toHaveLength(2);
   });
-  it('expands iterations once and rejects duplicate IDs before UI', async () => {
+  it('expands trials once and rejects duplicate IDs before UI', async () => {
     const cases = [
       { id: 'first', input: 'one', trials: 2 },
       { id: 'second', input: 'two' },

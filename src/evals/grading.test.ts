@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
-  evaluateExpectations,
+  gradeTrial,
   mergeSuiteJudges,
   resolveJudges,
   toolEvidenceGap,
   type GradedExecution,
-} from './expectations.js';
+} from './grading.js';
 import type { ClientResponse } from './caseExecution.js';
 import type { ClientMetadata } from './externalHost/types.js';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
@@ -66,7 +66,7 @@ describe('toolEvidenceGap', () => {
   });
 });
 
-describe('evaluateExpectations', () => {
+describe('gradeTrial', () => {
   const graded: GradedExecution = {
     response: mapped,
     hostResponse,
@@ -74,12 +74,9 @@ describe('evaluateExpectations', () => {
   };
 
   it('grades tool calls, metrics and the trace view on structured evidence', async () => {
-    const outcome = await evaluateExpectations(
-      { assertions: toolExpect },
-      graded
-    );
-    expect(outcome.expectations.toolsTriggered?.pass).toBe(false);
-    expect(outcome.expectations.toolCallCount?.pass).toBe(true);
+    const outcome = await gradeTrial({ assertions: toolExpect }, graded);
+    expect(outcome.scores.toolsTriggered?.pass).toBe(false);
+    expect(outcome.scores.toolCallCount?.pass).toBe(true);
     expect(outcome.toolPrecision).toBe(0.5);
     expect(outcome.toolRecall).toBe(0.5);
     // Matched on mapped names, shown with the host's own names.
@@ -96,8 +93,8 @@ describe('evaluateExpectations', () => {
     });
   });
 
-  it('fails every tool expectation with the gap and grades the rest', async () => {
-    const outcome = await evaluateExpectations(
+  it('fails every tool assertion with the gap and grades the rest', async () => {
+    const outcome = await gradeTrial(
       {
         assertions: { ...toolExpect, containsText: 'sunny' },
       },
@@ -105,22 +102,22 @@ describe('evaluateExpectations', () => {
     );
     const details =
       'Host evidence is observed; structured tool evidence is required.';
-    expect(outcome.expectations.toolsTriggered).toEqual({
+    expect(outcome.scores.toolsTriggered).toEqual({
       pass: false,
       details,
     });
-    expect(outcome.expectations.toolCallCount).toEqual({
+    expect(outcome.scores.toolCallCount).toEqual({
       pass: false,
       details,
     });
-    expect(outcome.expectations.textContains?.pass).toBe(true);
+    expect(outcome.scores.textContains?.pass).toBe(true);
     expect(outcome.toolPrecision).toBeUndefined();
     expect(outcome.toolRecall).toBeUndefined();
     expect(outcome.toolCallTrace).toBeUndefined();
   });
 
   it('lists a required call made with the wrong arguments as missed', async () => {
-    const outcome = await evaluateExpectations(
+    const outcome = await gradeTrial(
       {
         assertions: {
           toolsTriggered: {
@@ -136,7 +133,7 @@ describe('evaluateExpectations', () => {
       },
       graded
     );
-    expect(outcome.expectations.toolsTriggered?.pass).toBe(false);
+    expect(outcome.scores.toolsTriggered?.pass).toBe(false);
     expect(outcome.toolRecall).toBe(0);
     // Precision counts the call by identity; recall misses it on arguments.
     expect(outcome.toolPrecision).toBe(0.5);
@@ -153,12 +150,12 @@ describe('evaluateExpectations', () => {
     });
   });
 
-  it('fails a lone toolCallCount expectation on an evidence gap', async () => {
-    const outcome = await evaluateExpectations(
+  it('fails a lone toolCallCount assertion on an evidence gap', async () => {
+    const outcome = await gradeTrial(
       { assertions: { toolCallCount: { max: 5 } } },
       { ...graded, evidence: 'observed' }
     );
-    expect(outcome.expectations).toEqual({
+    expect(outcome.scores).toEqual({
       toolCallCount: {
         pass: false,
         details:
@@ -168,20 +165,20 @@ describe('evaluateExpectations', () => {
   });
 
   it("grades on the client's evidence, not external trace metadata", async () => {
-    const outcome = await evaluateExpectations(
+    const outcome = await gradeTrial(
       { assertions: toolExpect },
       { ...graded, clientMetadata: external({ traceConfidence: 'low' }) }
     );
-    expect(outcome.expectations.toolCallCount?.pass).toBe(true);
+    expect(outcome.scores.toolCallCount?.pass).toBe(true);
     expect(outcome.toolPrecision).toBe(0.5);
   });
 
   it('reports an empty judge list as 0/0 judges passed', async () => {
-    const outcome = await evaluateExpectations(
+    const outcome = await gradeTrial(
       { assertions: { passesJudge: [] } },
       { response: 'x' }
     );
-    expect(outcome.expectations.judge).toEqual({
+    expect(outcome.scores.judge).toEqual({
       pass: true,
       details: '0/0 judges passed',
       judgeResults: [],
@@ -193,7 +190,7 @@ describe('evaluateExpectations', () => {
     const plugin: Plugin = {
       meta: { name: 'test-plugin', namespace: 'test' },
       judges: {
-        'expectations-test-judge': {
+        'grading-test-judge': {
           schema: z.object({}).passthrough(),
           evaluate: async ({ case: evalCase, trial }) => {
             seen.push({
@@ -206,16 +203,16 @@ describe('evaluateExpectations', () => {
       },
     };
     installPlugins([plugin]);
-    const outcome = await evaluateExpectations(
+    const outcome = await gradeTrial(
       {
         expected: { answer: 'canonical' },
-        assertions: { passesJudge: { judge: 'test/expectations-test-judge' } },
+        assertions: { passesJudge: { judge: 'test/grading-test-judge' } },
       },
       { response: 'answer' }
     );
-    expect(outcome.expectations.judge).toMatchObject({
+    expect(outcome.scores.judge).toMatchObject({
       pass: true,
-      judgeName: 'test/expectations-test-judge',
+      judgeName: 'test/grading-test-judge',
     });
     expect(seen).toEqual([{ candidate: 'answer', reference: 'canonical' }]);
   });

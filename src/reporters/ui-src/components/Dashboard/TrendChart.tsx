@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import {
   LineChart,
   Line,
@@ -45,16 +45,16 @@ interface ChartDataPoint {
   total: number;
 }
 
-type CustomTooltipPayload = TooltipContentProps<number, string> & {
-  payload?: Array<{ payload: ChartDataPoint }>;
-};
-
-function CustomTooltip({ active, payload, label }: CustomTooltipPayload) {
+function CustomTooltip({
+  active,
+  payload,
+  label,
+}: TooltipContentProps<number, string>) {
   if (!active || !payload || payload.length === 0) {
     return null;
   }
 
-  const data = payload[0]?.payload;
+  const data = payload[0]?.payload as ChartDataPoint | undefined;
   if (!data) {
     return null;
   }

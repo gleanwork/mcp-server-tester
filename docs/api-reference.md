@@ -369,7 +369,7 @@ const dataset = await loadEvalDataset('./data/evals.json');
 
 ### `runEvalDataset(options, context)`
 
-Run an eval dataset. Expectations are defined per-case in the dataset's `assertions` blocks.
+Run an eval dataset. Assertions are defined per-case in the dataset's `assertions` blocks.
 
 **Parameters:**
 
@@ -586,7 +586,7 @@ await saveEvalRunComparison({ store, comparison, id: 'candidate-comparison' });
 
 **Result Structure:**
 
-```typescript snippet=src/evals/evalRunner.ts#L127-L209
+```typescript snippet=src/evals/evalRunner.ts#L124-L206
 /**
  * Overall result of running an eval dataset
  */
@@ -637,14 +637,14 @@ export interface EvalRunnerResult {
 
   /**
    * Average tool precision across all client cases that have a
-   * `toolsTriggered` expectation (precision = fraction of called tools
+   * `toolsTriggered` assertion (precision = fraction of called tools
    * that were expected). Only present when at least one such case ran.
    */
   datasetToolPrecision?: number;
 
   /**
    * Average tool recall across all client cases that have a
-   * `toolsTriggered` expectation (recall = fraction of required tools
+   * `toolsTriggered` assertion (recall = fraction of required tools
    * that were actually called). Only present when at least one such case ran.
    */
   datasetToolRecall?: number;
@@ -772,7 +772,7 @@ test('single eval case', async ({ mcp }, testInfo) => {
 });
 ```
 
-When `evalCase.trials > 1`, the case is run multiple times and `result.assertionPassRate` is populated with the fraction of passing trials.
+When `evalCase.trials > 1`, the case is run multiple times and `result.passRate` is populated with the fraction of passing trials.
 
 ---
 
@@ -886,25 +886,25 @@ Deep equality comparison using JSON serialization.
 const result = validateResponse(response, { status: 'ok', count: 42 });
 ```
 
-### `validateToolCalls(response, expectation)`
+### `validateToolCalls(response, assertion)`
 
 Validates the tool calls in a client case's trace. Only applicable to client cases.
 
 **Parameters:**
 
 - `response: unknown` — Must be an `MCPHostSimulationResult`
-- `expectation: ToolCallExpectation` — Expected tool call specification
+- `assertion: ToolCallAssertion` — Expected tool call specification
 
 ```typescript
-import type { ToolCallExpectation } from '@gleanwork/mcp-server-tester';
+import type { ToolCallAssertion } from '@gleanwork/mcp-server-tester';
 
-const expectation: ToolCallExpectation = {
+const assertion: ToolCallAssertion = {
   calls: [{ name: 'search', required: true }],
   order: 'any',
   exclusive: false,
 };
 
-const result = validateToolCalls(simulationResult, expectation);
+const result = validateToolCalls(simulationResult, assertion);
 // result.metrics contains { precision, recall }
 ```
 
@@ -952,7 +952,7 @@ const result = await validateJudge(response, {
 
 ### `validateSnapshot(response, name, options)` (async)
 
-Compares a response's text, after sanitizing, with a named snapshot in a `SnapshotStore`. `toMatchToolSnapshot` and eval `snapshot` expectations both use it. Throws when a sanitizer is invalid, which is a configuration error, not a mismatch.
+Compares a response's text, after sanitizing, with a named snapshot in a `SnapshotStore`. `toMatchToolSnapshot` and eval `snapshot` assertions both use it. Throws when a sanitizer is invalid, which is a configuration error, not a mismatch.
 
 **Parameters:**
 
@@ -1123,7 +1123,7 @@ test('custom predicate', async ({ mcp }) => {
 });
 ```
 
-### `toHaveToolCalls(expectation)` (client cases only)
+### `toHaveToolCalls(assertion)` (client cases only)
 
 Assert that the client made specific tool calls when given a natural language prompt. Only meaningful for client cases.
 
@@ -1395,7 +1395,7 @@ The `{ code, message, data? }` of the protocol error a result was made from, or 
 
 ```typescript snippet=src/evals/datasetTypes.ts#L144-L206
 /**
- * Unified expectation block for eval cases
+ * A case's assertions
  *
  * Mirrors the Playwright matcher API for consistency.
  */
@@ -1493,7 +1493,7 @@ export interface EvalCase extends ClientFields {
 
   /**
    * Number of trials (independent runs) of this case. When > 1,
-   * `EvalCaseResult.assertionPassRate` is the share of trials that passed, and
+   * `EvalCaseResult.passRate` is the share of trials that passed, and
    * `pass` is decided by `passThreshold`.
    * @default 1
    */
@@ -1560,6 +1560,6 @@ export interface EvalCase extends ClientFields {
 ## Next Steps
 
 - See the [Authentication Guide](./authentication.md) for OAuth and token auth
-- See the [Expectations Guide](./expectations.md) for detailed expectation usage
+- See the [Assertions Guide](./assertions.md) for detailed assertion usage
 - Check out the [Quick Start Guide](./quickstart.md) for getting started
 - Explore [Examples](../examples) for real-world usage patterns

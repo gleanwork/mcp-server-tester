@@ -1,6 +1,6 @@
 /**
- * The expectation evaluator: turns an eval case's `assertions` and what the
- * client did into expectation results.
+ * Grading: turns an eval case's `assertions` and what the
+ * client did into scores.
  *
  * It owns the rules every execution path shares:
  * - whether the evidence can support tool-call assertions (decided once, here);
@@ -19,7 +19,7 @@ import type { ClientResponse } from './caseExecution.js';
 import type { TraceEvidence } from './evalFrameworkTypes.js';
 import type { JudgeCaseSource } from '../judge/judgeContract.js';
 import type { ClientMetadata } from './externalHost/types.js';
-import type { EvalExpectationResult } from '../types/index.js';
+import type { GraderScore } from '../types/index.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import {
   validateText,
@@ -49,8 +49,8 @@ export interface GradedExecution {
   clientMetadata?: ClientMetadata;
 }
 
-export interface ExpectationOutcome {
-  expectations: EvalCaseResult['expectations'];
+export interface GradingOutcome {
+  scores: EvalCaseResult['scores'];
   /** Present when `toolsTriggered` was graded on sufficient evidence. */
   toolPrecision?: number;
   toolRecall?: number;
@@ -62,7 +62,7 @@ export interface ExpectationOutcome {
 }
 
 /**
- * Why tool-call expectations can't be graded for this execution, or undefined
+ * Why tool-call assertions can't be graded for this execution, or undefined
  * when the evidence is sufficient.
  */
 export function toolEvidenceGap(
@@ -145,7 +145,7 @@ async function evaluateJudges(
   response: unknown,
   judges: JudgeExpectConfig[],
   run: JudgeRun
-): Promise<EvalExpectationResult> {
+): Promise<GraderScore> {
   const results = await Promise.all(
     judges.map(async (judge) => {
       const validation = await validateJudge(response, judge, run);
@@ -161,17 +161,16 @@ async function evaluateJudges(
         ...(details.skipped === true ? { skipped: true } : {}),
         ...(details.subScores !== undefined
           ? {
-              subScores:
-                details.subScores as EvalExpectationResult['subScores'],
+              subScores: details.subScores as GraderScore['subScores'],
             }
           : {}),
         ...(details.usage !== undefined
-          ? { usage: details.usage as EvalExpectationResult['usage'] }
+          ? { usage: details.usage as GraderScore['usage'] }
           : {}),
         ...(details.metadata !== undefined
           ? { metadata: details.metadata as Record<string, unknown> }
           : {}),
-      } satisfies EvalExpectationResult;
+      } satisfies GraderScore;
     })
   );
   if (results.length === 1) return results[0]!;
@@ -199,16 +198,16 @@ function isToolCall(entry: { kind?: string }): boolean {
  * left out of the view.
  */
 function toolTraceView(
-  expectation: NonNullable<EvalAssertions['toolsTriggered']>,
+  assertion: NonNullable<EvalAssertions['toolsTriggered']>,
   graded: GradedExecution & { hostResponse: ClientResponse }
 ): NonNullable<EvalCaseResult['toolCallTrace']> {
   // Match on the mapped response the validator graded.
   const mapped = graded.response as ClientResponse;
-  const match = matchToolCalls(mapped.events ?? mapped.toolCalls, expectation);
+  const match = matchToolCalls(mapped.events ?? mapped.toolCalls, assertion);
   const matchedToolCalls = match.observed.filter((entry) =>
     isToolCall(entry.call)
   );
-  const expectedToolCalls = expectation.calls.filter(isToolCall);
+  const expectedToolCalls = assertion.calls.filter(isToolCall);
   return {
     calls: graded.hostResponse.toolCalls.map((call, index) => ({
       name: call.name,
@@ -225,18 +224,18 @@ function toolTraceView(
 
 /**
  * Grades an eval case's `assertions` against what the case produced.
- * Tool-call expectations fail with the evidence gap when the evidence can't
- * support them; every other expectation is graded normally.
+ * Tool-call assertions fail with the evidence gap when the evidence can't
+ * support them; every other assertion is graded normally.
  */
-export async function evaluateExpectations(
+export async function gradeTrial(
   evalCase: Pick<EvalCase, 'assertions' | 'judgeReps'> &
     JudgeCaseSource & { assertions: EvalAssertions },
   graded: GradedExecution
-): Promise<ExpectationOutcome> {
+): Promise<GradingOutcome> {
   const expectBlock = evalCase.assertions;
   const { response } = graded;
-  const results: EvalCaseResult['expectations'] = {};
-  const outcome: ExpectationOutcome = { expectations: results };
+  const results: EvalCaseResult['scores'] = {};
+  const outcome: GradingOutcome = { scores: results };
 
   if (expectBlock.containsText !== undefined) {
     const validation = validateText(response, expectBlock.containsText);

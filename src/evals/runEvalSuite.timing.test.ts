@@ -88,7 +88,7 @@ async function fixture(
 }
 
 describe('suite wall-clock timing', () => {
-  it('counts batch setup and cleanup once across cases, iterations, datasets and variants', async () => {
+  it('counts batch setup and cleanup once across cases, trials, datasets and variants', async () => {
     const judgeKey = `timing-judge-${sequence++}`;
     testPlugin.judges[judgeKey] = {
       schema: z.object({}).passthrough(),
@@ -140,7 +140,7 @@ describe('suite wall-clock timing', () => {
       ]);
       expect(
         dataset.result?.caseResults.map((c) =>
-          c.iterationResults?.map((iteration) => iteration.durationMs)
+          c.trialResults?.map((trial) => trial.durationMs)
         )
       ).toEqual([
         [12, 22],
@@ -167,7 +167,7 @@ describe('suite wall-clock timing', () => {
     const result = await runEvalSuite(f);
 
     expect(
-      result.summary.results[0]?.iterationResults?.map((r) => r.durationMs)
+      result.summary.results[0]?.trialResults?.map((r) => r.durationMs)
     ).toEqual([30, 30]);
     expect(result.summary.results[0]?.durationMs).toBe(60);
     expect(result.datasets[0]?.result?.durationMs).toBe(60);

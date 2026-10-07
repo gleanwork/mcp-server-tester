@@ -303,7 +303,7 @@ export interface MCPHostSimulationResult {
 
   /**
    * Ordered trace of MCP tool calls and skill loads. Present when skills are
-   * enabled; tool-call expectations read it so `kind: 'skill'` entries and
+   * enabled; tool-call assertions read it so `kind: 'skill'` entries and
    * strict ordering work.
    */
   events?: TraceEvent[];

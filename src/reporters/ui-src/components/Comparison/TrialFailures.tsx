@@ -1,4 +1,3 @@
-import React from 'react';
 import type { MCPComparisonData } from '../../types';
 import {
   FAILURE_COLOR,

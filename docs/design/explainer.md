@@ -58,8 +58,8 @@ mst run ─► resolve ─►  shard 1: client runs trials ─► traces ─┐
 **Grade** happens centrally, after gather:
 
 - **Assertions** (code graders such as `toolsTriggered`) are deterministic and free.
-- **Pointwise judges** give one verdict and score per trial.
-- **Pairwise judges** give one verdict per case for each variant against the baseline. They need both variants' traces, which may come from different shards, so grading has to wait for gather.
+- **Pointwise judges** give one score per trial.
+- **Pairwise judges** give one preference per case for each variant against the baseline. They need both variants' traces, which may come from different shards, so grading has to wait for gather.
 
 Grading runs on the coordinator, so judge credentials never reach client machines. Grades sit next to the traces, one file per grader per trial.
 
@@ -160,28 +160,28 @@ A scheduled job in the plugin repo extracts datasets and judge configs from the 
 
 ## What exists today vs what this design asks for
 
-| Command / key                                                                                 | Today                                                    | Proposed                                                         |
-| --------------------------------------------------------------------------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------- |
-| `mst run --config`                                                                            | `--manifest`                                             | Rename to `--config` (ADR 0002)                                  |
-| `variants`, `baseline`, `client`, `model`, `trials`, `input`, `expected`                      | Partly (`arms`, `host`, `scenario` remain in the schema) | Finish the ADR 0002 renames                                      |
-| `<namespace>/<kind>/<name>` names, checked by kind                                            | `namespace/name`                                         | Add the kind segment; reject a kind in the wrong place           |
-| Top-level `servers` map; variants pick servers by label                                       | Servers inline per arm                                   | New                                                              |
-| `--variant`, `--case`, `--trials`, `--max-cases`, `--filter-tag`                              | `--arm`; others are config keys                          | Run-time narrowing; partial runs labelled                        |
-| `plugins`, `extends`                                                                          | ✅ (`--plugins`)                                         | —                                                                |
-| `mst plugins`, `mst datasets [pull]`, `mst judges [show]`, `mst stores`                       | ❌                                                       | Generic inspection; dataset extensions gain an optional `list()` |
-| `--plugin-option ns.key=value`                                                                | ❌                                                       | Generic run-time plugin options                                  |
-| Case / config / variant judge merge rules                                                     | Partly                                                   | Define                                                           |
-| `pairwiseJudges` in eval configs, pairwise results in summary and report                      | `comparePairwise` API only                               | Wire into the grade phase and the report                         |
-| Resolve → collect → gather → grade → compare; `--no-grade`; `mst grade`; regrade as a new run | Grading is inline per case                               | Split into phases; grading reads stored traces                   |
-| Sharded collect, gather, `--resume`                                                           | ❌                                                       | New                                                              |
-| `mst auth`, credential stores, token staging and teardown                                     | `mst login` / `mst token` per URL                        | New command and extension kind                                   |
-| `setup` steps                                                                                 | ❌                                                       | New extension kind                                               |
-| `intercept`, interceptor extension                                                            | ❌                                                       | **Parked**: needs a design for client-hosted connectors          |
-| `--env`, `--env-option`, environment extension, built-in `local`                              | ❌                                                       | New extension kind; environment selects the client driver        |
-| `--detach`, `mst runs list/watch/cancel`, remote coordinator                                  | ❌                                                       | New                                                              |
-| `--results <store or URI>`, `mst open --results`                                              | Stores in config only; `mst open` is local               | Run-time store selection; open from stores                       |
-| `mst.run/v1` phase layout and JSON Schema                                                     | Run summary exists, unversioned                          | Version and publish                                              |
-| One report shape for every eval                                                               | Experiment tab for tool optimization                     | Generalize; recommendation only for tool optimization            |
+| Command / key                                                                                 | Today                                      | Proposed                                                         |
+| --------------------------------------------------------------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------- |
+| `mst run --config`                                                                            | ✅                                         | —                                                                |
+| `variants`, `baseline`, `client`, `model`, `trials`, `input`, `expected`                      | ✅; results use trials and scores          | —                                                                |
+| `<namespace>/<kind>/<name>` names, checked by kind                                            | `namespace/name`                           | Add the kind segment; reject a kind in the wrong place           |
+| Top-level `servers` map; variants pick servers by label                                       | Servers inline per variant                 | New                                                              |
+| `--variant`, `--case`, `--trials`, `--max-cases`, `--filter-tag`                              | `--variant`; others are config keys        | Run-time narrowing; partial runs labelled                        |
+| `plugins`, `extends`                                                                          | ✅ (`--plugins`)                           | —                                                                |
+| `mst plugins`, `mst datasets [pull]`, `mst judges [show]`, `mst stores`                       | ❌                                         | Generic inspection; dataset extensions gain an optional `list()` |
+| `--plugin-option ns.key=value`                                                                | ❌                                         | Generic run-time plugin options                                  |
+| Case / config / variant judge merge rules                                                     | Partly                                     | Define                                                           |
+| `pairwiseJudges` in eval configs, pairwise results in summary and report                      | `comparePairwise` API only                 | Wire into the grade phase and the report                         |
+| Resolve → collect → gather → grade → compare; `--no-grade`; `mst grade`; regrade as a new run | Grading is inline per case                 | Split into phases; grading reads stored traces                   |
+| Sharded collect, gather, `--resume`                                                           | ❌                                         | New                                                              |
+| `mst auth`, credential stores, token staging and teardown                                     | `mst login` / `mst token` per URL          | New command and extension kind                                   |
+| `setup` steps                                                                                 | ❌                                         | New extension kind                                               |
+| `intercept`, interceptor extension                                                            | ❌                                         | **Parked**: needs a design for client-hosted connectors          |
+| `--env`, `--env-option`, environment extension, built-in `local`                              | ❌                                         | New extension kind; environment selects the client driver        |
+| `--detach`, `mst runs list/watch/cancel`, remote coordinator                                  | ❌                                         | New                                                              |
+| `--results <store or URI>`, `mst open --results`                                              | Stores in config only; `mst open` is local | Run-time store selection; open from stores                       |
+| `mst.run/v1` phase layout and JSON Schema                                                     | Run summary exists, unversioned            | Version and publish                                              |
+| One report shape for every eval                                                               | Experiment tab for tool optimization       | Generalize; recommendation only for tool optimization            |
 
 ## Open questions
 

@@ -15,7 +15,7 @@ export {
 } from '../assertions/validators/types.js';
 
 export type {
-  ToolCallExpectation,
+  ToolCallAssertion,
   ToolCallCountOptions,
 } from '../assertions/validators/toolCalls.js';
 

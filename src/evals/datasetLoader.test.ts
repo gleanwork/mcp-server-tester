@@ -70,7 +70,7 @@ describe('datasetLoader', () => {
   });
 });
 
-describe('strict expectations', () => {
+describe('strict assertions', () => {
   it('rejects an assertion it does not know, instead of never running it', () => {
     expect(() =>
       loadEvalDatasetFromObject({
@@ -101,7 +101,7 @@ describe('strict cases', () => {
       /treshold/,
     ],
     [
-      'a call expectation',
+      'a call assertion',
       {
         assertions: {
           toolsTriggered: { calls: [{ name: 'search', requird: true }] },

@@ -16,7 +16,7 @@ import {
   type ToolSurfaceProxy,
 } from './toolSurfaceProxy.js';
 
-/** Pre-execute a batch host, retaining per-case iteration queues for the evaluator. */
+/** Pre-execute a batch host, retaining per-case trial queues for the evaluator. */
 export async function prepareHostBatch(
   definition: ClientDefinition,
   cases: EvalCase[],

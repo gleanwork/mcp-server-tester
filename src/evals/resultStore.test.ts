@@ -366,18 +366,18 @@ describe('redactStoredResponses', () => {
     const result = {
       id: 'one',
       pass: true,
-      expectations: {},
+      scores: {},
       response: { private: true },
       trace: trace(),
-      iterationResults: [{ pass: true, durationMs: 1, trace: trace() }],
+      trialResults: [{ pass: true, durationMs: 1, trace: trace() }],
     };
     const redacted = redactStoredResponses({ results: [result] });
     expect(redacted.results[0]).toEqual({
       id: 'one',
       pass: true,
-      expectations: {},
+      scores: {},
       trace: redactedTrace,
-      iterationResults: [{ pass: true, durationMs: 1, trace: redactedTrace }],
+      trialResults: [{ pass: true, durationMs: 1, trace: redactedTrace }],
     });
     // The input is not changed.
     expect(result.trace.finalText).toBe('private answer');

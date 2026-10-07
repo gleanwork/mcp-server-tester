@@ -25,7 +25,7 @@
 import type {
   TrialFailureKind,
   EvalCaseResult,
-  IterationResult,
+  TrialResult,
   MCPComparisonData,
   PairedChange,
   RegressionCheck,
@@ -287,8 +287,8 @@ export function pairedChange(
 
 /** Classifies a failed trial from its trace and error. */
 function failureOf(
-  trial: Pick<IterationResult, 'error' | 'isInfrastructureError'> & {
-    toolCallTrace?: IterationResult['toolCallTrace'];
+  trial: Pick<TrialResult, 'error' | 'isInfrastructureError'> & {
+    toolCallTrace?: TrialResult['toolCallTrace'];
   }
 ): TrialFailureKind {
   if (trial.isInfrastructureError || trial.error) return 'error';
@@ -312,9 +312,9 @@ interface RecordedAttempt extends VariantTrial {
 function toAttempt(
   pass: boolean,
   source: Pick<
-    IterationResult,
+    TrialResult,
     'error' | 'isInfrastructureError' | 'clientUsage'
-  > & { toolCallTrace?: IterationResult['toolCallTrace'] }
+  > & { toolCallTrace?: TrialResult['toolCallTrace'] }
 ): RecordedAttempt {
   const trace = source.toolCallTrace;
   const usage = source.clientUsage;
@@ -332,12 +332,10 @@ function toAttempt(
   };
 }
 
-/** The trials behind a case result: its iterations, or the case itself. */
+/** The trials behind a case result: its trials, or the case itself. */
 function attemptsOf(result: EvalCaseResult): RecordedAttempt[] {
-  if (result.iterationResults && result.iterationResults.length > 0) {
-    return result.iterationResults.map((iteration) =>
-      toAttempt(iteration.pass, iteration)
-    );
+  if (result.trialResults && result.trialResults.length > 0) {
+    return result.trialResults.map((trial) => toAttempt(trial.pass, trial));
   }
   return [toAttempt(result.pass, result)];
 }

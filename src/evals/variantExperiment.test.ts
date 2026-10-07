@@ -44,7 +44,7 @@ function makeResult(
       toolName: 't',
       source: 'eval' as const,
       pass: c.pass,
-      expectations: {},
+      scores: {},
       durationMs: 1,
       ...(c.tags ? { tags: c.tags } : {}),
     })),
@@ -544,15 +544,15 @@ function makeAttemptsResult(
       toolName: 't',
       source: 'eval' as const,
       pass: c.passes === trials,
-      expectations: {},
+      scores: {},
       durationMs: 1,
       ...(c.tags ? { tags: c.tags } : {}),
       ...(c.toolPrecision !== undefined
         ? { toolPrecision: c.toolPrecision }
         : {}),
       ...(c.toolRecall !== undefined ? { toolRecall: c.toolRecall } : {}),
-      assertionPassRate: c.passes / trials,
-      iterationResults: Array.from({ length: trials }, (_, i) => ({
+      passRate: c.passes / trials,
+      trialResults: Array.from({ length: trials }, (_, i) => ({
         pass: i < c.passes,
         durationMs: 1,
       })),

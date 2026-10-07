@@ -49,8 +49,8 @@ describe('validateToolCalls', () => {
       events: [event],
       evidence: 'structured',
     };
-    const expectation = { calls: [{ ...event, ...mismatch }], exclusive: true };
-    const result = validateToolCalls(response, expectation);
+    const assertion = { calls: [{ ...event, ...mismatch }], exclusive: true };
+    const result = validateToolCalls(response, assertion);
     expect(result.pass).toBe(false);
     expect(result.metrics).toEqual({ precision: 0, recall: 0 });
   });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { suggestExpectations } from './expectationSuggester.js';
+import { suggestAssertions } from './assertionSuggester.js';
 import type { Tool } from '@modelcontextprotocol/client';
 
 const dummyTool: Tool = {
@@ -12,10 +12,10 @@ function makeResponse(text: string): unknown {
   return { content: [{ type: 'text', text }] };
 }
 
-describe('suggestExpectations', () => {
+describe('suggestAssertions', () => {
   describe('textContains suggestions', () => {
     it('extracts markdown headers', () => {
-      const { textContains } = suggestExpectations(
+      const { textContains } = suggestAssertions(
         makeResponse('## Weather Report\n\nSome content'),
         dummyTool
       );
@@ -23,7 +23,7 @@ describe('suggestExpectations', () => {
     });
 
     it('extracts bold text when 5 or fewer instances', () => {
-      const { textContains } = suggestExpectations(
+      const { textContains } = suggestAssertions(
         makeResponse('**Temperature:** 20°C\n**Humidity:** 60%'),
         dummyTool
       );
@@ -31,7 +31,7 @@ describe('suggestExpectations', () => {
     });
 
     it('falls back to first line when nothing else matches', () => {
-      const { textContains } = suggestExpectations(
+      const { textContains } = suggestAssertions(
         makeResponse('Simple plain text response'),
         dummyTool
       );
@@ -40,17 +40,14 @@ describe('suggestExpectations', () => {
     });
 
     it('returns empty array for very short response', () => {
-      const { textContains } = suggestExpectations(
-        makeResponse('ok'),
-        dummyTool
-      );
+      const { textContains } = suggestAssertions(makeResponse('ok'), dummyTool);
       expect(textContains).toHaveLength(0);
     });
   });
 
   describe('regex pattern suggestions', () => {
     it('suggests date pattern for YYYY-MM-DD dates', () => {
-      const { regex } = suggestExpectations(
+      const { regex } = suggestAssertions(
         makeResponse('Updated on 2024-03-15'),
         dummyTool
       );
@@ -58,7 +55,7 @@ describe('suggestExpectations', () => {
     });
 
     it('suggests URL pattern for http/https links', () => {
-      const { regex } = suggestExpectations(
+      const { regex } = suggestAssertions(
         makeResponse('Visit https://example.com for details'),
         dummyTool
       );
@@ -66,7 +63,7 @@ describe('suggestExpectations', () => {
     });
 
     it('suggests email pattern for email addresses', () => {
-      const { regex } = suggestExpectations(
+      const { regex } = suggestAssertions(
         makeResponse('Contact us at support@example.com'),
         dummyTool
       );
@@ -76,7 +73,7 @@ describe('suggestExpectations', () => {
     });
 
     it('suggests percentage pattern', () => {
-      const { regex } = suggestExpectations(
+      const { regex } = suggestAssertions(
         makeResponse('Success rate: 99.5%'),
         dummyTool
       );
@@ -84,7 +81,7 @@ describe('suggestExpectations', () => {
     });
 
     it('suggests currency pattern for $', () => {
-      const { regex } = suggestExpectations(
+      const { regex } = suggestAssertions(
         makeResponse('Price: $12.99'),
         dummyTool
       );
@@ -92,7 +89,7 @@ describe('suggestExpectations', () => {
     });
 
     it('suggests list item pattern for markdown lists', () => {
-      const { regex } = suggestExpectations(
+      const { regex } = suggestAssertions(
         makeResponse('- item one\n- item two'),
         dummyTool
       );
@@ -100,7 +97,7 @@ describe('suggestExpectations', () => {
     });
 
     it('suggests numbered list pattern', () => {
-      const { regex } = suggestExpectations(
+      const { regex } = suggestAssertions(
         makeResponse('1. First item\n2. Second item'),
         dummyTool
       );
@@ -108,7 +105,7 @@ describe('suggestExpectations', () => {
     });
 
     it('suggests IP address pattern', () => {
-      const { regex } = suggestExpectations(
+      const { regex } = suggestAssertions(
         makeResponse('Server at 192.168.1.100'),
         dummyTool
       );
@@ -116,7 +113,7 @@ describe('suggestExpectations', () => {
     });
 
     it('returns no duplicates', () => {
-      const { regex } = suggestExpectations(
+      const { regex } = suggestAssertions(
         makeResponse('Date: 2024-01-01, Price: $9.99, Rate: 50%'),
         dummyTool
       );

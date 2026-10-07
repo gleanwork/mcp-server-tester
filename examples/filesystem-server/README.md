@@ -34,7 +34,7 @@ npm test
                     │   LLM Host E2E      │  ← Real LLM discovers & calls tools
                     │   (functional)      │     Requires API keys
                     ├─────────────────────┤
-                    │   Data-Driven       │  ← JSON datasets + expectations
+                    │   Data-Driven       │  ← JSON datasets + assertions
                     │   (eval datasets)   │     No LLM required
                     ├─────────────────────┤
                     │   Direct API        │  ← Tool calls + assertions

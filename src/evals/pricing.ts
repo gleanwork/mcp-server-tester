@@ -25,8 +25,8 @@ export interface PricingOutcome {
 
 /**
  * Give each trial whose host reported tokens but no cost an estimate, at the
- * price of the model it ran (`modelOf`). A multi-iteration case's usage is
- * re-summed from its iterations, so it agrees with them.
+ * price of the model it ran (`modelOf`). A multi-trial case's usage is
+ * re-summed from its trials, so it agrees with them.
  */
 export function estimateCosts(
   results: EvalCaseResult[],
@@ -50,12 +50,12 @@ export function estimateCosts(
   };
   for (const result of results) {
     const model = modelOf(result);
-    if (result.iterationResults?.length) {
-      for (const iteration of result.iterationResults)
-        price(iteration.clientUsage, model);
-      result.clientUsage = result.iterationResults.reduce<
-        UsageMetrics | undefined
-      >((sum, iteration) => sumUsage(sum, iteration.clientUsage), undefined);
+    if (result.trialResults?.length) {
+      for (const trial of result.trialResults) price(trial.clientUsage, model);
+      result.clientUsage = result.trialResults.reduce<UsageMetrics | undefined>(
+        (sum, trial) => sumUsage(sum, trial.clientUsage),
+        undefined
+      );
     } else {
       price(result.clientUsage, model);
     }
@@ -69,10 +69,10 @@ export function costSource(
 ): 'host' | 'pricing' | 'mixed' | undefined {
   // The trials metrics count: infrastructure failures aren't trials.
   const usages = results.flatMap((result) =>
-    result.iterationResults?.length
-      ? result.iterationResults
-          .filter((iteration) => !iteration.isInfrastructureError)
-          .map((iteration) => iteration.clientUsage)
+    result.trialResults?.length
+      ? result.trialResults
+          .filter((trial) => !trial.isInfrastructureError)
+          .map((trial) => trial.clientUsage)
       : [result.clientUsage]
   );
   const reported = usages.some((usage) => usage?.totalCostUsd !== undefined);
