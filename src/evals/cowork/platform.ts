@@ -36,15 +36,23 @@ export interface CoworkPlatform {
     app?: CoworkClientApp;
     /** macOS returns transaction-owned paths after installing its private profile. */
     stdioPaths?: ClientStdioPaths;
+    /**
+     * Quits and relaunches the app with the session's settings: the reset
+     * that needs no planner. macOS only.
+     */
+    restart?(): Promise<void>;
     dispose(): Promise<void>;
   }>;
   recover(): Promise<unknown>;
   /**
    * After a failed case, leave the app with no task running and no prompt
-   * open, so the next case is independent. Never types or presses keys.
-   * Optional: without it, a failed case stops the batch.
+   * open, so the next case is independent. Never types or submits.
+   * `restartApp` is the session's restart, the fallback when a gentler reset
+   * fails. Optional: without it, a failed case stops the batch.
    */
-  reset?(options: CoworkDriverOptions): Promise<void>;
+  reset?(
+    options: CoworkDriverOptions & { restartApp?: () => Promise<void> }
+  ): Promise<void>;
   submit(
     query: string,
     options: CoworkDriverOptions

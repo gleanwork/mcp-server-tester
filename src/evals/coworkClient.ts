@@ -272,6 +272,9 @@ async function runBatch(
                 model: config.computerUseModel,
                 env,
                 ...(session?.appPath ? { appPath: session.appPath } : {}),
+                ...(session?.restart
+                  ? { restartApp: () => session.restart!() }
+                  : {}),
               });
             },
           }

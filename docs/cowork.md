@@ -400,9 +400,12 @@ trace failure, MST records that case's failure and resets the app before the nex
 case. On Linux the reset opens one empty new-task deep link and waits read-only
 (about 10 seconds) for the Cowork start surface. On macOS, the Computer Use planner
 stops a task that is still running and declines an open permission prompt, within
-eight actions. The driver refuses typing, key presses and drags, and the planner is
-instructed never to click Send, approve, or answer a question; a reset that never
-concludes the app is idle fails. The next case takes its own
+eight actions. The driver refuses typing, drags and key presses other than Escape
+(a refused proposal does nothing, and the planner may try again within the
+budget), and the planner is instructed never to click Send, approve, or answer a
+question. If the planner can't conclude the app is idle, MST quits and relaunches
+Claude Desktop instead, which stops whatever was running; the session's settings
+and MCP servers stay installed. Only if that fails too is the reset a failure. The next case takes its own
 session snapshot, so a late session from the failed case cannot be attributed to
 it. If the reset fails, the remaining cases are not submitted, and the same
 happens after three failed cases in a row: a reset can succeed and still leave a

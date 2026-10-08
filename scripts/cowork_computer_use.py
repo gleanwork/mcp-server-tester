@@ -373,12 +373,13 @@ async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemet
                 "(Deny, Don't allow or Cancel); never approve. If the task is asking a question, "
                 "do not answer it or choose an option; stop the task instead. Never click Send, "
                 "Submit or any control that starts or continues a task, even if the composer "
-                "has text. Do not type, press keys, open another app or change settings. When no "
+                "has text. You may press Escape to close a menu or dialog. Do not type, press "
+                "other keys, open another app or change settings. When no "
                 "task is running and no prompt is open, stop without an action."
             ),
         }]
         system = (
-            "You are a bounded reset operator. Use screenshots and Computer Use clicks only. "
+            "You are a bounded reset operator. Use screenshots, Computer Use clicks and Escape only. "
             "Stop a running task or decline a permission prompt; never approve, answer a "
             "question, authenticate, type, click Send or Submit, or change settings. If nothing "
             "is running and no prompt is open, stop without an action."
@@ -538,9 +539,17 @@ async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemet
                 code = action.get('code')
                 raise DesktopBlockedError(code if code in BLOCKER_CODES else 'navigation_blocked')
             refusal = None
-            if mode in ("hitl", "reset") and (tool_name != "computer" or action_name not in {"screenshot", "wait", "mouse_move", "cursor_position", "left_click", "scroll"}):
-                telemetry.refused += 1
-                raise RuntimeError(f"{'Reset' if mode == 'reset' else 'HITL'} cannot type, press keys, drag, or submit tasks")
+            # Escape closes a menu or dialog; it can't type, submit or approve.
+            reset_escape = (mode == "reset" and tool_name == "computer" and action_name == "key"
+                            and str(action.get("text", "")).strip().lower() in {"escape", "esc"})
+            if mode in ("hitl", "reset") and not reset_escape and (tool_name != "computer" or action_name not in {"screenshot", "wait", "mouse_move", "cursor_position", "left_click", "scroll"}):
+                if mode == "hitl":
+                    telemetry.refused += 1
+                    raise RuntimeError("HITL cannot type, press keys, drag, or submit tasks")
+                # Refused, so nothing happened: the planner can try again
+                # within the reset's budget instead of failing the reset.
+                refusal = ("Not executed: a reset may only take screenshots, wait, move the mouse, "
+                           "click, scroll, or press Escape. Do not type, drag, or press other keys.")
             if mode == "submit":
                 if require_model_confirmation and tool_name == 'confirm_model':
                     model_confirmed = False

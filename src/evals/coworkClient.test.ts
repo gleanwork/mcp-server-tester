@@ -1052,6 +1052,45 @@ describe('V2 Cowork client', () => {
     expect(result[1]!.error).toContain('could not be reset');
   });
 
+  it('on macOS, restarts Claude when the Computer Use reset fails, and goes on', async () => {
+    const restart = vi.fn(async () => {
+      mocks.order.push('restart');
+    });
+    mocks.setup.mockImplementationOnce(async () => {
+      mocks.order.push('setup');
+      return { dispose: mocks.dispose, restart };
+    });
+    mocks.trace.mockRejectedValueOnce(new Error('native trace timeout'));
+    mocks.reset.mockRejectedValueOnce(
+      new Error('Computer Use reset exceeded 8 actions')
+    );
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const result = await COWORK_CLIENT.runBatch!(requests(), context);
+    expect(restart).toHaveBeenCalledOnce();
+    expect(mocks.submit).toHaveBeenCalledTimes(2);
+    expect(result[0]!.error).toBe('native trace timeout');
+    expect(result[1]!.error).toBeUndefined();
+  });
+
+  it('on macOS, sends nothing more when the restart fails too', async () => {
+    const restart = vi.fn(async () => {
+      throw new Error('Claude Desktop did not quit; not restarting it.');
+    });
+    mocks.setup.mockImplementationOnce(async () => ({
+      dispose: mocks.dispose,
+      restart,
+    }));
+    mocks.trace.mockRejectedValueOnce(new Error('native trace timeout'));
+    mocks.reset.mockRejectedValueOnce(
+      new Error('Computer Use reset exceeded 8 actions')
+    );
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const result = await COWORK_CLIENT.runBatch!(requests(), context);
+    expect(mocks.submit).toHaveBeenCalledOnce();
+    expect(result[1]!.error).toContain('could not be reset');
+    expect(result[1]!.error).toContain('did not quit');
+  });
+
   it('does not hide a HITL failure when native response collection succeeds', async () => {
     mocks.hitl.mockRejectedValueOnce(new Error('HITL timed out'));
     const result = await COWORK_CLIENT.runBatch!(requests(), readOnlyContext);

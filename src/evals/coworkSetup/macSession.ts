@@ -145,6 +145,8 @@ export async function prepareMacCoworkSession(options: {
   appPath: string;
   /** The Claude Desktop the session runs, as recorded with each result. */
   app: MacCoworkApp;
+  /** Quits and relaunches the session's app, with the session's settings. */
+  restart(): Promise<void>;
   dispose(): Promise<void>;
 }> {
   try {
@@ -404,6 +406,32 @@ export async function prepareMacCoworkSession(options: {
       },
       serverCount: evalConfig.servers?.length ?? 0,
       stdioPaths,
+      async restart() {
+        // Quitting stops any task still running; the settings, profile and
+        // MCP servers installed for the session stay as they are. Like setup
+        // and cleanup, act on the app only while this session owns it.
+        if (disposal)
+          throw new Error(
+            'The Cowork session is being cleaned up; not restarting.'
+          );
+        await ownsLease();
+        await ownsTransaction();
+        if ((await controller.state()).running) await controller.stop();
+        if ((await controller.state()).running)
+          throw new Error('Claude Desktop did not quit; not restarting it.');
+        await ownsLease();
+        await controller.start();
+        const state = await controller.state();
+        if (!state.running)
+          throw new Error('Claude Desktop did not start again after quitting.');
+        if (
+          state.runningAppPath &&
+          (await realpath(state.runningAppPath)) !== (await realpath(appPath))
+        )
+          throw new Error(
+            'A different Claude Desktop bundle started after the restart; refusing to continue.'
+          );
+      },
       dispose() {
         // Concurrent/repeated callers share one cleanup, including its failure.
         disposal ??= (async () => {
