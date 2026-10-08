@@ -112,6 +112,7 @@ async function run(
   tests: Array<{
     project: string;
     id?: string;
+    title?: string;
     attachments: TestResult['attachments'];
   }>,
   options: Record<string, unknown> = {},
@@ -126,7 +127,7 @@ async function run(
     await reporter.onTestEnd(
       {
         id: test.id ?? `${test.project}-${index}`,
-        title: 'eval',
+        title: test.title ?? 'eval',
         parent: { title: 'suite', project: () => ({ name: test.project }) },
       } as unknown as TestCase,
       { status: 'passed', attachments: test.attachments } as TestResult
@@ -448,17 +449,53 @@ describe('MCPReporter', () => {
     ]);
   });
 
-  it('refuses a project with the same case twice, and says why', async () => {
+  it('names a case two tests ran after each test, the same in every project', async () => {
+    const tests = [];
+    for (const project of ['stdio', 'http'])
+      for (const [title, pass] of [
+        ['serially', true],
+        ['in parallel', false],
+      ] as const)
+        tests.push({
+          project,
+          title,
+          attachments: await attachmentsOf(evalResults([result('a', pass)])),
+        });
+    const stored = await readRunDirectory((await run(tests))!);
+    expect(
+      stored.summary.results.map((r) => [r.variant, r.id, r.pass])
+    ).toEqual([
+      ['stdio', 'a (serially)', true],
+      ['stdio', 'a (in parallel)', false],
+      ['http', 'a (serially)', true],
+      ['http', 'a (in parallel)', false],
+    ]);
+  });
+
+  it('names one ID in two datasets of a test after its dataset', async () => {
+    const stored = await readRunDirectory(
+      (await run([
+        {
+          project: 'stdio',
+          attachments: await attachmentsOf(
+            evalResults([
+              result('a', true, { datasetName: 'one' }),
+              result('A', false, { datasetName: 'two' }),
+            ])
+          ),
+        },
+      ]))!
+    );
+    expect(stored.summary.results.map((r) => r.id)).toEqual(['one/a', 'two/A']);
+  });
+
+  it('refuses one dataset with the same case twice, and says why', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const directory = await run([
       {
         project: 'stdio',
-        attachments: await attachmentsOf(evalResults([result('a', true)])),
-      },
-      {
-        project: 'stdio',
         attachments: await attachmentsOf(
-          evalResults([result('A', true, { datasetName: 'other' })])
+          evalResults([result('a', true), result('A', true)])
         ),
       },
     ]);
@@ -466,9 +503,10 @@ describe('MCPReporter', () => {
     expect(error).toHaveBeenCalledWith(
       expect.stringContaining("wasn't written"),
       expect.objectContaining({
-        message: expect.stringContaining('has case "A" twice'),
+        message: expect.stringContaining('twice in one dataset'),
       })
     );
+    error.mockRestore();
   });
 
   it('writes a shard as a partial run that never becomes the latest', async () => {

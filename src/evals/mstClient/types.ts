@@ -71,7 +71,7 @@ type CLIOutputFormat = 'stream-json' | 'json';
  * language prompt — the framework replaces it before spawning.
  *
  * Because args are passed directly to the process (not through a shell),
- * special characters in the scenario (quotes, newlines, `$`, etc.) are
+ * special characters in the input (quotes, newlines, `$`, etc.) are
  * handled safely without escaping.
  *
  * @example Claude Code
@@ -264,8 +264,8 @@ export interface MstClientSimulationResult {
   /** Error message if simulation failed */
   error?: string;
 
-  /** The scenario prompt that was given to the LLM */
-  scenario?: string;
+  /** The case's input, as given to the model */
+  input?: string;
 
   /**
    * The conversation turns for attribution analysis.
@@ -321,13 +321,13 @@ export interface MstClientSimulator {
    * Simulates a client interacting with an MCP server
    *
    * @param mcp - MCP fixture API
-   * @param scenario - Natural language prompt describing what the LLM should do
+   * @param input - The case's input: what the user asks the client to do
    * @param config - client configuration
    * @returns Simulation result with tool calls and response
    */
   simulate(
     mcp: MCPFixtureApi,
-    scenario: string,
+    input: string,
     config: MstClientConfig,
     /** Optional enclosing client deadline; does not cover caller-owned fixtures. */
     signal?: AbortSignal

@@ -30,8 +30,8 @@ const TEST_CORRELATION = {
 const RUN_CONTEXT: ClientRunContext = {
   runId: 'run',
   caseId: 'case',
-  scenario: 'scenario',
-  submittedScenario: 'scenario',
+  input: 'input',
+  submittedInput: 'input',
   marker: 'MCP_SERVER_TESTER_CAPABILITY',
   correlation: TEST_CORRELATION,
   timeoutMs: 1000,
@@ -487,7 +487,7 @@ describe('external client capability lifecycle', () => {
   });
 
   it('reports an unknown capability as an unsupported client run', async () => {
-    const result = await runExternalClientCase('scenario', {
+    const result = await runExternalClientCase('input', {
       driver: TEST_DRIVER,
       capabilities: {
         control: {
@@ -505,7 +505,7 @@ describe('external client capability lifecycle', () => {
   });
 
   it('reports a module: capability as an unsupported client run', async () => {
-    const result = await runExternalClientCase('scenario', {
+    const result = await runExternalClientCase('input', {
       driver: TEST_DRIVER,
       capabilities: {
         control: {

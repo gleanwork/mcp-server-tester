@@ -62,11 +62,11 @@ async function runBuiltinClient(
     ...clientEnvironment(input, context),
     ...(clientConfig.env as ClientEnvironment | undefined),
   };
-  const options = { ...input, host: clientConfig, ...context };
+  const options = { ...input, client: clientConfig, ...context };
   if (!input.prompt) throw new Error('Clients require an input.');
   const prompt = input.prompt;
   const config = {
-    ...factory({ ...options.host, servers: options.servers, env }),
+    ...factory({ ...options.client, servers: options.servers, env }),
     env,
   };
   const clients: Array<Awaited<ReturnType<typeof createMCPClientForConfig>>> =

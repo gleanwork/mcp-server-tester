@@ -84,8 +84,8 @@ function context(
     run: {
       runId: 'run',
       caseId: 'case',
-      scenario: 'private prompt',
-      submittedScenario: 'private prompt',
+      input: 'private prompt',
+      submittedInput: 'private prompt',
       marker: 'marker',
       correlation: {
         strategy: 'exact_prompt',
@@ -292,7 +292,7 @@ describe('bounded native binding wait and failure classification', () => {
       ctx.config.options!.surface = 'codex';
       ctx.config.model = 'gpt-5.6-terra';
       ctx.config.reasoningEffort = 'medium';
-      ctx.run.scenario = ctx.run.submittedScenario = 'Find documents.';
+      ctx.run.input = ctx.run.submittedInput = 'Find documents.';
       clock.now = Date.parse('2026-09-23T15:36:01Z');
       const root = chatgptRunState(ctx.state).sessionsRoot as string;
       await mkdir(root, { recursive: true });

@@ -280,8 +280,8 @@ export interface ExternalClientConfig {
 export interface ClientRunContext {
   runId: string;
   caseId: string;
-  scenario: string;
-  submittedScenario: string;
+  input: string;
+  submittedInput: string;
   marker: string;
   correlation: ExternalClientCorrelationMetadata;
   timeoutMs: number;

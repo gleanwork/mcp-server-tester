@@ -775,7 +775,6 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
       const effectiveConfig: EvalConfig = {
         ...evalConfig,
         ...variant,
-        host: clientConfig.declaration,
         coworkSetup: resolveCoworkSetupConfig(
           evalConfig.coworkSetup,
           variant.coworkSetup

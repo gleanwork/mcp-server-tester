@@ -86,7 +86,7 @@ async function runBatch(
     );
   const configs = requests.map((request) => Schema.parse(request.config));
   if (requests.some((request) => !request.input.prompt.trim()))
-    throw new Error('ChatGPT requires non-empty scenarios.');
+    throw new Error('ChatGPT requires a non-empty input.');
   requireIdenticalClientSettings('ChatGPT', configs);
   const credentialEnv = requests.map((request, index) => ({
     ...process.env,

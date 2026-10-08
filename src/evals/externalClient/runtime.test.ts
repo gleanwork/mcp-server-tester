@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { formatSubmittedScenario, runExternalClientCase } from './runtime.js';
+import { formatSubmittedInput, runExternalClientCase } from './runtime.js';
 
 describe('external client runtime', () => {
   it('adds an evaluator marker with an instruction not to mention it', () => {
-    const submitted = formatSubmittedScenario(
+    const submitted = formatSubmittedInput(
       'Reply with exactly: acknowledged.',
       'MCP_SERVER_TESTER_run_123'
     );
@@ -13,8 +13,8 @@ describe('external client runtime', () => {
     expect(submitted).toContain('do not mention this marker');
   });
 
-  it('leaves the submitted scenario unchanged when prompt correlation is disabled', () => {
-    const submitted = formatSubmittedScenario(
+  it('leaves the submitted input unchanged when prompt correlation is disabled', () => {
+    const submitted = formatSubmittedInput(
       'Reply with exactly: acknowledged.',
       'MCP_SERVER_TESTER_run_123',
       { strategy: 'none' }
@@ -24,16 +24,16 @@ describe('external client runtime', () => {
   });
 
   it('keeps exact-prompt input byte-for-byte unchanged', () => {
-    const scenario = '  snake_case\\value\nUnicode α  ';
+    const input = '  snake_case\\value\nUnicode α  ';
     expect(
-      formatSubmittedScenario(scenario, 'internal-id', {
+      formatSubmittedInput(input, 'internal-id', {
         strategy: 'exact_prompt',
       })
-    ).toBe(scenario);
+    ).toBe(input);
   });
 
   it('supports prompt marker correlation without including it in the prompt', () => {
-    const submitted = formatSubmittedScenario(
+    const submitted = formatSubmittedInput(
       'Reply with exactly: acknowledged.',
       'MCP_SERVER_TESTER_run_123',
       { strategy: 'prompt_marker', includeInPrompt: false }

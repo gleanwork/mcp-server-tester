@@ -63,12 +63,12 @@ export function interpolateArgs(
  */
 export async function runCLIClient(
   cliConfig: CLIConfig,
-  scenario: string,
+  input: string,
   signal?: AbortSignal,
   systemPrompt?: string
 ): Promise<MstClientSimulationResult> {
   const timeout = cliConfig.timeout ?? DEFAULT_TIMEOUT;
-  const args = interpolateArgs(cliConfig.args, scenario, systemPrompt);
+  const args = interpolateArgs(cliConfig.args, input, systemPrompt);
 
   const startTime = Date.now();
   const isClaude = cliConfig.claudeMcpServers !== undefined;

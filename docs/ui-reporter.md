@@ -54,7 +54,7 @@ Each Playwright run's eval results (from `runEvalDataset()` and `runEvalCase()`)
 
 - **Retries:** a retried test counts once, with its last attempt.
 - **Shards:** each shard writes its own run, marked partial (`selection.shard`), which is compared only with the same shard and never becomes the eval's latest. For one run across shards, use Playwright's blob reporter and `merge-reports` with this reporter.
-- **Case IDs** must be unique within a project, and differ in more than case: two tests running one dataset, or one ID in two datasets, stop the run from being written, with an error naming the case.
+- **Case IDs** name a case's results, so the reporter tells repeats apart: a case two tests ran (one dataset run two ways) is `<id> (<test title>)`, and one ID in two datasets of a test is `<dataset>/<id>`. IDs that differ only in case count as the same. One dataset with the same ID twice stops the run from being written, with an error naming the case.
 
 | Option                  | Default             | What it does                                                                         |
 | ----------------------- | ------------------- | ------------------------------------------------------------------------------------ |

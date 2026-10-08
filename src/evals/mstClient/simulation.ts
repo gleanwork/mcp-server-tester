@@ -45,14 +45,14 @@ const allProviders: readonly LLMProvider[] = ProviderSchema.options;
  * through `runEvalDataset` / `runEvalCase` or an eval.
  *
  * @param mcp - MCP fixture API (used by the SDK client; ignored by the CLI client, which establishes its own connections)
- * @param scenario - Natural language prompt describing what the LLM should do
+ * @param input - The case's input: what the user asks the client to do
  * @param config - client configuration (provider, model, temperature, etc.)
  * @returns Simulation result with tool calls, final response, and latency data
  *
  */
 export async function simulateMstClient(
   mcp: MCPFixtureApi,
-  scenario: string,
+  input: string,
   config: MstClientConfig,
   signal?: AbortSignal
 ): Promise<MstClientSimulationResult> {
@@ -99,7 +99,7 @@ export async function simulateMstClient(
         timeout: config.timeout ?? config.cli.timeout,
         env: { ...config.env, ...config.cli.env },
       },
-      scenario,
+      input,
       signal,
       config.systemPrompt
     );
@@ -119,7 +119,7 @@ export async function simulateMstClient(
         `Supported: ${allProviders.join(', ')}`
     );
   }
-  return vercelOrchestrator.simulate(mcp, scenario, config, signal);
+  return vercelOrchestrator.simulate(mcp, input, config, signal);
 }
 
 /**
