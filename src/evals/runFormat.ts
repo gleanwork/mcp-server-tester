@@ -241,11 +241,14 @@ export interface RunFacts {
    * How far the run got. Default: both complete. A run saved while variants
    * remain is `partial`; one that stopped on an error is `collect: failed`.
    */
-  phases?: {
-    collect: 'complete' | 'partial' | 'skipped' | 'failed';
-    grade: 'complete' | 'partial' | 'skipped' | 'failed';
-  };
+  phases?: RunPhases;
 }
+
+/** `run.json`'s `phases`: how far collecting traces and grading them got. */
+type RunPhases = Pick<
+  z.infer<typeof RunRecordSchema>['phases'],
+  'collect' | 'grade'
+>;
 
 async function writeJson(file: string, value: unknown): Promise<void> {
   await fs.mkdir(path.dirname(file), { recursive: true });

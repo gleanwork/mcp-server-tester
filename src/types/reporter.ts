@@ -880,6 +880,15 @@ export interface MCPRunReportData {
     finishedAt: string;
     mstVersion: string;
     partial: boolean;
+    /**
+     * How far the run got (`run.json` phases). `collect: partial` is a run
+     * saved while variants remained (still running, or killed); `failed`
+     * stopped on an error.
+     */
+    phases: {
+      collect: 'complete' | 'partial' | 'skipped' | 'failed';
+      grade: 'complete' | 'partial' | 'skipped' | 'failed';
+    };
     /** Whether the run stored responses redacted (`redactStoredResponses`): no answers or tool outputs. */
     redacted: boolean;
     selection?: Record<string, unknown>;

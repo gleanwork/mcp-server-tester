@@ -438,6 +438,7 @@ export function buildRunReport(stored: StoredRun): MCPRunReportData {
       finishedAt: run.finishedAt,
       mstVersion: run.mst.version,
       partial: run.partial,
+      phases: { collect: run.phases.collect, grade: run.phases.grade },
       redacted: run.redactStoredResponses,
       ...(run.selection ? { selection: run.selection } : {}),
       baseline: baselineName,

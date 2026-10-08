@@ -13,6 +13,7 @@ import type {
   ClientRunResult,
 } from './evalFrameworkTypes.js';
 import { McpReadinessError } from './mcpReadiness.js';
+import { ClientUnavailableError } from './clientUnavailable.js';
 
 const SECRET = 'sk-desktop-secret';
 let leaseDirectory = '';
@@ -120,9 +121,12 @@ describe('runDesktopBatch', () => {
       pid: number;
     };
     expect(lease.pid).toBe(process.pid);
-    await expect(runDesktopBatch(fakeClient(), requests(1))).rejects.toThrow(
+    const refused = runDesktopBatch(fakeClient(), requests(1));
+    await expect(refused).rejects.toThrow(
       'Fake desktop is locked by another run or an interrupted run'
     );
+    // The eval records the batch as unavailable and goes on.
+    await expect(refused).rejects.toBeInstanceOf(ClientUnavailableError);
     release();
     await first;
   });

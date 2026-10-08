@@ -763,8 +763,14 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
       canonicalDatasets.map(({ dataset }) => dataset)
     );
 
+    // Where the running variant's results start, to drop them if it fails.
+    let variantStart = { results: 0, datasets: 0 };
     try {
       for (const variant of variants) {
+        variantStart = {
+          results: allResults.length,
+          datasets: allDatasets.length,
+        };
         const servers = options.mcpConfig
           ? [options.mcpConfig]
           : transportServers(variant.servers ?? evalConfig.servers);
@@ -978,8 +984,11 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
           await checkpoint('partial');
       }
     } catch (error) {
-      // Keep the variants that finished, then report the failure.
-      await checkpoint('failed');
+      // Keep the variants that finished, then report the failure. The
+      // variant that failed is left out: run.json wouldn't list it.
+      allResults.length = variantStart.results;
+      allDatasets.length = variantStart.datasets;
+      if (variantResults.length > 0) await checkpoint('failed');
       throw error;
     }
   } finally {

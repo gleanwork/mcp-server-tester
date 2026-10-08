@@ -26,6 +26,7 @@ import {
   redactClientSecrets,
   redactedClientError,
 } from './clientSecrets.js';
+import { ClientUnavailableError } from './clientUnavailable.js';
 
 /**
  * Failed cases in a row after which a batch stops submitting. A reset that
@@ -98,7 +99,9 @@ async function claimLease(
   await mkdir(adapter.lease.directory, { recursive: true, mode: 0o700 });
   const path = join(adapter.lease.directory, adapter.lease.file);
   const handle = await open(path, 'wx', 0o600).catch(() => {
-    throw new Error(
+    // The desktop isn't this run's to use: the batch's cases can't run, but
+    // an eval's other variants still can.
+    throw new ClientUnavailableError(
       `${adapter.name} desktop is locked by another run or an interrupted run (${path}). Use one worker; inspect stale locks before removing them.`
     );
   });
@@ -222,6 +225,9 @@ export async function runDesktopBatch<Session>(
         results.push({
           ...notSubmitted(`The ${adapter.name} case failed: ${reason}`),
           diagnostics: { failureKind: 'process' },
+          telemetry: {
+            caseExecution: { status: 'failed', continuation: 'blocked' },
+          },
         });
       while (results.length < requests.length)
         results.push(

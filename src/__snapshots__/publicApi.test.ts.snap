@@ -17,6 +17,7 @@ exports[`public API > ./auth 1`] = `
 exports[`public API > ./evals 1`] = `
 [
   "BUILT_IN_METRICS",
+  "ClientUnavailableError",
   "EvalConfigSchema",
   "FileEvalResultStore",
   "GCSEvalResultStore",
