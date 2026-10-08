@@ -49,7 +49,7 @@ function builtinResultStores(): Readonly<
 
 const resultStores = extensionLookup('resultStores', builtinResultStores);
 
-/** The result store `reference` names: a built-in, or `namespace/name` from a plugin. */
+/** The result store `reference` names: a built-in, or `<namespace>/result-store/<name>` from a plugin. */
 export function getResultStore(reference: string): ResultStoreDefinition {
   return resultStores.get(reference);
 }

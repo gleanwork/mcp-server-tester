@@ -246,7 +246,7 @@ The `examples/` directory contains complete working examples:
 For projects with multiple datasets, use an eval config. Dataset
 paths are shorthand for tagged file sources, while clients, metrics, judges,
 result stores, and other extensions are built-ins or come from plugins
-(referenced as `namespace/name`):
+(referenced as `<namespace>/<kind>/<name>`, such as `acme/judge/completeness`):
 
 ```json
 {
@@ -300,7 +300,7 @@ The canonical execution primitives remain `EvalDataset`, `EvalCase`,
 
 Plugins add dataset sources, clients, judges, metrics and result stores. A plugin
 is a plain default-exported object in ESLint's shape, and its extensions are
-referenced as `namespace/name`. See
+referenced as `<namespace>/<kind>/<name>`. See
 [Plugins](docs/evaluation-framework.md#plugins).
 Secrets remain environment-variable or plugin-owned runtime inputs and do not
 belong in committed eval configs.

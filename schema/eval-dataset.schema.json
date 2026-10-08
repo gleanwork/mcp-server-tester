@@ -62,7 +62,7 @@
         "client": {
           "type": "string",
           "minLength": 1,
-          "description": "The client the case runs on: mst, claude-code, cowork, chatgpt, or a plugin's namespace/name. Inherits the eval's (or the run's) client."
+          "description": "The client the case runs on: mst, claude-code, cowork, chatgpt, or a plugin's <namespace>/client/<name>. Inherits the eval's (or the run's) client."
         },
         "model": {
           "type": "string",

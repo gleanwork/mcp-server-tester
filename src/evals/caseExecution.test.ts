@@ -101,7 +101,11 @@ describe('executeEvalCase', () => {
     expect(
       playwrightClientOf(
         { ...clientCase, client: 'mst', model: 'claude-haiku-4-5' },
-        { client: 'acme/other', model: 'x', clientOptions: { region: 'eu' } }
+        {
+          client: 'acme/client/other',
+          model: 'x',
+          clientOptions: { region: 'eu' },
+        }
       )
     ).toEqual({ model: 'claude-haiku-4-5' });
   });
@@ -158,7 +162,7 @@ describe('custom executeCase results', () => {
 describe('createEvalCaseExecutor', () => {
   const trace: ClientRunResult = { finalText: 'ok', events: [], durationMs: 7 };
 
-  /** Install `host` as `test/<name>` and return that reference. */
+  /** Install `host` as `test/client/<name>` and return that reference. */
   function installTestClient(name: string, client: ClientDefinition): string {
     installPlugins([
       {
@@ -166,7 +170,7 @@ describe('createEvalCaseExecutor', () => {
         clients: { [name]: client },
       },
     ]);
-    return `test/${name}`;
+    return `test/client/${name}`;
   }
 
   afterEach(() => resetPluginsForTests());

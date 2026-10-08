@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { referenceSchema } from './referenceSchemas.js';
 import { clientFieldSchemas, type ClientFields } from './clientFields.js';
 import type { BuiltInRubric, ProviderKind } from '../judge/judgeTypes.js';
 import type { TraceEvent } from './evalFrameworkTypes.js';
@@ -111,7 +112,7 @@ export interface JudgeExpectConfig {
   /** Flat plugin policy fields are also accepted for eval config integration. */
   [key: string]: unknown;
   /**
-   * The judge to run: the built-in `rubric`, or `namespace/name` from a
+   * The judge to run: the built-in `rubric`, or `<namespace>/judge/<name>` from a
    * plugin. It returns a normalized score; `threshold` decides pass/fail and
    * `reps` how many times it scores the response. Other flat fields are the
    * judge's options.
@@ -234,7 +235,7 @@ export interface EvalDataset {
  * Zod schema for a single judge configuration
  */
 const JudgeExpectConfigFieldsSchema = z.object({
-  judge: z.string().min(1).optional(),
+  judge: referenceSchema('judge').optional(),
   options: z.record(z.string(), z.unknown()).optional(),
   rubric: RubricSpecSchema.optional(),
   reference: z.unknown().optional(),

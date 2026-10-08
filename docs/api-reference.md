@@ -34,7 +34,7 @@ The `./evals`, `./auth` and `./experimental/clients` subpaths are ESM only, and 
 
 ### `mcpPlugins` option
 
-Plugins whose extensions this project's tests use, such as a judge referenced as `toPassToolJudge({ judge: 'acme/completeness' })`. Set it in a project's `use` block or with `test.use({ mcpPlugins: [acme] })`. The `mcp` and `mcpClient` fixtures install them. See [Plugins](evaluation-framework.md#plugins).
+Plugins whose extensions this project's tests use, such as a judge referenced as `toPassToolJudge({ judge: 'acme/judge/completeness' })`. Set it in a project's `use` block or with `test.use({ mcpPlugins: [acme] })`. The `mcp` and `mcpClient` fixtures install them. See [Plugins](evaluation-framework.md#plugins).
 
 ### `installPlugins(plugins)`
 
@@ -375,7 +375,7 @@ Run an eval dataset. Assertions are defined per-case in the dataset's `assertion
 
 - `options: EvalRunnerOptions`
   - `dataset: EvalDataset` - Dataset to run
-  - `plugins?: readonly Plugin[]` - Plugins whose extensions (for example `acme/completeness` judges) the cases use
+  - `plugins?: readonly Plugin[]` - Plugins whose extensions (for example `acme/judge/completeness` judges) the cases use
   - `stopOnFailure?: boolean` - Stop on first failure (default: `false`)
   - `onCaseComplete?: (result: EvalCaseResult) => void` - Callback after each case completes
   - `concurrency?: number` - Max parallel cases (default: `1` = sequential)
@@ -935,7 +935,7 @@ Evaluates a response with a judge: the built-in `rubric` LLM judge or a plugin j
 
 | Field       | Type                      | Default       | Description                                                                   |
 | ----------- | ------------------------- | ------------- | ----------------------------------------------------------------------------- |
-| `judge`     | `string`                  | `'rubric'`    | The built-in `rubric`, or a plugin judge as `namespace/name`                  |
+| `judge`     | `string`                  | `'rubric'`    | The built-in `rubric`, or a plugin judge as `<namespace>/judge/<name>`        |
 | `rubric`    | `RubricSpec`              | —             | Shorthand for the `rubric` judge (required unless `judge` is set)             |
 | `reference` | `unknown`                 | —             | Reference response to compare against                                         |
 | `threshold` | `number`                  | `0.7`         | Minimum mean score to pass (0–1)                                              |
@@ -1084,7 +1084,7 @@ test('error handling', async ({ mcp }) => {
 
 ### `toPassToolJudge(rubric, options?)`
 
-Assert that the tool response passes a judge: the built-in `rubric` judge (an LLM call) or, with `{ judge: 'namespace/name' }`, a plugin judge. The matcher takes `passingThreshold` (default `0.7`), `reference`, `reps`, `provider`, `model`, `judge` and `options`.
+Assert that the tool response passes a judge: the built-in `rubric` judge (an LLM call) or, with `{ judge: '<namespace>/judge/<name>' }`, a plugin judge. The matcher takes `passingThreshold` (default `0.7`), `reference`, `reps`, `provider`, `model`, `judge` and `options`.
 
 ```typescript
 test('semantic quality', async ({ mcp }) => {
@@ -1393,7 +1393,7 @@ The `{ code, message, data? }` of the protocol error a result was made from, or 
 
 ### `EvalAssertions`
 
-```typescript snippet=src/evals/datasetTypes.ts#L144-L206
+```typescript snippet=src/evals/datasetTypes.ts#L145-L207
 /**
  * A case's assertions
  *
@@ -1461,7 +1461,7 @@ export interface EvalAssertions {
 
 ### `EvalCase`
 
-````typescript snippet=src/evals/datasetTypes.ts#L11-L103
+````typescript snippet=src/evals/datasetTypes.ts#L12-L104
 /**
  * A single eval case: an input the client under test acts on, and what to
  * assert about what it did. The case runs on the `client`, `model` and

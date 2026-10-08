@@ -1,7 +1,12 @@
 import {
+  BUILTIN_NAMESPACE,
   EXTENSION_KINDS,
+  KIND_SEGMENTS,
   assertPlugin,
+  extensionName,
   parseExtensionReference,
+  type ExtensionReference,
+  type KindSegment,
   type ExtensionKind,
   type ExtensionsByKind,
   type Plugin,
@@ -9,7 +14,7 @@ import {
 
 /**
  * The process-wide extension table: built-ins under bare names, plugin
- * extensions under `namespace/name`. Eval config validation checks that an eval
+ * extensions under `<namespace>/<kind>/<name>`. Eval config validation checks that an eval
  * references only namespaces it lists, so one shared table is safe even when
  * a batch runs several eval configs in one process (ADR-0001).
  *
@@ -112,7 +117,10 @@ export function installPlugins(plugins: readonly Plugin[]): Plugin[] {
     for (const kind of EXTENSION_KINDS) {
       const target = state.extensions[kind] as Map<string, unknown>;
       for (const [name, definition] of Object.entries(plugin[kind] ?? {}))
-        target.set(`${namespace}/${name}`, definition);
+        target.set(
+          extensionName(namespace, KIND_SEGMENTS[kind], name),
+          definition
+        );
     }
     state.plugins.set(namespace, plugin);
   }
@@ -143,14 +151,33 @@ export function extensionLookup<K extends ExtensionKind>(
   return {
     get(reference) {
       const map = extensions();
-      const definition = map.get(reference);
-      if (definition) return definition;
+      const segment = KIND_SEGMENTS[kind];
       const label = KIND_LABELS[kind];
-      const { namespace } = parseExtensionReference(reference);
-      if (namespace !== undefined && !state.plugins.has(namespace)) {
+      const parsed = parseExtensionReference(reference);
+      checkKind(reference, parsed, segment, label);
+      // `mst/<kind>/<name>` is the full name of the built-in `<name>`.
+      const key =
+        parsed.namespace === BUILTIN_NAMESPACE ? parsed.name : reference;
+      const definition = map.get(key);
+      if (definition) return definition;
+      if (
+        parsed.namespace !== undefined &&
+        parsed.namespace !== BUILTIN_NAMESPACE &&
+        !state.plugins.has(parsed.namespace)
+      ) {
         throw new Error(
-          `${label} "${reference}" needs the "${namespace}" plugin, which is not loaded.`
+          `${label} "${reference}" needs the "${parsed.namespace}" plugin, which is not loaded.`
         );
+      }
+      if (parsed.namespace === undefined) {
+        const suffix = `/${segment}/${reference}`;
+        const plugins = [...map.keys()]
+          .filter((name) => name.endsWith(suffix))
+          .sort();
+        if (plugins.length)
+          throw new Error(
+            `"${reference}" is not a built-in ${label.toLowerCase()}. Did you mean ${plugins.map((name) => `"${name}"`).join(' or ')}?`
+          );
       }
       const available = [...map.keys()].sort().join(', ');
       throw new Error(
@@ -161,11 +188,89 @@ export function extensionLookup<K extends ExtensionKind>(
 }
 
 /**
- * The shared config `namespace/name` names, from an installed plugin. Throws
- * when the plugin isn't installed or has no such config.
+ * A built-in written in full, `mst/<kind>/<name>`, as its short name;
+ * any other reference unchanged. The full name's kind must be `kind`.
+ * Configs and datasets apply this when they are read, so the rest of MST
+ * sees one name per built-in.
+ */
+export function builtinShortName(reference: string, kind: KindSegment): string {
+  const parsed = parseExtensionReference(reference);
+  if (parsed.namespace !== BUILTIN_NAMESPACE) return reference;
+  checkKind(reference, parsed, kind, SEGMENT_LABELS[kind] ?? kind);
+  return parsed.name;
+}
+
+/**
+ * Throws, saying what is wrong, unless a plugin `reference` names an
+ * extension of `kind` (`<namespace>/<kind>/<name>`). Bare names pass.
+ */
+export function checkReferenceKind(reference: string, kind: KindSegment): void {
+  const label = SEGMENT_LABELS[kind] ?? kind;
+  checkKind(
+    reference,
+    parseExtensionReference(reference),
+    kind,
+    label.charAt(0).toUpperCase() + label.slice(1)
+  );
+}
+
+const SEGMENT_LABELS: Record<string, string> = {
+  dataset: 'dataset source',
+  client: 'client',
+  judge: 'judge',
+  'pairwise-judge': 'pairwise judge',
+  metric: 'metric',
+  'result-store': 'result store',
+  connector: 'connector',
+  config: 'shared config',
+};
+
+/**
+ * A plugin reference must name its kind, and the kind must be the one the
+ * reference is used as: `acme/judge/x` is a judge, never a dataset.
+ */
+function checkKind(
+  reference: string,
+  parsed: ExtensionReference,
+  segment: KindSegment,
+  label: string
+): void {
+  if (parsed.namespace === undefined) return;
+  if (!parsed.name || parsed.kind === '')
+    throw new Error(
+      `${label} "${reference}" is not an extension name: use "<namespace>/${segment}/<name>".`
+    );
+  if (parsed.kind?.includes('/'))
+    throw new Error(
+      `${label} "${reference}" has too many parts: use "<namespace>/${segment}/<name>".`
+    );
+  const full = extensionName(parsed.namespace, segment, parsed.name);
+  if (parsed.kind === undefined)
+    throw new Error(`${label} "${reference}" needs its kind: use "${full}".`);
+  if (parsed.kind !== segment) {
+    const actual = Object.hasOwn(SEGMENT_LABELS, parsed.kind)
+      ? SEGMENT_LABELS[parsed.kind]
+      : undefined;
+    throw new Error(
+      actual
+        ? `"${reference}" is a ${actual}, not a ${label.toLowerCase()}.`
+        : `${label} "${reference}" has an unknown kind "${parsed.kind}": use "${full}".`
+    );
+  }
+}
+
+/**
+ * The shared config `<namespace>/config/<name>` names, from an installed
+ * plugin. Throws when the plugin isn't installed or has no such config.
  */
 export function getSharedConfig(reference: string): unknown {
-  const { namespace, name } = parseExtensionReference(reference);
+  const parsed = parseExtensionReference(reference);
+  checkKind(reference, parsed, 'config', 'Shared config');
+  if (parsed.namespace === BUILTIN_NAMESPACE)
+    throw new Error(
+      `Shared config "${reference}": MST has no built-in configs. Name a plugin's config: "<namespace>/config/<name>".`
+    );
+  const { namespace, name } = parsed;
   const plugin =
     namespace === undefined ? undefined : state.plugins.get(namespace);
   if (!plugin) {

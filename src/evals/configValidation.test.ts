@@ -73,19 +73,30 @@ describe('eval config validation', () => {
     installTestPlugin();
     const evalConfig: EvalConfig = {
       name: 'search',
-      datasets: [{ type: 'test/file', path: './search.json' }],
+      datasets: [{ type: 'test/dataset/file', path: './search.json' }],
       servers: [
         { transport: 'http', serverUrl: 'https://one.example', label: 'one' },
         { transport: 'http', serverUrl: 'https://two.example', label: 'two' },
       ],
-      client: 'test/sdk',
-      metrics: [{ type: 'test/passed' }],
-      judges: [{ type: 'test/correctness' }],
-      results: { store: { type: 'test/file' } },
+      client: 'test/client/sdk',
+      metrics: [{ type: 'test/metric/passed' }],
+      judges: [{ type: 'test/judge/correctness' }],
+      results: { store: { type: 'test/result-store/file' } },
       variants: [{ name: 'baseline', servers: [] }],
     };
 
     expect(() => validateEvalConfig(evalConfig)).not.toThrow();
+  });
+
+  it('rejects a connector server from a namespace the eval does not load', () => {
+    const evalConfig: EvalConfig = {
+      name: 'namespaces',
+      datasets: [{ type: 'file', path: './cases.json' }],
+      servers: [{ connector: 'other/connector/slack', label: 'slack' }],
+    };
+    expect(() => validateEvalConfig(evalConfig, { namespaces: [] })).toThrow(
+      `references "other/connector/slack", but doesn't load the "other" plugin`
+    );
   });
 
   it.each(['dataset', 'client', 'judge'] as const)(
@@ -102,15 +113,16 @@ describe('eval config validation', () => {
       });
       const evalConfig: EvalConfig = {
         name: 'namespaces',
-        datasets: [{ type: 'test/file' }],
+        datasets: [{ type: 'test/dataset/file' }],
       };
-      if (kind === 'dataset') evalConfig.datasets = [{ type: 'test/x' }];
-      if (kind === 'client') evalConfig.client = 'test/x';
-      if (kind === 'judge') evalConfig.judges = [{ type: 'test/x' }];
+      if (kind === 'dataset')
+        evalConfig.datasets = [{ type: 'test/dataset/x' }];
+      if (kind === 'client') evalConfig.client = 'test/client/x';
+      if (kind === 'judge') evalConfig.judges = [{ type: 'test/judge/x' }];
 
       // The plugin is installed process-wide, but this eval didn't list it.
       expect(() => validateEvalConfig(evalConfig, { namespaces: [] })).toThrow(
-        /references "test\/[a-z]+", but doesn't load the "test" plugin/
+        /references "test\/[a-z-]+\/[a-z]+", but doesn't load the "test" plugin/
       );
       expect(() => validateEvalConfig(evalConfig, { namespaces: [] })).toThrow(
         `doesn't load the "test" plugin`
@@ -126,12 +138,12 @@ describe('eval config validation', () => {
     const evalConfig: EvalConfig = {
       name: 'metric-key',
       datasets: [{ type: 'file', path: './search.json' }],
-      metrics: [{ type: 'passed', metric: 'test/missing' }],
+      metrics: [{ type: 'passed', metric: 'test/metric/missing' }],
     };
 
     expect(() =>
       validateEvalConfig(evalConfig, { namespaces: ['test'] })
-    ).toThrow('Metric "test/missing" is not available.');
+    ).toThrow('Metric "test/metric/missing" is not available.');
   });
 
   it('checks the metric a metric spec names, not only its type', () => {
@@ -139,11 +151,11 @@ describe('eval config validation', () => {
       name: 'metric-key',
       datasets: [{ type: 'file', path: './search.json' }],
       // resolveMetric prefers `metric` over `type`.
-      metrics: [{ type: 'passed', metric: 'test/hits' }],
+      metrics: [{ type: 'passed', metric: 'test/metric/hits' }],
     };
 
     expect(() => validateEvalConfig(evalConfig, { namespaces: [] })).toThrow(
-      `references "test/hits", but doesn't load the "test" plugin`
+      `references "test/metric/hits", but doesn't load the "test" plugin`
     );
   });
 
@@ -191,16 +203,16 @@ describe('eval config validation', () => {
     });
     const evalConfig: EvalConfig = {
       name: 'parsed',
-      datasets: [{ type: 'test/custom', ignored: true }],
-      client: 'test/custom',
-      metrics: [{ type: 'test/custom', name: 'alias' }],
-      judges: [{ type: 'test/custom' }],
-      results: { store: { type: 'test/custom' } },
+      datasets: [{ type: 'test/dataset/custom', ignored: true }],
+      client: 'test/client/custom',
+      metrics: [{ type: 'test/metric/custom', name: 'alias' }],
+      judges: [{ type: 'test/judge/custom' }],
+      results: { store: { type: 'test/result-store/custom' } },
       variants: [
         { name: 'inherited' },
         {
           name: 'override',
-          client: 'test/custom',
+          client: 'test/client/custom',
           clientOptions: { count: 4 },
           metrics: [],
           judges: [],
@@ -208,22 +220,30 @@ describe('eval config validation', () => {
       ],
     };
     const parsed = validateEvalConfig(evalConfig);
-    expect(parsed.datasets).toEqual([{ type: 'test/custom', count: 6 }]);
-    expect(clientPatchOf(parsed)).toEqual({ type: 'test/custom', count: 6 });
-    expect(parsed.metrics).toEqual([
-      { type: 'test/custom', name: 'alias', count: 6 },
+    expect(parsed.datasets).toEqual([
+      { type: 'test/dataset/custom', count: 6 },
     ]);
-    expect(parsed.judges).toEqual([{ type: 'test/custom', count: 6 }]);
-    expect(parsed.results?.store).toEqual({ type: 'test/custom', count: 6 });
+    expect(clientPatchOf(parsed)).toEqual({
+      type: 'test/client/custom',
+      count: 6,
+    });
+    expect(parsed.metrics).toEqual([
+      { type: 'test/metric/custom', name: 'alias', count: 6 },
+    ]);
+    expect(parsed.judges).toEqual([{ type: 'test/judge/custom', count: 6 }]);
+    expect(parsed.results?.store).toEqual({
+      type: 'test/result-store/custom',
+      count: 6,
+    });
     expect(clientPatchOf(parsed.variants?.[0])).toEqual(clientPatchOf(parsed));
     expect(parsed.variants?.[0]?.metrics).toEqual(parsed.metrics);
     expect(clientPatchOf(parsed.variants?.[1])).toEqual({
-      type: 'test/custom',
+      type: 'test/client/custom',
       count: 12,
     });
     expect(parsed.variants?.[1]?.metrics).toEqual([]);
     expect(evalConfig.datasets[0]).toEqual({
-      type: 'test/custom',
+      type: 'test/dataset/custom',
       ignored: true,
     });
   });
@@ -232,7 +252,7 @@ describe('eval config validation', () => {
     installTestPlugin();
     const evalConfig: EvalConfig = {
       name: 'rubric-judges',
-      datasets: [{ type: 'test/file' }],
+      datasets: [{ type: 'test/dataset/file' }],
       judges: [{ type: 'rubric', rubric: 'correctness', threshold: 0.8 }],
     };
     expect(validateEvalConfig(evalConfig).judges).toEqual([
@@ -259,10 +279,10 @@ describe('eval config validation', () => {
     });
     const evalConfig: EvalConfig = {
       name: 'judge-settings',
-      datasets: [{ type: 'test/file' }],
+      datasets: [{ type: 'test/dataset/file' }],
       judges: [
         {
-          type: 'test/policy',
+          type: 'test/judge/policy',
           count: 2,
           threshold: 0.9,
           reference: 'base-gold',
@@ -274,7 +294,7 @@ describe('eval config validation', () => {
           name: 'override',
           judges: [
             {
-              type: 'test/policy',
+              type: 'test/judge/policy',
               count: 4,
               threshold: 0,
               reference: 'variant-gold',
@@ -285,12 +305,17 @@ describe('eval config validation', () => {
     };
     const parsed = validateEvalConfig(evalConfig);
     expect(parsed.judges).toEqual([
-      { type: 'test/policy', count: 6, threshold: 0.9, reference: 'base-gold' },
+      {
+        type: 'test/judge/policy',
+        count: 6,
+        threshold: 0.9,
+        reference: 'base-gold',
+      },
     ]);
     expect(parsed.variants?.[0]?.judges).toEqual(parsed.judges);
     expect(parsed.variants?.[1]?.judges).toEqual([
       {
-        type: 'test/policy',
+        type: 'test/judge/policy',
         count: 12,
         threshold: 0,
         reference: 'variant-gold',
@@ -345,10 +370,20 @@ describe('eval config validation', () => {
         },
       },
     });
-    const config = { type: 'test/strict', required: 'invalid' };
+    const segment = {
+      dataset: 'dataset',
+      client: 'client',
+      metric: 'metric',
+      judge: 'judge',
+      store: 'result-store',
+      variantClient: 'client',
+      variantMetric: 'metric',
+      variantJudge: 'judge',
+    }[kind];
+    const config = { type: `test/${segment}/strict`, required: 'invalid' };
     const evalConfig: EvalConfig = {
       name: 'invalid-options',
-      datasets: [{ type: 'test/file' }],
+      datasets: [{ type: 'test/dataset/file' }],
     };
     if (kind === 'dataset') evalConfig.datasets = [config];
     if (kind === 'client') {
@@ -370,7 +405,7 @@ describe('eval config validation', () => {
     if (kind === 'variantJudge')
       evalConfig.variants = [{ name: 'variant', judges: [config] }];
     expect(() => validateEvalConfig(evalConfig)).toThrow(
-      /Invalid .* options "test\/strict"/
+      new RegExp(`Invalid .* options "test/${segment}/strict"`)
     );
   });
 
@@ -388,19 +423,19 @@ describe('eval config validation', () => {
     });
     const evalConfig: EvalConfig = {
       name: 'effective',
-      datasets: [{ type: 'test/file' }],
+      datasets: [{ type: 'test/dataset/file' }],
       maxToolCalls: 5,
-      variants: [{ name: 'variant', client: 'test/limited' }],
+      variants: [{ name: 'variant', client: 'test/client/limited' }],
     };
     expect(() => validateEvalConfig(evalConfig)).toThrow(
-      'Invalid client options "test/limited"'
+      'Invalid client options "test/client/limited"'
     );
     const parsed = validateEvalConfig({
       ...evalConfig,
       maxToolCalls: 2,
     });
     expect(clientPatchOf(parsed.variants?.[0])).toEqual({
-      type: 'test/limited',
+      type: 'test/client/limited',
       maxToolCalls: 2,
       model: 'default',
     });
@@ -411,7 +446,7 @@ describe('eval config validation', () => {
           variants: [
             {
               name: 'variant',
-              client: 'test/limited',
+              client: 'test/client/limited',
               clientOptions: { maxToolCalls: 1 },
             },
           ],
@@ -431,22 +466,22 @@ describe('eval config validation', () => {
     expect(() =>
       validateEvalConfig({
         name: 'invalid',
-        datasets: [{ type: 'test/missing' }],
+        datasets: [{ type: 'test/dataset/missing' }],
       })
-    ).toThrow('Dataset source "test/missing" is not available');
+    ).toThrow('Dataset source "test/dataset/missing" is not available');
     expect(() =>
       validateEvalConfig({
         name: 'unloaded',
-        datasets: [{ type: 'other/file' }],
+        datasets: [{ type: 'other/dataset/file' }],
       })
     ).toThrow(
-      'Dataset source "other/file" needs the "other" plugin, which is not loaded.'
+      'Dataset source "other/dataset/file" needs the "other" plugin, which is not loaded.'
     );
 
     expect(() =>
       validateEvalConfig({
         name: 'duplicate-labels',
-        datasets: [{ type: 'test/file' }],
+        datasets: [{ type: 'test/dataset/file' }],
         servers: [
           {
             transport: 'http',
@@ -485,7 +520,7 @@ describe('settings a client would ignore', () => {
     });
   }
 
-  it.each(['chatgpt', 'test/elsewhere'])(
+  it.each(['chatgpt', 'test/client/elsewhere'])(
     'rejects tool metadata for %s, which never shows it to the model',
     (type) => {
       installClients();
@@ -503,7 +538,7 @@ describe('settings a client would ignore', () => {
     }
   );
 
-  it.each(['claude-code', 'test/runner'])(
+  it.each(['claude-code', 'test/client/runner'])(
     'accepts tool metadata for %s, served through the tool proxy',
     (type) => {
       installClients();
@@ -677,7 +712,7 @@ describe('settings a client would ignore: defaults, inheritance, opt-in', () => 
     });
     expect(() =>
       validateEvalConfig(
-        evalConfig({ client: 'test/variants', tools: overrides }),
+        evalConfig({ client: 'test/client/variants', tools: overrides }),
         { namespaces: ['test'] }
       )
     ).not.toThrow();
@@ -695,13 +730,13 @@ describe('settings a client would ignore: defaults, inheritance, opt-in', () => 
     });
     expect(() =>
       validateEvalConfig(
-        evalConfig({ client: 'test/serial', concurrency: 4 }),
+        evalConfig({ client: 'test/client/serial', concurrency: 4 }),
         {
           namespaces: ['test'],
         }
       )
     ).toThrow(
-      'client "test/serial" runs at most 1 case at a time; set concurrency to 1.'
+      'client "test/client/serial" runs at most 1 case at a time; set concurrency to 1.'
     );
   });
 });

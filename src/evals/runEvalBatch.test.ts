@@ -230,11 +230,11 @@ describe('runEvalBatch skipExisting', () => {
         custom: { schema: z.object({ type: z.string() }), create },
       },
     };
-    configInput.results = { store: { type: 'test/custom' } };
+    configInput.results = { store: { type: 'test/result-store/custom' } };
     await fs.writeFile(configPath, JSON.stringify(configInput));
     await saveValidSummary();
     expect((await run({ plugins: [plugin] })).skipped).toBe(1);
-    expect(create).toHaveBeenCalledWith({ type: 'test/custom' });
+    expect(create).toHaveBeenCalledWith({ type: 'test/result-store/custom' });
     expect(runEval).not.toHaveBeenCalled();
   });
 
@@ -252,7 +252,7 @@ describe('runEvalBatch skipExisting', () => {
       storePluginSource('batch')
     );
     configInput.plugins = ['./plugin.mjs'];
-    configInput.results = { store: { type: 'batch/store' } };
+    configInput.results = { store: { type: 'batch/result-store/store' } };
     await fs.writeFile(configPath, JSON.stringify(configInput));
     await saveValidSummary();
     expect((await run()).skipped).toBe(1);
@@ -274,7 +274,7 @@ describe('runEvalBatch skipExisting', () => {
     );
     configPath = path.join(configDir, 'eval.json');
     configInput.plugins = ['./config-plugin.mjs'];
-    configInput.results = { store: { type: 'cli/store' } };
+    configInput.results = { store: { type: 'cli/result-store/store' } };
     await fs.writeFile(configPath, JSON.stringify(configInput));
     await saveValidSummary();
     const result = await run({ pluginPaths: ['./cli-plugin.mjs'] });
@@ -293,7 +293,7 @@ describe('runEvalBatch skipExisting', () => {
         },
       },
     ]);
-    configInput.results = { store: { type: 'elsewhere/custom' } };
+    configInput.results = { store: { type: 'elsewhere/result-store/custom' } };
     await fs.writeFile(configPath, JSON.stringify(configInput));
     await saveValidSummary();
     expect((await run()).skipped).toBe(0);
@@ -309,14 +309,16 @@ describe('runEvalBatch skipExisting', () => {
           custom: { schema: z.object({ type: z.string() }), create },
         },
         configs: {
-          recommended: { results: { store: { type: 'test/custom' } } },
+          recommended: {
+            results: { store: { type: 'test/result-store/custom' } },
+          },
         },
       };
     }
 
     beforeEach(async () => {
       delete configInput.results;
-      configInput.extends = ['test/recommended'];
+      configInput.extends = ['test/config/recommended'];
       await fs.writeFile(configPath, JSON.stringify(configInput));
     });
 
@@ -331,7 +333,7 @@ describe('runEvalBatch skipExisting', () => {
       await store.saveArtifact(summaryArtifact(completedSummary(resolved)));
 
       expect((await run({ plugins: [plugin] })).skipped).toBe(1);
-      expect(create).toHaveBeenCalledWith({ type: 'test/custom' });
+      expect(create).toHaveBeenCalledWith({ type: 'test/result-store/custom' });
       expect(runEval).not.toHaveBeenCalled();
     });
 
@@ -360,7 +362,7 @@ describe('runEvalBatch skipExisting', () => {
 
   it('reruns safely when a plugin store is not loaded', async () => {
     configInput.results = {
-      store: { type: 'missing/unavailable-plugin-store' },
+      store: { type: 'missing/result-store/unavailable-plugin-store' },
     };
     await fs.writeFile(configPath, JSON.stringify(configInput));
     await saveValidSummary();

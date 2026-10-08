@@ -133,7 +133,7 @@ function builtinDatasetSources(): Readonly<Record<string, DatasetSource>> {
 
 const datasetSources = extensionLookup('datasetSources', builtinDatasetSources);
 
-/** The dataset source `reference` names: a built-in, or `namespace/name` from a plugin. */
+/** The dataset source `reference` names: a built-in, or `<namespace>/dataset/<name>` from a plugin. */
 export function getDatasetSource(reference: string): DatasetSource {
   return datasetSources.get(reference);
 }

@@ -11,12 +11,12 @@ import type { PairwiseJudgeDefinition } from '../judge/pairwiseContract.js';
 import type { PluginConfig } from '../evals/evalConfig.js';
 import type { ConnectorDefinition } from '../auth/grants/types.js';
 
-/** Identifies a plugin. `namespace` prefixes its extensions: `namespace/name`. */
+/** Identifies a plugin. Its extensions are named `<namespace>/<kind>/<name>`. */
 export interface PluginMeta {
   /** The plugin's package name, used in error messages. */
   readonly name: string;
   readonly version?: string;
-  /** Lowercase; `@scope/name` is allowed. Eval configs reference `namespace/extension`. */
+  /** Lowercase; `@scope/name` is allowed. `mst` is reserved for MST's built-ins. */
   readonly namespace: string;
 }
 
@@ -37,12 +37,12 @@ export interface Plugin {
   /**
    * Vendor MCP servers as this organization uses them: URL, how to sign in,
    * and how a client reaches them. An eval config uses one as
-   * `{ "connector": "namespace/name" }`; `mst auth` signs in to it.
+   * `{ "connector": "<namespace>/connector/<name>" }`; `mst auth` signs in to it.
    */
   readonly connectors?: Readonly<Record<string, ConnectorDefinition>>;
   /**
    * Shared eval config settings. An eval config that lists this plugin applies one
-   * with `extends: ["namespace/name"]`. A config may use only this plugin's
+   * with `extends: ["namespace/config/name"]`. A config may use only this plugin's
    * extensions and built-ins.
    */
   readonly configs?: Readonly<Record<string, PluginConfig>>;
@@ -58,6 +58,29 @@ export const EXTENSION_KINDS = [
   'connectors',
 ] as const;
 export type ExtensionKind = (typeof EXTENSION_KINDS)[number];
+
+/**
+ * The kind segment of an extension name, `<namespace>/<kind>/<name>`, for
+ * each plugin key. Shared configs are the `config` kind.
+ */
+export const KIND_SEGMENTS = {
+  datasetSources: 'dataset',
+  clients: 'client',
+  judges: 'judge',
+  pairwiseJudges: 'pairwise-judge',
+  metrics: 'metric',
+  resultStores: 'result-store',
+  connectors: 'connector',
+} as const satisfies Record<ExtensionKind, string>;
+export type KindSegment = (typeof KIND_SEGMENTS)[ExtensionKind] | 'config';
+
+const KIND_SEGMENT_SET = new Set<string>([
+  ...Object.values(KIND_SEGMENTS),
+  'config',
+]);
+
+/** The namespace of MST's built-ins: `mst/judge/rubric` is `rubric`. */
+export const BUILTIN_NAMESPACE = 'mst';
 
 /** The extension definitions each kind holds. */
 export interface ExtensionsByKind {
@@ -224,6 +247,8 @@ export function assertPlugin(value: unknown, source: string): Plugin {
     fail(
       'meta.namespace must be lowercase letters, digits, ".", "_" or "-", optionally scoped as "@scope/name"'
     );
+  if (meta.namespace === BUILTIN_NAMESPACE)
+    fail('meta.namespace "mst" is reserved for MST\'s built-ins');
   for (const key of Object.keys(value)) {
     if (key === 'hosts') fail('`hosts` is now `clients`');
     if (!TOP_LEVEL_KEYS.has(key)) fail(`unknown key "${key}"`);
@@ -255,17 +280,45 @@ export function assertPlugin(value: unknown, source: string): Plugin {
   return value as unknown as Plugin;
 }
 
-/** Split `namespace/name`; a bare name is a built-in. */
-export function parseExtensionReference(reference: string): {
+/** A parsed extension name: `<namespace>/<kind>/<name>`, or a bare built-in name. */
+export interface ExtensionReference {
+  /** Absent for a bare name, which is a built-in. */
   namespace?: string;
+  /** The kind segment. Absent for a bare name, or a two-part `namespace/name`. */
+  kind?: string;
   name: string;
-} {
-  const slash = reference.lastIndexOf('/');
-  if (slash === -1) return { name: reference };
+}
+
+/**
+ * Split `<namespace>/<kind>/<name>`. A bare name is a built-in. The
+ * namespace may be scoped (`@scope/pkg/judge/x`). A two-part
+ * `namespace/name` has no kind; lookups reject it, naming the full name.
+ */
+export function parseExtensionReference(reference: string): ExtensionReference {
+  const parts = reference.split('/');
+  if (parts.length === 1) return { name: reference };
+  const namespaceParts = parts[0]!.startsWith('@') ? 2 : 1;
+  const namespace = parts.slice(0, namespaceParts).join('/');
+  const rest = parts.slice(namespaceParts);
+  if (rest.length === 2 && KIND_SEGMENT_SET.has(rest[0]!))
+    return { namespace, kind: rest[0]!, name: rest[1]! };
+  if (rest.length === 1) return { namespace, name: rest[0]! };
+  // An unknown kind segment, or too many parts: keep what was given so the
+  // lookup can say what is wrong.
   return {
-    namespace: reference.slice(0, slash),
-    name: reference.slice(slash + 1),
+    namespace,
+    kind: rest.slice(0, -1).join('/'),
+    name: rest.at(-1) ?? '',
   };
+}
+
+/** The full name of an extension of `kind` named `name` in `namespace`. */
+export function extensionName(
+  namespace: string,
+  kind: KindSegment,
+  name: string
+): string {
+  return `${namespace}/${kind}/${name}`;
 }
 
 /**

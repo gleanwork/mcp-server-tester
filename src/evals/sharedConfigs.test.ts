@@ -99,15 +99,15 @@ describe('shared configs', () => {
     const { evalConfig } = await dryRun(
       {
         name: 'extends',
-        extends: ['acme/recommended'],
+        extends: ['acme/config/recommended'],
         datasets: ['./cases.json'],
         trials: 3,
       },
       [
         acme({
           recommended: {
-            client: 'acme/echo',
-            judges: ['acme/fixed'],
+            client: 'acme/client/echo',
+            judges: ['acme/judge/fixed'],
             trials: 2,
             maxToolCalls: 4,
           },
@@ -115,36 +115,36 @@ describe('shared configs', () => {
       ]
     );
     expect(evalConfig).toMatchObject({
-      client: 'acme/echo',
-      judges: [{ type: 'acme/fixed', score: 1 }],
+      client: 'acme/client/echo',
+      judges: [{ type: 'acme/judge/fixed', score: 1 }],
       trials: 3,
       maxToolCalls: 4,
-      extends: ['acme/recommended'],
+      extends: ['acme/config/recommended'],
     });
   });
 
   it('applies configs in order and replaces lists rather than merging them', async () => {
     const plugin = acme({
-      base: { judges: [{ type: 'acme/fixed', score: 0.2 }], timeout: 10 },
-      strict: { judges: [{ type: 'acme/fixed', score: 0.9 }] },
+      base: { judges: [{ type: 'acme/judge/fixed', score: 0.2 }], timeout: 10 },
+      strict: { judges: [{ type: 'acme/judge/fixed', score: 0.9 }] },
     });
     const later = await dryRun(
       {
         name: 'order',
-        extends: ['acme/base', 'acme/strict'],
+        extends: ['acme/config/base', 'acme/config/strict'],
         datasets: ['./cases.json'],
       },
       [plugin]
     );
     expect(later.evalConfig.judges).toEqual([
-      { type: 'acme/fixed', score: 0.9 },
+      { type: 'acme/judge/fixed', score: 0.9 },
     ]);
     expect(later.evalConfig.timeout).toBe(10);
 
     const own = await dryRun(
       {
         name: 'own',
-        extends: ['acme/base'],
+        extends: ['acme/config/base'],
         datasets: ['./cases.json'],
         judges: [{ type: 'rubric', rubric: 'correctness' }],
       },
@@ -158,7 +158,7 @@ describe('shared configs', () => {
   it("identifies an eval by its resolved settings, so a changed config isn't a saved run", async () => {
     const evalConfig = {
       name: 'identity',
-      extends: ['acme/recommended'],
+      extends: ['acme/config/recommended'],
       datasets: ['./cases.json'],
     };
     const first = await dryRun(evalConfig, [
@@ -184,7 +184,7 @@ describe('shared configs', () => {
   it('runs an eval whose client and judge come from a config', async () => {
     const dir = await evalDir({
       name: 'run',
-      extends: ['acme/recommended'],
+      extends: ['acme/config/recommended'],
       datasets: ['./cases.json'],
     });
     const result = await runEval({
@@ -193,8 +193,8 @@ describe('shared configs', () => {
       plugins: [
         acme({
           recommended: {
-            client: 'acme/echo',
-            judges: [{ type: 'acme/fixed', score: 0.9 }],
+            client: 'acme/client/echo',
+            judges: [{ type: 'acme/judge/fixed', score: 0.9 }],
           },
         }),
       ],
@@ -212,54 +212,72 @@ describe('shared configs', () => {
       'a bare config name',
       { extends: ['recommended'] },
       [acme({ recommended: {} })],
-      'MST has no built-in configs. Name a plugin\'s config: "namespace/recommended"',
+      'MST has no built-in configs. Name a plugin\'s config: "<namespace>/config/recommended"',
     ],
     [
       'a plugin the eval config does not load',
-      { extends: ['other/recommended'] },
+      { extends: ['other/config/recommended'] },
       [acme({ recommended: {} })],
-      `references "other/recommended", but doesn't load the "other" plugin`,
+      `references "other/config/recommended", but doesn't load the "other" plugin`,
     ],
     [
       'a config the plugin does not have',
-      { extends: ['acme/strict'] },
+      { extends: ['acme/config/strict'] },
       [acme({ recommended: {}, base: {} })],
       'Plugin "acme-plugin" has no config "strict". Available: base, recommended.',
     ],
     [
       "a key that is the eval config's own",
-      { extends: ['acme/recommended'] },
+      { extends: ['acme/config/recommended'] },
       [acme({ recommended: { datasets: ['x.json'] } as never })],
-      `Shared config "acme/recommended" can't set "datasets"`,
+      `Shared config "acme/config/recommended" can't set "datasets"`,
     ],
     [
       'an unknown key',
-      { extends: ['acme/recommended'] },
+      { extends: ['acme/config/recommended'] },
       [acme({ recommended: { iteration: 2 } as never })],
-      'Invalid Shared config "acme/recommended"',
+      'Invalid Shared config "acme/config/recommended"',
     ],
     [
       'the same config twice',
-      { extends: ['acme/recommended', 'acme/recommended'] },
+      { extends: ['acme/config/recommended', 'acme/config/recommended'] },
       [acme({ recommended: {} })],
-      'The eval config extends "acme/recommended" more than once.',
+      'The eval config extends "acme/config/recommended" more than once.',
     ],
     [
       "another plugin's metric",
-      { extends: ['acme/recommended'] },
+      { extends: ['acme/config/recommended'] },
       [
         acme({
-          recommended: { metrics: [{ type: 'pass_rate', metric: 'beta/y' }] },
+          recommended: {
+            metrics: [{ type: 'pass_rate', metric: 'beta/metric/y' }],
+          },
         }),
         acme({}, 'beta'),
       ],
-      `Shared config "acme/recommended" references "beta/y"`,
+      `Shared config "acme/config/recommended" references "beta/metric/y"`,
+    ],
+    [
+      "another plugin's connector",
+      { extends: ['acme/config/recommended'] },
+      [
+        acme({
+          recommended: {
+            servers: [{ connector: 'beta/connector/slack' }],
+          },
+        }),
+        acme({}, 'beta'),
+      ],
+      `Shared config "acme/config/recommended" references "beta/connector/slack"`,
     ],
     [
       "another plugin's extension",
-      { extends: ['acme/recommended'] },
-      [acme({ recommended: { judges: ['beta/fixed'] } }), acme({}, 'beta')],
-      `Shared config "acme/recommended" references "beta/fixed". A shared config may use only its own plugin's extensions ("acme/...") and built-ins.`,
+      { extends: ['acme/config/recommended'] },
+      [
+        acme({ recommended: { judges: ['beta/judge/fixed'] } }),
+        acme({}, 'beta'),
+      ],
+      `Shared config "acme/config/recommended" references "beta/judge/fixed". A shared config may use only its own plugin's extensions ("acme/<kind>/...") and built-ins.`,
     ],
   ])('rejects %s', async (_, extra, plugins, message) => {
     await expect(
@@ -271,7 +289,7 @@ describe('shared configs', () => {
     const { evalConfig } = await dryRun(
       {
         name: 'run-controls',
-        extends: ['acme/recommended'],
+        extends: ['acme/config/recommended'],
         datasets: ['./cases.json'],
         run: { trials: 5 },
       },
@@ -284,7 +302,7 @@ describe('shared configs', () => {
     const { evalConfig } = await dryRun(
       {
         name: 'builtins',
-        extends: ['acme/recommended'],
+        extends: ['acme/config/recommended'],
         datasets: ['./cases.json'],
       },
       [
@@ -329,18 +347,18 @@ describe('plugin configs', () => {
     installPlugins([
       acme({
         recommended: {
-          judges: ['acme/fixed'],
+          judges: ['acme/judge/fixed'],
           metrics: ['passed'],
           results: { store: 'file' },
         },
       }),
     ]);
     const resolved = resolveConfigExtends(
-      { name: 'm', datasets: [], extends: ['acme/recommended'] },
+      { name: 'm', datasets: [], extends: ['acme/config/recommended'] },
       ['acme']
     );
     expect(resolved).toMatchObject({
-      judges: [{ type: 'acme/fixed' }],
+      judges: [{ type: 'acme/judge/fixed' }],
       metrics: [{ type: 'passed' }],
       results: { store: { type: 'file' } },
     });

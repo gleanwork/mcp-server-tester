@@ -37,7 +37,7 @@ export interface JudgeMatcherOptions {
   /** Override the judge model */
   model?: string;
   /**
-   * The judge to run: the built-in `rubric`, or `namespace/name` from a
+   * The judge to run: the built-in `rubric`, or `<namespace>/judge/<name>` from a
    * plugin. Its mean score over `reps` is compared with passingThreshold.
    */
   judge?: string;
@@ -165,7 +165,7 @@ declare global {
        * });
        *
        * // A judge a plugin provides (see the mcpPlugins fixture option)
-       * expect(result).toPassToolJudge({ judge: 'acme/completeness' });
+       * expect(result).toPassToolJudge({ judge: 'acme/judge/completeness' });
        * ```
        */
       toPassToolJudge(

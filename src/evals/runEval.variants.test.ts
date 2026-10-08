@@ -70,10 +70,10 @@ describe('pricing', () => {
   it('prices each case at the model it ran, records the prices, and lists unpriced models', async () => {
     const { summary } = await evalRun(
       {
-        extends: ['variants/prices'],
+        extends: ['variants/config/prices'],
         variants: [
-          { name: 'a', client: 'variants/tokens', model: 'model-a' },
-          { name: 'b', client: 'variants/tokens', model: 'model-b' },
+          { name: 'a', client: 'variants/client/tokens', model: 'model-a' },
+          { name: 'b', client: 'variants/client/tokens', model: 'model-b' },
         ],
       },
       [
@@ -82,7 +82,7 @@ describe('pricing', () => {
           // Its own client: priced at its model, not the variant's.
           id: 'own-model',
           input: 'q',
-          client: 'variants/tokens',
+          client: 'variants/client/tokens',
           model: 'model-a',
         },
       ]
@@ -108,15 +108,17 @@ describe('judge scores in the comparison', () => {
   it('reports per-judge score deltas between variants', async () => {
     const { summary } = await evalRun(
       {
-        client: 'variants/tokens',
+        client: 'variants/client/tokens',
         variants: [
           { name: 'low' },
           {
             name: 'high',
-            judges: [{ type: 'variants/score', name: 'quality', value: 0.9 }],
+            judges: [
+              { type: 'variants/judge/score', name: 'quality', value: 0.9 },
+            ],
           },
         ],
-        judges: [{ type: 'variants/score', name: 'quality', value: 0.4 }],
+        judges: [{ type: 'variants/judge/score', name: 'quality', value: 0.4 }],
       },
       [{ id: 'one', input: 'q' }]
     );
@@ -124,14 +126,14 @@ describe('judge scores in the comparison', () => {
       metricDeltas: Record<string, unknown>;
     };
     expect(summary.variants[0]!.metrics?.judge_score).toEqual({
-      'variants/score': 0.4,
+      'variants/judge/score': 0.4,
     });
     expect(summary.variants[1]!.metrics?.judge_score).toEqual({
-      'variants/score': 0.9,
+      'variants/judge/score': 0.9,
     });
     expect(
       (delta.metricDeltas.judge_score as Record<string, number>)[
-        'variants/score'
+        'variants/judge/score'
       ]
     ).toBeCloseTo(0.5, 9);
   });

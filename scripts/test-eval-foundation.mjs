@@ -126,7 +126,7 @@ try {
   assert.equal(
     (
       await validateJudge('candidate', {
-        judge: 'foundation/policy',
+        judge: 'foundation/judge/policy',
         options: { policy: 'allow' },
       })
     ).pass,
@@ -134,18 +134,22 @@ try {
   );
   assert.deepEqual(captured[0].options, { policy: 'ALLOW', limit: 5 });
   assert.equal(
-    (await validateJudge('candidate', { judge: 'foundation/legacy' })).pass,
-    true
-  );
-  assert.equal(
-    (await validateJudge('candidate', { judge: 'foundation/default-policy' }))
+    (await validateJudge('candidate', { judge: 'foundation/judge/legacy' }))
       .pass,
     true
   );
   assert.equal(
     (
       await validateJudge('candidate', {
-        judge: 'foundation/default-policy',
+        judge: 'foundation/judge/default-policy',
+      })
+    ).pass,
+    true
+  );
+  assert.equal(
+    (
+      await validateJudge('candidate', {
+        judge: 'foundation/judge/default-policy',
         options: {},
       })
     ).pass,
@@ -154,7 +158,7 @@ try {
   assert.equal(
     (
       await validateJudge('candidate', {
-        judge: 'foundation/default-policy',
+        judge: 'foundation/judge/default-policy',
         options: undefined,
       })
     ).pass,
@@ -176,7 +180,7 @@ try {
           input: 'offline',
           assertions: {
             passesJudge: {
-              judge: 'foundation/policy',
+              judge: 'foundation/judge/policy',
               reference: 'golden',
               options: { policy },
             },
@@ -197,16 +201,16 @@ try {
     assert.equal(result.passed, passed);
   }
   await playwrightExpect('candidate').toPassToolJudge({
-    judge: 'foundation/policy',
+    judge: 'foundation/judge/policy',
     options: { policy: 'allow' },
   });
   await playwrightExpect('candidate').toPassToolJudge({
-    judge: 'foundation/default-policy',
+    judge: 'foundation/judge/default-policy',
   });
   assert.equal(
     (
       await validateJudge('candidate', {
-        judge: 'foundation/policy',
+        judge: 'foundation/judge/policy',
         options: {},
       })
     ).pass,
@@ -296,8 +300,8 @@ try {
   const evalConfig = loadEvalConfigFromObject(
     {
       name: 'patch',
-      datasets: [{ type: 'foundation/source' }],
-      client: 'foundation/client',
+      datasets: [{ type: 'foundation/dataset/source' }],
+      client: 'foundation/client/client',
       model: 'base',
       clientOptions: { count: 2 },
       variants: [{ name: 'variant', model: 'variant' }],
@@ -319,7 +323,7 @@ try {
       clientOptions: resolved.variants[0].clientOptions,
     },
     {
-      client: 'foundation/client',
+      client: 'foundation/client/client',
       model: 'variant',
       clientOptions: { count: 6 },
     }
@@ -343,7 +347,7 @@ try {
   const suite = loadEvalConfigFromObject(
     {
       name: 'config',
-      datasets: [{ type: 'foundation/source' }],
+      datasets: [{ type: 'foundation/dataset/source' }],
       servers: [server],
     },
     { skipDatasetValidation: true }
@@ -354,7 +358,7 @@ try {
     loadEvalConfigFromObject(
       {
         name: 'invalid',
-        datasets: [{ type: 'foundation/source' }],
+        datasets: [{ type: 'foundation/dataset/source' }],
         servers: [{ ...server, serverUrl: 17 }],
       },
       { skipDatasetValidation: true }

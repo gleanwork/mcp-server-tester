@@ -38,32 +38,32 @@ describe('extension table', () => {
     expect(loadedNamespaces()).toEqual([]);
   });
 
-  it('serves plugin extensions as namespace/name', () => {
+  it('serves plugin extensions as namespace/kind/name', () => {
     installPlugins([acme()]);
 
-    expect(getJudge('acme/completeness')).toBe(judge);
+    expect(getJudge('acme/judge/completeness')).toBe(judge);
     expect(loadedNamespaces()).toEqual(['acme']);
   });
 
-  it('never resolves a plugin extension by its bare name', () => {
+  it('never resolves a plugin extension by its bare name, and suggests the full name', () => {
     installPlugins([acme()]);
 
     expect(() => getJudge('completeness')).toThrow(
-      'Judge "completeness" is not available.'
+      '"completeness" is not a built-in judge. Did you mean "acme/judge/completeness"?'
     );
   });
 
   it('names the missing plugin namespace for an unknown namespaced reference', () => {
-    expect(() => getJudge('other/completeness')).toThrow(
-      'Judge "other/completeness" needs the "other" plugin, which is not loaded.'
+    expect(() => getJudge('other/judge/completeness')).toThrow(
+      'Judge "other/judge/completeness" needs the "other" plugin, which is not loaded.'
     );
   });
 
   it('lists what is available when a name is unknown', () => {
     installPlugins([acme()]);
 
-    expect(() => getJudge('acme/missing')).toThrow(
-      'Judge "acme/missing" is not available. Available: acme/completeness, rubric.'
+    expect(() => getJudge('acme/judge/missing')).toThrow(
+      'Judge "acme/judge/missing" is not available. Available: acme/judge/completeness, rubric.'
     );
   });
 
@@ -75,7 +75,7 @@ describe('extension table', () => {
     installPlugins([acme()]);
 
     expect(loadedNamespaces()).toEqual(['acme']);
-    expect(getJudge('acme/completeness')).toBe(judge);
+    expect(getJudge('acme/judge/completeness')).toBe(judge);
   });
 
   it('treats a rebuilt unversioned object over the same definitions as the same plugin', () => {
@@ -132,5 +132,104 @@ describe('extension table', () => {
 
     expect(loadedNamespaces()).toEqual([]);
     expect(getClient('claude-code')).toBeDefined();
+  });
+});
+
+describe('extension kinds in references', () => {
+  it.each(['acme/', '@scope/pkg', 'acme//x'])(
+    'rejects %s, which is not an extension name',
+    (reference) => {
+      expect(() => getJudge(reference)).toThrow(
+        'is not an extension name: use "<namespace>/judge/<name>"'
+      );
+    }
+  );
+
+  it('treats an inherited key as an unknown kind', () => {
+    expect(() => getJudge('acme/constructor/x')).toThrow(
+      'has an unknown kind "constructor"'
+    );
+  });
+
+  const source = {
+    schema,
+    load: async () => ({ name: 'x', cases: [] }),
+  };
+
+  it('rejects a two-part namespace/name and names the full reference', () => {
+    installPlugins([acme()]);
+
+    expect(() => getJudge('acme/completeness')).toThrow(
+      'Judge "acme/completeness" needs its kind: use "acme/judge/completeness".'
+    );
+    expect(() => getDatasetSource('acme/cases')).toThrow(
+      'Dataset source "acme/cases" needs its kind: use "acme/dataset/cases".'
+    );
+  });
+
+  it('rejects an extension of one kind used as another', () => {
+    installPlugins([acme({ judges: { x: judge } })]);
+
+    expect(() => getDatasetSource('acme/judge/x')).toThrow(
+      '"acme/judge/x" is a judge, not a dataset source.'
+    );
+    expect(() => getJudge('acme/pairwise-judge/x')).toThrow(
+      '"acme/pairwise-judge/x" is a pairwise judge, not a judge.'
+    );
+  });
+
+  it('rejects an unknown kind and names the right one', () => {
+    installPlugins([acme()]);
+
+    expect(() => getJudge('acme/judges/completeness')).toThrow(
+      'Judge "acme/judges/completeness" has an unknown kind "judges": use "acme/judge/completeness".'
+    );
+  });
+
+  it('keeps plugin keys apart from kind segments', () => {
+    installPlugins([
+      acme({ judges: { x: judge }, datasetSources: { x: source } }),
+    ]);
+
+    expect(getJudge('acme/judge/x')).toBe(judge);
+    expect(getDatasetSource('acme/dataset/x')).toBe(source);
+  });
+
+  it('resolves built-ins by their full mst/<kind>/<name> name', () => {
+    expect(getJudge('mst/judge/rubric')).toBe(getJudge('rubric'));
+    expect(getDatasetSource('mst/dataset/file')).toBe(getDatasetSource('file'));
+    expect(getClient('mst/client/mst')).toBe(getClient('mst'));
+    expect(getMetric('mst/metric/passed')).toBe(getMetric('passed'));
+    expect(getResultStore('mst/result-store/file')).toBe(
+      getResultStore('file')
+    );
+  });
+
+  it('checks the kind of an mst/ reference too', () => {
+    expect(() => getDatasetSource('mst/judge/rubric')).toThrow(
+      '"mst/judge/rubric" is a judge, not a dataset source.'
+    );
+    expect(() => getJudge('mst/judge/missing')).toThrow(
+      'Judge "mst/judge/missing" is not available.'
+    );
+  });
+
+  it('suggests the full name for a bare name only a plugin has', () => {
+    installPlugins([acme({ judges: { x: judge } })]);
+
+    expect(() => getJudge('x')).toThrow(
+      '"x" is not a built-in judge. Did you mean "acme/judge/x"?'
+    );
+  });
+
+  it('resolves a scoped namespace', () => {
+    installPlugins([
+      acme({ meta: { name: '@scope/pkg', namespace: '@scope/pkg' } }),
+    ]);
+
+    expect(getJudge('@scope/pkg/judge/completeness')).toBe(judge);
+    expect(() => getJudge('@scope/pkg/completeness')).toThrow(
+      'Judge "@scope/pkg/completeness" needs its kind: use "@scope/pkg/judge/completeness".'
+    );
   });
 });

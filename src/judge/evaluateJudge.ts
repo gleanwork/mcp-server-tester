@@ -55,7 +55,7 @@ export function judgeOwnOptions(
 }
 
 export interface JudgeRequest {
-  /** A built-in judge such as `rubric`, or `namespace/name` from a plugin. */
+  /** A built-in judge such as `rubric`, or `<namespace>/judge/<name>` from a plugin. */
   judge: string;
   /** The judge's options, before its schema parses them. */
   options: Record<string, unknown>;

@@ -67,8 +67,8 @@ async function fixture(
       return { name: 'timing', cases };
     },
   };
-  const type = `test/${clientName}`;
-  const source = `test/${sourceName}`;
+  const type = `test/client/${clientName}`;
+  const source = `test/dataset/${sourceName}`;
   const root = path.resolve('.mcp-test-results');
   await fs.mkdir(root, { recursive: true });
   const dir = await fs.mkdtemp(path.join(root, 'suite-timing-'));
@@ -97,7 +97,7 @@ describe('eval wall-clock timing', () => {
         return { score: 1 };
       },
     };
-    const judgeName = `test/${judgeKey}`;
+    const judgeName = `test/judge/${judgeKey}`;
     const runBatch = vi.fn<NonNullable<ClientDefinition['runBatch']>>(
       async (requests) => {
         advance(20); // Shared setup.

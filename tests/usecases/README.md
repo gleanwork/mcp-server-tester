@@ -21,7 +21,7 @@ The runner copies the directory to a temp directory, then fills in each `"{{serv
 
 `fixtures/plugin.mjs` provides:
 
-- **`usecase/model`**, a deterministic stand-in for a model. It connects to the variant's real MCP servers, lists their tools, and follows a `policy`:
+- **`usecase/client/model`**, a deterministic stand-in for a model. It connects to the variant's real MCP servers, lists their tools, and follows a `policy`:
   - The first rule whose `when` matches is the case's plan. A rule can match on `input`, `inputStartsWith`, `instruction` (in the client's `systemPrompt`), a client `plugins` entry, or the `run` index.
   - Each step calls a visible tool chosen by `name`, `nameIncludes` or `description`, emits a host-native `skill` event, or runs a tool search.
   - A step's `rate` makes it run on that share of trials, deterministically.
@@ -30,8 +30,8 @@ The runner copies the directory to a temp directory, then fills in each `"{{serv
 
   The model answers from the last tool output it read, so a trace can hold facts its answer leaves out. Token usage grows with the tool definitions and outputs.
 
-- **`usecase/assistant`**, a client with `evidence: "none"`: it returns an answer and no trace.
-- **`usecase/keywords`**, a judge that scores the share of keywords in the client's answer. It never reads the trace.
+- **`usecase/client/assistant`**, a client with `evidence: "none"`: it returns an answer and no trace.
+- **`usecase/judge/keywords`**, a judge that scores the share of keywords in the client's answer. It never reads the trace.
 
 ## Checks
 

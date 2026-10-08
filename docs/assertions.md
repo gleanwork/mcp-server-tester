@@ -287,7 +287,7 @@ Sanitizers are applied automatically by `toMatchToolSnapshot()`. The sanitizer n
 
 A judge scores a response from 0 to 1, and the assertion passes when the score reaches its `threshold` (default `0.7`). Use one for subjective criteria such as relevance, quality or tone.
 
-Every judge runs the same way. The built-in `rubric` judge asks an LLM to score the response against a rubric. A plugin can add judges of its own, referenced as `namespace/name` (see [Plugins](./evaluation-framework.md#plugins)).
+Every judge runs the same way. The built-in `rubric` judge asks an LLM to score the response against a rubric. A plugin can add judges of its own, referenced as `<namespace>/judge/<name>` (see [Plugins](./evaluation-framework.md#plugins)).
 
 ### Eval Case Format
 
@@ -321,7 +321,7 @@ In an eval case, `assertions.passesJudge` judges the client's answer:
 }
 ```
 
-To use a plugin's judge, name it: `{ "judge": "acme/completeness", "threshold": 0.8 }`. Its other fields, or `options`, are the judge's own options, checked by its schema. With a list of judges, every judge must pass.
+To use a plugin's judge, name it: `{ "judge": "acme/judge/completeness", "threshold": 0.8 }`. Its other fields, or `options`, are the judge's own options, checked by its schema. With a list of judges, every judge must pass.
 
 ```typescript snippet=snippets/judge-config.ts
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
@@ -354,7 +354,7 @@ test('search relevance', async ({ mcp }) => {
 });
 ```
 
-The matcher takes `passingThreshold` where datasets use `threshold`, plus `reference`, `reps`, `provider`, `model`, `judge` and `options`. `toPassToolJudge({ judge: 'acme/completeness' })` runs a plugin judge, and a list of judges must all pass.
+The matcher takes `passingThreshold` where datasets use `threshold`, plus `reference`, `reps`, `provider`, `model`, `judge` and `options`. `toPassToolJudge({ judge: 'acme/judge/completeness' })` runs a plugin judge, and a list of judges must all pass.
 
 ### Supported Providers
 
@@ -383,7 +383,7 @@ The matcher takes `passingThreshold` where datasets use `threshold`, plus `refer
 
 | Field        | Default                        | Description                                                                                                                   |
 | ------------ | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| `judge`      | `rubric`                       | The judge: the built-in `rubric`, or `namespace/name` from a plugin.                                                          |
+| `judge`      | `rubric`                       | The judge: the built-in `rubric`, or `<namespace>/judge/<name>` from a plugin.                                                |
 | `rubric`     | —                              | A built-in rubric name or `{ "text": "..." }`. Shorthand for the `rubric` judge.                                              |
 | `threshold`  | `0.7`                          | Minimum mean score (0–1) to pass.                                                                                             |
 | `reference`  | the case's `expected.answer`   | What the judge compares the response with.                                                                                    |

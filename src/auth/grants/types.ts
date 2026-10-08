@@ -1,7 +1,7 @@
 /**
  * Connectors and grants: how MST signs in to the MCP servers an eval uses.
  *
- * A connector (a plugin extension, `namespace/name`) holds what MST needs to
+ * A connector (a plugin extension, `<namespace>/connector/<name>`) holds what MST needs to
  * know about one vendor's MCP server: its URL, how to sign in, and how a client
  * reaches it. A grant is what signing in leaves behind: a refresh token (or a
  * long-lived token) in a credential store. Connectors with the same `grant`
@@ -68,7 +68,7 @@ export interface ConnectorLaunchContext {
 /**
  * A connector: one vendor MCP server as an organization uses it. A plugin
  * provides it under `connectors`; an eval config uses it as
- * `{ "connector": "namespace/name" }`.
+ * `{ "connector": "<namespace>/connector/<name>" }`.
  */
 export interface ConnectorDefinition {
   /** Default endpoint (streamable HTTP). An eval config may override it. */

@@ -37,7 +37,7 @@ function matcherInput(response: string, answer?: unknown) {
 
 const mockCreateJudge = vi.mocked(createJudge);
 
-/** Install `evaluate` as the `test/<name>` judge and return that reference. */
+/** Install `evaluate` as the `test/judge/<name>` judge and return that reference. */
 function installJudge(
   name: string,
   evaluate: JudgeDefinition['evaluate'],
@@ -49,7 +49,7 @@ function installJudge(
       judges: { [name]: { schema, evaluate } },
     },
   ]);
-  return `test/${name}`;
+  return `test/judge/${name}`;
 }
 
 afterEach(() => resetPluginsForTests());
@@ -335,7 +335,7 @@ describe('validateJudge', () => {
 
       expect(evaluate).toHaveBeenCalledWith(matcherInput('some response'), {});
       expect(result.pass).toBe(true);
-      expect(result.message).toContain('test/my-custom-judge');
+      expect(result.message).toContain('test/judge/my-custom-judge');
       expect(result.message).toContain('0.95');
     });
 
@@ -439,10 +439,12 @@ describe('validateJudge', () => {
     });
 
     it('fails when a namespaced judge needs a plugin that is not loaded', async () => {
-      const result = await validateJudge('response', { judge: 'other/x' });
+      const result = await validateJudge('response', {
+        judge: 'other/judge/x',
+      });
 
       expect(result.pass).toBe(false);
-      expect(result.message).toContain('Judge "other/x" error');
+      expect(result.message).toContain('Judge "other/judge/x" error');
       expect(result.message).toContain('needs the "other" plugin');
     });
 

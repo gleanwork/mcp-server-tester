@@ -28,7 +28,7 @@ function matcherInput(response: string, answer?: unknown) {
   };
 }
 
-/** Install `evaluate` as the `test/<name>` judge and return that reference. */
+/** Install `evaluate` as the `test/judge/<name>` judge and return that reference. */
 function installJudge(
   name: string,
   evaluate: JudgeDefinition['evaluate']
@@ -39,7 +39,7 @@ function installJudge(
       judges: { [name]: { schema: z.object({}).passthrough(), evaluate } },
     },
   ]);
-  return `test/${name}`;
+  return `test/judge/${name}`;
 }
 
 afterEach(() => resetPluginsForTests());

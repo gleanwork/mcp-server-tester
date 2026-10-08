@@ -126,7 +126,7 @@ async function writeSuite(config: Record<string, unknown>) {
       name: 'connectors',
       datasets: ['./cases.json'],
       plugins: [],
-      client: 'acme/record',
+      client: 'acme/client/record',
       ...config,
     })
   );
@@ -144,13 +144,16 @@ describe('connector servers in a run', () => {
     await store.put('acme.google', grant({ accessToken: 'google-token' }));
     const configPath = await writeSuite({
       variants: [
-        { name: 'aggregated', servers: [{ connector: 'acme/glean' }] },
+        {
+          name: 'aggregated',
+          servers: [{ connector: 'acme/connector/glean' }],
+        },
         {
           name: 'native',
           servers: [
-            { connector: 'acme/slack' },
-            { connector: 'acme/gmail' },
-            { connector: 'acme/gdrive', label: 'drive' },
+            { connector: 'acme/connector/slack' },
+            { connector: 'acme/connector/gmail' },
+            { connector: 'acme/connector/gdrive', label: 'drive' },
           ],
         },
       ],
@@ -199,7 +202,10 @@ describe('connector servers in a run', () => {
   it('fails before any client starts when a grant is missing', async () => {
     await store.put('acme.slack', grant());
     const configPath = await writeSuite({
-      servers: [{ connector: 'acme/slack' }, { connector: 'acme/gmail' }],
+      servers: [
+        { connector: 'acme/connector/slack' },
+        { connector: 'acme/connector/gmail' },
+      ],
     });
     const error = await runEval({
       configPath,
@@ -217,7 +223,7 @@ describe('connector servers in a run', () => {
 
   it('dry-runs without tokens', async () => {
     const configPath = await writeSuite({
-      servers: [{ connector: 'acme/slack' }],
+      servers: [{ connector: 'acme/connector/slack' }],
     });
     await expect(
       runEval({
@@ -232,7 +238,7 @@ describe('connector servers in a run', () => {
 
   it('rejects an unknown connector', async () => {
     const configPath = await writeSuite({
-      servers: [{ connector: 'acme/jira' }],
+      servers: [{ connector: 'acme/connector/jira' }],
     });
     await expect(
       runEval({
@@ -241,7 +247,7 @@ describe('connector servers in a run', () => {
         plugins: [testPlugin()],
         credentialStore: store,
       })
-    ).rejects.toThrow('Connector "acme/jira" is not available.');
+    ).rejects.toThrow('Connector "acme/connector/jira" is not available.');
   });
 });
 
@@ -252,7 +258,7 @@ describe('startConnectorCredentials', () => {
       {
         name: 'x',
         datasets: [{ type: 'file', path: 'unused' }],
-        servers: [{ connector: 'acme/slack' }],
+        servers: [{ connector: 'acme/connector/slack' }],
       },
       { skipDatasetValidation: true }
     );
@@ -335,10 +341,10 @@ describe('variant selection', () => {
   it('needs only the grants the selected variants use', async () => {
     await store.put('acme.slack', grant({ accessToken: 'slack-token' }));
     const configPath = await writeSuite({
-      servers: [{ connector: 'acme/glean' }],
+      servers: [{ connector: 'acme/connector/glean' }],
       variants: [
         { name: 'aggregated' },
-        { name: 'native', servers: [{ connector: 'acme/slack' }] },
+        { name: 'native', servers: [{ connector: 'acme/connector/slack' }] },
       ],
     });
     // Glean is not signed in, but the native variant doesn't use it.

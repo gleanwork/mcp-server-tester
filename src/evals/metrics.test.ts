@@ -79,11 +79,11 @@ describe('computeMetrics', () => {
       },
     });
     const metrics = computeMetrics(
-      ['test/plugin-binary', 'test/plugin-continuous'],
+      ['test/metric/plugin-binary', 'test/metric/plugin-continuous'],
       [result('a', true), result('b', false)]
     );
-    expect(metrics.aggregated['test/plugin-binary_rate']).toBe(0.5);
-    expect(metrics.aggregated['test/plugin-continuous_mean']).toBe(1000);
+    expect(metrics.aggregated['test/metric/plugin-binary_rate']).toBe(0.5);
+    expect(metrics.aggregated['test/metric/plugin-continuous_mean']).toBe(1000);
   });
   it('keeps the built-in metrics read-only', () => {
     expect(Object.isFrozen(BUILT_IN_METRICS)).toBe(true);
@@ -183,7 +183,7 @@ describe('computeMetrics', () => {
       },
     });
     const metrics = computeMetrics(
-      [{ type: 'test/weighted', name: 'weighted_alias', weight: 7 }],
+      [{ type: 'test/metric/weighted', name: 'weighted_alias', weight: 7 }],
       [result('one', true)]
     );
     expect(metrics.perCase.one?.weighted_alias).toBe(7);
@@ -206,7 +206,7 @@ describe('computeMetrics', () => {
     const parsed = validateEvalConfig({
       name: 'metrics',
       datasets: [],
-      metrics: [{ type: 'test/weighted-parsed', name: 'alias' }],
+      metrics: [{ type: 'test/metric/weighted-parsed', name: 'alias' }],
     });
     expect(
       computeMetrics(parsed.metrics ?? [], [result('one', true)]).perCase.one
@@ -309,14 +309,16 @@ describe('computeMetrics', () => {
     const parsed = validateEvalConfig({
       name: 'metrics',
       datasets: [],
-      metrics: [{ type: 'test/plugin-metric', name: 'alias', params: {} }],
+      metrics: [
+        { type: 'test/metric/plugin-metric', name: 'alias', params: {} },
+      ],
     });
     expect(
       computeMetrics(parsed.metrics ?? [], [result('one', true)]).perCase.one
         ?.alias
     ).toBe(6);
-    expect(getMetric('test/plugin-metric')).toBe(definition);
-    expect(resolveMetric('test/plugin-metric').metric).toBe(definition);
+    expect(getMetric('test/metric/plugin-metric')).toBe(definition);
+    expect(resolveMetric('test/metric/plugin-metric').metric).toBe(definition);
     // Installing the same plugin version again is a no-op.
     const versioned = {
       meta: {
@@ -332,12 +334,12 @@ describe('computeMetrics', () => {
     ).not.toThrow();
     vi.resetModules();
     const secondCopy = await import('./metrics.js');
-    expect(secondCopy.resolveMetric('test/plugin-metric').metric).toBe(
+    expect(secondCopy.resolveMetric('test/metric/plugin-metric').metric).toBe(
       definition
     );
     resetPluginsForTests();
-    expect(() => secondCopy.resolveMetric('test/plugin-metric')).toThrow(
-      'Metric "test/plugin-metric" needs the "test" plugin, which is not loaded.'
+    expect(() => secondCopy.resolveMetric('test/metric/plugin-metric')).toThrow(
+      'Metric "test/metric/plugin-metric" needs the "test" plugin, which is not loaded.'
     );
     // Built-ins survive the reset.
     expect(secondCopy.resolveMetric('passed').outName).toBe('passed');

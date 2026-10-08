@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { referenceSchema } from './referenceSchemas.js';
 import type { TaggedConfig } from './evalConfig.js';
 
 /** The client a run uses when nothing names one. */
@@ -14,7 +15,7 @@ export type ClientOptions = Record<string, unknown>;
 export interface ClientFields {
   /**
    * The client under test: `mst`, `claude-code`, `cowork`, `chatgpt`, or a
-   * plugin's `namespace/name`.
+   * plugin's `<namespace>/client/<name>`.
    */
   client?: string;
   /** The model the client uses. */
@@ -31,7 +32,7 @@ const OWN_FIELDS: Record<string, string> = {
 
 /** Zod fields for `client`, `model` and `clientOptions`, and the old `host`. */
 export const clientFieldSchemas = {
-  client: z.string().min(1).optional(),
+  client: referenceSchema('client').optional(),
   model: z.string().optional(),
   clientOptions: z
     .record(z.string(), z.unknown())

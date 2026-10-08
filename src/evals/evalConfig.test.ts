@@ -367,14 +367,14 @@ describe('connector servers', () => {
       {
         name: 'connectors',
         datasets: [{ type: 'file', path: 'cases.json' }],
-        servers: [{ connector: 'acme/glean' }],
+        servers: [{ connector: 'acme/connector/glean' }],
         variants: [
           {
             name: 'native',
             servers: [
-              { connector: 'acme/slack', label: 'slack' },
+              { connector: 'acme/connector/slack', label: 'slack' },
               {
-                connector: '@acme/evals/jira',
+                connector: '@acme/evals/connector/jira',
                 url: 'https://jira.example/mcp',
               },
             ],
@@ -383,13 +383,13 @@ describe('connector servers', () => {
       },
       { skipDatasetValidation: true }
     );
-    expect(config.servers).toEqual([{ connector: 'acme/glean' }]);
+    expect(config.servers).toEqual([{ connector: 'acme/connector/glean' }]);
     expect(config.variants?.[0]?.servers).toHaveLength(2);
     for (const bad of [
       { connector: 'slack' },
-      { connector: 'acme/slack', transport: 'http' },
-      { connector: 'acme/slack', token: 'x' },
-      { connector: 'acme/slack', label: '1bad' },
+      { connector: 'acme/connector/slack', transport: 'http' },
+      { connector: 'acme/connector/slack', token: 'x' },
+      { connector: 'acme/connector/slack', label: '1bad' },
     ])
       expect(() =>
         loadEvalConfigFromObject(
@@ -401,5 +401,75 @@ describe('connector servers', () => {
           { skipDatasetValidation: true }
         )
       ).toThrow();
+  });
+});
+
+describe('built-ins written in full', () => {
+  it('reads mst/<kind>/<name> as the built-in short name in every slot', () => {
+    const config = loadEvalConfigFromObject(
+      {
+        name: 'full-names',
+        datasets: [{ type: 'mst/dataset/file', path: './cases.json' }],
+        client: 'mst/client/mst',
+        variants: [{ name: 'cli', client: 'mst/client/claude-code' }],
+        metrics: ['mst/metric/passed', { type: 'mst/metric/tool_count' }],
+        judges: [{ type: 'mst/judge/rubric', rubric: 'correctness' }],
+        results: { store: { type: 'mst/result-store/file', dir: './out' } },
+      },
+      { skipDatasetValidation: true }
+    );
+    expect(config.datasets).toEqual([{ type: 'file', path: './cases.json' }]);
+    expect(config.client).toBe('mst');
+    expect(config.variants?.[0]?.client).toBe('claude-code');
+    expect(config.metrics).toEqual([
+      expect.objectContaining({ type: 'passed' }),
+      expect.objectContaining({ type: 'tool_count' }),
+    ]);
+    expect(config.judges?.[0]).toEqual(
+      expect.objectContaining({ type: 'rubric' })
+    );
+    expect(config.results?.store).toEqual(
+      expect.objectContaining({ type: 'file' })
+    );
+  });
+
+  it.each([
+    [{ client: 'mst/judge/rubric' }, 'is a judge, not a client'],
+    [{ metrics: ['mst/client/mst'] }, 'is a client, not a metric'],
+    [{ judges: ['mst/metric/passed'] }, 'is a metric, not a judge'],
+    [
+      { results: { store: { type: 'mst/dataset/file' } } },
+      'is a dataset source, not a result store',
+    ],
+    [
+      { datasets: [{ type: 'mst/judge/rubric' }] },
+      'is a judge, not a dataset source',
+    ],
+  ])('rejects a full built-in name of the wrong kind: %j', (patch, message) => {
+    expect(() =>
+      loadEvalConfigFromObject(
+        { name: 'wrong-kind', datasets: ['./cases.json'], ...patch },
+        { skipDatasetValidation: true }
+      )
+    ).toThrow(message);
+  });
+
+  it('checks a connector name by kind', () => {
+    for (const [connector, message] of [
+      ['acme/judge/slack', 'is a judge, not a connector'],
+      ['acme/slack', 'needs its kind'],
+      ['slack', '<namespace>/connector/slack'],
+    ] as const) {
+      expect(() =>
+        loadEvalConfigFromObject(
+          {
+            name: 'connectors',
+            datasets: ['./cases.json'],
+            servers: [{ connector }],
+          },
+          { skipDatasetValidation: true }
+        )
+      ).toThrow(message);
+    }
   });
 });

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { referenceSchema } from './referenceSchemas.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { UsageMetrics } from '../types/index.js';
 import type { Trace } from './evalFrameworkTypes.js';
@@ -441,9 +442,9 @@ function parameterizedJudgeMetric(
       passMetric ? rateAggregation : meanAggregation
     ),
     schema: z.union([
-      z.object({ judge: z.string().min(1) }).passthrough(),
+      z.object({ judge: referenceSchema('judge') }).passthrough(),
       z
-        .object({ params: z.object({ judge: z.string().min(1) }) })
+        .object({ params: z.object({ judge: referenceSchema('judge') }) })
         .passthrough(),
     ]),
   };
@@ -681,7 +682,7 @@ const RENAMED_METRICS: Record<string, string> = {
   host_event_count: 'builtin_event_count',
 };
 
-/** The metric `reference` names: a built-in, or `namespace/name` from a plugin. */
+/** The metric `reference` names: a built-in, or `<namespace>/metric/<name>` from a plugin. */
 
 export function getMetric(reference: string): MetricDefinition {
   const renamed = RENAMED_METRICS[reference];

@@ -1,5 +1,5 @@
 /**
- * Connector servers in a run: expand `{ "connector": "acme/slack" }` entries
+ * Connector servers in a run: expand `{ "connector": "acme/connector/slack" }` entries
  * into the server entries clients launch, then keep their tokens fresh while
  * the run lasts and delete them when it ends.
  *

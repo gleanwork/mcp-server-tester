@@ -317,8 +317,8 @@ describe('golden: runEval clients', () => {
     dirs.push(dir);
     const clientName = `golden-${kind}${variant}-host`;
     const sourceName = `golden-${kind}${variant}-source`;
-    const type = `test/${clientName}`;
-    const source = `test/${sourceName}`;
+    const type = `test/client/${clientName}`;
+    const source = `test/dataset/${sourceName}`;
     const plugin = goldenPlugin({
       judges,
       clients: {
@@ -375,7 +375,7 @@ describe('golden: runEval clients', () => {
       {
         judges: [
           {
-            type: 'test/golden-config-judge',
+            type: 'test/judge/golden-config-judge',
             reference: 'eval ref',
             count: 2,
           },
@@ -389,11 +389,11 @@ describe('golden: runEval clients', () => {
           assertions: {
             passesJudge: [
               {
-                judge: 'test/golden-config-judge',
+                judge: 'test/judge/golden-config-judge',
                 reference: 'case ref',
                 options: { count: 3 },
               },
-              { judge: 'test/golden-case-judge', threshold: 0.5 },
+              { judge: 'test/judge/golden-case-judge', threshold: 0.5 },
             ],
           },
         },
@@ -469,7 +469,7 @@ describe('golden: judges', () => {
         input: 'Weather in London?',
         judgeReps: 2,
         expected: { answer: 'sunny' },
-        assertions: { passesJudge: { judge: 'test/golden-case-judge' } },
+        assertions: { passesJudge: { judge: 'test/judge/golden-case-judge' } },
       },
       context()
     );
@@ -485,8 +485,12 @@ describe('golden: judges', () => {
         expected: { answer: 'unused' },
         assertions: {
           passesJudge: [
-            { judge: 'test/golden-case-judge', reference: 'explicit', reps: 1 },
-            { judge: 'test/golden-strict-judge', threshold: 0.5 },
+            {
+              judge: 'test/judge/golden-case-judge',
+              reference: 'explicit',
+              reps: 1,
+            },
+            { judge: 'test/judge/golden-strict-judge', threshold: 0.5 },
           ],
         },
       },
@@ -500,7 +504,7 @@ describe('golden: judges', () => {
       {
         ...clientCase,
         id: 'host-judged',
-        assertions: { passesJudge: { judge: 'test/golden-case-judge' } },
+        assertions: { passesJudge: { judge: 'test/judge/golden-case-judge' } },
       },
       context()
     );
@@ -620,7 +624,7 @@ describe('golden: rubric judges', () => {
         assertions: {
           passesJudge: [
             { rubric: 'conciseness' },
-            { judge: 'test/golden-case-judge' },
+            { judge: 'test/judge/golden-case-judge' },
           ],
         },
       },

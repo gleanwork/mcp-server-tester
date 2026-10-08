@@ -18,6 +18,7 @@ import { getMetric } from './metrics.js';
 import { getResultStore } from './builtinResultStores.js';
 import {
   parseExtensionOptions,
+  BUILTIN_NAMESPACE,
   parseExtensionReference,
 } from '../plugins/plugin.js';
 import {
@@ -293,7 +294,11 @@ export function assertListedNamespaces(
 ): void {
   for (const reference of references) {
     const { namespace } = parseExtensionReference(reference);
-    if (namespace !== undefined && !namespaces.includes(namespace)) {
+    if (
+      namespace !== undefined &&
+      namespace !== BUILTIN_NAMESPACE &&
+      !namespaces.includes(namespace)
+    ) {
       throw new Error(
         `${context} references "${reference}", but doesn't load the "${namespace}" plugin. Add the plugin to "plugins".`
       );
@@ -321,6 +326,15 @@ export function validateEvalConfig(
 ): EvalConfig {
   evalConfig = normalizeEvalControls(evalConfig);
   const lookups = configLookups(options.namespaces);
+  // Connector servers resolve when the run expands them; check their namespaces now.
+  if (options.namespaces)
+    assertListedNamespaces(
+      [evalConfig.servers, ...(evalConfig.variants ?? []).map((v) => v.servers)]
+        .flatMap((servers) => servers ?? [])
+        .filter(isConnectorServer)
+        .map((server) => server.connector),
+      options.namespaces
+    );
   validateLabels(evalConfig.servers ?? [], 'the eval config');
   const datasets = evalConfig.datasets.map((config) =>
     parseConfig(config, lookups.datasetSource(config.type), 'dataset options')
