@@ -441,9 +441,14 @@ One run drives a desktop at a time. MST claims it with a lease file,
 `~/.mcp-server-tester/cowork-desktop-<id>.lock`, where `<id>` identifies the
 desktop by its native data directory. A second run on the same desktop, even in
 another process, refuses to share it; runs on separate desktops (for example,
-several Linux displays) don't block each other. If cleanup or restoration fails, every case result says
-so and the lease is kept, so the next run stops until you have inspected the
-desktop and removed the file. An interrupted run leaves it behind in the same way.
+several Linux displays) don't block each other. If cleanup or restoration fails, MST prints why,
+every case result in that batch says so (an infrastructure failure, since the
+desktop's state is unknown), and the lease is kept, so later batches stop until
+you have inspected the desktop and removed the file. In a run with several
+variants, those batches' trials are recorded as infrastructure failures that
+name the lease, and the run's results are still written. An interrupted run
+leaves the lease behind in the same way. If a case fails unexpectedly mid-batch,
+the cases before it keep their results and the rest are recorded as not submitted.
 
 ## Client plugins
 

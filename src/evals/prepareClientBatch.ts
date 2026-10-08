@@ -9,6 +9,8 @@ import type {
   ClientRunResult,
 } from './evalFrameworkTypes.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
+import { isClientUnavailable } from './clientUnavailable.js';
+import { clientSecretValues, redactClientError } from './clientSecrets.js';
 import {
   settleProxiedTrace,
   usesToolSurfaceProxy,
@@ -16,7 +18,31 @@ import {
   type ToolSurfaceProxy,
 } from './toolSurfaceProxy.js';
 
-/** Pre-execute a batch client, retaining per-case trial queues for the evaluator. */
+/**
+ * The trace for a request whose client was unavailable: an infrastructure
+ * failure that says why, so the run keeps its other results.
+ */
+function batchFailure(client: string, reason: string): ClientRunResult {
+  return {
+    finalText: '',
+    events: [],
+    error: `Not run: the ${client} client was unavailable: ${reason}`,
+    diagnostics: { failureKind: 'not-submitted' },
+    telemetry: {
+      caseExecution: { status: 'not-submitted', continuation: 'blocked' },
+    },
+  };
+}
+
+/**
+ * Pre-execute a batch client, retaining per-case trial queues for the evaluator.
+ *
+ * A batch whose client is unavailable ({@link ClientUnavailableError}: a
+ * desktop still leased by an earlier batch, say) gives every request an
+ * infrastructure failure instead of throwing, so an eval goes on with its
+ * other variants. Any other error stops the run. A batch client returns the
+ * traces of cases it ran even when it stops early.
+ */
 export async function prepareClientBatch(
   definition: ClientDefinition,
   cases: EvalCase[],
@@ -71,10 +97,27 @@ export async function prepareClientBatch(
       };
     });
   }
-  const traces = await definition.runBatch(
-    requests,
-    proxy ? withoutToolVariant(context) : context
-  );
+  let traces: ClientRunResult[];
+  try {
+    traces = await definition.runBatch(
+      requests,
+      proxy ? withoutToolVariant(context) : context
+    );
+  } catch (error) {
+    if (!isClientUnavailable(error)) throw error;
+    // The message is stored: never with a credential in it.
+    const reason = redactClientError(
+      error,
+      clientSecretValues(context.env ?? {}, servers),
+      'client unavailable'
+    );
+    console.warn(
+      `[mst] The ${config.type} batch${context.variant ? ` for variant "${context.variant.name}"` : ''} didn't run: ${reason}`
+    );
+    for (const request of requests)
+      queues.get(request.caseId)!.push(batchFailure(config.type, reason));
+    return queues;
+  }
   if (proxy) proxy.endScope(checkScope);
   if (traces.length !== requests.length)
     throw new Error(

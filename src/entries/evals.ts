@@ -94,6 +94,7 @@ export {
 } from '../evals/metrics.js';
 export { buildEvalDataset } from '../evals/buildEvalDataset.js';
 export { runEval } from '../evals/runEval.js';
+export { ClientUnavailableError } from '../evals/clientUnavailable.js';
 export type { RunEvalOptions, RunEvalResult } from '../evals/runEval.js';
 export { runEvalBatch } from '../evals/runEvalBatch.js';
 export type {

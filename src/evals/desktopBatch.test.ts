@@ -13,6 +13,7 @@ import type {
   ClientRunResult,
 } from './evalFrameworkTypes.js';
 import { McpReadinessError } from './mcpReadiness.js';
+import { ClientUnavailableError } from './clientUnavailable.js';
 
 const SECRET = 'sk-desktop-secret';
 let leaseDirectory = '';
@@ -120,9 +121,12 @@ describe('runDesktopBatch', () => {
       pid: number;
     };
     expect(lease.pid).toBe(process.pid);
-    await expect(runDesktopBatch(fakeClient(), requests(1))).rejects.toThrow(
+    const refused = runDesktopBatch(fakeClient(), requests(1));
+    await expect(refused).rejects.toThrow(
       'Fake desktop is locked by another run or an interrupted run'
     );
+    // The eval records the batch as unavailable and goes on.
+    await expect(refused).rejects.toBeInstanceOf(ClientUnavailableError);
     release();
     await first;
   });
@@ -218,6 +222,35 @@ describe('runDesktopBatch', () => {
     }
   });
 
+  it('keeps the cases that ran when a later case throws', async () => {
+    const client = fakeClient({
+      async runCase(_session, request, index) {
+        client.events.push(`case ${index + 1}`);
+        if (index === 1) throw new Error(`collector crashed with ${SECRET}`);
+        return ok(request.caseId);
+      },
+    });
+    const results = await runDesktopBatch(client, requests(3));
+    expect(client.events).toEqual([
+      'prepare',
+      'case 1',
+      'case 2',
+      'dispose session',
+    ]);
+    expect(results[0]?.finalText).toBe('case-1');
+    // The case that threw may have been submitted; its outcome is unknown.
+    expect(results[1]?.error).toBe(
+      'The Fake case failed: collector crashed with [REDACTED]'
+    );
+    expect(results[1]?.diagnostics).toEqual({ failureKind: 'process' });
+    expect(results[2]?.error).toBe(
+      'Not submitted because the Fake batch stopped: collector crashed with [REDACTED]'
+    );
+    // The client never ran it: infrastructure, not a grade.
+    expect(results[2]?.diagnostics).toEqual({ failureKind: 'not-submitted' });
+    expect(await exists(leasePath())).toBe(false);
+  });
+
   it('stops submitting when a platform has no reset', async () => {
     const results = await runDesktopBatch(
       fakeClient({
@@ -301,6 +334,7 @@ describe('runDesktopBatch', () => {
   });
 
   it('keeps results and the lease when cleanup fails', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
     const results: ClientRunResult[] = await runDesktopBatch(
       fakeClient({
         async dispose() {
@@ -315,6 +349,11 @@ describe('runDesktopBatch', () => {
     expect(results[0]?.telemetry?.batchFailure).toMatchObject({
       kind: 'cleanup_failed',
     });
+    // The desktop failed, not the client.
+    expect(results[0]?.diagnostics).toEqual({ failureKind: 'cleanup' });
+    expect(console.warn).toHaveBeenCalledWith(
+      '[mst] Fake batch cleanup failed; desktop lock retained for inspection: restore failed'
+    );
     expect(await exists(leasePath())).toBe(true);
   });
 

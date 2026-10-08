@@ -522,9 +522,42 @@ function Header({ data }: { data: MCPRunReportData }) {
             partial run
           </span>
         )}
+        {phaseNote(run.phases) && (
+          <span
+            className={`ml-2 rounded-full px-2 py-px text-xs font-semibold ${TONE.warn}`}
+            title={phaseNote(run.phases)!.title}
+          >
+            {phaseNote(run.phases)!.label}
+          </span>
+        )}
       </p>
     </header>
   );
+}
+
+/** A header note for a run that didn't finish collecting or grading. */
+function phaseNote(
+  phases: MCPRunReportData['run']['phases']
+): { label: string; title: string } | null {
+  if (phases.collect === 'failed')
+    return {
+      label: 'stopped early',
+      title:
+        'The run stopped on an error. This report shows the variants that finished before it.',
+    };
+  if (phases.collect === 'partial')
+    return {
+      label: 'incomplete',
+      title:
+        'Saved while variants were still to run: the run is still going, or was stopped before it finished.',
+    };
+  if (phases.grade === 'partial')
+    return {
+      label: 'some trials not graded',
+      title:
+        "A grader couldn't score some trials (a judge error, for example). They're left out of pass rates.",
+    };
+  return null;
 }
 
 function RunDetails({ data }: { data: MCPRunReportData }) {

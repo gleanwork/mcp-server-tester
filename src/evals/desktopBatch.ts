@@ -26,6 +26,7 @@ import {
   redactClientSecrets,
   redactedClientError,
 } from './clientSecrets.js';
+import { ClientUnavailableError } from './clientUnavailable.js';
 
 /**
  * Failed cases in a row after which a batch stops submitting. A reset that
@@ -98,7 +99,9 @@ async function claimLease(
   await mkdir(adapter.lease.directory, { recursive: true, mode: 0o700 });
   const path = join(adapter.lease.directory, adapter.lease.file);
   const handle = await open(path, 'wx', 0o600).catch(() => {
-    throw new Error(
+    // The desktop isn't this run's to use: the batch's cases can't run, but
+    // an eval's other variants still can.
+    throw new ClientUnavailableError(
       `${adapter.name} desktop is locked by another run or an interrupted run (${path}). Use one worker; inspect stale locks before removing them.`
     );
   });
@@ -146,6 +149,8 @@ function notSubmitted(message: string): ClientRunResult {
     finalText: '',
     events: [],
     error: message,
+    // The client never ran the case: an infrastructure failure, not a grade.
+    diagnostics: { failureKind: 'not-submitted' },
     telemetry: {
       caseExecution: { status: 'not-submitted', continuation: 'blocked' },
     },
@@ -212,8 +217,28 @@ export async function runDesktopBatch<Session>(
         blocked = `Not submitted because the last ${MAX_CONSECUTIVE_FAILURES} ${adapter.name} cases failed in a row (latest: ${redactClientSecrets(outcome.result.error ?? '', secrets)}). Check the desktop before running again.`;
     }
   } catch (error) {
-    executionFailed = true;
-    executionError = error;
+    if (results.length > 0) {
+      // Cases already ran: keep their traces, and say why the rest didn't.
+      const reason = redact(error, `${adapter.name} batch execution failed.`);
+      // The case that threw may have been submitted: its outcome is unknown.
+      if (results.length < requests.length)
+        results.push({
+          ...notSubmitted(`The ${adapter.name} case failed: ${reason}`),
+          diagnostics: { failureKind: 'process' },
+          telemetry: {
+            caseExecution: { status: 'failed', continuation: 'blocked' },
+          },
+        });
+      while (results.length < requests.length)
+        results.push(
+          notSubmitted(
+            `Not submitted because the ${adapter.name} batch stopped: ${reason}`
+          )
+        );
+    } else {
+      executionFailed = true;
+      executionError = error;
+    }
   } finally {
     let cleanupFailed = false;
     try {
@@ -221,8 +246,15 @@ export async function runDesktopBatch<Session>(
     } catch (error) {
       cleanupFailed = true;
       const message = `${adapter.name} batch cleanup failed; desktop lock retained for inspection: ${redact(error, redactClientSecrets(String(error), secrets))}`;
+      console.warn(`[mst] ${message}`);
       for (const result of results) {
+        // The desktop's state is unknown, so no case counts; but this is the
+        // desktop failing, not the client: an infrastructure failure.
         result.error = [result.error, message].filter(Boolean).join(' ');
+        result.diagnostics = {
+          ...result.diagnostics,
+          failureKind: result.diagnostics?.failureKind ?? 'cleanup',
+        };
         result.telemetry = {
           ...result.telemetry,
           batchFailure: { kind: 'cleanup_failed', error: message },

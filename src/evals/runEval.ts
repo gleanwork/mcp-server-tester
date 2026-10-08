@@ -8,6 +8,7 @@ import {
   runsDirectory,
   writeLatest,
   writeRun,
+  type RunFacts,
 } from './runFormat.js';
 import { rejectRenamedOptions } from './renamedKeys.js';
 import { configIdentity } from './configIdentity.js';
@@ -695,6 +696,12 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
     };
   }
 
+  const redact =
+    options.redactStoredResponses ??
+    (evalConfig.redactStoredResponses as boolean | undefined) ??
+    REDACT_STORED_RESPONSES_BY_DEFAULT;
+  // Keys the hashes of client options in run.json: comparable within this run only.
+  const runKey = randomBytes(32);
   const variantResults: EvaluationVariantResult[] = [];
   const allDatasets: RunEvalResult['datasets'] = [];
   const allResults: EvalCaseResult[] = [];
@@ -756,212 +763,262 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
       canonicalDatasets.map(({ dataset }) => dataset)
     );
 
-    for (const variant of variants) {
-      const servers = options.mcpConfig
-        ? [options.mcpConfig]
-        : transportServers(variant.servers ?? evalConfig.servers);
-      const resolvedServers = servers.map((server) =>
-        resolveServerSecrets(server, env)
-      );
-      resolvedServers.forEach((server) =>
-        assertEvalEndpoint(server, evalConfig)
-      );
-      // The first variant's client was resolved before the datasets loaded (to
-      // check its servers); reuse it rather than resolve it twice.
-      const clientConfig =
-        variant === sourceVariant
-          ? sourceClient
-          : resolveClient(evalConfig, variant, resolvedServers, env);
-      const effectiveConfig: EvalConfig = {
-        ...evalConfig,
-        ...variant,
-        coworkSetup: resolveCoworkSetupConfig(
-          evalConfig.coworkSetup,
-          variant.coworkSetup
-        ),
-        name: evalConfig.name,
-        datasets: evalConfig.datasets,
-      };
-      const sourceResults: Array<{
-        name: string;
-        result: EvalRunnerResult;
-      }> = [];
-      const appliedPricing: Record<string, ModelPricing> = {};
-      const unpricedModels = new Set<string>();
-      const rawVariant = rawConfig.variants?.find(
-        (candidate) => candidate.name === variant.name
-      ) ?? { name: variant.name };
-      const rawDeclaration = inheritClient(
-        clientOf(rawConfig),
-        clientPatchOf(rawVariant) ?? {}
-      );
-      const client =
-        clientConfig.definition.run || clientConfig.definition.runBatch
-          ? undefined
-          : resolvedServers.length === 1
-            ? await createMCPClientForConfig(resolvedServers[0]!)
-            : undefined;
-      const mcp = client
-        ? createMCPFixture(client, undefined, { authType: 'api-token' })
-        : undefined;
-      // Started on first use, for hosts that connect to their servers themselves.
-      const toolMetadata = variantToolMetadata(evalConfig, variant);
-      let proxy: Promise<ToolSurfaceProxy> | undefined;
-      const toolVariant = toolMetadata
-        ? {
-            id: toolMetadata.id,
-            proxy: () =>
-              (proxy ??= startToolSurfaceProxy(resolvedServers, toolMetadata)),
-          }
-        : undefined;
+    // Where the running variant's results start, to drop them if it fails.
+    let variantStart = { results: 0, datasets: 0 };
+    try {
+      for (const variant of variants) {
+        variantStart = {
+          results: allResults.length,
+          datasets: allDatasets.length,
+        };
+        const servers = options.mcpConfig
+          ? [options.mcpConfig]
+          : transportServers(variant.servers ?? evalConfig.servers);
+        const resolvedServers = servers.map((server) =>
+          resolveServerSecrets(server, env)
+        );
+        resolvedServers.forEach((server) =>
+          assertEvalEndpoint(server, evalConfig)
+        );
+        // The first variant's client was resolved before the datasets loaded (to
+        // check its servers); reuse it rather than resolve it twice.
+        const clientConfig =
+          variant === sourceVariant
+            ? sourceClient
+            : resolveClient(evalConfig, variant, resolvedServers, env);
+        const effectiveConfig: EvalConfig = {
+          ...evalConfig,
+          ...variant,
+          coworkSetup: resolveCoworkSetupConfig(
+            evalConfig.coworkSetup,
+            variant.coworkSetup
+          ),
+          name: evalConfig.name,
+          datasets: evalConfig.datasets,
+        };
+        const sourceResults: Array<{
+          name: string;
+          result: EvalRunnerResult;
+        }> = [];
+        const appliedPricing: Record<string, ModelPricing> = {};
+        const unpricedModels = new Set<string>();
+        const rawVariant = rawConfig.variants?.find(
+          (candidate) => candidate.name === variant.name
+        ) ?? { name: variant.name };
+        const rawDeclaration = inheritClient(
+          clientOf(rawConfig),
+          clientPatchOf(rawVariant) ?? {}
+        );
+        const client =
+          clientConfig.definition.run || clientConfig.definition.runBatch
+            ? undefined
+            : resolvedServers.length === 1
+              ? await createMCPClientForConfig(resolvedServers[0]!)
+              : undefined;
+        const mcp = client
+          ? createMCPFixture(client, undefined, { authType: 'api-token' })
+          : undefined;
+        // Started on first use, for hosts that connect to their servers themselves.
+        const toolMetadata = variantToolMetadata(evalConfig, variant);
+        let proxy: Promise<ToolSurfaceProxy> | undefined;
+        const toolVariant = toolMetadata
+          ? {
+              id: toolMetadata.id,
+              proxy: () =>
+                (proxy ??= startToolSurfaceProxy(
+                  resolvedServers,
+                  toolMetadata
+                )),
+            }
+          : undefined;
 
-      try {
-        for (const { source, dataset } of canonicalDatasets) {
-          const executionDataset = narrowEvalCases(
-            dataset,
-            evalConfig,
-            narrowing
-          );
-          if (executionDataset.cases.length === 0) continue;
-          const template = variant.inputTemplate ?? evalConfig.inputTemplate;
-          const effectiveDataset: EvalDataset = {
-            ...executionDataset,
-            cases: executionDataset.cases.map((evalCase) => ({
-              ...evalCase,
-              // A case's own client, resolved in full on the case itself.
-              ...(clientPatchOf(evalCase)
-                ? clientFieldsOf(
-                    parseClientConfig(
-                      inheritClient(rawDeclaration, clientPatchOf(evalCase)!),
-                      rawConfig
-                    )
-                  )
-                : {}),
-              // The case's judges and the eval config's (a variant's replace
-              // the config's); the case's settings win for a judge in both.
-              ...(effectiveConfig.judges?.length
-                ? {
-                    judges: mergeEvalJudges(
-                      evalCase,
-                      effectiveConfig.judges,
-                      (rawVariant.judges ?? rawConfig.judges ?? []) as Array<
-                        Record<string, unknown>
-                      >
-                    ),
-                  }
-                : {}),
-              ...(template && evalCase.input
-                ? {
-                    input: template.replaceAll('{{input}}', evalCase.input),
-                  }
-                : {}),
-            })),
-          };
-          const sourceConfig = source;
-          const runClient =
-            typeof clientConfig.definition.run === 'function' ||
-            typeof clientConfig.definition.runBatch === 'function';
-          if (!runClient && effectiveDataset.cases.length > 0)
-            throw new Error(
-              `Client "${clientConfig.declaration.type}" has neither run() nor runBatch(), so it can't run cases.`
+        try {
+          for (const { source, dataset } of canonicalDatasets) {
+            const executionDataset = narrowEvalCases(
+              dataset,
+              evalConfig,
+              narrowing
             );
-          // The model each case runs on prices its usage and labels its result:
-          // a case client's own, or the variant client's (including its default).
-          const variantModel =
-            clientConfig.declaration.model ??
-            (clientConfig.config as { model?: unknown } | undefined)?.model;
-          const batchStartTime = Date.now();
-          const batchTraces = await prepareClientBatch(
-            clientConfig.definition,
-            effectiveDataset.cases,
-            clientConfig.declaration,
-            resolvedServers,
-            { evalConfig: effectiveConfig, variant, env },
-            toolVariant
-          );
-          // Batch execution (including shared setup/cleanup) precedes the runner's
-          // wall clock. Count its elapsed time once, not the sum of request times.
-          const batchDurationMs = batchTraces ? Date.now() - batchStartTime : 0;
-          const result = await runEvalDataset(
-            {
-              dataset: effectiveDataset,
-              client: clientConfig.declaration.type,
-              ...(typeof variantModel === 'string'
-                ? { model: variantModel }
-                : {}),
-              // The eval writes its own run directory.
-              reporting: 'none',
-              concurrency: evalConfig.concurrency ?? 1,
-              defaultTrials: evalConfig.trials,
-              defaultPassThreshold: evalConfig.passThreshold,
-              toolOverrides: toolMetadata,
-              toolMap: variant.toolMap ?? evalConfig.toolMap,
-              ...(runClient
-                ? {
-                    executeCase: createEvalCaseExecutor({
-                      servers: resolvedServers,
-                      client: clientConfig.declaration,
-                      evalConfig: effectiveConfig,
-                      variant,
-                      env,
-                      batchTraces,
-                      toolVariant,
-                    }),
-                  }
-                : {}),
-            },
-            { mcp }
-          );
-          result.durationMs += batchDurationMs;
-          allDatasets.push({
-            source: sourceConfig,
-            dataset: executionDataset,
-            result,
-          });
-          for (const caseResult of result.caseResults)
-            caseResult.variant = variant.name;
-          // Price usage the client reported without a cost, at the model each
-          // case ran (a case client doesn't take the variant's model).
-          const caseModels = new Map(
-            effectiveDataset.cases.map((evalCase) => [
-              evalCase.id,
-              clientPatchOf(evalCase) ? evalCase.model : variantModel,
-            ])
-          );
-          const priced = estimateCosts(
-            result.caseResults,
-            (caseResult) => {
-              const model = caseModels.get(caseResult.id);
-              return typeof model === 'string' ? model : undefined;
-            },
-            evalConfig.pricing
-          );
-          Object.assign(appliedPricing, priced.applied);
-          for (const model of priced.unpriced) unpricedModels.add(model);
-          // The run's totals include the estimates.
-          result.totalClientUsage = result.caseResults.reduce<
-            UsageMetrics | undefined
-          >(
-            (sum, caseResult) => sumUsage(sum, caseResult.clientUsage),
-            undefined
-          );
-          sourceResults.push({ name: executionDataset.name, result });
-          allResults.push(...result.caseResults);
+            if (executionDataset.cases.length === 0) continue;
+            const template = variant.inputTemplate ?? evalConfig.inputTemplate;
+            const effectiveDataset: EvalDataset = {
+              ...executionDataset,
+              cases: executionDataset.cases.map((evalCase) => ({
+                ...evalCase,
+                // A case's own client, resolved in full on the case itself.
+                ...(clientPatchOf(evalCase)
+                  ? clientFieldsOf(
+                      parseClientConfig(
+                        inheritClient(rawDeclaration, clientPatchOf(evalCase)!),
+                        rawConfig
+                      )
+                    )
+                  : {}),
+                // The case's judges and the eval config's (a variant's replace
+                // the config's); the case's settings win for a judge in both.
+                ...(effectiveConfig.judges?.length
+                  ? {
+                      judges: mergeEvalJudges(
+                        evalCase,
+                        effectiveConfig.judges,
+                        (rawVariant.judges ?? rawConfig.judges ?? []) as Array<
+                          Record<string, unknown>
+                        >
+                      ),
+                    }
+                  : {}),
+                ...(template && evalCase.input
+                  ? {
+                      input: template.replaceAll('{{input}}', evalCase.input),
+                    }
+                  : {}),
+              })),
+            };
+            const sourceConfig = source;
+            const runClient =
+              typeof clientConfig.definition.run === 'function' ||
+              typeof clientConfig.definition.runBatch === 'function';
+            if (!runClient && effectiveDataset.cases.length > 0)
+              throw new Error(
+                `Client "${clientConfig.declaration.type}" has neither run() nor runBatch(), so it can't run cases.`
+              );
+            // The model each case runs on prices its usage and labels its result:
+            // a case client's own, or the variant client's (including its default).
+            const variantModel =
+              clientConfig.declaration.model ??
+              (clientConfig.config as { model?: unknown } | undefined)?.model;
+            const batchStartTime = Date.now();
+            const batchTraces = await prepareClientBatch(
+              clientConfig.definition,
+              effectiveDataset.cases,
+              clientConfig.declaration,
+              resolvedServers,
+              { evalConfig: effectiveConfig, variant, env },
+              toolVariant
+            );
+            // Batch execution (including shared setup/cleanup) precedes the runner's
+            // wall clock. Count its elapsed time once, not the sum of request times.
+            const batchDurationMs = batchTraces
+              ? Date.now() - batchStartTime
+              : 0;
+            const result = await runEvalDataset(
+              {
+                dataset: effectiveDataset,
+                client: clientConfig.declaration.type,
+                ...(typeof variantModel === 'string'
+                  ? { model: variantModel }
+                  : {}),
+                // The eval writes its own run directory.
+                reporting: 'none',
+                concurrency: evalConfig.concurrency ?? 1,
+                defaultTrials: evalConfig.trials,
+                defaultPassThreshold: evalConfig.passThreshold,
+                toolOverrides: toolMetadata,
+                toolMap: variant.toolMap ?? evalConfig.toolMap,
+                ...(runClient
+                  ? {
+                      executeCase: createEvalCaseExecutor({
+                        servers: resolvedServers,
+                        client: clientConfig.declaration,
+                        evalConfig: effectiveConfig,
+                        variant,
+                        env,
+                        batchTraces,
+                        toolVariant,
+                      }),
+                    }
+                  : {}),
+              },
+              { mcp }
+            );
+            result.durationMs += batchDurationMs;
+            allDatasets.push({
+              source: sourceConfig,
+              dataset: executionDataset,
+              result,
+            });
+            for (const caseResult of result.caseResults)
+              caseResult.variant = variant.name;
+            // Price usage the client reported without a cost, at the model each
+            // case ran (a case client doesn't take the variant's model).
+            const caseModels = new Map(
+              effectiveDataset.cases.map((evalCase) => [
+                evalCase.id,
+                clientPatchOf(evalCase) ? evalCase.model : variantModel,
+              ])
+            );
+            const priced = estimateCosts(
+              result.caseResults,
+              (caseResult) => {
+                const model = caseModels.get(caseResult.id);
+                return typeof model === 'string' ? model : undefined;
+              },
+              evalConfig.pricing
+            );
+            Object.assign(appliedPricing, priced.applied);
+            for (const model of priced.unpriced) unpricedModels.add(model);
+            // The run's totals include the estimates.
+            result.totalClientUsage = result.caseResults.reduce<
+              UsageMetrics | undefined
+            >(
+              (sum, caseResult) => sumUsage(sum, caseResult.clientUsage),
+              undefined
+            );
+            sourceResults.push({ name: executionDataset.name, result });
+            allResults.push(...result.caseResults);
+          }
+        } finally {
+          if (client) await closeMCPClient(client);
+          if (proxy) await (await proxy.catch(() => undefined))?.close();
         }
-      } finally {
-        if (client) await closeMCPClient(client);
-        if (proxy) await (await proxy.catch(() => undefined))?.close();
-      }
 
-      const summary = summarizeVariant(variant, servers, sourceResults);
-      if (Object.keys(appliedPricing).length > 0)
-        summary.pricing = appliedPricing;
-      if (unpricedModels.size > 0)
-        summary.unpricedModels = [...unpricedModels].sort();
-      variantResults.push(summary);
+        const summary = summarizeVariant(variant, servers, sourceResults);
+        if (Object.keys(appliedPricing).length > 0)
+          summary.pricing = appliedPricing;
+        if (unpricedModels.size > 0)
+          summary.unpricedModels = [...unpricedModels].sort();
+        variantResults.push(summary);
+        // A long run (a desktop client takes hours) keeps what it has so far:
+        // a crash or a kill later loses at most the variant that was running.
+        if (variantResults.length < variants.length)
+          await checkpoint('partial');
+      }
+    } catch (error) {
+      // Keep the variants that finished, then report the failure. The
+      // variant that failed is left out: run.json wouldn't list it.
+      allResults.length = variantStart.results;
+      allDatasets.length = variantStart.datasets;
+      if (variantResults.length > 0) await checkpoint('failed');
+      throw error;
     }
   } finally {
     await credentials.stop();
+  }
+
+  /**
+   * Writes the run as it stands, before pairwise judging and the run's
+   * comparisons: `collect: partial` while variants remain, `failed` when the
+   * run stopped. The final write replaces it. Never costs the run its error.
+   */
+  async function checkpoint(phase: 'partial' | 'failed'): Promise<void> {
+    try {
+      const summary = buildSummary(undefined);
+      const stored = redact
+        ? redactStoredResponses(summary)
+        : structuredClone(summary);
+      await fs.mkdir(outputDir, { recursive: true });
+      await writeRun(
+        outputDir,
+        executionId,
+        runFacts(stored, { collect: phase, grade: 'partial' }),
+        stored
+      );
+      if (options.report !== false) await writeRunReport(outputDir);
+    } catch (error) {
+      console.warn(
+        `[mst] Couldn't save the run so far: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   // Like the previous-run comparison, pairwise judging must never cost the
@@ -981,88 +1038,139 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
     }
   }
 
-  const variantMetrics = variantResults.map((variant, index) => {
-    const listed = (variants[index]?.metrics ??
-      evalConfig.metrics ??
-      []) as MetricSpec[];
-    const listedNames = new Set(
-      listed.map((spec) => resolveMetric(spec).outName)
-    );
-    const specs: MetricSpec[] = [
-      ...CORE_METRICS.filter((core) => !listedNames.has(core)),
-      ...listed,
-    ];
-    return computeMetrics(specs, variant.result?.caseResults ?? []);
-  });
-  variantResults.forEach((variant, index) => {
-    const caseResults = variant.result?.caseResults ?? [];
-    variant.metrics = variantMetrics[index]!.aggregated;
-    const evidence = variantEvidence(caseResults);
-    if (evidence !== undefined) variant.evidence = evidence;
-    // Core metrics are reported when they apply; only listed ones are missed.
-    const listed = new Set(
-      (
-        (variants[index]?.metrics ?? evalConfig.metrics ?? []) as MetricSpec[]
-      ).map((spec) => resolveMetric(spec).outName)
-    );
-    const unavailable = variantMetrics[index]!.unavailable.filter((name) =>
-      listed.has(name)
-    );
-    if (unavailable.length > 0) variant.unavailableMetrics = unavailable;
-    const source = costSource(caseResults);
-    if (source) variant.costSource = source;
-  });
-  // Top-level metrics describe the baseline variant. Comparison-variant metrics remain
-  // attached to their variant, avoiding case-id collisions across variants.
-  const computedMetrics = variantMetrics[0]?.aggregated ?? {};
-  let totalClientUsage: UsageMetrics | undefined;
-  for (const variant of variantResults) {
-    totalClientUsage = sumUsage(
-      totalClientUsage,
-      variant.result?.totalClientUsage
-    );
-  }
-  // Every judge's usage, pairwise included; pairwise is also reported alone.
-  const totalJudgeUsage = sumJudgeUsage([
-    ...variantResults.map((variant) => variant.result?.totalJudgeUsage),
-    pairwiseUsage,
-  ]);
-  const telemetry: RunTelemetry = {
-    cases: allResults.length,
-    toolCalls: countTrialToolCalls(allResults),
-    failedCases: allResults.filter((result) => !result.pass).length,
-    totalClientUsage,
-    ...(totalJudgeUsage !== undefined && { totalJudgeUsage }),
-    ...(pairwiseUsage !== undefined && { pairwiseJudgeUsage: pairwiseUsage }),
-  };
-  const summary: EvaluationSummary = {
-    format: RUN_FORMAT,
-    ...identity,
-    timestamp: new Date().toISOString(),
-    durationMs: Date.now() - runStartTime,
-    configName: evalConfig.name,
-    variants: variantResults,
-    metrics: {
-      total: allResults.length,
-      passed: allResults.filter((result) => result.pass).length,
-      failed: allResults.filter((result) => !result.pass).length,
-      passRate: passRate({
-        passed: allResults.filter((result) => result.pass).length,
-        total: allResults.length,
-      }),
-      ...computedMetrics,
-    },
-    telemetry,
-    variantDeltas: buildVariantDeltas(variantResults),
-    results: allResults,
-  };
+  const summary = buildSummary(pairwiseUsage);
 
-  summary.runId = executionId;
-  const selection = runSelection(options);
-  summary.partial = selection !== undefined;
-  if (selection) {
-    summary.selection = selection;
-    summary.selectionHash = selectionHashOf(selection);
+  /** The run's summary from the variants that have run so far. */
+  function buildSummary(
+    pairwiseUsage: Partial<UsageMetrics> | undefined
+  ): EvaluationSummary {
+    const variantMetrics = variantResults.map((variant, index) => {
+      const listed = (variants[index]?.metrics ??
+        evalConfig.metrics ??
+        []) as MetricSpec[];
+      const listedNames = new Set(
+        listed.map((spec) => resolveMetric(spec).outName)
+      );
+      const specs: MetricSpec[] = [
+        ...CORE_METRICS.filter((core) => !listedNames.has(core)),
+        ...listed,
+      ];
+      return computeMetrics(specs, variant.result?.caseResults ?? []);
+    });
+    variantResults.forEach((variant, index) => {
+      const caseResults = variant.result?.caseResults ?? [];
+      variant.metrics = variantMetrics[index]!.aggregated;
+      const evidence = variantEvidence(caseResults);
+      if (evidence !== undefined) variant.evidence = evidence;
+      // Core metrics are reported when they apply; only listed ones are missed.
+      const listed = new Set(
+        (
+          (variants[index]?.metrics ?? evalConfig.metrics ?? []) as MetricSpec[]
+        ).map((spec) => resolveMetric(spec).outName)
+      );
+      const unavailable = variantMetrics[index]!.unavailable.filter((name) =>
+        listed.has(name)
+      );
+      if (unavailable.length > 0) variant.unavailableMetrics = unavailable;
+      const source = costSource(caseResults);
+      if (source) variant.costSource = source;
+    });
+    // Top-level metrics describe the baseline variant. Comparison-variant metrics remain
+    // attached to their variant, avoiding case-id collisions across variants.
+    const computedMetrics = variantMetrics[0]?.aggregated ?? {};
+    let totalClientUsage: UsageMetrics | undefined;
+    for (const variant of variantResults) {
+      totalClientUsage = sumUsage(
+        totalClientUsage,
+        variant.result?.totalClientUsage
+      );
+    }
+    // Every judge's usage, pairwise included; pairwise is also reported alone.
+    const totalJudgeUsage = sumJudgeUsage([
+      ...variantResults.map((variant) => variant.result?.totalJudgeUsage),
+      pairwiseUsage,
+    ]);
+    const telemetry: RunTelemetry = {
+      cases: allResults.length,
+      toolCalls: countTrialToolCalls(allResults),
+      failedCases: allResults.filter((result) => !result.pass).length,
+      totalClientUsage,
+      ...(totalJudgeUsage !== undefined && { totalJudgeUsage }),
+      ...(pairwiseUsage !== undefined && { pairwiseJudgeUsage: pairwiseUsage }),
+    };
+    const summary: EvaluationSummary = {
+      format: RUN_FORMAT,
+      ...identity,
+      timestamp: new Date().toISOString(),
+      durationMs: Date.now() - runStartTime,
+      configName: evalConfig.name,
+      variants: variantResults,
+      metrics: {
+        total: allResults.length,
+        passed: allResults.filter((result) => result.pass).length,
+        failed: allResults.filter((result) => !result.pass).length,
+        passRate: passRate({
+          passed: allResults.filter((result) => result.pass).length,
+          total: allResults.length,
+        }),
+        ...computedMetrics,
+      },
+      telemetry,
+      variantDeltas: buildVariantDeltas(variantResults),
+      results: allResults,
+    };
+
+    summary.runId = executionId;
+    const selection = runSelection(options);
+    summary.partial = selection !== undefined;
+    if (selection) {
+      summary.selection = selection;
+      summary.selectionHash = selectionHashOf(selection);
+    }
+    return summary;
+  }
+
+  /** What run.json records beyond the summary. */
+  function runFacts(
+    storedSummary: EvaluationSummary,
+    phases: NonNullable<RunFacts['phases']>
+  ): RunFacts {
+    return {
+      evalName: evalConfig.name,
+      createdAt: new Date(runStartTime).toISOString(),
+      finishedAt: new Date().toISOString(),
+      mstVersion: packageJson.version,
+      // Validation put the baseline first; a --variant run may leave it out.
+      baseline: evalConfig.variants?.[0]?.name ?? 'default',
+      variants: storedSummary.variants.map((variant) => {
+        const declared = variants.find(
+          (candidate) => candidate.name === variant.name
+        );
+        return {
+          name: variant.name,
+          servers: variant.servers,
+          ...variantSetup(evalConfig, declared, runKey),
+        };
+      }),
+      // The cases each dataset ran (the first variant's selection).
+      datasets: allDatasets
+        .map((item) => item.dataset)
+        .filter(
+          (dataset, index, all): dataset is EvalDataset =>
+            dataset !== undefined &&
+            all.findIndex((other) => other?.name === dataset.name) === index
+        )
+        .map((dataset) => ({
+          name: dataset.name,
+          caseCount: dataset.cases.length,
+          contentHash: datasetContentHash(dataset),
+        })),
+      // Judges by name, with a hash of their options: options can hold
+      // settings that shouldn't be stored.
+      judges: judgeRecords(evalConfig),
+      redactStoredResponses: redact,
+      phases,
+    };
   }
   const store = evalConfig.results?.store
     ? getResultStore(evalConfig.results.store.type).create(
@@ -1087,10 +1195,6 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
     );
   }
 
-  const redact =
-    options.redactStoredResponses ??
-    (evalConfig.redactStoredResponses as boolean | undefined) ??
-    REDACT_STORED_RESPONSES_BY_DEFAULT;
   const storedSummary = redact
     ? redactStoredResponses(summary)
     : structuredClone(summary);
@@ -1138,46 +1242,10 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
       })
     );
   }
-  // Keys the hashes of client options in run.json: comparable within this run only.
-  const runKey = randomBytes(32);
   await writeRun(
     outputDir,
     executionId,
-    {
-      evalName: evalConfig.name,
-      createdAt: new Date(runStartTime).toISOString(),
-      finishedAt: new Date().toISOString(),
-      mstVersion: packageJson.version,
-      // Validation put the baseline first; a --variant run may leave it out.
-      baseline: evalConfig.variants?.[0]?.name ?? 'default',
-      variants: storedSummary.variants.map((variant) => {
-        const declared = variants.find(
-          (candidate) => candidate.name === variant.name
-        );
-        return {
-          name: variant.name,
-          servers: variant.servers,
-          ...variantSetup(evalConfig, declared, runKey),
-        };
-      }),
-      // The cases each dataset ran (the first variant's selection).
-      datasets: allDatasets
-        .map((item) => item.dataset)
-        .filter(
-          (dataset, index, all): dataset is EvalDataset =>
-            dataset !== undefined &&
-            all.findIndex((other) => other?.name === dataset.name) === index
-        )
-        .map((dataset) => ({
-          name: dataset.name,
-          caseCount: dataset.cases.length,
-          contentHash: datasetContentHash(dataset),
-        })),
-      // Judges by name, with a hash of their options: options can hold
-      // settings that shouldn't be stored.
-      judges: judgeRecords(evalConfig),
-      redactStoredResponses: redact,
-    },
+    runFacts(storedSummary, { collect: 'complete', grade: 'complete' }),
     storedSummary
   );
   // The report is rebuilt from the run's files, so it shows what was stored.

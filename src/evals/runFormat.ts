@@ -237,7 +237,18 @@ export interface RunFacts {
   datasets: Array<{ name: string; caseCount: number; contentHash: string }>;
   judges?: Array<{ type: string; level: string; optionsHash: string }>;
   redactStoredResponses: boolean;
+  /**
+   * How far the run got. Default: both complete. A run saved while variants
+   * remain is `partial`; one that stopped on an error is `collect: failed`.
+   */
+  phases?: RunPhases;
 }
+
+/** `run.json`'s `phases`: how far collecting traces and grading them got. */
+type RunPhases = Pick<
+  z.infer<typeof RunRecordSchema>['phases'],
+  'collect' | 'grade'
+>;
 
 async function writeJson(file: string, value: unknown): Promise<void> {
   await fs.mkdir(path.dirname(file), { recursive: true });
@@ -371,7 +382,7 @@ export async function writeRun(
       platform: process.platform,
       ci: Boolean(process.env.CI),
     },
-    phases: { collect: 'complete', grade: 'complete' },
+    phases: facts.phases ?? { collect: 'complete', grade: 'complete' },
   });
   for (const result of results) {
     const variant = segment(result.variant ?? 'default');
