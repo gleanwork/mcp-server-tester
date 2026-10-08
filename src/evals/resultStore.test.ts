@@ -383,3 +383,35 @@ describe('redactStoredResponses', () => {
     expect(result.trace.finalText).toBe('private answer');
   });
 });
+
+describe('partial runs and latest.json', () => {
+  it("a partial run's artifact never becomes the latest", async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mst-partial-latest-'));
+    try {
+      const store = new FileEvalResultStore({ provider: 'file', dir });
+      const full = createStoredEvalArtifact({
+        kind: 'eval-run-summary',
+        id: 'full',
+        data: { n: 1 },
+        metadata: { labels: { configId: 'c' } },
+        createdAt: '2026-10-07T00:00:00.000Z',
+      });
+      const partial = createStoredEvalArtifact({
+        kind: 'eval-run-summary',
+        id: 'partial',
+        data: { n: 2 },
+        metadata: { labels: { configId: 'c', partial: 'true' } },
+        createdAt: '2026-10-07T00:01:00.000Z',
+      });
+      await store.saveArtifact(full);
+      await store.saveArtifact(partial);
+      const latest = await store.loadLatestArtifact('eval-run-summary');
+      expect(latest?.id).toBe('full');
+      expect((await store.loadArtifact('eval-run-summary', 'partial')).id).toBe(
+        'partial'
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

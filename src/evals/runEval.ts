@@ -6,6 +6,7 @@ import { resolveCoworkSetupConfig } from './coworkSetup/options.js';
 import { sumUsage } from '../utils/usageUtils.js';
 import { sumJudgeUsage } from '../judge/judgeContract.js';
 import { randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -36,6 +37,7 @@ import type {
   EvaluationSummary,
   ClientDefinition,
   TraceEvidence,
+  RunSelection,
   RunTelemetry,
 } from './evalFrameworkTypes.js';
 import {
@@ -107,9 +109,14 @@ export interface RunEvalOptions {
   secretsFile?: string;
   mcpConfig?: MCPConfig;
   dryRun?: boolean;
-  variant?: string;
+  /** Variant names to run, instead of all of them (`--variant`). */
+  variant?: string | readonly string[];
   /** Case ids to run, instead of the config's selection (`--case`). */
   cases?: CaseNarrowing['cases'];
+  /** Tags to select cases by, instead of the config's `filterTags` (`--filter-tag`). */
+  filterTags?: CaseNarrowing['filterTags'];
+  /** Cases per dataset, instead of the config's `maxCases` (`--max-cases`). */
+  maxCases?: number;
   /** Trials per case, instead of the config's or the case's (`--trials`). */
   trials?: number;
   /**
@@ -216,15 +223,48 @@ function assertEvalEndpoint(server: MCPConfig, evalConfig: EvalConfig): void {
 
 function selectedVariants(
   evalConfig: EvalConfig,
-  name?: string
+  names?: string | readonly string[]
 ): EvalVariant[] {
   const variants = evalConfig.variants?.length
     ? evalConfig.variants
     : [{ name: 'default' } satisfies EvalVariant];
-  if (!name) return variants;
-  const variant = variants.find((candidate) => candidate.name === name);
-  if (!variant) throw new Error(`Evaluation variant "${name}" was not found.`);
-  return [variant];
+  const wanted = typeof names === 'string' ? [names] : (names ?? []);
+  if (wanted.length === 0) return variants;
+  const missing = wanted.filter(
+    (name) => !variants.some((variant) => variant.name === name)
+  );
+  if (missing.length)
+    throw new Error(
+      `No variant ${missing.map((name) => `"${name}"`).join(', ')} in the eval config. Variants: ${variants.map((variant) => variant.name).join(', ')}.`
+    );
+  // In the config's order, so the baseline stays first when it is selected.
+  return variants.filter((variant) => wanted.includes(variant.name));
+}
+
+/** What narrowed this run at run time, or undefined for a full run. */
+function runSelection(options: RunEvalOptions): RunSelection | undefined {
+  const variants =
+    typeof options.variant === 'string'
+      ? [options.variant]
+      : options.variant?.length
+        ? [...options.variant]
+        : undefined;
+  const selection: RunSelection = {
+    ...(variants ? { variants: [...new Set(variants)].sort() } : {}),
+    ...(options.cases?.length
+      ? { cases: [...new Set(options.cases)].sort() }
+      : {}),
+    ...(options.filterTags?.length
+      ? { filterTags: [...new Set(options.filterTags)].sort() }
+      : {}),
+    ...(options.maxCases !== undefined ? { maxCases: options.maxCases } : {}),
+    ...(options.trials !== undefined ? { trials: options.trials } : {}),
+  };
+  return Object.keys(selection).length ? selection : undefined;
+}
+
+function selectionHashOf(selection: RunSelection): string {
+  return createHash('sha256').update(JSON.stringify(selection)).digest('hex');
 }
 
 function resolveClient(
@@ -588,6 +628,8 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
   );
   const narrowing: CaseNarrowing = {
     cases: options.cases,
+    filterTags: options.filterTags,
+    maxCases: options.maxCases,
     trials: options.trials,
   };
   // Before any client starts: a fresh token for every connector server, kept
@@ -907,6 +949,12 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
   };
 
   summary.runId = executionId;
+  const selection = runSelection(options);
+  summary.partial = selection !== undefined;
+  if (selection) {
+    summary.selection = selection;
+    summary.selectionHash = selectionHashOf(selection);
+  }
   const store = evalConfig.results?.store
     ? getResultStore(evalConfig.results.store.type).create(
         resolveStorePaths(evalConfig.results.store, { configDir, rootDir })
@@ -918,6 +966,8 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
       configId: summary.configId,
       runId: executionId,
       variants: summary.variants.map((variant) => variant.name),
+      partial: summary.partial,
+      selectionHash: summary.selectionHash,
       store,
       outputRoot: path.dirname(outputDir),
     });
@@ -945,6 +995,9 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
       labels: {
         configId: summary.configId,
         contentHash: summary.contentHash,
+        ...(summary.partial
+          ? { partial: 'true', selectionHash: summary.selectionHash! }
+          : {}),
       },
     };
     summary.caseArtifactPointers = {};

@@ -9,9 +9,14 @@ export interface RunOptions {
   plugins?: string[];
   rootDir?: string;
   dryRun?: boolean;
-  variant?: string;
+  /** `--variant`: run only these variants. */
+  variant?: string[];
   /** `--case`: run only these case ids. */
   case?: string[];
+  /** `--filter-tag`: run the cases with any of these tags. */
+  filterTag?: string[];
+  /** `--max-cases`: cases per dataset. */
+  maxCases?: string | number;
   /** `--trials`: trials per case. */
   trials?: string | number;
   outputDir?: string;
@@ -20,11 +25,28 @@ export interface RunOptions {
   store?: string;
 }
 
-function parseTrials(value: string | number): number {
-  const trials = Number(value);
-  if (!Number.isInteger(trials) || trials < 1)
-    throw new Error(`--trials must be a positive integer, got "${value}"`);
-  return trials;
+function positiveInteger(flag: string, value: string | number): number {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 1)
+    throw new Error(`${flag} must be a positive integer, got "${value}"`);
+  return number;
+}
+
+/** `--case e2e-0011, --trials 1`: the flags that narrowed a run. */
+function describeSelection(
+  selection: NonNullable<
+    Awaited<ReturnType<typeof runEval>>['summary']['selection']
+  >
+): string {
+  return [
+    selection.variants && `--variant ${selection.variants.join(' ')}`,
+    selection.cases && `--case ${selection.cases.join(' ')}`,
+    selection.filterTags && `--filter-tag ${selection.filterTags.join(' ')}`,
+    selection.maxCases !== undefined && `--max-cases ${selection.maxCases}`,
+    selection.trials !== undefined && `--trials ${selection.trials}`,
+  ]
+    .filter(Boolean)
+    .join(', ');
 }
 
 export async function run(options: RunOptions): Promise<void> {
@@ -35,10 +57,14 @@ export async function run(options: RunOptions): Promise<void> {
     outputDir: options.outputDir,
     secretsFile: options.secretsFile,
     dryRun: options.dryRun,
-    variant: options.variant,
+    ...(options.variant?.length ? { variant: options.variant } : {}),
     ...(options.case?.length ? { cases: options.case } : {}),
+    ...(options.filterTag?.length ? { filterTags: options.filterTag } : {}),
+    ...(options.maxCases !== undefined
+      ? { maxCases: positiveInteger('--max-cases', options.maxCases) }
+      : {}),
     ...(options.trials !== undefined
-      ? { trials: parseTrials(options.trials) }
+      ? { trials: positiveInteger('--trials', options.trials) }
       : {}),
     ...(options.store
       ? { credentialStore: localCredentialStore(path.resolve(options.store)) }
@@ -66,6 +92,10 @@ export async function run(options: RunOptions): Promise<void> {
           variants: result.evalConfig.variants?.map(
             (variant) => variant.name
           ) ?? ['default'],
+          partial: result.summary.partial ?? false,
+          ...(result.summary.selection
+            ? { selection: result.summary.selection }
+            : {}),
         },
         null,
         2
@@ -85,6 +115,22 @@ export async function run(options: RunOptions): Promise<void> {
     `Results: ${metrics.passed ?? 0}/${metrics.total ?? 0} passed (${((metrics.passRate ?? 0) * 100).toFixed(1)}%)`
   );
   printVariantTable(result.summary.variants);
+  const { selection } = result.summary;
+  if (result.summary.partial && selection) {
+    console.log(
+      `Partial run (${describeSelection(selection)}): not compared with full runs`
+    );
+    const baseline =
+      result.evalConfig.baseline ?? result.evalConfig.variants?.[0]?.name;
+    if (
+      selection.variants &&
+      baseline &&
+      !selection.variants.includes(baseline)
+    )
+      console.log(
+        `The baseline "${baseline}" didn't run, so no variant is compared with it.`
+      );
+  }
   const previous = result.summary.previousRun;
   if (previous) {
     const pct = (value: number) => `${(value * 100).toFixed(1)}%`;

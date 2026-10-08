@@ -76,6 +76,7 @@ export type {
   MetricKind,
   MetricValue,
   ResultStoreDefinition,
+  RunSelection,
   RunSummary,
   RunTelemetry,
   EvalSummaryGenerator,

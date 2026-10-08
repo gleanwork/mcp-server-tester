@@ -143,10 +143,18 @@ program
   .description('Run an eval config')
   .option('-c, --config <path>', 'Path to an eval config JSON')
   .option('--plugins <paths...>', 'Plugin modules to load before the run')
-  .option('--variant <name>', "Run one of the config's variants")
+  .option('--variant <names...>', "Run only these of the config's variants")
   .option(
     '--case <ids...>',
     "Run only these case ids (instead of the config's tags and case cap)"
+  )
+  .option(
+    '--filter-tag <tags...>',
+    "Run the cases with any of these tags, instead of the config's filterTags"
+  )
+  .option(
+    '--max-cases <n>',
+    "Cases per dataset, instead of the config's maxCases"
   )
   .option('--trials <n>', 'Trials per case, instead of the config or case')
   .option('--output-dir <dir>', 'Directory for run artifacts')

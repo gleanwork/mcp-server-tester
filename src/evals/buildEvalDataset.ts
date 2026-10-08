@@ -42,13 +42,20 @@ export function buildEvalDataset(
   return selectEvalCases(dataset, evalConfig);
 }
 
-/** Apply the same tag selection and case cap to built-in and plugin datasets. */
+/**
+ * Apply the same tag selection and case cap to built-in and plugin datasets:
+ * the cases with any of the tags, then the first `maxCases` of those, per
+ * dataset. A run's `--filter-tag` and `--max-cases` replace the config's.
+ */
 function selectEvalCases(
   dataset: EvalDataset,
-  evalConfig: EvalConfig
+  evalConfig: EvalConfig,
+  overrides: Pick<CaseNarrowing, 'filterTags' | 'maxCases'> = {}
 ): EvalDataset {
   const controls = normalizeEvalControls(evalConfig);
-  const tags = controls.filterTags as string[] | undefined;
+  const tags =
+    overrides.filterTags ?? (controls.filterTags as string[] | undefined);
+  const maxCases = overrides.maxCases ?? controls.maxCases;
   const cases = tags?.length
     ? dataset.cases.filter((evalCase) =>
         evalCase.tags?.some((tag) => tags.includes(tag))
@@ -56,16 +63,19 @@ function selectEvalCases(
     : dataset.cases;
   return {
     ...dataset,
-    cases: controls.maxCases ? cases.slice(0, controls.maxCases) : cases,
+    cases: maxCases ? cases.slice(0, maxCases) : cases,
   };
 }
 
 /**
- * A run narrowed from the command line (`mst run --case <id>... --trials <n>`).
- * Named cases replace the config's tag selection and case cap.
+ * A run narrowed from the command line (`mst run --case`, `--filter-tag`,
+ * `--max-cases`, `--trials`). Named cases replace the config's tag
+ * selection and case cap; tags and a cap replace the config's.
  */
 export interface CaseNarrowing {
   cases?: readonly string[];
+  filterTags?: readonly string[];
+  maxCases?: number;
   trials?: number;
 }
 
@@ -78,7 +88,14 @@ export function narrowEvalCases(
   const ids = narrowing.cases?.length ? new Set(narrowing.cases) : undefined;
   const selected = ids
     ? dataset.cases.filter((evalCase) => ids.has(evalCase.id))
-    : selectEvalCases(dataset, evalConfig).cases;
+    : selectEvalCases(dataset, evalConfig, {
+        ...(narrowing.filterTags?.length
+          ? { filterTags: narrowing.filterTags }
+          : {}),
+        ...(narrowing.maxCases !== undefined
+          ? { maxCases: narrowing.maxCases }
+          : {}),
+      }).cases;
   return {
     ...dataset,
     cases:

@@ -300,9 +300,28 @@ export interface PreviousRunComparison {
   variants: Record<string, PreviousRunVariant>;
 }
 
+/** How a run was narrowed at run time (`mst run --variant/--case/--filter-tag/--max-cases/--trials`). */
+export interface RunSelection {
+  variants?: string[];
+  cases?: string[];
+  filterTags?: string[];
+  maxCases?: number;
+  trials?: number;
+}
+
 export interface RunSummary {
   /** This run's ID: its result store artifact ID and output directory name. */
   runId?: string;
+  /**
+   * Whether the run was narrowed at run time. A partial run is compared only
+   * with partial runs narrowed the same way, and never becomes a result
+   * store's latest run. Absent in older summaries: a full run.
+   */
+  partial?: boolean;
+  /** What narrowed a partial run. */
+  selection?: RunSelection;
+  /** A hash of `selection`: partial runs with the same hash are comparable. */
+  selectionHash?: string;
   /** This run compared with the previous run of the same eval config, if there is one. */
   previousRun?: PreviousRunComparison;
   /** The result format: see `RESULT_SCHEMA_VERSION`. */
