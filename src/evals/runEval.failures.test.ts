@@ -244,10 +244,30 @@ describe('a run that meets failures', () => {
     expect(graders.sort()).toEqual(
       ['textContains', 'judge.test/judge/flaky'].map(encodeURIComponent).sort()
     );
-    // Out of the pass rate: no trial was graded.
+    // No judge verdict to report; the trial pass rate leaves them out too.
     const baseline = result.summary.variants[0]!;
     expect(baseline.result?.caseResults.every((c) => !c.pass)).toBe(true);
-    expect(baseline.metrics).toEqual({});
+    expect(baseline.metrics).not.toHaveProperty('judge_pass_rate');
+    expect(baseline.metrics).not.toHaveProperty('trial_pass_rate');
+  });
+
+  it('still fails a trial another grader failed, when a judge errors', async () => {
+    const f = await fixture(
+      async (requests) =>
+        requests.map(() => ({ finalText: 'NOPE', events: [] })),
+      { judgeError: 'rate limited' }
+    );
+    await f.run();
+    const runDirectory = await f.runDirectory();
+    const { run, cases } = await storedRun(runDirectory);
+    // The assertion's fail settles it: a graded fail, not "not graded".
+    expect(run.phases).toEqual({ collect: 'complete', grade: 'complete' });
+    expect(cases[0]?.pass).toBe(false);
+    expect(cases[0]?.error).toBeUndefined();
+    const trial = await readJson<{ infrastructureError: boolean }>(
+      path.join(runDirectory, 'traces', 'baseline', 'one', '0.json')
+    );
+    expect(trial.infrastructureError).toBe(false);
   });
 
   it('saves the run after each variant, while later variants run', async () => {

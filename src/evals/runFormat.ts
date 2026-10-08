@@ -120,6 +120,8 @@ const TrialRecordSchema = z.looseObject({
   durationMs: z.number(),
   infrastructureError: z.boolean(),
   error: z.string().optional(),
+  /** A grader couldn't score the trial (`<grader>: <error>`); the client ran. */
+  gradingError: z.string().optional(),
   trace: z.looseObject({}).optional(),
 });
 
@@ -311,6 +313,8 @@ function trialRecord(
     durationMs: t.durationMs ?? 0,
     infrastructureError: isInfraTrial(trial),
     ...(t.error !== undefined ? { error: t.error } : {}),
+    // The client ran; a grader couldn't score it. A regrade can finish it.
+    ...(t.gradingError !== undefined ? { gradingError: t.gradingError } : {}),
     ...(t.trace
       ? { trace: t.trace as unknown as Record<string, unknown> }
       : {}),

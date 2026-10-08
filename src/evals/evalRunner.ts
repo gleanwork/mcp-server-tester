@@ -841,7 +841,13 @@ export async function runEvalCase(
 
   // Fall back to a synthetic result if all trials threw infrastructure
   // errors. Each trial's trace is in trialResults; none is the case's.
-  const { trace: _lastTrace, ...lastWithoutTrace } = lastResult ?? {};
+  // A case with trials has no grading error of its own: each trial says.
+  const {
+    trace: _lastTrace,
+    gradingError: lastGradingError,
+    ...lastWithoutTrace
+  }: Partial<EvalCaseResult> = lastResult ?? {};
+  if (lastGradingError !== undefined) delete lastWithoutTrace.error;
   const baseResult: EvalCaseResult = lastResult
     ? (lastWithoutTrace as EvalCaseResult)
     : {

@@ -386,9 +386,12 @@ async function comparePairwiseVariants(
   const byId = new Map<string, JudgeCaseSource>(
     cases.map((evalCase) => [evalCase.id, evalCase])
   );
-  // A case that errored on either side has nothing to compare.
+  // A case whose client errored on either side has nothing to compare; one
+  // a grader couldn't score still has the client's answer.
   const ran = (variant: EvaluationVariantResult) =>
-    (variant.result?.caseResults ?? []).filter((result) => !result.error);
+    (variant.result?.caseResults ?? []).filter(
+      (result) => !result.error || result.gradingError !== undefined
+    );
   for (const candidate of candidates)
     candidate.pairwise = await comparePairwise({
       baseline: { name: baseline.name, caseResults: ran(baseline) },

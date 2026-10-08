@@ -201,13 +201,26 @@ async function evaluateJudges(
   };
 }
 
+/** A grader (or one of several judges) gave a verdict, and it was a fail. */
+function failedOutright(score: GraderScore): boolean {
+  if (score.judgeResults?.length)
+    return score.judgeResults.some(failedOutright);
+  return !score.pass && score.error === undefined && score.skipped !== true;
+}
+
 /**
- * The first grader in a trial's scores that failed to run, as
- * `"<grader>: <error>"`; undefined when every grader gave a verdict.
+ * Why a trial has no verdict: the first grader that failed to run, as
+ * `"<grader>: <error>"`. Undefined when every grader gave one, or when
+ * another grader already failed the trial: every grader must pass, so one
+ * fail settles it whatever the others would have said.
  */
 export function gradingErrorOf(
   scores: Partial<Record<string, GraderScore>>
 ): string | undefined {
+  const graded = Object.values(scores).filter(
+    (score): score is GraderScore => score !== undefined
+  );
+  if (graded.some(failedOutright)) return undefined;
   for (const [grader, score] of Object.entries(scores))
     if (score?.error !== undefined) return `${grader}: ${score.error}`;
   return undefined;

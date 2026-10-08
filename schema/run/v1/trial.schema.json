@@ -13,6 +13,7 @@
     "durationMs": { "type": "number" },
     "infrastructureError": { "type": "boolean" },
     "error": { "type": "string" },
+    "gradingError": { "type": "string" },
     "trace": { "type": "object", "properties": {}, "additionalProperties": {} }
   },
   "required": [

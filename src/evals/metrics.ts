@@ -464,13 +464,7 @@ export const BUILT_IN_METRICS: Readonly<Record<string, MetricDefinition>> =
   Object.freeze({
     judge_pass_for: parameterizedJudgeMetric('judge_pass_for'),
     judge_score_for: parameterizedJudgeMetric('judge_score_for'),
-    // A case with no graded trial (every one an infrastructure failure)
-    // neither passed nor failed: it's left out of the rate.
-    passed: metric(
-      'binary',
-      (result) => (caseTrials(result).length === 0 ? null : result.pass),
-      rateAggregation
-    ),
+    passed: metric('binary', (result) => result.pass, rateAggregation),
     // Per case: the share of its trials that passed. The case passes when
     // that share reaches its pass threshold; `trial_pass_rate` keeps it.
     trial_pass: metric(
