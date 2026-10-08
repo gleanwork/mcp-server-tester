@@ -20,21 +20,59 @@ import type { JudgeInput, JudgeScore } from '../judge/judgeContract.js';
 import type { PairwiseComparisonResult } from './pairwiseComparison.js';
 import type { ShardTokens, TrialKey } from './environments/protocol.js';
 
+/** Which copy of a dataset with snapshots to read. */
+export interface DatasetRequest {
+  /** `snapshot` (the default): a frozen copy. `live`: the current data. */
+  source: 'snapshot' | 'live';
+  /** A snapshot's id, such as `2026-10-01`. Absent: the source's latest. */
+  snapshot?: string;
+}
+
 /** Context provided to a dataset source implementation. */
 export interface DatasetSourceContext {
   rootDir: string;
   /** The eval config's directory; relative paths resolve here before `rootDir`. */
   configDir?: string;
   evalConfig: EvalConfig;
+  /** For a source with `snapshots`: which copy to read. */
+  request?: DatasetRequest;
 }
 
-/** Public dataset-source extension point. */
+/** What `mst datasets` shows about a dataset without loading its cases. */
+export interface DatasetSummary {
+  cases?: number;
+  /** The snapshot `load` reads by default. */
+  snapshot?: string;
+  tags?: string[];
+}
+
+/**
+ * Public dataset-source extension point. A source whose schema accepts no
+ * options is a named dataset: an eval config lists it as
+ * `"acme/dataset/info-seeking"`, and `mst datasets` lists it.
+ */
 export interface DatasetSource {
   readonly schema: ZodType;
+  /** What the dataset holds, for `mst datasets`. */
+  readonly description?: string;
+  /**
+   * Whether the source keeps snapshots. It then reads `context.request`, and
+   * an eval config may ask for `"snapshot": "<id>"` or `"source": "live"`.
+   * MST takes those two keys off the config before `schema` sees it.
+   */
+  readonly snapshots?: boolean;
+  /**
+   * The cases. A source with `snapshots` sets the dataset's `snapshot` to the
+   * one it read (none for live data).
+   */
   load(
     config: DatasetConfig,
     context: DatasetSourceContext
   ): Promise<EvalDataset>;
+  /** A cheap summary for `mst datasets`, without loading cases. */
+  describe?(
+    context: Pick<DatasetSourceContext, 'rootDir' | 'configDir'>
+  ): Promise<DatasetSummary>;
 }
 
 /** Options supplied to a client implementation. */

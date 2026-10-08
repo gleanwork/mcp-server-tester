@@ -55,7 +55,7 @@ A key the schema doesn't define is an error, in an eval config and in a dataset,
 - **Client defaults:** `model`, `provider`, `maxToolCalls`, `timeout`, `temperature` and `maxTokens` default each client option of that name, for the clients that take it.
 - **The client:** `client` names the client under test, `model` the model it uses, and `clientOptions` the client's other options. A variant or case may set any of the three; it inherits the eval config's `clientOptions` only when it uses the same client.
 
-A bare dataset path is shorthand for `{ "type": "file", "path": "..." }`. Relative dataset and plugin paths in an eval config resolve against the eval config's directory, then `rootDir` (`--root-dir`, the working directory by default). A `file` result store's `dir` is always relative to the eval config, so where results are written doesn't depend on the working directory. Plugin result stores resolve their own options.
+A bare dataset path is shorthand for `{ "type": "file", "path": "..." }`; a bare `namespace/dataset/name` is a [plugin's dataset](#plugin-datasets-and-snapshots). Relative dataset and plugin paths in an eval config resolve against the eval config's directory, then `rootDir` (`--root-dir`, the working directory by default). A `file` result store's `dir` is always relative to the eval config, so where results are written doesn't depend on the working directory. Plugin result stores resolve their own options.
 Every other pluggable block is a tagged object. `servers` is the MCP servers under test, a map keyed by label (`"servers": { "acme": { "transport": "http", ... } }`); an entry doesn't set `label`, because the key is its label. A variant picks servers by label (`"servers": ["acme"]`): one that lists none uses every server, and `[]` uses none. An empty map is valid for clients that provide their own capabilities. When the eval config and a shared config it extends both set `servers`, the eval config's map replaces the shared config's whole, like every key; a variant may name a shared config's servers when the eval config sets none.
 
 ## Plugins
@@ -484,6 +484,50 @@ export default {
 ```
 
 An eval config that loads the plugin declares `{ "type": "my/dataset/format", "path": "..." }` in `datasets`. Select the format in the declaration rather than inferring it from a first case, and fail on fields the source can't map instead of dropping them.
+
+### Plugin datasets and snapshots
+
+A dataset source whose schema takes no options is a dataset: an eval config lists it by name, and [`mst datasets`](cli.md#datasets---find-plugin-datasets) lists it. A source that keeps snapshots sets `snapshots: true`, reads `context.request`, and sets the dataset's `snapshot` to the one it read:
+
+```ts
+const plugin: Plugin = {
+  meta: { name: '@acme/mst-plugin', namespace: 'acme' },
+  datasetSources: {
+    'info-seeking': {
+      description: 'Questions with one right answer, from the support corpus.',
+      snapshots: true,
+      schema: z.object({ type: z.string() }).strict(),
+      // context.request: { source: 'snapshot' | 'live', snapshot?: string }
+      async load(_config, { request }) {
+        if (request?.source === 'live')
+          return loadEvalDatasetFromObject(await readLive());
+        const snapshot = request?.snapshot ?? (await latestSnapshot());
+        return {
+          ...loadEvalDatasetFromObject(await readSnapshot(snapshot)),
+          snapshot,
+        };
+      },
+      // Optional: what `mst datasets` shows without loading cases.
+      async describe() {
+        return { cases: 50, snapshot: await latestSnapshot() };
+      },
+    },
+  },
+};
+```
+
+```json
+{
+  "datasets": [
+    "acme/dataset/info-seeking",
+    { "ref": "acme/dataset/info-seeking", "snapshot": "2026-10-01" },
+    { "ref": "acme/dataset/info-seeking", "source": "live" }
+  ]
+}
+```
+
+- **`snapshot` and `source` are MST's.** MST takes them off the declaration before the source's schema sees it, passes them as `context.request` (`source` defaults to `snapshot`; no `snapshot` means the source's latest), and rejects them for a source without `snapshots`. A dataset back with a snapshot other than the one asked for, or live data with a snapshot, fails the run.
+- **`run.json` records which copy.** Each plugin dataset in `datasets` has its `ref`, plus `snapshot` or `live: true`, next to its `caseCount` and `contentHash`. `mst run --dry-run` prints the same. Unchanged cases hash the same whichever copy they came from.
 
 ### Clients
 

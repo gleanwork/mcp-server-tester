@@ -96,7 +96,7 @@ import type { EvalCaseResult } from '../types/reporter.js';
 import type { UsageMetrics } from '../types/index.js';
 import type { Plugin } from '../plugins/plugin.js';
 import { assertDatasetNamespaces, loadEvalPlugins } from './evalPlugins.js';
-import { getDatasetSource } from './builtinDatasetSources.js';
+import { loadDataset } from './builtinDatasetSources.js';
 import {
   assertClientSupports,
   builtinClientDefaults,
@@ -943,7 +943,7 @@ async function evaluate(
     // A dry run checks the datasets too, without the client (and its secrets).
     const loaded = await Promise.all(
       datasets.map((source) =>
-        getDatasetSource(source.type).load(source, {
+        loadDataset(source, {
           rootDir,
           configDir,
           evalConfig: sourceConfig,
@@ -990,7 +990,7 @@ async function evaluate(
   const canonicalDatasets = await Promise.all(
     datasets.map(async (source) => ({
       source,
-      dataset: await getDatasetSource(source.type).load(source, {
+      dataset: await loadDataset(source, {
         rootDir,
         configDir,
         evalConfig: sourceConfig,
@@ -1777,6 +1777,8 @@ async function evaluate(
           name: dataset.name,
           caseCount: dataset.cases.length,
           contentHash: datasetContentHash(dataset),
+          // Which plugin dataset, and which copy of it.
+          ...dataset.origin,
         })),
       // Judges by name, with a hash of their options: options can hold
       // settings that shouldn't be stored.
