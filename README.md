@@ -216,7 +216,7 @@ for client-specific fields, environment rules, and setup ownership.
 
 ## AI Skills
 
-Install AI skills to help your coding assistant generate tests, eval datasets, and client evals:
+Install AI skills to help your coding assistant write tests and evals, and improve tool metadata:
 
 ```bash
 npx skills add -g gleanwork/mcp-server-tester
@@ -224,12 +224,12 @@ npx skills add -g gleanwork/mcp-server-tester
 
 This installs skills globally so they're available across all your projects. Four skills are included:
 
-| Skill                   | Description                                                 |
-| ----------------------- | ----------------------------------------------------------- |
-| `mcp-tester-guide`      | Framework reference — matchers, config, auth, anti-patterns |
-| `write-mcp-test`        | Generate Playwright tool tests                              |
-| `write-mcp-eval`        | Generate data-driven eval datasets                          |
-| `write-mcp-client-eval` | Generate LLM client simulation evals                        |
+| Skill                        | Description                                                                         |
+| ---------------------------- | ----------------------------------------------------------------------------------- |
+| `mcp-tester-guide`           | Reference: vocabulary, config, fixtures, matchers, eval configs, CLI, 1.x renames   |
+| `write-mcp-test`             | Write Playwright tests that call tools directly and check them with matchers        |
+| `write-mcp-eval`             | Write eval datasets and eval configs: cases a client and model act on, and variants |
+| `optimize-mcp-tool-metadata` | Find tool-metadata changes that measurably help, with `runToolOptimization`         |
 
 Compatible with Claude Code, Cursor, Windsurf, Copilot, and [40+ other AI agents](https://github.com/nicepkg/nice-skills).
 
