@@ -72,8 +72,8 @@ Extract a dataset to read, diff, or freeze it:
 
 ```bash
 npx mst datasets pull acme/dataset/info-seeking --out datasets/info-seeking.json
-npx mst datasets pull acme/dataset/info-seeking --plugin-option acme.source=live
-npx mst datasets pull acme/dataset/info-seeking --plugin-option acme.snapshot=2026-10-01
+npx mst datasets pull acme/dataset/info-seeking --source live
+npx mst datasets pull acme/dataset/info-seeking --snapshot 2026-10-01
 ```
 
 Each case has an `input`, an `expected` answer, tags, and optional default judges:
