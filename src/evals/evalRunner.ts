@@ -797,6 +797,7 @@ export async function runEvalCase(
       const infraError = isInfrastructureFailure(result);
       trialResults.push({
         pass: result.pass,
+        scores: result.scores,
         durationMs: result.durationMs,
         error: result.error,
         isInfrastructureError: infraError,

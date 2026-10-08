@@ -1,6 +1,6 @@
 # Use-case eval
 
-Each directory in `cases/` is one comparison MST is built to run: tool triggering over time, tool-description variants, one aggregating server against several native servers, a client with and without a plugin, and so on. The runs every case through the `mst` CLI, as a user would, and checks the `results.json` it writes.
+Each directory in `cases/` is one comparison MST is built to run: tool triggering over time, tool-description variants, one aggregating server against several native servers, a client with and without a plugin, and so on. The runs every case through the `mst` CLI, as a user would, and checks the run it writes (`summary.json`, with the case results from `results.json`).
 
 ```bash
 npm run build
@@ -35,7 +35,7 @@ The runner copies the directory to a temp directory, then fills in each `"{{serv
 
 ## Checks
 
-Each check is a `path` into `results.json`, with `equals` or `exists`.
+Each check is a `path` into the run's `summary.json` (its `results` are the cases from `results.json`), with `equals` or `exists`.
 
 - A segment can select an array item with `[key=value]` (for example `variants[name=native]`) or an index (`[0]`). `length` counts items or keys.
 - Segments are split on `.` first, so a selector value can't contain a dot.

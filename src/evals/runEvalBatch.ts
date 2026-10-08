@@ -1,4 +1,4 @@
-import { RESULT_SCHEMA_VERSION } from './resultFormat.js';
+import { RUN_FORMAT } from './resultFormat.js';
 import { rejectRenamedOptions } from './renamedKeys.js';
 import crypto from 'node:crypto';
 import { describeError } from '../utils/describeError.js';
@@ -52,7 +52,7 @@ const CompletedResultSchema = z.object({
   caseResults: z.array(CompletedCaseSchema),
 });
 const CompletedSummarySchema = z.object({
-  schemaVersion: z.literal(RESULT_SCHEMA_VERSION),
+  format: z.literal(RUN_FORMAT),
   configId: z.string(),
   contentHash: z.string(),
   configName: z.string(),
@@ -69,7 +69,7 @@ const CompletedSummarySchema = z.object({
   results: z.array(CompletedCaseSchema),
 });
 const StoredSummarySchema = z.object({
-  schemaVersion: z.literal(RESULT_SCHEMA_VERSION),
+  format: z.literal(RUN_FORMAT),
   kind: z.literal('eval-run-summary'),
   id: z.string().min(1),
   createdAt: z.iso.datetime(),

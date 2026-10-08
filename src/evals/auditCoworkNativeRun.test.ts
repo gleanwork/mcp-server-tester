@@ -155,14 +155,38 @@ async function fixture(
     traceEvidence: 'structured',
     scores: { judge: { pass: true } },
   };
-  const raw = {
-    schemaVersion: 2,
+  const raw: {
+    format?: string;
+    schemaVersion?: number;
+    results: unknown[];
+    variants: Array<{ servers: unknown[]; result: { caseResults: unknown[] } }>;
+  } = {
+    format: 'mst.run/v1',
     results: [saved],
     variants: [{ servers: [], result: { caseResults: [saved] } }],
   };
-  const rawResultsPath = join(root, 'raw-results.json');
+  // A run directory: results.json and the summary.json beside it.
+  const rawResultsPath = join(root, 'results.json');
   async function save() {
-    await writeFile(rawResultsPath, JSON.stringify(raw));
+    await writeFile(
+      rawResultsPath,
+      JSON.stringify({
+        format: raw.format,
+        schemaVersion: raw.schemaVersion,
+        kind: 'results',
+        runId: 'run',
+        cases: raw.results,
+      })
+    );
+    await writeFile(
+      join(root, 'summary.json'),
+      JSON.stringify({
+        format: raw.format,
+        kind: 'summary',
+        runId: 'run',
+        variants: raw.variants,
+      })
+    );
   }
   async function audit(expectedCases = 1) {
     await save();
@@ -195,7 +219,8 @@ function records(value: unknown): RecordValue[] {
 describe('auditCoworkNativeRun', () => {
   it('rejects results written by an earlier MST', async () => {
     const f = await fixture();
-    (f.raw as { schemaVersion: number }).schemaVersion = 1;
+    f.raw.format = undefined;
+    f.raw.schemaVersion = 2;
     const report = await f.audit();
     expect(report.evidencePassed).toBe(false);
     expect(report.issues).toContain('INVALID_RESULTS');

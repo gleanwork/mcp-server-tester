@@ -1,11 +1,19 @@
-import { RESULT_SCHEMA_VERSION } from './resultFormat.js';
+import { RUN_FORMAT } from './resultFormat.js';
+import {
+  assertUniqueCaseIds,
+  assertUniqueVariantNames,
+  datasetContentHash,
+  newRunId,
+  runsDirectory,
+  writeLatest,
+  writeRun,
+} from './runFormat.js';
 import { rejectRenamedOptions } from './renamedKeys.js';
 import { configIdentity } from './configIdentity.js';
 import { resolveConfigExtends } from './configExtends.js';
 import { resolveCoworkSetupConfig } from './coworkSetup/options.js';
 import { sumUsage } from '../utils/usageUtils.js';
 import { sumJudgeUsage } from '../judge/judgeContract.js';
-import { randomUUID } from 'node:crypto';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -468,6 +476,40 @@ async function comparePairwiseVariants(
   return sumJudgeUsage(candidates.map((variant) => variant.pairwise?.usage));
 }
 
+/** The judges a run used, by name and level, each with a hash of its options. */
+function judgeRecords(
+  evalConfig: EvalConfig
+): Array<{ type: string; level: string; optionsHash: string }> {
+  const record = (level: string) => (entry: unknown) => {
+    const { type, ...options } =
+      typeof entry === 'string'
+        ? { type: entry }
+        : (entry as { type: string } & Record<string, unknown>);
+    return {
+      type,
+      level,
+      optionsHash: createHash('sha256')
+        .update(JSON.stringify(options))
+        .digest('hex'),
+    };
+  };
+  const configJudges = JSON.stringify(evalConfig.judges ?? []);
+  return [
+    ...(evalConfig.judges ?? []).map(record('config')),
+    // A variant's judges, when they replace the config's.
+    ...(evalConfig.variants ?? [])
+      .filter(
+        (variant) =>
+          variant.judges !== undefined &&
+          JSON.stringify(variant.judges) !== configJudges
+      )
+      .flatMap((variant) =>
+        variant.judges!.map(record(`variant:${variant.name}`))
+      ),
+    ...((evalConfig.pairwiseJudges ?? []) as unknown[]).map(record('pairwise')),
+  ];
+}
+
 function redactServerForReport(server: MCPConfig): MCPConfig {
   const label = server.label ? { label: server.label } : {};
   if (server.transport === 'stdio') {
@@ -600,12 +642,12 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
     { namespaces }
   );
 
-  const executionId = randomUUID();
-  const outputDir = path.join(
+  const executionId = newRunId();
+  // The eval's directory holds its runs (runs/<run-id>/) and latest.json.
+  const evalDirectory =
     options.outputDir ??
-      path.join(rootDir, '.mcp-test-results', evalConfig.name),
-    executionId
-  );
+    path.join(rootDir, '.mcp-test-results', evalConfig.name);
+  const outputDir = path.join(runsDirectory(evalDirectory), executionId);
   const variants = selectedVariants(evalConfig, options.variant);
   const datasets = evalConfig.datasets;
 
@@ -640,7 +682,7 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
         dataset: loaded[index],
       })),
       summary: {
-        schemaVersion: RESULT_SCHEMA_VERSION,
+        format: RUN_FORMAT,
         ...identity,
         timestamp: new Date().toISOString(),
         durationMs: 0,
@@ -669,6 +711,8 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
   );
   for (const { dataset } of canonicalDatasets)
     assertDatasetNamespaces(dataset, namespaces);
+  assertUniqueCaseIds(canonicalDatasets.map(({ dataset }) => dataset));
+  assertUniqueVariantNames(variants.map((variant) => variant.name));
   assertNamedCases(
     canonicalDatasets.map(({ dataset }) => dataset),
     options.cases
@@ -846,7 +890,7 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
               ...(typeof variantModel === 'string'
                 ? { model: variantModel }
                 : {}),
-              // The suite reports its own results (results.json).
+              // The eval writes its own run directory.
               reporting: 'none',
               concurrency: evalConfig.concurrency ?? 1,
               defaultTrials: evalConfig.trials,
@@ -993,7 +1037,7 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
     ...(pairwiseUsage !== undefined && { pairwiseJudgeUsage: pairwiseUsage }),
   };
   const summary: EvaluationSummary = {
-    schemaVersion: RESULT_SCHEMA_VERSION,
+    format: RUN_FORMAT,
     ...identity,
     timestamp: new Date().toISOString(),
     durationMs: Date.now() - runStartTime,
@@ -1035,7 +1079,7 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
       partial: summary.partial,
       selectionHash: summary.selectionHash,
       store,
-      outputRoot: path.dirname(outputDir),
+      outputRoot: runsDirectory(evalDirectory),
     });
     if (previous) summary.previousRun = compareWithPrevious(previous, summary);
   } catch (error) {
@@ -1095,9 +1139,52 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
       })
     );
   }
-  await fs.writeFile(
-    path.join(outputDir, 'results.json'),
-    `${JSON.stringify(storedSummary, null, 2)}\n`
+  await writeRun(
+    outputDir,
+    executionId,
+    {
+      evalName: evalConfig.name,
+      createdAt: new Date(runStartTime).toISOString(),
+      finishedAt: new Date().toISOString(),
+      mstVersion: packageJson.version,
+      // Validation put the baseline first; a --variant run may leave it out.
+      baseline: evalConfig.variants?.[0]?.name ?? 'default',
+      variants: storedSummary.variants.map((variant) => {
+        const declared = variants.find(
+          (candidate) => candidate.name === variant.name
+        );
+        const client = declared?.client ?? evalConfig.client;
+        const model = declared?.model ?? evalConfig.model;
+        return {
+          name: variant.name,
+          servers: variant.servers,
+          ...(typeof client === 'string' ? { client } : {}),
+          ...(typeof model === 'string' ? { model } : {}),
+        };
+      }),
+      // The cases each dataset ran (the first variant's selection).
+      datasets: allDatasets
+        .map((item) => item.dataset)
+        .filter(
+          (dataset, index, all): dataset is EvalDataset =>
+            dataset !== undefined &&
+            all.findIndex((other) => other?.name === dataset.name) === index
+        )
+        .map((dataset) => ({
+          name: dataset.name,
+          caseCount: dataset.cases.length,
+          contentHash: datasetContentHash(dataset),
+        })),
+      // Judges by name, with a hash of their options: options can hold
+      // settings that shouldn't be stored.
+      judges: judgeRecords(evalConfig),
+      redactStoredResponses: redact,
+    },
+    storedSummary
   );
+  // Last, so a crash leaves latest.json at the previous run; a partial run
+  // never becomes the latest.
+  if (!summary.partial)
+    await writeLatest(evalDirectory, executionId, summary.timestamp);
   return { evalConfig, outputDir, datasets: allDatasets, summary };
 }

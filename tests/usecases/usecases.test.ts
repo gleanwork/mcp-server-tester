@@ -2,7 +2,7 @@
  * The use-case eval: each directory under cases/ is one comparison MST is
  * built to run (see README.md). The test copies it to a temp directory,
  * runs it through the `mst` CLI with the fixture plugin, and checks the
- * results.json it writes.
+ * run directory (summary.json and results.json) it writes.
  *
  * Checks marked with a `gap` describe what MST should report but doesn't
  * yet; they run as expected failures, so fixing a gap fails the eval until
@@ -140,7 +140,7 @@ function resultFiles(dir: string): string[] {
   if (!fs.existsSync(dir)) return [];
   return fs
     .readdirSync(dir, { recursive: true, encoding: 'utf8' })
-    .filter((entry) => path.basename(entry) === 'results.json')
+    .filter((entry) => path.basename(entry) === 'summary.json')
     .map((entry) => path.join(dir, entry));
 }
 
@@ -201,16 +201,48 @@ function runCase(caseDir: string, runs: number): Outcome {
       child.stderr,
     ].join('\n');
     const created = resultFiles(outDir).filter((file) => !before.has(file));
-    outcome.results =
-      created.length === 1
-        ? (JSON.parse(fs.readFileSync(created[0]!, 'utf8')) as Record<
-            string,
-            unknown
-          >)
-        : undefined;
+    outcome.results = created.length === 1 ? readRun(created[0]!) : undefined;
     outcome.ledger = readLedger(ledger);
   }
   return outcome;
+}
+
+type CaseResult = { variant?: string };
+type Variant = { name: string; result?: Record<string, unknown> };
+
+/**
+ * A run directory's summary.json with its case results put back from
+ * results.json: overall, and in each variant's result.
+ */
+function readRun(summaryPath: string): Record<string, unknown> {
+  const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf8')) as {
+    variants?: Variant[];
+  } & Record<string, unknown>;
+  const cases = (
+    JSON.parse(
+      fs.readFileSync(
+        path.join(path.dirname(summaryPath), 'results.json'),
+        'utf8'
+      )
+    ) as { cases: CaseResult[] }
+  ).cases;
+  return {
+    ...summary,
+    results: cases,
+    variants: (summary.variants ?? []).map((variant) =>
+      variant.result
+        ? {
+            ...variant,
+            result: {
+              ...variant.result,
+              caseResults: cases.filter(
+                (result) => (result.variant ?? 'default') === variant.name
+              ),
+            },
+          }
+        : variant
+    ),
+  };
 }
 
 /**

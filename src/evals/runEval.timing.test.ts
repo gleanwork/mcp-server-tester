@@ -61,10 +61,18 @@ async function fixture(
     ...clientDefinition,
   };
   testPlugin.datasetSources[sourceName] = {
-    schema: z.object({ type: z.string() }),
-    async load() {
+    schema: z.object({ type: z.string(), suffix: z.string().optional() }),
+    async load(config) {
       advance(7);
-      return { name: 'timing', cases };
+      // A second dataset from the same source gets its own case IDs.
+      const suffix = (config as { suffix?: string }).suffix ?? '';
+      return {
+        name: `timing${suffix}`,
+        cases: cases.map((evalCase) => ({
+          ...evalCase,
+          id: `${evalCase.id}${suffix}`,
+        })),
+      };
     },
   };
   const type = `test/client/${clientName}`;
@@ -127,7 +135,10 @@ describe('eval wall-clock timing', () => {
     const evalConfig = JSON.parse(
       await fs.readFile(f.configPath, 'utf8')
     ) as Record<string, unknown>;
-    evalConfig.datasets = [{ type: f.source }, { type: f.source }];
+    evalConfig.datasets = [
+      { type: f.source },
+      { type: f.source, suffix: '-2' },
+    ];
     await fs.writeFile(f.configPath, JSON.stringify(evalConfig));
 
     const result = await runEval(f);

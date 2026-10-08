@@ -34,6 +34,7 @@ This guide covers upgrading from 1.x (the last 1.x release is 1.1.1). Features f
 - [Plugin extension names say their kind](#plugin-extension-names-say-their-kind)
 - [Servers are a map keyed by label](#servers-are-a-map-keyed-by-label)
 - [Case judges sit beside assertions](#case-judges-sit-beside-assertions)
+- [Runs are directories in the mst.run/v1 format](#runs-are-directories-in-the-mstrunv1-format)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
 ---
@@ -717,6 +718,19 @@ A judge is a grader, not an assertion, so a case lists its judges in `judges`, b
 - **`JudgeExpectConfig`** remains the judge request type (it has `judge`); a case's entries are `CaseJudge` (`string | CaseJudgeConfig`, which has `type`).
 
 Pairwise judges can now go in an eval config too: `"pairwiseJudges": ["acme/pairwise-judge/preference"]` compares each variant with the baseline after the run, and the result is the variant's `pairwise` in the run summary.
+
+## Runs are directories in the mst.run/v1 format
+
+**Affects:** tools that read what `mst run` writes, and code that reads stored results or baselines.
+
+1.x wrote one `results.json` per run in `<output dir>/<eval name>/<uuid>/`. 2.0 writes a run directory in the versioned `mst.run/v1` format: `<output dir>/<eval name>/runs/<run-id>/` with `run.json`, `traces/`, `scores/`, `results.json` (now `{ format, kind, runId, cases }`), `summary.json` (the run summary without its case list) and the eval's `latest.json`. See [What a run leaves behind](../evaluation-framework.md#what-a-run-leaves-behind).
+
+- Read the run summary from `summary.json` and the case results from `results.json`'s `cases`. `mst run` prints the run directory.
+- `schemaVersion: 2` is `format: 'mst.run/v1'` in summaries and stored artifacts. Older results fail on an explicit load with "Rerun to write it again", and comparisons with the previous run skip them.
+- `--output-dir` names the eval's directory, which holds `runs/` and `latest.json`.
+- Run IDs are `20261007T182504Z-7f3c2a`, not UUIDs.
+- Case IDs must be unique within a run. A case ID in two datasets fails before anything runs.
+- Each trial in `trialResults` has its own `scores`.
 
 ## New in 2.0 (non-breaking)
 

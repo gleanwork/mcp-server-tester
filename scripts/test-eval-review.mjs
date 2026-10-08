@@ -118,9 +118,11 @@ export default {meta:{name:'local-plugin',version:'1.0.0',namespace:'local'},cli
     ['run', '--config', paths[0], '--output-dir', path.join(dir, 'failure')],
     1
   );
-  const summaryPath = /^Output: (.+)$/m.exec(failedRun)?.[1];
-  assert.ok(summaryPath, 'CLI must print the unique execution result path');
-  const summary = JSON.parse(await fs.readFile(summaryPath, 'utf8'));
+  const runDirectory = /^Output: (.+)$/m.exec(failedRun)?.[1];
+  assert.ok(runDirectory, 'CLI must print the run directory');
+  const summary = JSON.parse(
+    await fs.readFile(path.join(runDirectory, 'summary.json'), 'utf8')
+  );
   assert.equal(summary.metrics.failed, 1);
   assert.equal(summary.metrics.passed, 4);
   assert.equal(summary.metrics['local/metric/plugin-metric_rate'], 0.8);

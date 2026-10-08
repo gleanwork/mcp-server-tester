@@ -22,7 +22,7 @@ A check that calls a tool with fixed arguments has no client, so it is a test, n
 | -------- | ---------------------------------------- | --------------------------------------------------------------- |
 | Client   | `mst` only, on the test's MCP connection | `mst`, `claude-code`, `cowork`, `chatgpt`, or a plugin's client |
 | Compares | one setup per call                       | several variants in one run, each compared with the baseline    |
-| Results  | the MCP Playwright reporter              | `results.json` and a table per variant                          |
+| Results  | the MCP Playwright reporter              | a run directory and a table per variant                         |
 
 Start with a Playwright test on `mst` while you write cases. Use an eval config to run them on another client or to compare variants.
 
@@ -294,7 +294,7 @@ npx mst run --config evals/eval.json --case find-planning-doc --trials 1
 npx mst run --config evals/eval.json
 ```
 
-`mst run` prints a row per variant (cases passed, trial pass rate, MCP calls, tokens, cost, time) and the change since the previous run of the same eval config. It writes `results.json` under `.mcp-test-results/<name>/` and exits 1 if any case failed.
+`mst run` prints a row per variant (cases passed, trial pass rate, MCP calls, tokens, cost, time) and the change since the previous run of the same eval config. It writes the run to `.mcp-test-results/<name>/runs/<run-id>/` (`results.json`, `summary.json`, traces and scores) and exits 1 if any case failed.
 
 Every key, the clients, and what variants inherit: [references/eval-configs.md](references/eval-configs.md).
 

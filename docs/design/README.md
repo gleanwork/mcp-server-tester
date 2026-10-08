@@ -296,8 +296,8 @@ Runs are written locally by default:
 .mcp-test-results/cowork-aggregated-vs-native/runs/<run-id>/
 ├── run.json        # config, resolved datasets and judges, environment, phase status
 ├── traces/         # one trace per trial
-├── grades/         # one score per grader per trial; pairwise preferences per case
-├── results.json    # traces and grades joined
+├── scores/         # one score per grader per trial; pairwise preferences per case
+├── results.json    # traces and scores joined
 ├── summary.json    # per-variant metrics and comparisons
 └── report/
 ```

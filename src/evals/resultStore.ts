@@ -1,4 +1,4 @@
-import { RESULT_SCHEMA_VERSION, olderResultsError } from './resultFormat.js';
+import { RUN_FORMAT, olderResultsError } from './resultFormat.js';
 import type { ProtocolEra } from '../types/index.js';
 import { mkdir, readFile, readdir, writeFile } from 'fs/promises';
 import { join } from 'path';
@@ -28,8 +28,8 @@ export interface StoredEvalArtifactMetadata {
 }
 
 export interface StoredEvalArtifact<T> {
-  /** The result format: see `RESULT_SCHEMA_VERSION`. */
-  schemaVersion: typeof RESULT_SCHEMA_VERSION;
+  /** The run format: see `RUN_FORMAT`. */
+  format: typeof RUN_FORMAT;
   kind: StoredArtifactKind;
   id: string;
   createdAt: string;
@@ -186,7 +186,7 @@ export function createStoredEvalArtifact<T>(options: {
 }): StoredEvalArtifact<T> {
   const createdAt = options.createdAt ?? new Date().toISOString();
   return {
-    schemaVersion: RESULT_SCHEMA_VERSION,
+    format: RUN_FORMAT,
     kind: options.kind,
     id: options.id ?? createDefaultArtifactId(createdAt),
     createdAt,
@@ -452,8 +452,8 @@ function currentArtifact<T>(
   what: string
 ): StoredEvalArtifact<T> {
   const artifact = value as StoredEvalArtifact<T>;
-  if (artifact?.schemaVersion !== RESULT_SCHEMA_VERSION)
-    throw olderResultsError(what, artifact?.schemaVersion);
+  if (artifact?.format !== RUN_FORMAT)
+    throw olderResultsError(what, artifact?.format);
   return artifact;
 }
 
@@ -462,7 +462,7 @@ function currentSummaries(
   artifacts: Array<StoredEvalArtifact<unknown>>
 ): StoredArtifactSummary[] {
   return artifacts
-    .filter((artifact) => artifact?.schemaVersion === RESULT_SCHEMA_VERSION)
+    .filter((artifact) => artifact?.format === RUN_FORMAT)
     .map(toSummary);
 }
 

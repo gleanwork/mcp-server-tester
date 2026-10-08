@@ -76,7 +76,8 @@
     "scripts/cowork_linux.py",
     "scripts/chatgpt_linux.py",
     "scripts/chatgpt_linux_contract.json",
-    "scripts/cowork-requirements.txt"
+    "scripts/cowork-requirements.txt",
+    "schema"
   ],
   "scripts": {
     "build": "npm run build:ui && tsup && npm run build:copy-ui",
@@ -104,7 +105,8 @@
     "test:playwright": "playwright test",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.ui.json",
-    "knip": "knip"
+    "knip": "knip",
+    "schema:generate": "node --import tsx scripts/generate-run-schemas.ts"
   },
   "dependencies": {
     "@inkjs/ui": "^2.0.0",
