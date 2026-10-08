@@ -112,6 +112,10 @@ function trialDetail(trial: Trial, redacted: boolean): RunReportTrial {
     ...(isInfraTrial(trial) ? { infrastructureError: true } : {}),
     ...(trial.durationMs !== undefined ? { durationMs: trial.durationMs } : {}),
     ...(trace?.finalText ? { finalText: clip(trace.finalText) } : {}),
+    // A client that can't observe calls (evidence 'none') has no trace to read.
+    traced:
+      trace?.events !== undefined &&
+      (trace as { evidence?: string }).evidence !== 'none',
     events: (trace?.events ?? []).map((event) => ({
       kind: event.kind ?? 'event',
       ...(event.name ? { name: event.name } : {}),
@@ -131,6 +135,28 @@ function trialDetail(trial: Trial, redacted: boolean): RunReportTrial {
         }
       : {}),
   };
+}
+
+/** Graders that read only the trace (which tools were called, how often), never the answer. */
+const TRACE_GRADERS = new Set(['toolsTriggered', 'toolCallCount']);
+
+/** Every grader that scored a trial in the run, assertions first, then judges. */
+function gradersOf(
+  trials: MCPRunReportData['trials']
+): MCPRunReportData['graders'] {
+  const seen = new Map<string, boolean>();
+  for (const byCase of Object.values(trials))
+    for (const list of Object.values(byCase))
+      for (const trial of list)
+        for (const score of trial.scores)
+          seen.set(score.grader, score.judge === true);
+  return [...seen]
+    .map(([name, judge]) => ({
+      name,
+      judge,
+      readsAnswer: judge || !TRACE_GRADERS.has(name),
+    }))
+    .sort((a, b) => Number(a.judge) - Number(b.judge));
 }
 
 function median(values: number[]): number | undefined {
@@ -442,6 +468,7 @@ export function buildRunReport(stored: StoredRun): MCPRunReportData {
     ),
     trials,
     preferences,
+    graders: gradersOf(trials),
     ...(summary.toolOptimization
       ? { toolOptimization: summary.toolOptimization }
       : {}),

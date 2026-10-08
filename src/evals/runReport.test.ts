@@ -216,6 +216,36 @@ describe('the run report', () => {
         reasoning: 'the longer answer',
       },
     ]);
+    expect(trials[0]!.traced).toBe(true);
+  });
+
+  it('says what graded the trials, and which graders read the answer', async () => {
+    const report = await readReport((await run()).outputDir);
+    expect(report.graders).toEqual([
+      { name: 'textContains', judge: false, readsAnswer: true },
+      { name: 'rr/judge/length', judge: true, readsAnswer: true },
+    ]);
+    // A trace-only grader never reads the answer.
+    const stored = await readRunDirectory((await run()).outputDir);
+    for (const result of stored.summary.results)
+      for (const trial of result.trialResults ?? [result])
+        (trial as { scores?: Record<string, unknown> }).scores = {
+          toolsTriggered: { pass: true },
+        };
+    expect(buildRunReport(stored).graders).toEqual([
+      { name: 'toolsTriggered', judge: false, readsAnswer: false },
+    ]);
+  });
+
+  it('has no trace for a client that cannot see tool calls', async () => {
+    const stored = await readRunDirectory((await run()).outputDir);
+    const result = stored.summary.results.find((r) => r.variant === 'longer')!;
+    const trial = (result.trialResults ?? [result])[0] as {
+      trace?: { evidence?: string; events?: unknown[] };
+    };
+    trial.trace = { ...trial.trace, evidence: 'none', events: [] };
+    const report = buildRunReport(stored);
+    expect(report.trials.longer![result.id]![0]!.traced).toBe(false);
   });
 });
 

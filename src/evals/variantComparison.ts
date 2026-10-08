@@ -39,6 +39,7 @@ import type {
   VariantToolMistake,
 } from '../types/reporter.js';
 import type { EvalRunnerResult, ToolMetadataOverride } from './evalRunner.js';
+import { isInfrastructureFailure } from './infrastructureFailure.js';
 
 /** The tag that marks a case as held out, unless the optimization sets another. */
 export const DEFAULT_HELD_OUT_TAG = 'held-out';
@@ -313,7 +314,11 @@ function toAttempt(
   pass: boolean,
   source: Pick<
     TrialResult,
-    'error' | 'isInfrastructureError' | 'clientUsage'
+    | 'error'
+    | 'isInfrastructureError'
+    | 'clientUsage'
+    | 'clientDiagnostics'
+    | 'clientMetadata'
   > & { toolCallTrace?: TrialResult['toolCallTrace'] }
 ): RecordedAttempt {
   const trace = source.toolCallTrace;
@@ -328,7 +333,10 @@ function toAttempt(
         }
       : {}),
     ...(usage ? { tokens: usage.inputTokens + usage.outputTokens } : {}),
-    infrastructure: source.isInfrastructureError === true,
+    // As the runner and the run report classify it: the flag when a trial
+    // has one, else the error itself (a single-trial case result has none).
+    infrastructure:
+      source.isInfrastructureError ?? isInfrastructureFailure(source),
   };
 }
 

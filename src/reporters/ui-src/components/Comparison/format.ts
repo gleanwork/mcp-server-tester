@@ -34,6 +34,17 @@ function trim(x: number): string {
     : x.toFixed(1);
 }
 
+/** Score keys as the dataset writes them: `textContains` is the `containsText` assertion. */
+const GRADER_NAMES: Record<string, string> = {
+  textContains: 'containsText',
+  regex: 'matchesPattern',
+};
+
+/** A grader's name as a dataset author knows it. */
+export function graderName(name: string): string {
+  return GRADER_NAMES[name] ?? name;
+}
+
 /** The library's assessment on a change, as a direction. */
 export function direction(change: PairedChange): 'up' | 'down' | 'flat' {
   if (change.assessment === 'better') return 'up';

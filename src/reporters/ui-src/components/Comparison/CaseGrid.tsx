@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type {
   MCPComparisonData,
+  RunReportTrial,
   VariantTrial,
   VariantComparisonCase,
   VariantComparisonEntry,
@@ -10,8 +11,29 @@ import { FAILURE_LABEL, pct, variantName } from './format';
 import {
   Preferences,
   TrialView,
+  traceSummary,
   useTrialLookup,
 } from '../RunReport/TrialDetail';
+
+/** "All 3 trials passed and made the same calls", when a side's trials agree. */
+function sameNote(trials: RunReportTrial[]): string | null {
+  if (trials.length < 2) return null;
+  const first = trials[0]!;
+  const signature = (t: RunReportTrial) =>
+    JSON.stringify(
+      t.events
+        .filter((e) => e.kind === 'tool_call')
+        .map((e) => [e.name, e.input])
+    );
+  const same = trials.every(
+    (t) => t.pass === first.pass && signature(t) === signature(first)
+  );
+  if (!same) return null;
+  const calls = traceSummary(first);
+  return calls === 'called no tools'
+    ? `All ${trials.length} trials ${first.pass ? 'passed' : 'failed'} and called no tools.`
+    : `All ${trials.length} trials ${first.pass ? 'passed' : 'failed'}, with the same tool calls.`;
+}
 
 export type CaseFilter = 'all' | 'regressed' | 'improved' | 'unsteady';
 
@@ -41,7 +63,7 @@ function sectionsOf(data: MCPComparisonData): Section[] {
     return [
       {
         key: 'cases',
-        label: regression.length ? 'Other cases' : 'All cases',
+        label: regression.length ? 'Capability cases' : 'All cases',
         hint: regression.length
           ? `not tagged “${data.regressionTag}”`
           : 'pass rate per variant',
@@ -118,13 +140,16 @@ function Cell({
   const d = isBase ? 0 : p - passes(row, data.baselineId);
   const change = d > 0 ? 'up' : d < 0 ? 'down' : null;
   // Red for failing every trial or getting worse; green for passing every
-  // trial; amber for passing some.
+  // trial; amber for passing some. The baseline's cells are grey: they are
+  // what the others are compared with, and its dots still say pass or fail.
   const tone =
-    p === 0 || change === 'down'
-      ? 'bg-red-500/10'
-      : p === k
-        ? 'bg-green-500/10'
-        : 'bg-amber-500/10';
+    isBase && data.variants.length > 1
+      ? 'bg-muted/70'
+      : p === 0 || change === 'down'
+        ? 'bg-red-500/10'
+        : p === k
+          ? 'bg-green-500/10'
+          : 'bg-amber-500/10';
   const label = `${variantName(data, variant)}, ${row.id}: ${p} of ${k} trials passed${
     change
       ? `, ${change === 'up' ? 'better' : 'worse'} than ${variantName(data, { id: data.baselineId })}`
@@ -292,6 +317,11 @@ function AttemptDialog({
                     preferences={lookup.preferences[id]?.[row.id] ?? []}
                   />
                 )}
+                {sameNote(lookup.trials[id]![row.id]!) && (
+                  <p className="text-xs text-muted-foreground">
+                    {sameNote(lookup.trials[id]![row.id]!)}
+                  </p>
+                )}
                 <ol className="grid gap-2">
                   {lookup.trials[id]![row.id]!.map((trial, i) => (
                     <TrialView key={i} trial={trial} index={i} />
@@ -401,6 +431,42 @@ export function CaseGrid({
           {sortByChange ? 'Sort: biggest drop first' : 'Sort: dataset order'}
         </button>
       </div>
+      <div
+        className="flex flex-wrap gap-4 text-xs text-muted-foreground"
+        aria-hidden="true"
+      >
+        <span className="inline-flex items-center gap-1">
+          <span className="h-3 w-3 rounded-sm border border-green-600 bg-green-500/10" />{' '}
+          passed every trial
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="h-3 w-3 rounded-sm border border-amber-600 bg-amber-500/10" />{' '}
+          passed some
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="h-3 w-3 rounded-sm border border-red-600 bg-red-500/10" />{' '}
+          {single
+            ? 'failed every trial'
+            : 'failed every trial, or worse than the baseline'}
+        </span>
+        {!single && (
+          <span className="inline-flex items-center gap-1">
+            <span className="h-3 w-3 rounded-sm border bg-muted/70" /> baseline
+            (the reference)
+          </span>
+        )}
+        {!single && (
+          <>
+            <span>
+              <b className="text-green-600 dark:text-green-400">▲</b> passes
+              more trials than the baseline
+            </span>
+            <span>
+              <b className="text-red-600 dark:text-red-400">▼</b> passes fewer
+            </span>
+          </>
+        )}
+      </div>
       <div className="max-h-[720px] overflow-auto rounded-lg border bg-card">
         <table className="w-full min-w-[640px] text-sm">
           <thead className="sticky top-0 z-10 bg-muted text-muted-foreground">
@@ -480,7 +546,7 @@ export function CaseGrid({
                             “{row.input}”
                           </div>
                         )}
-                        {section.key === 'keep' && row.expectedTools && (
+                        {row.expectedTools && (
                           <div className="font-mono text-xs text-muted-foreground/80">
                             expects {row.expectedTools.join(', ')}
                           </div>
@@ -519,36 +585,6 @@ export function CaseGrid({
             )}
           </tbody>
         </table>
-      </div>
-      <div
-        className="flex flex-wrap gap-4 text-xs text-muted-foreground"
-        aria-hidden="true"
-      >
-        <span className="inline-flex items-center gap-1">
-          <span className="h-3 w-3 rounded-sm border border-green-600 bg-green-500/10" />{' '}
-          passed every trial
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <span className="h-3 w-3 rounded-sm border border-amber-600 bg-amber-500/10" />{' '}
-          passed some
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <span className="h-3 w-3 rounded-sm border border-red-600 bg-red-500/10" />{' '}
-          {single
-            ? 'failed every trial'
-            : 'failed every trial, or worse than the baseline'}
-        </span>
-        {!single && (
-          <>
-            <span>
-              <b className="text-green-600 dark:text-green-400">▲</b> passes
-              more trials than the baseline
-            </span>
-            <span>
-              <b className="text-red-600 dark:text-red-400">▼</b> passes fewer
-            </span>
-          </>
-        )}
       </div>
       {open && openRow && (
         <AttemptDialog

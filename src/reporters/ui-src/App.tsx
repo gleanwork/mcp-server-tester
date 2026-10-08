@@ -7,14 +7,7 @@ import { RunReport } from './components/RunReport/RunReport';
 /** A run's report (`mst open`): what `mst run` and the Playwright reporter write. */
 function RunReportApp({ data }: { data: MCPRunReportData }) {
   return (
-    <Layout
-      timestamp={data.run.createdAt}
-      platform={data.run.evalName}
-      durationMs={
-        new Date(data.run.finishedAt).getTime() -
-        new Date(data.run.createdAt).getTime()
-      }
-    >
+    <Layout>
       <ErrorBoundary>
         <div className="h-full overflow-auto">
           <RunReport data={data} />

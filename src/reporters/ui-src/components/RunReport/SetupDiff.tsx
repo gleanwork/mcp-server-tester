@@ -5,27 +5,37 @@ import type {
 } from '../../types';
 import { ChangeDiff } from '../Comparison/ChangeDiff';
 
-/** What a variant runs with that the baseline doesn't: setup fields, then tool metadata. */
-export function SetupDiff({
-  variant,
-  baselineName,
-  differences,
-  toolChanges,
-}: {
+/** One candidate's setup, against the baseline's. */
+export interface SetupDiffEntry {
   variant: RunReportVariant;
-  baselineName: string;
   differences: RunReportDifference[];
   toolChanges: VariantToolChange[];
+}
+
+/** What one variant runs with that the baseline doesn't: setup fields, then tool metadata. */
+function VariantDiff({
+  entry: { variant, differences, toolChanges },
+  baselineName,
+  titled,
+}: {
+  entry: SetupDiffEntry;
+  baselineName: string;
+  /** Whether to name the variant above its diff: when the section shows several. */
+  titled: boolean;
 }) {
   const same = differences.length === 0 && toolChanges.length === 0;
   return (
-    <section aria-labelledby="run-diff-h" className="grid gap-3">
-      <h2 id="run-diff-h" className="text-lg font-semibold">
-        What differs
-      </h2>
+    <div className="grid gap-3">
+      {titled && (
+        <h3 className="font-mono text-sm font-semibold">{variant.name}</h3>
+      )}
       {variant.description && (
         <p className="max-w-[80ch] text-sm text-muted-foreground">
-          <span className="font-mono">{variant.name}</span>:{' '}
+          {titled ? null : (
+            <>
+              <span className="font-mono">{variant.name}</span>:{' '}
+            </>
+          )}
           {variant.description}
         </p>
       )}
@@ -81,6 +91,34 @@ export function SetupDiff({
           baselineLabel={baselineName}
         />
       )}
+    </div>
+  );
+}
+
+/** What each variant runs with that the baseline doesn't. */
+export function SetupDiff({
+  variants,
+  baselineName,
+}: {
+  variants: SetupDiffEntry[];
+  baselineName: string;
+}) {
+  if (variants.length === 0) return null;
+  return (
+    <section aria-labelledby="run-diff-h" className="grid gap-3">
+      <h2 id="run-diff-h" className="text-lg font-semibold">
+        What differs
+      </h2>
+      <div className="grid gap-6">
+        {variants.map((entry) => (
+          <VariantDiff
+            key={entry.variant.id}
+            entry={entry}
+            baselineName={baselineName}
+            titled={variants.length > 1}
+          />
+        ))}
+      </div>
     </section>
   );
 }

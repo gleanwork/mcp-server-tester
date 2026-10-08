@@ -19,7 +19,19 @@ const plugin: Plugin = {
       schema: z.object({ type: z.string() }).passthrough(),
       evidence: 'structured',
       run: async (input, _config, context) => {
-        const calls = context.variant?.name === 'searching';
+        // The `flaky` variant's client times out on one case.
+        if (
+          context.variant?.name === 'flaky' &&
+          input.prompt?.includes('owners')
+        )
+          return {
+            finalText: '',
+            events: [],
+            error: 'connect ETIMEDOUT 10.0.0.1:443',
+          };
+        const calls =
+          context.variant?.name === 'searching' ||
+          context.variant?.name === 'flaky';
         return {
           finalText: `answer to ${input.prompt}`,
           events: calls
@@ -110,6 +122,11 @@ test.describe('run report', () => {
     const result = page.getByRole('heading', { name: 'Result' }).locator('..');
     await expect(result).toContainText('searching');
     await expect(result).toContainText('100%');
+    // The change in the sentence is the difference of the rates it shows.
+    await expect(result).toContainText('pass rate 0% → 100% (+100 pts');
+    // Only toolsTriggered graded the trials: the report says no grader read the answers.
+    await expect(result).toContainText('Graded on: toolsTriggered');
+    await expect(result).toContainText('No grader read the answers');
     await expect(
       page.getByRole('cell', { name: 'search-model' })
     ).toBeVisible();
@@ -124,8 +141,32 @@ test.describe('run report', () => {
     await expect(dialog).toContainText('find-refunds');
     await expect(dialog).toContainText('Trial 2');
     await expect(dialog).toContainText('toolsTriggered');
-    await expect(dialog).toContainText('called search');
+    // A trial's calls show their arguments; one that called nothing says so.
+    await expect(dialog).toContainText('search(query: "Who handles refunds?")');
+    await expect(dialog).toContainText('called no tools');
+    await expect(dialog).not.toContainText('No trace recorded');
+    // The answer shows without opening anything.
+    await expect(
+      dialog.getByText('answer to Who handles refunds?').first()
+    ).toBeVisible();
     expect(errors).toEqual([]);
+  });
+
+  test('leaves trials that ended in an infrastructure failure out of the rates, and says so', async ({
+    page,
+  }) => {
+    const report = await reportFor([{ name: 'flaky' }]);
+    await page.goto(`file://${report}`);
+    const result = page.getByRole('heading', { name: 'Result' }).locator('..');
+    // 2 of 3 cases pass both trials; the third timed out both times. Rates
+    // leave infrastructure failures out, and the page says so.
+    await expect(result).toContainText('100%');
+    await expect(result).not.toContainText('trials failed');
+    await expect(result).toContainText(
+      '2 trials ended in a client or infrastructure failure'
+    );
+    await expect(result).toContainText('Pass rates leave them out');
+    await expect(result).toContainText('ETIMEDOUT');
   });
 
   test('a single variant opens on the cases that need attention', async ({

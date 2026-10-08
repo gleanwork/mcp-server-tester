@@ -14,6 +14,7 @@ export type {
   VariantComparisonCase,
   VariantTrial,
   VariantToolChange,
+  VariantToolMistake,
   VariantStatus,
   TrialFailureKind,
   PairedChange,

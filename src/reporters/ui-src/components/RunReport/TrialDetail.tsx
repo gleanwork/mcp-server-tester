@@ -4,7 +4,7 @@ import type {
   RunReportPreference,
   RunReportTrial,
 } from '../../types';
-import { TONE } from '../Comparison/format';
+import { TONE, graderName } from '../Comparison/format';
 
 /** A run report's trials and pairwise preferences, by variant ID, then case ID. */
 export interface TrialLookup {
@@ -69,6 +69,47 @@ function EventRow({ event }: { event: RunReportEvent }) {
   );
 }
 
+/** `find_skills(query: "create a ticket")`: a tool call and its arguments, shortened. */
+function callText(event: RunReportEvent, max = 90): string {
+  const name = event.name ?? event.kind;
+  if (!event.input) return name;
+  let args = event.input;
+  try {
+    const parsed: unknown = JSON.parse(event.input);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+      args = Object.entries(parsed as Record<string, unknown>)
+        .map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
+        .join(', ');
+  } catch {
+    // Not JSON (already shortened): show it as is.
+  }
+  const text = `${name}(${args})`;
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+/** How a trial's trace reads in one line: its tool calls, or that it called none. */
+export function traceSummary(trial: RunReportTrial): string {
+  const calls = trial.events.filter((e) => e.kind === 'tool_call');
+  if (calls.length) return calls.map((e) => callText(e)).join(' → ');
+  if (trial.events.length || trial.traced) return 'called no tools';
+  return 'no trace recorded';
+}
+
+const EXCERPT = 280;
+
+/** The answer, its start shown inline: what the user would have read. */
+function Answer({ text }: { text: string }) {
+  const long = text.length > EXCERPT;
+  return (
+    <div className="grid gap-1">
+      <blockquote className="whitespace-pre-wrap break-words border-l-2 pl-2 text-xs text-foreground/90">
+        {long ? `${text.slice(0, EXCERPT).trimEnd()}…` : text}
+      </blockquote>
+      {long && <Block label="full answer" text={text} />}
+    </div>
+  );
+}
+
 /** One trial in full: its scores, its trace, its answer. */
 export function TrialView({
   trial,
@@ -111,7 +152,9 @@ export function TrialView({
             <li key={i} className="grid gap-0.5 text-xs">
               <span className="flex flex-wrap items-baseline gap-2">
                 <Badge pass={score.pass} />
-                <span className="font-mono font-semibold">{score.grader}</span>
+                <span className="font-mono font-semibold">
+                  {score.judge ? score.grader : graderName(score.grader)}
+                </span>
                 {score.score !== undefined && (
                   <span className="font-mono text-muted-foreground">
                     score {Number(score.score.toFixed(2))}
@@ -129,15 +172,8 @@ export function TrialView({
       )}
       {trial.events.length > 0 ? (
         <details>
-          <summary className="cursor-pointer text-xs text-muted-foreground">
-            Trace: {trial.events.length}{' '}
-            {trial.events.length === 1 ? 'event' : 'events'}
-            {(() => {
-              const calls = trial.events.filter((e) => e.kind === 'tool_call');
-              return calls.length
-                ? ` · called ${calls.map((e) => e.name).join(' → ')}`
-                : ' · no tool calls';
-            })()}
+          <summary className="cursor-pointer break-words font-mono text-xs text-muted-foreground">
+            {traceSummary(trial)}
           </summary>
           <ol className="mt-2 grid gap-2">
             {trial.events.map((event, i) => (
@@ -146,9 +182,11 @@ export function TrialView({
           </ol>
         </details>
       ) : (
-        <p className="text-xs text-muted-foreground">No trace recorded.</p>
+        <p className="font-mono text-xs text-muted-foreground">
+          {traceSummary(trial)}
+        </p>
       )}
-      {trial.finalText && <Block label="answer" text={trial.finalText} />}
+      {trial.finalText && <Answer text={trial.finalText} />}
     </li>
   );
 }
