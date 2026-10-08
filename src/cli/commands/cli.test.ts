@@ -306,6 +306,73 @@ describe('mst CLI', () => {
     });
   });
 
+  describe('datasets command', () => {
+    const plugin = `export default {
+      meta: { name: 'acme-plugin', namespace: 'acme' },
+      datasetSources: {
+        'info-seeking': {
+          description: 'Questions with one right answer.',
+          snapshots: true,
+          schema: { safeParse: (value) => ({ success: true, data: value }) },
+          async load(_config, { request }) {
+            return {
+              name: 'info-seeking',
+              cases: [{ id: 'a', input: 'qa' }],
+              snapshot: request.snapshot ?? '2026-10-06',
+            };
+          },
+          async describe() { return { cases: 1, snapshot: '2026-10-06' }; },
+        },
+      },
+    };`;
+
+    it('lists, shows and pulls a plugin dataset', async () => {
+      await project.write({ 'plugin.mjs': plugin });
+      const list = await runBin('datasets', '--plugins', './plugin.mjs');
+      expect(list.exitCode).toBe(0);
+      expect(list.stdout).toContain(
+        'acme/dataset/info-seeking  1 cases  snapshot 2026-10-06  Questions with one right answer.'
+      );
+
+      const show = await runBin(
+        'datasets',
+        'show',
+        'acme/dataset/info-seeking',
+        '--plugins',
+        './plugin.mjs',
+        '--snapshot',
+        '2026-10-01',
+        '--json'
+      );
+      expect(show.exitCode).toBe(0);
+      expect(JSON.parse(String(show.stdout))).toMatchObject({
+        ref: 'acme/dataset/info-seeking',
+        snapshot: '2026-10-01',
+        caseCount: 1,
+      });
+
+      const pull = await runBin(
+        'datasets',
+        'pull',
+        'acme/dataset/info-seeking',
+        '--plugins',
+        './plugin.mjs',
+        '--out',
+        'datasets/info.json'
+      );
+      expect(pull.exitCode).toBe(0);
+      expect(pull.stderr).toMatch(
+        /^acme\/dataset\/info-seeking: 1 cases \(snapshot 2026-10-06, hash [0-9a-f]{64}\) -> datasets\/info\.json/
+      );
+    });
+
+    it('without plugins says how to name them', async () => {
+      const result = await runBin('datasets');
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('--plugins <module...>, or --config');
+    });
+  });
+
   describe('open command', () => {
     it('exits with code 1 when there is no run in the default directory', async () => {
       const result = await runBin('open');
