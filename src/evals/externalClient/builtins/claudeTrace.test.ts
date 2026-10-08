@@ -26,18 +26,26 @@ async function writeJsonl(path: string, events: unknown[]): Promise<void> {
   );
 }
 
-async function parseNativeEvents(audit: unknown[], transcript: unknown[] = []) {
+async function parseNativeEvents(
+  audit: unknown[],
+  transcript: unknown[] = [],
+  options: Parameters<typeof parseClaudeTrace>[2] = {}
+) {
   const sessionDir = await mkdtemp(join(tmpdir(), 'claude-native-telemetry-'));
   onTestFinished(() => rm(sessionDir, { recursive: true, force: true }));
   await writeJsonl(join(sessionDir, 'audit.jsonl'), audit);
   await writeJsonl(join(sessionDir, 'cli.jsonl'), transcript);
-  return parseClaudeTrace({
-    id: 'native-telemetry',
-    metadataPath: join(sessionDir, 'metadata.json'),
-    sessionDir,
-    statMtimeMs: Date.now(),
-    metadata: { cliSessionId: 'cli' },
-  });
+  return parseClaudeTrace(
+    {
+      id: 'native-telemetry',
+      metadataPath: join(sessionDir, 'metadata.json'),
+      sessionDir,
+      statMtimeMs: Date.now(),
+      metadata: { cliSessionId: 'cli' },
+    },
+    undefined,
+    options
+  );
 }
 
 function toolUseEvent(id: string, name: string, timestamp?: string) {
@@ -59,7 +67,7 @@ describe('Claude local-agent trace parsing', () => {
     await mkdir(results, { recursive: true });
     await writeFile(join(results, `${id}.json`), full);
     const placeholder = `<persisted-output>\nOutput too large (97KB). Full output saved to: ${join(results, `${id}.json`)}\n\nPreview (first 2KB):\n[{"type":"text"`;
-    const trace = await parseNativeEvents([
+    const events = [
       {
         type: 'assistant',
         message: {
@@ -81,9 +89,15 @@ describe('Claude local-agent trace parsing', () => {
           ],
         },
       },
-    ]);
-    expect(trace.toolCalls).toHaveLength(1);
-    expect(trace.toolCalls[0]!.output).toBe(full);
+    ];
+    const live = await parseNativeEvents(events, [], {
+      resolvePersistedOutputs: true,
+    });
+    expect(live.toolCalls).toHaveLength(1);
+    expect(live.toolCalls[0]!.output).toBe(full);
+    // A replay (the evidence audit) reads no file a transcript names.
+    const replay = await parseNativeEvents(events);
+    expect(replay.toolCalls[0]!.output).toBe(placeholder);
   });
 
   it.each(['partial', 'conflicting'] as const)(

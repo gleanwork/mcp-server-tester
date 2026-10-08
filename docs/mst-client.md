@@ -164,6 +164,8 @@ Claude Code loads skills, plugins and settings from its config directory (`~/.cl
 
 That also leaves out your `settings.json`: its `env` block (a region, a base URL, a gateway) and `apiKeyHelper` don't apply. Authentication comes from the environment instead: `provider: 'vertex'` (Google Application Default Credentials) or an Anthropic API key. To run with your own configuration, for example to sign in with a claude.ai account, set `isolate: false` on the client; a `CLAUDE_CONFIG_DIR` in the client's or case's `env` is used as given.
 
+Claude Code saves a large tool result to a file in its config directory and leaves a `<persisted-output>` placeholder in the transcript. With the empty config directory MST makes (`mst-claude-*`), MST reads the file back so the trace has the full result, up to 1 MB. With `isolate: false` or your own `CLAUDE_CONFIG_DIR`, it doesn't: the trace keeps the placeholder and its 2 KB preview.
+
 ## Claude Code startup and failure evidence
 
 The built-in `claude-code` client uses blocking MCP initialization

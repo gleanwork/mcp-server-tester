@@ -1,6 +1,8 @@
-import { tmpdir } from 'node:os';
 import type { MstClientSimulationResult, LLMToolCall } from '../../types.js';
-import { resolvePersistedOutput } from '../../../persistedToolOutput.js';
+import {
+  mstScratchRoots,
+  resolvePersistedOutput,
+} from '../../../persistedToolOutput.js';
 import type { UsageMetrics } from '../../../../types/index.js';
 import {
   splitClaudeMcpName,
@@ -61,8 +63,13 @@ export function parseStreamJson(stdout: string): MstClientSimulationResult {
             : undefined;
           if (call) {
             // Store the payload once on the call; the transcript just references it.
-            // A large result is a placeholder; the file it names holds it.
-            call.output = resolvePersistedOutput(content, call.id, [tmpdir()]);
+            // A large result is a placeholder; the file it names holds it,
+            // in the config directory MST made for this run (mst-claude-*).
+            call.output = resolvePersistedOutput(
+              content,
+              call.id,
+              mstScratchRoots('mst-claude-')
+            );
             conversationHistory.push({ role: 'tool', toolCallId: call.id });
           } else {
             // Orphan result (no matching tool_use) — keep inline so nothing is lost.

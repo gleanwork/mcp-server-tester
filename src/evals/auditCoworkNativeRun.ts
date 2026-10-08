@@ -21,6 +21,7 @@ import {
   awaitingUserAnswer,
 } from './externalClient/builtins/claudeTrace.js';
 import { clientRunToExecution, simulationToClientRun } from './clientTrace.js';
+import { matchesPersistedPreview } from './persistedToolOutput.js';
 
 export interface AuditCoworkNativeRunOptions {
   rawResultsPath: string;
@@ -535,6 +536,22 @@ async function auditCase(
   if (trace.toolCalls.some((call) => call.output === undefined))
     result.issues.push('TOOL_OUTPUT_UNAVAILABLE');
   const response = object(saved.response);
+  // Collection read back the large results Claude Code saved to files; the
+  // replay has only their placeholders. A stored result counts as the same
+  // when it starts with the placeholder's preview.
+  const storedCalls = Array.isArray(response.toolCalls)
+    ? (response.toolCalls as Array<{ id?: unknown; output?: unknown }>)
+    : [];
+  for (const call of trace.toolCalls) {
+    if (typeof call.output !== 'string' || call.id === undefined) continue;
+    const stored = storedCalls.find((candidate) => candidate.id === call.id);
+    if (
+      typeof stored?.output === 'string' &&
+      stored.output !== call.output &&
+      matchesPersistedPreview(call.output, stored.output)
+    )
+      call.output = stored.output;
+  }
   const replay = object(
     clientRunToExecution(
       simulationToClientRun(
