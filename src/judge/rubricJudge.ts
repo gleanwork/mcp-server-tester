@@ -41,6 +41,8 @@ const RubricJudgeOptionsSchema = RubricJudgeLLMSchema.extend({
 }).strict();
 
 export const RUBRIC_JUDGE: JudgeDefinition = {
+  description:
+    "An LLM grades the answer against a rubric: a built-in one or your own text, with the case's expected answer as reference.",
   schema: RubricJudgeOptionsSchema,
   async evaluate({ case: evalCase, trial }, options) {
     const { rubric, ...config } = RubricJudgeOptionsSchema.parse(options);

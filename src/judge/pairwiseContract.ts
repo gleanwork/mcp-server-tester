@@ -66,6 +66,8 @@ export interface PairwiseDimension {
 
 /** Public pairwise judge extension point. */
 export interface PairwiseJudgeDefinition {
+  /** What the judge prefers, for `mst judges`. */
+  readonly description?: string;
   /** Parses the judge's options. */
   readonly schema: ZodType;
   /**

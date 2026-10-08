@@ -162,6 +162,12 @@ function extensionProblem(
     )
       return `${label}: snapshots must be true or false`;
   }
+  if (
+    (kind === 'judges' || kind === 'pairwiseJudges') &&
+    definition.description !== undefined &&
+    typeof definition.description !== 'string'
+  )
+    return `${label}: description must be a string`;
   if (kind === 'clients' && 'toolOverrides' in definition)
     return `${label}: \`toolOverrides\` is now \`toolMetadata\``;
   if (

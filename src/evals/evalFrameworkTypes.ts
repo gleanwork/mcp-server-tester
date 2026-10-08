@@ -246,6 +246,8 @@ export type { JudgeScore } from '../judge/judgeContract.js';
  * the threshold to the mean score unless the judge returns its own `pass`.
  */
 export interface JudgeDefinition {
+  /** What the judge grades, for `mst judges`. */
+  readonly description?: string;
   /** Parses the judge's options. */
   readonly schema: ZodType;
   /**
