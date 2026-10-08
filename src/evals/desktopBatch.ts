@@ -5,6 +5,8 @@
  * - cases run one at a time, each self-contained: a case that leaves the app
  *   in an unknown state resets it before the next case, and if it can't be
  *   reset, the remaining cases are not submitted (never retried or resent);
+ * - after {@link MAX_CONSECUTIVE_FAILURES} failed cases in a row, the rest are
+ *   not submitted: the desktop is no longer doing what the run expects;
  * - one native session per case (duplicate attribution fails the case);
  * - every error the batch surfaces is redacted against the batch's secrets;
  * - cleanup always runs; if it fails, the lease is kept for inspection and
@@ -24,6 +26,13 @@ import {
   redactClientSecrets,
   redactedClientError,
 } from './clientSecrets.js';
+
+/**
+ * Failed cases in a row after which a batch stops submitting. A reset that
+ * "succeeds" can still leave the desktop unusable (another app in front, a
+ * dialog the driver can't see), and then every case fails the same way.
+ */
+const MAX_CONSECUTIVE_FAILURES = 3;
 
 /** How a case left the app. */
 export type DesktopContinuation =
@@ -172,35 +181,35 @@ export async function runDesktopBatch<Session>(
     await adapter.ready?.(session);
     let resetBeforeCase = false;
     let blocked: string | undefined;
+    let consecutiveFailures = 0;
     for (const [index, request] of requests.entries()) {
       if (resetBeforeCase && !blocked) {
         resetBeforeCase = false;
         if (!adapter.reset)
-          blocked = `this ${adapter.name} platform cannot reset between cases`;
+          blocked = `Not submitted because the ${adapter.name} app could not be ${adapter.resetVerb} after an earlier failed case: this ${adapter.name} platform cannot reset between cases`;
         else
           try {
             await adapter.reset(session, index);
           } catch (error) {
-            blocked = redact(
+            blocked = `Not submitted because the ${adapter.name} app could not be ${adapter.resetVerb} after an earlier failed case: ${redact(
               error,
               adapter.resetVerb === 'restarted'
                 ? 'restart failed'
                 : 'reset failed'
-            );
+            )}`;
           }
       }
       if (blocked) {
         // Without an app in a known state, nothing can be sent safely.
-        results.push(
-          notSubmitted(
-            `Not submitted because the ${adapter.name} app could not be ${adapter.resetVerb} after an earlier failed case: ${blocked}`
-          )
-        );
+        results.push(notSubmitted(blocked));
         continue;
       }
       const outcome = await adapter.runCase(session, request, index, ledger);
       results.push(outcome.result);
       resetBeforeCase = outcome.continuation === 'reset';
+      consecutiveFailures = outcome.result.error ? consecutiveFailures + 1 : 0;
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES)
+        blocked = `Not submitted because the last ${MAX_CONSECUTIVE_FAILURES} ${adapter.name} cases failed in a row (latest: ${redactClientSecrets(outcome.result.error ?? '', secrets)}). Check the desktop before running again.`;
     }
   } catch (error) {
     executionFailed = true;

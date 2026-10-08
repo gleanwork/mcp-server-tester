@@ -29,6 +29,30 @@ DEFAULT_MAX_ACTIONS = 24
 
 def log(message: str) -> None:
     print(f"[mst:cowork-cu] {message}", file=sys.stderr, flush=True)
+    # MST discards the driver's stderr. MST_COWORK_CUA_LOG_FILE keeps these lines
+    # (action names and app names only, never query text) for diagnosis.
+    log_file = os.environ.get("MST_COWORK_CUA_LOG_FILE")
+    if log_file:
+        try:
+            with open(log_file, "a", encoding="utf-8") as handle:
+                handle.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {message}\n")
+        except OSError:
+            pass
+
+
+# Actions that only observe the screen; everything else reaches the frontmost app.
+OBSERVING_ACTIONS = {"screenshot", "wait", "cursor_position"}
+
+
+def frontmost_app() -> str | None:
+    """The frontmost application's name, or None when it can't be read."""
+    try:
+        from AppKit import NSWorkspace
+
+        app = NSWorkspace.sharedWorkspace().frontmostApplication()
+        return str(app.localizedName()) if app is not None else None
+    except Exception:
+        return None
 
 
 def screenshot() -> dict[str, Any]:
@@ -554,6 +578,34 @@ async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemet
                 # within the same action budget; never retry a failed physical text entry.
                 tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": refusal, "is_error": True})
                 continue
+            if action_name not in OBSERVING_ACTIONS:
+                # A click outside the app's window (on the desktop, say) brings
+                # another app forward, and every later click or key would land
+                # there. Act only when the app is frontmost; after refocusing it,
+                # the planner's screenshot is stale, so it must take a new one.
+                front = frontmost_app()
+                if front != app_name:
+                    log(f"focus lost before action {actions_executed} ({action_name}): frontmost is {front or 'unknown'}")
+                    subprocess.run(["open", "-a", app_path or app_name], capture_output=True)
+                    time.sleep(1.0)
+                    front = frontmost_app()
+                    if front != app_name:
+                        log(f"could not refocus {app_name}: frontmost is {front or 'unknown'}")
+                        raise DesktopBlockedError('navigation_blocked')
+                    telemetry.refused += 1
+                    ui_revision += 1
+                    model_confirmed = False
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": (
+                            f"Not executed: another app was in front of {app_name}. {app_name} is "
+                            "in front again. Take a fresh screenshot before acting. Click only "
+                            f"inside the {app_name} window."
+                        ),
+                        "is_error": True,
+                    })
+                    continue
             log(f"executing action {actions_executed}: {action_name}")
             if mode in ("hitl", "reset") and action_name not in {
                 "screenshot",
