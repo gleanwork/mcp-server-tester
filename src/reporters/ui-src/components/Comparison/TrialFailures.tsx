@@ -45,7 +45,10 @@ function Mistakes({
       </h3>
       {variant.mistakes.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No tool-call traces were recorded for its failed trials.
+          {variant.failures.error > 0 &&
+          variant.failures.error === variant.failedTrials
+            ? 'Its failed trials ended in errors: open them in the case grid.'
+            : 'No tool-call traces were recorded for its failed trials.'}
         </p>
       ) : (
         <ul className="grid gap-2 text-sm">
@@ -112,7 +115,17 @@ export function TrialFailures({
   selectedId: string;
 }) {
   const lookup = useTrialLookup();
-  const failing = data.variants.filter((v) => v.failedTrials > 0);
+  // A run report shows every failing variant, with answers. A tool
+  // optimization (no trials to look up) can have many rounds of variants:
+  // the baseline, the selected and the recommended one.
+  const failing = data.variants.filter(
+    (v) =>
+      v.failedTrials > 0 &&
+      (lookup !== null ||
+        v.id === data.baselineId ||
+        v.id === selectedId ||
+        v.id === data.recommendedId)
+  );
   const kinds = FAILURE_KINDS.filter((kind) =>
     data.variants.some((v) => v.failures[kind] > 0)
   );

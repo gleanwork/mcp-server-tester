@@ -226,7 +226,7 @@ export function VariantTable({
       </div>
       <p className="text-sm text-muted-foreground">
         Select a row to compare that variant with the baseline in the case grid
-        and failures below.
+        below.
       </p>
       <div className="overflow-x-auto rounded-lg border bg-card">
         <table className="w-full text-sm">
@@ -408,8 +408,8 @@ export function VariantTable({
         </table>
       </div>
       <p className="max-w-[100ch] text-xs text-muted-foreground">
-        Percentages are the share of trials that passed. Each change is against
-        the baseline, with its 95% range:{' '}
+        Each rate is the mean, over cases, of the share of trials that passed.
+        Each change is against the baseline, with its 95% range:{' '}
         <span className={`rounded-full px-1.5 ${TONE.good}`}>green</span> is
         clearly better,{' '}
         <span className={`rounded-full px-1.5 ${TONE.bad}`}>red</span> is
@@ -453,12 +453,10 @@ function heldOutNote(data: MCPComparisonData, v: VariantComparisonEntry) {
   const heldOut = data.cases.filter(
     (c) => c.group === 'capability' && c.heldOut
   ).length;
-  const { seenPassRate, heldOutPassRate } = v.capability;
-  return heldOutPassRate !== undefined &&
-    seenPassRate !== undefined &&
-    heldOutPassRate >= seenPassRate
+  const gain = v.capability.heldOutChange?.mean ?? 0;
+  return gain > 0
     ? `too few held-out cases (${heldOut}) to confirm`
-    : 'lower on held-out cases';
+    : 'no gain on held-out cases';
 }
 
 /**

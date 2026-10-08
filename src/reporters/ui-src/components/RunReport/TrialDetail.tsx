@@ -4,7 +4,7 @@ import type {
   RunReportPreference,
   RunReportTrial,
 } from '../../types';
-import { TONE } from '../Comparison/format';
+import { TONE, graderName } from '../Comparison/format';
 
 /** A run report's trials and pairwise preferences, by variant ID, then case ID. */
 export interface TrialLookup {
@@ -152,7 +152,9 @@ export function TrialView({
             <li key={i} className="grid gap-0.5 text-xs">
               <span className="flex flex-wrap items-baseline gap-2">
                 <Badge pass={score.pass} />
-                <span className="font-mono font-semibold">{score.grader}</span>
+                <span className="font-mono font-semibold">
+                  {score.judge ? score.grader : graderName(score.grader)}
+                </span>
                 {score.score !== undefined && (
                   <span className="font-mono text-muted-foreground">
                     score {Number(score.score.toFixed(2))}

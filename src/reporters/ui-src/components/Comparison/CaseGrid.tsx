@@ -19,8 +19,14 @@ import {
 function sameNote(trials: RunReportTrial[]): string | null {
   if (trials.length < 2) return null;
   const first = trials[0]!;
+  const signature = (t: RunReportTrial) =>
+    JSON.stringify(
+      t.events
+        .filter((e) => e.kind === 'tool_call')
+        .map((e) => [e.name, e.input])
+    );
   const same = trials.every(
-    (t) => t.pass === first.pass && traceSummary(t) === traceSummary(first)
+    (t) => t.pass === first.pass && signature(t) === signature(first)
   );
   if (!same) return null;
   const calls = traceSummary(first);

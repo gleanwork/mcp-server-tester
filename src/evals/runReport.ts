@@ -112,7 +112,10 @@ function trialDetail(trial: Trial, redacted: boolean): RunReportTrial {
     ...(isInfraTrial(trial) ? { infrastructureError: true } : {}),
     ...(trial.durationMs !== undefined ? { durationMs: trial.durationMs } : {}),
     ...(trace?.finalText ? { finalText: clip(trace.finalText) } : {}),
-    traced: trace?.events !== undefined,
+    // A client that can't observe calls (evidence 'none') has no trace to read.
+    traced:
+      trace?.events !== undefined &&
+      (trace as { evidence?: string }).evidence !== 'none',
     events: (trace?.events ?? []).map((event) => ({
       kind: event.kind ?? 'event',
       ...(event.name ? { name: event.name } : {}),

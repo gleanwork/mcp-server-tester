@@ -236,6 +236,17 @@ describe('the run report', () => {
       { name: 'toolsTriggered', judge: false, readsAnswer: false },
     ]);
   });
+
+  it('has no trace for a client that cannot see tool calls', async () => {
+    const stored = await readRunDirectory((await run()).outputDir);
+    const result = stored.summary.results.find((r) => r.variant === 'longer')!;
+    const trial = (result.trialResults ?? [result])[0] as {
+      trace?: { evidence?: string; events?: unknown[] };
+    };
+    trial.trace = { ...trial.trace, evidence: 'none', events: [] };
+    const report = buildRunReport(stored);
+    expect(report.trials.longer![result.id]![0]!.traced).toBe(false);
+  });
 });
 
 describe('a redacted run', () => {

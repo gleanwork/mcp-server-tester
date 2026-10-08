@@ -19,7 +19,19 @@ const plugin: Plugin = {
       schema: z.object({ type: z.string() }).passthrough(),
       evidence: 'structured',
       run: async (input, _config, context) => {
-        const calls = context.variant?.name === 'searching';
+        // The `flaky` variant's client times out on one case.
+        if (
+          context.variant?.name === 'flaky' &&
+          input.prompt?.includes('owners')
+        )
+          return {
+            finalText: '',
+            events: [],
+            error: 'connect ETIMEDOUT 10.0.0.1:443',
+          };
+        const calls =
+          context.variant?.name === 'searching' ||
+          context.variant?.name === 'flaky';
         return {
           finalText: `answer to ${input.prompt}`,
           events: calls
@@ -138,6 +150,23 @@ test.describe('run report', () => {
       dialog.getByText('answer to Who handles refunds?').first()
     ).toBeVisible();
     expect(errors).toEqual([]);
+  });
+
+  test('leaves trials that ended in an infrastructure failure out of the rates, and says so', async ({
+    page,
+  }) => {
+    const report = await reportFor([{ name: 'flaky' }]);
+    await page.goto(`file://${report}`);
+    const result = page.getByRole('heading', { name: 'Result' }).locator('..');
+    // 2 of 3 cases pass both trials; the third timed out both times. Rates
+    // leave infrastructure failures out, and the page says so.
+    await expect(result).toContainText('100%');
+    await expect(result).not.toContainText('trials failed');
+    await expect(result).toContainText(
+      '2 trials ended in a client or infrastructure failure'
+    );
+    await expect(result).toContainText('Pass rates leave them out');
+    await expect(result).toContainText('ETIMEDOUT');
   });
 
   test('a single variant opens on the cases that need attention', async ({

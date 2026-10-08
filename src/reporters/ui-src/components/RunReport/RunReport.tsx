@@ -3,6 +3,7 @@ import type {
   MCPRunReportData,
   PairedChange,
   RunReportVariant,
+  VariantComparisonEntry,
 } from '../../types';
 import {
   VariantTable,
@@ -11,7 +12,7 @@ import {
 } from '../Comparison/VariantTable';
 import { CaseGrid, type CaseFilter } from '../Comparison/CaseGrid';
 import { TrialFailures } from '../Comparison/TrialFailures';
-import { TONE, pct, pts, rangeText } from '../Comparison/format';
+import { TONE, graderName, pct, pts, rangeText } from '../Comparison/format';
 import { SetupDiff } from './SetupDiff';
 import { ComparisonView } from '../Comparison/ComparisonView';
 import { TrialLookupContext } from './TrialDetail';
@@ -23,6 +24,18 @@ function rateOf(
 ): number | undefined {
   const entry = data.comparison.variants.find((v) => v.id === variant.id);
   return variant.trialPassRate ?? entry?.capability.passRate;
+}
+
+/** A rate's colour comes from its own change, not the variant's overall verdict. */
+function assessmentTone(
+  change: PairedChange | undefined
+): RunReportVariant['verdict'] {
+  if (!change) return 'baseline';
+  return change.assessment === 'better'
+    ? 'better'
+    : change.assessment === 'worse'
+      ? 'worse'
+      : 'unclear';
 }
 
 const RATE_TONE: Record<RunReportVariant['verdict'], string> = {
@@ -56,7 +69,7 @@ function costPhrases(
     phrases.push(
       Math.abs(ratio) < 0.05
         ? 'about the same tokens per trial'
-        : `${signed(tokens - baseTokens, (x) => `${(x / 1000).toFixed(1)}k`)} tokens per trial (${signed(ratio, (x) => `${Math.round(x * 100)}%`)})`
+        : `${signed(tokens - baseTokens, (x) => (x < 1000 ? `${Math.round(x)}` : `${(x / 1000).toFixed(1)}k`))} tokens per trial (${signed(ratio, (x) => `${Math.round(x * 100)}%`)})`
     );
   }
   const time = variant.medianDurationMs;
@@ -73,7 +86,9 @@ function costPhrases(
   const baseCost = baseline?.costPerCase;
   if (cost !== undefined && baseCost !== undefined)
     phrases.push(
-      `${signed(cost - baseCost, (x) => `$${x.toFixed(3)}`)} per case`
+      Math.abs(cost - baseCost) < 0.0005
+        ? 'about the same cost per case'
+        : `${signed(cost - baseCost, (x) => `$${x.toFixed(3)}`)} per case`
     );
   return phrases;
 }
@@ -93,6 +108,9 @@ function groupPhrase(
   if (rate === undefined || baseRate === undefined) return null;
   if (change && Math.abs(change.mean) < 0.0005)
     return `${label} held at ${pct(rate)}`;
+  // The change pairs the cases both sides scored, so the baseline's rate on
+  // those cases is the variant's minus the change: the two always agree.
+  if (change) baseRate = rate - change.mean;
   const range =
     change && change.upper - change.lower >= 0.0005
       ? `, 95% range ${rangeText(change)}`
@@ -118,9 +136,9 @@ function VariantSentence({
   const groups = [
     groupPhrase(
       split ? 'capability cases' : 'pass rate',
-      entry?.capability.passRate,
-      baseEntry?.capability.passRate,
-      entry?.capability.change
+      headlineGroup(entry)?.passRate,
+      headlineGroup(baseEntry)?.passRate,
+      headlineGroup(entry)?.change
     ),
     split
       ? groupPhrase(
@@ -145,11 +163,17 @@ function VariantSentence({
       {costs.length > 0 && (
         <span className="text-muted-foreground">
           {' '}
-          Costs {costs.join(', ')}.
+          Against the baseline: {costs.join(', ')}.
         </span>
       )}
     </li>
   );
+}
+
+/** The cases a variant's headline rate covers: capability cases, or the regression cases when there are no others. */
+function headlineGroup(entry: VariantComparisonEntry | undefined) {
+  if (!entry) return undefined;
+  return entry.capability.cases > 0 ? entry.capability : entry.regression;
 }
 
 function hasRegressionCases(data: MCPRunReportData): boolean {
@@ -171,10 +195,61 @@ const GRADER_TEXT: Record<string, string> = {
   size: 'the response size',
 };
 
+/** Trials of a variant that ended in an infrastructure failure. */
+function infraCount(data: MCPRunReportData, variantId: string): number {
+  return Object.values(data.trials[variantId] ?? {})
+    .flat()
+    .filter((trial) => trial.infrastructureError).length;
+}
+
+/**
+ * Trials that ended in a client or infrastructure failure (a timeout, a
+ * client error) rather than an answer. They count as failed in every rate,
+ * so the page says how many there were and what the first one was.
+ */
+function InfraNote({ data }: { data: MCPRunReportData }) {
+  const failures: Array<{ variant: string; caseId: string; error?: string }> =
+    [];
+  for (const variant of data.variants)
+    for (const [caseId, list] of Object.entries(data.trials[variant.id] ?? {}))
+      for (const trial of list)
+        if (trial.infrastructureError)
+          failures.push({
+            variant: variant.name,
+            caseId,
+            ...(trial.error ? { error: trial.error } : {}),
+          });
+  if (failures.length === 0) return null;
+  const first = failures[0]!;
+  const n = failures.length;
+  return (
+    <p className={`w-fit rounded px-2 py-1 text-sm ${TONE.warn}`}>
+      {n} {n === 1 ? 'trial' : 'trials'} ended in a client or infrastructure
+      failure instead of an answer. Pass rates leave {n === 1 ? 'it' : 'them'}{' '}
+      out; rerun {n === 1 ? 'that case' : 'those cases'} to grade{' '}
+      {n === 1 ? 'it' : 'them'}. First:{' '}
+      <span className="font-mono">
+        {data.variants.length > 1 ? `${first.variant} · ` : ''}
+        {first.caseId}
+      </span>
+      {first.error ? `: ${first.error}` : ''}
+    </p>
+  );
+}
+
 /** What decided pass or fail, and a warning when nothing read the answers. */
 function GradedOn({ data }: { data: MCPRunReportData }) {
   const graders = data.graders;
-  if (graders.length === 0) return null;
+  const ranTrials = Object.values(data.trials).some((byCase) =>
+    Object.values(byCase).some((list) => list.length > 0)
+  );
+  if (graders.length === 0)
+    return ranTrials ? (
+      <p className={`w-fit rounded px-2 py-1 text-sm ${TONE.warn}`}>
+        Nothing graded these trials: every trial that ran counts as passed. Add
+        assertions or judges to the cases.
+      </p>
+    ) : null;
   const answersUngraded = graders.every((g) => !g.readsAnswer);
   return (
     <div className="grid gap-1 text-sm">
@@ -183,11 +258,11 @@ function GradedOn({ data }: { data: MCPRunReportData }) {
         {graders.map((g, i) => (
           <span key={g.name}>
             {i > 0 && ' · '}
-            <span className="font-mono">{g.name}</span>
-            {GRADER_TEXT[g.name]
-              ? ` (${GRADER_TEXT[g.name]})`
-              : g.judge
-                ? ' (judge)'
+            <span className="font-mono">{graderName(g.name)}</span>
+            {g.judge
+              ? ' (judge)'
+              : GRADER_TEXT[g.name]
+                ? ` (${GRADER_TEXT[g.name]})`
                 : ''}
           </span>
         ))}
@@ -195,8 +270,9 @@ function GradedOn({ data }: { data: MCPRunReportData }) {
       {answersUngraded && (
         <p className={`w-fit rounded px-2 py-1 ${TONE.warn}`}>
           No grader read the answers: a trial passes on the tools it called,
-          even when its answer is wrong. Add a judge or an answer assertion to
-          check them.
+          even when its answer is wrong. Add a judge, or an assertion on the
+          answer (<code className="font-mono">containsText</code>,{' '}
+          <code className="font-mono">matchesPattern</code>), to check them.
         </p>
       )}
     </div>
@@ -208,8 +284,10 @@ function Result({ data }: { data: MCPRunReportData }) {
   const single = data.variants.length === 1;
   const only = data.variants[0];
   if (single && only) {
-    const rate = rateOf(data, only);
     const entry = data.comparison.variants[0];
+    // The comparison's rate, as every other number on the page. Trials that
+    // ended in an infrastructure failure are left out (InfraNote says so).
+    const rate = headlineGroup(entry)?.passRate ?? rateOf(data, only);
     const cases = data.comparison.cases;
     const fullyPassing = cases.filter((row) =>
       (row.trials[only.id] ?? []).every((t) => t.pass)
@@ -267,12 +345,13 @@ function Result({ data }: { data: MCPRunReportData }) {
             {only.previous && only.previous.regressed.length
               ? `; ${only.previous.regressed.length} regressed since the previous run`
               : ''}
-            {entry && entry.failedTrials > 0
-              ? `. ${entry.failedTrials} of ${entry.trials} trials failed.`
+            {entry && entry.failedTrials - infraCount(data, only.id) > 0
+              ? `. ${entry.failedTrials - infraCount(data, only.id)} of ${entry.trials - infraCount(data, only.id)} graded trials failed.`
               : '.'}
           </p>
         </div>
-        <div className="col-span-2">
+        <div className="col-span-2 grid gap-2">
+          <InfraNote data={data} />
           <GradedOn data={data} />
         </div>
       </div>
@@ -287,31 +366,37 @@ function Result({ data }: { data: MCPRunReportData }) {
     <div className="grid gap-5 rounded-lg border bg-card p-6">
       <table className="w-full text-sm">
         <caption className="mb-3 text-left font-semibold">
-          {split ? 'Each variant' : 'Share of trials passed, each variant'}{' '}
-          against <span className="font-mono">{baseline?.name}</span>
+          {split ? 'Each variant' : 'Pass rate, each variant'} against{' '}
+          <span className="font-mono">{baseline?.name}</span>
         </caption>
         {split && (
           <thead className="text-xs text-muted-foreground">
             <tr>
-              <th />
-              <th className="pb-1 text-left font-normal">
-                Capability cases (not tagged “{data.comparison.regressionTag}
-                ”)
+              <td />
+              <th
+                scope="col"
+                colSpan={2}
+                className="pb-1 text-left font-normal"
+              >
+                Capability cases (not tagged “{data.comparison.regressionTag}”)
               </th>
-              <th />
-              <th className="pb-1 pr-4 text-right font-normal">Regression</th>
-              <th />
+              <th scope="col" className="pb-1 pr-4 text-right font-normal">
+                Regression cases
+              </th>
+              <td />
             </tr>
           </thead>
         )}
         <tbody>
           {data.variants.map((variant) => {
-            const rate = entryOf(variant)?.capability.passRate;
+            const group = headlineGroup(entryOf(variant));
+            const rate = group?.passRate;
             const regression = entryOf(variant)?.regression;
+            const tone = assessmentTone(group?.change);
             const bar =
-              variant.verdict === 'better'
+              tone === 'better'
                 ? 'bg-green-600 dark:bg-green-400'
-                : variant.verdict === 'worse'
+                : tone === 'worse'
                   ? 'bg-red-600 dark:bg-red-400'
                   : 'bg-muted-foreground/50';
             return (
@@ -331,7 +416,7 @@ function Result({ data }: { data: MCPRunReportData }) {
                   </div>
                 </td>
                 <td
-                  className={`w-[1%] whitespace-nowrap py-1 pr-4 text-right font-mono text-2xl font-bold tabular-nums ${RATE_TONE[variant.verdict]}`}
+                  className={`w-[1%] whitespace-nowrap py-1 pr-4 text-right font-mono text-2xl font-bold tabular-nums ${RATE_TONE[assessmentTone(group?.change)]}`}
                 >
                   {rate !== undefined ? pct(rate) : '—'}
                 </td>
@@ -346,6 +431,11 @@ function Result({ data }: { data: MCPRunReportData }) {
                     {regression?.passRate !== undefined
                       ? pct(regression.passRate)
                       : '—'}
+                    {regression?.change?.assessment === 'worse' && (
+                      <span className="ml-1 font-sans text-xs font-semibold">
+                        ▼ worse
+                      </span>
+                    )}
                   </td>
                 )}
                 <td className="w-[1%] whitespace-nowrap py-1">
@@ -365,6 +455,7 @@ function Result({ data }: { data: MCPRunReportData }) {
           <VariantSentence key={variant.id} data={data} variant={variant} />
         ))}
       </ul>
+      <InfraNote data={data} />
       <GradedOn data={data} />
       {!data.run.baselineRan && (
         <p className={`rounded px-2 py-1 text-sm ${TONE.warn}`}>
@@ -569,9 +660,7 @@ function EvalRunReport({ data }: { data: MCPRunReportData }) {
           <SetupDiff
             variants={(candidates.length <= 3
               ? candidates
-              : selected && !selected.baseline
-                ? [selected]
-                : []
+              : [selected && !selected.baseline ? selected : candidates[0]!]
             ).map((variant) => ({
               variant,
               differences: data.differences[variant.name] ?? [],

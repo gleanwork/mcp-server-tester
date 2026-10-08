@@ -353,6 +353,20 @@ describe('measureAgainstBaseline', () => {
       measureAgainstBaseline(base, candidate, declared).capability.passRate
     ).toBe(1);
   });
+
+  it('knows an infrastructure failure by its error when a trial has no flag', () => {
+    const base = run([{ id: 'c', trials: [false, false] }]);
+    const candidate = run([
+      {
+        id: 'c',
+        trials: [true, false],
+        error: [undefined, 'connect ETIMEDOUT 10.0.0.1:443'],
+      },
+    ]);
+    expect(
+      measureAgainstBaseline(base, candidate, declared).capability.passRate
+    ).toBe(1);
+  });
 });
 
 /**
