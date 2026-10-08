@@ -143,6 +143,19 @@ export function getDatasetSource(reference: string): DatasetSource {
   return datasetSources.get(reference);
 }
 
+/** Built-in and installed plugins' dataset sources, by name, sorted. */
+export function listDatasetSources(): Array<[string, DatasetSource]> {
+  return datasetSources.list();
+}
+
+/** Whether a source needs no options: a dataset an eval config lists by name. */
+export function takesNoOptions(
+  reference: string,
+  source: DatasetSource
+): boolean {
+  return source.schema.safeParse({ type: reference }).success;
+}
+
 /** The keys MST reads off a dataset declaration for a source with snapshots. */
 const REQUEST_KEYS = ['snapshot', 'source'] as const;
 

@@ -12,6 +12,7 @@ Before the package is installed (for example, running `init` in a new directory)
 - [generate - Generate Eval Dataset](#generate---generate-playwright-tests)
 - [login - OAuth Authentication](#login---oauth-authentication)
 - [token - Export Tokens for CI/CD](#token---export-tokens-for-cicd)
+- [datasets - Find Plugin Datasets](#datasets---find-plugin-datasets)
 - [auth - Sign In to Connector Servers](#auth---sign-in-to-connector-servers)
 - [run - Run an Eval Config](#run---run-an-eval-config)
 - [batch - Run Several Eval Configs](#batch---run-several-eval-configs)
@@ -671,6 +672,39 @@ npx mst token https://api.example.com/mcp
 #
 # Run 'mst login https://api.example.com/mcp' to authenticate first.
 ```
+
+## `datasets` - Find Plugin Datasets
+
+Lists the [datasets](./evaluation-framework.md#plugin-datasets-and-snapshots) plugins provide, shows what one holds, and pulls one into a dataset file to read, diff or freeze.
+
+### Usage
+
+```bash
+npx mst datasets --plugins @acme/mst-plugin
+npx mst datasets show acme/dataset/info-seeking --plugins @acme/mst-plugin
+npx mst datasets pull acme/dataset/info-seeking --plugins @acme/mst-plugin --out datasets/info-seeking.json
+npx mst datasets pull acme/dataset/info-seeking --plugins @acme/mst-plugin --source live
+npx mst datasets pull acme/dataset/info-seeking --plugins @acme/mst-plugin --snapshot 2026-10-01
+```
+
+```text
+acme/dataset/action-taking  32 cases   snapshot 2026-10-06
+acme/dataset/info-seeking   50 cases   snapshot 2026-10-06  tags: source:correctness, tool:*  Questions with one right answer.
+```
+
+The list shows what each dataset's `describe()` reports, without loading cases; a dataset without one shows its description only. A plugin dataset source that takes options is listed too, marked as one to use in an eval config. `show` loads the cases and prints the snapshot read, the case count, the content hash of the cases (the one `run.json` records), tag and judge counts, and the case ids. `pull` writes the cases as the plugin returned them, a canonical dataset file an eval config can list as `./datasets/info-seeking.json`; it hashes the same as the plugin's dataset. Without `--out` it prints to stdout.
+
+### Options
+
+| Option                   | Description                                                          |
+| ------------------------ | -------------------------------------------------------------------- |
+| `--plugins <modules...>` | Plugin modules to look in.                                           |
+| `-c, --config <path>`    | Look in an eval config's plugins instead (plus any `--plugins`).     |
+| `--snapshot <id>`        | `show`, `pull`: a snapshot. Default: the plugin's latest.            |
+| `--source <source>`      | `show`, `pull`: `snapshot` (the default) or `live`.                  |
+| `-o, --out <file>`       | `pull`: write here. Default: stdout.                                 |
+| `--json`                 | `datasets`, `show`: print JSON.                                      |
+| `--root-dir <dir>`       | Where relative plugin paths resolve. Default: the working directory. |
 
 ## `auth` - Sign In to Connector Servers
 

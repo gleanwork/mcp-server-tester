@@ -131,6 +131,8 @@ export function installPlugins(plugins: readonly Plugin[]): Plugin[] {
 export interface ExtensionLookup<T> {
   /** The extension `reference` names. Throws a uniform error when there is none. */
   get(reference: string): T;
+  /** Built-ins (short names) and installed plugins' extensions (full names), sorted. */
+  list(): Array<[string, T]>;
 }
 
 /** Create the lookup for `kind`, whose built-ins `builtins` returns. */
@@ -182,6 +184,11 @@ export function extensionLookup<K extends ExtensionKind>(
       const available = [...map.keys()].sort().join(', ');
       throw new Error(
         `${label} "${reference}" is not available.${available ? ` Available: ${available}.` : ''}`
+      );
+    },
+    list() {
+      return [...extensions().entries()].sort(([a], [b]) =>
+        a < b ? -1 : a > b ? 1 : 0
       );
     },
   };
