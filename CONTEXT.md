@@ -110,6 +110,10 @@ _Avoid_: KPI, stat
 One execution of an eval: every variant on every case, for the case's number of trials.
 _Avoid_: experiment, suite run, execution
 
+**Partial run**:
+A run narrowed at run time (`--variant`, `--case`, `--filter-tag`, `--max-cases`, `--trials`). It's compared only with partial runs narrowed the same way, and never becomes a result store's latest run.
+_Avoid_: subset run, filtered run
+
 **Comparison**:
 How a variant differs from the baseline, or a run from an earlier run: metric changes with confidence intervals, an assessment of each change (better, worse or unclear, from a paired test), and the cases that improved or regressed.
 _Avoid_: diff, A/B result, verdict

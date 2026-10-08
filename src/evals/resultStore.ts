@@ -223,6 +223,11 @@ export function defaultEnvironmentMetadata(): StoredEvalArtifactMetadata {
   };
 }
 
+/** A partial run's artifacts never become a store's latest. */
+function isPartial(artifact: StoredEvalArtifact<unknown>): boolean {
+  return artifact.metadata?.labels?.partial === 'true';
+}
+
 export class FileEvalResultStore implements EvalResultStore {
   private readonly dir: string;
 
@@ -239,7 +244,8 @@ export class FileEvalResultStore implements EvalResultStore {
       serialized,
       'utf8'
     );
-    await writeFile(join(artifactDir, 'latest.json'), serialized, 'utf8');
+    if (!isPartial(artifact))
+      await writeFile(join(artifactDir, 'latest.json'), serialized, 'utf8');
   }
 
   async loadArtifact<T>(
@@ -346,6 +352,7 @@ export class GCSEvalResultStore implements EvalResultStore {
         resumable: false,
         validation: false,
       });
+    if (isPartial(artifact)) return;
     await bucket
       .file(this.objectPath(artifact.kind, 'latest.json'))
       .save(serialized, {

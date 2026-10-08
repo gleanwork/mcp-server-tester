@@ -200,6 +200,19 @@ describe('runEvalBatch skipExisting', () => {
     expect(runEval).not.toHaveBeenCalled();
   });
 
+  it('never resumes from a partial run', async () => {
+    const artifact = summaryArtifact(
+      completedSummary(loadEvalConfig(configPath, { rootDir }))
+    );
+    artifact.metadata = {
+      ...artifact.metadata,
+      labels: { ...artifact.metadata?.labels, partial: 'true' },
+    };
+    await store.saveArtifact(artifact);
+    expect((await run()).skipped).toBe(0);
+    expect(runEval).toHaveBeenCalledTimes(1);
+  });
+
   it('reruns when skipExisting is disabled', async () => {
     await saveValidSummary();
     const result = await runEvalBatch({

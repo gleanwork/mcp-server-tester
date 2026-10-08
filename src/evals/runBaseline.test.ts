@@ -212,3 +212,55 @@ describe('findPreviousRun', () => {
     });
   });
 });
+
+describe('partial runs and the previous run', () => {
+  async function setup() {
+    const root = await tempDir();
+    await fs.writeFile(
+      path.join(root, 'cases.json'),
+      JSON.stringify({
+        name: 'cases',
+        cases: ['a', 'b'].map((id) => ({
+          id,
+          input: id,
+          assertions: { containsText: 'yes' },
+        })),
+      })
+    );
+    await fs.writeFile(
+      path.join(root, 'eval.json'),
+      JSON.stringify({
+        name: 'partial',
+        datasets: ['./cases.json'],
+        client: 'base/client/fixed',
+        results: { store: { type: 'file', dir: './store' } },
+      })
+    );
+    const clientPlugin = plugin(() => new Set(['a', 'b']));
+    return (options: { cases?: string[]; trials?: number } = {}) =>
+      runEval({
+        configPath: path.join(root, 'eval.json'),
+        rootDir: root,
+        outputDir: path.join(root, 'out'),
+        plugins: [clientPlugin],
+        ...options,
+      });
+  }
+
+  it('a full run never compares with a partial one, nor a partial with a full one', async () => {
+    const run = await setup();
+    const full = await run();
+    const partial = await run({ cases: ['a'] });
+    expect(partial.summary.previousRun).toBeUndefined();
+    const fullAgain = await run();
+    expect(fullAgain.summary.previousRun?.runId).toBe(full.summary.runId);
+  });
+
+  it('a partial run compares with a partial run narrowed the same way', async () => {
+    const run = await setup();
+    const first = await run({ cases: ['a'], trials: 1 });
+    await run({ cases: ['b'], trials: 1 });
+    const again = await run({ trials: 1, cases: ['a'] });
+    expect(again.summary.previousRun?.runId).toBe(first.summary.runId);
+  });
+});

@@ -19,13 +19,19 @@ interface PreviousRun {
 function isComparable(
   value: unknown,
   configId: string,
-  variants: string[]
+  variants: string[],
+  selection: { partial?: boolean; selectionHash?: string } = {}
 ): value is EvaluationSummary {
   if (typeof value !== 'object' || value === null) return false;
   const summary = value as EvaluationSummary;
   // A run in an older result format isn't a baseline.
   if (summary.schemaVersion !== RESULT_SCHEMA_VERSION) return false;
   if (summary.configId !== configId || !Array.isArray(summary.variants))
+    return false;
+  // A full run compares with full runs; a partial run with partial runs
+  // narrowed the same way.
+  if ((summary.partial ?? false) !== (selection.partial ?? false)) return false;
+  if (selection.partial && summary.selectionHash !== selection.selectionHash)
     return false;
   const names = summary.variants.map((variant) => variant.name).sort();
   return names.join('\0') === [...variants].sort().join('\0');
@@ -41,6 +47,9 @@ export async function findPreviousRun(options: {
   runId: string;
   /** This run's variant names: only a run of the same variants is comparable. */
   variants: string[];
+  /** Whether this run is partial, and how it was narrowed. */
+  partial?: boolean;
+  selectionHash?: string;
   store?: EvalResultStore;
   outputRoot: string;
 }): Promise<PreviousRun | undefined> {
@@ -58,7 +67,14 @@ export async function findPreviousRun(options: {
           'eval-run-summary',
           candidate.id
         );
-        if (isComparable(artifact.data, options.configId, options.variants))
+        if (
+          isComparable(
+            artifact.data,
+            options.configId,
+            options.variants,
+            options
+          )
+        )
           return { runId: candidate.id, summary: artifact.data };
       } catch {
         // An unreadable or half-written summary isn't a baseline.
@@ -82,7 +98,7 @@ export async function findPreviousRun(options: {
           'utf8'
         )
       );
-      if (isComparable(value, options.configId, options.variants))
+      if (isComparable(value, options.configId, options.variants, options))
         runs.push({ runId: value.runId ?? entry, summary: value });
     } catch {
       // Not a run directory, or an unreadable one: not a baseline.

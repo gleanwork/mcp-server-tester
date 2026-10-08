@@ -74,7 +74,11 @@ const StoredSummarySchema = z.object({
   id: z.string().min(1),
   createdAt: z.iso.datetime(),
   metadata: z.object({
-    labels: z.object({ configId: z.string(), contentHash: z.string() }),
+    labels: z.object({
+      configId: z.string(),
+      contentHash: z.string(),
+      partial: z.string().optional(),
+    }),
   }),
   data: CompletedSummarySchema,
 });
@@ -87,6 +91,8 @@ function isMatchingCompletedSummary(
   const parsed = StoredSummarySchema.safeParse(artifact);
   if (!parsed.success) return false;
   const { data: summary, metadata } = parsed.data;
+  // A narrowed run is not the eval's result.
+  if (metadata.labels.partial === 'true') return false;
   const identity = configIdentity(evalConfig);
   if (
     parsed.data.id !== artifactId ||
