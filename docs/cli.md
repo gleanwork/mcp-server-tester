@@ -684,16 +684,24 @@ A connector server names a plugin's connector instead of a transport:
   "variants": [
     {
       "name": "aggregated",
-      "servers": [{ "connector": "acme/connector/glean" }]
+      "servers": ["glean"]
     },
     {
       "name": "native",
-      "servers": [
-        { "connector": "acme/connector/slack" },
-        { "connector": "acme/connector/gmail" }
-      ]
+      "servers": ["slack", "gmail"]
     }
-  ]
+  ],
+  "servers": {
+    "glean": {
+      "connector": "acme/connector/glean"
+    },
+    "slack": {
+      "connector": "acme/connector/slack"
+    },
+    "gmail": {
+      "connector": "acme/connector/gmail"
+    }
+  }
 }
 ```
 

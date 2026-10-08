@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { validateEvalConfig } from './configValidation.js';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
@@ -10,7 +10,7 @@ import type {
   MetricDefinition,
   ResultStoreDefinition,
 } from './evalFrameworkTypes.js';
-import type { EvalConfig } from './evalConfig.js';
+import { loadEvalConfigFromObject, type EvalConfig } from './evalConfig.js';
 import { clientPatchOf } from './clientFields.js';
 
 const schema = z.object({}).passthrough();
@@ -496,6 +496,82 @@ describe('eval config validation', () => {
         ],
       })
     ).toThrow('MCP server labels must be unique');
+  });
+});
+
+describe('variant servers named by label', () => {
+  const acme = { transport: 'http', serverUrl: 'https://acme.example/mcp' };
+  const beta = { transport: 'http', serverUrl: 'https://beta.example/mcp' };
+  /** An eval config file with two servers, loaded and validated as runEval does. */
+  function validate(
+    variants: Array<Record<string, unknown>>,
+    servers: Record<string, unknown> = { acme, beta }
+  ): EvalConfig {
+    return validateEvalConfig(
+      loadEvalConfigFromObject(
+        {
+          name: 'servers',
+          datasets: [{ type: 'test/dataset/file' }],
+          client: 'test/client/sdk',
+          servers,
+          variants,
+        },
+        { skipDatasetValidation: true }
+      )
+    );
+  }
+  beforeEach(() => installTestPlugin());
+  const urlsOf = (evalConfig: EvalConfig) =>
+    evalConfig.variants?.map((variant) =>
+      variant.servers?.map((server) => [
+        server.label,
+        'serverUrl' in server ? server.serverUrl : undefined,
+      ])
+    );
+
+  it('gives a variant that names no servers every server', () => {
+    expect(urlsOf(validate([{ name: 'all' }]))).toEqual([
+      [
+        ['acme', acme.serverUrl],
+        ['beta', beta.serverUrl],
+      ],
+    ]);
+  });
+
+  it('gives a variant that lists no labels no servers', () => {
+    expect(urlsOf(validate([{ name: 'none', servers: [] }]))).toEqual([[]]);
+  });
+
+  it('resolves labels to the eval config servers, in the order the variant lists them', () => {
+    expect(
+      urlsOf(
+        validate([
+          { name: 'reversed', servers: ['beta', 'acme'] },
+          { name: 'one', servers: ['beta'] },
+        ])
+      )
+    ).toEqual([
+      [
+        ['beta', beta.serverUrl],
+        ['acme', acme.serverUrl],
+      ],
+      [['beta', beta.serverUrl]],
+    ]);
+  });
+
+  it('rejects a label the eval config does not define, listing the ones it does', () => {
+    expect(() => validate([{ name: 'typo', servers: ['x'] }])).toThrow(
+      'Variant "typo" names server "x", which the eval config doesn\'t define. Its servers are: acme, beta.'
+    );
+    expect(() => validate([{ name: 'typo', servers: ['x'] }], {})).toThrow(
+      'Variant "typo" names server "x", which the eval config doesn\'t define. It defines no servers.'
+    );
+  });
+
+  it('rejects a label listed more than once', () => {
+    expect(() =>
+      validate([{ name: 'twice', servers: ['acme', 'beta', 'acme'] }])
+    ).toThrow('Variant "twice" lists server "acme" more than once.');
   });
 });
 

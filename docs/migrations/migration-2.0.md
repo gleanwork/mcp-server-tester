@@ -32,6 +32,7 @@ This guide covers upgrading from 1.x (the last 1.x release is 1.1.1). Features f
 - [Result fields use the eval vocabulary](#result-fields-use-the-eval-vocabulary)
 - [Eval APIs and client contracts say eval, client and tool optimization](#eval-apis-and-client-contracts-say-eval-client-and-tool-optimization)
 - [Plugin extension names say their kind](#plugin-extension-names-say-their-kind)
+- [Servers are a map keyed by label](#servers-are-a-map-keyed-by-label)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
 ---
@@ -303,35 +304,24 @@ MST's LLM calls now resolve their endpoint and credential in one place (`src/llm
 
 **Affects:** code that calls `runServerComparison()` or `saveServerComparison()`, or reads `ServerComparisonResult`, `CaseComparisonResult` or `ComparisonOutcome`.
 
-`runServerComparison()` and `saveServerComparison()` are removed. An eval runs the same comparison as two variants, each with its own `servers`, and compares them on every metric, not only pass rate:
+`runServerComparison()` and `saveServerComparison()` are removed. An eval runs the same comparison as two variants, each naming its servers by label, and compares them on every metric, not only pass rate:
 
 ```json
 {
   "name": "server-ab",
   "datasets": ["./evals/triggering.json"],
+  "servers": {
+    "prod": { "transport": "http", "serverUrl": "https://mcp.example.com/mcp" },
+    "next": {
+      "transport": "http",
+      "serverUrl": "https://staging.example.com/mcp"
+    }
+  },
   "client": "mst",
   "model": "claude-sonnet-4-6",
   "variants": [
-    {
-      "name": "production",
-      "servers": [
-        {
-          "transport": "http",
-          "serverUrl": "https://mcp.example.com/mcp",
-          "label": "prod"
-        }
-      ]
-    },
-    {
-      "name": "candidate",
-      "servers": [
-        {
-          "transport": "http",
-          "serverUrl": "https://staging.example.com/mcp",
-          "label": "next"
-        }
-      ]
-    }
+    { "name": "production", "servers": ["prod"] },
+    { "name": "candidate", "servers": ["next"] }
   ]
 }
 ```
@@ -657,6 +647,33 @@ A plugin extension's name is `<namespace>/<kind>/<name>` ([ADR 0003](../adr/0003
 | `{ "connector": "acme/slack" }`                                              | `{ "connector": "acme/connector/slack" }`                    |
 
 A two-part name fails with the full one (`needs its kind: use "acme/judge/completeness"`), and a name used as the wrong kind fails with what it is (`"acme/judge/x" is a judge, not a dataset source`). Built-ins keep their short names and may be written in full (`mst/judge/rubric`); plugins can't use the `mst` namespace. A plugin schema that checks `type: z.literal('acme/legacy')` checks the new name. Aggregate keys built from a plugin metric's name include the kind (`acme/metric/hits_rate`).
+
+## Servers are a map keyed by label
+
+**Affects:** eval configs and shared configs that set `servers`, and variants that set their own servers.
+
+Define each server once under top-level `servers`, keyed by its label, and list labels in a variant. An entry doesn't set `label`: the key is the label. A variant that lists no servers uses all of them; `[]` uses none.
+
+```jsonc
+// Before
+"servers": [{ "label": "acme", "transport": "http", "serverUrl": "https://acme.example/mcp" }],
+"variants": [
+  { "name": "aggregated" },
+  { "name": "native", "servers": [{ "label": "slack", "transport": "http", "serverUrl": "https://slack.example/mcp" }] }
+]
+
+// 2.0
+"servers": {
+  "acme": { "transport": "http", "serverUrl": "https://acme.example/mcp" },
+  "slack": { "transport": "http", "serverUrl": "https://slack.example/mcp" }
+},
+"variants": [
+  { "name": "aggregated", "servers": ["acme"] },
+  { "name": "native", "servers": ["slack"] }
+]
+```
+
+An array of servers, a `label` in a map entry, a server object in a variant's `servers`, and a label the eval config doesn't define each fail with what to write instead. Inside MST and in what plugins receive (`evalConfig.servers`, `ClientRunInput.servers`), servers are still labelled lists: `MCPConfig` entries, and connector servers until a run expands them. A loaded config keeps a variant's labels as `serverLabels`; once validated, the variant has its `servers` instead.
 
 ## New in 2.0 (non-breaking)
 

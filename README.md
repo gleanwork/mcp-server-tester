@@ -257,13 +257,12 @@ result stores, and other extensions are built-ins or come from plugins
       "path": "evalsets/search.json"
     }
   ],
-  "servers": [
-    {
+  "servers": {
+    "prod": {
       "transport": "http",
-      "serverUrl": "https://example.com/mcp",
-      "label": "prod"
+      "serverUrl": "https://example.com/mcp"
     }
-  ],
+  },
   "client": "mst",
   "clientOptions": {
     "provider": "anthropic"

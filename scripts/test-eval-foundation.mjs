@@ -348,7 +348,9 @@ try {
     {
       name: 'config',
       datasets: [{ type: 'foundation/dataset/source' }],
-      servers: [server],
+      servers: {
+        agg: { transport: server.transport, serverUrl: server.serverUrl },
+      },
     },
     { skipDatasetValidation: true }
   );
@@ -359,7 +361,7 @@ try {
       {
         name: 'invalid',
         datasets: [{ type: 'foundation/dataset/source' }],
-        servers: [{ ...server, serverUrl: 17 }],
+        servers: { agg: { transport: 'http', serverUrl: 17 } },
       },
       { skipDatasetValidation: true }
     )

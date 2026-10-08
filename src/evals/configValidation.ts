@@ -25,11 +25,12 @@ import {
   isConnectorServer,
   type EvalConfig,
   type EvalServerConfig,
+  type EvalVariant,
   type ExtensionConfig,
   type ClientConfig,
   type TaggedConfig,
 } from './evalConfig.js';
-import type { MCPConfig } from '../config/mcpConfig.js';
+import { mcpServerLabel, type MCPConfig } from '../config/mcpConfig.js';
 
 /**
  * The servers a client must support. A connector server is checked once `mst
@@ -286,6 +287,44 @@ function validateLabels(
   }
 }
 
+/**
+ * A variant's servers: the eval config's servers it names by label, in the
+ * order it lists them, or every server when it names none. A programmatic
+ * variant may carry its own `servers` instead.
+ */
+function variantServers(
+  variant: EvalVariant,
+  servers: readonly EvalServerConfig[]
+): EvalServerConfig[] | undefined {
+  if (variant.serverLabels === undefined) return variant.servers;
+  if (variant.servers !== undefined)
+    throw new Error(
+      `Variant "${variant.name}" sets both servers and serverLabels; name its servers by label only.`
+    );
+  const byLabel = new Map(
+    servers.map((server, index) => [
+      server.label ?? mcpServerLabel(server as MCPConfig, index),
+      server,
+    ])
+  );
+  const seen = new Set<string>();
+  return variant.serverLabels.map((label) => {
+    if (seen.has(label))
+      throw new Error(
+        `Variant "${variant.name}" lists server "${label}" more than once.`
+      );
+    seen.add(label);
+    const server = byLabel.get(label);
+    if (!server) {
+      const known = [...byLabel.keys()].join(', ');
+      throw new Error(
+        `Variant "${variant.name}" names server "${label}", which the eval config doesn't define. ${known ? `Its servers are: ${known}.` : 'It defines no servers.'}`
+      );
+    }
+    return server;
+  });
+}
+
 /** Reject references to plugin namespaces the eval didn't load (ADR-0001). */
 export function assertListedNamespaces(
   references: readonly string[],
@@ -363,7 +402,8 @@ export function validateEvalConfig(
   }
   const variantClients: ClientConfig[] = [];
   const variants = evalConfig.variants?.map((variant) => {
-    const servers = variant.servers ?? evalConfig.servers;
+    const servers =
+      variantServers(variant, evalConfig.servers ?? []) ?? evalConfig.servers;
     validateLabels(servers ?? [], `variant "${variant.name}"`);
     const patch = clientPatchOf(variant);
     const variantClient = patch
@@ -378,8 +418,9 @@ export function validateEvalConfig(
         context: `Variant "${variant.name}"`,
       });
     }
+    const { serverLabels: _labels, ...resolved } = variant;
     return {
-      ...variant,
+      ...resolved,
       servers,
       ...(variantClient ? clientFieldsOf(variantClient) : {}),
       metrics: variant.metrics

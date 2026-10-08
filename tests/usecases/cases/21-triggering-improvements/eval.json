@@ -1,13 +1,13 @@
 {
   "name": "triggering-improvements",
   "datasets": ["./dataset.json"],
-  "servers": [
-    "{{server aggregate agg}}",
-    "{{server github github}}",
-    "{{server tracker tracker}}",
-    "{{server chat chat}}",
-    "{{server mail mail}}"
-  ],
+  "servers": {
+    "agg": "{{server aggregate}}",
+    "github": "{{server github}}",
+    "tracker": "{{server tracker}}",
+    "chat": "{{server chat}}",
+    "mail": "{{server mail}}"
+  },
   "toolMap": {
     "company_search": ["agg.search"]
   },

@@ -1,6 +1,14 @@
 {
   "name": "variants-native-vs-aggregate",
   "datasets": ["./dataset.json"],
+  "servers": {
+    "github": "{{server github}}",
+    "tracker": "{{server tracker}}",
+    "chat": "{{server chat}}",
+    "mail": "{{server mail}}",
+    "agg": "{{server aggregate}}",
+    "gateway": "{{server gateway}}"
+  },
   "client": "usecase/client/model",
   "model": "claude-sonnet-4-5",
   "clientOptions": {
@@ -58,43 +66,26 @@
   "variants": [
     {
       "name": "native-connectors",
-      "servers": [
-        "{{server github github}}",
-        "{{server tracker tracker}}",
-        "{{server chat chat}}",
-        "{{server mail mail}}"
-      ]
+      "servers": ["github", "tracker", "chat", "mail"]
     },
     {
       "name": "aggregate-mcp-gateway",
-      "servers": ["{{server aggregate agg}}", "{{server gateway gateway}}"]
+      "servers": ["agg", "gateway"]
     },
     {
       "name": "aggregate-mcp-native-connectors",
-      "servers": [
-        "{{server aggregate agg}}",
-        "{{server github github}}",
-        "{{server tracker tracker}}",
-        "{{server chat chat}}",
-        "{{server mail mail}}"
-      ]
+      "servers": ["agg", "github", "tracker", "chat", "mail"]
     },
     {
       "name": "aggregate-plugin-gateway",
-      "servers": ["{{server aggregate agg}}", "{{server gateway gateway}}"],
+      "servers": ["agg", "gateway"],
       "clientOptions": {
         "plugins": ["aggregate-plugin"]
       }
     },
     {
       "name": "aggregate-plugin-native-connectors",
-      "servers": [
-        "{{server aggregate agg}}",
-        "{{server github github}}",
-        "{{server tracker tracker}}",
-        "{{server chat chat}}",
-        "{{server mail mail}}"
-      ],
+      "servers": ["agg", "github", "tracker", "chat", "mail"],
       "clientOptions": {
         "plugins": ["aggregate-plugin"]
       }

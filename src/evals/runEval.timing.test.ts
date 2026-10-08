@@ -80,7 +80,7 @@ async function fixture(
       name: 'timing',
       client: type,
       datasets: [{ type: source }],
-      servers: [],
+      servers: {},
       ...extra,
     })
   );

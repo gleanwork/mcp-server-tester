@@ -1,6 +1,9 @@
 {
   "name": "assistant-sxs",
   "datasets": ["./dataset.json"],
+  "servers": {
+    "agg": "{{server aggregate}}"
+  },
   "metrics": ["passed", "tool_count", "judge_pass", "cost_usd"],
   "variants": [
     {
@@ -13,7 +16,7 @@
     },
     {
       "name": "desktop",
-      "servers": ["{{server aggregate agg}}"],
+      "servers": ["agg"],
       "client": "usecase/client/model",
       "clientOptions": {
         "policy": [
@@ -42,7 +45,7 @@
     },
     {
       "name": "cli",
-      "servers": ["{{server aggregate agg}}"],
+      "servers": ["agg"],
       "client": "usecase/client/model",
       "clientOptions": {
         "policy": [

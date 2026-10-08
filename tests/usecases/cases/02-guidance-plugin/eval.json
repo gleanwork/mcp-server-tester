@@ -1,7 +1,9 @@
 {
   "name": "guidance-plugin-effect",
   "datasets": ["./dataset.json"],
-  "servers": ["{{server aggregate agg}}"],
+  "servers": {
+    "agg": "{{server aggregate}}"
+  },
   "client": "usecase/client/model",
   "clientOptions": {
     "policy": [

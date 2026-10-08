@@ -142,6 +142,8 @@ export async function expandConnectorServers(
   };
 
   const grantsByVariant = new Map<string, Set<string>>();
+  // The grant each top-level server's label needs, for variants that name servers by label.
+  const grantByLabel = new Map<string, string>();
   async function expand(
     server: EvalServerConfig,
     variant: string
@@ -153,6 +155,7 @@ export async function expandConnectorServers(
       const keys = grantsByVariant.get(variant) ?? new Set<string>();
       keys.add(slot.target.key);
       grantsByVariant.set(variant, keys);
+      if (variant === '') grantByLabel.set(use.label, slot.target.key);
     }
     if (use.connector.launch) {
       let tokenFile: string | undefined;
@@ -207,6 +210,17 @@ export async function expandConnectorServers(
         }
       : {}),
   };
+  // A variant that names servers by label needs only those servers' grants.
+  for (const variant of evalConfig.variants ?? []) {
+    if (variant.serverLabels === undefined || variant.servers !== undefined)
+      continue;
+    const keys = new Set<string>();
+    for (const label of variant.serverLabels) {
+      const key = grantByLabel.get(label);
+      if (key) keys.add(key);
+    }
+    grantsByVariant.set(variant.name, keys);
+  }
   return {
     evalConfig: expanded,
     uses,
@@ -297,7 +311,10 @@ export async function startConnectorCredentials(
   // A variant without servers of its own uses the config's (key '').
   const ownServers = new Set(
     (expansion.evalConfig.variants ?? [])
-      .filter((variant) => variant.servers !== undefined)
+      .filter(
+        (variant) =>
+          variant.servers !== undefined || variant.serverLabels !== undefined
+      )
       .map((variant) => variant.name)
   );
   const needed = options.variants

@@ -20,13 +20,16 @@ runtime validation is provided by `EvalConfigSchema`.
       "path": "evalsets/search.json"
     }
   ],
-  "servers": [
-    {
+  "servers": {
+    "prod": {
       "transport": "http",
-      "serverUrl": "https://example.com/mcp",
-      "label": "prod"
+      "serverUrl": "https://example.com/mcp"
+    },
+    "variant": {
+      "transport": "http",
+      "serverUrl": "https://example.com/mcp-v2"
     }
-  ],
+  },
   "client": "mst",
   "clientOptions": {
     "provider": "anthropic"
@@ -39,19 +42,8 @@ runtime validation is provided by `EvalConfigSchema`.
     }
   },
   "variants": [
-    {
-      "name": "baseline"
-    },
-    {
-      "name": "variant",
-      "servers": [
-        {
-          "transport": "http",
-          "serverUrl": "https://example.com/mcp-v2",
-          "label": "variant"
-        }
-      ]
-    }
+    { "name": "baseline", "servers": ["prod"] },
+    { "name": "variant", "servers": ["variant"] }
   ]
 }
 ```
@@ -63,9 +55,7 @@ A key the schema doesn't define is an error, in an eval config and in a dataset,
 - **The client:** `client` names the client under test, `model` the model it uses, and `clientOptions` the client's other options. A variant or case may set any of the three; it inherits the eval config's `clientOptions` only when it uses the same client.
 
 A bare dataset path is shorthand for `{ "type": "file", "path": "..." }`. Relative dataset and plugin paths in an eval config resolve against the eval config's directory, then `rootDir` (`--root-dir`, the working directory by default). A `file` result store's `dir` is always relative to the eval config, so where results are written doesn't depend on the working directory. Plugin result stores resolve their own options.
-Every other pluggable block is a tagged object. `servers` is the complete MCP
-server set under test; an empty set is valid for clients that provide their own
-capabilities.
+Every other pluggable block is a tagged object. `servers` is the MCP servers under test, a map keyed by label (`"servers": { "acme": { "transport": "http", ... } }`); an entry doesn't set `label`, because the key is its label. A variant picks servers by label (`"servers": ["acme"]`): one that lists none uses every server, and `[]` uses none. An empty map is valid for clients that provide their own capabilities. When the eval config and a shared config it extends both set `servers`, the eval config's map replaces the shared config's whole, like every key; a variant may name a shared config's servers when the eval config sets none.
 
 ## Plugins
 
@@ -390,8 +380,8 @@ variant-optimization concepts. A variant may change its server set, client, mode
 tool-name map, input template, metrics, or judges. An eval config without variants
 has one implicit `default` variant.
 
-Each `MCPConfig` may have a `label`. Labels are required when a server set has
-more than one entry so traces and metrics can attribute MCP calls correctly.
+Each server's label is its key in `servers`. Traces and metrics attribute MCP
+calls to servers by label.
 
 ## Metrics
 

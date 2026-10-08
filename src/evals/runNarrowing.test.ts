@@ -44,7 +44,7 @@ beforeEach(async () => {
       name: 'narrowing',
       datasets: ['./cases.json'],
       client: 'acme/client/record',
-      servers: [],
+      servers: {},
       trials: 2,
       filterTags: ['keep'],
       maxCases: 1,

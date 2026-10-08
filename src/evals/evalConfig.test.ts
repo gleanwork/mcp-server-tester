@@ -67,20 +67,105 @@ describe('EvalConfigSchema', () => {
     { transport: 'stdio', command: 'node', args: [17] },
     { transport: 'stdio', command: 'node', env: { PORT: 17 } },
   ])(
-    'uses canonical transport validation on defaults and variants: %j',
+    'uses canonical transport validation on the eval config servers: %j',
     (server) => {
-      const base = { name: 'invalid', datasets: ['cases.json'] };
-      expect(() =>
-        EvalConfigSchema.parse({ ...base, servers: [server] })
-      ).toThrow();
-      expect(() =>
-        EvalConfigSchema.parse({
-          ...base,
-          variants: [{ name: 'candidate', servers: [server] }],
-        })
-      ).toThrow();
+      const result = EvalConfigSchema.safeParse({
+        name: 'invalid',
+        datasets: ['cases.json'],
+        servers: { acme: server },
+      });
+      expect(result.success).toBe(false);
+      // The entry itself is invalid, not the map's shape.
+      expect(result.error?.issues[0]?.path[0]).toBe('servers');
+      expect(result.error?.issues[0]?.message).not.toContain(
+        'is a map keyed by label'
+      );
     }
   );
+
+  describe('servers', () => {
+    const base = { name: 'servers', datasets: ['cases.json'] };
+    const acme = { transport: 'http', serverUrl: 'https://acme.example/mcp' };
+    const issuesOf = (config: Record<string, unknown>) => {
+      const result = EvalConfigSchema.safeParse({ ...base, ...config });
+      expect(result.success).toBe(false);
+      return result.error?.issues;
+    };
+
+    it('reads the map into configs labelled by their keys, in order', () => {
+      const parsed = EvalConfigSchema.parse({
+        ...base,
+        servers: {
+          acme,
+          local: { transport: 'stdio', command: 'node', args: ['server.js'] },
+        },
+      });
+      expect(parsed.servers).toEqual([
+        { ...acme, label: 'acme' },
+        {
+          transport: 'stdio',
+          command: 'node',
+          args: ['server.js'],
+          label: 'local',
+        },
+      ]);
+    });
+
+    it('rejects the 1.x array of servers, pointing to the map', () => {
+      expect(issuesOf({ servers: [{ ...acme, label: 'acme' }] })).toEqual([
+        expect.objectContaining({
+          path: ['servers'],
+          message: expect.stringContaining('is a map keyed by label'),
+        }),
+      ]);
+    });
+
+    it('rejects a map entry that sets its own label', () => {
+      expect(
+        issuesOf({ servers: { acme: { ...acme, label: 'acme' } } })
+      ).toEqual([
+        expect.objectContaining({
+          path: ['servers', 'acme', 'label'],
+          message: expect.stringContaining("the key is the server's label"),
+        }),
+      ]);
+    });
+
+    it('keeps the labels a variant names as its serverLabels, in order', () => {
+      const parsed = EvalConfigSchema.parse({
+        ...base,
+        servers: { acme, beta: acme },
+        variants: [
+          { name: 'both', servers: ['beta', 'acme'] },
+          { name: 'none', servers: [] },
+          { name: 'all' },
+        ],
+      });
+      expect(parsed.variants).toEqual([
+        { name: 'both', serverLabels: ['beta', 'acme'] },
+        { name: 'none', serverLabels: [] },
+        { name: 'all' },
+      ]);
+      for (const variant of parsed.variants ?? [])
+        expect(variant).not.toHaveProperty('servers');
+    });
+
+    it('rejects a server defined inside a variant, pointing to the top-level map', () => {
+      expect(
+        issuesOf({
+          servers: { acme },
+          variants: [{ name: 'inline', servers: ['acme', acme] }],
+        })
+      ).toEqual([
+        expect.objectContaining({
+          path: ['variants', 0, 'servers', 1],
+          message: expect.stringContaining(
+            "define this server under the eval config's top-level `servers`"
+          ),
+        }),
+      ]);
+    });
+  });
 
   it('keeps editor transport schema synchronized with canonical MCPConfigSchema', () => {
     const schema = JSON.parse(
@@ -91,21 +176,32 @@ describe('EvalConfigSchema', () => {
     ) as {
       definitions: { mcpConfig: unknown };
       properties: {
-        servers: { items: unknown };
+        servers: { type: string; additionalProperties: unknown };
         variants: {
-          items: { properties: { client: { required?: string[] } } };
+          items: {
+            properties: {
+              client: { required?: string[] };
+              servers: { type: string; items: { type: string } };
+            };
+          };
         };
       };
     };
     expect(schema.definitions.mcpConfig).toEqual(
       z.toJSONSchema(MCPConfigSchema, { target: 'draft-7', io: 'input' })
     );
-    expect(schema.properties.servers.items).toEqual({
+    // A map keyed by label, of server configs or connector servers.
+    expect(schema.properties.servers.type).toBe('object');
+    expect(schema.properties.servers.additionalProperties).toEqual({
       anyOf: [
         { $ref: '#/definitions/mcpConfig' },
         { $ref: '#/definitions/connectorServer' },
       ],
     });
+    // A variant names its servers by label.
+    const variantServers = schema.properties.variants.items.properties.servers;
+    expect(variantServers.type).toBe('array');
+    expect(variantServers.items.type).toBe('string');
     expect(
       schema.properties.variants.items.properties.client.required
     ).toBeUndefined();
@@ -261,13 +357,9 @@ describe('EvalConfigSchema', () => {
       {
         name: 'search',
         datasets: ['evalsets/search.json'],
-        servers: [
-          {
-            transport: 'http',
-            serverUrl: 'https://example.com/mcp',
-            label: 'prod',
-          },
-        ],
+        servers: {
+          prod: { transport: 'http', serverUrl: 'https://example.com/mcp' },
+        },
         client: 'sdk',
         variants: [
           { name: 'baseline' },
@@ -302,7 +394,7 @@ describe('EvalConfigSchema', () => {
       EvalConfigSchema.parse({
         name: 'host-only',
         datasets: [{ type: 'file', path: './cases.json' }],
-        servers: [],
+        servers: {},
       }).servers
     ).toEqual([]);
   });
@@ -367,36 +459,41 @@ describe('connector servers', () => {
       {
         name: 'connectors',
         datasets: [{ type: 'file', path: 'cases.json' }],
-        servers: [{ connector: 'acme/connector/glean' }],
-        variants: [
-          {
-            name: 'native',
-            servers: [
-              { connector: 'acme/connector/slack', label: 'slack' },
-              {
-                connector: '@acme/evals/connector/jira',
-                url: 'https://jira.example/mcp',
-              },
-            ],
+        servers: {
+          glean: { connector: 'acme/connector/glean' },
+          slack: { connector: 'acme/connector/slack' },
+          jira: {
+            connector: '@acme/evals/connector/jira',
+            url: 'https://jira.example/mcp',
           },
-        ],
+        },
+        variants: [{ name: 'native', servers: ['slack', 'jira'] }],
       },
       { skipDatasetValidation: true }
     );
-    expect(config.servers).toEqual([{ connector: 'acme/connector/glean' }]);
-    expect(config.variants?.[0]?.servers).toHaveLength(2);
+    expect(config.servers).toEqual([
+      { connector: 'acme/connector/glean', label: 'glean' },
+      { connector: 'acme/connector/slack', label: 'slack' },
+      {
+        connector: '@acme/evals/connector/jira',
+        url: 'https://jira.example/mcp',
+        label: 'jira',
+      },
+    ]);
+    expect(config.variants?.[0]?.serverLabels).toEqual(['slack', 'jira']);
     for (const bad of [
       { connector: 'slack' },
+      { connector: 'acme/slack' },
       { connector: 'acme/connector/slack', transport: 'http' },
       { connector: 'acme/connector/slack', token: 'x' },
-      { connector: 'acme/connector/slack', label: '1bad' },
+      { connector: 'acme/connector/slack', label: 'slack' },
     ])
       expect(() =>
         loadEvalConfigFromObject(
           {
             name: 'x',
             datasets: [{ type: 'file', path: 'c.json' }],
-            servers: [bad],
+            servers: { slack: bad },
           },
           { skipDatasetValidation: true }
         )
@@ -465,7 +562,7 @@ describe('built-ins written in full', () => {
           {
             name: 'connectors',
             datasets: ['./cases.json'],
-            servers: [{ connector }],
+            servers: { slack: { connector } },
           },
           { skipDatasetValidation: true }
         )

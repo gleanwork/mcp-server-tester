@@ -17,7 +17,7 @@ A case directory holds:
 - `dataset.json`: the cases it runs.
 - `expected.json`: what the results must show.
 
-The runner copies the directory to a temp directory, then fills in each `"{{server <catalog> <label>}}"` with a stdio server entry for `fixtures/catalogServer.mjs` serving `fixtures/catalogs/<catalog>.json`. It then runs `mst run --plugins fixtures/plugin.mjs`. With `runs` above 1, the runs share one output directory, and each run's index is in `USECASE_RUN`. Set `USECASE_KEEP=1` to keep the temp directories; a case whose checks fail keeps its directory either way and prints its path.
+The runner copies the directory to a temp directory, then fills in each `"{{server <catalog>}}"` (a value in the `servers` map, keyed by label) with a stdio server entry for `fixtures/catalogServer.mjs` serving `fixtures/catalogs/<catalog>.json`. It then runs `mst run --plugins fixtures/plugin.mjs`. With `runs` above 1, the runs share one output directory, and each run's index is in `USECASE_RUN`. Set `USECASE_KEEP=1` to keep the temp directories; a case whose checks fail keeps its directory either way and prints its path.
 
 `fixtures/plugin.mjs` provides:
 

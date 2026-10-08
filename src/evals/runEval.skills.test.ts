@@ -47,7 +47,9 @@ async function evalRun(caseOverrides: Record<string, unknown> = {}) {
     JSON.stringify({
       name: 'skills-help',
       datasets: ['./cases.json'],
-      servers: [{ transport: 'http', serverUrl: 'https://example.com/mcp' }],
+      servers: {
+        'server-1': { transport: 'http', serverUrl: 'https://example.com/mcp' },
+      },
       client: 'mst',
       clientOptions: { provider: 'anthropic' },
       variants: [
