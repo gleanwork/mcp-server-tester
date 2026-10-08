@@ -237,6 +237,14 @@ export interface RunFacts {
   datasets: Array<{ name: string; caseCount: number; contentHash: string }>;
   judges?: Array<{ type: string; level: string; optionsHash: string }>;
   redactStoredResponses: boolean;
+  /**
+   * How far the run got. Default: both complete. A run saved while variants
+   * remain is `partial`; one that stopped on an error is `collect: failed`.
+   */
+  phases?: {
+    collect: 'complete' | 'partial' | 'skipped' | 'failed';
+    grade: 'complete' | 'partial' | 'skipped' | 'failed';
+  };
 }
 
 async function writeJson(file: string, value: unknown): Promise<void> {
@@ -371,7 +379,7 @@ export async function writeRun(
       platform: process.platform,
       ci: Boolean(process.env.CI),
     },
-    phases: { collect: 'complete', grade: 'complete' },
+    phases: facts.phases ?? { collect: 'complete', grade: 'complete' },
   });
   for (const result of results) {
     const variant = segment(result.variant ?? 'default');

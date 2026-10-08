@@ -16,7 +16,31 @@ import {
   type ToolSurfaceProxy,
 } from './toolSurfaceProxy.js';
 
-/** Pre-execute a batch client, retaining per-case trial queues for the evaluator. */
+/**
+ * The trace for a request whose batch failed before running it: an
+ * infrastructure failure that says why, so the run keeps its other results.
+ */
+function batchFailure(client: string, error: unknown): ClientRunResult {
+  const reason = error instanceof Error ? error.message : String(error);
+  return {
+    finalText: '',
+    events: [],
+    error: `Not run: the ${client} batch failed before this case ran: ${reason}`,
+    diagnostics: { failureKind: 'not-submitted' },
+    telemetry: {
+      caseExecution: { status: 'not-submitted', continuation: 'blocked' },
+    },
+  };
+}
+
+/**
+ * Pre-execute a batch client, retaining per-case trial queues for the evaluator.
+ *
+ * A batch that fails before returning traces (its setup, a desktop lease held
+ * by an earlier batch) gives every request an infrastructure failure instead
+ * of throwing, so an eval keeps the variants that did run. A batch client
+ * returns the traces of cases it ran even when it stops early.
+ */
 export async function prepareClientBatch(
   definition: ClientDefinition,
   cases: EvalCase[],
@@ -53,11 +77,25 @@ export async function prepareClientBatch(
     }
   }
   if (!requests.length) return queues;
+  const failAll = (error: unknown): Map<string, ClientRunResult[]> => {
+    console.warn(
+      `[mst] The ${config.type} batch${context.variant ? ` for variant "${context.variant.name}"` : ''} failed before its cases ran: ${error instanceof Error ? error.message : String(error)}`
+    );
+    for (const request of requests)
+      queues.get(request.caseId)!.push(batchFailure(config.type, error));
+    return queues;
+  };
   // Proxied clients connect to the variant's servers, one scope per request.
-  const proxy =
-    toolVariant && usesToolSurfaceProxy(definition)
-      ? await toolVariant.proxy()
-      : undefined;
+  let started: ToolSurfaceProxy | undefined;
+  try {
+    started =
+      toolVariant && usesToolSurfaceProxy(definition)
+        ? await toolVariant.proxy()
+        : undefined;
+  } catch (error) {
+    return failAll(error);
+  }
+  const proxy = started;
   // A client that connects to one server set for the batch shares one scope.
   const shared = proxy && definition.serversPerBatch;
   if (shared) scopes.fill(scopes[0]!);
@@ -71,10 +109,15 @@ export async function prepareClientBatch(
       };
     });
   }
-  const traces = await definition.runBatch(
-    requests,
-    proxy ? withoutToolVariant(context) : context
-  );
+  let traces: ClientRunResult[];
+  try {
+    traces = await definition.runBatch(
+      requests,
+      proxy ? withoutToolVariant(context) : context
+    );
+  } catch (error) {
+    return failAll(error);
+  }
   if (proxy) proxy.endScope(checkScope);
   if (traces.length !== requests.length)
     throw new Error(
