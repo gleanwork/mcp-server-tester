@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import type {
   MCPComparisonData,
+  MCPRunReportData,
   PairedChange,
+  RunReportVariant,
   VariantComparisonEntry,
 } from '../../types';
 import {
@@ -22,6 +24,39 @@ interface VariantTableProps {
   data: MCPComparisonData;
   selectedId: string;
   onSelect: (id: string) => void;
+  /** An eval run's report: adds its judge, pairwise, cost, time and tool columns. */
+  report?: MCPRunReportData;
+}
+
+export const VERDICT_LABEL: Record<RunReportVariant['verdict'], string> = {
+  baseline: 'Baseline',
+  better: 'Clearly better',
+  worse: 'Clearly worse',
+  unclear: 'No clear change',
+};
+
+export const VERDICT_TONE: Record<
+  RunReportVariant['verdict'],
+  keyof typeof TONE
+> = {
+  baseline: 'neutral',
+  better: 'good',
+  worse: 'bad',
+  unclear: 'neutral',
+};
+
+/** "aggregated 100% · native 4%": the top tools (or servers) by share of calls. */
+function toolsText(tools: RunReportVariant['toolsUsed']): string {
+  if (tools.length === 0) return 'no tool calls';
+  const top = tools.slice(0, 3).map((t) => `${t.name} ${pct(t.share)}`);
+  return tools.length > 3 ? `${top.join(' · ')} · …` : top.join(' · ');
+}
+
+/** A pairwise judge's verdict: "32% win · 61% loss". */
+function pairwiseText(judge: RunReportVariant['pairwise'][number]): string {
+  const n = judge.compared;
+  if (n === 0) return 'not compared';
+  return `${pct(judge.wins / n)} win · ${pct(judge.losses / n)} loss`;
 }
 
 /** A change from the baseline as a colored pill: green, red, or grey for noise. */
@@ -141,8 +176,21 @@ export function VariantTable({
   data,
   selectedId,
   onSelect,
+  report,
 }: VariantTableProps) {
   const [showStats, setShowStats] = useState(false);
+  const isEval = data.purpose === 'eval';
+  const rowOf = (id: string) => report?.variants.find((v) => v.id === id);
+  const rows = report?.variants ?? [];
+  const showRegression =
+    !isEval || data.cases.some((c) => c.group === 'regression');
+  const showJudge = rows.some((v) => v.judgeScores.length > 0);
+  const judgeCount = new Set(
+    rows.flatMap((v) => v.judgeScores.map((s) => s.judge))
+  ).size;
+  const showPairwise = rows.some((v) => v.pairwise.length > 0);
+  const showCost = rows.some((v) => v.costPerCase !== undefined);
+  const showTime = rows.some((v) => v.medianDurationMs !== undefined);
   const candidates = data.variants.filter((v) => v.id !== data.baselineId);
   const swDomain = domainOf(candidates, (v) => v.capability.change);
   const kwDomain = domainOf(candidates, (v) => v.regression.change);
@@ -157,7 +205,7 @@ export function VariantTable({
     <section aria-labelledby="exp-variants-h" className="grid gap-2">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 id="exp-variants-h" className="text-lg font-semibold">
-          All variants compared
+          {isEval ? 'Variants compared' : 'All variants compared'}
         </h2>
         <button
           type="button"
@@ -179,15 +227,22 @@ export function VariantTable({
                 Variant
               </th>
               <th scope="col" className={thNum}>
-                Capability cases
+                {isEval
+                  ? showRegression
+                    ? 'Untagged cases'
+                    : 'Pass rate'
+                  : 'Capability cases'}
               </th>
-              <th scope="col" className={thNum}>
-                Regression cases
-              </th>
+              {showRegression && (
+                <th scope="col" className={thNum}>
+                  Regression cases
+                </th>
+              )}
               {showStats && (
                 <>
                   <th scope="col" className={th}>
-                    Capability cases: change, 95% range
+                    {isEval ? 'Pass rate' : 'Capability cases'}: change, 95%
+                    range
                   </th>
                   <th scope="col" className={thNum}>
                     Seen → held out
@@ -195,16 +250,43 @@ export function VariantTable({
                   <th scope="col" className={thNum}>
                     Every trial passed (pass^{k})
                   </th>
-                  <th scope="col" className={th}>
-                    Regression cases: change, 95% range
-                  </th>
+                  {showRegression && (
+                    <th scope="col" className={th}>
+                      Regression cases: change, 95% range
+                    </th>
+                  )}
                   <th scope="col" className={thNum}>
                     Cases ▲ / ▼
                   </th>
                 </>
               )}
+              {showJudge && (
+                <th scope="col" className={thNum}>
+                  Judge
+                </th>
+              )}
+              {showPairwise && (
+                <th scope="col" className={th}>
+                  vs baseline (pairwise)
+                </th>
+              )}
+              {showCost && (
+                <th scope="col" className={thNum}>
+                  $/case
+                </th>
+              )}
+              {showTime && (
+                <th scope="col" className={thNum}>
+                  Median
+                </th>
+              )}
+              {report && (
+                <th scope="col" className={th}>
+                  Tools used
+                </th>
+              )}
               <th scope="col" className={thNum}>
-                Cost per trial
+                {report ? 'Tokens per trial' : 'Cost per trial'}
               </th>
             </tr>
           </thead>
@@ -212,16 +294,25 @@ export function VariantTable({
             {data.variants.map((v) => {
               const isBase = v.id === data.baselineId;
               const selected = v.id === selectedId;
+              const row = rowOf(v.id);
               const name = (
                 <span className="grid gap-0.5">
                   <span className="whitespace-nowrap font-mono font-semibold">
                     {variantName(data, v)}
                   </span>
-                  <span
-                    className={`w-fit whitespace-nowrap rounded-full px-2 py-px text-xs font-semibold ${TONE[STATUS_TONE[v.status]]}`}
-                  >
-                    {STATUS_LABEL[v.status]}
-                  </span>
+                  {row ? (
+                    <span
+                      className={`w-fit whitespace-nowrap rounded-full px-2 py-px text-xs font-semibold ${TONE[VERDICT_TONE[row.verdict]]}`}
+                    >
+                      {VERDICT_LABEL[row.verdict]}
+                    </span>
+                  ) : (
+                    <span
+                      className={`w-fit whitespace-nowrap rounded-full px-2 py-px text-xs font-semibold ${TONE[STATUS_TONE[v.status]]}`}
+                    >
+                      {STATUS_LABEL[v.status]}
+                    </span>
+                  )}
                 </span>
               );
               const sw = v.capability;
@@ -255,13 +346,15 @@ export function VariantTable({
                       showChange={!showStats}
                     />
                   </td>
-                  <td className={tdNum}>
-                    <Rate
-                      rate={v.regression.passRate}
-                      change={v.regression.change}
-                      showChange={!showStats}
-                    />
-                  </td>
+                  {showRegression && (
+                    <td className={tdNum}>
+                      <Rate
+                        rate={v.regression.passRate}
+                        change={v.regression.change}
+                        showChange={!showStats}
+                      />
+                    </td>
+                  )}
                   {showStats && (
                     <>
                       <td className={td}>
@@ -300,19 +393,21 @@ export function VariantTable({
                           ? pct(sw.allTrialsPassedRate)
                           : '—'}
                       </td>
-                      <td className={td}>
-                        {v.regression.change ? (
-                          <RangePlot
-                            change={v.regression.change}
-                            domain={kwDomain}
-                            p={v.regression.change.pWorse}
-                          />
-                        ) : (
-                          <span className="text-xs text-muted-foreground">
-                            reference
-                          </span>
-                        )}
-                      </td>
+                      {showRegression && (
+                        <td className={td}>
+                          {v.regression.change ? (
+                            <RangePlot
+                              change={v.regression.change}
+                              domain={kwDomain}
+                              p={v.regression.change.pWorse}
+                            />
+                          ) : (
+                            <span className="text-xs text-muted-foreground">
+                              reference
+                            </span>
+                          )}
+                        </td>
+                      )}
                       <td className={`${tdNum} whitespace-nowrap`}>
                         {isBase ? (
                           <span className="text-xs text-muted-foreground">
@@ -326,6 +421,65 @@ export function VariantTable({
                         )}
                       </td>
                     </>
+                  )}
+                  {showJudge && (
+                    <td className={`${tdNum} whitespace-nowrap font-mono`}>
+                      {row && row.judgeScores.length > 0
+                        ? row.judgeScores.map((s) => (
+                            <span
+                              key={s.judge}
+                              className="block"
+                              title={`${s.judge}: mean score`}
+                            >
+                              {judgeCount > 1 && (
+                                <span className="text-xs text-muted-foreground">
+                                  {s.judge.split('/').pop()}{' '}
+                                </span>
+                              )}
+                              {Number(s.mean.toFixed(2))}
+                            </span>
+                          ))
+                        : '—'}
+                    </td>
+                  )}
+                  {showPairwise && (
+                    <td className={`${td} whitespace-nowrap font-mono text-xs`}>
+                      {isBase || !row || row.pairwise.length === 0 ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : (
+                        row.pairwise.map((judge) => (
+                          <span
+                            key={judge.judge}
+                            className="block"
+                            title={`${judge.judge}: ${judge.wins} wins, ${judge.losses} losses, ${judge.ties} ties over ${judge.compared} cases${judge.errors ? `, ${judge.errors} errors` : ''}`}
+                          >
+                            {pairwiseText(judge)}
+                          </span>
+                        ))
+                      )}
+                    </td>
+                  )}
+                  {showCost && (
+                    <td className={`${tdNum} font-mono`}>
+                      {row?.costPerCase !== undefined
+                        ? row.costPerCase.toFixed(2)
+                        : '—'}
+                    </td>
+                  )}
+                  {showTime && (
+                    <td className={`${tdNum} whitespace-nowrap font-mono`}>
+                      {row?.medianDurationMs !== undefined
+                        ? `${(row.medianDurationMs / 1000).toFixed(row.medianDurationMs < 10000 ? 1 : 0)} s`
+                        : '—'}
+                    </td>
+                  )}
+                  {report && (
+                    <td
+                      className={`${td} max-w-[260px] truncate font-mono text-xs`}
+                      title={row ? toolsText(row.toolsUsed) : undefined}
+                    >
+                      {row ? toolsText(row.toolsUsed) : '—'}
+                    </td>
                   )}
                   <td className={`${tdNum} whitespace-nowrap font-mono`}>
                     {v.meanTokensPerTrial !== undefined ? (
@@ -353,11 +507,11 @@ export function VariantTable({
         {showStats ? (
           <>
             Pass rate (pass@1) is the share of trials that passed. pass^{k} is
-            the share of should-now-work cases that passed all {k} trials. Each
-            change is the mean per-case difference from the current variant,
-            with a 95% t-interval over cases for scale. Colors and p come from
-            an exact paired sign-flip test: clearly better needs p below{' '}
-            {Number(betterThreshold(data).toPrecision(2))}
+            the share of {isEval ? '' : 'should-now-work '}cases that passed all{' '}
+            {k} trials. Each change is the mean per-case difference from the
+            baseline, with a 95% t-interval over cases for scale. Colors and p
+            come from an exact paired sign-flip test: clearly better needs p
+            below {Number(betterThreshold(data).toPrecision(2))}
             {data.variantsTried > 1
               ? ` (${data.alpha} split across ${data.variantsTried} variants tried)`
               : ''}

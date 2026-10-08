@@ -7,6 +7,11 @@ import type {
 } from '../../types';
 import { CaseCounts } from './VariantTable';
 import { FAILURE_LABEL, pct, variantName } from './format';
+import {
+  Preferences,
+  TrialView,
+  useTrialLookup,
+} from '../RunReport/TrialDetail';
 
 export type CaseFilter = 'all' | 'regressed' | 'improved' | 'unsteady';
 
@@ -30,6 +35,26 @@ interface Section {
 }
 
 function sectionsOf(data: MCPComparisonData): Section[] {
+  if (data.purpose === 'eval') {
+    // An eval's cases are one group, unless some are tagged as regression cases.
+    const regression = data.cases.filter((c) => c.group === 'regression');
+    return [
+      {
+        key: 'cases',
+        label: regression.length ? 'Cases' : 'All cases',
+        hint: regression.length ? 'not tagged' : 'pass rate per variant',
+        rows: data.cases.filter((c) => c.group === 'capability'),
+        rate: (v: VariantComparisonEntry) => v.capability.passRate,
+      },
+      {
+        key: 'keep',
+        label: 'Regression cases',
+        hint: `tagged “${data.regressionTag}”`,
+        rows: regression,
+        rate: (v: VariantComparisonEntry) => v.regression.passRate,
+      },
+    ].filter((s) => s.rows.length > 0);
+  }
   const capability = data.cases.filter((c) => c.group === 'capability');
   const hasHeldOut = capability.some((c) => c.heldOut);
   const seen = capability.filter((c) => !c.heldOut);
@@ -99,7 +124,9 @@ function Cell({
         ? 'bg-green-500/10'
         : 'bg-amber-500/10';
   const label = `${variantName(data, variant)}, ${row.id}: ${p} of ${k} trials passed${
-    change ? `, ${change === 'up' ? 'better' : 'worse'} than current` : ''
+    change
+      ? `, ${change === 'up' ? 'better' : 'worse'} than ${variantName(data, { id: data.baselineId })}`
+      : ''
   }. Open trials.`;
   return (
     <td className={`p-1 text-center ${selected ? 'bg-primary/5' : ''}`}>
@@ -197,6 +224,7 @@ function AttemptDialog({
     const dialog = ref.current;
     if (dialog && !dialog.open) dialog.showModal();
   }, []);
+  const lookup = useTrialLookup();
   const sides = [
     data.baselineId,
     ...(variantId === data.baselineId ? [] : [variantId]),
@@ -236,6 +264,14 @@ function AttemptDialog({
           </button>
         </div>
       </div>
+      {lookup?.redacted && (
+        <p className="border-b px-4 py-2 text-xs text-muted-foreground">
+          This run stored responses redacted, so answers, tool outputs and
+          judges’ reasoning aren’t shown. Set{' '}
+          <code className="font-mono">redactStoredResponses: false</code> in the
+          eval config to keep them.
+        </p>
+      )}
       <div
         className={`grid gap-4 p-4 ${sides.length > 1 ? 'md:grid-cols-2' : ''}`}
       >
@@ -247,7 +283,22 @@ function AttemptDialog({
                 {passes(row, id)}/{(row.trials[id] ?? []).length} passed
               </span>
             </h3>
-            <AttemptList trials={row.trials[id] ?? []} />
+            {lookup?.trials[id]?.[row.id] ? (
+              <>
+                {id !== data.baselineId && (
+                  <Preferences
+                    preferences={lookup.preferences[id]?.[row.id] ?? []}
+                  />
+                )}
+                <ol className="grid gap-2">
+                  {lookup.trials[id]![row.id]!.map((trial, i) => (
+                    <TrialView key={i} trial={trial} index={i} />
+                  ))}
+                </ol>
+              </>
+            ) : (
+              <AttemptList trials={row.trials[id] ?? []} />
+            )}
           </div>
         ))}
       </div>
@@ -277,12 +328,18 @@ export function CaseGrid({
     unsteady: (row) =>
       passes(row, selectedId) < (row.trials[selectedId] ?? []).length,
   };
-  const filters: Array<[CaseFilter, string]> = [
-    ['all', 'All'],
-    ['regressed', 'Worse'],
-    ['improved', 'Better'],
-    ['unsteady', 'Not fully passing'],
-  ];
+  const single = data.purpose === 'eval' && data.variants.length === 1;
+  const filters: Array<[CaseFilter, string]> = single
+    ? [
+        ['unsteady', 'Needs attention'],
+        ['all', 'All'],
+      ]
+    : [
+        ['all', 'All'],
+        ['regressed', 'Worse'],
+        ['improved', 'Better'],
+        ['unsteady', 'Not fully passing'],
+      ];
   const sections = sectionsOf(data);
   const openRow = open
     ? data.cases.find((c) => c.id === open.caseId)
@@ -295,8 +352,15 @@ export function CaseGrid({
         Case by case
       </h2>
       <p className="text-sm text-muted-foreground">
-        Each dot is one trial. Filters and arrows compare{' '}
-        <span className="font-mono">{selectedName}</span> with the baseline.
+        {single ? (
+          <>Each dot is one trial. Select a case to read its trials.</>
+        ) : (
+          <>
+            Each dot is one trial. Filters and arrows compare{' '}
+            <span className="font-mono">{selectedName}</span> with the baseline.
+            Select a cell to read its trials.
+          </>
+        )}
       </p>
       <div
         className="flex flex-wrap items-center gap-2"
@@ -357,7 +421,9 @@ export function CaseGrid({
                     {variantName(data, v)}
                   </span>
                   <span className="mt-0.5 block text-xs font-normal">
-                    {v.id === base ? (
+                    {single ? (
+                      'trials'
+                    ) : v.id === base ? (
                       'reference'
                     ) : (
                       <CaseCounts
@@ -386,7 +452,9 @@ export function CaseGrid({
                     <td className="px-3 py-2 font-semibold">
                       {section.label}{' '}
                       <span className="font-normal text-muted-foreground">
-                        · {section.rows.length} cases · {section.hint}
+                        · {section.rows.length}{' '}
+                        {section.rows.length === 1 ? 'case' : 'cases'} ·{' '}
+                        {section.hint}
                       </span>
                     </td>
                     {data.variants.map((v) => {
@@ -464,16 +532,21 @@ export function CaseGrid({
         </span>
         <span className="inline-flex items-center gap-1">
           <span className="h-3 w-3 rounded-sm border border-red-600 bg-red-500/10" />{' '}
-          failed every trial, or worse than current
+          {single
+            ? 'failed every trial'
+            : 'failed every trial, or worse than the baseline'}
         </span>
-        <span>
-          <b className="text-green-600 dark:text-green-400">▲</b> better than
-          current
-        </span>
-        <span>
-          <b className="text-red-600 dark:text-red-400">▼</b> worse than current
-        </span>
-        <span>Select a cell to compare its trials with the baseline</span>
+        {!single && (
+          <>
+            <span>
+              <b className="text-green-600 dark:text-green-400">▲</b> passes
+              more trials than the baseline
+            </span>
+            <span>
+              <b className="text-red-600 dark:text-red-400">▼</b> passes fewer
+            </span>
+          </>
+        )}
       </div>
       {open && openRow && (
         <AttemptDialog

@@ -276,7 +276,7 @@ Options: `outputDir` (default `.mcp-test-results`), `autoOpen`, `historyLimit` (
 | `mst run --config <path>`                                | Run an eval config. `--variant`, `--case <ids...>`, `--trials <n>`, `--plugins`, `--output-dir`, `--secrets-file`, `--dry-run` |
 | `mst batch --config-dir <dir>`                           | Run several eval configs. `--configs`, `--workers`, `--skip-existing`, `--dry-run`                                             |
 | `mst auth --config <path>`                               | Sign in to an eval config's connector servers (`status`, `revoke`)                                                             |
-| `mst open [--dir .mcp-test-results]`                     | Open the reporter UI                                                                                                           |
+| `mst open [run or eval dir]`                             | Open a run's report: the newest run, or the one named. `--print` prints its path                                               |
 | `mst cowork setup`                                       | Prepare Claude Desktop's profile for the `cowork` client (macOS)                                                               |
 
 Inside a project, `npx mst` and `npx mcp-server-tester` run the same binary. Before installing, use `npx @gleanwork/mcp-server-tester@beta`: `npx mst` alone downloads an unrelated package.

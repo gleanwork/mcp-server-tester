@@ -581,15 +581,15 @@ export function improvesCapabilityCases(
   return measurement.capability.change?.assessment === 'better';
 }
 
-/** One candidate run, as `runToolOptimization` scored it. */
+/** One candidate run, as `runToolOptimization` scored it (or an eval run's variant). */
 interface VariantRunInput {
   id: string;
   description?: string;
-  tools: Record<string, ToolMetadataOverride>;
+  tools?: Record<string, ToolMetadataOverride>;
   result: EvalRunnerResult;
   /** Whether the optimization judged this variant to fix what it should. */
-  fixes: boolean;
-  disqualified: boolean;
+  fixes?: boolean;
+  disqualified?: boolean;
 }
 
 /** Options for {@link compareVariants}. */
@@ -604,6 +604,10 @@ export interface CompareVariantsOptions {
   heldOutTag?: string;
   /** Variants tried across every round. @default candidates.length */
   variantsTried?: number;
+  /** What the comparison is for. @default 'tool-optimization' */
+  purpose?: 'eval' | 'tool-optimization';
+  /** The baseline's ID and display name. @default 'baseline', shown as "current" */
+  baselineName?: string;
   /** The server's original metadata for the tools the variants change. */
   originalTools?: Record<
     string,
@@ -717,7 +721,7 @@ export function compareVariants(
   const groupOf = grouper(options.grouping);
   const variantsTried = options.variantsTried ?? options.candidates.length;
   const ids = new Set(options.candidates.map((c) => c.id));
-  let baselineId = BASELINE_ID;
+  let baselineId = options.baselineName ?? BASELINE_ID;
   while (ids.has(baselineId)) baselineId = `_${baselineId}`;
 
   const runs = [
@@ -835,7 +839,7 @@ export function compareVariants(
           }
         : {}),
       toolChanges: candidate
-        ? toolChangesOf(candidate.tools, options.originalTools)
+        ? toolChangesOf(candidate.tools ?? {}, options.originalTools)
         : [],
     };
   };
@@ -851,6 +855,10 @@ export function compareVariants(
   );
   return {
     baselineId,
+    ...(options.baselineName !== undefined
+      ? { baselineName: options.baselineName }
+      : {}),
+    ...(options.purpose !== undefined ? { purpose: options.purpose } : {}),
     regressionCheck: options.regressionCheck,
     grouping: options.grouping.source,
     trialsToDetectBrokenCase: trialsToDetectBrokenCase(regressionCases.length),

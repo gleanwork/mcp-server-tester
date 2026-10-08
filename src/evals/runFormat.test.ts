@@ -100,7 +100,10 @@ describe('the mst.run/v1 layout', () => {
     expect(runId).toMatch(RUN_ID_PATTERN);
     expect(result.outputDir).toBe(path.join(evalDir, 'runs', runId));
 
-    const tree = await files(result.outputDir);
+    // report/ is the reporter UI and its data; the rest is the format.
+    const all = await files(result.outputDir);
+    expect(all).toContain(path.join('report', 'index.html'));
+    const tree = all.filter((file) => !file.startsWith(`report${path.sep}`));
     const trial = (variant: string, id: string, n: number) =>
       `traces/${variant}/${encodeURIComponent(id)}/${n}.json`;
     const score = (variant: string, id: string, n: number) =>
@@ -204,7 +207,10 @@ describe('judges, pairwise judges and long case IDs', () => {
       })
     );
     const result = await run();
-    const tree = await files(result.outputDir);
+    // report/ is the reporter UI and its data; the rest is the format.
+    const all = await files(result.outputDir);
+    expect(all).toContain(path.join('report', 'index.html'));
+    const tree = all.filter((file) => !file.startsWith(`report${path.sep}`));
     for (const file of tree)
       for (const part of file.split(path.sep))
         expect(Buffer.byteLength(part)).toBeLessThanOrEqual(255);

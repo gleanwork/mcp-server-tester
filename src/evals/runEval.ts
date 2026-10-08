@@ -1,4 +1,5 @@
 import { RUN_FORMAT } from './resultFormat.js';
+import { writeRunReport } from './runReport.js';
 import {
   assertUniqueCaseIds,
   assertUniqueVariantNames,
@@ -14,7 +15,7 @@ import { resolveConfigExtends } from './configExtends.js';
 import { resolveCoworkSetupConfig } from './coworkSetup/options.js';
 import { sumUsage } from '../utils/usageUtils.js';
 import { sumJudgeUsage } from '../judge/judgeContract.js';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -143,6 +144,12 @@ export interface RunEvalOptions {
   redactStoredResponses?: boolean;
   /** Skip the eval config's pairwise judges (tool optimization ranks variants itself). */
   skipPairwise?: boolean;
+  /**
+   * Write the run's report (`report/`, about 650 KB of reporter UI plus the
+   * run's data). `mst open` writes a missing report when it opens a run.
+   * @default true
+   */
+  report?: boolean;
   /**
    * Where connector servers' grants are (`mst auth` puts them there).
    * Default: `mst/credential-store/local`.
@@ -474,6 +481,83 @@ async function comparePairwiseVariants(
       concurrency: evalConfig.concurrency,
     });
   return sumJudgeUsage(candidates.map((variant) => variant.pairwise?.usage));
+}
+
+/**
+ * What a variant runs with, for run.json and the report's "What differs":
+ * its client, model and client options, tool metadata, input template and
+ * judges. Client options whose names suggest credentials, and any that
+ * aren't plain values, are replaced by a hash.
+ */
+function variantSetup(
+  evalConfig: EvalConfig,
+  declared: EvalVariant | undefined,
+  runKey: Buffer
+): Record<string, unknown> {
+  const client = declared?.client ?? evalConfig.client;
+  const model = declared?.model ?? evalConfig.model;
+  // A variant's options add to the eval config's when it keeps the client.
+  const options =
+    declared?.client === undefined || declared.client === evalConfig.client
+      ? { ...evalConfig.clientOptions, ...declared?.clientOptions }
+      : { ...declared.clientOptions };
+  const tools = declared?.tools ?? evalConfig.tools;
+  const inputTemplate = declared?.inputTemplate ?? evalConfig.inputTemplate;
+  const judges = (declared?.judges ?? evalConfig.judges ?? []).map((judge) =>
+    typeof judge === 'string' ? judge : judge.type
+  );
+  return {
+    ...(declared?.description ? { description: declared.description } : {}),
+    ...(typeof client === 'string' ? { client } : {}),
+    ...(typeof model === 'string' ? { model } : {}),
+    ...(Object.keys(options).length
+      ? { clientOptions: recordableOptions(options, runKey) }
+      : {}),
+    ...(tools ? { tools } : {}),
+    ...(inputTemplate ? { inputTemplate } : {}),
+    ...(judges.length ? { judges } : {}),
+  };
+}
+
+/** Option names that suggest a credential, a location or a header. */
+const SENSITIVE_OPTION =
+  /key|token|secret|password|passwd|auth|credential|cookie|bearer|session|jwt|sig|pat$|url|uri|header|env/i;
+
+/** Values that look like a URL, a long token, or a key=value pair. */
+const SENSITIVE_VALUE = /:\/\/|=|^[A-Za-z0-9_\-.~+/]{24,}$/;
+
+/**
+ * A variant's client options as run.json records them: numbers, booleans
+ * and short strings whose name and value don't suggest a credential are
+ * kept; everything else is replaced by an HMAC keyed for this run, so
+ * variants of one run can be compared but values can't be guessed or
+ * matched across runs.
+ */
+export function recordableOptions(
+  options: Record<string, unknown>,
+  runKey: Buffer
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(options).map(([key, value]) => {
+      const safe =
+        !SENSITIVE_OPTION.test(key) &&
+        (value === null ||
+          typeof value === 'number' ||
+          typeof value === 'boolean' ||
+          (typeof value === 'string' &&
+            value.length <= 64 &&
+            !SENSITIVE_VALUE.test(value)));
+      return [
+        key,
+        safe
+          ? value
+          : `hmac:${createHmac('sha256', runKey)
+              .update(JSON.stringify(value) ?? '')
+              .digest('hex')
+              .slice(0, 16)}`,
+      ];
+    })
+  );
 }
 
 /** The judges a run used, by name and level, each with a hash of its options. */
@@ -1139,6 +1223,8 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
       })
     );
   }
+  // Keys the hashes of client options in run.json: comparable within this run only.
+  const runKey = randomBytes(32);
   await writeRun(
     outputDir,
     executionId,
@@ -1153,13 +1239,10 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
         const declared = variants.find(
           (candidate) => candidate.name === variant.name
         );
-        const client = declared?.client ?? evalConfig.client;
-        const model = declared?.model ?? evalConfig.model;
         return {
           name: variant.name,
           servers: variant.servers,
-          ...(typeof client === 'string' ? { client } : {}),
-          ...(typeof model === 'string' ? { model } : {}),
+          ...variantSetup(evalConfig, declared, runKey),
         };
       }),
       // The cases each dataset ran (the first variant's selection).
@@ -1182,6 +1265,15 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
     },
     storedSummary
   );
+  // The report is rebuilt from the run's files, so it shows what was stored.
+  // It must never cost the run its results.
+  try {
+    if (options.report !== false) await writeRunReport(outputDir);
+  } catch (error) {
+    console.warn(
+      `[mst] The run's report wasn't written: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
   // Last, so a crash leaves latest.json at the previous run; a partial run
   // never becomes the latest.
   if (!summary.partial)

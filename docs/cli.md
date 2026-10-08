@@ -15,7 +15,7 @@ Before the package is installed (for example, running `init` in a new directory)
 - [auth - Sign In to Connector Servers](#auth---sign-in-to-connector-servers)
 - [run - Run an Eval Config](#run---run-an-eval-config)
 - [batch - Run Several Eval Configs](#batch---run-several-eval-configs)
-- [open - Open the Reporter](#open---open-the-reporter)
+- [open - Open a Run's Report](#open---open-a-runs-report)
 - [cowork setup - Prepare Cowork](#cowork-setup---prepare-cowork)
 
 ## `init` - Initialize Project
@@ -787,13 +787,19 @@ npx mst batch --configs a.json b.json [options]
 
 `batch` prints each eval config's outcome and a total, and exits 1 when any eval config failed.
 
-## `open` - Open the Reporter
+## `open` - Open a Run's Report
 
 ```bash
-npx mst open [--dir .mcp-test-results]
+npx mst open                                          # the newest run under .mcp-test-results
+npx mst open .mcp-test-results/<eval name>            # that eval's latest run
+npx mst open .mcp-test-results/<eval name>/runs/<run-id>
 ```
 
-Opens the [UI reporter](./ui-reporter.md) the Playwright reporter wrote in a results directory (`-d, --dir`, default `.mcp-test-results`; it opens `latest/index.html`). `mst run` writes a run directory, not a report yet.
+Opens a run's report (`<run>/report/index.html`), which `mst run` writes with every run. With no path it opens the newest complete run under `-d, --dir` (default `.mcp-test-results`), read from each eval's `latest.json`. A path names a run directory, or an eval's directory for its latest run. A run without a report, such as one copied without `report/`, gets one written from its files first. `--print` prints the report's path instead of opening it.
+
+When the directory has no eval runs, `mst open` opens the Playwright reporter's `latest/index.html` there, if there is one.
+
+The report has the same sections for every eval: **Result** (each variant clearly better, clearly worse, or unclear against the baseline), **Variants compared** (pass rate, judge score, pairwise preference, cost, time, tools used; _Show statistics_ adds 95% ranges, p-values and pass^k), **What differs** (each variant's setup next to the baseline's), **Case by case** (every trial with its trace, each grader's score and the pairwise preference) and **Why trials failed**. A run with one variant opens on the cases that need attention. A run that stored responses redacted (the default, `redactStoredResponses`) shows no answers or tool outputs; set `redactStoredResponses: false` in the eval config to keep them.
 
 ## `cowork setup` - Prepare Cowork
 

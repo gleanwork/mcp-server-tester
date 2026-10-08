@@ -25,12 +25,20 @@ export type {
   EvalCaseResult,
   MCPEvalHistoricalSummary,
   MCPEvalData,
+  MCPRunReportData,
+  RunReportDifference,
+  RunReportEvent,
+  RunReportPreference,
+  RunReportTrial,
+  RunReportVariant,
 } from '../../types/reporter.js';
 
-import type { MCPEvalData } from '../../types/reporter.js';
+import type { MCPEvalData, MCPRunReportData } from '../../types/reporter.js';
 
 declare global {
   interface Window {
     MCP_EVAL_DATA: MCPEvalData;
+    /** Set by a run's report/data.js (`mst open`). */
+    MST_RUN_REPORT?: MCPRunReportData;
   }
 }

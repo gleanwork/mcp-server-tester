@@ -70,12 +70,14 @@ export function rangeText(change: PairedChange): string {
   return `${pts(change.lower)} to ${pts(change.upper)} pts`;
 }
 
-/** Display name: the baseline is "current". */
+/** Display name: the baseline's name, or "current" in a tool optimization. */
 export function variantName(
   data: MCPComparisonData,
   variant: Pick<VariantComparisonEntry, 'id'>
 ): string {
-  return variant.id === data.baselineId ? 'current' : variant.id;
+  return variant.id === data.baselineId
+    ? (data.baselineName ?? 'current')
+    : variant.id;
 }
 
 export const STATUS_LABEL: Record<VariantStatus, string> = {

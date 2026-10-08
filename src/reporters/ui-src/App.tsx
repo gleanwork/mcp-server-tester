@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { createRoot } from 'react-dom/client';
-import type { MCPEvalData, EvalCaseResult } from './types';
+import type { MCPEvalData, EvalCaseResult, MCPRunReportData } from './types';
+import { RunReport } from './components/RunReport/RunReport';
 import { Layout } from './components/Layout';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import {
@@ -321,7 +322,33 @@ function App() {
   );
 }
 
+/** An eval run's report (`mst open`), in the same shell. */
+function RunReportApp({ data }: { data: MCPRunReportData }) {
+  return (
+    <Layout
+      timestamp={data.run.createdAt}
+      platform={data.run.evalName}
+      durationMs={
+        new Date(data.run.finishedAt).getTime() -
+        new Date(data.run.createdAt).getTime()
+      }
+    >
+      <ErrorBoundary>
+        <div className="h-full overflow-auto">
+          <RunReport data={data} />
+        </div>
+      </ErrorBoundary>
+    </Layout>
+  );
+}
+
 const root = document.getElementById('root');
 if (root) {
-  createRoot(root).render(<App />);
+  createRoot(root).render(
+    window.MST_RUN_REPORT ? (
+      <RunReportApp data={window.MST_RUN_REPORT} />
+    ) : (
+      <App />
+    )
+  );
 }
