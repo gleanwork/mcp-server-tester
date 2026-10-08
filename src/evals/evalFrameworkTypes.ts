@@ -15,6 +15,7 @@ import type {
 import type { EvalResultStore } from './resultStore.js';
 import type { EvalRunnerResult } from './evalRunner.js';
 import type { JudgeInput, JudgeScore } from '../judge/judgeContract.js';
+import type { PairwiseComparisonResult } from './pairwiseComparison.js';
 
 /** Context provided to a dataset source implementation. */
 export interface DatasetSourceContext {
@@ -261,6 +262,13 @@ export interface EvaluationVariantResult {
   /** Models whose usage had no reported cost and no price: `cost_usd` leaves them out. */
   unpricedModels?: string[];
   comparison?: Record<string, unknown>;
+  /**
+   * This variant compared with the baseline by the eval config's
+   * `pairwiseJudges`: a preference per case and judge, and each judge's
+   * win, loss and tie counts. Absent on the baseline, and when the baseline
+   * didn't run.
+   */
+  pairwise?: PairwiseComparisonResult;
 }
 
 /** Stable summary shape written by a completed evaluation eval. */
@@ -269,8 +277,10 @@ export interface RunTelemetry {
   toolCalls: number;
   failedCases: number;
   totalClientUsage?: Partial<UsageMetrics>;
-  /** Judge model usage, from judges that report it. Separate from client usage. */
+  /** Judge model usage, from judges that report it, pairwise judges included. Separate from client usage. */
   totalJudgeUsage?: Partial<UsageMetrics>;
+  /** The pairwise judges' share of `totalJudgeUsage`. */
+  pairwiseJudgeUsage?: Partial<UsageMetrics>;
 }
 
 /** How one variant changed since the previous run of the same eval config. */

@@ -33,6 +33,7 @@ This guide covers upgrading from 1.x (the last 1.x release is 1.1.1). Features f
 - [Eval APIs and client contracts say eval, client and tool optimization](#eval-apis-and-client-contracts-say-eval-client-and-tool-optimization)
 - [Plugin extension names say their kind](#plugin-extension-names-say-their-kind)
 - [Servers are a map keyed by label](#servers-are-a-map-keyed-by-label)
+- [Case judges sit beside assertions](#case-judges-sit-beside-assertions)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
 ---
@@ -267,7 +268,7 @@ export default {
 ```
 
 - **A judge's `evaluate` takes `({ case, trial }, options)`** instead of `(candidate, reference)`. `candidate` is `trial.response` (its text is `trial.text`) and `reference` is `case.expected.answer`. The case's input, criteria, tags and metadata, and the run's tool events, are in the input too. `options` is what the judge's `schema` parsed. A judge returns the old `{ score, reasoning }`, and may also return `provider`, `model`, `pass`, `skipped`, `subScores`, `usage` and `metadata`. It runs once per `reps` ([Every judge runs the same way](#every-judge-runs-the-same-way); [Judge contract](../evaluation-framework.md#judge-contract)). The `schema` is required; `z.object({}).passthrough()` accepts any options, as the old registry did.
-- **Reference it as `namespace/name`**, in `toPassToolJudge({ judge })` and in a dataset's `passesJudge.judge`. Bare names belong to built-ins, so a plugin can't take one. A 1.x bare name such as `judge: 'completeness'` now fails the assertion with `Judge "completeness" is not available`, followed by the names that are.
+- **Reference it as `namespace/name`**, in `toPassToolJudge({ judge })` and in a dataset case's `judges` ([Case judges sit beside assertions](#case-judges-sit-beside-assertions)). Bare names belong to built-ins, so a plugin can't take one. A 1.x bare name such as `judge: 'completeness'` now fails the assertion with `Judge "completeness" is not available`, followed by the names that are.
 - **Pass the plugin where the judge is used**, instead of registering it in global setup: `test.use({ mcpPlugins: [plugin] })` in Playwright, `runEvalDataset({ dataset, plugins: [plugin] }, ctx)`, or `runEvalCase(evalCase, ctx, { plugins: [plugin] })`. Code that calls `validateJudge` or the matchers outside those installs it with `installPlugins([plugin])`. For a one-off judge, a small local plugin is enough: `{ meta: { name: 'local', namespace: 'local' }, judges: { x } }`.
 - **Plugins are validated when installed.** A judge without a `schema` or `evaluate`, an unknown top-level key, or a different plugin claiming an installed namespace is an error that names the plugin.
 - **Removed from the root:** `registerJudge`, `getRegisteredJudge`, `clearJudgeRegistry`, and the `CustomJudgeExecutor` and `CustomJudgeResult` types.
@@ -296,7 +297,7 @@ MST's LLM calls now resolve their endpoint and credential in one place (`src/llm
 - **`ANTHROPIC_BASE_URL` takes either form.** The SDK host needed the AI SDK's form (ending in `/v1`) and the judge needed the API root (the official SDK's and Claude Code's form); each failed with 404 on the other. Both now accept both.
 - **The `mst` client streams Anthropic calls.** Its agent loop uses `streamText` instead of `generateText`. Tool calls, text, steps and usage are the same; an error part in the middle of a stream now fails the case.
 - **The `mst` client sends `store: false` to OpenAI behind `OPENAI_BASE_URL`.** Multi-turn tool loops through a gateway failed with `Item with id 'rs_…' not found`, because the AI SDK refers to earlier Responses items by id. Calls to the public API are unchanged.
-- **Unknown dataset keys are errors.** A key MST doesn't define in a dataset, a case or its `assertions` block fails loading. Examples are `regex` (use `matchesPattern`), `judge` (use `passesJudge`), and a misspelt `passThreshold`. 1.x ignored such keys, so the setting or assertion never applied. The error names the case.
+- **Unknown dataset keys are errors.** A key MST doesn't define in a dataset, a case or its `assertions` block fails loading. Examples are `regex` (use `matchesPattern`), `judge` (use the case's `judges`), and a misspelt `passThreshold`. 1.x ignored such keys, so the setting or assertion never applied. The error names the case.
 - **The `mst` client doesn't report cost.** `usage.totalCostUsd` is undefined for the `mst` client, which knows tokens but not prices; the 1.x SDK host reported 0. The same holds for `claude-code` output without a cost. An eval can estimate cost with its eval config's `pricing`.
 - **Clearer `mst` client errors.** Errors are classified by HTTP status as well as message text, so a 401 whose message doesn't say "401" still gets the authentication hint, and the hint now includes the provider's message: `authentication error (<provider message>)`. A plain-object stream error shows its `message` instead of `[object Object]`.
 
@@ -458,9 +459,11 @@ test('weather-london', async ({ mcp }) => {
 | `matchesPattern`  | `toMatchToolPattern(patterns)`              |
 | `passesJudge`     | `toPassToolJudge(rubric, options?)`         |
 
+In an eval case, a judge isn't an assertion any more: it goes in the case's `judges` ([Case judges sit beside assertions](#case-judges-sit-beside-assertions)).
+
 - To keep tool checks in JSON, loop over the file in a spec and make each entry a `test()`; the [filesystem example](../../examples/filesystem-server/) does this with `tool-checks.json`.
 - A `request` case becomes `mcp.request(method, params, schema)` in a test; `mcp.skills` covers the skills methods. A JSON-RPC error rejects with its `code`. The built-in `SkillsListResult`-style schemas are gone with `assertions.schema`; use `validateSkillEntry()`.
-- `containsText`, `matchesPattern`, `passesJudge`, `toolsTriggered` and `toolCallCount` stay as eval assertions, on what the client did.
+- `containsText`, `matchesPattern`, `toolsTriggered` and `toolCallCount` stay as eval assertions, on what the client did. Judges stay too, in the case's `judges`.
 - `mst generate` writes a Playwright spec (default `tests/generated.spec.ts`) instead of a dataset, and adds tests to a spec it wrote before. `mst init` scaffolds a tool test and a client-case dataset.
 - `executeCase` returns `kind: 'completed'` or `'failed'`; `'direct'` fails. Results no longer carry `request.mode`. `JudgeCase.input.tool` is gone (judges see `input.prompt`).
 - `defaultTrials` and `defaultPassThreshold` now apply to every case.
@@ -674,6 +677,46 @@ Define each server once under top-level `servers`, keyed by its label, and list 
 ```
 
 An array of servers, a `label` in a map entry, a server object in a variant's `servers`, and a label the eval config doesn't define each fail with what to write instead. Inside MST and in what plugins receive (`evalConfig.servers`, `ClientRunInput.servers`), servers are still labelled lists: `MCPConfig` entries, and connector servers until a run expands them. A loaded config keeps a variant's labels as `serverLabels`; once validated, the variant has its `servers` instead.
+
+## Case judges sit beside assertions
+
+**Affects:** datasets whose cases set `assertions.passesJudge`, and code that builds `EvalCase` objects with it or reads `EvalAssertions.passesJudge`.
+
+A judge is a grader, not an assertion, so a case lists its judges in `judges`, beside `assertions`. Each entry has the same shape as an eval config's `judges`: a reference, or `{ "type": <reference>, ...options }`. The built-in rubric judge is `"type": "rubric"`; a plugin judge's `judge` key becomes `type`. A single judge becomes a one-entry list.
+
+```jsonc
+// Before
+{
+  "id": "summarize-readme",
+  "input": "Summarize the README",
+  "assertions": {
+    "containsText": "README",
+    "passesJudge": [
+      { "rubric": "groundedness", "threshold": 0.8 },
+      { "judge": "acme/judge/completeness" }
+    ]
+  }
+}
+
+// 2.0
+{
+  "id": "summarize-readme",
+  "input": "Summarize the README",
+  "assertions": { "containsText": "README" },
+  "judges": [
+    { "type": "rubric", "rubric": "groundedness", "threshold": 0.8 },
+    "acme/judge/completeness"
+  ]
+}
+```
+
+- **`assertions.passesJudge` fails loading**, naming `judges`. A plugin judge named as the wrong kind (`"acme/metric/x"`) fails when the dataset loads, not when the case is graded.
+- **The merge rules are unchanged.** A case runs its own judges plus the eval config's; a variant's `judges` replace the eval config's for that variant; when the case and the eval config list the same judge, the case's settings win. See [Judges](../evaluation-framework.md#judges).
+- **Results keep their shape.** Judge scores stay under `scores.judge`. A result's `request` echoes the judges the case ran as `request.judges` instead of `request.assertions.passesJudge`.
+- **Playwright is unchanged.** `toPassToolJudge` and `validateJudge` take the same options as before.
+- **`JudgeExpectConfig`** remains the judge request type (it has `judge`); a case's entries are `CaseJudge` (`string | CaseJudgeConfig`, which has `type`).
+
+Pairwise judges can now go in an eval config too: `"pairwiseJudges": ["acme/pairwise-judge/preference"]` compares each variant with the baseline after the run, and the result is the variant's `pairwise` in the run summary.
 
 ## New in 2.0 (non-breaking)
 

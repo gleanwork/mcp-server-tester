@@ -465,6 +465,8 @@ function evalRunner(options: EvalToolOptimizationOptions): RunVariants {
     const { summary } = await runEval({
       configPath: target.configPath,
       rootDir: target.rootDir,
+      // Rounds rank candidates by the metric; pairwise judges would only cost.
+      skipPairwise: true,
       pluginPaths: target.pluginPaths,
       plugins: target.plugins,
       secretsFile: target.secretsFile,

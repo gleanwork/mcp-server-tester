@@ -182,7 +182,7 @@ An eval case gives the client under test an input, and asserts on what it did. C
 }
 ```
 
-Assertions are declared per case in the `assertions` block: which tools the client called (`toolsTriggered`, `toolCallCount`), its answer (`containsText`, `matchesPattern`), and judges (`passesJudge`). See the [Evals Guide](./evals-guide.md).
+Assertions are declared per case in the `assertions` block: which tools the client called (`toolsTriggered`, `toolCallCount`) and its answer (`containsText`, `matchesPattern`). Judges go in the case's `judges` list, beside `assertions`. See the [Evals Guide](./evals-guide.md).
 
 ## Running Evals
 

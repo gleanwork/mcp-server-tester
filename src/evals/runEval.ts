@@ -50,7 +50,7 @@ import { createEvalCaseExecutor } from './caseExecution.js';
 import { mergeEvalJudges } from './grading.js';
 import { prepareClientBatch } from './prepareClientBatch.js';
 import type { EvalRunnerResult } from './evalRunner.js';
-import { EvalAssertionsSchema, type EvalDataset } from './datasetTypes.js';
+import type { EvalCase, EvalDataset } from './datasetTypes.js';
 import {
   assertNamedCases,
   narrowEvalCases,
@@ -74,10 +74,13 @@ import { getResultStore, resolveStorePaths } from './builtinResultStores.js';
 import { compareWithPrevious, findPreviousRun } from './runBaseline.js';
 import { costSource, estimateCosts } from './pricing.js';
 import {
+  pairwiseJudgeSpec,
   parseClientConfig,
   validateEvalConfig,
   inheritClient,
 } from './configValidation.js';
+import { comparePairwise } from './pairwiseComparison.js';
+import type { JudgeCaseSource } from '../judge/judgeContract.js';
 import {
   computeMetrics,
   type MetricSpec,
@@ -130,6 +133,8 @@ export interface RunEvalOptions {
     | EvalVariant[]
     | ((configVariants: readonly EvalVariant[]) => EvalVariant[]);
   redactStoredResponses?: boolean;
+  /** Skip the eval config's pairwise judges (tool optimization ranks variants itself). */
+  skipPairwise?: boolean;
   /**
    * Where connector servers' grants are (`mst auth` puts them there).
    * Default: `mst/credential-store/local`.
@@ -419,6 +424,48 @@ function buildVariantDeltas(
       ];
     })
   );
+}
+
+/**
+ * After every variant has run: compare each variant with the baseline, case
+ * by case, with the eval config's `pairwiseJudges`, and record the result on
+ * the variant. Skipped, with a note, when the baseline didn't run (`--variant`).
+ * Returns the pairwise judges' usage.
+ */
+async function comparePairwiseVariants(
+  evalConfig: EvalConfig,
+  variantResults: EvaluationVariantResult[],
+  cases: readonly EvalCase[]
+): Promise<Partial<UsageMetrics> | undefined> {
+  const judges = (evalConfig.pairwiseJudges ?? []).map(pairwiseJudgeSpec);
+  if (judges.length === 0) return undefined;
+  // Validation put the baseline first.
+  const baselineName = evalConfig.variants?.[0]?.name ?? 'default';
+  const baseline = variantResults.find(
+    (variant) => variant.name === baselineName
+  );
+  if (!baseline) {
+    console.warn(
+      `[mst] The baseline "${baselineName}" didn't run, so no pairwise judge compared the variants with it.`
+    );
+    return undefined;
+  }
+  const candidates = variantResults.filter((variant) => variant !== baseline);
+  const byId = new Map<string, JudgeCaseSource>(
+    cases.map((evalCase) => [evalCase.id, evalCase])
+  );
+  // A case that errored on either side has nothing to compare.
+  const ran = (variant: EvaluationVariantResult) =>
+    (variant.result?.caseResults ?? []).filter((result) => !result.error);
+  for (const candidate of candidates)
+    candidate.pairwise = await comparePairwise({
+      baseline: { name: baseline.name, caseResults: ran(baseline) },
+      candidate: { name: candidate.name, caseResults: ran(candidate) },
+      judges,
+      cases: byId,
+      concurrency: evalConfig.concurrency,
+    });
+  return sumJudgeUsage(candidates.map((variant) => variant.pairwise?.usage));
 }
 
 function redactServerForReport(server: MCPConfig): MCPConfig {
@@ -747,18 +794,17 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
                     )
                   )
                 : {}),
+              // The case's judges and the eval config's (a variant's replace
+              // the config's); the case's settings win for a judge in both.
               ...(effectiveConfig.judges?.length
                 ? {
-                    assertions: EvalAssertionsSchema.parse({
-                      ...evalCase.assertions,
-                      passesJudge: mergeEvalJudges(
-                        evalCase,
-                        effectiveConfig.judges,
-                        (rawVariant.judges ?? rawConfig.judges ?? []) as Array<
-                          Record<string, unknown>
-                        >
-                      ),
-                    }),
+                    judges: mergeEvalJudges(
+                      evalCase,
+                      effectiveConfig.judges,
+                      (rawVariant.judges ?? rawConfig.judges ?? []) as Array<
+                        Record<string, unknown>
+                      >
+                    ),
                   }
                 : {}),
               ...(template && evalCase.input
@@ -875,6 +921,23 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
     await credentials.stop();
   }
 
+  // Like the previous-run comparison, pairwise judging must never cost the
+  // run its results.
+  let pairwiseUsage: Partial<UsageMetrics> | undefined;
+  if (!options.skipPairwise) {
+    try {
+      pairwiseUsage = await comparePairwiseVariants(
+        evalConfig,
+        variantResults,
+        canonicalDatasets.flatMap(({ dataset }) => dataset.cases)
+      );
+    } catch (error) {
+      console.warn(
+        `[mst] Pairwise judges didn't run: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
   const variantMetrics = variantResults.map((variant, index) => {
     const listed = (variants[index]?.metrics ??
       evalConfig.metrics ??
@@ -916,15 +979,18 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
       variant.result?.totalClientUsage
     );
   }
-  const totalJudgeUsage = sumJudgeUsage(
-    variantResults.map((variant) => variant.result?.totalJudgeUsage)
-  );
+  // Every judge's usage, pairwise included; pairwise is also reported alone.
+  const totalJudgeUsage = sumJudgeUsage([
+    ...variantResults.map((variant) => variant.result?.totalJudgeUsage),
+    pairwiseUsage,
+  ]);
   const telemetry: RunTelemetry = {
     cases: allResults.length,
     toolCalls: countTrialToolCalls(allResults),
     failedCases: allResults.filter((result) => !result.pass).length,
     totalClientUsage,
     ...(totalJudgeUsage !== undefined && { totalJudgeUsage }),
+    ...(pairwiseUsage !== undefined && { pairwiseJudgeUsage: pairwiseUsage }),
   };
   const summary: EvaluationSummary = {
     schemaVersion: RESULT_SCHEMA_VERSION,

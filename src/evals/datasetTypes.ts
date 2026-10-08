@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { referenceSchema } from './referenceSchemas.js';
+import { kindCheckedReferenceSchema } from './referenceSchemas.js';
 import { clientFieldSchemas, type ClientFields } from './clientFields.js';
 import type { BuiltInRubric, ProviderKind } from '../judge/judgeTypes.js';
 import type { TraceEvent } from './evalFrameworkTypes.js';
@@ -53,17 +53,16 @@ export interface EvalCase extends ClientFields {
   passThreshold?: number;
 
   /**
-   * Number of times to invoke the LLM judge per `passesJudge` assertion.
-   * Scores are averaged; the mean must meet the threshold to pass.
-   * Reduces judge variance caused by non-determinism.
-   * Per-assertion `passesJudge.reps` overrides this value.
+   * Number of times to run each of the case's judges. Scores are averaged;
+   * the mean must meet the threshold to pass. Reduces judge variance caused
+   * by non-determinism. A judge's own `reps` overrides this value.
    * @default 1
    */
   judgeReps?: number;
 
   /**
    * What the case expects, for graders: `answer` (the reference answer,
-   * passed to judges as `reference` unless an assertion sets its own),
+   * passed to judges as `reference` unless a judge sets its own),
    * `criteria` (rubric criteria keyed by name), and any other ground truth.
    * Judges read it as `case.expected`.
    */
@@ -101,32 +100,44 @@ export interface EvalCase extends ClientFields {
    * ```
    */
   assertions?: EvalAssertions;
+
+  /**
+   * Judges (model graders) that score each trial. Each must pass. They run
+   * on top of the eval config's `judges`; when the case and the eval config
+   * list the same judge, the case's settings win.
+   *
+   * @example
+   * ```json
+   * "judges": [
+   *   { "type": "rubric", "rubric": "correctness", "threshold": 0.8 },
+   *   "acme/judge/completeness"
+   * ]
+   * ```
+   */
+  judges?: CaseJudge[];
 }
 
 /**
- * Configuration for a single LLM-as-judge evaluation
+ * One of a case's judges, written like an eval config's: a reference
+ * (`acme/judge/completeness`) or `{ "type": <reference>, ...options }`.
  */
-export interface JudgeExpectConfig {
-  /** Plugin options, validated by the judge's schema. */
+export type CaseJudge = string | CaseJudgeConfig;
+
+/** How a judge grades: the settings a case judge and a judge request share. */
+interface JudgeSettings {
+  /** The judge's options, validated by its schema. */
   options?: Record<string, unknown>;
-  /** Flat plugin policy fields are also accepted for eval config integration. */
+  /** Other flat fields are the judge's options too. */
   [key: string]: unknown;
-  /**
-   * The judge to run: the built-in `rubric`, or `<namespace>/judge/<name>` from a
-   * plugin. It returns a normalized score; `threshold` decides pass/fail and
-   * `reps` how many times it scores the response. Other flat fields are the
-   * judge's options.
-   */
-  judge?: string;
-  /** Built-in rubric name or custom rubric object: shorthand for the `rubric` judge. Required when no `judge` is specified. */
+  /** The rubric judge's rubric: a built-in name or a custom `{ text }`. */
   rubric?: BuiltInRubric | { text: string };
-  /** Reference response to compare against */
+  /** Reference answer to compare against. Default: the case's `expected.answer`. */
   reference?: unknown;
   /** Score threshold for passing (0-1, default: 0.7) */
   threshold?: number;
-  /** Number of judge evaluations for this assertion. Overrides EvalCase.judgeReps. */
+  /** Number of judge evaluations. Overrides EvalCase.judgeReps. */
   reps?: number;
-  /** Judge provider. @default 'anthropic' */
+  /** The rubric judge's provider. @default 'anthropic' */
   provider?: ProviderKind;
   /** Model override (e.g., 'claude-opus-4-20250514') */
   model?: string;
@@ -134,12 +145,35 @@ export interface JudgeExpectConfig {
   apiKeyEnvVar?: string;
   /** Max tokens for judge response */
   maxTokens?: number;
-  /** Temperature for judge LLM (0–1) */
+  /** Temperature for judge LLM (0-1) */
   temperature?: number;
   /** Max budget in USD per evaluation */
   maxBudgetUsd?: number;
   /** Fail if response exceeds this size in bytes before judging */
   maxToolOutputSize?: number;
+}
+
+/**
+ * A case judge with its settings: `type` names the judge (the built-in
+ * `rubric`, or `<namespace>/judge/<name>` from a plugin); `threshold`,
+ * `reference` and `reps` say how it grades; other flat fields (or
+ * `options`) are the judge's own options.
+ */
+export interface CaseJudgeConfig extends JudgeSettings {
+  type: string;
+}
+
+/**
+ * The judge request a case judge maps to, as the judge validator takes it.
+ */
+export interface JudgeExpectConfig extends JudgeSettings {
+  /**
+   * The judge to run: the built-in `rubric`, or `<namespace>/judge/<name>` from a
+   * plugin. It returns a normalized score; `threshold` decides pass/fail and
+   * `reps` how many times it scores the response. Other flat fields are the
+   * judge's options. Without it, `rubric` is shorthand for the rubric judge.
+   */
+  judge?: string;
 }
 
 /**
@@ -157,14 +191,6 @@ export interface EvalAssertions {
    * Regex pattern(s) the client's answer must match (toMatchToolPattern)
    */
   matchesPattern?: string | string[];
-
-  /**
-   * LLM-as-judge evaluation (toPassToolJudge)
-   *
-   * Accepts a single judge config or an array for multi-judge evaluation.
-   * When an array is provided, all judges must pass (AND semantics).
-   */
-  passesJudge?: JudgeExpectConfig | JudgeExpectConfig[];
 
   /**
    * Asserts which tools the client called. Needs structured tool evidence
@@ -231,42 +257,57 @@ export interface EvalDataset {
   metadata?: Record<string, unknown>;
 }
 
-/**
- * Zod schema for a single judge configuration
- */
-const JudgeExpectConfigFieldsSchema = z.object({
-  judge: referenceSchema('judge').optional(),
+/** A case judge's settings, as an eval config writes a judge: `type` names it. */
+const CaseJudgeFieldsSchema = z.object({
+  type: kindCheckedReferenceSchema('judge'),
   options: z.record(z.string(), z.unknown()).optional(),
   rubric: RubricSpecSchema.optional(),
   reference: z.unknown().optional(),
   threshold: z.number().min(0).max(1).optional(),
   reps: z.number().int().min(1).optional(),
-  // The rubric judge's LLM settings, which an assertion may set flat.
+  // The rubric judge's LLM settings, which a case may set flat.
   ...RubricJudgeLLMSchema.shape,
 });
 
-const JUDGE_FIELDS = new Set(Object.keys(JudgeExpectConfigFieldsSchema.shape));
+const RUBRIC_JUDGE_FIELDS = new Set(Object.keys(CaseJudgeFieldsSchema.shape));
 
-// A named judge's own options may sit next to these fields; a rubric
-// assertion has no others, so an unknown key there is a typo.
-const JudgeExpectConfigSchema = JudgeExpectConfigFieldsSchema.passthrough()
-  .superRefine((config, context) => {
-    if (config.judge !== undefined) return;
-    const unknown = Object.keys(config).filter((key) => !JUDGE_FIELDS.has(key));
+/**
+ * One of a case's judges: a reference, or `{ "type": <reference>, ...options }`.
+ * A plugin judge's own options may sit next to the grading fields; the
+ * rubric judge has no others, so an unknown key there is a typo.
+ */
+const CaseJudgeSchema = z
+  .union([
+    kindCheckedReferenceSchema('judge').transform((type) => ({ type })),
+    CaseJudgeFieldsSchema.passthrough(),
+  ])
+  .superRefine((entry, context) => {
+    if ('judge' in entry)
+      context.addIssue({
+        code: 'custom',
+        path: ['judge'],
+        message: `a case judge names its judge in \`type\`: { "type": "${String(entry.judge)}" }`,
+      });
+    if (entry.type !== 'rubric') return;
+    const unknown = Object.keys(entry).filter(
+      (key) => !RUBRIC_JUDGE_FIELDS.has(key) && key !== 'judge'
+    );
     if (unknown.length > 0)
       context.addIssue({
         code: 'unrecognized_keys',
         keys: unknown,
         message: `Unrecognized key${unknown.length > 1 ? 's' : ''}: ${unknown.map((key) => `"${key}"`).join(', ')}`,
       });
-  })
-  .transform((config) =>
-    config.judge !== undefined
-      ? config
-      : JudgeExpectConfigFieldsSchema.parse(config)
-  )
-  .refine((data) => data.judge !== undefined || data.rubric !== undefined, {
-    message: 'Either "judge" or "rubric" must be provided in passesJudge',
+    const options = (entry as { options?: Record<string, unknown> }).options;
+    if (
+      (entry as { rubric?: unknown }).rubric === undefined &&
+      options?.rubric === undefined
+    )
+      context.addIssue({
+        code: 'custom',
+        message:
+          'the rubric judge needs a rubric: { "type": "rubric", "rubric": "correctness" }',
+      });
   });
 
 /**
@@ -276,9 +317,6 @@ export const EvalAssertionsSchema = z
   .object({
     containsText: z.union([z.string(), z.array(z.string())]).optional(),
     matchesPattern: z.union([z.string(), z.array(z.string())]).optional(),
-    passesJudge: z
-      .union([JudgeExpectConfigSchema, z.array(JudgeExpectConfigSchema).min(1)])
-      .optional(),
     toolsTriggered: z
       .object({
         calls: z.array(
@@ -335,6 +373,8 @@ export const EvalAssertionsSchema = z
         'it checked a tool response: use `toBeToolError` in a Playwright test',
       responseSize:
         'it checked a tool response: use `toHaveToolResponseSize` in a Playwright test',
+      passesJudge:
+        'list the case\'s judges in `judges`, beside `assertions`: "judges": [{ "type": "rubric", "rubric": "correctness" }]. See docs/migrations/migration-2.0.md#case-judges-sit-beside-assertions',
     }),
   })
   // An unknown key is a mistake: a misspelt assertion would never run.
@@ -376,6 +416,7 @@ export const EvalCaseSchema = z
       .optional(),
     tags: z.array(z.string()).optional(),
     assertions: EvalAssertionsSchema.optional(),
+    judges: z.array(CaseJudgeSchema).optional(),
     ...renamedKeys({
       scenario: 'input',
       iterations: 'trials',

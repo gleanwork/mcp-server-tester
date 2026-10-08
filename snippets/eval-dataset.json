@@ -27,11 +27,9 @@
               "required": true
             }
           ]
-        },
-        "passesJudge": {
-          "rubric": "groundedness"
         }
-      }
+      },
+      "judges": [{ "type": "rubric", "rubric": "groundedness" }]
     }
   ]
 }

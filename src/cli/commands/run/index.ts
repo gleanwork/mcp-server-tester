@@ -115,6 +115,7 @@ export async function run(options: RunOptions): Promise<void> {
     `Results: ${metrics.passed ?? 0}/${metrics.total ?? 0} passed (${((metrics.passRate ?? 0) * 100).toFixed(1)}%)`
   );
   printVariantTable(result.summary.variants);
+  printPairwise(result.summary.variants);
   const { selection } = result.summary;
   if (result.summary.partial && selection) {
     console.log(
@@ -224,4 +225,20 @@ function printVariantTable(variants: VariantSummary[]): void {
     'Calls, tokens, cost and time are means per trial.' +
       (estimated ? ' * Includes estimates from `pricing`.' : '')
   );
+}
+
+/** Each pairwise judge's verdict on each variant against the baseline. */
+function printPairwise(variants: VariantSummary[]): void {
+  const pct = (part: number, whole: number) =>
+    whole === 0 ? '-' : `${Math.round((part / whole) * 100)}%`;
+  for (const variant of variants) {
+    for (const judge of variant.pairwise?.summary ?? []) {
+      const n = judge.compared;
+      console.log(
+        `Pairwise ${judge.judge}: ${variant.name} vs ${variant.pairwise!.baseline}: ` +
+          `${pct(judge.candidateWins, n)} win · ${pct(judge.baselineWins, n)} loss · ${pct(judge.ties, n)} tie (${n} cases` +
+          `${judge.errors ? `, ${judge.errors} errors` : ''})`
+      );
+    }
+  }
 }

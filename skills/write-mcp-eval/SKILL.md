@@ -49,19 +49,20 @@ A dataset is a JSON file with a `name` and a list of `cases`:
 
 Case fields:
 
-| Field                              | Required | Meaning                                                                                               |
-| ---------------------------------- | -------- | ----------------------------------------------------------------------------------------------------- |
-| `id`                               | yes      | Unique within the dataset                                                                             |
-| `input`                            | yes      | The user's request, sent to the client as its prompt                                                  |
-| `description`                      | no       | What the case is for                                                                                  |
-| `expected`                         | no       | Ground truth for graders: `answer`, `criteria` (rubric criteria by name), any other key               |
-| `assertions`                       | no       | Code graders: `toolsTriggered`, `toolCallCount`, `containsText`, `matchesPattern`, plus `passesJudge` |
-| `tags`                             | no       | Labels for filtering (`filterTags`) and grouping (`regression`, `held-out`)                           |
-| `trials`                           | no       | Trials of this case (default 1)                                                                       |
-| `passThreshold`                    | no       | Share of trials that must pass, 0 to 1 (default 1)                                                    |
-| `judgeReps`                        | no       | Times each judge scores a trial; the mean is compared with its threshold                              |
-| `client`, `model`, `clientOptions` | no       | This case's own client, model or client options, over what it inherits                                |
-| `metadata`                         | no       | Free-form data kept with the case                                                                     |
+| Field                              | Required | Meaning                                                                                 |
+| ---------------------------------- | -------- | --------------------------------------------------------------------------------------- |
+| `id`                               | yes      | Unique within the dataset                                                               |
+| `input`                            | yes      | The user's request, sent to the client as its prompt                                    |
+| `description`                      | no       | What the case is for                                                                    |
+| `expected`                         | no       | Ground truth for graders: `answer`, `criteria` (rubric criteria by name), any other key |
+| `assertions`                       | no       | Code graders: `toolsTriggered`, `toolCallCount`, `containsText`, `matchesPattern`       |
+| `judges`                           | no       | LLM graders: the built-in `rubric` judge or a plugin's judges, beside `assertions`      |
+| `tags`                             | no       | Labels for filtering (`filterTags`) and grouping (`regression`, `held-out`)             |
+| `trials`                           | no       | Trials of this case (default 1)                                                         |
+| `passThreshold`                    | no       | Share of trials that must pass, 0 to 1 (default 1)                                      |
+| `judgeReps`                        | no       | Times each judge scores a trial; the mean is compared with its threshold                |
+| `client`, `model`, `clientOptions` | no       | This case's own client, model or client options, over what it inherits                  |
+| `metadata`                         | no       | Free-form data kept with the case                                                       |
 
 A key MST doesn't define fails validation, so a misspelt assertion never silently skips. Keys from 1.x fail with a message that names the replacement:
 
@@ -98,7 +99,6 @@ Every assertion in a case's `assertions` must pass for a trial to pass.
 | `toolCallCount`  | The number of tool calls is within `min`/`max`, or equals `exact`    |
 | `containsText`   | The final answer contains every listed substring                     |
 | `matchesPattern` | The final answer matches every listed regular expression             |
-| `passesJudge`    | A judge's mean score reaches its `threshold` (default 0.7)           |
 
 ### `toolsTriggered`
 
@@ -144,32 +144,32 @@ They check the client's final answer, not a tool's output:
 
 Escape backslashes in JSON (`\\d`).
 
-### `passesJudge`
+### Judges
 
-A judge is an LLM that scores the trial from 0 to 1. Use a built-in rubric (`correctness`, `completeness`, `groundedness`, `instruction-following`, `conciseness`) or your own text:
+A judge is an LLM that scores the trial from 0 to 1. A case lists its judges in `judges`, beside `assertions`. Use the built-in `rubric` judge with a built-in rubric (`correctness`, `completeness`, `groundedness`, `instruction-following`, `conciseness`) or your own text:
 
 ```json
 {
   "id": "pto-policy",
   "input": "How many days of PTO do new employees get?",
   "expected": { "answer": "New employees get 20 days of PTO a year." },
-  "assertions": {
-    "passesJudge": [
-      { "rubric": "correctness", "threshold": 0.75 },
-      {
-        "rubric": {
-          "text": "Score 1 if the answer cites the policy document, 0.5 if it gives the number without a source, 0 otherwise."
-        }
+  "judges": [
+    { "type": "rubric", "rubric": "correctness", "threshold": 0.75 },
+    {
+      "type": "rubric",
+      "rubric": {
+        "text": "Score 1 if the answer cites the policy document, 0.5 if it gives the number without a source, 0 otherwise."
       }
-    ]
-  }
+    }
+  ]
 }
 ```
 
-- `expected.answer` is what the judge compares the answer with, unless the assertion sets `reference`.
-- With a list, every judge must pass.
+- A judge passes when its mean score reaches its `threshold` (default 0.7), and every listed judge must pass.
+- `expected.answer` is what the judge compares the answer with, unless the judge sets `reference`.
+- An eval config's `judges` apply to every case, on top of the case's own.
 - The rubric judge's LLM settings sit next to it: `provider` (`anthropic` by default, `vertex-anthropic`, `anthropic-agent-sdk`, `openai`, `google`), `model`, `temperature`, `maxTokens`. The default `anthropic` judge needs `@anthropic-ai/sdk` and `ANTHROPIC_API_KEY`.
-- A plugin's judge is named `<namespace>/judge/<name>`: `{ "judge": "acme/judge/completeness", "threshold": 0.8 }`. Load the plugin where the cases run (Step 5).
+- A plugin's judge is named `<namespace>/judge/<name>`: `"acme/judge/completeness"`, or `{ "type": "acme/judge/completeness", "threshold": 0.8 }` with options. Load the plugin where the cases run (Step 5).
 
 Judges cost a model call per trial (times `reps`). Prefer `toolsTriggered` when the question is which tool was called.
 
@@ -408,9 +408,11 @@ Change one thing per variant, so a difference has one cause.
       "input": "How many days of PTO do new employees get?",
       "expected": { "answer": "New employees get 20 days of PTO a year." },
       "assertions": {
-        "toolsTriggered": { "calls": [{ "name": "search" }] },
-        "passesJudge": { "rubric": "correctness", "threshold": 0.75 }
-      }
+        "toolsTriggered": { "calls": [{ "name": "search" }] }
+      },
+      "judges": [
+        { "type": "rubric", "rubric": "correctness", "threshold": 0.75 }
+      ]
     }
   ]
 }

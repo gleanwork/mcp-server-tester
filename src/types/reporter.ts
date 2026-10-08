@@ -309,6 +309,9 @@ export interface EvalCaseRequest {
   /** Configured assertions, sanitized for reporter output */
   assertions?: Record<string, unknown>;
 
+  /** The judges the case ran (its own and the eval config's), sanitized for reporter output */
+  judges?: Array<string | Record<string, unknown>>;
+
   /** Tool arguments, for a tool call the reporter tracked in a Playwright test */
   args?: Record<string, unknown>;
 

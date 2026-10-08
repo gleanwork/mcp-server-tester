@@ -305,7 +305,7 @@ export interface EvalRunnerOptions {
 
   /**
    * Default number of judge evaluations for cases that do not specify
-   * `judgeReps` explicitly. Applies to any case with a `passesJudge`
+   * `judgeReps` explicitly. Applies to any case with `judges`
    * assertion. Per-case `judgeReps` overrides this.
    *
    * @default 1 (single judge run)
@@ -566,6 +566,11 @@ function buildRequest(
       unknown
     >;
   }
+  if (evalCase.judges?.length) {
+    request.judges = sanitizeReporterValue(evalCase.judges) as Array<
+      string | Record<string, unknown>
+    >;
+  }
 
   const client = evalCase.client ?? run.client;
   // A case's own client doesn't take the run's model.
@@ -698,18 +703,15 @@ async function runTrial(
     clientExecution?.clientMetadata ?? clientResponse?.clientMetadata;
 
   let outcome: GradingOutcome = { scores: {} };
-  if (!error && evalCase.assertions) {
-    outcome = await gradeTrial(
-      { ...evalCase, assertions: evalCase.assertions },
-      {
-        response: clientResponse
-          ? mapToolNames(clientResponse, options.toolMap)
-          : response,
-        clientResponse: clientResponse,
-        evidence,
-        clientMetadata,
-      }
-    );
+  if (!error && (evalCase.assertions || evalCase.judges?.length)) {
+    outcome = await gradeTrial(evalCase, {
+      response: clientResponse
+        ? mapToolNames(clientResponse, options.toolMap)
+        : response,
+      clientResponse: clientResponse,
+      evidence,
+      clientMetadata,
+    });
   }
 
   const clientUsage = clientExecution?.usage ?? clientResponse?.usage;
@@ -1005,12 +1007,14 @@ export async function runEvalDataset(
   // Preflight cost warning: estimate the number of LLM judge API calls this run will make
   const estimatedJudgeCalls = casesToRun.reduce((sum, c) => {
     const effectiveTrials = c.trials ?? defaultTrials ?? 1;
-    if (c.assertions?.passesJudge == null) return sum;
-    const judges = Array.isArray(c.assertions.passesJudge)
-      ? c.assertions.passesJudge
-      : [c.assertions.passesJudge];
-    const totalReps = judges.reduce(
-      (r, j) => r + (j.reps ?? c.judgeReps ?? defaultJudgeReps ?? 1),
+    if (!c.judges?.length) return sum;
+    const totalReps = c.judges.reduce(
+      (r, j) =>
+        r +
+        ((typeof j === 'string' ? undefined : j.reps) ??
+          c.judgeReps ??
+          defaultJudgeReps ??
+          1),
       0
     );
     return sum + effectiveTrials * totalReps;

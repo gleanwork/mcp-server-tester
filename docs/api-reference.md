@@ -1393,7 +1393,7 @@ The `{ code, message, data? }` of the protocol error a result was made from, or 
 
 ### `EvalAssertions`
 
-```typescript snippet=src/evals/datasetTypes.ts#L145-L207
+```typescript snippet=src/evals/datasetTypes.ts#L179-L233
 /**
  * A case's assertions
  *
@@ -1409,14 +1409,6 @@ export interface EvalAssertions {
    * Regex pattern(s) the client's answer must match (toMatchToolPattern)
    */
   matchesPattern?: string | string[];
-
-  /**
-   * LLM-as-judge evaluation (toPassToolJudge)
-   *
-   * Accepts a single judge config or an array for multi-judge evaluation.
-   * When an array is provided, all judges must pass (AND semantics).
-   */
-  passesJudge?: JudgeExpectConfig | JudgeExpectConfig[];
 
   /**
    * Asserts which tools the client called. Needs structured tool evidence
@@ -1459,9 +1451,61 @@ export interface EvalAssertions {
 }
 ```
 
+### `CaseJudge`
+
+A case's `judges` entries, written like an eval config's `judges`.
+
+```typescript snippet=src/evals/datasetTypes.ts#L120-L164
+/**
+ * One of a case's judges, written like an eval config's: a reference
+ * (`acme/judge/completeness`) or `{ "type": <reference>, ...options }`.
+ */
+export type CaseJudge = string | CaseJudgeConfig;
+
+/** How a judge grades: the settings a case judge and a judge request share. */
+interface JudgeSettings {
+  /** The judge's options, validated by its schema. */
+  options?: Record<string, unknown>;
+  /** Other flat fields are the judge's options too. */
+  [key: string]: unknown;
+  /** The rubric judge's rubric: a built-in name or a custom `{ text }`. */
+  rubric?: BuiltInRubric | { text: string };
+  /** Reference answer to compare against. Default: the case's `expected.answer`. */
+  reference?: unknown;
+  /** Score threshold for passing (0-1, default: 0.7) */
+  threshold?: number;
+  /** Number of judge evaluations. Overrides EvalCase.judgeReps. */
+  reps?: number;
+  /** The rubric judge's provider. @default 'anthropic' */
+  provider?: ProviderKind;
+  /** Model override (e.g., 'claude-opus-4-20250514') */
+  model?: string;
+  /** Environment variable name for API key */
+  apiKeyEnvVar?: string;
+  /** Max tokens for judge response */
+  maxTokens?: number;
+  /** Temperature for judge LLM (0-1) */
+  temperature?: number;
+  /** Max budget in USD per evaluation */
+  maxBudgetUsd?: number;
+  /** Fail if response exceeds this size in bytes before judging */
+  maxToolOutputSize?: number;
+}
+
+/**
+ * A case judge with its settings: `type` names the judge (the built-in
+ * `rubric`, or `<namespace>/judge/<name>` from a plugin); `threshold`,
+ * `reference` and `reps` say how it grades; other flat fields (or
+ * `options`) are the judge's own options.
+ */
+export interface CaseJudgeConfig extends JudgeSettings {
+  type: string;
+}
+```
+
 ### `EvalCase`
 
-````typescript snippet=src/evals/datasetTypes.ts#L12-L104
+````typescript snippet=src/evals/datasetTypes.ts#L12-L118
 /**
  * A single eval case: an input the client under test acts on, and what to
  * assert about what it did. The case runs on the `client`, `model` and
@@ -1506,17 +1550,16 @@ export interface EvalCase extends ClientFields {
   passThreshold?: number;
 
   /**
-   * Number of times to invoke the LLM judge per `passesJudge` assertion.
-   * Scores are averaged; the mean must meet the threshold to pass.
-   * Reduces judge variance caused by non-determinism.
-   * Per-assertion `passesJudge.reps` overrides this value.
+   * Number of times to run each of the case's judges. Scores are averaged;
+   * the mean must meet the threshold to pass. Reduces judge variance caused
+   * by non-determinism. A judge's own `reps` overrides this value.
    * @default 1
    */
   judgeReps?: number;
 
   /**
    * What the case expects, for graders: `answer` (the reference answer,
-   * passed to judges as `reference` unless an assertion sets its own),
+   * passed to judges as `reference` unless a judge sets its own),
    * `criteria` (rubric criteria keyed by name), and any other ground truth.
    * Judges read it as `case.expected`.
    */
@@ -1554,6 +1597,21 @@ export interface EvalCase extends ClientFields {
    * ```
    */
   assertions?: EvalAssertions;
+
+  /**
+   * Judges (model graders) that score each trial. Each must pass. They run
+   * on top of the eval config's `judges`; when the case and the eval config
+   * list the same judge, the case's settings win.
+   *
+   * @example
+   * ```json
+   * "judges": [
+   *   { "type": "rubric", "rubric": "correctness", "threshold": 0.8 },
+   *   "acme/judge/completeness"
+   * ]
+   * ```
+   */
+  judges?: CaseJudge[];
 }
 ````
 

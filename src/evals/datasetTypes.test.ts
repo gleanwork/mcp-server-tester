@@ -1,12 +1,14 @@
+import fs from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import {
   validateEvalCase,
   validateEvalDataset,
   EvalCaseSchema,
+  EvalAssertionsSchema,
   type EvalCase,
   type SerializedEvalDataset,
 } from './datasetTypes.js';
-import { ZodError } from 'zod';
+import { z, ZodError } from 'zod';
 
 describe('datasetTypes', () => {
   it('retains event identity and named judge policy in serialized assertions', () => {
@@ -20,12 +22,8 @@ describe('datasetTypes', () => {
             { name: 'research', source: 'builtin', kind: 'skill' },
           ],
         },
-        passesJudge: {
-          judge: 'policy',
-          policy: 'strict',
-          options: { limit: 3 },
-        },
       },
+      judges: [{ type: 'policy', policy: 'strict', options: { limit: 3 } }],
     };
     expect(validateEvalCase(input)).toEqual(input);
   });
@@ -68,10 +66,12 @@ describe('datasetTypes', () => {
         assertions: {
           containsText: 'London',
           matchesPattern: '\\d+°C',
-          passesJudge: { rubric: { text: 'Should contain temperature' } },
           toolsTriggered: { calls: [{ name: 'get_weather' }] },
           toolCallCount: { max: 2 },
         },
+        judges: [
+          { type: 'rubric', rubric: { text: 'Should contain temperature' } },
+        ],
         metadata: { priority: 'high' },
       };
       expect(validateEvalCase(evalCase)).toEqual(evalCase);
@@ -225,31 +225,31 @@ describe('datasetTypes', () => {
       expect(result.success).toBe(false);
     });
 
-    it('accepts passesJudge.reps', () => {
+    it("accepts a judge's reps", () => {
       const result = EvalCaseSchema.safeParse({
         id: 'test',
         input: 'x',
-        assertions: { passesJudge: { rubric: 'correctness', reps: 5 } },
+        judges: [{ type: 'rubric', rubric: 'correctness', reps: 5 }],
       });
       expect(result.success).toBe(true);
     });
 
-    it('rejects passesJudge.reps: 0', () => {
+    it("rejects a judge's reps: 0", () => {
       const result = EvalCaseSchema.safeParse({
         id: 'test',
         input: 'x',
-        assertions: { passesJudge: { rubric: 'correctness', reps: 0 } },
+        judges: [{ type: 'rubric', rubric: 'correctness', reps: 0 }],
       });
       expect(result.success).toBe(false);
     });
   });
 
-  describe('passesJudge rubric discriminated union', () => {
+  describe('rubric case judges', () => {
     it('accepts a built-in rubric name', () => {
       const result = EvalCaseSchema.safeParse({
         id: 'test',
         input: 'x',
-        assertions: { passesJudge: { rubric: 'correctness' } },
+        judges: [{ type: 'rubric', rubric: 'correctness' }],
       });
       expect(result.success).toBe(true);
     });
@@ -258,11 +258,12 @@ describe('datasetTypes', () => {
       const result = EvalCaseSchema.safeParse({
         id: 'test',
         input: 'x',
-        assertions: {
-          passesJudge: {
+        judges: [
+          {
+            type: 'rubric',
             rubric: { text: 'Evaluate if the response is helpful' },
           },
-        },
+        ],
       });
       expect(result.success).toBe(true);
     });
@@ -271,9 +272,7 @@ describe('datasetTypes', () => {
       const result = EvalCaseSchema.safeParse({
         id: 'test',
         input: 'x',
-        assertions: {
-          passesJudge: { rubric: 'this is not a built-in rubric' },
-        },
+        judges: [{ type: 'rubric', rubric: 'this is not a built-in rubric' }],
       });
       expect(result.success).toBe(false);
     });
@@ -290,7 +289,7 @@ describe('datasetTypes', () => {
         const result = EvalCaseSchema.safeParse({
           id: 'test',
           input: 'x',
-          assertions: { passesJudge: { rubric } },
+          judges: [{ type: 'rubric', rubric }],
         });
         expect(result.success).toBe(true);
       }
@@ -300,17 +299,18 @@ describe('datasetTypes', () => {
       const result = EvalCaseSchema.safeParse({
         id: 'test',
         input: 'x',
-        assertions: { passesJudge: { rubric: { text: '' } } },
+        judges: [{ type: 'rubric', rubric: { text: '' } }],
       });
       expect(result.success).toBe(false);
     });
 
-    it('accepts inline judge config fields on passesJudge', () => {
+    it("accepts the rubric judge's LLM settings flat", () => {
       const result = EvalCaseSchema.safeParse({
         id: 'test',
         input: 'x',
-        assertions: {
-          passesJudge: {
+        judges: [
+          {
+            type: 'rubric',
             rubric: 'correctness',
             provider: 'openai',
             model: 'gpt-4o',
@@ -320,91 +320,106 @@ describe('datasetTypes', () => {
             maxBudgetUsd: 0.05,
             maxToolOutputSize: 100000,
           },
-        },
+        ],
       });
       expect(result.success).toBe(true);
     });
 
-    it('rejects unknown provider values in passesJudge', () => {
+    it('rejects unknown provider values', () => {
       const result = EvalCaseSchema.safeParse({
         id: 'test',
         input: 'x',
-        assertions: {
-          passesJudge: { rubric: 'correctness', provider: 'ollama' },
-        },
+        judges: [{ type: 'rubric', rubric: 'correctness', provider: 'ollama' }],
       });
       expect(result.success).toBe(false);
     });
 
-    it('rejects configId on passesJudge', () => {
+    it('rejects configId on a rubric judge', () => {
       const result = EvalCaseSchema.safeParse({
         id: 'test',
         input: 'x',
-        assertions: {
-          passesJudge: { rubric: 'correctness', configId: 'my-judge' },
-        },
+        judges: [
+          { type: 'rubric', rubric: 'correctness', configId: 'my-judge' },
+        ],
       });
-      // configId is no longer a field; a rubric assertion has no other keys.
+      // configId is no longer a field; a rubric judge has no other keys.
       expect(result.success).toBe(false);
     });
   });
 
-  describe('multi-judge passesJudge', () => {
-    it('accepts an array of judge configs', () => {
-      const result = EvalCaseSchema.safeParse({
-        id: 'test',
-        input: 'x',
-        assertions: {
-          passesJudge: [
-            { rubric: 'correctness', threshold: 0.8 },
-            { rubric: 'completeness', threshold: 0.7 },
-          ],
-        },
-      });
+  describe('case judges', () => {
+    const parse = (judges: unknown) =>
+      EvalCaseSchema.safeParse({ id: 'test', input: 'x', judges });
+
+    it('accepts references and tagged entries, as an eval config writes them', () => {
+      const result = parse([
+        'acme/judge/completeness',
+        { type: 'rubric', rubric: 'correctness', threshold: 0.8 },
+        { type: 'acme/judge/tone', threshold: 0.9, formality: 'high' },
+        { type: 'mst/judge/rubric', options: { rubric: 'conciseness' } },
+      ]);
       expect(result.success).toBe(true);
+      expect(result.data?.judges).toEqual([
+        { type: 'acme/judge/completeness' },
+        { type: 'rubric', rubric: 'correctness', threshold: 0.8 },
+        { type: 'acme/judge/tone', threshold: 0.9, formality: 'high' },
+        // A built-in written in full reads as its short name.
+        { type: 'rubric', options: { rubric: 'conciseness' } },
+      ]);
     });
 
-    it('accepts mixed rubric and custom judge in array', () => {
-      const result = EvalCaseSchema.safeParse({
-        id: 'test',
-        input: 'x',
-        assertions: {
-          passesJudge: [
-            { rubric: 'correctness' },
-            { judge: 'domain-relevance', threshold: 0.9 },
-          ],
-        },
-      });
-      expect(result.success).toBe(true);
-    });
-
-    it('rejects empty array', () => {
-      const result = EvalCaseSchema.safeParse({
-        id: 'test',
-        input: 'x',
-        assertions: { passesJudge: [] },
-      });
+    it.each([
+      ['acme/metric/x', 'is a metric, not a judge'],
+      ['mst/metric/rubric', 'is a metric, not a judge'],
+      [{ type: 'acme/pairwise-judge/x' }, 'is a pairwise judge, not a judge'],
+    ])('rejects %j, which is not a judge', (entry, message) => {
+      const result = parse([entry]);
       expect(result.success).toBe(false);
+      expect(JSON.stringify(result.error?.issues)).toContain(message);
     });
 
-    it('rejects array entry missing both judge and rubric', () => {
-      const result = EvalCaseSchema.safeParse({
-        id: 'test',
-        input: 'x',
-        assertions: {
-          passesJudge: [{ threshold: 0.8 }],
-        },
-      });
+    it('needs a rubric for the rubric judge', () => {
+      for (const entry of ['rubric', { type: 'rubric', threshold: 0.5 }]) {
+        const result = parse([entry]);
+        expect(result.success).toBe(false);
+        expect(result.error?.issues[0]?.message).toContain(
+          'the rubric judge needs a rubric'
+        );
+      }
+    });
+
+    it('names the judge in type, not judge', () => {
+      const result = parse([{ type: 'acme/judge/x', judge: 'acme/judge/x' }]);
       expect(result.success).toBe(false);
+      expect(result.error?.issues[0]?.message).toContain(
+        'a case judge names its judge in `type`'
+      );
     });
 
-    it('still accepts single object form (backwards compat)', () => {
+    it('rejects an entry without a type', () => {
+      expect(parse([{ rubric: 'correctness' }]).success).toBe(false);
+      expect(parse([{ threshold: 0.8 }]).success).toBe(false);
+    });
+
+    it('accepts an empty list', () => {
+      expect(parse([]).success).toBe(true);
+    });
+
+    it('rejects assertions.passesJudge, naming judges', () => {
       const result = EvalCaseSchema.safeParse({
         id: 'test',
         input: 'x',
         assertions: { passesJudge: { rubric: 'correctness' } },
       });
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
+      expect(result.error?.issues).toEqual([
+        expect.objectContaining({
+          path: ['assertions', 'passesJudge'],
+          message: expect.stringContaining(
+            "`passesJudge` is gone: list the case's judges in `judges`, beside `assertions`"
+          ),
+        }),
+      ]);
     });
   });
 
@@ -643,5 +658,43 @@ describe('datasetTypes', () => {
 
       expect(result.cases).toHaveLength(10);
     });
+  });
+});
+
+describe('the dataset editor schema', () => {
+  const editor = JSON.parse(
+    fs.readFileSync(
+      new URL('../../schema/eval-dataset.schema.json', import.meta.url),
+      'utf8'
+    )
+  ) as {
+    definitions: Record<string, { properties: Record<string, unknown> }>;
+  };
+  /** Keys a schema accepts: removed and renamed keys only explain themselves. */
+  function liveKeys(shape: Record<string, z.ZodType>): string[] {
+    return Object.keys(shape)
+      .filter((key) => {
+        const field = shape[key]!;
+        return !(
+          field instanceof z.ZodOptional && field.unwrap() instanceof z.ZodNever
+        );
+      })
+      .sort();
+  }
+
+  it('declares the same case keys as EvalCaseSchema, judges included', () => {
+    expect(Object.keys(editor.definitions.EvalCase!.properties).sort()).toEqual(
+      liveKeys(EvalCaseSchema.shape)
+    );
+    expect(editor.definitions.EvalCase!.properties).toHaveProperty('judges');
+  });
+
+  it('declares the same assertion keys as EvalAssertionsSchema, without passesJudge', () => {
+    expect(
+      Object.keys(editor.definitions.EvalAssertions!.properties).sort()
+    ).toEqual(liveKeys(EvalAssertionsSchema.shape));
+    expect(editor.definitions.EvalAssertions!.properties).not.toHaveProperty(
+      'passesJudge'
+    );
   });
 });

@@ -386,16 +386,14 @@ describe('golden: runEval clients', () => {
           id: 'suite-judged',
           input: 'Weather in London?',
           expected: { answer: 'canonical' },
-          assertions: {
-            passesJudge: [
-              {
-                judge: 'test/judge/golden-config-judge',
-                reference: 'case ref',
-                options: { count: 3 },
-              },
-              { judge: 'test/judge/golden-case-judge', threshold: 0.5 },
-            ],
-          },
+          judges: [
+            {
+              type: 'test/judge/golden-config-judge',
+              reference: 'case ref',
+              options: { count: 3 },
+            },
+            { type: 'test/judge/golden-case-judge', threshold: 0.5 },
+          ],
         },
       ],
       {
@@ -445,9 +443,7 @@ describe('golden: runEval clients', () => {
         {
           id: 'suite-rubric',
           input: 'Weather in London?',
-          assertions: {
-            passesJudge: { rubric: 'correctness', threshold: 0.9 },
-          },
+          judges: [{ type: 'rubric', rubric: 'correctness', threshold: 0.9 }],
         },
       ]
     );
@@ -469,7 +465,7 @@ describe('golden: judges', () => {
         input: 'Weather in London?',
         judgeReps: 2,
         expected: { answer: 'sunny' },
-        assertions: { passesJudge: { judge: 'test/judge/golden-case-judge' } },
+        judges: [{ type: 'test/judge/golden-case-judge' }],
       },
       context()
     );
@@ -483,16 +479,14 @@ describe('golden: judges', () => {
         input: 'Weather in London?',
         judgeReps: 3,
         expected: { answer: 'unused' },
-        assertions: {
-          passesJudge: [
-            {
-              judge: 'test/judge/golden-case-judge',
-              reference: 'explicit',
-              reps: 1,
-            },
-            { judge: 'test/judge/golden-strict-judge', threshold: 0.5 },
-          ],
-        },
+        judges: [
+          {
+            type: 'test/judge/golden-case-judge',
+            reference: 'explicit',
+            reps: 1,
+          },
+          { type: 'test/judge/golden-strict-judge', threshold: 0.5 },
+        ],
       },
       context()
     );
@@ -504,7 +498,9 @@ describe('golden: judges', () => {
       {
         ...clientCase,
         id: 'host-judged',
-        assertions: { passesJudge: { judge: 'test/judge/golden-case-judge' } },
+        // Only the judge grades: none of clientCase's assertions.
+        assertions: undefined,
+        judges: [{ type: 'test/judge/golden-case-judge' }],
       },
       context()
     );
@@ -550,7 +546,7 @@ describe('golden: rubric judges', () => {
         id: 'rubric-judged',
         input: 'Weather in London?',
         expected: { answer: 'sunny' },
-        assertions: { passesJudge: { rubric: 'correctness' } },
+        judges: [{ type: 'rubric', rubric: 'correctness' }],
       },
       context()
     );
@@ -568,7 +564,7 @@ describe('golden: rubric judges', () => {
       {
         id: 'rubric-reps',
         input: 'Weather in London?',
-        assertions: { passesJudge: { rubric: 'completeness', reps: 3 } },
+        judges: [{ type: 'rubric', rubric: 'completeness', reps: 3 }],
       },
       context()
     );
@@ -582,8 +578,9 @@ describe('golden: rubric judges', () => {
       {
         id: 'rubric-custom',
         input: 'Weather in London?',
-        assertions: {
-          passesJudge: {
+        judges: [
+          {
+            type: 'rubric',
             rubric: { text: 'Does it say it is sunny?\nAnswer carefully.' },
             reference: 'It is sunny.',
             threshold: 0.9,
@@ -594,7 +591,7 @@ describe('golden: rubric judges', () => {
             temperature: 0.5,
             maxToolOutputSize: 1000,
           },
-        },
+        ],
       },
       context()
     );
@@ -607,7 +604,7 @@ describe('golden: rubric judges', () => {
       {
         id: 'rubric-error',
         input: 'Weather in London?',
-        assertions: { passesJudge: { rubric: 'correctness' } },
+        judges: [{ type: 'rubric', rubric: 'correctness' }],
       },
       context()
     );
@@ -621,12 +618,10 @@ describe('golden: rubric judges', () => {
         id: 'rubric-and-plugin',
         input: 'Weather in London?',
         judgeReps: 2,
-        assertions: {
-          passesJudge: [
-            { rubric: 'conciseness' },
-            { judge: 'test/judge/golden-case-judge' },
-          ],
-        },
+        judges: [
+          { type: 'rubric', rubric: 'conciseness' },
+          { type: 'test/judge/golden-case-judge' },
+        ],
       },
       context()
     );

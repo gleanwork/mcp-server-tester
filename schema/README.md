@@ -84,32 +84,28 @@ EvalDataset (root)
         ├── expected           (object: answer, criteria, other ground truth)
         ├── tags               (string[])
         ├── metadata           (object)
-        └── assertions         (EvalAssertions)
-            ├── containsText       — substring(s) of the client's answer
-            ├── matchesPattern     — regex(es) the answer matches
-            ├── passesJudge
-            │   ├── rubric         (string, required)
-            │   ├── reference
-            │   ├── threshold      (number 0–1, default 0.7)
-            │   ├── reps           (integer, default 1)
-            │   ├── provider       ("claude" | "anthropic" | "openai" | "google")
-            │   ├── model          (string)
-            │   ├── apiKeyEnvVar   (string)
-            │   ├── maxTokens      (integer)
-            │   ├── temperature    (number 0–1)
-            │   ├── maxBudgetUsd   (number)
-            │   └── maxToolOutputSize (integer)
-            ├── toolsTriggered
-            │   ├── calls[]
-            │   │   ├── name       (string, required)
-            │   │   ├── arguments  (object, partial match)
-            │   │   └── required   (boolean, default true)
-            │   ├── order          ("strict" | "any", default "any")
-            │   └── exclusive      (boolean, default false)
-            └── toolCallCount
-                ├── min            (integer)
-                ├── max            (integer)
-                └── exact          (integer)
+        ├── assertions         (EvalAssertions)
+        │   ├── containsText       — substring(s) of the client's answer
+        │   ├── matchesPattern     — regex(es) the answer matches
+        │   ├── toolsTriggered
+        │   │   ├── calls[]
+        │   │   │   ├── name       (string, required)
+        │   │   │   ├── arguments  (object, partial match)
+        │   │   │   └── required   (boolean, default true)
+        │   │   ├── order          ("strict" | "any", default "any")
+        │   │   └── exclusive      (boolean, default false)
+        │   └── toolCallCount
+        │       ├── min            (integer)
+        │       ├── max            (integer)
+        │       └── exact          (integer)
+        └── judges             (CaseJudge[]) — beside assertions; each a reference or { type, ...options }
+            ├── type           (string, required: "rubric" or <namespace>/judge/<name>)
+            ├── rubric         (rubric judge: built-in name or { text })
+            ├── reference      (default: expected.answer)
+            ├── threshold      (number 0–1, default 0.7)
+            ├── reps           (integer, default judgeReps)
+            ├── options        (object: the judge's options; or flat fields)
+            └── provider, model, apiKeyEnvVar, maxTokens, temperature, maxBudgetUsd, maxToolOutputSize (rubric judge)
 ```
 
 ## Supported LLM providers

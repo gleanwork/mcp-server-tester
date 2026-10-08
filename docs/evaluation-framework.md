@@ -90,7 +90,7 @@ const plugin: Plugin = {
 export default plugin;
 ```
 
-- **Names.** Each map key names an extension within the plugin's namespace. Eval configs and datasets reference it as `<namespace>/<kind>/<name>`, such as `{ "type": "acme/dataset/legacy" }` or `passesJudge: { "judge": "acme/judge/completeness" }`. The kind is `dataset`, `client`, `judge`, `pairwise-judge`, `metric`, `result-store`, `connector` or `config`, and it must match where the name is used: `acme/judge/x` in `datasets` is an error. Built-ins (`file`, `claude-code`, `rubric`, `passed`, ...) use bare names, or the full `mst/<kind>/<name>` (`mst/judge/rubric`); the `mst` namespace is reserved.
+- **Names.** Each map key names an extension within the plugin's namespace. Eval configs and datasets reference it as `<namespace>/<kind>/<name>`, such as `{ "type": "acme/dataset/legacy" }` or a case's `"judges": ["acme/judge/completeness"]`. The kind is `dataset`, `client`, `judge`, `pairwise-judge`, `metric`, `result-store`, `connector` or `config`, and it must match where the name is used: `acme/judge/x` in `datasets` is an error. Built-ins (`file`, `claude-code`, `rubric`, `passed`, ...) use bare names, or the full `mst/<kind>/<name>` (`mst/judge/rubric`); the `mst` namespace is reserved.
 - **Namespace.** `meta.namespace` is required: lowercase, optionally scoped as `@scope/name`. Two different plugins can't share a namespace. Loading the same plugin again is a no-op, including a rebuilt object with the same name, version, extension definitions and configs. A plugin factory that builds differently configured copies needs a namespace per copy. A package's CommonJS and ESM builds are different objects too, so load a plugin one way; publishing plugins as ESM avoids the question.
 - **Loading.** An eval config lists plugin specifiers in `plugins`. Each one resolves relative to the eval config's directory, then `rootDir` (`--root-dir`, the working directory by default), then as a package name, resolved as `import` resolves it. `--plugins` and the `pluginPaths` / `plugins` options of `runEval` and `runEvalBatch` add to that list. Code that runs datasets directly passes plugin objects: `runEvalDataset({ dataset, plugins: [plugin] }, ctx)`, or `test.use({ mcpPlugins: [plugin] })` in Playwright. Code that calls validators or matchers on its own installs them with `installPlugins([plugin])`.
 - **Scope.** An eval config may only reference namespaces of plugins it loads, even if another eval in the same process (a batch) loaded more. The same check applies to the clients and judges its datasets name. `runEvalDataset`, `runEvalCase` and the fixtures have no eval config, so they resolve against every plugin installed in the process.
@@ -109,7 +109,7 @@ export default plugin;
 
   A config is typed `PluginConfig` and can set any documented eval config key except `name`, `datasets`, `variants`, `plugins` and `extends`. Other keys, including `run`, are rejected when an eval config extends the config; until then MST only checks that it's an object. Configs apply in order, then the eval config's own settings, including its `run` controls. Each top-level key is replaced, never merged: here the eval config's `trials` replaces the config's, and an eval config `judges` list would replace the config's list rather than add to it. A config may use only its own plugin's extensions and built-ins, and can't extend other configs. MST has no built-in configs. An eval's `contentHash` is computed with its configs applied, so `runEvalBatch` doesn't resume a saved run after a config changes. Code that validates an eval config itself applies `extends` first with `resolveConfigExtends` (from `./evals`).
 
-- **Judges.** A judge's `evaluate({ case, trial }, options)` returns a score: `score` from 0 to 1 ([Judge contract](#judge-contract)). MST parses `options` with the judge's schema, calls `evaluate` once per `reps`, and compares the mean score with the assertion's `threshold`. The schema sees only the judge's own options, never `threshold`, `reference`, `reps` or an eval config entry's `type` and `name`. The built-in `rubric` judge has the same contract, and an eval config can list it: `judges: [{ "type": "rubric", "rubric": "correctness" }]`.
+- **Judges.** A judge's `evaluate({ case, trial }, options)` returns a score: `score` from 0 to 1 ([Judge contract](#judge-contract)). MST parses `options` with the judge's schema, calls `evaluate` once per `reps`, and compares the mean score with the judge entry's `threshold`. The schema sees only the judge's own options, never `threshold`, `reference`, `reps` or an eval config entry's `type` and `name`. The built-in `rubric` judge has the same contract, and an eval config can list it: `judges: [{ "type": "rubric", "rubric": "correctness" }]`.
 
 Plugins load before eval config validation, so validation can check every reference and schema.
 
@@ -382,6 +382,29 @@ has one implicit `default` variant.
 
 Each server's label is its key in `servers`. Traces and metrics attribute MCP
 calls to servers by label.
+
+## Judges
+
+Judges are graders that score each trial. They are listed in three places, each entry a reference (`"acme/judge/completeness"`) or `{ "type": <reference>, ...options }`, such as `{ "type": "rubric", "rubric": "correctness", "threshold": 0.8 }`:
+
+- **A case's `judges`**, beside its `assertions`, in the dataset.
+- **The eval config's `judges`**, which every case runs.
+- **A variant's `judges`**, which every case runs in that variant.
+
+Which judges a case runs:
+
+1. The case runs its own judges plus the eval config's.
+2. A variant's `judges` replace the eval config's for that variant (`"judges": []` turns them off). The case's own judges still run.
+3. When the case and the eval config (or the variant) list the same judge, the case's settings win: its `threshold`, `reference`, `reps` and options override the eval config's, and options it doesn't set keep the eval config's. Two entries are the same judge when results would give them the same name: a plugin judge's reference, or a rubric judge's built-in rubric (`correctness`), so two rubric judges stay apart.
+4. `reference` defaults to the case's `expected.answer`, and `reps` to the case's `judgeReps`, then 1.
+
+Every judge a case runs must pass. Scores are reported under the case's `judge` grader, with one entry per judge when there are several.
+
+### Pairwise judges in an eval config
+
+`pairwiseJudges` lists [pairwise judges](#pairwise-judges) at the eval config's top level (or in a shared config, not on a variant): references `<namespace>/pairwise-judge/<name>`, or `{ "type": <reference>, "reps": 2, ...options }`. Validation checks each one exists in a plugin the eval loads, and that its schema takes the options.
+
+After every variant has run, MST compares each variant with the baseline (the first, or the one `baseline` names), case by case, with `comparePairwise`. The result is the variant's `pairwise` in the run summary: a preference per case and judge, and per judge the wins, losses, ties and `candidateWinRate`. The baseline has none. When `--variant` leaves the baseline out, MST skips pairwise and prints a note. Pairwise judge usage counts in the telemetry's `totalJudgeUsage`, and on its own in `pairwiseJudgeUsage`. `mst run` prints each judge's win, loss and tie rates. A case that errored in either variant isn't compared. With several trials, the judge compares each variant's last trial of the case. A pairwise judge that fails to start is reported and the run keeps its results. Tool optimization rounds don't run pairwise judges.
 
 ## Metrics
 

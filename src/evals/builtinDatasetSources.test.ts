@@ -69,9 +69,7 @@ describe('canonical built-in dataset sources', () => {
           client: 'custom-host',
           clientOptions: { option: true },
           trials: 3,
-          assertions: {
-            passesJudge: { judge: 'custom-quality', threshold: 0.8 },
-          },
+          judges: [{ type: 'custom-quality', threshold: 0.8 }],
         };
         expect(
           (await load({ name: 'canonical', cases: [case_] })).cases[0]

@@ -208,7 +208,7 @@ Built-in rubrics: `'correctness'`, `'completeness'`, `'groundedness'`, `'instruc
 
 Custom rubrics: pass a string prompt or `{ text: '...' }` object. Use `judgeReps` (case-level) or `reps` (assertion-level) for variance reduction — scores are averaged across repetitions.
 
-Custom judges come from plugins: a plugin's `judges: { completeness: { schema, evaluate } }` is used as `{ judge: 'acme/judge/completeness' }` in `toPassToolJudge` or `passesJudge`. Pass plugins with `test.use({ mcpPlugins: [plugin] })`, `runEvalDataset({ dataset, plugins })`, or an eval config's `plugins`.
+Custom judges come from plugins: a plugin's `judges: { completeness: { schema, evaluate } }` is used as `{ judge: 'acme/judge/completeness' }` in `toPassToolJudge`, or listed in a case's `judges` (`"acme/judge/completeness"` or `{ "type": "acme/judge/completeness", ...options }`). Pass plugins with `test.use({ mcpPlugins: [plugin] })`, `runEvalDataset({ dataset, plugins })`, or an eval config's `plugins`.
 
 ### Debugging
 

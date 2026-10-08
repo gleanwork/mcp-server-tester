@@ -1,3 +1,4 @@
+import { judgeNameOf } from '../assertions/validators/judge.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
@@ -173,15 +174,30 @@ describe('gradeTrial', () => {
     expect(outcome.toolPrecision).toBe(0.5);
   });
 
-  it('reports an empty judge list as 0/0 judges passed', async () => {
+  it('grades no judge for an empty judges list', async () => {
+    const outcome = await gradeTrial({ judges: [] }, { response: 'x' });
+    expect(outcome.scores.judge).toBeUndefined();
+  });
+
+  it('grades judges on a case without assertions', async () => {
+    installPlugins([
+      {
+        meta: { name: 'only-judges', namespace: 'only' },
+        judges: {
+          j: {
+            schema: z.object({}).passthrough(),
+            evaluate: async () => ({ score: 1 }),
+          },
+        },
+      },
+    ]);
     const outcome = await gradeTrial(
-      { assertions: { passesJudge: [] } },
+      { judges: ['only/judge/j'] },
       { response: 'x' }
     );
-    expect(outcome.scores.judge).toEqual({
+    expect(outcome.scores.judge).toMatchObject({
       pass: true,
-      details: '0/0 judges passed',
-      judgeResults: [],
+      judgeName: 'only/judge/j',
     });
   });
 
@@ -206,7 +222,7 @@ describe('gradeTrial', () => {
     const outcome = await gradeTrial(
       {
         expected: { answer: 'canonical' },
-        assertions: { passesJudge: { judge: 'test/judge/grading-test-judge' } },
+        judges: [{ type: 'test/judge/grading-test-judge' }],
       },
       { response: 'answer' }
     );
@@ -219,29 +235,43 @@ describe('gradeTrial', () => {
 });
 
 describe('resolveJudges', () => {
+  it("keeps a rubric judge's flat rubric when it also has options", () => {
+    const [judge] = resolveJudges({
+      judges: [
+        {
+          type: 'rubric',
+          rubric: 'correctness',
+          threshold: 0.8,
+          options: { temperature: 0 },
+        },
+      ],
+    });
+    expect(judge).toMatchObject({
+      rubric: 'correctness',
+      threshold: 0.8,
+      options: { temperature: 0 },
+    });
+    expect(judge).not.toHaveProperty('judge');
+    expect(judgeNameOf(judge!)).toBe('correctness');
+  });
+
   it('applies judge reps, then case reps, then 1', () => {
     const judges = resolveJudges({
       judgeReps: 3,
-      assertions: {
-        passesJudge: [{ judge: 'a', reps: 5 }, { judge: 'b' }],
-      },
+      judges: [{ type: 'a', reps: 5 }, { type: 'b' }],
     });
     expect(judges.map((judge) => judge.reps)).toEqual([5, 3]);
-    expect(
-      resolveJudges({ assertions: { passesJudge: { judge: 'c' } } })[0]?.reps
-    ).toBe(1);
+    expect(resolveJudges({ judges: [{ type: 'c' }] })[0]?.reps).toBe(1);
   });
 
   it('uses expected.answer only when no reference is set', () => {
     const judges = resolveJudges({
       expected: { answer: 'canonical' },
-      assertions: {
-        passesJudge: [
-          { judge: 'a', reference: 'explicit' },
-          { judge: 'b', reference: '' },
-          { judge: 'c' },
-        ],
-      },
+      judges: [
+        { type: 'a', reference: 'explicit' },
+        { type: 'b', reference: '' },
+        { type: 'c' },
+      ],
     });
     expect(judges.map((judge) => judge.reference)).toEqual([
       'explicit',
@@ -251,7 +281,7 @@ describe('resolveJudges', () => {
   });
 
   it('returns nothing when no judge is configured', () => {
-    expect(resolveJudges({ assertions: {} })).toEqual([]);
+    expect(resolveJudges({})).toEqual([]);
   });
 });
 
@@ -260,21 +290,18 @@ describe('mergeEvalJudges', () => {
     const merged = mergeEvalJudges(
       {
         expected: { answer: 'canonical' },
-        assertions: {
-          passesJudge: [
-            { judge: 'config', reference: 'case', options: { count: 3 } },
-            { judge: 'case-only', threshold: 0.5 },
-          ],
-        },
+        judges: [
+          { type: 'config', reference: 'case', options: { count: 3 } },
+          { type: 'case-only', threshold: 0.5 },
+        ],
       },
       [{ type: 'config', reference: 'suite', count: 2 }],
       [{ type: 'config', reference: 'suite', count: 2, raw: true }]
     );
     expect(merged).toEqual([
-      { judge: 'case-only', threshold: 0.5 },
+      { type: 'case-only', threshold: 0.5 },
       {
         type: 'config',
-        judge: 'config',
         count: 2,
         reference: 'case',
         // Only the judge's own options: no routing or assertion keys.
@@ -290,21 +317,18 @@ describe('mergeEvalJudges', () => {
     ];
     const merged = mergeEvalJudges(
       {
-        assertions: {
-          passesJudge: [
-            { rubric: 'correctness', threshold: 0.9 },
-            { judge: 'case-only' },
-          ],
-        },
+        judges: [
+          { type: 'rubric', rubric: 'correctness', threshold: 0.9 },
+          { type: 'case-only' },
+        ],
       },
       raw,
       raw
     );
     expect(merged).toEqual([
-      { judge: 'case-only' },
+      { type: 'case-only' },
       {
         type: 'rubric',
-        judge: 'rubric',
         rubric: 'correctness',
         threshold: 0.9,
         options: { rubric: 'correctness' },
@@ -312,7 +336,6 @@ describe('mergeEvalJudges', () => {
       },
       {
         type: 'rubric',
-        judge: 'rubric',
         rubric: 'conciseness',
         threshold: 0.6,
         options: { rubric: 'conciseness' },
@@ -323,12 +346,12 @@ describe('mergeEvalJudges', () => {
 
   it('falls back from the eval config reference to expected.answer', () => {
     const [withEvalRef] = mergeEvalJudges(
-      { expected: { answer: 'canonical' }, assertions: {} },
+      { expected: { answer: 'canonical' } },
       [{ type: 'j', reference: 'suite' }],
       []
     );
     const [withoutRef] = mergeEvalJudges(
-      { expected: { answer: 'canonical' }, assertions: {} },
+      { expected: { answer: 'canonical' } },
       [{ type: 'j' }],
       []
     );

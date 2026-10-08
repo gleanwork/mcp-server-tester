@@ -100,7 +100,7 @@ export interface MCPProtocolInfo {
 export type ResultSource = 'eval' | 'test';
 
 /**
- * Grader types: the assertion types and `passesJudge`
+ * Grader types: the assertion types and `judge` (a case's judges)
  */
 export type GraderType =
   | 'exact'
@@ -129,28 +129,28 @@ export interface GraderScore {
   details?: string;
 
   /**
-   * Judge score (0-1). Populated for passesJudge assertions.
+   * Judge score (0-1). Populated for judges.
    */
   score?: number;
 
   /**
-   * Judge reasoning. Populated for passesJudge assertions.
+   * Judge reasoning. Populated for judges.
    */
   reasoning?: string;
 
   /**
    * Judge name — rubric name (e.g. 'correctness') or custom judge name.
-   * Populated for passesJudge assertions.
+   * Populated for judges.
    */
   judgeName?: string;
 
   /**
-   * Judge provider used. Populated for passesJudge assertions.
+   * Judge provider used. Populated for judges.
    */
   judgeProvider?: string;
 
   /**
-   * Judge model used. Populated for passesJudge assertions.
+   * Judge model used. Populated for judges.
    */
   judgeModel?: string;
 
@@ -169,7 +169,7 @@ export interface GraderScore {
   /**
    * Per-judge breakdown when multiple judges are used.
    * Each entry contains the individual judge's result.
-   * Only populated when passesJudge is an array with 2+ entries.
+   * Only populated when a case runs 2+ judges.
    */
   judgeResults?: GraderScore[];
 }
@@ -246,6 +246,8 @@ export type {
   EvalDataset,
   EvalAssertions,
   JudgeExpectConfig,
+  CaseJudge,
+  CaseJudgeConfig,
   SerializedEvalDataset,
   LoadDatasetOptions,
   EvalContext,

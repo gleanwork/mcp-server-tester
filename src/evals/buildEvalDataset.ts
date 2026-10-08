@@ -127,7 +127,7 @@ export function assertNamedCases(
 /** Keys people reach for that MST spells differently. */
 const KEY_HINTS: Record<string, string> = {
   regex: 'matchesPattern',
-  judge: 'passesJudge',
+  judge: 'judges',
   contains: 'containsText',
   pattern: 'matchesPattern',
 };

@@ -2,7 +2,7 @@
 
 MST's matchers assert on an MCP tool's response in a Playwright test: call the tool with `mcp.callTool()`, then `expect(result).toContainToolText(...)` and so on. This guide covers each matcher.
 
-Eval cases assert on what the client under test did, not on a tool response. Their `assertions` take a subset: `containsText` and `matchesPattern` (on the client's answer), `passesJudge`, `toolsTriggered` and `toolCallCount`. The [Evals Guide](./evals-guide.md) covers them. Sections below show the case form where one exists.
+Eval cases assert on what the client under test did, not on a tool response. Their `assertions` take a subset: `containsText` and `matchesPattern` (on the client's answer), `toolsTriggered` and `toolCallCount`. Judges sit beside them, in the case's `judges` list. The [Evals Guide](./evals-guide.md) covers them. Sections below show the case form where one exists.
 
 ## Table of Contents
 
@@ -291,43 +291,47 @@ Every judge runs the same way. The built-in `rubric` judge asks an LLM to score 
 
 ### Eval Case Format
 
-In an eval case, `assertions.passesJudge` judges the client's answer:
+In an eval case, the `judges` list (beside `assertions`) judges the client's answer. Each entry is written like an eval config's `judges`: a reference, or `{ "type": <reference>, ...options }`.
 
 ```json snippet=snippets/assertions-passes-judge.json
 {
   "id": "auth-docs",
   "input": "Find our documentation on authentication",
-  "assertions": {
-    "passesJudge": {
+  "judges": [
+    {
+      "type": "rubric",
       "rubric": {
         "text": "Evaluate if the answer points to relevant authentication docs. Score 0-1."
       },
       "threshold": 0.7
     }
-  }
+  ]
 }
 ```
 
-`rubric` is shorthand for the built-in `rubric` judge, and its LLM settings go next to it:
+`"type": "rubric"` is the built-in `rubric` judge, and its LLM settings go next to the rubric:
 
 ```json
 {
-  "passesJudge": {
-    "rubric": "correctness",
-    "provider": "openai",
-    "model": "gpt-4o",
-    "threshold": 0.75
-  }
+  "judges": [
+    {
+      "type": "rubric",
+      "rubric": "correctness",
+      "provider": "openai",
+      "model": "gpt-4o",
+      "threshold": 0.75
+    }
+  ]
 }
 ```
 
-To use a plugin's judge, name it: `{ "judge": "acme/judge/completeness", "threshold": 0.8 }`. Its other fields, or `options`, are the judge's own options, checked by its schema. With a list of judges, every judge must pass.
+To use a plugin's judge, name it: `"acme/judge/completeness"`, or `{ "type": "acme/judge/completeness", "threshold": 0.8 }` with settings. Its other fields, or `options`, are the judge's own options, checked by its schema. Every judge in the list must pass. A case also runs the eval config's `judges` (see [Judges](./evaluation-framework.md#judges)); a case judge that names one of them overrides its settings.
 
 ```typescript snippet=snippets/judge-config.ts
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
 import { loadEvalDataset, runEvalDataset } from '@gleanwork/mcp-server-tester';
 
-// Each case's passesJudge chooses its judge and the judge's LLM settings.
+// Each case lists its judges, with their LLM settings, in `judges`.
 test('search relevance eval with judge', async ({ mcp }, testInfo) => {
   const dataset = await loadEvalDataset('./data/evals.json');
   const result = await runEvalDataset(
@@ -411,10 +415,7 @@ Use a built-in rubric by name in your eval case:
 
 ```json
 {
-  "passesJudge": {
-    "rubric": "correctness",
-    "threshold": 0.75
-  }
+  "judges": [{ "type": "rubric", "rubric": "correctness", "threshold": 0.75 }]
 }
 ```
 
@@ -569,7 +570,7 @@ test('city info', async ({ mcp }) => {
 });
 ```
 
-An eval case can declare several assertions too. Each is graded on its own and reported per assertion:
+An eval case can declare several assertions and judges too. Each is graded on its own and reported per grader:
 
 ```json snippet=snippets/assertions-combined.json
 {
@@ -588,12 +589,9 @@ An eval case can declare several assertions too. Each is graded on its own and r
           "required": true
         }
       ]
-    },
-    "passesJudge": {
-      "rubric": "correctness",
-      "threshold": 0.7
     }
-  }
+  },
+  "judges": [{ "type": "rubric", "rubric": "correctness", "threshold": 0.7 }]
 }
 ```
 

@@ -140,7 +140,13 @@ export interface EvalConfig {
   /** The variant the others are compared with. @default the first */
   baseline?: string;
   metrics?: ExtensionConfig[];
+  /** Judges every case runs, on top of each case's own `judges`. */
   judges?: ExtensionConfig[];
+  /**
+   * Pairwise judges (`<namespace>/pairwise-judge/<name>`): after every variant
+   * runs, each compares each other variant with the baseline, case by case.
+   */
+  pairwiseJudges?: ExtensionConfig[];
   coworkSetup?: CoworkSetupConfig;
   results?: {
     store: ExtensionConfig;
@@ -198,6 +204,7 @@ const DatasetConfigSchema = z.union([
 ]);
 const MetricConfigSchema = extensionReferenceSchema('metric');
 const JudgeConfigSchema = extensionReferenceSchema('judge');
+const PairwiseJudgeConfigSchema = extensionReferenceSchema('pairwise-judge');
 const ResultStoreConfigSchema = extensionReferenceSchema('result-store');
 
 /**
@@ -332,6 +339,12 @@ const EvalVariantSchema = z
     metrics: z.array(MetricConfigSchema).optional(),
     judges: z.array(JudgeConfigSchema).optional(),
     coworkSetup: CoworkSetupConfigSchema.optional(),
+    pairwiseJudges: z
+      .never({
+        message:
+          "pairwise judges compare each variant with the baseline: list them in the eval config's top-level `pairwiseJudges`, not on a variant",
+      })
+      .optional(),
     ...renamedKeys({ scenarioTemplate: 'inputTemplate' }),
     ...removedKeys({ toolOverrides: TOOL_OVERRIDES_MOVED }),
   })
@@ -363,6 +376,7 @@ export const EvalConfigSchema = z
     baseline: z.string().min(1).optional(),
     metrics: z.array(MetricConfigSchema).optional(),
     judges: z.array(JudgeConfigSchema).optional(),
+    pairwiseJudges: z.array(PairwiseJudgeConfigSchema).optional(),
     coworkSetup: CoworkSetupConfigSchema.optional(),
     results: z.object({ store: ResultStoreConfigSchema }).strict().optional(),
     plugins: z.array(z.string().min(1)).optional(),
@@ -447,6 +461,7 @@ const PluginConfigSchema = EvalConfigSchema.pick({
   inputTemplate: true,
   metrics: true,
   judges: true,
+  pairwiseJudges: true,
   coworkSetup: true,
   results: true,
   provider: true,
@@ -469,9 +484,10 @@ export type PluginConfig = z.input<typeof PluginConfigSchema>;
 /** A parsed shared config: judge, metric and store shorthands are tagged configs. */
 export type ParsedPluginConfig = Omit<
   z.output<typeof PluginConfigSchema>,
-  'judges' | 'metrics' | 'results'
+  'judges' | 'pairwiseJudges' | 'metrics' | 'results'
 > & {
   judges?: ExtensionConfig[];
+  pairwiseJudges?: ExtensionConfig[];
   metrics?: ExtensionConfig[];
   results?: { store: ExtensionConfig };
 };
@@ -496,10 +512,13 @@ export function parsePluginConfig(
   const result = PluginConfigSchema.safeParse(value);
   if (!result.success)
     throw new Error(`Invalid ${label}: ${result.error.message}`);
-  const { judges, metrics, results, ...settings } = result.data;
+  const { judges, pairwiseJudges, metrics, results, ...settings } = result.data;
   return {
     ...settings,
     ...(judges ? { judges: judges.map(normalizeExtension) } : {}),
+    ...(pairwiseJudges
+      ? { pairwiseJudges: pairwiseJudges.map(normalizeExtension) }
+      : {}),
     ...(metrics ? { metrics: metrics.map(normalizeExtension) } : {}),
     ...(results
       ? { results: { store: normalizeExtension(results.store) } }
@@ -521,6 +540,7 @@ function normalizeConfig(value: z.output<typeof EvalConfigSchema>): EvalConfig {
     datasets: value.datasets.map(normalizeDataset),
     metrics: value.metrics?.map(normalizeExtension),
     judges: value.judges?.map(normalizeExtension),
+    pairwiseJudges: value.pairwiseJudges?.map(normalizeExtension),
     results: value.results
       ? { ...value.results, store: normalizeExtension(value.results.store) }
       : undefined,

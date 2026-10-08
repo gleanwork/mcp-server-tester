@@ -222,13 +222,7 @@ describe('judge input', () => {
           criteria: { grounded: 'Cites the plan' },
         },
         tags: ['rubric'],
-        assertions: {
-          passesJudge: {
-            judge: 'ctx/judge/judge',
-            threshold: 0.6,
-            strict: true,
-          },
-        },
+        judges: [{ type: 'ctx/judge/judge', threshold: 0.6, strict: true }],
       },
     ]);
     expect(result.passed).toBe(1);
@@ -271,13 +265,13 @@ describe('judge input', () => {
       {
         id: 'none',
         input: 'q',
-        assertions: { passesJudge: { judge: 'needs/judge/judge' } },
+        judges: [{ type: 'needs/judge/judge' }],
       },
       {
         id: 'some',
         input: 'q',
         expected: { criteria: { c: 'x' } },
-        assertions: { passesJudge: { judge: 'needs/judge/judge' } },
+        judges: [{ type: 'needs/judge/judge' }],
       },
     ]);
     expect(evaluate).toHaveBeenCalledTimes(1);
@@ -320,9 +314,7 @@ describe('judge output', () => {
       {
         id: 'rich',
         input: 'q',
-        assertions: {
-          passesJudge: { judge: 'rich/judge/judge', threshold: 0.9 },
-        },
+        judges: [{ type: 'rich/judge/judge', threshold: 0.9 }],
       },
     ]);
     const caseResult = result.caseResults[0]!;
@@ -353,7 +345,7 @@ describe('judge output', () => {
       {
         id: 'bad',
         input: 'q',
-        assertions: { passesJudge: { judge: 'bad/judge/judge' } },
+        judges: [{ type: 'bad/judge/judge' }],
       },
     ]);
     expect(result.passed).toBe(0);
@@ -377,21 +369,21 @@ describe('judge output', () => {
       score: 1,
       usage: { inputTokens: 10, outputTokens: 2 },
     }));
-    const passesJudge = [
-      { judge: 'always/judge/judge', threshold: 0.5 },
-      { judge: 'needs-criteria/judge/judge', threshold: 0.5 },
+    const judges = [
+      { type: 'always/judge/judge', threshold: 0.5 },
+      { type: 'needs-criteria/judge/judge', threshold: 0.5 },
     ];
     const result = await run([
       {
         id: 'no-criteria',
         input: 'q',
-        assertions: { passesJudge },
+        judges,
       },
       {
         id: 'with-criteria',
         input: 'q',
         expected: { criteria: { c: 'x' } },
-        assertions: { passesJudge },
+        judges,
       },
     ]);
     const [skippedCase, gradedCase] = result.caseResults;
@@ -492,7 +484,7 @@ describe('judge output', () => {
         id: 'a',
         input: 'q',
         expected: { answer: 'new' },
-        assertions: { passesJudge: { judge: 'answer/judge/judge' } },
+        judges: [{ type: 'answer/judge/judge' }],
       },
     ]);
     expect(evaluate.mock.calls[0]![0].case.expected.answer).toBe('new');
@@ -508,7 +500,7 @@ describe('judge output', () => {
         id: 'iterated',
         input: 'q',
         trials: 3,
-        assertions: { passesJudge: { judge: 'iter/judge/judge' } },
+        judges: [{ type: 'iter/judge/judge' }],
       },
     ]);
     const caseResult = result.caseResults[0]!;
@@ -535,7 +527,7 @@ describe('judge output', () => {
       {
         id: 'only-skip',
         input: 'q',
-        assertions: { passesJudge: { judge: 'skip/judge/judge' } },
+        judges: [{ type: 'skip/judge/judge' }],
       },
     ]);
     expect(result.caseResults[0]!.pass).toBe(true);

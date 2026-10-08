@@ -3,6 +3,8 @@ export type {
   EvalDataset,
   EvalAssertions,
   JudgeExpectConfig,
+  CaseJudge,
+  CaseJudgeConfig,
   SerializedEvalDataset,
 } from '../evals/datasetTypes.js';
 

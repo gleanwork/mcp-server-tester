@@ -14,6 +14,11 @@ import {
   resolveClientName,
 } from './builtinClients.js';
 import { getJudge } from '../judge/builtinJudges.js';
+import type { PairwiseJudgeDefinition } from '../judge/pairwiseContract.js';
+import {
+  getPairwiseJudge,
+  type PairwiseJudgeSpec,
+} from './pairwiseComparison.js';
 import { getMetric } from './metrics.js';
 import { getResultStore } from './builtinResultStores.js';
 import {
@@ -57,6 +62,7 @@ interface ConfigLookups {
   client(reference: string): ClientDefinition;
   metric(reference: string): MetricDefinition;
   judge(reference: string): JudgeDefinition;
+  pairwiseJudge(reference: string): PairwiseJudgeDefinition;
   resultStore(reference: string): ResultStoreDefinition;
 }
 
@@ -72,6 +78,7 @@ function configLookups(namespaces?: readonly string[]): ConfigLookups {
     client: scoped(getClient),
     metric: scoped(getMetric),
     judge: scoped(getJudge),
+    pairwiseJudge: scoped(getPairwiseJudge),
     resultStore: scoped(getResultStore),
   };
 }
@@ -168,11 +175,22 @@ function parseMetrics(
   );
 }
 
+/** How an eval config judge grades: checked here, since the entry is otherwise the judge's. */
+const JudgeGradingSchema = z.object({
+  threshold: z.number().min(0).max(1).optional(),
+  reps: z.number().int().min(1).optional(),
+});
+
 function parseJudges(
   configs: ExtensionConfig[] | undefined,
   lookups: ConfigLookups
 ): ExtensionConfig[] | undefined {
   return configs?.map((config) => {
+    const grading = JudgeGradingSchema.safeParse(config);
+    if (!grading.success)
+      throw new Error(
+        `Invalid judge "${config.type}": ${grading.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ')}`
+      );
     // The judge's schema sees only its own options; the assertion keys
     // (threshold, reference, reps) and routing (type, name) are kept as given.
     const own = judgeOwnOptions(config);
@@ -186,6 +204,46 @@ function parseJudges(
     );
     return { ...options, ...assertion } as ExtensionConfig;
   });
+}
+
+/** How a pairwise judge runs: `reps` per case and order; the rest are its options. */
+const PairwiseRepsSchema = z.number().int().min(1).optional();
+
+/**
+ * Check each pairwise judge exists (in a loaded plugin) and takes its
+ * options. The entries are returned as written: `comparePairwise` parses the
+ * options itself, once.
+ */
+function checkPairwiseJudges(
+  configs: ExtensionConfig[] | undefined,
+  lookups: ConfigLookups
+): ExtensionConfig[] | undefined {
+  return configs?.map((config) => {
+    const definition = lookups.pairwiseJudge(config.type);
+    const reps = PairwiseRepsSchema.safeParse(config.reps);
+    if (!reps.success)
+      throw new Error(
+        `Invalid pairwise judge "${config.type}": reps must be a whole number of at least 1.`
+      );
+    parseExtensionOptions(
+      definition.schema,
+      pairwiseJudgeSpec(config).options,
+      `pairwise judge options "${config.type}"`
+    );
+    return config;
+  });
+}
+
+/** A pairwise judge entry (`{ type, reps?, ...options }`) as comparePairwise takes it. */
+export function pairwiseJudgeSpec(
+  config: ExtensionConfig
+): PairwiseJudgeSpec & { options: Record<string, unknown> } {
+  const { type, reps, name: _name, ...options } = config;
+  return {
+    type,
+    ...(typeof reps === 'number' ? { reps } : {}),
+    options,
+  };
 }
 
 /** Eval config settings that default every client's option of the same name. */
@@ -382,6 +440,10 @@ export function validateEvalConfig(
   const client = effectiveClient(evalConfig, base, lookups);
   const metrics = parseMetrics(evalConfig.metrics, lookups);
   const judges = parseJudges(evalConfig.judges, lookups);
+  const pairwiseJudges = checkPairwiseJudges(
+    evalConfig.pairwiseJudges,
+    lookups
+  );
   const results = evalConfig.results
     ? {
         ...evalConfig.results,
@@ -448,6 +510,7 @@ export function validateEvalConfig(
     ...(client ? clientFieldsOf(client) : {}),
     metrics,
     judges,
+    ...(pairwiseJudges ? { pairwiseJudges } : {}),
     results,
     variants: baselineFirst(variants, evalConfig.baseline),
   };

@@ -90,6 +90,7 @@ function configReferences(config: ParsedPluginConfig): string[] {
     config.client,
     config.results?.store.type,
     ...(config.judges ?? []).map((judge) => judge.type),
+    ...(config.pairwiseJudges ?? []).map((judge) => judge.type),
     // A metric names its definition in `metric`, or by its `type`.
     ...(config.metrics ?? []).map((metric) =>
       typeof metric.metric === 'string' ? metric.metric : metric.type

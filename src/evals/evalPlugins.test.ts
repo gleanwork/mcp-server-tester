@@ -15,7 +15,7 @@ describe('assertDatasetNamespaces', () => {
           {
             id: 'a',
             input: 'x',
-            assertions: { passesJudge: { judge: 'other/x' } },
+            judges: [{ type: 'other/judge/x' }],
           },
         ],
       }),

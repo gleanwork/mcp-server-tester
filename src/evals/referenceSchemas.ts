@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { builtinShortName } from '../plugins/extensions.js';
+import { builtinShortName, checkReferenceKind } from '../plugins/extensions.js';
 import type { KindSegment } from '../plugins/plugin.js';
 
 /**
@@ -20,6 +20,21 @@ export function referenceSchema(kind: KindSegment) {
         return z.NEVER;
       }
     });
+}
+
+/**
+ * `referenceSchema`, also checking a plugin reference's kind when it is read
+ * (`acme/metric/x` is not a judge), for references the lookup sees only
+ * later, such as a dataset case's judges.
+ */
+export function kindCheckedReferenceSchema(kind: KindSegment) {
+  return referenceSchema(kind).superRefine((reference, context) => {
+    try {
+      checkReferenceKind(reference, kind);
+    } catch (error) {
+      context.addIssue({ code: 'custom', message: (error as Error).message });
+    }
+  });
 }
 
 /** `{ "type": <reference>, ...options }` for an extension of `kind`. */
