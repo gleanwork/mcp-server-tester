@@ -419,6 +419,13 @@ nothing more is sent. MST discards the driver's own log; set
 `MST_COWORK_CUA_LOG_FILE` to a path to keep it. The log holds action and app
 names, never the query.
 
+Claude Code replaces a large tool result in its transcript with a
+`<persisted-output>` placeholder and saves the result to a file, which the model
+reads. MST reads that file back while it collects the trial, so the trace (and
+any judge) sees the full result, up to 1 MB. It reads only a file named for the
+call's own `tool_use_id` in a `tool-results` directory under the system
+temporary directory or the session's, never another path a placeholder names.
+
 Results include `clientUsage`, `clientTelemetry`, and `telemetry.totalClientUsage`.
 These describe native Claude execution, not the separate Computer Use planner's
 API cost. A test assertion or judge failure is distinct from a driver failure.

@@ -1,5 +1,7 @@
 import { readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { resolvePersistedOutput } from '../../persistedToolOutput.js';
 import { Readable } from 'node:stream';
 import { parse as parseNdjson } from 'ndjson';
 import type { LLMToolCall } from '../../mstClient/types.js';
@@ -192,6 +194,13 @@ export async function parseClaudeTrace(
       : extractAssistantText(combinedEventsForRun);
   const usage = extractAggregatedUsage(resultEvents);
   const toolCalls = extractToolCalls(auditEventsForRun, transcriptEventsForRun);
+  // Large results are only placeholders in the transcript; while the
+  // session's files exist, read back what the model saw. Claude Code saves
+  // them under its temporary directory or the session's.
+  const roots = [tmpdir(), candidate.sessionDir];
+  for (const call of toolCalls)
+    if (typeof call.output === 'string')
+      call.output = resolvePersistedOutput(call.output, call.id, roots);
 
   return {
     candidate,

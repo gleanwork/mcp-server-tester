@@ -49,6 +49,43 @@ function toolUseEvent(id: string, name: string, timestamp?: string) {
 }
 
 describe('Claude local-agent trace parsing', () => {
+  it('reads back a large tool result the transcript only points to', async () => {
+    const id = 'toolu_bdrk_01QnnrBzoJ7qWyZbzHvwEouZ';
+    const full = '[{"type":"text","text":"# Search Results (16 found)"}]';
+    // Claude Code saves it under its temporary directory.
+    const scratch = await mkdtemp(join(tmpdir(), 'mst-cowork-native-'));
+    onTestFinished(() => rm(scratch, { recursive: true, force: true }));
+    const results = join(scratch, 'projects', 'session', 'cli', 'tool-results');
+    await mkdir(results, { recursive: true });
+    await writeFile(join(results, `${id}.json`), full);
+    const placeholder = `<persisted-output>\nOutput too large (97KB). Full output saved to: ${join(results, `${id}.json`)}\n\nPreview (first 2KB):\n[{"type":"text"`;
+    const trace = await parseNativeEvents([
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            {
+              type: 'tool_use',
+              id,
+              name: 'mcp__glean__enterprise_search',
+              input: { query: 'MST 2.0' },
+            },
+          ],
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: id, content: placeholder },
+          ],
+        },
+      },
+    ]);
+    expect(trace.toolCalls).toHaveLength(1);
+    expect(trace.toolCalls[0]!.output).toBe(full);
+  });
+
   it.each(['partial', 'conflicting'] as const)(
     'preserves transcript ordering with %s audit coverage and audit-only results',
     async (coverage) => {
