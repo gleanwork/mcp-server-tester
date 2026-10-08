@@ -192,11 +192,17 @@ approval inspections within the original per-case action budget; prompts are
 never resubmitted. Follow-up usage is recorded under
 `clientTelemetry.computerUse.hitlFollowups`.
 
-For the client application's login-backed OOTB connectors, use its
-`nativeConnectors` selector and existing dry-run proxy entries alongside your
-MCP server's `/eval` endpoint. The registry, OAuth login, and vendor write classification remain
-in the client application, not MST. Missing or
-expired credentials fail preflight rather than silently dropping a connector.
+MST does not configure or observe Cowork's own connectors (the ones added from
+Cowork's connector directory and signed in to in the Claude account). Anthropic's
+cloud calls those vendors, so there is nowhere to put a dry-run proxy: MST can't
+block their writes, record their calls fully, or swap their tool descriptions,
+and a batch's setup replaces only the locally configured MCP servers, not
+these. Before a run, disconnect any that
+could write to real accounts, or use test accounts. Servers in the eval config
+are the only ones MST controls; to compare against a vendor's server, add it
+there behind the dry-run proxy (see [Dry-run proxy](#dry-run-proxy)). See the
+[known gap](./design/explainer.md#known-gap-coworks-own-connectors) for the
+options being considered.
 
 ## Run an installed release
 
