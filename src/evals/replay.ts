@@ -3,6 +3,7 @@
  * the client run, so a run is graded with the same pipeline that collected
  * it, without starting a client.
  */
+import path from 'node:path';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import type { EvalCase, EvalDataset } from './datasetTypes.js';
 import type {
@@ -23,6 +24,8 @@ import type { RunRecord, TrialRecord } from './runFormat.js';
 export interface RunReplay {
   /** The stored run's `run.json`. */
   run: RunRecord;
+  /** The stored run's directory. */
+  directory: string;
   /** The new run's ID: the stored run's with the next `.g<n>`. */
   runId: string;
   /** The run that collected the traces: a regrade's own source, or the run. */
@@ -38,6 +41,7 @@ export interface RunReplay {
  */
 export function runReplay(
   run: RunRecord,
+  directory: string,
   trials: readonly TrialRecord[],
   runId: string
 ): RunReplay {
@@ -58,6 +62,7 @@ export function runReplay(
     for (const list of byCase.values()) list.sort((a, b) => a.trial - b.trial);
   return {
     run,
+    directory,
     runId,
     gradedFrom: run.gradedFrom ?? run.runId,
     trials: byVariant,
@@ -137,6 +142,7 @@ export function replayedCases(
 /** A stored trial as the execution that produced it. */
 function storedExecution(
   trial: TrialRecord,
+  directory: string,
   servers: MCPConfig[],
   evidence: TraceEvidence
 ): CaseExecution {
@@ -164,6 +170,10 @@ function storedExecution(
           diagnostics:
             trial.clientDiagnostics as ClientRunResult['diagnostics'],
         }
+      : {}),
+    // The copy the run kept: judges read what they read when it ran.
+    ...(trial.artifacts
+      ? { artifactsDir: path.join(directory, trial.artifacts) }
       : {}),
   };
   const execution = clientRunToExecution(
@@ -221,6 +231,6 @@ export function replayExecutor(
           `Run ${replay.run.runId} has no trial ${index} of case "${evalCase.id}" on variant "${variant}".`
         )
       );
-    return storedExecution(trial, servers, evidence);
+    return storedExecution(trial, replay.directory, servers, evidence);
   };
 }

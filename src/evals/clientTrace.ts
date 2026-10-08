@@ -76,6 +76,12 @@ export function clientRunToExecution(
         ? { llmDurationMs: trace.llmDurationMs }
         : {}),
       ...(trace.diagnostics ? { diagnostics: trace.diagnostics } : {}),
+      ...(trace.artifactsDir !== undefined
+        ? { artifactsDir: trace.artifactsDir }
+        : {}),
+      ...(trace.artifactsExclude?.length
+        ? { artifactsExclude: trace.artifactsExclude }
+        : {}),
     },
     error: trace.error,
     usage: trace.usage,

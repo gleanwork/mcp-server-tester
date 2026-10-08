@@ -111,6 +111,20 @@ export interface ClientRunResult {
   /** Per-request wall time, excluding shared batch setup and cleanup. */
   durationMs?: number;
   llmDurationMs?: number;
+  /**
+   * A local directory with the client's own record of this trial, such as a
+   * desktop session folder with its audit log, spilled tool output and the
+   * files it wrote. Judges read it. A run that keeps full traces
+   * (`redactStoredResponses: false`) copies it into the run directory, so
+   * `mst grade` can read it later. Never stored as a path.
+   */
+  artifactsDir?: string;
+  /**
+   * Paths in `artifactsDir`, relative to it, that aren't evidence and must
+   * not be copied or shown to judges: credentials, settings, environment
+   * snapshots. A directory excludes everything under it.
+   */
+  artifactsExclude?: readonly string[];
 }
 
 /**

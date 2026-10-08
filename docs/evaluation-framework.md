@@ -253,6 +253,128 @@ do not carry.
   (wins plus half the ties, over compared cases), order `consistency`,
   per-dimension win rates, and judge usage.
 
+### Agentic judges
+
+An agentic judge doesn't get the trial in one prompt. It runs an agent over a
+workspace of the trial's evidence, so it can read every tool output in full,
+search the trace, and run helper programs before it answers. `agenticJudge`
+makes a pointwise judge and `agenticPairwiseJudge` a pairwise one; both are
+registered like any other judge.
+
+```ts
+import { agenticJudge } from '@gleanwork/mcp-server-tester/evals';
+
+const plugin = {
+  meta: { name: 'my-judges', namespace: 'mine' },
+  judges: {
+    grounded: agenticJudge({
+      requires: ['case.expected.answer'],
+      defaults: { runtime: 'codex', effort: 'medium', maxTurns: 10 },
+      // Added to the workspace next to case.json, response.md and trace/.
+      files: ({ trial }) => [{ path: 'scripts/digest.py', content: DIGEST_PY }],
+      // Programs the agent may run from the workspace.
+      commands: [
+        {
+          name: 'digest',
+          description: 'Summarize the trace',
+          argv: ['python3', 'scripts/digest.py'],
+        },
+      ],
+      buildPrompt: ({ case: c }) => ({
+        system: GRADER_INSTRUCTIONS,
+        prompt: `Grade response.md against case.json expected.answer: ${c.input.prompt}`,
+      }),
+      outputSchema: {
+        type: 'object',
+        required: ['score', 'reasoning'],
+        properties: {
+          score: { type: 'number' },
+          reasoning: { type: 'string' },
+        },
+      },
+      parseScore: ({ json }) => {
+        const { score, reasoning } = json as {
+          score: number;
+          reasoning: string;
+        };
+        return { score: score / 10, reasoning };
+      },
+    }),
+  },
+};
+```
+
+The workspace holds `case.json`, `response.md`, `trace/events.json` (every
+client event with its full output), `trace/messages.json` when the client
+reports turns, and the plugin's `files`. A pairwise workspace has `case.json`
+and one such tree per trial: `a/` is the baseline, `b/` the candidate
+(`agenticPairwiseJudge` takes `parsePreference`). When the client keeps its
+own record of the trial (for Cowork, its session folder), `trial.artifactsDir`
+points to a copy of it, so `files` can stage what the judge needs; see
+[Client artifacts](#client-artifacts).
+
+The runtime is an option, so the same judge runs on either agent SDK:
+
+```json
+{
+  "type": "mine/judge/grounded",
+  "runtime": "claude-agent",
+  "model": "claude-sonnet-4-5"
+}
+```
+
+| Option          | Effect                                                       |
+| --------------- | ------------------------------------------------------------ |
+| `runtime`       | `codex` (`@openai/codex-sdk`) or `claude-agent` (Agent SDK). |
+| `model`         | The judge model.                                             |
+| `effort`        | Reasoning effort, where the runtime supports it.             |
+| `maxTurns`      | Agent turn limit (Claude). Codex is bounded by `timeoutMs`.  |
+| `maxBudgetUsd`  | Spend limit, where the runtime enforces one (Claude).        |
+| `timeoutMs`     | Wall-clock limit per judge call. Default 15 minutes.         |
+| `keepWorkspace` | Keep the workspace and record its path, for debugging.       |
+
+Both runtimes keep the judge to the workspace:
+
+- **Codex** runs in its `read-only` OS sandbox with no network and web search
+  off. It runs commands through its sandboxed shell.
+- **Claude** gets only `Read`, `Grep` and `Glob`, and a permission check
+  denies any path outside the workspace, symlinks included. It has no shell;
+  each command is a tool that runs the program with the agent's arguments,
+  without a shell. That process is not OS-sandboxed, so commands must be
+  read-only helpers.
+- Each run starts with a fresh, empty config home (`CODEX_HOME`,
+  `CLAUDE_CONFIG_DIR`) and loads no user settings, rules, memory or MCP
+  servers. The agent's environment is an allowlist: the runtime's own
+  credentials and `PATH`, `HOME`, `TMPDIR` and `LANG`. Organization-managed
+  policy that the agent CLI reads from system locations still applies.
+- The workspace is private (mode 0700) and removed after the judge answers. File
+  paths that would leave it are errors.
+
+The score's (or preference's) `usage`, `provider` (the runtime) and `model` come from the
+agent run. `metadata.agent` records the runtime, turns, and each tool call
+with a short preview of its input and output.
+
+Codex needs `@openai/codex-sdk` and `CODEX_API_KEY` or `OPENAI_API_KEY`;
+Claude needs `@anthropic-ai/claude-agent-sdk` and `ANTHROPIC_API_KEY` (or
+its gateway variables). Both are optional peer dependencies, loaded only when
+the judge runs.
+
+### Client artifacts
+
+A client can report a local directory with its own record of each trial
+(`ClientRunResult.artifactsDir`): Cowork reports its session folder, with the
+audit log, spilled tool output and the files the agent wrote. Before anything
+grades the trial, MST copies it, leaving out symbolic links and the paths the
+client marks private (`artifactsExclude`; for Cowork, the audit key, the
+agent's settings and its environment and shell snapshots). Judges and pairwise
+judges get the copy as `trial.artifactsDir`; no result holds its path.
+
+A run that keeps full traces (`"redactStoredResponses": false`) keeps the copy
+in its directory, at `artifacts/<variant>/<case-id>/<trial>/`, and the trial's
+trace names it (`"artifacts"`), so `mst grade` gives judges exactly what they
+read when the run was graded first. Otherwise the copy is in a temporary
+directory, removed once grading is done.
+
 ### Dataset sources
 
 The built-in `file`, `dir` and `gcs` sources read canonical `EvalDataset` JSON only. They don't infer assertions from a first case, attach clients or add judges, and they reject fields they don't know, on every case. A minimal dataset needs a name, a case ID and an input:

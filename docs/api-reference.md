@@ -586,7 +586,7 @@ await saveEvalRunComparison({ store, comparison, id: 'candidate-comparison' });
 
 **Result Structure:**
 
-```typescript snippet=src/evals/evalRunner.ts#L124-L206
+```typescript snippet=src/evals/evalRunner.ts#L125-L207
 /**
  * Overall result of running an eval dataset
  */

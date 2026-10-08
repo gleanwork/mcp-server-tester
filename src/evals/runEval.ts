@@ -16,6 +16,10 @@ import {
   readRunTrials,
 } from './runFormat.js';
 import {
+  withCopiedArtifacts,
+  withoutTrialArtifacts,
+} from './trialArtifacts.js';
+import {
   assertReplayedCases,
   replayExecutor,
   replayedCases,
@@ -31,6 +35,7 @@ import { sumUsage } from '../utils/usageUtils.js';
 import { sumJudgeUsage } from '../judge/judgeContract.js';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import {
   createMCPClientForConfig,
@@ -652,6 +657,7 @@ export async function gradeRun(
     );
   const replay = runReplay(
     run,
+    directory,
     await readRunTrials(directory),
     await nextRegradeId(path.dirname(directory), run.runId)
   );
@@ -772,6 +778,25 @@ async function evaluate(
     options.redactStoredResponses ??
     (evalConfig.redactStoredResponses as boolean | undefined) ??
     REDACT_STORED_RESPONSES_BY_DEFAULT;
+  /** The summary as the run stores it: redacted or not, never with local paths. */
+  const storedSummaryOf = (summary: EvaluationSummary): EvaluationSummary =>
+    withoutTrialArtifacts(
+      redact ? redactStoredResponses(summary) : structuredClone(summary)
+    );
+  // Trials' client artifacts are copied before grading: into the run when it
+  // keeps full traces, else into a directory removed once graders are done.
+  let temporaryArtifacts: string | undefined;
+  const artifactsRoot = async (): Promise<string> =>
+    redact
+      ? (temporaryArtifacts ??= await fs.mkdtemp(
+          path.join(os.tmpdir(), 'mst-artifacts-')
+        ))
+      : outputDir;
+  const removeArtifacts = async (): Promise<void> => {
+    if (temporaryArtifacts)
+      await fs.rm(temporaryArtifacts, { recursive: true, force: true });
+    temporaryArtifacts = undefined;
+  };
   // Before any client starts: an ungraded run is only worth its traces.
   if (options.grade === false && redact)
     throw new Error(
@@ -1102,28 +1127,31 @@ async function evaluate(
                 toolOverrides: toolMetadata,
                 toolMap: variant.toolMap ?? evalConfig.toolMap,
                 ...(options.grade === false ? { grade: false } : {}),
-                ...(replay
+                ...(replay || runClient
                   ? {
-                      executeCase: replayExecutor(
-                        replay,
-                        variant.name,
-                        resolvedServers,
-                        clientConfig.definition.evidence ?? 'none'
+                      // Graders read a copy of the trial's client artifacts.
+                      executeCase: withCopiedArtifacts(
+                        replay
+                          ? replayExecutor(
+                              replay,
+                              variant.name,
+                              resolvedServers,
+                              clientConfig.definition.evidence ?? 'none'
+                            )
+                          : createEvalCaseExecutor({
+                              servers: resolvedServers,
+                              client: clientConfig.declaration,
+                              evalConfig: effectiveConfig,
+                              variant,
+                              env,
+                              batchTraces,
+                              toolVariant,
+                            }),
+                        await artifactsRoot(),
+                        variant.name
                       ),
                     }
-                  : runClient
-                    ? {
-                        executeCase: createEvalCaseExecutor({
-                          servers: resolvedServers,
-                          client: clientConfig.declaration,
-                          evalConfig: effectiveConfig,
-                          variant,
-                          env,
-                          batchTraces,
-                          toolVariant,
-                        }),
-                      }
-                    : {}),
+                  : {}),
               },
               { mcp }
             );
@@ -1188,6 +1216,9 @@ async function evaluate(
       if (variantResults.length > 0 || started) await checkpoint('failed');
       throw error;
     }
+  } catch (error) {
+    await removeArtifacts();
+    throw error;
   } finally {
     await credentials.stop();
   }
@@ -1200,9 +1231,7 @@ async function evaluate(
   async function checkpoint(phase: 'partial' | 'failed'): Promise<void> {
     try {
       const summary = buildSummary(undefined);
-      const stored = redact
-        ? redactStoredResponses(summary)
-        : structuredClone(summary);
+      const stored = storedSummaryOf(summary);
       await fs.mkdir(outputDir, { recursive: true });
       await writeRun(
         outputDir,
@@ -1258,6 +1287,10 @@ async function evaluate(
       );
     }
   }
+
+  // Graders are done with the artifacts' copies; a run that redacts its
+  // traces doesn't keep them.
+  await removeArtifacts();
 
   const summary = buildSummary(pairwiseUsage);
 
@@ -1427,9 +1460,7 @@ async function evaluate(
       );
     }
 
-  const storedSummary = redact
-    ? redactStoredResponses(summary)
-    : structuredClone(summary);
+  const storedSummary = storedSummaryOf(summary);
   await fs.mkdir(outputDir, { recursive: true });
   if (store) {
     // Eval config validation already parsed defaults and transforms once.

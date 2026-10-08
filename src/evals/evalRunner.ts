@@ -35,6 +35,7 @@ import type {
 import type {
   EvalCaseResult,
   EvalCaseRequest,
+  TrialArtifacts,
   TrialResult,
   EvalRunMetadata,
 } from '../types/reporter.js';
@@ -714,6 +715,15 @@ export function executedTrialResult(
       : undefined);
   const clientMetadata =
     clientExecution?.clientMetadata ?? clientResponse?.clientMetadata;
+  const artifacts: TrialArtifacts | undefined =
+    clientResponse?.artifactsDir !== undefined
+      ? {
+          dir: clientResponse.artifactsDir,
+          ...(clientResponse.artifactsExclude?.length
+            ? { exclude: clientResponse.artifactsExclude }
+            : {}),
+        }
+      : undefined;
   const clientUsage = clientExecution?.usage ?? clientResponse?.usage;
   const clientDiagnostics =
     clientExecution?.diagnostics ?? clientResponse?.diagnostics;
@@ -725,7 +735,8 @@ export function executedTrialResult(
     source: 'eval',
     pass: false,
     request: buildRequest(evalCase, options),
-    response,
+    // A local path, for judges only: never in results.
+    response: withoutArtifacts(response),
     error,
     scores: {},
     authType: context.mcp?.authType,
@@ -742,6 +753,7 @@ export function executedTrialResult(
     clientUsage,
     clientTelemetry: clientExecution?.telemetry,
     clientMetadata,
+    ...(artifacts ? { artifacts } : {}),
   };
 }
 
@@ -779,8 +791,12 @@ async function runTrial(
     !executed.error &&
     (evalCase.assertions || evalCase.judges?.length)
   ) {
-    // Without an error, the execution completed: its response is the client's.
-    const clientResponse = executed.response as ClientResponse;
+    // Without an error, the execution completed: its response is the client's,
+    // and judges get its artifacts' copy (results don't keep the path).
+    const clientResponse = {
+      ...(executed.response as ClientResponse),
+      ...(executed.artifacts ? { artifactsDir: executed.artifacts.dir } : {}),
+    };
     outcome = await gradeTrial(evalCase, {
       response: mapToolNames(clientResponse, options.toolMap),
       clientResponse,
@@ -806,6 +822,22 @@ async function runTrial(
     toolCallTrace: outcome.toolCallTrace,
     ...(judgeUsage !== undefined && { judgeUsage }),
   };
+}
+
+/** `response` without the local artifacts path and exclusions. */
+function withoutArtifacts(response: unknown): unknown {
+  if (
+    typeof response !== 'object' ||
+    response === null ||
+    !('artifactsDir' in response)
+  )
+    return response;
+  const {
+    artifactsDir: _dir,
+    artifactsExclude: _exclude,
+    ...rest
+  } = response as Record<string, unknown>;
+  return rest;
 }
 
 /**
@@ -877,6 +909,7 @@ export async function runEvalCase(
         }),
         clientTelemetry: result.clientTelemetry,
         clientMetadata: result.clientMetadata,
+        ...(result.artifacts ? { artifacts: result.artifacts } : {}),
         ...trialSkillLoads(result.response),
       });
     } catch (err) {

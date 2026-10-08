@@ -9,6 +9,7 @@ import { resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 import type { ClientRunResult } from './evalFrameworkTypes.js';
 import { findRunDirectory, nextRegradeId } from './runFormat.js';
+import { withoutTrialArtifacts } from './trialArtifacts.js';
 
 const dirs: string[] = [];
 
@@ -32,6 +33,8 @@ async function setup(
     failCase?: string;
     /** The keyword judge's preflight: throw this to say it can't run. */
     preflightError?: string;
+    /** Report a session folder per trial, as Cowork does. */
+    artifacts?: boolean;
   } = {}
 ) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-grade-'));
@@ -43,7 +46,32 @@ async function setup(
     ): Promise<ClientRunResult> => {
       if (options.failCase && prompt.includes(options.failCase))
         throw new Error('The client crashed.');
+      const session = options.artifacts
+        ? await fs.mkdtemp(path.join(dir, 'session-'))
+        : undefined;
+      if (session) {
+        await fs.mkdir(path.join(session, 'outputs'));
+        await fs.writeFile(
+          path.join(session, 'outputs', 'answer.md'),
+          `${variant} wrote: ${prompt}`
+        );
+        await fs.writeFile(path.join(session, '.audit-key'), 'secret');
+        await fs.mkdir(path.join(session, '.claude', 'session-env'), {
+          recursive: true,
+        });
+        await fs.writeFile(
+          path.join(session, '.claude', 'session-env', 'env'),
+          'TOKEN=secret'
+        );
+        await fs.symlink(os.homedir(), path.join(session, 'home'));
+      }
       return {
+        ...(session
+          ? {
+              artifactsDir: session,
+              artifactsExclude: ['.audit-key', '.claude/session-env'],
+            }
+          : {}),
         finalText:
           variant === 'better'
             ? `${prompt}: the certificate expired after 41 minutes`
@@ -63,12 +91,24 @@ async function setup(
     }
   );
   const preflight = vi.fn((_options: Record<string, unknown>) => {});
+  /** What judges found in each trial's artifacts. */
+  const seen: Array<{ dir: string; files: string[]; answer?: string }> = [];
+  const look = async (dir: string | undefined) => {
+    if (!dir) return;
+    const files = (await fs.readdir(dir, { recursive: true })).sort();
+    const answer = await fs
+      .readFile(path.join(dir, 'outputs', 'answer.md'), 'utf8')
+      .catch(() => undefined);
+    seen.push({ dir, files, ...(answer ? { answer } : {}) });
+  };
   const judge = vi.fn(
     async (
-      { trial }: { trial: { text?: string } },
+      { trial }: { trial: { text?: string; artifactsDir?: string } },
       judgeOptions: Record<string, unknown>
     ) => ({
-      score: trial.text?.includes(String(judgeOptions.keyword)) ? 1 : 0,
+      score:
+        (await look(trial.artifactsDir),
+        trial.text?.includes(String(judgeOptions.keyword)) ? 1 : 0),
       reasoning: `looked for ${String(judgeOptions.keyword)}`,
     })
   );
@@ -77,9 +117,13 @@ async function setup(
       baseline,
       candidate,
     }: {
-      baseline: { text?: string };
-      candidate: { text?: string };
+      baseline: { text?: string; artifactsDir?: string };
+      candidate: { text?: string; artifactsDir?: string };
     }) => ({
+      ...(await Promise.all([
+        look(baseline.artifactsDir),
+        look(candidate.artifactsDir),
+      ]).then(() => ({}))),
       preference:
         (candidate.text?.length ?? 0) > (baseline.text?.length ?? 0)
           ? ('candidate' as const)
@@ -148,7 +192,7 @@ async function setup(
     plugins: [plugin],
     report: false,
   };
-  return { dir, base, client, judge, pairwise, preflight, writeConfig };
+  return { dir, base, client, judge, pairwise, preflight, writeConfig, seen };
 }
 
 /** Each case's pass and scores, without timings: what grading decided. */
@@ -404,5 +448,80 @@ describe('finding the run to grade', () => {
     await expect(nextRegradeId(runs, ids[2]!)).resolves.toBe(
       '20261008T090000Z-abc123.g2'
     );
+  });
+});
+
+describe("trials' client artifacts", () => {
+  it('judges read a copy kept in the run, without private files, and mst grade reads the same copy', async () => {
+    const t = await setup({ artifacts: true });
+    const collected = await runEval(t.base);
+    // 4 judge calls and 4 pairwise calls (2 cases, both orders, 2 sides).
+    const atCollect = t.seen.splice(0);
+    expect(atCollect).toHaveLength(4 + 8);
+    for (const view of atCollect) {
+      expect(view.dir.startsWith(collected.outputDir)).toBe(true);
+      expect(view.files).toEqual(['.claude', 'outputs', 'outputs/answer.md']);
+      expect(view.answer).toMatch(/^(baseline|better) wrote: /);
+    }
+    const trace = await readJson(
+      path.join(collected.outputDir, 'traces', 'better', 'cause', '0.json')
+    );
+    expect(trace.artifacts).toBe(
+      path.join('artifacts', 'better', 'cause', '0')
+    );
+    // No stored file holds the session's path.
+    const stored = await fs.readFile(
+      path.join(collected.outputDir, 'results.json'),
+      'utf8'
+    );
+    expect(stored).not.toContain('session-');
+    expect(stored).not.toContain('artifactsDir');
+
+    const regrade = await gradeRun({ ...t.base, run: collected.outputDir });
+    const atGrade = t.seen.splice(0);
+    expect(atGrade).toHaveLength(12);
+    for (const view of atGrade)
+      expect(view.dir.startsWith(regrade.outputDir)).toBe(true);
+    const relative = (views: typeof atGrade, root: string) =>
+      views
+        .map((view) => ({ ...view, dir: path.relative(root, view.dir) }))
+        .sort((a, b) => a.dir.localeCompare(b.dir));
+    expect(relative(atGrade, regrade.outputDir)).toEqual(
+      relative(atCollect, collected.outputDir)
+    );
+  });
+
+  it('a run that redacts its traces lets judges read a copy, then removes it', async () => {
+    const t = await setup({ artifacts: true, redact: true });
+    const collected = await runEval(t.base);
+    expect(t.seen).toHaveLength(12);
+    for (const view of t.seen) {
+      expect(view.dir.startsWith(collected.outputDir)).toBe(false);
+      expect(view.files).not.toContain('.audit-key');
+      await expect(fs.stat(view.dir)).rejects.toThrow();
+    }
+    await expect(
+      fs.stat(path.join(collected.outputDir, 'artifacts'))
+    ).rejects.toThrow();
+  });
+});
+
+describe('withoutTrialArtifacts', () => {
+  it("drops trials' artifact paths from a stored copy, not from the results graders use", () => {
+    const result = {
+      id: 'cause',
+      artifacts: { dir: '/tmp/session', exclude: ['.audit-key'] },
+      trialResults: [{ pass: true, artifacts: { dir: '/tmp/session/0' } }],
+      response: { artifacts: ['report.md'] },
+    };
+    const summary = {
+      results: [result],
+      variants: [{ result: { caseResults: [result] } }],
+    };
+    const stored = withoutTrialArtifacts(summary);
+    expect(JSON.stringify(stored)).not.toContain('/tmp/session');
+    // Other fields named "artifacts" stay.
+    expect(stored.results[0]!.response).toEqual({ artifacts: ['report.md'] });
+    expect(result.artifacts.dir).toBe('/tmp/session');
   });
 });

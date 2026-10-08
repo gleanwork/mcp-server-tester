@@ -269,6 +269,18 @@ export interface TrialResult {
   clientTelemetry?: Record<string, unknown>;
   /** How a desktop client was driven and observed in this trial. */
   clientMetadata?: ClientMetadata;
+  /** This trial's client artifacts, while the run is in memory: never stored. */
+  artifacts?: TrialArtifacts;
+}
+
+/**
+ * Where a trial's client artifacts are on this machine (see
+ * `ClientRunResult.artifactsDir`), and what in them isn't evidence. Kept in
+ * memory for judges; the run directory stores a copy, never the path.
+ */
+export interface TrialArtifacts {
+  dir: string;
+  exclude?: readonly string[];
 }
 
 /**
@@ -502,6 +514,9 @@ export interface EvalCaseResult {
    * Populated for clients that drive a desktop app, such as ChatGPT.
    */
   clientMetadata?: ClientMetadata;
+
+  /** The (last) trial's client artifacts, while the run is in memory: never stored. */
+  artifacts?: TrialArtifacts;
 }
 
 /**

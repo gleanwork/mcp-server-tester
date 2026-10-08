@@ -63,6 +63,12 @@ export interface JudgeTrial {
   messages?: JudgeMessage[];
   /** How the trace was observed. Absent for a tool result. */
   evidence?: TraceEvidence;
+  /**
+   * A local directory with the client's own record of the trial (for
+   * Cowork, its session folder: audit log, spilled tool output, written
+   * files), when the client reports one. Read it; never write to it.
+   */
+  artifactsDir?: string;
   /** Client model usage for this run. */
   usage?: Partial<UsageMetrics>;
 }
@@ -132,6 +138,7 @@ interface ClientResponseLike {
   events?: TraceEvent[];
   conversationHistory?: JudgeMessage[];
   usage?: Partial<UsageMetrics>;
+  artifactsDir?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -202,6 +209,9 @@ export function buildJudgeTrial(
     }),
     ...(client?.evidence !== undefined && { evidence: client.evidence }),
     ...(clientResponse?.usage !== undefined && { usage: clientResponse.usage }),
+    ...(typeof clientResponse?.artifactsDir === 'string' && {
+      artifactsDir: clientResponse.artifactsDir,
+    }),
   };
 }
 

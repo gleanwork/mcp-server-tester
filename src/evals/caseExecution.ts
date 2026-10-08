@@ -41,6 +41,10 @@ export type ClientResponse = MstClientSimulationResult & {
   events?: TraceEvent[];
   evidence?: TraceEvidence;
   clientMetadata?: ClientMetadata;
+  /** See `ClientRunResult.artifactsDir`. Never stored in results. */
+  artifactsDir?: string;
+  /** See `ClientRunResult.artifactsExclude`. */
+  artifactsExclude?: readonly string[];
 };
 
 interface ExecutionBase {
