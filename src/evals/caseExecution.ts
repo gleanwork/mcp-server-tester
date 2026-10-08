@@ -16,6 +16,7 @@ import { clientPatchOf, type ClientFields } from './clientFields.js';
 import type {
   TraceEvent,
   TraceEvidence,
+  ClientDefinition,
   ClientRunResult,
   Trace,
 } from './evalFrameworkTypes.js';
@@ -188,6 +189,18 @@ export interface EvalCaseExecutorOptions {
   toolVariant?: { id: string; proxy: () => Promise<ToolSurfaceProxy> };
 }
 
+/** How a trace a batch client returned ran: the execution the case grades. */
+export function batchTraceExecution(
+  trace: ClientRunResult,
+  definition: ClientDefinition,
+  servers: MCPConfig[]
+): CaseExecution {
+  return {
+    ...clientRunToExecution(trace, definition.evidence ?? 'none', servers),
+    preExecutionDurationMs: trace.durationMs,
+  };
+}
+
 /**
  * The eval's per-case executor for clients with `run()` or `runBatch()`:
  * a case consumes a batch trace or calls the client's `run()`.
@@ -207,10 +220,7 @@ export function createEvalCaseExecutor(
         throw new Error(
           'Batch trace already consumed or missing; refusing to resubmit.'
         );
-      return {
-        ...clientRunToExecution(trace, definition.evidence ?? 'none', servers),
-        preExecutionDurationMs: trace.durationMs,
-      };
+      return batchTraceExecution(trace, definition, servers);
     }
     if (!definition.run)
       throw new Error(

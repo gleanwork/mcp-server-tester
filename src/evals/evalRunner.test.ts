@@ -815,6 +815,35 @@ describe('runEvalDataset', () => {
     expect(onCaseComplete.mock.calls[1]![0].id).toBe('case-2');
   });
 
+  it('calls onTrialComplete after each trial, before the case completes', async () => {
+    const context = createContext();
+    const dataset = createDataset([
+      createEvalCase({ id: 'case-1', trials: 3 }),
+      createEvalCase({ id: 'case-2' }),
+    ]);
+    const order: string[] = [];
+    await runEvalDataset(
+      {
+        dataset,
+        onTrialComplete: (result, trial) => {
+          order.push(`${result.id}/${trial}`);
+        },
+        onCaseComplete: (result) => {
+          order.push(`${result.id} done`);
+        },
+      },
+      context
+    );
+    expect(order).toEqual([
+      'case-1/0',
+      'case-1/1',
+      'case-1/2',
+      'case-1 done',
+      'case-2/0',
+      'case-2 done',
+    ]);
+  });
+
   it('should stop on failure when stopOnFailure is true', async () => {
     const mcp = createMockMCP({
       content: [{ type: 'text', text: 'hello' }],

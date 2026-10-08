@@ -25,6 +25,10 @@ import { isInfrastructureFailure } from './infrastructureFailure.js';
  * Every file starts with `format` and `kind`. Readers ignore fields they
  * don't know, so adding an optional field keeps the version; removing or
  * renaming one moves the format to `mst.run/v2`.
+ *
+ * A trial's trace is written when the trial finishes (`writeTrial`), so a
+ * run that is killed keeps every trial that finished. The other files are
+ * written when the run is saved (`writeRun`), which rewrites the traces.
  */
 
 /** A run's ID: its UTC start time, then 6 hex characters (`20261007T182504Z-7f3c2a`). */
@@ -257,6 +261,13 @@ async function writeJson(file: string, value: unknown): Promise<void> {
   await fs.writeFile(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+/** Writes a JSON file in one step: a kill mid-write leaves the old file or none. */
+async function replaceJson(file: string, value: unknown): Promise<void> {
+  const temporary = `${file}.${randomBytes(4).toString('hex')}.tmp`;
+  await writeJson(temporary, value);
+  await fs.rename(temporary, file);
+}
+
 /** A case result's trials: its trial results, or the case itself when it ran once. */
 function trialsOf(result: EvalCaseResult): Array<TrialResult | EvalCaseResult> {
   return result.trialResults?.length ? result.trialResults : [result];
@@ -327,6 +338,41 @@ function trialRecord(
   };
 }
 
+/** `traces/<variant>/<case-id>/<trial>.json`, for one trial of a case result. */
+async function writeTrialRecord(
+  runDirectory: string,
+  runId: string,
+  result: EvalCaseResult,
+  trial: TrialResult | EvalCaseResult,
+  index: number
+): Promise<void> {
+  await replaceJson(
+    path.join(
+      runDirectory,
+      'traces',
+      segment(result.variant ?? 'default'),
+      segment(result.id),
+      `${index}.json`
+    ),
+    trialRecord(runId, result, trial, index)
+  );
+}
+
+/**
+ * Write one trial's trace as soon as the trial finishes. `result` is the
+ * trial's own result, as it is stored (redacted when the run redacts), with
+ * its `variant`; `trial` is its number from 0. `writeRun` writes the same
+ * record again when the run is saved.
+ */
+export async function writeTrial(
+  runDirectory: string,
+  runId: string,
+  result: EvalCaseResult,
+  trial: number
+): Promise<void> {
+  await writeTrialRecord(runDirectory, runId, result, result, trial);
+}
+
 /**
  * Write a run directory: `run.json`, one trace and one score per grader per
  * trial, `results.json` and `summary.json`. `summary` is the stored (redacted)
@@ -392,10 +438,7 @@ export async function writeRun(
     const variant = segment(result.variant ?? 'default');
     const caseId = segment(result.id);
     for (const [index, trial] of trialsOf(result).entries()) {
-      await writeJson(
-        path.join(runDirectory, 'traces', variant, caseId, `${index}.json`),
-        trialRecord(runId, result, trial, index)
-      );
+      await writeTrialRecord(runDirectory, runId, result, trial, index);
       // An infrastructure failure isn't a trial the graders scored, except
       // one where a grader failed: the others' scores, and its error, stay.
       if (isInfraTrial(trial) && !trial.gradingError) continue;
@@ -463,16 +506,13 @@ export async function writeLatest(
   runId: string,
   createdAt: string
 ): Promise<void> {
-  const file = path.join(evalDirectory, 'latest.json');
-  const temporary = `${file}.${randomBytes(4).toString('hex')}.tmp`;
-  await writeJson(temporary, {
+  await replaceJson(path.join(evalDirectory, 'latest.json'), {
     format: RUN_FORMAT,
     kind: 'latest',
     runId,
     createdAt,
     path: `runs/${runId}`,
   });
-  await fs.rename(temporary, file);
 }
 
 /**

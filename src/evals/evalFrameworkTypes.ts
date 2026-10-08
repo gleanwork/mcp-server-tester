@@ -67,6 +67,13 @@ export interface ClientRunContext {
   variant?: EvalVariant;
   /** Runtime-only environment isolated per eval. */
   env?: Record<string, string | undefined>;
+  /**
+   * For `runBatch`: report a request's result as soon as it finishes, with
+   * its index in `requests`, so the eval saves the trial before the batch
+   * ends. Optional, and it never throws. Report a result once, and don't
+   * change it after; `runBatch` still returns every result.
+   */
+  reportResult?: (index: number, result: ClientRunResult) => Promise<void>;
 }
 
 export type TraceEvidence = 'structured' | 'observed' | 'none';

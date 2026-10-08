@@ -254,6 +254,72 @@ describe('prepareClientBatch with a tool variant', () => {
     ]);
   });
 
+  it('reports each settled trace as the client finishes it', async () => {
+    const reported: Array<{ id: string; trace: ClientRunResult }> = [];
+    const queues = await prepareClientBatch(
+      {
+        schema: z.object({}),
+        runBatch: async (requests, context) => {
+          const traces: ClientRunResult[] = [];
+          for (const [index] of requests.entries()) {
+            const trace = { finalText: '', events: [call('find_more')] };
+            await context.reportResult?.(index, trace);
+            // Reported before the next request runs.
+            expect(reported).toHaveLength(index + 1);
+            traces.push(trace);
+          }
+          return traces;
+        },
+      },
+      [
+        { id: 'a', input: 'x', trials: 2 },
+        { id: 'b', input: 'y' },
+      ],
+      { type: 'test/batch' },
+      servers,
+      { evalConfig },
+      { id: 'v', proxy: async () => stubProxy() },
+      {
+        onTrace: async (request, trace) => {
+          reported.push({ id: `${request.caseId}/${request.trial}`, trace });
+        },
+      }
+    );
+    expect(reported.map(({ id }) => id)).toEqual(['a/0', 'a/1', 'b/0']);
+    // Settled, like the trace the eval grades.
+    expect(reported[0]?.trace).toEqual(queues?.get('a')?.[0]);
+    expect(reported[0]?.trace.events).toMatchObject([
+      { name: 'find_skills', rawName: 'find_more' },
+    ]);
+  });
+
+  it('goes on with the batch when saving a trace fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const queues = await prepareClientBatch(
+      {
+        schema: z.object({}),
+        runBatch: async (requests, context) => {
+          for (const [index] of requests.entries())
+            await context.reportResult?.(index, { finalText: '', events: [] });
+          return requests.map(() => ({ finalText: 'done', events: [] }));
+        },
+      },
+      [{ id: 'a', input: 'x' }],
+      { type: 'test/batch' },
+      [],
+      { evalConfig },
+      undefined,
+      {
+        onTrace: async () => {
+          throw new Error('disk full');
+        },
+      }
+    );
+    expect(queues?.get('a')?.[0]?.finalText).toBe('done');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('disk full'));
+    warn.mockRestore();
+  });
+
   it('fails each request whose client never listed tools', async () => {
     const queues = await prepareClientBatch(
       {

@@ -34,6 +34,18 @@ function batchFailure(client: string, reason: string): ClientRunResult {
   };
 }
 
+/** What else a batch does while it runs. */
+export interface ClientBatchOptions {
+  /**
+   * Receives each trace the client reports before its batch ends, settled
+   * like the traces the batch returns. A failure is printed, not thrown.
+   */
+  onTrace?: (
+    request: ClientBatchRequest,
+    trace: ClientRunResult
+  ) => Promise<void>;
+}
+
 /**
  * Pre-execute a batch client, retaining per-case trial queues for the evaluator.
  *
@@ -49,7 +61,8 @@ export async function prepareClientBatch(
   config: ClientConfig,
   servers: MCPConfig[],
   context: ClientRunContext,
-  toolVariant?: { id: string; proxy: () => Promise<ToolSurfaceProxy> }
+  toolVariant?: { id: string; proxy: () => Promise<ToolSurfaceProxy> },
+  options: ClientBatchOptions = {}
 ): Promise<Map<string, ClientRunResult[]> | undefined> {
   if (!definition.runBatch) return undefined;
   const scopes: string[] = [];
@@ -97,11 +110,39 @@ export async function prepareClientBatch(
       };
     });
   }
+  const { onTrace } = options;
+  // A trace reported early is settled with the proxy's traffic so far; the
+  // batch's returned traces are settled again when it ends.
+  const reportResult = onTrace
+    ? async (index: number, trace: ClientRunResult): Promise<void> => {
+        const request = requests[index];
+        if (!request) return;
+        try {
+          await onTrace(
+            request,
+            proxy
+              ? settleProxiedTrace(
+                  trace,
+                  proxy,
+                  proxy.activity(scopes[index]!).listedTools,
+                  servers,
+                  toolVariant!.id
+                )
+              : trace
+          );
+        } catch (error) {
+          console.warn(
+            `[mst] Couldn't save the trace of ${request.caseId} (trial ${request.trial}) before the batch ended: ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+      }
+    : undefined;
+  const batchContext = proxy ? withoutToolVariant(context) : context;
   let traces: ClientRunResult[];
   try {
     traces = await definition.runBatch(
       requests,
-      proxy ? withoutToolVariant(context) : context
+      reportResult ? { ...batchContext, reportResult } : batchContext
     );
   } catch (error) {
     if (!isClientUnavailable(error)) throw error;

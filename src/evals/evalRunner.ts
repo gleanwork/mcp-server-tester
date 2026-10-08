@@ -270,6 +270,12 @@ export interface EvalRunnerOptions {
   onCaseComplete?: (result: EvalCaseResult) => void | Promise<void>;
 
   /**
+   * Called after each trial of a case, with the trial's result and its
+   * number from 0, before the case's `onCaseComplete`.
+   */
+  onTrialComplete?: EvalCaseOptions['onTrialComplete'];
+
+  /**
    * Maximum number of eval cases to run concurrently.
    * When > 1, cases run in parallel (ignores stopOnFailure ordering).
    * @default 1 (sequential)
@@ -421,6 +427,12 @@ export interface EvalCaseOptions {
    * Runtime tool override variant id for reporter/debug metadata.
    */
   toolVariantId?: string;
+
+  /** Called after each trial, with the trial's result and its number from 0. */
+  onTrialComplete?: (
+    result: EvalCaseResult,
+    trial: number
+  ) => void | Promise<void>;
 }
 
 function createToolOverrideMCP(
@@ -661,26 +673,18 @@ function caseTrace(
   };
 }
 
-async function runTrial(
+/**
+ * A trial's result before grading: what the client did, with no scores. A
+ * trial's trace record comes from it (see `writeTrial`), so a trace saved
+ * before grading matches the one the run ends with.
+ */
+export function executedTrialResult(
   evalCase: EvalCase,
-  context: EvalContext,
-  options: EvalCaseOptions
-): Promise<EvalCaseResult> {
-  const startTime = Date.now();
-
-  // A custom executor (e.g. an eval's client) replaces the fixture path.
-  let execution: CaseExecution;
-  try {
-    execution = options.executeCase
-      ? checkedExecution(await options.executeCase(evalCase))
-      : await executeEvalCase(evalCase, context.mcp, {
-          client: options.client,
-          model: options.model,
-          clientOptions: options.clientOptions,
-        });
-  } catch (error) {
-    execution = failedExecution(error);
-  }
+  execution: CaseExecution,
+  options: EvalCaseOptions,
+  durationMs: number,
+  context: EvalContext = {}
+): EvalCaseResult {
   const clientExecution =
     execution.kind === 'completed' ? execution : undefined;
   const evidence = normalizeEvidence(
@@ -701,22 +705,7 @@ async function runTrial(
       : undefined);
   const clientMetadata =
     clientExecution?.clientMetadata ?? clientResponse?.clientMetadata;
-
-  let outcome: GradingOutcome = { scores: {} };
-  if (!error && (evalCase.assertions || evalCase.judges?.length)) {
-    outcome = await gradeTrial(evalCase, {
-      response: clientResponse
-        ? mapToolNames(clientResponse, options.toolMap)
-        : response,
-      clientResponse: clientResponse,
-      evidence,
-      clientMetadata,
-    });
-  }
-  const gradingError = gradingErrorOf(outcome.scores);
-
   const clientUsage = clientExecution?.usage ?? clientResponse?.usage;
-  const judgeUsage = caseJudgeUsage(outcome.scores.judge);
   const clientDiagnostics =
     clientExecution?.diagnostics ?? clientResponse?.diagnostics;
 
@@ -725,32 +714,84 @@ async function runTrial(
     id: evalCase.id,
     datasetName: options.datasetName ?? 'single-case',
     source: 'eval',
-    pass: !gradingError && didCasePass(error, outcome.scores),
+    pass: false,
     request: buildRequest(evalCase, options),
     response,
-    // A grader that failed to run leaves the trial without a verdict.
-    error: error ?? (gradingError ? `Not graded: ${gradingError}` : undefined),
-    ...(gradingError ? { gradingError } : {}),
-    scores: outcome.scores,
+    error,
+    scores: {},
     authType: context.mcp?.authType,
     project: context.mcp?.project,
     // Only pre-executed traces need extra time. Live execution is already
     // included in this trial's wall clock.
-    durationMs:
-      Date.now() - startTime + (execution.preExecutionDurationMs ?? 0),
+    durationMs: durationMs + (execution.preExecutionDurationMs ?? 0),
     tags: evalCase.tags,
-    toolPrecision: outcome.toolPrecision,
-    toolRecall: outcome.toolRecall,
-    toolCallTrace: outcome.toolCallTrace,
     traceEvidence: evidence,
     ...(clientExecution
       ? { trace: caseTrace(clientExecution, evidence, error) }
       : {}),
     ...(clientDiagnostics ? { clientDiagnostics } : {}),
     clientUsage,
-    ...(judgeUsage !== undefined && { judgeUsage }),
     clientTelemetry: clientExecution?.telemetry,
     clientMetadata,
+  };
+}
+
+async function runTrial(
+  evalCase: EvalCase,
+  context: EvalContext,
+  options: EvalCaseOptions
+): Promise<EvalCaseResult> {
+  const startTime = Date.now();
+
+  // A custom executor (e.g. an eval's client) replaces the fixture path.
+  let execution: CaseExecution;
+  try {
+    execution = options.executeCase
+      ? checkedExecution(await options.executeCase(evalCase))
+      : await executeEvalCase(evalCase, context.mcp, {
+          client: options.client,
+          model: options.model,
+          clientOptions: options.clientOptions,
+        });
+  } catch (error) {
+    execution = failedExecution(error);
+  }
+  const executed = executedTrialResult(
+    evalCase,
+    execution,
+    options,
+    0,
+    context
+  );
+
+  let outcome: GradingOutcome = { scores: {} };
+  if (!executed.error && (evalCase.assertions || evalCase.judges?.length)) {
+    // Without an error, the execution completed: its response is the client's.
+    const clientResponse = executed.response as ClientResponse;
+    outcome = await gradeTrial(evalCase, {
+      response: mapToolNames(clientResponse, options.toolMap),
+      clientResponse,
+      evidence: executed.traceEvidence,
+      clientMetadata: executed.clientMetadata,
+    });
+  }
+  const gradingError = gradingErrorOf(outcome.scores);
+  const judgeUsage = caseJudgeUsage(outcome.scores.judge);
+
+  return {
+    ...executed,
+    pass: !gradingError && didCasePass(executed.error, outcome.scores),
+    // A grader that failed to run leaves the trial without a verdict.
+    error:
+      executed.error ??
+      (gradingError ? `Not graded: ${gradingError}` : undefined),
+    ...(gradingError ? { gradingError } : {}),
+    scores: outcome.scores,
+    durationMs: Date.now() - startTime + executed.durationMs,
+    toolPrecision: outcome.toolPrecision,
+    toolRecall: outcome.toolRecall,
+    toolCallTrace: outcome.toolCallTrace,
+    ...(judgeUsage !== undefined && { judgeUsage }),
   };
 }
 
@@ -784,7 +825,9 @@ export async function runEvalCase(
   const trials = evalCase.trials ?? 1;
 
   if (trials === 1) {
-    return runTrial(evalCase, context, options);
+    const result = await runTrial(evalCase, context, options);
+    await options.onTrialComplete?.(result, 0);
+    return result;
   }
 
   // Multi-trial: run N times and compute the pass rate
@@ -792,8 +835,12 @@ export async function runEvalCase(
   let lastResult: EvalCaseResult | null = null;
 
   for (let i = 0; i < trials; i++) {
+    // A trial that ran, for onTrialComplete; outside the try, so a failing
+    // callback isn't recorded as a failed trial.
+    let ran: EvalCaseResult | undefined;
     try {
       const result = await runTrial(evalCase, context, options);
+      ran = result;
       lastResult = result;
       // Check whether the tool call itself failed due to infrastructure (the
       // error is surfaced as result.error since executeEvalCase swallows throws)
@@ -829,6 +876,12 @@ export async function runEvalCase(
         isInfrastructureError: isInfrastructureError(err),
       });
     }
+    // With the trial's skill loads, as its trial result keeps them.
+    if (ran)
+      await options.onTrialComplete?.(
+        { ...ran, ...trialSkillLoads(ran.response) },
+        i
+      );
   }
 
   const infraErrors = trialResults.filter((r) => r.isInfrastructureError);
@@ -1086,6 +1139,7 @@ export async function runEvalDataset(
       toolMap: options.toolMap,
       datasetName: dataset.name,
       toolVariantId: toolOverrides?.id,
+      onTrialComplete: options.onTrialComplete,
     });
 
     if (onCaseComplete) {

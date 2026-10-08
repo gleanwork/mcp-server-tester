@@ -9,6 +9,8 @@
  *   not submitted: the desktop is no longer doing what the run expects;
  * - one native session per case (duplicate attribution fails the case);
  * - every error the batch surfaces is redacted against the batch's secrets;
+ * - each case that ran is reported as it finishes, so the eval saves it even
+ *   if the batch never ends;
  * - cleanup always runs; if it fails, the lease is kept for inspection and
  *   every result says so.
  *
@@ -19,6 +21,7 @@ import { mkdir, open, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import type {
   ClientBatchRequest,
+  ClientRunContext,
   ClientRunResult,
 } from './evalFrameworkTypes.js';
 import {
@@ -157,10 +160,14 @@ function notSubmitted(message: string): ClientRunResult {
   };
 }
 
-/** Runs a desktop batch under the rules above. */
+/**
+ * Runs a desktop batch under the rules above. `reportResult` (the batch
+ * context's) receives a redacted copy of each case's result as it finishes.
+ */
 export async function runDesktopBatch<Session>(
   adapter: DesktopClientAdapter<Session>,
-  requests: ClientBatchRequest[]
+  requests: ClientBatchRequest[],
+  reportResult?: ClientRunContext['reportResult']
 ): Promise<ClientRunResult[]> {
   if (!requests.length) return [];
   const secrets = [...adapter.secrets];
@@ -211,6 +218,13 @@ export async function runDesktopBatch<Session>(
       }
       const outcome = await adapter.runCase(session, request, index, ledger);
       results.push(outcome.result);
+      // A copy: the batch adds to its results when it ends.
+      await reportResult?.(index, {
+        ...outcome.result,
+        ...(outcome.result.error
+          ? { error: redactClientSecrets(outcome.result.error, secrets) }
+          : {}),
+      });
       resetBeforeCase = outcome.continuation === 'reset';
       consecutiveFailures = outcome.result.error ? consecutiveFailures + 1 : 0;
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES)
