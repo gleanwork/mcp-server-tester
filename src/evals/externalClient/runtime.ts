@@ -20,8 +20,8 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_PROMPT_MARKER_TEMPLATE =
   'Trace marker for MCP Server Tester; do not mention this marker in your response: [eval-run-marker:{{marker}}]';
 
-export function formatSubmittedScenario(
-  scenario: string,
+export function formatSubmittedInput(
+  input: string,
   marker: string,
   correlation: ExternalClientCorrelationConfig = {
     strategy: 'prompt_marker',
@@ -30,15 +30,15 @@ export function formatSubmittedScenario(
 ): string {
   const metadata = normalizeCorrelation(correlation, marker);
   if (!metadata.includedInPrompt) {
-    return scenario;
+    return input;
   }
 
   const template = correlation.promptTemplate ?? DEFAULT_PROMPT_MARKER_TEMPLATE;
-  return `${scenario}\n\n${template.replaceAll('{{marker}}', marker)}`;
+  return `${input}\n\n${template.replaceAll('{{marker}}', marker)}`;
 }
 
 export async function runExternalClientCase(
-  scenario: string,
+  input: string,
   config: ExternalClientConfig,
   options: { caseId?: string; runId?: string } = {}
 ): Promise<ExternalClientRunResult> {
@@ -55,8 +55,8 @@ export async function runExternalClientCase(
 
   const timeoutMs = loaded.config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const correlation = normalizeCorrelation(loaded.config.correlation, marker);
-  const submittedScenario = formatSubmittedScenario(
-    scenario,
+  const submittedInput = formatSubmittedInput(
+    input,
     marker,
     loaded.config.correlation
   );
@@ -64,8 +64,8 @@ export async function runExternalClientCase(
   const context: ClientRunContext = {
     runId,
     caseId: options.caseId ?? 'unknown',
-    scenario,
-    submittedScenario,
+    input,
+    submittedInput,
     marker,
     correlation,
     timeoutMs,

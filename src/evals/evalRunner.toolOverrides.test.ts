@@ -60,7 +60,7 @@ describe('runEvalDataset toolOverrides', () => {
     mocks.simulateMstClient.mockReset();
   });
 
-  it('exposes overridden tool metadata to mcp_host runs and preserves untouched tools', async () => {
+  it('exposes overridden tool metadata to client runs and preserves untouched tools', async () => {
     const mcp = createMockMCP([
       {
         name: 'search',

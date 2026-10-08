@@ -75,7 +75,7 @@ function enrichErrorMessage(err: unknown, provider: string): string {
     raw.includes('ERR_MODULE_NOT_FOUND')
   ) {
     return (
-      `MCP host simulation failed: required package not installed.\n` +
+      `The mst client failed: required package not installed.\n` +
       `Hint: run \`getMissingDependencyMessage('${provider}')\` or check docs/mst-client.md for install instructions.`
     );
   }
@@ -118,7 +118,7 @@ function enrichErrorMessage(err: unknown, provider: string): string {
     probe.includes('ECONNREFUSED')
   ) {
     return (
-      `MCP host simulation failed: network error.\n` +
+      `The mst client failed: network error.\n` +
       `Hint: check network connectivity and whether the provider's API endpoint is reachable from this machine.`
     );
   }
@@ -130,7 +130,7 @@ function enrichErrorMessage(err: unknown, provider: string): string {
     probe.includes('Too Many Requests')
   ) {
     return (
-      `MCP host simulation failed: rate limited.\n` +
+      `The mst client failed: rate limited.\n` +
       `Hint: reduce concurrency, add delays between requests, or upgrade your API plan.`
     );
   }
@@ -415,7 +415,7 @@ export function createVercelOrchestrator(): MstClientSimulator {
   return {
     async simulate(
       mcp: MCPFixtureApi,
-      scenario: string,
+      input: string,
       config: MstClientConfig,
       signal?: AbortSignal
     ): Promise<MstClientSimulationResult> {
@@ -569,7 +569,7 @@ export function createVercelOrchestrator(): MstClientSimulator {
             {
               model,
               ...(system ? { system } : {}),
-              prompt: scenario,
+              prompt: input,
               tools,
               stopWhen: stepCountIs(Math.max(1, maxSteps)),
               temperature: config.temperature ?? 0,
@@ -631,7 +631,7 @@ export function createVercelOrchestrator(): MstClientSimulator {
           success: true,
           toolCalls: allToolCalls,
           response: result.text as string,
-          scenario,
+          input,
           llmDurationMs,
           mcpDurationMs,
           conversationHistory,

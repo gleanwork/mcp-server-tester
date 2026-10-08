@@ -626,6 +626,7 @@ The eval APIs use the 2.0 vocabulary ([ADR 0002](../adr/0002-common-eval-vocabul
 | `ExperimentMetric`                                                                                   | `OptimizationMetric`                                                            |
 | `MCPHostCapabilities`                                                                                | `MCPClientCapabilities`                                                         |
 | `HostExecution`, `MCPHostSimulationResult`                                                           | `ClientExecution`, `MstClientSimulationResult`                                  |
+| `MstClientSimulationResult.scenario`                                                                 | `input`                                                                         |
 | `hostStdioServers`, `materializeHostStdioFiles`, `resolveHostStdioServer` (`./experimental/clients`) | `clientStdioServers`, `materializeClientStdioFiles`, `resolveClientStdioServer` |
 
 **Client plugins.** `ClientRunOptions.host` is `client`. An `executeCase` that completes returns `kind: 'completed'` (was `'host'`); returning `'host'` fails with the new kind.

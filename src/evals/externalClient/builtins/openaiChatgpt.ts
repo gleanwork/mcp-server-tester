@@ -186,10 +186,7 @@ async function setupChatgptConfig({
     validateChatgptConfig(config);
     chatgptPlatform(config).validate(config);
     if (run.correlation.strategy === 'exact_prompt') {
-      if (
-        run.correlation.includedInPrompt ||
-        run.submittedScenario !== run.scenario
-      )
+      if (run.correlation.includedInPrompt || run.submittedInput !== run.input)
         throw new Error(
           'Exact-prompt correlation requires an unchanged prompt.'
         );
@@ -308,7 +305,7 @@ async function submitNatively(
       'submit',
       config,
       run.startedAtMs + run.timeoutMs,
-      run.submittedScenario,
+      run.submittedInput,
       (prompt) => session.openPrompt(prompt)
     );
     runState.promptSubmitted = true;
@@ -378,7 +375,7 @@ async function submitWithComputerUse(
 ): Promise<ExternalClientRunResult | void> {
   try {
     const receipt = await submitChatgptQuery(
-      run.submittedScenario,
+      run.submittedInput,
       config,
       run.startedAtMs + run.timeoutMs
     );
@@ -498,7 +495,7 @@ async function captureChatgptComputerUseResult({
   let progressAtMs = Date.now();
   const selector: ChatgptTraceSelector =
     run.correlation.strategy === 'exact_prompt'
-      ? { strategy: 'exact_prompt', prompt: run.submittedScenario }
+      ? { strategy: 'exact_prompt', prompt: run.submittedInput }
       : run.marker;
   const bindingDeadline = chatgptBindingDeadline(
     config,
@@ -867,10 +864,9 @@ function buildMetadata(options: MetadataOptions): ClientMetadata {
     correlation: {
       ...options.context.correlation,
       promptSha256: createHash('sha256')
-        .update(options.context.submittedScenario, 'utf8')
+        .update(options.context.submittedInput, 'utf8')
         .digest('hex'),
-      promptUnchanged:
-        options.context.submittedScenario === options.context.scenario,
+      promptUnchanged: options.context.submittedInput === options.context.input,
     },
     computerUse: options.computerUse,
     nativeController: options.nativeController,

@@ -91,7 +91,7 @@ async function submitPromptCapability({
   try {
     const appName =
       runStringOption(config, binding, 'appName') ?? state.displayName;
-    await submitPromptToMacosDesktopApp(run.submittedScenario, {
+    await submitPromptToMacosDesktopApp(run.submittedInput, {
       appName,
       createNewConversation: shouldCreateNewConversation(
         binding.with?.createNewConversation,

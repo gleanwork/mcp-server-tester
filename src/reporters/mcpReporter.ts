@@ -118,7 +118,7 @@ export default class MCPReporter implements Reporter {
   /** Each test's eval results, by test ID: a retry replaces the earlier attempt. */
   private results = new Map<
     string,
-    { project: string; caseResults: EvalCaseResult[] }
+    { project: string; test: string; caseResults: EvalCaseResult[] }
   >();
   /** Each test's tool optimization, by test ID. */
   private optimizations = new Map<string, MCPToolOptimizationData>();
@@ -201,19 +201,30 @@ export default class MCPReporter implements Reporter {
         this.optimizations.set(test.id, attachment.data);
     }
     // The last attempt is the result: a retry replaces the one before.
-    if (caseResults.length) this.results.set(test.id, { project, caseResults });
+    if (caseResults.length)
+      this.results.set(test.id, {
+        project,
+        test: testName(test),
+        caseResults,
+      });
     else this.results.delete(test.id);
   }
 
   /** Case results by project, projects in config order. */
   private byProject(): Map<string, EvalCaseResult[]> {
-    const grouped = new Map<string, EvalCaseResult[]>();
+    const grouped = new Map<string, TestCaseResults[]>();
     for (const name of this.projects.keys()) grouped.set(name, []);
-    for (const { project, caseResults } of this.results.values())
-      grouped.set(project, [...(grouped.get(project) ?? []), ...caseResults]);
-    for (const [name, list] of grouped)
-      if (list.length === 0) grouped.delete(name);
-    return grouped;
+    for (const { project, test, caseResults } of this.results.values())
+      grouped.set(project, [
+        ...(grouped.get(project) ?? []),
+        { test, caseResults },
+      ]);
+    const byProject = new Map<string, EvalCaseResult[]>();
+    for (const [name, tests] of grouped) {
+      const list = distinguishCases(tests);
+      if (list.length) byProject.set(name, list);
+    }
+    return byProject;
   }
 
   async onEnd(_result: FullResult): Promise<void> {
@@ -429,6 +440,61 @@ function projectName(name: string | undefined): string {
   return name || 'default';
 }
 
+interface TestCaseResults {
+  test: string;
+  caseResults: EvalCaseResult[];
+}
+
+/** A test's name without its project and file: its describe blocks and title. */
+function testName(test: TestCase): string {
+  const path =
+    typeof test.titlePath === 'function' ? test.titlePath().slice(3) : [];
+  return path.filter(Boolean).join(' › ') || test.title;
+}
+
+const caseKey = (id: string) => id.toLowerCase();
+
+/** Renames each result whose case ID (ignoring case) another result in `results` shares. */
+function qualifyShared(
+  results: EvalCaseResult[],
+  qualify: (result: EvalCaseResult) => string
+): EvalCaseResult[] {
+  const counts = new Map<string, number>();
+  for (const result of results)
+    counts.set(caseKey(result.id), (counts.get(caseKey(result.id)) ?? 0) + 1);
+  return results.map((result) =>
+    (counts.get(caseKey(result.id)) ?? 0) > 1
+      ? { ...result, id: qualify(result) }
+      : result
+  );
+}
+
+/**
+ * A project's case results with IDs that differ, since IDs name the run's
+ * trace and score paths and pair a case across variants. A case two tests
+ * ran (one dataset run two ways) is `<id> (<test>)`; one ID in two datasets
+ * of a test is `<dataset>/<id>`. Each project gets the same names, so cases
+ * still pair across variants.
+ */
+function distinguishCases(tests: TestCaseResults[]): EvalCaseResult[] {
+  const testsByCase = new Map<string, Set<string>>();
+  for (const { test, caseResults } of tests)
+    for (const result of caseResults) {
+      const key = caseKey(result.id);
+      testsByCase.set(key, (testsByCase.get(key) ?? new Set()).add(test));
+    }
+  return tests.flatMap(({ test, caseResults }) =>
+    qualifyShared(
+      caseResults.map((result) =>
+        (testsByCase.get(caseKey(result.id))?.size ?? 0) > 1
+          ? { ...result, id: `${result.id} (${test})` }
+          : result
+      ),
+      (result) => `${result.datasetName ?? 'default'}/${result.id}`
+    )
+  );
+}
+
 /**
  * A project's case IDs name its trace and score paths, so they must differ,
  * and in more than case: two tests running the same dataset, or one ID in
@@ -441,7 +507,7 @@ function assertUniqueCases(project: string, results: EvalCaseResult[]): void {
     const other = seen.get(key);
     if (other)
       throw new Error(
-        `Project "${project}" has case "${result.id}" twice (datasets "${other.datasetName ?? 'default'}" and "${result.datasetName ?? 'default'}"). Give each case a unique ID, or run each dataset in one test.`
+        `Project "${project}" has case "${result.id}" twice in one dataset ("${other.datasetName ?? 'default'}"${other.id !== result.id ? `, as "${other.id}"` : ''}). Give each case a unique ID.`
       );
     seen.set(key, result);
   }
