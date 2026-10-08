@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { datasetContentHash } from '../../../evals/runFormat.js';
 import { runReportPath } from '../../../evals/runReport.js';
 import path from 'node:path';
 import { z } from 'zod';
@@ -93,7 +94,19 @@ export async function run(options: RunOptions): Promise<void> {
         {
           name: result.evalConfig.name,
           outputDir: result.outputDir,
-          datasets: result.datasets.map((item) => item.source),
+          // Each dataset as declared, and what it loaded: cases, their
+          // hash, and for a plugin's dataset which copy.
+          datasets: result.datasets.map(({ source, dataset }) => ({
+            ...source,
+            ...(dataset
+              ? {
+                  name: dataset.name,
+                  caseCount: dataset.cases.length,
+                  contentHash: datasetContentHash(dataset),
+                  ...dataset.origin,
+                }
+              : {}),
+          })),
           variants: result.evalConfig.variants?.map(
             (variant) => variant.name
           ) ?? ['default'],

@@ -3,9 +3,11 @@ import path from 'node:path';
 import { z } from 'zod';
 import {
   extensionReferenceSchema,
+  referenceSchema,
   taggedReferenceSchema,
 } from './referenceSchemas.js';
 import { checkReferenceKind } from '../plugins/extensions.js';
+import { parseExtensionReference } from '../plugins/plugin.js';
 import { removedKeys, renamedKeys } from './renamedKeys.js';
 import { clientFieldSchemas, type ClientFields } from './clientFields.js';
 import { MCPConfigSchema, type MCPConfig } from '../config/mcpConfig.js';
@@ -36,6 +38,24 @@ export interface TaggedConfig {
 export interface DatasetConfig extends TaggedConfig {
   path?: string;
   recursive?: boolean;
+  /** For a dataset source with snapshots: a snapshot id. Absent: its latest. */
+  snapshot?: string;
+  /** For a dataset source with snapshots: `snapshot` (the default) or `live`. */
+  source?: 'snapshot' | 'live';
+}
+
+/**
+ * Whether a string in `datasets` names a plugin's dataset rather than a
+ * file: `<namespace>/dataset/<name>` not ending in `.json` or `.jsonl`.
+ */
+export function isDatasetReference(value: string): boolean {
+  const { namespace, kind } = parseExtensionReference(value);
+  return (
+    namespace !== undefined &&
+    kind === 'dataset' &&
+    !value.startsWith('.') &&
+    !/\.jsonl?$/i.test(value)
+  );
 }
 
 /** A client implementation declaration. Client-specific options are plugin-owned. */
@@ -198,8 +218,17 @@ export function variantToolMetadata(
 }
 
 // A bare dataset string is a path; a tagged dataset names its source.
+/** `{ "ref": "acme/dataset/x", "snapshot"?, "source"? }`: a plugin's dataset. */
+const DatasetReferenceSchema = z
+  .object({
+    ref: referenceSchema('dataset'),
+    snapshot: z.string().min(1).optional(),
+    source: z.enum(['snapshot', 'live']).optional(),
+  })
+  .strict();
 const DatasetConfigSchema = z.union([
   z.string().min(1),
+  DatasetReferenceSchema,
   taggedReferenceSchema('dataset'),
 ]);
 const MetricConfigSchema = extensionReferenceSchema('metric');
@@ -526,8 +555,18 @@ export function parsePluginConfig(
   };
 }
 
-function normalizeDataset(value: string | TaggedConfig): DatasetConfig {
-  return typeof value === 'string' ? { type: 'file', path: value } : value;
+function normalizeDataset(
+  value: z.output<typeof DatasetConfigSchema>
+): DatasetConfig {
+  if (typeof value === 'string')
+    return isDatasetReference(value)
+      ? { type: value }
+      : { type: 'file', path: value };
+  if ('ref' in value && !('type' in value)) {
+    const { ref, ...rest } = value;
+    return { type: ref, ...rest } as DatasetConfig;
+  }
+  return value as DatasetConfig;
 }
 
 function normalizeExtension(value: string | TaggedConfig): ExtensionConfig {

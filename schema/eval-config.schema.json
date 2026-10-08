@@ -22,7 +22,29 @@
         "oneOf": [
           {
             "type": "string",
-            "description": "Shorthand for a file dataset."
+            "description": "A plugin's dataset (namespace/dataset/name), or a file path (shorthand for a file dataset)."
+          },
+          {
+            "type": "object",
+            "required": ["ref"],
+            "additionalProperties": false,
+            "description": "A plugin's dataset.",
+            "properties": {
+              "ref": {
+                "type": "string",
+                "minLength": 1,
+                "description": "namespace/dataset/name"
+              },
+              "snapshot": {
+                "type": "string",
+                "minLength": 1,
+                "description": "A snapshot id. Absent: the source's latest. Only for a source with snapshots."
+              },
+              "source": {
+                "enum": ["snapshot", "live"],
+                "description": "snapshot (the default) or live data. Only for a source with snapshots."
+              }
+            }
           },
           {
             "type": "object",

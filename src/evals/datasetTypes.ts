@@ -255,6 +255,17 @@ export interface EvalDataset {
    * Additional dataset metadata
    */
   metadata?: Record<string, unknown>;
+
+  /** The snapshot a dataset source with snapshots read: it sets this. */
+  snapshot?: string;
+
+  /** A plugin's dataset: which one and which copy. MST sets this when it loads one. */
+  origin?: {
+    /** The dataset source, `namespace/dataset/name`. */
+    ref: string;
+    snapshot?: string;
+    live?: true;
+  };
 }
 
 /** A case judge's settings, as an eval config writes a judge: `type` names it. */

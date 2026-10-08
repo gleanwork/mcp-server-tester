@@ -145,6 +145,23 @@ function extensionProblem(
   const required = REQUIRED_FUNCTIONS[kind];
   if (!required.some((fn) => typeof definition[fn] === 'function'))
     return `${label} needs ${describeFunctions(required)}`;
+  if (kind === 'datasetSources') {
+    if (
+      definition.description !== undefined &&
+      typeof definition.description !== 'string'
+    )
+      return `${label}: description must be a string`;
+    if (
+      definition.describe !== undefined &&
+      typeof definition.describe !== 'function'
+    )
+      return `${label}: describe must be a function`;
+    if (
+      definition.snapshots !== undefined &&
+      typeof definition.snapshots !== 'boolean'
+    )
+      return `${label}: snapshots must be true or false`;
+  }
   if (kind === 'clients' && 'toolOverrides' in definition)
     return `${label}: \`toolOverrides\` is now \`toolMetadata\``;
   if (

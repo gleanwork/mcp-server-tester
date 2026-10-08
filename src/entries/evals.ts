@@ -59,6 +59,8 @@ export type { ClientFields, ClientOptions } from '../evals/clientFields.js';
 export type {
   DatasetSource,
   DatasetSourceContext,
+  DatasetRequest,
+  DatasetSummary,
   EvaluationVariantResult,
   EvaluationBatchOptions,
   EvaluationBatchItem,
