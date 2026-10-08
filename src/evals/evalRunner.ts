@@ -259,6 +259,13 @@ export interface EvalRunnerOptions {
   executeCase?: (evalCase: EvalCase) => Promise<CaseExecution>;
 
   /**
+   * Grade each trial (assertions and judges). `false` only collects: trials
+   * keep their traces and get no scores (`mst run --no-grade`).
+   * @default true
+   */
+  grade?: boolean;
+
+  /**
    * Whether to stop on first failure
    * @default false
    */
@@ -418,6 +425,8 @@ export interface EvalCaseOptions {
   toolMap?: Record<string, string[]>;
   /** Case executor called once per trial; assertions remain runner-owned. */
   executeCase?: (evalCase: EvalCase) => Promise<CaseExecution>;
+  /** Grade each trial; `false` only collects. @default true */
+  grade?: boolean;
   /**
    * Dataset name for the result (defaults to 'single-case')
    */
@@ -765,7 +774,11 @@ async function runTrial(
   );
 
   let outcome: GradingOutcome = { scores: {} };
-  if (!executed.error && (evalCase.assertions || evalCase.judges?.length)) {
+  if (
+    options.grade !== false &&
+    !executed.error &&
+    (evalCase.assertions || evalCase.judges?.length)
+  ) {
     // Without an error, the execution completed: its response is the client's.
     const clientResponse = executed.response as ClientResponse;
     outcome = await gradeTrial(evalCase, {
@@ -1136,6 +1149,7 @@ export async function runEvalDataset(
       model: options.model,
       clientOptions: options.clientOptions,
       executeCase: options.executeCase,
+      ...(options.grade === false ? { grade: false } : {}),
       toolMap: options.toolMap,
       datasetName: dataset.name,
       toolVariantId: toolOverrides?.id,

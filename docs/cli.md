@@ -14,6 +14,7 @@ Before the package is installed (for example, running `init` in a new directory)
 - [token - Export Tokens for CI/CD](#token---export-tokens-for-cicd)
 - [auth - Sign In to Connector Servers](#auth---sign-in-to-connector-servers)
 - [run - Run an Eval Config](#run---run-an-eval-config)
+- [grade - Grade a Stored Run Again](#grade---grade-a-stored-run-again)
 - [batch - Run Several Eval Configs](#batch---run-several-eval-configs)
 - [open - Open a Run's Report](#open---open-a-runs-report)
 - [cowork setup - Prepare Cowork](#cowork-setup---prepare-cowork)
@@ -756,6 +757,7 @@ npx mst run --config ./eval.json [options]
 | `--root-dir <dir>`       | Fallback for relative eval config paths, and the default results location. Default: `.`.                                                                                                                                                        |
 | `--secrets-file <path>`  | A JSON or dotenv-style file of environment values for the run (API keys, `auth.accessTokenEnv` tokens, stdio server environments), kept out of the eval config. A relative path resolves against the root; its values override the environment. |
 | `--dry-run`              | Validate the eval config, its plugins and datasets without running anything.                                                                                                                                                                    |
+| `--no-grade`             | Collect the trials without grading them: no assertions, judges or pairwise judges run. Grade the run later with [`grade`](#grade---grade-a-stored-run-again). Requires `"redactStoredResponses": false`, so the traces keep what graders read.  |
 | `--store <dir>`          | Where connector servers' grants are (see [`auth`](#auth---sign-in-to-connector-servers)). Default: `~/.mcp-server-tester/grants`.                                                                                                               |
 | `--env <name>`           | Where to collect the trials: `local` (the default, in the `mst run` process), or a plugin environment, `<namespace>/env/<name>`. MST runs trials only in `local` for now; `--dry-run` checks a plugin environment and its options.              |
 | `--env-option <k=v>`     | An environment option; repeat the flag for more. MST owns `shards` (a positive integer, default 1; `local` runs one) and `keep` (`never`, `failed` or `always`); the environment's schema checks the rest. Options are recorded in `run.json`.  |
@@ -763,6 +765,36 @@ npx mst run --config ./eval.json [options]
 A run narrowed by any of `--variant`, `--case`, `--filter-tag`, `--max-cases` or `--trials` is a **partial run**. Its summary has `partial: true` and the `selection` that narrowed it, and the run prints `Partial run (--case e2e-0011, --trials 1): not compared with full runs`. A partial run is compared only with earlier partial runs narrowed the same way, never becomes the result store's `latest.json`, and is never resumed by `--skip-existing`. `--case` replaces the tags and the case cap; `--filter-tag` and `--max-cases` replace the config's. When `--variant` leaves out the baseline, the run says that no variant is compared with it.
 
 `run` prints a row per variant (cases passed, trial pass rate, MCP calls, client events, tokens, cost, time) and, when there is one, the change since the previous run of the same eval config and variant. It writes the run's directory (`runs/<run-id>/` under the eval's output directory; see [What a run leaves behind](./evaluation-framework.md#what-a-run-leaves-behind)), prints its path, and exits 1 when any case failed. `--dry-run` prints the eval config's name, output directory, datasets, variants and environment (`env`: its name, shards, and any `keep` or options) as JSON.
+
+## `grade` - Grade a Stored Run Again
+
+Grades the traces a run stored with the eval config's graders as they are now (assertions, judges and pairwise judges), without running the client again, and writes the scores as a new run next to it: `<run-id>.g2`, then `.g3`, and so on.
+
+### Usage
+
+```bash
+npx mst run --config ./eval.json --no-grade   # collect now
+npx mst grade 7f3c2a --config ./eval.json     # grade later, as often as the graders change
+```
+
+`<run>` is a run directory, a run ID, or its short form (the last six characters, with any `.g<n>`) among the eval's runs.
+
+### Options
+
+| Option                  | Description                                                                                   |
+| ----------------------- | --------------------------------------------------------------------------------------------- |
+| `-c, --config <path>`   | The eval config the run ran (required). Its graders and datasets are read again.              |
+| `--plugins <paths...>`  | Plugin modules to load, as well as the eval config's own `plugins`.                           |
+| `--output-dir <dir>`    | The eval's directory, if `run` was given one. Default: `.mcp-test-results/<config name>`.     |
+| `--root-dir <dir>`      | Fallback for relative eval config paths, and the default results location. Default: `.`.      |
+| `--secrets-file <path>` | A JSON or dotenv-style file of environment values, as for `run` (for example judge API keys). |
+| `--no-report`           | Don't write the regrade's report.                                                             |
+
+The datasets are loaded again, so each case's `expected` and judges are the dataset's current ones; `run.json` records their content hashes. Every variant and case the run stored must still be in the eval config and its datasets. A trial that failed when it ran stays failed and isn't judged. No client starts, so grading needs no connector tokens.
+
+The regrade's `run.json` has `gradedFrom`, the run whose traces it graded, and its `phases.grade` is `complete`. A full regrade becomes the eval's `latest.json`, and its summary compares with the previous graded run. `grade` prints what `run` prints, and exits 1 when any case failed.
+
+A run stored with redacted traces (the default, `redactStoredResponses`) can't be graded again: collect with `"redactStoredResponses": false`.
 
 ## `batch` - Run Several Eval Configs
 

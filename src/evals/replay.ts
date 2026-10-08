@@ -1,0 +1,226 @@
+/**
+ * Grading a stored run (`mst grade`): each trial's stored trace stands in for
+ * the client run, so a run is graded with the same pipeline that collected
+ * it, without starting a client.
+ */
+import type { MCPConfig } from '../config/mcpConfig.js';
+import type { EvalCase, EvalDataset } from './datasetTypes.js';
+import type {
+  ClientRunResult,
+  Trace,
+  TraceEvidence,
+} from './evalFrameworkTypes.js';
+import type { EvalConfig, EvalVariant } from './evalConfig.js';
+import {
+  failedExecution,
+  type CaseExecution,
+  type ClientExecution,
+} from './caseExecution.js';
+import { clientRunToExecution } from './clientTrace.js';
+import type { RunRecord, TrialRecord } from './runFormat.js';
+
+/** A stored run to grade, and the ID of the run that grades it. */
+export interface RunReplay {
+  /** The stored run's `run.json`. */
+  run: RunRecord;
+  /** The new run's ID: the stored run's with the next `.g<n>`. */
+  runId: string;
+  /** The run that collected the traces: a regrade's own source, or the run. */
+  gradedFrom: string;
+  /** Stored trials by variant, then case, in trial order. */
+  trials: Map<string, Map<string, TrialRecord[]>>;
+}
+
+/**
+ * The replay of a stored run: its trials grouped by variant and case. Fails
+ * when the traces can't be graded: none were stored, or they were stored
+ * without the answers and tool outputs judges read.
+ */
+export function runReplay(
+  run: RunRecord,
+  trials: readonly TrialRecord[],
+  runId: string
+): RunReplay {
+  if (trials.length === 0)
+    throw new Error(`Run ${run.runId} stored no trials to grade.`);
+  if (run.redactStoredResponses)
+    throw new Error(
+      `Run ${run.runId} stored redacted traces, without the answers and tool outputs graders read, so it can't be graded again. Collect with "redactStoredResponses": false in the eval config (mst run --no-grade requires it).`
+    );
+  const byVariant = new Map<string, Map<string, TrialRecord[]>>();
+  for (const trial of trials) {
+    const byCase =
+      byVariant.get(trial.variant) ?? new Map<string, TrialRecord[]>();
+    byVariant.set(trial.variant, byCase);
+    byCase.set(trial.caseId, [...(byCase.get(trial.caseId) ?? []), trial]);
+  }
+  for (const byCase of byVariant.values())
+    for (const list of byCase.values()) list.sort((a, b) => a.trial - b.trial);
+  return {
+    run,
+    runId,
+    gradedFrom: run.gradedFrom ?? run.runId,
+    trials: byVariant,
+  };
+}
+
+/**
+ * The eval config's variants that the stored run ran, in the config's order.
+ * Fails for a stored variant the config no longer has.
+ */
+export function replayedVariants(
+  evalConfig: EvalConfig,
+  replay: RunReplay
+): EvalVariant[] {
+  const variants: EvalVariant[] = evalConfig.variants?.length
+    ? evalConfig.variants
+    : [{ name: 'default' }];
+  const missing = [...replay.trials.keys()].filter(
+    (name) => !variants.some((variant) => variant.name === name)
+  );
+  if (missing.length)
+    throw new Error(
+      `Run ${replay.run.runId} ran variant ${missing.map((name) => `"${name}"`).join(', ')}, which the eval config doesn't have. Variants: ${variants.map((variant) => variant.name).join(', ')}.`
+    );
+  return variants.filter((variant) => replay.trials.has(variant.name));
+}
+
+/** Fails for a stored case that no dataset has any more. */
+export function assertReplayedCases(
+  replay: RunReplay,
+  datasets: readonly EvalDataset[]
+): void {
+  const known = new Set(
+    datasets.flatMap((dataset) => dataset.cases.map((evalCase) => evalCase.id))
+  );
+  const missing = [
+    ...new Set(
+      [...replay.trials.values()].flatMap((byCase) =>
+        [...byCase.keys()].filter((id) => !known.has(id))
+      )
+    ),
+  ];
+  if (missing.length)
+    throw new Error(
+      `Run ${replay.run.runId} ran case ${missing
+        .slice(0, 5)
+        .map((id) => `"${id}"`)
+        .join(
+          ', '
+        )}${missing.length > 5 ? ` and ${missing.length - 5} more` : ''}, which the eval's datasets no longer have.`
+    );
+}
+
+/**
+ * A dataset's cases the stored run ran on a variant, each with the number of
+ * trials it stored.
+ */
+export function replayedCases(
+  dataset: EvalDataset,
+  replay: RunReplay,
+  variant: string
+): EvalDataset {
+  const byCase = replay.trials.get(variant) ?? new Map<string, TrialRecord[]>();
+  return {
+    ...dataset,
+    cases: dataset.cases
+      .filter((evalCase) => byCase.has(evalCase.id))
+      .map(
+        (evalCase): EvalCase => ({
+          ...evalCase,
+          trials: byCase.get(evalCase.id)!.length,
+        })
+      ),
+  };
+}
+
+/** A stored trial as the execution that produced it. */
+function storedExecution(
+  trial: TrialRecord,
+  servers: MCPConfig[],
+  evidence: TraceEvidence
+): CaseExecution {
+  const trace = trial.trace as Trace | undefined;
+  if (!trace) {
+    const execution = failedExecution(
+      trial.error ?? 'The stored trial has no trace.'
+    );
+    return { ...execution, preExecutionDurationMs: trial.durationMs };
+  }
+  const run: ClientRunResult = {
+    events: trace.events ?? [],
+    finalText: trace.finalText ?? '',
+    ...(trace.error !== undefined ? { error: trace.error } : {}),
+    ...((trial.clientUsage ?? trace.usage)
+      ? {
+          usage: (trial.clientUsage ?? trace.usage) as ClientRunResult['usage'],
+        }
+      : {}),
+    ...(trial.clientTelemetry
+      ? { telemetry: trial.clientTelemetry as Record<string, unknown> }
+      : {}),
+    ...(trial.clientDiagnostics
+      ? {
+          diagnostics:
+            trial.clientDiagnostics as ClientRunResult['diagnostics'],
+        }
+      : {}),
+  };
+  const execution = clientRunToExecution(
+    run,
+    (trial.traceEvidence as TraceEvidence | undefined) ??
+      trace.evidence ??
+      evidence,
+    servers
+  );
+  const completed: ClientExecution = {
+    ...execution,
+    response: {
+      ...execution.response,
+      ...(trial.skillLoads
+        ? {
+            skillLoads:
+              trial.skillLoads as ClientExecution['response']['skillLoads'],
+          }
+        : {}),
+    },
+    ...(trial.clientMetadata
+      ? {
+          clientMetadata:
+            trial.clientMetadata as ClientExecution['clientMetadata'],
+        }
+      : {}),
+    // The trial took this long when it ran; grading adds its own time.
+    preExecutionDurationMs: trial.durationMs,
+  };
+  // An error the runner recorded, not the client, still fails the trial.
+  return trial.error !== undefined && completed.error === undefined
+    ? { ...completed, error: trial.error }
+    : completed;
+}
+
+/**
+ * The case executor for a variant of a replay: each call returns the case's
+ * next stored trial.
+ */
+export function replayExecutor(
+  replay: RunReplay,
+  variant: string,
+  servers: MCPConfig[],
+  evidence: TraceEvidence
+): (evalCase: EvalCase) => Promise<CaseExecution> {
+  const next = new Map<string, number>();
+  return async (evalCase) => {
+    const trials = replay.trials.get(variant)?.get(evalCase.id) ?? [];
+    const index = next.get(evalCase.id) ?? 0;
+    next.set(evalCase.id, index + 1);
+    const trial = trials[index];
+    if (!trial)
+      return failedExecution(
+        new Error(
+          `Run ${replay.run.runId} has no trial ${index} of case "${evalCase.id}" on variant "${variant}".`
+        )
+      );
+    return storedExecution(trial, servers, evidence);
+  };
+}

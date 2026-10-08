@@ -28,6 +28,8 @@ function isComparable(
   const summary = value as EvaluationSummary;
   // A run in an older result format isn't a baseline.
   if (summary.format !== RUN_FORMAT) return false;
+  // An ungraded run's passes aren't results.
+  if (summary.graded === false) return false;
   if (summary.configId !== configId || !Array.isArray(summary.variants))
     return false;
   // A full run compares with full runs; a partial run with partial runs
