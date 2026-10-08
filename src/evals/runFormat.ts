@@ -107,6 +107,8 @@ const RunRecordSchema = z.looseObject({
   partial: z.boolean(),
   selection: z.looseObject({}).optional(),
   redactStoredResponses: z.boolean(),
+  /** A regrade's run: the run whose traces it graded (`mst grade`). */
+  gradedFrom: z.string().regex(RUN_ID_PATTERN).optional(),
   /** Where the trials were collected, and the machine `mst run` ran on. */
   environment: z.looseObject({
     /** `local`, or a plugin environment (`<namespace>/env/<name>`). */
@@ -263,6 +265,8 @@ export interface RunFacts {
    * remain is `partial`; one that stopped on an error is `collect: failed`.
    */
   phases?: RunPhases;
+  /** The run a regrade graded the traces of. */
+  gradedFrom?: string;
 }
 
 /** `run.json`'s `phases`: how far collecting traces and grading them got. */
@@ -442,6 +446,7 @@ export async function writeRun(
     partial: summary.partial ?? false,
     ...(summary.selection ? { selection: summary.selection } : {}),
     redactStoredResponses: facts.redactStoredResponses,
+    ...(facts.gradedFrom ? { gradedFrom: facts.gradedFrom } : {}),
     environment: {
       name: facts.environment?.name ?? 'local',
       shards: facts.environment?.shards ?? 1,
@@ -602,4 +607,94 @@ export async function readRunDirectory(directory: string): Promise<StoredRun> {
     run,
     summary: joinCaseResults(summary, results.cases ?? []),
   };
+}
+
+/** A trial's stored record: `traces/<variant>/<case-id>/<trial>.json`. */
+export type TrialRecord = z.infer<typeof TrialRecordSchema>;
+
+/**
+ * Every trial a run stored, read from its `traces/` directory, in trial order
+ * within each variant and case.
+ */
+export async function readRunTrials(directory: string): Promise<TrialRecord[]> {
+  const root = path.join(directory, 'traces');
+  const files = (
+    await fs.readdir(root, { recursive: true }).catch(() => {
+      throw new Error(`${root} is missing: ${directory} stored no traces.`);
+    })
+  )
+    .filter((file) => file.endsWith('.json'))
+    .sort();
+  const trials = await Promise.all(
+    files.map(async (file) => {
+      const full = path.join(root, file);
+      const value: unknown = JSON.parse(await fs.readFile(full, 'utf8'));
+      assertRunFormat(value, full);
+      return TrialRecordSchema.parse(value);
+    })
+  );
+  return trials.sort(
+    (a, b) =>
+      a.variant.localeCompare(b.variant) ||
+      a.caseId.localeCompare(b.caseId) ||
+      a.trial - b.trial
+  );
+}
+
+/** A run ID without its regrade suffix: `…-7f3c2a.g2` is `…-7f3c2a`. */
+function collectedRunId(runId: string): string {
+  return runId.replace(/\.g\d+$/, '');
+}
+
+/**
+ * The ID of a new regrade of `runId`: the run's collected ID with the next
+ * free `.g<n>` among the eval's runs. The first regrade is `.g2`; the run
+ * graded when it was collected is the first grading.
+ */
+export async function nextRegradeId(
+  runs: string,
+  runId: string
+): Promise<string> {
+  const collected = collectedRunId(runId);
+  const taken = (await fs.readdir(runs).catch(() => [] as string[]))
+    .map((name) =>
+      name.startsWith(`${collected}.g`)
+        ? Number(name.slice(collected.length + 2))
+        : NaN
+    )
+    .filter((n) => Number.isInteger(n));
+  return `${collected}.g${Math.max(1, ...taken) + 1}`;
+}
+
+/**
+ * A run's directory from what the user typed: a run directory, a full run
+ * ID, or its short form (the 6 hex characters, with any `.g<n>`) among the
+ * eval's runs.
+ */
+export async function findRunDirectory(
+  runs: string,
+  run: string
+): Promise<string> {
+  const asPath = path.resolve(run);
+  if (
+    await fs
+      .stat(path.join(asPath, 'run.json'))
+      .then(() => true)
+      .catch(() => false)
+  )
+    return asPath;
+  const names = await fs.readdir(runs).catch(() => [] as string[]);
+  const matches = RUN_ID_PATTERN.test(run)
+    ? names.filter((name) => name === run)
+    : names.filter(
+        (name) => RUN_ID_PATTERN.test(name) && name.endsWith(`-${run}`)
+      );
+  if (matches.length === 1) return path.join(runs, matches[0]!);
+  if (matches.length > 1)
+    throw new Error(
+      `"${run}" matches ${matches.length} runs in ${runs}: ${matches.join(', ')}. Give the full run ID.`
+    );
+  throw new Error(
+    `No run "${run}" in ${runs}. Give a run ID from there or a run directory.`
+  );
 }

@@ -31,6 +31,8 @@ export interface RunOptions {
   env?: string;
   /** `--env-option key=value`, each time it was given. */
   envOption?: string[];
+  /** `--no-grade`: collect the trials without grading them. */
+  grade?: boolean;
 }
 
 /** `--env-option key=value` flags as an object; a key may be given once. */
@@ -81,6 +83,7 @@ export async function run(options: RunOptions): Promise<void> {
     secretsFile: options.secretsFile,
     dryRun: options.dryRun,
     ...(options.report === false ? { report: false } : {}),
+    ...(options.grade === false ? { grade: false } : {}),
     ...(options.variant?.length ? { variant: options.variant } : {}),
     ...(options.case?.length ? { cases: options.case } : {}),
     ...(options.filterTag?.length ? { filterTags: options.filterTag } : {}),
@@ -141,18 +144,36 @@ export async function run(options: RunOptions): Promise<void> {
     );
     return;
   }
+  printRunResult(result, options.config);
+}
 
+/**
+ * What a run (or a regrade) did: totals, the variant table, pairwise
+ * preferences, the previous run and where the run is. Sets a failing exit
+ * code when a graded case failed.
+ */
+export function printRunResult(
+  result: Awaited<ReturnType<typeof runEval>>,
+  config: string
+): void {
   const metrics = result.summary.metrics as {
     passed?: number;
     failed?: number;
     total?: number;
     passRate?: number;
   };
+  const runId = path.basename(result.outputDir);
+  const graded = result.summary.graded !== false;
   console.log(`\nEval complete: ${result.evalConfig.name}`);
-  console.log(
-    `Results: ${metrics.passed ?? 0}/${metrics.total ?? 0} passed (${((metrics.passRate ?? 0) * 100).toFixed(1)}%)`
-  );
-  printVariantTable(result.summary.variants);
+  if (graded)
+    console.log(
+      `Results: ${metrics.passed ?? 0}/${metrics.total ?? 0} passed (${((metrics.passRate ?? 0) * 100).toFixed(1)}%)`
+    );
+  else
+    console.log(
+      `Collected ${metrics.total ?? 0} cases, not graded. Grade them with \`mst grade ${runId.split('-').pop()} -c ${config}\`.`
+    );
+  printVariantTable(result.summary.variants, graded);
   printPairwise(result.summary.variants);
   const { selection } = result.summary;
   if (result.summary.partial && selection) {
@@ -194,11 +215,11 @@ export async function run(options: RunOptions): Promise<void> {
   console.log(`Output: ${result.outputDir}`);
   const report = runReportPath(result.outputDir);
   if (existsSync(report))
-    // A partial run never becomes the eval's latest, so name it.
+    // A partial or ungraded run never becomes the eval's latest, so name it.
     console.log(
-      `Report: ${report} (open it with \`mst open${result.summary.partial ? ` ${result.outputDir}` : ''}\`)`
+      `Report: ${report} (open it with \`mst open${result.summary.partial || !graded ? ` ${result.outputDir}` : ''}\`)`
     );
-  if ((metrics.failed ?? 0) > 0) process.exitCode = 1;
+  if (graded && (metrics.failed ?? 0) > 0) process.exitCode = 1;
 }
 
 type VariantSummary = Awaited<
@@ -206,7 +227,7 @@ type VariantSummary = Awaited<
 >['summary']['variants'][number];
 
 /** One row per variant: outcomes, calls, tokens, cost and time ("-" when unavailable). */
-function printVariantTable(variants: VariantSummary[]): void {
+function printVariantTable(variants: VariantSummary[], graded = true): void {
   if (variants.length === 0) return;
   const value = (variant: VariantSummary, key: string) => {
     const v = variant.metrics?.[key];
@@ -227,8 +248,13 @@ function printVariantTable(variants: VariantSummary[]): void {
     const client = value(variant, 'builtin_event_count_mean');
     return [
       variant.name,
-      `${variant.result?.passed ?? 0}/${variant.result?.total ?? 0}`,
-      pct(value(variant, 'trial_pass_rate')),
+      // An ungraded run's trials pass unless they errored: not results.
+      ...(graded
+        ? [
+            `${variant.result?.passed ?? 0}/${variant.result?.total ?? 0}`,
+            pct(value(variant, 'trial_pass_rate')),
+          ]
+        : []),
       ...(judged ? [pct(value(variant, 'judge_pass_rate'))] : []),
       mcp === undefined && client === undefined
         ? '-'
@@ -245,8 +271,7 @@ function printVariantTable(variants: VariantSummary[]): void {
   });
   const header = [
     'Variant',
-    'Passed',
-    'Trial pass',
+    ...(graded ? ['Passed', 'Trial pass'] : []),
     ...(judged ? ['Judge pass'] : []),
     'MCP calls / client events',
     'Input tokens',

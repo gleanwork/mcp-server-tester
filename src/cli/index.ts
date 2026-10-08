@@ -9,6 +9,7 @@ import { login } from './commands/login/index.js';
 import { token } from './commands/token/index.js';
 import { open } from './commands/open/index.js';
 import { run } from './commands/run/index.js';
+import { grade } from './commands/grade/index.js';
 import { batch } from './commands/batch/index.js';
 import { setupCowork } from './commands/cowork/index.js';
 import {
@@ -166,6 +167,10 @@ program
   )
   .option('--dry-run', 'Validate the config and plugins without executing')
   .option(
+    '--no-grade',
+    'Collect the trials without grading them; grade them later with mst grade'
+  )
+  .option(
     '--no-report',
     "Don't write the run's report (mst open writes it when it opens the run)"
   )
@@ -190,6 +195,35 @@ program
     if (typeof options.config !== 'string')
       throw new Error("required option '-c, --config <path>' not specified");
     return run(options as unknown as Parameters<typeof run>[0]);
+  });
+
+// Grade command
+program
+  .command('grade')
+  .description(
+    "Grade a stored run's traces again with the eval config's graders, as a new run (<run-id>.g<n>)"
+  )
+  .argument('<run>', 'Run directory, run ID, or its short form (7f3c2a)')
+  .option('-c, --config <path>', 'Path to the eval config the run ran')
+  .option('--plugins <paths...>', 'Plugin modules to load before grading')
+  .option(
+    '--output-dir <dir>',
+    "Directory of the eval's runs, if mst run was given one"
+  )
+  .option('--secrets-file <path>', 'JSON or dotenv-style runtime secrets file')
+  .option(
+    '--root-dir <dir>',
+    'Fallback directory for relative config paths; default location for results',
+    '.'
+  )
+  .option(
+    '--no-report',
+    "Don't write the regrade's report (mst open writes it when it opens the run)"
+  )
+  .action((runArg: string, options: Record<string, unknown>) => {
+    if (typeof options.config !== 'string')
+      throw new Error("required option '-c, --config <path>' not specified");
+    return grade(runArg, options as unknown as Parameters<typeof grade>[1]);
   });
 
 // Batch command

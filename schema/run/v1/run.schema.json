@@ -80,6 +80,10 @@
       "additionalProperties": {}
     },
     "redactStoredResponses": { "type": "boolean" },
+    "gradedFrom": {
+      "type": "string",
+      "pattern": "^\\d{8}T\\d{6}Z-[0-9a-f]{6}(\\.g\\d+)?$"
+    },
     "environment": {
       "type": "object",
       "properties": {

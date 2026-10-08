@@ -383,6 +383,11 @@ export interface RunSummary {
    * store's latest run. Absent in older summaries: a full run.
    */
   partial?: boolean;
+  /**
+   * `false` for a run that only collected (`mst run --no-grade`): its trials
+   * have no scores, so it is never a previous run to compare with. Absent: graded.
+   */
+  graded?: false;
   /** What narrowed a partial run. */
   selection?: RunSelection;
   /** A hash of `selection`: partial runs with the same hash are comparable. */
