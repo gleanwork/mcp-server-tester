@@ -32,7 +32,7 @@ import {
  * "succeeds" can still leave the desktop unusable (another app in front, a
  * dialog the driver can't see), and then every case fails the same way.
  */
-export const MAX_CONSECUTIVE_FAILURES = 3;
+const MAX_CONSECUTIVE_FAILURES = 3;
 
 /** How a case left the app. */
 export type DesktopContinuation =
