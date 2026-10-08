@@ -29,7 +29,6 @@ export default defineConfig({
       {
         outputDir: '.mcp-test-results',
         autoOpen: !process.env.CI,
-        historyLimit: 10,
       },
     ],
   ],

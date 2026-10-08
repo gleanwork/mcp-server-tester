@@ -446,7 +446,7 @@ Seeded simulations in `src/evals/variantComparison.test.ts` pin these error rate
 
 Each candidate's `measurement` holds the per-group pass rates, each `change` with its interval, p-values and `assessment`, and `brokenCaseIds`. `improvement` is the change behind the "clearly better" call, and `fixes` is that call.
 
-With `testInfo`, the optimization also attaches a case-by-case comparison of every variant, and the [UI reporter](./ui-reporter.md#comparison-tab) opens on a **Comparison** tab that shows the recommendation, each variant against the baseline, what changed, every case and trial, and why trials failed.
+With `testInfo`, the optimization also attaches a case-by-case comparison of every variant, and the MCP reporter's [run report](./ui-reporter.md#what-it-shows) opens on it: the recommendation, each variant against the baseline, what changed, every case and trial, and why trials failed.
 
 ## Project-Based A/B Testing
 

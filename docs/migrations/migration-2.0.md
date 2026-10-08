@@ -36,6 +36,7 @@ This guide covers upgrading from 1.x (the last 1.x release is 1.1.1). Features f
 - [Case judges sit beside assertions](#case-judges-sit-beside-assertions)
 - [Runs are directories in the mst.run/v1 format](#runs-are-directories-in-the-mstrunv1-format)
 - [`mst open` opens a run's report](#mst-open-opens-a-runs-report)
+- [The MCP reporter reports evals only](#the-mcp-reporter-reports-evals-only)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
 ---
@@ -224,7 +225,7 @@ Every API that persists results now uses one policy (`redactStoredResponses` in 
 - **What is redacted is the same everywhere.** Every eval case result, wherever it is nested, loses its raw `response` and the exact-match `expect.response` echoed in `request.expect`. The runner's store path, `omitResponsesFromResult()` and baseline files used to keep `request.expect.response`. The reporter and comparisons used to drop any key named `response` at any depth, including tool arguments; they now keep those.
 - **One pass rate.** Every run-level pass rate is `passed / total`, and 0 for a run without cases. The reporter's `metrics.passRate` was `NaN` for an empty run, which was stored as `null`.
 
-The reporter's local report (`index.html`, `data.js` and `run-*.json` in its `outputDir`) keeps responses so the report can show them. Its result-store artifacts follow the policy above.
+The reporter's runs follow the same policy, locally too: see [The MCP reporter reports evals only](#the-mcp-reporter-reports-evals-only).
 
 ## Which credentials are used
 
@@ -737,7 +738,19 @@ Pairwise judges can now go in an eval config too: `"pairwiseJudges": ["acme/pair
 
 **Affects:** scripts that run `mst open`.
 
-Every `mst run` now writes a report into its run directory (`runs/<run-id>/report/index.html`). `mst open` opens the newest run's report under `--dir` (default `.mcp-test-results`), or the run or eval directory you name: `mst open .mcp-test-results/<eval name>/runs/<run-id>`. Only when there's no eval run there does it fall back to the Playwright reporter's `latest/index.html`. `--print` prints the path instead of opening a browser. See [`mst open`](../cli.md#open---open-a-runs-report).
+Every `mst run` now writes a report into its run directory (`runs/<run-id>/report/index.html`). `mst open` opens the newest run's report under `--dir` (default `.mcp-test-results`), or the run or eval directory you name: `mst open .mcp-test-results/<eval name>/runs/<run-id>`. `--print` prints the path instead of opening a browser. See [`mst open`](../cli.md#open---open-a-runs-report).
+
+## The MCP reporter reports evals only
+
+**Affects:** projects that use `@gleanwork/mcp-server-tester/reporters/mcpReporter`, and code that reads its output.
+
+The MCP Playwright reporter now writes each Playwright run's eval results as a run, the way `mst run` does: `<outputDir>/<name>/runs/<run-id>/` in the `mst.run/v1` format, with the same report, which `mst open` opens. Each Playwright project is a variant; the first is the baseline.
+
+- **Tests and conformance checks** are no longer in the MCP report. They're Playwright tests: add Playwright's `['html']` reporter, which shows them with their MCP attachments. The Overview, Tests and Evals tabs, the trend chart and the conformance panel are gone.
+- **Options:** `name` (default `playwright`) names the eval. `historyLimit`, `includeAutoTracking` and `runId` were removed and fail with what to do instead. Old runs are directories under `runs/`; delete them yourself.
+- **Output:** `.mcp-test-results/latest/index.html` and `run-*.json` are no longer written. `MCPEvalRunData`, `MCPEvalData` and `MCPEvalHistoricalSummary` were removed; read a run with its `summary.json` and `results.json`.
+- **Result stores** get an `eval-run-summary` artifact per run, as `mst run` saves, instead of `reporter-run`.
+- **Redaction applies locally too.** The old local report kept responses. A run's files and report are now redacted by default, like `mst run`'s; pass `redactStoredResponses: false` to keep answers and tool outputs.
 
 ## New in 2.0 (non-breaking)
 

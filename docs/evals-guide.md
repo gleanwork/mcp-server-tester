@@ -707,7 +707,7 @@ gs://my-mcp-eval-results/my-server/main/
 ├── eval-runs/
 │   ├── latest.json
 │   └── <run-id>.json
-├── reporter-runs/
+├── eval-summaries/
 │   ├── latest.json
 │   └── <run-id>.json
 └── comparisons/

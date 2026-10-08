@@ -1,3 +1,4 @@
+import type { MCPToolOptimizationData } from '../types/reporter.js';
 import type { Plugin } from '../plugins/plugin.js';
 import type { RUN_FORMAT } from './resultFormat.js';
 import type { ZodType } from 'zod';
@@ -318,6 +319,8 @@ export interface RunSelection {
   filterTags?: string[];
   maxCases?: number;
   trials?: number;
+  /** The Playwright shard (`1/3`) a reporter's run covers. */
+  shard?: string;
 }
 
 export interface RunSummary {
@@ -348,6 +351,8 @@ export interface RunSummary {
   variantDeltas: Record<string, Record<string, unknown>>;
   caseArtifactPointers?: Record<string, string[]>;
   results: EvalCaseResult[];
+  /** A tool optimization the run reported (the Playwright reporter's runs). */
+  toolOptimization?: MCPToolOptimizationData;
 }
 
 export type EvaluationSummary = RunSummary;

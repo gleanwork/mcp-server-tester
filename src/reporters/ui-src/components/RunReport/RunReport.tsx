@@ -9,6 +9,7 @@ import { CaseGrid, type CaseFilter } from '../Comparison/CaseGrid';
 import { TrialFailures } from '../Comparison/TrialFailures';
 import { TONE, pct, pts } from '../Comparison/format';
 import { SetupDiff } from './SetupDiff';
+import { ComparisonView } from '../Comparison/ComparisonView';
 import { TrialLookupContext } from './TrialDetail';
 
 /** The headline rate for a variant: its share of passing trials. */
@@ -318,6 +319,22 @@ function RunDetails({ data }: { data: MCPRunReportData }) {
  * `MCPRunReportData` as `buildRunReport` computed it.
  */
 export function RunReport({ data }: { data: MCPRunReportData }) {
+  const optimization = data.toolOptimization;
+  // A run that only optimized tool metadata is its optimization's report.
+  if (optimization?.comparison && data.variants.length === 0)
+    return (
+      <div className="mx-auto grid max-w-[1180px] gap-8 px-6 py-8">
+        <ComparisonView
+          optimization={optimization}
+          data={optimization.comparison}
+        />
+      </div>
+    );
+  return <EvalRunReport data={data} />;
+}
+
+function EvalRunReport({ data }: { data: MCPRunReportData }) {
+  const optimization = data.toolOptimization;
   const comparison = data.comparison;
   const single = data.variants.length === 1;
   const candidates = data.variants.filter((v) => !v.baseline);
@@ -343,6 +360,21 @@ export function RunReport({ data }: { data: MCPRunReportData }) {
           <Header data={data} />
           <RunDetails data={data} />
         </div>
+
+        {optimization?.comparison && (
+          <section aria-labelledby="run-opt-h" className="grid gap-4">
+            <h2
+              id="run-opt-h"
+              className="text-sm font-semibold text-muted-foreground"
+            >
+              Tool optimization
+            </h2>
+            <ComparisonView
+              optimization={optimization}
+              data={optimization.comparison}
+            />
+          </section>
+        )}
 
         <section aria-labelledby="run-result-h" className="grid gap-2">
           <h2

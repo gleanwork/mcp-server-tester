@@ -130,7 +130,7 @@ describe('CLI template generators', () => {
       });
     });
 
-    it('includes outputDir and historyLimit in reporter config', () => {
+    it('names the eval runs after the project in the reporter config', () => {
       const config = getPlaywrightConfigTemplate({
         projectName: 'my-tests',
         transport: 'stdio',
@@ -138,7 +138,8 @@ describe('CLI template generators', () => {
       });
 
       expect(config).toContain('outputDir');
-      expect(config).toContain('historyLimit');
+      expect(config).toContain('name: "my-tests"');
+      expect(config).not.toContain('historyLimit');
     });
   });
 

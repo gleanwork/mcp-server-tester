@@ -7,12 +7,7 @@
  * esbuild inlines type imports at bundle time (stripped at runtime — zero overhead).
  */
 
-export type { GraderType, SkillLoad } from '../../types/index.js';
-
 export type {
-  MCPConformanceCheck,
-  MCPConformanceResultData,
-  MCPServerCapabilitiesData,
   MCPToolOptimizationData,
   MCPComparisonData,
   VariantComparisonEntry,
@@ -22,9 +17,6 @@ export type {
   VariantStatus,
   TrialFailureKind,
   PairedChange,
-  EvalCaseResult,
-  MCPEvalHistoricalSummary,
-  MCPEvalData,
   MCPRunReportData,
   RunReportDifference,
   RunReportEvent,
@@ -33,11 +25,10 @@ export type {
   RunReportVariant,
 } from '../../types/reporter.js';
 
-import type { MCPEvalData, MCPRunReportData } from '../../types/reporter.js';
+import type { MCPRunReportData } from '../../types/reporter.js';
 
 declare global {
   interface Window {
-    MCP_EVAL_DATA: MCPEvalData;
     /** Set by a run's report/data.js (`mst open`). */
     MST_RUN_REPORT?: MCPRunReportData;
   }

@@ -41,8 +41,10 @@ function sectionsOf(data: MCPComparisonData): Section[] {
     return [
       {
         key: 'cases',
-        label: regression.length ? 'Cases' : 'All cases',
-        hint: regression.length ? 'not tagged' : 'pass rate per variant',
+        label: regression.length ? 'Other cases' : 'All cases',
+        hint: regression.length
+          ? `not tagged “${data.regressionTag}”`
+          : 'pass rate per variant',
         rows: data.cases.filter((c) => c.group === 'capability'),
         rate: (v: VariantComparisonEntry) => v.capability.passRate,
       },

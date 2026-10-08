@@ -44,7 +44,7 @@ npm run format:check        # Check formatting
 - **`judge/`** - LLM-as-a-judge via Claude Agent SDK
 - **`plugins/`** - ESLint-style plugins: the `Plugin` shape and validation (`plugin.ts`), the process-wide extension table keyed by `<namespace>/<kind>/<name>` (names parsed and kind-checked in `plugin.ts` and `extensions.ts`), where each kind's lookup (next to its built-ins) adds them under bare names (`extensions.ts`), and the loader (`loadPlugins.ts`). `evals/evalPlugins.ts` loads an eval's plugins and checks it only references namespaces it loads. Domain terms are in `CONTEXT.md`; decisions in `docs/adr/`
 - **`spec/`** - Conformance check registry (`checks/core.ts`, `checks/modern.ts`, `checks/skills.ts`), raw probe channel, and cross-era checks
-- **`reporters/`** - Custom Playwright reporter with React-based UI. `reporters/channel.ts` owns every attachment the reporter reads (names, payload types, read-side Zod schemas). Write with `attachReporterData(testInfo, { kind, data })`, never `testInfo.attach('mcp-...')` directly
+- **`reporters/`** - The run report UI (React) and the MCP Playwright reporter, which reports evals only: each Playwright run's eval results are a `mst.run/v1` run (a variant per project) with the same report `mst run` writes (`evals/runReport.ts`). Tests and conformance checks are in Playwright's own reporter. `reporters/channel.ts` owns every attachment the reporter reads (names, payload types, read-side Zod schemas). Write with `attachReporterData(testInfo, { kind, data })`, never `testInfo.attach('mcp-...')` directly
 - **`cli/`** - The CLI, shipped as `mst` and `mcp-server-tester` (the same binary): `init`, `generate`, `login`, `token`, `run`, `batch`, `cowork`, `open`
 
 ### Assertions Module (`src/assertions/`)
@@ -229,7 +229,7 @@ Custom judges come from plugins: a plugin's `judges: { completeness: { schema, e
 Types are organized in a canonical hierarchy to prevent duplication and drift:
 
 - **`src/types/index.ts`** - Core shared types: `AuthType`, `ResultSource`, `GraderType`, `GraderScore`
-- **`src/types/reporter.ts`** - Reporter-specific types: `MCPEvalRunData`, `EvalCaseResult`, `MCPConformanceResultData`, `MCPServerCapabilitiesData`
+- **`src/types/reporter.ts`** - Reporter-specific types: `MCPRunReportData`, `EvalCaseResult`, `MCPConformanceResultData`, `MCPServerCapabilitiesData`
 
 ### Import Guidelines
 

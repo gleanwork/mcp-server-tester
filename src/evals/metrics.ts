@@ -798,3 +798,22 @@ export function computeMetrics(
   }
   return { perCase, aggregated, unavailable };
 }
+
+/**
+ * What every variant reports, whatever the eval config lists: outcomes, calls,
+ * tokens, cost and time. An eval config's `metrics` add to these.
+ */
+export const CORE_METRICS = [
+  'passed',
+  'trial_pass',
+  'tool_count',
+  'mcp_call_count',
+  'builtin_event_count',
+  'tool_search_hit',
+  'input_tokens',
+  'output_tokens',
+  'cost_usd',
+  'duration_s',
+  'judge_pass',
+  'judge_score',
+] as const;

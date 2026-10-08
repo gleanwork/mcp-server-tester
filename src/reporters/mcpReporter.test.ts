@@ -1,649 +1,509 @@
 /**
- * Unit tests for MCPReporter.buildRunData()
- *
- * buildRunData() is a private method that aggregates all EvalCaseResult records
- * into the MCPEvalRunData structure. Tests access the private method via type
- * assertion to avoid the need for a full Playwright test harness.
+ * The MCP reporter writes each Playwright run's eval results as a run in the
+ * mst.run/v1 format, with a variant per project and the run's report.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import type {
+  FullConfig,
+  FullResult,
+  Suite,
+  TestCase,
+  TestResult,
+} from '@playwright/test/reporter';
 import MCPReporter from './mcpReporter.js';
-import type { EvalCaseResult, MCPEvalRunData } from '../types/reporter.js';
-import {
-  createStoredEvalArtifact,
-  type EvalResultStore,
-  type ListStoredArtifactsOptions,
-  type StoredArtifactKind,
-  type StoredArtifactSummary,
-  type StoredEvalArtifact,
+import { attachReporterData, type ReporterAttachment } from './channel.js';
+import type {
+  EvalCaseResult,
+  MCPRunReportData,
+  MCPToolOptimizationData,
+} from '../types/reporter.js';
+import type { EvaluationSummary } from '../evals/evalFrameworkTypes.js';
+import { readRunDirectory } from '../evals/runFormat.js';
+import { runReportPath } from '../evals/runReport.js';
+import type {
+  EvalResultStore,
+  StoredArtifactKind,
+  StoredEvalArtifact,
 } from '../evals/resultStore.js';
 
-// Suppress file-system side effects (mkdir, writeFile, etc.) in onEnd/onBegin
-vi.mock('fs/promises', () => ({
-  mkdir: vi.fn().mockResolvedValue(undefined),
-  writeFile: vi.fn().mockResolvedValue(undefined),
-  readdir: vi.fn().mockResolvedValue([]),
-  readFile: vi.fn().mockResolvedValue('{}'),
-  unlink: vi.fn().mockResolvedValue(undefined),
-  cp: vi.fn().mockResolvedValue(undefined),
-}));
-
-// Suppress open (auto-open browser)
 vi.mock('open', () => ({ default: vi.fn() }));
 
-function makeReporter(options: Record<string, unknown> = {}): MCPReporter {
-  return new MCPReporter({ quiet: true, autoOpen: false, ...options });
-}
+let outputDir: string;
+beforeEach(async () => {
+  outputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-reporter-'));
+});
+afterEach(async () => {
+  vi.restoreAllMocks();
+  await fs.rm(outputDir, { recursive: true, force: true });
+});
 
-function callBuildRunData(reporter: MCPReporter, durationMs: number) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (reporter as any).buildRunData(durationMs) as {
-    timestamp: string;
-    durationMs: number;
-    environment: { ci: boolean; node: string; platform: string };
-    metrics: {
-      total: number;
-      passed: number;
-      failed: number;
-      passRate: number;
-      datasetBreakdown: Record<string, number>;
-      graderBreakdown: Record<string, number>;
-    };
-    results: EvalCaseResult[];
-    conformanceChecks?: unknown[];
-    serverCapabilities?: unknown[];
-  };
-}
-
-function setResults(reporter: MCPReporter, results: EvalCaseResult[]): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (reporter as any).allResults = results;
-}
-
-function makeResult(
-  overrides: Partial<EvalCaseResult> & { pass: boolean }
+function result(
+  id: string,
+  pass: boolean,
+  extra: Partial<EvalCaseResult> = {}
 ): EvalCaseResult {
   return {
-    id: 'case-1',
-    datasetName: 'test-dataset',
-    toolName: 'search',
+    id,
+    datasetName: 'weather',
     source: 'eval',
-    scores: {},
-    durationMs: 100,
-    ...overrides,
+    pass,
+    scores: { textContains: { pass } },
+    response: { content: [{ type: 'text', text: 'PRIVATE_RESPONSE' }] },
+    durationMs: 10,
+    ...extra,
   };
 }
 
-class MemoryEvalResultStore implements EvalResultStore {
-  artifacts = new Map<string, StoredEvalArtifact<unknown>>();
-  latest = new Map<StoredArtifactKind, StoredEvalArtifact<unknown>>();
+const projects = [
+  {
+    name: 'stdio',
+    use: {
+      mcpConfig: {
+        transport: 'stdio',
+        command: 'node',
+        args: ['server.js', '--token=SECRET_ARG'],
+        env: { API_KEY: 'SECRET_ENV' },
+      },
+    },
+  },
+  {
+    name: 'http',
+    use: {
+      mcpConfig: {
+        transport: 'http',
+        serverUrl: 'https://user:pass@example.com/mcp?key=SECRET_QUERY',
+        headers: { Authorization: 'Bearer SECRET_HEADER' },
+      },
+    },
+  },
+];
 
-  async saveArtifact<T>(artifact: StoredEvalArtifact<T>): Promise<void> {
-    this.artifacts.set(`${artifact.kind}:${artifact.id}`, artifact);
-    this.latest.set(artifact.kind, artifact);
-  }
+async function attachmentsOf(
+  ...items: ReporterAttachment[]
+): Promise<TestResult['attachments']> {
+  const attachments: TestResult['attachments'] = [];
+  for (const item of items)
+    await attachReporterData(
+      {
+        attach: async (
+          name: string,
+          options: { contentType: string; body: string | Buffer }
+        ) => {
+          attachments.push({
+            name,
+            contentType: options.contentType,
+            body:
+              typeof options.body === 'string'
+                ? Buffer.from(options.body)
+                : options.body,
+          });
+        },
+      },
+      item
+    );
+  return attachments;
+}
 
-  async loadArtifact<T>(
-    kind: StoredArtifactKind,
-    id: string
-  ): Promise<StoredEvalArtifact<T>> {
-    const artifact = this.artifacts.get(`${kind}:${id}`);
-    if (!artifact) throw new Error(`Missing artifact ${kind}:${id}`);
-    return artifact as StoredEvalArtifact<T>;
-  }
-
-  async loadLatestArtifact<T>(
-    kind: StoredArtifactKind
-  ): Promise<StoredEvalArtifact<T> | null> {
-    return (this.latest.get(kind) as StoredEvalArtifact<T> | undefined) ?? null;
-  }
-
-  async listArtifacts(
-    kind: StoredArtifactKind,
-    options: ListStoredArtifactsOptions = {}
-  ): Promise<StoredArtifactSummary[]> {
-    return [...this.artifacts.values()]
-      .filter((a) => a.kind === kind)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-      .slice(0, options.limit)
-      .map((a) => ({
-        kind: a.kind,
-        id: a.id,
-        createdAt: a.createdAt,
-        metadata: a.metadata,
-      }));
+/** Run the reporter over (project, attachments) pairs; a repeated `id` is a retry. */
+async function run(
+  tests: Array<{
+    project: string;
+    id?: string;
+    attachments: TestResult['attachments'];
+  }>,
+  options: Record<string, unknown> = {},
+  config: Record<string, unknown> = {}
+): Promise<string | undefined> {
+  const reporter = new MCPReporter({ quiet: true, outputDir, ...options });
+  reporter.onBegin(
+    { projects, ...config } as unknown as FullConfig,
+    {} as Suite
+  );
+  for (const [index, test] of tests.entries())
+    await reporter.onTestEnd(
+      {
+        id: test.id ?? `${test.project}-${index}`,
+        title: 'eval',
+        parent: { title: 'suite', project: () => ({ name: test.project }) },
+      } as unknown as TestCase,
+      { status: 'passed', attachments: test.attachments } as TestResult
+    );
+  await reporter.onEnd({} as FullResult);
+  try {
+    const latest = JSON.parse(
+      await fs.readFile(
+        path.join(
+          outputDir,
+          (options.name as string) ?? 'playwright',
+          'latest.json'
+        ),
+        'utf8'
+      )
+    ) as { path: string };
+    return path.join(
+      outputDir,
+      (options.name as string) ?? 'playwright',
+      latest.path
+    );
+  } catch {
+    return undefined;
   }
 }
 
-describe('MCPReporter.buildRunData()', () => {
-  let reporter: MCPReporter;
+const evalResults = (caseResults: EvalCaseResult[]): ReporterAttachment => ({
+  kind: 'evalResults',
+  data: { caseResults },
+});
 
-  beforeEach(() => {
-    reporter = makeReporter();
+async function readReport(runDirectory: string): Promise<MCPRunReportData> {
+  const script = await fs.readFile(
+    path.join(runDirectory, 'report', 'data.js'),
+    'utf8'
+  );
+  return JSON.parse(
+    script.replace(/^window\.MST_RUN_REPORT = /, '').replace(/;\s*$/, '')
+  ) as MCPRunReportData;
+}
+
+describe('MCPReporter', () => {
+  it('writes a run with a variant per project, and its report', async () => {
+    const directory = await run(
+      [
+        {
+          project: 'stdio',
+          attachments: await attachmentsOf(
+            evalResults([result('sunny', true), result('rainy', false)])
+          ),
+        },
+        {
+          project: 'http',
+          attachments: await attachmentsOf(
+            evalResults([result('sunny', true), result('rainy', true)])
+          ),
+        },
+      ],
+      { name: 'weather-server' }
+    );
+    expect(directory).toBeDefined();
+    const stored = await readRunDirectory(directory!);
+    expect(stored.run).toMatchObject({
+      evalName: 'weather-server',
+      baseline: 'stdio',
+      partial: false,
+      redactStoredResponses: true,
+      datasets: [{ name: 'weather', caseCount: 2 }],
+    });
+    expect(stored.summary.variants.map((v) => v.name)).toEqual([
+      'stdio',
+      'http',
+    ]);
+    expect(stored.summary.variants[1]!.result).toMatchObject({
+      total: 2,
+      passed: 2,
+    });
+    expect(stored.summary.variants[0]!.metrics?.passed_rate).toBe(0.5);
+    await expect(fs.stat(runReportPath(directory!))).resolves.toBeTruthy();
+    const report = await readReport(directory!);
+    expect(report.variants.map((v) => [v.name, v.baseline])).toEqual([
+      ['stdio', true],
+      ['http', false],
+    ]);
   });
 
-  describe('pass/fail totals', () => {
-    it('computes pass and fail counts correctly', () => {
-      setResults(reporter, [
-        makeResult({ pass: true }),
-        makeResult({ pass: true }),
-        makeResult({ pass: false }),
-      ]);
+  it('records each project’s server without anything that can hold a credential', async () => {
+    const directory = await run([
+      {
+        project: 'stdio',
+        attachments: await attachmentsOf(evalResults([result('a', true)])),
+      },
+      {
+        project: 'http',
+        attachments: await attachmentsOf(evalResults([result('a', true)])),
+      },
+    ]);
+    const runJson = await fs.readFile(
+      path.join(directory!, 'run.json'),
+      'utf8'
+    );
+    for (const secret of [
+      'SECRET_ARG',
+      'SECRET_ENV',
+      'SECRET_QUERY',
+      'SECRET_HEADER',
+      'user:pass',
+    ])
+      expect(runJson).not.toContain(secret);
+    const stored = await readRunDirectory(directory!);
+    expect(stored.run.variants).toEqual([
+      expect.objectContaining({
+        name: 'stdio',
+        servers: [{ transport: 'stdio', command: 'node' }],
+      }),
+      expect.objectContaining({
+        name: 'http',
+        servers: [{ transport: 'http', serverUrl: 'https://example.com/mcp' }],
+      }),
+    ]);
+  });
 
-      const data = callBuildRunData(reporter, 500);
-
-      expect(data.metrics.total).toBe(3);
-      expect(data.metrics.passed).toBe(2);
-      expect(data.metrics.failed).toBe(1);
+  it('redacts responses unless told not to', async () => {
+    const attachments = await attachmentsOf(evalResults([result('a', true)]));
+    const redacted = await run([{ project: 'stdio', attachments }]);
+    const text = async (dir: string) =>
+      (await fs.readFile(path.join(dir, 'results.json'), 'utf8')) +
+      (await fs.readFile(path.join(dir, 'report', 'data.js'), 'utf8'));
+    expect(await text(redacted!)).not.toContain('PRIVATE_RESPONSE');
+    const kept = await run([{ project: 'stdio', attachments }], {
+      redactStoredResponses: false,
     });
+    expect(await text(kept!)).toContain('PRIVATE_RESPONSE');
+  });
 
-    it('computes pass rate correctly', () => {
-      setResults(reporter, [
-        makeResult({ pass: true }),
-        makeResult({ pass: false }),
-        makeResult({ pass: false }),
-        makeResult({ pass: false }),
-      ]);
-
-      const data = callBuildRunData(reporter, 1000);
-
-      expect(data.metrics.passRate).toBe(0.25);
-    });
-
-    it('handles 100% pass rate', () => {
-      setResults(reporter, [
-        makeResult({ pass: true }),
-        makeResult({ pass: true }),
-      ]);
-
-      const data = callBuildRunData(reporter, 200);
-
-      expect(data.metrics.passed).toBe(2);
-      expect(data.metrics.failed).toBe(0);
-      expect(data.metrics.passRate).toBe(1);
-    });
-
-    it('handles 0% pass rate', () => {
-      setResults(reporter, [
-        makeResult({ pass: false }),
-        makeResult({ pass: false }),
-      ]);
-
-      const data = callBuildRunData(reporter, 200);
-
-      expect(data.metrics.passed).toBe(0);
-      expect(data.metrics.failed).toBe(2);
-      expect(data.metrics.passRate).toBe(0);
+  it('compares a run with the previous one', async () => {
+    const first = await run([
+      {
+        project: 'stdio',
+        attachments: await attachmentsOf(evalResults([result('a', true)])),
+      },
+    ]);
+    const second = await run([
+      {
+        project: 'stdio',
+        attachments: await attachmentsOf(evalResults([result('a', false)])),
+      },
+    ]);
+    const stored = await readRunDirectory(second!);
+    expect(stored.summary.previousRun).toMatchObject({
+      runId: path.basename(first!),
+      passRateDelta: -1,
+      variants: { stdio: { regressed: ['a'] } },
     });
   });
 
-  describe('empty results', () => {
-    it('handles empty results array without crashing', () => {
-      setResults(reporter, []);
-
-      expect(() => callBuildRunData(reporter, 0)).not.toThrow();
+  it('saves the run summary to a result store', async () => {
+    const saved: Array<StoredEvalArtifact<unknown>> = [];
+    const store: EvalResultStore = {
+      saveArtifact: async (artifact) => {
+        saved.push(artifact as StoredEvalArtifact<unknown>);
+      },
+      loadArtifact: async () => {
+        throw new Error('none');
+      },
+      loadLatestArtifact: async () => null,
+      listArtifacts: async (_kind: StoredArtifactKind) => [],
+    };
+    const directory = await run(
+      [
+        {
+          project: 'stdio',
+          attachments: await attachmentsOf(evalResults([result('a', true)])),
+        },
+      ],
+      { resultStore: store, runMetadata: { branch: 'main' } }
+    );
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({
+      kind: 'eval-run-summary',
+      id: path.basename(directory!),
+      metadata: {
+        branch: 'main',
+        labels: { configId: 'playwright:playwright' },
+      },
     });
-
-    it('returns zero totals for empty results', () => {
-      setResults(reporter, []);
-
-      const data = callBuildRunData(reporter, 0);
-
-      expect(data.metrics.total).toBe(0);
-      expect(data.metrics.passed).toBe(0);
-      expect(data.metrics.failed).toBe(0);
-      // Not NaN, which serialized as null in stored reports.
-      expect(data.metrics.passRate).toBe(0);
-    });
+    expect(JSON.stringify(saved[0]!.data)).not.toContain('PRIVATE_RESPONSE');
+    expect((saved[0]!.data as EvaluationSummary).variants).toHaveLength(1);
   });
 
-  describe('external result store', () => {
-    it('saves reporter run data to the configured store', async () => {
-      const store = new MemoryEvalResultStore();
-      reporter = makeReporter({
-        resultStore: store,
-        runId: 'reporter-run-1',
-        runMetadata: { datasetName: 'reporter-suite' },
-      });
-      setResults(reporter, [makeResult({ pass: true })]);
+  it('writes a tool optimization’s report', async () => {
+    const optimization = {
+      metric: 'passRate',
+      baselineValue: 0.5,
+      bestValue: 0.75,
+      rounds: [],
+      reason: 'threshold-met',
+    } as unknown as MCPToolOptimizationData;
+    const directory = await run([
+      {
+        project: 'stdio',
+        attachments: await attachmentsOf({
+          kind: 'toolOptimization',
+          data: optimization,
+        }),
+      },
+    ]);
+    const report = await readReport(directory!);
+    expect(report.toolOptimization).toEqual(optimization);
+    expect(report.variants).toEqual([]);
+  });
 
-      await reporter.onEnd({} as never);
-
-      const artifact = await store.loadArtifact<MCPEvalRunData>(
-        'reporter-run',
-        'reporter-run-1'
-      );
-      expect(artifact.metadata.datasetName).toBe('reporter-suite');
-      expect(artifact.data.metrics.passed).toBe(1);
-    });
-
-    it('loads historical summaries from the configured store', async () => {
-      const store = new MemoryEvalResultStore();
-      await store.saveArtifact(
-        createStoredEvalArtifact({
-          kind: 'reporter-run',
-          id: 'previous-run',
-          createdAt: '2026-05-22T12:00:00.000Z',
-          data: {
-            timestamp: '2026-05-22T12:00:00.000Z',
-            durationMs: 10,
-            environment: { ci: true, node: 'v22.0.0', platform: 'darwin' },
-            metrics: {
-              total: 2,
-              passed: 1,
-              failed: 1,
-              passRate: 0.5,
-              datasetBreakdown: { dataset: 2 },
-              graderBreakdown: {
-                exact: 0,
-                schema: 0,
-                textContains: 0,
-                regex: 0,
-                snapshot: 0,
-                judge: 0,
-                error: 0,
-                size: 0,
-                toolsTriggered: 0,
-                toolCallCount: 0,
+  it('writes nothing for a run without evals', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    expect(
+      await run(
+        [
+          {
+            project: 'stdio',
+            attachments: await attachmentsOf({
+              kind: 'toolCall',
+              data: {
+                operation: 'callTool',
+                toolName: 'get_weather',
+                args: {},
+                result: { content: [] },
+                durationMs: 1,
+                isError: false,
               },
-            },
-            results: [],
-          } satisfies MCPEvalRunData,
-        })
-      );
-      reporter = makeReporter({ resultStore: store });
-
-      const historical = (await (
-        reporter as unknown as {
-          loadHistoricalData(): Promise<
-            Array<{ total: number; passRate: number }>
-          >;
-        }
-      ).loadHistoricalData()) as Array<{
-        total: number;
-        passRate: number;
-      }>;
-
-      expect(historical).toHaveLength(1);
-      expect(historical[0]).toMatchObject({ total: 2, passRate: 0.5 });
-    });
-  });
-
-  describe('grader counters', () => {
-    it('counts exact assertion', () => {
-      setResults(reporter, [
-        makeResult({ pass: true, scores: { exact: { pass: true } } }),
-      ]);
-
-      const data = callBuildRunData(reporter, 100);
-
-      expect(data.metrics.graderBreakdown.exact).toBe(1);
-    });
-
-    it('counts schema assertion', () => {
-      setResults(reporter, [
-        makeResult({ pass: true, scores: { schema: { pass: true } } }),
-      ]);
-
-      const data = callBuildRunData(reporter, 100);
-
-      expect(data.metrics.graderBreakdown.schema).toBe(1);
-    });
-
-    it('counts textContains assertion', () => {
-      setResults(reporter, [
-        makeResult({
-          pass: true,
-          scores: { textContains: { pass: true } },
-        }),
-      ]);
-
-      const data = callBuildRunData(reporter, 100);
-
-      expect(data.metrics.graderBreakdown.textContains).toBe(1);
-    });
-
-    it('counts regex assertion', () => {
-      setResults(reporter, [
-        makeResult({ pass: true, scores: { regex: { pass: true } } }),
-      ]);
-
-      const data = callBuildRunData(reporter, 100);
-
-      expect(data.metrics.graderBreakdown.regex).toBe(1);
-    });
-
-    it('counts snapshot assertion', () => {
-      setResults(reporter, [
-        makeResult({ pass: true, scores: { snapshot: { pass: true } } }),
-      ]);
-
-      const data = callBuildRunData(reporter, 100);
-
-      expect(data.metrics.graderBreakdown.snapshot).toBe(1);
-    });
-
-    it('counts judge assertion', () => {
-      setResults(reporter, [
-        makeResult({ pass: true, scores: { judge: { pass: true } } }),
-      ]);
-
-      const data = callBuildRunData(reporter, 100);
-
-      expect(data.metrics.graderBreakdown.judge).toBe(1);
-    });
-
-    it('counts error assertion', () => {
-      setResults(reporter, [
-        makeResult({ pass: true, scores: { error: { pass: true } } }),
-      ]);
-
-      const data = callBuildRunData(reporter, 100);
-
-      expect(data.metrics.graderBreakdown.error).toBe(1);
-    });
-
-    it('counts size assertion (validates Issue 5 fix)', () => {
-      setResults(reporter, [
-        makeResult({ pass: true, scores: { size: { pass: true } } }),
-      ]);
-
-      const data = callBuildRunData(reporter, 100);
-
-      // This test validates that the size assertion counter increments correctly.
-      // If this fails with count=0, the Issue 5 fix is missing from buildRunData.
-      expect(data.metrics.graderBreakdown.size).toBe(1);
-    });
-
-    it('counts toolsTriggered assertion', () => {
-      setResults(reporter, [
-        makeResult({
-          pass: true,
-          scores: { toolsTriggered: { pass: true } },
-        }),
-      ]);
-
-      const data = callBuildRunData(reporter, 100);
-
-      expect(data.metrics.graderBreakdown.toolsTriggered).toBe(1);
-    });
-
-    it('counts toolCallCount assertion', () => {
-      setResults(reporter, [
-        makeResult({
-          pass: true,
-          scores: { toolCallCount: { pass: true } },
-        }),
-      ]);
-
-      const data = callBuildRunData(reporter, 100);
-
-      expect(data.metrics.graderBreakdown.toolCallCount).toBe(1);
-    });
-
-    it('counts multiple grader types from the same result', () => {
-      setResults(reporter, [
-        makeResult({
-          pass: true,
-          scores: {
-            textContains: { pass: true },
-            schema: { pass: false },
-            judge: { pass: true },
+            }),
           },
-        }),
-      ]);
-
-      const data = callBuildRunData(reporter, 100);
-
-      expect(data.metrics.graderBreakdown.textContains).toBe(1);
-      expect(data.metrics.graderBreakdown.schema).toBe(1);
-      expect(data.metrics.graderBreakdown.judge).toBe(1);
-      expect(data.metrics.graderBreakdown.exact).toBe(0);
-    });
-
-    it('aggregates grader counts across multiple results', () => {
-      setResults(reporter, [
-        makeResult({
-          pass: true,
-          scores: { textContains: { pass: true } },
-        }),
-        makeResult({
-          pass: true,
-          scores: { textContains: { pass: true } },
-        }),
-        makeResult({
-          pass: false,
-          scores: { textContains: { pass: false } },
-        }),
-        makeResult({ pass: true, scores: { judge: { pass: true } } }),
-      ]);
-
-      const data = callBuildRunData(reporter, 400);
-
-      expect(data.metrics.graderBreakdown.textContains).toBe(3);
-      expect(data.metrics.graderBreakdown.judge).toBe(1);
-    });
-
-    it('initializes all grader counters to 0 when no assertions are set', () => {
-      setResults(reporter, [makeResult({ pass: true, scores: {} })]);
-
-      const data = callBuildRunData(reporter, 100);
-
-      const breakdown = data.metrics.graderBreakdown;
-      expect(breakdown.exact).toBe(0);
-      expect(breakdown.schema).toBe(0);
-      expect(breakdown.textContains).toBe(0);
-      expect(breakdown.regex).toBe(0);
-      expect(breakdown.snapshot).toBe(0);
-      expect(breakdown.judge).toBe(0);
-      expect(breakdown.error).toBe(0);
-      expect(breakdown.size).toBe(0);
-      expect(breakdown.toolsTriggered).toBe(0);
-      expect(breakdown.toolCallCount).toBe(0);
-    });
-  });
-
-  describe('dataset breakdown', () => {
-    it('groups results by dataset name', () => {
-      setResults(reporter, [
-        makeResult({ pass: true, datasetName: 'dataset-a' }),
-        makeResult({ pass: true, datasetName: 'dataset-a' }),
-        makeResult({ pass: false, datasetName: 'dataset-b' }),
-      ]);
-
-      const data = callBuildRunData(reporter, 300);
-
-      expect(data.metrics.datasetBreakdown['dataset-a']).toBe(2);
-      expect(data.metrics.datasetBreakdown['dataset-b']).toBe(1);
-    });
-
-    it('uses "Unknown Dataset" when datasetName is missing', () => {
-      const result = makeResult({ pass: true });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      delete (result as any).datasetName;
-      setResults(reporter, [result]);
-
-      const data = callBuildRunData(reporter, 100);
-
-      expect(data.metrics.datasetBreakdown['Unknown Dataset']).toBe(1);
-    });
-  });
-
-  describe('sourceCounts (direct vs mcp_host)', () => {
-    it('includes all results regardless of source type', () => {
-      setResults(reporter, [
-        makeResult({ pass: true, source: 'eval' }),
-        makeResult({ pass: true, source: 'test' }),
-        makeResult({ pass: false, source: 'eval' }),
-      ]);
-
-      const data = callBuildRunData(reporter, 300);
-
-      expect(data.results.length).toBe(3);
-      expect(data.metrics.total).toBe(3);
-    });
-
-    it('preserves source field on each result', () => {
-      setResults(reporter, [
-        makeResult({ pass: true, source: 'eval' }),
-        makeResult({ pass: false, source: 'test' }),
-      ]);
-
-      const data = callBuildRunData(reporter, 200);
-
-      expect(data.results[0]?.source).toBe('eval');
-      expect(data.results[1]?.source).toBe('test');
-    });
-  });
-
-  describe('durationMs', () => {
-    it('includes the provided durationMs in run data', () => {
-      setResults(reporter, [makeResult({ pass: true })]);
-
-      const data = callBuildRunData(reporter, 12345);
-
-      expect(data.durationMs).toBe(12345);
-    });
-  });
-
-  describe('external client metadata', () => {
-    it('preserves external client trace metadata in run data', () => {
-      setResults(reporter, [
-        makeResult({
-          pass: true,
-          clientMetadata: {
-            driver: {
-              provider: 'anthropic',
-              product: 'claude',
-              surface: 'cowork',
-              runtime: 'desktop-app',
-              platform: 'macos',
-            },
-            driverSlug: 'anthropic.claude.cowork.desktop-app.macos',
-            displayName: 'Claude Cowork Desktop',
-            clientName: 'Claude Cowork Desktop',
-            clientType: 'desktop',
-            capabilitiesUsed: [
-              'control',
-              'input',
-              'completion',
-              'trace',
-              'normalize',
-            ],
-            traceSource: 'client-local-transcript',
-            traceConfidence: 'high',
-            traceLimitations: ['fixture limitation'],
-            artifacts: [
-              {
-                kind: 'audit',
-                name: 'Claude audit log',
-                path: '/tmp/audit.jsonl',
-              },
-            ],
-            session: {
-              id: 'local_123',
-              runMarker: 'MCP_SERVER_TESTER_TEST',
-              requestId: 'req_123',
-            },
-            correlation: {
-              strategy: 'prompt_marker',
-              marker: 'MCP_SERVER_TESTER_TEST',
-              includedInPrompt: true,
-            },
-            evidence: {
-              finalAnswer: {
-                source: 'client-local-transcript',
-                confidence: 'high',
-              },
-              toolCalls: {
-                source: 'client-local-transcript',
-                confidence: 'high',
-              },
-            },
-          },
-        }),
-      ]);
-
-      const data = callBuildRunData(reporter, 100);
-
-      expect(data.results[0]?.clientMetadata).toMatchObject({
-        driverSlug: 'anthropic.claude.cowork.desktop-app.macos',
-        clientName: 'Claude Cowork Desktop',
-        traceSource: 'client-local-transcript',
-        traceConfidence: 'high',
-        session: { id: 'local_123', requestId: 'req_123' },
-      });
-    });
-  });
-
-  describe('conformanceChecks and serverCapabilities', () => {
-    it('returns undefined conformanceChecks when none are recorded', () => {
-      setResults(reporter, [makeResult({ pass: true })]);
-
-      const data = callBuildRunData(reporter, 100);
-
-      expect(data.conformanceChecks).toBeUndefined();
-    });
-
-    it('returns undefined serverCapabilities when none are recorded', () => {
-      setResults(reporter, [makeResult({ pass: true })]);
-
-      const data = callBuildRunData(reporter, 100);
-
-      expect(data.serverCapabilities).toBeUndefined();
-    });
-
-    it('collects every conformance attachment with its protocol and scope', async () => {
-      const attach = (body: unknown) => ({
-        name: 'mcp-conformance-checks',
-        contentType: 'application/json',
-        body: Buffer.from(JSON.stringify(body)),
-      });
-      const protocol = {
-        requested: '2026-07-28',
-        negotiated: '2026-07-28',
-        era: 'modern',
-      };
-      const test = { title: 'conformance' } as Parameters<
-        MCPReporter['onTestEnd']
-      >[0];
-      const result = {
-        attachments: [
-          attach({
-            operation: 'conformanceChecks',
-            pass: true,
-            checks: [
-              {
-                name: 'discover_succeeds',
-                pass: true,
-                message: 'ok',
-                severity: 'must',
-              },
-            ],
-            toolCount: 4,
-            protocol,
-          }),
-          attach({
-            operation: 'crossEraChecks',
-            pass: false,
-            checks: [
-              { name: 'cross_era_tools_match', pass: false, message: 'x' },
-            ],
-            toolCount: 4,
-            scope: 'Cross-era: legacy ↔ 2026-07-28',
-          }),
         ],
-      } as unknown as Parameters<MCPReporter['onTestEnd']>[1];
+        { quiet: false }
+      )
+    ).toBeUndefined();
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining("Playwright's own report")
+    );
+  });
 
-      await reporter.onTestEnd(test, result);
-      const data = callBuildRunData(reporter, 100);
-
-      expect(data.conformanceChecks).toEqual([
-        expect.objectContaining({ pass: true, protocol }),
-        expect.objectContaining({
-          pass: false,
-          scope: 'Cross-era: legacy ↔ 2026-07-28',
-        }),
-      ]);
+  it('puts projects in config order, so the baseline is the same every run', async () => {
+    const directory = await run([
+      {
+        project: 'http',
+        attachments: await attachmentsOf(evalResults([result('a', true)])),
+      },
+      {
+        project: 'stdio',
+        attachments: await attachmentsOf(evalResults([result('a', true)])),
+      },
+    ]);
+    const stored = await readRunDirectory(directory!);
+    expect(stored.run.baseline).toBe('stdio');
+    expect(stored.summary.variants.map((v) => v.name)).toEqual([
+      'stdio',
+      'http',
+    ]);
+    expect(stored.summary.variantDeltas.http).toMatchObject({
+      baseline: 'stdio',
+      passRateDelta: 0,
     });
+  });
+
+  it('counts a retried test once: its last attempt', async () => {
+    const directory = await run([
+      {
+        project: 'stdio',
+        id: 'flaky',
+        attachments: await attachmentsOf(evalResults([result('a', false)])),
+      },
+      {
+        project: 'stdio',
+        id: 'flaky',
+        attachments: await attachmentsOf(evalResults([result('a', true)])),
+      },
+    ]);
+    const stored = await readRunDirectory(directory!);
+    expect(stored.summary.results).toEqual([
+      expect.objectContaining({ id: 'a', pass: true }),
+    ]);
+  });
+
+  it('calls the unnamed default project `default`, with its server', async () => {
+    const reporter = new MCPReporter({ quiet: true, outputDir });
+    reporter.onBegin(
+      {
+        projects: [
+          { name: '', use: { mcpConfig: projects[0]!.use.mcpConfig } },
+        ],
+      } as unknown as FullConfig,
+      {} as Suite
+    );
+    await reporter.onTestEnd(
+      {
+        id: 't',
+        title: 'eval',
+        parent: { title: 'suite', project: () => ({ name: '' }) },
+      } as unknown as TestCase,
+      {
+        status: 'passed',
+        attachments: await attachmentsOf(evalResults([result('a', true)])),
+      } as TestResult
+    );
+    await reporter.onEnd({} as FullResult);
+    const latest = JSON.parse(
+      await fs.readFile(
+        path.join(outputDir, 'playwright', 'latest.json'),
+        'utf8'
+      )
+    ) as { path: string };
+    const stored = await readRunDirectory(
+      path.join(outputDir, 'playwright', latest.path)
+    );
+    expect(stored.run.variants).toEqual([
+      expect.objectContaining({
+        name: 'default',
+        servers: [{ transport: 'stdio', command: 'node' }],
+      }),
+    ]);
+  });
+
+  it('refuses a project with the same case twice, and says why', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const directory = await run([
+      {
+        project: 'stdio',
+        attachments: await attachmentsOf(evalResults([result('a', true)])),
+      },
+      {
+        project: 'stdio',
+        attachments: await attachmentsOf(
+          evalResults([result('A', true, { datasetName: 'other' })])
+        ),
+      },
+    ]);
+    expect(directory).toBeUndefined();
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining("wasn't written"),
+      expect.objectContaining({
+        message: expect.stringContaining('has case "A" twice'),
+      })
+    );
+  });
+
+  it('writes a shard as a partial run that never becomes the latest', async () => {
+    const attachments = await attachmentsOf(evalResults([result('a', true)]));
+    const reporter = new MCPReporter({ quiet: true, outputDir });
+    reporter.onBegin(
+      { projects, shard: { current: 2, total: 3 } } as unknown as FullConfig,
+      {} as Suite
+    );
+    await reporter.onTestEnd(
+      {
+        id: 't',
+        title: 'eval',
+        parent: { title: 'suite', project: () => ({ name: 'stdio' }) },
+      } as unknown as TestCase,
+      { status: 'passed', attachments } as TestResult
+    );
+    await reporter.onEnd({} as FullResult);
+    const evalDir = path.join(outputDir, 'playwright');
+    await expect(fs.stat(path.join(evalDir, 'latest.json'))).rejects.toThrow();
+    const [runId] = await fs.readdir(path.join(evalDir, 'runs'));
+    const stored = await readRunDirectory(path.join(evalDir, 'runs', runId!));
+    expect(stored.run).toMatchObject({
+      partial: true,
+      selection: { shard: '2/3' },
+    });
+  });
+
+  it.each([
+    ['historyLimit', 5],
+    ['includeAutoTracking', false],
+    ['runId', 'x'],
+  ])('rejects the removed `%s` option with what to do', (key, value) => {
+    expect(() => new MCPReporter({ [key]: value } as never)).toThrow(
+      new RegExp(`\`${key}\` was removed`)
+    );
   });
 });

@@ -76,12 +76,6 @@ export async function open(
 ): Promise<void> {
   const root = resolve(options.dir ?? '.mcp-test-results');
   const run = path !== undefined ? await runAt(path) : await newestRun(root);
-  // The Playwright reporter's report, when no eval run is there.
-  const playwrightReport = join(root, 'latest', 'index.html');
-  if (!run && existsSync(playwrightReport)) {
-    await show(playwrightReport, options);
-    return;
-  }
   if (!run) {
     console.error(
       `No eval runs found under ${root}. Run an eval with \`mst run <eval config>\`, or name a run directory: \`mst open <run directory>\`.`

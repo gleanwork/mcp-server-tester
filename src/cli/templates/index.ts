@@ -49,12 +49,12 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
 
-  // Reporters: HTML and MCP Eval Reporter
+  // Reporters: Playwright's HTML report for tests, the MCP reporter for evals
   reporter: [
     ['html'],
     ['@gleanwork/mcp-server-tester/reporters/mcpReporter', {
       outputDir: '.mcp-test-results',
-      historyLimit: 10
+      name: ${JSON.stringify(answers.projectName)}
     }]
   ],
 

@@ -263,7 +263,7 @@ export default defineConfig({
 });
 ```
 
-Options: `outputDir` (default `.mcp-test-results`), `autoOpen`, `historyLimit` (default 10), `quiet`, `includeAutoTracking` (default `true`), `resultStore`, `runMetadata`. Open the latest report with `npx mst open`. `mst run` writes `results.json`, not a report.
+Options: `outputDir` (default `.mcp-test-results`), `name` (the eval's name, default `playwright`), `autoOpen`, `quiet`, `resultStore`, `runMetadata`. Each Playwright run's eval results are a run directory (`<outputDir>/<name>/runs/<run-id>/`) with a variant per project and the same report `mst run` writes; open it with `npx mst open`. Tests and conformance checks are in Playwright's own report.
 
 ## CLI
 

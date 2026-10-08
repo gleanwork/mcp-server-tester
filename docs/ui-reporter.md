@@ -1,224 +1,76 @@
-# UI Reporter Guide
+# The Run Report
 
-`@gleanwork/mcp-server-tester` includes a custom Playwright reporter with an interactive web UI for visualizing test results. It is organized into three tabs — Overview, Tests, and Evals — so that deterministic tests and probabilistic eval results are never mixed together.
+Every eval run writes a report: an HTML page that answers whether each variant did better or worse than the baseline, and shows every case and trial behind that answer. `mst run` writes one with each run, and so does the MCP Playwright reporter for the evals in a Playwright run. `npx mst open` opens the newest.
 
-## Configuration
+The report is for evals. Playwright tests, including direct tool calls and conformance checks, are in Playwright's own report (`['html']`), with their MCP attachments.
 
-Add the reporter to your `playwright.config.ts`:
+![The run report: result, variants compared, what differs, case by case, why trials failed](img/run-report.png)
+
+## Open a report
+
+```bash
+npx mst open                                           # the newest run under .mcp-test-results
+npx mst open .mcp-test-results/<eval name>             # that eval's latest run
+npx mst open .mcp-test-results/<eval name>/runs/<id>   # one run
+npx mst open --print                                   # print the path; don't open a browser
+```
+
+A run copied without its `report/` directory gets one written from its files when you open it. See [`mst open`](./cli.md#open---open-a-runs-report).
+
+## What it shows
+
+The sections are the same for every eval:
+
+- **Result:** each variant's share of passing trials next to the baseline's, and whether it's clearly better, clearly worse, or unclear. "Clearly" comes from a paired test over cases, adjusted for the number of variants, so a lucky run isn't called a win.
+- **Variants compared:** pass rate (split into regression cases and the rest when cases are tagged `regression`), each judge's mean score, each pairwise judge's win and loss rates, cost per case, median trial time, the tools (or servers) the variant called, and tokens per trial. _Show statistics_ adds 95% ranges, p-values and pass^k.
+- **What differs:** the selected variant's setup next to the baseline's: client, model, server labels, client options, input template, judges, and the tool metadata it changes.
+- **Case by case:** a dot per trial for every case and variant. Select a cell to read its trials: each grader's score, the trace (tool calls with their inputs and outputs), the answer, and the pairwise preference.
+- **Why trials failed:** failed trials grouped by cause (no tool called, the wrong tool, a failed check, an error).
+
+A run with one variant opens on the cases that need attention. A run that optimized tool metadata (`runToolOptimization`) shows the optimization's report first.
+
+**Redaction.** Runs store responses redacted by default (`redactStoredResponses`), so their reports show no answers, tool outputs or judges' reasoning, and say so. Set `redactStoredResponses: false` in the eval config (or the reporter options) to keep them.
+
+## The MCP Playwright reporter
+
+Add it next to Playwright's own reporter:
 
 ```typescript
 import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   reporter: [
-    ['list'], // Keep the terminal output
-    ['@gleanwork/mcp-server-tester/reporters/mcpReporter'], // Add the UI reporter
+    ['list'],
+    ['html'], // tests and conformance checks
+    [
+      '@gleanwork/mcp-server-tester/reporters/mcpReporter',
+      { name: 'my-server' },
+    ], // evals
   ],
-  // ... rest of config
 });
 ```
 
-## Usage
-
-The reporter automatically generates an HTML report after each test run:
-
-```bash
-npm test
-
-# Report generated at: .mcp-test-results/latest/index.html
-# Opens automatically in your default browser
-```
-
-To open a previous report:
-
-```bash
-npx mst open
-```
-
----
-
-## Overview Tab
-
-![MCP Server Tester — Overview tab](img/ux-overview.png)
-
-The Overview tab shows **Test Suites** and **Eval Datasets** side by side with their own separate pass rates. These are fundamentally different kinds of results — a test is binary (pass or fail), an eval has an assertion pass rate across trials — so they are never collapsed into a single combined number.
-
-Below the cards, the **Pass Rate Trend** chart shows historical pass rates across runs. This is the main signal for answering "are we getting better over time?"
-
----
-
-## Comparison Tab
-
-![MCP Server Tester — Comparison tab](img/ux-tool-optimization.png)
-
-When the run is a [`runToolOptimization`](./mst-client.md#driving-it-from-an-agent-runtooloptimization), the report opens on the Comparison tab. It answers which variant to ship first, then lets you dig into why:
-
-- **Result** — the recommended variant, the two checks it passed (clearly better on capability cases, and no clear breakage on regression cases), why each other variant wasn't chosen, and caveats: cases that pass only some trials, a gain not confirmed on held-out cases, too few cases for any variant to be clearly better, a run too small to catch one case breaking, or groups that came from an extra baseline run.
-- **All variants compared** — each variant's pass rate on capability cases and regression cases, colored by the library's assessment of its change from the baseline: green is clearly better, red is clearly worse, grey is within noise. **Show statistics** adds the 95% ranges and p-values, the seen versus held-out split, pass^k, and improved/regressed case counts.
-- **What changed** — the selected variant's description or schema next to the server's original.
-- **Case by case** — every case and every trial for every variant. A cell is green when all trials passed, amber when some did, and red when none did or it got worse than the baseline; ▲ and ▼ mark changes. Select a cell to compare its trials, including the tools called, with the baseline's.
-- **Why trials failed** — failed trials grouped by what went wrong (no tool called, wrong tool, right tool but a check failed, error), plus the selected variant's most common tool mix-ups.
-
-The library computes every number and assessment on this tab; the reporter only renders them. See [How variants are judged](./mst-client.md#how-variants-are-judged) for the method and its limits.
-
----
-
-## Tests Tab
-
-![MCP Server Tester — Tests tab](img/ux-tests.png)
-
-The Tests tab shows Playwright test suite results — deterministic, binary pass/fail tests that call MCP tools directly and assert on the output.
-
-### What's shown
-
-- **Pass rate and count** — `100.0% pass rate | 2/2 passed`
-- **MCP Conformance Checks** — expandable panel showing protocol compliance (server info present, capabilities valid, list tools succeeds, required tools present). Collapsed by default.
-- **Server Capabilities** — expandable panel listing all tools the server exposes with their descriptions
-- **Results table** — grouped by test file, each row shows case ID, tool name, and duration
-
-### MCP Conformance Checks
-
-Conformance checks validate that your MCP server implements the protocol correctly:
-
-- `server_info_present` — server returns name and version
-- `capabilities_valid` — capability declaration is well-formed
-- `list_tools_succeeds` — `tools/list` returns without error
-- `required_tools_present` — any tools declared in `requiredTools` are available
-
----
-
-## Evals Tab
-
-![MCP Server Tester — Evals tab](img/ux-evals.png)
-
-The Evals tab shows data-driven eval dataset results, including multi-trial pass rates and LLM client mode tool discovery metrics.
-
-### Metrics bar
-
-From left to right, in order of urgency:
-
-- **Pass rate** — fraction of cases that met their pass threshold
-- **Regressions / fixed** — cases that changed vs the baseline run (only shown when a baseline is provided)
-- **X/Y passed** — compact pass count
-- **Avg pass rate** — mean trial pass rate across multi-trial cases
-- **Tool discovery** — mean recall across client cases with `toolsTriggered` assertions
-
-### Trial dots and CI
-
-For multi-trial cases, each row shows:
-
-- A pass rate badge: `80% 4/5`
-- Trial dots showing each trial
-
-The dot legend below the filter bar explains the symbols:
-
-| Symbol    | Meaning                                        |
-| --------- | ---------------------------------------------- |
-| ● (green) | Trial passed                                   |
-| ● (red)   | Trial failed                                   |
-| ○ (grey)  | Infrastructure error (excluded from pass rate) |
-
-Infrastructure errors (network timeouts, rate limits) are excluded from the pass rate denominator so environment reliability doesn't distort your pass rates.
-
-### Detail panel
-
-Click **Show details** to expand:
-
-- **Why Cases Fail** — breakdown of which assertion types are causing failures (`textContains`, `schema`, `judge`, etc.)
-- **Performance by Tool** — per-tool pass rate, average duration, recall, and precision
-
-### Tag filtering
-
-Tag buttons above the search bar let you filter to specific subsets. Tags come from the `tags` field on your eval cases.
-
----
-
-## Detail Modal
-
-Click any result row to open the detail modal:
-
-1. **Status and metadata** — Pass/Fail badge, source (Eval Dataset or Test Suite), auth type, project
-2. **Pass rate and CI** (multi-trial only) — trial pass rate with 95% confidence interval. Hover for: _"the true pass rate is likely between X% and Y%. Run more trials to narrow this range."_
-3. **Error details** — error message and stack trace (failed cases only)
-4. **Response preview** — full tool response, scrollable
-5. **Assertion results** — each assertion type with pass/fail and failure message
-6. **Duration** — total execution time
-
----
-
-## Results Organization
-
-Results are saved to `.mcp-test-results/`:
-
-```
-.mcp-test-results/
-├── latest/                    # Symlink to most recent run
-│   ├── index.html            # Main UI
-│   ├── data.js               # Test results data
-│   ├── app.js                # UI JavaScript
-│   └── styles.css            # UI styles
-└── run-2025-01-24T12-00-00/  # Timestamped runs
-    └── ...
-```
-
-Each run creates a timestamped directory. `latest/` is a symlink to the newest run — useful for CI artifacts and bookmarking.
-
-Add to `.gitignore`:
-
-```gitignore
-.mcp-test-results/
-```
-
----
-
-## CI/CD Integration
-
-### GitHub Actions
-
-```yaml
-name: MCP Tests
-on: [push]
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-      - run: npm ci
-      - run: npm test
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: mcp-test-results
-          path: .mcp-test-results/latest/
-          retention-days: 30
-```
-
-Download the artifact and open `index.html` to view results.
-
----
-
-## Configuration Options
-
-```typescript
-[
-  '@gleanwork/mcp-server-tester/reporters/mcpReporter',
-  {
-    outputDir: '.mcp-test-results', // Where to save reports (default)
-    autoOpen: false, // Open browser after run (default: true)
-    historyLimit: 10, // Historical runs to keep (default: 10)
-    quiet: false, // Suppress console output (default: false)
-    includeAutoTracking: true, // Include MCP fixture calls without explicit evals (default: true)
-  },
-];
-```
-
-### External History Storage
-
-The reporter can load and save historical runs through a result store. This keeps
-the trend chart useful across CI jobs and local machines while still writing the
-normal local report.
+Each Playwright run's eval results (from `runEvalDataset()` and `runEvalCase()`) become one run, written like `mst run`'s: `<outputDir>/<name>/runs/<run-id>/` with the run's files and its report. Each Playwright project is a variant, and the first project in the config is the baseline, so a [`protocolMatrix()`](./protocol-versions.md) compares protocols. Each run is compared with the previous run of the same `name` that ran the same projects.
+
+- **Retries:** a retried test counts once, with its last attempt.
+- **Shards:** each shard writes its own run, marked partial (`selection.shard`), which is compared only with the same shard and never becomes the eval's latest. For one run across shards, use Playwright's blob reporter and `merge-reports` with this reporter.
+- **Case IDs** must be unique within a project, and differ in more than case: two tests running one dataset, or one ID in two datasets, stop the run from being written, with an error naming the case.
+
+| Option                  | Default             | What it does                                                                         |
+| ----------------------- | ------------------- | ------------------------------------------------------------------------------------ |
+| `outputDir`             | `.mcp-test-results` | Where runs are written                                                               |
+| `name`                  | `playwright`        | The eval's name: its directory, and what the report calls it                         |
+| `autoOpen`              | `false`             | Open the report after the run (never in CI)                                          |
+| `quiet`                 | `false`             | No console output                                                                    |
+| `redactStoredResponses` | `true`              | Strip answers and tool outputs from the run's files, its report and the result store |
+| `resultStore`           | none                | A result store that also gets each run's summary                                     |
+| `runMetadata`           | none                | Extra metadata for runs saved to the result store                                    |
+
+`historyLimit`, `includeAutoTracking` and `runId` were removed; passing one fails with what to do instead.
+
+### Result stores
+
+The reporter saves each run's summary to a result store, as `mst run` does:
 
 ```typescript snippet=snippets/result-store-reporter-config.ts
 import { defineConfig } from '@playwright/test';
@@ -245,37 +97,32 @@ export default defineConfig({
 });
 ```
 
-GCS storage uses Application Default Credentials. Set
-`GOOGLE_APPLICATION_CREDENTIALS` locally or in CI before running Playwright.
-`mst open` opens the local `.mcp-test-results/latest/` report only
-in v1; externally stored JSON is intended for history, baselines, dashboards, and
-AI analysis.
+GCS storage uses Application Default Credentials. Set `GOOGLE_APPLICATION_CREDENTIALS` locally or in CI before running Playwright.
 
----
+## In CI
+
+Upload the eval's directory and open `runs/<run-id>/report/index.html` from the artifact, or run `npx mst open <run directory>` on the downloaded copy:
+
+```yaml
+- uses: actions/upload-artifact@v4
+  if: always()
+  with:
+    name: mcp-eval-runs
+    path: .mcp-test-results/
+    retention-days: 30
+```
+
+Add `.mcp-test-results/` to `.gitignore`.
 
 ## Troubleshooting
 
-### Report not generated
+- **No report was written.** The MCP reporter writes a run only when tests produced eval results; it says so otherwise. Tests without evals are in Playwright's report.
+- **The report says "This report has no data."** Its `data.js` is missing: open the run with `npx mst open <run directory>`, which writes it again.
+- **No answers in trials.** The run was redacted; see Redaction above.
+- **Preview the report while working on it:** `npm run build:ui && npm run preview-reporter` runs a small scripted eval and prints its report's path.
 
-- Verify the reporter is in `playwright.config.ts`
-- Check for write permission errors in `.mcp-test-results/`
-- Ensure tests actually ran
+## Next steps
 
-### Browser doesn't open
-
-Set `PLAYWRIGHT_SKIP_BROWSER_OPEN=1` to suppress auto-open, or open manually:
-
-```bash
-npx mst open
-```
-
-### Missing data
-
-- Check browser console (F12) for JavaScript errors
-- Verify `data.js` was generated alongside `index.html`
-
-## Next Steps
-
-- See the [Quick Start Guide](./quickstart.md) for running tests
-- Check the [Assertions Guide](./assertions.md) for validation setup
-- Explore [Examples](../examples) for sample test suites
+- [Evaluation framework](./evaluation-framework.md): eval configs, variants and what a run leaves behind
+- [Assertions](./assertions.md): what graders score
+- [CLI](./cli.md): `mst run` and `mst open`

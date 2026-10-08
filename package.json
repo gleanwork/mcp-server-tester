@@ -152,7 +152,6 @@
     "postcss": "^8.4.49",
     "prettier": "^3.4.2",
     "react-dom": "^18.3.1",
-    "recharts": "^3.7.0",
     "release-it": "^19.2.4",
     "tailwindcss": "^3.4.15",
     "tsup": "^8.3.5",
