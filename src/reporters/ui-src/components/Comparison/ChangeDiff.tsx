@@ -136,10 +136,24 @@ export function ChangeDiff({
   baselineLabel?: string;
 }) {
   return (
-    <section aria-labelledby="exp-diff-h" className="grid max-w-[760px] gap-2">
+    <section
+      {...(baselineLabel
+        ? { 'aria-label': `${variantLabel}: tool metadata` }
+        : { 'aria-labelledby': 'exp-diff-h' })}
+      className="grid max-w-[760px] gap-2"
+    >
       {baselineLabel ? (
-        <h3 id="exp-diff-h" className="text-sm font-semibold">
+        <h3 className="text-sm font-semibold">
           Tool metadata
+          {changes.length === 1 && changes[0] && (
+            <span className="font-normal text-muted-foreground">
+              {' '}
+              · <span className="font-mono">{changes[0].tool}</span>{' '}
+              {changes[0].field === 'description'
+                ? 'description'
+                : 'input schema'}
+            </span>
+          )}
         </h3>
       ) : (
         <h2 id="exp-diff-h" className="text-lg font-semibold">

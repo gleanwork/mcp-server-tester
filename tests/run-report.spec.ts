@@ -110,6 +110,11 @@ test.describe('run report', () => {
     const result = page.getByRole('heading', { name: 'Result' }).locator('..');
     await expect(result).toContainText('searching');
     await expect(result).toContainText('100%');
+    // The change in the sentence is the difference of the rates it shows.
+    await expect(result).toContainText('pass rate 0% → 100% (+100 pts');
+    // Only toolsTriggered graded the trials: the report says no grader read the answers.
+    await expect(result).toContainText('Graded on: toolsTriggered');
+    await expect(result).toContainText('No grader read the answers');
     await expect(
       page.getByRole('cell', { name: 'search-model' })
     ).toBeVisible();
@@ -124,7 +129,14 @@ test.describe('run report', () => {
     await expect(dialog).toContainText('find-refunds');
     await expect(dialog).toContainText('Trial 2');
     await expect(dialog).toContainText('toolsTriggered');
-    await expect(dialog).toContainText('called search');
+    // A trial's calls show their arguments; one that called nothing says so.
+    await expect(dialog).toContainText('search(query: "Who handles refunds?")');
+    await expect(dialog).toContainText('called no tools');
+    await expect(dialog).not.toContainText('No trace recorded');
+    // The answer shows without opening anything.
+    await expect(
+      dialog.getByText('answer to Who handles refunds?').first()
+    ).toBeVisible();
     expect(errors).toEqual([]);
   });
 

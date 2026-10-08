@@ -1,10 +1,108 @@
-import type { MCPComparisonData } from '../../types';
+import type {
+  MCPComparisonData,
+  VariantComparisonEntry,
+  VariantToolMistake,
+} from '../../types';
 import {
   FAILURE_COLOR,
   FAILURE_KINDS,
   FAILURE_LABEL,
   variantName,
 } from './format';
+import { useTrialLookup, type TrialLookup } from '../RunReport/TrialDetail';
+
+/** The answer of one failed trial a mistake covers: what the user saw. */
+function sampleAnswer(
+  lookup: TrialLookup | null,
+  variantId: string,
+  mistake: VariantToolMistake
+): { caseId: string; text: string } | null {
+  if (!lookup) return null;
+  for (const caseId of mistake.caseIds) {
+    const trial = lookup.trials[variantId]?.[caseId]?.find(
+      (t) => !t.pass && t.finalText
+    );
+    if (trial?.finalText) return { caseId, text: trial.finalText };
+  }
+  return null;
+}
+
+/** One variant's recurring mistakes, each with an answer it gave. */
+function Mistakes({
+  data,
+  variant,
+  lookup,
+}: {
+  data: MCPComparisonData;
+  variant: VariantComparisonEntry;
+  lookup: TrialLookup | null;
+}) {
+  return (
+    <div className="grid gap-2">
+      <h3 className="font-semibold">
+        What went wrong for{' '}
+        <span className="font-mono">{variantName(data, variant)}</span>
+      </h3>
+      {variant.mistakes.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No tool-call traces were recorded for its failed trials.
+        </p>
+      ) : (
+        <ul className="grid gap-2 text-sm">
+          {variant.mistakes.map((m, i) => {
+            const sample = sampleAnswer(lookup, variant.id, m);
+            return (
+              <li key={i} className="grid gap-1 border-b pb-2">
+                <span className="flex justify-between gap-3">
+                  <span>
+                    {m.called === null ? (
+                      <>No tool called</>
+                    ) : m.calledExpected ? (
+                      <>
+                        <span className="font-mono">{m.called}</span> called,
+                        but the trial failed
+                      </>
+                    ) : (
+                      <>
+                        <span className="font-mono">{m.called}</span> called
+                      </>
+                    )}
+                    {m.expected.length > 0 && !m.calledExpected && (
+                      <>
+                        ; expected{' '}
+                        <span className="font-mono">
+                          {m.expected.join(', ')}
+                        </span>
+                      </>
+                    )}
+                  </span>
+                  <span className="whitespace-nowrap font-mono text-muted-foreground">
+                    {m.trials} {m.trials === 1 ? 'trial' : 'trials'}
+                  </span>
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {m.caseIds.join(', ')}
+                </span>
+                {sample && (
+                  <blockquote className="border-l-2 pl-2 text-xs text-foreground/90">
+                    <span className="font-mono text-muted-foreground">
+                      {sample.caseId}:
+                    </span>{' '}
+                    “
+                    {sample.text.length > 200
+                      ? `${sample.text.slice(0, 200).trimEnd()}…`
+                      : sample.text}
+                    ”
+                  </blockquote>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 export function TrialFailures({
   data,
@@ -13,7 +111,8 @@ export function TrialFailures({
   data: MCPComparisonData;
   selectedId: string;
 }) {
-  const selected = data.variants.find((v) => v.id === selectedId);
+  const lookup = useTrialLookup();
+  const failing = data.variants.filter((v) => v.failedTrials > 0);
   const kinds = FAILURE_KINDS.filter((kind) =>
     data.variants.some((v) => v.failures[kind] > 0)
   );
@@ -33,10 +132,10 @@ export function TrialFailures({
             {data.variants.map((v) => (
               <div
                 key={v.id}
-                className="grid grid-cols-[120px_1fr] items-center gap-3 sm:grid-cols-[170px_1fr_140px]"
+                className="grid grid-cols-[max-content_1fr] items-center gap-3 sm:grid-cols-[max-content_1fr_140px]"
               >
                 <span
-                  className={`truncate font-mono text-sm ${v.id === selectedId ? 'font-bold' : ''}`}
+                  className={`font-mono text-sm ${v.id === selectedId ? 'font-bold' : ''}`}
                 >
                   {variantName(data, v)}
                 </span>
@@ -134,60 +233,16 @@ export function TrialFailures({
           </details>
         </figure>
 
-        {selected && (
-          <div className="grid gap-2">
-            <h3 className="font-semibold">
-              What went wrong for{' '}
-              <span className="font-mono">{variantName(data, selected)}</span>
-            </h3>
-            {selected.mistakes.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                {selected.failedTrials === 0
-                  ? 'No failed trials.'
-                  : 'No tool-call traces were recorded for its failed trials.'}
-              </p>
-            ) : (
-              <ul className="grid gap-2 text-sm">
-                {selected.mistakes.map((m, i) => (
-                  <li
-                    key={i}
-                    className="flex justify-between gap-3 border-b pb-2"
-                  >
-                    <span>
-                      {m.called === null ? (
-                        <>No tool called</>
-                      ) : m.calledExpected ? (
-                        <>
-                          <span className="font-mono">{m.called}</span> called,
-                          but the trial failed
-                        </>
-                      ) : (
-                        <>
-                          <span className="font-mono">{m.called}</span> called
-                        </>
-                      )}
-                      {m.expected.length > 0 && !m.calledExpected && (
-                        <>
-                          ; expected{' '}
-                          <span className="font-mono">
-                            {m.expected.join(', ')}
-                          </span>
-                        </>
-                      )}
-                      <br />
-                      <span className="text-xs text-muted-foreground">
-                        {m.caseIds.join(', ')}
-                      </span>
-                    </span>
-                    <span className="whitespace-nowrap font-mono text-muted-foreground">
-                      {m.trials} {m.trials === 1 ? 'trial' : 'trials'}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
+        <div className="grid gap-6">
+          {failing.map((variant) => (
+            <Mistakes
+              key={variant.id}
+              data={data}
+              variant={variant}
+              lookup={lookup}
+            />
+          ))}
+        </div>
       </div>
     </section>
   );

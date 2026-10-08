@@ -807,6 +807,8 @@ export interface RunReportTrial {
   infrastructureError?: boolean;
   durationMs?: number;
   finalText?: string;
+  /** Whether the client recorded a trace; `events` is empty when it called nothing. */
+  traced?: boolean;
   events: RunReportEvent[];
   scores: RunReportScore[];
   tokens?: number;
@@ -896,6 +898,12 @@ export interface MCPRunReportData {
   trials: Record<string, Record<string, RunReportTrial[]>>;
   /** By variant ID, then case ID. */
   preferences: Record<string, Record<string, RunReportPreference[]>>;
+  /**
+   * What graded the run's trials: each assertion and judge that scored one.
+   * `readsAnswer` is false for graders that read only the trace (which tools
+   * were called), so a run graded only by those never checked an answer.
+   */
+  graders: Array<{ name: string; judge: boolean; readsAnswer: boolean }>;
   previousRun?: {
     runId: string;
     timestamp: string;

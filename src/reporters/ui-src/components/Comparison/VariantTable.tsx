@@ -153,21 +153,34 @@ function domainOf(
   return [lo - pad, hi + pad];
 }
 
+/** A group's pass rate, its change from the baseline, and that change's 95% range. */
 function Rate({
   rate,
   change,
-  showChange,
 }: {
   rate: number | undefined;
   change: PairedChange | undefined;
-  showChange: boolean;
 }) {
   if (rate === undefined)
     return <span className="text-muted-foreground">—</span>;
+  const range =
+    change && Math.abs(change.upper - change.lower) >= 0.0005
+      ? `${pts(change.lower)} to ${pts(change.upper)}`
+      : null;
   return (
-    <span className="inline-flex items-baseline justify-end gap-2">
-      {showChange && change ? <ChangePill change={change} /> : null}
-      <b className="font-mono tabular-nums">{pct(rate)}</b>
+    <span className="grid justify-items-end gap-0.5">
+      <span className="inline-flex items-baseline justify-end gap-2">
+        {change ? <ChangePill change={change} /> : null}
+        <b className="font-mono tabular-nums">{pct(rate)}</b>
+      </span>
+      {range && (
+        <span
+          className="whitespace-nowrap font-mono text-[11px] text-muted-foreground"
+          title="95% range of the change, over cases"
+        >
+          95%: {range}
+        </span>
+      )}
     </span>
   );
 }
@@ -191,11 +204,6 @@ export function VariantTable({
   const showPairwise = rows.some((v) => v.pairwise.length > 0);
   const showCost = rows.some((v) => v.costPerCase !== undefined);
   const showTime = rows.some((v) => v.medianDurationMs !== undefined);
-  const candidates = data.variants.filter((v) => v.id !== data.baselineId);
-  const swDomain = domainOf(candidates, (v) => v.capability.change);
-  const kwDomain = domainOf(candidates, (v) => v.regression.change);
-  const k = data.trialsPerCase;
-
   const th = 'px-3 py-2 text-left align-bottom font-semibold';
   const thNum = `${th} text-right`;
   const td = 'px-3 py-2 align-middle';
@@ -217,7 +225,8 @@ export function VariantTable({
         </button>
       </div>
       <p className="text-sm text-muted-foreground">
-        Select a row to show that variant in the sections below.
+        Select a row to compare that variant with the baseline in the case grid
+        and failures below.
       </p>
       <div className="overflow-x-auto rounded-lg border bg-card">
         <table className="w-full text-sm">
@@ -227,38 +236,12 @@ export function VariantTable({
                 Variant
               </th>
               <th scope="col" className={thNum}>
-                {isEval
-                  ? showRegression
-                    ? 'Other cases'
-                    : 'Pass rate'
-                  : 'Capability cases'}
+                {isEval && !showRegression ? 'Pass rate' : 'Capability cases'}
               </th>
               {showRegression && (
                 <th scope="col" className={thNum}>
                   Regression cases
                 </th>
-              )}
-              {showStats && (
-                <>
-                  <th scope="col" className={th}>
-                    {isEval ? 'Pass rate' : 'Capability cases'}: change, 95%
-                    range
-                  </th>
-                  <th scope="col" className={thNum}>
-                    Seen → held out
-                  </th>
-                  <th scope="col" className={thNum}>
-                    Every trial passed (pass^{k})
-                  </th>
-                  {showRegression && (
-                    <th scope="col" className={th}>
-                      Regression cases: change, 95% range
-                    </th>
-                  )}
-                  <th scope="col" className={thNum}>
-                    Cases ▲ / ▼
-                  </th>
-                </>
               )}
               {showJudge && (
                 <th scope="col" className={thNum}>
@@ -272,17 +255,17 @@ export function VariantTable({
               )}
               {showCost && (
                 <th scope="col" className={thNum}>
-                  $/case
+                  Cost per case
                 </th>
               )}
               {showTime && (
                 <th scope="col" className={thNum}>
-                  Median
+                  Median trial time
                 </th>
               )}
               {report && (
                 <th scope="col" className={th}>
-                  Tools used
+                  Tool calls, by tool
                 </th>
               )}
               <th scope="col" className={thNum}>
@@ -340,87 +323,15 @@ export function VariantTable({
                     )}
                   </th>
                   <td className={tdNum}>
-                    <Rate
-                      rate={sw.passRate}
-                      change={sw.change}
-                      showChange={!showStats}
-                    />
+                    <Rate rate={sw.passRate} change={sw.change} />
                   </td>
                   {showRegression && (
                     <td className={tdNum}>
                       <Rate
                         rate={v.regression.passRate}
                         change={v.regression.change}
-                        showChange={!showStats}
                       />
                     </td>
-                  )}
-                  {showStats && (
-                    <>
-                      <td className={td}>
-                        {sw.change ? (
-                          <RangePlot
-                            change={sw.change}
-                            domain={swDomain}
-                            p={sw.change.pBetter}
-                          />
-                        ) : (
-                          <span className="text-xs text-muted-foreground">
-                            reference
-                          </span>
-                        )}
-                      </td>
-                      <td className={`${tdNum} whitespace-nowrap font-mono`}>
-                        {sw.seenPassRate !== undefined &&
-                        sw.heldOutPassRate !== undefined ? (
-                          <>
-                            {pct(sw.seenPassRate)} → {pct(sw.heldOutPassRate)}
-                            {!isBase && heldOutUnconfirmed(v) && (
-                              <span
-                                title="Clearly better overall, but not on held-out cases, which ranking never used"
-                                className={`ml-2 rounded-full px-2 py-px font-sans text-xs font-semibold ${TONE.warn}`}
-                              >
-                                not confirmed
-                              </span>
-                            )}
-                          </>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </td>
-                      <td className={`${tdNum} font-mono`}>
-                        {sw.allTrialsPassedRate !== undefined
-                          ? pct(sw.allTrialsPassedRate)
-                          : '—'}
-                      </td>
-                      {showRegression && (
-                        <td className={td}>
-                          {v.regression.change ? (
-                            <RangePlot
-                              change={v.regression.change}
-                              domain={kwDomain}
-                              p={v.regression.change.pWorse}
-                            />
-                          ) : (
-                            <span className="text-xs text-muted-foreground">
-                              reference
-                            </span>
-                          )}
-                        </td>
-                      )}
-                      <td className={`${tdNum} whitespace-nowrap`}>
-                        {isBase ? (
-                          <span className="text-xs text-muted-foreground">
-                            reference
-                          </span>
-                        ) : (
-                          <CaseCounts
-                            up={v.improvedCaseIds.length}
-                            down={v.regressedCaseIds.length}
-                          />
-                        )}
-                      </td>
-                    </>
                   )}
                   {showJudge && (
                     <td className={`${tdNum} whitespace-nowrap font-mono`}>
@@ -462,7 +373,7 @@ export function VariantTable({
                   {showCost && (
                     <td className={`${tdNum} font-mono`}>
                       {row?.costPerCase !== undefined
-                        ? row.costPerCase.toFixed(2)
+                        ? `$${row.costPerCase.toFixed(3)}`
                         : '—'}
                     </td>
                   )}
@@ -483,15 +394,8 @@ export function VariantTable({
                   )}
                   <td className={`${tdNum} whitespace-nowrap font-mono`}>
                     {v.meanTokensPerTrial !== undefined ? (
-                      <span className="grid">
-                        <span>
-                          {(v.meanTokensPerTrial / 1000).toFixed(1)}k tokens
-                        </span>
-                        {showStats && v.meanToolCallsPerTrial !== undefined && (
-                          <span className="text-muted-foreground">
-                            {v.meanToolCallsPerTrial.toFixed(1)} tool calls
-                          </span>
-                        )}
+                      <span>
+                        {(v.meanTokensPerTrial / 1000).toFixed(1)}k tokens
                       </span>
                     ) : (
                       <span className="text-muted-foreground">—</span>
@@ -504,36 +408,20 @@ export function VariantTable({
         </table>
       </div>
       <p className="max-w-[100ch] text-xs text-muted-foreground">
-        {showStats ? (
-          <>
-            Pass rate (pass@1) is the share of trials that passed. pass^{k} is
-            the share of {isEval ? '' : 'should-now-work '}cases that passed all{' '}
-            {k} trials. Each change is the mean per-case difference from the
-            baseline, with a 95% t-interval over cases for scale. Colors and p
-            come from an exact paired sign-flip test: clearly better needs p
-            below {Number(betterThreshold(data).toPrecision(2))}
-            {data.variantsTried > 1
-              ? ` (${data.alpha} split across ${data.variantsTried} variants tried)`
-              : ''}
-            ; clearly worse needs p below {data.alpha}.
-          </>
-        ) : (
-          <>
-            Percent = share of trials that passed. Changes are compared with the
-            baseline:{' '}
-            <span className={`rounded-full px-1.5 ${TONE.good}`}>green</span> is
-            clearly better,{' '}
-            <span className={`rounded-full px-1.5 ${TONE.bad}`}>red</span> is
-            clearly worse,{' '}
-            <span className={`rounded-full px-1.5 ${TONE.neutral}`}>grey</span>{' '}
-            is too small to tell from noise
-            {data.variantsTried > 1
-              ? `, allowing for ${data.variantsTried} variants tried`
-              : ''}
-            .
-          </>
-        )}
+        Percentages are the share of trials that passed. Each change is against
+        the baseline, with its 95% range:{' '}
+        <span className={`rounded-full px-1.5 ${TONE.good}`}>green</span> is
+        clearly better,{' '}
+        <span className={`rounded-full px-1.5 ${TONE.bad}`}>red</span> is
+        clearly worse, and{' '}
+        <span className={`rounded-full px-1.5 ${TONE.neutral}`}>grey</span> is
+        too small to tell from chance
+        {data.variantsTried > 1
+          ? `, allowing for ${data.variantsTried} variants compared`
+          : ''}
+        .
       </p>
+      {showStats && <StatsTable data={data} />}
     </section>
   );
 }
@@ -557,5 +445,175 @@ export function CaseCounts({ up, down }: { up: number; down: number }) {
         ▼ {down}
       </span>
     </span>
+  );
+}
+
+/** Why a variant's held-out cases don't confirm its gain, in words. */
+function heldOutNote(data: MCPComparisonData, v: VariantComparisonEntry) {
+  const heldOut = data.cases.filter(
+    (c) => c.group === 'capability' && c.heldOut
+  ).length;
+  const { seenPassRate, heldOutPassRate } = v.capability;
+  return heldOutPassRate !== undefined &&
+    seenPassRate !== undefined &&
+    heldOutPassRate >= seenPassRate
+    ? `too few held-out cases (${heldOut}) to confirm`
+    : 'lower on held-out cases';
+}
+
+/**
+ * The statistics behind each call: each change's estimate and 95% range,
+ * held-out cases, pass^k, and the p-values. A table of its own, so showing
+ * it doesn't push the main table's columns out of view.
+ */
+function StatsTable({ data }: { data: MCPComparisonData }) {
+  const isEval = data.purpose === 'eval';
+  const showRegression =
+    !isEval || data.cases.some((c) => c.group === 'regression');
+  const showHeldOut = data.variants.some(
+    (v) => v.capability.heldOutPassRate !== undefined
+  );
+  const candidates = data.variants.filter((v) => v.id !== data.baselineId);
+  const swDomain = domainOf(candidates, (v) => v.capability.change);
+  const kwDomain = domainOf(candidates, (v) => v.regression.change);
+  const k = data.trialsPerCase;
+  const th = 'px-3 py-2 text-left align-bottom font-semibold';
+  const thNum = `${th} text-right`;
+  const td = 'px-3 py-2 align-middle';
+  const tdNum = `${td} text-right`;
+  return (
+    <div className="grid gap-2">
+      <h3 className="text-sm font-semibold">Statistics</h3>
+      <div className="overflow-x-auto rounded-lg border bg-card">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50 text-muted-foreground">
+            <tr>
+              <th scope="col" className={th}>
+                Variant
+              </th>
+              <th scope="col" className={th}>
+                {isEval && !showRegression ? 'Pass rate' : 'Capability'}: change
+                [95% range], p
+              </th>
+              {showHeldOut && (
+                <th scope="col" className={thNum}>
+                  Seen → held out
+                </th>
+              )}
+              <th scope="col" className={thNum}>
+                pass^{k}
+              </th>
+              {showRegression && (
+                <th scope="col" className={th}>
+                  Regression: change [95% range], p
+                </th>
+              )}
+              <th scope="col" className={thNum}>
+                Cases ▲ / ▼
+              </th>
+              <th scope="col" className={thNum}>
+                Calls per trial
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.variants.map((v) => {
+              const isBase = v.id === data.baselineId;
+              const sw = v.capability;
+              const reference = (
+                <span className="text-xs text-muted-foreground">reference</span>
+              );
+              return (
+                <tr key={v.id} className="border-t">
+                  <th
+                    scope="row"
+                    className={`${td} whitespace-nowrap text-left font-mono font-semibold`}
+                  >
+                    {variantName(data, v)}
+                  </th>
+                  <td className={td}>
+                    {sw.change ? (
+                      <RangePlot
+                        change={sw.change}
+                        domain={swDomain}
+                        p={sw.change.pBetter}
+                      />
+                    ) : (
+                      reference
+                    )}
+                  </td>
+                  {showHeldOut && (
+                    <td className={`${tdNum} whitespace-nowrap font-mono`}>
+                      {sw.seenPassRate !== undefined &&
+                      sw.heldOutPassRate !== undefined ? (
+                        <span className="grid justify-items-end gap-1">
+                          <span>
+                            {pct(sw.seenPassRate)} → {pct(sw.heldOutPassRate)}
+                          </span>
+                          {!isBase && heldOutUnconfirmed(v) && (
+                            <span
+                              title="Clearly better overall, but not clearly better on the held-out cases alone, which ranking never used."
+                              className={`rounded-full px-2 py-px font-sans text-[11px] font-semibold ${TONE.warn}`}
+                            >
+                              {heldOutNote(data, v)}
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+                  )}
+                  <td className={`${tdNum} font-mono`}>
+                    {sw.allTrialsPassedRate !== undefined
+                      ? pct(sw.allTrialsPassedRate)
+                      : '—'}
+                  </td>
+                  {showRegression && (
+                    <td className={td}>
+                      {v.regression.change ? (
+                        <RangePlot
+                          change={v.regression.change}
+                          domain={kwDomain}
+                          p={v.regression.change.pWorse}
+                        />
+                      ) : (
+                        reference
+                      )}
+                    </td>
+                  )}
+                  <td className={`${tdNum} whitespace-nowrap`}>
+                    {isBase ? (
+                      reference
+                    ) : (
+                      <CaseCounts
+                        up={v.improvedCaseIds.length}
+                        down={v.regressedCaseIds.length}
+                      />
+                    )}
+                  </td>
+                  <td className={`${tdNum} font-mono`}>
+                    {v.meanToolCallsPerTrial !== undefined
+                      ? v.meanToolCallsPerTrial.toFixed(1)
+                      : '—'}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="max-w-[100ch] text-xs text-muted-foreground">
+        Pass rate (pass@1) is the share of trials that passed; pass^{k} is the
+        share of capability cases that passed all {k} trials. Each change is the
+        mean per-case difference from the baseline, with a 95% t-interval over
+        cases. “Clearly better” needs an exact paired sign-flip test’s p below{' '}
+        {Number(betterThreshold(data).toPrecision(2))}
+        {data.variantsTried > 1
+          ? ` (${data.alpha} split across ${data.variantsTried} variants compared)`
+          : ''}
+        ; “clearly worse” needs p below {data.alpha}.
+      </p>
+    </div>
   );
 }
