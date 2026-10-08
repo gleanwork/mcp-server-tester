@@ -25,6 +25,8 @@ import {
   showDataset,
   type DatasetPullOptions,
 } from './commands/datasets/index.js';
+import { listJudgeCommand, showJudge } from './commands/judges/index.js';
+import type { DiscoveryOptions } from './commands/discoveryPlugins.js';
 import packageJson from '../../package.json' with { type: 'json' };
 import { inspect } from 'node:util';
 import { debugCli } from '../debug.js';
@@ -183,6 +185,21 @@ discoveryOptions(
   )
 ).action((ref: string, _options: unknown, command: Command) =>
   pullDataset(ref, command.optsWithGlobals<DatasetPullOptions>())
+);
+
+// Judges command: built-in and plugin judges
+const judgesCommand = discoveryOptions(
+  program
+    .command('judges')
+    .description('List judges and pairwise judges: built-in and from plugins')
+).action((options: DiscoveryOptions) => listJudgeCommand(options));
+discoveryOptions(
+  judgesCommand
+    .command('show')
+    .description("A judge's description, what it requires, and its options")
+    .argument('<ref>', 'A built-in name, or namespace/name')
+).action((ref: string, _options: unknown, command: Command) =>
+  showJudge(ref, command.optsWithGlobals<DiscoveryOptions>())
 );
 
 // Run command

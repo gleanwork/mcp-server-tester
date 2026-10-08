@@ -373,6 +373,22 @@ describe('mst CLI', () => {
     });
   });
 
+  describe('judges command', () => {
+    it('lists and shows built-in judges without plugins', async () => {
+      const list = await runBin('judges');
+      expect(list.exitCode).toBe(0);
+      expect(list.stdout).toMatch(/^rubric {2}judge {2}An LLM grades/m);
+
+      const show = await runBin('judges', 'show', 'rubric', '--json');
+      expect(show.exitCode).toBe(0);
+      expect(JSON.parse(String(show.stdout))).toMatchObject({
+        ref: 'rubric',
+        kind: 'judge',
+        options: { type: 'object', required: ['rubric'] },
+      });
+    });
+  });
+
   describe('open command', () => {
     it('exits with code 1 when there is no run in the default directory', async () => {
       const result = await runBin('open');

@@ -13,3 +13,8 @@ const judges = extensionLookup('judges', builtinJudges);
 export function getJudge(reference: string): JudgeDefinition {
   return judges.get(reference);
 }
+
+/** Built-in and installed plugins' judges, by reference, sorted. */
+export function listJudges(): Array<[string, JudgeDefinition]> {
+  return judges.list();
+}

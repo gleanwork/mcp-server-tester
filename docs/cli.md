@@ -13,6 +13,7 @@ Before the package is installed (for example, running `init` in a new directory)
 - [login - OAuth Authentication](#login---oauth-authentication)
 - [token - Export Tokens for CI/CD](#token---export-tokens-for-cicd)
 - [datasets - Find Plugin Datasets](#datasets---find-plugin-datasets)
+- [judges - Find Judges](#judges---find-judges)
 - [auth - Sign In to Connector Servers](#auth---sign-in-to-connector-servers)
 - [run - Run an Eval Config](#run---run-an-eval-config)
 - [grade - Grade a Stored Run Again](#grade---grade-a-stored-run-again)
@@ -706,6 +707,29 @@ The list shows what each dataset's `describe()` reports, without loading cases; 
 | `-o, --out <file>`       | `pull`: write here. Default: stdout.                                 |
 | `--json`                 | `datasets`, `show`: print JSON.                                      |
 | `--root-dir <dir>`       | Where relative plugin paths resolve. Default: the working directory. |
+
+## `judges` - Find Judges
+
+Lists the judges an eval config can use, built-in and from plugins, and shows what one requires and the options it takes.
+
+### Usage
+
+```bash
+npx mst judges                                 # built-in judges
+npx mst judges --plugins @acme/mst-plugin      # plus the plugin's
+npx mst judges show acme/judge/completeness --plugins @acme/mst-plugin
+npx mst judges show rubric --json
+```
+
+```text
+acme/judge/completeness         judge     requires case.expected.answer  Did the answer cover every point of the expected answer?
+rubric                          judge                                    An LLM grades the answer against a rubric: ...
+acme/pairwise-judge/preference  pairwise                                 Which answer would the asker rather get?
+```
+
+A `judge` scores each trial; a `pairwise` judge compares each variant's trial with the baseline's. `show` prints the description, the case or trial fields the judge `requires` (a case without them is recorded as skipped), whether a pairwise judge also compares with the runs swapped, and its options as JSON Schema: what an eval config's `judges` entry may set besides `type`. Plugins add `description` to a judge or pairwise judge for these commands.
+
+Options: `--plugins <modules...>`, `-c, --config <path>` (an eval config's plugins), `--json`, `--root-dir <dir>`, as for [`datasets`](#datasets---find-plugin-datasets).
 
 ## `auth` - Sign In to Connector Servers
 
