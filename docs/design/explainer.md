@@ -246,8 +246,8 @@ Every result store holds the same layout. Each part was written by one of the st
 ├── run.json        # step 2: the config, exact datasets and judge settings (with hashes),
 │                   #   environment, and how far each step got
 ├── traces/         # step 4: one file per trial
-├── grades/         # step 7: one score per grader per trial; one preference per case per variant
-├── results.json    # step 9: traces and grades joined
+├── scores/         # step 7: one score per grader per trial; one preference per case per variant
+├── results.json    # step 9: traces and scores joined
 ├── summary.json    # step 9: per-variant metrics and comparisons
 └── report/         # step 9: what `mst open` shows
 ```
@@ -318,7 +318,7 @@ There's a related unknown: it's not yet confirmed whether Cowork reaches the pla
 | Sign-ins (step 3)                                       | Connectors, `mst auth` / `status` / `revoke`, local credential store, token hand-out and renewal, dry-run proxy                   | Plugin credential stores; handing tokens to VMs                     |
 | Environments (steps 4–5)                                | Local Cowork on macOS and Linux                                                                                                   | `--env`, `--env-option`, shards, `--detach`, `mst runs`             |
 | Grading as its own step (6–7)                           | Grading during collect; `comparePairwise` as an API; pairwise judges in eval configs (`pairwiseJudges`, after every variant runs) | Gather, `--resume`, `--no-grade`, `mst grade`, regrade as a new run |
-| Results (8–9)                                           | Run summaries; result stores set in the config                                                                                    | `--results`, `mst open --results`, the `mst.run/v1` layout          |
+| Results (8–9)                                           | Run summaries; result stores set in the config; the `mst.run/v1` layout and its JSON Schemas                                      | `--results`, `mst open --results`; the report written with each run |
 | Report                                                  | Tool optimization report                                                                                                          | The same layout for every eval                                      |
 | Cowork's own connectors                                 | —                                                                                                                                 | An approach; see [Known gap](#known-gap-coworks-own-connectors)     |
 

@@ -166,7 +166,7 @@ for (const variant of summary.variants)
 
 ## Results
 
-Each run writes `results.json` under `.mcp-test-results/<name>/` (or `--output-dir`). Its summary has:
+Each run writes a directory under `.mcp-test-results/<name>/runs/` (or `--output-dir`): `results.json` holds every case result, and `summary.json` has:
 
 - `variants`: each variant's metrics, results and evidence.
 - `variantDeltas`: each variant's change from the baseline (`passRate`, `trialPassRate`, `metricDeltas`).

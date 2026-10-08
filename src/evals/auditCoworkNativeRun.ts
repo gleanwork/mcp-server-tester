@@ -1,4 +1,4 @@
-import { RESULT_SCHEMA_VERSION } from './resultFormat.js';
+import { RUN_FORMAT } from './resultFormat.js';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import {
@@ -658,13 +658,26 @@ export async function auditCoworkNativeRun(
     await safePath(options.nativeRoot);
     if (!(await lstat(options.nativeRoot)).isDirectory())
       throw new AuditFailure('UNSAFE_PATH');
-    const raw = object(
+    // A run's results.json, and the summary.json beside it.
+    const results = object(
       JSON.parse(
         (await readBounded(options.rawResultsPath, MAX_RAW)).toString('utf8')
       )
     );
+    const summaryPath = join(dirname(options.rawResultsPath), 'summary.json');
+    await safePath(summaryPath);
+    const summary = object(
+      JSON.parse((await readBounded(summaryPath, MAX_RAW)).toString('utf8'))
+    );
     if (
-      raw.schemaVersion !== RESULT_SCHEMA_VERSION ||
+      results.format !== RUN_FORMAT ||
+      results.kind !== 'results' ||
+      summary.format !== RUN_FORMAT ||
+      summary.kind !== 'summary'
+    )
+      throw new AuditFailure('INVALID_RESULTS');
+    const raw = { results: results.cases, variants: summary.variants };
+    if (
       !Array.isArray(raw.results) ||
       raw.results.length > 1000 ||
       !Array.isArray(raw.variants) ||
@@ -674,11 +687,11 @@ export async function auditCoworkNativeRun(
     report.observedCases = raw.results.length;
     if (report.observedCases !== options.expectedCases)
       report.issues.push('CASE_COUNT_MISMATCH');
-    const variantCases = raw.variants.flatMap((variant) => {
-      const value = object(object(variant).result).caseResults;
-      return Array.isArray(value) ? (value as unknown[]) : [];
-    });
-    if (!same(raw.results, variantCases))
+    // A summary that still lists each variant's cases must agree with results.json.
+    const variantLists = raw.variants
+      .map((variant) => object(object(variant).result).caseResults)
+      .filter((value) => Array.isArray(value)) as unknown[][];
+    if (variantLists.length && !same(raw.results, variantLists.flat()))
       report.issues.push('ARM_RESULTS_MISMATCH');
     const ids = new Map<string, CoworkNativeAuditCase>();
     const sessions = new Map<string, CoworkNativeAuditCase>();

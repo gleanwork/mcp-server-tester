@@ -373,6 +373,30 @@ EvalConfig
 the canonical case and execution primitives. The eval layer composes them; it
 does not replace them with a second case model.
 
+## What a run leaves behind
+
+Each run of an eval is a directory, in the versioned `mst.run/v1` format:
+
+```text
+.mcp-test-results/<eval name>/
+├── latest.json                     # the newest complete, full run
+└── runs/<run-id>/
+    ├── run.json                    # what ran: variants, datasets (with content hashes), judges, environment, phases
+    ├── traces/<variant>/<case-id>/<trial>.json          # what the client did in one trial
+    ├── scores/<grader>/<variant>/<case-id>/<trial>.json # one grader's score for one trial
+    ├── results.json                # every case result, traces and scores joined
+    └── summary.json                # per-variant totals, metrics and comparisons (cases are in results.json)
+```
+
+- **Run IDs** sort by start time: `20261007T182504Z-7f3c2a`. The last six characters are its short form.
+- **Every file** starts with `"format": "mst.run/v1"` and its `kind` (`run`, `trial`, `score`, `results`, `summary`, `latest`). Readers ignore fields they don't know, so new optional fields keep the version; removing or renaming one moves the format to `mst.run/v2`. The JSON Schemas are published in `schema/run/v1/`.
+- **Paths:** variant, case and grader names are URI-encoded into one path segment each, and trials count from 0. Case IDs must be unique within a run, because they name these paths: a case ID in two datasets fails before anything runs.
+- **`latest.json`** is written last, and only for a full run, so a crash or a partial run leaves it at the previous run.
+- **Redaction** applies to every file, as it does to stored results (`redactStoredResponses`).
+- **`--output-dir`** names the eval's directory (`<output-dir>/runs/<run-id>/`).
+
+A result store set in the eval config also gets the run summary, as before.
+
 ## Variants
 
 A variant is a patch over the eval config defaults. Variants replace separate A/B and
@@ -462,13 +486,13 @@ MST ships no prices; they change too often to bake in.
 
 Every run has a `runId`. Its summary's `previousRun` compares it with the previous run of the same eval config that ran the same variants, when there is one:
 
-- **Which run.** The eval config's `name` identifies it, so two eval configs with the same name share a history. With a result store, the previous run is the store's newest summary for that eval config. Without one, it's the newest earlier `results.json` in the output directory (`--output-dir`, by default `.mcp-test-results/<name>/`).
+- **Which run.** The eval config's `name` identifies it, so two eval configs with the same name share a history. With a result store, the previous run is the store's newest summary for that eval config. Without one, it's the newest earlier run in the eval's `runs/` directory (under `--output-dir`, by default `.mcp-test-results/<name>/`), read from its `summary.json` and `results.json`.
 - **Output.** `mst run` prints the change and the regressed, improved, added and removed cases.
 - **Best effort.** A previous run that can't be read is skipped with a warning; it never fails the run.
 
 ```json
 "previousRun": {
-  "runId": "4c1f…",
+  "runId": "20261007T182504Z-a3f9c1",
   "timestamp": "2026-10-03T18:02:11.000Z",
   "sameConfig": true,
   "passRate": 1,

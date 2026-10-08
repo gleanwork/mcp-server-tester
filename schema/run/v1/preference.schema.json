@@ -1,0 +1,31 @@
+{
+  "$id": "https://unpkg.com/@gleanwork/mcp-server-tester/schema/run/v1/preference.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "format": { "type": "string", "const": "mst.run/v1" },
+    "kind": { "type": "string", "const": "preference" },
+    "runId": { "type": "string" },
+    "judge": { "type": "string" },
+    "variant": { "type": "string" },
+    "baseline": { "type": "string" },
+    "caseId": { "type": "string" },
+    "preference": {
+      "type": "object",
+      "properties": { "judge": { "type": "string" } },
+      "required": ["judge"],
+      "additionalProperties": {}
+    }
+  },
+  "required": [
+    "format",
+    "kind",
+    "runId",
+    "judge",
+    "variant",
+    "baseline",
+    "caseId",
+    "preference"
+  ],
+  "additionalProperties": {}
+}

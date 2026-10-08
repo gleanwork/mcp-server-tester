@@ -11,6 +11,7 @@ import type {
   ResultSource,
   GraderType,
   GraderScore,
+  GraderScoreMap,
   GraderBreakdown,
   UsageMetrics,
   ClientDiagnostics,
@@ -247,6 +248,8 @@ export interface MCPServerCapabilitiesData {
 export interface TrialResult {
   /** Whether this trial passed */
   pass: boolean;
+  /** Each grader's score for this trial, by grader type. */
+  scores?: GraderScoreMap;
   /** Execution time for this trial */
   durationMs: number;
   /** Error message if the trial failed with an exception */

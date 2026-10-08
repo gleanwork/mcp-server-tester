@@ -284,7 +284,7 @@ or judges. No CLI or private parser import is required.
 import { auditCoworkNativeRun } from '@gleanwork/mcp-server-tester/experimental/clients';
 
 const report = await auditCoworkNativeRun({
-  rawResultsPath: '/archive/results/raw-results.json',
+  rawResultsPath: '/archive/runs/20261007T182504Z-a3f9c1/results.json',
   nativeRoot: '/archive/native',
   expectedCases: 2,
   expectedModel: 'claude-opus-4-6', // optional exact native model assertion
@@ -298,7 +298,7 @@ if (!report.evidencePassed) {
 }
 ```
 
-The input is MST schema-v2 `raw-results.json` (written by MST 2.0), including `results` and `variants`.
+The input is a run's `results.json` in the `mst.run/v1` format, with the run's `summary.json` beside it.
 Each case must have a unique ID and `clientTelemetry.nativeSessionId`. Retain this
 archive layout, including the actual saved tool-output bytes:
 

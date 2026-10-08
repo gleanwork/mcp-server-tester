@@ -785,7 +785,7 @@ describe('eval review regressions', () => {
     });
     expect(f.run.mock.calls[0]?.[0].servers).toHaveLength(2);
     const json = await fs.readFile(
-      path.join(result.outputDir, 'results.json'),
+      path.join(result.outputDir, 'summary.json'),
       'utf8'
     );
     for (const secret of [

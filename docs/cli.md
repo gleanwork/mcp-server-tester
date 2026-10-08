@@ -760,7 +760,7 @@ npx mst run --config ./eval.json [options]
 
 A run narrowed by any of `--variant`, `--case`, `--filter-tag`, `--max-cases` or `--trials` is a **partial run**. Its summary has `partial: true` and the `selection` that narrowed it, and the run prints `Partial run (--case e2e-0011, --trials 1): not compared with full runs`. A partial run is compared only with earlier partial runs narrowed the same way, never becomes the result store's `latest.json`, and is never resumed by `--skip-existing`. `--case` replaces the tags and the case cap; `--filter-tag` and `--max-cases` replace the config's. When `--variant` leaves out the baseline, the run says that no variant is compared with it.
 
-`run` prints a row per variant (cases passed, trial pass rate, MCP calls, client events, tokens, cost, time) and, when there is one, the change since the previous run of the same eval config and variant. It writes `results.json` in the output directory and exits 1 when any case failed. `--dry-run` prints the eval config's name, output directory, datasets and variants as JSON.
+`run` prints a row per variant (cases passed, trial pass rate, MCP calls, client events, tokens, cost, time) and, when there is one, the change since the previous run of the same eval config and variant. It writes the run's directory (`runs/<run-id>/` under the eval's output directory; see [What a run leaves behind](./evaluation-framework.md#what-a-run-leaves-behind)), prints its path, and exits 1 when any case failed. `--dry-run` prints the eval config's name, output directory, datasets and variants as JSON.
 
 ## `batch` - Run Several Eval Configs
 
@@ -793,7 +793,7 @@ npx mst batch --configs a.json b.json [options]
 npx mst open [--dir .mcp-test-results]
 ```
 
-Opens the [UI reporter](./ui-reporter.md) the Playwright reporter wrote in a results directory (`-d, --dir`, default `.mcp-test-results`; it opens `latest/index.html`). `mst run` writes `results.json`, not a report.
+Opens the [UI reporter](./ui-reporter.md) the Playwright reporter wrote in a results directory (`-d, --dir`, default `.mcp-test-results`; it opens `latest/index.html`). `mst run` writes a run directory, not a report yet.
 
 ## `cowork setup` - Prepare Cowork
 

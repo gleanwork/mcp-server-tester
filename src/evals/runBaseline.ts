@@ -1,4 +1,4 @@
-import { RESULT_SCHEMA_VERSION } from './resultFormat.js';
+import { RUN_FORMAT } from './resultFormat.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {
@@ -8,6 +8,7 @@ import type {
 } from './evalFrameworkTypes.js';
 import { compareEvalRuns } from './evalRunComparison.js';
 import type { EvalResultStore } from './resultStore.js';
+import type { EvalCaseResult } from '../types/reporter.js';
 
 /** A previous run's summary and ID. */
 interface PreviousRun {
@@ -25,7 +26,7 @@ function isComparable(
   if (typeof value !== 'object' || value === null) return false;
   const summary = value as EvaluationSummary;
   // A run in an older result format isn't a baseline.
-  if (summary.schemaVersion !== RESULT_SCHEMA_VERSION) return false;
+  if (summary.format !== RUN_FORMAT) return false;
   if (summary.configId !== configId || !Array.isArray(summary.variants))
     return false;
   // A full run compares with full runs; a partial run with partial runs
@@ -39,8 +40,8 @@ function isComparable(
 
 /**
  * The newest earlier run of the eval config: from the result store when the
- * eval config has one, else from the `results.json` files beside this run's
- * output directory. Never another eval config's run.
+ * eval config has one, else from the other runs in this eval's `runs/`
+ * directory (their `summary.json` and `results.json`). Never another eval config's run.
  */
 export async function findPreviousRun(options: {
   configId: string;
@@ -94,12 +95,18 @@ export async function findPreviousRun(options: {
     try {
       const value: unknown = JSON.parse(
         await fs.readFile(
-          path.join(options.outputRoot, entry, 'results.json'),
+          path.join(options.outputRoot, entry, 'summary.json'),
           'utf8'
         )
       );
       if (isComparable(value, options.configId, options.variants, options))
-        runs.push({ runId: value.runId ?? entry, summary: value });
+        runs.push({
+          runId: value.runId ?? entry,
+          summary: await withCaseResults(
+            value,
+            path.join(options.outputRoot, entry, 'results.json')
+          ),
+        });
     } catch {
       // Not a run directory, or an unreadable one: not a baseline.
     }
@@ -107,6 +114,42 @@ export async function findPreviousRun(options: {
   return runs.sort((a, b) =>
     b.summary.timestamp.localeCompare(a.summary.timestamp)
   )[0];
+}
+
+/**
+ * A run directory's summary with each variant's case results put back from
+ * its results.json, which is where the run keeps them.
+ */
+async function withCaseResults(
+  summary: EvaluationSummary,
+  resultsPath: string
+): Promise<EvaluationSummary> {
+  let cases: EvalCaseResult[] = [];
+  try {
+    const results = JSON.parse(await fs.readFile(resultsPath, 'utf8')) as {
+      cases?: EvalCaseResult[];
+    };
+    cases = results.cases ?? [];
+  } catch {
+    // A run without results.json compares as having no cases.
+  }
+  return {
+    ...summary,
+    results: cases,
+    variants: summary.variants.map((variant) => ({
+      ...variant,
+      ...(variant.result
+        ? {
+            result: {
+              ...variant.result,
+              caseResults: cases.filter(
+                (result) => (result.variant ?? 'default') === variant.name
+              ),
+            },
+          }
+        : {}),
+    })),
+  };
 }
 
 function metric(

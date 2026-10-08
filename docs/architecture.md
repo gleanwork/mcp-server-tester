@@ -115,7 +115,7 @@ EvalRunnerResult
 ```
 EvalRunnerResult / MCPEvalRunData / comparison result
    ↓  resultStore.ts: createStoredEvalArtifact()
-StoredEvalArtifact { schemaVersion, kind, id, metadata, data }
+StoredEvalArtifact { format, kind, id, metadata, data }
    ↓
 FileEvalResultStore or GCSEvalResultStore
    ↓

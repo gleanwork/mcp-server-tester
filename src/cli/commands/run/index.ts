@@ -153,7 +153,7 @@ export async function run(options: RunOptions): Promise<void> {
       if (parts.length) console.log(`  ${variant}: ${parts.join('; ')}`);
     }
   }
-  console.log(`Output: ${path.join(result.outputDir, 'results.json')}`);
+  console.log(`Output: ${result.outputDir}`);
   if ((metrics.failed ?? 0) > 0) process.exitCode = 1;
 }
 

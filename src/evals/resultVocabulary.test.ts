@@ -42,8 +42,8 @@ describe('2.0 run option names', () => {
 
 describe('olderResultsError', () => {
   it('asks to upgrade MST for a newer result format', () => {
-    expect(olderResultsError('Stored x', 3).message).toBe(
-      'Stored x was written by a newer MST (result schemaVersion 3). Upgrade MST to read it.'
+    expect(olderResultsError('Stored x', 'mst.run/v2').message).toBe(
+      'Stored x was written by a newer MST (mst.run/v2). Upgrade MST to read it.'
     );
   });
 });

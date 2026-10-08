@@ -1,0 +1,17 @@
+{
+  "$id": "https://unpkg.com/@gleanwork/mcp-server-tester/schema/run/v1/latest.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "format": { "type": "string", "const": "mst.run/v1" },
+    "kind": { "type": "string", "const": "latest" },
+    "runId": {
+      "type": "string",
+      "pattern": "^\\d{8}T\\d{6}Z-[0-9a-f]{6}(\\.g\\d+)?$"
+    },
+    "createdAt": { "type": "string" },
+    "path": { "type": "string" }
+  },
+  "required": ["format", "kind", "runId", "createdAt", "path"],
+  "additionalProperties": {}
+}

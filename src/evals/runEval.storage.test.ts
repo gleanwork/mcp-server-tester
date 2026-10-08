@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { RUN_ID_PATTERN } from './runFormat.js';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -229,9 +230,9 @@ describe('eval storage through public APIs', () => {
       const allPointers: string[] = [];
       for (const result of runs) {
         const id = path.basename(result.outputDir);
-        expect(z.uuidv4().safeParse(id).success).toBe(true);
+        expect(id).toMatch(RUN_ID_PATTERN);
         const localText = await fs.readFile(
-          path.join(result.outputDir, 'results.json'),
+          path.join(result.outputDir, 'summary.json'),
           'utf8'
         );
         const local = JSON.parse(localText) as EvaluationSummary;
@@ -249,7 +250,29 @@ describe('eval storage through public APIs', () => {
           'baseline',
           'candidate',
         ]);
-        expect(saved.data).toEqual(local);
+        // The stored summary is summary.json plus the case results (overall
+        // and per variant), which the run directory keeps in results.json.
+        const { results: savedResults, ...savedSummary } = saved.data;
+        const { kind: _kind, ...localSummary } = local as EvaluationSummary & {
+          kind?: string;
+        };
+        expect({
+          ...savedSummary,
+          variants: savedSummary.variants.map((variant) =>
+            variant.result
+              ? {
+                  ...variant,
+                  result: (({ caseResults: _cases, ...totals }) => totals)(
+                    variant.result
+                  ),
+                }
+              : variant
+          ),
+        }).toEqual(localSummary);
+        const localResults = JSON.parse(
+          await fs.readFile(path.join(result.outputDir, 'results.json'), 'utf8')
+        ) as { cases: unknown[] };
+        expect(savedResults).toEqual(localResults.cases);
         expect(saved.metadata.labels).toMatchObject({
           configId: result.summary.configId,
           contentHash: result.summary.contentHash,
@@ -269,7 +292,9 @@ describe('eval storage through public APIs', () => {
             configId: local.configId,
             contentHash: local.contentHash,
           });
-          expect(artifact.data).toEqual(variant.result);
+          // summary.json keeps a variant's totals; its cases are in results.json.
+          const { caseResults: _cases, ...totals } = artifact.data;
+          expect(totals).toEqual(variant.result);
           expect(artifact.data.caseResults).toHaveLength(1);
           expect(artifact.data.caseResults[0]?.trialResults).toHaveLength(2);
           artifacts.push(artifact.data);
@@ -287,7 +312,11 @@ describe('eval storage through public APIs', () => {
         ]) {
           expect(JSON.stringify(result.summary)).toContain(marker);
           for (const persisted of [
-            localText,
+            // Responses are in results.json, not summary.json.
+            await fs.readFile(
+              path.join(result.outputDir, 'results.json'),
+              'utf8'
+            ),
             JSON.stringify(saved),
             ...artifacts.map((data) => JSON.stringify(data)),
           ]) {

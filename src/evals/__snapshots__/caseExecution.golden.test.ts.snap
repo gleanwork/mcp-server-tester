@@ -3419,6 +3419,20 @@ exports[`golden: the mst client (dataset API) > trials exclude infrastructure er
       "durationMs": "<time>",
       "isInfrastructureError": false,
       "pass": false,
+      "scores": {
+        "textContains": {
+          "details": "Response contains expected text",
+          "pass": true,
+        },
+        "toolCallCount": {
+          "details": "Tool call count (2) is within expected range",
+          "pass": true,
+        },
+        "toolsTriggered": {
+          "details": "Expected tool 'forecast' to be called, but it was not",
+          "pass": false,
+        },
+      },
       "toolCallTrace": {
         "calls": [
           {
@@ -3475,6 +3489,7 @@ exports[`golden: the mst client (dataset API) > trials exclude infrastructure er
       "error": "read ECONNRESET",
       "isInfrastructureError": true,
       "pass": false,
+      "scores": {},
     },
     {
       "clientUsage": {
@@ -3485,6 +3500,20 @@ exports[`golden: the mst client (dataset API) > trials exclude infrastructure er
       "durationMs": "<time>",
       "isInfrastructureError": false,
       "pass": false,
+      "scores": {
+        "textContains": {
+          "details": "Response does not contain expected text: "sunny"",
+          "pass": false,
+        },
+        "toolCallCount": {
+          "details": "Tool call count (2) is within expected range",
+          "pass": true,
+        },
+        "toolsTriggered": {
+          "details": "Expected tool 'forecast' to be called, but it was not",
+          "pass": false,
+        },
+      },
       "toolCallTrace": {
         "calls": [
           {

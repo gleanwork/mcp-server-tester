@@ -1,4 +1,5 @@
 import type { Plugin } from '../plugins/plugin.js';
+import type { RUN_FORMAT } from './resultFormat.js';
 import type { ZodType } from 'zod';
 import type { EvalDataset, EvalCase } from './datasetTypes.js';
 import type { EvalCaseResult } from '../types/reporter.js';
@@ -334,8 +335,8 @@ export interface RunSummary {
   selectionHash?: string;
   /** This run compared with the previous run of the same eval config, if there is one. */
   previousRun?: PreviousRunComparison;
-  /** The result format: see `RESULT_SCHEMA_VERSION`. */
-  schemaVersion: 2;
+  /** The run format: see `RUN_FORMAT`. */
+  format: typeof RUN_FORMAT;
   configId: string;
   contentHash: string;
   timestamp: string;
