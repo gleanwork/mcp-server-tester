@@ -51,7 +51,7 @@ type ListToolsPayload = Pick<
 > & { operation: 'listTools' };
 
 /** A fixture callTool() call, auto-tracked for tests without eval results. */
-export interface ToolCallPayload {
+interface ToolCallPayload {
   operation: 'callTool';
   toolName: string;
   args: Record<string, unknown>;

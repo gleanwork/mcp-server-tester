@@ -6,7 +6,6 @@ import { join } from 'path';
 export type StoredArtifactKind =
   | 'eval-runner-result'
   | 'eval-run-summary'
-  | 'reporter-run'
   | 'eval-run-comparison';
 
 export interface StoredEvalArtifactMetadata {
@@ -83,7 +82,6 @@ export type EvalResultStoreLike = EvalResultStore | EvalResultStoreConfig;
 const KIND_DIRS: Record<StoredArtifactKind, string> = {
   'eval-runner-result': 'eval-runs',
   'eval-run-summary': 'eval-summaries',
-  'reporter-run': 'reporter-runs',
   'eval-run-comparison': 'comparisons/eval-runs',
 };
 

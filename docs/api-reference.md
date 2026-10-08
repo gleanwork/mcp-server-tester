@@ -519,7 +519,6 @@ as JSON. GCS is the first built-in cloud provider.
 type StoredArtifactKind =
   | 'eval-runner-result'
   | 'eval-run-summary'
-  | 'reporter-run'
   | 'eval-run-comparison';
 
 interface EvalResultStore {

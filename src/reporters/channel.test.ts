@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type {
   FullConfig,
+  FullResult,
   Suite,
   TestCase,
   TestResult,
@@ -15,7 +16,8 @@ import {
   type ReporterAttachment,
 } from './channel.js';
 import MCPReporter from './mcpReporter.js';
-import type { EvalCaseResult, MCPEvalRunData } from '../types/reporter.js';
+import type { EvalCaseResult } from '../types/reporter.js';
+import { readRunDirectory, type StoredRun } from '../evals/runFormat.js';
 
 type Attachment = TestResult['attachments'][number];
 
@@ -169,39 +171,54 @@ describe('reporter channel', () => {
 });
 
 describe('MCPReporter reading the channel', () => {
+  /** Run the reporter over the tests, and read back the run it wrote, if any. */
   async function report(
     tests: Array<{
       title: string;
-      status?: TestResult['status'];
-      error?: string;
+      project?: string;
       attachments: Attachment[];
     }>,
     options: Record<string, unknown> = {}
-  ): Promise<MCPEvalRunData> {
+  ): Promise<StoredRun | undefined> {
     const outputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-channel-'));
     const reporter = new MCPReporter({
       quiet: true,
-      autoOpen: false,
       outputDir,
       ...options,
     });
-    await reporter.onBegin({} as FullConfig, {} as Suite);
-    for (const test of tests) {
-      const errors = test.error ? [{ message: test.error }] : [];
+    reporter.onBegin(
+      { projects: [{ name: 'chromium', use: {} }] } as unknown as FullConfig,
+      {} as Suite
+    );
+    for (const [index, test] of tests.entries())
       await reporter.onTestEnd(
-        { title: test.title, parent: { title: 'suite' } } as TestCase,
         {
-          status: test.status ?? 'passed',
+          id: `test-${index}`,
+          title: test.title,
+          parent: {
+            title: 'suite',
+            project: () => ({ name: test.project ?? 'chromium' }),
+          },
+        } as unknown as TestCase,
+        {
+          status: 'passed',
           attachments: test.attachments,
-          error: errors[0],
-          errors,
+          errors: [],
         } as unknown as TestResult
       );
+    await reporter.onEnd({} as FullResult);
+    const evalDir = path.join(outputDir, 'playwright');
+    let run: StoredRun | undefined;
+    try {
+      const latest = JSON.parse(
+        await fs.readFile(path.join(evalDir, 'latest.json'), 'utf8')
+      ) as { path: string };
+      run = await readRunDirectory(path.join(evalDir, latest.path));
+    } catch {
+      run = undefined;
     }
     await fs.rm(outputDir, { recursive: true, force: true });
-    return (
-      reporter as unknown as { buildRunData(ms: number): MCPEvalRunData }
-    ).buildRunData(0);
+    return run;
   }
 
   async function attachments(
@@ -225,79 +242,20 @@ describe('MCPReporter reading the channel', () => {
         ),
       },
     ]);
-    expect(run.results.map((result) => result.id)).toEqual([
+    expect(run?.summary.results.map((result) => result.id)).toEqual([
       'weather',
       'second',
     ]);
   });
 
-  it('keeps every conformance result and the first tool list', async () => {
+  it("leaves tests, tool calls and conformance checks to Playwright's report", async () => {
     const run = await report([
       {
-        title: 'conformance',
-        attachments: await attachments(
-          samples[2]!,
-          samples[2]!,
-          samples[3]!,
-          samples[3]!
-        ),
+        title: 'not evals',
+        attachments: await attachments(samples[2]!, samples[3]!, samples[4]!),
       },
     ]);
-    expect(run.conformanceChecks).toHaveLength(2);
-    expect(run.conformanceChecks?.[0]).toMatchObject({
-      testTitle: 'conformance',
-      scope: 'Protocol 2026-07-28',
-    });
-    expect(run.serverCapabilities).toHaveLength(1);
-  });
-
-  it('reports auto-tracked calls with their arguments and the test failure', async () => {
-    const run = await report([
-      {
-        title: 'weather test',
-        status: 'failed',
-        error: '\u001b[31mexpected sunny\u001b[39m',
-        attachments: await attachments(samples[4]!),
-      },
-    ]);
-    expect(run.results).toEqual([
-      expect.objectContaining({
-        id: 'weather test',
-        datasetName: 'suite',
-        toolName: 'get_weather',
-        source: 'test',
-        pass: false,
-        request: { args: { city: 'London' } },
-        error: 'expected sunny',
-        durationMs: 3,
-      }),
-    ]);
-  });
-
-  it('names the status when a test fails without an error', async () => {
-    const run = await report([
-      {
-        title: 'timed out',
-        status: 'timedOut',
-        attachments: await attachments(samples[4]!),
-      },
-    ]);
-    expect(run.results[0]?.error).toBe('Test timedOut');
-  });
-
-  it('skips auto-tracked calls next to eval results, or when disabled', async () => {
-    const withEval = await report([
-      {
-        title: 'both',
-        attachments: await attachments(samples[0]!, samples[4]!),
-      },
-    ]);
-    expect(withEval.results.map((result) => result.source)).toEqual(['eval']);
-    const disabled = await report(
-      [{ title: 'calls', attachments: await attachments(samples[4]!) }],
-      { includeAutoTracking: false }
-    );
-    expect(disabled.results).toEqual([]);
+    expect(run).toBeUndefined();
   });
 
   it('reads attachments Playwright wrote to disk', async () => {
@@ -321,29 +279,13 @@ describe('MCPReporter reading the channel', () => {
       },
     ]);
     await fs.rm(dir, { recursive: true, force: true });
-    expect(run.results.map((result) => result.id)).toEqual(['weather']);
-  });
-
-  it('uses the first valid tool list when an earlier one is malformed', async () => {
-    const run = await report([
-      {
-        title: 'tools',
-        attachments: [
-          {
-            name: 'mcp-list-tools',
-            contentType: 'application/json',
-            body: Buffer.from('{"tools": "not a list"}'),
-          },
-          ...(await attachments(samples[3]!)),
-        ],
-      },
-    ]);
-    expect(run.serverCapabilities).toEqual([
-      expect.objectContaining({ testTitle: 'tools', toolCount: 1 }),
+    expect(run?.summary.results.map((result) => result.id)).toEqual([
+      'weather',
     ]);
   });
 
   it('rejects eval results the report would fail to aggregate', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     const run = await report([
       {
         title: 'no assertions',
@@ -358,20 +300,22 @@ describe('MCPReporter reading the channel', () => {
         ],
       },
     ]);
-    expect(run.results).toEqual([]);
+    expect(run).toBeUndefined();
+    vi.restoreAllMocks();
   });
 
   it('logs a malformed attachment and keeps reading the rest', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
     const run = await report(
       [
         {
           title: 'mixed',
           attachments: [
             {
-              name: 'mcp-conformance-checks',
+              name: 'mcp-test-results',
               contentType: 'application/json',
-              body: Buffer.from('{"pass": true}'),
+              body: Buffer.from('{"caseResults": "not a list"}'),
             },
             ...(await attachments(samples[0]!)),
           ],
@@ -379,13 +323,11 @@ describe('MCPReporter reading the channel', () => {
       ],
       { quiet: false }
     );
-    expect(run.results).toHaveLength(1);
+    expect(run?.summary.results).toHaveLength(1);
     expect(error).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'Failed to read attachment "mcp-conformance-checks"'
-      ),
+      expect.stringContaining('Failed to read attachment "mcp-test-results"'),
       expect.any(Error)
     );
-    error.mockRestore();
+    vi.restoreAllMocks();
   });
 });

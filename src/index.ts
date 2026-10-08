@@ -99,11 +99,8 @@ export type {
   MCPConformanceCheck,
   MCPConformanceRaw,
   MCPEvalReporterConfig,
-  MCPEvalRunData,
-  MCPEvalHistoricalSummary,
   MCPConformanceResultData,
   MCPServerCapabilitiesData,
-  MCPEvalData,
   ClientDiagnostics,
 } from './types/index.js';
 export {

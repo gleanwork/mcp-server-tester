@@ -55,6 +55,7 @@ import {
 } from './mstClient/clientOptions.js';
 import { runEvalDataset } from './evalRunner.js';
 import { passRate } from './evalRunComparison.js';
+import { buildVariantDeltas } from './variantDeltas.js';
 import { createEvalCaseExecutor } from './caseExecution.js';
 import { mergeEvalJudges } from './grading.js';
 import { prepareClientBatch } from './prepareClientBatch.js';
@@ -91,6 +92,7 @@ import {
 import { comparePairwise } from './pairwiseComparison.js';
 import type { JudgeCaseSource } from '../judge/judgeContract.js';
 import {
+  CORE_METRICS,
   computeMetrics,
   type MetricSpec,
   countTrialToolCalls,
@@ -345,12 +347,6 @@ function assertCaseClients(
   }
 }
 
-/** The variant's share of passing trials, averaged over its cases. */
-function trialPassRate(variant: EvaluationVariantResult): number | undefined {
-  const value = variant.metrics?.trial_pass_rate;
-  return typeof value === 'number' ? value : undefined;
-}
-
 const EVIDENCE_STRENGTH: TraceEvidence[] = ['none', 'observed', 'structured'];
 
 /** The weakest evidence among a variant's cases: what its trace metrics rest on. */
@@ -359,86 +355,6 @@ function variantEvidence(results: EvalCaseResult[]): TraceEvidence | undefined {
     .map((result) => result.traceEvidence)
     .filter((level): level is TraceEvidence => level !== undefined);
   return EVIDENCE_STRENGTH.find((level) => levels.includes(level));
-}
-
-/**
- * What every variant reports, whatever the eval config lists: outcomes, calls,
- * tokens, cost and time. An eval config's `metrics` add to these.
- */
-const CORE_METRICS = [
-  'passed',
-  'trial_pass',
-  'tool_count',
-  'mcp_call_count',
-  'builtin_event_count',
-  'tool_search_hit',
-  'input_tokens',
-  'output_tokens',
-  'cost_usd',
-  'duration_s',
-  'judge_pass',
-  'judge_score',
-] as const;
-
-function isNumberRecord(value: unknown): value is Record<string, number> {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value) &&
-    Object.values(value).every((v) => typeof v === 'number')
-  );
-}
-
-/** Every numeric metric both variants report, as variant minus baseline (per judge for scores). */
-function metricDeltas(
-  variant: EvaluationVariantResult,
-  baseline: EvaluationVariantResult
-): Record<string, number | Record<string, number>> {
-  const deltas: Record<string, number | Record<string, number>> = {};
-  for (const [key, value] of Object.entries(variant.metrics ?? {})) {
-    const before = baseline.metrics?.[key];
-    if (typeof value === 'number' && typeof before === 'number') {
-      deltas[key] = value - before;
-    } else if (isNumberRecord(value) && isNumberRecord(before)) {
-      // Per-judge scores: a delta for each judge both variants ran.
-      const shared = Object.keys(value).filter((name) => name in before);
-      if (shared.length > 0)
-        deltas[key] = Object.fromEntries(
-          shared.map((name) => [name, value[name]! - before[name]!])
-        );
-    }
-  }
-  return deltas;
-}
-
-function buildVariantDeltas(
-  variants: EvaluationVariantResult[]
-): Record<string, Record<string, unknown>> {
-  const baseline = variants[0]?.result;
-  if (!baseline || baseline.total === 0) return {};
-  const baselineRate = passRate(baseline);
-  const baselineTrialRate = trialPassRate(variants[0]!);
-  return Object.fromEntries(
-    variants.slice(1).map((variant) => {
-      const rate = variant.result ? passRate(variant.result) : 0;
-      const trials = trialPassRate(variant);
-      return [
-        variant.name,
-        {
-          passRate: rate,
-          passRateDelta: rate - baselineRate,
-          ...(trials !== undefined && baselineTrialRate !== undefined
-            ? {
-                trialPassRate: trials,
-                trialPassRateDelta: trials - baselineTrialRate,
-              }
-            : {}),
-          metricDeltas: metricDeltas(variant, variants[0]!),
-          baseline: variants[0]?.name,
-        },
-      ];
-    })
-  );
 }
 
 /**

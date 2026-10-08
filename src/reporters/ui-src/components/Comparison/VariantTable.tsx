@@ -229,7 +229,7 @@ export function VariantTable({
               <th scope="col" className={thNum}>
                 {isEval
                   ? showRegression
-                    ? 'Untagged cases'
+                    ? 'Other cases'
                     : 'Pass rate'
                   : 'Capability cases'}
               </th>

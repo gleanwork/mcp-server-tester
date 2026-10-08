@@ -208,7 +208,7 @@ for client-specific fields, environment rules, and setup ownership.
 - [Protocol Versions](./docs/protocol-versions.md) — legacy and 2026-07-28, protocol matrices, era-aware conformance
 - [Agent Skills](./docs/skills.md) — testing and evaluating skills served over MCP (SEP-2640)
 - [CLI Commands](./docs/cli.md) — init, generate, login, token
-- [UI Reporter](./docs/ui-reporter.md) — interactive web UI for test results
+- [The run report](./docs/ui-reporter.md): the report every eval run writes
 - [Development](./docs/development.md) — contributing and building
 - [Migration Guide (v1.x → v2.0)](./docs/migrations/migration-2.0.md) — MCP SDK v2 and protocol versions
 - [Migration Guide (v0.12 → v1.0)](./docs/migrations/migration-1.0.md) — upgrading from pre-1.0 releases

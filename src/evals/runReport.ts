@@ -442,6 +442,9 @@ export function buildRunReport(stored: StoredRun): MCPRunReportData {
     ),
     trials,
     preferences,
+    ...(summary.toolOptimization
+      ? { toolOptimization: summary.toolOptimization }
+      : {}),
     ...(summary.previousRun
       ? {
           previousRun: {

@@ -12,7 +12,6 @@ import type {
   GraderType,
   GraderScore,
   GraderScoreMap,
-  GraderBreakdown,
   UsageMetrics,
   ClientDiagnostics,
   MCPProtocolInfo,
@@ -27,57 +26,40 @@ import type { ClientMetadata } from '../evals/externalClient/types.js';
  */
 export interface MCPEvalReporterConfig {
   /**
-   * Output directory for reports and historical data
+   * Where runs are written: `<outputDir>/<name>/runs/<run-id>/`.
    * @default '.mcp-test-results'
    */
   outputDir?: string;
 
   /**
-   * Auto-open report in browser after test run
+   * The eval's name: the directory its runs are written to, and what
+   * `mst open` and the report call it. Runs with the same name are compared
+   * with the previous one.
+   * @default 'playwright'
+   */
+  name?: string;
+
+  /**
+   * Open the report in a browser after the run (never in CI).
    * @default false
    */
   autoOpen?: boolean;
 
   /**
-   * Number of historical runs to keep
-   * @default 10
-   */
-  historyLimit?: number;
-
-  /**
-   * Suppress console output (report still generated)
+   * Suppress console output (the run is still written).
    * @default false
    */
   quiet?: boolean;
 
-  /**
-   * Include auto-tracked MCP tool calls from tests without explicit eval results.
-   * When true, any test using the MCP fixture will have its tool calls
-   * included in the report, even without using runEvalCase/runEvalDataset.
-   * When false, only tests with explicit eval results are included.
-   * @default true
-   */
-  includeAutoTracking?: boolean;
-
-  /**
-   * Optional external result store for durable reporter run history.
-   */
+  /** A result store that also gets each run's summary. */
   resultStore?: EvalResultStoreLike;
 
-  /**
-   * Optional run ID for externally stored reporter results.
-   * Defaults to a generated timestamp-based ID.
-   */
-  runId?: string;
-
-  /**
-   * Extra metadata to attach to externally stored reporter results.
-   */
+  /** Extra metadata for runs saved to the result store. */
   runMetadata?: Record<string, unknown>;
 
   /**
-   * When true, strips response payloads before storing reporter results externally.
-   * Local report output is unchanged.
+   * Strip responses (answers, tool outputs) from the run's files, its
+   * report and the result store.
    * @default true
    */
   redactStoredResponses?: boolean;
@@ -515,92 +497,6 @@ export interface EvalCaseResult {
 }
 
 /**
- * Aggregated MCP eval run data
- */
-export interface MCPEvalRunData {
-  /**
-   * Run timestamp (ISO 8601)
-   */
-  timestamp: string;
-
-  /**
-   * Total duration in milliseconds
-   */
-  durationMs: number;
-
-  /**
-   * Environment info
-   */
-  environment: {
-    ci: boolean;
-    node: string;
-    platform: string;
-  };
-
-  /**
-   * Aggregate metrics
-   */
-  metrics: {
-    /**
-     * Total number of eval cases
-     */
-    total: number;
-
-    /**
-     * Number of passed cases
-     */
-    passed: number;
-
-    /**
-     * Number of failed cases
-     */
-    failed: number;
-
-    /**
-     * Pass rate (0-1)
-     */
-    passRate: number;
-
-    /**
-     * Dataset breakdown: dataset name -> count
-     */
-    datasetBreakdown: Record<string, number>;
-
-    /**
-     * Grader type breakdown
-     */
-    graderBreakdown: GraderBreakdown;
-
-    /**
-     * Aggregate token usage from every client case's model calls in this run.
-     */
-    totalClientUsage?: UsageMetrics;
-  };
-
-  /**
-   * All eval results from this run
-   */
-  results: EvalCaseResult[];
-
-  /**
-   * Conformance check results (optional)
-   */
-  conformanceChecks?: MCPConformanceResultData[];
-
-  /**
-   * Server capabilities discovered via listTools (optional)
-   */
-  serverCapabilities?: MCPServerCapabilitiesData[];
-
-  /**
-   * Summary of a tool-metadata tool optimization (runToolOptimization),
-   * present when the run was produced by one. The `results` above reflect the
-   * winning variant; this records how the optimization got there.
-   */
-  toolOptimization?: MCPToolOptimizationData;
-}
-
-/**
  * Compact summary of a `runToolOptimization` run, for the reporter UI.
  */
 export interface MCPToolOptimizationData {
@@ -1007,24 +903,6 @@ export interface MCPRunReportData {
     passRate: number;
     passRateDelta: number;
   };
-}
-
-/**
- * Historical summary for trend charts
- */
-export interface MCPEvalHistoricalSummary {
-  timestamp: string;
-  total: number;
-  passed: number;
-  failed: number;
-  passRate: number;
-  durationMs: number;
-}
-
-/**
- * Complete data structure passed to UI
- */
-export interface MCPEvalData {
-  runData: MCPEvalRunData;
-  historical: MCPEvalHistoricalSummary[];
+  /** A tool optimization the run reported, shown before the variants. */
+  toolOptimization?: MCPToolOptimizationData;
 }

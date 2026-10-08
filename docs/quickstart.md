@@ -212,5 +212,5 @@ See the [Assertions Guide](./assertions.md) for all available assertion types.
 - Learn about [Transport Configuration](./transports.md)
 - Set up [Authentication](./authentication.md) for OAuth or token auth
 - Check out the [Examples](../examples) for real-world usage
-- Set up the [UI Reporter](./ui-reporter.md) for interactive test results
+- Read [the run report](./ui-reporter.md) each eval run writes
 - Upgrading from a pre-1.0 release? See the [Migration Guide](./migrations/migration-1.0.md)

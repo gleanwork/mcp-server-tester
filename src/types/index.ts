@@ -319,9 +319,6 @@ export type {
   EvalCaseResult,
   EvalRunMetadata,
   TrialResult,
-  MCPEvalRunData,
-  MCPEvalHistoricalSummary,
   MCPConformanceResultData,
   MCPServerCapabilitiesData,
-  MCPEvalData,
 } from './reporter.js';

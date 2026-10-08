@@ -57,7 +57,7 @@ MCP protocol conformance checks. `conformanceChecks.ts` runs a set of server-lev
 
 ### `src/reporters/`
 
-Custom Playwright reporter. `channel.ts` is the contract between the code that records results on a test (the fixture's `listTools`/`callTool`, conformance and cross-era checks, `runEvalDataset`, tool optimizations) and the reporter: attachment names, payload types, one writer (`attachReporterData`) and a schema-checked reader. `mcpReporter.ts` is a Playwright `Reporter` implementation that reads channel data from each test and writes JSON/HTML output. This repo's own `playwright.config.ts` runs it once the UI is built. The `ui-src/` subdirectory contains the React application that renders the report UI; it is compiled separately and embedded into `ui-dist/`. `build-ui.ts` is the build script for the React app.
+Custom Playwright reporter. `channel.ts` is the contract between the code that records results on a test (the fixture's `listTools`/`callTool`, conformance and cross-era checks, `runEvalDataset`, tool optimizations) and the reporter: attachment names, payload types, one writer (`attachReporterData`) and a schema-checked reader. `mcpReporter.ts` is a Playwright `Reporter` implementation that reads each test's eval results and tool optimizations (and nothing else: tests and conformance checks are in Playwright's own report) and writes them as a `mst.run/v1` run with the run report, a variant per project. This repo's own `playwright.config.ts` runs it once the UI is built. The `ui-src/` subdirectory contains the React application that renders the report UI; it is compiled separately and embedded into `ui-dist/`. `build-ui.ts` is the build script for the React app.
 
 ### `src/cli/`
 
@@ -68,7 +68,7 @@ The CLI, installed as `mst` and as `mcp-server-tester` (the same binary). `index
 Canonical shared type definitions, kept here to prevent drift between modules:
 
 - `index.ts` — core types: `AuthType`, `ResultSource`, `GraderType`, `GraderScore`.
-- `reporter.ts` — reporter-specific types: `MCPEvalRunData`, `EvalCaseResult`, `MCPConformanceResultData`.
+- `reporter.ts` — reporter-specific types: `EvalCaseResult`, `MCPRunReportData`, `MCPConformanceResultData`.
 
 `src/reporters/ui-src/types.ts` re-exports all types directly from the canonical backend sources (`src/types/index.ts` and `src/types/reporter.ts`) — no manual sync is required.
 
@@ -113,22 +113,22 @@ EvalRunnerResult
 ### External Result Storage
 
 ```
-EvalRunnerResult / MCPEvalRunData / comparison result
+EvalRunnerResult / run summary / comparison result
    ↓  resultStore.ts: createStoredEvalArtifact()
 StoredEvalArtifact { format, kind, id, metadata, data }
    ↓
 FileEvalResultStore or GCSEvalResultStore
    ↓
-eval-runs/, reporter-runs/, or comparisons/
+eval-runs/, eval-summaries/, or comparisons/
    ↓
 latest.json + immutable <id>.json
 ```
 
 The eval runner uses stored `eval-runner-result` artifacts for baseline
 regression detection. `compareEvalRuns()` remains pure; helpers load stored runs
-and save comparison artifacts around it. The Playwright reporter stores
-`reporter-run` artifacts for cross-run trend history while continuing to generate
-local HTML reports.
+and save comparison artifacts around it. The Playwright reporter writes each
+run's eval results as a run directory with its report, and stores its summary as
+an `eval-run-summary` artifact, as `mst run` does.
 
 ### Auth Flow
 
