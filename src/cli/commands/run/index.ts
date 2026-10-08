@@ -150,7 +150,8 @@ export async function run(options: RunOptions): Promise<void> {
 /**
  * What a run (or a regrade) did: totals, the variant table, pairwise
  * preferences, the previous run and where the run is. Sets a failing exit
- * code when a graded case failed.
+ * code when a graded case failed, or an ungraded run has a trial that failed
+ * to collect.
  */
 export function printRunResult(
   result: Awaited<ReturnType<typeof runEval>>,
@@ -173,6 +174,24 @@ export function printRunResult(
     console.log(
       `Collected ${metrics.total ?? 0} cases, not graded. Grade them with \`mst grade ${runId.split('-').pop()} -c ${config}\`.`
     );
+  // Grading can't rescue a trial the client never finished: say so now.
+  const uncollected = graded
+    ? []
+    : result.summary.results.filter((caseResult) =>
+        caseResult.trialResults?.length
+          ? caseResult.trialResults.some((trial) => trial.error !== undefined)
+          : caseResult.error !== undefined
+      );
+  if (uncollected.length) {
+    const names = uncollected.map((caseResult) =>
+      caseResult.variant
+        ? `${caseResult.variant}/${caseResult.id}`
+        : caseResult.id
+    );
+    console.log(
+      `${uncollected.length} failed to collect (${names.slice(0, 5).join(', ')}${names.length > 5 ? `, +${names.length - 5} more` : ''}); grading fails them. See the report for each error.`
+    );
+  }
   printVariantTable(result.summary.variants, graded);
   printPairwise(result.summary.variants);
   const { selection } = result.summary;
@@ -219,7 +238,8 @@ export function printRunResult(
     console.log(
       `Report: ${report} (open it with \`mst open${result.summary.partial || !graded ? ` ${result.outputDir}` : ''}\`)`
     );
-  if (graded && (metrics.failed ?? 0) > 0) process.exitCode = 1;
+  if ((graded && (metrics.failed ?? 0) > 0) || uncollected.length)
+    process.exitCode = 1;
 }
 
 type VariantSummary = Awaited<

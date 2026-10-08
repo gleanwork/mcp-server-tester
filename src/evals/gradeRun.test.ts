@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import { gradeRun, runEval } from './runEval.js';
+import { printRunResult } from '../cli/commands/run/index.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 import type { ClientRunResult } from './evalFrameworkTypes.js';
@@ -255,6 +256,24 @@ describe('mst run --no-grade and mst grade', () => {
     expect(failed.every((result) => !result.pass)).toBe(true);
     // Only the two answered trials were judged.
     expect(t.judge).toHaveBeenCalledTimes(2);
+  });
+
+  it('mst run --no-grade names the trials that failed to collect and fails', async () => {
+    const t = await setup({ failCase: 'How long' });
+    const collected = await runEval({ ...t.base, grade: false });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitCode = process.exitCode;
+    try {
+      printRunResult(collected, 'eval.json');
+      const printed = log.mock.calls.map((call) => String(call[0])).join('\n');
+      expect(printed).toContain(
+        '2 failed to collect (baseline/duration, better/duration); grading fails them.'
+      );
+      expect(process.exitCode).toBe(1);
+    } finally {
+      log.mockRestore();
+      process.exitCode = exitCode;
+    }
   });
 
   it('refuses to collect or grade traces stored without their answers', async () => {
