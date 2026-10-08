@@ -895,13 +895,13 @@ exports[`golden: judges > judges a client response 1`] = `
     "pass": true,
     "project": "golden",
     "request": {
-      "assertions": {
-        "passesJudge": {
-          "judge": "test/judge/golden-case-judge",
-        },
-      },
       "client": "mst",
       "input": "Weather in London?",
+      "judges": [
+        {
+          "type": "test/judge/golden-case-judge",
+        },
+      ],
     },
     "response": {
       "response": "It is sunny in London.",
@@ -1043,14 +1043,14 @@ exports[`golden: judges > one judge with case reps and the canonical answer as r
     "pass": true,
     "project": "golden",
     "request": {
-      "assertions": {
-        "passesJudge": {
-          "judge": "test/judge/golden-case-judge",
-        },
-      },
       "client": "mst",
       "input": "Weather in London?",
       "judgeReps": 2,
+      "judges": [
+        {
+          "type": "test/judge/golden-case-judge",
+        },
+      ],
       "reference": "sunny",
     },
     "response": {
@@ -1248,22 +1248,20 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
     "pass": false,
     "project": "golden",
     "request": {
-      "assertions": {
-        "passesJudge": [
-          {
-            "judge": "test/judge/golden-case-judge",
-            "reference": "explicit",
-            "reps": 1,
-          },
-          {
-            "judge": "test/judge/golden-strict-judge",
-            "threshold": 0.5,
-          },
-        ],
-      },
       "client": "mst",
       "input": "Weather in London?",
       "judgeReps": 3,
+      "judges": [
+        {
+          "reference": "explicit",
+          "reps": 1,
+          "type": "test/judge/golden-case-judge",
+        },
+        {
+          "threshold": 0.5,
+          "type": "test/judge/golden-strict-judge",
+        },
+      ],
       "reference": "unused",
     },
     "response": {
@@ -1394,13 +1392,14 @@ exports[`golden: rubric judges > a built-in rubric with the default provider and
     "pass": true,
     "project": "golden",
     "request": {
-      "assertions": {
-        "passesJudge": {
-          "rubric": "correctness",
-        },
-      },
       "client": "mst",
       "input": "Weather in London?",
+      "judges": [
+        {
+          "rubric": "correctness",
+          "type": "rubric",
+        },
+      ],
       "reference": "sunny",
     },
     "response": {
@@ -1526,8 +1525,10 @@ exports[`golden: rubric judges > a custom-text rubric with provider, model, LLM 
     "pass": false,
     "project": "golden",
     "request": {
-      "assertions": {
-        "passesJudge": {
+      "client": "mst",
+      "input": "Weather in London?",
+      "judges": [
+        {
           "apiKeyEnvVar": "[redacted]",
           "maxTokens": "[redacted]",
           "maxToolOutputSize": 1000,
@@ -1540,10 +1541,9 @@ Answer carefully.",
           },
           "temperature": 0.5,
           "threshold": 0.9,
+          "type": "rubric",
         },
-      },
-      "client": "mst",
-      "input": "Weather in London?",
+      ],
     },
     "response": {
       "response": "It is sunny in London.",
@@ -1662,13 +1662,14 @@ exports[`golden: rubric judges > a judge client error fails the assertion 1`] = 
     "pass": false,
     "project": "golden",
     "request": {
-      "assertions": {
-        "passesJudge": {
-          "rubric": "correctness",
-        },
-      },
       "client": "mst",
       "input": "Weather in London?",
+      "judges": [
+        {
+          "rubric": "correctness",
+          "type": "rubric",
+        },
+      ],
     },
     "response": {
       "response": "It is sunny in London.",
@@ -1874,19 +1875,18 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
     "pass": true,
     "project": "golden",
     "request": {
-      "assertions": {
-        "passesJudge": [
-          {
-            "rubric": "conciseness",
-          },
-          {
-            "judge": "test/judge/golden-case-judge",
-          },
-        ],
-      },
       "client": "mst",
       "input": "Weather in London?",
       "judgeReps": 2,
+      "judges": [
+        {
+          "rubric": "conciseness",
+          "type": "rubric",
+        },
+        {
+          "type": "test/judge/golden-case-judge",
+        },
+      ],
     },
     "response": {
       "response": "It is sunny in London.",
@@ -2082,14 +2082,15 @@ exports[`golden: rubric judges > reps average the scores and report their spread
     "pass": false,
     "project": "golden",
     "request": {
-      "assertions": {
-        "passesJudge": {
-          "reps": 3,
-          "rubric": "completeness",
-        },
-      },
       "client": "mst",
       "input": "Weather in London?",
+      "judges": [
+        {
+          "reps": 3,
+          "rubric": "completeness",
+          "type": "rubric",
+        },
+      ],
     },
     "response": {
       "response": "It is sunny in London.",
@@ -2300,29 +2301,25 @@ exports[`golden: runEval clients > an eval config declares two rubric judges and
       "id": "suite-rubric",
       "pass": false,
       "request": {
-        "assertions": {
-          "passesJudge": [
-            {
-              "judge": "rubric",
-              "options": {
-                "rubric": "correctness",
-              },
-              "rubric": "correctness",
-              "threshold": 0.9,
-              "type": "rubric",
-            },
-            {
-              "judge": "rubric",
-              "options": {
-                "rubric": "conciseness",
-              },
-              "rubric": "conciseness",
-              "type": "rubric",
-            },
-          ],
-        },
         "client": "test/client/golden-run-rubric-host",
         "input": "Weather in London?",
+        "judges": [
+          {
+            "options": {
+              "rubric": "correctness",
+            },
+            "rubric": "correctness",
+            "threshold": 0.9,
+            "type": "rubric",
+          },
+          {
+            "options": {
+              "rubric": "conciseness",
+            },
+            "rubric": "conciseness",
+            "type": "rubric",
+          },
+        ],
       },
       "response": {
         "events": [
@@ -2578,25 +2575,22 @@ exports[`golden: runEval clients > eval config judges merge with case judges 1`]
       "id": "suite-judged",
       "pass": false,
       "request": {
-        "assertions": {
-          "passesJudge": [
-            {
-              "judge": "test/judge/golden-case-judge",
-              "threshold": 0.5,
-            },
-            {
-              "count": 2,
-              "judge": "test/judge/golden-config-judge",
-              "options": {
-                "count": 3,
-              },
-              "reference": "case ref",
-              "type": "test/judge/golden-config-judge",
-            },
-          ],
-        },
         "client": "test/client/golden-run-judged-host",
         "input": "Weather in London?",
+        "judges": [
+          {
+            "threshold": 0.5,
+            "type": "test/judge/golden-case-judge",
+          },
+          {
+            "count": 2,
+            "options": {
+              "count": 3,
+            },
+            "reference": "case ref",
+            "type": "test/judge/golden-config-judge",
+          },
+        ],
         "reference": "canonical",
       },
       "response": {

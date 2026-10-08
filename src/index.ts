@@ -63,6 +63,8 @@ export type {
   EvalDataset,
   EvalAssertions,
   JudgeExpectConfig,
+  CaseJudge,
+  CaseJudgeConfig,
   SerializedEvalDataset,
   LoadDatasetOptions,
   EvalCaseRequest,

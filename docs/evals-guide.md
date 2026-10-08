@@ -229,9 +229,9 @@ How many tools did the LLM call?
 
 Useful for detecting runaway tool use (the LLM calling tools in a loop) or for confirming it found the answer in one shot.
 
-### `passesJudge`
+### `judges`
 
-Did an LLM evaluator (judge) say the response was good? This is for quality, not just correctness.
+Did an LLM evaluator (judge) say the response was good? This is for quality, not just correctness. Judges aren't assertions: a case lists them in `judges`, beside `assertions`. Each entry is a judge reference (`"acme/judge/completeness"`) or `{ "type": <reference>, ...options }`, the same shape as an eval config's `judges`. The built-in rubric judge is `{ "type": "rubric", "rubric": "correctness" }`.
 
 ```json snippet=snippets/evals-passes-judge.json
 {
@@ -241,26 +241,27 @@ Did an LLM evaluator (judge) say the response was good? This is for quality, not
       "id": "search-quality-check",
       "input": "Find recent internal documents about the Q4 planning process",
       "passThreshold": 0.7,
-      "assertions": {
-        "passesJudge": {
+      "judges": [
+        {
+          "type": "rubric",
           "rubric": {
             "text": "The response should cite specific documents, not generic advice"
           },
           "threshold": 0.7
         }
-      }
+      ]
     }
   ]
 }
 ```
 
-This is the most expensive assertion (requires a second LLM call) and the most powerful. Use it when you care not just that the right tool was called, but that the final answer was actually useful.
+A judge is the most expensive grader (it makes a second LLM call) and the most powerful. Use it when you care not just that the right tool was called, but that the final answer was actually useful.
 
 ---
 
 ## Stacking Assertions
 
-Assertions compose. A case passes only if _all_ assertions pass. This lets you be precise about what "correct behavior" means:
+Graders compose. A case passes only if _all_ its assertions and judges pass. This lets you be precise about what "correct behavior" means:
 
 ```json snippet=snippets/evals-combined-assertions.json
 {
@@ -282,12 +283,11 @@ Assertions compose. A case passes only if _all_ assertions pass. This lets you b
         "toolCallCount": {
           "min": 1,
           "max": 5
-        },
-        "passesJudge": {
-          "rubric": "completeness",
-          "threshold": 0.7
         }
-      }
+      },
+      "judges": [
+        { "type": "rubric", "rubric": "completeness", "threshold": 0.7 }
+      ]
     }
   ]
 }
@@ -416,11 +416,15 @@ Compare the pass rates per case. To decide whether a variant really is better (p
           "exclusive": false,
         },
         "toolCallCount": { "min": 1, "max": 5 },
-        "passesJudge": {
+      },
+      // Judges sit beside assertions: a reference, or { type, ...options }.
+      "judges": [
+        {
+          "type": "rubric",
           "rubric": { "text": "Response must cite specific documents" },
           "threshold": 0.7,
         },
-      },
+      ],
     },
   ],
 }

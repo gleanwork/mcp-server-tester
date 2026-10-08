@@ -142,15 +142,17 @@ For use outside Playwright, each matcher has a function that returns `{ pass, me
       "passThreshold": 0.8,
       "assertions": {
         "toolsTriggered": { "calls": [{ "name": "search", "required": true }] },
-        "toolCallCount": { "max": 4 },
-        "passesJudge": { "rubric": "correctness", "threshold": 0.7 }
-      }
+        "toolCallCount": { "max": 4 }
+      },
+      "judges": [
+        { "type": "rubric", "rubric": "correctness", "threshold": 0.7 }
+      ]
     }
   ]
 }
 ```
 
-Case keys: `id`, `input` (both required), `description`, `expected`, `assertions`, `tags`, `trials`, `passThreshold`, `judgeReps`, `client`, `model`, `clientOptions`, `metadata`. Assertions: `toolsTriggered` (`calls` with `name`, `required`, `arguments` with `$pattern`/`$flags`, `server`, `kind`, `source`; `order`; `exclusive`), `toolCallCount`, `containsText`, `matchesPattern` (on the final answer), `passesJudge`. Unknown keys fail validation. Load with `loadEvalDataset(path)` or `loadEvalDatasetFromObject(object)`; check with `validateEvalDataset(object)`.
+Case keys: `id`, `input` (both required), `description`, `expected`, `assertions`, `judges`, `tags`, `trials`, `passThreshold`, `judgeReps`, `client`, `model`, `clientOptions`, `metadata`. Assertions: `toolsTriggered` (`calls` with `name`, `required`, `arguments` with `$pattern`/`$flags`, `server`, `kind`, `source`; `order`; `exclusive`), `toolCallCount`, `containsText`, `matchesPattern` (on the final answer). Judges go in `judges`, beside `assertions`. Unknown keys fail validation. Load with `loadEvalDataset(path)` or `loadEvalDatasetFromObject(object)`; check with `validateEvalDataset(object)`.
 
 Run in a Playwright test, on the `mst` client and the test's MCP connection:
 
@@ -216,9 +218,9 @@ The `mst` client infers the API from the model id (`claude-*` Anthropic, `claude
 
 - Built-in rubrics: `correctness`, `completeness`, `groundedness`, `instruction-following`, `conciseness`, or `{ "text": "..." }`.
 - Providers: `anthropic` (default; needs `@anthropic-ai/sdk`), `vertex-anthropic`, `anthropic-agent-sdk` (needs `@anthropic-ai/claude-agent-sdk`), `openai`, `google`.
-- In a case: `passesJudge: { rubric, threshold, reference?, reps?, provider?, model? }`. `expected.answer` is the default reference. A list means every judge must pass.
+- In a case: `judges: [{ "type": "rubric", rubric, threshold?, reference?, reps?, provider?, model? }]`, or a plugin judge's name. `expected.answer` is the default reference. Every listed judge must pass. An eval config's `judges` apply to every case, on top of its own; the case's settings win for a judge both name.
 - In a matcher: `toPassToolJudge(rubric, { passingThreshold, reference, reps, provider, model })`.
-- A plugin's judge: `{ "judge": "acme/judge/completeness" }`, with the plugin loaded (`plugins` in `runEvalDataset` or the eval config, `mcpPlugins` for matchers).
+- A plugin's judge: `"acme/judge/completeness"` in `judges` (or `{ judge: 'acme/judge/completeness' }` in `toPassToolJudge`), with the plugin loaded (`plugins` in `runEvalDataset` or the eval config, `mcpPlugins` for matchers).
 
 ## Plugins
 

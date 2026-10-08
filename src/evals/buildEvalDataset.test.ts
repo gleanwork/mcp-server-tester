@@ -46,9 +46,7 @@ describe('buildEvalDataset canonical ingestion', () => {
     const case_ = {
       id: 'a',
       input: 'Find it',
-      assertions: {
-        passesJudge: { judge: 'my-judge', reference: 'answer', threshold: 0.7 },
-      },
+      judges: [{ type: 'my-judge', reference: 'answer', threshold: 0.7 }],
     };
     expect(
       buildEvalDataset(

@@ -1,5 +1,5 @@
 /**
- * Grading: turns an eval case's `assertions` and what the
+ * Grading: turns an eval case's `assertions` and `judges` and what the
  * client did into scores.
  *
  * It owns the rules every execution path shares:
@@ -11,6 +11,8 @@
  * which settings, then calls them.
  */
 import type {
+  CaseJudge,
+  CaseJudgeConfig,
   EvalCase,
   EvalAssertions,
   JudgeExpectConfig,
@@ -76,39 +78,48 @@ function caseAnswer(evalCase: Pick<EvalCase, 'expected'>): unknown {
   return evalCase.expected?.answer;
 }
 
-/** Judge configurations with the case's defaults for reps and reference applied. */
+/** A case judge (`"acme/judge/x"` or `{ type, ...settings }`) with its settings. */
+function caseJudgeConfig(entry: CaseJudge): CaseJudgeConfig {
+  return typeof entry === 'string' ? { type: entry } : entry;
+}
+
+/** The judge request a case judge means: `type` names the judge. */
+function caseJudgeRequest(entry: CaseJudge): JudgeExpectConfig {
+  const { type, ...settings } = caseJudgeConfig(entry);
+  // The rubric judge with a flat `rubric` is the shorthand, which merges
+  // its flat settings with `options`.
+  if (type === 'rubric' && settings.rubric !== undefined) return settings;
+  return { ...settings, judge: type };
+}
+
+/** Judge requests for the case's `judges`, with its defaults for reps and reference applied. */
 export function resolveJudges(
-  evalCase: Pick<EvalCase, 'assertions' | 'judgeReps' | 'expected'>
+  evalCase: Pick<EvalCase, 'judges' | 'judgeReps' | 'expected'>
 ): JudgeExpectConfig[] {
-  const configured = evalCase.assertions?.passesJudge;
-  if (configured === undefined) return [];
-  return (Array.isArray(configured) ? configured : [configured]).map(
-    (judge) => ({
-      ...judge,
-      reference:
-        judge.reference !== undefined ? judge.reference : caseAnswer(evalCase),
-      reps: judge.reps ?? evalCase.judgeReps ?? 1,
-    })
-  );
+  return (evalCase.judges ?? []).map(caseJudgeRequest).map((judge) => ({
+    ...judge,
+    reference:
+      judge.reference !== undefined ? judge.reference : caseAnswer(evalCase),
+    reps: judge.reps ?? evalCase.judgeReps ?? 1,
+  }));
 }
 
 /**
- * The case's `passesJudge` list with an eval config's judges merged in.
- * A case entry naming an eval config judge overrides that judge's settings;
- * other case entries are kept. `rawJudges` are the eval config entries before
- * parsing, so the judge's own schema sees its inputs once.
+ * The case's `judges` with an eval config's (or its variant's) judges merged
+ * in: the case runs both. When the case lists a judge the eval config also
+ * lists (the same name in results), the case's settings win over the eval
+ * config's; other case judges are kept. `rawJudges` are the eval config
+ * entries before parsing, so the judge's own schema sees its inputs once.
  */
 export function mergeEvalJudges(
-  evalCase: Pick<EvalCase, 'assertions' | 'expected'>,
+  evalCase: Pick<EvalCase, 'judges' | 'expected'>,
   judges: Array<Record<string, unknown>>,
   rawJudges: Array<Record<string, unknown>>
-): Array<Record<string, unknown>> {
-  const existing = Array.isArray(evalCase.assertions?.passesJudge)
-    ? evalCase.assertions.passesJudge
-    : evalCase.assertions?.passesJudge
-      ? [evalCase.assertions.passesJudge]
-      : [];
-  // `rawJudges[i]` is `judges[i]` before parsing. A case entry overrides a
+): CaseJudgeConfig[] {
+  const existing = (evalCase.judges ?? []).map(caseJudgeConfig);
+  const nameOf = (entry: CaseJudgeConfig) =>
+    judgeNameOf(caseJudgeRequest(entry));
+  // `rawJudges[i]` is `judges[i]` before parsing. A case entry overrides an
   // eval config judge when results would give both the same name, so two
   // rubric judges (`correctness`, `conciseness`) stay distinct.
   const names = judges.map((judge, i) =>
@@ -118,15 +129,15 @@ export function mergeEvalJudges(
     })
   );
   return [
-    ...existing.filter((item) => !names.includes(judgeNameOf(item))),
+    ...existing.filter((item) => !names.includes(nameOf(item))),
     ...judges.map((judge, i) => {
-      const caseJudge = existing.find((item) => judgeNameOf(item) === names[i]);
+      const caseJudge = existing.find((item) => nameOf(item) === names[i]);
       const raw = rawJudges[i] ?? judge;
       const { options: caseOptions, ...caseSettings } = caseJudge ?? {};
       return {
         ...judge,
         ...caseSettings,
-        judge: judge.type,
+        type: judge.type as string,
         // Merge raw policy inputs so the shared evaluator transforms them once.
         // Explicit case settings, including flat policy fields, win over defaults.
         options: judgeOwnOptions({ ...raw, ...caseSettings, ...caseOptions }),
@@ -223,16 +234,16 @@ function toolTraceView(
 }
 
 /**
- * Grades an eval case's `assertions` against what the case produced.
- * Tool-call assertions fail with the evidence gap when the evidence can't
- * support them; every other assertion is graded normally.
+ * Grades an eval case's `assertions` and `judges` against what the case
+ * produced. Tool-call assertions fail with the evidence gap when the evidence
+ * can't support them; every other grader runs normally.
  */
 export async function gradeTrial(
-  evalCase: Pick<EvalCase, 'assertions' | 'judgeReps'> &
-    JudgeCaseSource & { assertions: EvalAssertions },
+  evalCase: Pick<EvalCase, 'assertions' | 'judges' | 'judgeReps'> &
+    JudgeCaseSource,
   graded: GradedExecution
 ): Promise<GradingOutcome> {
-  const expectBlock = evalCase.assertions;
+  const expectBlock: EvalAssertions = evalCase.assertions ?? {};
   const { response } = graded;
   const results: EvalCaseResult['scores'] = {};
   const outcome: GradingOutcome = { scores: results };
@@ -293,8 +304,7 @@ export async function gradeTrial(
     }
   }
 
-  // An empty passesJudge list still reports (as 0/0 judges passed).
-  if (expectBlock.passesJudge !== undefined)
+  if (evalCase.judges?.length)
     results.judge = await evaluateJudges(response, resolveJudges(evalCase), {
       evalCase,
       clientResponse: graded.clientResponse,

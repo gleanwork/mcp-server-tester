@@ -178,13 +178,13 @@ try {
         {
           id: policy,
           input: 'offline',
-          assertions: {
-            passesJudge: {
-              judge: 'foundation/judge/policy',
+          judges: [
+            {
+              type: 'foundation/judge/policy',
               reference: 'golden',
               options: { policy },
             },
-          },
+          ],
         },
       ],
     });

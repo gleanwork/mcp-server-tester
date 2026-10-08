@@ -80,11 +80,9 @@ Eval datasets define cases as JSON: an `input` the client under test acts on, an
               "required": true
             }
           ]
-        },
-        "passesJudge": {
-          "rubric": "groundedness"
         }
-      }
+      },
+      "judges": [{ "type": "rubric", "rubric": "groundedness" }]
     }
   ]
 }
@@ -106,13 +104,14 @@ test('file operations eval', async ({ mcp }, testInfo) => {
 
 Supported assertions:
 
-| Assertion        | Description                                             |
-| ---------------- | ------------------------------------------------------- |
-| `containsText`   | The client's answer includes expected substrings        |
-| `matchesPattern` | The client's answer matches a pattern                   |
-| `passesJudge`    | A judge scores the answer against a rubric or reference |
-| `toolsTriggered` | The client called the expected tools                    |
-| `toolCallCount`  | The client made a number of tool calls in a range       |
+| Assertion        | Description                                       |
+| ---------------- | ------------------------------------------------- |
+| `containsText`   | The client's answer includes expected substrings  |
+| `matchesPattern` | The client's answer matches a pattern             |
+| `toolsTriggered` | The client called the expected tools              |
+| `toolCallCount`  | The client made a number of tool calls in a range |
+
+Judges go in the case's `judges` list, beside `assertions`: each scores the answer against a rubric or reference, such as `{ "type": "rubric", "rubric": "groundedness" }` or a plugin judge `"acme/judge/completeness"`.
 
 ### LLM client mode
 

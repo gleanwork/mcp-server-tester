@@ -97,7 +97,7 @@ describe('strict cases', () => {
     ['a case setting', { accuracyThresold: 0.8 }, /accuracyThresold/],
     [
       'a rubric option',
-      { assertions: { passesJudge: { rubric: 'correctness', treshold: 0.9 } } },
+      { judges: [{ type: 'rubric', rubric: 'correctness', treshold: 0.9 }] },
       /treshold/,
     ],
     [
@@ -121,11 +121,11 @@ describe('strict cases', () => {
   it("keeps a named judge's own options", () => {
     const loaded = loadEvalDatasetFromObject(
       dataset({
-        assertions: { passesJudge: { judge: 'acme/quality', strictness: 2 } },
+        judges: [{ type: 'acme/judge/quality', strictness: 2 }],
       })
     );
-    expect(loaded.cases[0]?.assertions?.passesJudge).toMatchObject({
-      strictness: 2,
-    });
+    expect(loaded.cases[0]?.judges).toEqual([
+      { type: 'acme/judge/quality', strictness: 2 },
+    ]);
   });
 });

@@ -1,7 +1,7 @@
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
 import { loadEvalDataset, runEvalDataset } from '@gleanwork/mcp-server-tester';
 
-// Each case's passesJudge chooses its judge and the judge's LLM settings.
+// Each case lists its judges, with their LLM settings, in `judges`.
 test('search relevance eval with judge', async ({ mcp }, testInfo) => {
   const dataset = await loadEvalDataset('./data/evals.json');
   const result = await runEvalDataset(

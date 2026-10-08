@@ -194,7 +194,15 @@
       "type": "array",
       "items": {
         "$ref": "#/definitions/extension"
-      }
+      },
+      "description": "Judges every case runs, on top of each case's own judges. A variant's judges replace these for that variant."
+    },
+    "pairwiseJudges": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/extension"
+      },
+      "description": "Pairwise judges (<namespace>/pairwise-judge/<name>, or { type, reps, ...options }). After every variant runs, each compares each variant with the baseline, case by case."
     },
     "results": {
       "type": "object",

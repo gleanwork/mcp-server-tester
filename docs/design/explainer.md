@@ -208,7 +208,7 @@ Now, on the coordinator, every grader reads the traces:
 | Judge (`acme/judge/correctness`)                  | one trace plus the case's expected answer                        | a score: 0–1, pass or fail, and why                 | 450                                      |
 | Pairwise judge (`acme/pairwise-judge/preference`) | one variant's trials and the baseline's trials for the same case | a preference: which is better, by how much, and why | 100 (50 cases × 2 non-baseline variants) |
 
-A case's own dataset can ask for extra judges (`e2e-0011` asks for `acme/judge/completeness`). The eval config's judges apply to every case. A variant can set its own.
+A case's own dataset can ask for extra judges in its `judges`, beside its assertions (`e2e-0011` asks for `acme/judge/completeness`). The eval config's judges apply to every case, on top of the case's own. A variant's judges replace the eval config's for that variant. When a case lists a judge the eval config also lists, the case's settings win.
 
 A case **passes** for a variant when enough of its trials pass. By default that means all of them, and `passThreshold` lowers the bar.
 
@@ -310,17 +310,17 @@ There's a related unknown: it's not yet confirmed whether Cowork reaches the pla
 
 ## What's built and what's planned
 
-| Area                                                    | Built                                                                                                                    | Planned                                                                                              |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| Eval configs, variants, baseline, client, model, trials | `--config`, `--variant` (one or more), `--case`, `--filter-tag`, `--max-cases`, `--trials`; narrowed runs marked partial | —                                                                                                    |
-| Extension names                                         | `namespace/kind/name`, checked by kind (ADR 0003); `mst/` built-ins; a top-level `servers` map keyed by label            | —                                                                                                    |
-| Datasets and judges from plugins                        | `plugins`, `extends`                                                                                                     | `mst plugins`, `mst datasets`, `mst judges`, `--plugin-option`; judge merge rules                    |
-| Sign-ins (step 3)                                       | Connectors, `mst auth` / `status` / `revoke`, local credential store, token hand-out and renewal, dry-run proxy          | Plugin credential stores; handing tokens to VMs                                                      |
-| Environments (steps 4–5)                                | Local Cowork on macOS and Linux                                                                                          | `--env`, `--env-option`, shards, `--detach`, `mst runs`                                              |
-| Grading as its own step (6–7)                           | Grading during collect; `comparePairwise` as an API                                                                      | Gather, `--resume`, `--no-grade`, `mst grade`, regrade as a new run, pairwise judges in eval configs |
-| Results (8–9)                                           | Run summaries; result stores set in the config                                                                           | `--results`, `mst open --results`, the `mst.run/v1` layout                                           |
-| Report                                                  | Tool optimization report                                                                                                 | The same layout for every eval                                                                       |
-| Cowork's own connectors                                 | —                                                                                                                        | An approach; see [Known gap](#known-gap-coworks-own-connectors)                                      |
+| Area                                                    | Built                                                                                                                             | Planned                                                             |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Eval configs, variants, baseline, client, model, trials | `--config`, `--variant` (one or more), `--case`, `--filter-tag`, `--max-cases`, `--trials`; narrowed runs marked partial          | —                                                                   |
+| Extension names                                         | `namespace/kind/name`, checked by kind (ADR 0003); `mst/` built-ins; a top-level `servers` map keyed by label                     | —                                                                   |
+| Datasets and judges from plugins                        | `plugins`, `extends`; case `judges` beside `assertions`; judge merge rules (case plus eval config, the case's settings win)       | `mst plugins`, `mst datasets`, `mst judges`, `--plugin-option`      |
+| Sign-ins (step 3)                                       | Connectors, `mst auth` / `status` / `revoke`, local credential store, token hand-out and renewal, dry-run proxy                   | Plugin credential stores; handing tokens to VMs                     |
+| Environments (steps 4–5)                                | Local Cowork on macOS and Linux                                                                                                   | `--env`, `--env-option`, shards, `--detach`, `mst runs`             |
+| Grading as its own step (6–7)                           | Grading during collect; `comparePairwise` as an API; pairwise judges in eval configs (`pairwiseJudges`, after every variant runs) | Gather, `--resume`, `--no-grade`, `mst grade`, regrade as a new run |
+| Results (8–9)                                           | Run summaries; result stores set in the config                                                                                    | `--results`, `mst open --results`, the `mst.run/v1` layout          |
+| Report                                                  | Tool optimization report                                                                                                          | The same layout for every eval                                      |
+| Cowork's own connectors                                 | —                                                                                                                                 | An approach; see [Known gap](#known-gap-coworks-own-connectors)     |
 
 ## Open questions
 
@@ -329,5 +329,5 @@ There's a related unknown: it's not yet confirmed whether Cowork reaches the pla
 3. **Skipping consent.** Which vendors offer client credentials or service accounts for test accounts, so `mst auth` needs no browser?
 4. **Who can read stored sign-ins.** A shared credential store must keep each person's grants separate.
 5. **Judge cost.** Grading should report its own cost, separate from the client's.
-6. **Judges in datasets.** Should a case's judges sit beside its assertions (as written here) or under them?
+6. **Judges in datasets.** Settled: a case's judges sit beside its assertions, in `judges`.
 7. **What an environment must do.** Start machines, hand them their trials and tokens, stream progress, upload traces, clean up. Is that enough for local, VMs, and a future Docker environment?

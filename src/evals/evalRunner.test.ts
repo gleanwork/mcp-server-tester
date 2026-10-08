@@ -1546,7 +1546,7 @@ describe('dataset-level tool precision/recall/F1 aggregation', () => {
   });
 });
 
-describe('multi-judge passesJudge', () => {
+describe('several case judges', () => {
   beforeEach(() => {
     vi.resetModules();
   });
@@ -1568,12 +1568,10 @@ describe('multi-judge passesJudge', () => {
 
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const evalCase = createEvalCase({
-      assertions: {
-        passesJudge: [
-          { rubric: 'correctness', threshold: 0.7 },
-          { rubric: 'completeness', threshold: 0.7 },
-        ],
-      },
+      judges: [
+        { type: 'rubric', rubric: 'correctness', threshold: 0.7 },
+        { type: 'rubric', rubric: 'completeness', threshold: 0.7 },
+      ],
     });
 
     const result = await runEvalCaseMocked(evalCase, createContext(mcp));
@@ -1612,12 +1610,10 @@ describe('multi-judge passesJudge', () => {
 
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const evalCase = createEvalCase({
-      assertions: {
-        passesJudge: [
-          { rubric: 'correctness', threshold: 0.7 },
-          { judge: 'custom-judge', threshold: 0.7 },
-        ],
-      },
+      judges: [
+        { type: 'rubric', rubric: 'correctness', threshold: 0.7 },
+        { type: 'custom-judge', threshold: 0.7 },
+      ],
     });
 
     const result = await runEvalCaseMocked(evalCase, createContext(mcp));
@@ -1643,9 +1639,7 @@ describe('multi-judge passesJudge', () => {
 
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const evalCase = createEvalCase({
-      assertions: {
-        passesJudge: { rubric: 'correctness' },
-      },
+      judges: [{ type: 'rubric', rubric: 'correctness' }],
     });
 
     const result = await runEvalCaseMocked(evalCase, createContext(mcp));
@@ -1674,9 +1668,10 @@ describe('multi-judge passesJudge', () => {
 
     const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
     const evalCase = createEvalCase({
-      assertions: {
-        passesJudge: [{ rubric: 'correctness' }, { judge: 'domain-relevance' }],
-      },
+      judges: [
+        { type: 'rubric', rubric: 'correctness' },
+        { type: 'domain-relevance' },
+      ],
     });
 
     const result = await runEvalCaseMocked(evalCase, createContext(mcp));

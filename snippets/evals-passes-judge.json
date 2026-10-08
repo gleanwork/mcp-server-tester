@@ -5,14 +5,15 @@
       "id": "search-quality-check",
       "input": "Find recent internal documents about the Q4 planning process",
       "passThreshold": 0.7,
-      "assertions": {
-        "passesJudge": {
+      "judges": [
+        {
+          "type": "rubric",
           "rubric": {
             "text": "The response should cite specific documents, not generic advice"
           },
           "threshold": 0.7
         }
-      }
+      ]
     }
   ]
 }

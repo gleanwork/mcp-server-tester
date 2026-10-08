@@ -14,10 +14,7 @@
           "required": true
         }
       ]
-    },
-    "passesJudge": {
-      "rubric": "correctness",
-      "threshold": 0.7
     }
-  }
+  },
+  "judges": [{ "type": "rubric", "rubric": "correctness", "threshold": 0.7 }]
 }

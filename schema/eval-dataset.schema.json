@@ -14,7 +14,7 @@
     "name": {
       "type": "string",
       "minLength": 1,
-      "description": "Dataset name — should be unique and descriptive"
+      "description": "Dataset name \u2014 should be unique and descriptive"
     },
     "description": {
       "type": "string",
@@ -83,12 +83,12 @@
           "minimum": 0,
           "maximum": 1,
           "default": 1.0,
-          "description": "Share of trials (0–1) that must pass for the case to pass. Default 1 (every trial)."
+          "description": "Share of trials (0\u20131) that must pass for the case to pass. Default 1 (every trial)."
         },
         "judgeReps": {
           "type": "integer",
           "minimum": 1,
-          "description": "Number of times to run each judge; scores are averaged."
+          "description": "Number of times to run each of the case's judges; scores are averaged. A judge's own reps overrides it."
         },
         "expected": {
           "type": "object",
@@ -120,6 +120,13 @@
         "assertions": {
           "$ref": "#/definitions/EvalAssertions",
           "description": "Assertions (code graders) each trial must pass."
+        },
+        "judges": {
+          "type": "array",
+          "description": "Judges (model graders) that score each trial; each must pass. They run on top of the eval config's judges; for a judge both list, the case's settings win. Each entry is a reference or { type, ...options }, as in an eval config.",
+          "items": {
+            "$ref": "#/definitions/CaseJudge"
+          }
         }
       }
     },
@@ -158,9 +165,6 @@
           ],
           "description": "Regular expression pattern(s) that must match the response text. All provided patterns must match. Corresponds to toMatchToolPattern()."
         },
-        "passesJudge": {
-          "$ref": "#/definitions/PassesJudge"
-        },
         "toolsTriggered": {
           "$ref": "#/definitions/ToolsTriggered"
         },
@@ -169,90 +173,151 @@
         }
       }
     },
-    "PassesJudge": {
-      "type": "object",
-      "required": ["rubric"],
-      "additionalProperties": false,
-      "description": "LLM-as-judge evaluation. The response is scored by a judge LLM using the given rubric. Corresponds to toPassToolJudge().",
-      "properties": {
-        "rubric": {
-          "oneOf": [
-            {
+    "CaseJudge": {
+      "description": "One of a case's judges: a reference (\"acme/judge/completeness\") or { type, ...options } (\"type\": \"rubric\" with a rubric, or a plugin judge).",
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "not": {
+            "enum": ["rubric", "mst/judge/rubric"]
+          },
+          "examples": ["acme/judge/completeness"]
+        },
+        {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "description": "The built-in rubric judge: an LLM scores the response against the rubric. Needs rubric (or options.rubric).",
+          "properties": {
+            "type": {
+              "description": "The built-in rubric judge.",
+              "enum": ["rubric", "mst/judge/rubric"]
+            },
+            "rubric": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "correctness",
+                    "completeness",
+                    "groundedness",
+                    "instruction-following",
+                    "conciseness"
+                  ],
+                  "description": "Built-in rubric name"
+                },
+                {
+                  "type": "object",
+                  "required": ["text"],
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Custom rubric text"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Evaluation rubric: a built-in name ('correctness', 'completeness', etc.) or custom { text: string }"
+            },
+            "reference": {
+              "description": "Optional reference response to compare against during judging"
+            },
+            "threshold": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0.7,
+              "description": "Minimum score (0\u20131) required to pass the judge evaluation"
+            },
+            "reps": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Number of judge evaluations to run; scores are averaged. Overrides EvalCase.judgeReps."
+            },
+            "provider": {
               "type": "string",
               "enum": [
-                "correctness",
-                "completeness",
-                "groundedness",
-                "instruction-following",
-                "conciseness"
+                "anthropic",
+                "vertex-anthropic",
+                "anthropic-agent-sdk",
+                "openai",
+                "google"
               ],
-              "description": "Built-in rubric name"
+              "description": "Judge LLM provider. Defaults to 'anthropic'."
             },
-            {
+            "model": {
+              "type": "string",
+              "description": "Model override for the judge LLM (e.g., 'claude-opus-4-20250514')."
+            },
+            "apiKeyEnvVar": {
+              "type": "string",
+              "description": "Environment variable name that holds the API key for the judge provider."
+            },
+            "maxTokens": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Maximum tokens for the judge LLM response."
+            },
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Temperature for the judge LLM (0 = deterministic, 1 = max creativity)."
+            },
+            "maxBudgetUsd": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Maximum budget in USD per judge evaluation."
+            },
+            "maxToolOutputSize": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Fail if the response exceeds this size in bytes before judging."
+            },
+            "options": {
               "type": "object",
-              "required": ["text"],
-              "properties": {
-                "text": {
-                  "type": "string",
-                  "minLength": 1,
-                  "description": "Custom rubric text"
-                }
-              },
-              "additionalProperties": false
+              "description": "The judge's options, instead of flat fields."
             }
-          ],
-          "description": "Evaluation rubric: a built-in name ('correctness', 'completeness', etc.) or custom { text: string }"
+          }
         },
-        "reference": {
-          "description": "Optional reference response to compare against during judging"
-        },
-        "threshold": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1,
-          "default": 0.7,
-          "description": "Minimum score (0–1) required to pass the judge evaluation"
-        },
-        "reps": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "Number of judge evaluations to run; scores are averaged. Overrides EvalCase.judgeReps."
-        },
-        "provider": {
-          "type": "string",
-          "enum": ["claude", "anthropic", "openai", "google"],
-          "description": "Judge LLM provider. Defaults to 'claude'."
-        },
-        "model": {
-          "type": "string",
-          "description": "Model override for the judge LLM (e.g., 'claude-opus-4-20250514')."
-        },
-        "apiKeyEnvVar": {
-          "type": "string",
-          "description": "Environment variable name that holds the API key for the judge provider."
-        },
-        "maxTokens": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "Maximum tokens for the judge LLM response."
-        },
-        "temperature": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1,
-          "description": "Temperature for the judge LLM (0 = deterministic, 1 = max creativity)."
-        },
-        "maxBudgetUsd": {
-          "type": "number",
-          "exclusiveMinimum": 0,
-          "description": "Maximum budget in USD per judge evaluation."
-        },
-        "maxToolOutputSize": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "Fail if the response exceeds this size in bytes before judging."
+        {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": true,
+          "description": "A plugin judge, <namespace>/judge/<name>. Fields other than threshold, reference and reps (or options) are the judge's options.",
+          "properties": {
+            "type": {
+              "type": "string",
+              "minLength": 1,
+              "not": {
+                "enum": ["rubric", "mst/judge/rubric"]
+              }
+            },
+            "reference": {
+              "description": "Reference answer to compare against. Default: the case's expected.answer."
+            },
+            "threshold": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0.7,
+              "description": "Minimum score (0\u20131) required to pass the judge evaluation"
+            },
+            "reps": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Number of judge evaluations to run; scores are averaged. Overrides EvalCase.judgeReps."
+            },
+            "options": {
+              "type": "object",
+              "description": "The judge's options, instead of flat fields."
+            }
+          }
         }
-      }
+      ]
     },
     "ToolsTriggered": {
       "type": "object",
@@ -294,7 +359,7 @@
         },
         "arguments": {
           "type": "object",
-          "description": "Expected arguments (partial match — extra keys in the actual call are allowed)",
+          "description": "Expected arguments (partial match \u2014 extra keys in the actual call are allowed)",
           "additionalProperties": true
         },
         "required": {

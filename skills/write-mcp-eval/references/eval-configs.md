@@ -17,7 +17,8 @@ An eval config is the JSON file that defines one eval: its datasets, the servers
 | `tools`                                                           | Tool metadata every variant shows its client, unless it sets its own                             |
 | `toolMap`                                                         | Canonical tool name to the native names a client reports, for assertions                         |
 | `inputTemplate`                                                   | Wraps each case's input: `{{input}}` is replaced by it                                           |
-| `judges`                                                          | Judges added to every case's `passesJudge`                                                       |
+| `judges`                                                          | Judges added to every case's own `judges`                                                        |
+| `pairwiseJudges`                                                  | Pairwise judges that compare each variant with the baseline, case by case (top level only)       |
 | `metrics`                                                         | Metrics to report beyond the defaults                                                            |
 | `trials`, `passThreshold`                                         | Defaults for cases that don't set their own                                                      |
 | `maxCases`, `concurrency`, `filterTags`                           | Run controls. All five run controls may also go under `run`: `"run": { "trials": 5 }`            |
@@ -116,7 +117,7 @@ A variant has a `name` and may set `description`, `servers` (labels), `client`, 
 "metrics": ["passed", "trial_pass", "tool_count", "mcp_call_count", "input_tokens", "cost_usd", "duration_s", "judge_score"]
 ```
 
-Config `judges` are added to every case's own `passesJudge`. A variant's `judges` replace the config's.
+Config `judges` are added to every case's own `judges`. A variant's `judges` replace the config's. When a case and the config name the same judge, the case's settings win. `pairwiseJudges` (top level only) compare each variant with the baseline, case by case.
 
 Every variant reports `passed_rate`, `trial_pass_rate`, tool and call counts, tokens, cost and time when the client reports them. `metrics` adds more; built-in names include `passed`, `trial_pass`, `tool_count`, `mcp_call_count`, `builtin_event_count`, `first_tool`, `is_no_action`, `input_tokens`, `output_tokens`, `cache_read_tokens`, `cost_usd`, `duration_s`, `response_len`, `skill_loaded`, `tool_search_hit`, `judge_pass` and `judge_score`. A plugin's metric is `<namespace>/metric/<name>`.
 

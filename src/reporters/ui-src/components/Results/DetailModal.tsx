@@ -584,7 +584,8 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
               (result.request.args ||
                 result.request.input ||
                 result.request.description ||
-                result.request.assertions) && (
+                result.request.assertions ||
+                result.request.judges) && (
                 <CollapsibleSection
                   title="Setup & Configuration"
                   defaultOpen={false}
@@ -677,6 +678,15 @@ export function DetailModal({ result, onClose }: DetailModalProps) {
                           Configured Assertions
                         </h4>
                         <JsonBlock value={result.request.assertions} />
+                      </div>
+                    )}
+
+                    {result.request.judges && (
+                      <div>
+                        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+                          Configured Judges
+                        </h4>
+                        <JsonBlock value={result.request.judges} />
                       </div>
                     )}
 

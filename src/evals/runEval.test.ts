@@ -507,11 +507,8 @@ describe('eval review regressions', () => {
       {
         ...scenario,
         trials: 3,
-        assertions: {
-          containsText: 'EXPECTED',
-          toolCallCount: { min: 1 },
-          passesJudge: { judge: judgeName },
-        },
+        assertions: { containsText: 'EXPECTED', toolCallCount: { min: 1 } },
+        judges: [{ type: judgeName }],
       },
     ]);
     const result = await runEvalConfig({
@@ -615,16 +612,16 @@ describe('eval review regressions', () => {
             ...scenario,
             id: 'case',
             expected: { answer: 'canonical-gold' },
-            assertions: {
-              passesJudge: {
-                judge: name,
+            judges: [
+              {
+                type: name,
                 threshold: 0.9,
                 reference: 'case-gold',
                 ...(casePolicy === 'nested'
                   ? { options: { count: 4 } }
                   : { count: 4 }),
               },
-            },
+            ],
           },
         ],
         {
@@ -977,7 +974,7 @@ describe('eval plugins', () => {
     };
     installPlugins([other]);
     const f = await fixture([
-      { ...scenario, assertions: { passesJudge: { judge: 'other/judge/x' } } },
+      { ...scenario, judges: [{ type: 'other/judge/x' }] },
     ]);
 
     await expect(

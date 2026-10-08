@@ -44,13 +44,11 @@ function datasetReferences(dataset: EvalDataset): string[] {
   const clients = dataset.cases.flatMap((evalCase) =>
     typeof evalCase.client === 'string' ? [evalCase.client] : []
   );
-  const judges = dataset.cases.flatMap((evalCase) => {
-    const configs = evalCase.assertions?.passesJudge;
-    const list = Array.isArray(configs) ? configs : configs ? [configs] : [];
-    return list.flatMap((judge) =>
-      typeof judge.judge === 'string' ? [judge.judge] : []
-    );
-  });
+  const judges = dataset.cases.flatMap((evalCase) =>
+    (evalCase.judges ?? []).map((judge) =>
+      typeof judge === 'string' ? judge : judge.type
+    )
+  );
   return [...clients, ...judges];
 }
 

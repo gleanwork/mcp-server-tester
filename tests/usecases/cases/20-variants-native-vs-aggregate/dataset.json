@@ -4,24 +4,24 @@
     {
       "id": "outage-cause",
       "input": "What caused the checkout outage?",
-      "assertions": {
-        "passesJudge": {
-          "judge": "usecase/judge/keywords",
+      "judges": [
+        {
+          "type": "usecase/judge/keywords",
           "keywords": ["certificate"],
           "threshold": 1
         }
-      }
+      ]
     },
     {
       "id": "outage-duration",
       "input": "How long did the checkout outage last?",
-      "assertions": {
-        "passesJudge": {
-          "judge": "usecase/judge/keywords",
+      "judges": [
+        {
+          "type": "usecase/judge/keywords",
           "keywords": ["41 minutes"],
           "threshold": 1
         }
-      }
+      ]
     }
   ]
 }
