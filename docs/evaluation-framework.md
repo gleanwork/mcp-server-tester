@@ -385,7 +385,8 @@ Each run of an eval is a directory, in the versioned `mst.run/v1` format:
     ├── traces/<variant>/<case-id>/<trial>.json          # what the client did in one trial
     ├── scores/<grader>/<variant>/<case-id>/<trial>.json # one grader's score for one trial
     ├── results.json                # every case result, traces and scores joined
-    └── summary.json                # per-variant totals, metrics and comparisons (cases are in results.json)
+    ├── summary.json                # per-variant totals, metrics and comparisons (cases are in results.json)
+    └── report/index.html           # the report `mst open` shows, built from the files above
 ```
 
 - **Run IDs** sort by start time: `20261007T182504Z-7f3c2a`. The last six characters are its short form.
@@ -394,6 +395,7 @@ Each run of an eval is a directory, in the versioned `mst.run/v1` format:
 - **`latest.json`** is written last, and only for a full run, so a crash or a partial run leaves it at the previous run.
 - **Redaction** applies to every file, as it does to stored results (`redactStoredResponses`).
 - **`--output-dir`** names the eval's directory (`<output-dir>/runs/<run-id>/`).
+- **`report/`** is built from the run's own files, so `mst open <run>` can rebuild it for a run copied without it. `run.json` records each variant's setup (client, model, servers, tool metadata, input template, judges, and client options, with any whose name suggests a credential replaced by a hash) for the report's _What differs_. See [`mst open`](./cli.md#open---open-a-runs-report).
 
 A result store set in the eval config also gets the run summary, as before.
 

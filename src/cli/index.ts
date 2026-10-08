@@ -166,6 +166,10 @@ program
   )
   .option('--dry-run', 'Validate the config and plugins without executing')
   .option(
+    '--no-report',
+    "Don't write the run's report (mst open writes it when it opens the run)"
+  )
+  .option(
     '--store <dir>',
     'Credential store for connector servers (default: ~/.mcp-server-tester/grants)'
   )
@@ -224,12 +228,19 @@ program
 // Open command
 program
   .command('open')
-  .description('Open the MCP eval reporter UI in your browser')
+  .description(
+    "Open a run's report: the newest run, or the run or eval directory you name"
+  )
+  .argument(
+    '[path]',
+    'A run directory, or an eval directory for its latest run'
+  )
   .option(
     '-d, --dir <directory>',
-    'Report output directory',
+    'Where runs are written',
     '.mcp-test-results'
   )
+  .option('--print', "Print the report's path instead of opening it")
   .action(open);
 
 // An ordinary mistake (a missing file, a misspelt key) prints one message,

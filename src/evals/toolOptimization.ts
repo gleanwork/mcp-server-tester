@@ -467,6 +467,8 @@ function evalRunner(options: EvalToolOptimizationOptions): RunVariants {
       rootDir: target.rootDir,
       // Rounds rank candidates by the metric; pairwise judges would only cost.
       skipPairwise: true,
+      // The optimization writes its own report.
+      report: false,
       pluginPaths: target.pluginPaths,
       plugins: target.plugins,
       secretsFile: target.secretsFile,

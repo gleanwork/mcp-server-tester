@@ -8,6 +8,7 @@ import type {
 } from './evalFrameworkTypes.js';
 import { compareEvalRuns } from './evalRunComparison.js';
 import type { EvalResultStore } from './resultStore.js';
+import { joinCaseResults } from './runFormat.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 
 /** A previous run's summary and ID. */
@@ -116,10 +117,7 @@ export async function findPreviousRun(options: {
   )[0];
 }
 
-/**
- * A run directory's summary with each variant's case results put back from
- * its results.json, which is where the run keeps them.
- */
+/** A run directory's summary, with its case results from results.json. */
 async function withCaseResults(
   summary: EvaluationSummary,
   resultsPath: string
@@ -133,23 +131,7 @@ async function withCaseResults(
   } catch {
     // A run without results.json compares as having no cases.
   }
-  return {
-    ...summary,
-    results: cases,
-    variants: summary.variants.map((variant) => ({
-      ...variant,
-      ...(variant.result
-        ? {
-            result: {
-              ...variant.result,
-              caseResults: cases.filter(
-                (result) => (result.variant ?? 'default') === variant.name
-              ),
-            },
-          }
-        : {}),
-    })),
-  };
+  return joinCaseResults(summary, cases);
 }
 
 function metric(

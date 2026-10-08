@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import { RUN_FORMAT } from './resultFormat.js';
+import { RUN_FORMAT, assertRunFormat } from './resultFormat.js';
 import type { EvaluationSummary } from './evalFrameworkTypes.js';
 import type { EvalCaseResult, TrialResult } from '../types/reporter.js';
 import type { GraderScore } from '../types/index.js';
@@ -81,9 +81,14 @@ const RunRecordSchema = z.looseObject({
   variants: z.array(
     z.looseObject({
       name: z.string(),
+      description: z.string().optional(),
       servers: z.array(z.looseObject({})).optional(),
       client: z.string().optional(),
       model: z.string().optional(),
+      clientOptions: z.record(z.string(), z.unknown()).optional(),
+      tools: z.record(z.string(), z.unknown()).optional(),
+      inputTemplate: z.string().optional(),
+      judges: z.array(z.string()).optional(),
     })
   ),
   datasets: z.array(
@@ -245,7 +250,7 @@ function trialsOf(result: EvalCaseResult): Array<TrialResult | EvalCaseResult> {
 }
 
 /** Whether a trial failed on infrastructure: graders didn't score it. */
-function isInfraTrial(trial: TrialResult | EvalCaseResult): boolean {
+export function isInfraTrial(trial: TrialResult | EvalCaseResult): boolean {
   return 'isInfrastructureError' in trial &&
     trial.isInfrastructureError !== undefined
     ? trial.isInfrastructureError
@@ -452,4 +457,70 @@ export async function writeLatest(
     path: `runs/${runId}`,
   });
   await fs.rename(temporary, file);
+}
+
+/**
+ * A run's summary with its case results put back from results.json: overall
+ * and in each variant's result. summary.json keeps only the totals.
+ */
+export function joinCaseResults(
+  summary: EvaluationSummary,
+  cases: EvalCaseResult[]
+): EvaluationSummary {
+  return {
+    ...summary,
+    results: cases,
+    variants: summary.variants.map((variant) =>
+      variant.result
+        ? {
+            ...variant,
+            result: {
+              ...variant.result,
+              caseResults: cases.filter(
+                (result) => (result.variant ?? 'default') === variant.name
+              ),
+            },
+          }
+        : variant
+    ),
+  };
+}
+
+/** The type of run.json. */
+export type RunRecord = z.infer<typeof RunRecordSchema>;
+
+/** A run directory, read back: run.json, and the summary with its case results. */
+export interface StoredRun {
+  directory: string;
+  run: RunRecord;
+  summary: EvaluationSummary;
+}
+
+/**
+ * Read a run directory written in the mst.run/v1 format. Throws, with what
+ * to do, when a file is missing or in another format.
+ */
+export async function readRunDirectory(directory: string): Promise<StoredRun> {
+  const read = async (name: string): Promise<unknown> => {
+    const file = path.join(directory, name);
+    let text: string;
+    try {
+      text = await fs.readFile(file, 'utf8');
+    } catch {
+      throw new Error(
+        `${file} is missing: ${directory} isn't a complete MST run.`
+      );
+    }
+    const value: unknown = JSON.parse(text);
+    assertRunFormat(value, file);
+    return value;
+  };
+  const run = RunRecordSchema.parse(await read('run.json'));
+  const summary = (await read('summary.json')) as EvaluationSummary;
+  const results = (await read('results.json')) as { cases?: EvalCaseResult[] };
+  return {
+    directory,
+    run,
+    summary: joinCaseResults(summary, results.cases ?? []),
+  };
 }

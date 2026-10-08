@@ -27,6 +27,7 @@
         "type": "object",
         "properties": {
           "name": { "type": "string" },
+          "description": { "type": "string" },
           "servers": {
             "type": "array",
             "items": {
@@ -36,7 +37,19 @@
             }
           },
           "client": { "type": "string" },
-          "model": { "type": "string" }
+          "model": { "type": "string" },
+          "clientOptions": {
+            "type": "object",
+            "propertyNames": { "type": "string" },
+            "additionalProperties": {}
+          },
+          "tools": {
+            "type": "object",
+            "propertyNames": { "type": "string" },
+            "additionalProperties": {}
+          },
+          "inputTemplate": { "type": "string" },
+          "judges": { "type": "array", "items": { "type": "string" } }
         },
         "required": ["name"],
         "additionalProperties": {}

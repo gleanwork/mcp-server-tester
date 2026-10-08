@@ -53,9 +53,12 @@ function overlap(before: string, after: string): number {
 function OneChange({
   change,
   variantLabel,
+  baselineLabel,
 }: {
   change: VariantToolChange;
   variantLabel: string;
+  /** The baseline's label. Absent: "Current" (a tool optimization). */
+  baselineLabel?: string;
 }) {
   const block = 'whitespace-pre-wrap rounded-md px-3 py-2';
   const isSchema = change.field === 'inputSchema';
@@ -92,7 +95,7 @@ function OneChange({
     <div className="grid gap-3">
       <div className="grid gap-1">
         <span className="text-xs font-semibold text-muted-foreground">
-          Current
+          {baselineLabel ?? 'Current'}
         </span>
         {change.before !== undefined ? (
           <div
@@ -102,7 +105,9 @@ function OneChange({
           </div>
         ) : (
           <div className="text-xs text-muted-foreground">
-            The server’s original text couldn’t be read.
+            {baselineLabel
+              ? 'Uses the server’s own text, which the run didn’t record.'
+              : 'The server’s original text couldn’t be read.'}
           </div>
         )}
       </div>
@@ -123,15 +128,24 @@ function OneChange({
 export function ChangeDiff({
   variantLabel,
   changes,
+  baselineLabel,
 }: {
   variantLabel: string;
   changes: VariantToolChange[];
+  /** Set in an eval run's report, where the diff sits under "What differs". */
+  baselineLabel?: string;
 }) {
   return (
     <section aria-labelledby="exp-diff-h" className="grid max-w-[760px] gap-2">
-      <h2 id="exp-diff-h" className="text-lg font-semibold">
-        What <span className="font-mono">{variantLabel}</span> changed
-      </h2>
+      {baselineLabel ? (
+        <h3 id="exp-diff-h" className="text-sm font-semibold">
+          Tool metadata
+        </h3>
+      ) : (
+        <h2 id="exp-diff-h" className="text-lg font-semibold">
+          What <span className="font-mono">{variantLabel}</span> changed
+        </h2>
+      )}
       <div className="grid gap-4 rounded-lg border bg-card p-4 text-sm">
         {changes.length === 0 ? (
           <p className="text-muted-foreground">This variant changes nothing.</p>
@@ -148,7 +162,11 @@ export function ChangeDiff({
                     {c.tool} · {c.field}
                   </h3>
                 )}
-                <OneChange change={c} variantLabel={variantLabel} />
+                <OneChange
+                  change={c}
+                  variantLabel={variantLabel}
+                  {...(baselineLabel ? { baselineLabel } : {})}
+                />
                 {c.before !== undefined && c.field === 'description' && (
                   <p className="text-xs text-muted-foreground">
                     {c.before.length} → {c.after.length} characters

@@ -35,6 +35,7 @@ This guide covers upgrading from 1.x (the last 1.x release is 1.1.1). Features f
 - [Servers are a map keyed by label](#servers-are-a-map-keyed-by-label)
 - [Case judges sit beside assertions](#case-judges-sit-beside-assertions)
 - [Runs are directories in the mst.run/v1 format](#runs-are-directories-in-the-mstrunv1-format)
+- [`mst open` opens a run's report](#mst-open-opens-a-runs-report)
 - [New in 2.0 (non-breaking)](#new-in-20-non-breaking)
 
 ---
@@ -731,6 +732,12 @@ Pairwise judges can now go in an eval config too: `"pairwiseJudges": ["acme/pair
 - Run IDs are `20261007T182504Z-7f3c2a`, not UUIDs.
 - Case IDs must be unique within a run. A case ID in two datasets fails before anything runs.
 - Each trial in `trialResults` has its own `scores`.
+
+## `mst open` opens a run's report
+
+**Affects:** scripts that run `mst open`.
+
+Every `mst run` now writes a report into its run directory (`runs/<run-id>/report/index.html`). `mst open` opens the newest run's report under `--dir` (default `.mcp-test-results`), or the run or eval directory you name: `mst open .mcp-test-results/<eval name>/runs/<run-id>`. Only when there's no eval run there does it fall back to the Playwright reporter's `latest/index.html`. `--print` prints the path instead of opening a browser. See [`mst open`](../cli.md#open---open-a-runs-report).
 
 ## New in 2.0 (non-breaking)
 

@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import { runReportPath } from '../../../evals/runReport.js';
 import path from 'node:path';
 import { z } from 'zod';
 import { localCredentialStore } from '../../../auth/grants/localStore.js';
@@ -9,6 +11,8 @@ export interface RunOptions {
   plugins?: string[];
   rootDir?: string;
   dryRun?: boolean;
+  /** `--no-report`: don't write the run's report. */
+  report?: boolean;
   /** `--variant`: run only these variants. */
   variant?: string[];
   /** `--case`: run only these case ids. */
@@ -57,6 +61,7 @@ export async function run(options: RunOptions): Promise<void> {
     outputDir: options.outputDir,
     secretsFile: options.secretsFile,
     dryRun: options.dryRun,
+    ...(options.report === false ? { report: false } : {}),
     ...(options.variant?.length ? { variant: options.variant } : {}),
     ...(options.case?.length ? { cases: options.case } : {}),
     ...(options.filterTag?.length ? { filterTags: options.filterTag } : {}),
@@ -154,6 +159,12 @@ export async function run(options: RunOptions): Promise<void> {
     }
   }
   console.log(`Output: ${result.outputDir}`);
+  const report = runReportPath(result.outputDir);
+  if (existsSync(report))
+    // A partial run never becomes the eval's latest, so name it.
+    console.log(
+      `Report: ${report} (open it with \`mst open${result.summary.partial ? ` ${result.outputDir}` : ''}\`)`
+    );
   if ((metrics.failed ?? 0) > 0) process.exitCode = 1;
 }
 

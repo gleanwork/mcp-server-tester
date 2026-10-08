@@ -224,11 +224,11 @@ describe('mst CLI', () => {
   });
 
   describe('open command', () => {
-    it('exits with code 1 when no report exists in default directory', async () => {
+    it('exits with code 1 when there is no run in the default directory', async () => {
       const result = await runBin('open');
 
       expect(result.exitCode).toBe(1);
-      expect(result.stderr).toContain('No report found');
+      expect(result.stderr).toContain('No eval runs found');
     });
 
     it('exits with code 1 when --dir points to a directory with no report', async () => {
@@ -239,7 +239,7 @@ describe('mst CLI', () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.stderr).toContain('No report found');
+      expect(result.stderr).toContain('No eval runs found');
     });
   });
 

@@ -835,6 +835,13 @@ export type RegressionCheck = 'any-case' | 'significant';
 /** Every variant compared with the baseline, case by case. */
 export interface MCPComparisonData {
   baselineId: string;
+  /** The baseline's display name. Absent: "current" (a tool optimization's current metadata). */
+  baselineName?: string;
+  /**
+   * What the comparison is for: an eval run's variants, or a tool
+   * optimization's candidates. Absent: a tool optimization.
+   */
+  purpose?: 'eval' | 'tool-optimization';
   regressionCheck: RegressionCheck;
   /** Where the case groups came from. */
   grouping: VariantGrouping;
@@ -873,6 +880,133 @@ export interface MCPComparisonData {
   /** Baseline first, then candidates in the order they ran. */
   variants: VariantComparisonEntry[];
   cases: VariantComparisonCase[];
+}
+
+/** One grader's score for one trial, as the run report shows it. */
+export interface RunReportScore {
+  grader: string;
+  pass: boolean;
+  score?: number;
+  details?: string;
+  reasoning?: string;
+  /** Whether a judge gave the score. */
+  judge?: boolean;
+}
+
+/** One event of a trial's trace, with long fields shortened. */
+export interface RunReportEvent {
+  kind: string;
+  name?: string;
+  server?: string;
+  input?: string;
+  output?: string;
+  text?: string;
+  isError?: boolean;
+}
+
+/** One trial of one case by one variant: its trace and scores. */
+export interface RunReportTrial {
+  pass: boolean;
+  error?: string;
+  infrastructureError?: boolean;
+  durationMs?: number;
+  finalText?: string;
+  events: RunReportEvent[];
+  scores: RunReportScore[];
+  tokens?: number;
+}
+
+/** A pairwise judge's preference for one case. */
+export interface RunReportPreference {
+  judge: string;
+  /** `candidate`, `baseline` or `tie`; `none` when the judge gave none. */
+  preference: string;
+  reasoning?: string;
+  error?: string;
+}
+
+/** One setup field where a variant differs from the baseline. */
+export interface RunReportDifference {
+  field: string;
+  baseline?: string;
+  variant?: string;
+}
+
+/** One variant's row in the run report. */
+export interface RunReportVariant {
+  /** The variant's ID in `comparison`. */
+  id: string;
+  name: string;
+  baseline: boolean;
+  description?: string;
+  client?: string;
+  model?: string;
+  /** Compared with the baseline: clearly better, clearly worse, or unclear. */
+  verdict: 'baseline' | 'better' | 'worse' | 'unclear';
+  /** Share of cases that passed. */
+  casePassRate?: number;
+  /** Share of trials that passed. */
+  trialPassRate?: number;
+  /** Each judge's mean score over the trials it scored (judges use their own scales). */
+  judgeScores: Array<{ judge: string; mean: number }>;
+  costPerCase?: number;
+  medianDurationMs?: number;
+  /** Share of tool calls per tool, or per server when the run has several. */
+  toolsUsed: Array<{ name: string; share: number }>;
+  /** Each pairwise judge's verdict against the baseline. */
+  pairwise: Array<{
+    judge: string;
+    compared: number;
+    wins: number;
+    losses: number;
+    ties: number;
+    errors: number;
+    winRate?: number;
+  }>;
+  /** Changes since the previous run of the eval. */
+  previous?: {
+    passRateDelta: number;
+    regressed: string[];
+    improved: string[];
+  };
+}
+
+/** Everything the run report shows: computed by `buildRunReport`, rendered as is. */
+export interface MCPRunReportData {
+  format: string;
+  kind: 'report';
+  run: {
+    runId: string;
+    evalName: string;
+    createdAt: string;
+    finishedAt: string;
+    mstVersion: string;
+    partial: boolean;
+    /** Whether the run stored responses redacted (`redactStoredResponses`): no answers or tool outputs. */
+    redacted: boolean;
+    selection?: Record<string, unknown>;
+    baseline: string;
+    /** False when a narrowed run left the baseline out. */
+    baselineRan: boolean;
+    datasets: Array<{ name: string; caseCount: number }>;
+    cases: number;
+    trialsPerCase: { min: number; max: number };
+  };
+  comparison: MCPComparisonData;
+  variants: RunReportVariant[];
+  /** By variant name. */
+  differences: Record<string, RunReportDifference[]>;
+  /** By variant ID, then case ID. */
+  trials: Record<string, Record<string, RunReportTrial[]>>;
+  /** By variant ID, then case ID. */
+  preferences: Record<string, Record<string, RunReportPreference[]>>;
+  previousRun?: {
+    runId: string;
+    timestamp: string;
+    sameConfig: boolean;
+    passRate: number;
+    passRateDelta: number;
+  };
 }
 
 /**
