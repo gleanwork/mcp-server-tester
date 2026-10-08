@@ -14,8 +14,10 @@ CONFIRM_MODEL = {'tool': 'confirm_model', 'input': {'model': 'claude-opus-4-6'}}
 
 
 class DriverTests(unittest.TestCase):
-    def run_actions(self, actions, mode='submit', budget=8, query='query', next_plan=None, entry_error=False, response_metadata=None, planner_error=None, application='cowork', target_model=None, reasoning_effort=None, chatgpt_surface='chatgpt-work'):
+    def run_actions(self, actions, mode='submit', budget=8, query='query', next_plan=None, entry_error=False, response_metadata=None, planner_error=None, application='cowork', target_model=None, reasoning_effort=None, chatgpt_surface='chatgpt-work', frontmost=None):
         api = MagicMock()
+        app_name = 'ChatGPT' if application == 'chatgpt' else 'Claude'
+        front = MagicMock(side_effect=frontmost) if frontmost is not None else MagicMock(return_value=app_name)
 
         def response(plan):
             return types.SimpleNamespace(**(response_metadata or {}), content=[
@@ -43,7 +45,7 @@ class DriverTests(unittest.TestCase):
                 return {'type': 'image'}, False
             return 'done', action.get('action') == 'key' and str(action.get('text', '')).lower() in {'enter', 'return'}
 
-        with patch.dict(sys.modules, {'anthropic': api}), patch.dict(driver.os.environ, {'ANTHROPIC_API_KEY': 'test-only'}), patch.object(driver.subprocess, 'run') as launched, patch.object(driver, 'check_chatgpt_permissions'), patch.object(driver.time, 'sleep'), patch.object(driver, 'screenshot', return_value={'type': 'image'}), patch.object(driver, 'execute_action', side_effect=execute) as performed:
+        with patch.dict(sys.modules, {'anthropic': api}), patch.dict(driver.os.environ, {'ANTHROPIC_API_KEY': 'test-only'}), patch.object(driver.subprocess, 'run') as launched, patch.object(driver, 'check_chatgpt_permissions'), patch.object(driver.time, 'sleep'), patch.object(driver, 'screenshot', return_value={'type': 'image'}), patch.object(driver, 'execute_action', side_effect=execute) as performed, patch.object(driver, 'frontmost_app', front):
             try:
                 result = asyncio.run(driver.run(query, budget, mode, application, target_model, reasoning_effort, chatgpt_surface))
             except RuntimeError as error:
@@ -55,6 +57,7 @@ class DriverTests(unittest.TestCase):
             self.planner_request = planner.call_args.kwargs if planner.call_args else {}
             self.launches = launched.call_args_list
             self.client_kwargs = api.Anthropic.call_args.kwargs if api.Anthropic.call_args else {}
+            self.focus_checks = front.call_count
             return result, performed.call_count
 
     def test_planner_ignores_inherited_gateway_settings(self):
@@ -124,6 +127,37 @@ class DriverTests(unittest.TestCase):
                 self.run_actions([FILL, ENTER], mode=mode)
                 self.assertEqual(self.launches[0].args[0], ['open', '-a', path])
                 self.assertTrue(self.launches[0].kwargs['check'])
+
+    def test_cowork_refocuses_and_skips_an_action_aimed_at_another_app(self):
+        click = {'action': 'left_click', 'coordinate': [10, 10]}
+        # Finder came forward; refocusing brings Claude back for the next plan.
+        result, count = self.run_actions([click], next_plan=[{'action': 'screenshot'}, FILL, ENTER],
+                                         frontmost=['Finder', 'Claude', 'Claude', 'Claude'])
+        self.assertEqual(result['status'], 'submitted')
+        self.assertEqual(self.executed_actions, [{'action': 'screenshot'}, {'action': 'type', 'text': 'query'}, ENTER])
+        self.assertEqual(sum(1 for call in self.launches if call.args[0] == ['open', '-a', 'Claude']), 2)
+        feedback = self.planner_request['messages'][2]['content'][0]
+        self.assertTrue(feedback['is_error'])
+        self.assertIn('Take a fresh screenshot', feedback['content'])
+        self.assertEqual(result['telemetry']['refused_action_count'], 1)
+
+    def test_cowork_stops_without_acting_when_it_cannot_refocus(self):
+        result, count = self.run_actions([FILL, ENTER], frontmost=['Slack', 'Slack'])
+        self.assertIsInstance(result, str)
+        self.assertEqual(self.error_code, 'navigation_blocked')
+        self.assertEqual(self.executed_actions, [])
+
+    def test_cowork_screenshots_do_not_need_focus(self):
+        result, count = self.run_actions([{'action': 'screenshot'}], next_plan=[FILL, ENTER],
+                                         frontmost=['Claude', 'Claude'])
+        self.assertEqual(result['status'], 'submitted')
+        self.assertEqual(self.focus_checks, 2)
+
+    def test_cowork_reset_also_checks_focus(self):
+        stop = {'action': 'left_click', 'coordinate': [10, 10]}
+        result, count = self.run_actions([stop], mode='reset', frontmost=['Finder', 'Finder'])
+        self.assertIsInstance(result, str)
+        self.assertEqual(self.executed_actions, [])
 
     def test_cowork_reset_with_nothing_running_takes_no_action(self):
         result, count = self.run_actions([], mode='reset')

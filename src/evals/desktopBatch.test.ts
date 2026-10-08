@@ -177,6 +177,47 @@ describe('runDesktopBatch', () => {
     }
   });
 
+  it('stops submitting after three failed cases in a row', async () => {
+    const client = fakeClient({
+      async runCase(_session, request, index) {
+        client.events.push(`case ${index + 1}`);
+        // Case 2 passes, so the run of failures starts again at case 3.
+        return index === 1
+          ? ok(request.caseId)
+          : {
+              result: {
+                finalText: '',
+                events: [],
+                error: `no session for ${SECRET}`,
+              },
+              continuation: 'reset',
+            };
+      },
+    });
+    const results = await runDesktopBatch(client, requests(7));
+    expect(client.events).toEqual([
+      'prepare',
+      'case 1',
+      'reset before 2',
+      'case 2',
+      'case 3',
+      'reset before 4',
+      'case 4',
+      'reset before 5',
+      'case 5',
+      'dispose session',
+    ]);
+    for (const result of results.slice(5)) {
+      expect(result.error).toMatch(
+        /^Not submitted because the last 3 Fake cases failed in a row \(latest: no session for \[REDACTED\]\)/
+      );
+      expect(result.telemetry?.caseExecution).toEqual({
+        status: 'not-submitted',
+        continuation: 'blocked',
+      });
+    }
+  });
+
   it('stops submitting when a platform has no reset', async () => {
     const results = await runDesktopBatch(
       fakeClient({

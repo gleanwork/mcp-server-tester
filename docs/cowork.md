@@ -398,9 +398,20 @@ eight actions. The driver refuses typing, key presses and drags, and the planner
 instructed never to click Send, approve, or answer a question; a reset that never
 concludes the app is idle fails. The next case takes its own
 session snapshot, so a late session from the failed case cannot be attributed to
-it. If the reset fails, the remaining cases are not submitted. Per-case snapshots distinguish
+it. If the reset fails, the remaining cases are not submitted, and the same
+happens after three failed cases in a row: a reset can succeed and still leave a
+desktop that every case fails on. Per-case snapshots distinguish
 repeated identical prompts. Use a dedicated desktop: do not manually create or
 switch tasks during evaluation.
+
+On macOS the driver acts only while Claude is the frontmost app. A click that
+misses Claude's window (on the desktop, say) brings another app forward; before
+every click, key or scroll, the driver checks, and if another app is in front it
+brings Claude back, skips the action and has the planner take a new screenshot.
+If Claude can't be brought back, the case stops with `navigation_blocked` and
+nothing more is sent. MST discards the driver's own log; set
+`MST_COWORK_CUA_LOG_FILE` to a path to keep it. The log holds action and app
+names, never the query.
 
 Results include `clientUsage`, `clientTelemetry`, and `telemetry.totalClientUsage`.
 These describe native Claude execution, not the separate Computer Use planner's
