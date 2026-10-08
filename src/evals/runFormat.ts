@@ -392,8 +392,9 @@ export async function writeRun(
         path.join(runDirectory, 'traces', variant, caseId, `${index}.json`),
         trialRecord(runId, result, trial, index)
       );
-      // An infrastructure failure isn't a trial the graders scored.
-      if (isInfraTrial(trial)) continue;
+      // An infrastructure failure isn't a trial the graders scored, except
+      // one where a grader failed: the others' scores, and its error, stay.
+      if (isInfraTrial(trial) && !trial.gradingError) continue;
       const scores = (trial as Partial<EvalCaseResult>).scores ?? {};
       for (const [grader, score] of graderScores(scores)) {
         await writeJson(

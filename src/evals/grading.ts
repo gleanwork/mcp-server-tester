@@ -170,6 +170,7 @@ async function evaluateJudges(
         judgeProvider: details.judgeProvider as string | undefined,
         judgeModel: details.judgeModel as string | undefined,
         ...(details.skipped === true ? { skipped: true } : {}),
+        ...(typeof details.error === 'string' ? { error: details.error } : {}),
         ...(details.subScores !== undefined
           ? {
               subScores: details.subScores as GraderScore['subScores'],
@@ -189,13 +190,27 @@ async function evaluateJudges(
   const graded = results.filter((result) => !result.skipped);
   const passCount = graded.filter((result) => result.pass).length;
   const skipped = results.length - graded.length;
+  const failedToRun = results.find((result) => result.error !== undefined);
   return {
     pass: passCount === graded.length,
     details:
       `${passCount}/${graded.length} judges passed` +
       (skipped > 0 ? ` (${skipped} skipped)` : ''),
+    ...(failedToRun ? { error: failedToRun.error } : {}),
     judgeResults: results,
   };
+}
+
+/**
+ * The first grader in a trial's scores that failed to run, as
+ * `"<grader>: <error>"`; undefined when every grader gave a verdict.
+ */
+export function gradingErrorOf(
+  scores: Partial<Record<string, GraderScore>>
+): string | undefined {
+  for (const [grader, score] of Object.entries(scores))
+    if (score?.error !== undefined) return `${grader}: ${score.error}`;
+  return undefined;
 }
 
 function isToolCall(entry: { kind?: string }): boolean {

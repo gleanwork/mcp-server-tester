@@ -236,6 +236,8 @@ export interface TrialResult {
   durationMs: number;
   /** Error message if the trial failed with an exception */
   error?: string;
+  /** A grader failed to run on this trial, so it has no verdict (`<grader>: <error>`). */
+  gradingError?: string;
   /** When true, this trial failed due to network/infrastructure issues rather than an assertion failure */
   isInfrastructureError?: boolean;
   /**
@@ -356,6 +358,12 @@ export interface EvalCaseResult {
    * Error if tool call failed
    */
   error?: string;
+
+  /**
+   * A grader failed to run on this (single-trial) case, so it has no
+   * verdict: `<grader>: <error>`. An infrastructure failure.
+   */
+  gradingError?: string;
 
   /**
    * Grader scores, by grader type

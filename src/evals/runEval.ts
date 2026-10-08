@@ -1245,7 +1245,17 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
   await writeRun(
     outputDir,
     executionId,
-    runFacts(storedSummary, { collect: 'complete', grade: 'complete' }),
+    runFacts(storedSummary, {
+      collect: 'complete',
+      // Trials a grader couldn't score are what a regrade would finish.
+      grade: allResults.some(
+        (result) =>
+          result.gradingError !== undefined ||
+          result.trialResults?.some((trial) => trial.gradingError !== undefined)
+      )
+        ? 'partial'
+        : 'complete',
+    }),
     storedSummary
   );
   // The report is rebuilt from the run's files, so it shows what was stored.

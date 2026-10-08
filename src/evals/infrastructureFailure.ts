@@ -68,9 +68,14 @@ function isExternalClientInfrastructureFailure(
  * the pass rate and of per-trial metrics.
  */
 export function isInfrastructureFailure(
-  result: Pick<EvalCaseResult, 'error' | 'clientDiagnostics' | 'clientMetadata'>
+  result: Pick<
+    EvalCaseResult,
+    'error' | 'clientDiagnostics' | 'clientMetadata' | 'gradingError'
+  >
 ): boolean {
   return (
+    // A grader that couldn't run says nothing about the client.
+    result.gradingError !== undefined ||
     isExternalClientInfrastructureFailure(result.clientMetadata) ||
     (result.error != null &&
       (result.clientDiagnostics?.failureKind !== undefined ||

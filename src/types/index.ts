@@ -157,6 +157,13 @@ export interface GraderScore {
   /** The judge could not grade this case. Not counted in pass/fail or score metrics. */
   skipped?: boolean;
 
+  /**
+   * The grader failed to run (a judge's SDK missing, its endpoint down, an
+   * invalid score): no verdict on the trial. A trial with a grader error is
+   * an infrastructure failure, left out of pass rates.
+   */
+  error?: string;
+
   /** Named sub-scores from the judge, such as one per rubric criterion. */
   subScores?: Record<string, JudgeSubScore>;
 
