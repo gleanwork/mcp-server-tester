@@ -182,7 +182,7 @@ export async function findMatchingClaudeSessions(
         session.metadata.initialMessage !== options.exactPrompt
       )
         continue;
-      traces.push(await parseClaudeTrace(session));
+      traces.push(await parseClaudeTrace(session, undefined, LIVE_COLLECTION));
       continue;
     }
     if (!isNewOrUpdated && !isRecent) {
@@ -195,7 +195,8 @@ export async function findMatchingClaudeSessions(
       session,
       options.correlation?.includedInPrompt === false
         ? undefined
-        : options.marker
+        : options.marker,
+      LIVE_COLLECTION
     );
     if (
       sessionMatchesCorrelation({
@@ -222,6 +223,9 @@ function describeCorrelation(options: ClaudeSessionMatchOptions): string {
   }
   return `${options.correlation?.strategy ?? 'none'} correlation near the run start`;
 }
+
+/** Collecting a trial: the session's files are still there. */
+const LIVE_COLLECTION = { resolvePersistedOutputs: true } as const;
 
 async function listSessionCandidates(
   dataDir: string

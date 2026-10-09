@@ -30,6 +30,8 @@ async function fixture(
     pointer?: string;
     attachment?: boolean;
     modifyResult?: (result: RecordValue) => void;
+    /** The first tool result's content, instead of an output pointer. */
+    toolOutput?: string;
   } = {}
 ) {
   const root = await mkdtemp(join(tmpdir(), 'mst-native-audit-test-'));
@@ -90,7 +92,9 @@ async function fixture(
           {
             type: 'tool_result',
             tool_use_id: 'tool-1',
-            content: `Output has been saved to ${options.pointer ?? pointer}.`,
+            content:
+              options.toolOutput ??
+              `Output has been saved to ${options.pointer ?? pointer}.`,
             is_error: false,
           },
           {
@@ -224,6 +228,36 @@ describe('auditCoworkNativeRun', () => {
     const report = await f.audit();
     expect(report.evidencePassed).toBe(false);
     expect(report.issues).toContain('INVALID_RESULTS');
+  });
+
+  describe('a large result collection read back from its file', () => {
+    const full = `[\n  {\n    "type": "text",\n    "text": "${'x'.repeat(3000)}"\n  }\n]`;
+    const placeholder = `<persisted-output>\nOutput too large (97KB). Full output saved to: /gone/tool-results/tool-1.json\n\nPreview (first 2KB):\n${full.slice(0, 2000)}\n...\n</persisted-output>`;
+    // The run stored what collection read back; the replay sees the placeholder.
+    function storeFull(saved: RecordValue, output: string) {
+      const response = saved.response as {
+        toolCalls: Array<{ id?: string; output?: string }>;
+        events: Array<{ id?: string; output?: string }>;
+      };
+      for (const call of response.toolCalls)
+        if (call.id === 'tool-1') call.output = output;
+      // Events carry no id: the one with the placeholder is that call's.
+      for (const event of response.events)
+        if (event.output === placeholder) event.output = output;
+    }
+    it('matches the replayed placeholder when it starts with its preview', async () => {
+      const f = await fixture({ toolOutput: placeholder, attachment: false });
+      storeFull(f.saved, full);
+      const report = await f.audit();
+      expect(report.cases[0]?.issues).toEqual([]);
+      expect(report.status).toBe('verified');
+    });
+    it('is still a mismatch when it does not', async () => {
+      const f = await fixture({ toolOutput: placeholder, attachment: false });
+      storeFull(f.saved, 'something else entirely');
+      const report = await f.audit();
+      expect(report.cases[0]?.issues).toContain('TOOL_CALLS_MISMATCH');
+    });
   });
 
   it('replays the native parser and normalizers, hashes attachments, and returns no content or paths', async () => {

@@ -26,18 +26,26 @@ async function writeJsonl(path: string, events: unknown[]): Promise<void> {
   );
 }
 
-async function parseNativeEvents(audit: unknown[], transcript: unknown[] = []) {
+async function parseNativeEvents(
+  audit: unknown[],
+  transcript: unknown[] = [],
+  options: Parameters<typeof parseClaudeTrace>[2] = {}
+) {
   const sessionDir = await mkdtemp(join(tmpdir(), 'claude-native-telemetry-'));
   onTestFinished(() => rm(sessionDir, { recursive: true, force: true }));
   await writeJsonl(join(sessionDir, 'audit.jsonl'), audit);
   await writeJsonl(join(sessionDir, 'cli.jsonl'), transcript);
-  return parseClaudeTrace({
-    id: 'native-telemetry',
-    metadataPath: join(sessionDir, 'metadata.json'),
-    sessionDir,
-    statMtimeMs: Date.now(),
-    metadata: { cliSessionId: 'cli' },
-  });
+  return parseClaudeTrace(
+    {
+      id: 'native-telemetry',
+      metadataPath: join(sessionDir, 'metadata.json'),
+      sessionDir,
+      statMtimeMs: Date.now(),
+      metadata: { cliSessionId: 'cli' },
+    },
+    undefined,
+    options
+  );
 }
 
 function toolUseEvent(id: string, name: string, timestamp?: string) {
@@ -49,6 +57,49 @@ function toolUseEvent(id: string, name: string, timestamp?: string) {
 }
 
 describe('Claude local-agent trace parsing', () => {
+  it('reads back a large tool result the transcript only points to', async () => {
+    const id = 'toolu_bdrk_01QnnrBzoJ7qWyZbzHvwEouZ';
+    const full = '[{"type":"text","text":"# Search Results (16 found)"}]';
+    // Claude Code saves it under its temporary directory.
+    const scratch = await mkdtemp(join(tmpdir(), 'mst-cowork-native-'));
+    onTestFinished(() => rm(scratch, { recursive: true, force: true }));
+    const results = join(scratch, 'projects', 'session', 'cli', 'tool-results');
+    await mkdir(results, { recursive: true });
+    await writeFile(join(results, `${id}.json`), full);
+    const placeholder = `<persisted-output>\nOutput too large (97KB). Full output saved to: ${join(results, `${id}.json`)}\n\nPreview (first 2KB):\n[{"type":"text"`;
+    const events = [
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            {
+              type: 'tool_use',
+              id,
+              name: 'mcp__glean__enterprise_search',
+              input: { query: 'MST 2.0' },
+            },
+          ],
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: id, content: placeholder },
+          ],
+        },
+      },
+    ];
+    const live = await parseNativeEvents(events, [], {
+      resolvePersistedOutputs: true,
+    });
+    expect(live.toolCalls).toHaveLength(1);
+    expect(live.toolCalls[0]!.output).toBe(full);
+    // A replay (the evidence audit) reads no file a transcript names.
+    const replay = await parseNativeEvents(events);
+    expect(replay.toolCalls[0]!.output).toBe(placeholder);
+  });
+
   it.each(['partial', 'conflicting'] as const)(
     'preserves transcript ordering with %s audit coverage and audit-only results',
     async (coverage) => {

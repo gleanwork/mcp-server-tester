@@ -1,5 +1,55 @@
 import { describe, it, expect } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { parseStreamJson, createJsonParser } from './parsers.js';
+
+describe('parseStreamJson and large tool results', () => {
+  it('reads back a result Claude Code saved in the config directory MST made', () => {
+    const config = mkdtempSync(join(tmpdir(), 'mst-claude-'));
+    try {
+      const dir = join(config, 'projects', 'p', 's', 'tool-results');
+      mkdirSync(dir, { recursive: true });
+      const file = join(dir, 'toolu_1.json');
+      writeFileSync(file, 'FULL RESULT');
+      const placeholder = `<persisted-output>\nOutput too large (60KB). Full output saved to: ${file}\n\nPreview (first 2KB):\nFULL\n...\n</persisted-output>`;
+      const stdout = [
+        {
+          type: 'assistant',
+          message: {
+            content: [
+              {
+                type: 'tool_use',
+                id: 'toolu_1',
+                name: 'mcp__s__search',
+                input: {},
+              },
+            ],
+          },
+        },
+        {
+          type: 'user',
+          message: {
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'toolu_1',
+                content: placeholder,
+              },
+            ],
+          },
+        },
+        { type: 'result', result: 'done' },
+      ]
+        .map((event) => JSON.stringify(event))
+        .join('\n');
+      const result = parseStreamJson(stdout);
+      expect(result.toolCalls?.[0]?.output).toBe('FULL RESULT');
+    } finally {
+      rmSync(config, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('parseStreamJson', () => {
   it('parses valid NDJSON with tool_use blocks', () => {

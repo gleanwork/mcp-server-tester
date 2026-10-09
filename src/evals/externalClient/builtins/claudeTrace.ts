@@ -1,5 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import {
+  mstScratchRoots,
+  resolvePersistedOutput,
+} from '../../persistedToolOutput.js';
 import { Readable } from 'node:stream';
 import { parse as parseNdjson } from 'ndjson';
 import type { LLMToolCall } from '../../mstClient/types.js';
@@ -115,7 +119,14 @@ interface ClaudeAuditEvent {
 
 export async function parseClaudeTrace(
   candidate: SessionCandidate,
-  marker?: string
+  marker?: string,
+  options: {
+    /**
+     * Live collection only: read back large results Claude Code saved to a
+     * file. A later replay (the evidence audit) has no such files.
+     */
+    resolvePersistedOutputs?: boolean;
+  } = {}
 ): Promise<ClaudeTrace> {
   const parseWarnings: string[] = [];
   const auditPath = join(candidate.sessionDir, 'audit.jsonl');
@@ -192,6 +203,18 @@ export async function parseClaudeTrace(
       : extractAssistantText(combinedEventsForRun);
   const usage = extractAggregatedUsage(resultEvents);
   const toolCalls = extractToolCalls(auditEventsForRun, transcriptEventsForRun);
+  // Large results are only placeholders in the transcript; while the
+  // session's files exist, read back what the model saw. On macOS, Claude
+  // Desktop's TMPDIR is MST's native helper scratch.
+  if (options.resolvePersistedOutputs) {
+    const roots = [
+      ...mstScratchRoots('mst-cowork-native-'),
+      candidate.sessionDir,
+    ];
+    for (const call of toolCalls)
+      if (typeof call.output === 'string')
+        call.output = resolvePersistedOutput(call.output, call.id, roots);
+  }
 
   return {
     candidate,
