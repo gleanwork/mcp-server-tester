@@ -320,6 +320,8 @@ describe('eval review regressions', () => {
     expect(result.datasets[0]?.dataset).toEqual({
       name: 'canonical',
       cases: [original],
+      // A plugin's dataset says which one it is.
+      origin: { ref: expect.stringMatching(/^test\/dataset\//) },
     });
   });
 

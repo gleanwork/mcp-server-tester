@@ -19,6 +19,14 @@ import {
   authStatus,
   type AuthOptions,
 } from './commands/auth/index.js';
+import {
+  listDatasets,
+  pullDataset,
+  showDataset,
+  type DatasetPullOptions,
+} from './commands/datasets/index.js';
+import { listJudgeCommand, showJudge } from './commands/judges/index.js';
+import type { DiscoveryOptions } from './commands/discoveryPlugins.js';
 import packageJson from '../../package.json' with { type: 'json' };
 import { inspect } from 'node:util';
 import { debugCli } from '../debug.js';
@@ -137,6 +145,61 @@ authOptions(
     .description("Revoke servers' grants at the provider and delete them")
 ).action((_options: AuthOptions, command: Command) =>
   authRevoke(withConfig(command.optsWithGlobals<AuthOptions>()))
+);
+
+// Datasets command: the datasets plugins provide
+function discoveryOptions(command: Command): Command {
+  return command
+    .option('--plugins <modules...>', 'Plugin modules to look in')
+    .option('-c, --config <path>', "Look in an eval config's plugins")
+    .option('--root-dir <dir>', 'Where relative plugin paths resolve', '.')
+    .option('--json', 'Print JSON');
+}
+function datasetSelection(command: Command): Command {
+  return command
+    .option('--snapshot <id>', "A snapshot (default: the plugin's latest)")
+    .option('--source <source>', 'snapshot (default) or live');
+}
+const datasetsCommand = discoveryOptions(
+  program
+    .command('datasets')
+    .description("List plugins' datasets: cases, snapshot, tags")
+).action((options: DatasetPullOptions) => listDatasets(options));
+discoveryOptions(
+  datasetSelection(
+    datasetsCommand
+      .command('show')
+      .description("A dataset's snapshot, case count, hash, tags and judges")
+      .argument('<ref>', 'namespace/dataset/name')
+  )
+).action((ref: string, _options: unknown, command: Command) =>
+  showDataset(ref, command.optsWithGlobals<DatasetPullOptions>())
+);
+discoveryOptions(
+  datasetSelection(
+    datasetsCommand
+      .command('pull')
+      .description('Write a dataset as a dataset file, to read, diff or freeze')
+      .argument('<ref>', 'namespace/dataset/name')
+      .option('-o, --out <file>', 'Write here (default: stdout)')
+  )
+).action((ref: string, _options: unknown, command: Command) =>
+  pullDataset(ref, command.optsWithGlobals<DatasetPullOptions>())
+);
+
+// Judges command: built-in and plugin judges
+const judgesCommand = discoveryOptions(
+  program
+    .command('judges')
+    .description('List judges and pairwise judges: built-in and from plugins')
+).action((options: DiscoveryOptions) => listJudgeCommand(options));
+discoveryOptions(
+  judgesCommand
+    .command('show')
+    .description("A judge's description, what it requires, and its options")
+    .argument('<ref>', 'A built-in name, or namespace/name')
+).action((ref: string, _options: unknown, command: Command) =>
+  showJudge(ref, command.optsWithGlobals<DiscoveryOptions>())
 );
 
 // Run command

@@ -6,7 +6,12 @@ import type {
   MetricDefinition,
   ResultStoreDefinition,
 } from './evalFrameworkTypes.js';
-import { getDatasetSource } from './builtinDatasetSources.js';
+import {
+  assertDatasetRequest,
+  datasetRequest,
+  getDatasetSource,
+  withoutRequest,
+} from './builtinDatasetSources.js';
 import { clientFieldsOf, clientOf, clientPatchOf } from './clientFields.js';
 import {
   assertClientSupports,
@@ -433,9 +438,19 @@ export function validateEvalConfig(
       options.namespaces
     );
   validateLabels(evalConfig.servers ?? [], 'the eval config');
-  const datasets = evalConfig.datasets.map((config) =>
-    parseConfig(config, lookups.datasetSource(config.type), 'dataset options')
-  );
+  const datasets = evalConfig.datasets.map((config) => {
+    const source = lookups.datasetSource(config.type);
+    // `snapshot` and `source` are MST's: checked here, never the schema's.
+    assertDatasetRequest(config, source);
+    const request = datasetRequest(config);
+    return {
+      ...parseConfig(withoutRequest(config), source, 'dataset options'),
+      ...(config.snapshot !== undefined ? { snapshot: config.snapshot } : {}),
+      ...(request && config.source !== undefined
+        ? { source: request.source }
+        : {}),
+    };
+  });
   const base = clientOf(evalConfig);
   const client = effectiveClient(evalConfig, base, lookups);
   const metrics = parseMetrics(evalConfig.metrics, lookups);

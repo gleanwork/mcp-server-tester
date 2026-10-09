@@ -33,6 +33,11 @@ export function getPairwiseJudge(reference: string): PairwiseJudgeDefinition {
   return pairwiseJudges.get(reference);
 }
 
+/** Installed plugins' pairwise judges, by reference, sorted. */
+export function listPairwiseJudges(): Array<[string, PairwiseJudgeDefinition]> {
+  return pairwiseJudges.list();
+}
+
 /** One pairwise judge to run, as an eval config lists it. */
 export interface PairwiseJudgeSpec {
   type: string;
