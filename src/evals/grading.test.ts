@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
   gradeTrial,
+  gradingErrorOf,
   mergeEvalJudges,
   resolveJudges,
   toolEvidenceGap,
@@ -357,5 +358,42 @@ describe('mergeEvalJudges', () => {
     );
     expect(withEvalRef?.reference).toBe('suite');
     expect(withoutRef?.reference).toBe('canonical');
+  });
+});
+
+describe('gradingErrorOf', () => {
+  const error = { pass: false, error: 'Judge "x" error: rate limited' };
+  it('names the grader that failed to run', () => {
+    expect(gradingErrorOf({ judge: error, textContains: { pass: true } })).toBe(
+      'judge: Judge "x" error: rate limited'
+    );
+  });
+  it('is nothing when every grader gave a verdict', () => {
+    expect(
+      gradingErrorOf({ judge: { pass: false }, textContains: { pass: true } })
+    ).toBeUndefined();
+  });
+  it('is nothing when another grader already failed the trial', () => {
+    expect(
+      gradingErrorOf({ judge: error, textContains: { pass: false } })
+    ).toBeUndefined();
+  });
+  it('looks inside several judges: one fail settles it, else the error stands', () => {
+    const judges = (other: { pass: boolean }) => ({
+      judge: {
+        pass: false,
+        error: error.error,
+        judgeResults: [error, other],
+      },
+    });
+    expect(gradingErrorOf(judges({ pass: false }))).toBeUndefined();
+    expect(gradingErrorOf(judges({ pass: true }))).toBe(
+      'judge: Judge "x" error: rate limited'
+    );
+  });
+  it('ignores a skipped judge', () => {
+    expect(
+      gradingErrorOf({ judge: { pass: true, skipped: true } })
+    ).toBeUndefined();
   });
 });

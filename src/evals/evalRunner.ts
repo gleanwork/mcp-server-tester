@@ -26,7 +26,7 @@ import {
   type ToolSurface,
 } from './toolSurface.js';
 import type { Tool } from '@modelcontextprotocol/client';
-import { gradeTrial, type GradingOutcome } from './grading.js';
+import { gradeTrial, gradingErrorOf, type GradingOutcome } from './grading.js';
 import type {
   MCPProtocolInfo,
   SkillLoad,
@@ -713,6 +713,7 @@ async function runTrial(
       clientMetadata,
     });
   }
+  const gradingError = gradingErrorOf(outcome.scores);
 
   const clientUsage = clientExecution?.usage ?? clientResponse?.usage;
   const judgeUsage = caseJudgeUsage(outcome.scores.judge);
@@ -724,10 +725,12 @@ async function runTrial(
     id: evalCase.id,
     datasetName: options.datasetName ?? 'single-case',
     source: 'eval',
-    pass: didCasePass(error, outcome.scores),
+    pass: !gradingError && didCasePass(error, outcome.scores),
     request: buildRequest(evalCase, options),
     response,
-    error,
+    // A grader that failed to run leaves the trial without a verdict.
+    error: error ?? (gradingError ? `Not graded: ${gradingError}` : undefined),
+    ...(gradingError ? { gradingError } : {}),
     scores: outcome.scores,
     authType: context.mcp?.authType,
     project: context.mcp?.project,
@@ -800,6 +803,7 @@ export async function runEvalCase(
         scores: result.scores,
         durationMs: result.durationMs,
         error: result.error,
+        ...(result.gradingError ? { gradingError: result.gradingError } : {}),
         isInfrastructureError: infraError,
         toolCallTrace: result.toolCallTrace,
         traceEvidence: result.traceEvidence,
@@ -837,7 +841,13 @@ export async function runEvalCase(
 
   // Fall back to a synthetic result if all trials threw infrastructure
   // errors. Each trial's trace is in trialResults; none is the case's.
-  const { trace: _lastTrace, ...lastWithoutTrace } = lastResult ?? {};
+  // A case with trials has no grading error of its own: each trial says.
+  const {
+    trace: _lastTrace,
+    gradingError: lastGradingError,
+    ...lastWithoutTrace
+  }: Partial<EvalCaseResult> = lastResult ?? {};
+  if (lastGradingError !== undefined) delete lastWithoutTrace.error;
   const baseResult: EvalCaseResult = lastResult
     ? (lastWithoutTrace as EvalCaseResult)
     : {

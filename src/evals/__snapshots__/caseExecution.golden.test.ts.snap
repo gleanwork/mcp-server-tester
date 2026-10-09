@@ -1612,7 +1612,7 @@ Answer carefully.",
 }
 `;
 
-exports[`golden: rubric judges > a judge client error fails the assertion 1`] = `
+exports[`golden: rubric judges > a judge client error leaves the trial ungraded, an infrastructure failure 1`] = `
 {
   "calls": [
     [
@@ -1658,6 +1658,8 @@ exports[`golden: rubric judges > a judge client error fails the assertion 1`] = 
     },
     "datasetName": "single-case",
     "durationMs": "<time>",
+    "error": "Not graded: judge: Judge "correctness" error: rate limited",
+    "gradingError": "judge: Judge "correctness" error: rate limited",
     "id": "rubric-error",
     "pass": false,
     "project": "golden",
@@ -1698,6 +1700,7 @@ exports[`golden: rubric judges > a judge client error fails the assertion 1`] = 
     "scores": {
       "judge": {
         "details": "Judge "correctness" error: rate limited",
+        "error": "Judge "correctness" error: rate limited",
         "judgeName": "correctness",
         "pass": false,
       },

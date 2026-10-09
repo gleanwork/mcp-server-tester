@@ -120,6 +120,8 @@ const TrialRecordSchema = z.looseObject({
   durationMs: z.number(),
   infrastructureError: z.boolean(),
   error: z.string().optional(),
+  /** A grader couldn't score the trial (`<grader>: <error>`); the client ran. */
+  gradingError: z.string().optional(),
   trace: z.looseObject({}).optional(),
 });
 
@@ -311,6 +313,8 @@ function trialRecord(
     durationMs: t.durationMs ?? 0,
     infrastructureError: isInfraTrial(trial),
     ...(t.error !== undefined ? { error: t.error } : {}),
+    // The client ran; a grader couldn't score it. A regrade can finish it.
+    ...(t.gradingError !== undefined ? { gradingError: t.gradingError } : {}),
     ...(t.trace
       ? { trace: t.trace as unknown as Record<string, unknown> }
       : {}),
@@ -392,8 +396,9 @@ export async function writeRun(
         path.join(runDirectory, 'traces', variant, caseId, `${index}.json`),
         trialRecord(runId, result, trial, index)
       );
-      // An infrastructure failure isn't a trial the graders scored.
-      if (isInfraTrial(trial)) continue;
+      // An infrastructure failure isn't a trial the graders scored, except
+      // one where a grader failed: the others' scores, and its error, stay.
+      if (isInfraTrial(trial) && !trial.gradingError) continue;
       const scores = (trial as Partial<EvalCaseResult>).scores ?? {};
       for (const [grader, score] of graderScores(scores)) {
         await writeJson(

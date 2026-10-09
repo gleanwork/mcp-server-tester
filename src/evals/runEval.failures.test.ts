@@ -26,10 +26,19 @@ afterEach(async () => {
  */
 async function fixture(
   runBatch: NonNullable<ClientDefinition['runBatch']>,
-  { datasets = 1 }: { datasets?: number } = {}
+  { datasets = 1, judgeError }: { datasets?: number; judgeError?: string } = {}
 ) {
   const plugin: Plugin = {
     meta: { name: 'failures-test-plugin', namespace: 'test' },
+    judges: {
+      flaky: {
+        schema: z.object({}).passthrough(),
+        async evaluate() {
+          if (judgeError) throw new Error(judgeError);
+          return { score: 1 };
+        },
+      },
+    },
     clients: {
       batch: {
         schema: z.object({ type: z.string() }),
@@ -68,6 +77,7 @@ async function fixture(
       })),
       servers: {},
       variants: [{ name: 'baseline' }, { name: 'candidate' }],
+      ...(judgeError ? { judges: [{ type: 'test/judge/flaky' }] } : {}),
     })
   );
   const outputDir = path.join(dir, 'out');
@@ -211,6 +221,53 @@ describe('a run that meets failures', () => {
     });
     await expect(f.run()).rejects.toThrow('invalid client option: model');
     expect(await f.runCount()).toBe(0);
+  });
+
+  it('leaves a trial a judge failed on ungraded, not failed', async () => {
+    const f = await fixture(async (requests) => requests.map(ok), {
+      judgeError: 'Cannot find package @anthropic-ai/sdk',
+    });
+    const result = await f.run();
+    const runDirectory = await f.runDirectory();
+    const { run, cases } = await storedRun(runDirectory);
+    // A regrade would finish these.
+    expect(run.phases).toEqual({ collect: 'complete', grade: 'partial' });
+    expect(cases[0]?.error).toBe(
+      'Not graded: judge: Judge "test/judge/flaky" error: Cannot find package @anthropic-ai/sdk'
+    );
+    const trial = await readJson<{ infrastructureError: boolean }>(
+      path.join(runDirectory, 'traces', 'baseline', 'one', '0.json')
+    );
+    expect(trial.infrastructureError).toBe(true);
+    // The other graders' scores, and the judge's error, are kept.
+    const graders = await fs.readdir(path.join(runDirectory, 'scores'));
+    expect(graders.sort()).toEqual(
+      ['textContains', 'judge.test/judge/flaky'].map(encodeURIComponent).sort()
+    );
+    // No judge verdict to report; the trial pass rate leaves them out too.
+    const baseline = result.summary.variants[0]!;
+    expect(baseline.result?.caseResults.every((c) => !c.pass)).toBe(true);
+    expect(baseline.metrics).not.toHaveProperty('judge_pass_rate');
+    expect(baseline.metrics).not.toHaveProperty('trial_pass_rate');
+  });
+
+  it('still fails a trial another grader failed, when a judge errors', async () => {
+    const f = await fixture(
+      async (requests) =>
+        requests.map(() => ({ finalText: 'NOPE', events: [] })),
+      { judgeError: 'rate limited' }
+    );
+    await f.run();
+    const runDirectory = await f.runDirectory();
+    const { run, cases } = await storedRun(runDirectory);
+    // The assertion's fail settles it: a graded fail, not "not graded".
+    expect(run.phases).toEqual({ collect: 'complete', grade: 'complete' });
+    expect(cases[0]?.pass).toBe(false);
+    expect(cases[0]?.error).toBeUndefined();
+    const trial = await readJson<{ infrastructureError: boolean }>(
+      path.join(runDirectory, 'traces', 'baseline', 'one', '0.json')
+    );
+    expect(trial.infrastructureError).toBe(false);
   });
 
   it('saves the run after each variant, while later variants run', async () => {

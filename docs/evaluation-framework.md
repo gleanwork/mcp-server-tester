@@ -128,6 +128,15 @@ The threshold is not in the input. MST compares the mean score with it,
 unless the judge returns its own `pass`; over several reps, the majority of
 those decides, and a tie fails.
 
+A judge that can't score (it throws, its SDK isn't installed, its endpoint
+rejects the call, or it returns an invalid score) gives no verdict. Unless
+another grader already failed the trial (every grader must pass, so that fail
+stands), the trial is **not graded**: its `error` says
+`Not graded: <grader>: <error>`, its trial record has `gradingError`, it's an
+infrastructure failure left out of the trial pass rate and judge metrics, and
+the run's `run.json` says `grade: partial`. Its other graders' scores, and the
+judge's error, are still stored under `scores/`.
+
 `case.expected` holds the case's ground truth:
 
 - `answer`: the assertion's `reference`, else the case's `expected.answer`,

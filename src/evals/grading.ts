@@ -170,6 +170,7 @@ async function evaluateJudges(
         judgeProvider: details.judgeProvider as string | undefined,
         judgeModel: details.judgeModel as string | undefined,
         ...(details.skipped === true ? { skipped: true } : {}),
+        ...(typeof details.error === 'string' ? { error: details.error } : {}),
         ...(details.subScores !== undefined
           ? {
               subScores: details.subScores as GraderScore['subScores'],
@@ -189,13 +190,40 @@ async function evaluateJudges(
   const graded = results.filter((result) => !result.skipped);
   const passCount = graded.filter((result) => result.pass).length;
   const skipped = results.length - graded.length;
+  const failedToRun = results.find((result) => result.error !== undefined);
   return {
     pass: passCount === graded.length,
     details:
       `${passCount}/${graded.length} judges passed` +
       (skipped > 0 ? ` (${skipped} skipped)` : ''),
+    ...(failedToRun ? { error: failedToRun.error } : {}),
     judgeResults: results,
   };
+}
+
+/** A grader (or one of several judges) gave a verdict, and it was a fail. */
+function failedOutright(score: GraderScore): boolean {
+  if (score.judgeResults?.length)
+    return score.judgeResults.some(failedOutright);
+  return !score.pass && score.error === undefined && score.skipped !== true;
+}
+
+/**
+ * Why a trial has no verdict: the first grader that failed to run, as
+ * `"<grader>: <error>"`. Undefined when every grader gave one, or when
+ * another grader already failed the trial: every grader must pass, so one
+ * fail settles it whatever the others would have said.
+ */
+export function gradingErrorOf(
+  scores: Partial<Record<string, GraderScore>>
+): string | undefined {
+  const graded = Object.values(scores).filter(
+    (score): score is GraderScore => score !== undefined
+  );
+  if (graded.some(failedOutright)) return undefined;
+  for (const [grader, score] of Object.entries(scores))
+    if (score?.error !== undefined) return `${grader}: ${score.error}`;
+  return undefined;
 }
 
 function isToolCall(entry: { kind?: string }): boolean {

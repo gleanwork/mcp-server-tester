@@ -304,7 +304,10 @@ function allJudgeEntries(
 function judgeEntries(
   caseResult: EvalCaseResult
 ): Array<Record<string, unknown>> {
-  return allJudgeEntries(caseResult).filter((entry) => entry.skipped !== true);
+  // A skipped judge, or one that failed to run, gave no verdict.
+  return allJudgeEntries(caseResult).filter(
+    (entry) => entry.skipped !== true && entry.error === undefined
+  );
 }
 
 type JudgeUsageField = 'totalCostUsd' | 'inputTokens' | 'outputTokens';
