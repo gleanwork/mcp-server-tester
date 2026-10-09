@@ -16,6 +16,7 @@ describe('assertPlugin', () => {
       judges: { complete: { schema, evaluate: async () => ({ score: 1 }) } },
       metrics: { hits: { schema, kind: 'continuous', compute: () => 1 } },
       resultStores: { bucket: { schema, create: () => ({}) } },
+      environments: { vm: { schema, open: async () => ({}) } },
       configs: { recommended: {} },
     });
 
@@ -96,6 +97,12 @@ describe('assertPlugin', () => {
       'metrics.x needs a compute function',
     ],
     ['resultStores', { schema }, 'resultStores.x needs a create function'],
+    ['environments', { schema }, 'environments.x needs an open function'],
+    [
+      'environments',
+      { schema, open: async () => ({}), maxShards: 0 },
+      'environments.x: maxShards must be a positive integer',
+    ],
     [
       'judges',
       { evaluate: async () => ({ score: 1 }) },

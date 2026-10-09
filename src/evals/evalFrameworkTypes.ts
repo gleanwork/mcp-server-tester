@@ -239,6 +239,50 @@ export interface ResultStoreDefinition {
   create(config: ExtensionConfig): EvalResultStore;
 }
 
+/**
+ * `--env-option keep`: which machines an environment leaves running after
+ * their shard, for inspection. Default `never`.
+ */
+export type EnvironmentKeep = 'never' | 'failed' | 'always';
+
+/** What an environment's `open` is given, beside its own options. */
+export interface EnvironmentContext {
+  readonly runId: string;
+  /** How many shards the run has (`--env-option shards`). */
+  readonly shards: number;
+  readonly keep: EnvironmentKeep;
+}
+
+/**
+ * An environment, opened for one run. Shards run on it in a later release
+ * (ADR 0004); until then MST collects trials only in `local`.
+ */
+export interface Environment {
+  /** Deletes what the environment created, as `keep` allows. Called once. */
+  close(): Promise<void>;
+}
+
+/**
+ * Where a run's trials are collected, chosen with `--env` (ADR 0004). An
+ * environment creates machines and opens a channel to each; MST runs the
+ * shards over it. The built-in `local` collects in the `mst run` process.
+ */
+export interface EnvironmentDefinition {
+  /**
+   * Checks the environment's own `--env-option`s: all but `shards` and
+   * `keep`, which MST owns. Values arrive as strings. Options are recorded in
+   * run.json, so they must not hold secrets.
+   */
+  readonly schema: ZodType;
+  readonly description?: string;
+  /** The most shards it can run. Default: no limit. */
+  readonly maxShards?: number;
+  open(
+    options: Record<string, unknown>,
+    context: EnvironmentContext
+  ): Promise<Environment>;
+}
+
 /** Options shared by an eval config runner implementation. */
 export interface EvaluationRunOptions {
   configPath: string;

@@ -6,6 +6,7 @@ import type {
   MetricDefinition,
   MetricKind,
   ResultStoreDefinition,
+  EnvironmentDefinition,
 } from '../evals/evalFrameworkTypes.js';
 import type { PairwiseJudgeDefinition } from '../judge/pairwiseContract.js';
 import type { PluginConfig } from '../evals/evalConfig.js';
@@ -41,6 +42,11 @@ export interface Plugin {
    */
   readonly connectors?: Readonly<Record<string, ConnectorDefinition>>;
   /**
+   * Where a run's trials can be collected: `--env <namespace>/env/<name>`
+   * (ADR 0004).
+   */
+  readonly environments?: Readonly<Record<string, EnvironmentDefinition>>;
+  /**
    * Shared eval config settings. An eval config that lists this plugin applies one
    * with `extends: ["namespace/config/name"]`. A config may use only this plugin's
    * extensions and built-ins.
@@ -56,6 +62,7 @@ export const EXTENSION_KINDS = [
   'metrics',
   'resultStores',
   'connectors',
+  'environments',
 ] as const;
 export type ExtensionKind = (typeof EXTENSION_KINDS)[number];
 
@@ -71,6 +78,7 @@ export const KIND_SEGMENTS = {
   metrics: 'metric',
   resultStores: 'result-store',
   connectors: 'connector',
+  environments: 'env',
 } as const satisfies Record<ExtensionKind, string>;
 export type KindSegment = (typeof KIND_SEGMENTS)[ExtensionKind] | 'config';
 
@@ -91,6 +99,7 @@ export interface ExtensionsByKind {
   metrics: MetricDefinition;
   resultStores: ResultStoreDefinition;
   connectors: ConnectorDefinition;
+  environments: EnvironmentDefinition;
 }
 
 const NAMESPACE = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
@@ -107,6 +116,7 @@ const REQUIRED_FUNCTIONS: Record<ExtensionKind, readonly string[]> = {
   resultStores: ['create'],
   // A connector is data plus optional functions; checked in extensionProblem.
   connectors: [],
+  environments: ['open'],
 };
 
 /** Every metric kind; a Record so a new MetricKind must be added here. */
@@ -152,6 +162,14 @@ function extensionProblem(
     !(typeof definition.kind === 'string' && definition.kind in METRIC_KINDS)
   )
     return `${label} needs a kind: ${Object.keys(METRIC_KINDS).join(', ')}`;
+  if (
+    kind === 'environments' &&
+    definition.maxShards !== undefined &&
+    !(
+      Number.isInteger(definition.maxShards) && Number(definition.maxShards) > 0
+    )
+  )
+    return `${label}: maxShards must be a positive integer`;
   return undefined;
 }
 

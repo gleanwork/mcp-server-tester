@@ -176,6 +176,10 @@ describe('extension kinds in references', () => {
     expect(() => getJudge('acme/pairwise-judge/x')).toThrow(
       '"acme/pairwise-judge/x" is a pairwise judge, not a judge.'
     );
+    // With the right article for a kind that starts with a vowel.
+    expect(() => getJudge('acme/env/x')).toThrow(
+      '"acme/env/x" is an environment, not a judge.'
+    );
   });
 
   it('rejects an unknown kind and names the right one', () => {

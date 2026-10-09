@@ -27,6 +27,25 @@ export interface RunOptions {
   secretsFile?: string;
   /** Credential store directory for connector servers. */
   store?: string;
+  /** `--env`: where to collect trials. */
+  env?: string;
+  /** `--env-option key=value`, each time it was given. */
+  envOption?: string[];
+}
+
+/** `--env-option key=value` flags as an object; a key may be given once. */
+function parseEnvOptions(flags: readonly string[]): Record<string, string> {
+  const options: Record<string, string> = {};
+  for (const flag of flags) {
+    const separator = flag.indexOf('=');
+    if (separator < 1)
+      throw new Error(`--env-option takes key=value, got "${flag}"`);
+    const key = flag.slice(0, separator);
+    if (Object.hasOwn(options, key))
+      throw new Error(`--env-option ${key} is given twice`);
+    options[key] = flag.slice(separator + 1);
+  }
+  return options;
 }
 
 function positiveInteger(flag: string, value: string | number): number {
@@ -74,6 +93,10 @@ export async function run(options: RunOptions): Promise<void> {
     ...(options.store
       ? { credentialStore: localCredentialStore(path.resolve(options.store)) }
       : {}),
+    ...(options.env ? { env: options.env } : {}),
+    ...(options.envOption?.length
+      ? { envOptions: parseEnvOptions(options.envOption) }
+      : {}),
   };
   let result: Awaited<ReturnType<typeof runEval>>;
   try {
@@ -101,6 +124,16 @@ export async function run(options: RunOptions): Promise<void> {
           ...(result.summary.selection
             ? { selection: result.summary.selection }
             : {}),
+          env: {
+            name: result.environment.name,
+            shards: result.environment.shards,
+            ...(result.environment.keep !== 'never'
+              ? { keep: result.environment.keep }
+              : {}),
+            ...(Object.keys(result.environment.options).length
+              ? { options: result.environment.options }
+              : {}),
+          },
         },
         null,
         2

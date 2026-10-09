@@ -121,6 +121,7 @@ describe('runEvalBatch skipExisting', () => {
         evalConfig,
         summary,
         outputDir: options.outputDir ?? rootDir,
+        environment: { name: 'local', shards: 1, keep: 'never', options: {} },
         datasets: [],
       };
     });

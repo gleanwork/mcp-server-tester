@@ -177,7 +177,7 @@ The first part of a plugin extension's name, `<namespace>/<kind>/<name>` (for ex
 _Avoid_: scope, prefix
 
 **Extension**:
-One named thing a plugin contributes, of one kind: a dataset source (`dataset`), client (`client`), judge (`judge`), pairwise judge (`pairwise-judge`), metric (`metric`), result store (`result-store`), connector (`connector`) or shared config (`config`). Its name says its kind: `acme/judge/completeness` is a judge.
+One named thing a plugin contributes, of one kind: a dataset source (`dataset`), client (`client`), judge (`judge`), pairwise judge (`pairwise-judge`), metric (`metric`), result store (`result-store`), connector (`connector`), environment (`env`) or shared config (`config`). Its name says its kind: `acme/judge/completeness` is a judge.
 _Avoid_: contribution, registration, capability
 
 **Built-in**:
