@@ -72,10 +72,10 @@ function VariantDiff({
                   >
                     {row.field}
                   </th>
-                  <td className="whitespace-pre-wrap break-words px-3 py-2 font-mono text-xs text-muted-foreground">
+                  <td className="whitespace-pre-wrap wrap-break-word px-3 py-2 font-mono text-xs text-muted-foreground">
                     {row.baseline ?? '—'}
                   </td>
-                  <td className="whitespace-pre-wrap break-words px-3 py-2 font-mono text-xs">
+                  <td className="whitespace-pre-wrap wrap-break-word px-3 py-2 font-mono text-xs">
                     {row.variant ?? '—'}
                   </td>
                 </tr>

@@ -390,7 +390,7 @@ export function Recommendation({
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border bg-card shadow-sm">
+    <div className="overflow-hidden rounded-lg border bg-card shadow-xs">
       {pick ? (
         <div
           className={`flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-5 py-4 ${TONE.good}`}
