@@ -8,6 +8,7 @@ import {
   runsDirectory,
   writeLatest,
   writeRun,
+  writeTrial,
   type RunFacts,
 } from './runFormat.js';
 import { rejectRenamedOptions } from './renamedKeys.js';
@@ -54,10 +55,13 @@ import {
   clientEnvironment,
   type ClientEnvironment,
 } from './mstClient/clientOptions.js';
-import { runEvalDataset } from './evalRunner.js';
+import { executedTrialResult, runEvalDataset } from './evalRunner.js';
 import { passRate } from './evalRunComparison.js';
 import { buildVariantDeltas } from './variantDeltas.js';
-import { createEvalCaseExecutor } from './caseExecution.js';
+import {
+  batchTraceExecution,
+  createEvalCaseExecutor,
+} from './caseExecution.js';
 import { mergeEvalJudges } from './grading.js';
 import { prepareClientBatch } from './prepareClientBatch.js';
 import type { EvalRunnerResult } from './evalRunner.js';
@@ -708,6 +712,8 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
   const variantResults: EvaluationVariantResult[] = [];
   const allDatasets: RunEvalResult['datasets'] = [];
   const allResults: EvalCaseResult[] = [];
+  // Saved with the first trial: from then on, run.json says how far the run got.
+  let started: Promise<void> | undefined;
   const sourceVariant = variants[0] ?? { name: 'default' };
   const canonicalDatasets = await Promise.all(
     datasets.map(async (source) => ({
@@ -891,13 +897,45 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
               clientConfig.declaration.model ??
               (clientConfig.config as { model?: unknown } | undefined)?.model;
             const batchStartTime = Date.now();
+            const casesById = new Map(
+              effectiveDataset.cases.map((evalCase) => [evalCase.id, evalCase])
+            );
+            const caseOptions = {
+              datasetName: effectiveDataset.name,
+              toolVariantId: toolMetadata?.id,
+            };
             const batchTraces = await prepareClientBatch(
               clientConfig.definition,
               effectiveDataset.cases,
               clientConfig.declaration,
               resolvedServers,
               { evalConfig: effectiveConfig, variant, env },
-              toolVariant
+              toolVariant,
+              {
+                // A trace the client reports before its batch ends is saved
+                // as the trial it will be graded as.
+                onTrace: async (request, trace) => {
+                  const evalCase = casesById.get(request.caseId);
+                  if (!evalCase) return;
+                  const execution = batchTraceExecution(
+                    trace,
+                    clientConfig.definition,
+                    resolvedServers
+                  );
+                  await saveTrial(
+                    {
+                      ...executedTrialResult(
+                        evalCase,
+                        execution,
+                        caseOptions,
+                        0
+                      ),
+                      variant: variant.name,
+                    },
+                    request.trial
+                  );
+                },
+              }
             );
             // Batch execution (including shared setup/cleanup) precedes the runner's
             // wall clock. Count its elapsed time once, not the sum of request times.
@@ -911,8 +949,11 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
                 ...(typeof variantModel === 'string'
                   ? { model: variantModel }
                   : {}),
-                // The eval writes its own run directory.
+                // The eval writes its own run directory, each trial as it
+                // finishes.
                 reporting: 'none',
+                onTrialComplete: (caseResult, trial) =>
+                  saveTrial({ ...caseResult, variant: variant.name }, trial),
                 concurrency: evalConfig.concurrency ?? 1,
                 defaultTrials: evalConfig.trials,
                 defaultPassThreshold: evalConfig.passThreshold,
@@ -991,7 +1032,8 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
       // variant that failed is left out: run.json wouldn't list it.
       allResults.length = variantStart.results;
       allDatasets.length = variantStart.datasets;
-      if (variantResults.length > 0) await checkpoint('failed');
+      // Its trials that finished are already saved, and stay.
+      if (variantResults.length > 0 || started) await checkpoint('failed');
       throw error;
     }
   } finally {
@@ -1020,6 +1062,30 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
     } catch (error) {
       console.warn(
         `[mst] Couldn't save the run so far: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /**
+   * Saves one trial's trace when it finishes, as the run stores it. The
+   * first also saves the run as it stands (`collect: partial`), so a run
+   * that is killed says it didn't finish. Never costs the run its results.
+   */
+  async function saveTrial(
+    result: EvalCaseResult,
+    trial: number
+  ): Promise<void> {
+    try {
+      await (started ??= checkpoint('partial'));
+      await writeTrial(
+        outputDir,
+        executionId,
+        redact ? redactStoredResponses(result) : result,
+        trial
+      );
+    } catch (error) {
+      console.warn(
+        `[mst] Couldn't save trial ${trial} of ${result.id}: ${error instanceof Error ? error.message : String(error)}`
       );
     }
   }

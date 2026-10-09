@@ -601,7 +601,8 @@ async function runBatch(
         return finishCase();
       },
     },
-    requests
+    requests,
+    context.reportResult
   );
 }
 

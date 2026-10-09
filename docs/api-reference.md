@@ -378,6 +378,7 @@ Run an eval dataset. Assertions are defined per-case in the dataset's `assertion
   - `plugins?: readonly Plugin[]` - Plugins whose extensions (for example `acme/judge/completeness` judges) the cases use
   - `stopOnFailure?: boolean` - Stop on first failure (default: `false`)
   - `onCaseComplete?: (result: EvalCaseResult) => void` - Callback after each case completes
+  - `onTrialComplete?: (result: EvalCaseResult, trial: number) => void` - Callback after each trial of a case, with the trial's result and its number from 0, before the case's `onCaseComplete`
   - `concurrency?: number` - Max parallel cases (default: `1` = sequential)
   - `client?: string`, `model?: string`, `clientOptions?: ClientOptions` - The client cases run on, its model and options; a case's own fields change them. Outside an eval, cases run on `mst`, on the test's MCP connection (default client: `'mst'`)
   - `defaultTrials?: number` - Default trial count for client cases (default: `1`)

@@ -251,6 +251,66 @@ describe('runDesktopBatch', () => {
     expect(await exists(leasePath())).toBe(false);
   });
 
+  it('reports each case that ran as it finishes, redacted', async () => {
+    const reported: Array<[number, ClientRunResult]> = [];
+    const client = fakeClient({
+      async runCase(_session, request, index) {
+        client.events.push(`case ${index + 1}`);
+        return index === 0
+          ? {
+              result: {
+                finalText: '',
+                events: [],
+                error: `failed with ${SECRET}`,
+              },
+              continuation: 'allowed',
+            }
+          : ok(request.caseId);
+      },
+    });
+    const results = await runDesktopBatch(
+      client,
+      requests(2),
+      async (index, result) => {
+        client.events.push(`report ${index + 1}`);
+        reported.push([index, result]);
+      }
+    );
+    // Each case is reported before the next one runs.
+    expect(client.events).toEqual([
+      'prepare',
+      'case 1',
+      'report 1',
+      'case 2',
+      'report 2',
+      'dispose session',
+    ]);
+    expect(reported[0]?.[1].error).toBe('failed with [REDACTED]');
+    expect(reported[1]?.[1]).toEqual({ finalText: 'case-2', events: [] });
+    // The returned results stay the batch's to finish.
+    expect(results[1]?.telemetry?.batchCase).toBeDefined();
+  });
+
+  it('reports only the cases that ran', async () => {
+    const reported: number[] = [];
+    await runDesktopBatch(
+      fakeClient({
+        reset: undefined,
+        async runCase() {
+          return {
+            result: { finalText: '', events: [] },
+            continuation: 'reset',
+          };
+        },
+      }),
+      requests(3),
+      async (index) => {
+        reported.push(index);
+      }
+    );
+    expect(reported).toEqual([0]);
+  });
+
   it('stops submitting when a platform has no reset', async () => {
     const results = await runDesktopBatch(
       fakeClient({
