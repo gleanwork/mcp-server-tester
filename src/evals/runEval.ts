@@ -1234,6 +1234,7 @@ async function evaluate(
           groups,
           secrets: fileSecrets,
           workDir,
+          ...(evalConfig.limits ? { limits: evalConfig.limits } : {}),
           signal: controller.signal,
           log: (line) => console.error(`[mst] ${line}`),
           onResult: async (key, trace) => {

@@ -173,6 +173,14 @@ export async function runShardOverChannel(
         for (const value of Object.values(tokens.env ?? {}))
           if (value) secrets.push(value);
         send({ type: 'tokens', ...tokens });
+      } else if (message.type === 'acquire') {
+        // Waiting for room mustn't stop the loop: heartbeats keep coming.
+        const { key } = message;
+        void Promise.resolve(events.acquire?.(key)).then(
+          () => send({ type: 'granted', key }),
+          (error: unknown) =>
+            fail(error instanceof Error ? error.message : String(error))
+        );
       } else if (message.type === 'trial') {
         // Copy as the trials come, so a dropped channel loses at most one. A
         // copy that fails (it can race the worker's next write) is retried

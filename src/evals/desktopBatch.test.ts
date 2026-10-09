@@ -291,6 +291,28 @@ describe('runDesktopBatch', () => {
     expect(results[1]?.telemetry?.batchCase).toBeDefined();
   });
 
+  it('waits for room before each case it runs, after any reset', async () => {
+    const client = fakeClient({
+      async runCase(_session, request, index) {
+        client.events.push(`case ${index + 1}`);
+        return ok(request.caseId);
+      },
+    });
+    await runDesktopBatch(client, requests(2), undefined, async (index) => {
+      client.events.push(`acquire ${index + 1}`);
+    });
+    expect(client.events.filter((event) => !event.startsWith('reset'))).toEqual(
+      [
+        'prepare',
+        'acquire 1',
+        'case 1',
+        'acquire 2',
+        'case 2',
+        'dispose session',
+      ]
+    );
+  });
+
   it('reports only the cases that ran', async () => {
     const reported: number[] = [];
     await runDesktopBatch(

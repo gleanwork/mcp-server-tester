@@ -167,7 +167,9 @@ function notSubmitted(message: string): ClientRunResult {
 export async function runDesktopBatch<Session>(
   adapter: DesktopClientAdapter<Session>,
   requests: ClientBatchRequest[],
-  reportResult?: ClientRunContext['reportResult']
+  reportResult?: ClientRunContext['reportResult'],
+  /** The batch context's `acquire`: room for a case under the run's limits. */
+  acquire?: ClientRunContext['acquire']
 ): Promise<ClientRunResult[]> {
   if (!requests.length) return [];
   const secrets = [...adapter.secrets];
@@ -216,6 +218,7 @@ export async function runDesktopBatch<Session>(
         results.push(notSubmitted(blocked));
         continue;
       }
+      await acquire?.(index);
       const outcome = await adapter.runCase(session, request, index, ledger);
       results.push(outcome.result);
       // A copy: the batch adds to its results when it ends.

@@ -296,7 +296,8 @@ async function runBatch(
       },
     },
     requests,
-    context.reportResult
+    context.reportResult,
+    context.acquire
   );
 }
 

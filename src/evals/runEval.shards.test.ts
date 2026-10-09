@@ -15,13 +15,17 @@ const dirs: string[] = [];
 afterEach(async () => {
   resetPluginsForTests();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   await Promise.all(
     dirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true }))
   );
 });
 
 /** Four cases, two variants, on the shard-test client, in fork/env/children. */
-async function fixture({ redact = true }: { redact?: boolean } = {}) {
+async function fixture({
+  redact = true,
+  extra = {},
+}: { redact?: boolean; extra?: Record<string, unknown> } = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-run-shards-'));
   dirs.push(dir);
   await fs.writeFile(
@@ -46,6 +50,7 @@ async function fixture({ redact = true }: { redact?: boolean } = {}) {
       servers: {},
       variants: [{ name: 'baseline' }, { name: 'candidate' }],
       ...(redact ? {} : { redactStoredResponses: false }),
+      ...extra,
     })
   );
   const outputDir = path.join(dir, 'out');
@@ -183,6 +188,42 @@ describe('a run in an environment with shards', () => {
     await expect(f.resume(runId)).rejects.toThrow(
       `Run ${runId} has no missing trials: there is nothing to resume.`
     );
+  }, 90_000);
+
+  it('keeps run-wide limits across shards', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const f = await fixture({
+      extra: {
+        model: 'claude-test',
+        clientOptions: { delayMs: 300 },
+        // One trial at a time on this provider, whatever the shard count.
+        limits: { providers: { anthropic: 1 } },
+      },
+    });
+    const log = path.join(path.dirname(f.outputDir), 'trials.log');
+    vi.stubEnv('SHARD_TEST_LOG', log);
+
+    const result = await f.run({ shards: '2' });
+
+    expect(result.summary.metrics).toMatchObject({ passed: 8, total: 8 });
+    const marks = (await fs.readFile(log, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => {
+        const [event, prompt, at] = line.split(' ');
+        return { event, prompt: prompt!, at: Number(at) };
+      })
+      .sort((a, b) => a.at - b.at || (a.event === 'end' ? -1 : 1));
+    let running = 0;
+    let most = 0;
+    for (const { event } of marks) {
+      running += event === 'start' ? 1 : -1;
+      most = Math.max(most, running);
+    }
+    expect(most).toBe(1);
+    // Both shards ran trials; the limit only took turns between them.
+    const shards = new Set(marks.map(({ prompt }) => shardOf(prompt, 2)));
+    expect(shards).toEqual(new Set([0, 1]));
   }, 90_000);
 
   it("can't resume a run stored redacted, which can't be graded again", async () => {

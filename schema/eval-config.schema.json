@@ -323,6 +323,21 @@
       "type": "object",
       "description": "Cowork desktop setup; see docs/cowork.md."
     },
+    "limits": {
+      "type": "object",
+      "description": "The most trials that may run at once across an environment's shards, per LLM provider and per server label.",
+      "properties": {
+        "providers": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 1 }
+        },
+        "servers": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 1 }
+        }
+      },
+      "additionalProperties": false
+    },
     "pricing": {
       "type": "object",
       "description": "USD per million tokens, by model, for clients that report tokens but not cost.",

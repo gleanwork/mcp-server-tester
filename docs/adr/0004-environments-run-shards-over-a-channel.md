@@ -24,6 +24,7 @@ The design (`docs/design/README.md`) plans `--env`, shards, gather and `--resume
 - **The worker and the coordinator speak `mst.shard/v1`**, one JSON object per line.
   - The worker writes to stdout: `hello` (its MST version, image digest and client version), `need-tokens`, `trial` (a trace was written), `heartbeat`, and `done` (counts, and whether clean-up worked).
   - The coordinator writes `tokens` and `cancel` to stdin.
+  - Before each trial, the worker sends `acquire` and waits for `granted`, so the coordinator can hold trials to the eval config's `limits` per provider and per server across every shard. The trial's `trial` message gives the room back.
   - A version mismatch fails the shard at `hello`, before any prompt.
   - A heartbeat tells a slow case from a dead channel. Each case keeps its own deadline.
 - **Tokens travel only over stdin.** The worker writes them only to tmpfs (`/run/mst/tokens`, mode 0700), never to the bundle, the image, argv or a trace. Refresh grants stay with the coordinator, and a worker asks for new tokens before its tokens expire.
