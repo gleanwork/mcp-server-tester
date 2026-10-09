@@ -12,6 +12,7 @@ This walkthrough runs one eval end to end. It uses a fictional company, Acme, wh
 - Access to your organization's MST plugin package (here `@acme/mst-plugin`)
 - Cloud credentials for the plugin's result store and credential store (only for remote runs, CI, or remote results)
 - For local Cowork runs: Claude Desktop on your Mac
+- For container runs: Docker (or OrbStack), and Claude Desktop's Linux package or a desktop image your organization publishes
 
 ## 1. Install
 
@@ -24,6 +25,10 @@ npm i -D @gleanwork/mcp-server-tester@beta @acme/mst-plugin
 
 # Once, on a Mac that will run Cowork locally
 npx mst cowork setup
+
+# Once, to run Cowork in containers (section 6)
+npx mst env setup docker --app ./claude-desktop-linux.deb
+# → built mst-desktop@sha256:9c1e…
 ```
 
 See what the plugin provides:
@@ -180,6 +185,8 @@ cowork-aggregated-vs-native
   credentials 2 of 8 servers need `mst auth` (gmail, gcal)
 ```
 
+The `env` line says where the trials would run. With `--env docker --env-option shards=4`, it reads `docker (linux/amd64) · 4 shards · image mst-desktop@sha256:9c1e…`.
+
 ## 4. Authenticate once
 
 ```bash
@@ -228,9 +235,38 @@ grade     aggregated              e2e-0000 ✓✓✓  e2e-0001 ✓✓✓  e2e-00
 
 The client runs the trials first. Judges then grade the collected traces.
 
-## 6. Run remotely
+## 6. Run in containers
 
-Use the same config, on 5 fresh VMs:
+Run the same config in 4 Linux containers on your machine:
+
+```bash
+npx mst run --config evals/cowork-aggregated-vs-native.json --env docker --env-option shards=4
+```
+
+```text
+setup     auth staged for 8 servers · 4 containers from mst-desktop@sha256:9c1e…
+collect   shard 1  e2e-0003 ●●● ●●● ●●●  e2e-0007 ●●● ●●● ●●●
+          shard 2  e2e-0000 ●●● ●●● ●●●  e2e-0011 ●●● ●●! ●●●
+          shard 3  e2e-0001 ●●● ●●● ●●●
+          shard 4  e2e-0002 ●●● ●●● ●●●  e2e-0005 ●●● ●●● ●●●
+teardown  tokens removed · 4 containers deleted
+grade     …
+```
+
+Cowork runs in the containers, so you can keep using your Mac. Each container is a fresh desktop: it has nothing from your own Claude Desktop, and leaves nothing behind. A case's variants and trials all run in one container, so each comparison is made on one desktop, minutes apart.
+
+To use an image your organization publishes instead of building one, add `--env-option image=registry.acme.example/mst-desktop@sha256:…`.
+
+Watch a container's desktop while it runs, or keep a container that failed so you can look at it:
+
+```bash
+npx mst runs view <run-id> --shard 2
+npx mst run --config evals/cowork-aggregated-vs-native.json --env docker --env-option shards=4 --env-option keep=failed
+```
+
+## 7. Run remotely
+
+Use the same config, on 5 fresh VMs. They run the same image as the containers in section 6:
 
 ```bash
 npx mst run --config evals/cowork-aggregated-vs-native.json \
@@ -238,7 +274,7 @@ npx mst run --config evals/cowork-aggregated-vs-native.json \
   --results acme/result-store/eval-results
 ```
 
-The VMs run the trials. Your machine gathers their traces, runs the judges, and writes the results. Ctrl-C deletes the VMs and keeps the traces collected so far. Rerun with `--resume <run-id>` to collect only what's missing.
+The VMs run the trials. Your machine gathers their traces, runs the judges, and writes the results. Ctrl-C deletes the VMs and keeps the traces collected so far. Rerun with `--resume <run-id>` to collect only what's missing. `--env-option keep=failed` keeps a VM whose shard failed, as it does for containers.
 
 To walk away from a long run, detach it:
 
@@ -276,7 +312,7 @@ jobs:
           --results acme/result-store/eval-results
 ```
 
-## 7. Regrade without re-running
+## 8. Regrade without re-running
 
 Judges read stored traces, so you can change or add judges and regrade without running Cowork again:
 
@@ -288,14 +324,14 @@ npx mst grade 7f3c2a --judge acme/judge/groundedness
 # → run 7f3c2a.g2 (traces from 7f3c2a)
 ```
 
-## 8. Find your results
+## 9. Find your results
 
 Runs are written locally by default:
 
 ```text
 .mcp-test-results/cowork-aggregated-vs-native/runs/<run-id>/
 ├── run.json        # config, resolved datasets and judges, environment, phase status
-├── traces/         # one trace per trial
+├── traces/         # one trace per trial, with the shard it ran on
 ├── scores/         # one score per grader per trial; pairwise preferences per case
 ├── results.json    # traces and scores joined
 ├── summary.json    # per-variant metrics and comparisons
@@ -314,7 +350,9 @@ Runs are written locally by default:
 npx mst stores --plugins @acme/mst-plugin
 ```
 
-## 9. Read your results
+`run.json` records where the run ran: the environment, its options, the number of shards, and each shard's image digest and Claude Desktop version.
+
+## 10. Read your results
 
 Every graded run ends with a comparison against the baseline:
 

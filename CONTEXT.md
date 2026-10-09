@@ -134,6 +134,32 @@ _Avoid_: unseen case, test split
 A run of tool-metadata variants, proposed up front or round by round, compared with the baseline, ending in a recommendation to apply one or none.
 _Avoid_: variant experiment, tool experiment
 
+### Where a run happens
+
+**Coordinator**:
+The machine where `mst run` was typed (your machine or a CI job). It loads, resolves, prepares, gathers, grades, compares and reports; only collecting can happen elsewhere.
+_Avoid_: controller, host, driver
+
+**Environment**:
+Where a run's trials are collected, chosen with `--env`: `local` (in the `mst run` process, the default), or an environment extension that creates machines, such as containers or VMs (`acme/env/cloud-vm`). Never part of an eval config ([ADR 0004](docs/adr/0004-environments-run-shards-over-a-channel.md)).
+_Avoid_: sandbox, backend, runner, target
+
+**Shard**:
+(Planned.) One machine's part of a run's trials. Trials are split by case, so a case's variants and trials all run on one shard.
+_Avoid_: partition, worker (for the slice)
+
+**Worker**:
+(Planned.) The process that collects a shard's trials on its machine (`mst collect`), with the same code a local run uses.
+_Avoid_: agent, guest, runner
+
+**Channel**:
+(Planned.) How the coordinator reaches a worker's machine: run a command with its input and output attached, and copy files in and out (`docker exec` and `docker cp`, or SSH and `scp`).
+_Avoid_: transport (MCP's word), connection
+
+**Missing trial**:
+(Planned.) A trial with no trace after collect, because its shard failed. It isn't a failed trial: its case is incomplete, and `--resume` collects it.
+_Avoid_: failed trial, skipped trial
+
 ### Tests
 
 **Test**:
