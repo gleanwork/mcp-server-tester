@@ -142,6 +142,17 @@ function stripTrace(trace: unknown): void {
       if (isJsonObject(event)) delete event.output;
 }
 
+/**
+ * A judge's `metadata` is the judge's own: an agentic judge's audit, a
+ * plugin's working notes. It can quote the evidence, so it goes too; the
+ * score, pass and reasoning stay.
+ */
+function stripScoreMetadata(scores: unknown): void {
+  if (!isJsonObject(scores)) return;
+  for (const score of Object.values(scores))
+    if (isJsonObject(score)) delete score.metadata;
+}
+
 function stripResponses(value: unknown): void {
   if (Array.isArray(value)) {
     for (const item of value) stripResponses(item);
@@ -154,9 +165,13 @@ function stripResponses(value: unknown): void {
     if (isJsonObject(request) && isJsonObject(request.assertions))
       delete request.assertions.response;
     stripTrace(value.trace);
+    stripScoreMetadata(value.scores);
     if (Array.isArray(value.trialResults))
       for (const trial of value.trialResults)
-        if (isJsonObject(trial)) stripTrace(trial.trace);
+        if (isJsonObject(trial)) {
+          stripTrace(trial.trace);
+          stripScoreMetadata(trial.scores);
+        }
   }
   for (const nested of Object.values(value)) stripResponses(nested);
 }
@@ -165,7 +180,8 @@ function stripResponses(value: unknown): void {
  * The one redaction policy for stored results: returns a JSON copy in which
  * every eval case result, wherever it is nested (runs, eval variants, reports,
  * comparisons), has no raw `response`, no echoed exact-match
- * `expect.response`, and no `finalText` or event `output` in its traces.
+ * `expect.response`, no `finalText` or event `output` in its traces, and no
+ * judge score `metadata` (in it or its trials).
  * These may hold data from the server under test. Everything else is kept,
  * including each trace's events, servers, arguments and usage.
  */
