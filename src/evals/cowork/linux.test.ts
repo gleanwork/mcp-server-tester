@@ -404,6 +404,91 @@ describe('caller-owned Linux Cowork desktop', () => {
   });
 });
 
+describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
+  const RESTART = '/opt/mst/restart-desktop';
+  // The image's own settings: another model, a header helper, a stale server.
+  const image = {
+    inferenceProvider: 'gateway',
+    inferenceModels: [
+      { name: 'other-model' },
+      { name: 'test-model', provider: 'gateway' },
+    ],
+    managedMcpServers: [
+      {
+        name: 'primary',
+        transport: 'http',
+        url: 'https://example.com/eval',
+        headersHelper: '/opt/mst/primary-headers.sh',
+      },
+      { name: 'stale', transport: 'http', url: 'https://example.com/old' },
+    ],
+    allowManagedMcpServersOnly: true,
+  };
+
+  async function prepareOwned(env: Record<string, string> = {}) {
+    const file = join(directory, 'settings.json');
+    const original = `${JSON.stringify(image, null, 2)}\n`;
+    await writeFile(file, original);
+    const lifecycle = linuxCoworkPlatform.prepare({
+      evalConfig,
+      model: 'test-model',
+      env: {
+        ...session,
+        MST_COWORK_SETTINGS_FILE: file,
+        MST_DESKTOP_OWNED: '1',
+        MST_DESKTOP_RESTART: RESTART,
+        ...env,
+      },
+    });
+    return { file, original, lifecycle };
+  }
+
+  it("writes the variant's settings, restarts the desktop, and restores the file", async () => {
+    const { file, original, lifecycle } = await prepareOwned();
+    const prepared = await lifecycle;
+
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({
+      inferenceProvider: 'gateway',
+      inferenceModels: [{ name: 'test-model', provider: 'gateway' }],
+      managedMcpServers: [
+        {
+          name: 'primary',
+          transport: 'http',
+          url: 'https://example.com/eval',
+          headersHelper: '/opt/mst/primary-headers.sh',
+        },
+      ],
+      allowedMcpServers: [{ serverName: 'primary' }],
+      allowManagedMcpServersOnly: true,
+    });
+    // The restart, then the usual probe.
+    expect(child.exec.mock.calls.map((call) => String(call[0]))).toEqual([
+      RESTART,
+      'python3',
+    ]);
+    expect(child.exec.mock.calls[1]![1]).toContain('probe');
+
+    await prepared.dispose();
+    expect(await readFile(file, 'utf8')).toBe(original);
+  });
+
+  it('needs a restart command, and touches nothing without one', async () => {
+    const { file, original, lifecycle } = await prepareOwned({
+      MST_DESKTOP_RESTART: '',
+    });
+    await expect(lifecycle).rejects.toThrow('needs MST_DESKTOP_RESTART');
+    expect(await readFile(file, 'utf8')).toBe(original);
+    expect(child.exec).not.toHaveBeenCalled();
+  });
+
+  it('restores the settings when the desktop is not ready after them', async () => {
+    child.responses.push({}, { failed: true });
+    const { file, original, lifecycle } = await prepareOwned();
+    await expect(lifecycle).rejects.toThrow('Linux desktop probe failed');
+    expect(await readFile(file, 'utf8')).toBe(original);
+  });
+});
+
 describe('Linux Cowork plugins with a stdio eval server', () => {
   const evalServer = {
     transport: 'stdio',

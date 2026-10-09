@@ -255,6 +255,18 @@ or empty. Stdio eval servers and blocked plugin servers follow the contract in
 Preparation is read-only. MST does not provision or authenticate the environment,
 change its launch policy, or manage its lifecycle.
 
+**Owned-desktop mode.** A worker image that runs several variants on one desktop
+([ADR 0004](./adr/0004-environments-run-shards-over-a-channel.md)) sets
+`MST_DESKTOP_OWNED=1`, makes the settings file writable by the desktop user, and
+sets `MST_DESKTOP_RESTART` to the absolute path of a command that restarts Claude
+Desktop and returns once it's back. For each variant, MST then writes the
+variant's servers, plugins and model over the image's own settings, keeping the
+image's other keys and the `headersHelper` of an HTTP server with the same name
+and URL (MST writes no secrets there). It runs the restart command, checks the
+file as above, and probes. When the variant ends, or if the desktop isn't ready,
+the file goes back to what it was. Without `MST_DESKTOP_OWNED=1`, preparation
+stays read-only.
+
 Submission opens the native deep link through the prepared environment's `xdg-open`
 handler, then attempts one semantic `Start task` action. Alternatively, set
 `MST_COWORK_URL_OPENER` to an absolute executable path that accepts the URL as its
