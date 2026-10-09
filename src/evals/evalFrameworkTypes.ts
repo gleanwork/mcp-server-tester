@@ -232,6 +232,13 @@ export interface JudgeDefinition {
     input: JudgeInput,
     options: Record<string, unknown>
   ) => Promise<JudgeScore>;
+  /**
+   * Checks, before a run collects or grades anything, that the judge can run
+   * with these options: its SDK is installed and its credential is set.
+   * Throws what's missing. Must not call a model. `options` is parsed by
+   * `schema`.
+   */
+  preflight?: (options: Record<string, unknown>) => Promise<void>;
 }
 
 /** Public result-store extension point. */

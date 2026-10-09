@@ -67,6 +67,29 @@ export interface JudgeRequest {
   reps: number;
 }
 
+/**
+ * Checks, without calling a model, that the judge a request names exists,
+ * accepts its options and (when it has a `preflight`) can run. Throws
+ * naming the judge and what's wrong.
+ */
+export async function preflightJudgeRequest(
+  request: JudgeRequest
+): Promise<void> {
+  try {
+    const judge = getJudge(request.judge);
+    const options = parseExtensionOptions(
+      judge.schema,
+      request.options,
+      `judge options "${request.judge}"`
+    );
+    await judge.preflight?.(options);
+  } catch (error) {
+    throw new Error(
+      `Judge "${request.label}" can't run: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
 /** Score spread above which the rubric is probably ambiguous. */
 const HIGH_VARIANCE = 0.2;
 

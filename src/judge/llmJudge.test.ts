@@ -112,6 +112,16 @@ describe('createLLMJudge', () => {
     );
   });
 
+  it('reports a provider that stopped at its token limit', async () => {
+    const judge = createLLMJudge(async () => ({
+      text: '{"pass": true, "score": 0.9, "reasoning": "cut',
+      truncated: true,
+    }));
+    await expect(judge.evaluate('c', null, 'r')).rejects.toThrow(
+      'cut off at its token limit'
+    );
+  });
+
   it('propagates provider errors', async () => {
     const judge = createLLMJudge(async () => {
       throw new Error('rate limited');
@@ -173,6 +183,36 @@ describe('parseJudgeResponse', () => {
   it('reads JSON embedded in prose', () => {
     expect(parseJudgeResponse(`Here you go: ${judgeOutput} Thanks.`).pass).toBe(
       true
+    );
+  });
+
+  it('reads the last judge object after reasoning that uses braces', () => {
+    const answer = `I checked {the PR list} against {"items": [1]} and the "}" quote.\n\n${judgeOutput}`;
+    expect(parseJudgeResponse(answer).score).toBe(0.8);
+    expect(
+      parseJudgeResponse(`${judgeOutput}\nFor example: {"note": "x"}`).score
+    ).toBe(0.8);
+  });
+
+  it('keeps braces and quotes inside the reasoning', () => {
+    const tricky = JSON.stringify({
+      pass: false,
+      score: 0.2,
+      reasoning: 'claims "{a}" and } were unsupported',
+    });
+    expect(parseJudgeResponse(`Verdict: ${tricky}`).reasoning).toBe(
+      'claims "{a}" and } were unsupported'
+    );
+  });
+
+  it('says when the answer was cut off at the token limit', () => {
+    const cut =
+      'Looking at this... {"pass": true, "score": 0.9, "reasoning": "The resp';
+    expect(() => parseJudgeResponse(cut, true)).toThrow(
+      "The judge's answer was cut off at its token limit before its JSON was complete; raise the judge's maxTokens."
+    );
+    expect(() => parseJudgeResponse(cut)).toThrow(
+      'Failed to parse judge response as JSON'
     );
   });
 

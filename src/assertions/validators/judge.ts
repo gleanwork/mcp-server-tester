@@ -16,6 +16,7 @@ import {
   judgeError,
   judgeOwnOptions,
   type JudgeRequest,
+  preflightJudgeRequest,
 } from '../../judge/evaluateJudge.js';
 
 export { DEFAULT_JUDGE_THRESHOLD, type JudgeRun };
@@ -100,6 +101,18 @@ export async function validateJudge(
   return typeof request === 'string'
     ? judgeError(request)
     : evaluateJudge(response, request, run);
+}
+
+/**
+ * Checks, without calling a model, that the judge an assertion names can run
+ * (see `JudgeDefinition.preflight`). Throws naming what's missing.
+ */
+export async function preflightJudgeAssertion(
+  config: JudgeValidatorConfig
+): Promise<void> {
+  const request = judgeRequest(config);
+  if (typeof request === 'string') throw new Error(request);
+  await preflightJudgeRequest(request);
 }
 
 /**

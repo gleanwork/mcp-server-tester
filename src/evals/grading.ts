@@ -37,7 +37,10 @@ import {
   matchToolCalls,
 } from '../assertions/validators/toolCalls.js';
 import { judgeOwnOptions } from '../judge/evaluateJudge.js';
-import { judgeNameOf } from '../assertions/validators/judge.js';
+import {
+  judgeNameOf,
+  preflightJudgeAssertion,
+} from '../assertions/validators/judge.js';
 
 /** What a case produced, in the form the evaluator grades. */
 export interface GradedExecution {
@@ -102,6 +105,25 @@ export function resolveJudges(
       judge.reference !== undefined ? judge.reference : caseAnswer(evalCase),
     reps: judge.reps ?? evalCase.judgeReps ?? 1,
   }));
+}
+
+/**
+ * Checks that every judge the cases run can run (`JudgeDefinition.preflight`)
+ * before anything is collected or graded, so a missing SDK or credential
+ * fails the run once instead of failing every trial. `checked` holds the
+ * judge settings already checked, across calls.
+ */
+export async function preflightCaseJudges(
+  cases: ReadonlyArray<Pick<EvalCase, 'judges' | 'judgeReps' | 'expected'>>,
+  checked: Set<string>
+): Promise<void> {
+  for (const evalCase of cases)
+    for (const { reference: _reference, ...judge } of resolveJudges(evalCase)) {
+      const key = JSON.stringify(judge);
+      if (checked.has(key)) continue;
+      await preflightJudgeAssertion(judge);
+      checked.add(key);
+    }
 }
 
 /**

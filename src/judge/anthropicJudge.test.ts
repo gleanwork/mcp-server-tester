@@ -214,7 +214,7 @@ describe('anthropicJudge', () => {
     await judge.evaluate('candidate', null, 'rubric');
 
     expect(mock).toHaveBeenCalledWith(
-      expect.objectContaining({ model: 'claude-sonnet-4-20250514' })
+      expect.objectContaining({ model: 'claude-sonnet-4-6' })
     );
   });
 

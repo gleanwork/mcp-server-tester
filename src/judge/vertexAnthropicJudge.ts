@@ -19,6 +19,16 @@ interface VertexSdk {
   };
 }
 
+/** Loads the optional `@anthropic-ai/vertex-sdk` package, or throws naming how to install it. */
+export function loadVertexAnthropicSdk(): Promise<VertexSdk> {
+  return loadJudgeSdk<VertexSdk>(
+    // @ts-expect-error - optional: npm install @anthropic-ai/vertex-sdk
+    () => import('@anthropic-ai/vertex-sdk'),
+    'Vertex Anthropic',
+    '@anthropic-ai/vertex-sdk'
+  );
+}
+
 /**
  * Anthropic on Google Vertex AI completion adapter.
  * Requires the `@anthropic-ai/vertex-sdk` package and Application Default
@@ -28,12 +38,7 @@ export function vertexAnthropicCompletion(
   config: JudgeConfig = {}
 ): JudgeCompletionAdapter {
   return async ({ system, prompt }) => {
-    const sdk = await loadJudgeSdk<VertexSdk>(
-      // @ts-expect-error - optional: npm install @anthropic-ai/vertex-sdk
-      () => import('@anthropic-ai/vertex-sdk'),
-      'Vertex Anthropic',
-      '@anthropic-ai/vertex-sdk'
-    );
+    const sdk = await loadVertexAnthropicSdk();
     const client = new sdk.AnthropicVertex({
       projectId:
         process.env.GOOGLE_VERTEX_PROJECT ?? process.env.CLOUD_ML_PROJECT_ID,

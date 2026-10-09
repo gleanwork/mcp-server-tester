@@ -1200,9 +1200,9 @@ Create an LLM judge for semantic evaluation of tool responses.
     | `openai`              | `openai`                         |
     | `google`              | `@google/generative-ai`          |
 
-  - `model?: string` - Model name (default: `'claude-sonnet-4-20250514'`)
+  - `model?: string` - Model name (default: `'claude-sonnet-4-6'`)
   - `temperature?: number` - Temperature 0–1 (default: `0.0`)
-  - `maxTokens?: number` - Maximum tokens for response (default: `1000`)
+  - `maxTokens?: number` - Maximum tokens for response (default: `4096`)
   - `maxBudgetUsd?: number` - Maximum budget in USD (default: `0.10`)
   - `maxToolOutputSize?: number` - Fail if response exceeds this byte count
 

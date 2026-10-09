@@ -40,6 +40,8 @@ vi.mock('./mstClient/simulation.js', async (original) => ({
 vi.mock('../judge/judgeClient.js', async (original) => ({
   ...(await original<typeof JudgeClientModule>()),
   createJudge: vi.fn(),
+  // The mocked judges need no SDK or credential.
+  preflightJudge: vi.fn(async () => {}),
 }));
 
 /** Drop wall-clock and build-environment values; everything else is pinned. */

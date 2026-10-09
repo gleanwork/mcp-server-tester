@@ -18,12 +18,25 @@ interface OpenAISdk {
           temperature: number;
           messages: Array<{ role: 'system' | 'user'; content: string }>;
         }): Promise<{
-          choices: Array<{ message: { content?: string | null } }>;
+          choices: Array<{
+            message: { content?: string | null };
+            finish_reason?: string | null;
+          }>;
           usage?: { prompt_tokens?: number; completion_tokens?: number };
         }>;
       };
     };
   };
+}
+
+/** Loads the optional `openai` package, or throws naming how to install it. */
+export function loadOpenAISdk(): Promise<OpenAISdk> {
+  return loadJudgeSdk<OpenAISdk>(
+    // @ts-expect-error - optional: npm install openai
+    () => import('openai'),
+    'OpenAI',
+    'openai'
+  );
 }
 
 /**
@@ -37,12 +50,7 @@ export function openaiCompletion(
   const options = { apiKeyEnvVar: config.apiKeyEnvVar };
   requireJudgeCredential('OpenAI', 'openai', options);
   return async ({ system, prompt }) => {
-    const sdk = await loadJudgeSdk<OpenAISdk>(
-      // @ts-expect-error - optional: npm install openai
-      () => import('openai'),
-      'OpenAI',
-      'openai'
-    );
+    const sdk = await loadOpenAISdk();
     const endpoint = await resolveLLMEndpoint('openai', options);
     const completion = await new sdk.default({
       apiKey: endpoint.apiKey ?? '',
@@ -62,6 +70,9 @@ export function openaiCompletion(
         inputTokens: completion.usage?.prompt_tokens,
         outputTokens: completion.usage?.completion_tokens,
       },
+      ...(completion.choices[0]?.finish_reason === 'length'
+        ? { truncated: true }
+        : {}),
     };
   };
 }
