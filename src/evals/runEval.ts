@@ -18,6 +18,7 @@ import {
 } from './runFormat.js';
 import {
   assertReplayedCases,
+  isMissingTrial,
   replayExecutor,
   replayedCases,
   replayedVariants,
@@ -663,6 +664,88 @@ export async function gradeRun(
   );
 }
 
+/** What `mst run --resume` completes, and where. */
+export interface ResumeRunOptions extends GradeRunOptions {
+  /** The environment to collect in. Default: the one the run used. */
+  env?: string;
+  /** Its options. Default: the run's (`shards`, `keep` and its own). */
+  envOptions?: Readonly<Record<string, string>>;
+  credentialStore?: CredentialStore;
+}
+
+/**
+ * Complete a run whose shards ended early (`mst run --resume`, ADR 0004):
+ * collect only its missing trials, in its environment, and grade the run
+ * again into its own directory, with every other trial graded from its
+ * stored trace. Needs traces stored unredacted, as `mst grade` does.
+ */
+export async function resumeRun(
+  options: ResumeRunOptions
+): Promise<RunEvalResult> {
+  const rootDir = options.rootDir ?? process.cwd();
+  const { name } = loadEvalConfig(options.configPath, { rootDir });
+  const evalDirectory =
+    options.outputDir ?? path.join(rootDir, '.mcp-test-results', name);
+  const directory = await findRunDirectory(
+    runsDirectory(evalDirectory),
+    options.run,
+    rootDir
+  );
+  const { run, summary: stored } = await readRunDirectory(directory);
+  if (run.evalName !== name)
+    throw new Error(
+      `Run ${run.runId} is a run of eval "${run.evalName}", not of "${name}" (${options.configPath}).`
+    );
+  if (run.gradedFrom)
+    throw new Error(
+      `Run ${run.runId} is a regrade of ${run.gradedFrom}: resume ${run.gradedFrom} instead.`
+    );
+  const trials = await readRunTrials(directory);
+  const missing = trials.filter(isMissingTrial).length;
+  if (missing === 0)
+    throw new Error(
+      `Run ${run.runId} has no missing trials: there is nothing to resume.`
+    );
+  const recorded = run.environment as {
+    name?: string;
+    shards?: number;
+    keep?: string;
+    options?: Record<string, unknown>;
+  };
+  const env = options.env ?? recorded.name ?? LOCAL_ENVIRONMENT;
+  const envOptions =
+    options.envOptions ??
+    Object.fromEntries(
+      Object.entries({
+        ...recorded.options,
+        shards: recorded.shards,
+        keep: recorded.keep,
+      }).flatMap(([key, value]) =>
+        value === undefined ? [] : [[key, String(value)]]
+      )
+    );
+  const { run: _run, env: _env, envOptions: _envOptions, ...rest } = options;
+  return evaluate(
+    {
+      ...rest,
+      rootDir,
+      outputDir: evalDirectory,
+      redactStoredResponses: run.redactStoredResponses,
+      env,
+      envOptions,
+    },
+    {
+      ...runReplay(
+        run,
+        trials,
+        run.runId,
+        stored.collectedAt ?? stored.timestamp
+      ),
+      resume: true,
+    }
+  );
+}
+
 /**
  * Whether a regrade becomes the eval's latest run: only a regrade of a run
  * that collected every trial, and only when the latest run collected its
@@ -710,6 +793,8 @@ async function evaluate(
     { manifestPath: 'configPath', arm: 'variant', arms: 'variants' },
     'runEval'
   );
+  // A regrade grades stored traces into a new run; a resume completes its run.
+  const regrade = replay?.resume ? undefined : replay;
   const runStartTime = Date.now();
   const rootDir = options.rootDir ?? process.cwd();
   const configDir = path.dirname(path.resolve(options.configPath));
@@ -1068,12 +1153,21 @@ async function evaluate(
               datasetName: prepared.effectiveDataset.name,
               variant,
             });
-          // Servers as declared: a worker resolves their secrets itself.
+          // Servers as declared: a worker resolves their secrets itself. A
+          // resume collects only the trials its run is missing.
           const requests = batchRequests(
             prepared.effectiveDataset.cases,
             setup.clientConfig.declaration,
             setup.servers,
             { evalConfig: setup.effectiveConfig }
+          ).filter(
+            (request) =>
+              !replay ||
+              isMissingTrial(
+                replay.trials.get(variant.name)?.get(request.caseId)?.[
+                  request.trial
+                ]
+              )
           );
           for (const type of new Set(requests.map((r) => r.config.type)))
             groups.push({
@@ -1154,7 +1248,7 @@ async function evaluate(
     // In an environment, every variant's trials are collected first, on
     // shards that each hold whole cases (ADR 0004); the loop below grades them.
     const gathered =
-      inEnvironment && !replay ? await collectEnvironmentTrials() : undefined;
+      inEnvironment && !regrade ? await collectEnvironmentTrials() : undefined;
     missingTrials = gathered?.missing.length ?? 0;
 
     // Where the running variant's results start, to drop them if it fails.
@@ -1305,7 +1399,20 @@ async function evaluate(
                         replay,
                         variant.name,
                         resolvedServers,
-                        clientConfig.definition.evidence ?? 'none'
+                        clientConfig.definition.evidence ?? 'none',
+                        // A resume's missing trials, as collected again.
+                        gathered
+                          ? (caseId, trial) =>
+                              batchTraceExecution(
+                                gathered.result({
+                                  variant: variant.name,
+                                  caseId,
+                                  trial,
+                                }),
+                                clientConfig.definition,
+                                resolvedServers
+                              )
+                          : undefined
                       ),
                     }
                   : runClient
@@ -1407,9 +1514,9 @@ async function evaluate(
         runFacts(
           stored,
           // A regrade collected nothing: its traces are the source run's.
-          replay
+          regrade
             ? {
-                collect: replay.run.phases.collect,
+                collect: regrade.run.phases.collect,
                 grade: phase === 'failed' ? 'failed' : 'partial',
               }
             : { collect: phase, grade: 'partial' }
@@ -1557,7 +1664,7 @@ async function evaluate(
       ? (replay.run.selection as RunSelection | undefined)
       : runSelection(options);
     summary.partial = replay ? replay.run.partial : selection !== undefined;
-    if (replay) summary.collectedAt = replay.collectedAt;
+    if (regrade) summary.collectedAt = regrade.collectedAt;
     if (options.grade === false) {
       summary.graded = false;
       // Nothing judged the answers, so there is no pass rate: only how many
@@ -1623,7 +1730,7 @@ async function evaluate(
       // A collect-only run is never graded; the run's grading says so.
       phases:
         options.grade === false ? { ...phases, grade: 'skipped' } : phases,
-      ...(replay ? { gradedFrom: replay.gradedFrom } : {}),
+      ...(regrade ? { gradedFrom: regrade.gradedFrom } : {}),
     };
   }
   const store = evalConfig.results?.store
@@ -1639,11 +1746,11 @@ async function evaluate(
         configId: summary.configId,
         runId: executionId,
         // A regrade compares with the same traces' last grading.
-        ...(replay
+        ...(regrade
           ? {
               regradeOf: {
-                runId: replay.gradedFrom,
-                collectedAt: replay.collectedAt,
+                runId: regrade.gradedFrom,
+                collectedAt: regrade.collectedAt,
               },
             }
           : {}),
@@ -1712,8 +1819,8 @@ async function evaluate(
     outputDir,
     executionId,
     runFacts(storedSummary, {
-      collect: replay
-        ? replay.run.phases.collect
+      collect: regrade
+        ? regrade.run.phases.collect
         : missingTrials > 0
           ? 'partial'
           : 'complete',
@@ -1744,7 +1851,7 @@ async function evaluate(
     !summary.partial &&
     missingTrials === 0 &&
     options.grade !== false &&
-    (!replay || (await regradeTakesLatest(evalDirectory, replay)))
+    (!regrade || (await regradeTakesLatest(evalDirectory, regrade)))
   )
     await writeLatest(evalDirectory, executionId, summary.timestamp);
   return {
@@ -1753,6 +1860,6 @@ async function evaluate(
     environment,
     datasets: allDatasets,
     summary,
-    ...(replay ? { gradedFrom: replay.gradedFrom } : {}),
+    ...(regrade ? { gradedFrom: regrade.gradedFrom } : {}),
   };
 }

@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runEval } from './runEval.js';
+import { resumeRun, runEval } from './runEval.js';
 import { shardOf } from './environments/shardedCollect.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 
@@ -21,7 +21,7 @@ afterEach(async () => {
 });
 
 /** Four cases, two variants, on the shard-test client, in fork/env/children. */
-async function fixture() {
+async function fixture({ redact = true }: { redact?: boolean } = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-run-shards-'));
   dirs.push(dir);
   await fs.writeFile(
@@ -45,6 +45,7 @@ async function fixture() {
       datasets: ['./cases.json'],
       servers: {},
       variants: [{ name: 'baseline' }, { name: 'candidate' }],
+      ...(redact ? {} : { redactStoredResponses: false }),
     })
   );
   const outputDir = path.join(dir, 'out');
@@ -53,6 +54,14 @@ async function fixture() {
   return {
     outputDir,
     readJson,
+    resume: (run: string, envOptions?: Record<string, string>) =>
+      resumeRun({
+        configPath,
+        rootDir: dir,
+        outputDir,
+        run,
+        ...(envOptions ? { envOptions } : {}),
+      }),
     run: (envOptions: Record<string, string>) =>
       runEval({
         configPath,
@@ -133,5 +142,55 @@ describe('a run in an environment with shards', () => {
     await expect(
       fs.stat(path.join(f.outputDir, 'latest.json'))
     ).rejects.toThrow();
+  }, 60_000);
+
+  it('--resume collects only the missing trials and completes the run', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const f = await fixture({ redact: false });
+    const lost = CASES.filter((id) => shardOf(id, 2) === 1);
+    const partial = await f.run({ shards: '2', fail: '1' });
+    const runId = path.basename(partial.outputDir);
+    log.mockClear();
+
+    // The run's own environment and options, without the failure.
+    const resumed = await f.resume(runId, { shards: '2' });
+
+    expect(resumed.outputDir).toBe(partial.outputDir);
+    expect(resumed.summary.metrics).toMatchObject({
+      total: 8,
+      passed: 8,
+      failed: 0,
+    });
+    expect(resumed.summary.metrics).not.toHaveProperty('incomplete');
+    // Only the lost shard's trials ran again.
+    const collected = log.mock.calls
+      .map((call) => String(call[0]))
+      .filter((line) => / collected$/.test(line));
+    expect(collected).toHaveLength(lost.length * 2);
+    for (const line of collected)
+      expect(lost.some((id) => line.includes(` ${id} `))).toBe(true);
+    const run = await f.readJson<{ phases: unknown; gradedFrom?: string }>(
+      path.join(resumed.outputDir, 'run.json')
+    );
+    expect(run.phases).toEqual({ collect: 'complete', grade: 'complete' });
+    expect(run.gradedFrom).toBeUndefined();
+    // Complete now, so it is the eval's latest.
+    const latest = await f.readJson<{ runId: string }>(
+      path.join(f.outputDir, 'latest.json')
+    );
+    expect(latest.runId).toBe(runId);
+
+    await expect(f.resume(runId)).rejects.toThrow(
+      `Run ${runId} has no missing trials: there is nothing to resume.`
+    );
+  }, 90_000);
+
+  it("can't resume a run stored redacted, which can't be graded again", async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const f = await fixture();
+    const partial = await f.run({ shards: '2', fail: '1' });
+    await expect(
+      f.resume(path.basename(partial.outputDir), { shards: '2' })
+    ).rejects.toThrow('stored redacted traces');
   }, 60_000);
 });

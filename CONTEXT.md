@@ -157,7 +157,7 @@ How the coordinator reaches a worker's machine: run a command with its input and
 _Avoid_: transport (MCP's word), connection
 
 **Missing trial**:
-A trial with no trace after collect, because its shard failed. It isn't a failed trial: its case is incomplete, left out of the pass rate, and (planned) `--resume` collects it.
+A trial with no trace after collect, because its shard failed. It isn't a failed trial: its case is incomplete, left out of the pass rate, and `--resume` collects it.
 _Avoid_: failed trial, skipped trial
 
 ### Tests
