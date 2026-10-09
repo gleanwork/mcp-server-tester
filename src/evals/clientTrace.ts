@@ -76,6 +76,7 @@ export function clientRunToExecution(
         ? { llmDurationMs: trace.llmDurationMs }
         : {}),
       ...(trace.diagnostics ? { diagnostics: trace.diagnostics } : {}),
+      ...(trace.artifacts ? { artifacts: trace.artifacts } : {}),
     },
     error: trace.error,
     usage: trace.usage,

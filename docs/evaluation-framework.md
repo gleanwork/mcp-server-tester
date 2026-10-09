@@ -279,6 +279,37 @@ do not carry.
   (wins plus half the ties, over compared cases), order `consistency`,
   per-dimension win rates, and judge usage.
 
+### Client artifacts
+
+A client can report a local directory with its own record of each trial, and
+which paths in it are evidence (`ClientRunResult.artifacts`, `{ dir, include }`).
+Cowork reports its session folder and includes only the audit log
+(`audit.jsonl`), the files the agent wrote (`outputs/`), its transcripts
+(`.claude/projects/*/*.jsonl`) and the tool output it saved to files
+(`.claude/projects/*/*/tool-results`). Before anything grades the trial, MST
+copies what `include` names and nothing else: an allowlist, so a credential
+or setting the client didn't anticipate is never copied. In a pattern, `*`
+matches any characters of one name, but not a leading `.`, as in a shell. A
+directory includes everything under it except hidden names, which a pattern
+must name: Cowork's `outputs/` is its working directory, and its
+`outputs/.claude/settings.local.json` isn't copied. Symbolic links and other
+non-regular files are never copied. Judges and
+pairwise judges get the copy as `trial.artifactsDir`; no result holds its path.
+
+A copy has limits: 16 MB per file, 64 MB in all, 4,096 entries and 16
+directories deep. A copy that fails (over a limit, or a directory that's gone)
+leaves nothing behind, and the trial is an infrastructure failure
+(`clientDiagnostics.failureKind: "artifacts"`), not graded and left out of
+pass rates.
+
+A run that keeps full traces (`"redactStoredResponses": false`) keeps the copy
+in its directory, at `artifacts/<variant>/<case-id>/<trial>/`, and the trial's
+trace names it (`"artifacts"`), so `mst grade` gives judges exactly what they
+read when the run was graded first. `mst grade` refuses a run whose trace
+names any other path, or whose copy leads outside the run directory through a
+symbolic link. Otherwise the copy is in a temporary directory, removed once
+grading is done.
+
 ### Dataset sources
 
 The built-in `file`, `dir` and `gcs` sources read canonical `EvalDataset` JSON only. They don't infer assertions from a first case, attach clients or add judges, and they reject fields they don't know, on every case. A minimal dataset needs a name, a case ID and an input:

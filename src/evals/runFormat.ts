@@ -128,6 +128,20 @@ const RunRecordSchema = z.looseObject({
   }),
 });
 
+/** A trial's copy of its client artifacts, relative to the run directory. */
+export function trialArtifactsPath(
+  variant: string,
+  caseId: string,
+  trial: number
+): string {
+  return path.join(
+    'artifacts',
+    segment(variant),
+    segment(caseId),
+    String(trial)
+  );
+}
+
 /** `traces/<variant>/<case-id>/<trial>.json`: what the client did in one trial. */
 const TrialRecordSchema = z.looseObject({
   ...Envelope('trial'),
@@ -142,6 +156,8 @@ const TrialRecordSchema = z.looseObject({
   /** A grader couldn't score the trial (`<grader>: <error>`); the client ran. */
   gradingError: z.string().optional(),
   trace: z.looseObject({}).optional(),
+  /** The trial's client artifacts, copied into the run: a path relative to it. */
+  artifacts: z.string().optional(),
 });
 
 /** `scores/<grader>/<variant>/<case-id>/<trial>.json`: one grader's score for one trial. */
@@ -329,7 +345,8 @@ function trialRecord(
   runId: string,
   result: EvalCaseResult,
   trial: TrialResult | EvalCaseResult,
-  index: number
+  index: number,
+  artifacts: string | undefined
 ): z.infer<typeof TrialRecordSchema> {
   const t = trial as TrialResult & Partial<EvalCaseResult>;
   return {
@@ -354,6 +371,7 @@ function trialRecord(
     ...(t.clientDiagnostics ? { clientDiagnostics: t.clientDiagnostics } : {}),
     ...(t.traceEvidence ? { traceEvidence: t.traceEvidence } : {}),
     ...(t.skillLoads ? { skillLoads: t.skillLoads } : {}),
+    ...(artifacts ? { artifacts } : {}),
   };
 }
 
@@ -365,6 +383,16 @@ async function writeTrialRecord(
   trial: TrialResult | EvalCaseResult,
   index: number
 ): Promise<void> {
+  // The trial's client artifacts, when the run kept a copy of them.
+  const artifacts = trialArtifactsPath(
+    result.variant ?? 'default',
+    result.id,
+    index
+  );
+  const copied = await fs
+    .stat(path.join(runDirectory, artifacts))
+    .then((stat) => stat.isDirectory())
+    .catch(() => false);
   await replaceJson(
     path.join(
       runDirectory,
@@ -373,7 +401,7 @@ async function writeTrialRecord(
       segment(result.id),
       `${index}.json`
     ),
-    trialRecord(runId, result, trial, index)
+    trialRecord(runId, result, trial, index, copied ? artifacts : undefined)
   );
 }
 

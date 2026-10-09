@@ -3,6 +3,7 @@
  * the client run, so a run is graded with the same pipeline that collected
  * it, without starting a client.
  */
+import path from 'node:path';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import type { EvalCase, EvalDataset } from './datasetTypes.js';
 import type {
@@ -17,12 +18,20 @@ import {
   type ClientExecution,
 } from './caseExecution.js';
 import { clientRunToExecution } from './clientTrace.js';
-import type { RunRecord, TrialRecord } from './runFormat.js';
+import {
+  trialArtifactsPath,
+  type RunRecord,
+  type TrialRecord,
+} from './runFormat.js';
+import { ALL_ARTIFACTS } from './trialArtifacts.js';
+import fs from 'node:fs/promises';
 
 /** A stored run to grade, and the ID of the run that grades it. */
 export interface RunReplay {
   /** The stored run's `run.json`. */
   run: RunRecord;
+  /** The stored run's directory. */
+  directory: string;
   /** The new run's ID: the stored run's with the next `.g<n>`. */
   runId: string;
   /** The run that collected the traces: a regrade's own source, or the run. */
@@ -54,6 +63,7 @@ export function isMissingTrial(trial: TrialRecord | undefined): boolean {
  */
 export function runReplay(
   run: RunRecord,
+  directory: string,
   trials: readonly TrialRecord[],
   runId: string,
   collectedAt: string
@@ -66,6 +76,16 @@ export function runReplay(
     );
   const byVariant = new Map<string, Map<string, TrialRecord[]>>();
   for (const trial of trials) {
+    // The path comes from a file anyone could edit: it must be the trial's
+    // own place in the run, or judges could be shown any directory.
+    if (
+      trial.artifacts !== undefined &&
+      trial.artifacts !==
+        trialArtifactsPath(trial.variant, trial.caseId, trial.trial)
+    )
+      throw new Error(
+        `Run ${run.runId}'s trial ${trial.trial} of case "${trial.caseId}" on variant "${trial.variant}" names artifacts at "${trial.artifacts}", not at ${trialArtifactsPath(trial.variant, trial.caseId, trial.trial)}: the run directory was changed.`
+      );
     const byCase =
       byVariant.get(trial.variant) ?? new Map<string, TrialRecord[]>();
     byVariant.set(trial.variant, byCase);
@@ -75,6 +95,7 @@ export function runReplay(
     for (const list of byCase.values()) list.sort((a, b) => a.trial - b.trial);
   return {
     run,
+    directory,
     runId,
     gradedFrom: run.gradedFrom ?? run.runId,
     collectedAt,
@@ -152,12 +173,50 @@ export function replayedCases(
   };
 }
 
+/**
+ * A trial's stored artifacts, as a directory that resolves inside the run:
+ * a symbolic link on the way can't point judges elsewhere.
+ */
+async function storedArtifactsDir(
+  directory: string,
+  relative: string
+): Promise<string> {
+  const [run, dir] = await Promise.all([
+    fs.realpath(directory),
+    fs.realpath(path.join(directory, relative)),
+  ]);
+  if (dir !== path.join(run, relative))
+    throw new Error(
+      `${path.join(directory, relative)} leads outside the run directory.`
+    );
+  return dir;
+}
+
+/**
+ * Fails, before anything is graded, when a trial's stored artifacts are
+ * missing or lead outside the run directory.
+ */
+export async function assertStoredArtifacts(replay: RunReplay): Promise<void> {
+  for (const byCase of replay.trials.values())
+    for (const trials of byCase.values())
+      for (const trial of trials)
+        if (trial.artifacts !== undefined)
+          await storedArtifactsDir(replay.directory, trial.artifacts).catch(
+            (error: unknown) => {
+              throw new Error(
+                `Run ${replay.run.runId}'s artifacts for trial ${trial.trial} of case "${trial.caseId}" on variant "${trial.variant}" can't be read: ${error instanceof Error ? error.message : String(error)}`
+              );
+            }
+          );
+}
+
 /** A stored trial as the execution that produced it. */
-function storedExecution(
+async function storedExecution(
   trial: TrialRecord,
+  directory: string,
   servers: MCPConfig[],
   evidence: TraceEvidence
-): CaseExecution {
+): Promise<CaseExecution> {
   const trace = trial.trace as Trace | undefined;
   // A trial a grader couldn't score stores "Not graded: …" as its error. The
   // client ran; finishing its grading is what a regrade is for.
@@ -185,6 +244,15 @@ function storedExecution(
       ? {
           diagnostics:
             trial.clientDiagnostics as ClientRunResult['diagnostics'],
+        }
+      : {}),
+    // The copy the run kept: judges read what they read when it ran.
+    ...(trial.artifacts
+      ? {
+          artifacts: {
+            dir: await storedArtifactsDir(directory, trial.artifacts),
+            include: ALL_ARTIFACTS,
+          },
         }
       : {}),
   };
@@ -249,6 +317,6 @@ export function replayExecutor(
           `Run ${replay.run.runId} has no trial ${index} of case "${evalCase.id}" on variant "${variant}".`
         )
       );
-    return storedExecution(trial, servers, evidence);
+    return storedExecution(trial, replay.directory, servers, evidence);
   };
 }

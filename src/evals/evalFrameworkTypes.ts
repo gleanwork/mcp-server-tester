@@ -112,6 +112,32 @@ export interface ClientRunResult {
   /** Per-request wall time, excluding shared batch setup and cleanup. */
   durationMs?: number;
   llmDurationMs?: number;
+  /**
+   * The client's own record of this trial, such as a desktop session folder
+   * with its audit log, transcripts, spilled tool output and the files it
+   * wrote. MST copies what `include` names before grading, and judges read
+   * the copy. A run that keeps full traces (`redactStoredResponses: false`)
+   * keeps the copy, so `mst grade` reads it later. Never stored as a path.
+   */
+  artifacts?: ClientArtifacts;
+}
+
+/**
+ * A local directory of a trial's evidence (`ClientRunResult.artifacts`), and
+ * the only paths in it to copy: an allowlist, so a credential or setting the
+ * client didn't anticipate is never copied.
+ */
+export interface ClientArtifacts {
+  /** An absolute path. */
+  dir: string;
+  /**
+   * Paths relative to `dir`, with `/` between segments. In a segment, `*`
+   * matches any characters of one name (`*.jsonl`, `*`), but not a leading
+   * `.`. A path that names a directory includes everything under it except
+   * hidden names (`outputs/.claude`), which a path must name. `**` alone
+   * includes everything. Symbolic links and other non-regular files are never copied.
+   */
+  include: readonly string[];
 }
 
 /**

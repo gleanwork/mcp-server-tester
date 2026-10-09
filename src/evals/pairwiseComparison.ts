@@ -130,12 +130,16 @@ function caseSource(
 }
 
 function trial(result: EvalCaseResult) {
-  return buildJudgeTrial(result.response, {
+  const judged = buildJudgeTrial(result.response, {
     clientResponse: result.response,
     ...(result.traceEvidence !== undefined && {
       evidence: result.traceEvidence,
     }),
   });
+  // Stored responses drop the local path; the run keeps it in memory.
+  return result.artifacts
+    ? { ...judged, artifactsDir: result.artifacts.dir }
+    : judged;
 }
 
 function checkPreference(value: unknown): PairwisePreference {
