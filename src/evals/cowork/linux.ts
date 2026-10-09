@@ -1,6 +1,9 @@
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
 import { lstat, open, realpath } from 'node:fs/promises';
+import type { MCPConfig } from '../../config/mcpConfig.js';
+import { mcpServerLabel } from '../../config/mcpConfig.js';
+import type { MarketplacePlugin } from '../clientPlugins.js';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
@@ -17,6 +20,7 @@ import {
 } from '../clientPlugins.js';
 import {
   coworkJsonEqual,
+  coworkManagedPluginSettings,
   coworkMcpSettingsMatch,
   coworkPluginSettingsMatch,
 } from './managedSettings.js';
@@ -67,6 +71,142 @@ async function readSettings(file: string): Promise<Record<string, unknown>> {
   } finally {
     await handle.close();
   }
+}
+
+/** The settings file as it is, or undefined when there is none. */
+async function readSettingsText(file: string): Promise<string | undefined> {
+  let handle;
+  try {
+    handle = await open(
+      file,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+  try {
+    const metadata = await handle.stat();
+    if (!metadata.isFile() || metadata.size > 1024 * 1024)
+      throw new Error('Invalid prepared settings file.');
+    return await handle.readFile('utf8');
+  } finally {
+    await handle.close();
+  }
+}
+
+/** Replaces the settings file's content in place (its directory may be read-only). */
+async function writeSettingsText(file: string, text: string): Promise<void> {
+  const handle = await open(
+    file,
+    constants.O_WRONLY |
+      constants.O_CREAT |
+      constants.O_TRUNC |
+      constants.O_NOFOLLOW,
+    0o644
+  );
+  try {
+    await handle.writeFile(text);
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Managed settings for owned-desktop mode (ADR 0004): the image's own
+ * settings, with the variant's servers, plugins and model in place of
+ * whatever was there. An HTTP server keeps the image's `headersHelper` for
+ * the same name and URL, since MST writes no secrets here. Exactly what
+ * `prepare` then checks.
+ */
+function coworkLinuxOwnedSettings(
+  base: Record<string, unknown>,
+  options: {
+    servers: readonly MCPConfig[];
+    plugins?: readonly MarketplacePlugin[];
+    paths?: ClientStdioPaths;
+    approveWriteTools?: boolean;
+    model?: string;
+  }
+): Record<string, unknown> {
+  const managed = coworkManagedPluginSettings(options);
+  const prior = Array.isArray(base.managedMcpServers)
+    ? (base.managedMcpServers as Array<Record<string, unknown> | null>)
+    : [];
+  const http = options.servers.flatMap((server, index) => {
+    if (server.transport !== 'http') return [];
+    const name = mcpServerLabel(server, index);
+    const helper = prior.find(
+      (entry) =>
+        entry?.name === name &&
+        entry.transport === 'http' &&
+        entry.url === server.serverUrl
+    )?.headersHelper;
+    return [
+      {
+        name,
+        transport: 'http',
+        url: server.serverUrl,
+        ...(typeof helper === 'string' ? { headersHelper: helper } : {}),
+        ...(options.approveWriteTools
+          ? { toolPolicy: { '*': 'allow' as const } }
+          : {}),
+      },
+    ];
+  });
+  const models = Array.isArray(base.inferenceModels)
+    ? (base.inferenceModels as Array<{ name?: unknown } | null>)
+    : [];
+  const { allowedPluginMarketplaces: _previous, ...rest } = base;
+  return {
+    ...rest,
+    managedMcpServers: [...http, ...managed.managedMcpServers],
+    allowedMcpServers: [
+      ...http.map((entry) => ({ serverName: entry.name })),
+      ...managed.allowedMcpServers,
+    ],
+    allowManagedMcpServersOnly: true,
+    ...(managed.allowedPluginMarketplaces
+      ? { allowedPluginMarketplaces: managed.allowedPluginMarketplaces }
+      : {}),
+    ...(options.model
+      ? {
+          inferenceModels: [
+            models.find((entry) => entry?.name === options.model) ?? {
+              name: options.model,
+            },
+          ],
+        }
+      : {}),
+  };
+}
+
+/** Runs the image's desktop restart command; it returns once Claude is back. */
+async function restartDesktop(
+  command: string,
+  env: Record<string, string | undefined>
+): Promise<void> {
+  const failed = await new Promise<boolean>((resolve) => {
+    const child = execFile(
+      command,
+      [],
+      {
+        timeout: 120_000,
+        killSignal: 'SIGKILL',
+        maxBuffer: 64 * 1024,
+        env: Object.fromEntries(
+          SESSION_ENV.flatMap((k) => (env[k] ? [[k, env[k]]] : []))
+        ),
+      },
+      (error) => resolve(error !== null)
+    );
+    child.stdin?.on('error', () => {});
+    child.stdin?.end();
+  });
+  if (failed)
+    throw new Error(
+      'The desktop restart command (MST_DESKTOP_RESTART) failed after MST wrote the variant settings.'
+    );
 }
 
 function telemetry(
@@ -279,45 +419,90 @@ export const linuxCoworkPlatform: CoworkPlatform = {
       '/etc/claude-desktop/managed-settings.json';
     if (!isAbsolute(settingsFile))
       throw new Error('Linux Cowork settings path must be absolute.');
-    try {
-      const settings = await readSettings(settingsFile);
-      const models = settings.inferenceModels as
-        | Array<{ name?: string }>
-        | undefined;
-      if (model && !models?.some((m) => m.name === model))
-        throw new Error('model');
-      if (!coworkPluginSettingsMatch(settings, plugins))
-        throw new Error('plugins');
-      const servers = transportServers(evalConfig.servers, 'Cowork');
-      if (
-        !coworkMcpSettingsMatch(settings, {
-          servers,
-          plugins,
-          paths: stdioPaths,
-          approveWriteTools: evalConfig.coworkSetup?.approveWriteTools === true,
-        })
-      )
-        throw new Error('servers');
-      await verifyStdioPaths(
-        clientStdioServers(servers, plugins),
-        stdioPaths,
-        env
-      );
-    } catch {
-      throw new Error(
-        'Prepared Linux desktop settings do not match the eval model, MCP servers, plugins, plugin/data paths, or approval policy.'
+    // Owned-desktop mode (ADR 0004): a worker image lets MST write each
+    // variant's settings, restart the desktop, and restore the file after.
+    const owned = env.MST_DESKTOP_OWNED === '1';
+    let original: string | undefined;
+    if (owned) {
+      const restart = env.MST_DESKTOP_RESTART;
+      if (!restart || !isAbsolute(restart))
+        throw new Error(
+          'Owned-desktop mode (MST_DESKTOP_OWNED=1) needs MST_DESKTOP_RESTART: an absolute path to the command that restarts Claude Desktop.'
+        );
+      original = await readSettingsText(settingsFile);
+      const base = original
+        ? (JSON.parse(original) as Record<string, unknown>)
+        : {};
+      await writeSettingsText(
+        settingsFile,
+        `${JSON.stringify(
+          coworkLinuxOwnedSettings(base, {
+            servers: transportServers(evalConfig.servers, 'Cowork'),
+            plugins,
+            paths: stdioPaths,
+            approveWriteTools:
+              evalConfig.coworkSetup?.approveWriteTools === true,
+            ...(model ? { model } : {}),
+          }),
+          null,
+          2
+        )}\n`
       );
     }
-    await execute(
-      'probe',
-      {},
-      { deadlineAt: Date.now() + 15_000, maxActions: 1, env }
-    );
-    return {
-      async dispose() {
-        /* Caller owns desktop/profile/container lifecycle. */
-      },
+    // In owned mode the settings go back, whether or not the desktop is ready.
+    const restore = async () => {
+      if (owned) await writeSettingsText(settingsFile, original ?? '{}\n');
     };
+    try {
+      if (owned)
+        await restartDesktop(env.MST_DESKTOP_RESTART!, {
+          ...process.env,
+          ...env,
+        });
+      await checkAndProbe();
+    } catch (error) {
+      await restore().catch(() => {});
+      throw error;
+    }
+    return { dispose: restore };
+
+    async function checkAndProbe(): Promise<void> {
+      try {
+        const settings = await readSettings(settingsFile);
+        const models = settings.inferenceModels as
+          | Array<{ name?: string }>
+          | undefined;
+        if (model && !models?.some((m) => m.name === model))
+          throw new Error('model');
+        if (!coworkPluginSettingsMatch(settings, plugins))
+          throw new Error('plugins');
+        const servers = transportServers(evalConfig.servers, 'Cowork');
+        if (
+          !coworkMcpSettingsMatch(settings, {
+            servers,
+            plugins,
+            paths: stdioPaths,
+            approveWriteTools:
+              evalConfig.coworkSetup?.approveWriteTools === true,
+          })
+        )
+          throw new Error('servers');
+        await verifyStdioPaths(
+          clientStdioServers(servers, plugins),
+          stdioPaths,
+          env
+        );
+      } catch {
+        throw new Error(
+          'Prepared Linux desktop settings do not match the eval model, MCP servers, plugins, plugin/data paths, or approval policy.'
+        );
+      }
+      await execute(
+        'probe',
+        {},
+        { deadlineAt: Date.now() + 15_000, maxActions: 1, env }
+      );
+    }
   },
   async recover() {
     throw new Error(
