@@ -70,25 +70,37 @@ export function forkEnvironment(
   context: EnvironmentContext,
   root: string,
   env: Record<string, string>,
-  options: { silenceMs?: number; cancelGraceMs?: number } = {}
+  options: {
+    silenceMs?: number;
+    cancelGraceMs?: number;
+    /** A shard whose machine can't be created, as if its VM never came up. */
+    failShard?: number;
+  } = {}
 ): ForkEnvironment {
+  const { failShard, ...channelOptions } = options;
   const disposed: boolean[] = [];
   const environment = machineEnvironment(
     context,
     async (shard) => {
+      if (shard.index === failShard)
+        throw new Error(`machine ${shard.index} never came up`);
       const workDir = path.join(root, `machine-${shard.index}`);
       await fs.mkdir(workDir, { recursive: true });
       return {
         id: `fork-${shard.index}`,
         workDir,
-        channel: forkChannel(env),
+        // Each machine keeps its own tokens, unless the test names a directory.
+        channel: forkChannel({
+          MST_TOKENS_DIR: path.join(workDir, 'tokens'),
+          ...env,
+        }),
         async dispose({ keep }) {
           disposed.push(keep);
           if (!keep) await fs.rm(workDir, { recursive: true, force: true });
         },
       };
     },
-    options
+    channelOptions
   );
   return Object.assign(environment, { disposed });
 }

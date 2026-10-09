@@ -174,8 +174,10 @@ export async function runShardOverChannel(
           if (value) secrets.push(value);
         send({ type: 'tokens', ...tokens });
       } else if (message.type === 'trial') {
-        // Copy as the trials come, so a dropped channel loses at most one.
-        await channel.get(remoteResults, shard.resultsDir);
+        // Copy as the trials come, so a dropped channel loses at most one. A
+        // copy that fails (it can race the worker's next write) is retried
+        // by the next one, and by the final copy.
+        await channel.get(remoteResults, shard.resultsDir).catch(() => {});
         events.progress(message);
       } else if (message.type === 'heartbeat') {
         events.progress(message);

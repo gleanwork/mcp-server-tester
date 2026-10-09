@@ -34,6 +34,41 @@ function batchFailure(client: string, reason: string): ClientRunResult {
   };
 }
 
+/**
+ * One request per trial of each case: what a batch client is given, and what
+ * a shard's worker runs. A case's own client replaces `config` for it.
+ */
+export function batchRequests(
+  cases: readonly EvalCase[],
+  config: ClientConfig,
+  servers: MCPConfig[],
+  context: Pick<ClientRunContext, 'evalConfig' | 'env'>
+): ClientBatchRequest[] {
+  const requests: ClientBatchRequest[] = [];
+  const seen = new Set<string>();
+  for (const c of cases) {
+    if (seen.has(c.id))
+      throw new Error('Batch client case IDs must be unique within a dataset.');
+    seen.add(c.id);
+    // The eval resolves a case's own client in full (see runEval).
+    const declaration =
+      (clientPatchOf(c) as ClientConfig | undefined) ?? config;
+    const trials = c.trials ?? context.evalConfig.trials ?? 1;
+    for (let trial = 0; trial < trials; trial++)
+      requests.push({
+        caseId: c.id,
+        trial,
+        config: declaration,
+        input: {
+          prompt: c.input ?? '',
+          servers,
+          ...(context.env ? { env: context.env } : {}),
+        },
+      });
+  }
+  return requests;
+}
+
 /** What else a batch does while it runs. */
 export interface ClientBatchOptions {
   /**
@@ -65,32 +100,19 @@ export async function prepareClientBatch(
   options: ClientBatchOptions = {}
 ): Promise<Map<string, ClientRunResult[]> | undefined> {
   if (!definition.runBatch) return undefined;
-  const scopes: string[] = [];
-  const requests: ClientBatchRequest[] = [];
-  const queues = new Map<string, ClientRunResult[]>();
   for (const c of cases) {
-    if (queues.has(c.id))
-      throw new Error('Batch client case IDs must be unique within a dataset.');
-    // The eval resolves a case's own client in full (see runEval).
     const declaration =
       (clientPatchOf(c) as ClientConfig | undefined) ?? config;
     if (declaration.type !== config.type)
       throw new Error(
         'A batch client dataset cannot mix client types. Use separate eval configs.'
       );
-    queues.set(c.id, []);
-    const trials = c.trials ?? context.evalConfig.trials ?? 1;
-    for (let trial = 0; trial < trials; trial++) {
-      const scope = randomUUID();
-      scopes.push(scope);
-      requests.push({
-        caseId: c.id,
-        trial,
-        config: declaration,
-        input: { prompt: c.input ?? '', servers, env: context.env },
-      });
-    }
   }
+  const requests = batchRequests(cases, config, servers, context);
+  const scopes = requests.map(() => randomUUID());
+  const queues = new Map<string, ClientRunResult[]>(
+    cases.map((c) => [c.id, []])
+  );
   if (!requests.length) return queues;
   // Proxied clients connect to the variant's servers, one scope per request.
   const proxy =

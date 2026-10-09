@@ -10,6 +10,7 @@ import packageJson from '../../../package.json' with { type: 'json' };
 import { getClient } from '../builtinClients.js';
 import { redactClientSecrets } from '../clientSecrets.js';
 import { isInfrastructureError } from '../infrastructureFailure.js';
+import { resolveServerSecrets } from '../serverSecrets.js';
 import { installPlugins } from '../../plugins/extensions.js';
 import { loadPlugins } from '../../plugins/loadPlugins.js';
 import type {
@@ -193,12 +194,27 @@ export async function collectShard(
     installPlugins(
       await loadPlugins(bundle.plugins, { baseDir: options.bundleDir })
     );
+    // Servers arrive as declared; their secrets come from this machine's
+    // environment and the coordinator's `tokens`.
+    const serverEnv = { ...process.env, ...runtimeEnv };
     for (const [batchIndex, batch] of bundle.batches.entries()) {
       if (cancelled || !batch.requests.length) continue;
       const definition = getClient(batch.requests[0]!.config.type);
+      if (
+        batch.requests.some(
+          (request) => request.config.type !== batch.requests[0]!.config.type
+        )
+      )
+        throw new Error('A shard batch must hold one client type.');
       const requests: ClientBatchRequest[] = batch.requests.map((request) => ({
         ...request,
-        input: { ...request.input, env: runtimeEnv },
+        input: {
+          ...request.input,
+          servers: request.input.servers.map((server) =>
+            resolveServerSecrets(server, serverEnv)
+          ),
+          env: runtimeEnv,
+        },
       }));
       const keyOf = (index: number): TrialKey => ({
         variant: batch.variant.name,

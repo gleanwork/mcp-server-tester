@@ -162,6 +162,7 @@ export function printRunResult(
     failed?: number;
     total?: number;
     passRate?: number;
+    incomplete?: number;
   };
   const runId = path.basename(result.outputDir);
   const graded = result.summary.graded !== false;
@@ -238,7 +239,16 @@ export function printRunResult(
     console.log(
       `Report: ${report} (open it with \`mst open${result.summary.partial || !graded ? ` ${result.outputDir}` : ''}\`)`
     );
-  if ((graded && (metrics.failed ?? 0) > 0) || uncollected.length)
+  if (metrics.incomplete)
+    console.log(
+      `${metrics.incomplete} cases are incomplete: their shard ended before every trial came back.`
+    );
+  // A run that didn't finish isn't a success either.
+  if (
+    (graded && (metrics.failed ?? 0) > 0) ||
+    uncollected.length ||
+    (metrics.incomplete ?? 0) > 0
+  )
     process.exitCode = 1;
 }
 

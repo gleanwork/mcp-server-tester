@@ -4,7 +4,8 @@ export interface ClientDiagnostics {
    * Why the client produced no usable trace. `not-submitted`: the client never
    * ran the case (its batch stopped, or failed before the case's turn).
    * `cleanup`: the case ran, but restoring the desktop afterwards failed, so
-   * its state (and the case's isolation) is unknown.
+   * its state (and the case's isolation) is unknown. `missing`: the trial's
+   * shard ended before it ran or before its result came back (ADR 0004).
    */
   failureKind?:
     | 'startup'
@@ -12,7 +13,8 @@ export interface ClientDiagnostics {
     | 'process'
     | 'output'
     | 'not-submitted'
-    | 'cleanup';
+    | 'cleanup'
+    | 'missing';
   claudeStartup?: {
     status: 'ready' | 'failed' | 'missing';
     elapsedMs: number;
