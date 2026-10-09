@@ -1055,6 +1055,13 @@ async function evaluate(
         for (const { dataset } of canonicalDatasets) {
           const prepared = variantDataset(variant, setup, dataset);
           if (!prepared) continue;
+          // Before any shard starts: a judge that can't run fails the run
+          // now, not after the shards have collected every trial.
+          if (options.grade !== false)
+            await preflightCaseJudges(
+              prepared.effectiveDataset.cases,
+              checkedJudges
+            );
           for (const evalCase of prepared.effectiveDataset.cases)
             trialCases.set(`${variant.name}\u0000${evalCase.id}`, {
               evalCase,
