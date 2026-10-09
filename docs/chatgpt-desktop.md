@@ -414,8 +414,12 @@ The parser reads only native structure in the matched turn, never tool-result te
   without output is marked `pending` in `toolProvenance`.
 - A `function_call` namespace `mcp__<label>` is an MCP call. Configured labels map
   back with the app's namespace form (non-alphanumeric → `_`, so `acme-eval` is
-  `mcp__acme_eval`). `executed_tool_calls` must agree. `cua_repl.js` stays a client
-  tool. Unknown namespaces remain external MCP calls.
+  `mcp__acme_eval`). `executed_tool_calls` must agree. `cua_repl.js`,
+  `codex.list_mcp_resources` and `codex.list_mcp_resource_templates` stay built-in
+  tools, including when recorded as native `McpToolCall` items. Resource listing
+  does not satisfy `requireMcpCalls`. The `cua_repl` and `codex` server labels are
+  reserved for the app; rename configured MCP servers using either label.
+  Other server/tool pairs remain external MCP calls.
 - Work code mode: a `custom_tool_call` `exec` is one built-in call. MST keeps only the
   nested built-in tool names (for example `web__run`, `exec_command`), input length,
   and sha256, never the code. Each nested `tools.mcp__<label>__<tool>` reference
