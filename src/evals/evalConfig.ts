@@ -148,6 +148,13 @@ export interface EvalConfig {
    */
   pairwiseJudges?: ExtensionConfig[];
   coworkSetup?: CoworkSetupConfig;
+  /**
+   * Connector servers' dry-run proxies answer writes with a success reply,
+   * instead of a planned-write result, and record them; each trial's tool
+   * calls they answered are marked `simulatedWrite`. Writes still never
+   * reach the server. Default false.
+   */
+  simulateWrites?: boolean;
   results?: {
     store: ExtensionConfig;
   };
@@ -409,6 +416,7 @@ export const EvalConfigSchema = z
       .strict()
       .optional(),
     redactStoredResponses: z.boolean().optional(),
+    simulateWrites: z.boolean().optional(),
     /**
      * USD per million tokens, by model, for clients that report tokens but not
      * cost. MST ships no prices: they change, and every estimate should be

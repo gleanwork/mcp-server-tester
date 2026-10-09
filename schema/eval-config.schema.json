@@ -311,6 +311,10 @@
       "type": "boolean",
       "description": "Omit raw responses and trace text from stored results (default true)."
     },
+    "simulateWrites": {
+      "type": "boolean",
+      "description": "Connector servers' dry-run proxies answer writes with a success reply instead of a planned-write result, and record them; the trial's tool calls they answered are marked simulatedWrite. Writes still never reach the server. Default false."
+    },
     "extends": {
       "type": "array",
       "items": {

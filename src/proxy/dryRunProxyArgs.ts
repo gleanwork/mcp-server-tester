@@ -1,11 +1,13 @@
 /** Command-line options of the dry-run proxy entry point (`dist/proxy/dryRun.js`). */
+import { isAbsolute } from 'node:path';
 import { parseArgs } from 'node:util';
 import { fileToken, staticToken, type TokenSource } from './dryRunProxy.js';
 
 export const DRY_RUN_PROXY_USAGE = `Usage: dryRun --upstream-url <url> --name <label>
   [--token-file <path> | --token-env <NAME>]
   [--header NAME:VALUE]... [--read-only TOOL]... [--always-write TOOL]...
-  [--planned-write-alias KEY]...`;
+  [--planned-write-alias KEY]...
+  [--simulate-writes <file> [--write-replies <json>]]`;
 
 export function parseDryRunProxyArgs(
   argv: readonly string[],
@@ -22,6 +24,8 @@ export function parseDryRunProxyArgs(
       'read-only': { type: 'string', multiple: true, default: [] },
       'always-write': { type: 'string', multiple: true, default: [] },
       'planned-write-alias': { type: 'string', multiple: true, default: [] },
+      'simulate-writes': { type: 'string' },
+      'write-replies': { type: 'string' },
     },
     strict: true,
   });
@@ -51,6 +55,23 @@ export function parseDryRunProxyArgs(
       );
     headers[raw.slice(0, colon).trim()] = raw.slice(colon + 1).trim();
   }
+  const writesFile = values['simulate-writes'];
+  if (values['write-replies'] !== undefined && !writesFile)
+    throw new Error('--write-replies needs --simulate-writes.');
+  if (writesFile !== undefined && !isAbsolute(writesFile))
+    throw new Error('--simulate-writes takes an absolute path.');
+  let replies: Record<string, unknown> | undefined;
+  if (values['write-replies'] !== undefined) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(values['write-replies']);
+    } catch {
+      throw new Error('--write-replies must be a JSON object.');
+    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
+      throw new Error('--write-replies must be a JSON object.');
+    replies = parsed as Record<string, unknown>;
+  }
   return {
     upstreamUrl,
     name,
@@ -59,5 +80,13 @@ export function parseDryRunProxyArgs(
     readOnlyTools: values['read-only'],
     alwaysWriteTools: values['always-write'],
     plannedWriteAliases: values['planned-write-alias'],
+    ...(writesFile
+      ? {
+          simulateWrites: {
+            file: writesFile,
+            ...(replies ? { replies } : {}),
+          },
+        }
+      : {}),
   };
 }

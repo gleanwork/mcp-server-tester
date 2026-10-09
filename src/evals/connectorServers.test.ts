@@ -17,6 +17,7 @@ import {
 import { installPlugins } from '../plugins/extensions.js';
 import { loadEvalConfigFromObject } from './evalConfig.js';
 import { fakeAuthServer } from '../auth/grants/fakeAuthServer.js';
+import { recordSimulatedWrite } from '../proxy/simulatedWrites.js';
 
 let dir: string;
 let store: CredentialStore;
@@ -367,5 +368,151 @@ describe('variant selection', () => {
         variant: 'aggregated',
       })
     ).rejects.toThrow('acme/glean: not signed in.');
+  });
+});
+
+describe('simulateWrites', () => {
+  const launches: Array<Record<string, unknown>> = [];
+  function writesPlugin(): Plugin {
+    return {
+      meta: { name: 'writes-plugin', namespace: 'w' },
+      connectors: {
+        // Passes simulateWrites to its proxy, as dryRunProxyServer does.
+        notes: {
+          url: 'https://notes.example/mcp',
+          auth: { type: 'none' },
+          launch: (context) => {
+            launches.push({ ...context });
+            return {
+              transport: 'stdio',
+              command: '/usr/bin/true',
+              args: context.simulateWrites
+                ? ['--simulate-writes', context.simulateWrites.file]
+                : [],
+            };
+          },
+        },
+        // Ignores it: its writes stay planned.
+        legacy: {
+          url: 'https://legacy.example/mcp',
+          auth: { type: 'none' },
+          launch: () => ({ transport: 'stdio', command: '/usr/bin/true' }),
+        },
+      },
+      clients: {
+        // Writes through "notes" the way the proxy records it.
+        writer: {
+          schema: z.object({ type: z.string() }).strict(),
+          evidence: 'structured',
+          run: async (input) => {
+            const notes = input.servers.find((s) => s.label === 'notes');
+            const file =
+              notes?.transport === 'stdio' ? notes.args?.[1] : undefined;
+            if (file)
+              await recordSimulatedWrite(file, {
+                time: new Date().toISOString(),
+                server: 'notes',
+                tool: 'create_note',
+                arguments: { text: 'hi' },
+                reply: { ok: true },
+              });
+            return {
+              finalText: 'Saved your note.',
+              events: [
+                {
+                  kind: 'tool_call',
+                  source: 'mcp',
+                  server: 'notes',
+                  name: 'create_note',
+                  arguments: { text: 'hi' },
+                  output: '{"ok":true}',
+                },
+                {
+                  kind: 'tool_call',
+                  source: 'mcp',
+                  server: 'notes',
+                  name: 'list_notes',
+                  arguments: {},
+                  output: '[]',
+                },
+              ],
+            };
+          },
+        },
+      },
+    };
+  }
+
+  async function run(simulateWrites?: boolean) {
+    launches.length = 0;
+    await fs.writeFile(
+      path.join(dir, 'cases.json'),
+      JSON.stringify({ name: 'cases', cases: [{ id: 'c1', input: 'q' }] })
+    );
+    await fs.writeFile(
+      path.join(dir, 'eval.json'),
+      JSON.stringify({
+        name: 'writes',
+        datasets: ['./cases.json'],
+        client: 'w/client/writer',
+        ...(simulateWrites !== undefined ? { simulateWrites } : {}),
+        redactStoredResponses: false,
+        servers: {
+          notes: { connector: 'w/connector/notes' },
+          legacy: { connector: 'w/connector/legacy' },
+        },
+      })
+    );
+    const warnings: string[] = [];
+    const warn = console.warn;
+    console.warn = (line: string) => void warnings.push(line);
+    try {
+      const result = await runEval({
+        configPath: path.join(dir, 'eval.json'),
+        rootDir: dir,
+        plugins: [writesPlugin()],
+        credentialStore: store,
+        report: false,
+      });
+      return { result, warnings };
+    } finally {
+      console.warn = warn;
+    }
+  }
+
+  it("marks the trial's simulated writes, then deletes the records", async () => {
+    const { result, warnings } = await run(true);
+    const file = (launches[0]!.simulateWrites as { file: string }).file;
+    expect(path.basename(file)).toBe('notes.jsonl');
+    const events = result.summary.results[0]!.trace!.events;
+    expect(events.map((event) => event.simulatedWrite)).toEqual([
+      true,
+      undefined,
+    ]);
+    // The trace MST stored says so too.
+    const stored = JSON.parse(
+      await fs.readFile(
+        path.join(result.outputDir, 'traces', 'default', 'c1', '0.json'),
+        'utf8'
+      )
+    );
+    expect(stored.trace.events[0].simulatedWrite).toBe(true);
+    await expect(fs.stat(path.dirname(file))).rejects.toThrow();
+    expect(warnings.join('\n')).toContain(
+      'Connector server "legacy" doesn\'t pass simulateWrites to its dry-run proxy'
+    );
+  });
+
+  it('leaves writes planned without the flag', async () => {
+    const { result, warnings } = await run();
+    expect(launches.every((context) => !('simulateWrites' in context))).toBe(
+      true
+    );
+    expect(
+      result.summary.results[0]!.trace!.events.some(
+        (event) => event.simulatedWrite
+      )
+    ).toBe(false);
+    expect(warnings.join('\n')).not.toContain('simulateWrites');
   });
 });

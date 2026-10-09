@@ -23,6 +23,16 @@ export interface DryRunProxyServerOptions {
   alwaysWriteTools?: readonly string[];
   /** Extra keys for the planned-write result, for graders that read an older name. */
   plannedWriteAliases?: readonly string[];
+  /**
+   * Answer writes with a success reply and record them in `file` instead of
+   * a planned-write result. Pass a connector's `launch` context
+   * `simulateWrites` here, with the connector's reply templates.
+   */
+  simulateWrites?: {
+    file: string;
+    /** Reply templates by tool name (see `SimulatedWritesOptions.replies`). */
+    replies?: Readonly<Record<string, unknown>>;
+  };
   /** Readiness fails closed below this many tools. */
   minTools?: number;
   /** Node to run the proxy with. Default: the Node running MST. */
@@ -80,6 +90,14 @@ export function dryRunProxyServer(
     args.push('--always-write', tool);
   for (const key of options.plannedWriteAliases ?? [])
     args.push('--planned-write-alias', key);
+  if (options.simulateWrites) {
+    args.push('--simulate-writes', options.simulateWrites.file);
+    if (options.simulateWrites.replies)
+      args.push(
+        '--write-replies',
+        JSON.stringify(options.simulateWrites.replies)
+      );
+  }
   return {
     transport: 'stdio',
     label: options.label,
