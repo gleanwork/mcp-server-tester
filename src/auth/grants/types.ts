@@ -63,6 +63,12 @@ export interface ConnectorLaunchContext {
    */
   tokenFile?: string;
   platform: NodeJS.Platform;
+  /**
+   * Set when the eval config sets `simulateWrites`: pass it to
+   * `dryRunProxyServer` (with the connector's reply templates), so writes get
+   * a success reply and are recorded in `file` for MST to read.
+   */
+  simulateWrites?: { file: string };
 }
 
 /**

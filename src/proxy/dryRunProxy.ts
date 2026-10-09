@@ -2,7 +2,8 @@
  * Dry-run proxy: a stdio MCP server in front of one streamable-HTTP MCP
  * server. The client sees the upstream server's real tools; read-only tool
  * calls go upstream; every other tool call returns a planned-write result and
- * never reaches the upstream server.
+ * never reaches the upstream server. With `simulateWrites`, a write instead
+ * gets a success reply and is recorded in a file (see simulatedWrites.ts).
  *
  * Fail closed: a tool without annotations, or one the upstream server does
  * not list, is a write. `readOnlyTools` allows reads on servers that annotate
@@ -23,6 +24,12 @@ import type { FetchLike, Tool } from '@modelcontextprotocol/client';
 import { Server } from '@modelcontextprotocol/server';
 import type { Transport } from '@modelcontextprotocol/server';
 import { z } from 'zod';
+import {
+  recordSimulatedWrite,
+  simulatedReply,
+  simulatedWriteId,
+  type SimulatedWritesOptions,
+} from './simulatedWrites.js';
 
 /** The key of a planned-write result: what the client asked to do, not done. */
 export const PLANNED_WRITE_KEY = '_mst_planned_write';
@@ -55,6 +62,11 @@ export interface DryRunProxyOptions {
   alwaysWriteTools?: readonly string[];
   /** Extra keys for the planned-write result, for graders that read an older name. */
   plannedWriteAliases?: readonly string[];
+  /**
+   * Answer writes with a success reply instead of a planned-write result,
+   * and record each in a file. The write still never reaches the server.
+   */
+  simulateWrites?: SimulatedWritesOptions;
   /** For tests: how long to wait for a new token after a 401. */
   authRetryWaitMs?: number;
   /** For tests: a fetch to reach the upstream server with. */
@@ -248,6 +260,40 @@ export async function createDryRunProxy(
     { capabilities }
   );
 
+  /**
+   * A write's success reply, once it is recorded. A write that can't be
+   * recorded gets the planned-write result: it is never forwarded either way.
+   */
+  async function simulateWrite(name: string, args: unknown): Promise<unknown> {
+    const simulate = options.simulateWrites!;
+    const now = new Date();
+    const reply = simulatedReply(
+      tools.get(name),
+      name,
+      args,
+      simulate.replies,
+      {
+        id: simulatedWriteId(),
+        now,
+      }
+    );
+    try {
+      await recordSimulatedWrite(simulate.file, {
+        time: now.toISOString(),
+        server: options.name,
+        tool: name,
+        arguments: args ?? {},
+        reply: reply.structuredContent ?? reply.content[0]?.text,
+      });
+      return reply;
+    } catch {
+      options.log?.(
+        `Couldn't record a simulated write of ${name}; answered as planned.`
+      );
+      return plannedWriteResult(options.name, name, args, aliases);
+    }
+  }
+
   async function forward(
     method: string,
     params: unknown,
@@ -287,13 +333,16 @@ export async function createDryRunProxy(
       const name = request.params.name;
       if (!tools.has(name) && !alwaysWrite.has(name) && !readOnly.has(name))
         await listAllTools().catch(() => {});
-      if (isWrite(name))
+      if (isWrite(name)) {
+        if (options.simulateWrites)
+          return (await simulateWrite(name, request.params.arguments)) as never;
         return plannedWriteResult(
           options.name,
           name,
           request.params.arguments,
           aliases
         ) as never;
+      }
       return (await forward(
         'tools/call',
         request.params,

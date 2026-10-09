@@ -77,6 +77,8 @@ export interface ConnectorExpansion {
   grantsByVariant: Map<string, Set<string>>;
   /** The private directory token files go in (not yet created). */
   tokenDirectory?: string;
+  /** Where the dry-run proxies record simulated writes, one file per server label. */
+  simulatedWriteFiles: string[];
 }
 
 function connectorUse(server: ConnectorServerConfig): ConnectorUse {
@@ -120,11 +122,23 @@ export function connectorUses(evalConfig: EvalConfig): ConnectorUse[] {
  */
 export async function expandConnectorServers(
   evalConfig: EvalConfig,
-  options: { tokenDirectory?: string; platform?: NodeJS.Platform } = {}
+  options: {
+    tokenDirectory?: string;
+    platform?: NodeJS.Platform;
+    /** With `simulateWrites`: the private directory proxies record writes in. */
+    simulatedWritesDirectory?: string;
+  } = {}
 ): Promise<ConnectorExpansion> {
   const uses = connectorUses(evalConfig);
   if (uses.length === 0)
-    return { evalConfig, uses, slots: [], grantsByVariant: new Map() };
+    return {
+      evalConfig,
+      uses,
+      slots: [],
+      grantsByVariant: new Map(),
+      simulatedWriteFiles: [],
+    };
+  const simulatedWriteFiles = new Set<string>();
   const tokenDirectory =
     options.tokenDirectory ??
     join(await realpath(tmpdir()), `${TOKEN_DIRECTORY_PREFIX}${randomUUID()}`);
@@ -163,13 +177,28 @@ export async function expandConnectorServers(
         slot.file ??= join(tokenDirectory, `${slot.target.key}.json`);
         tokenFile = slot.file;
       }
+      const writesFile = options.simulatedWritesDirectory
+        ? join(
+            options.simulatedWritesDirectory,
+            `${encodeURIComponent(use.label)}.jsonl`
+          )
+        : undefined;
       const launched = await use.connector.launch({
         url: use.url,
         label: use.label,
         ...(tokenFile ? { tokenFile } : {}),
         platform: options.platform ?? process.platform,
+        ...(writesFile ? { simulateWrites: { file: writesFile } } : {}),
       });
       const entry = validateMCPConfig({ ...launched, label: use.label });
+      if (writesFile) {
+        if (entry.transport === 'stdio' && entry.args?.includes(writesFile))
+          simulatedWriteFiles.add(writesFile);
+        else
+          console.warn(
+            `[mst] Connector server "${use.label}" doesn't pass simulateWrites to its dry-run proxy, so its writes get planned-write results.`
+          );
+      }
       if (
         entry.transport === 'stdio' &&
         entry.minTools === undefined &&
@@ -227,6 +256,7 @@ export async function expandConnectorServers(
     slots: [...slots.values()],
     grantsByVariant,
     tokenDirectory,
+    simulatedWriteFiles: [...simulatedWriteFiles],
   };
 }
 

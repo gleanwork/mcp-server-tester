@@ -98,6 +98,12 @@ export interface TraceEvent {
   completedAt?: string;
   /** `tool_search` only: the tools the search returned, by name and server. */
   results?: Array<{ name: string; server?: string }>;
+  /**
+   * The dry-run proxy answered this write with a success reply it made up
+   * (eval config `simulateWrites`): `output` is that reply, and the write
+   * never reached the server.
+   */
+  simulatedWrite?: boolean;
 }
 
 /** One execution trace. Clients never return evaluation scores. */

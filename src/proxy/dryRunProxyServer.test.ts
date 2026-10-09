@@ -58,6 +58,24 @@ describe('dryRunProxyServer', () => {
     ]);
     expect(entry.env).toBeUndefined();
   });
+
+  it('passes simulated writes and their reply templates', () => {
+    if (!built()) return;
+    const entry = dryRunProxyServer({
+      label: 'slack',
+      upstreamUrl: 'https://mcp.slack.com/mcp',
+      simulateWrites: {
+        file: '/private/run/slack.jsonl',
+        replies: { send: { ok: true } },
+      },
+    });
+    expect(entry.args?.slice(-4)).toEqual([
+      '--simulate-writes',
+      '/private/run/slack.jsonl',
+      '--write-replies',
+      '{"send":{"ok":true}}',
+    ]);
+  });
 });
 
 // Runs the built proxy as a real child process. CI builds before it tests.
@@ -163,6 +181,51 @@ describe.skipIf(!built())('built dry-run proxy (stdio)', () => {
         },
       });
       expect(calls).toEqual(['search']);
+    } finally {
+      await closeMCPClient(client);
+    }
+  }, 20_000);
+
+  it('simulates writes on stdio and records them', async () => {
+    const tokenFile = join(dir, 'token.json');
+    await fs.writeFile(
+      tokenFile,
+      JSON.stringify({ version: 1, accessToken: 'file-token' }),
+      { mode: 0o600 }
+    );
+    const file = join(dir, 'vendor.jsonl');
+    calls.length = 0;
+    const client = await createMCPClientForConfig({
+      ...dryRunProxyServer({
+        label: 'vendor',
+        upstreamUrl: url,
+        tokenFile,
+        simulateWrites: {
+          file,
+          replies: { post: { ok: true, text: '{{arguments.text}}' } },
+        },
+      }),
+      connectTimeoutMs: 10_000,
+    });
+    try {
+      const write = await client.callTool({
+        name: 'post',
+        arguments: { text: 'hi' },
+      });
+      expect(write.content).toEqual([
+        { type: 'text', text: '{"ok":true,"text":"hi"}' },
+      ]);
+      expect(calls).toEqual([]);
+      const [record] = (await fs.readFile(file, 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(record).toMatchObject({
+        format: 'mst.simulated-write/v1',
+        server: 'vendor',
+        tool: 'post',
+        arguments: { text: 'hi' },
+      });
     } finally {
       await closeMCPClient(client);
     }

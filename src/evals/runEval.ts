@@ -36,7 +36,7 @@ import { resolveConfigExtends } from './configExtends.js';
 import { resolveCoworkSetupConfig } from './coworkSetup/options.js';
 import { sumUsage } from '../utils/usageUtils.js';
 import { sumJudgeUsage } from '../judge/judgeContract.js';
-import { createHash, createHmac, randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -83,6 +83,7 @@ import {
   createEvalCaseExecutor,
 } from './caseExecution.js';
 import { mergeEvalJudges, preflightCaseJudges } from './grading.js';
+import { withSimulatedWriteMarks } from './simulatedWriteMarks.js';
 import { batchRequests, prepareClientBatch } from './prepareClientBatch.js';
 import type { EvalRunnerResult } from './evalRunner.js';
 import type { EvalCase, EvalDataset } from './datasetTypes.js';
@@ -861,7 +862,18 @@ async function evaluate(
   const identity = configIdentity(rawConfig);
   // Connector servers become the entries their connectors launch. Paths and
   // env names only; tokens arrive when the run starts.
-  const connectors = await expandConnectorServers(rawConfig);
+  // With `simulateWrites`, proxies record the writes they answer here.
+  const simulatedWritesDirectory =
+    (rawConfig as { simulateWrites?: unknown }).simulateWrites === true
+      ? path.join(
+          await fs.realpath(os.tmpdir()),
+          `mst-simulated-writes-${randomUUID()}`
+        )
+      : undefined;
+  const connectors = await expandConnectorServers(
+    rawConfig,
+    simulatedWritesDirectory ? { simulatedWritesDirectory } : {}
+  );
   let evalConfig = connectors.evalConfig;
 
   evalConfig = validateEvalConfig(
@@ -1022,6 +1034,9 @@ async function evaluate(
     replay ? server : resolveServerSecrets(server, env);
   try {
     Object.assign(env, credentials.env);
+    // Private, like the token files: it holds what the client tried to write.
+    if (simulatedWritesDirectory)
+      await fs.mkdir(simulatedWritesDirectory, { mode: 0o700 });
     const sourceServers = (
       options.mcpConfig
         ? [options.mcpConfig]
@@ -1443,15 +1458,19 @@ async function evaluate(
                                     )
                                 : undefined
                             )
-                          : createEvalCaseExecutor({
-                              servers: resolvedServers,
-                              client: clientConfig.declaration,
-                              evalConfig: effectiveConfig,
-                              variant,
-                              env,
-                              batchTraces,
-                              toolVariant,
-                            }),
+                          : // Writes the proxy simulated are marked in the trace.
+                            withSimulatedWriteMarks(
+                              createEvalCaseExecutor({
+                                servers: resolvedServers,
+                                client: clientConfig.declaration,
+                                evalConfig: effectiveConfig,
+                                variant,
+                                env,
+                                batchTraces,
+                                toolVariant,
+                              }),
+                              connectors.simulatedWriteFiles
+                            ),
                         await artifactsRoot(),
                         variant.name
                       ),
@@ -1526,6 +1545,8 @@ async function evaluate(
     throw error;
   } finally {
     await credentials.stop();
+    if (simulatedWritesDirectory)
+      await fs.rm(simulatedWritesDirectory, { recursive: true, force: true });
   }
 
   /**

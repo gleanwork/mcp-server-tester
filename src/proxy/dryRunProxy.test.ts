@@ -18,6 +18,7 @@ import {
   type DryRunProxyOptions,
 } from './dryRunProxy.js';
 import { parseDryRunProxyArgs } from './dryRunProxyArgs.js';
+import type { SimulatedWriteRecord } from './simulatedWrites.js';
 
 const TOOLS = [
   {
@@ -43,6 +44,21 @@ const TOOLS = [
     name: 'mark_read',
     inputSchema: { type: 'object' as const },
     annotations: { readOnlyHint: true },
+  },
+  // A write that declares what it returns.
+  {
+    name: 'create_issue',
+    inputSchema: { type: 'object' as const },
+    outputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string' },
+        url: { type: 'string', format: 'uri' },
+        number: { type: 'integer' },
+      },
+      required: ['id', 'url'],
+    },
+    annotations: { readOnlyHint: false },
   },
 ];
 
@@ -243,6 +259,95 @@ describe('dry-run proxy', () => {
     expect(result.structuredContent).toHaveProperty('_legacy_planned_write');
   });
 
+  it('simulates writes: a success reply, recorded, never forwarded', async () => {
+    const vendor = fakeVendor();
+    const file = join(dir, 'vendor.jsonl');
+    const { client } = await start({
+      vendor,
+      token: staticToken('token-1'),
+      simulateWrites: {
+        file,
+        replies: {
+          send_message: {
+            ok: true,
+            channel: '{{arguments.channel}}',
+            ts: '{{unixTime}}',
+            message: { text: '{{arguments.text}}' },
+          },
+        },
+      },
+    });
+    await client.listTools();
+
+    // A template from the connector.
+    const sent = await client.callTool({
+      name: 'send_message',
+      arguments: { channel: 'C1', text: 'hi' },
+    });
+    const reply = JSON.parse(
+      (sent.content as Array<{ text: string }>)[0]!.text
+    );
+    expect(reply).toMatchObject({
+      ok: true,
+      channel: 'C1',
+      message: { text: 'hi' },
+    });
+    expect(reply.ts).toMatch(/^\d+\.\d{6}$/);
+    expect(JSON.stringify(sent)).not.toContain(PLANNED_WRITE_KEY);
+    expect(sent.isError).toBeUndefined();
+
+    // No template: the tool's outputSchema, as structured content.
+    const created = await client.callTool({
+      name: 'create_issue',
+      arguments: { title: 'Bug' },
+    });
+    const issue = created.structuredContent as Record<string, unknown>;
+    expect(Object.keys(issue).sort()).toEqual(['id', 'url']);
+    expect(issue.url).toBe(`https://example.com/${String(issue.id)}`);
+
+    // Neither: a generic success that echoes what was written.
+    const purged = await client.callTool({
+      name: 'purge',
+      arguments: { all: true },
+    });
+    expect(
+      JSON.parse((purged.content as Array<{ text: string }>)[0]!.text)
+    ).toMatchObject({ ok: true, result: { all: true } });
+
+    expect(vendor.calls).toEqual([]);
+    const records = (await fs.readFile(file, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as SimulatedWriteRecord);
+    expect(records.map((r) => [r.server, r.tool, r.arguments])).toEqual([
+      ['vendor', 'send_message', { channel: 'C1', text: 'hi' }],
+      ['vendor', 'create_issue', { title: 'Bug' }],
+      ['vendor', 'purge', { all: true }],
+    ]);
+    expect(records[0]!.reply).toBe(
+      (sent.content as Array<{ text: string }>)[0]!.text
+    );
+    expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
+  });
+
+  it('answers a write it cannot record as planned, still without forwarding it', async () => {
+    const vendor = fakeVendor();
+    const { client, logs } = await start({
+      vendor,
+      token: staticToken('token-1'),
+      simulateWrites: { file: join(dir, 'missing', 'vendor.jsonl') },
+    });
+    const write = await client.callTool({
+      name: 'send_message',
+      arguments: { text: 'hi' },
+    });
+    expect(write.structuredContent).toHaveProperty(PLANNED_WRITE_KEY);
+    expect(vendor.calls).toEqual([]);
+    expect(logs.join('\n')).toContain(
+      "Couldn't record a simulated write of send_message"
+    );
+  });
+
   it('reads a renewed token from the file without restarting the session', async () => {
     const vendor = fakeVendor();
     const file = join(dir, 'token.json');
@@ -391,6 +496,43 @@ describe('parseDryRunProxyArgs', () => {
       alwaysWriteTools: ['c'],
     });
     expect(parsed.token?.current()).toBe('secret');
+  });
+
+  it('parses simulated writes and their reply templates', () => {
+    const base = [
+      '--upstream-url',
+      'https://mcp.example/mcp',
+      '--name',
+      'slack',
+    ];
+    expect(
+      parseDryRunProxyArgs([
+        ...base,
+        '--simulate-writes',
+        '/tmp/run/slack.jsonl',
+        '--write-replies',
+        '{"send":{"ok":true}}',
+      ]).simulateWrites
+    ).toEqual({
+      file: '/tmp/run/slack.jsonl',
+      replies: { send: { ok: true } },
+    });
+    expect(parseDryRunProxyArgs(base).simulateWrites).toBeUndefined();
+    expect(() =>
+      parseDryRunProxyArgs([...base, '--write-replies', '{}'])
+    ).toThrow('--write-replies needs --simulate-writes.');
+    expect(() =>
+      parseDryRunProxyArgs([...base, '--simulate-writes', 'relative.jsonl'])
+    ).toThrow('--simulate-writes takes an absolute path.');
+    expect(() =>
+      parseDryRunProxyArgs([
+        ...base,
+        '--simulate-writes',
+        '/tmp/x.jsonl',
+        '--write-replies',
+        '[1]',
+      ])
+    ).toThrow('--write-replies must be a JSON object.');
   });
 
   it('rejects plaintext upstreams off loopback', () => {

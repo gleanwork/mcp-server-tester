@@ -650,6 +650,60 @@ takes effect on the next request without restarting the MCP session. After a
 401 it waits up to 90 seconds for a new token, then retries once. If none
 arrives, it logs `CONNECTOR_AUTH_EXPIRED` to stderr. It never logs a token.
 
+#### Simulated writes
+
+A planned-write result tells the client its write didn't happen, and a model
+that knows that may retry, apologize or answer differently. To grade it as it
+behaves after a real write, set `"simulateWrites": true` in the eval config.
+The proxy then answers a write with a success reply. It still never forwards
+the write, and it records it. The reply, in order of preference:
+
+1. The connector's template for the tool (`simulateWrites.replies`).
+2. A minimal object that satisfies the tool's `outputSchema`, as structured
+   content, when it declares one.
+3. `{ "ok": true, "id": "<id>", "result": <the call's arguments> }`.
+
+In a template, a string that is exactly `{{arguments.<path>}}` becomes that
+argument's value; inside a longer string, its text. `{{id}}` is a fresh ID for
+the call, `{{now}}` the time (ISO 8601) and `{{unixTime}}` seconds with
+microseconds, as in Slack's `ts`:
+
+```ts
+const slack = dryRunProxyServer({
+  label: 'slack',
+  upstreamUrl: 'https://mcp.slack.com/mcp',
+  tokenFile,
+  // From the connector's launch context; absent without simulateWrites.
+  ...(simulateWrites && {
+    simulateWrites: {
+      ...simulateWrites,
+      replies: {
+        slack_send_message: {
+          ok: true,
+          channel: '{{arguments.channel_id}}',
+          ts: '{{unixTime}}',
+          message: { text: '{{arguments.message}}' },
+        },
+      },
+    },
+  }),
+});
+```
+
+With the flag, MST passes each connector's `launch` a private file,
+`simulateWrites.file`, for its proxy to record writes in: one JSONL line per
+write (`mst.simulated-write/v1`: server, tool, arguments, reply). A connector
+whose launch doesn't pass it on keeps planned-write results, and the run says
+so. After each trial, MST marks the trial's tool calls the proxy answered
+(same server, tool and arguments) `simulatedWrite: true`, in its trace events
+and in the client response's `events` and `toolCalls`, so judges and reports
+know the write never happened; `output` is the reply.
+The files are deleted when the run ends. A write the proxy can't record gets
+the planned-write result instead.
+
+The model can't read back what it "wrote": a search for the message it sent
+won't find it.
+
 ### macOS setup contract
 
 MST validates the full server set before changing the app or profile. HTTP,
