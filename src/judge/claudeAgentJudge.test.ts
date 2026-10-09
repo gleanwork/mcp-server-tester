@@ -67,7 +67,7 @@ describe('claudeAgentJudge', () => {
       expect(query).toHaveBeenCalledWith({
         prompt: expect.stringContaining('candidate'),
         options: {
-          model: 'claude-sonnet-4-20250514',
+          model: 'claude-sonnet-4-6',
           maxBudgetUsd: 0.1,
           tools: [],
           permissionMode: 'bypassPermissions',
@@ -331,7 +331,7 @@ describe('claudeAgentJudge', () => {
       expect(query).toHaveBeenCalledWith(
         expect.objectContaining({
           options: expect.objectContaining({
-            model: 'claude-sonnet-4-20250514',
+            model: 'claude-sonnet-4-6',
           }),
         })
       );

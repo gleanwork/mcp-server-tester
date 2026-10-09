@@ -27,6 +27,16 @@ interface AgentResultMessage {
   errors?: string[];
 }
 
+/** Loads the optional `@anthropic-ai/claude-agent-sdk` package, or throws naming how to install it. */
+export function loadClaudeAgentSdk(): Promise<AgentSdk> {
+  return loadJudgeSdk<AgentSdk>(
+    // An optional peer dependency, loaded only when this judge runs.
+    () => import('@anthropic-ai/claude-agent-sdk'),
+    'Claude Agent',
+    '@anthropic-ai/claude-agent-sdk'
+  );
+}
+
 /**
  * Claude Agent SDK completion adapter: one response-only turn with no tools.
  * Reports the SDK's own cost, duration and cache usage.
@@ -35,12 +45,7 @@ export function claudeAgentCompletion(
   config: JudgeConfig = {}
 ): JudgeCompletionAdapter {
   return async ({ system, prompt }) => {
-    // An optional peer dependency, loaded only when this judge runs.
-    const { query } = await loadJudgeSdk<AgentSdk>(
-      () => import('@anthropic-ai/claude-agent-sdk'),
-      'Claude Agent',
-      '@anthropic-ai/claude-agent-sdk'
-    );
+    const { query } = await loadClaudeAgentSdk();
     try {
       let result: AgentResultMessage | undefined;
       for await (const message of query({

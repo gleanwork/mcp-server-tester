@@ -5,12 +5,15 @@ import {
   type LLMEndpointOptions,
 } from '../llm/endpoint.js';
 
-/** Output token budget for a judge score, unless configured. */
-export const DEFAULT_JUDGE_MAX_TOKENS = 1000;
+/**
+ * Output token budget for a judge score, unless configured. Models often
+ * reason before the JSON, so the budget leaves room for both.
+ */
+export const DEFAULT_JUDGE_MAX_TOKENS = 4096;
 /** Judges are deterministic unless configured otherwise. */
 export const DEFAULT_JUDGE_TEMPERATURE = 0;
 /** The Claude model Anthropic-family judges use unless configured. */
-export const DEFAULT_CLAUDE_JUDGE_MODEL = 'claude-sonnet-4-20250514';
+export const DEFAULT_CLAUDE_JUDGE_MODEL = 'claude-sonnet-4-6';
 
 /**
  * Loads a judge's optional SDK. Pass the import as a thunk with a literal

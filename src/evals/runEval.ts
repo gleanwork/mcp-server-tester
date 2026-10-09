@@ -74,7 +74,7 @@ import {
   batchTraceExecution,
   createEvalCaseExecutor,
 } from './caseExecution.js';
-import { mergeEvalJudges } from './grading.js';
+import { mergeEvalJudges, preflightCaseJudges } from './grading.js';
 import { prepareClientBatch } from './prepareClientBatch.js';
 import type { EvalRunnerResult } from './evalRunner.js';
 import type { EvalCase, EvalDataset } from './datasetTypes.js';
@@ -832,6 +832,8 @@ async function evaluate(
   // Keys the hashes of client options in run.json: comparable within this run only.
   const runKey = randomBytes(32);
   const variantResults: EvaluationVariantResult[] = [];
+  // Judge settings whose preflight passed, across variants.
+  const checkedJudges = new Set<string>();
   const allDatasets: RunEvalResult['datasets'] = [];
   const allResults: EvalCaseResult[] = [];
   // Saved with the first trial: from then on, run.json says how far the run got.
@@ -1017,6 +1019,10 @@ async function evaluate(
                   : {}),
               })),
             };
+            // Before this variant's client starts: a judge that can't run
+            // (no SDK, no credential) fails the run, not every trial.
+            if (options.grade !== false)
+              await preflightCaseJudges(effectiveDataset.cases, checkedJudges);
             const sourceConfig = source;
             const runClient =
               typeof clientConfig.definition.run === 'function' ||

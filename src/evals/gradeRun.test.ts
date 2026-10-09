@@ -30,6 +30,8 @@ async function setup(
     keyword?: string;
     /** Throw instead of answering this case. */
     failCase?: string;
+    /** The keyword judge's preflight: throw this to say it can't run. */
+    preflightError?: string;
   } = {}
 ) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-grade-'));
@@ -60,6 +62,7 @@ async function setup(
       };
     }
   );
+  const preflight = vi.fn((_options: Record<string, unknown>) => {});
   const judge = vi.fn(
     async (
       { trial }: { trial: { text?: string } },
@@ -98,6 +101,10 @@ async function setup(
       keyword: {
         schema: z.object({ keyword: z.string() }).strict(),
         evaluate: judge,
+        preflight: async (judgeOptions: Record<string, unknown>) => {
+          preflight(judgeOptions);
+          if (options.preflightError) throw new Error(options.preflightError);
+        },
       },
     },
     pairwiseJudges: {
@@ -141,7 +148,7 @@ async function setup(
     plugins: [plugin],
     report: false,
   };
-  return { dir, base, client, judge, pairwise, writeConfig };
+  return { dir, base, client, judge, pairwise, preflight, writeConfig };
 }
 
 /** Each case's pass and scores, without timings: what grading decided. */
@@ -274,6 +281,39 @@ describe('mst run --no-grade and mst grade', () => {
       log.mockRestore();
       process.exitCode = exitCode;
     }
+  });
+
+  it('checks once, before any client starts, that every judge can run', async () => {
+    const t = await setup();
+    await runEval(t.base);
+    // Two variants, two cases, one judge setting: one check.
+    expect(t.preflight).toHaveBeenCalledTimes(1);
+    expect(t.preflight).toHaveBeenCalledWith({ keyword: 'certificate' });
+
+    resetPluginsForTests();
+    const broken = await setup({ preflightError: 'Set ACME_JUDGE_KEY.' });
+    await expect(runEval(broken.base)).rejects.toThrow(
+      'Judge "gr/judge/keyword" can\'t run: Set ACME_JUDGE_KEY.'
+    );
+    expect(broken.client).not.toHaveBeenCalled();
+    expect(broken.judge).not.toHaveBeenCalled();
+    await expect(
+      fs.readdir(
+        path.join(broken.dir, '.mcp-test-results', 'grade-test', 'runs')
+      )
+    ).rejects.toThrow();
+  });
+
+  it('mst grade checks the judges before writing a regrade; --no-grade does not check them', async () => {
+    const t = await setup({ preflightError: 'Set ACME_JUDGE_KEY.' });
+    const collected = await runEval({ ...t.base, grade: false });
+    expect(t.preflight).not.toHaveBeenCalled();
+    await expect(
+      gradeRun({ ...t.base, run: collected.outputDir })
+    ).rejects.toThrow("can't run: Set ACME_JUDGE_KEY.");
+    expect(t.judge).not.toHaveBeenCalled();
+    const runs = await fs.readdir(path.dirname(collected.outputDir));
+    expect(runs).toEqual([path.basename(collected.outputDir)]);
   });
 
   it('refuses to collect or grade traces stored without their answers', async () => {

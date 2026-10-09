@@ -163,6 +163,25 @@ judges: {
 When a required path is missing or empty, MST does not call the judge and
 records it as skipped.
 
+A judge can also check that it can run at all, such as that its SDK is
+installed and its credential is set. `preflight(options)` runs once per
+judge setting, before `mst run` starts a variant's client and before
+`mst grade` writes anything, so a missing key fails the run instead of every
+trial. It must not call a model. `mst run --no-grade` doesn't call it. The
+built-in `rubric` judge checks its provider's package and credential.
+
+```ts
+judges: {
+  graded: {
+    schema: z.object({}).strict(),
+    preflight: async () => {
+      if (!process.env.ACME_JUDGE_KEY) throw new Error('Set ACME_JUDGE_KEY.');
+    },
+    evaluate: async ({ trial }) => grade(trial.text),
+  },
+}
+```
+
 A judge returns a `JudgeScore`. Only `score` (0 to 1) is required:
 
 | Field               | Effect                                                                                                           |
@@ -180,7 +199,10 @@ judge of a case skips, the judge assertion passes.
 Judge usage is kept apart from client usage: `judgeUsage` on each case and
 trial, `totalJudgeUsage` on the run and eval telemetry, and the
 `judge_cost_usd`, `judge_input_tokens`, and `judge_output_tokens` metrics.
-The built-in `rubric` judge reports its usage the same way.
+The built-in `rubric` judge reports its usage the same way. It reads the
+last `{pass, score, reasoning}` object in the model's answer, so reasoning
+before the JSON is fine; an answer cut off at `maxTokens` (default 4096)
+fails saying so.
 
 ### Pairwise judges
 

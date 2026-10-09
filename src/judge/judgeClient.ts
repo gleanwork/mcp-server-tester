@@ -5,11 +5,17 @@ import {
   type ProviderKind,
 } from './judgeTypes.js';
 import { createLLMJudge, type JudgeCompletionAdapter } from './llmJudge.js';
-import { anthropicCompletion } from './anthropicJudge.js';
-import { vertexAnthropicCompletion } from './vertexAnthropicJudge.js';
-import { claudeAgentCompletion } from './claudeAgentJudge.js';
-import { openaiCompletion } from './openaiJudge.js';
-import { googleCompletion } from './googleJudge.js';
+import { anthropicCompletion, loadAnthropicSdk } from './anthropicJudge.js';
+import {
+  loadVertexAnthropicSdk,
+  vertexAnthropicCompletion,
+} from './vertexAnthropicJudge.js';
+import {
+  claudeAgentCompletion,
+  loadClaudeAgentSdk,
+} from './claudeAgentJudge.js';
+import { loadOpenAISdk, openaiCompletion } from './openaiJudge.js';
+import { googleCompletion, loadGoogleSdk } from './googleJudge.js';
 
 /**
  * Every judge provider's completion adapter. Typing this as a full record
@@ -24,6 +30,15 @@ const JUDGE_PROVIDERS: Record<
   'anthropic-agent-sdk': claudeAgentCompletion,
   openai: openaiCompletion,
   google: googleCompletion,
+};
+
+/** Every judge provider's optional SDK. */
+const JUDGE_SDKS: Record<ProviderKind, () => Promise<unknown>> = {
+  anthropic: loadAnthropicSdk,
+  'vertex-anthropic': loadVertexAnthropicSdk,
+  'anthropic-agent-sdk': loadClaudeAgentSdk,
+  openai: loadOpenAISdk,
+  google: loadGoogleSdk,
 };
 
 /**
@@ -43,7 +58,7 @@ const JUDGE_PROVIDERS: Record<
  * @example
  * // With configuration
  * const judge = createJudge({
- *   model: 'claude-sonnet-4-20250514',
+ *   model: 'claude-sonnet-4-6',
  *   maxToolOutputSize: 50000, // Fail if response > 50KB
  * });
  *
@@ -58,6 +73,23 @@ const JUDGE_PROVIDERS: Record<
  * console.log('Tokens:', result.usage?.inputTokens, result.usage?.outputTokens);
  */
 export function createJudge(config: JudgeConfig = {}): Judge {
+  return createLLMJudge(judgeCompletion(config), {
+    maxToolOutputSize: config.maxToolOutputSize,
+  });
+}
+
+/**
+ * Checks, without calling a model, that a judge with this configuration can
+ * run: its provider exists, its credential is set and its SDK is installed.
+ * Throws what `createJudge` or the first call would.
+ */
+export async function preflightJudge(config: JudgeConfig = {}): Promise<void> {
+  judgeCompletion(config);
+  await JUDGE_SDKS[config.provider ?? DEFAULT_JUDGE_PROVIDER]();
+}
+
+/** The provider's completion adapter; throws for an unknown provider or a missing credential. */
+function judgeCompletion(config: JudgeConfig): JudgeCompletionAdapter {
   const provider: ProviderKind = config.provider ?? DEFAULT_JUDGE_PROVIDER;
   const completion = Object.hasOwn(JUDGE_PROVIDERS, provider)
     ? JUDGE_PROVIDERS[provider]
@@ -70,7 +102,5 @@ export function createJudge(config: JudgeConfig = {}): Judge {
         .map((kind) => `'${kind}'`)
         .join(', ')}`
     );
-  return createLLMJudge(completion(config), {
-    maxToolOutputSize: config.maxToolOutputSize,
-  });
+  return completion(config);
 }
