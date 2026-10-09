@@ -8,6 +8,7 @@ import type { EvalCaseResult, TrialResult } from '../types/reporter.js';
 import type { GraderScore } from '../types/index.js';
 import type { EvalDataset } from './datasetTypes.js';
 import { isInfrastructureFailure } from './infrastructureFailure.js';
+import type { RunEnvironment } from './environments/builtinEnvironments.js';
 
 /**
  * The run format, `mst.run/v1`: what a run leaves behind, one directory per
@@ -106,7 +107,19 @@ const RunRecordSchema = z.looseObject({
   partial: z.boolean(),
   selection: z.looseObject({}).optional(),
   redactStoredResponses: z.boolean(),
-  environment: z.looseObject({}),
+  /** Where the trials were collected, and the machine `mst run` ran on. */
+  environment: z.looseObject({
+    /** `local`, or a plugin environment (`<namespace>/env/<name>`). */
+    name: z.string().optional(),
+    shards: z.number().int().positive().optional(),
+    /** `--env-option keep`, when not `never`. */
+    keep: z.enum(['failed', 'always']).optional(),
+    /** The environment's own options, when it was given any. */
+    options: z.looseObject({}).optional(),
+    node: z.string().optional(),
+    platform: z.string().optional(),
+    ci: z.boolean().optional(),
+  }),
   phases: z.looseObject({
     collect: z.enum(['complete', 'partial', 'skipped', 'failed']),
     grade: z.enum(['complete', 'partial', 'skipped', 'failed']),
@@ -243,6 +256,8 @@ export interface RunFacts {
   datasets: Array<{ name: string; caseCount: number; contentHash: string }>;
   judges?: Array<{ type: string; level: string; optionsHash: string }>;
   redactStoredResponses: boolean;
+  /** Where the trials were collected (`--env`). Default: `local`. */
+  environment?: RunEnvironment;
   /**
    * How far the run got. Default: both complete. A run saved while variants
    * remain is `partial`; one that stopped on an error is `collect: failed`.
@@ -428,6 +443,14 @@ export async function writeRun(
     ...(summary.selection ? { selection: summary.selection } : {}),
     redactStoredResponses: facts.redactStoredResponses,
     environment: {
+      name: facts.environment?.name ?? 'local',
+      shards: facts.environment?.shards ?? 1,
+      ...(facts.environment && facts.environment.keep !== 'never'
+        ? { keep: facts.environment.keep }
+        : {}),
+      ...(facts.environment && Object.keys(facts.environment.options).length
+        ? { options: facts.environment.options }
+        : {}),
       node: process.version,
       platform: process.platform,
       ci: Boolean(process.env.CI),

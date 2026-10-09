@@ -173,6 +173,16 @@ program
     '--store <dir>',
     'Credential store for connector servers (default: ~/.mcp-server-tester/grants)'
   )
+  .option(
+    '--env <name>',
+    'Where to collect trials: local (the default), or a plugin environment (<namespace>/env/<name>)'
+  )
+  .option(
+    '--env-option <key=value>',
+    "An environment option; repeat for more: shards=N, keep=never|failed|always, or the environment's own",
+    (value: string, previous: string[]) => [...previous, value],
+    [] as string[]
+  )
   .addOption(removedFlag('-m, --manifest <path>', '--config'))
   .addOption(removedFlag('--arm <name>', '--variant'))
   .action((options: Record<string, unknown>) => {

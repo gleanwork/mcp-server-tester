@@ -39,6 +39,7 @@ const KIND_LABELS: Record<ExtensionKind, string> = {
   metrics: 'Metric',
   resultStores: 'Result store',
   connectors: 'Connector',
+  environments: 'Environment',
 };
 
 // Shared across the CommonJS and ESM copies of this package. Versioned so a
@@ -62,6 +63,7 @@ function emptyState(): ExtensionTableState {
       metrics: new Map(),
       resultStores: new Map(),
       connectors: new Map(),
+      environments: new Map(),
     },
   };
 }
@@ -222,8 +224,14 @@ const SEGMENT_LABELS: Record<string, string> = {
   metric: 'metric',
   'result-store': 'result store',
   connector: 'connector',
+  env: 'environment',
   config: 'shared config',
 };
+
+/** `label` with its indefinite article: "a judge", "an environment". */
+function withArticle(label: string): string {
+  return `${/^[aeiou]/i.test(label) ? 'an' : 'a'} ${label}`;
+}
 
 /**
  * A plugin reference must name its kind, and the kind must be the one the
@@ -253,7 +261,7 @@ function checkKind(
       : undefined;
     throw new Error(
       actual
-        ? `"${reference}" is a ${actual}, not a ${label.toLowerCase()}.`
+        ? `"${reference}" is ${withArticle(actual)}, not ${withArticle(label.toLowerCase())}.`
         : `${label} "${reference}" has an unknown kind "${parsed.kind}": use "${full}".`
     );
   }

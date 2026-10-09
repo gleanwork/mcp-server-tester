@@ -78,7 +78,7 @@ const plugin: Plugin = {
       evaluate: async ({ case: c, trial }, options) => ({ score: 1 }),
     },
   },
-  // Also: clients, metrics, resultStores.
+  // Also: clients, metrics, resultStores, connectors, environments.
   configs: {
     recommended: {
       judges: ['acme/judge/completeness'],
@@ -90,11 +90,12 @@ const plugin: Plugin = {
 export default plugin;
 ```
 
-- **Names.** Each map key names an extension within the plugin's namespace. Eval configs and datasets reference it as `<namespace>/<kind>/<name>`, such as `{ "type": "acme/dataset/legacy" }` or a case's `"judges": ["acme/judge/completeness"]`. The kind is `dataset`, `client`, `judge`, `pairwise-judge`, `metric`, `result-store`, `connector` or `config`, and it must match where the name is used: `acme/judge/x` in `datasets` is an error. Built-ins (`file`, `claude-code`, `rubric`, `passed`, ...) use bare names, or the full `mst/<kind>/<name>` (`mst/judge/rubric`); the `mst` namespace is reserved.
+- **Names.** Each map key names an extension within the plugin's namespace. Eval configs and datasets reference it as `<namespace>/<kind>/<name>`, such as `{ "type": "acme/dataset/legacy" }` or a case's `"judges": ["acme/judge/completeness"]`. The kind is `dataset`, `client`, `judge`, `pairwise-judge`, `metric`, `result-store`, `connector`, `env` or `config`, and it must match where the name is used: `acme/judge/x` in `datasets` is an error. Built-ins (`file`, `claude-code`, `rubric`, `passed`, ...) use bare names, or the full `mst/<kind>/<name>` (`mst/judge/rubric`); the `mst` namespace is reserved.
 - **Namespace.** `meta.namespace` is required: lowercase, optionally scoped as `@scope/name`. Two different plugins can't share a namespace. Loading the same plugin again is a no-op, including a rebuilt object with the same name, version, extension definitions and configs. A plugin factory that builds differently configured copies needs a namespace per copy. A package's CommonJS and ESM builds are different objects too, so load a plugin one way; publishing plugins as ESM avoids the question.
 - **Loading.** An eval config lists plugin specifiers in `plugins`. Each one resolves relative to the eval config's directory, then `rootDir` (`--root-dir`, the working directory by default), then as a package name, resolved as `import` resolves it. `--plugins` and the `pluginPaths` / `plugins` options of `runEval` and `runEvalBatch` add to that list. Code that runs datasets directly passes plugin objects: `runEvalDataset({ dataset, plugins: [plugin] }, ctx)`, or `test.use({ mcpPlugins: [plugin] })` in Playwright. Code that calls validators or matchers on its own installs them with `installPlugins([plugin])`.
 - **Scope.** An eval config may only reference namespaces of plugins it loads, even if another eval in the same process (a batch) loaded more. The same check applies to the clients and judges its datasets name. `runEvalDataset`, `runEvalCase` and the fixtures have no eval config, so they resolve against every plugin installed in the process.
-- **Contracts.** Each extension has a Zod `schema` for its options and the functions its kind needs: `load` (dataset sources), `run` or `runBatch` (clients), `evaluate` (judges), `kind` and `compute` (metrics), and `create` (result stores). MST validates the plugin when it loads, and names the plugin and extension in any error.
+- **Contracts.** Each extension has a Zod `schema` for its options and the functions its kind needs: `load` (dataset sources), `run` or `runBatch` (clients), `evaluate` (judges), `kind` and `compute` (metrics), `create` (result stores), and `open` (environments, with an optional positive `maxShards`). MST validates the plugin when it loads, and names the plugin and extension in any error.
+- **Environments.** `environments` declares where a run's trials can be collected, used as `mst run --env acme/env/cloud-vm` ([ADR 0004](./adr/0004-environments-run-shards-over-a-channel.md)). An environment's `schema` checks its `--env-option`s, which arrive as strings, except `shards` and `keep`, which MST owns. MST collects trials only in the built-in `local` for now: `--dry-run` checks a plugin environment and its options, and a run with one stops before it starts. `run.json`'s `environment` records the environment's name, shards, and any `keep` or options, so options must not hold secrets.
 - **Shared configs.** `configs` holds named eval config settings an eval can opt into. An eval that loads the plugin applies one with `"extends": ["acme/config/recommended"]`:
 
   ```json

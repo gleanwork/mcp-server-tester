@@ -82,7 +82,23 @@
     "redactStoredResponses": { "type": "boolean" },
     "environment": {
       "type": "object",
-      "properties": {},
+      "properties": {
+        "name": { "type": "string" },
+        "shards": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "keep": { "type": "string", "enum": ["failed", "always"] },
+        "options": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {}
+        },
+        "node": { "type": "string" },
+        "platform": { "type": "string" },
+        "ci": { "type": "boolean" }
+      },
       "additionalProperties": {}
     },
     "phases": {

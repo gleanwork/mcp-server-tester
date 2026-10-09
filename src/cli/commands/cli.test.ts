@@ -205,6 +205,72 @@ describe('mst CLI', () => {
       expect(result.stderr).toMatch(/\n\s+at /);
     });
 
+    it('--env-option takes key=value', async () => {
+      const result = await runBin(
+        'run',
+        '--config',
+        'x.json',
+        '--env-option',
+        'shards'
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        'mst: --env-option takes key=value, got "shards"'
+      );
+      const twice = await runBin(
+        'run',
+        '--config',
+        'x.json',
+        '--env-option',
+        'keep=failed',
+        '--env-option',
+        'keep=always'
+      );
+      expect(twice.exitCode).toBe(1);
+      expect(twice.stderr).toContain('mst: --env-option keep is given twice');
+    });
+
+    it('a dry run says where the trials would run', async () => {
+      await project.write({
+        'ok-cases.json': JSON.stringify({
+          name: 'cases',
+          cases: [{ id: 'a', input: 'hello' }],
+        }),
+        'ok.json': JSON.stringify({
+          name: 'm',
+          datasets: ['./ok-cases.json'],
+          client: 'claude-code',
+        }),
+      });
+      const result = await runBin(
+        'run',
+        '--config',
+        'ok.json',
+        '--dry-run',
+        '--env',
+        'local',
+        '--env-option',
+        'keep=failed'
+      );
+      expect(result.stderr).toBe('');
+      expect(result.exitCode).toBe(0);
+      expect(JSON.parse(String(result.stdout))).toMatchObject({
+        env: { name: 'local', shards: 1, keep: 'failed' },
+      });
+      const sharded = await runBin(
+        'run',
+        '--config',
+        'ok.json',
+        '--dry-run',
+        '--env-option',
+        'shards=3'
+      );
+      expect(sharded.exitCode).toBe(1);
+      expect(sharded.stderr).toContain(
+        'mst: The local environment runs one shard'
+      );
+    });
+
     it('an unknown client lists the clients there are', async () => {
       await project.write({
         'cases.json': cases,

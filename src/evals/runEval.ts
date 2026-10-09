@@ -116,6 +116,11 @@ import {
 } from './connectorServers.js';
 import { localCredentialStore } from '../auth/grants/localStore.js';
 import type { CredentialStore } from '../auth/grants/types.js';
+import {
+  LOCAL_ENVIRONMENT,
+  resolveEnvironment,
+  type RunEnvironment,
+} from './environments/builtinEnvironments.js';
 
 export interface RunEvalOptions {
   configPath: string;
@@ -162,11 +167,17 @@ export interface RunEvalOptions {
    * Default: `mst/credential-store/local`.
    */
   credentialStore?: CredentialStore;
+  /** Where to collect trials (`--env`). Default: `local`. */
+  env?: string;
+  /** The environment's options (`--env-option key=value`), as strings. */
+  envOptions?: Readonly<Record<string, string>>;
 }
 
 export interface RunEvalResult {
   evalConfig: EvalConfig;
   outputDir: string;
+  /** Where the trials were (or, in a dry run, would be) collected. */
+  environment: RunEnvironment;
   datasets: Array<{
     source: DatasetConfig;
     dataset?: EvalDataset;
@@ -649,6 +660,11 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
     },
     { namespaces }
   );
+  // With the plugins loaded, so a plugin environment resolves too.
+  const { definition: _definition, ...environment } = resolveEnvironment(
+    options.env ?? LOCAL_ENVIRONMENT,
+    options.envOptions ?? {}
+  );
 
   const executionId = newRunId();
   // The eval's directory holds its runs (runs/<run-id>/) and latest.json.
@@ -685,6 +701,7 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
     return {
       evalConfig,
       outputDir,
+      environment,
       datasets: datasets.map((source, index) => ({
         source,
         dataset: loaded[index],
@@ -702,6 +719,12 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
       },
     };
   }
+
+  // Shards come later (ADR 0004): until then, only local collects trials.
+  if (environment.name !== LOCAL_ENVIRONMENT)
+    throw new Error(
+      `MST can't run trials in "${environment.name}" yet: only the local environment runs them. Use --dry-run to check its options.`
+    );
 
   const redact =
     options.redactStoredResponses ??
@@ -1238,6 +1261,7 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
       // settings that shouldn't be stored.
       judges: judgeRecords(evalConfig),
       redactStoredResponses: redact,
+      environment,
       phases,
     };
   }
@@ -1340,5 +1364,11 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
   // never becomes the latest.
   if (!summary.partial)
     await writeLatest(evalDirectory, executionId, summary.timestamp);
-  return { evalConfig, outputDir, datasets: allDatasets, summary };
+  return {
+    evalConfig,
+    outputDir,
+    environment,
+    datasets: allDatasets,
+    summary,
+  };
 }
