@@ -32,6 +32,7 @@ import { sumUsage } from '../utils/usageUtils.js';
 import { sumJudgeUsage } from '../judge/judgeContract.js';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import {
   createMCPClientForConfig,
@@ -39,7 +40,7 @@ import {
 } from '../mcp/clientFactory.js';
 import { createMCPFixture } from '../mcp/fixtures/mcpFixture.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
-import { isHttpConfig, usesClientResolvedFields } from '../config/mcpConfig.js';
+import { isHttpConfig } from '../config/mcpConfig.js';
 import {
   variantToolMetadata,
   loadEvalConfig,
@@ -76,7 +77,7 @@ import {
   createEvalCaseExecutor,
 } from './caseExecution.js';
 import { mergeEvalJudges, preflightCaseJudges } from './grading.js';
-import { prepareClientBatch } from './prepareClientBatch.js';
+import { batchRequests, prepareClientBatch } from './prepareClientBatch.js';
 import type { EvalRunnerResult } from './evalRunner.js';
 import type { EvalCase, EvalDataset } from './datasetTypes.js';
 import {
@@ -96,8 +97,15 @@ import {
 } from './builtinClients.js';
 import {
   startToolSurfaceProxy,
+  usesToolSurfaceProxy,
   type ToolSurfaceProxy,
 } from './toolSurfaceProxy.js';
+import {
+  collectInEnvironment,
+  gatheredQueues,
+  type GatheredResults,
+  type RequestGroup,
+} from './environments/shardedCollect.js';
 import { getResultStore, resolveStorePaths } from './builtinResultStores.js';
 import { compareWithPrevious, findPreviousRun } from './runBaseline.js';
 import { costSource, estimateCosts } from './pricing.js';
@@ -128,6 +136,7 @@ import {
   type ConnectorCredentials,
 } from './connectorServers.js';
 import { localCredentialStore } from '../auth/grants/localStore.js';
+import { resolveServerSecrets } from './serverSecrets.js';
 import type { CredentialStore } from '../auth/grants/types.js';
 import {
   LOCAL_ENVIRONMENT,
@@ -241,31 +250,14 @@ async function loadSecretsFile(
   );
 }
 
-function resolveServerSecrets(
-  server: MCPConfig,
-  env: Record<string, string | undefined>
-): MCPConfig {
-  // A client resolves these; merging process.env here would copy secrets.
-  if (usesClientResolvedFields(server)) return server;
-  if (server.transport === 'stdio')
-    return {
-      ...server,
-      env: Object.fromEntries(
-        Object.entries({ ...env, ...server.env }).filter(
-          (entry): entry is [string, string] => typeof entry[1] === 'string'
-        )
-      ),
-    };
-  if (!isHttpConfig(server) || !server.auth?.accessTokenEnv) return server;
-  const envName = server.auth.accessTokenEnv;
-  const token = env[envName];
-  if (!token) {
-    throw new Error(
-      `MCP access token environment variable "${envName}" is not set.`
-    );
-  }
-  const { accessTokenEnv: _accessTokenEnv, ...auth } = server.auth;
-  return { ...server, auth: { ...auth, accessToken: token } };
+/** Whether a shard ended before one of the case's trials came back. */
+function hasMissingTrial(result: EvalCaseResult): boolean {
+  return (
+    result.clientDiagnostics?.failureKind === 'missing' ||
+    (result.trialResults ?? []).some(
+      (trial) => trial.clientDiagnostics?.failureKind === 'missing'
+    )
+  );
 }
 
 function assertEvalEndpoint(server: MCPConfig, evalConfig: EvalConfig): void {
@@ -727,16 +719,15 @@ async function evaluate(
       (entry): entry is [string, string] => typeof entry[1] === 'string'
     )
   );
-  const env = {
-    ...ambientEnv,
-    ...(options.secretsFile
-      ? await loadSecretsFile(
-          path.isAbsolute(options.secretsFile)
-            ? options.secretsFile
-            : path.resolve(rootDir, options.secretsFile)
-        )
-      : {}),
-  };
+  // The secrets file's values: all a worker in an environment is sent.
+  const fileSecrets = options.secretsFile
+    ? await loadSecretsFile(
+        path.isAbsolute(options.secretsFile)
+          ? options.secretsFile
+          : path.resolve(rootDir, options.secretsFile)
+      )
+    : {};
+  const env = { ...ambientEnv, ...fileSecrets };
 
   const namespaces = await loadEvalPlugins({
     configPath: options.configPath,
@@ -789,10 +780,12 @@ async function evaluate(
     { namespaces }
   );
   // With the plugins loaded, so a plugin environment resolves too.
-  const { definition: _definition, ...environment } = resolveEnvironment(
+  const resolvedEnvironment = resolveEnvironment(
     options.env ?? LOCAL_ENVIRONMENT,
     options.envOptions ?? {}
   );
+  const { definition: _definition, ...environment } = resolvedEnvironment;
+  const inEnvironment = environment.name !== LOCAL_ENVIRONMENT;
 
   const executionId = replay?.runId ?? newRunId();
   // The eval's directory holds its runs (runs/<run-id>/) and latest.json.
@@ -859,12 +852,6 @@ async function evaluate(
     };
   }
 
-  // Shards come later (ADR 0004): until then, only local collects trials.
-  if (environment.name !== LOCAL_ENVIRONMENT)
-    throw new Error(
-      `MST can't run trials in "${environment.name}" yet: only the local environment runs them. Use --dry-run to check its options.`
-    );
-
   // Keys the hashes of client options in run.json: comparable within this run only.
   const runKey = randomBytes(32);
   const variantResults: EvaluationVariantResult[] = [];
@@ -874,6 +861,8 @@ async function evaluate(
   const allResults: EvalCaseResult[] = [];
   // Saved with the first trial: from then on, run.json says how far the run got.
   let started: Promise<void> | undefined;
+  // Trials an environment's shards didn't bring back: the run is partial.
+  let missingTrials = 0;
   const sourceVariant = variants[0] ?? { name: 'default' };
   const canonicalDatasets = await Promise.all(
     datasets.map(async (source) => ({
@@ -944,6 +933,230 @@ async function evaluate(
       canonicalDatasets.map(({ dataset }) => dataset)
     );
 
+    // A variant's servers, client and settings, worked out once.
+    const setups = new Map<string, ReturnType<typeof variantSetupOf>>();
+    const variantSetupOf = (variant: EvalVariant) => {
+      const servers = options.mcpConfig
+        ? [options.mcpConfig]
+        : transportServers(variant.servers ?? evalConfig.servers);
+      const resolvedServers = servers.map(serverFor);
+      if (!replay)
+        resolvedServers.forEach((server) =>
+          assertEvalEndpoint(server, evalConfig)
+        );
+      // The first variant's client was resolved before the datasets loaded (to
+      // check its servers); reuse it rather than resolve it twice.
+      const clientConfig =
+        variant === sourceVariant
+          ? sourceClient
+          : resolveClient(evalConfig, variant, resolvedServers, env);
+      const effectiveConfig: EvalConfig = {
+        ...evalConfig,
+        ...variant,
+        coworkSetup: resolveCoworkSetupConfig(
+          evalConfig.coworkSetup,
+          variant.coworkSetup
+        ),
+        name: evalConfig.name,
+        datasets: evalConfig.datasets,
+      };
+      const rawVariant = rawConfig.variants?.find(
+        (candidate) => candidate.name === variant.name
+      ) ?? { name: variant.name };
+      const rawDeclaration = inheritClient(
+        clientOf(rawConfig),
+        clientPatchOf(rawVariant) ?? {}
+      );
+      return {
+        servers,
+        resolvedServers,
+        clientConfig,
+        effectiveConfig,
+        rawVariant,
+        rawDeclaration,
+      };
+    };
+    const setupVariant = (variant: EvalVariant) => {
+      let setup = setups.get(variant.name);
+      if (!setup) setups.set(variant.name, (setup = variantSetupOf(variant)));
+      return setup;
+    };
+    /** A dataset's cases as `variant` runs them; undefined when it runs none. */
+    const variantDataset = (
+      variant: EvalVariant,
+      setup: ReturnType<typeof variantSetupOf>,
+      dataset: EvalDataset
+    ) => {
+      const { effectiveConfig, rawVariant, rawDeclaration } = setup;
+      // A regrade runs the stored run's cases; a run, the narrowed ones.
+      const executionDataset = replay
+        ? replayedCases(dataset, replay, variant.name)
+        : narrowEvalCases(dataset, evalConfig, narrowing);
+      if (executionDataset.cases.length === 0) return undefined;
+      const template = variant.inputTemplate ?? evalConfig.inputTemplate;
+      const effectiveDataset: EvalDataset = {
+        ...executionDataset,
+        cases: executionDataset.cases.map((evalCase) => ({
+          ...evalCase,
+          // A case's own client, resolved in full on the case itself.
+          ...(clientPatchOf(evalCase)
+            ? clientFieldsOf(
+                parseClientConfig(
+                  inheritClient(rawDeclaration, clientPatchOf(evalCase)!),
+                  rawConfig
+                )
+              )
+            : {}),
+          // The case's judges and the eval config's (a variant's replace
+          // the config's); the case's settings win for a judge in both.
+          ...(effectiveConfig.judges?.length
+            ? {
+                judges: mergeEvalJudges(
+                  evalCase,
+                  effectiveConfig.judges,
+                  (rawVariant.judges ?? rawConfig.judges ?? []) as Array<
+                    Record<string, unknown>
+                  >
+                ),
+              }
+            : {}),
+          ...(template && evalCase.input
+            ? { input: template.replaceAll('{{input}}', evalCase.input) }
+            : {}),
+        })),
+      };
+      return { executionDataset, effectiveDataset };
+    };
+
+    /**
+     * Collects every variant's trials in the environment, `shards` machines
+     * at a time, saving each trial as it comes back. Ctrl-C stops the shards
+     * and keeps what came back; a second Ctrl-C quits.
+     */
+    const collectEnvironmentTrials = async (): Promise<GatheredResults> => {
+      if (connectors.uses.length > 0)
+        throw new Error(
+          `Connector servers can't run in "${environment.name}" yet: their tokens are kept on this machine.`
+        );
+      const groups: RequestGroup[] = [];
+      const trialCases = new Map<
+        string,
+        { evalCase: EvalCase; datasetName: string; variant: EvalVariant }
+      >();
+      for (const variant of variants) {
+        const setup = setupVariant(variant);
+        if (
+          variantToolMetadata(evalConfig, variant) &&
+          usesToolSurfaceProxy(setup.clientConfig.definition)
+        )
+          throw new Error(
+            `Variant "${variant.name}" sets tool metadata, which MST serves through a proxy on this machine, so it can't run in "${environment.name}" yet.`
+          );
+        for (const { dataset } of canonicalDatasets) {
+          const prepared = variantDataset(variant, setup, dataset);
+          if (!prepared) continue;
+          // Before any shard starts: a judge that can't run fails the run
+          // now, not after the shards have collected every trial.
+          if (options.grade !== false)
+            await preflightCaseJudges(
+              prepared.effectiveDataset.cases,
+              checkedJudges
+            );
+          for (const evalCase of prepared.effectiveDataset.cases)
+            trialCases.set(`${variant.name}\u0000${evalCase.id}`, {
+              evalCase,
+              datasetName: prepared.effectiveDataset.name,
+              variant,
+            });
+          // Servers as declared: a worker resolves their secrets itself.
+          const requests = batchRequests(
+            prepared.effectiveDataset.cases,
+            setup.clientConfig.declaration,
+            setup.servers,
+            { evalConfig: setup.effectiveConfig }
+          );
+          for (const type of new Set(requests.map((r) => r.config.type)))
+            groups.push({
+              variant,
+              requests: requests.filter((r) => r.config.type === type),
+            });
+        }
+      }
+      const workerPlugins = [
+        ...(loadedConfig.plugins ?? []).map((specifier) =>
+          specifier.startsWith('.')
+            ? path.resolve(configDir, specifier)
+            : specifier
+        ),
+        ...(options.pluginPaths ?? []).map((specifier) =>
+          specifier.startsWith('.')
+            ? path.resolve(rootDir, specifier)
+            : specifier
+        ),
+      ];
+      const controller = new AbortController();
+      let interrupts = 0;
+      const onInterrupt = () => {
+        if (++interrupts > 1) process.exit(130);
+        console.error(
+          '[mst] Stopping the shards; the trials that came back are kept (Ctrl-C again to quit now).'
+        );
+        controller.abort();
+      };
+      process.on('SIGINT', onInterrupt);
+      const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-shards-'));
+      try {
+        const result = await collectInEnvironment({
+          environment: resolvedEnvironment,
+          runId: executionId,
+          evalConfig,
+          plugins: workerPlugins,
+          groups,
+          secrets: fileSecrets,
+          workDir,
+          signal: controller.signal,
+          log: (line) => console.error(`[mst] ${line}`),
+          onResult: async (key, trace) => {
+            const entry = trialCases.get(`${key.variant}\u0000${key.caseId}`);
+            if (!entry) return;
+            const { clientConfig, resolvedServers } = setupVariant(
+              entry.variant
+            );
+            await saveTrial(
+              {
+                ...executedTrialResult(
+                  entry.evalCase,
+                  batchTraceExecution(
+                    trace,
+                    clientConfig.definition,
+                    resolvedServers
+                  ),
+                  { datasetName: entry.datasetName },
+                  0
+                ),
+                variant: key.variant,
+              },
+              key.trial
+            );
+          },
+        });
+        if (result.missing.length)
+          console.error(
+            `[mst] ${result.missing.length} trials are missing: the run is partial.`
+          );
+        return result;
+      } finally {
+        process.off('SIGINT', onInterrupt);
+        await fs.rm(workDir, { recursive: true, force: true });
+      }
+    };
+
+    // In an environment, every variant's trials are collected first, on
+    // shards that each hold whole cases (ADR 0004); the loop below grades them.
+    const gathered =
+      inEnvironment && !replay ? await collectEnvironmentTrials() : undefined;
+    missingTrials = gathered?.missing.length ?? 0;
+
     // Where the running variant's results start, to drop them if it fails.
     let variantStart = { results: 0, datasets: 0 };
     try {
@@ -952,43 +1165,15 @@ async function evaluate(
           results: allResults.length,
           datasets: allDatasets.length,
         };
-        const servers = options.mcpConfig
-          ? [options.mcpConfig]
-          : transportServers(variant.servers ?? evalConfig.servers);
-        const resolvedServers = servers.map(serverFor);
-        if (!replay)
-          resolvedServers.forEach((server) =>
-            assertEvalEndpoint(server, evalConfig)
-          );
-        // The first variant's client was resolved before the datasets loaded (to
-        // check its servers); reuse it rather than resolve it twice.
-        const clientConfig =
-          variant === sourceVariant
-            ? sourceClient
-            : resolveClient(evalConfig, variant, resolvedServers, env);
-        const effectiveConfig: EvalConfig = {
-          ...evalConfig,
-          ...variant,
-          coworkSetup: resolveCoworkSetupConfig(
-            evalConfig.coworkSetup,
-            variant.coworkSetup
-          ),
-          name: evalConfig.name,
-          datasets: evalConfig.datasets,
-        };
+        const setup = setupVariant(variant);
+        const { servers, resolvedServers, clientConfig, effectiveConfig } =
+          setup;
         const sourceResults: Array<{
           name: string;
           result: EvalRunnerResult;
         }> = [];
         const appliedPricing: Record<string, ModelPricing> = {};
         const unpricedModels = new Set<string>();
-        const rawVariant = rawConfig.variants?.find(
-          (candidate) => candidate.name === variant.name
-        ) ?? { name: variant.name };
-        const rawDeclaration = inheritClient(
-          clientOf(rawConfig),
-          clientPatchOf(rawVariant) ?? {}
-        );
         const client =
           replay ||
           clientConfig.definition.run ||
@@ -1017,44 +1202,9 @@ async function evaluate(
 
         try {
           for (const { source, dataset } of canonicalDatasets) {
-            const executionDataset = replay
-              ? replayedCases(dataset, replay, variant.name)
-              : narrowEvalCases(dataset, evalConfig, narrowing);
-            if (executionDataset.cases.length === 0) continue;
-            const template = variant.inputTemplate ?? evalConfig.inputTemplate;
-            const effectiveDataset: EvalDataset = {
-              ...executionDataset,
-              cases: executionDataset.cases.map((evalCase) => ({
-                ...evalCase,
-                // A case's own client, resolved in full on the case itself.
-                ...(clientPatchOf(evalCase)
-                  ? clientFieldsOf(
-                      parseClientConfig(
-                        inheritClient(rawDeclaration, clientPatchOf(evalCase)!),
-                        rawConfig
-                      )
-                    )
-                  : {}),
-                // The case's judges and the eval config's (a variant's replace
-                // the config's); the case's settings win for a judge in both.
-                ...(effectiveConfig.judges?.length
-                  ? {
-                      judges: mergeEvalJudges(
-                        evalCase,
-                        effectiveConfig.judges,
-                        (rawVariant.judges ?? rawConfig.judges ?? []) as Array<
-                          Record<string, unknown>
-                        >
-                      ),
-                    }
-                  : {}),
-                ...(template && evalCase.input
-                  ? {
-                      input: template.replaceAll('{{input}}', evalCase.input),
-                    }
-                  : {}),
-              })),
-            };
+            const prepared = variantDataset(variant, setup, dataset);
+            if (!prepared) continue;
+            const { executionDataset, effectiveDataset } = prepared;
             // Before this variant's client starts: a judge that can't run
             // (no SDK, no credential) fails the run, not every trial.
             if (options.grade !== false)
@@ -1082,39 +1232,50 @@ async function evaluate(
             };
             const batchTraces = replay
               ? undefined
-              : await prepareClientBatch(
-                  clientConfig.definition,
-                  effectiveDataset.cases,
-                  clientConfig.declaration,
-                  resolvedServers,
-                  { evalConfig: effectiveConfig, variant, env },
-                  toolVariant,
-                  {
-                    // A trace the client reports before its batch ends is saved
-                    // as the trial it will be graded as.
-                    onTrace: async (request, trace) => {
-                      const evalCase = casesById.get(request.caseId);
-                      if (!evalCase) return;
-                      const execution = batchTraceExecution(
-                        trace,
-                        clientConfig.definition,
-                        resolvedServers
-                      );
-                      await saveTrial(
-                        {
-                          ...executedTrialResult(
-                            evalCase,
-                            execution,
-                            caseOptions,
-                            0
-                          ),
-                          variant: variant.name,
-                        },
-                        request.trial
-                      );
-                    },
-                  }
-                );
+              : gathered
+                ? gatheredQueues(
+                    gathered,
+                    variant.name,
+                    batchRequests(
+                      effectiveDataset.cases,
+                      clientConfig.declaration,
+                      servers,
+                      { evalConfig: effectiveConfig }
+                    )
+                  )
+                : await prepareClientBatch(
+                    clientConfig.definition,
+                    effectiveDataset.cases,
+                    clientConfig.declaration,
+                    resolvedServers,
+                    { evalConfig: effectiveConfig, variant, env },
+                    toolVariant,
+                    {
+                      // A trace the client reports before its batch ends is saved
+                      // as the trial it will be graded as.
+                      onTrace: async (request, trace) => {
+                        const evalCase = casesById.get(request.caseId);
+                        if (!evalCase) return;
+                        const execution = batchTraceExecution(
+                          trace,
+                          clientConfig.definition,
+                          resolvedServers
+                        );
+                        await saveTrial(
+                          {
+                            ...executedTrialResult(
+                              evalCase,
+                              execution,
+                              caseOptions,
+                              0
+                            ),
+                            variant: variant.name,
+                          },
+                          request.trial
+                        );
+                      },
+                    }
+                  );
             // Batch execution (including shared setup/cleanup) precedes the runner's
             // wall clock. Count its elapsed time once, not the sum of request times.
             const batchDurationMs = batchTraces
@@ -1356,6 +1517,8 @@ async function evaluate(
       ...variantResults.map((variant) => variant.result?.totalJudgeUsage),
       pairwiseUsage,
     ]);
+    const complete = allResults.filter((result) => !hasMissingTrial(result));
+    const incomplete = allResults.length - complete.length;
     const telemetry: RunTelemetry = {
       cases: allResults.length,
       toolCalls: countTrialToolCalls(allResults),
@@ -1372,13 +1535,15 @@ async function evaluate(
       configName: evalConfig.name,
       variants: variantResults,
       metrics: {
-        total: allResults.length,
-        passed: allResults.filter((result) => result.pass).length,
-        failed: allResults.filter((result) => !result.pass).length,
+        // A case with a missing trial is incomplete: neither passed nor failed.
+        total: complete.length,
+        passed: complete.filter((result) => result.pass).length,
+        failed: complete.filter((result) => !result.pass).length,
         passRate: passRate({
-          passed: allResults.filter((result) => result.pass).length,
-          total: allResults.length,
+          passed: complete.filter((result) => result.pass).length,
+          total: complete.length,
         }),
+        ...(incomplete > 0 ? { incomplete } : {}),
         ...computedMetrics,
       },
       telemetry,
@@ -1547,7 +1712,11 @@ async function evaluate(
     outputDir,
     executionId,
     runFacts(storedSummary, {
-      collect: replay ? replay.run.phases.collect : 'complete',
+      collect: replay
+        ? replay.run.phases.collect
+        : missingTrials > 0
+          ? 'partial'
+          : 'complete',
       // Trials a grader couldn't score are what a regrade would finish.
       grade: allResults.some(
         (result) =>
@@ -1569,9 +1738,11 @@ async function evaluate(
     );
   }
   // Last, so a crash leaves latest.json at the previous run; a partial or
-  // ungraded run never becomes the latest, nor does a regrade of an older run.
+  // ungraded run never becomes the latest, nor does a regrade of an older
+  // run, nor a run with missing trials.
   if (
     !summary.partial &&
+    missingTrials === 0 &&
     options.grade !== false &&
     (!replay || (await regradeTakesLatest(evalDirectory, replay)))
   )

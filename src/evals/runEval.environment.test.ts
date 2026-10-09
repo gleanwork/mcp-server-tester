@@ -129,10 +129,10 @@ describe('runEval environments', () => {
     ).rejects.toThrow('test/env/vm runs at most 4 shards');
   });
 
-  it("doesn't run trials in a plugin environment yet, and writes nothing", async () => {
+  it("stops before writing anything when the environment can't open", async () => {
     const f = await fixture();
     await expect(f.run({ env: 'test/env/vm' })).rejects.toThrow(
-      'MST can\'t run trials in "test/env/vm" yet: only the local environment runs them. Use --dry-run to check its options.'
+      'MST should not open an environment yet'
     );
     await expect(fs.stat(f.outputDir)).rejects.toThrow();
   });

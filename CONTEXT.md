@@ -145,7 +145,7 @@ Where a run's trials are collected, chosen with `--env`: `local` (in the `mst ru
 _Avoid_: sandbox, backend, runner, target
 
 **Shard**:
-(Planned.) One machine's part of a run's trials. Trials are split by case, so a case's variants and trials all run on one shard.
+One machine's part of a run's trials. Trials are split by case, so a case's variants and trials all run on one shard.
 _Avoid_: partition, worker (for the slice)
 
 **Worker**:
@@ -157,7 +157,7 @@ How the coordinator reaches a worker's machine: run a command with its input and
 _Avoid_: transport (MCP's word), connection
 
 **Missing trial**:
-(Planned.) A trial with no trace after collect, because its shard failed. It isn't a failed trial: its case is incomplete, and `--resume` collects it.
+A trial with no trace after collect, because its shard failed. It isn't a failed trial: its case is incomplete, left out of the pass rate, and (planned) `--resume` collects it.
 _Avoid_: failed trial, skipped trial
 
 ### Tests
