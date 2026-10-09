@@ -192,3 +192,6 @@ export type {
   ConnectorServerConfig,
   EvalServerConfig,
 } from '../evals/evalConfig.js';
+// Agentic judges: an agent (Claude Agent SDK, or Codex) grades over a
+// workspace of the trial's evidence.
+export * from '../judge/agentic/index.js';

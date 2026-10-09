@@ -382,6 +382,32 @@ describe('redactStoredResponses', () => {
     // The input is not changed.
     expect(result.trace.finalText).toBe('private answer');
   });
+
+  it("drops judges' score metadata, keeping the score and reasoning", () => {
+    const score = {
+      pass: true,
+      score: 0.8,
+      reasoning: 'cites the report',
+      metadata: { agent: { steps: [{ tool: 'Read' }] }, quote: 'evidence' },
+    };
+    const redacted = redactStoredResponses({
+      results: [
+        {
+          id: 'c1',
+          pass: true,
+          scores: { 'judge.x': score },
+          trialResults: [{ pass: true, scores: { 'judge.x': score } }],
+        },
+      ],
+    });
+    const [result] = redacted.results;
+    for (const scores of [result!.scores, result!.trialResults[0]!.scores])
+      expect(scores['judge.x']).toEqual({
+        pass: true,
+        score: 0.8,
+        reasoning: 'cites the report',
+      });
+  });
 });
 
 describe('partial runs and latest.json', () => {
