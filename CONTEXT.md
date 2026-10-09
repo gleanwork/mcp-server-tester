@@ -149,11 +149,11 @@ _Avoid_: sandbox, backend, runner, target
 _Avoid_: partition, worker (for the slice)
 
 **Worker**:
-(Planned.) The process that collects a shard's trials on its machine (`mst collect`), with the same code a local run uses.
+The process that collects a shard's trials on its machine (`mst collect`), with the same code a local run uses.
 _Avoid_: agent, guest, runner
 
 **Channel**:
-(Planned.) How the coordinator reaches a worker's machine: run a command with its input and output attached, and copy files in and out (`docker exec` and `docker cp`, or SSH and `scp`).
+How the coordinator reaches a worker's machine: run a command with its input and output attached, and copy files in and out (`docker exec` and `docker cp`, or SSH and `scp`).
 _Avoid_: transport (MCP's word), connection
 
 **Missing trial**:

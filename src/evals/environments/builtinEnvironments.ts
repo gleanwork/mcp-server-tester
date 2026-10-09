@@ -21,7 +21,14 @@ function builtinEnvironments(): Readonly<
       description: 'Collect trials in the mst run process, on this machine.',
       maxShards: 1,
       async open() {
-        return { async close() {} };
+        return {
+          async runShard() {
+            throw new Error(
+              'The local environment collects trials in the mst run process, not in shards.'
+            );
+          },
+          async close() {},
+        };
       },
     },
   };

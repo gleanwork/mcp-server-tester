@@ -13,7 +13,7 @@ const vm: EnvironmentDefinition = {
   schema: z.object({ zone: z.string().default('us-west1-b') }).strict(),
   maxShards: 5,
   async open() {
-    return { async close() {} };
+    throw new Error('not opened in these tests');
   },
 };
 

@@ -40,6 +40,7 @@ exports[`public API > ./evals 1`] = `
   "loadEvalConfig",
   "loadEvalConfigFromObject",
   "loadStoredEvalRunnerResult",
+  "machineEnvironment",
   "resolveConfigExtends",
   "resolveDatasetPaths",
   "resolveEvalResultStore",
