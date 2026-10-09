@@ -281,6 +281,22 @@ function GradedOn({ data }: { data: MCPRunReportData }) {
 
 /** The answer first: which variants are better, worse, or unclear. */
 function Result({ data }: { data: MCPRunReportData }) {
+  // A collect-only run has no pass rates: nothing has judged its answers.
+  if (data.run.phases.grade === 'skipped')
+    return (
+      <div className="grid gap-2 rounded-lg border bg-card p-6">
+        <p className="text-sm">
+          <span className="font-semibold">Not graded.</span> These trials were
+          collected with <span className="font-mono">mst run --no-grade</span>.
+          Grade them with{' '}
+          <span className="font-mono">
+            mst grade {data.run.runId.split('-').pop()} -c &lt;eval config&gt;
+          </span>
+          .
+        </p>
+        <InfraNote data={data} />
+      </div>
+    );
   const single = data.variants.length === 1;
   const only = data.variants[0];
   if (single && only) {
@@ -550,6 +566,12 @@ function phaseNote(
       label: 'incomplete',
       title:
         'Saved while variants were still to run: the run is still going, or was stopped before it finished.',
+    };
+  if (phases.grade === 'skipped')
+    return {
+      label: 'not graded',
+      title:
+        'Collected with mst run --no-grade: grade it with mst grade. It has no pass rates.',
     };
   if (phases.grade === 'partial')
     return {

@@ -22,6 +22,8 @@ export interface JudgeCompletion {
   text: string;
   /** Missing token counts default to 0, cost to 0 and duration to wall-clock time. */
   usage?: Partial<UsageMetrics>;
+  /** The provider stopped at the token limit, so `text` may be incomplete. */
+  truncated?: boolean;
 }
 
 /** Sends one judge prompt to a provider. */
@@ -57,11 +59,54 @@ export function buildJudgePrompt(
 }
 
 /**
- * Reads a judge's answer: strips a surrounding Markdown code fence, falls
- * back to the JSON object embedded in surrounding prose, and validates the
- * shape. Fences inside the JSON (e.g. in `reasoning`) are left alone.
+ * The JSON objects in `text`, in order: each balanced `{...}` (braces in
+ * strings don't count) that parses. An object inside another isn't listed
+ * separately.
  */
-export function parseJudgeResponse(text: string): JudgeResponse {
+function embeddedJsonObjects(text: string): unknown[] {
+  const objects: unknown[] = [];
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (depth > 0 && inString) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"' && depth > 0) inString = true;
+    else if (char === '{') {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (char === '}' && depth > 0) {
+      depth--;
+      if (depth === 0) {
+        try {
+          objects.push(JSON.parse(text.slice(start, i + 1)));
+        } catch {
+          // Prose in braces, not JSON: keep scanning after it.
+        }
+      }
+    }
+  }
+  return objects;
+}
+
+/**
+ * Reads a judge's answer: strips a surrounding Markdown code fence, falls
+ * back to the last `{pass, score, reasoning}` object embedded in surrounding
+ * prose (models often reason first, and may quote braces while doing so),
+ * and validates the shape. Fences inside the JSON (e.g. in `reasoning`) are
+ * left alone. `truncated` says the provider stopped at its token limit, so
+ * the error can say so.
+ */
+export function parseJudgeResponse(
+  text: string,
+  truncated = false
+): JudgeResponse {
   const cleaned = text
     .trim()
     .replace(/^```(?:json)?\s*/i, '')
@@ -72,15 +117,20 @@ export function parseJudgeResponse(text: string): JudgeResponse {
   try {
     parsed = JSON.parse(cleaned);
   } catch {
-    // Models sometimes wrap the JSON object in prose.
-    const embedded = cleaned.match(/\{[\s\S]*"pass"[\s\S]*\}/);
-    try {
-      parsed = embedded ? JSON.parse(embedded[0]) : undefined;
-    } catch {
-      parsed = undefined;
-    }
+    // Models sometimes wrap the JSON object in prose: the answer is the last
+    // object that has the judge's shape, else the last object at all.
+    const embedded = embeddedJsonObjects(cleaned);
+    parsed =
+      [...embedded]
+        .reverse()
+        .find((value) => JudgeResponseSchema.safeParse(value).success) ??
+      embedded.at(-1);
     if (parsed === undefined)
-      throw new Error(`Failed to parse judge response as JSON: ${text}`);
+      throw new Error(
+        truncated
+          ? `The judge's answer was cut off at its token limit before its JSON was complete; raise the judge's maxTokens. Answer: ${text}`
+          : `Failed to parse judge response as JSON: ${text}`
+      );
   }
 
   const result = JudgeResponseSchema.safeParse(parsed);
@@ -124,7 +174,10 @@ export function createLLMJudge(
         prompt: buildJudgePrompt(candidate, reference, rubric),
       });
       const durationMs = Date.now() - startTime;
-      const parsed = parseJudgeResponse(completion.text);
+      const parsed = parseJudgeResponse(
+        completion.text,
+        completion.truncated === true
+      );
       // Only what the provider reported overrides the defaults.
       const reported = Object.fromEntries(
         Object.entries(completion.usage ?? {}).filter(

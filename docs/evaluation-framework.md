@@ -189,6 +189,25 @@ judges: {
 When a required path is missing or empty, MST does not call the judge and
 records it as skipped.
 
+A judge can also check that it can run at all, such as that its SDK is
+installed and its credential is set. `preflight(options)` runs once per
+judge setting, before `mst run` starts a variant's client and before
+`mst grade` writes anything, so a missing key fails the run instead of every
+trial. It must not call a model. `mst run --no-grade` doesn't call it. The
+built-in `rubric` judge checks its provider's package and credential.
+
+```ts
+judges: {
+  graded: {
+    schema: z.object({}).strict(),
+    preflight: async () => {
+      if (!process.env.ACME_JUDGE_KEY) throw new Error('Set ACME_JUDGE_KEY.');
+    },
+    evaluate: async ({ trial }) => grade(trial.text),
+  },
+}
+```
+
 A judge returns a `JudgeScore`. Only `score` (0 to 1) is required:
 
 | Field               | Effect                                                                                                           |
@@ -206,7 +225,10 @@ judge of a case skips, the judge assertion passes.
 Judge usage is kept apart from client usage: `judgeUsage` on each case and
 trial, `totalJudgeUsage` on the run and eval telemetry, and the
 `judge_cost_usd`, `judge_input_tokens`, and `judge_output_tokens` metrics.
-The built-in `rubric` judge reports its usage the same way.
+The built-in `rubric` judge reports its usage the same way. It reads the
+last `{pass, score, reasoning}` object in the model's answer, so reasoning
+before the JSON is fine; an answer cut off at `maxTokens` (default 4096)
+fails saying so.
 
 ### Pairwise judges
 
@@ -428,11 +450,13 @@ Each run of an eval is a directory, in the versioned `mst.run/v1` format:
 - **Run IDs** sort by start time: `20261007T182504Z-7f3c2a`. The last six characters are its short form.
 - **Every file** starts with `"format": "mst.run/v1"` and its `kind` (`run`, `trial`, `score`, `results`, `summary`, `latest`). Readers ignore fields they don't know, so new optional fields keep the version; removing or renaming one moves the format to `mst.run/v2`. The JSON Schemas are published in `schema/run/v1/`.
 - **Paths:** variant, case and grader names are URI-encoded into one path segment each, and trials count from 0. Case IDs must be unique within a run, because they name these paths: a case ID in two datasets fails before anything runs.
-- **`latest.json`** is written last, and only for a full run, so a crash or a partial run leaves it at the previous run.
+- **`latest.json`** is written last, and only for a full, graded run, so a crash, a partial run or an `mst run --no-grade` run leaves it at the previous run.
 - **A run is saved as it goes.** Each trial's trace is written to `traces/` as soon as the trial finishes, so a run that is stopped or killed keeps every trial that finished. With the first trial, and after each variant but the last, MST writes the run directory with what has run so far, and `run.json` says `"phases": { "collect": "partial", "grade": "partial" }`; the final write makes both `complete`. If the run stops on an error, it is written with `collect: failed` before the error is reported. `results.json`, `summary.json` and `run.json`'s `variants` list only the variants that finished, so `traces/` can also hold the trials of the variant that was running. Pairwise judges and the comparison with the previous run happen only in the final write.
 - **An unavailable client is a result, not the end of the run.** When a batch client throws `ClientUnavailableError` (from `./evals`), because its desktop is still leased by an earlier batch or its machine can't be reached, each of its trials is an infrastructure failure that says why (with credentials redacted), and the run goes on to the next variant. Any other error, such as a bad option or a server that isn't ready, stops the run, keeping the variants that finished. Infrastructure failures are left out of pass rates.
 - **The report says when a run didn't finish:** _incomplete_ for a run saved while variants remained (still running, or killed), and _stopped early_ for one that stopped on an error.
-- **Redaction** applies to every file, as it does to stored results (`redactStoredResponses`).
+- **Redaction** applies to every file, as it does to stored results (`redactStoredResponses`). A redacted trace has no answer or tool outputs, so a run is only graded again (`mst grade`) when it was stored with `"redactStoredResponses": false`.
+- **Phases:** `run.json`'s `phases.grade` is `skipped` for a run collected with `mst run --no-grade`: its trials have traces and no scores, and it is never a previous run to compare with.
+- **Regrades:** `mst grade <run>` grades a run's traces with the eval config's graders as they are now, and writes the scores as a new run, `<run-id>.g2` (then `.g3`, …), next to it. Its `run.json` has `gradedFrom`, the run that collected the traces, and the regrade carries a copy of them.
 - **`--output-dir`** names the eval's directory (`<output-dir>/runs/<run-id>/`).
 - **`report/`** is built from the run's own files, so `mst open <run>` can rebuild it for a run copied without it. `run.json` records each variant's setup (client, model, servers, tool metadata, input template, judges, and client options, with any whose name suggests a credential replaced by a hash) for the report's _What differs_. See [`mst open`](./cli.md#open---open-a-runs-report).
 

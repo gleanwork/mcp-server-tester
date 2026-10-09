@@ -27,6 +27,16 @@ interface GoogleSdk {
   };
 }
 
+/** Loads the optional `@google/generative-ai` package, or throws naming how to install it. */
+export function loadGoogleSdk(): Promise<GoogleSdk> {
+  return loadJudgeSdk<GoogleSdk>(
+    // @ts-expect-error - optional: npm install @google/generative-ai
+    () => import('@google/generative-ai'),
+    'Google',
+    '@google/generative-ai'
+  );
+}
+
 /**
  * Google Gemini completion adapter.
  * Requires the `@google/generative-ai` package and a Google API key.
@@ -39,12 +49,7 @@ export function googleCompletion(
     config.apiKeyEnvVar ?? 'GOOGLE_API_KEY'
   );
   return async ({ system, prompt }) => {
-    const sdk = await loadJudgeSdk<GoogleSdk>(
-      // @ts-expect-error - optional: npm install @google/generative-ai
-      () => import('@google/generative-ai'),
-      'Google',
-      '@google/generative-ai'
-    );
+    const sdk = await loadGoogleSdk();
     const gemini = new sdk.GoogleGenerativeAI(apiKey).getGenerativeModel({
       model: config.model ?? 'gemini-2.0-flash',
       generationConfig: {

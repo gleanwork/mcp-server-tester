@@ -7,10 +7,23 @@ import {
   newRunId,
   runsDirectory,
   writeLatest,
+  readLatestRunId,
   writeRun,
   writeTrial,
   type RunFacts,
+  findRunDirectory,
+  nextRegradeId,
+  readRunDirectory,
+  readRunTrials,
 } from './runFormat.js';
+import {
+  assertReplayedCases,
+  replayExecutor,
+  replayedCases,
+  replayedVariants,
+  runReplay,
+  type RunReplay,
+} from './replay.js';
 import { rejectRenamedOptions } from './renamedKeys.js';
 import { configIdentity } from './configIdentity.js';
 import { resolveConfigExtends } from './configExtends.js';
@@ -62,7 +75,7 @@ import {
   batchTraceExecution,
   createEvalCaseExecutor,
 } from './caseExecution.js';
-import { mergeEvalJudges } from './grading.js';
+import { mergeEvalJudges, preflightCaseJudges } from './grading.js';
 import { prepareClientBatch } from './prepareClientBatch.js';
 import type { EvalRunnerResult } from './evalRunner.js';
 import type { EvalCase, EvalDataset } from './datasetTypes.js';
@@ -154,6 +167,13 @@ export interface RunEvalOptions {
     | EvalVariant[]
     | ((configVariants: readonly EvalVariant[]) => EvalVariant[]);
   redactStoredResponses?: boolean;
+  /**
+   * Grade the trials: assertions, judges and pairwise judges. `false` only
+   * collects (`mst run --no-grade`): the run keeps its traces, with no scores,
+   * for `mst grade` to grade later.
+   * @default true
+   */
+  grade?: boolean;
   /** Skip the eval config's pairwise judges (tool optimization ranks variants itself). */
   skipPairwise?: boolean;
   /**
@@ -184,6 +204,8 @@ export interface RunEvalResult {
     result?: EvalRunnerResult;
   }>;
   summary: EvaluationSummary;
+  /** A regrade's source: the run whose traces it graded. */
+  gradedFrom?: string;
 }
 
 async function loadSecretsFile(
@@ -585,6 +607,112 @@ function summarizeVariant(
 }
 
 export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
+  return evaluate(options);
+}
+
+/** What `mst grade` grades, and with which eval config. */
+export interface GradeRunOptions extends Pick<
+  RunEvalOptions,
+  | 'configPath'
+  | 'rootDir'
+  | 'pluginPaths'
+  | 'plugins'
+  | 'outputDir'
+  | 'secretsFile'
+  | 'report'
+> {
+  /**
+   * The run to grade: its directory, its run ID, or the ID's short form (the
+   * 6 hex characters) among the eval's runs.
+   */
+  run: string;
+}
+
+/**
+ * Grade a stored run again (`mst grade`): the eval config's current
+ * assertions, judges and pairwise judges score the traces the run stored,
+ * and the scores are a new run (`<run-id>.g<n>`) next to it, whose
+ * `gradedFrom` names the run. No client runs, so it needs no tokens. The
+ * datasets are loaded again: a case's `expected` and judges are today's.
+ */
+export async function gradeRun(
+  options: GradeRunOptions
+): Promise<RunEvalResult> {
+  const rootDir = options.rootDir ?? process.cwd();
+  const { name } = loadEvalConfig(options.configPath, { rootDir });
+  const evalDirectory =
+    options.outputDir ?? path.join(rootDir, '.mcp-test-results', name);
+  const directory = await findRunDirectory(
+    runsDirectory(evalDirectory),
+    options.run,
+    rootDir
+  );
+  const { run, summary: stored } = await readRunDirectory(directory);
+  if (run.evalName !== name)
+    throw new Error(
+      `Run ${run.runId} is a run of eval "${run.evalName}", not of "${name}" (${options.configPath}).`
+    );
+  const replay = runReplay(
+    run,
+    await readRunTrials(directory),
+    await nextRegradeId(path.dirname(directory), run.runId),
+    stored.collectedAt ?? stored.timestamp
+  );
+  const { run: _run, ...evalOptions } = options;
+  return evaluate(
+    {
+      ...evalOptions,
+      rootDir,
+      // The regrade goes next to the run it grades.
+      outputDir: path.dirname(path.dirname(directory)),
+      redactStoredResponses: run.redactStoredResponses,
+    },
+    replay
+  );
+}
+
+/**
+ * Whether a regrade becomes the eval's latest run: only a regrade of a run
+ * that collected every trial, and only when the latest run collected its
+ * traces no later. A regrade of an older run leaves a newer run the latest.
+ */
+async function regradeTakesLatest(
+  evalDirectory: string,
+  replay: RunReplay
+): Promise<boolean> {
+  if (replay.run.phases.collect !== 'complete') return false;
+  const latest = await readLatestRunId(evalDirectory);
+  // Missing, or already a grading of these traces.
+  if (
+    latest === undefined ||
+    latest.replace(/\.g\d+$/, '') === replay.gradedFrom
+  )
+    return true;
+  let latestCollectedAt: string;
+  try {
+    const summary = JSON.parse(
+      await fs.readFile(
+        path.join(runsDirectory(evalDirectory), latest, 'summary.json'),
+        'utf8'
+      )
+    ) as EvaluationSummary;
+    latestCollectedAt = summary.collectedAt ?? summary.timestamp;
+  } catch {
+    // latest.json names a run that's gone: nothing newer to keep.
+    return true;
+  }
+  return latestCollectedAt <= replay.collectedAt;
+}
+
+/**
+ * Run an eval, or (with `replay`) grade the trials a run stored: the same
+ * pipeline from datasets to report, with each trial's stored trace in place
+ * of a client run.
+ */
+async function evaluate(
+  options: RunEvalOptions,
+  replay?: RunReplay
+): Promise<RunEvalResult> {
   rejectRenamedOptions(
     options,
     { manifestPath: 'configPath', arm: 'variant', arms: 'variants' },
@@ -666,14 +794,25 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
     options.envOptions ?? {}
   );
 
-  const executionId = newRunId();
+  const executionId = replay?.runId ?? newRunId();
   // The eval's directory holds its runs (runs/<run-id>/) and latest.json.
   const evalDirectory =
     options.outputDir ??
     path.join(rootDir, '.mcp-test-results', evalConfig.name);
   const outputDir = path.join(runsDirectory(evalDirectory), executionId);
-  const variants = selectedVariants(evalConfig, options.variant);
+  const variants = replay
+    ? replayedVariants(evalConfig, replay)
+    : selectedVariants(evalConfig, options.variant);
   const datasets = evalConfig.datasets;
+  const redact =
+    options.redactStoredResponses ??
+    (evalConfig.redactStoredResponses as boolean | undefined) ??
+    REDACT_STORED_RESPONSES_BY_DEFAULT;
+  // Before any client starts: an ungraded run is only worth its traces.
+  if (options.grade === false && redact)
+    throw new Error(
+      'mst run --no-grade keeps the traces for mst grade, but this eval redacts stored responses, which leaves the answers and tool outputs out of them. Set "redactStoredResponses": false in the eval config.'
+    );
 
   // Datasets load with the eval's selection controls removed: each variant
   // selects its own cases below.
@@ -726,13 +865,11 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
       `MST can't run trials in "${environment.name}" yet: only the local environment runs them. Use --dry-run to check its options.`
     );
 
-  const redact =
-    options.redactStoredResponses ??
-    (evalConfig.redactStoredResponses as boolean | undefined) ??
-    REDACT_STORED_RESPONSES_BY_DEFAULT;
   // Keys the hashes of client options in run.json: comparable within this run only.
   const runKey = randomBytes(32);
   const variantResults: EvaluationVariantResult[] = [];
+  // Judge settings whose preflight passed, across variants.
+  const checkedJudges = new Set<string>();
   const allDatasets: RunEvalResult['datasets'] = [];
   const allResults: EvalCaseResult[] = [];
   // Saved with the first trial: from then on, run.json says how far the run got.
@@ -756,6 +893,11 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
     canonicalDatasets.map(({ dataset }) => dataset),
     options.cases
   );
+  if (replay)
+    assertReplayedCases(
+      replay,
+      canonicalDatasets.map(({ dataset }) => dataset)
+    );
   const narrowing: CaseNarrowing = {
     cases: options.cases,
     filterTags: options.filterTags,
@@ -764,22 +906,29 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
   };
   // Before any client starts: a fresh token for every connector server, kept
   // fresh until the run ends.
-  const credentials: ConnectorCredentials = await startConnectorCredentials(
-    connectors,
-    options.credentialStore ?? localCredentialStore(),
-    {
-      configPath: options.configPath,
-      variants: variants.map((variant) => variant.name),
-    }
-  );
+  // Grading stored traces starts no client, so it needs no tokens.
+  const credentials: ConnectorCredentials = replay
+    ? { env: {}, secrets: () => [], stop: async () => {} }
+    : await startConnectorCredentials(
+        connectors,
+        options.credentialStore ?? localCredentialStore(),
+        {
+          configPath: options.configPath,
+          variants: variants.map((variant) => variant.name),
+        }
+      );
+  // A replay's servers only name the trace's tools: no secrets, no endpoint.
+  const serverFor = (server: MCPConfig): MCPConfig =>
+    replay ? server : resolveServerSecrets(server, env);
   try {
     Object.assign(env, credentials.env);
     const sourceServers = (
       options.mcpConfig
         ? [options.mcpConfig]
         : transportServers(sourceVariant.servers ?? evalConfig.servers)
-    ).map((server) => resolveServerSecrets(server, env));
-    sourceServers.forEach((server) => assertEvalEndpoint(server, evalConfig));
+    ).map(serverFor);
+    if (!replay)
+      sourceServers.forEach((server) => assertEvalEndpoint(server, evalConfig));
     const sourceClient = resolveClient(
       evalConfig,
       sourceVariant,
@@ -806,12 +955,11 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
         const servers = options.mcpConfig
           ? [options.mcpConfig]
           : transportServers(variant.servers ?? evalConfig.servers);
-        const resolvedServers = servers.map((server) =>
-          resolveServerSecrets(server, env)
-        );
-        resolvedServers.forEach((server) =>
-          assertEvalEndpoint(server, evalConfig)
-        );
+        const resolvedServers = servers.map(serverFor);
+        if (!replay)
+          resolvedServers.forEach((server) =>
+            assertEvalEndpoint(server, evalConfig)
+          );
         // The first variant's client was resolved before the datasets loaded (to
         // check its servers); reuse it rather than resolve it twice.
         const clientConfig =
@@ -842,7 +990,9 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
           clientPatchOf(rawVariant) ?? {}
         );
         const client =
-          clientConfig.definition.run || clientConfig.definition.runBatch
+          replay ||
+          clientConfig.definition.run ||
+          clientConfig.definition.runBatch
             ? undefined
             : resolvedServers.length === 1
               ? await createMCPClientForConfig(resolvedServers[0]!)
@@ -853,24 +1003,23 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
         // Started on first use, for hosts that connect to their servers themselves.
         const toolMetadata = variantToolMetadata(evalConfig, variant);
         let proxy: Promise<ToolSurfaceProxy> | undefined;
-        const toolVariant = toolMetadata
-          ? {
-              id: toolMetadata.id,
-              proxy: () =>
-                (proxy ??= startToolSurfaceProxy(
-                  resolvedServers,
-                  toolMetadata
-                )),
-            }
-          : undefined;
+        const toolVariant =
+          toolMetadata && !replay
+            ? {
+                id: toolMetadata.id,
+                proxy: () =>
+                  (proxy ??= startToolSurfaceProxy(
+                    resolvedServers,
+                    toolMetadata
+                  )),
+              }
+            : undefined;
 
         try {
           for (const { source, dataset } of canonicalDatasets) {
-            const executionDataset = narrowEvalCases(
-              dataset,
-              evalConfig,
-              narrowing
-            );
+            const executionDataset = replay
+              ? replayedCases(dataset, replay, variant.name)
+              : narrowEvalCases(dataset, evalConfig, narrowing);
             if (executionDataset.cases.length === 0) continue;
             const template = variant.inputTemplate ?? evalConfig.inputTemplate;
             const effectiveDataset: EvalDataset = {
@@ -906,11 +1055,15 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
                   : {}),
               })),
             };
+            // Before this variant's client starts: a judge that can't run
+            // (no SDK, no credential) fails the run, not every trial.
+            if (options.grade !== false)
+              await preflightCaseJudges(effectiveDataset.cases, checkedJudges);
             const sourceConfig = source;
             const runClient =
               typeof clientConfig.definition.run === 'function' ||
               typeof clientConfig.definition.runBatch === 'function';
-            if (!runClient && effectiveDataset.cases.length > 0)
+            if (!replay && !runClient && effectiveDataset.cases.length > 0)
               throw new Error(
                 `Client "${clientConfig.declaration.type}" has neither run() nor runBatch(), so it can't run cases.`
               );
@@ -927,39 +1080,41 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
               datasetName: effectiveDataset.name,
               toolVariantId: toolMetadata?.id,
             };
-            const batchTraces = await prepareClientBatch(
-              clientConfig.definition,
-              effectiveDataset.cases,
-              clientConfig.declaration,
-              resolvedServers,
-              { evalConfig: effectiveConfig, variant, env },
-              toolVariant,
-              {
-                // A trace the client reports before its batch ends is saved
-                // as the trial it will be graded as.
-                onTrace: async (request, trace) => {
-                  const evalCase = casesById.get(request.caseId);
-                  if (!evalCase) return;
-                  const execution = batchTraceExecution(
-                    trace,
-                    clientConfig.definition,
-                    resolvedServers
-                  );
-                  await saveTrial(
-                    {
-                      ...executedTrialResult(
-                        evalCase,
-                        execution,
-                        caseOptions,
-                        0
-                      ),
-                      variant: variant.name,
+            const batchTraces = replay
+              ? undefined
+              : await prepareClientBatch(
+                  clientConfig.definition,
+                  effectiveDataset.cases,
+                  clientConfig.declaration,
+                  resolvedServers,
+                  { evalConfig: effectiveConfig, variant, env },
+                  toolVariant,
+                  {
+                    // A trace the client reports before its batch ends is saved
+                    // as the trial it will be graded as.
+                    onTrace: async (request, trace) => {
+                      const evalCase = casesById.get(request.caseId);
+                      if (!evalCase) return;
+                      const execution = batchTraceExecution(
+                        trace,
+                        clientConfig.definition,
+                        resolvedServers
+                      );
+                      await saveTrial(
+                        {
+                          ...executedTrialResult(
+                            evalCase,
+                            execution,
+                            caseOptions,
+                            0
+                          ),
+                          variant: variant.name,
+                        },
+                        request.trial
+                      );
                     },
-                    request.trial
-                  );
-                },
-              }
-            );
+                  }
+                );
             // Batch execution (including shared setup/cleanup) precedes the runner's
             // wall clock. Count its elapsed time once, not the sum of request times.
             const batchDurationMs = batchTraces
@@ -982,19 +1137,29 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
                 defaultPassThreshold: evalConfig.passThreshold,
                 toolOverrides: toolMetadata,
                 toolMap: variant.toolMap ?? evalConfig.toolMap,
-                ...(runClient
+                ...(options.grade === false ? { grade: false } : {}),
+                ...(replay
                   ? {
-                      executeCase: createEvalCaseExecutor({
-                        servers: resolvedServers,
-                        client: clientConfig.declaration,
-                        evalConfig: effectiveConfig,
-                        variant,
-                        env,
-                        batchTraces,
-                        toolVariant,
-                      }),
+                      executeCase: replayExecutor(
+                        replay,
+                        variant.name,
+                        resolvedServers,
+                        clientConfig.definition.evidence ?? 'none'
+                      ),
                     }
-                  : {}),
+                  : runClient
+                    ? {
+                        executeCase: createEvalCaseExecutor({
+                          servers: resolvedServers,
+                          client: clientConfig.declaration,
+                          evalConfig: effectiveConfig,
+                          variant,
+                          env,
+                          batchTraces,
+                          toolVariant,
+                        }),
+                      }
+                    : {}),
               },
               { mcp }
             );
@@ -1078,7 +1243,16 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
       await writeRun(
         outputDir,
         executionId,
-        runFacts(stored, { collect: phase, grade: 'partial' }),
+        runFacts(
+          stored,
+          // A regrade collected nothing: its traces are the source run's.
+          replay
+            ? {
+                collect: replay.run.phases.collect,
+                grade: phase === 'failed' ? 'failed' : 'partial',
+              }
+            : { collect: phase, grade: 'partial' }
+        ),
         stored
       );
       if (options.report !== false) await writeRunReport(outputDir);
@@ -1116,7 +1290,7 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
   // Like the previous-run comparison, pairwise judging must never cost the
   // run its results.
   let pairwiseUsage: Partial<UsageMetrics> | undefined;
-  if (!options.skipPairwise) {
+  if (!options.skipPairwise && options.grade !== false) {
     try {
       pairwiseUsage = await comparePairwiseVariants(
         evalConfig,
@@ -1213,8 +1387,27 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
     };
 
     summary.runId = executionId;
-    const selection = runSelection(options);
-    summary.partial = selection !== undefined;
+    // A regrade is as partial as the run whose traces it graded.
+    const selection = replay
+      ? (replay.run.selection as RunSelection | undefined)
+      : runSelection(options);
+    summary.partial = replay ? replay.run.partial : selection !== undefined;
+    if (replay) summary.collectedAt = replay.collectedAt;
+    if (options.grade === false) {
+      summary.graded = false;
+      // Nothing judged the answers, so there is no pass rate: only how many
+      // cases collected every trial.
+      const failedToCollect = allResults.filter((result) =>
+        result.trialResults?.length
+          ? result.trialResults.some((trial) => trial.error !== undefined)
+          : result.error !== undefined
+      ).length;
+      summary.metrics = {
+        total: allResults.length,
+        collected: allResults.length - failedToCollect,
+        failedToCollect,
+      };
+    }
     if (selection) {
       summary.selection = selection;
       summary.selectionHash = selectionHashOf(selection);
@@ -1262,7 +1455,10 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
       judges: judgeRecords(evalConfig),
       redactStoredResponses: redact,
       environment,
-      phases,
+      // A collect-only run is never graded; the run's grading says so.
+      phases:
+        options.grade === false ? { ...phases, grade: 'skipped' } : phases,
+      ...(replay ? { gradedFrom: replay.gradedFrom } : {}),
     };
   }
   const store = evalConfig.results?.store
@@ -1271,22 +1467,34 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
       )
     : undefined;
   // The comparison is a convenience: it must never cost the run its results.
-  try {
-    const previous = await findPreviousRun({
-      configId: summary.configId,
-      runId: executionId,
-      variants: summary.variants.map((variant) => variant.name),
-      partial: summary.partial,
-      selectionHash: summary.selectionHash,
-      store,
-      outputRoot: runsDirectory(evalDirectory),
-    });
-    if (previous) summary.previousRun = compareWithPrevious(previous, summary);
-  } catch (error) {
-    console.warn(
-      `[mst] Couldn't compare with the previous run: ${error instanceof Error ? error.message : String(error)}`
-    );
-  }
+  // An ungraded run has no results to compare.
+  if (options.grade !== false)
+    try {
+      const previous = await findPreviousRun({
+        configId: summary.configId,
+        runId: executionId,
+        // A regrade compares with the same traces' last grading.
+        ...(replay
+          ? {
+              regradeOf: {
+                runId: replay.gradedFrom,
+                collectedAt: replay.collectedAt,
+              },
+            }
+          : {}),
+        variants: summary.variants.map((variant) => variant.name),
+        partial: summary.partial,
+        selectionHash: summary.selectionHash,
+        store,
+        outputRoot: runsDirectory(evalDirectory),
+      });
+      if (previous)
+        summary.previousRun = compareWithPrevious(previous, summary);
+    } catch (error) {
+      console.warn(
+        `[mst] Couldn't compare with the previous run: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
 
   const storedSummary = redact
     ? redactStoredResponses(summary)
@@ -1339,7 +1547,7 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
     outputDir,
     executionId,
     runFacts(storedSummary, {
-      collect: 'complete',
+      collect: replay ? replay.run.phases.collect : 'complete',
       // Trials a grader couldn't score are what a regrade would finish.
       grade: allResults.some(
         (result) =>
@@ -1360,9 +1568,13 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
       `[mst] The run's report wasn't written: ${error instanceof Error ? error.message : String(error)}`
     );
   }
-  // Last, so a crash leaves latest.json at the previous run; a partial run
-  // never becomes the latest.
-  if (!summary.partial)
+  // Last, so a crash leaves latest.json at the previous run; a partial or
+  // ungraded run never becomes the latest, nor does a regrade of an older run.
+  if (
+    !summary.partial &&
+    options.grade !== false &&
+    (!replay || (await regradeTakesLatest(evalDirectory, replay)))
+  )
     await writeLatest(evalDirectory, executionId, summary.timestamp);
   return {
     evalConfig,
@@ -1370,5 +1582,6 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
     environment,
     datasets: allDatasets,
     summary,
+    ...(replay ? { gradedFrom: replay.gradedFrom } : {}),
   };
 }

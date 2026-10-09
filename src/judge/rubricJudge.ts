@@ -6,7 +6,7 @@
  */
 import { z } from 'zod';
 import type { JudgeDefinition } from '../evals/evalFrameworkTypes.js';
-import { createJudge } from './judgeClient.js';
+import { createJudge, preflightJudge } from './judgeClient.js';
 import { DEFAULT_JUDGE_PROVIDER, JUDGE_PROVIDER_KINDS } from './judgeTypes.js';
 import {
   BUILT_IN_RUBRICS,
@@ -56,5 +56,10 @@ export const RUBRIC_JUDGE: JudgeDefinition = {
       ...(config.model !== undefined ? { model: config.model } : {}),
       ...(result.usage !== undefined ? { usage: result.usage } : {}),
     };
+  },
+  async preflight(options) {
+    const { rubric: _rubric, ...config } =
+      RubricJudgeOptionsSchema.parse(options);
+    await preflightJudge(config);
   },
 };

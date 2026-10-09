@@ -232,6 +232,13 @@ export interface JudgeDefinition {
     input: JudgeInput,
     options: Record<string, unknown>
   ) => Promise<JudgeScore>;
+  /**
+   * Checks, before a run collects or grades anything, that the judge can run
+   * with these options: its SDK is installed and its credential is set.
+   * Throws what's missing. Must not call a model. `options` is parsed by
+   * `schema`.
+   */
+  preflight?: (options: Record<string, unknown>) => Promise<void>;
 }
 
 /** Public result-store extension point. */
@@ -465,6 +472,17 @@ export interface RunSummary {
    * store's latest run. Absent in older summaries: a full run.
    */
   partial?: boolean;
+  /**
+   * `false` for a run that only collected (`mst run --no-grade`): its trials
+   * have no scores, so it is never a previous run to compare with. Absent: graded.
+   */
+  graded?: false;
+  /**
+   * A regrade's: when the run that collected its traces finished (that run's
+   * `timestamp`). Runs are ordered by when they collected, so a regrade of an
+   * older run stays older than a newer run.
+   */
+  collectedAt?: string;
   /** What narrowed a partial run. */
   selection?: RunSelection;
   /** A hash of `selection`: partial runs with the same hash are comparable. */

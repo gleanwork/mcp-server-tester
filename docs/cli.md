@@ -14,6 +14,7 @@ Before the package is installed (for example, running `init` in a new directory)
 - [token - Export Tokens for CI/CD](#token---export-tokens-for-cicd)
 - [auth - Sign In to Connector Servers](#auth---sign-in-to-connector-servers)
 - [run - Run an Eval Config](#run---run-an-eval-config)
+- [grade - Grade a Stored Run Again](#grade---grade-a-stored-run-again)
 - [batch - Run Several Eval Configs](#batch---run-several-eval-configs)
 - [open - Open a Run's Report](#open---open-a-runs-report)
 - [cowork setup - Prepare Cowork](#cowork-setup---prepare-cowork)
@@ -743,26 +744,59 @@ npx mst run --config ./eval.json [options]
 
 ### Options
 
-| Option                   | Description                                                                                                                                                                                                                                     |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `-c, --config <path>`    | The eval config to run (required).                                                                                                                                                                                                              |
-| `--variant <names...>`   | Run only these variants, in the config's order. A name the config doesn't have fails the run before anything starts.                                                                                                                            |
-| `--case <ids...>`        | Run only these case ids, instead of the config's `filterTags` and `maxCases`. An id in no dataset fails the run before anything starts.                                                                                                         |
-| `--filter-tag <tags...>` | Run the cases with any of these tags, instead of the config's `filterTags`.                                                                                                                                                                     |
-| `--max-cases <n>`        | Cases per dataset (after the tags), instead of the config's `maxCases`.                                                                                                                                                                         |
-| `--trials <n>`           | Trials per case, instead of the config's `trials` and each case's own.                                                                                                                                                                          |
-| `--plugins <paths...>`   | Plugin modules to load before the run, as well as the eval config's own `plugins`.                                                                                                                                                              |
-| `--output-dir <dir>`     | Where to write runs: each run goes in `<dir>/<run id>/`. Default: `.mcp-test-results/<config name>` under the root.                                                                                                                             |
-| `--root-dir <dir>`       | Fallback for relative eval config paths, and the default results location. Default: `.`.                                                                                                                                                        |
-| `--secrets-file <path>`  | A JSON or dotenv-style file of environment values for the run (API keys, `auth.accessTokenEnv` tokens, stdio server environments), kept out of the eval config. A relative path resolves against the root; its values override the environment. |
-| `--dry-run`              | Validate the eval config, its plugins and datasets without running anything.                                                                                                                                                                    |
-| `--store <dir>`          | Where connector servers' grants are (see [`auth`](#auth---sign-in-to-connector-servers)). Default: `~/.mcp-server-tester/grants`.                                                                                                               |
-| `--env <name>`           | Where to collect the trials: `local` (the default, in the `mst run` process), or a plugin environment, `<namespace>/env/<name>`. MST runs trials only in `local` for now; `--dry-run` checks a plugin environment and its options.              |
-| `--env-option <k=v>`     | An environment option; repeat the flag for more. MST owns `shards` (a positive integer, default 1; `local` runs one) and `keep` (`never`, `failed` or `always`); the environment's schema checks the rest. Options are recorded in `run.json`.  |
+| Option                   | Description                                                                                                                                                                                                                                                                                     |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-c, --config <path>`    | The eval config to run (required).                                                                                                                                                                                                                                                              |
+| `--variant <names...>`   | Run only these variants, in the config's order. A name the config doesn't have fails the run before anything starts.                                                                                                                                                                            |
+| `--case <ids...>`        | Run only these case ids, instead of the config's `filterTags` and `maxCases`. An id in no dataset fails the run before anything starts.                                                                                                                                                         |
+| `--filter-tag <tags...>` | Run the cases with any of these tags, instead of the config's `filterTags`.                                                                                                                                                                                                                     |
+| `--max-cases <n>`        | Cases per dataset (after the tags), instead of the config's `maxCases`.                                                                                                                                                                                                                         |
+| `--trials <n>`           | Trials per case, instead of the config's `trials` and each case's own.                                                                                                                                                                                                                          |
+| `--plugins <paths...>`   | Plugin modules to load before the run, as well as the eval config's own `plugins`.                                                                                                                                                                                                              |
+| `--output-dir <dir>`     | Where to write runs: each run goes in `<dir>/<run id>/`. Default: `.mcp-test-results/<config name>` under the root.                                                                                                                                                                             |
+| `--root-dir <dir>`       | Fallback for relative eval config paths, and the default results location. Default: `.`.                                                                                                                                                                                                        |
+| `--secrets-file <path>`  | A JSON or dotenv-style file of environment values for the run (API keys, `auth.accessTokenEnv` tokens, stdio server environments), kept out of the eval config. A relative path resolves against the root; its values override the environment.                                                 |
+| `--dry-run`              | Validate the eval config, its plugins and datasets without running anything.                                                                                                                                                                                                                    |
+| `--no-grade`             | Collect the trials without grading them: no assertions, judges or pairwise judges run. Grade the run later with [`grade`](#grade---grade-a-stored-run-again). Requires `"redactStoredResponses": false`, so the traces keep what graders read. Exits 1 if a trial failed to collect, naming it. |
+| `--store <dir>`          | Where connector servers' grants are (see [`auth`](#auth---sign-in-to-connector-servers)). Default: `~/.mcp-server-tester/grants`.                                                                                                                                                               |
+| `--env <name>`           | Where to collect the trials: `local` (the default, in the `mst run` process), or a plugin environment, `<namespace>/env/<name>`. MST runs trials only in `local` for now; `--dry-run` checks a plugin environment and its options.                                                              |
+| `--env-option <k=v>`     | An environment option; repeat the flag for more. MST owns `shards` (a positive integer, default 1; `local` runs one) and `keep` (`never`, `failed` or `always`); the environment's schema checks the rest. Options are recorded in `run.json`.                                                  |
 
 A run narrowed by any of `--variant`, `--case`, `--filter-tag`, `--max-cases` or `--trials` is a **partial run**. Its summary has `partial: true` and the `selection` that narrowed it, and the run prints `Partial run (--case e2e-0011, --trials 1): not compared with full runs`. A partial run is compared only with earlier partial runs narrowed the same way, never becomes the result store's `latest.json`, and is never resumed by `--skip-existing`. `--case` replaces the tags and the case cap; `--filter-tag` and `--max-cases` replace the config's. When `--variant` leaves out the baseline, the run says that no variant is compared with it.
 
 `run` prints a row per variant (cases passed, trial pass rate, MCP calls, client events, tokens, cost, time) and, when there is one, the change since the previous run of the same eval config and variant. It writes the run's directory (`runs/<run-id>/` under the eval's output directory; see [What a run leaves behind](./evaluation-framework.md#what-a-run-leaves-behind)), prints its path, and exits 1 when any case failed. `--dry-run` prints the eval config's name, output directory, datasets, variants and environment (`env`: its name, shards, and any `keep` or options) as JSON.
+
+## `grade` - Grade a Stored Run Again
+
+Grades the traces a run stored with the eval config's graders as they are now (assertions, judges and pairwise judges), without running the client again, and writes the scores as a new run next to it: `<run-id>.g2`, then `.g3`, and so on.
+
+### Usage
+
+```bash
+npx mst run --config ./eval.json --no-grade   # collect now
+npx mst grade 7f3c2a --config ./eval.json     # grade later, as often as the graders change
+```
+
+`<run>` is a run directory (relative to `--root-dir`), a run ID, or its short form (the last six characters, with any `.g<n>`) among the eval's runs.
+
+### Options
+
+| Option                  | Description                                                                                   |
+| ----------------------- | --------------------------------------------------------------------------------------------- |
+| `-c, --config <path>`   | The eval config the run ran (required). Its graders and datasets are read again.              |
+| `--plugins <paths...>`  | Plugin modules to load, as well as the eval config's own `plugins`.                           |
+| `--output-dir <dir>`    | The eval's directory, if `run` was given one. Default: `.mcp-test-results/<config name>`.     |
+| `--root-dir <dir>`      | Fallback for relative eval config paths, and the default results location. Default: `.`.      |
+| `--secrets-file <path>` | A JSON or dotenv-style file of environment values, as for `run` (for example judge API keys). |
+| `--no-report`           | Don't write the regrade's report.                                                             |
+
+The datasets are loaded again, so each case's `expected` and judges are the dataset's current ones; `run.json` records their content hashes. Every variant and case the run stored must still be in the eval config and its datasets. A trial that failed when it ran stays failed and isn't judged. A trial a grader couldn't score (`phases.grade: partial`, `gradingError`) is graded again: finishing those is what a regrade is for. No client starts, so grading needs no connector tokens.
+
+The regrade's `run.json` has `gradedFrom`, the run whose traces it graded, and the same `phases.collect` as that run: a regrade of a run that stopped early (`collect: failed` or `partial`) still covers only what it collected. Its summary has `collectedAt`, when those traces were collected, and compares with the same traces' last grading, or else with a graded run collected before them, never a newer one. A regrade becomes the eval's `latest.json` only when it is full, its run collected every variant, and no run collected later is the latest: regrading an older run leaves the newer run the latest. `grade` prints what `run` prints, and exits 1 when any case failed.
+
+A `--no-grade` run's `run.json` has `phases.grade: skipped`, also in the copy saved while it runs. Its `summary.json` has no pass rate, only `total`, `collected` and `failedToCollect` cases, and its report says it isn't graded.
+
+A run stored with redacted traces (the default, `redactStoredResponses`) can't be graded again: collect with `"redactStoredResponses": false`.
 
 ## `batch` - Run Several Eval Configs
 

@@ -13,6 +13,7 @@ import { resolveLLMEndpoint } from '../llm/endpoint.js';
 export interface AnthropicMessage {
   content: Array<{ type: string; text?: string }>;
   usage?: { input_tokens?: number; output_tokens?: number };
+  stop_reason?: string | null;
 }
 
 /** The Messages API request a judge sends (Anthropic and Vertex). */
@@ -34,6 +35,16 @@ interface AnthropicSdk {
       create(request: AnthropicMessageRequest): Promise<AnthropicMessage>;
     };
   };
+}
+
+/** Loads the optional `@anthropic-ai/sdk` package, or throws naming how to install it. */
+export function loadAnthropicSdk(): Promise<AnthropicSdk> {
+  return loadJudgeSdk<AnthropicSdk>(
+    // @ts-expect-error - optional: npm install @anthropic-ai/sdk
+    () => import('@anthropic-ai/sdk'),
+    'Anthropic',
+    '@anthropic-ai/sdk'
+  );
 }
 
 /** The Messages API request for a judge prompt. */
@@ -61,6 +72,7 @@ export function anthropicMessageCompletion(
       inputTokens: response.usage?.input_tokens,
       outputTokens: response.usage?.output_tokens,
     },
+    ...(response.stop_reason === 'max_tokens' ? { truncated: true } : {}),
   };
 }
 
@@ -75,12 +87,7 @@ export function anthropicCompletion(
   const options = { apiKeyEnvVar: config.apiKeyEnvVar };
   requireJudgeCredential('Anthropic', 'anthropic', options);
   return async ({ system, prompt }) => {
-    const sdk = await loadJudgeSdk<AnthropicSdk>(
-      // @ts-expect-error - optional: npm install @anthropic-ai/sdk
-      () => import('@anthropic-ai/sdk'),
-      'Anthropic',
-      '@anthropic-ai/sdk'
-    );
+    const sdk = await loadAnthropicSdk();
     const endpoint = await resolveLLMEndpoint('anthropic', options);
     // Explicit nulls stop the SDK reading the other credential from the
     // environment and sending both headers.

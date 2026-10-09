@@ -99,7 +99,7 @@ export interface JudgeConfig {
 
   /**
    * Model to use for judging
-   * @default 'claude-sonnet-4-20250514'
+   * @default 'claude-sonnet-4-6'
    */
   model?: string;
 

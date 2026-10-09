@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
-import { runEval } from './runEval.js';
+import { gradeRun, runEval } from './runEval.js';
 import { ClientUnavailableError } from './clientUnavailable.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
@@ -26,15 +26,26 @@ afterEach(async () => {
  */
 async function fixture(
   runBatch: NonNullable<ClientDefinition['runBatch']>,
-  { datasets = 1, judgeError }: { datasets?: number; judgeError?: string } = {}
+  {
+    datasets = 1,
+    judgeError,
+    storeResponses = false,
+  }: {
+    datasets?: number;
+    judgeError?: string;
+    /** Store unredacted traces, so the run can be regraded. */
+    storeResponses?: boolean;
+  } = {}
 ) {
+  // The judge's error, which a test may clear before a regrade.
+  const state = { judgeError };
   const plugin: Plugin = {
     meta: { name: 'failures-test-plugin', namespace: 'test' },
     judges: {
       flaky: {
         schema: z.object({}).passthrough(),
         async evaluate() {
-          if (judgeError) throw new Error(judgeError);
+          if (state.judgeError) throw new Error(state.judgeError);
           return { score: 1 };
         },
       },
@@ -78,13 +89,17 @@ async function fixture(
       servers: {},
       variants: [{ name: 'baseline' }, { name: 'candidate' }],
       ...(judgeError ? { judges: [{ type: 'test/judge/flaky' }] } : {}),
+      ...(storeResponses ? { redactStoredResponses: false } : {}),
     })
   );
   const outputDir = path.join(dir, 'out');
   const runsDir = path.join(outputDir, 'runs');
+  const base = { configPath, rootDir: dir, plugins: [plugin], outputDir };
   return {
-    run: () =>
-      runEval({ configPath, rootDir: dir, plugins: [plugin], outputDir }),
+    state,
+    outputDir,
+    run: (options: { grade?: false } = {}) => runEval({ ...base, ...options }),
+    regrade: (run: string) => gradeRun({ ...base, run }),
     async runDirectory() {
       const [id] = await fs.readdir(runsDir);
       return path.join(runsDir, id!);
@@ -197,6 +212,42 @@ describe('a run that meets failures', () => {
     ]);
   });
 
+  it('a collect-only run that stops is collect: failed, grade: skipped', async () => {
+    let batches = 0;
+    const f = await fixture(
+      async (requests) => {
+        batches += 1;
+        if (batches === 2) throw new Error('invalid client option: model');
+        return requests.map(ok);
+      },
+      { storeResponses: true }
+    );
+    await expect(f.run({ grade: false })).rejects.toThrow(
+      'invalid client option: model'
+    );
+    const { run } = await storedRun(await f.runDirectory());
+    expect(run.phases).toEqual({ collect: 'failed', grade: 'skipped' });
+  });
+
+  it("a regrade keeps its run's collect phase and doesn't become the latest of a run that stopped", async () => {
+    let batches = 0;
+    const f = await fixture(
+      async (requests) => {
+        batches += 1;
+        if (batches === 2) throw new Error('invalid client option: model');
+        return requests.map(ok);
+      },
+      { storeResponses: true }
+    );
+    await expect(f.run()).rejects.toThrow('invalid client option: model');
+    const regrade = await f.regrade(await f.runDirectory());
+    const { run } = await storedRun(regrade.outputDir);
+    expect(run.phases).toEqual({ collect: 'failed', grade: 'complete' });
+    await expect(
+      fs.stat(path.join(f.outputDir, 'latest.json'))
+    ).rejects.toThrow();
+  });
+
   it('leaves out the cases of a variant that failed partway', async () => {
     let batches = 0;
     const f = await fixture(
@@ -249,6 +300,30 @@ describe('a run that meets failures', () => {
     expect(baseline.result?.caseResults.every((c) => !c.pass)).toBe(true);
     expect(baseline.metrics).not.toHaveProperty('judge_pass_rate');
     expect(baseline.metrics).not.toHaveProperty('trial_pass_rate');
+  });
+
+  it('a regrade of a grade: partial run finishes the trials a judge failed on', async () => {
+    const f = await fixture(async (requests) => requests.map(ok), {
+      judgeError: 'rate limited',
+      storeResponses: true,
+    });
+    await f.run();
+    const source = await f.runDirectory();
+    expect((await storedRun(source)).run.phases).toEqual({
+      collect: 'complete',
+      grade: 'partial',
+    });
+    f.state.judgeError = undefined;
+    const regrade = await f.regrade(source);
+    const { run, cases } = await storedRun(regrade.outputDir);
+    expect(run.phases).toEqual({ collect: 'complete', grade: 'complete' });
+    expect(cases).toHaveLength(4);
+    expect(cases.every((c) => c.pass && c.error === undefined)).toBe(true);
+    // Now complete, the regrade is the latest.
+    expect(
+      (await readJson<{ runId: string }>(path.join(f.outputDir, 'latest.json')))
+        .runId
+    ).toBe(path.basename(regrade.outputDir));
   });
 
   it('still fails a trial another grader failed, when a judge errors', async () => {
