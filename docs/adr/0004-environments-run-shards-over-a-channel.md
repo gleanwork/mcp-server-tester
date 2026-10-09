@@ -18,7 +18,7 @@ The design (`docs/design/README.md`) plans `--env`, shards, gather and `--resume
 - **A channel has three operations:** run a command with its stdin and stdout attached, copy a directory to the machine, and copy one back. An optional fourth forwards a port, for a live view of the desktop.
   - Docker, a VM over IAP SSH and a Kubernetes pod each provide all three: `docker exec -i` and `docker cp`, `gcloud compute ssh --tunnel-through-iap` and `gcloud compute scp`, `kubectl exec -i` and `kubectl cp`.
   - MST provides a helper that builds a complete environment from a function that creates a machine, so most environments implement only that function. An environment that can't use the helper implements `runShard` itself.
-- **A worker runs the same code as a local run.** The coordinator copies a bundle to the machine: `run.json`, the resolved datasets and the shard's trial keys. It then starts the hidden command `mst collect --bundle <dir> --out <dir>` there.
+- **A worker runs the same code as a local run.** The coordinator copies a bundle to the machine: `run.json`, the resolved datasets and the shard's trial keys. It then starts the hidden command `mst collect --bundle <dir> --results <location>` there.
   - `mst collect` drives the client through the same code `local` uses (`runDesktopBatch`, the proxies, native evidence), so a trace can't differ between a local and a remote run.
   - The worker never resolves a dataset or runs a judge, so it needs no dataset or judge plugins and no judge credentials.
 - **The worker and the coordinator speak `mst.shard/v1`**, one JSON object per line.
@@ -29,7 +29,7 @@ The design (`docs/design/README.md`) plans `--env`, shards, gather and `--resume
 - **Tokens travel only over stdin.** The worker writes them only to tmpfs (`/run/mst/tokens`, mode 0700), never to the bundle, the image, argv or a trace. Refresh grants stay with the coordinator, and a worker asks for new tokens before its tokens expire.
 - **A shard holds whole cases.** Trials are split by `hash(caseId) mod N`, and a case's variants and trials all go to one shard, so each paired comparison runs on one machine, minutes apart.
   - A worker writes each trial's trace as soon as the trial finishes.
-  - The coordinator copies `/out` back after each `trial` event. With a `gs://` result store, the worker writes the traces there directly instead.
+  - With a directory as `--results`, the coordinator copies it back after each `trial` event. With a `gs://` result store, the worker writes the traces there itself.
   - Either way, a dropped channel loses at most the trial in flight.
 - **Missing isn't failed.** After collect, the coordinator gathers every shard's traces into one run. A trial with no trace is missing:
   - its case is incomplete and left out of pass rates,
