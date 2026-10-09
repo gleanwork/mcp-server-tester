@@ -10,6 +10,7 @@ import { token } from './commands/token/index.js';
 import { open } from './commands/open/index.js';
 import { run } from './commands/run/index.js';
 import { batch } from './commands/batch/index.js';
+import { collect } from './commands/collect/index.js';
 import { setupCowork } from './commands/cowork/index.js';
 import {
   auth,
@@ -252,6 +253,14 @@ program
   )
   .option('--print', "Print the report's path instead of opening it")
   .action(open);
+
+// Collect command: a shard's worker, started by environments (ADR 0004)
+program
+  .command('collect', { hidden: true })
+  .description("Collect a shard's trials (environments run this)")
+  .requiredOption('--bundle <dir>', "The shard's bundle directory")
+  .requiredOption('--results <dir>', 'Where to write result files')
+  .action(collect);
 
 // An ordinary mistake (a missing file, a misspelt key) prints one message,
 // not a stack trace; DEBUG shows the stack.

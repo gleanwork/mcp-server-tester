@@ -80,6 +80,12 @@ export type {
   Environment,
   EnvironmentContext,
   EnvironmentKeep,
+  Machine,
+  WorkerChannel,
+  ShardSpec,
+  ShardEvents,
+  ShardOutcome,
+  ShardProgress,
   RunSelection,
   RunSummary,
   RunTelemetry,
@@ -89,6 +95,9 @@ export {
   resolveResultStoreConfig,
   validateEvalConfig,
 } from '../evals/configValidation.js';
+export { machineEnvironment } from '../evals/environments/channel.js';
+export type { ShardChannelOptions } from '../evals/environments/channel.js';
+export type { ShardTokens, TrialKey } from '../evals/environments/protocol.js';
 export { resolveConfigExtends } from '../evals/configExtends.js';
 export type { ValidateEvalConfigOptions } from '../evals/configValidation.js';
 export {

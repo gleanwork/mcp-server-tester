@@ -18,6 +18,7 @@ import type { EvalResultStore } from './resultStore.js';
 import type { EvalRunnerResult } from './evalRunner.js';
 import type { JudgeInput, JudgeScore } from '../judge/judgeContract.js';
 import type { PairwiseComparisonResult } from './pairwiseComparison.js';
+import type { ShardTokens, TrialKey } from './environments/protocol.js';
 
 /** Context provided to a dataset source implementation. */
 export interface DatasetSourceContext {
@@ -253,11 +254,92 @@ export interface EnvironmentContext {
   readonly keep: EnvironmentKeep;
 }
 
+/** One shard of a run, as the coordinator hands it to an environment. */
+export interface ShardSpec {
+  readonly runId: string;
+  readonly index: number;
+  readonly count: number;
+  /** A local directory holding the shard's bundle (`writeShardBundle`). */
+  readonly bundleDir: string;
+  /** A local directory the shard's result files are copied into. */
+  readonly resultsDir: string;
+}
+
+/** What a shard reports while it runs. */
+export type ShardProgress =
+  | { type: 'hello'; mst: string; image?: string; client: string }
+  | {
+      type: 'trial';
+      key: TrialKey;
+      status: 'collected' | 'infra';
+      path: string;
+    }
+  | { type: 'heartbeat'; at: string };
+
+/** The coordinator's side of a running shard. */
+export interface ShardEvents {
+  progress(event: ShardProgress): void;
+  /** Fresh access tokens (and the run's secrets environment) for the worker. */
+  requestTokens(request: {
+    servers: string[];
+    reason: 'start' | 'expiring';
+  }): Promise<ShardTokens>;
+}
+
+/** How a shard ended. A shard that isn't `ok` leaves its trials missing. */
+export interface ShardOutcome {
+  ok: boolean;
+  /** Why it isn't ok. */
+  reason?: string;
+  collected: number;
+  infra: number;
+  cancelled: boolean;
+}
+
 /**
- * An environment, opened for one run. Shards run on it in a later release
- * (ADR 0004); until then MST collects trials only in `local`.
+ * How the coordinator reaches a machine (ADR 0004): run a command with its
+ * input and output attached, and copy directories in and out.
+ */
+export interface WorkerChannel {
+  /** Runs `argv` on the machine. `signal` aborts it (kills the command). */
+  exec(
+    argv: string[],
+    io: { stdin: AsyncIterable<string>; signal: AbortSignal }
+  ): {
+    stdout: AsyncIterable<string | Buffer>;
+    stderr: AsyncIterable<string | Buffer>;
+    exit: Promise<number>;
+  };
+  /** Copies the contents of a local directory into a directory on the machine. */
+  put(localDir: string, remoteDir: string): Promise<void>;
+  /** Copies the contents of a directory on the machine into a local one. */
+  get(remoteDir: string, localDir: string): Promise<void>;
+  /** Forwards a port on the machine, for a live view of its desktop. */
+  forward?(remotePort: number): Promise<{ localPort: number; close(): void }>;
+}
+
+/** A machine an environment created for one shard. */
+export interface Machine {
+  readonly id: string;
+  readonly image?: { ref: string; digest?: string };
+  /** Where the shard's bundle and results go on the machine. Default `/mst`. */
+  readonly workDir?: string;
+  readonly channel: WorkerChannel;
+  /** Deletes the machine, unless `keep` (`--env-option keep`). */
+  dispose(options: { keep: boolean }): Promise<void>;
+}
+
+/**
+ * An environment, opened for one run. Most environments build it with
+ * `machineEnvironment`, from a function that creates a machine.
  */
 export interface Environment {
+  /** Runs one shard. Its failures are its outcome, not a throw. */
+  runShard(
+    shard: ShardSpec,
+    events: ShardEvents,
+    signal: AbortSignal
+  ): Promise<ShardOutcome>;
   /** Deletes what the environment created, as `keep` allows. Called once. */
   close(): Promise<void>;
 }

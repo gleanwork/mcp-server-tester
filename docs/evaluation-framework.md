@@ -96,6 +96,32 @@ export default plugin;
 - **Scope.** An eval config may only reference namespaces of plugins it loads, even if another eval in the same process (a batch) loaded more. The same check applies to the clients and judges its datasets name. `runEvalDataset`, `runEvalCase` and the fixtures have no eval config, so they resolve against every plugin installed in the process.
 - **Contracts.** Each extension has a Zod `schema` for its options and the functions its kind needs: `load` (dataset sources), `run` or `runBatch` (clients), `evaluate` (judges), `kind` and `compute` (metrics), `create` (result stores), and `open` (environments, with an optional positive `maxShards`). MST validates the plugin when it loads, and names the plugin and extension in any error.
 - **Environments.** `environments` declares where a run's trials can be collected, used as `mst run --env acme/env/cloud-vm` ([ADR 0004](./adr/0004-environments-run-shards-over-a-channel.md)). An environment's `schema` checks its `--env-option`s, which arrive as strings, except `shards` and `keep`, which MST owns. MST collects trials only in the built-in `local` for now: `--dry-run` checks a plugin environment and its options, and a run with one stops before it starts. `run.json`'s `environment` records the environment's name, shards, and any `keep` or options, so options must not hold secrets.
+
+  Most environments only create machines. `machineEnvironment` (from `./evals`) builds the rest: it copies the shard's bundle to the machine, starts the hidden `mst collect` there, answers the worker's `mst.shard/v1` messages (tokens, progress, heartbeats, cancel), copies the results back after each trial, and deletes the machine when the shard ends, or keeps it as `keep` says:
+
+  ```ts
+  import { machineEnvironment } from '@gleanwork/mcp-server-tester/evals';
+
+  const docker: EnvironmentDefinition = {
+    schema: z.object({ image: z.string() }).strict(),
+    maxShards: 8,
+    async open({ image }, context) {
+      return machineEnvironment(context, async (shard) => {
+        const id = await startContainer(String(image), shard.index);
+        return {
+          id,
+          channel: dockerChannel(id), // exec: `docker exec -i`; put and get: `docker cp`
+          dispose: async ({ keep }) => {
+            if (!keep) await removeContainer(id);
+          },
+        };
+      });
+    },
+  };
+  ```
+
+  A worker machine needs the same MST version as the coordinator (a mismatch fails the shard at `hello`), on `PATH` as `mst`, and the client's plugin. Access tokens reach it only over stdin; the worker writes them to `MST_TOKENS_DIR` (default `/run/mst/tokens`, which a worker image should mount as tmpfs), one file per server label, renews them before they expire, and removes them at the end. `MST_IMAGE` names the image in the worker's `hello`. A shard's failures (no machine, a silent or cancelled worker) are its outcome; `runShard` doesn't throw for them.
+
 - **Shared configs.** `configs` holds named eval config settings an eval can opt into. An eval that loads the plugin applies one with `"extends": ["acme/config/recommended"]`:
 
   ```json
