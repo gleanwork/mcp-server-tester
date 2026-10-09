@@ -1,4 +1,14 @@
-import { readdir, readFile, stat } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
@@ -259,6 +269,47 @@ describe('agenticJudge', () => {
     }
   });
 
+  it("copies the trial's stored artifacts into artifacts/, leaving the copy alone", async () => {
+    const stored = await mkdtemp(join(tmpdir(), 'mst-stored-'));
+    try {
+      await mkdir(join(stored, 'outputs'), { recursive: true });
+      await writeFile(join(stored, 'audit.jsonl'), '{}\n');
+      await writeFile(join(stored, 'outputs', 'plan.md'), '# Plan\n');
+      await symlink('/etc/hosts', join(stored, 'outputs', 'link'));
+      const seen: { files?: Record<string, string> } = {};
+      runtimes['claude-agent'] = fakeRuntime(() => ({}), seen);
+      const judge = agenticJudge({
+        buildPrompt: () => ({ prompt: 'p' }),
+        parseScore: () => ({ score: 1 }),
+      });
+      await judge.evaluate(
+        { ...input, trial: { ...input.trial, artifactsDir: stored } },
+        {}
+      );
+      expect(seen.files!['artifacts/audit.jsonl']).toBe('{}\n');
+      expect(seen.files!['artifacts/outputs/plan.md']).toBe('# Plan\n');
+      expect(seen.files).not.toHaveProperty('artifacts/outputs/link');
+      expect(await readFile(join(stored, 'outputs', 'plan.md'), 'utf-8')).toBe(
+        '# Plan\n'
+      );
+    } finally {
+      await rm(stored, { recursive: true, force: true });
+    }
+  });
+
+  it('gives a trial without artifacts no artifacts/ directory', async () => {
+    const seen: { files?: Record<string, string> } = {};
+    runtimes['claude-agent'] = fakeRuntime(() => ({}), seen);
+    const judge = agenticJudge({
+      buildPrompt: () => ({ prompt: 'p' }),
+      parseScore: () => ({ score: 1 }),
+    });
+    await judge.evaluate(input, {});
+    expect(
+      Object.keys(seen.files!).filter((f) => f.startsWith('artifacts/'))
+    ).toEqual([]);
+  });
+
   it('rejects unknown options and keeps plugin options', () => {
     const judge = agenticJudge({
       schema: z.object({ rubric: z.string().optional() }),
@@ -287,6 +338,76 @@ describe('agenticPairwiseJudge', () => {
       response: { response: text, events: [] },
     } as EvalCaseResult;
   }
+
+  it("gives each side its trial's artifacts, as a/artifacts and b/artifacts", async () => {
+    const dirs = await Promise.all(
+      ['base', 'cand'].map(async (name) => {
+        const dir = await mkdtemp(join(tmpdir(), `mst-stored-${name}-`));
+        await writeFile(join(dir, 'audit.jsonl'), `${name}\n`);
+        return dir;
+      })
+    );
+    try {
+      const seen: Array<Record<string, string>> = [];
+      runtimes['claude-agent'] = fakeRuntime((_task, files) => {
+        seen.push(files);
+        return {
+          winner: files['a/artifacts/audit.jsonl'] === 'base\n' ? 'B' : 'A',
+        };
+      });
+      installPlugins([
+        {
+          meta: { name: 'p', namespace: 'p' },
+          pairwiseJudges: {
+            logs: agenticPairwiseJudge({
+              buildPrompt: () => ({
+                prompt: 'compare a/artifacts and b/artifacts',
+              }),
+              parsePreference: (out) => ({
+                preference:
+                  (out.json as { winner: string }).winner === 'A'
+                    ? 'baseline'
+                    : 'candidate',
+              }),
+            }),
+          },
+        },
+      ]);
+      const withArtifacts = (id: string, text: string, dir: string) =>
+        ({
+          ...result(id, text),
+          artifacts: { dir, include: ['**'] },
+        }) as unknown as EvalCaseResult;
+      const out = await comparePairwise({
+        baseline: {
+          name: 'base',
+          caseResults: [withArtifacts('c', 'x', dirs[0]!)],
+        },
+        candidate: {
+          name: 'cand',
+          caseResults: [withArtifacts('c', 'y', dirs[1]!)],
+        },
+        judges: [{ type: 'p/pairwise-judge/logs' }],
+      });
+      // Both orders: each side's own log, never the other's.
+      expect(
+        seen.map((f) => [
+          f['a/artifacts/audit.jsonl'],
+          f['b/artifacts/audit.jsonl'],
+        ])
+      ).toEqual(
+        expect.arrayContaining([
+          ['base\n', 'cand\n'],
+          ['cand\n', 'base\n'],
+        ])
+      );
+      expect(out.cases[0]!.preferences[0]!.preference).toBe('candidate');
+    } finally {
+      await Promise.all(
+        dirs.map((dir) => rm(dir, { recursive: true, force: true }))
+      );
+    }
+  });
 
   it('gives a/ the baseline and b/ the candidate, in both orders', async () => {
     const seenA: string[] = [];

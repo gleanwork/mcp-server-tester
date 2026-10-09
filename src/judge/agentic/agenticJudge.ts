@@ -32,7 +32,9 @@ import type {
 } from './runtime.js';
 import {
   createWorkspace,
+  trialArtifacts,
   trialFiles,
+  type WorkspaceArtifacts,
   type WorkspaceFile,
 } from './workspace.js';
 
@@ -167,6 +169,7 @@ async function runAgent<Input>(
   input: Input,
   options: Record<string, unknown>,
   baseFiles: WorkspaceFile[],
+  artifacts: readonly WorkspaceArtifacts[],
   parse: (output: AgentJudgeOutput) => JudgeScore | PairwisePreference
 ) {
   const config = settings(spec, options);
@@ -174,6 +177,7 @@ async function runAgent<Input>(
   const files = [...baseFiles, ...((await spec.files?.(input)) ?? [])];
   const workspace = await createWorkspace(files, {
     keep: config.keepWorkspace,
+    artifacts,
   });
   try {
     const prompt = await spec.buildPrompt(input, { workspace: workspace.root });
@@ -230,6 +234,7 @@ export function agenticJudge(spec: AgenticJudgeSpec): JudgeDefinition {
         input,
         options,
         trialFiles(input.case, input.trial),
+        trialArtifacts(input.trial),
         (out) => spec.parseScore(out, input, options)
       ) as Promise<JudgeScore>,
   };
@@ -256,6 +261,10 @@ export function agenticPairwiseJudge(
         input,
         options,
         pairFiles(input.case, input.baseline, input.candidate),
+        [
+          ...trialArtifacts(input.baseline, 'a'),
+          ...trialArtifacts(input.candidate, 'b'),
+        ],
         (out) => spec.parsePreference(out, input, options)
       ) as Promise<PairwisePreference>,
   };
