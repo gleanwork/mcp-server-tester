@@ -193,6 +193,57 @@ PROVIDER_CODES = {429: 'provider_rate_limit', 401: 'provider_authentication',
                   413: 'provider_request_rejected', 500: 'provider_unavailable',
                   502: 'provider_unavailable', 503: 'provider_unavailable', 529: 'provider_unavailable'}
 
+# Waits between planner requests that failed to connect, on top of the SDK's
+# own two quick retries. A planner request has no desktop side effects, so
+# retrying it is safe; a short network drop shouldn't end the case.
+PLANNER_CONNECTION_RETRY_DELAYS = (2.0, 4.0, 8.0, 16.0)
+
+
+class PlannerConnectionError(RuntimeError):
+    """The planner API stayed unreachable through every retry."""
+
+    code = 'provider_unavailable'
+
+
+def connection_error_chain(error: BaseException) -> str:
+    """The exception's class names down its cause chain; never its messages."""
+    names: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen and len(names) < 6:
+        seen.add(id(current))
+        names.append(type(current).__name__)
+        current = current.__cause__ or current.__context__
+    return ' <- '.join(names)
+
+
+def is_planner_connection_error(anthropic: Any, error: BaseException) -> bool:
+    """A request that never got a response. Timeouts are not retried: the
+    request may still be running, and the case's deadline bounds them."""
+    connection = getattr(anthropic, 'APIConnectionError', None)
+    timeout = getattr(anthropic, 'APITimeoutError', None)
+    return (isinstance(connection, type) and isinstance(error, connection)
+            and not (isinstance(timeout, type) and isinstance(error, timeout)))
+
+
+def request_plan(anthropic: Any, request: Any) -> Any:
+    """Sends one planner request, retrying while the API can't be reached."""
+    for attempt in range(len(PLANNER_CONNECTION_RETRY_DELAYS) + 1):
+        try:
+            return request()
+        except Exception as error:
+            if not is_planner_connection_error(anthropic, error):
+                raise
+            chain = connection_error_chain(error)
+            if attempt == len(PLANNER_CONNECTION_RETRY_DELAYS):
+                raise PlannerConnectionError(
+                    f'Computer Use planner could not reach the API ({chain})') from error
+            delay = PLANNER_CONNECTION_RETRY_DELAYS[attempt]
+            log(f"planner connection failed ({chain}); retrying in {delay:g}s "
+                f"({attempt + 1}/{len(PLANNER_CONNECTION_RETRY_DELAYS)})")
+            time.sleep(delay)
+    raise AssertionError('unreachable')
+
 
 def check_chatgpt_permissions() -> None:
     """Read-only checks: never request permission or open System Settings."""
@@ -511,14 +562,14 @@ async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemet
             trim_screenshot_history(messages)
         # Only screenshots supplied to this request can ground its confirmations.
         observed_revision = screenshot_revision
-        response = client.beta.messages.create(
+        response = request_plan(anthropic, lambda: client.beta.messages.create(
             model=model,
             max_tokens=1024,
             system=system,
             tools=tools,
             messages=messages,
             betas=["computer-use-2025-11-24"],
-        )
+        ))
         telemetry.observe(response)
         messages.append({"role": "assistant", "content": assistant_turn(response.content)})
         tool_results: list[dict[str, Any]] = []

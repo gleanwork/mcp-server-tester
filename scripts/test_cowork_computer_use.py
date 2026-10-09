@@ -13,9 +13,30 @@ ENTER = {'action': 'key', 'text': 'Return'}
 CONFIRM_MODEL = {'tool': 'confirm_model', 'input': {'model': 'claude-opus-4-6'}}
 
 
+class APIConnectionError(Exception):
+    """Stands in for anthropic.APIConnectionError."""
+
+
+class APITimeoutError(APIConnectionError):
+    """Stands in for anthropic.APITimeoutError, a connection error subclass."""
+
+
+def connection_error(message='Connection error.'):
+    """An SDK connection error caused by a transport error, as httpx raises."""
+    try:
+        try:
+            raise OSError('connect: secret-host-detail')
+        except OSError as cause:
+            raise APIConnectionError(message) from cause
+    except APIConnectionError as error:
+        return error
+
+
 class DriverTests(unittest.TestCase):
-    def run_actions(self, actions, mode='submit', budget=8, query='query', next_plan=None, entry_error=False, response_metadata=None, planner_error=None, application='cowork', target_model=None, reasoning_effort=None, chatgpt_surface='chatgpt-work', frontmost=None, plans=None):
+    def run_actions(self, actions, mode='submit', budget=8, query='query', next_plan=None, entry_error=False, response_metadata=None, planner_error=None, application='cowork', target_model=None, reasoning_effort=None, chatgpt_surface='chatgpt-work', frontmost=None, plans=None, planner_failures=()):
         api = MagicMock()
+        api.APIConnectionError = APIConnectionError
+        api.APITimeoutError = APITimeoutError
         app_name = 'ChatGPT' if application == 'chatgpt' else 'Claude'
         front = MagicMock(side_effect=frontmost) if frontmost is not None else MagicMock(return_value=app_name)
 
@@ -31,7 +52,10 @@ class DriverTests(unittest.TestCase):
 
         api.Anthropic.side_effect = construct
         planner = api.Anthropic.return_value.beta.messages.create
-        if plans is not None:
+        if planner_failures:
+            # Requests that fail before the first plan arrives.
+            planner.side_effect = [*planner_failures, response(actions), *(response(plan) for plan in plans or [])]
+        elif plans is not None:
             # The planner's responses in order, after the first.
             planner.side_effect = [response(actions), *(response(plan) for plan in plans)]
         elif planner_error is not None:
@@ -48,7 +72,7 @@ class DriverTests(unittest.TestCase):
                 return {'type': 'image'}, False
             return 'done', action.get('action') == 'key' and str(action.get('text', '')).lower() in {'enter', 'return'}
 
-        with patch.dict(sys.modules, {'anthropic': api}), patch.dict(driver.os.environ, {'ANTHROPIC_API_KEY': 'test-only'}), patch.object(driver.subprocess, 'run') as launched, patch.object(driver, 'check_chatgpt_permissions'), patch.object(driver.time, 'sleep'), patch.object(driver, 'screenshot', return_value={'type': 'image'}), patch.object(driver, 'execute_action', side_effect=execute) as performed, patch.object(driver, 'frontmost_app', front):
+        with patch.dict(sys.modules, {'anthropic': api}), patch.dict(driver.os.environ, {'ANTHROPIC_API_KEY': 'test-only'}), patch.object(driver.subprocess, 'run') as launched, patch.object(driver, 'check_chatgpt_permissions'), patch.object(driver.time, 'sleep') as slept, patch.object(driver, 'log') as logged, patch.object(driver, 'screenshot', return_value={'type': 'image'}), patch.object(driver, 'execute_action', side_effect=execute) as performed, patch.object(driver, 'frontmost_app', front):
             try:
                 result = asyncio.run(driver.run(query, budget, mode, application, target_model, reasoning_effort, chatgpt_surface))
             except RuntimeError as error:
@@ -56,6 +80,9 @@ class DriverTests(unittest.TestCase):
                 self.error_telemetry = getattr(error, 'telemetry', None)
                 self.error_code = getattr(error, 'code', None)
             self.executed_actions = [call.args[0] for call in performed.call_args_list]
+            self.planner_calls = planner.call_count
+            self.sleeps = [call.args[0] for call in slept.call_args_list]
+            self.logged = [str(call.args[0]) for call in logged.call_args_list]
             self.requested_tools = planner.call_args.kwargs['tools'] if planner.call_args else []
             self.planner_request = planner.call_args.kwargs if planner.call_args else {}
             self.launches = launched.call_args_list
@@ -370,6 +397,42 @@ class DriverTests(unittest.TestCase):
         error = RuntimeError('sensitive provider response')
         error.status_code = 429
         self.run_actions([{'action': 'screenshot'}], application='chatgpt', planner_error=error)
+        self.assertEqual(self.error_code, 'provider_rate_limit')
+
+    def test_planner_connection_errors_are_retried_without_desktop_actions(self):
+        result, count = self.run_actions([FILL, ENTER], planner_failures=[connection_error(), connection_error()])
+        self.assertEqual(result['status'], 'submitted')
+        self.assertEqual(self.planner_calls, 3)
+        self.assertEqual(self.executed_actions, [{'action': 'type', 'text': 'query'}, ENTER])
+        retries = [line for line in self.logged if 'planner connection failed' in line]
+        self.assertEqual(len(retries), 2)
+        self.assertIn('APIConnectionError <- OSError', retries[0])
+        self.assertIn('retrying in 2s (1/4)', retries[0])
+        self.assertIn('retrying in 4s (2/4)', retries[1])
+        self.assertIn(2.0, self.sleeps)
+        self.assertIn(4.0, self.sleeps)
+        # Class names only: never the error's message or its cause's.
+        self.assertFalse(any('secret-host-detail' in line or 'Connection error.' in line for line in self.logged))
+
+    def test_planner_that_stays_unreachable_reports_provider_unavailable(self):
+        failures = [connection_error() for _ in range(len(driver.PLANNER_CONNECTION_RETRY_DELAYS) + 1)]
+        result, count = self.run_actions([FILL, ENTER], planner_failures=failures)
+        self.assertEqual(self.error_code, 'provider_unavailable')
+        self.assertIn('could not reach the API (APIConnectionError <- OSError)', result)
+        self.assertNotIn('secret-host-detail', result)
+        self.assertEqual(self.planner_calls, len(failures))
+        self.assertEqual(self.executed_actions, [])
+        self.assertEqual(self.error_telemetry['planner_response_count'], 0)
+
+    def test_planner_timeouts_and_status_errors_are_not_retried(self):
+        result, count = self.run_actions([FILL, ENTER], planner_failures=[APITimeoutError('Request timed out.')])
+        self.assertEqual(self.planner_calls, 1)
+        self.assertIsNone(self.error_code)
+        self.assertEqual(self.executed_actions, [])
+        limited = RuntimeError('rate limited')
+        limited.status_code = 429
+        result, count = self.run_actions([FILL, ENTER], planner_failures=[limited])
+        self.assertEqual(self.planner_calls, 1)
         self.assertEqual(self.error_code, 'provider_rate_limit')
 
     def test_screenshot_history_preserves_three_latest_images_and_tool_structure(self):
