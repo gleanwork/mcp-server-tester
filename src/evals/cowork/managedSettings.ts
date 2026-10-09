@@ -16,6 +16,38 @@ import { mcpServerLabel } from '../../config/mcpConfig.js';
  * that write `/etc/claude-desktop/managed-settings.json` can build the same
  * entries MST checks.
  */
+/**
+ * Built-in Cowork tools a headless eval removes. No user can answer
+ * `AskUserQuestion`, so a task that asks stops without an answer; removed, the
+ * model proceeds on its best assumption. Write this exact value as
+ * `disabledBuiltinTools` in managed settings.
+ */
+export const COWORK_HEADLESS_DISABLED_BUILTIN_TOOLS: readonly string[] =
+  Object.freeze(['AskUserQuestion']);
+
+/** The managed-settings keys every headless Cowork eval sets. */
+export function coworkHeadlessSettings(): { disabledBuiltinTools: string[] } {
+  return { disabledBuiltinTools: [...COWORK_HEADLESS_DISABLED_BUILTIN_TOOLS] };
+}
+
+/**
+ * Caller contract for headless Cowork: `disabledBuiltinTools` disables at least
+ * every tool in `COWORK_HEADLESS_DISABLED_BUILTIN_TOOLS`. Callers may disable
+ * more. Read-only; exported so callers can check what they generate.
+ */
+export function coworkHeadlessSettingsMatch(
+  settings: Record<string, unknown>
+): boolean {
+  const disabled = settings.disabledBuiltinTools;
+  return (
+    Array.isArray(disabled) &&
+    disabled.every((tool) => typeof tool === 'string') &&
+    COWORK_HEADLESS_DISABLED_BUILTIN_TOOLS.every((tool) =>
+      disabled.includes(tool)
+    )
+  );
+}
+
 export interface CoworkManagedStdioServer {
   name: string;
   transport: 'stdio';

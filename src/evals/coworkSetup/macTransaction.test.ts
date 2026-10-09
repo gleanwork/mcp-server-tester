@@ -467,6 +467,7 @@ describe('Mac Cowork settings transaction', () => {
     expect(result.id).not.toBe(SOURCE);
     expect(await readJson(profile(result.id))).toEqual({
       disableAutoUpdates: true,
+      disabledBuiltinTools: ['AskUserQuestion'],
       managedMcpServers: [
         {
           name: 'Search',
