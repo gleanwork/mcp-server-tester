@@ -430,7 +430,12 @@ misses Claude's window (on the desktop, say) brings another app forward; before
 every click, key or scroll, the driver checks, and if another app is in front it
 brings Claude back, skips the action and has the planner take a new screenshot.
 If Claude can't be brought back, the case stops with `navigation_blocked` and
-nothing more is sent. MST discards the driver's own log; set
+nothing more is sent. A planner request that can't reach the API (a short network
+drop) is sent again after 2, 4, 8 and 16 seconds, on top of the SDK's own two
+quick retries: it has no effect on the desktop. If the API stays unreachable,
+the case fails with `provider_unavailable`; the driver log names the error's
+classes, such as `APIConnectionError <- ConnectError`. Timeouts aren't
+retried. MST discards the driver's own log; set
 `MST_COWORK_CUA_LOG_FILE` to a path to keep it. The log holds action and app
 names, never the query.
 
