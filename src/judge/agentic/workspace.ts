@@ -8,6 +8,9 @@
  *   response.md        the final response text
  *   trace/events.json  client events in order, with full tool output
  *   trace/messages.json conversation turns, when the client reported them
+ *   artifacts/...      the client's artifacts stored with the trial (a Cowork
+ *                      session's audit log, outputs, transcripts and saved
+ *                      tool output), when it has them
  *   files/...          files a judge or plugin adds (deliverables, raw logs)
  *
  * Nothing is truncated. The directory is created with mode 0700, files with
@@ -16,7 +19,15 @@
  * and what the caller adds explicitly.
  */
 
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  cp,
+  lstat,
+  mkdir,
+  mkdtemp,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import type { JudgeCase, JudgeTrial } from '../judgeContract.js';
@@ -25,6 +36,12 @@ import type { JudgeCase, JudgeTrial } from '../judgeContract.js';
 export interface WorkspaceFile {
   path: string;
   content: string | Uint8Array;
+}
+
+/** A trial's stored client artifacts, copied into the workspace at `at`. */
+export interface WorkspaceArtifacts {
+  dir: string;
+  at: string;
 }
 
 /** A workspace on disk. */
@@ -81,17 +98,59 @@ export function trialFiles(
 }
 
 /**
- * Writes `files` to a new private directory. Paths that would leave the
- * directory, and duplicate paths, are errors.
+ * The trial's stored client artifacts, as `artifacts/` (under `prefix`):
+ * none when the trial has none.
+ */
+export function trialArtifacts(
+  trial: JudgeTrial,
+  prefix = ''
+): WorkspaceArtifacts[] {
+  if (!trial.artifactsDir) return [];
+  return [
+    {
+      dir: trial.artifactsDir,
+      at: prefix ? `${prefix}/artifacts` : 'artifacts',
+    },
+  ];
+}
+
+/**
+ * A copy, not a link: a runtime confined to the workspace can't read past
+ * it. Symlinks are left out; a stored artifact copy has none.
+ */
+async function copyArtifacts(
+  root: string,
+  { dir, at }: WorkspaceArtifacts
+): Promise<void> {
+  const target = confinedPath(root, at);
+  await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+  await cp(dir, target, {
+    recursive: true,
+    errorOnExist: true,
+    force: false,
+    filter: async (source) => !(await lstat(source)).isSymbolicLink(),
+  });
+}
+
+/**
+ * Writes `files` to a new private directory, and copies the trials' stored
+ * `artifacts` into it. Paths that would leave the directory, and duplicate
+ * paths, are errors.
  */
 export async function createWorkspace(
   files: readonly WorkspaceFile[],
-  options: { keep?: boolean; parent?: string } = {}
+  options: {
+    keep?: boolean;
+    parent?: string;
+    artifacts?: readonly WorkspaceArtifacts[];
+  } = {}
 ): Promise<JudgeWorkspace> {
   const root = await mkdtemp(join(options.parent ?? tmpdir(), 'mst-judge-'));
   await chmod(root, 0o700);
   try {
     for (const file of files) await put(root, file);
+    for (const artifacts of options.artifacts ?? [])
+      await copyArtifacts(root, artifacts);
   } catch (err) {
     await rm(root, { recursive: true, force: true });
     throw err;

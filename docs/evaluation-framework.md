@@ -333,12 +333,19 @@ const plugin = {
 
 The workspace holds `case.json`, `response.md`, `trace/events.json` (every
 client event with its full output), `trace/messages.json` when the client
-reports turns, and the plugin's `files`. A pairwise workspace has `case.json`
-and one such tree per trial: `a/` is the baseline, `b/` the candidate
-(`agenticPairwiseJudge` takes `parsePreference`). When the client keeps its
-own record of the trial (for Cowork, its session folder), `trial.artifactsDir`
-points to a copy of it, so `files` can stage what the judge needs; see
-[Client artifacts](#client-artifacts).
+reports turns, `artifacts/` when the client kept its own record of the
+trial, and the plugin's `files`. A pairwise workspace has `case.json` and one
+such tree per trial: `a/` is the baseline, `b/` the candidate
+(`agenticPairwiseJudge` takes `parsePreference`).
+
+`artifacts/` is a copy of the trial's stored client artifacts (see
+[Client artifacts](#client-artifacts)). For Cowork, that's the session the
+agent worked in: `audit.jsonl`, the files it wrote (`outputs/`), its
+transcripts and the tool output it saved to files. They are stored with the
+run, so `mst grade` gives a regraded trial the same workspace: a judge can read
+and run its helpers over what the agent did without running the client again.
+`trial.artifactsDir` points to the stored copy, for a judge whose `files` stage
+it differently.
 
 The runtime is an option, so the same judge runs on either agent SDK. The
 default is `claude-agent`, the one that keeps the judge to the workspace;
