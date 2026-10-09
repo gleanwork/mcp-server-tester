@@ -31,6 +31,20 @@ export interface RunReplay {
   collectedAt: string;
   /** Stored trials by variant, then case, in trial order. */
   trials: Map<string, Map<string, TrialRecord[]>>;
+  /**
+   * `mst run --resume`: the stored run's missing trials are collected again,
+   * and the run is graded into its own directory, not as a regrade.
+   */
+  resume?: boolean;
+}
+
+/** A trial whose shard ended without it (ADR 0004): what `--resume` collects. */
+export function isMissingTrial(trial: TrialRecord | undefined): boolean {
+  return (
+    trial === undefined ||
+    (trial.clientDiagnostics as { failureKind?: unknown } | undefined)
+      ?.failureKind === 'missing'
+  );
 }
 
 /**
@@ -215,7 +229,9 @@ export function replayExecutor(
   replay: RunReplay,
   variant: string,
   servers: MCPConfig[],
-  evidence: TraceEvidence
+  evidence: TraceEvidence,
+  /** For a resume: a missing trial as it was collected again. */
+  collected?: (caseId: string, trial: number) => CaseExecution | undefined
 ): (evalCase: EvalCase) => Promise<CaseExecution> {
   const next = new Map<string, number>();
   return async (evalCase) => {
@@ -223,6 +239,10 @@ export function replayExecutor(
     const index = next.get(evalCase.id) ?? 0;
     next.set(evalCase.id, index + 1);
     const trial = trials[index];
+    if (collected && isMissingTrial(trial)) {
+      const execution = collected(evalCase.id, index);
+      if (execution) return execution;
+    }
     if (!trial)
       return failedExecution(
         new Error(

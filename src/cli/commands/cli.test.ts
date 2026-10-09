@@ -230,6 +230,23 @@ describe('mst CLI', () => {
       expect(twice.stderr).toContain('mst: --env-option keep is given twice');
     });
 
+    it('--resume refuses flags that would change the run', async () => {
+      const result = await runBin(
+        'run',
+        '--config',
+        'x.json',
+        '--resume',
+        '7f3c2a',
+        '--case',
+        'a',
+        '--no-grade'
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "mst: --resume completes a run as it was started, so it can't take --case, --no-grade."
+      );
+    });
+
     it('a dry run says where the trials would run', async () => {
       await project.write({
         'ok-cases.json': JSON.stringify({

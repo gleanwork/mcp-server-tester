@@ -172,6 +172,10 @@ program
     'Collect the trials without grading them; grade them later with mst grade'
   )
   .option(
+    '--resume <run>',
+    'Collect only the trials a run is missing (its shards ended early), in its environment, and grade it again'
+  )
+  .option(
     '--no-report',
     "Don't write the run's report (mst open writes it when it opens the run)"
   )

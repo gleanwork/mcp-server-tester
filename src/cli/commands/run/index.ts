@@ -4,7 +4,11 @@ import path from 'node:path';
 import { z } from 'zod';
 import { localCredentialStore } from '../../../auth/grants/localStore.js';
 import { describeError } from '../../../utils/describeError.js';
-import { runEval, type RunEvalOptions } from '../../../evals/runEval.js';
+import {
+  resumeRun,
+  runEval,
+  type RunEvalOptions,
+} from '../../../evals/runEval.js';
 
 export interface RunOptions {
   config: string;
@@ -33,7 +37,19 @@ export interface RunOptions {
   envOption?: string[];
   /** `--no-grade`: collect the trials without grading them. */
   grade?: boolean;
+  /** `--resume <run>`: collect a run's missing trials and grade it again. */
+  resume?: string;
 }
+
+/** Flags that would change what a resumed run is. */
+const NOT_WITH_RESUME = [
+  ['variant', '--variant'],
+  ['case', '--case'],
+  ['filterTag', '--filter-tag'],
+  ['maxCases', '--max-cases'],
+  ['trials', '--trials'],
+  ['dryRun', '--dry-run'],
+] as const;
 
 /** `--env-option key=value` flags as an object; a key may be given once. */
 function parseEnvOptions(flags: readonly string[]): Record<string, string> {
@@ -101,9 +117,44 @@ export async function run(options: RunOptions): Promise<void> {
       ? { envOptions: parseEnvOptions(options.envOption) }
       : {}),
   };
+  if (options.resume !== undefined) {
+    const given: string[] = NOT_WITH_RESUME.filter(([key]) => {
+      const value = options[key];
+      return Array.isArray(value) ? value.length > 0 : value !== undefined;
+    }).map(([, flag]) => flag);
+    if (options.grade === false) given.push('--no-grade');
+    if (given.length)
+      throw new Error(
+        `--resume completes a run as it was started, so it can't take ${given.join(', ')}.`
+      );
+  }
   let result: Awaited<ReturnType<typeof runEval>>;
   try {
-    result = await runEval(evalOptions);
+    result =
+      options.resume === undefined
+        ? await runEval(evalOptions)
+        : await resumeRun({
+            configPath: evalOptions.configPath,
+            run: options.resume,
+            ...(evalOptions.rootDir ? { rootDir: evalOptions.rootDir } : {}),
+            ...(evalOptions.pluginPaths
+              ? { pluginPaths: evalOptions.pluginPaths }
+              : {}),
+            ...(evalOptions.outputDir
+              ? { outputDir: evalOptions.outputDir }
+              : {}),
+            ...(evalOptions.secretsFile
+              ? { secretsFile: evalOptions.secretsFile }
+              : {}),
+            ...(evalOptions.report === false ? { report: false } : {}),
+            ...(evalOptions.env ? { env: evalOptions.env } : {}),
+            ...(evalOptions.envOptions
+              ? { envOptions: evalOptions.envOptions }
+              : {}),
+            ...(evalOptions.credentialStore
+              ? { credentialStore: evalOptions.credentialStore }
+              : {}),
+          });
   } catch (error) {
     // A validation failure says which config it is in.
     if (error instanceof z.ZodError)
