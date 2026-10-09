@@ -68,7 +68,7 @@ These terms are used throughout this page and the walkthrough. The full glossary
 | **Extension**        | One thing a plugin adds, of a given **kind**: a dataset, a judge, a connector, an environment, a result store, …                        | `acme/judge/correctness` is an extension of kind `judge` |
 | **Connector**        | An extension that describes one vendor's MCP server: its URL, how to sign in, and optionally a proxy in front of it.                    | `acme/connector/slack`                                   |
 | **Credential store** | Where long-lived sign-ins (refresh grants) are kept, so runs can get fresh tokens without a browser.                                    | `acme/credential-store/secret-manager`                   |
-| **Environment**      | Where the client runs: your machine, or VMs.                                                                                            | `local`, `acme/env/cloud-vm`                             |
+| **Environment**      | Where the client runs: your machine, containers on it, or VMs. Each machine runs one **shard** of the trials.                           | `local`, `docker`, `acme/env/cloud-vm`                   |
 | **Result store**     | Where a run's files are written.                                                                                                        | a local directory, `acme/result-store/eval-results`      |
 | **Snapshot**         | A frozen copy of a plugin's datasets and judge settings, published nightly. The alternative is **live**: fetched at the start of a run. | `snapshot 2026-10-06`                                    |
 
@@ -164,7 +164,7 @@ The client runs every trial. For each one, MST:
 
 Nothing is graded here. The progress output only shows which trials finished (`●`) and which hit an infrastructure problem (`!`), such as the client crashing. An infrastructure problem isn't a failed trial, because the client never got to answer.
 
-**Where it runs:** wherever `--env` says. With `local` (the default), MST drives Cowork on your Mac. With `acme/env/cloud-vm`, the plugin starts VMs and MST drives Cowork on each of them. You can split the trials across several VMs, called **shards**, with `--env-option shards=5`.
+**Where it runs:** wherever `--env` says. With `local` (the default), MST drives Cowork on your Mac. With `docker`, MST drives Cowork in Linux containers on your machine. With `acme/env/cloud-vm`, the plugin starts VMs and MST drives Cowork on each of them. You can split the trials across several containers or VMs, called **shards**, with `--env-option shards=5`. A case's variants and trials all go to one shard.
 
 ```mermaid
 flowchart TD
@@ -182,13 +182,17 @@ flowchart TD
   store --> post
 ```
 
+**How a shard runs:** an environment only creates machines and opens a **channel** to each one. A channel can run a command with its input and output attached, and copy files in and out. Docker, SSH and Kubernetes all have one. Over the channel, MST copies the shard's cases to the machine and starts a **worker** there. The worker drives the client with the same code a local run uses, writes each trace as it finishes, and reports its progress back. Tokens reach the worker over the channel's input and are kept only in memory-backed files; refresh grants never leave the coordinator. [ADR 0004](../adr/0004-environments-run-shards-over-a-channel.md) has the protocol.
+
 _Why `--env` is a flag and not part of the eval config:_ the question you're asking doesn't change with where the client runs. Keeping it out of the config means the same file works for a quick local check, a full run on VMs, and a nightly CI job.
+
+_Why containers:_ in a container, Cowork can't be disturbed by your windows and doesn't touch your own Claude Desktop, and every run starts from the same desktop. You can also run several at once on one machine.
 
 _Why VMs:_ a desktop client can only run one conversation at a time per machine. Fifty cases × three variants × three trials, at a minute or more each, is hours on one machine. Five VMs make it about an hour.
 
 ### 5. Clean up
 
-As soon as collect ends, MST removes the access tokens it handed out, stops any proxies, and puts the client back how it found it. On VMs, the VM is deleted. Clean-up runs even when the run fails or you press Ctrl-C.
+As soon as collect ends, MST removes the access tokens it handed out, stops any proxies, and puts the client back how it found it. Containers and VMs are deleted; `--env-option keep=failed` keeps one whose shard failed, so you can look at it. Clean-up runs even when the run fails or you press Ctrl-C.
 
 _Why straight after collect:_ tokens and VMs are only needed while the client is running. Grading doesn't need them, so they aren't kept for it.
 
@@ -244,8 +248,9 @@ Every result store holds the same layout. Each part was written by one of the st
 ```text
 <eval-name>/runs/<run-id>/
 ├── run.json        # step 2: the config, exact datasets and judge settings (with hashes),
-│                   #   environment, and how far each step got
-├── traces/         # step 4: one file per trial
+│                   #   the environment (its options, shards, and each shard's image
+│                   #   and client version), and how far each step got
+├── traces/         # step 4: one file per trial, with its shard
 ├── scores/         # step 7: one score per grader per trial; one preference per case per variant
 ├── results.json    # step 9: traces and scores joined
 ├── summary.json    # step 9: per-variant metrics and comparisons
@@ -316,7 +321,7 @@ There's a related unknown: it's not yet confirmed whether Cowork reaches the pla
 | Extension names                                         | `namespace/kind/name`, checked by kind (ADR 0003); `mst/` built-ins; a top-level `servers` map keyed by label                                                                                                            | —                                                                   |
 | Datasets and judges from plugins                        | `plugins`, `extends`; case `judges` beside `assertions`; judge merge rules (case plus eval config, the case's settings win)                                                                                              | `mst plugins`, `mst datasets`, `mst judges`, `--plugin-option`      |
 | Sign-ins (step 3)                                       | Connectors, `mst auth` / `status` / `revoke`, local credential store, token hand-out and renewal, dry-run proxy                                                                                                          | Plugin credential stores; handing tokens to VMs                     |
-| Environments (steps 4–5)                                | Local Cowork on macOS and Linux                                                                                                                                                                                          | `--env`, `--env-option`, shards, `--detach`, `mst runs`             |
+| Environments (steps 4–5)                                | Local Cowork on macOS and Linux; each trial's trace written when it finishes                                                                                                                                             | `--env`, `--env-option`, `docker`, shards, `--detach`, `mst runs`   |
 | Grading as its own step (6–7)                           | Grading during collect; `comparePairwise` as an API; pairwise judges in eval configs (`pairwiseJudges`, after every variant runs)                                                                                        | Gather, `--resume`, `--no-grade`, `mst grade`, regrade as a new run |
 | Results (8–9)                                           | Run summaries; result stores set in the config; the `mst.run/v1` layout and its JSON Schemas; the report written with each run; `mst open` for local runs; the MCP Playwright reporter writing the same runs, evals only | `--results`, `mst open --results`                                   |
 | Report                                                  | Tool optimization report                                                                                                                                                                                                 | The same layout for every eval                                      |
@@ -330,4 +335,4 @@ There's a related unknown: it's not yet confirmed whether Cowork reaches the pla
 4. **Who can read stored sign-ins.** A shared credential store must keep each person's grants separate.
 5. **Judge cost.** Grading should report its own cost, separate from the client's.
 6. **Judges in datasets.** Settled: a case's judges sit beside its assertions, in `judges`.
-7. **What an environment must do.** Start machines, hand them their trials and tokens, stream progress, upload traces, clean up. Is that enough for local, VMs, and a future Docker environment?
+7. **What an environment must do.** Settled ([ADR 0004](../adr/0004-environments-run-shards-over-a-channel.md)): create machines and open a channel to each (run a command, copy files in and out). MST does the rest over that channel, the same way for containers and VMs: it hands each worker its trials and tokens, reads its progress, and gathers its traces. Still open: whether MST ships the desktop image or each organization supplies its own.
