@@ -55,14 +55,14 @@ describe('ChatGPT server translation', () => {
       )
     ).toThrow('ChatGPT does not support client-resolved stdio eval servers');
   });
-  it('rejects configured servers impersonating built-in client namespaces', () => {
-    expect(() =>
-      chatgptServers(
-        [{ transport: 'stdio', label: 'cua_repl', command: 'node' }],
-        {}
-      )
-    ).toThrow('reserved');
-  });
+  it.each(['cua_repl', 'codex'])(
+    'rejects configured servers impersonating built-in namespace %s',
+    (label) => {
+      expect(() =>
+        chatgptServers([{ transport: 'stdio', label, command: 'node' }], {})
+      ).toThrow('reserved');
+    }
+  );
   it('rejects missing credentials, duplicate labels and unsupported headers', () => {
     expect(() =>
       chatgptServers(
