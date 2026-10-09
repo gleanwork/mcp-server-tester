@@ -470,6 +470,50 @@ describe('automatic Mac Cowork session (no native execution)', () => {
     expect(removeMacCoworkApp).not.toHaveBeenCalled();
     await clean();
   });
+  it('restarts the app in place, keeping the session', async () => {
+    const session = await prepare();
+    events.length = 0;
+    await session.restart();
+    expect(events).toEqual(['stop', 'start']);
+    expect(running).toBe(true);
+    // The session's settings stay installed until it's disposed.
+    await session.dispose();
+    await clean();
+  });
+  it('refuses to restart unless the session still owns the desktop', async () => {
+    const session = await prepare();
+    events.length = 0;
+    const receipt = join(lease, 'session.json');
+    const original = await fs.readFile(receipt);
+    await fs.writeFile(receipt, 'someone else');
+    await expect(session.restart()).rejects.toThrow();
+    // Nothing was stopped or started.
+    expect(events).toEqual([]);
+    await fs.writeFile(receipt, original);
+    await session.dispose();
+    await clean();
+  });
+  it('refuses to restart a session being cleaned up', async () => {
+    const session = await prepare();
+    const disposing = session.dispose();
+    await expect(session.restart()).rejects.toThrow(
+      'The Cowork session is being cleaned up; not restarting.'
+    );
+    await disposing;
+    await clean();
+  });
+  it('refuses to restart when the app does not quit', async () => {
+    const session = await prepare();
+    controller.stop.mockImplementationOnce(async () => {
+      events.push('stop');
+    });
+    await expect(session.restart()).rejects.toThrow(
+      'Claude Desktop did not quit; not restarting it.'
+    );
+    expect(controller.start).toHaveBeenCalledTimes(1); // The session's own launch.
+    await session.dispose();
+    await clean();
+  });
   it('refuses results when the installed app changes during evaluation', async () => {
     const session = await prepare();
     vi.mocked(verifyMacCoworkAppVersion).mockRejectedValueOnce(

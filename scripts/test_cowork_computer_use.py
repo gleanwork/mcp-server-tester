@@ -14,7 +14,7 @@ CONFIRM_MODEL = {'tool': 'confirm_model', 'input': {'model': 'claude-opus-4-6'}}
 
 
 class DriverTests(unittest.TestCase):
-    def run_actions(self, actions, mode='submit', budget=8, query='query', next_plan=None, entry_error=False, response_metadata=None, planner_error=None, application='cowork', target_model=None, reasoning_effort=None, chatgpt_surface='chatgpt-work', frontmost=None):
+    def run_actions(self, actions, mode='submit', budget=8, query='query', next_plan=None, entry_error=False, response_metadata=None, planner_error=None, application='cowork', target_model=None, reasoning_effort=None, chatgpt_surface='chatgpt-work', frontmost=None, plans=None):
         api = MagicMock()
         app_name = 'ChatGPT' if application == 'chatgpt' else 'Claude'
         front = MagicMock(side_effect=frontmost) if frontmost is not None else MagicMock(return_value=app_name)
@@ -31,7 +31,10 @@ class DriverTests(unittest.TestCase):
 
         api.Anthropic.side_effect = construct
         planner = api.Anthropic.return_value.beta.messages.create
-        if planner_error is not None:
+        if plans is not None:
+            # The planner's responses in order, after the first.
+            planner.side_effect = [response(actions), *(response(plan) for plan in plans)]
+        elif planner_error is not None:
             planner.side_effect = [response(actions), planner_error]
         elif next_plan is not None:
             planner.side_effect = [response(actions), response(next_plan)]
@@ -176,17 +179,39 @@ class DriverTests(unittest.TestCase):
         for action in (
             {'action': 'type', 'text': 'x'},
             {'action': 'key', 'text': 'enter'},
+            {'action': 'key', 'text': 'cmd+escape'},
             {'action': 'left_click_drag', 'coordinate': [10, 10]},
             {'action': 'double_click', 'coordinate': [10, 10]},
             {'action': 'right_click', 'coordinate': [10, 10]},
         ):
-            result, count = self.run_actions([action], mode='reset')
-            self.assertIn('Reset cannot type, press keys', result)
-            self.assertEqual(self.executed_actions, [])
+            with self.subTest(action=action):
+                # A planner that keeps proposing it never gets it executed.
+                result, count = self.run_actions([action], mode='reset', budget=3)
+                self.assertIn('Computer Use reset exceeded 3 actions', result)
+                self.assertEqual(self.executed_actions, [])
+                self.assertEqual(self.error_telemetry['refused_action_count'], 3)
+
+    def test_cowork_reset_refusal_lets_the_planner_try_again(self):
+        # It proposed a key press, was refused, then clicked Stop and finished.
+        stop = {'action': 'left_click', 'coordinate': [10, 10]}
+        result, count = self.run_actions([{'action': 'key', 'text': 'enter'}], mode='reset',
+                                         plans=[[stop], []])
+        self.assertEqual(result['status'], 'reset_done')
+        self.assertEqual(self.executed_actions, [stop])
+        self.assertEqual(result['telemetry']['refused_action_count'], 1)
+        feedback = self.planner_request['messages'][2]['content'][0]
+        self.assertTrue(feedback['is_error'])
+        self.assertIn('a reset may only', feedback['content'])
+
+    def test_cowork_reset_may_press_escape(self):
+        escape = {'action': 'key', 'text': 'Escape'}
+        result, count = self.run_actions([escape], mode='reset', next_plan=[])
+        self.assertEqual(result['status'], 'reset_done')
+        self.assertEqual(self.executed_actions, [escape])
 
     def test_cowork_reset_refuses_other_tools(self):
-        result, count = self.run_actions([{'tool': 'fill_query', 'input': {}}], mode='reset')
-        self.assertIn('Reset cannot type, press keys', result)
+        result, count = self.run_actions([{'tool': 'fill_query', 'input': {}}], mode='reset', budget=2)
+        self.assertIn('Computer Use reset exceeded 2 actions', result)
         self.assertEqual(self.executed_actions, [])
 
     def test_cowork_reset_that_only_watches_until_the_budget_fails(self):
