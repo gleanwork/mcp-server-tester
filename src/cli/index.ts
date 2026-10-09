@@ -205,7 +205,7 @@ program
     "Grade a stored run's traces again with the eval config's graders, as a new run (<run-id>.g<n>)"
   )
   .argument('<run>', 'Run directory, run ID, or its short form (7f3c2a)')
-  .option('-c, --config <path>', 'Path to the eval config the run ran')
+  .requiredOption('-c, --config <path>', 'Path to the eval config the run ran')
   .option('--plugins <paths...>', 'Plugin modules to load before grading')
   .option(
     '--output-dir <dir>',
@@ -221,11 +221,9 @@ program
     '--no-report',
     "Don't write the regrade's report (mst open writes it when it opens the run)"
   )
-  .action((runArg: string, options: Record<string, unknown>) => {
-    if (typeof options.config !== 'string')
-      throw new Error("required option '-c, --config <path>' not specified");
-    return grade(runArg, options as unknown as Parameters<typeof grade>[1]);
-  });
+  .action((runArg: string, options: Record<string, unknown>) =>
+    grade(runArg, options as unknown as Parameters<typeof grade>[1])
+  );
 
 // Batch command
 program

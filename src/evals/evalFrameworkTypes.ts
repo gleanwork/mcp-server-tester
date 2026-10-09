@@ -477,6 +477,12 @@ export interface RunSummary {
    * have no scores, so it is never a previous run to compare with. Absent: graded.
    */
   graded?: false;
+  /**
+   * A regrade's: when the run that collected its traces finished (that run's
+   * `timestamp`). Runs are ordered by when they collected, so a regrade of an
+   * older run stays older than a newer run.
+   */
+  collectedAt?: string;
   /** What narrowed a partial run. */
   selection?: RunSelection;
   /** A hash of `selection`: partial runs with the same hash are comparable. */

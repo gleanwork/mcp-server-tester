@@ -27,6 +27,8 @@ export interface RunReplay {
   runId: string;
   /** The run that collected the traces: a regrade's own source, or the run. */
   gradedFrom: string;
+  /** When that run collected them: its summary's `timestamp`. */
+  collectedAt: string;
   /** Stored trials by variant, then case, in trial order. */
   trials: Map<string, Map<string, TrialRecord[]>>;
 }
@@ -39,7 +41,8 @@ export interface RunReplay {
 export function runReplay(
   run: RunRecord,
   trials: readonly TrialRecord[],
-  runId: string
+  runId: string,
+  collectedAt: string
 ): RunReplay {
   if (trials.length === 0)
     throw new Error(`Run ${run.runId} stored no trials to grade.`);
@@ -60,6 +63,7 @@ export function runReplay(
     run,
     runId,
     gradedFrom: run.gradedFrom ?? run.runId,
+    collectedAt,
     trials: byVariant,
   };
 }
@@ -141,9 +145,13 @@ function storedExecution(
   evidence: TraceEvidence
 ): CaseExecution {
   const trace = trial.trace as Trace | undefined;
+  // A trial a grader couldn't score stores "Not graded: …" as its error. The
+  // client ran; finishing its grading is what a regrade is for.
+  const runnerError =
+    trial.gradingError === undefined ? trial.error : undefined;
   if (!trace) {
     const execution = failedExecution(
-      trial.error ?? 'The stored trial has no trace.'
+      runnerError ?? 'The stored trial has no trace.'
     );
     return { ...execution, preExecutionDurationMs: trial.durationMs };
   }
@@ -194,8 +202,8 @@ function storedExecution(
     preExecutionDurationMs: trial.durationMs,
   };
   // An error the runner recorded, not the client, still fails the trial.
-  return trial.error !== undefined && completed.error === undefined
-    ? { ...completed, error: trial.error }
+  return runnerError !== undefined && completed.error === undefined
+    ? { ...completed, error: runnerError }
     : completed;
 }
 

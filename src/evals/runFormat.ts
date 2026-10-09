@@ -525,6 +525,20 @@ export async function writeRun(
   }
 }
 
+/** The run `latest.json` points at, if it exists and reads as one. */
+export async function readLatestRunId(
+  evalDirectory: string
+): Promise<string | undefined> {
+  try {
+    const value: unknown = JSON.parse(
+      await fs.readFile(path.join(evalDirectory, 'latest.json'), 'utf8')
+    );
+    return LatestRecordSchema.parse(value).runId;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Point the eval's `latest.json` at a run. Written last, and only for a full
  * run, so a crash or a partial run leaves it at the previous run.
@@ -667,15 +681,16 @@ export async function nextRegradeId(
 }
 
 /**
- * A run's directory from what the user typed: a run directory, a full run
- * ID, or its short form (the 6 hex characters, with any `.g<n>`) among the
- * eval's runs.
+ * A run's directory from what the user typed: a run directory (relative to
+ * `baseDir`), a full run ID, or its short form (the 6 hex characters, with
+ * any `.g<n>`) among the eval's runs.
  */
 export async function findRunDirectory(
   runs: string,
-  run: string
+  run: string,
+  baseDir: string
 ): Promise<string> {
-  const asPath = path.resolve(run);
+  const asPath = path.resolve(baseDir, run);
   if (
     await fs
       .stat(path.join(asPath, 'run.json'))

@@ -187,6 +187,15 @@ describe('mst run --no-grade and mst grade', () => {
     // Each case in both orders.
     expect(t.pairwise).toHaveBeenCalledTimes(4);
     expect(collected.summary.graded).toBe(false);
+    // No pass rate: nothing judged the answers.
+    const collectedSummary = await readJson(
+      path.join(collected.outputDir, 'summary.json')
+    );
+    expect(collectedSummary.metrics).toEqual({
+      total: 4,
+      collected: 4,
+      failedToCollect: 0,
+    });
     const collectedRun = await readJson(
       path.join(collected.outputDir, 'run.json')
     );
@@ -226,6 +235,40 @@ describe('mst run --no-grade and mst grade', () => {
     // The regrade compares with the previous graded run, not the ungraded one.
     expect(regrade.summary.previousRun?.runId).toBe(
       path.basename(graded.outputDir)
+    );
+  });
+
+  it("a regrade of an older run doesn't take over latest.json, and compares with its own grading", async () => {
+    const t = await setup();
+    const a = await runEval(t.base);
+    const b = await runEval(t.base);
+    const latestFile = path.join(
+      t.dir,
+      '.mcp-test-results',
+      'grade-test',
+      'latest.json'
+    );
+    const aId = path.basename(a.outputDir);
+    const bId = path.basename(b.outputDir);
+    const regradeA = await gradeRun({ ...t.base, run: a.outputDir });
+    expect((await readJson(latestFile)).runId).toBe(bId);
+    expect(regradeA.summary.previousRun?.runId).toBe(aId);
+    // A's next regrade compares with its last one.
+    const again = await gradeRun({ ...t.base, run: aId });
+    expect(again.summary.previousRun?.runId).toBe(`${aId}.g2`);
+    // A regrade of the newest run does become the latest.
+    const regradeB = await gradeRun({ ...t.base, run: bId });
+    expect((await readJson(latestFile)).runId).toBe(
+      path.basename(regradeB.outputDir)
+    );
+    expect(regradeB.summary.previousRun?.runId).toBe(bId);
+    // And its next regrade, which compares with it.
+    const regradeB2 = await gradeRun({ ...t.base, run: bId });
+    expect((await readJson(latestFile)).runId).toBe(
+      path.basename(regradeB2.outputDir)
+    );
+    expect(regradeB2.summary.previousRun?.runId).toBe(
+      path.basename(regradeB.outputDir)
     );
   });
 
@@ -377,22 +420,27 @@ describe('finding the run to grade', () => {
       await fs.mkdir(path.join(runs, id));
       await fs.writeFile(path.join(runs, id, 'run.json'), '{}');
     }
-    await expect(findRunDirectory(runs, '7f3c2a')).resolves.toBe(
+    // A relative run directory is relative to --root-dir, not the cwd.
+    const base = path.dirname(runs);
+    await expect(
+      findRunDirectory(runs, path.join(path.basename(runs), ids[3]!), base)
+    ).resolves.toBe(path.join(runs, ids[3]!));
+    await expect(findRunDirectory(runs, '7f3c2a', base)).resolves.toBe(
       path.join(runs, ids[0]!)
     );
-    await expect(findRunDirectory(runs, '7f3c2a.g2')).resolves.toBe(
+    await expect(findRunDirectory(runs, '7f3c2a.g2', base)).resolves.toBe(
       path.join(runs, ids[1]!)
     );
-    await expect(findRunDirectory(runs, ids[2]!)).resolves.toBe(
+    await expect(findRunDirectory(runs, ids[2]!, base)).resolves.toBe(
       path.join(runs, ids[2]!)
     );
     await expect(
-      findRunDirectory(runs, path.join(runs, ids[3]!))
+      findRunDirectory(runs, path.join(runs, ids[3]!), base)
     ).resolves.toBe(path.join(runs, ids[3]!));
-    await expect(findRunDirectory(runs, 'abc123')).rejects.toThrow(
+    await expect(findRunDirectory(runs, 'abc123', base)).rejects.toThrow(
       /matches 2 runs/
     );
-    await expect(findRunDirectory(runs, 'ffffff')).rejects.toThrow(
+    await expect(findRunDirectory(runs, 'ffffff', base)).rejects.toThrow(
       /No run "ffffff"/
     );
     await expect(nextRegradeId(runs, ids[0]!)).resolves.toBe(

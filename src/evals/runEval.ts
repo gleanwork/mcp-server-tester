@@ -7,6 +7,7 @@ import {
   newRunId,
   runsDirectory,
   writeLatest,
+  readLatestRunId,
   writeRun,
   writeTrial,
   type RunFacts,
@@ -643,9 +644,10 @@ export async function gradeRun(
     options.outputDir ?? path.join(rootDir, '.mcp-test-results', name);
   const directory = await findRunDirectory(
     runsDirectory(evalDirectory),
-    options.run
+    options.run,
+    rootDir
   );
-  const { run } = await readRunDirectory(directory);
+  const { run, summary: stored } = await readRunDirectory(directory);
   if (run.evalName !== name)
     throw new Error(
       `Run ${run.runId} is a run of eval "${run.evalName}", not of "${name}" (${options.configPath}).`
@@ -653,7 +655,8 @@ export async function gradeRun(
   const replay = runReplay(
     run,
     await readRunTrials(directory),
-    await nextRegradeId(path.dirname(directory), run.runId)
+    await nextRegradeId(path.dirname(directory), run.runId),
+    stored.collectedAt ?? stored.timestamp
   );
   const { run: _run, ...evalOptions } = options;
   return evaluate(
@@ -666,6 +669,39 @@ export async function gradeRun(
     },
     replay
   );
+}
+
+/**
+ * Whether a regrade becomes the eval's latest run: only a regrade of a run
+ * that collected every trial, and only when the latest run collected its
+ * traces no later. A regrade of an older run leaves a newer run the latest.
+ */
+async function regradeTakesLatest(
+  evalDirectory: string,
+  replay: RunReplay
+): Promise<boolean> {
+  if (replay.run.phases.collect !== 'complete') return false;
+  const latest = await readLatestRunId(evalDirectory);
+  // Missing, or already a grading of these traces.
+  if (
+    latest === undefined ||
+    latest.replace(/\.g\d+$/, '') === replay.gradedFrom
+  )
+    return true;
+  let latestCollectedAt: string;
+  try {
+    const summary = JSON.parse(
+      await fs.readFile(
+        path.join(runsDirectory(evalDirectory), latest, 'summary.json'),
+        'utf8'
+      )
+    ) as EvaluationSummary;
+    latestCollectedAt = summary.collectedAt ?? summary.timestamp;
+  } catch {
+    // latest.json names a run that's gone: nothing newer to keep.
+    return true;
+  }
+  return latestCollectedAt <= replay.collectedAt;
 }
 
 /**
@@ -1207,7 +1243,16 @@ async function evaluate(
       await writeRun(
         outputDir,
         executionId,
-        runFacts(stored, { collect: phase, grade: 'partial' }),
+        runFacts(
+          stored,
+          // A regrade collected nothing: its traces are the source run's.
+          replay
+            ? {
+                collect: replay.run.phases.collect,
+                grade: phase === 'failed' ? 'failed' : 'partial',
+              }
+            : { collect: phase, grade: 'partial' }
+        ),
         stored
       );
       if (options.report !== false) await writeRunReport(outputDir);
@@ -1347,7 +1392,22 @@ async function evaluate(
       ? (replay.run.selection as RunSelection | undefined)
       : runSelection(options);
     summary.partial = replay ? replay.run.partial : selection !== undefined;
-    if (options.grade === false) summary.graded = false;
+    if (replay) summary.collectedAt = replay.collectedAt;
+    if (options.grade === false) {
+      summary.graded = false;
+      // Nothing judged the answers, so there is no pass rate: only how many
+      // cases collected every trial.
+      const failedToCollect = allResults.filter((result) =>
+        result.trialResults?.length
+          ? result.trialResults.some((trial) => trial.error !== undefined)
+          : result.error !== undefined
+      ).length;
+      summary.metrics = {
+        total: allResults.length,
+        collected: allResults.length - failedToCollect,
+        failedToCollect,
+      };
+    }
     if (selection) {
       summary.selection = selection;
       summary.selectionHash = selectionHashOf(selection);
@@ -1413,6 +1473,15 @@ async function evaluate(
       const previous = await findPreviousRun({
         configId: summary.configId,
         runId: executionId,
+        // A regrade compares with the same traces' last grading.
+        ...(replay
+          ? {
+              regradeOf: {
+                runId: replay.gradedFrom,
+                collectedAt: replay.collectedAt,
+              },
+            }
+          : {}),
         variants: summary.variants.map((variant) => variant.name),
         partial: summary.partial,
         selectionHash: summary.selectionHash,
@@ -1478,7 +1547,7 @@ async function evaluate(
     outputDir,
     executionId,
     runFacts(storedSummary, {
-      collect: 'complete',
+      collect: replay ? replay.run.phases.collect : 'complete',
       // Trials a grader couldn't score are what a regrade would finish.
       grade: allResults.some(
         (result) =>
@@ -1500,8 +1569,12 @@ async function evaluate(
     );
   }
   // Last, so a crash leaves latest.json at the previous run; a partial or
-  // ungraded run never becomes the latest.
-  if (!summary.partial && options.grade !== false)
+  // ungraded run never becomes the latest, nor does a regrade of an older run.
+  if (
+    !summary.partial &&
+    options.grade !== false &&
+    (!replay || (await regradeTakesLatest(evalDirectory, replay)))
+  )
     await writeLatest(evalDirectory, executionId, summary.timestamp);
   return {
     evalConfig,

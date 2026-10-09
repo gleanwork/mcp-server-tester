@@ -56,7 +56,24 @@ export async function findPreviousRun(options: {
   selectionHash?: string;
   store?: EvalResultStore;
   outputRoot: string;
+  /**
+   * For a regrade: the run that collected its traces, and when. That run's
+   * gradings (it and its `.g<n>` regrades) come first; failing those, a run
+   * collected before it. Never a run collected after it.
+   */
+  regradeOf?: { runId: string; collectedAt: string };
 }): Promise<PreviousRun | undefined> {
+  const regradeOf = options.regradeOf;
+  const sameTraces = (runId: string | undefined) =>
+    regradeOf !== undefined &&
+    runId?.replace(/\.g\d+$/, '') === regradeOf.runId;
+  // Another grading of the same traces always is; another run, only one
+  // collected no later.
+  const eligible = (summary: EvaluationSummary) =>
+    regradeOf === undefined ||
+    sameTraces(summary.runId) ||
+    (summary.collectedAt ?? summary.timestamp) <= regradeOf.collectedAt;
+  const rank = (runId: string) => (sameTraces(runId) ? 0 : 1);
   if (options.store) {
     const candidates = (await options.store.listArtifacts('eval-run-summary'))
       .filter(
@@ -64,7 +81,10 @@ export async function findPreviousRun(options: {
           artifact.id !== options.runId &&
           artifact.metadata?.labels?.configId === options.configId
       )
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      .sort(
+        (a, b) =>
+          rank(a.id) - rank(b.id) || b.createdAt.localeCompare(a.createdAt)
+      );
     for (const candidate of candidates) {
       try {
         const artifact = await options.store.loadArtifact(
@@ -77,7 +97,8 @@ export async function findPreviousRun(options: {
             options.configId,
             options.variants,
             options
-          )
+          ) &&
+          eligible(artifact.data)
         )
           return { runId: candidate.id, summary: artifact.data };
       } catch {
@@ -102,7 +123,10 @@ export async function findPreviousRun(options: {
           'utf8'
         )
       );
-      if (isComparable(value, options.configId, options.variants, options))
+      if (
+        isComparable(value, options.configId, options.variants, options) &&
+        eligible(value)
+      )
         runs.push({
           runId: value.runId ?? entry,
           summary: await withCaseResults(
@@ -114,8 +138,10 @@ export async function findPreviousRun(options: {
       // Not a run directory, or an unreadable one: not a baseline.
     }
   }
-  return runs.sort((a, b) =>
-    b.summary.timestamp.localeCompare(a.summary.timestamp)
+  return runs.sort(
+    (a, b) =>
+      rank(a.runId) - rank(b.runId) ||
+      b.summary.timestamp.localeCompare(a.summary.timestamp)
   )[0];
 }
 

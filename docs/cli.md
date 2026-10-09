@@ -777,7 +777,7 @@ npx mst run --config ./eval.json --no-grade   # collect now
 npx mst grade 7f3c2a --config ./eval.json     # grade later, as often as the graders change
 ```
 
-`<run>` is a run directory, a run ID, or its short form (the last six characters, with any `.g<n>`) among the eval's runs.
+`<run>` is a run directory (relative to `--root-dir`), a run ID, or its short form (the last six characters, with any `.g<n>`) among the eval's runs.
 
 ### Options
 
@@ -790,9 +790,11 @@ npx mst grade 7f3c2a --config ./eval.json     # grade later, as often as the gra
 | `--secrets-file <path>` | A JSON or dotenv-style file of environment values, as for `run` (for example judge API keys). |
 | `--no-report`           | Don't write the regrade's report.                                                             |
 
-The datasets are loaded again, so each case's `expected` and judges are the dataset's current ones; `run.json` records their content hashes. Every variant and case the run stored must still be in the eval config and its datasets. A trial that failed when it ran stays failed and isn't judged. No client starts, so grading needs no connector tokens.
+The datasets are loaded again, so each case's `expected` and judges are the dataset's current ones; `run.json` records their content hashes. Every variant and case the run stored must still be in the eval config and its datasets. A trial that failed when it ran stays failed and isn't judged. A trial a grader couldn't score (`phases.grade: partial`, `gradingError`) is graded again: finishing those is what a regrade is for. No client starts, so grading needs no connector tokens.
 
-The regrade's `run.json` has `gradedFrom`, the run whose traces it graded, and its `phases.grade` is `complete`. A full regrade becomes the eval's `latest.json`, and its summary compares with the previous graded run. `grade` prints what `run` prints, and exits 1 when any case failed.
+The regrade's `run.json` has `gradedFrom`, the run whose traces it graded, and the same `phases.collect` as that run: a regrade of a run that stopped early (`collect: failed` or `partial`) still covers only what it collected. Its summary has `collectedAt`, when those traces were collected, and compares with the same traces' last grading, or else with a graded run collected before them, never a newer one. A regrade becomes the eval's `latest.json` only when it is full, its run collected every variant, and no run collected later is the latest: regrading an older run leaves the newer run the latest. `grade` prints what `run` prints, and exits 1 when any case failed.
+
+A `--no-grade` run's `run.json` has `phases.grade: skipped`, also in the copy saved while it runs. Its `summary.json` has no pass rate, only `total`, `collected` and `failedToCollect` cases, and its report says it isn't graded.
 
 A run stored with redacted traces (the default, `redactStoredResponses`) can't be graded again: collect with `"redactStoredResponses": false`.
 
