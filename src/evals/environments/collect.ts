@@ -126,6 +126,9 @@ export async function collectShard(
     const tokens = await waiting.promise;
     if (cancelled) return;
     for (const [server, token] of Object.entries(tokens.byServer)) {
+      // A label names a file in the tokens directory, never a path.
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(server))
+        throw new Error(`"${server}" can't name a token file.`);
       secrets.add(token.accessToken);
       await writeFileAtomically(
         path.join(tokensDir, server),

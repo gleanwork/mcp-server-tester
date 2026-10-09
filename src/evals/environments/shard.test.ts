@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import packageJson from '../../../package.json' with { type: 'json' };
 import { forkEnvironment } from '../../../tests/mocks/forkEnvironment.js';
 import { machineEnvironment, runShardOverChannel } from './channel.js';
+import { collectShard } from './collect.js';
 import {
   parseCoordinatorMessage,
   readClientResult,
@@ -351,6 +352,34 @@ describe('runShardOverChannel', () => {
       new AbortController().signal
     );
     expect(outcome.reason).toContain("isn't mst.shard/v1");
+  });
+});
+
+describe('collectShard', () => {
+  it('refuses a server label that would write outside the tokens directory', async () => {
+    const root = await tempDir();
+    const shard = await shardIn(root, [{ caseId: 'a', prompt: 'a' }]);
+    let reply: ((line: string) => void) | undefined;
+    const input = (async function* () {
+      yield await new Promise<string>((resolve) => (reply = resolve));
+    })();
+    const run = collectShard({
+      bundleDir: shard.bundleDir,
+      resultsDir: shard.resultsDir,
+      input,
+      write: (line) => {
+        if (line.includes('"need-tokens"'))
+          reply?.(
+            JSON.stringify({
+              type: 'tokens',
+              byServer: { '../escape': { accessToken: 'x' } },
+            })
+          );
+      },
+      env: { MST_TOKENS_DIR: path.join(root, 'tokens') },
+    });
+    await expect(run).rejects.toThrow('"../escape" can\'t name a token file.');
+    await expect(fs.stat(path.join(root, 'escape'))).rejects.toThrow();
   });
 });
 
