@@ -125,6 +125,19 @@ const CoworkSchema = z
           'appVersion requires anthropic-computer-use; linux-desktop runs the prepared desktop.',
       });
   });
+/**
+ * The evidence in a Cowork session folder, and only that: the audit log, the
+ * files the agent wrote (`outputs/`), its transcripts and the tool output it
+ * saved to files. Anything else there (the audit key, the agent's settings,
+ * snapshots of its environment) never reaches judges or a run directory.
+ */
+const COWORK_SESSION_EVIDENCE = [
+  'audit.jsonl',
+  'outputs',
+  '.claude/projects/*/*.jsonl',
+  '.claude/projects/*/*/tool-results',
+] as const;
+
 /** Platforms with managed stdio setup, readiness, and cleanup support. */
 export const COWORK_STDIO_PLATFORMS = ['darwin', 'linux'] as const;
 
@@ -580,6 +593,15 @@ async function runBatch(
           );
           result = {
             ...nativeResult,
+            // The session folder: audit log, spilled tool output, written files.
+            ...(trace.candidate.sessionDir
+              ? {
+                  artifacts: {
+                    dir: trace.candidate.sessionDir,
+                    include: COWORK_SESSION_EVIDENCE,
+                  },
+                }
+              : {}),
             error: nativeResult.error ?? hitlError,
             telemetry: {
               source: 'claude-native',

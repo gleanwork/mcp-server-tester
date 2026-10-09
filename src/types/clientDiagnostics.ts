@@ -6,6 +6,8 @@ export interface ClientDiagnostics {
    * `cleanup`: the case ran, but restoring the desktop afterwards failed, so
    * its state (and the case's isolation) is unknown. `missing`: the trial's
    * shard ended before it ran or before its result came back (ADR 0004).
+   * `artifacts`: the case ran, but its client artifacts couldn't be copied
+   * for the judges.
    */
   failureKind?:
     | 'startup'
@@ -14,7 +16,8 @@ export interface ClientDiagnostics {
     | 'output'
     | 'not-submitted'
     | 'cleanup'
-    | 'missing';
+    | 'missing'
+    | 'artifacts';
   claudeStartup?: {
     status: 'ready' | 'failed' | 'missing';
     elapsedMs: number;

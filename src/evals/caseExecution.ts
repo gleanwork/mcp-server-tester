@@ -17,6 +17,7 @@ import type {
   TraceEvent,
   TraceEvidence,
   ClientDefinition,
+  ClientArtifacts,
   ClientRunResult,
   Trace,
 } from './evalFrameworkTypes.js';
@@ -41,6 +42,8 @@ export type ClientResponse = MstClientSimulationResult & {
   events?: TraceEvent[];
   evidence?: TraceEvidence;
   clientMetadata?: ClientMetadata;
+  /** See `ClientRunResult.artifacts`. Never stored in results. */
+  artifacts?: ClientArtifacts;
 };
 
 interface ExecutionBase {
