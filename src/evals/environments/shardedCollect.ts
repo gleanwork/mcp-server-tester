@@ -14,6 +14,7 @@ import type {
 } from '../evalFrameworkTypes.js';
 import type { EvalConfig, EvalVariant } from '../evalConfig.js';
 import type { ResolvedEnvironment } from './builtinEnvironments.js';
+import { createLimiter, trialResources, type RunLimits } from './limiter.js';
 import {
   readClientResult,
   writeShardBundle,
@@ -42,6 +43,8 @@ export interface CollectInEnvironmentOptions {
   secrets: Record<string, string>;
   /** A private local directory for bundles and copied results. */
   workDir: string;
+  /** The most trials at once across every shard, per provider and server. */
+  limits?: RunLimits;
   signal: AbortSignal;
   /** Each result as it comes back, before the shards end. */
   onResult?: (key: TrialKey, result: ClientRunResult) => Promise<void>;
@@ -82,6 +85,18 @@ export async function collectInEnvironment(
   });
   const reasons = new Map<number, string>();
   const outcomes: ShardOutcome[] = [];
+  const limiter = createLimiter(options.limits);
+  const resources = new Map<string, string[]>();
+  for (const group of options.groups)
+    for (const request of group.requests)
+      resources.set(
+        keyString({
+          variant: group.variant.name,
+          caseId: request.caseId,
+          trial: request.trial,
+        }),
+        trialResources(request.config.model, request.input.servers)
+      );
   try {
     const shards = Array.from({ length: count }, (_, index) => ({
       index,
@@ -109,6 +124,12 @@ export async function collectInEnvironment(
           tokenServers: [],
           batches,
         });
+        // Room this shard's trials hold under the limits, until they're done.
+        const held = new Map<string, () => void>();
+        const giveBack = (key: string) => {
+          held.get(key)?.();
+          held.delete(key);
+        };
         // Results are read as they arrive, one at a time per shard, once each.
         let reading = Promise.resolve();
         const seen = new Set<string>();
@@ -143,6 +164,7 @@ export async function collectInEnvironment(
                   `shard ${index + 1}/${count}: ${event.client} on MST ${event.mst}${event.image ? ` (${event.image})` : ''}`
                 );
               else if (event.type === 'trial') {
+                giveBack(keyString(event.key));
                 log(
                   `shard ${index + 1}/${count}: ${event.key.variant} ${event.key.caseId} #${event.key.trial + 1} ${event.status}`
                 );
@@ -152,9 +174,15 @@ export async function collectInEnvironment(
             async requestTokens() {
               return { byServer: {}, env: options.secrets };
             },
+            async acquire(key) {
+              const id = keyString(key);
+              held.set(id, await limiter.acquire(resources.get(id) ?? []));
+            },
           },
           options.signal
         );
+        // A shard that ended gives back whatever its trials still held.
+        for (const key of [...held.keys()]) giveBack(key);
         await reading.catch(() => {});
         // Anything copied back that no progress event announced.
         for (const relative of await resultFiles(resultsDir))

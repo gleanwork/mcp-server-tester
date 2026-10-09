@@ -4,7 +4,7 @@
  * token renewed mid-trial, and logs to stdout, which must not reach the
  * protocol.
  */
-import { readFile } from 'node:fs/promises';
+import { appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import type {
@@ -22,14 +22,26 @@ async function token(input: ClientRunInput): Promise<string> {
   return readFile(path.join(dir, 'acme'), 'utf8').catch(() => 'none');
 }
 
+/** With SHARD_TEST_LOG set, each trial's start and end (ms), for overlap checks. */
+async function mark(event: 'start' | 'end', prompt: string): Promise<void> {
+  const log = process.env.SHARD_TEST_LOG;
+  if (log) await appendFile(log, `${event} ${prompt} ${Date.now()}\n`);
+}
+
 async function probe(
   input: ClientRunInput,
   config: ClientConfig
 ): Promise<ClientRunResult> {
   console.log('a stray log line from the client');
+  await mark('start', input.prompt);
   const first = await token(input);
-  await sleep(Number((config as { delayMs?: number }).delayMs ?? 0));
+  const options = config as {
+    delayMs?: number;
+    clientOptions?: { delayMs?: number };
+  };
+  await sleep(Number(options.delayMs ?? options.clientOptions?.delayMs ?? 0));
   const second = await token(input);
+  await mark('end', input.prompt);
   if (input.prompt === 'flaky')
     return {
       finalText: '',

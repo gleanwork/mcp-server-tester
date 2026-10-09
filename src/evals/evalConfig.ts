@@ -422,6 +422,22 @@ export const EvalConfigSchema = z
      * cost. MST ships no prices: they change, and every estimate should be
      * traceable to a table someone chose.
      */
+    /**
+     * The most trials that may run at once across an environment's shards,
+     * per LLM provider (`anthropic`, `openai`, ...) and per server label, so
+     * shards don't trip rate limits (ADR 0004).
+     */
+    limits: z
+      .object({
+        providers: z
+          .record(z.string().min(1), z.number().int().positive())
+          .optional(),
+        servers: z
+          .record(z.string().min(1), z.number().int().positive())
+          .optional(),
+      })
+      .strict()
+      .optional(),
     pricing: z
       .record(
         z.string().min(1),
@@ -481,6 +497,7 @@ const PluginConfigSchema = EvalConfigSchema.pick({
   tools: true,
   requireEvalEndpoint: true,
   pricing: true,
+  limits: true,
   passThreshold: true,
   temperature: true,
   maxTokens: true,

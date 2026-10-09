@@ -87,13 +87,33 @@ export async function collectShard(
   const cancel = () => {
     cancelled = true;
     waiting.resolve({ byServer: {} });
+    // A trial waiting for room won't run now.
+    for (const grant of grants.values()) grant();
+    grants.clear();
   };
+  /** Waits until the coordinator has room for this trial. */
+  const acquire = async (key: TrialKey): Promise<void> => {
+    if (cancelled) return;
+    const granted = new Promise<void>((resolve) =>
+      grants.set(grantKey(key), resolve)
+    );
+    send({ type: 'acquire', key });
+    await granted;
+  };
+  // Trials waiting for room under the run's limits, by key.
+  const grants = new Map<string, () => void>();
+  const grantKey = (key: TrialKey) =>
+    JSON.stringify([key.variant, key.caseId, key.trial]);
   // Read the coordinator's messages for as long as the shard runs.
   const reading = (async () => {
     for await (const line of options.input) {
       const message = parseCoordinatorMessage(line);
       if (message.type === 'cancel') cancel();
-      else {
+      else if (message.type === 'granted') {
+        const grant = grants.get(grantKey(message.key));
+        grants.delete(grantKey(message.key));
+        grant?.();
+      } else {
         const { type: _type, ...tokens } = message;
         waiting.resolve(tokens);
       }
@@ -230,6 +250,9 @@ export async function collectShard(
         const reported = new Set<number>();
         const results = await definition.runBatch(requests, {
           ...context,
+          acquire: async (index) => {
+            if (requests[index]) await acquire(keyOf(index));
+          },
           reportResult: async (index, result) => {
             if (reported.has(index) || !requests[index]) return;
             reported.add(index);
@@ -243,6 +266,8 @@ export async function collectShard(
         continue;
       }
       for (const [index, request] of requests.entries()) {
+        if (cancelled) break;
+        await acquire(keyOf(index));
         if (cancelled) break;
         let result: ClientRunResult;
         try {

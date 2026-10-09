@@ -51,6 +51,7 @@ runtime validation is provided by `EvalConfigSchema`.
 A key the schema doesn't define is an error, in an eval config and in a dataset, so a misspelling fails instead of being ignored. So is a setting the selected client can't honour, such as `tools` (tool metadata) for a client that doesn't present tool variants. `--dry-run` reports all of these, including in datasets.
 
 - **Run controls** (`trials`, `maxCases`, `concurrency`, `filterTags`, `passThreshold`) go at the top level or under `run`.
+- **Run-wide limits** (`limits`) cap how many trials run at once across an environment's shards, per LLM provider (from each trial's model: `anthropic`, `openai`, ...) and per server label: `"limits": { "providers": { "anthropic": 3 }, "servers": { "slack": 2 } }`. A worker waits for room before each trial, and its trial gives the room back when it finishes. Shared configs can set them, so an organization's rate limits live in its plugin.
 - **Client defaults:** `model`, `provider`, `maxToolCalls`, `timeout`, `temperature` and `maxTokens` default each client option of that name, for the clients that take it.
 - **The client:** `client` names the client under test, `model` the model it uses, and `clientOptions` the client's other options. A variant or case may set any of the three; it inherits the eval config's `clientOptions` only when it uses the same client.
 

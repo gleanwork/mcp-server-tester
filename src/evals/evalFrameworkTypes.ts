@@ -75,6 +75,12 @@ export interface ClientRunContext {
    * change it after; `runBatch` still returns every result.
    */
   reportResult?: (index: number, result: ClientRunResult) => Promise<void>;
+  /**
+   * For `runBatch`: wait for room under the run's limits before request
+   * `index` starts (ADR 0004). Optional; a batch client that doesn't call
+   * it runs its requests unlimited.
+   */
+  acquire?: (index: number) => Promise<void>;
 }
 
 export type TraceEvidence = 'structured' | 'observed' | 'none';
@@ -323,6 +329,11 @@ export interface ShardEvents {
     servers: string[];
     reason: 'start' | 'expiring';
   }): Promise<ShardTokens>;
+  /**
+   * Resolves when the trial may start under the run's limits; its `trial`
+   * progress event gives the room back. Without it, every trial may start.
+   */
+  acquire?(key: TrialKey): Promise<void>;
 }
 
 /** How a shard ended. A shard that isn't `ok` leaves its trials missing. */

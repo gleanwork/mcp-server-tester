@@ -40,6 +40,9 @@ const WorkerMessageSchema = z.discriminatedUnion('type', [
     servers: z.array(z.string()),
     reason: z.enum(['start', 'expiring']),
   }),
+  // Before a trial starts: wait for room under the run's limits. The trial's
+  // `trial` message gives it back.
+  z.object({ type: z.literal('acquire'), key: TrialKeySchema }),
   z.object({
     type: z.literal('trial'),
     key: TrialKeySchema,
@@ -67,6 +70,7 @@ const CoordinatorMessageSchema = z.discriminatedUnion('type', [
     env: z.record(z.string(), z.string()).optional(),
   }),
   z.object({ type: z.literal('cancel'), reason: z.string() }),
+  z.object({ type: z.literal('granted'), key: TrialKeySchema }),
 ]);
 export type CoordinatorMessage = z.infer<typeof CoordinatorMessageSchema>;
 /** What a `tokens` message carries. */
