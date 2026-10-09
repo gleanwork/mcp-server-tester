@@ -37,6 +37,7 @@ The design (`docs/design/README.md`) plans `--env`, shards, gather and `--resume
   - `--resume <run-id>` collects only the missing trials.
 - **Linux Cowork gets an owned-desktop mode.** A shard runs several variants on one desktop, so MST must write each variant's managed settings, as it already does on macOS.
   - A worker image sets `MST_DESKTOP_OWNED=1` and makes `/etc/claude-desktop/managed-settings.json` writable by the desktop user. MST then writes the file for each variant and restores it at the end.
+  - Claude Desktop reads managed settings when it starts, so the image also sets `MST_DESKTOP_RESTART` to a command that restarts it. MST runs that command after writing the file; the driver itself still never starts or stops the desktop.
   - Without the variable, Linux preparation stays read-only, as it is today.
 - **`run.json` records where the run ran**: the environment's name and options, the shard count, and each shard's image digest and client version. Each trace records its shard. Because options are recorded, they must not hold secrets.
 
