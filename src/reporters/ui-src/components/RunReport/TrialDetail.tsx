@@ -42,7 +42,7 @@ function Block({ label, text }: { label: string; text: string }) {
       <summary className="cursor-pointer px-2 py-1 text-xs text-muted-foreground">
         {label}
       </summary>
-      <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words px-2 pb-2 font-mono text-xs">
+      <pre className="max-h-64 overflow-auto whitespace-pre-wrap wrap-break-word px-2 pb-2 font-mono text-xs">
         {text}
       </pre>
     </details>
@@ -102,7 +102,7 @@ function Answer({ text }: { text: string }) {
   const long = text.length > EXCERPT;
   return (
     <div className="grid gap-1">
-      <blockquote className="whitespace-pre-wrap break-words border-l-2 pl-2 text-xs text-foreground/90">
+      <blockquote className="whitespace-pre-wrap wrap-break-word border-l-2 pl-2 text-xs text-foreground/90">
         {long ? `${text.slice(0, EXCERPT).trimEnd()}…` : text}
       </blockquote>
       {long && <Block label="full answer" text={text} />}
@@ -172,7 +172,7 @@ export function TrialView({
       )}
       {trial.events.length > 0 ? (
         <details>
-          <summary className="cursor-pointer break-words font-mono text-xs text-muted-foreground">
+          <summary className="cursor-pointer wrap-break-word font-mono text-xs text-muted-foreground">
             {traceSummary(trial)}
           </summary>
           <ol className="mt-2 grid gap-2">

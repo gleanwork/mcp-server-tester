@@ -125,7 +125,7 @@ function RangePlot({
           }}
         />
         <span
-          className={`absolute top-[3px] -ml-[5px] h-2.5 w-2.5 rounded-full ${color}`}
+          className={`absolute top-[3px] ml-[-5px] h-2.5 w-2.5 rounded-full ${color}`}
           style={{ left: `${pos(change.mean)}%` }}
         />
       </div>
