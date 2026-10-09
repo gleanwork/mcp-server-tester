@@ -4,6 +4,8 @@
  * the writes the proxies recorded are matched to the trial's tool calls
  * (same server, tool and arguments), and each match is marked
  * `simulatedWrite: true`, so graders and reports know the write didn't happen.
+ * That is in the trace's events and in the client response's own copies
+ * (`events`, and `toolCalls`, which may name the tool `<server>.<tool>`).
  */
 import { isDeepStrictEqual } from 'node:util';
 import type { CaseExecution } from './caseExecution.js';
@@ -33,7 +35,8 @@ function markSimulatedWrites(
       ({ key, record }) =>
         !used.has(key) &&
         record.server === event.server &&
-        record.tool === event.name &&
+        (record.tool === event.name ||
+          `${record.server}.${record.tool}` === event.name) &&
         isDeepStrictEqual(record.arguments ?? {}, event.arguments ?? {})
     );
     if (!match) continue;
@@ -68,9 +71,12 @@ export function withSimulatedWriteMarks(
     ).flat();
     if (records.length === 0) return execution;
     // The trace and the response may hold the same event objects, or copies.
-    const lists = [execution.trace?.events, execution.response.events].filter(
-      (events): events is TraceEvent[] => Array.isArray(events)
-    );
+    const { toolCalls } = execution.response as { toolCalls?: unknown };
+    const lists = [
+      execution.trace?.events,
+      execution.response.events,
+      toolCalls,
+    ].filter((events): events is TraceEvent[] => Array.isArray(events));
     const seen = new Set<string>(used);
     for (const events of lists) {
       const local = new Set(seen);

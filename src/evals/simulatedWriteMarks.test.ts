@@ -71,6 +71,49 @@ describe('withSimulatedWriteMarks', () => {
     }
   });
 
+  it("marks the response's own tool calls, named <server>.<tool>", async () => {
+    const dir = await fs.mkdtemp(join(os.tmpdir(), 'mst-marks-'));
+    try {
+      const file = join(dir, 'slack.jsonl');
+      await recordSimulatedWrite(file, {
+        time: '',
+        server: 'slack',
+        tool: 'send',
+        arguments: { text: 'one' },
+        reply: '',
+      });
+      const events = [call('send', { text: 'one' })];
+      const toolCalls = [
+        call('slack.search', {}),
+        call('slack.send', { text: 'one' }),
+      ];
+      const execute = withSimulatedWriteMarks(
+        async () => ({
+          kind: 'completed',
+          response: {
+            success: true,
+            response: '',
+            toolCalls,
+            events: events.map((event) => ({ ...event })),
+          } as never,
+          trace: { events, finalText: '' } as never,
+        }),
+        [file]
+      );
+      const execution = (await execute({ id: 'c' } as never)) as {
+        trace: { events: TraceEvent[] };
+        response: { events: TraceEvent[]; toolCalls: TraceEvent[] };
+      };
+      const marked = (list: TraceEvent[]) =>
+        list.map((event) => event.simulatedWrite === true);
+      expect(marked(execution.trace.events)).toEqual([true]);
+      expect(marked(execution.response.events)).toEqual([true]);
+      expect(marked(execution.response.toolCalls)).toEqual([false, true]);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('leaves a failed trial alone', async () => {
     const failed: CaseExecution = {
       kind: 'failed',

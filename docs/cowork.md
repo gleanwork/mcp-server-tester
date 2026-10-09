@@ -695,8 +695,9 @@ With the flag, MST passes each connector's `launch` a private file,
 write (`mst.simulated-write/v1`: server, tool, arguments, reply). A connector
 whose launch doesn't pass it on keeps planned-write results, and the run says
 so. After each trial, MST marks the trial's tool calls the proxy answered
-(same server, tool and arguments) `simulatedWrite: true` in its trace events,
-so judges and reports know the write never happened; `output` is the reply.
+(same server, tool and arguments) `simulatedWrite: true`, in its trace events
+and in the client response's `events` and `toolCalls`, so judges and reports
+know the write never happened; `output` is the reply.
 The files are deleted when the run ends. A write the proxy can't record gets
 the planned-write result instead.
 
