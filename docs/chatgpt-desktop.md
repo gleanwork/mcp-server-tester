@@ -445,3 +445,11 @@ Linux controller accounting is in `externalHost.nativeController`, with
 `provider: 'linux-atspi'`, the selected surface, and planner/cost marked
 `not-applicable`. It is separate from native model usage and from macOS
 `externalHost.computerUse` planner accounting.
+
+### Codex resource discovery
+
+The app-owned `codex.list_mcp_resources` and
+`codex.list_mcp_resource_templates` helpers are recorded as host tools. They do
+not satisfy `requireMcpCalls`; external MCP calls still require the configured
+server selection. The `codex` and `cua_repl` server labels are reserved for
+app-owned namespaces. Rename an external server configured with either label.

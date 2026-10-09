@@ -481,6 +481,54 @@ describe('marker-free native correlation', () => {
 });
 
 describe('ChatGPT native telemetry', () => {
+  it.each(['list_mcp_resources', 'list_mcp_resource_templates'])(
+    'classifies the native codex %s helper as built-in while preserving MCP calls',
+    (tool) => {
+      const records = turn();
+      const item = records[3]!.payload.item as Record<string, unknown>;
+      item.server = 'codex';
+      item.tool = tool;
+      const trace = parseChatgptTrace(
+        serialize(records, 'session', 'Codex Desktop'),
+        marker,
+        0,
+        Infinity,
+        { surface: 'codex' }
+      )!;
+      expect(trace.toolCalls).toMatchObject([
+        {
+          source: 'host',
+          server: 'codex',
+          name: tool,
+          rawName: `codex.${tool}`,
+        },
+        { source: 'mcp', server: 'beta', name: 'lookup' },
+      ]);
+      expect(trace.telemetry).toMatchObject({
+        mcpToolCallCount: 1,
+        hostToolCallCount: 1,
+        mcpWallDurationMs: 200,
+        hostToolDurationMs: 200,
+      });
+      item.server = 'alpha';
+      expect(
+        parseChatgptTrace(serialize(records), marker)!.toolCalls[0]
+      ).toMatchObject({
+        source: 'mcp',
+        server: 'alpha',
+        name: tool,
+      });
+      item.server = 'codex';
+      item.tool = 'unknown_future_tool';
+      expect(
+        parseChatgptTrace(serialize(records), marker)!.toolCalls[0]
+      ).toMatchObject({
+        source: 'mcp',
+        server: 'codex',
+        name: 'unknown_future_tool',
+      });
+    }
+  );
   it('classifies confirmed built-in CUA calls as host tools and separates MCP timing', () => {
     const records = turn();
     const item = records[3]!.payload.item as Record<string, unknown>;
@@ -1069,6 +1117,39 @@ describe('ChatGPT native response_item tool calls', () => {
     expect(trace.limitations.join(' ')).not.toContain('code-mode');
     expect(trace.usage).toMatchObject({ inputTokens: 100, durationMs: 5000 });
   });
+
+  it.each(['list_mcp_resources', 'list_mcp_resource_templates'])(
+    'keeps direct and code-mode codex %s helpers out of MCP evidence',
+    (name) => {
+      const direct = parse(
+        call(
+          'resource',
+          { name, namespace: 'mcp__codex', arguments: '{}' },
+          1,
+          { at: 2 }
+        ),
+        { surface: 'codex' }
+      );
+      expect(direct.toolCalls).toMatchObject([
+        { source: 'host', server: 'codex', name, rawName: `codex.${name}` },
+      ]);
+      expect(direct.telemetry).toMatchObject({
+        mcpToolCallCount: 0,
+        hostToolCallCount: 1,
+      });
+      const nested = parse(
+        exec('resource', `await tools.mcp__codex__${name}({})`, 1, 2)
+      );
+      expect(nested.toolCalls).toMatchObject([
+        { source: 'host', name: 'exec' },
+        { source: 'host', server: 'codex', name, rawName: `codex.${name}` },
+      ]);
+      expect(nested.telemetry).toMatchObject({
+        mcpToolCallCount: 0,
+        hostToolCallCount: 2,
+      });
+    }
+  );
 
   it('attributes nested code-mode MCP references inside exec to the configured label', () => {
     const trace = parse(

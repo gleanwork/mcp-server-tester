@@ -64,9 +64,17 @@ function splitMcpName(
   return match ? { server: match[1]!, tool: match[2]! } : undefined;
 }
 
-/** Confirmed ChatGPT Work built-in namespace; never allow a configured MCP server to impersonate it. */
+/** App-owned namespaces must not be impersonated by configured MCP servers. */
 export function isChatgptBuiltinServer(server: string): boolean {
-  return server === 'cua_repl';
+  return server === 'cua_repl' || server === 'codex';
+}
+
+function isChatgptBuiltinTool(server: string, tool: string): boolean {
+  return (
+    (server === 'cua_repl' && tool === 'js') ||
+    (server === 'codex' &&
+      (tool === 'list_mcp_resources' || tool === 'list_mcp_resource_templates'))
+  );
 }
 interface Event {
   timestamp?: string;
@@ -461,9 +469,7 @@ export function parseChatgptTrace(
         // Native event types, and the confirmed app-owned server/tool pair, define
         // host provenance. Generic names or untrusted tool-result metadata do not.
         const source =
-          !isMcp || (isChatgptBuiltinServer(server!) && name === 'js')
-            ? 'host'
-            : 'mcp';
+          !isMcp || isChatgptBuiltinTool(server!, name) ? 'host' : 'mcp';
         calls.set(id, {
           source,
           id,
@@ -760,9 +766,7 @@ function nativeResponseCall(
     const argumentsValue =
       parsedArgs ?? object(executed[0]?.arguments) ?? ({} as ObjectValue);
     const source =
-      !split || (isChatgptBuiltinServer(split.server) && split.tool === 'js')
-        ? 'host'
-        : 'mcp';
+      !split || isChatgptBuiltinTool(split.server, split.tool) ? 'host' : 'mcp';
     return {
       calls: [
         {
@@ -805,8 +809,7 @@ function nativeResponseCall(
       const split = splitMcpName(qualified, configured)!;
       const runs = executed.filter((entry) => entry.name === qualified);
       for (const run of runs.length ? runs : [undefined]) {
-        const builtin =
-          isChatgptBuiltinServer(split.server) && split.tool === 'js';
+        const builtin = isChatgptBuiltinTool(split.server, split.tool);
         nested.push({
           source: builtin ? 'host' : 'mcp',
           id: `${id}#${nested.length + 1}`,
