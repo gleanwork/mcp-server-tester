@@ -239,29 +239,29 @@ const DatasetObjectSchema = z
 const DatasetStringSchema = z.string().min(1);
 // One branch per input type rather than a union, so an error names the
 // object's problem (a removed `ref`, a bad `source`), not "Invalid input".
+// Typed as the union it checks, so `EvalConfigInput` keeps both forms.
+type DatasetEntry =
+  | z.output<typeof DatasetStringSchema>
+  | z.output<typeof DatasetObjectSchema>;
+type DatasetEntryInput =
+  | z.input<typeof DatasetStringSchema>
+  | z.input<typeof DatasetObjectSchema>;
 const DatasetConfigSchema = z
   .unknown()
-  .transform(
-    (
-      value,
-      context
-    ):
-      | z.output<typeof DatasetStringSchema>
-      | z.output<typeof DatasetObjectSchema> => {
-      const result =
-        typeof value === 'string'
-          ? DatasetStringSchema.safeParse(value)
-          : DatasetObjectSchema.safeParse(value);
-      if (result.success) return result.data;
-      for (const issue of result.error.issues)
-        context.addIssue({
-          code: 'custom',
-          message: issue.message,
-          path: issue.path,
-        });
-      return z.NEVER;
-    }
-  );
+  .transform((value, context): DatasetEntry => {
+    const result =
+      typeof value === 'string'
+        ? DatasetStringSchema.safeParse(value)
+        : DatasetObjectSchema.safeParse(value);
+    if (result.success) return result.data;
+    for (const issue of result.error.issues)
+      context.addIssue({
+        code: 'custom',
+        message: issue.message,
+        path: issue.path,
+      });
+    return z.NEVER;
+  }) as unknown as z.ZodType<DatasetEntry, DatasetEntryInput>;
 const MetricConfigSchema = extensionReferenceSchema('metric');
 const JudgeConfigSchema = extensionReferenceSchema('judge');
 const PairwiseJudgeConfigSchema = extensionReferenceSchema('pairwise-judge');
