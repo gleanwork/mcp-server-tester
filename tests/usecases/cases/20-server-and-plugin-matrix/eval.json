@@ -1,13 +1,13 @@
 {
-  "name": "variants-native-vs-aggregate",
+  "name": "server-and-plugin-matrix",
   "datasets": ["./dataset.json"],
   "servers": {
     "github": "{{server github}}",
     "tracker": "{{server tracker}}",
     "chat": "{{server chat}}",
     "mail": "{{server mail}}",
-    "agg": "{{server aggregate}}",
-    "gateway": "{{server gateway}}"
+    "docs": "{{server docs}}",
+    "wiki": "{{server wiki}}"
   },
   "client": "usecase/client/model",
   "model": "claude-sonnet-4-5",
@@ -15,11 +15,11 @@
     "policy": [
       {
         "when": {
-          "plugin": "aggregate-plugin"
+          "plugin": "docs-plugin"
         },
         "steps": [
           {
-            "skill": "company-search"
+            "skill": "docs-search"
           },
           {
             "call": {
@@ -65,29 +65,29 @@
   ],
   "variants": [
     {
-      "name": "native-connectors",
+      "name": "four-servers",
       "servers": ["github", "tracker", "chat", "mail"]
     },
     {
-      "name": "aggregate-mcp-gateway",
-      "servers": ["agg", "gateway"]
+      "name": "docs-wiki",
+      "servers": ["docs", "wiki"]
     },
     {
-      "name": "aggregate-mcp-native-connectors",
-      "servers": ["agg", "github", "tracker", "chat", "mail"]
+      "name": "docs-four-servers",
+      "servers": ["docs", "github", "tracker", "chat", "mail"]
     },
     {
-      "name": "aggregate-plugin-gateway",
-      "servers": ["agg", "gateway"],
+      "name": "docs-wiki-plugin",
+      "servers": ["docs", "wiki"],
       "clientOptions": {
-        "plugins": ["aggregate-plugin"]
+        "plugins": ["docs-plugin"]
       }
     },
     {
-      "name": "aggregate-plugin-native-connectors",
-      "servers": ["agg", "github", "tracker", "chat", "mail"],
+      "name": "docs-four-servers-plugin",
+      "servers": ["docs", "github", "tracker", "chat", "mail"],
       "clientOptions": {
-        "plugins": ["aggregate-plugin"]
+        "plugins": ["docs-plugin"]
       }
     }
   ],

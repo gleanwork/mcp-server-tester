@@ -45,7 +45,7 @@ export const VERDICT_TONE: Record<
   unclear: 'neutral',
 };
 
-/** "aggregated 100% · native 4%": the top tools (or servers) by share of calls. */
+/** "search 62% · read_document 30%": the top tools (or servers) by share of calls. */
 function toolsText(tools: RunReportVariant['toolsUsed']): string {
   if (tools.length === 0) return 'no tool calls';
   const top = tools.slice(0, 3).map((t) => `${t.name} ${pct(t.share)}`);

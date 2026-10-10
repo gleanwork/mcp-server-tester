@@ -30,7 +30,7 @@
     },
     {
       "path": "variants[name=default].result.caseResults[0].trialResults[0].trace.events[0].server",
-      "equals": "agg"
+      "equals": "docs"
     },
     {
       "path": "variants[name=default].result.caseResults[0].trace",

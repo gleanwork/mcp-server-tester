@@ -53,9 +53,9 @@ describe('startToolSurfaceProxy', () => {
   it.each(['legacy', '2026-07-28'] as const)(
     'serves the variant to a %s client and records calls under original names',
     async (protocol) => {
-      const proxy = await start([catalog('aggregate', 'agg')]);
+      const proxy = await start([catalog('docs', 'docs')]);
       const [config] = proxy.serversFor('case-1');
-      expect(config).toMatchObject({ transport: 'http', label: 'agg' });
+      expect(config).toMatchObject({ transport: 'http', label: 'docs' });
       expect((config as { serverUrl: string }).serverUrl).toMatch(
         /^http:\/\/127\.0\.0\.1:\d+\//
       );
@@ -88,7 +88,7 @@ describe('startToolSurfaceProxy', () => {
       expect(activity.listedTools).toBe(true);
       expect(activity.calls).toMatchObject([
         {
-          server: 'agg',
+          server: 'docs',
           name: 'find_skills',
           rawName: 'find_more_skills_and_tools',
           arguments: { query: 'create ticket' },
@@ -99,7 +99,7 @@ describe('startToolSurfaceProxy', () => {
         listedTools: false,
         calls: [],
       });
-      expect(proxy.originalName('find_more_skills_and_tools', 'agg')).toBe(
+      expect(proxy.originalName('find_more_skills_and_tools', 'docs')).toBe(
         'find_skills'
       );
     },
@@ -108,7 +108,7 @@ describe('startToolSurfaceProxy', () => {
 
   it('rejects a variant that does not fit the servers, and closes them', async () => {
     await expect(
-      startToolSurfaceProxy([catalog('aggregate', 'agg')], {
+      startToolSurfaceProxy([catalog('docs', 'docs')], {
         id: 'bad',
         tools: { missing: { description: 'x' } },
       })
@@ -116,7 +116,7 @@ describe('startToolSurfaceProxy', () => {
   }, 30_000);
 
   it('answers 404 off its endpoints, and closes once', async () => {
-    const proxy = await start([catalog('aggregate', 'agg')]);
+    const proxy = await start([catalog('docs', 'docs')]);
     const url = new URL(
       (proxy.serversFor('s')[0] as { serverUrl: string }).serverUrl
     );
@@ -167,21 +167,22 @@ const call = (name: string, server?: string) => ({
 });
 
 describe('settleProxiedTrace', () => {
-  const two: MCPConfig[] = [
-    catalog('aggregate', 'agg'),
-    catalog('aggregate', 'b'),
-  ];
+  const two: MCPConfig[] = [catalog('docs', 'docs'), catalog('docs', 'b')];
 
   it('maps calls named by server field, label prefix, or the one server', () => {
     const trace: ClientRunResult = {
       finalText: '',
-      events: [call('find_more', 'agg'), call('agg.find_more'), call('other')],
+      events: [
+        call('find_more', 'docs'),
+        call('docs.find_more'),
+        call('other'),
+      ],
     };
     expect(
       settleProxiedTrace(trace, stubProxy(), true, two, 'v').events
     ).toMatchObject([
-      { name: 'find_skills', server: 'agg', rawName: 'find_more' },
-      { name: 'agg.find_skills', rawName: 'agg.find_more' },
+      { name: 'find_skills', server: 'docs', rawName: 'find_more' },
+      { name: 'docs.find_skills', rawName: 'docs.find_more' },
       { name: 'other' },
     ]);
     const unlabelled: MCPConfig[] = [{ transport: 'stdio', command: 'x' }];
@@ -220,7 +221,7 @@ describe('settleProxiedTrace', () => {
 
 describe('prepareClientBatch with a tool variant', () => {
   const evalConfig = { name: 'm', datasets: [] };
-  const servers: MCPConfig[] = [catalog('aggregate', 'agg')];
+  const servers: MCPConfig[] = [catalog('docs', 'docs')];
 
   it('gives each request its own proxy scope and settles each trace', async () => {
     const seen: string[] = [];
@@ -347,18 +348,21 @@ describe('settleProxiedTrace tool searches', () => {
             kind: 'tool_search',
             source: 'builtin',
             name: 'ToolSearch',
-            results: [{ name: 'find_more' }, { name: 'search', server: 'agg' }],
+            results: [
+              { name: 'find_more' },
+              { name: 'search', server: 'docs' },
+            ],
           },
         ],
       },
       stubProxy(true, { find_more: 'find_skills' }),
       true,
-      [catalog('aggregate', 'agg')],
+      [catalog('docs', 'docs')],
       'v'
     );
     expect(settled.events[0]?.results).toEqual([
       { name: 'find_skills' },
-      { name: 'search', server: 'agg' },
+      { name: 'search', server: 'docs' },
     ]);
   });
 });
@@ -384,7 +388,7 @@ describe('a batch client that connects to one server set for the batch', () => {
       check: MCPConfig[];
     }) => Promise<void>
   ) {
-    const proxy = await start([catalog('aggregate', 'agg')]);
+    const proxy = await start([catalog('docs', 'docs')]);
     const seen: string[] = [];
     const queues = await prepareClientBatch(
       {
@@ -407,7 +411,7 @@ describe('a batch client that connects to one server set for the batch', () => {
         { id: 'b', input: 'y' },
       ],
       { type: 'test/batch' },
-      [catalog('aggregate', 'agg')],
+      [catalog('docs', 'docs')],
       { evalConfig },
       { id: 'v2', proxy: async () => proxy }
     );
@@ -417,7 +421,7 @@ describe('a batch client that connects to one server set for the batch', () => {
   it('serves the whole batch on one endpoint and checks once that the client listed tools', async () => {
     const { queues, seen } = await runBatchWith(async ({ servers, check }) => {
       expect(check[0]).not.toEqual(servers[0]);
-      expect(check[0]).toMatchObject({ label: 'agg' });
+      expect(check[0]).toMatchObject({ label: 'docs' });
       await listFrom(check);
       await listFrom(servers);
     });

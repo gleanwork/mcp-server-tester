@@ -8,7 +8,7 @@
         "toolsTriggered": {
           "calls": [
             {
-              "name": "company_search",
+              "name": "docs_search",
               "required": true
             }
           ]

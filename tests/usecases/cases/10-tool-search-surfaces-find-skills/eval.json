@@ -2,7 +2,7 @@
   "name": "find-skills-tool-search",
   "datasets": ["./dataset.json"],
   "servers": {
-    "agg": "{{server aggregate}}"
+    "docs": "{{server docs}}"
   },
   "client": "usecase/client/model",
   "clientOptions": {
@@ -40,7 +40,7 @@
       "name": "description-v2",
       "tools": {
         "find_skills": {
-          "description": "Find skills and tools for connected apps: create tracker tickets, post chat messages, share files."
+          "description": "Find skills and tools: create tracker tickets, post chat messages, share files."
         }
       }
     }

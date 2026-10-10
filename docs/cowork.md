@@ -194,17 +194,9 @@ approval inspections within the original per-case action budget; prompts are
 never resubmitted. Follow-up usage is recorded under
 `clientTelemetry.computerUse.hitlFollowups`.
 
-MST does not configure or observe Cowork's own connectors (the ones added from
-Cowork's connector directory and signed in to in the Claude account). Anthropic's
-cloud calls those vendors, so there is nowhere to put a dry-run proxy: MST can't
-block their writes, record their calls fully, or swap their tool descriptions,
-and a batch's setup replaces only the locally configured MCP servers, not
-these. Before a run, disconnect any that
-could write to real accounts, or use test accounts. Servers in the eval config
-are the only ones MST controls; to compare against a vendor's server, add it
-there behind the dry-run proxy (see [Dry-run proxy](#dry-run-proxy)). See the
-[known gap](./design/explainer.md#known-gap-coworks-own-connectors) for the
-options being considered.
+MST does not configure or observe connectors added from Cowork's own connector
+directory, so disconnect any that could write to real accounts before a run, or
+use test accounts.
 
 ## Run an installed release
 
@@ -276,8 +268,7 @@ stays read-only.
 can run Cowork shards on Linux workers in owned-desktop mode. Two limits apply
 today: connector servers and variants with tool metadata can't run in an
 environment yet, because their tokens and proxies stay on the coordinator. MST
-ships no `docker` environment or desktop image yet; both are planned
-(DEVPLAT-1451).
+ships no `docker` environment or desktop image yet; both are planned.
 
 Submission opens the native deep link through the prepared environment's `xdg-open`
 handler, then attempts one semantic `Start task` action. Alternatively, set

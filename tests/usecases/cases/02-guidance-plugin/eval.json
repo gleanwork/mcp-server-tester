@@ -2,7 +2,7 @@
   "name": "guidance-plugin-effect",
   "datasets": ["./dataset.json"],
   "servers": {
-    "agg": "{{server aggregate}}"
+    "docs": "{{server docs}}"
   },
   "client": "usecase/client/model",
   "clientOptions": {

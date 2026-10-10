@@ -1,0 +1,15 @@
+{
+  "name": "wiki",
+  "tools": [
+    {
+      "name": "search_pages",
+      "description": "Search wiki pages.",
+      "response": "Pages for \"{query}\": Payments runbook (renew the gateway certificate every 90 days); Checkout outage notes (gateway cert expired)."
+    },
+    {
+      "name": "get_page",
+      "description": "Read a wiki page by id.",
+      "response": "Checkout outage notes: gateway cert expired."
+    }
+  ]
+}

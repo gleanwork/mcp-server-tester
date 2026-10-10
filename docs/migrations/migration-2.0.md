@@ -665,8 +665,8 @@ Define each server once under top-level `servers`, keyed by its label, and list 
 // Before
 "servers": [{ "label": "acme", "transport": "http", "serverUrl": "https://acme.example/mcp" }],
 "variants": [
-  { "name": "aggregated" },
-  { "name": "native", "servers": [{ "label": "slack", "transport": "http", "serverUrl": "https://slack.example/mcp" }] }
+  { "name": "current" },
+  { "name": "candidate", "servers": [{ "label": "slack", "transport": "http", "serverUrl": "https://slack.example/mcp" }] }
 ]
 
 // 2.0
@@ -675,8 +675,8 @@ Define each server once under top-level `servers`, keyed by its label, and list 
   "slack": { "transport": "http", "serverUrl": "https://slack.example/mcp" }
 },
 "variants": [
-  { "name": "aggregated", "servers": ["acme"] },
-  { "name": "native", "servers": ["slack"] }
+  { "name": "current", "servers": ["acme"] },
+  { "name": "candidate", "servers": ["slack"] }
 ]
 ```
 

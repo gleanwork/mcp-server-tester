@@ -1,10 +1,10 @@
 {
-  "name": "aggregate",
+  "name": "docs",
   "tools": [
     {
       "name": "search",
-      "description": "Search company documents.",
-      "response": "Top results for \"{query}\": [doc-17] Q3 planning notes (Drive); [inc-482] Checkout outage postmortem (Tracker); [msg-9] #payments thread on the outage (Chat)."
+      "description": "Search documents.",
+      "response": "Top results for \"{query}\": [doc-17] Q3 planning notes; [inc-482] Checkout outage postmortem; [doc-9] Payments runbook."
     },
     {
       "name": "read_document",
@@ -14,7 +14,7 @@
     {
       "name": "find_skills",
       "description": "Find skills.",
-      "response": "Skills: jira_create_issue, slack_post_message, drive_share_file."
+      "response": "Skills: create_ticket, post_message, share_file."
     }
   ]
 }

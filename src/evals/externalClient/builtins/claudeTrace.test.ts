@@ -75,7 +75,7 @@ describe('Claude local-agent trace parsing', () => {
             {
               type: 'tool_use',
               id,
-              name: 'mcp__glean__enterprise_search',
+              name: 'mcp__acme__search',
               input: { query: 'MST 2.0' },
             },
           ],

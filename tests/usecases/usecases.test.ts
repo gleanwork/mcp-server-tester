@@ -247,7 +247,7 @@ function readRun(summaryPath: string): Record<string, unknown> {
 
 /**
  * Resolve a dotted path. A segment may select from an array with
- * `[key=value]` (for example `variants[name=native]`) or an index `[0]`;
+ * `[key=value]` (for example `variants[name=baseline]`) or an index `[0]`;
  * `length` gives an array's length or an object's key count. Segments are
  * split on `.` first, so selector values can't contain dots.
  */

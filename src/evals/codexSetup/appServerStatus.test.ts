@@ -160,7 +160,7 @@ describe('bounded JSONL stream channel', () => {
     const input = new PassThrough();
     const output = new PassThrough();
     const jsonl = new StreamJsonlChannel(input, output);
-    // Seven real native connectors list ~600 KB of tool schemas in one line.
+    // Seven real connectors list ~600 KB of tool schemas in one line.
     const row = `{"data":"${'x'.repeat(1024 * 1024)}"}`;
     output.write(`${row}\n`);
     expect((await jsonl.readLine()).length).toBe(row.length);

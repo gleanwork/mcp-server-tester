@@ -8,7 +8,7 @@
 
 An author runs `mst auth` once. After that, every local `mst run` on any client reaches every server in every variant with a fresh token. The author doesn't edit `.env` or copy tokens, and no secret ever goes into a config or a result.
 
-The connector contract is done when the walkthrough's three variants (`aggregated`, `vendor-mcp`, `aggregated-plus-vendor-mcp`) authenticate and run one case each in local Cowork on macOS.
+The connector contract is done when the walkthrough's three variants (`current`, `rewritten`, `rewritten-terse`) authenticate and run one case each in local Cowork on macOS.
 
 ## Who owns what
 
@@ -185,8 +185,8 @@ MST ships `mst/credential-store/local`. It stores files at `~/.mcp-server-tester
 | Unit (MST)     | A fake authorization server covering authorization code with PKCE, DCR, device flow, client credentials, rotating refresh, revocation and under-scoped grants. Also: grant grouping and scope union, a lock that allows one redemption under concurrency, renewal rewriting `tokenFile`, expiry becoming an infrastructure error, and the preflight message. |
 | Contract (MST) | A fixture plugin with connectors and a fake vendor MCP server. `mst auth`, `status`, `revoke`, then `mst run` on the `mst` client: the token reaches the server and renews. A scan of the run directory and the logs finds no token.                                                                                                                         |
 | Cowork (MST)   | Platform doubles: token files staged in the transaction, removed on success, on failure and on cancel.                                                                                                                                                                                                                                                       |
-| Plugin (acme)  | Connectors for 7 vendor servers and one direct HTTP server. `launch` returns the dry-run proxy. Writes are blocked: zero write calls reach a fake vendor.                                                                                                                                                                                                    |
-| Live (manual)  | `mst auth` against all 8 servers. Then 1 case × 3 variants in local Cowork. Then one run longer than an hour, to show Google renewal.                                                                                                                                                                                                                        |
+| Plugin (acme)  | Connectors for two servers behind the dry-run proxy and one direct HTTP server. `launch` returns the dry-run proxy. Writes are blocked: zero write calls reach a fake vendor.                                                                                                                                                                                |
+| Live (manual)  | `mst auth` against all 3 servers. Then 1 case × 3 variants in local Cowork. Then one run longer than an hour, to show token renewal.                                                                                                                                                                                                                         |
 
 ## Out of scope
 
@@ -196,7 +196,7 @@ MST ships `mst/credential-store/local`. It stores files at `~/.mcp-server-tester
 
 ## Decisions
 
-1. **A server that guards its own writes** is a plugin connector like any other (`acme/connector/search`), without `launch`: the client connects to it directly over HTTP.
+1. **A server that guards its own writes** is a plugin connector like any other (`acme/connector/acme`), without `launch`: the client connects to it directly over HTTP.
 2. **Store key** is per user (`<namespace>.<grant>`), so one sign-in serves every eval config.
 3. **Proxy runtime** is Node, built into MST (`dryRunProxyServer()`), so a Mac needs nothing beyond what MST needs.
 4. **`mst auth` with several missing grants** signs in to each in turn, and reports every failure at the end.
