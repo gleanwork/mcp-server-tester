@@ -5,14 +5,35 @@
  */
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import packageJson from '../../../package.json' with { type: 'json' };
 import { getClient } from '../builtinClients.js';
 import { redactClientSecrets } from '../clientSecrets.js';
+import {
+  expandWorkerConnectors,
+  writeTokenFile,
+  type WorkerConnectors,
+} from '../connectorServers.js';
+import {
+  isConnectorServer,
+  variantToolMetadata,
+  type ConnectorServerConfig,
+  type EvalServerConfig,
+} from '../evalConfig.js';
 import { isInfrastructureError } from '../infrastructureFailure.js';
+import { proxiedBatch, type ProxiedBatch } from '../prepareClientBatch.js';
 import { resolveServerSecrets } from '../serverSecrets.js';
+import { markResultSimulatedWrites } from '../simulatedWriteMarks.js';
+import {
+  startToolSurfaceProxy,
+  usesToolSurfaceProxy,
+  withoutToolVariant,
+  type ToolSurfaceProxy,
+} from '../toolSurfaceProxy.js';
 import { installPlugins } from '../../plugins/extensions.js';
 import { loadPlugins } from '../../plugins/loadPlugins.js';
+import type { MCPConfig } from '../../config/mcpConfig.js';
 import type {
   ClientBatchRequest,
   ClientRunContext,
@@ -136,9 +157,24 @@ export async function collectShard(
   );
   heartbeat.unref();
 
+  // Connector servers arrive as declarations; this machine expands them.
+  const declarations = new Map<string, ConnectorServerConfig>();
+  for (const batch of bundle.batches)
+    for (const request of batch.requests)
+      for (const server of request.input.servers as EvalServerConfig[])
+        if (isConnectorServer(server))
+          declarations.set(server.label ?? server.connector, server);
+  let connectors: WorkerConnectors | undefined;
+  // With `simulateWrites`, where this machine's dry-run proxies record writes.
+  let simulatedWritesDir: string | undefined;
+  // Simulated writes already matched to a trial, across trials.
+  const usedWrites = new Set<string>();
+
   // Values the worker never lets out in an error: tokens and secrets.
   const secrets = new Set<string>();
   let runEnv: Record<string, string> = {};
+  // Direct HTTP connectors' tokens, by the env var their server entry names.
+  const connectorEnv: Record<string, string> = {};
   let renewal: NodeJS.Timeout | undefined;
   async function receiveTokens(reason: 'start' | 'expiring'): Promise<void> {
     if (cancelled) return;
@@ -151,6 +187,20 @@ export async function collectShard(
       if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(server))
         throw new Error(`"${server}" can't name a token file.`);
       secrets.add(token.accessToken);
+      // A connector server's token goes where its expansion reads it.
+      const delivery = connectors?.deliveries.get(server);
+      if (delivery) {
+        if (delivery.file) {
+          await fs.mkdir(path.dirname(delivery.file), {
+            recursive: true,
+            mode: 0o700,
+          });
+          await writeTokenFile(delivery.file, token.accessToken);
+        }
+        for (const name of delivery.envNames)
+          connectorEnv[name] = token.accessToken;
+        continue;
+      }
       await writeFileAtomically(
         path.join(tokensDir, server),
         token.accessToken,
@@ -184,8 +234,16 @@ export async function collectShard(
     batch: number,
     index: number,
     key: TrialKey,
-    result: ClientRunResult
+    trace: ClientRunResult
   ): Promise<void> {
+    // The writes this machine's proxies simulated, marked in the trace.
+    const result = connectors?.simulatedWriteFiles.length
+      ? await markResultSimulatedWrites(
+          trace,
+          connectors.simulatedWriteFiles,
+          usedWrites
+        )
+      : trace;
     const stored: ClientRunResult = result.error
       ? { ...result, error: redactClientSecrets(result.error, [...secrets]) }
       : result;
@@ -209,14 +267,44 @@ export async function collectShard(
   }
 
   try {
-    await receiveTokens('start');
-    const runtimeEnv = { ...runEnv, MST_TOKENS_DIR: tokensDir };
+    // Plugins first: their connectors expand before any token arrives.
     installPlugins(
       await loadPlugins(bundle.plugins, { baseDir: options.bundleDir })
     );
+    if (declarations.size) {
+      if (bundle.evalConfig.simulateWrites === true)
+        simulatedWritesDir = await fs.mkdtemp(
+          path.join(os.tmpdir(), 'mst-simulated-writes-')
+        );
+      connectors = await expandWorkerConnectors([...declarations.values()], {
+        tokenDirectory: path.join(tokensDir, 'connectors'),
+        ...(simulatedWritesDir
+          ? { simulatedWritesDirectory: simulatedWritesDir }
+          : {}),
+      });
+    }
+    await receiveTokens('start');
+    const runtimeEnv = {
+      ...runEnv,
+      ...connectorEnv,
+      MST_TOKENS_DIR: tokensDir,
+    };
     // Servers arrive as declared; their secrets come from this machine's
     // environment and the coordinator's `tokens`.
     const serverEnv = { ...process.env, ...runtimeEnv };
+    const serverFor = (server: unknown): MCPConfig => {
+      const declared = server as EvalServerConfig;
+      if (!isConnectorServer(declared))
+        return resolveServerSecrets(declared, serverEnv);
+      const expanded = connectors?.servers.get(
+        declared.label ?? declared.connector
+      );
+      if (!expanded)
+        throw new Error(
+          `Connector server "${declared.label ?? declared.connector}" wasn't expanded.`
+        );
+      return resolveServerSecrets(expanded, serverEnv);
+    };
     for (const [batchIndex, batch] of bundle.batches.entries()) {
       if (cancelled || !batch.requests.length) continue;
       const definition = getClient(batch.requests[0]!.config.type);
@@ -226,69 +314,113 @@ export async function collectShard(
         )
       )
         throw new Error('A shard batch must hold one client type.');
-      const requests: ClientBatchRequest[] = batch.requests.map((request) => ({
+      const declared: ClientBatchRequest[] = batch.requests.map((request) => ({
         ...request,
         input: {
           ...request.input,
-          servers: request.input.servers.map((server) =>
-            resolveServerSecrets(server, serverEnv)
-          ),
+          servers: request.input.servers.map(serverFor),
           env: runtimeEnv,
         },
       }));
       const keyOf = (index: number): TrialKey => ({
         variant: batch.variant.name,
-        caseId: requests[index]!.caseId,
-        trial: requests[index]!.trial,
+        caseId: declared[index]!.caseId,
+        trial: declared[index]!.trial,
       });
-      const context: ClientRunContext = {
+      const baseContext: ClientRunContext = {
         evalConfig: bundle.evalConfig,
         variant: batch.variant,
         env: runtimeEnv,
       };
-      if (definition.runBatch) {
-        const reported = new Set<number>();
-        const results = await definition.runBatch(requests, {
-          ...context,
-          acquire: async (index) => {
-            if (requests[index]) await acquire(keyOf(index));
-          },
-          reportResult: async (index, result) => {
-            if (reported.has(index) || !requests[index]) return;
-            reported.add(index);
-            await save(batchIndex, index, keyOf(index), result);
-          },
-        });
-        // What the client didn't report as it went.
-        for (const [index, result] of results.entries())
-          if (!reported.has(index) && requests[index])
-            await save(batchIndex, index, keyOf(index), result);
-        continue;
+      // A variant's tool metadata reaches a proxied client through a proxy
+      // on this machine, as in a local run.
+      const toolMetadata = variantToolMetadata(
+        bundle.evalConfig,
+        batch.variant
+      );
+      let proxy: ToolSurfaceProxy | undefined;
+      let proxied: ProxiedBatch | undefined;
+      if (toolMetadata && usesToolSurfaceProxy(definition)) {
+        const servers = declared[0]!.input.servers;
+        proxy = await startToolSurfaceProxy(servers, toolMetadata);
+        proxied = proxiedBatch(
+          definition,
+          declared,
+          proxy,
+          servers,
+          toolMetadata.id
+        );
       }
-      for (const [index, request] of requests.entries()) {
-        if (cancelled) break;
-        await acquire(keyOf(index));
-        if (cancelled) break;
-        let result: ClientRunResult;
-        try {
-          result = await definition.run!(
-            request.input,
-            request.config,
-            context
-          );
-        } catch (error) {
-          result = {
-            finalText: '',
-            events: [],
-            error: error instanceof Error ? error.message : String(error),
-          };
+      const requests = proxied?.requests ?? declared;
+      const context = proxied ? withoutToolVariant(baseContext) : baseContext;
+      // A trace under the tools' original names (`final`: its request is over).
+      const settled = (
+        index: number,
+        result: ClientRunResult,
+        final: boolean
+      ) => (proxied ? proxied.settle(index, result, final) : result);
+      try {
+        if (definition.runBatch) {
+          const reported = new Set<number>();
+          const results = await definition.runBatch(requests, {
+            ...context,
+            acquire: async (index) => {
+              if (requests[index]) await acquire(keyOf(index));
+            },
+            reportResult: async (index, result) => {
+              if (reported.has(index) || !requests[index]) return;
+              reported.add(index);
+              // The batch's scope stays open for the requests still running.
+              await save(
+                batchIndex,
+                index,
+                keyOf(index),
+                settled(index, result, false)
+              );
+            },
+          });
+          proxied?.endChecks();
+          // What the client didn't report as it went.
+          for (const [index, result] of results.entries())
+            if (!reported.has(index) && requests[index])
+              await save(
+                batchIndex,
+                index,
+                keyOf(index),
+                settled(index, result, true)
+              );
+          continue;
         }
-        await save(batchIndex, index, keyOf(index), result);
+        for (const [index, request] of requests.entries()) {
+          if (cancelled) break;
+          await acquire(keyOf(index));
+          if (cancelled) break;
+          let result: ClientRunResult;
+          try {
+            result = settled(
+              index,
+              await definition.run!(request.input, request.config, context),
+              true
+            );
+          } catch (error) {
+            result = {
+              finalText: '',
+              events: [],
+              error: error instanceof Error ? error.message : String(error),
+            };
+          }
+          await save(batchIndex, index, keyOf(index), result);
+        }
+        proxied?.endChecks();
+      } finally {
+        await proxy?.close();
       }
     }
   } finally {
     clearInterval(heartbeat);
     clearTimeout(renewal);
+    if (simulatedWritesDir)
+      await fs.rm(simulatedWritesDir, { recursive: true, force: true });
   }
   let cleanup: 'ok' | 'failed' = 'ok';
   try {

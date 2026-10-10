@@ -10,7 +10,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { CaseExecution } from './caseExecution.js';
 import type { EvalCase } from './datasetTypes.js';
-import type { TraceEvent } from './evalFrameworkTypes.js';
+import type { ClientRunResult, TraceEvent } from './evalFrameworkTypes.js';
 import {
   readSimulatedWrites,
   type SimulatedWriteRecord,
@@ -47,6 +47,40 @@ function markSimulatedWrites(
   return marked;
 }
 
+/** Every record in `files`, each keyed by its file and position. */
+async function readRecords(
+  files: readonly string[]
+): Promise<Array<{ key: string; record: SimulatedWriteRecord }>> {
+  return (
+    await Promise.all(
+      files.map(async (file) =>
+        (await readSimulatedWrites(file)).map((record, index) => ({
+          key: `${file}\0${index}`,
+          record,
+        }))
+      )
+    )
+  ).flat();
+}
+
+/**
+ * A client's result with its simulated writes marked: what a shard's worker
+ * does before it sends a result back, because its proxies record writes on
+ * its own machine. `used` holds the records already matched, across trials.
+ */
+export async function markResultSimulatedWrites(
+  result: ClientRunResult,
+  files: readonly string[],
+  used: Set<string>
+): Promise<ClientRunResult> {
+  if (files.length === 0) return result;
+  const records = await readRecords(files);
+  if (records.length === 0) return result;
+  const events = result.events.map((event) => ({ ...event }));
+  markSimulatedWrites(events, records, used);
+  return { ...result, events };
+}
+
 /**
  * `executor`, with each completed trial's simulated writes marked. `files`
  * are the proxies' records (see `ConnectorLaunchContext.simulateWrites`).
@@ -59,16 +93,7 @@ export function withSimulatedWriteMarks(
   return async (evalCase) => {
     const execution = await executor(evalCase);
     if (execution.kind !== 'completed') return execution;
-    const records = (
-      await Promise.all(
-        files.map(async (file) =>
-          (await readSimulatedWrites(file)).map((record, index) => ({
-            key: `${file}\0${index}`,
-            record,
-          }))
-        )
-      )
-    ).flat();
+    const records = await readRecords(files);
     if (records.length === 0) return execution;
     // The trace and the response may hold the same event objects, or copies.
     const { toolCalls } = execution.response as { toolCalls?: unknown };
